@@ -1,0 +1,1032 @@
+/* Sidebar panel: the list beside the rail, drawn as a card that starts below
+   the title bar. Geometry is shared by every row so labels line up:
+   6px list inset + 8px row padding = 14px for section labels and flush rows,
+   and 36px for project names, nested sessions, and "New session". */
+
+/* Panel surfaces are shared by the left panel and the right panel. */
+.app-layout {
+  --sidebar-panel-bg: rgba(255, 255, 255, 0.035);
+  --sidebar-panel-border: var(--color-border-subtle);
+  --sidebar-panel-row-hover: var(--color-bg-hover);
+  --sidebar-panel-chip-bg: rgba(255, 255, 255, 0.075);
+  --sidebar-panel-chip-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --sidebar-accent: var(--color-accent);
+  --sidebar-live: #34d399;
+  --sidebar-live-text: #6ee7b7;
+}
+
+.theme-light .app-layout {
+  --sidebar-panel-bg: rgba(255, 255, 255, 0.72);
+  --sidebar-panel-border: rgba(0, 0, 0, 0.07);
+  --sidebar-panel-row-hover: rgba(0, 0, 0, 0.045);
+  --sidebar-panel-chip-bg: #ffffff;
+  --sidebar-panel-chip-shadow: 0 1px 2px rgba(15, 23, 42, 0.07);
+  --sidebar-live: #16a34a;
+  --sidebar-live-text: #15803d;
+}
+
+html.visual-calm .app-layout {
+  --sidebar-panel-bg: color-mix(in srgb, var(--calm-page) 60%, var(--calm-sidebar));
+  --sidebar-panel-border: var(--calm-border);
+  --sidebar-panel-row-hover: var(--calm-surface-hover);
+  --sidebar-panel-chip-bg: var(--calm-surface-raised);
+  --sidebar-panel-chip-shadow: var(--calm-shadow-soft);
+  --sidebar-accent: var(--calm-accent);
+  --sidebar-live: var(--calm-success);
+  --sidebar-live-text: var(--calm-success);
+}
+
+.app-layout > .sidebar.sidebar-panel {
+  height: calc(100% - var(--title-bar-height));
+  margin-top: var(--title-bar-height);
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--sidebar-panel-border);
+  border-left: 1px solid var(--sidebar-panel-border);
+  border-top-left-radius: 14px;
+}
+
+/* The macOS and Calm sidebar surfaces are set with !important elsewhere. */
+.app-layout > .sidebar.sidebar-panel,
+html.platform-darwin .app-layout > .sidebar.sidebar-panel,
+html.platform-darwin.visual-calm .app-layout > .sidebar.sidebar-panel {
+  background: var(--sidebar-panel-bg) !important;
+}
+
+/* With the panel open, the main view meets it and the navbar with hairlines
+   instead of being its own rounded card. */
+html .app-layout:not(.sidebar-panel-collapsed) > .main-content,
+html
+  .app-layout:not(.sidebar-panel-collapsed)
+  > .selected-workspace-view
+  > .selected-workspace-main-row
+  > .main-content {
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+html.visual-calm .app .app-layout:not(.sidebar-panel-collapsed) > .main-content,
+html.visual-calm
+  .app
+  .app-layout:not(.sidebar-panel-collapsed)
+  > .selected-workspace-view
+  > .selected-workspace-main-row
+  > .main-content {
+  border-top: 1px solid var(--calm-border);
+}
+
+/* The hairline under the navbar runs across the whole session row, including
+   around the floating inspector card. Panels that reach the top draw
+   their own border on the same pixel row. */
+.app-layout .selected-workspace-main-row {
+  box-shadow: inset 0 1px 0 var(--color-border-subtle);
+}
+
+html.visual-calm .app-layout .selected-workspace-main-row {
+  box-shadow: inset 0 1px 0 var(--calm-border);
+}
+
+/* Resizable right-hand panels (browser, artifact viewers, side chat) meet the
+   navbar with the same hairline as the main view. */
+.app-layout .spreadsheet-resizable-sidebar {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+html.visual-calm .app-layout .spreadsheet-resizable-sidebar {
+  border-top-color: var(--calm-border);
+}
+
+/* ---------- Header ---------- */
+
+/* The header introduces your agent: avatar, name, and what it is doing now.
+   The actions share the name's line so the status runs the full width below. */
+.sidebar-panel-header {
+  display: grid;
+  grid-template-areas:
+    "avatar title actions"
+    "avatar status status";
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: 18px auto;
+  align-content: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  height: 58px;
+  flex-shrink: 0;
+  padding: 8px 8px 2px 10px;
+}
+
+.sidebar-panel-identity,
+.sidebar-panel-identity-copy {
+  display: contents;
+}
+
+.sidebar-panel-header .sidebar-panel-avatar {
+  grid-area: avatar;
+  align-self: center;
+}
+
+.sidebar-panel-header .sidebar-panel-title {
+  grid-area: title;
+}
+
+.sidebar-panel-header .sidebar-panel-status {
+  grid-area: status;
+}
+
+/* 28px buttons centred on the 18px name line. */
+.sidebar-panel-header .sidebar-panel-header-actions {
+  grid-area: actions;
+  align-self: center;
+  margin: -5px -2px -5px 0;
+}
+
+.sidebar-panel-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--sidebar-accent) 18%, var(--sidebar-panel-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sidebar-accent) 10%, var(--sidebar-panel-chip-bg));
+  overflow: visible;
+}
+
+button.sidebar-panel-avatar {
+  cursor: pointer;
+}
+
+button.sidebar-panel-avatar:hover {
+  border-color: color-mix(in srgb, var(--sidebar-accent) 40%, var(--sidebar-panel-border));
+}
+
+.sidebar-panel-avatar .calm-agent-avatar {
+  display: block;
+}
+
+/* Bob gently while sessions are working, in every theme. */
+.sidebar-panel-avatar .calm-agent-avatar.animated {
+  animation: calm-agent-bob 2.4s ease-in-out infinite;
+  transform-origin: 50% 80%;
+}
+
+.sidebar-panel-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-panel-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font: 500 11.5px/1.2 var(--font-ui);
+  white-space: nowrap;
+}
+
+.sidebar-panel-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sidebar-panel-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sidebar-panel-status-working {
+  color: var(--sidebar-live-text);
+}
+
+.sidebar-panel-status-working .sidebar-panel-status-dot {
+  background: var(--sidebar-live);
+  animation: sidebar-live-pulse 1.8s ease-out infinite;
+}
+
+.sidebar-panel-status-needs {
+  color: var(--color-warning);
+}
+
+.theme-light .sidebar-panel-status-needs {
+  color: #b45309;
+}
+
+@keyframes sidebar-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--sidebar-live) 50%, transparent);
+  }
+
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+.sidebar-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-panel-icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.sidebar-panel-icon-btn:hover,
+.sidebar-panel-icon-btn.active {
+  background: var(--sidebar-panel-row-hover);
+  color: var(--color-text-primary);
+}
+
+.sidebar-panel-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sidebar-panel-icon-btn > svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-panel-icon-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-info, #3b82f6);
+  pointer-events: none;
+}
+
+/* ---------- New session ---------- */
+
+.sidebar-panel-primary {
+  flex-shrink: 0;
+  padding: 2px 6px 6px;
+}
+
+.sidebar-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-panel-row:hover {
+  background: var(--sidebar-panel-row-hover);
+}
+
+.sidebar-panel-row > svg {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+/* The primary action is a panel row like the rest, laid out as a project row
+   (icon slot, then the label on the 30px line), marked only by its accent
+   icon and weight. The raised chip is kept for the selected row. */
+.sidebar-panel-row.sidebar-panel-new {
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.sidebar-panel-row > svg.sidebar-panel-new-icon {
+  color: var(--sidebar-accent);
+}
+
+.sidebar-panel-new-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Calm's Home / Build / Agents switch spans the panel under the header, on the
+   same 6px inset as the rows. */
+html.visual-calm .sidebar-panel .sidebar-panel-segments {
+  display: flex;
+  flex-shrink: 0;
+  margin: 2px 6px 8px;
+}
+
+html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+/* ---------- Search ---------- */
+
+.sidebar-panel .sidebar-header-sessions {
+  padding: 0 6px;
+}
+
+.sidebar-panel-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 6px;
+}
+
+/* A smaller sibling of the New session pill, on the same inset. */
+.sidebar.sidebar-panel.cli-sidebar .sidebar-panel-search .sidebar-sessions-search {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  margin-top: 0;
+  gap: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--sidebar-panel-border);
+  border-radius: 9px;
+  background: var(--sidebar-panel-chip-bg);
+  color: var(--color-text-muted);
+}
+
+.sidebar.sidebar-panel.cli-sidebar .sidebar-panel-search .sidebar-sessions-search:focus-within {
+  border-color: color-mix(in srgb, var(--sidebar-accent) 45%, var(--sidebar-panel-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sidebar-accent) 12%, transparent);
+  color: var(--color-text-secondary);
+}
+
+.sidebar.sidebar-panel.cli-sidebar .sidebar-panel-search .sidebar-sessions-search > svg {
+  flex-shrink: 0;
+}
+
+.sidebar.sidebar-panel.cli-sidebar
+  .sidebar-panel-search
+  .sidebar-sessions-search
+  input[type="search"] {
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+/* Replace WebKit's blue clear glyph with a muted cross. */
+.sidebar-panel-search .sidebar-sessions-search input::-webkit-search-cancel-button {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  background-color: var(--color-text-muted);
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M7 7l10 10M17 7L7 17'/%3E%3C/svg%3E")
+    center / 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M7 7l10 10M17 7L7 17'/%3E%3C/svg%3E")
+    center / 14px no-repeat;
+  cursor: pointer;
+}
+
+.sidebar-panel-search .sidebar-sessions-search input::-webkit-search-cancel-button:hover {
+  background-color: var(--color-text-primary);
+}
+
+/* ---------- List ---------- */
+
+.sidebar-panel .task-list {
+  padding: 0 6px 8px;
+}
+
+/* Section and day labels are small tracked caps so the session titles stay the
+   anchors. Day labels fit the 26px virtual row. */
+.sidebar.sidebar-panel.cli-sidebar .sidebar-date-group {
+  padding: 11px 8px 3px;
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+
+.sidebar.sidebar-panel.cli-sidebar .sidebar-navigation-section-header {
+  padding: 14px 8px 5px;
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-panel .sidebar-workspace-row {
+  min-height: 28px;
+  padding: 0 6px 0 8px !important;
+  border-radius: 8px;
+}
+
+.sidebar-panel .sidebar-workspace-row:hover,
+.sidebar-panel .sidebar-workspace-node.current .sidebar-workspace-row {
+  background: var(--sidebar-panel-row-hover);
+}
+
+/* The folder icon shows open or closed, so the chevron is redundant. */
+.sidebar-panel .sidebar-workspace-chevron {
+  display: none;
+}
+
+.sidebar-panel .sidebar-workspace-toggle {
+  height: 28px;
+  gap: 6px;
+  color: var(--color-text-primary);
+}
+
+/* Each project gets a coloured monogram tile; an open project's tile is ringed. */
+.sidebar-workspace-tile {
+  display: inline-flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4.5px;
+  background: hsl(var(--workspace-hue) 72% 91%);
+  color: hsl(var(--workspace-hue) 48% 32%);
+  font: 700 9px/1 var(--font-ui);
+  letter-spacing: -0.02em;
+}
+
+html:not(.theme-light) .sidebar-workspace-tile {
+  background: hsl(var(--workspace-hue) 32% 27%);
+  color: hsl(var(--workspace-hue) 85% 82%);
+}
+
+.sidebar-workspace-tile[data-expanded="true"] {
+  box-shadow: 0 0 0 1.5px hsl(var(--workspace-hue) 60% 58% / 0.5);
+}
+
+.sidebar-panel .sidebar-workspace-label {
+  font-size: 13.5px;
+  font-weight: 400;
+}
+
+.sidebar-panel .sidebar-workspace-session-action {
+  padding: 2px 8px 2px 30px;
+  font-size: 13px;
+}
+
+/* Automated sessions group like a project folder: icon, name, then the count,
+   so its sessions line up under the name as a project's do. */
+.sidebar.sidebar-panel .automated-folder-header {
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px !important;
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sidebar.sidebar-panel .automated-folder-header:hover {
+  background: var(--sidebar-panel-row-hover);
+  color: var(--color-text-primary);
+}
+
+.sidebar-panel .automated-folder-icon {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.sidebar-panel .automated-folder-label {
+  flex: 0 1 auto;
+}
+
+.sidebar-panel .automated-folder-chevron {
+  width: 13px;
+  margin: 0;
+  color: var(--color-text-muted);
+  opacity: 1;
+  transition: transform 0.15s ease;
+}
+
+.sidebar-panel .automated-folder-header[aria-expanded="true"] .automated-folder-chevron {
+  transform: rotate(90deg);
+}
+
+.sidebar-panel .automated-folder-count {
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-panel .cli-task-item {
+  min-height: 28px;
+  /* The modern theme spaces rows with side margins; the panel grid owns that. */
+  margin: 0 !important;
+  padding-left: var(--cli-task-padding-left, 8px) !important;
+  padding-right: 6px !important;
+  border-radius: 8px !important;
+}
+
+.sidebar-panel .cli-task-title {
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+}
+
+/* Subagents sit one step in under their parent, without the modern theme's
+   extra indent or tree glyph, and read as ordinary rows: the role's colour
+   marks the icon rather than a bold, faded name. */
+.sidebar.sidebar-panel .task-tree-children,
+.sidebar.sidebar-panel .task-tree-node-child {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.sidebar.sidebar-panel .cli-tree-prefix {
+  display: none;
+}
+
+.sidebar.sidebar-panel .task-item-subagent {
+  opacity: 1;
+  font-size: inherit;
+}
+
+.sidebar.sidebar-panel .task-item-subagent .cli-task-title {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.sidebar.sidebar-panel .cli-task-agent-name {
+  font-weight: 400;
+}
+
+.sidebar.sidebar-panel .cli-subagent-icon {
+  opacity: 1;
+}
+
+/* Parent rows keep the menu's width reserved so their chevron doesn't slide
+   left, under the pointer, when the menu appears on hover. */
+.sidebar-panel .cli-task-title-row:has(.cli-collapse-btn) .cli-task-actions {
+  width: 22px;
+}
+
+/* The parent's show/hide toggle is a small chevron that turns when open. */
+.sidebar.sidebar-panel.cli-sidebar .cli-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+.sidebar.sidebar-panel.cli-sidebar .cli-collapse-btn:hover,
+.sidebar.sidebar-panel.cli-sidebar .cli-collapse-btn:focus-visible {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.sidebar-panel .cli-collapse-btn > svg {
+  transition: transform 0.15s ease;
+}
+
+.sidebar-panel .cli-collapse-btn[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+.sidebar-panel .cli-task-item:has(.cli-task-status-trailing) {
+  padding-right: 28px !important;
+}
+
+/* The row menu takes the status slot on hover. */
+.sidebar-panel .cli-task-item:hover .cli-task-status-trailing,
+.sidebar-panel .cli-task-item:focus-within .cli-task-status-trailing {
+  opacity: 0;
+}
+
+/* The session menu is a quiet icon button, like the project row's, rather
+   than an accent-outlined chip. */
+.sidebar.sidebar-panel .cli-more-btn {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.sidebar.sidebar-panel .cli-more-btn:hover,
+.sidebar.sidebar-panel .cli-more-btn:focus-visible,
+.sidebar.sidebar-panel .cli-more-btn[aria-expanded="true"] {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+/* Status reads at the end of the row, as with the running spinner. */
+.sidebar-panel .cli-task-branch {
+  order: 3;
+  margin: 0 2px 0 4px !important;
+}
+
+.sidebar-panel .cli-task-branch svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* The Pinned section already says so. */
+.sidebar-panel .cli-task-pinned {
+  display: none;
+}
+
+/* Selection lifts the row into a chip above the panel, with no accent bar or
+   accent text. */
+.sidebar.sidebar-panel .cli-task-item.task-item-selected {
+  background: var(--sidebar-panel-chip-bg) !important;
+  box-shadow:
+    0 0 0 1px var(--sidebar-panel-border),
+    var(--sidebar-panel-chip-shadow) !important;
+}
+
+.sidebar.sidebar-panel .cli-task-item.task-item-selected::before {
+  display: none;
+}
+
+.sidebar.sidebar-panel .task-item-selected .cli-task-title {
+  color: var(--color-text-primary);
+  font-weight: 400;
+}
+
+/* Awaiting sessions are the ones the header counts as needing you, so they end
+   in its amber dot instead of a pill that squeezed the title. The label stays
+   for screen readers and as the tooltip. */
+.sidebar.sidebar-panel .cli-task-awaiting-badge {
+  width: 8px;
+  height: 8px;
+  margin: 0 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning) 16%, transparent);
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.theme-light .sidebar.sidebar-panel .cli-task-awaiting-badge {
+  background: #b45309;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #b45309 14%, transparent);
+}
+
+/* A working session's title carries a slow light sweep in the accent colour. */
+.sidebar-panel .cli-task-item:has(.cli-task-status-trailing) .cli-task-title {
+  background: linear-gradient(
+      100deg,
+      var(--color-text-primary) 0%,
+      var(--color-text-primary) 40%,
+      var(--sidebar-accent) 50%,
+      var(--color-text-primary) 60%,
+      var(--color-text-primary) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sidebar-title-sweep 2.8s linear infinite;
+}
+
+@keyframes sidebar-title-sweep {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -150% 0;
+  }
+}
+
+/* ---------- Devices ---------- */
+
+/* Fleet sections are panel rows in one column on the 6px inset (two columns
+   wrapped their labels), with the current section as the raised chip. */
+.sidebar.sidebar-panel .devices-sidebar-panel {
+  gap: 10px;
+  padding: 0 6px 12px;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-header {
+  gap: 1px;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-home-btn,
+.sidebar.sidebar-panel .devices-sidebar-link {
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  white-space: nowrap;
+  transform: none;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-home-btn:hover,
+.sidebar.sidebar-panel .devices-sidebar-link:hover {
+  background: var(--sidebar-panel-row-hover);
+  transform: none;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-home-btn.active {
+  background: var(--sidebar-panel-chip-bg);
+  box-shadow:
+    0 0 0 1px var(--sidebar-panel-border),
+    var(--sidebar-panel-chip-shadow);
+}
+
+.sidebar.sidebar-panel .devices-sidebar-home-icon {
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+/* 16px like the folder icons, so every label starts on the same line. */
+.sidebar.sidebar-panel .devices-sidebar-link > svg,
+.sidebar.sidebar-panel .devices-sidebar-home-icon > svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-secondary);
+}
+
+.sidebar.sidebar-panel .devices-sidebar-link > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-home-count,
+.sidebar.sidebar-panel .devices-sidebar-link strong {
+  min-width: 0;
+  height: auto;
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-subhead {
+  padding: 4px 8px 0;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+
+/* Observers read like the bot roster: an icon tile, what it watches, then its
+   state, instead of tall centred glass cards. */
+.sidebar.sidebar-panel .devices-sidebar-list {
+  gap: 1px;
+  margin-top: -4px;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-item {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 46px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-primary);
+  text-align: left;
+  transform: none;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-item:hover {
+  background: var(--sidebar-panel-row-hover);
+  transform: none;
+}
+
+.sidebar-panel .devices-sidebar-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--sidebar-panel-chip-bg);
+  box-shadow: 0 0 0 1px var(--sidebar-panel-border);
+  color: var(--color-text-secondary);
+}
+
+.sidebar-panel .devices-sidebar-item-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-item-label,
+.sidebar-panel .devices-sidebar-item-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar.sidebar-panel .devices-sidebar-item-label {
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.sidebar-panel .devices-sidebar-item-status {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+/* Issues waiting use the header's "needs you" amber. */
+.sidebar-panel .devices-sidebar-item-attention {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning) 16%, transparent);
+}
+
+.theme-light .sidebar-panel .devices-sidebar-item-attention {
+  background: #b45309;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #b45309 14%, transparent);
+}
+
+/* ---------- Bot roster ---------- */
+
+/* The roster uses the session list's inset, section label and search pill. */
+.sidebar.sidebar-panel .sidebar-bots-pane {
+  padding: 2px 6px 10px;
+}
+
+.sidebar.sidebar-panel .sidebar-bots-header {
+  padding: 0 0 0 8px;
+}
+
+.sidebar.sidebar-panel .sidebar-bots-title-group {
+  gap: 6px;
+  color: var(--color-text-muted);
+}
+
+.sidebar.sidebar-panel .sidebar-bots-title-group > svg {
+  display: none;
+}
+
+.sidebar.sidebar-panel .sidebar-bots-title-group h2 {
+  font-size: 10.5px;
+}
+
+.sidebar.sidebar-panel .sidebar-bots-count {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  font-size: 10.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar.sidebar-panel .sidebar-bots-search {
+  height: 30px;
+  flex-basis: 30px;
+  margin: 4px 0 8px;
+  gap: 7px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--sidebar-panel-border);
+  border-radius: 9px;
+  background: var(--sidebar-panel-chip-bg);
+}
+
+.sidebar.sidebar-panel .sidebar-bots-search:focus-within {
+  border-color: color-mix(in srgb, var(--sidebar-accent) 45%, var(--sidebar-panel-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sidebar-accent) 12%, transparent);
+}
+
+.sidebar.sidebar-panel .sidebar-bots-search > svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.sidebar.sidebar-panel .sidebar-bots-search input {
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+/* The roster search has its own clear button. */
+.sidebar-bots-search input::-webkit-search-cancel-button {
+  display: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Bots select like sessions: the raised chip, without an accent tint or bar. */
+.sidebar.sidebar-panel .sidebar-bot-row:hover {
+  background: var(--sidebar-panel-row-hover);
+}
+
+.sidebar.sidebar-panel .sidebar-bot-row.selected {
+  background: var(--sidebar-panel-chip-bg);
+  box-shadow:
+    0 0 0 1px var(--sidebar-panel-border),
+    var(--sidebar-panel-chip-shadow);
+}
+
+/* The edit menu takes the age's slot on hover, as the session row menu takes
+   the status slot, so names aren't cut short for a button that is rarely used. */
+.sidebar-panel .sidebar-bot-row-wrap:not(:has(.sidebar-bot-reopen-button)) .sidebar-bot-row {
+  padding-right: 9px;
+}
+
+.sidebar-panel .sidebar-bot-edit-button {
+  opacity: 0;
+}
+
+.sidebar-panel .sidebar-bot-row-wrap:hover .sidebar-bot-edit-button,
+.sidebar-panel .sidebar-bot-row-wrap:focus-within .sidebar-bot-edit-button {
+  opacity: 1;
+}
+
+.sidebar-panel .sidebar-bot-row-wrap:not(:has(.sidebar-bot-reopen-button)):hover .sidebar-bot-age,
+.sidebar-panel
+  .sidebar-bot-row-wrap:not(:has(.sidebar-bot-reopen-button)):focus-within
+  .sidebar-bot-age {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-panel-status-working .sidebar-panel-status-dot,
+  .sidebar-panel-avatar .calm-agent-avatar.animated,
+  .sidebar-panel .cli-task-item:has(.cli-task-status-trailing) .cli-task-title {
+    animation: none;
+  }
+}

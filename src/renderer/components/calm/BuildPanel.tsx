@@ -1,9 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Code2, LayoutDashboard, AppWindow, Gauge } from "lucide-react";
 import { isTempWorkspaceId, type Workspace } from "../../../shared/types";
 import { getWorkspaceStatusFolderLabel } from "../MainContent/welcome-suggestions";
 import { ModelDropdown, type ModelDropdownProps } from "../MainContent/ModelDropdown";
 import { CalmFolderMenu } from "./CalmTopBar";
+import { BUILD_FOCUS_COMPOSER_EVENT } from "./build-events";
 
 interface BuildPanelProps {
   onStart: (prompt: string) => void | boolean | Promise<void | boolean>;
@@ -85,6 +86,15 @@ export function BuildPanel({
   }, []);
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // The composer is the view's starting point: focus it on arrival and when the
+  // sidebar's New build asks again.
+  useEffect(() => {
+    const focusComposer = () => inputRef.current?.focus();
+    focusComposer();
+    window.addEventListener(BUILD_FOCUS_COMPOSER_EVENT, focusComposer);
+    return () => window.removeEventListener(BUILD_FOCUS_COMPOSER_EVENT, focusComposer);
+  }, []);
 
   const submit = async (text: string) => {
     const trimmed = text.trim();

@@ -21,7 +21,18 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
 import { useTaskDuration } from "./hooks/useTaskDuration";
 import { useComposerDraft } from "./hooks/useComposerDraft";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
+import { SidebarRail } from "./components/sidebar/SidebarRail";
+import { TITLE_BAR_CONTEXT_SLOT_ID } from "./utils/title-bar-slot";
+import { useMainColumnRightEdge } from "./hooks/useMainColumnRightEdge";
+import {
+  getActiveSidebarDestination,
+  getSidebarDestination,
+  isSidebarDestinationAvailable,
+  type SidebarDestinationId,
+  type SidebarPanelTab,
+} from "./components/sidebar/sidebar-destinations";
 import { BotDetailsRail } from "./components/BotDetailsRail";
 import type { BotRole } from "./components/BotsPane";
 import {
@@ -56,7 +67,19 @@ import { BuildPanel } from "./components/calm/BuildPanel";
 import { GitChangesPanel } from "./components/GitChangesPanel";
 import { CalmAgentSetupHost } from "./components/calm/CalmAgentSetup";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
-import { NotificationPanel } from "./components/NotificationPanel";
+import {
+  NotificationPanel,
+  type NotificationPanelNotification,
+} from "./components/NotificationPanel";
+import {
+  createNavigationHistory,
+  getNavigationAvailability,
+  isSameNavigationEntry,
+  recordNavigationEntry,
+  stepNavigationHistory,
+  toNavigationEntry,
+  type NavigationEntry,
+} from "./utils/navigation-history";
 import { WebAccessClient } from "./components/WebAccessClient";
 import {
   Task,
@@ -693,6 +716,21 @@ type AppView =
   | "library"
   | "git"
   | "build";
+/** Views rendered inside the rail and sidebar panel shell. */
+const SIDEBAR_SHELL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([
+  "main",
+  "home",
+  "automations",
+  "devices",
+  "ideas",
+  "inboxAgent",
+  "agents",
+  "everydayAgent",
+  "missionControl",
+  "library",
+  "git",
+  "build",
+]);
 type RemoteTaskView = {
   deviceId: string;
   deviceName: string;
@@ -1571,6 +1609,7 @@ const SelectedTaskWorkspaceView = memo(
         <div className="selected-workspace-main-row">
           <Suspense fallback={<TaskViewSkeleton />}>
             <MainContent
+              headerPlacement="title-bar"
               task={task}
               selectedTaskId={selectedTaskId}
               workspace={workspace}
@@ -2315,8 +2354,9 @@ export function App() {
     }
   }, [currentView]);
 
-  // Sidebar collapse state
+  // Sidebar collapse state. Collapsing hides the panel; the rail stays.
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  const [sidebarPanelTab, setSidebarPanelTab] = useState<SidebarPanelTab>("sessions");
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
   const [terminalTabsOpen, setTerminalTabsOpen] = useState(false);
   const handleCloseTerminalTabs = useCallback(() => {
@@ -7264,6 +7304,100 @@ export function App() {
     setMissionControlEverydayAgentFocus(false);
     setCurrentView("missionControl");
   }, []);
+
+  const isBotViewActive =
+    currentView === "main" &&
+    !remoteTaskView &&
+    selectedTask?.agentConfig?.botConversation === true;
+  // Follow navigation into a bot, but let the user browse Sessions while that
+  // conversation stays open.
+  useEffect(() => {
+    if (isBotViewActive) setSidebarPanelTab("bots");
+  }, [isBotViewActive, selectedTaskId]);
+
+  const addToastRef = useRef(addToast);
+  useEffect(() => {
+    addToastRef.current = addToast;
+  });
+  const notifySidebarDestinationUnavailable = useCallback((label: string) => {
+    addToastRef.current({
+      id: "sidebar-destination-unavailable",
+      type: "info",
+      title: `${label} is unavailable`,
+      message: `${label} requires a host service that is unavailable in this session.`,
+    });
+  }, []);
+
+  const handleSidebarNavigate = useCallback(
+    (id: SidebarDestinationId) => {
+      const destination = getSidebarDestination(id);
+      const available = isSidebarDestinationAvailable(destination);
+      // Agents still shows the bot roster when the host cannot open the hub.
+      if (!available && destination.panel !== "bots") {
+        notifySidebarDestinationUnavailable(destination.label);
+        return;
+      }
+      setSidebarPanelTab(destination.panel === "bots" ? "bots" : "sessions");
+      if (destination.panel) setLeftSidebarCollapsed(false);
+      if (!available) return;
+
+      switch (id) {
+        case "home":
+          setCurrentView("main");
+          return;
+        case "inbox":
+          setCurrentView("inboxAgent");
+          return;
+        case "agents":
+          setCurrentView("agents");
+          return;
+        case "automations":
+          setFocusAutomationRoutineId(null);
+          setCurrentView("automations");
+          return;
+        case "library":
+          setCurrentView("library");
+          return;
+        case "gitChanges":
+          setCurrentView("git");
+          return;
+        case "devices":
+          setCurrentView("devices");
+          return;
+        case "everyday":
+          setCurrentView("everydayAgent");
+          return;
+        case "missionControl":
+          handleOpenMissionControl();
+          return;
+        case "ideas":
+          setCurrentView("ideas");
+          return;
+        case "build":
+          setCurrentView("build");
+          return;
+        case "addTools":
+          setSettingsTab("addtools");
+          setCurrentView("settings");
+          return;
+      }
+    },
+    [handleOpenMissionControl, notifySidebarDestinationUnavailable],
+  );
+
+  const handleSidebarRailOpenSettings = useCallback(() => {
+    if (!hasHostMethod("getLLMSettings") || !hasHostMethod("getLLMConfigStatus")) {
+      notifySidebarDestinationUnavailable("Settings");
+      return;
+    }
+    setCurrentView("settings");
+  }, [notifySidebarDestinationUnavailable]);
+
+  const handleViewUpdate = useCallback(() => {
+    setSettingsTab("updates");
+    setCurrentView("settings");
+  }, []);
+
   const handleSelectChildTaskFromMainContent = useCallback(
     (taskId: string) => {
       const task = tasksRef.current.find((candidate) => candidate.id === taskId);
@@ -7547,6 +7681,147 @@ export function App() {
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, [openBotConversationByDeepLink]);
 
+  const handleNotificationClick = useCallback(
+    (notification: NotificationPanelNotification) => {
+      // Prioritize taskId to show the completed task result
+      if (notification.taskId) {
+        void openTaskById(notification.taskId);
+        return;
+      }
+      if (notification.suggestionId) {
+        void (async () => {
+          try {
+            if (notification.workspaceId) {
+              const workspaces = await window.electronAPI.listWorkspaces();
+              const targetWorkspace = workspaces.find(
+                (workspace) => workspace.id === notification.workspaceId,
+              );
+              if (targetWorkspace) {
+                setCurrentWorkspace(targetWorkspace);
+              }
+            }
+          } catch {
+            // best-effort
+          } finally {
+            setCurrentView("home");
+            setHomeAutomationFocusTick((tick) => tick + 1);
+          }
+        })();
+        return;
+      }
+      // Fall back to scheduled tasks settings if only cronJobId
+      if (notification.cronJobId) {
+        setSettingsTab("scheduled");
+        setCurrentView("settings");
+      }
+    },
+    [openTaskById],
+  );
+  const canShowNotifications =
+    !isBrowserHost ||
+    (hasHostCapability("notifications.read") && hasHostCapability("notifications.manage"));
+  // The bell lives in the panel header; the title bar shows it when the panel is hidden.
+  const sidebarNotificationBell = useMemo(
+    () =>
+      canShowNotifications ? (
+        <NotificationPanel placement="sidebar" onNotificationClick={handleNotificationClick} />
+      ) : null,
+    [canShowNotifications, handleNotificationClick],
+  );
+  const showTitleBarNotifications =
+    canShowNotifications && (leftSidebarCollapsed || !SIDEBAR_SHELL_VIEWS.has(currentView));
+
+  // Where the navbar draws its divider over the edge of a right-hand panel.
+  const mainColumnRightEdge = useMainColumnRightEdge(
+    currentView === "main",
+    `${selectedTaskId ?? ""}:${remoteTaskView ? "remote" : "local"}:${effectiveRightCollapsed}`,
+  );
+
+  // Back/forward over app views and the open session.
+  const navigationHistoryRef = useRef(createNavigationHistory<AppView>());
+  const pendingNavigationRef = useRef<{
+    entry: NavigationEntry<AppView>;
+    startedAt: number;
+  } | null>(null);
+  const [navigationAvailability, setNavigationAvailability] = useState({
+    canGoBack: false,
+    canGoForward: false,
+  });
+  const syncNavigationAvailability = useCallback(() => {
+    const next = getNavigationAvailability(navigationHistoryRef.current);
+    setNavigationAvailability((current) =>
+      current.canGoBack === next.canGoBack && current.canGoForward === next.canGoForward
+        ? current
+        : next,
+    );
+  }, []);
+
+  useEffect(() => {
+    // Record settled locations only: opening a session switches the view first
+    // and selects the task after the composer draft flushes.
+    const timer = window.setTimeout(() => {
+      const location = toNavigationEntry<AppView>(currentView, selectedTaskId, "main");
+      const pending = pendingNavigationRef.current;
+      if (pending) {
+        if (isSameNavigationEntry(pending.entry, location)) {
+          pendingNavigationRef.current = null;
+          return;
+        }
+        if (Date.now() - pending.startedAt < 1500) return;
+        pendingNavigationRef.current = null;
+      }
+      navigationHistoryRef.current = recordNavigationEntry(navigationHistoryRef.current, location);
+      syncNavigationAvailability();
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [currentView, selectedTaskId, syncNavigationAvailability]);
+
+  const applyNavigationEntryRef = useRef<(entry: NavigationEntry<AppView>) => void>(() => {});
+  useEffect(() => {
+    applyNavigationEntryRef.current = (entry) => {
+      if (entry.view !== "main") {
+        setCurrentView(entry.view);
+      } else if (entry.taskId) {
+        void openTaskById(entry.taskId);
+      } else {
+        handleClearTaskView();
+      }
+    };
+  });
+  const handleNavigateHistory = useCallback(
+    (delta: -1 | 1) => {
+      const step = stepNavigationHistory(navigationHistoryRef.current, delta);
+      if (!step) return;
+      navigationHistoryRef.current = step.history;
+      pendingNavigationRef.current = { entry: step.entry, startedAt: Date.now() };
+      syncNavigationAvailability();
+      applyNavigationEntryRef.current(step.entry);
+    },
+    [syncNavigationAvailability],
+  );
+
+  const closeSettings = useCallback(() => {
+    setFocusAutomationOwner(null);
+    setCurrentView("main");
+  }, []);
+
+  // Settings has no back button of its own, so with no history to step back
+  // through, the navbar's back still leaves it.
+  const canNavigateBack = navigationAvailability.canGoBack || currentView === "settings";
+  const handleNavigateBack = useCallback(() => {
+    if (!navigationAvailability.canGoBack && currentView === "settings") {
+      closeSettings();
+      return;
+    }
+    handleNavigateHistory(-1);
+  }, [closeSettings, currentView, handleNavigateHistory, navigationAvailability.canGoBack]);
+
+  // An automation focused for Settings shouldn't refocus on the next visit,
+  // however Settings was left.
+  useEffect(() => {
+    if (currentView !== "settings") setFocusAutomationOwner(null);
+  }, [currentView]);
+
   if (!hasElectronAPI) {
     const isHttpContext =
       typeof window !== "undefined" &&
@@ -7613,14 +7888,46 @@ export function App() {
   }
 
   return (
-    <div className="app">
-      <div className="title-bar">
+    <div className={`app${SIDEBAR_SHELL_VIEWS.has(currentView) ? " app-shell" : ""}`}>
+      <div
+        className={`title-bar${SIDEBAR_SHELL_VIEWS.has(currentView) ? " title-bar-shell" : ""}`}
+        style={
+          mainColumnRightEdge === null
+            ? undefined
+            : ({ "--title-bar-main-right": `${mainColumnRightEdge}px` } as React.CSSProperties)
+        }
+      >
         <div className="title-bar-drag-handle" aria-hidden="true" />
+        {mainColumnRightEdge !== null && SIDEBAR_SHELL_VIEWS.has(currentView) && (
+          <div className="title-bar-divider" aria-hidden="true" />
+        )}
         <div className="title-bar-left">
+          <button
+            type="button"
+            className="title-bar-btn title-bar-history-btn"
+            onClick={handleNavigateBack}
+            disabled={!canNavigateBack}
+            title="Back"
+            aria-label="Back"
+          >
+            <ArrowLeft size={18} strokeWidth={1.9} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="title-bar-btn title-bar-history-btn"
+            onClick={() => handleNavigateHistory(1)}
+            disabled={!navigationAvailability.canGoForward}
+            title="Forward"
+            aria-label="Forward"
+          >
+            <ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" />
+          </button>
+          {/* Settings and the full-screen browser have no sidebar to toggle. */}
           <button
             type="button"
             className="title-bar-btn title-bar-sidebar-toggle"
             onClick={() => setLeftSidebarCollapsed(!leftSidebarCollapsed)}
+            hidden={!SIDEBAR_SHELL_VIEWS.has(currentView)}
             title={leftSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
             aria-label={leftSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           >
@@ -7641,6 +7948,12 @@ export function App() {
             </svg>
           </button>
         </div>
+        {SIDEBAR_SHELL_VIEWS.has(currentView) && (
+          <div
+            id={TITLE_BAR_CONTEXT_SLOT_ID}
+            className={`title-bar-context${leftSidebarCollapsed ? " title-bar-context-collapsed" : ""}`}
+          />
+        )}
         <div className="title-bar-spacer" />
         <div className="title-bar-actions">
           {titleBarBrowserTaskId && !isBrowserHost && (
@@ -7754,44 +8067,8 @@ export function App() {
               </svg>
             )}
           </button>
-          {(!isBrowserHost ||
-            (hasHostCapability("notifications.read") &&
-              hasHostCapability("notifications.manage"))) && (
-            <NotificationPanel
-              onNotificationClick={(notification) => {
-                // Prioritize taskId to show the completed task result
-                if (notification.taskId) {
-                  void openTaskById(notification.taskId);
-                  return;
-                }
-                if (notification.suggestionId) {
-                  void (async () => {
-                    try {
-                      if (notification.workspaceId) {
-                        const workspaces = await window.electronAPI.listWorkspaces();
-                        const targetWorkspace = workspaces.find(
-                          (workspace) => workspace.id === notification.workspaceId,
-                        );
-                        if (targetWorkspace) {
-                          setCurrentWorkspace(targetWorkspace);
-                        }
-                      }
-                    } catch {
-                      // best-effort
-                    } finally {
-                      setCurrentView("home");
-                      setHomeAutomationFocusTick((tick) => tick + 1);
-                    }
-                  })();
-                  return;
-                }
-                // Fall back to scheduled tasks settings if only cronJobId
-                if (notification.cronJobId) {
-                  setSettingsTab("scheduled");
-                  setCurrentView("settings");
-                }
-              }}
-            />
+          {showTitleBarNotifications && (
+            <NotificationPanel onNotificationClick={handleNotificationClick} />
           )}
           {isBrowserHost && (
             <button
@@ -7920,18 +8197,7 @@ export function App() {
           </div>
         )}
       </div>
-      {(currentView === "main" ||
-        currentView === "home" ||
-        currentView === "automations" ||
-        currentView === "devices" ||
-        currentView === "ideas" ||
-        currentView === "inboxAgent" ||
-        currentView === "agents" ||
-        currentView === "everydayAgent" ||
-        currentView === "missionControl" ||
-        currentView === "library" ||
-        currentView === "git" ||
-        currentView === "build") && (
+      {SIDEBAR_SHELL_VIEWS.has(currentView) && (
         <>
           {isBrowserHost && !browserProviderReady && currentView !== "git" && (
             <section className="browser-provider-notice" role="status">
@@ -7951,49 +8217,35 @@ export function App() {
             </section>
           )}
           <div
-            className={`app-layout ${leftSidebarCollapsed ? "left-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
+            className={`app-layout ${leftSidebarCollapsed ? "sidebar-panel-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
           >
+            <SidebarRail
+              activeId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
+              onNavigate={handleSidebarNavigate}
+              onOpenSettings={handleSidebarRailOpenSettings}
+              workspaceId={currentWorkspace?.id}
+              updateAvailable={Boolean(updateInfo?.available)}
+              updateSupported={updateInfo?.supported !== false}
+              onViewUpdate={handleViewUpdate}
+            />
             {!leftSidebarCollapsed && (
               <Sidebar
                 workspace={currentWorkspace}
                 tasks={tasks}
                 botTasks={botConversationTasks}
                 selectedTaskId={selectedTaskId}
+                highlightSelection={currentView === "main"}
                 selectedBotConversationProjection={selectedBotConversationProjection}
                 botConversationProjections={botConversationProjections}
-                isBotViewActive={
-                  currentView === "main" &&
-                  !remoteTaskView &&
-                  selectedTask?.agentConfig?.botConversation === true
-                }
-                isAutomationsActive={currentView === "automations"}
-                isIdeasActive={currentView === "ideas"}
-                isInboxAgentActive={currentView === "inboxAgent"}
-                isAgentsActive={currentView === "agents"}
-                isEverydayAgentActive={currentView === "everydayAgent"}
-                isMissionControlActive={currentView === "missionControl"}
+                activeTab={sidebarPanelTab}
+                headerAccessory={sidebarNotificationBell}
+                activeDestinationId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
+                onNavigate={handleSidebarNavigate}
                 isDevicesActive={currentView === "devices"}
-                isGitChangesActive={currentView === "git"}
-                isBuildActive={currentView === "build"}
-                isLibraryActive={currentView === "library"}
-                onOpenHome={() => setCurrentView("main")}
-                onOpenGitChanges={() => setCurrentView("git")}
-                onOpenBuild={() => setCurrentView("build")}
-                onOpenLibrary={() => setCurrentView("library")}
-                onOpenPlugins={() => {
-                  setSettingsTab("addtools");
-                  setCurrentView("settings");
-                }}
                 isLoadingSessions={isInitialTaskListLoading}
                 isLoadingMoreTasks={isLoadingMoreTasks}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
                 onSelectTask={handleSelectTaskFromShell}
-                onOpenAutomations={() => {
-                  setFocusAutomationRoutineId(null);
-                  setCurrentView("automations");
-                }}
-                onOpenIdeas={() => setCurrentView("ideas")}
-                onOpenInboxAgent={() => setCurrentView("inboxAgent")}
                 onOpenAgents={() => setCurrentView("agents")}
                 onOpenBot={handleOpenBot}
                 onReopenBot={handleReopenBot}
@@ -8002,20 +8254,12 @@ export function App() {
                     handleClearTaskView();
                   }
                 }}
-                onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
-                onOpenDevices={() => setCurrentView("devices")}
                 onNewSession={handleNewSession}
                 onOpenSettings={handleOpenSettings}
-                onOpenMissionControl={handleOpenMissionControl}
                 onTasksChanged={refreshTaskLists}
                 onLoadMoreTasks={loadMoreTasks}
                 hasMoreTasks={hasMoreTasks}
                 uiDensity={uiDensity}
-                updateInfo={updateInfo}
-                onViewUpdate={() => {
-                  setSettingsTab("updates");
-                  setCurrentView("settings");
-                }}
               />
             )}
             <Suspense
@@ -8444,10 +8688,7 @@ export function App() {
       {currentView === "settings" && (
         <Suspense fallback={<LazyViewFallback />}>
           <Settings
-            onBack={() => {
-              setFocusAutomationOwner(null);
-              setCurrentView("main");
-            }}
+            onBack={closeSettings}
             onSettingsChanged={loadLLMConfig}
             themeMode={themeMode}
             visualTheme={visualTheme}

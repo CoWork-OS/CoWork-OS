@@ -732,22 +732,6 @@ html.visual-calm .calm-sidebar-brand {
   color: var(--calm-text);
 }
 
-html.visual-calm .calm-sidebar-segments {
-  display: flex;
-  width: 100%;
-}
-
-html.visual-calm .calm-sidebar-segments > button {
-  flex: 1;
-  padding: 7px 6px;
-}
-
-html.visual-calm .calm-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
 html.visual-calm .calm-nav-item {
   appearance: none;
   display: flex;
@@ -786,21 +770,6 @@ html.visual-calm .calm-nav-item-label {
   text-overflow: ellipsis;
 }
 
-html.visual-calm .calm-nav-item-chevron {
-  color: var(--calm-text-muted);
-}
-
-html.visual-calm .calm-nav-item-badge {
-  min-width: 18px;
-  padding: 1px 6px;
-  border-radius: var(--calm-radius-pill);
-  background: var(--calm-ink);
-  color: var(--calm-ink-contrast);
-  font-size: 11px;
-  font-weight: 600;
-  text-align: center;
-}
-
 html.visual-calm .calm-nav-new {
   background: var(--calm-surface-muted);
   font-weight: 600;
@@ -822,13 +791,6 @@ html.visual-calm .calm-nav-new-icon {
   color: var(--calm-ink-contrast);
 }
 
-html.visual-calm .calm-nav-more {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding-left: 12px;
-}
-
 /* Session list typography */
 html.visual-calm .calm-sidebar .sidebar-navigation-section-header,
 html.visual-calm .calm-sidebar .sidebar-date-group {
@@ -848,53 +810,6 @@ html.visual-calm .calm-sidebar .cli-task-item {
 html.visual-calm .calm-sidebar .cli-task-item.active,
 html.visual-calm .calm-sidebar .cli-task-item.selected {
   background: var(--calm-surface-muted);
-}
-
-/* Profile footer */
-html.visual-calm .calm-profile {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: auto;
-  padding: 10px 6px 12px;
-  border-top: 1px solid var(--calm-border);
-}
-
-html.visual-calm .calm-profile-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #c7b8ff, #9fd8ff);
-  color: #1b1b19;
-  font: 700 12px var(--font-ui);
-}
-
-html.visual-calm .calm-profile-copy {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-html.visual-calm .calm-profile-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--calm-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-html.visual-calm .calm-profile-detail {
-  font-size: 12px;
-  color: var(--calm-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ---------- Library / Build views ---------- */
@@ -1296,31 +1211,6 @@ html.visual-calm .calm-setup-pill:hover {
   background: var(--calm-surface-hover);
 }
 
-html.visual-calm .calm-profile-agent {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--calm-text-muted);
-  font: 400 12px var(--font-ui);
-  cursor: pointer;
-  text-align: left;
-}
-
-html.visual-calm .calm-profile-agent > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-html.visual-calm .calm-profile-agent:hover {
-  color: var(--calm-text);
-}
-
 /* ---------- Dialog ---------- */
 
 .calm-dialog-backdrop {
@@ -1615,15 +1505,6 @@ html.visual-calm .calm-nav-item > svg:first-child {
   padding: 0 2px;
 }
 
-/* Secondary "More" items sit on the same grid as the primary list. */
-html.visual-calm .calm-nav-more {
-  padding-left: 0;
-}
-
-html.visual-calm .calm-nav-more .calm-nav-item {
-  color: var(--calm-text-secondary);
-}
-
 /* The Sessions header lines up with the nav rows above it. The base rule
    sets padding with !important. */
 html.visual-calm .calm-sidebar .sidebar-header-sessions {
@@ -1646,13 +1527,6 @@ html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle > sv
 html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle svg:first-of-type {
   box-sizing: content-box;
   padding: 0 2px;
-}
-
-/* Profile: the agent line starts under the user's name. */
-html.visual-calm .calm-profile-agent {
-  justify-content: flex-start;
-  align-self: flex-start;
-  max-width: 100%;
 }
 
 /* Settings nav: selection is a quiet fill, not a 2px ink border (calm maps
@@ -2581,21 +2455,11 @@ html.visual-calm .document-editor-panel-title {
   letter-spacing: 0;
 }
 
-/* ---------- Right panel as a rail ----------
-   The base styles float the inspector as a shadowed card; calm docks it as a
-   full-height rail that mirrors the left sidebar. */
-html.visual-calm .right-panel,
-html.visual-calm.theme-light .right-panel {
-  align-self: stretch;
-  height: auto !important;
-  max-height: none;
-  margin: 0;
-  padding-top: var(--title-bar-height) !important;
-  background: var(--calm-sidebar) !important;
-  border: none !important;
-  border-left: 1px solid var(--calm-border) !important;
-  border-radius: 0;
-  box-shadow: none;
+/* ---------- Right panel ----------
+   Calm uses the modern theme's floating inspector card; keep the canvas around
+   it the same colour as the main view. */
+html.visual-calm .app-layout .selected-workspace-main-row {
+  background: var(--calm-page) !important;
 }
 
 html.visual-calm .right-panel .cli-section,
@@ -2684,45 +2548,6 @@ html.visual-calm .task-status-banner-stop-btn {
 html.visual-calm .task-status-banner-stop-btn:hover {
   background: var(--color-error-subtle, rgba(198, 40, 40, 0.08));
   border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
-}
-
-/* Profile footer: agent avatar + assistant name as one button. */
-html.visual-calm .calm-profile-identity {
-  appearance: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-  padding: 4px 6px 4px 2px;
-  border: none;
-  border-radius: var(--calm-radius-item);
-  background: transparent;
-  color: var(--calm-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-html.visual-calm .calm-profile-identity:hover {
-  background: var(--calm-surface-hover);
-}
-
-html.visual-calm .calm-profile-avatar-agent {
-  background: var(--calm-surface);
-  box-shadow: 0 0 0 1px var(--calm-border);
-}
-
-/* Footer identity sits on the nav grid: avatar centred on the 20px icon
-   column, name on the label column. */
-html.visual-calm .calm-profile-identity {
-  justify-content: flex-start;
-  gap: 6px;
-  padding: 4px 8px 4px 6px;
-}
-
-html.visual-calm .calm-profile-avatar.calm-profile-avatar-agent {
-  width: 24px;
-  height: 24px;
 }
 
 /* ---------- Reasoning slider layout (calm) ----------

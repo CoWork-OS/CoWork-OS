@@ -10,10 +10,10 @@
   align-self: flex-start;
   flex: 0 0 var(--right-panel-width);
   width: var(--right-panel-width);
-  /* The title bar overlays the content row, so start below it like the other
-     panels in this slot instead of sliding underneath the window controls. */
-  margin: 54px 12px 12px 0;
-  max-height: calc(100% - 66px);
+  /* Clear the title bar when it overlays the content row; inside the app shell
+     the layout already starts below it and the variable is 0. */
+  margin: calc(var(--title-bar-height, 0px) + 16px) 12px 12px 0;
+  max-height: calc(100% - var(--title-bar-height, 0px) - 28px);
   box-sizing: border-box;
   padding: 16px 14px max(14px, env(safe-area-inset-bottom, 0px));
   overflow-x: hidden;

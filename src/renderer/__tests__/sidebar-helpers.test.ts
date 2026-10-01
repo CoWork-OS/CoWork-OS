@@ -13,6 +13,7 @@ import {
   flattenVisibleTaskRows,
   formatRelativeShort,
   getSidebarDateGroup,
+  getSidebarRecencyBucket,
   getSidebarSessionTitle,
   isActiveSessionStatus,
   isAutomatedSession,
@@ -571,5 +572,19 @@ describe("isAwaitingSessionStatus", () => {
     expect(isAwaitingSessionStatus("completed")).toBe(false);
     expect(isAwaitingSessionStatus("failed")).toBe(false);
     expect(isAwaitingSessionStatus("cancelled")).toBe(false);
+  });
+});
+
+describe("getSidebarRecencyBucket", () => {
+  const now = new Date(2026, 9, 1, 15, 0, 0);
+  const at = (daysAgo: number, hour = 9) => new Date(2026, 9, 1 - daysAgo, hour, 0, 0).getTime();
+
+  it("buckets by the timestamp Recents sort by", () => {
+    expect(getSidebarRecencyBucket({ createdAt: at(10), updatedAt: at(0) }, now)).toBe("Today");
+    expect(getSidebarRecencyBucket({ createdAt: at(1), updatedAt: 0 }, now)).toBe("Yesterday");
+    expect(getSidebarRecencyBucket({ createdAt: at(6), updatedAt: 0 }, now)).toBe(
+      "Previous 7 days",
+    );
+    expect(getSidebarRecencyBucket({ createdAt: at(7), updatedAt: 0 }, now)).toBe("Earlier");
   });
 });

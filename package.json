@@ -200,7 +200,7 @@
     "@grammyjs/transformer-throttler": "^1.2.1",
     "@phosphor-icons/react": "^2.1.10",
     "@pydantic/monty": "^0.0.4",
-    "@slack/bolt": "^4.6.0",
+    "@slack/bolt": "^5.1.0",
     "@xmldom/xmldom": "^0.8.11",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -241,14 +241,14 @@
     "recharts": "^3.10.1",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.2",
     "ws": "^8.21.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/mime-types": "^3.0.1",
-    "@types/node": "^25.2.0",
+    "@types/node": "^26.6.2",
     "@types/pdf-parse": "^1.1.5",
     "@types/pdfkit": "^0.17.5",
     "@types/qrcode": "^1.5.5",
@@ -270,7 +270,7 @@
     "twilio": "^6.1.1",
     "typescript": "^5.9.0",
     "vite": "^8.3.0",
-    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron": "^1.1.2",
     "vitest": "^5.0.1"
   },
   "optionalDependencies": {

@@ -79,6 +79,37 @@ describe("SidebarRail", () => {
     const markup = renderRail({ initialPinnedIds: ["missionControl"] });
     expect(markup).toContain('class="sidebar-rail-label" aria-hidden="true">Home</span>');
     expect(markup).toContain('class="sidebar-rail-label" aria-hidden="true">Missions</span>');
-    expect(markup).toMatch(/aria-label="Mission Control"[^>]*title="Mission Control"/);
+    expect(markup).toMatch(/aria-label="Mission Control"[^>]*title="Mission Control \(Ctrl\+5\)"/);
+  });
+
+  it("numbers the rail for Ctrl+1–9, pinned items included", () => {
+    const markup = renderRail();
+    expect(markup).toMatch(/aria-keyshortcuts="Control\+1" title="Home \(Ctrl\+1\)"/);
+    expect(markup).toMatch(/aria-keyshortcuts="Control\+5" title="Devices \(Ctrl\+5\)"/);
+    // More and Settings aren't destinations to number.
+    expect(markup).not.toMatch(/aria-label="More"[^>]*aria-keyshortcuts/);
+    expect(markup).not.toMatch(/aria-label="Settings"[^>]*aria-keyshortcuts/);
+  });
+
+  it("uses ⌘ on macOS", () => {
+    vi.stubGlobal("window", { electronAPI: { getPlatform: () => "darwin" } });
+    const markup = renderRail();
+    expect(markup).toMatch(/aria-keyshortcuts="Meta\+2" title="Inbox \(⌘2\)"/);
+  });
+
+  it("follows a saved order, and the shortcuts follow it", () => {
+    const markup = renderRail({ initialRailOrder: ["automations", "home"] });
+    const order = ["Automations", "Home", "Inbox", "Agents"].map((label) =>
+      markup.indexOf(`aria-label="${label}"`),
+    );
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(markup).toMatch(/title="Automations \(Ctrl\+1\)"/);
+  });
+
+  it("lets destinations be dragged, but not More or Settings", () => {
+    const markup = renderRail();
+    expect(markup).toMatch(/draggable="true"[^>]*aria-label="Home"/);
+    expect(markup).not.toMatch(/draggable="true"[^>]*aria-label="More"/);
+    expect(markup).not.toMatch(/draggable="true"[^>]*aria-label="Settings"/);
   });
 });

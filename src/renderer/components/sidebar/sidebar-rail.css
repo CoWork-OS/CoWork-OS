@@ -126,6 +126,48 @@
   background: color-mix(in srgb, var(--rail-accent) 18%, transparent);
 }
 
+/* Keyboard focus rings the icon tile, so Alt+↑/↓ reordering can be followed.
+   Scoped to the rail to beat Calm's global ring, which would draw a second one. */
+.sidebar-rail .sidebar-rail-btn:focus-visible {
+  outline: none;
+}
+
+.sidebar-rail-btn:focus-visible .sidebar-rail-icon {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rail-accent) 55%, transparent);
+}
+
+/* Reordering: the dragged item fades, and an accent bar marks where it lands. */
+.sidebar-rail-btn.dragging {
+  opacity: 0.4;
+}
+
+.sidebar-rail-btn.drop-before::after,
+.sidebar-rail-btn.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 32px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--rail-accent);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.sidebar-rail-btn.drop-before::after {
+  top: -2px;
+}
+
+.sidebar-rail-btn.drop-after::after {
+  bottom: -2px;
+}
+
+.sidebar-rail-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-border);
+}
+
 .sidebar-rail-dot {
   position: absolute;
   top: 2px;
@@ -226,6 +268,11 @@ html.visual-calm .sidebar-rail-btn:hover {
 html.visual-calm .sidebar-rail-btn:hover .sidebar-rail-icon,
 html.visual-calm .sidebar-rail-btn.open .sidebar-rail-icon {
   background: var(--calm-surface-hover);
+}
+
+/* The current destination keeps its accent tile under the pointer. */
+html.visual-calm .sidebar-rail-btn.active .sidebar-rail-icon {
+  background: color-mix(in srgb, var(--rail-accent) 15%, transparent);
 }
 
 html.visual-calm .sidebar-rail-btn.open {

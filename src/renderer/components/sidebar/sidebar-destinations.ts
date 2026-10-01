@@ -182,9 +182,14 @@ export interface SidebarRailLayout {
   more: SidebarDestination[];
 }
 
+/**
+ * `railOrder` is the user's order for the fixed rail items; items it doesn't
+ * name (new destinations, say) keep their default order after the ones it does.
+ */
 export function getSidebarRailLayout(
   context: SidebarDestinationContext,
   pinnedIds: readonly SidebarDestinationId[],
+  railOrder: readonly SidebarDestinationId[] = [],
 ): SidebarRailLayout {
   const visible = SIDEBAR_DESTINATIONS.filter(
     (destination) => destination.isVisible?.(context) ?? true,
@@ -193,47 +198,130 @@ export function getSidebarRailLayout(
   const pinned = pinnedIds
     .map((id) => more.find((destination) => destination.id === id))
     .filter((destination): destination is SidebarDestination => Boolean(destination));
-  return {
-    rail: visible.filter((destination) => destination.placement === "rail"),
-    pinned,
-    more,
+  const rank = (id: SidebarDestinationId) => {
+    const index = railOrder.indexOf(id);
+    return index === -1 ? railOrder.length : index;
   };
+  const rail = visible
+    .filter((destination) => destination.placement === "rail")
+    .map((destination, index) => ({ destination, index }))
+    .sort((a, b) => rank(a.destination.id) - rank(b.destination.id) || a.index - b.index)
+    .map(({ destination }) => destination);
+  return { rail, pinned, more };
+}
+
+/** Destinations ⌘1–⌘9 open: the rail top to bottom, pinned items included. */
+export const SIDEBAR_RAIL_SHORTCUT_LIMIT = 9;
+
+export function getSidebarRailShortcutTargets(layout: SidebarRailLayout): SidebarDestination[] {
+  return [...layout.rail, ...layout.pinned].slice(0, SIDEBAR_RAIL_SHORTCUT_LIMIT);
+}
+
+/** Moves `id` next to `targetId`; returns the list unchanged when either is missing. */
+export function moveSidebarDestination(
+  ids: readonly SidebarDestinationId[],
+  id: SidebarDestinationId,
+  targetId: SidebarDestinationId,
+  position: "before" | "after",
+): SidebarDestinationId[] {
+  if (id === targetId || !ids.includes(id) || !ids.includes(targetId)) return [...ids];
+  const rest = ids.filter((candidate) => candidate !== id);
+  const targetIndex = rest.indexOf(targetId);
+  rest.splice(position === "before" ? targetIndex : targetIndex + 1, 0, id);
+  return rest;
+}
+
+/** Moves `id` one place up (-1) or down (1), stopping at either end. */
+export function shiftSidebarDestination(
+  ids: readonly SidebarDestinationId[],
+  id: SidebarDestinationId,
+  delta: -1 | 1,
+): SidebarDestinationId[] {
+  const index = ids.indexOf(id);
+  const target = ids[index + delta];
+  if (index === -1 || !target) return [...ids];
+  return moveSidebarDestination(ids, id, target, delta < 0 ? "before" : "after");
 }
 
 export const SIDEBAR_RAIL_STORAGE_KEY = "cowork.sidebar.rail.v1";
 export const DEFAULT_PINNED_SIDEBAR_DESTINATIONS: readonly SidebarDestinationId[] = ["devices"];
 
-function isPinnableDestinationId(value: unknown): value is SidebarDestinationId {
+function isPlacedDestinationId(
+  value: unknown,
+  placement: SidebarDestination["placement"],
+): value is SidebarDestinationId {
   return (
     typeof value === "string" &&
-    DESTINATIONS_BY_ID.get(value as SidebarDestinationId)?.placement === "more"
+    DESTINATIONS_BY_ID.get(value as SidebarDestinationId)?.placement === placement
   );
+}
+
+/** The stored rail preferences: pins, and the user's order for the fixed items. */
+interface StoredRailPreferences {
+  pinned?: unknown;
+  order?: unknown;
+}
+
+function readRailPreferences(
+  storage: Pick<Storage, "getItem"> | undefined,
+): StoredRailPreferences | null {
+  try {
+    const raw = storage?.getItem(SIDEBAR_RAIL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as StoredRailPreferences) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Updates one field and keeps the others, so pinning doesn't reset the order. */
+function writeRailPreference(
+  field: keyof StoredRailPreferences,
+  value: readonly SidebarDestinationId[] | undefined,
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
+): void {
+  try {
+    const next = { ...readRailPreferences(storage) };
+    if (value === undefined) delete next[field];
+    else next[field] = value;
+    storage?.setItem(SIDEBAR_RAIL_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Rail layout is a convenience preference; keep the in-memory state if storage fails.
+  }
 }
 
 /** Pinned More items in pin order. Falls back to the defaults until the user pins or unpins. */
 export function readPinnedSidebarDestinations(
   storage: Pick<Storage, "getItem"> | undefined = globalThis.localStorage,
 ): SidebarDestinationId[] {
-  try {
-    const raw = storage?.getItem(SIDEBAR_RAIL_STORAGE_KEY);
-    if (!raw) return [...DEFAULT_PINNED_SIDEBAR_DESTINATIONS];
-    const parsed = JSON.parse(raw) as { pinned?: unknown };
-    if (!Array.isArray(parsed.pinned)) return [...DEFAULT_PINNED_SIDEBAR_DESTINATIONS];
-    return [...new Set(parsed.pinned.filter(isPinnableDestinationId))];
-  } catch {
-    return [...DEFAULT_PINNED_SIDEBAR_DESTINATIONS];
-  }
+  const pinned = readRailPreferences(storage)?.pinned;
+  if (!Array.isArray(pinned)) return [...DEFAULT_PINNED_SIDEBAR_DESTINATIONS];
+  return [...new Set(pinned.filter((id) => isPlacedDestinationId(id, "more")))];
 }
 
 export function writePinnedSidebarDestinations(
   pinnedIds: readonly SidebarDestinationId[],
-  storage: Pick<Storage, "setItem"> | undefined = globalThis.localStorage,
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined = globalThis.localStorage,
 ): void {
-  try {
-    storage?.setItem(SIDEBAR_RAIL_STORAGE_KEY, JSON.stringify({ pinned: pinnedIds }));
-  } catch {
-    // Rail pins are a convenience preference; keep the in-memory state if storage fails.
-  }
+  writeRailPreference("pinned", pinnedIds, storage);
+}
+
+/** The user's order for the fixed rail items; empty until they reorder. */
+export function readSidebarRailOrder(
+  storage: Pick<Storage, "getItem"> | undefined = globalThis.localStorage,
+): SidebarDestinationId[] {
+  const order = readRailPreferences(storage)?.order;
+  if (!Array.isArray(order)) return [];
+  return [...new Set(order.filter((id) => isPlacedDestinationId(id, "rail")))];
+}
+
+/** Pass an empty list to go back to the default order. */
+export function writeSidebarRailOrder(
+  order: readonly SidebarDestinationId[],
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined = globalThis.localStorage,
+): void {
+  writeRailPreference("order", order.length > 0 ? order : undefined, storage);
 }
 
 export function togglePinnedSidebarDestination(

@@ -6,10 +6,15 @@ import {
   getActiveSidebarDestination,
   getSidebarDestination,
   getSidebarRailLayout,
+  getSidebarRailShortcutTargets,
   isSidebarDestinationAvailable,
+  moveSidebarDestination,
   readPinnedSidebarDestinations,
+  readSidebarRailOrder,
+  shiftSidebarDestination,
   togglePinnedSidebarDestination,
   writePinnedSidebarDestinations,
+  writeSidebarRailOrder,
 } from "../sidebar-destinations";
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -72,6 +77,63 @@ describe("getSidebarRailLayout", () => {
     const layout = getSidebarRailLayout({ isCalm: false, isBrowserHost: false }, []);
     expect(ids(layout.rail)).not.toContain("gitChanges");
   });
+
+  it("applies a saved order and keeps unnamed items in default order after it", () => {
+    const layout = getSidebarRailLayout(
+      { isCalm: false, isBrowserHost: false },
+      [],
+      ["automations", "inbox"],
+    );
+    expect(ids(layout.rail)).toEqual(["automations", "inbox", "home", "agents"]);
+  });
+});
+
+describe("rail shortcuts and reordering", () => {
+  it("numbers at most nine destinations, rail first then pinned", () => {
+    const layout = getSidebarRailLayout({ isCalm: true, isBrowserHost: false }, [
+      "devices",
+      "everyday",
+      "missionControl",
+      "ideas",
+      "build",
+      "addTools",
+    ]);
+    const targets = getSidebarRailShortcutTargets(layout);
+    expect(targets).toHaveLength(9);
+    expect(ids(targets).slice(0, 6)).toEqual([
+      "home",
+      "inbox",
+      "agents",
+      "automations",
+      "library",
+      "devices",
+    ]);
+  });
+
+  it("moves an item before or after another", () => {
+    const list = ["home", "inbox", "agents", "automations"] as const;
+    expect(moveSidebarDestination([...list], "automations", "inbox", "before")).toEqual([
+      "home",
+      "automations",
+      "inbox",
+      "agents",
+    ]);
+    expect(moveSidebarDestination([...list], "home", "agents", "after")).toEqual([
+      "inbox",
+      "agents",
+      "home",
+      "automations",
+    ]);
+    expect(moveSidebarDestination([...list], "home", "ideas", "after")).toEqual([...list]);
+  });
+
+  it("shifts an item one place and stops at the ends", () => {
+    const list = ["home", "inbox", "agents"] as const;
+    expect(shiftSidebarDestination([...list], "inbox", -1)).toEqual(["inbox", "home", "agents"]);
+    expect(shiftSidebarDestination([...list], "inbox", 1)).toEqual(["home", "agents", "inbox"]);
+    expect(shiftSidebarDestination([...list], "home", -1)).toEqual([...list]);
+    expect(shiftSidebarDestination([...list], "agents", 1)).toEqual([...list]);
+  });
 });
 
 describe("rail pin persistence", () => {
@@ -101,6 +163,27 @@ describe("rail pin persistence", () => {
     expect(readPinnedSidebarDestinations(storage)).toEqual([
       ...DEFAULT_PINNED_SIDEBAR_DESTINATIONS,
     ]);
+  });
+
+  it("stores the rail order beside the pins without either resetting the other", () => {
+    const storage = memoryStorage();
+    writeSidebarRailOrder(["agents", "home", "ideas"], storage);
+    writePinnedSidebarDestinations(["ideas"], storage);
+    // Only fixed rail items belong in the order.
+    expect(readSidebarRailOrder(storage)).toEqual(["agents", "home"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["ideas"]);
+
+    writeSidebarRailOrder([], storage);
+    expect(readSidebarRailOrder(storage)).toEqual([]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["ideas"]);
+  });
+
+  it("reads pins saved before the order existed", () => {
+    const storage = memoryStorage({
+      [SIDEBAR_RAIL_STORAGE_KEY]: JSON.stringify({ pinned: ["ideas"] }),
+    });
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["ideas"]);
+    expect(readSidebarRailOrder(storage)).toEqual([]);
   });
 
   it("toggles a pin on and off", () => {

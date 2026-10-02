@@ -158,6 +158,39 @@ function messageHasToolResult(message: LLMMessage): boolean {
 }
 
 /**
+ * Indexes compaction keeps regardless of budget: the latest user request and the
+ * latest complete tool call with its results. Without them the model loses what
+ * it was asked and where it stopped.
+ */
+function findLatestWorkIndexes(messages: LLMMessage[]): number[] {
+  const indexes: number[] = [];
+  for (let i = messages.length - 1; i > 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "user" || messageHasToolResult(message) || isPinnedMessage(message)) {
+      continue;
+    }
+    const text =
+      typeof message.content === "string" ? message.content : messageTextForPinnedCheck(message);
+    if (text.trim()) {
+      indexes.push(i);
+      break;
+    }
+  }
+  for (let i = messages.length - 1; i > 1; i--) {
+    if (
+      messages[i]?.role === "user" &&
+      messageHasToolResult(messages[i]) &&
+      messages[i - 1]?.role === "assistant" &&
+      messageHasToolUse(messages[i - 1])
+    ) {
+      indexes.push(i - 1, i);
+      break;
+    }
+  }
+  return indexes;
+}
+
+/**
  * Estimate token count from text (rough approximation)
  * LLMs use ~4 characters per token on average for English text
  */
@@ -1063,6 +1096,14 @@ export class ContextManager {
     // Always keep pinned messages (system-generated context blocks).
     for (let i = 1; i < messages.length; i++) {
       if (!isPinnedMessage(messages[i])) continue;
+      keep.add(i);
+      currentTokens += estimateMessageTokens(messages[i]);
+    }
+
+    // Always keep the latest request and tool exchange, even past the target: a
+    // large first message would otherwise leave no room for any recent message.
+    for (const i of findLatestWorkIndexes(messages)) {
+      if (keep.has(i)) continue;
       keep.add(i);
       currentTokens += estimateMessageTokens(messages[i]);
     }

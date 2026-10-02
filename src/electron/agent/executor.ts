@@ -53,6 +53,7 @@ import {
 import { resolveModelPreferenceToModelKey } from "../../shared/agent-preferences";
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
+import { CONTEXT_COMPACTION_RECENT_USER_MESSAGE_MAX_TOKENS } from "../../shared/context-compaction";
 import { formatProviderErrorForDisplay } from "../../shared/provider-error-format";
 import { classifyShellPermissionDecision } from "../../shared/shell-permission-intents";
 import {
@@ -181,6 +182,7 @@ import {
 } from "./llm/prompt-cache";
 import { assertNormalizedTurnTranscript } from "./runtime/turn-transcript-normalizer";
 import {
+  PINNED_CONTEXT_OPEN_TAGS,
   PINNED_CONTEXT_TAGS,
   removePinnedContextBlock,
   upsertPinnedContextBlock,
@@ -5782,13 +5784,6 @@ export class TaskExecutor {
     removedMessages: LLMMessage[],
     maxChars: number,
   ): string {
-    const out: string[] = [];
-
-    const push = (text: string) => {
-      if (!text) return;
-      out.push(text);
-    };
-
     const clamp = (text: string, n: number) => {
       if (text.length <= n) return text;
       // For long texts, preserve head + tail so trailing instructions aren't lost
@@ -5805,53 +5800,129 @@ export class TaskExecutor {
     const textClamp = (role: string) =>
       role === "user" ? COMPACTION_USER_MSG_CLAMP : COMPACTION_ASSISTANT_TEXT_CLAMP;
 
+    // The newest user messages go to the summarizer verbatim, newest first, up to
+    // this budget: they carry the latest corrections and decisions.
+    let verbatimUserChars = Math.min(
+      CONTEXT_COMPACTION_RECENT_USER_MESSAGE_MAX_TOKENS * 4,
+      Math.floor(maxChars / 3),
+    );
+    const verbatimUserIndexes = new Set<number>();
+    for (let index = removedMessages.length - 1; index >= 0; index -= 1) {
+      const msg = removedMessages[index];
+      if (msg?.role !== "user") continue;
+      const text =
+        typeof msg.content === "string"
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? (msg.content as Any[])
+                .filter((block) => block?.type === "text" && typeof block.text === "string")
+                .map((block) => block.text)
+                .join("\n")
+            : "";
+      const trimmed = text.trim();
+      if (!trimmed || PINNED_CONTEXT_OPEN_TAGS.some((tag) => trimmed.startsWith(tag))) continue;
+      if (text.length > verbatimUserChars) break;
+      verbatimUserChars -= text.length;
+      verbatimUserIndexes.add(index);
+    }
+
+    // One entry per message, so an over-long transcript is shortened by whole messages.
+    const entries: Array<{ text: string; verbatim: boolean }> = [];
     let turnIndex = 0;
     let lastRole: string | null = null;
 
-    for (const msg of removedMessages) {
+    removedMessages.forEach((msg, index) => {
       const role = msg.role;
+      const lines: string[] = [];
 
       // Add turn separator when the role alternates
       if (lastRole !== null && role !== lastRole) {
         turnIndex++;
-        push(`--- Turn ${turnIndex} ---`);
+        lines.push(`--- Turn ${turnIndex} ---`);
       }
       lastRole = role;
 
+      const verbatim = verbatimUserIndexes.has(index);
+      const clampText = (text: string) => (verbatim ? text : clamp(text, textClamp(role)));
       if (typeof msg.content === "string") {
-        push(`[${role}] ${clamp(msg.content.trim(), textClamp(role))}`);
-        continue;
-      }
-
-      if (!Array.isArray(msg.content)) continue;
-      for (const block of msg.content as Any[]) {
-        if (!block) continue;
-        if (block.type === "text" && typeof block.text === "string") {
-          push(`[${role}] ${clamp(block.text.trim(), textClamp(role))}`);
-        } else if (block.type === "tool_use") {
-          const input = (() => {
-            try {
-              return JSON.stringify(block.input ?? {});
-            } catch {
-              return "";
-            }
-          })();
-          push(
-            `[${role}] TOOL_USE ${String(block.name || "").trim()} ${clamp(input, COMPACTION_TOOL_USE_CLAMP)}`,
-          );
-        } else if (block.type === "tool_result") {
-          push(
-            `[${role}] TOOL_RESULT ${clamp(String(block.content || "").trim(), COMPACTION_TOOL_RESULT_CLAMP)}`,
-          );
-        } else if (block.type === "image") {
-          const sizeMB = ((block.originalSizeBytes || 0) / (1024 * 1024)).toFixed(1);
-          push(`[${role}] IMAGE ${block.mimeType || "unknown"} ${sizeMB}MB`);
+        lines.push(`[${role}] ${clampText(msg.content.trim())}`);
+      } else if (Array.isArray(msg.content)) {
+        for (const block of msg.content as Any[]) {
+          if (!block) continue;
+          if (block.type === "text" && typeof block.text === "string") {
+            lines.push(`[${role}] ${clampText(block.text.trim())}`);
+          } else if (block.type === "tool_use") {
+            const input = (() => {
+              try {
+                return JSON.stringify(block.input ?? {});
+              } catch {
+                return "";
+              }
+            })();
+            lines.push(
+              `[${role}] TOOL_USE ${String(block.name || "").trim()} ${clamp(input, COMPACTION_TOOL_USE_CLAMP)}`,
+            );
+          } else if (block.type === "tool_result") {
+            lines.push(
+              `[${role}] TOOL_RESULT ${clamp(String(block.content || "").trim(), COMPACTION_TOOL_RESULT_CLAMP)}`,
+            );
+          } else if (block.type === "image") {
+            const sizeMB = ((block.originalSizeBytes || 0) / (1024 * 1024)).toFixed(1);
+            lines.push(`[${role}] IMAGE ${block.mimeType || "unknown"} ${sizeMB}MB`);
+          }
         }
       }
+      if (lines.length > 0) entries.push({ text: lines.join("\n"), verbatim });
+    });
+
+    const joined = entries.map((entry) => entry.text).join("\n");
+    if (joined.length <= maxChars) return joined;
+
+    // Too long: keep the verbatim user messages, then about 30% of the remaining
+    // room from the start of the dropped span and the rest from its end, where the
+    // latest errors, decisions and corrections are. Omitted runs are marked.
+    const markerReserve = (verbatimUserIndexes.size + 2) * 64;
+    const keep = new Set<number>();
+    let remaining = maxChars - markerReserve;
+    entries.forEach((entry, index) => {
+      if (!entry.verbatim) return;
+      keep.add(index);
+      remaining -= entry.text.length + 1;
+    });
+    let headRoom = Math.floor(Math.max(0, remaining) * 0.3);
+    for (let index = 0; index < entries.length; index += 1) {
+      if (keep.has(index)) continue;
+      const size = entries[index].text.length + 1;
+      if (size > headRoom) break;
+      keep.add(index);
+      headRoom -= size;
+      remaining -= size;
+    }
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      if (keep.has(index)) continue;
+      const size = entries[index].text.length + 1;
+      if (size > remaining) break;
+      keep.add(index);
+      remaining -= size;
     }
 
-    const joined = out.join("\n");
-    return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
+    const out: string[] = [];
+    let omitted = 0;
+    const flushOmitted = () => {
+      if (omitted === 0) return;
+      out.push(`...[${omitted} dropped messages omitted for length]...`);
+      omitted = 0;
+    };
+    entries.forEach((entry, index) => {
+      if (!keep.has(index)) {
+        omitted += 1;
+        return;
+      }
+      flushOmitted();
+      out.push(entry.text);
+    });
+    flushOmitted();
+    return out.join("\n");
   }
 
   private async buildCompactionSummaryBlock(opts: {
@@ -5865,10 +5936,6 @@ export class TaskExecutor {
     if (!removed || removed.length === 0) return "";
     if (!Number.isFinite(opts.maxOutputTokens) || opts.maxOutputTokens <= 0) return "";
 
-    const transcript = this.formatMessagesForCompactionSummary(
-      removed,
-      COMPACTION_SUMMARY_MAX_INPUT_CHARS,
-    );
     const contextLabel = opts.contextLabel || "task";
 
     // Framing inspired by Codex CLI's "handoff to another LLM" pattern:
@@ -5893,6 +5960,14 @@ ${previousSummary}
 
 `
       : "";
+    // The previous summary shares the summarizer's input budget with the transcript.
+    const transcript = this.formatMessagesForCompactionSummary(
+      removed,
+      Math.max(
+        Math.floor(COMPACTION_SUMMARY_MAX_INPUT_CHARS / 2),
+        COMPACTION_SUMMARY_MAX_INPUT_CHARS - previousSummary.length,
+      ),
+    );
 
     const system =
       "You are a session continuity specialist. You produce comprehensive, structured summaries that allow an AI agent to seamlessly continue a session from compacted context. Your summaries are thorough — you preserve all user messages, key decisions, files changed, errors encountered, and pending work. You never omit details that would cause the agent to repeat work or misunderstand the current state.";
@@ -5948,6 +6023,16 @@ ${transcript}
       Math.min(opts.maxOutputTokens, scaledMax),
     );
 
+    // Keep the start and, mostly, the end of an over-long fallback transcript.
+    const truncateKeepingEnds = (text: string, maxTokens: number): string => {
+      const maxChars = Math.max(1, maxTokens) * 4;
+      if (text.length <= maxChars) return text;
+      const marker = "\n...[middle of the dropped context omitted]...\n";
+      if (maxChars <= marker.length * 2) return text.slice(-maxChars);
+      const head = Math.floor((maxChars - marker.length) * 0.3);
+      return text.slice(0, head) + marker + text.slice(-(maxChars - marker.length - head));
+    };
+
     const buildDeterministicFallback = (): string => {
       const rawTranscript = InputSanitizer.sanitizeMemoryContent(transcript).trim();
       const fallbackBody =
@@ -5956,7 +6041,7 @@ ${transcript}
       const earlierSummary = previousSummary
         ? `Earlier summary:\n${truncateToTokens(previousSummary, Math.floor(bodyBudget / 2))}\n\n`
         : "";
-      const fallback = truncateToTokens(
+      const fallback = truncateKeepingEnds(
         fallbackBody,
         Math.max(1, bodyBudget - estimateTokens(earlierSummary)),
       );

@@ -12287,9 +12287,29 @@ ${transcript}
     const desc = String(step.description || "").toLowerCase();
     if (!desc.trim()) return false;
 
+    // An inspection step that also asks for the remediation ("investigate the
+    // crash and patch it", "check the config and correct the port") expects
+    // that edit, unless the task itself is read-only. Proposing a fix and
+    // negated or deferred edits ("before changing anything") are not requests.
+    const remediationText = desc
+      .replace(
+        /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without|before)\b[^,.;!?\n]*/g,
+        " ",
+      )
+      .replace(
+        /\b(?:propose|suggest|recommend|outline|describe|explain|identify|document)\s+(?:(?:a|an|the|possible|potential)\s+)*(?:fix(?:es)?|patch(?:es)?|changes?|solutions?|improvements?)\b/g,
+        " ",
+      );
+    if (descriptionHasWriteIntent(remediationText)) {
+      return this.promptHasReadOnlyConstraint(
+        `${this.task?.title || ""}\n${this.getContractPrompt()}`,
+      );
+    }
+
     return (
       descriptionHasReadOnlyIntent(desc) ||
       descriptionHasDiscoveryIntent(desc) ||
+      /\b(?:before|without)\s+(?:changing|modifying|editing)\b/.test(desc) ||
       /\b(checklist|scorecard|qa|audit)\b/.test(desc)
     );
   }

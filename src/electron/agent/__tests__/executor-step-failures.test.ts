@@ -3146,6 +3146,92 @@ relationship_memory:
     }
   });
 
+  async function runInspectThenEditStep(opts: {
+    description: string;
+    relPath: string;
+    before: string;
+    after: string;
+    taskPrompt?: string;
+  }): Promise<{ step: Any; contract: Any; fileNow: string }> {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-inspect-edit-"));
+    const target = path.join(tempDir, opts.relPath);
+    fs.writeFileSync(target, opts.before);
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("read_file", { path: opts.relPath }),
+        toolUseResponse("edit_file", {
+          file_path: opts.relPath,
+          old_string: opts.before,
+          new_string: opts.after,
+        }),
+        textResponse(`Found the problem in ${opts.relPath} and corrected it.`),
+      ],
+      {},
+    );
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).task.prompt = opts.taskPrompt || opts.description;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file") {
+        fs.writeFileSync(target, opts.after);
+        return { success: true, file_path: opts.relPath, replacements: 1 };
+      }
+      if (name === "read_file") {
+        return { success: true, path: opts.relPath, content: fs.readFileSync(target, "utf8") };
+      }
+      return { success: true };
+    });
+    const step: Any = { id: "inspect-edit", description: opts.description, status: "pending" };
+    try {
+      const contract = (executor as Any).resolveStepExecutionContract(step);
+      await (executor as Any).executeStep(step);
+      return { step, contract, fileNow: fs.readFileSync(target, "utf8") };
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  it.each([
+    ["Investigate the root cause of the crash in parser.ts and patch it", "parser.ts"],
+    ["Check the config in server.ts and correct the port number", "server.ts"],
+    ["Look into the flaky test in retry.test.ts and stabilize it", "retry.test.ts"],
+    ["Analyze the slow query in repo.ts and optimize it", "repo.ts"],
+    ["Inspect the migration in 001.sql and change the column type", "001.sql"],
+    ["Review the CSS in app.css and adjust the spacing", "app.css"],
+    ["Investigate the crash and patch the null check", "parser.ts"],
+  ])(
+    "does not fail an inspect-then-fix step for its requested edit: %s",
+    async (description, relPath) => {
+      const { step, contract, fileNow } = await runInspectThenEditStep({
+        description,
+        relPath,
+        before: "value = 1",
+        after: "value = 2",
+      });
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fileNow).toBe("value = 2");
+      if (/\.\w+\b/.test(description)) {
+        expect(contract.mode).toBe("mutation_required");
+      }
+    },
+  );
+
+  it.each([
+    "Investigate the root cause of the crash in parser.ts",
+    "Investigate the crash and propose a fix",
+    "Look into the parser crash but do not modify any files yet",
+  ])("still fails a purely inspective step that edits files: %s", async (description) => {
+    const { step } = await runInspectThenEditStep({
+      description,
+      relPath: "parser.ts",
+      before: "value = 1",
+      after: "value = 2",
+    });
+    expect(step.status).toBe("failed");
+    expect(String(step.error || "")).toContain(
+      "Analysis/inspection step performed a workspace mutation",
+    );
+  });
+
   it("reuses prior mutation evidence for refinement steps when current-step target verification is present", async () => {
     executor = createExecutorWithStubs(
       [

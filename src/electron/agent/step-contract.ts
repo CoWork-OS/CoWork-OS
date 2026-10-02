@@ -71,8 +71,11 @@ const COMMAND_PREFIX_REGEX =
   /(^|\s)(python3?|node|npm|npx|pnpm|yarn|bash|sh|zsh|git|curl|wget|make|cmake|xcodebuild|uv|pip3?|go|cargo|java|ruby|php|ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap)\b/i;
 const SHELL_OPERATOR_REGEX = /(?:\|\||&&|[|;<>])/;
 const URL_LIKE_REGEX = /^[a-z][a-z0-9+.-]*:\/\//i;
+// "change", "correct", "convert" and "resolve" are also nouns/adjectives or
+// read-only verbs ("the change log", "is correct", "resolve the hostname"),
+// so they count only with an object that makes them a remediation.
 const STRONG_WRITE_VERB_REGEX =
-  /\b(write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite|delete|remove|rename|move|modify|replace|fix|refactor)\b/;
+  /\b(write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite|delete|remove|rename|move|modify|replace|fix|refactor|patch|adjust|optimi[sz]e|tweak|stabili[sz]e|bump|upgrade|repair|migrate)\b|\b(?:change|correct|convert)\s+(?:it|them|this|that|these|those|the|a|an|all|any|each|every|its|their|our)\b|\bresolve\s+(?:(?:the|all|any|each|every|its|their|our|these|those|remaining|outstanding)\s+)*(?:(?:merge|type|lint|build|test)\s+)?(?:conflicts?|issues?|bugs?|errors?|warnings?|failures?|problems?|it|them)\b/;
 const PASSIVE_ARTIFACT_WRITE_CUE_REGEX =
   /\b(saved|written|created|generated|produced|updated|edited|rewritten|appended|stored|placed)\s+(?:as|to|at|in|under)\b/;
 

@@ -53,6 +53,13 @@ html.platform-darwin.visual-calm .app-layout > .sidebar.sidebar-panel {
   background: var(--sidebar-panel-bg) !important;
 }
 
+/* One typeface for the whole panel. The terminal theme sets the old sidebar
+   to monospace, which left project names and section labels in it beside
+   session titles in the UI font. */
+.sidebar.sidebar-panel.cli-sidebar {
+  font-family: var(--font-ui);
+}
+
 /* With the panel open, the main view meets it and the navbar with hairlines
    instead of being its own rounded card. */
 html .app-layout:not(.sidebar-panel-collapsed) > .main-content,
@@ -427,6 +434,14 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
 }
 
 /* ---------- List ---------- */
+
+/* The panel's lists scroll with a slim thumb and no track in every theme.
+   Dark mode had no scrollbar styling, so it drew the platform's full-height
+   track down the panel. */
+.sidebar-panel :is(.task-list, .sidebar-virtual-list, .sidebar-bots-list, .devices-sidebar-panel) {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-text-primary) 16%, transparent) transparent;
+}
 
 .sidebar-panel .task-list {
   padding: 0 6px 8px;

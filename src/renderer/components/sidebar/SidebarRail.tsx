@@ -15,6 +15,7 @@ import { useDismissable } from "../calm/useDismissable";
 import {
   getSidebarRailLayout,
   getSidebarRailShortcutTargets,
+  isCustomSidebarRailOrder,
   moveSidebarDestination,
   readPinnedSidebarDestinations,
   readSidebarRailOrder,
@@ -199,6 +200,7 @@ function SidebarRailComponent({
     () => getSidebarRailLayout({ isCalm, isBrowserHost }, pinnedIds, railOrder),
     [isBrowserHost, isCalm, pinnedIds, railOrder],
   );
+  const railIsCustom = isCustomSidebarRailOrder({ isCalm, isBrowserHost }, railOrder);
   const activeIsHiddenInMore =
     activeId !== null &&
     layout.more.some((item) => item.id === activeId) &&
@@ -240,8 +242,10 @@ function SidebarRailComponent({
 
   const applyGroupOrder = (group: RailGroup, next: SidebarDestinationId[]) => {
     if (group === "rail") {
-      setRailOrder(next);
-      writeSidebarRailOrder(next);
+      // An order moved back to the default is stored as no order.
+      const stored = isCustomSidebarRailOrder({ isCalm, isBrowserHost }, next) ? next : [];
+      setRailOrder(stored);
+      writeSidebarRailOrder(stored);
     } else {
       setPinnedIds(next);
       writePinnedSidebarDestinations(next);
@@ -376,7 +380,7 @@ function SidebarRailComponent({
                   </div>
                 );
               })}
-              {railOrder.length > 0 && (
+              {railIsCustom && (
                 <>
                   <div className="sidebar-rail-menu-separator" role="separator" />
                   <button

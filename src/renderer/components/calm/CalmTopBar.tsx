@@ -39,6 +39,8 @@ export interface CalmTopBarProps {
   /** Omit where there is no task access profile to show (e.g. Build). */
   access?: {
     label: string;
+    /** Caveats about the current profile, shown in the button's tooltip. */
+    notice?: string | null;
     selectedId?: string;
     isFullAccess: boolean;
     options: CalmAccessOption[];
@@ -175,7 +177,9 @@ export function CalmAccessMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Access: ${access.label}`}
-        title={`Access: ${access.label}`}
+        title={
+          access.notice ? `Access: ${access.label} — ${access.notice}` : `Access: ${access.label}`
+        }
       >
         <Icon size={17} aria-hidden="true" />
       </button>

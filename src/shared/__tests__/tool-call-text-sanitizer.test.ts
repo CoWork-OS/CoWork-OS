@@ -106,6 +106,52 @@ describe("sanitizeToolCallTextFromAssistant", () => {
     expect(responseLooksLikeUnexecutedToolCall("I will check. search_web:0")).toBe(false);
   });
 
+  it("detects Hermes/Qwen tool_call blocks and Llama function tags emitted as text", () => {
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        '<tool_call>\n{"name": "list_directory", "arguments": {"path": "."}}\n</tool_call>',
+      ),
+    ).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        "I'll start by listing the project files.\n\n<tool_call>\n" +
+          '{"name": "list_directory", "arguments": {"path": "."}}\n</tool_call>',
+      ),
+    ).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall('<function=list_directory>{"path": "."}</function>'),
+    ).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        "<tool_call>\n<function=list_directory>\n<parameter=path>\n.\n</parameter>\n</function>\n</tool_call>",
+      ),
+    ).toBe(true);
+    expect(responseLooksLikeUnexecutedToolCall('<tool_call>\n{"na', { allowPartial: true })).toBe(
+      true,
+    );
+    expect(responseLooksLikeUnexecutedToolCall('<tool_call>\n{"na')).toBe(false);
+  });
+
+  it("ignores tool_call and function tags in code, examples and plain prose", () => {
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        'Qwen wraps calls in `<tool_call>{"name": "x"}</tool_call>` blocks.',
+      ),
+    ).toBe(false);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        'For example, <tool_call>{"name": "x", "arguments": {}}</tool_call> is the Hermes format.',
+      ),
+    ).toBe(false);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        '```\n<tool_call>\n{"name": "x"}\n</tool_call>\n```',
+      ),
+    ).toBe(false);
+    expect(responseLooksLikeUnexecutedToolCall("Use the <function=name> syntax here.")).toBe(false);
+    expect(responseLooksLikeUnexecutedToolCall("The <tool_call> tag wraps each call.")).toBe(false);
+  });
+
   it("detects structured invoke markup but ignores code and syntax examples", () => {
     expect(responseLooksLikeUnexecutedToolCall('<invoke name="search_web">')).toBe(true);
     expect(

@@ -128,6 +128,33 @@ function hasStructuredInvokeCall(input: string): boolean {
   );
 }
 
+const TAGGED_TOOL_CALL_OPENER = /<tool_call>|<function=[a-z_][\w.-]*>/gi;
+
+/**
+ * Hermes/Qwen `<tool_call>{"name": ...}</tool_call>` blocks and Llama/Qwen
+ * `<function=name>{...}` or `<function=name><parameter=...>` calls. A bare tag
+ * in prose ("the <tool_call> tag wraps each call") is not a call: the tag must
+ * be followed by a call body.
+ */
+function hasTaggedToolCall(input: string, allowPartial: boolean): boolean {
+  TAGGED_TOOL_CALL_OPENER.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = TAGGED_TOOL_CALL_OPENER.exec(input)) !== null) {
+    if (isToolCallExplanationContext(input, match.index)) continue;
+
+    const body = input.slice(match.index + match[0].length);
+    const isToolCallTag = match[0].toLowerCase() === "<tool_call>";
+    const startsCallBody = isToolCallTag
+      ? /^\s*(?:\{\s*"name"\s*:|<function=[a-z_])/i.test(body)
+      : /^\s*(?:\{|<parameter=)/i.test(body);
+    if (startsCallBody) return true;
+    if (allowPartial && (isToolCallTag ? /^\s*(?:\{[^}]*)?$/ : /^\s*$/).test(body)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export interface UnexecutedToolCallDetectionOptions {
   /** Allow a still-growing stream prefix such as `search_web:0`. */
   allowPartial?: boolean;
@@ -149,7 +176,8 @@ export function responseLooksLikeUnexecutedToolCall(
   const masked = maskMarkdownCodeExamples(input);
   return (
     hasStructuredToolCallPrefix(masked, options.allowPartial === true) ||
-    hasStructuredInvokeCall(masked)
+    hasStructuredInvokeCall(masked) ||
+    hasTaggedToolCall(masked, options.allowPartial === true)
   );
 }
 

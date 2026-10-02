@@ -801,3 +801,31 @@ export function maybeInjectVariedFailureNudge(opts: {
 
   return false;
 }
+
+const INTENT_ACTION_VERB = String.raw`(?:start|begin|check|look|read|list|search|inspect|explore|examine|review|open|run|execute|fetch|find|gather|collect|retrieve|analy[sz]e|investigate|scan|browse|query|call|use|grep|view|see|try|take a (?:look|peek)|dig|go through|walk through|compare|load|pull|download|navigate|visit|create|write|edit|update|fix|implement|build|install|test|verify|confirm|get|identify|locate|figure out|map|trace|debug|reproduce)`;
+const INTENT_SENTENCE = new RegExp(
+  String.raw`^(?:(?:first(?:ly)?|now|next|then|so|to (?:start|begin))[,]?\s+)?` +
+    String.raw`(?:i(?:'ll|’ll| will| am going to|'m going to|’m going to| need to| want to)|let me|let's|let’s)\s+` +
+    String.raw`(?:(?:go ahead and|quickly|first|now|also|then)\s+)*${INTENT_ACTION_VERB}\b`,
+  "i",
+);
+const INTERJECTION_SENTENCE =
+  /^(?:ok(?:ay)?|sure|alright|great|got it|understood|of course|absolutely|certainly|perfect)[.!]?$/i;
+
+/**
+ * True when a reply only announces what the model is about to do ("I'll start
+ * by listing the project files.") and carries no result. A turn that ends on
+ * such text without a tool call has not done the work it describes. Lists,
+ * code, tables or a colon introducing content are treated as results.
+ */
+export function isForwardLookingIntentOnlyText(text: string): boolean {
+  const trimmed = String(text || "").trim();
+  if (!trimmed || trimmed.length > 320) return false;
+  if (/```|:\s+\S|\n\s*(?:[-*•]|\d+[.)])\s|\|/.test(trimmed)) return false;
+  const sentences = trimmed
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0 && !INTERJECTION_SENTENCE.test(sentence));
+  if (sentences.length === 0 || sentences.length > 3) return false;
+  return sentences.every((sentence) => INTENT_SENTENCE.test(sentence));
+}

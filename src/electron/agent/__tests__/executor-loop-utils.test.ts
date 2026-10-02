@@ -5,6 +5,7 @@ import {
   buildMaxTokensExhaustedNotice,
   computeToolFailureDecision,
   handleMaxTokensRecovery,
+  isForwardLookingIntentOnlyText,
   maybeInjectLowProgressNudge,
   maybeInjectStopReasonNudge,
   recordPackagingFailureFingerprint,
@@ -496,5 +497,32 @@ describe("executor-loop-utils guardrails", () => {
       buildMaxTokensExhaustedNotice({ content: [{ type: "text", text: "Section one" }] }),
     ).toMatch(/^Section one\n\n.*output token limit/s);
     expect(buildMaxTokensExhaustedNotice({ content: [] })).toMatch(/output token limit/);
+  });
+});
+
+describe("isForwardLookingIntentOnlyText", () => {
+  it.each([
+    "I'll start by listing the project files.",
+    "Let me check the project structure first.",
+    "First, I will read the README.",
+    "Sure! Let me take a look at the config.",
+    "I'm going to search for the failing test. Then I'll fix it.",
+    "Now I'll run the tests.",
+    "Let me fetch https://example.com/docs and summarize it.",
+  ])("treats a stated next action with no result as intent-only: %s", (text) => {
+    expect(isForwardLookingIntentOnlyText(text)).toBe(true);
+  });
+
+  it.each([
+    "",
+    "The project has three main modules: api, core and ui.",
+    "I'll summarize: the main modules are api, core and ui.",
+    "Here are the main modules:\n- api\n- core",
+    "Let me know if you need more detail.",
+    "I'll note that the build passes on main.",
+    "Let me explain the structure. The api module handles HTTP. The core module holds the logic. The ui module renders it.",
+    "I checked the files. Let me know if you want me to change anything.",
+  ])("does not treat an answer as intent-only: %s", (text) => {
+    expect(isForwardLookingIntentOnlyText(text)).toBe(false);
   });
 });

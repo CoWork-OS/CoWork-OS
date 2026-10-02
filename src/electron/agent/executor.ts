@@ -390,6 +390,7 @@ import {
   computeToolFailureDecision as computeToolFailureDecisionUtil,
   handleMaxTokensRecovery as handleMaxTokensRecoveryUtil,
   injectToolRecoveryHint as injectToolRecoveryHintUtil,
+  isForwardLookingIntentOnlyText as isForwardLookingIntentOnlyTextUtil,
   maybeInjectLowProgressNudge as maybeInjectLowProgressNudgeUtil,
   maybeInjectStopReasonNudge as maybeInjectStopReasonNudgeUtil,
   maybeInjectToolLoopBreak as maybeInjectToolLoopBreakUtil,
@@ -31937,6 +31938,9 @@ Return ONLY a JSON object:
       // trackVerificationCommandOutcome). Enforced for mutation steps.
       const unresolvedVerificationCommandFailures = new Map<string, string>();
       let verificationRerunNudgeInjected = false;
+      // Nudges for turns that describe an action without making the tool call.
+      let unexecutedActionNudgeCount = 0;
+      let intentOnlyNudgeInjected = false;
       const expectsImageVerification = stepContract.verificationMode === "image_file";
       const imageVerificationSince =
         typeof this.task.createdAt === "number"
@@ -32790,6 +32794,58 @@ Return ONLY a JSON object:
             continueLoop = true;
             state.messages = messages;
             return { continueLoop, emptyResponseCount };
+          }
+          // A turn that ends on tool-call markup the provider did not parse, or on
+          // a bare "I'll start by listing the files." before any tool ran, has not
+          // done the work it describes; ending the step there reports it done.
+          if (
+            response.stopReason === "end_turn" &&
+            !responseHasToolUse &&
+            !assistantAskedQuestion &&
+            !localModelStepFinalizationForced &&
+            availableToolNames.size > 0 &&
+            unexecutedActionNudgeCount < 2
+          ) {
+            const rawResponseText = ((response.content || []) as Any[])
+              .filter((block) => block?.type === "text" && typeof block.text === "string")
+              .map((block) => String(block.text))
+              .join("\n");
+            const textualToolCall = this.responseLooksLikeUnexecutedToolCall(rawResponseText);
+            const intentOnly =
+              !textualToolCall &&
+              !stepAttemptedToolUse &&
+              !intentOnlyNudgeInjected &&
+              isForwardLookingIntentOnlyTextUtil(assistantText || "");
+            if (textualToolCall || intentOnly) {
+              unexecutedActionNudgeCount += 1;
+              if (intentOnly) intentOnlyNudgeInjected = true;
+              this.emitEvent("log", {
+                metric: "unexecuted_action_nudge",
+                stepId: step.id,
+                kind: textualToolCall ? "textual_tool_call" : "intent_only",
+                attempt: unexecutedActionNudgeCount,
+              });
+              emptyResponseCount = appendAssistantResponseToConversationUtil(
+                messages,
+                response,
+                emptyResponseCount,
+              );
+              messages.push({
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: this.sanitizeFallbackInstruction(
+                      "You described a next action but didn't call a tool. " +
+                        "Call the tool now, or give the final answer if no tool is needed.",
+                    ),
+                  },
+                ],
+              });
+              continueLoop = true;
+              state.messages = messages;
+              return { continueLoop, emptyResponseCount };
+            }
           }
           if (
             assistantText &&

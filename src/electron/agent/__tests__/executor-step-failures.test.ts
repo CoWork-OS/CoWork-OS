@@ -6061,6 +6061,97 @@ describe("TaskExecutor step loop control", () => {
     });
   });
 
+  describe("unexecuted actions", () => {
+    const inspectStep = (id: string): Any => ({
+      id,
+      description: "Inspect the project structure and list the main modules",
+      status: "pending",
+    });
+    const actionNudges = (executor: Any) =>
+      userTexts(executor).filter((text) =>
+        text.includes("You described a next action but didn't call a tool"),
+      );
+    const listing = {
+      success: true,
+      path: ".",
+      items: [
+        { name: "api", type: "directory" },
+        { name: "core", type: "directory" },
+      ],
+    };
+
+    it("runs the tool after a textual tool call instead of ending the step", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse(
+            '<tool_call>\n{"name": "list_directory", "arguments": {"path": "."}}\n</tool_call>',
+          ),
+          toolCall("list_directory", { path: "." }, "l1"),
+          textResponse("The main modules are api (HTTP handlers) and core (domain logic)."),
+        ],
+        { list_directory: listing },
+      );
+      const step = inspectStep("textual-tool-call");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledWith("list_directory", {
+        path: ".",
+      });
+      expect(actionNudges(executor)).toHaveLength(1);
+    });
+
+    it("nudges once when the step ends on a stated intent without calling a tool", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse("I'll start by listing the project files."),
+          toolCall("list_directory", { path: "." }, "l1"),
+          textResponse("The main modules are api (HTTP handlers) and core (domain logic)."),
+        ],
+        { list_directory: listing },
+      );
+      const step = inspectStep("intent-only");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledTimes(1);
+      expect(actionNudges(executor)).toHaveLength(1);
+    });
+
+    it("stops nudging after one intent-only reminder", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse("Let me check the project structure first."),
+          textResponse("Let me check the project structure first."),
+          textResponse("Let me check the project structure first."),
+        ],
+        {},
+      );
+      const step = inspectStep("intent-only-bounded");
+
+      await (executor as Any).executeStep(step);
+
+      expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(2);
+      expect(actionNudges(executor)).toHaveLength(1);
+    });
+
+    it("does not nudge a direct answer", async () => {
+      const executor = createExecutorWithStubs(
+        [textResponse("The project has two main modules: api and core.")],
+        {},
+      );
+      const step = inspectStep("direct-answer");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(1);
+      expect(actionNudges(executor)).toEqual([]);
+    });
+  });
+
   describe("recovery from tool failures", () => {
     it("completes a step that recovers from an unavailable tool through an available alternative", async () => {
       const executor = createExecutorWithStubs(

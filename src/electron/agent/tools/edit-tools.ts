@@ -257,6 +257,109 @@ function writeRecoveryRecord(
   }
 }
 
+/** One way of reading old_string/new_string against the file; tried in order until one matches. */
+interface EditMatchCandidate {
+  oldString: string;
+  newString: string;
+  /** Set when line-number prefixes were stripped: the 1-based line the match must start on. */
+  expectedLine?: number;
+}
+
+// Prefixes copied from numbered views: `cat -n`/`nl` (tab), `grep -n` (colon), arrow and pipe gutters.
+const LINE_NUMBER_PREFIX_PATTERN = /^[ \t]*(\d+)(?:\t|:|→|[ \t]?\|[ \t]?)/;
+
+function withLineEndings(value: string, lineEnding: "\n" | "\r\n"): string {
+  return value.replace(/\r?\n/g, lineEnding);
+}
+
+/** The file's line ending when every line uses the same one; null for mixed or single-line files. */
+function detectConsistentLineEnding(text: string): "\n" | "\r\n" | null {
+  let newlines = 0;
+  let crlf = 0;
+  for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) {
+    newlines += 1;
+    if (index > 0 && text.charCodeAt(index - 1) === 13) crlf += 1;
+  }
+  if (newlines === 0) return null;
+  if (crlf === newlines) return "\r\n";
+  return crlf === 0 ? "\n" : null;
+}
+
+/**
+ * Remove consecutive line-number prefixes (e.g. "    12\t") that a model copied from a numbered
+ * view. Returns null unless every line carries one and the numbers increase by one.
+ */
+function stripLineNumberPrefixes(value: string): { text: string; firstLine: number } | null {
+  const lines = value.split("\n");
+  const hasTrailingNewline = lines.length > 1 && lines[lines.length - 1] === "";
+  const contentLines = hasTrailingNewline ? lines.slice(0, -1) : lines;
+  let firstLine = 0;
+  const stripped: string[] = [];
+  for (const [index, line] of contentLines.entries()) {
+    const match = LINE_NUMBER_PREFIX_PATTERN.exec(line);
+    if (!match) return null;
+    const lineNumber = Number(match[1]);
+    if (index === 0) firstLine = lineNumber;
+    else if (lineNumber !== firstLine + index) return null;
+    stripped.push(line.slice(match[0].length));
+  }
+  if (firstLine < 1) return null;
+  return { text: stripped.join("\n") + (hasTrailingNewline ? "\n" : ""), firstLine };
+}
+
+function lineNumberAt(text: string, offset: number): number {
+  let line = 1;
+  let index = text.indexOf("\n");
+  while (index !== -1 && index < offset) {
+    line += 1;
+    index = text.indexOf("\n", index + 1);
+  }
+  return line;
+}
+
+/**
+ * Exact text first, then the same text with the other line-ending convention (models emit LF
+ * even for CRLF files), then without numbered-view prefixes. new_string follows the file's line
+ * ending whenever the file uses only one, so an edit never mixes LF and CRLF lines.
+ */
+function buildEditMatchCandidates(
+  text: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+): EditMatchCandidate[] {
+  const fileLineEnding = detectConsistentLineEnding(text);
+  const candidates: EditMatchCandidate[] = [];
+  const addWithLineEndings = (oldValue: string, newValue: string, expectedLine?: number) => {
+    const variants: Array<[string, string]> = [
+      [oldValue, fileLineEnding ? withLineEndings(newValue, fileLineEnding) : newValue],
+    ];
+    if (oldValue.includes("\n") && text.includes("\r\n")) {
+      variants.push([withLineEndings(oldValue, "\r\n"), withLineEndings(newValue, "\r\n")]);
+    }
+    if (oldValue.includes("\r\n")) {
+      variants.push([withLineEndings(oldValue, "\n"), withLineEndings(newValue, "\n")]);
+    }
+    for (const [variantOld, variantNew] of variants) {
+      if (candidates.some((candidate) => candidate.oldString === variantOld)) continue;
+      candidates.push({ oldString: variantOld, newString: variantNew, expectedLine });
+    }
+  };
+
+  addWithLineEndings(oldString, newString);
+  // Line numbers address a single location, so prefixes are never stripped for replace_all.
+  const strippedOld = replaceAll ? null : stripLineNumberPrefixes(oldString);
+  if (strippedOld) {
+    const strippedNew = stripLineNumberPrefixes(newString);
+    addWithLineEndings(
+      strippedOld.text,
+      strippedNew && strippedNew.firstLine === strippedOld.firstLine ? strippedNew.text : newString,
+      strippedOld.firstLine,
+    );
+  }
+  return candidates;
+}
+
 /**
  * EditTools provides surgical file editing capabilities
  * Similar to Claude Code's Edit tool for precise string replacements
@@ -611,27 +714,44 @@ export class EditTools {
     newString: string,
     replaceAll: boolean,
   ): { content: string; replacements: number } {
-    const occurrences = this.countOccurrences(content, oldString);
-    if (occurrences === 0) {
-      throw new Error(
-        "old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).",
-      );
+    for (const candidate of buildEditMatchCandidates(content, oldString, newString, replaceAll)) {
+      const occurrences = this.countOccurrences(content, candidate.oldString);
+      if (occurrences === 0) continue;
+      if (candidate.expectedLine !== undefined) {
+        if (occurrences > 1) {
+          throw new Error(
+            `old_string appears to include line-number prefixes; without them it was found ${occurrences} times in file. ` +
+              "Remove the prefixes and include more surrounding lines to make it unique.",
+          );
+        }
+        const index = content.indexOf(candidate.oldString);
+        const startsLine = index === 0 || content[index - 1] === "\n";
+        if (!startsLine || lineNumberAt(content, index) !== candidate.expectedLine) continue;
+      }
+      if (occurrences > 1 && !replaceAll) {
+        throw new Error(
+          `old_string found ${occurrences} times in file. ` +
+            "Use replace_all: true to replace all occurrences, or provide more context to make it unique.",
+        );
+      }
+      if (replaceAll) {
+        return {
+          content: content.split(candidate.oldString).join(candidate.newString),
+          replacements: occurrences,
+        };
+      }
+      const index = content.indexOf(candidate.oldString);
+      return {
+        content:
+          content.substring(0, index) +
+          candidate.newString +
+          content.substring(index + candidate.oldString.length),
+        replacements: 1,
+      };
     }
-    if (occurrences > 1 && !replaceAll) {
-      throw new Error(
-        `old_string found ${occurrences} times in file. ` +
-          "Use replace_all: true to replace all occurrences, or provide more context to make it unique.",
-      );
-    }
-    if (replaceAll) {
-      return { content: content.split(oldString).join(newString), replacements: occurrences };
-    }
-    const index = content.indexOf(oldString);
-    return {
-      content:
-        content.substring(0, index) + newString + content.substring(index + oldString.length),
-      replacements: 1,
-    };
+    throw new Error(
+      "old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).",
+    );
   }
 
   protected async revalidateEditTarget(options: {

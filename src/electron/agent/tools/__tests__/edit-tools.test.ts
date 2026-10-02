@@ -1549,3 +1549,98 @@ describe("edit recovery and conflict handling", () => {
     30_000,
   );
 });
+
+async function editFixture(
+  content: string | Buffer,
+  input: { old_string: string; new_string: string; replace_all?: boolean },
+): Promise<{ result: Awaited<ReturnType<EditTools["editFile"]>>; bytes: Buffer }> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-matching-"));
+  const target = path.join(directory, "target.txt");
+  fs.writeFileSync(target, content);
+  try {
+    const editor = new EditTools({ ...mockWorkspace, path: directory }, mockDaemon as Any, "task");
+    const result = await editor.editFile({ file_path: "target.txt", ...input });
+    return { result, bytes: fs.readFileSync(target) };
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+describe("edit line-ending tolerance", () => {
+  it("matches an LF old_string in a CRLF file and keeps CRLF endings", async () => {
+    const { result, bytes } = await editFixture("alpha=1\r\nbeta=1\r\ngamma=1\r\n", {
+      old_string: "alpha=1\nbeta=1",
+      new_string: "alpha=2\nbeta=2\nbeta2=2",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(result.replacements).toBe(1);
+    expect(bytes.toString("utf8")).toBe("alpha=2\r\nbeta=2\r\nbeta2=2\r\ngamma=1\r\n");
+  });
+
+  it("writes new lines with the file's CRLF endings for a single-line match", async () => {
+    const { result, bytes } = await editFixture("a\r\nb\r\n", {
+      old_string: "b",
+      new_string: "b\nc",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("a\r\nb\r\nc\r\n");
+  });
+
+  it("matches a CRLF old_string in an LF file and keeps LF endings", async () => {
+    const { result, bytes } = await editFixture("a\nb\nc\n", {
+      old_string: "a\r\nb",
+      new_string: "x\r\ny",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("x\ny\nc\n");
+  });
+
+  it("keeps replace_all counts and uniqueness under line-ending tolerance", async () => {
+    const all = await editFixture("k=1\r\nv\r\nk=1\r\nv\r\n", {
+      old_string: "k=1\nv",
+      new_string: "k=2\nv",
+      replace_all: true,
+    });
+    expect(all.result.success, all.result.error).toBe(true);
+    expect(all.result.replacements).toBe(2);
+    expect(all.bytes.toString("utf8")).toBe("k=2\r\nv\r\nk=2\r\nv\r\n");
+
+    const ambiguous = await editFixture("k=1\r\nv\r\nk=1\r\nv\r\n", {
+      old_string: "k=1\nv",
+      new_string: "k=2\nv",
+    });
+    expect(ambiguous.result.success).toBe(false);
+    expect(ambiguous.result.error).toContain("found 2 times");
+    expect(ambiguous.bytes.toString("utf8")).toBe("k=1\r\nv\r\nk=1\r\nv\r\n");
+  });
+});
+
+describe("edit numbered-view prefixes", () => {
+  it("strips cat -n style line-number prefixes that match the file's line numbers", async () => {
+    const { result, bytes } = await editFixture("one\ntwo\nthree\nfour\n", {
+      old_string: "     2\ttwo\n     3\tthree",
+      new_string: "TWO\nTHREE",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("one\nTWO\nTHREE\nfour\n");
+  });
+
+  it("strips matching grep -n style prefixes from new_string too", async () => {
+    const { result, bytes } = await editFixture("one\ntwo\nthree\nfour\n", {
+      old_string: "2:two\n3:three",
+      new_string: "2:TWO\n3:THREE",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("one\nTWO\nTHREE\nfour\n");
+  });
+
+  it("does not strip prefixes whose numbers disagree with the file", async () => {
+    const { result, bytes } = await editFixture("one\ntwo\nthree\nfour\n", {
+      old_string: "     7\ttwo\n     8\tthree",
+      new_string: "TWO\nTHREE",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("old_string not found");
+    expect(bytes.toString("utf8")).toBe("one\ntwo\nthree\nfour\n");
+  });
+});

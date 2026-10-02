@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { MousePointer2, RefreshCw } from "lucide-react";
+import { hasHostMethods } from "../host/browser-capabilities";
+import { DesktopOnlyCard } from "./DesktopOnlyCard";
 
 type ScreenStatus = "granted" | "denied" | "not-determined" | "unknown";
 
@@ -31,7 +33,30 @@ function screenStatusLabel(s: ScreenStatus): string {
   }
 }
 
+const COMPUTER_USE_METHODS = [
+  "getPlatform",
+  "getComputerUseStatus",
+  "onComputerUseEvent",
+  "openComputerUseAccessibilitySettings",
+  "openComputerUseScreenRecordingSettings",
+  "endComputerUseSession",
+] as const;
+
+/** Computer use controls this machine, so a browser session shows a note instead. */
 export function ComputerUseSettings() {
+  if (!hasHostMethods(...COMPUTER_USE_METHODS)) {
+    return (
+      <DesktopOnlyCard
+        icon={<MousePointer2 size={18} strokeWidth={1.5} />}
+        title="Computer use"
+        description="Computer use controls the desktop running CoWork. Grant its permissions and manage sessions in the desktop app."
+      />
+    );
+  }
+  return <ComputerUseSettingsPanel />;
+}
+
+function ComputerUseSettingsPanel() {
   const [platform, setPlatform] = useState<string>("");
   const [status, setStatus] = useState<ComputerUseStatus | null>(null);
   const [loading, setLoading] = useState(true);

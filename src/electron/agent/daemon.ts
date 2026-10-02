@@ -13232,7 +13232,9 @@ export class AgentDaemon extends EventEmitter {
       message:
         result.verdict === "PASS"
           ? "Post-completion verifier confirmed deliverables."
-          : "Post-completion verifier found issues.",
+          : result.incomplete
+            ? "Post-completion verifier did not complete; the result is unverified."
+            : "Post-completion verifier found issues.",
       report: result.report.slice(0, 2000),
       verificationVerdict: result.verdict,
     });

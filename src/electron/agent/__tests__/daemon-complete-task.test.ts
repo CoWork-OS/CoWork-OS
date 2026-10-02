@@ -156,11 +156,14 @@ describe("AgentDaemon.completeTask", () => {
       120_000,
       { explicit: true },
     );
-    expect(result).toMatchObject({ verdict: "FAIL", shouldBlock: true });
+    expect(result).toMatchObject({ verdict: "PARTIAL", incomplete: true, shouldBlock: false });
     expect(daemonLike.logEvent).toHaveBeenCalledWith(
       "task-1",
       "verification_failed",
-      expect.anything(),
+      expect.objectContaining({
+        message: expect.stringContaining("did not complete"),
+        verificationVerdict: "PARTIAL",
+      }),
     );
     expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
       "task-1",
@@ -267,6 +270,59 @@ describe("AgentDaemon.completeTask", () => {
       "task-1",
       "task_completed",
       expect.objectContaining({ verificationVerdict: "PASS" }),
+    );
+    (PersonalityManager.recordTaskCompleted as Any).mockClear();
+  });
+
+  it("does not fail a finished task when the required verifier times out", async () => {
+    const daemonLike = createDaemonLike();
+    daemonLike.taskRepo.findById.mockReturnValue({
+      id: "task-1",
+      title: "Ship production changes",
+      prompt: "Deploy and verify the production API",
+      status: "executing",
+      workspaceId: "workspace-1",
+      agentType: "main",
+      agentConfig: { reviewPolicy: "strict" },
+    });
+    daemonLike.eventRepo.findByTaskId.mockReturnValue([
+      {
+        id: "mutation-1",
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "tool_call",
+        payload: { tool: "run_command", input: { command: "npm run deploy" } },
+      },
+      ...["error-1", "error-2", "error-3"].map((id) => ({
+        id,
+        taskId: "task-1",
+        timestamp: Date.now(),
+        type: "tool_error",
+        payload: { tool: "run_command" },
+      })),
+    ]);
+    daemonLike.runPostCompletionVerification = (AgentDaemon.prototype as Any)
+      .runPostCompletionVerification;
+    daemonLike.runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
+      childTaskId: "verifier-timeout",
+      status: "timeout",
+      summary: "",
+    });
+
+    await AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "Deployed and checked.", {
+      outputSummary: { created: ["a", "b", "c", "d", "e", "f"], outputCount: 6 },
+    });
+
+    expect(daemonLike.runReadOnlyChildTaskAndWait).toHaveBeenCalledOnce();
+    expect(daemonLike.taskRepo.update).toHaveBeenLastCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "partial_success",
+        failureClass: "required_verification",
+        verificationVerdict: "PARTIAL",
+        verificationReport: expect.stringContaining("timed out"),
+      }),
     );
     (PersonalityManager.recordTaskCompleted as Any).mockClear();
   });

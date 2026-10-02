@@ -731,6 +731,8 @@ const SIDEBAR_SHELL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([
   "git",
   "build",
 ]);
+/** Views that show the rail: the shell views, plus Settings without the panel. */
+const RAIL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([...SIDEBAR_SHELL_VIEWS, "settings"]);
 type RemoteTaskView = {
   deviceId: string;
   deviceName: string;
@@ -7398,6 +7400,21 @@ export function App() {
     setCurrentView("settings");
   }, []);
 
+  // One rail for the shell views and Settings, so its pins, order and More
+  // menu read the same everywhere.
+  const sidebarRail = (
+    <SidebarRail
+      activeId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
+      settingsActive={currentView === "settings"}
+      onNavigate={handleSidebarNavigate}
+      onOpenSettings={handleSidebarRailOpenSettings}
+      workspaceId={currentWorkspace?.id}
+      updateAvailable={Boolean(updateInfo?.available)}
+      updateSupported={updateInfo?.supported !== false}
+      onViewUpdate={handleViewUpdate}
+    />
+  );
+
   const handleSelectChildTaskFromMainContent = useCallback(
     (taskId: string) => {
       const task = tasksRef.current.find((candidate) => candidate.id === taskId);
@@ -7888,9 +7905,9 @@ export function App() {
   }
 
   return (
-    <div className={`app${SIDEBAR_SHELL_VIEWS.has(currentView) ? " app-shell" : ""}`}>
+    <div className={`app${RAIL_VIEWS.has(currentView) ? " app-shell" : ""}`}>
       <div
-        className={`title-bar${SIDEBAR_SHELL_VIEWS.has(currentView) ? " title-bar-shell" : ""}`}
+        className={`title-bar${RAIL_VIEWS.has(currentView) ? " title-bar-shell" : ""}`}
         style={
           mainColumnRightEdge === null
             ? undefined
@@ -8219,15 +8236,7 @@ export function App() {
           <div
             className={`app-layout ${leftSidebarCollapsed ? "sidebar-panel-collapsed" : ""} ${effectiveRightCollapsed ? "right-collapsed" : ""}`}
           >
-            <SidebarRail
-              activeId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
-              onNavigate={handleSidebarNavigate}
-              onOpenSettings={handleSidebarRailOpenSettings}
-              workspaceId={currentWorkspace?.id}
-              updateAvailable={Boolean(updateInfo?.available)}
-              updateSupported={updateInfo?.supported !== false}
-              onViewUpdate={handleViewUpdate}
-            />
+            {sidebarRail}
             {!leftSidebarCollapsed && (
               <Sidebar
                 workspace={currentWorkspace}
@@ -8686,44 +8695,49 @@ export function App() {
         </>
       )}
       {currentView === "settings" && (
-        <Suspense fallback={<LazyViewFallback />}>
-          <Settings
-            onBack={closeSettings}
-            onSettingsChanged={loadLLMConfig}
-            themeMode={themeMode}
-            visualTheme={visualTheme}
-            accentColor={accentColor}
-            transparencyEffectsEnabled={transparencyEffectsEnabled}
-            onThemeChange={handleThemeChange}
-            onVisualThemeChange={handleVisualThemeChange}
-            onAccentChange={handleAccentChange}
-            onTransparencyEffectsEnabledChange={handleTransparencyEffectsEnabledChange}
-            uiDensity={uiDensity}
-            onUiDensityChange={handleUiDensityChange}
-            commandOutputStyle={commandOutputStyle}
-            onCommandOutputStyleChange={handleCommandOutputStyleChange}
-            devRunLoggingEnabled={devRunLoggingEnabled}
-            onDevRunLoggingEnabledChange={handleDevRunLoggingEnabledChange}
-            homeResearchVaultEnabled={homeResearchVaultEnabled}
-            homeNextActionsEnabled={homeNextActionsEnabled}
-            onHomeResearchVaultEnabledChange={handleHomeResearchVaultEnabledChange}
-            onHomeNextActionsEnabledChange={handleHomeNextActionsEnabledChange}
-            initialTab={settingsTab}
-            focusAutomation={focusAutomationOwner}
-            onShowOnboarding={handleShowOnboarding}
-            onboardingCompletedAt={onboardingCompletedAt}
-            workspaceId={currentWorkspace?.id}
-            onCreateTask={(title, prompt) => {
-              setCurrentView("main");
-              handleCreateTask(title, prompt, { generateTitle: true });
-            }}
-            onOpenTask={(taskId) => {
-              setCurrentView("main");
-              void selectTaskAfterDraftFlush(taskId);
-              setRightSidebarCollapsed(false);
-            }}
-          />
-        </Suspense>
+        // Settings keeps the rail, so ⌘1–9 and the destinations still work, but
+        // has no session panel; it lays out like the shell with the panel hidden.
+        <div className="app-layout app-layout-settings sidebar-panel-collapsed">
+          {sidebarRail}
+          <Suspense fallback={<LazyViewFallback />}>
+            <Settings
+              onBack={closeSettings}
+              onSettingsChanged={loadLLMConfig}
+              themeMode={themeMode}
+              visualTheme={visualTheme}
+              accentColor={accentColor}
+              transparencyEffectsEnabled={transparencyEffectsEnabled}
+              onThemeChange={handleThemeChange}
+              onVisualThemeChange={handleVisualThemeChange}
+              onAccentChange={handleAccentChange}
+              onTransparencyEffectsEnabledChange={handleTransparencyEffectsEnabledChange}
+              uiDensity={uiDensity}
+              onUiDensityChange={handleUiDensityChange}
+              commandOutputStyle={commandOutputStyle}
+              onCommandOutputStyleChange={handleCommandOutputStyleChange}
+              devRunLoggingEnabled={devRunLoggingEnabled}
+              onDevRunLoggingEnabledChange={handleDevRunLoggingEnabledChange}
+              homeResearchVaultEnabled={homeResearchVaultEnabled}
+              homeNextActionsEnabled={homeNextActionsEnabled}
+              onHomeResearchVaultEnabledChange={handleHomeResearchVaultEnabledChange}
+              onHomeNextActionsEnabledChange={handleHomeNextActionsEnabledChange}
+              initialTab={settingsTab}
+              focusAutomation={focusAutomationOwner}
+              onShowOnboarding={handleShowOnboarding}
+              onboardingCompletedAt={onboardingCompletedAt}
+              workspaceId={currentWorkspace?.id}
+              onCreateTask={(title, prompt) => {
+                setCurrentView("main");
+                handleCreateTask(title, prompt, { generateTitle: true });
+              }}
+              onOpenTask={(taskId) => {
+                setCurrentView("main");
+                void selectTaskAfterDraftFlush(taskId);
+                setRightSidebarCollapsed(false);
+              }}
+            />
+          </Suspense>
+        </div>
       )}
       {currentView === "browser" && (
         <Suspense fallback={<LazyViewFallback />}>

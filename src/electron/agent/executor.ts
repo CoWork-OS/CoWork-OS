@@ -279,6 +279,7 @@ import {
   ToolFailureTracker,
   FileOperationTracker,
   collectMutationTargetPaths as collectMutationTargetPathsUtil,
+  hashToolInput as hashToolInputUtil,
   toolMayChangeFilesImplicitly as toolMayChangeFilesImplicitlyUtil,
   withTimeout,
   calculateBackoffDelay,
@@ -481,6 +482,7 @@ import {
   isAdvisoryToolFailureResult as isAdvisoryToolFailureResultUtil,
   isEffectivelyIdempotentToolCall as isEffectivelyIdempotentToolCallUtil,
   isHardToolFailure as isHardToolFailureUtil,
+  buildDuplicateCallSuggestion as buildDuplicateCallSuggestionUtil,
   markCachedToolResult as markCachedToolResultUtil,
   normalizeToolUseName as normalizeToolUseNameUtil,
   preflightValidateAndRepairToolInput as preflightValidateAndRepairToolInputUtil,
@@ -11148,7 +11150,23 @@ ${transcript}
         }
       }
 
-      this.toolCallDeduplicator.clearReadOnlyHistory();
+      // Reads, searches and commands (e.g. a failing test run) may now give a different
+      // result, so repeating them is no longer a duplicate.
+      this.toolCallDeduplicator.clearHistoryAfterWorkspaceMutation();
+    } else if (
+      mutatingTools.has(toolName) ||
+      this.isFileMutationTool(toolName) ||
+      toolMayChangeFilesImplicitlyUtil(toolName)
+    ) {
+      if (toolSucceeded) {
+        // A successful command can change files too (e.g. a fix applied with sed); keep only
+        // this call's own history so the same command repeated back-to-back is still caught.
+        this.toolCallDeduplicator.clearHistoryAfterWorkspaceMutation({ toolName, input });
+      } else {
+        // Failed attempts can still leave files changed (a partial write, a formatter that
+        // exits non-zero), so repeated reads must not be answered from history.
+        this.toolCallDeduplicator?.clearReadOnlyHistory();
+      }
     }
   }
 
@@ -24568,7 +24586,9 @@ You are continuing a previous conversation. The context from the previous conver
     if (!rawPath) return null;
     const normalizedPath = this.normalizeArtifactPathForComparison(rawPath);
     if (!normalizedPath) return null;
-    return `${dedupeClass}:${normalizedPath}`;
+    // Keyed by the change itself: repeating an identical change is blocked, while a
+    // different edit to the same file is new work.
+    return `${dedupeClass}:${normalizedPath}:${hashToolInputUtil(input)}`;
   }
 
   private getLatestAssistantText(messages: LLMMessage[]): string {
@@ -32535,8 +32555,9 @@ Return ONLY a JSON object:
                             input: content.input,
                             isIdempotentTool: (name) => ToolCallDeduplicator.isIdempotentTool(name),
                           }),
-                        suggestion:
-                          "This tool was already called with these exact parameters. The previous call succeeded. Please proceed to the next step or try a different approach.",
+                        suggestion: buildDuplicateCallSuggestionUtil(duplicateCheck),
+                        sanitizeToolResult: (toolName, resultText) =>
+                          OutputFilter.sanitizeToolResult(toolName, resultText),
                       });
                       if (duplicateResult.hasDuplicateAttempt) {
                         hasDuplicateToolAttempt = true;
@@ -32582,7 +32603,7 @@ Return ONLY a JSON object:
                         tool: content.name,
                         reason: "mutation_already_satisfied",
                         message:
-                          "Mutation already satisfied for this target. Move to verification/completion instead of repeating the same artifact write.",
+                          "This exact change was already applied in this step. Move to verification/completion instead of repeating it.",
                       });
                       return {
                         status: "immediate" as const,
@@ -32594,7 +32615,7 @@ Return ONLY a JSON object:
                             tool_use_id: content.id,
                             content: JSON.stringify({
                               error:
-                                "This step already has successful mutation evidence for this artifact target. Do not repeat the same write; proceed to verification/completion.",
+                                "This step already applied this exact change to this file successfully. Do not repeat the same write; proceed to verification/completion.",
                               blocked: true,
                               reason: "mutation_already_satisfied",
                             }),
@@ -40182,8 +40203,9 @@ Return ONLY a JSON object:
                           input: content.input,
                           isIdempotentTool: (name) => ToolCallDeduplicator.isIdempotentTool(name),
                         }),
-                      suggestion:
-                        "This tool was already called with these exact parameters. Please proceed or try a different approach.",
+                      suggestion: buildDuplicateCallSuggestionUtil(duplicateCheck),
+                      sanitizeToolResult: (toolName, resultText) =>
+                        OutputFilter.sanitizeToolResult(toolName, resultText),
                     });
                     if (duplicateResult.hasDuplicateAttempt) {
                       hasDuplicateToolAttempt = true;

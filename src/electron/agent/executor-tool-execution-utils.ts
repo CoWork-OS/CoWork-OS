@@ -738,12 +738,45 @@ export function buildInvalidInputToolResult(opts: {
   };
 }
 
+/**
+ * What to tell the model after a blocked duplicate call. Never claims the earlier call
+ * succeeded unless its recorded result did.
+ */
+export function buildDuplicateCallSuggestion(duplicateCheck: {
+  kind?: "exact" | "semantic" | "rate_limit";
+  previousOutcome?: "succeeded" | "failed" | "unknown";
+}): string {
+  if (duplicateCheck.kind === "rate_limit") {
+    return "Wait before calling this tool again, or continue with a different approach.";
+  }
+  if (duplicateCheck.kind === "semantic") {
+    return (
+      "Check what the earlier attempts did before trying again: if one already did what " +
+      "you need, move on; if they failed, fix the cause or change the approach."
+    );
+  }
+  if (duplicateCheck.previousOutcome === "failed") {
+    return (
+      "Repeating this exact call unchanged will fail the same way. Fix the underlying " +
+      "cause or change the inputs before running it again."
+    );
+  }
+  if (duplicateCheck.previousOutcome === "succeeded") {
+    return (
+      "The earlier identical call succeeded: use its result and move on, or change the " +
+      "inputs if you need something different."
+    );
+  }
+  return "Use the result of the earlier identical call, or change the inputs if you need something different.";
+}
+
 export function buildDuplicateToolResult(opts: {
   toolName: string;
   toolUseId: string;
   duplicateCheck: { reason?: string; cachedResult?: string };
   isIdempotentTool: (toolName: string) => boolean;
   suggestion: string;
+  sanitizeToolResult?: (toolName: string, resultText: string) => string;
 }): { toolResult: LLMToolResult; hasDuplicateAttempt: boolean } {
   const reason =
     typeof opts.duplicateCheck.reason === "string" && opts.duplicateCheck.reason.trim()
@@ -751,11 +784,20 @@ export function buildDuplicateToolResult(opts: {
       : "Duplicate tool call blocked.";
 
   if (opts.duplicateCheck.cachedResult && opts.isIdempotentTool(opts.toolName)) {
+    // The cached result is the raw tool output: bound and sanitize it like a live result,
+    // and say it is a repeat rather than a new run.
+    const bounded = truncateToolResult(opts.duplicateCheck.cachedResult);
+    const sanitized = opts.sanitizeToolResult
+      ? opts.sanitizeToolResult(opts.toolName, bounded)
+      : bounded;
     return {
       toolResult: {
         type: "tool_result",
         tool_use_id: opts.toolUseId,
-        content: opts.duplicateCheck.cachedResult,
+        content: markCachedToolResult(
+          sanitized,
+          `Served from cache instead of running the call again: ${reason}`,
+        ),
       },
       hasDuplicateAttempt: false,
     };

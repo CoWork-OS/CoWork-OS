@@ -63,7 +63,7 @@ describe("TaskExecutor entrypoint guards", () => {
       invalidateFileRead: vi.fn(),
       invalidateDirectoryListing: vi.fn(),
     };
-    executor.toolCallDeduplicator = { clearReadOnlyHistory: vi.fn() };
+    executor.toolCallDeduplicator = { clearHistoryAfterWorkspaceMutation: vi.fn() };
     executor.recordWebEvidence = vi.fn();
     executor.trackFileRead = vi.fn();
     executor.summarizeToolResult = vi.fn();

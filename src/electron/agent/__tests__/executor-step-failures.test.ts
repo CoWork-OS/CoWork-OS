@@ -3814,6 +3814,143 @@ relationship_memory:
     );
   });
 
+  it("runs eight distinct edit_file calls across two turns without loop blocking", async () => {
+    const files = Array.from({ length: 8 }, (_, i) => `src/feature${i}.ts`);
+    const editTurn = (paths: string[]) =>
+      multiToolUseResponse(
+        paths.map((file_path) => ({
+          name: "edit_file",
+          input: { file_path, old_string: "getUser(", new_string: "fetchUser(" },
+        })),
+      );
+    executor = createExecutorWithStubs(
+      [
+        editTurn(files.slice(0, 4)),
+        editTurn(files.slice(4)),
+        textResponse("Renamed getUser to fetchUser in all 8 files."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    const step: Any = {
+      id: "rename-across-files",
+      description: "Rename getUser to fetchUser across the src/ files",
+      status: "pending",
+    };
+
+    await runtime.executeStep(step);
+
+    const edits = runtime.toolRegistry.executeTool.mock.calls.filter(
+      (call: Any[]) => call[0] === "edit_file",
+    );
+    expect(edits.map((call: Any[]) => call[1].file_path)).toEqual(files);
+    const blocked = runtime.daemon.logEvent.mock.calls.filter(
+      (call: Any[]) => call[1] === "tool_blocked",
+    );
+    expect(blocked).toEqual([]);
+  });
+
+  it("re-runs a failing test command after edits instead of reporting it as a duplicate success", async () => {
+    const testRun = { command: "pytest tests/test_login.py -x" };
+    const edit = (from: string, to: string) => ({
+      file_path: "app/login.py",
+      old_string: from,
+      new_string: to,
+    });
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", testRun),
+        toolUseResponse("edit_file", edit("a", "b")),
+        toolUseResponse("run_command", testRun),
+        toolUseResponse("edit_file", edit("b", "c")),
+        toolUseResponse("run_command", testRun),
+        toolUseResponse("edit_file", edit("c", "d")),
+        toolUseResponse("run_command", testRun),
+        textResponse("The login test still fails after three fixes."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    runtime.fileOperationTracker = new FileOperationTracker();
+    delete runtime.recordFileOperation;
+    runtime.toolRegistry.executeTool = vi.fn(async (name: string) =>
+      name === "run_command"
+        ? { success: false, exitCode: 1, stdout: "1 failed", stderr: "AssertionError" }
+        : { success: true, file_path: "app/login.py", replacements: 1 },
+    );
+    const step: Any = {
+      id: "fix-login-test",
+      description: "Make the failing login test pass",
+      status: "pending",
+    };
+
+    await runtime.executeStep(step).catch(() => undefined);
+
+    const testRuns = runtime.toolRegistry.executeTool.mock.calls.filter(
+      (call: Any[]) => call[0] === "run_command",
+    );
+    expect(testRuns).toHaveLength(4);
+    const duplicateBlocks = runtime.daemon.logEvent.mock.calls.filter(
+      (call: Any[]) => call[1] === "tool_blocked" && call[2]?.reason === "duplicate_call",
+    );
+    expect(duplicateBlocks).toEqual([]);
+  });
+
+  it("blocks only an identical repeated change once a step's mutation is satisfied", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-repeat-mutation-"));
+    fs.writeFileSync(path.join(tempDir, "app.js"), "const a = 1;\nconst b = 2;\n", "utf8");
+    const editA = { file_path: "app.js", old_string: "const a = 1;", new_string: "const a = 10;" };
+    const editB = { file_path: "app.js", old_string: "const b = 2;", new_string: "const b = 20;" };
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("edit_file", editA),
+        toolUseResponse("edit_file", editB),
+        toolUseResponse("edit_file", editB),
+        textResponse("Updated both constants in app.js."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.workspace.path = tempDir;
+    runtime.reliabilityV2DisableBootstrapWrite = true;
+    runtime.toolRegistry.executeTool = vi.fn(async (name: string, input: Any) => {
+      if (name !== "edit_file") return { success: true };
+      const filePath = path.join(tempDir, String(input.file_path));
+      const current = fs.readFileSync(filePath, "utf8");
+      if (!current.includes(input.old_string)) {
+        return { success: false, file_path: input.file_path, error: "old_string not found" };
+      }
+      fs.writeFileSync(filePath, current.replace(input.old_string, input.new_string), "utf8");
+      return { success: true, file_path: input.file_path, replacements: 1 };
+    });
+    const step: Any = {
+      id: "update-constants",
+      description: "Implement the new constant values in `app.js`.",
+      status: "pending",
+    };
+
+    try {
+      await runtime.executeStep(step);
+
+      const edits = runtime.toolRegistry.executeTool.mock.calls.filter(
+        (call: Any[]) => call[0] === "edit_file",
+      );
+      expect(edits.map((call: Any[]) => call[1])).toEqual([editA, editB]);
+      expect(fs.readFileSync(path.join(tempDir, "app.js"), "utf8")).toBe(
+        "const a = 10;\nconst b = 20;\n",
+      );
+      expect(runtime.daemon.logEvent).toHaveBeenCalledWith(
+        "task-1",
+        "tool_blocked",
+        expect.objectContaining({ tool: "edit_file", reason: "mutation_already_satisfied" }),
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("runs a read that follows an edit of the same file in one batch instead of serving cached content", async () => {
     executor = createExecutorWithStubs(
       [
@@ -5266,7 +5403,7 @@ relationship_memory:
       checkDuplicate: vi.fn().mockReturnValue({ isDuplicate: false }),
       recordCall: vi.fn(),
       resetMutationHistoryForNewStep: vi.fn(),
-      clearReadOnlyHistory: vi.fn(),
+      clearHistoryAfterWorkspaceMutation: vi.fn(),
     };
 
     // Call the real recordFileOperation (restore it from prototype)

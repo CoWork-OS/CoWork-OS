@@ -318,11 +318,44 @@ allowlist entry cannot open them:
 
 Loopback is deliberately allowed: the agent legitimately fetches development
 servers it has just started, and the app's own loopback services all require
-bearer tokens. A DNS name that resolves to an internal address is also refused —
-the hostname is resolved before connecting, and re-checked on every redirect hop.
+bearer tokens. A DNS name that resolves to an internal address is also refused.
+For `web_fetch`, `http_request`, and Canvas HTTP(S) traffic, the actual socket
+connects through the validated address rather than performing a separate DNS
+lookup. Each redirect is checked independently.
 
-Implementation: `src/electron/security/address-classes.ts`, applied in
-`evaluateNetworkPolicy` and in the fetch tools' redirect loop.
+Implementation: `src/electron/security/address-classes.ts`,
+`src/electron/security/pinned-fetch.ts`, and `evaluateNetworkPolicy`.
+
+### Canvas and Resource Limits
+
+Canvas windows and interactive previews enforce the owning task's live network
+permissions and domain rules. Task tools cannot execute or modify another task's
+Canvas session. With **Ask for approval**, remote resources require an authorized
+origin; grants apply only to the matching permission state and are not persisted
+across app restarts. Canvas remote traffic supports HTTP(S), with WebSocket and
+other remote schemes blocked. Local
+content and snapshots remain available when networking is disabled. See
+[Live Canvas network access](live-canvas-security.md).
+
+`web_fetch` and `http_request` cap decoded response bodies at **5 MiB** and keep
+the request deadline active through body consumption. The `maxLength` option
+limits returned text independently. LINE, Teams, Google Chat, Feishu, and WeCom
+webhook handlers reject bodies over **1 MiB** with HTTP 413 before processing.
+ClawHub downloads are limited to **5 MiB** compressed; incremental extraction
+limits each file to **512 KiB** and total expanded content to **5 MiB**, with a
+**200-entry** archive limit.
+
+See the [2026-09-30 security fix record](security-fixes-2026-09-30.md) for the
+implementation map, validation results, and reproduction commands.
+
+The [2026-10-02 follow-up record](security-fixes-2026-10-02.md) documents five
+additional fixes, currently local and unreleased. Cross-origin HTTP redirects
+discard caller headers and reject preserved request bodies. Grep matching uses
+a terminable worker with a 500 ms per-job deadline. Pulse rejects streamed input
+over 16 KiB, and Git skill imports reject symlinks before reading skill content.
+Read-only MCP tunnels now block every tool call, including allowlisted tools;
+discovery and resource reads remain available. See the follow-up record for
+compatibility changes and the limits of local verification.
 
 ### External Link Handling
 

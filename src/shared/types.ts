@@ -9871,6 +9871,7 @@ export const CUSTOM_LLM_PROVIDER_TYPES = [
   "atomic-chat",
   "hf-agents",
   "mlx",
+  "omlx",
 ] as const;
 
 export const LLM_PROVIDER_TYPES = [
@@ -9888,6 +9889,7 @@ export const MULTI_LLM_PROVIDER_DISPLAY: Record<
   anthropic: { name: "Claude", icon: "\u{1F9E0}", color: "#d97706" },
   bedrock: { name: "Bedrock", icon: "\u{2601}\uFE0F", color: "#ff9900" },
   ollama: { name: "Ollama", icon: "\u{1F999}", color: "#0ea5e9" },
+  omlx: { name: "oMLX", icon: "\u{1F9E0}", color: "#14b8a6" },
   mlx: { name: "MLX (Apple Silicon)", icon: "\u{1F9E0}", color: "#8b5cf6" },
   gemini: { name: "Gemini", icon: "\u{2728}", color: "#6366f1" },
   openrouter: { name: "OpenRouter", icon: "\u{1F310}", color: "#8b5cf6" },

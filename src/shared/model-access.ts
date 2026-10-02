@@ -62,6 +62,7 @@ const ACCESS_KIND_OVERRIDES: Partial<Record<LLMProviderType, ModelAccessKind>> =
   ollama: "local",
   "hf-agents": "local",
   mlx: "local",
+  omlx: "local",
   moa: "orchestration",
 };
 

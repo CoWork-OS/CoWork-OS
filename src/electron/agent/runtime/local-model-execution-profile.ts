@@ -49,7 +49,7 @@ export const LOCAL_BALANCED_PROFILE: LocalModelExecutionProfile = Object.freeze(
   safetyMarginTokens: 256,
 });
 
-const LOCAL_PROVIDER_TYPES = new Set(["atomic-chat", "ollama", "mlx", "hf-agents"]);
+const LOCAL_PROVIDER_TYPES = new Set(["atomic-chat", "ollama", "mlx", "omlx", "hf-agents"]);
 
 export function isLocalInferenceProvider(providerType: string, baseUrl?: string): boolean {
   const normalizedType = String(providerType || "")

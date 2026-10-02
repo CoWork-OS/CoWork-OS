@@ -10,6 +10,7 @@
  */
 
 import * as http from "http";
+import { readLimitedBody, WebhookBodyTooLargeError } from "./webhook-channel-utils";
 import * as https from "https";
 import * as fs from "fs";
 import * as path from "path";
@@ -350,19 +351,14 @@ export class GoogleChatAdapter implements ChannelAdapter {
     return new Promise((resolve, reject) => {
       this.server = http.createServer(async (req, res) => {
         if (req.method === "POST" && req.url === webhookPath) {
-          let body = "";
-          req.on("data", (chunk) => {
-            body += chunk.toString();
-          });
-          req.on("end", async () => {
-            try {
-              await this.processIncomingEvent(req, res, body);
-            } catch (error) {
-              console.error("Error processing Google Chat event:", error);
-              res.writeHead(500);
-              res.end(JSON.stringify({ error: "Internal Server Error" }));
-            }
-          });
+          try {
+            const body = (await readLimitedBody(req)).toString("utf8");
+            await this.processIncomingEvent(req, res, body);
+          } catch (error) {
+            console.error("Error processing webhook:", error);
+            res.writeHead(error instanceof WebhookBodyTooLargeError ? 413 : 500);
+            res.end("Internal Server Error");
+          }
         } else if (req.method === "GET" && req.url === "/health") {
           // Health check endpoint
           res.writeHead(200, { "Content-Type": "application/json" });

@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -90,6 +91,15 @@ export class SubconsciousArtifactStore {
     return path.join(this.getTargetRoot(target), "runs", runId);
   }
 
+  private targetWorkspaceRoot(target: SubconsciousTargetRef | null): string {
+    if (!target) return this.resolveGlobalRoot();
+    return (
+      target?.codeWorkspacePath ||
+      this.resolveWorkspacePath(target?.workspaceId) ||
+      this.resolveGlobalRoot()
+    );
+  }
+
   private async canWriteTargetArtifacts(target: SubconsciousTargetRef | null): Promise<boolean> {
     if (!target) return true;
     const workspacePath = target.codeWorkspacePath || this.resolveWorkspacePath(target.workspaceId);
@@ -106,7 +116,7 @@ export class SubconsciousArtifactStore {
     targets: SubconsciousTargetSummary[],
   ): Promise<void> {
     const brainRoot = this.getBrainRoot();
-    await fs.mkdir(brainRoot, { recursive: true });
+    await ensureWorkspaceDirectory(this.resolveGlobalRoot(), brainRoot);
     await fs.writeFile(
       path.join(brainRoot, "state.json"),
       JSON.stringify({ summary, targets }, null, 2),
@@ -133,7 +143,7 @@ export class SubconsciousArtifactStore {
       return;
     }
     const targetRoot = this.getTargetRoot(target.target);
-    await fs.mkdir(targetRoot, { recursive: true });
+    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(target.target), targetRoot);
     await fs.writeFile(
       path.join(targetRoot, "state.json"),
       JSON.stringify({ target, latestEvidence: evidence }, null, 2),
@@ -167,7 +177,7 @@ export class SubconsciousArtifactStore {
     if (!(await this.canWriteTargetArtifacts(params.target))) {
       return runRoot;
     }
-    await fs.mkdir(runRoot, { recursive: true });
+    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(params.target), runRoot);
     await fs.writeFile(
       path.join(runRoot, "evidence.json"),
       JSON.stringify(params.evidence, null, 2),
@@ -206,7 +216,7 @@ export class SubconsciousArtifactStore {
 
   async appendJournalEntry(entry: SubconsciousJournalEntry): Promise<void> {
     const journalRoot = this.getJournalRoot();
-    await fs.mkdir(journalRoot, { recursive: true });
+    await ensureWorkspaceDirectory(this.resolveGlobalRoot(), journalRoot);
     const day = new Date(entry.createdAt).toISOString().slice(0, 10);
     await fs.appendFile(
       path.join(journalRoot, `${day}.jsonl`),
@@ -257,7 +267,7 @@ export class SubconsciousArtifactStore {
       return;
     }
     const root = target ? this.getTargetRoot(target) : this.getBrainRoot();
-    await fs.mkdir(root, { recursive: true });
+    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(target), root);
     await fs.writeFile(
       path.join(root, "memory-index.json"),
       JSON.stringify(items, null, 2),
@@ -290,7 +300,7 @@ export class SubconsciousArtifactStore {
     const root = target
       ? path.join(this.getTargetRoot(target), "dreams")
       : path.join(this.getBrainRoot(), "dreams");
-    await fs.mkdir(root, { recursive: true });
+    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(target), root);
     await fs.writeFile(
       path.join(root, `${artifact.createdAt}-${sanitizeKey(artifact.id)}.json`),
       JSON.stringify(artifact, null, 2),

@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import fsSync from "fs";
 import fs from "fs/promises";
 import os from "os";
@@ -466,8 +467,8 @@ export class TranscriptStore {
 
   static async ensureLayout(workspacePath: string): Promise<void> {
     await Promise.all([
-      fs.mkdir(spansDir(workspacePath), { recursive: true }),
-      fs.mkdir(checkpointsDir(workspacePath), { recursive: true }),
+      ensureWorkspaceDirectory(workspacePath, spansDir(workspacePath)),
+      ensureWorkspaceDirectory(workspacePath, checkpointsDir(workspacePath)),
     ]);
   }
 

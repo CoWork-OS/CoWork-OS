@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import fs from "fs";
 import { promises as fsp } from "fs";
 import path from "path";
@@ -195,7 +196,7 @@ async function writeManagedKitDoc(
 ): Promise<void> {
   const absPath = path.join(workspacePath, relPath);
   const updated = formatUpdatedStamp(now);
-  await fsp.mkdir(path.dirname(absPath), { recursive: true });
+  await ensureWorkspaceDirectory(workspacePath, path.dirname(absPath));
 
   const existing = fs.existsSync(absPath)
     ? await fsp.readFile(absPath, "utf8")
@@ -243,7 +244,7 @@ export class OnboardingProfileService {
     const now = new Date();
     const summary = buildOnboardingWorkspaceSummary(data);
     const kitRoot = path.join(workspacePath, KIT_DIR_NAME);
-    await fsp.mkdir(kitRoot, { recursive: true });
+    await ensureWorkspaceDirectory(workspacePath, kitRoot);
 
     await writeManagedKitDoc(
       workspacePath,

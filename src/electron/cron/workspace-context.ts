@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectorySync } from "../utils/workspace-directory";
 import * as crypto from "crypto";
 import fs from "fs";
 import path from "path";
@@ -86,11 +87,11 @@ export function createScheduledRunDirectory(
   const nowMs = options.nowMs ?? Date.now();
   const workspaceRoot = path.resolve(workspacePath);
   const runsRoot = path.join(workspaceRoot, SCHEDULED_RUNS_RELATIVE_DIR);
-  fs.mkdirSync(runsRoot, { recursive: true });
+  ensureWorkspaceDirectorySync(workspaceRoot, runsRoot);
 
   const runId = `run-${formatRunTimestamp(nowMs)}-${crypto.randomBytes(3).toString("hex")}`;
   const runPath = path.join(runsRoot, runId);
-  fs.mkdirSync(runPath, { recursive: true });
+  ensureWorkspaceDirectorySync(workspaceRoot, runPath);
 
   // Best-effort retention cleanup after each run directory creation.
   pruneScheduledRunDirectories(runsRoot, {

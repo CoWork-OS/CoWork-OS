@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Browser preview desktop isolation**: restrict the preview approval notice and associated composer/sidebar behavior to browser clients, restoring native desktop presentation without changing approval settings. See the [local correction and validation record](docs/qa/browser-desktop-isolation-2026-10-01.md); full shared-runtime desktop compatibility remains unverified.
+
+### Security
+
+- **HTTP redirect credentials**: replace caller headers with public defaults on origin changes and reject cross-origin redirects that preserve a request body.
+- **Grep execution limits**: move regex and glob matching into a terminable worker with a 500 ms per-job deadline, and cap pattern size and brace expansion.
+- **Pulse request limits**: enforce the 16 KiB body cap while streaming, canceling oversized input before complete buffering.
+- **Read-only MCP tunnels**: deny all tool calls in read-only mode, including allowlisted and ambiguously named tools; discovery and resource reads remain available.
+- **Git skill import boundaries**: reject checkout symlinks before discovery or manifest reads and reject symlink bundle roots during staging.
+- See the [October 2 security fix record](docs/security-fixes-2026-10-02.md) for these five findings, compatibility changes, regression coverage, and verification limits. These fixes are local and unreleased.
+- **Canvas task boundaries**: isolated Canvas windows and interactive previews now enforce the owning task's live network policy, origin approval, and session ownership. HTTP(S) connections use validated DNS addresses; WebSocket and other remote schemes are blocked.
+- **HTTP connection and response limits**: pinned DNS validation to the actual socket, bounded decoded responses to 5 MiB, and kept request deadlines active through body consumption.
+- **Channel webhook limits**: LINE, Teams, Google Chat, Feishu, and WeCom reject request bodies over 1 MiB with HTTP 413 before provider processing.
+- **Secure MCP tunnel lifecycle**: added an explicit client-method allowlist, blocking host shutdown and malformed tool calls regardless of read-only mode.
+- **Imported skill archive limits**: bounded downloads and incremental ZIP inflation before complete allocation, enforcing per-file and cumulative expanded budgets.
+- See the [security fix record](docs/security-fixes-2026-09-30.md) for all six findings, compatibility changes, regression coverage, and recorded validation.
+
 ### Removed
 
 - **Personal Health**: discontinued the Health dashboard, source imports, macOS Apple Health/HealthKit bridge, and related build and packaging paths to focus engineering effort on core agent workflows, integrations, and reliability. Upgrading deletes the retired Health data in the active CoWork profile; older settings backups cannot restore it. See the [decision record](docs/personal-health-discontinuation.md).

@@ -1344,6 +1344,7 @@ export function CanvasPreview({
             {isInteractiveMode && (
               <div className="canvas-interactive-wrapper" style={{ height: previewHeight - 48 }}>
                 <webview
+                  partition={`canvas-${session.id}`}
                   src={`canvas://${session.id}/index.html`}
                   className="canvas-interactive-iframe"
                   style={{ width: "100%", height: "100%" }}

@@ -914,6 +914,7 @@ export class VisualTools {
     if (input.sessionId) {
       const session = this.canvasManager.getSession(input.sessionId);
       if (!session) throw new Error(`Canvas session not found: ${input.sessionId}`);
+      CanvasManager.assertSessionOwner(session, this.taskId, this.workspace.id);
       return { sessionId: session.id, sessionDir: session.sessionDir };
     }
 

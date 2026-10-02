@@ -2,6 +2,14 @@
 
 The browser application connects to a running CoWork host. The host remains the authority for profiles, workspaces, task execution, permissions, events, files, and human decisions. A browser tab is a client of that host, not another task runtime.
 
+## Desktop compatibility contract
+
+Browser preview is additive and opt-in. Reusing desktop components does not authorize changes to native desktop presentation, defaults, permissions, approval policy, navigation, or task behavior solely to support the browser. Browser-specific UI and recovery behavior must be selected by the renderer's explicit `window.coworkBrowserHost === true` identity. `COWORK_WEB_ENABLED=1` enables host routes; it does not make an Electron renderer a browser client and must not select browser UI there.
+
+Capability helpers preserve native availability when the browser marker is absent or false. Browser-specific styles must be scoped to `.browser-host`, and native component structure must remain unchanged where browser wrappers are needed. Validate both renderers: an enabled browser host must not add preview notices or disable native tools in the desktop app.
+
+The merged preview also touched shared execution and persistence code. Those changes require independent native regression evidence; browser acceptance, a passing build, or an opt-in route flag cannot establish desktop equivalence. The approval banner regression and local correction are recorded in [desktop isolation follow-up](qa/browser-desktop-isolation-2026-10-01.md). A complete native compatibility audit remains open.
+
 ## Authority and transport
 
 An opt-in `WebApplication` instance belongs to one host profile and generation. It mounts on the existing Control Plane listener and, in desktop mode, an enabled Web Access listener. Each listener has its own pairing audience and session cookie. Pairing codes are one-use and short-lived; browser sessions bind to the listener, profile, and host generation. Host, Origin, CSRF, WebSocket ticket, and deployment-origin checks run before any browser RPC or file route. The browser calls only named, capability-gated methods; it cannot dispatch arbitrary Electron IPC or Control Plane methods.

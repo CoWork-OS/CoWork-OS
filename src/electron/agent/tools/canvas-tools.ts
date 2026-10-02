@@ -67,10 +67,16 @@ export class CanvasTools {
     };
   }
 
+  private getOwnedSession(sessionId: string) {
+    const session = this.manager.getSession(sessionId);
+    CanvasManager.assertSessionOwner(session, this.taskId, this.workspace.id);
+    return session;
+  }
+
   private resolveSessionId(sessionId?: string): string | null {
     const normalizedSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
     if (normalizedSessionId) {
-      const requestedSession = this.manager.getSession(normalizedSessionId);
+      const requestedSession = this.getOwnedSession(normalizedSessionId);
       if (requestedSession?.status === "active") {
         return normalizedSessionId;
       }
@@ -105,7 +111,7 @@ export class CanvasTools {
     }
 
     if (this.fallbackSessionId) {
-      const fallbackSession = this.manager.getSession(this.fallbackSessionId);
+      const fallbackSession = this.getOwnedSession(this.fallbackSessionId);
       if (fallbackSession?.status === "active") {
         return fallbackSession.id;
       }
@@ -120,20 +126,10 @@ export class CanvasTools {
     return session.id;
   }
 
-  private enforceSessionCutoff(sessionId: string, action: "canvas_push" | "canvas_open_url"): void {
-    if (!this.sessionCutoff) return;
-    const session = this.manager.getSession(sessionId);
-    if (!session) return;
-    // Allow follow-up pushes to sessions created by the same task
-    if (session.taskId === this.taskId) return;
-    if (session.createdAt < this.sessionCutoff) {
-      const message =
-        "Canvas session belongs to a previous run. Create a new session with canvas_create for follow-up content instead of reusing an older session.";
-      log.error(
-        `${action} blocked for stale session. sessionId=${sessionId}, createdAt=${session.createdAt}, cutoff=${this.sessionCutoff}`,
-      );
-      throw new Error(message);
-    }
+  private enforceSessionCutoff(sessionId: string): void {
+    // getOwnedSession rejects other tasks' sessions, and a task may always follow
+    // up on its own sessions, so no older-run check remains to apply here.
+    if (this.sessionCutoff) this.getOwnedSession(sessionId);
   }
 
   /**
@@ -188,7 +184,7 @@ export class CanvasTools {
   ): Promise<{ success: boolean }> {
     const resolvedSessionId = await this.getOrCreatePushSession(sessionId);
 
-    this.enforceSessionCutoff(resolvedSessionId, "canvas_push");
+    this.enforceSessionCutoff(resolvedSessionId);
     let resolvedContent = content;
     const defaultMarker = "Waiting for content...";
     const sanitizeFilename = path.basename(filename || "index.html");
@@ -197,7 +193,7 @@ export class CanvasTools {
 
     // Validate content parameter; if missing, attempt to reuse existing canvas file
     if (resolvedContent === undefined || resolvedContent === null) {
-      const session = this.manager.getSession(resolvedSessionId);
+      const session = this.getOwnedSession(resolvedSessionId);
       if (session) {
         const filePath = path.join(session.sessionDir, sanitizeFilename);
         try {
@@ -446,7 +442,7 @@ export class CanvasTools {
     url: string,
     show: boolean = true,
   ): Promise<{ success: boolean; url: string }> {
-    this.enforceSessionCutoff(sessionId, "canvas_open_url");
+    this.getOwnedSession(sessionId);
     let parsedUrl: URL;
     try {
       parsedUrl = new URL(url);
@@ -480,7 +476,10 @@ export class CanvasTools {
     });
 
     try {
-      const normalizedUrl = await this.manager.openUrl(sessionId, url, { show });
+      const normalizedUrl = await this.manager.openUrl(sessionId, url, {
+        show,
+        authorizedNetwork: true,
+      });
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "canvas_open_url",
@@ -503,6 +502,7 @@ export class CanvasTools {
    * Show the canvas window
    */
   async showCanvas(sessionId: string): Promise<{ success: boolean }> {
+    this.getOwnedSession(sessionId);
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_show",
       sessionId,
@@ -559,6 +559,7 @@ export class CanvasTools {
    * Close the canvas session
    */
   async closeCanvas(sessionId: string): Promise<{ success: boolean }> {
+    this.getOwnedSession(sessionId);
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_close",
       sessionId,
@@ -587,6 +588,7 @@ export class CanvasTools {
    * Execute JavaScript in the canvas context
    */
   async evalScript(sessionId: string, script: string): Promise<{ result: unknown }> {
+    this.getOwnedSession(sessionId);
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_eval",
       sessionId,
@@ -620,6 +622,7 @@ export class CanvasTools {
     width: number;
     height: number;
   }> {
+    this.getOwnedSession(sessionId);
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_snapshot",
       sessionId,
@@ -657,6 +660,7 @@ export class CanvasTools {
     sessionId: string,
     label?: string,
   ): Promise<{ checkpointId: string; label: string; fileCount: number }> {
+    this.getOwnedSession(sessionId);
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_checkpoint",
       sessionId,
@@ -694,6 +698,7 @@ export class CanvasTools {
     sessionId: string,
     checkpointId: string,
   ): Promise<{ success: boolean; label: string }> {
+    this.getOwnedSession(sessionId);
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "canvas_restore",
       sessionId,

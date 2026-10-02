@@ -6,6 +6,10 @@ import { AgentRoleStore } from "../agents/AgentRoleRepository";
 import { AgentTeamStore } from "../agents/AgentTeamRepository";
 import { TaskStore, WorkspaceStore } from "../database/repositories";
 import { getUserDataDir } from "../utils/user-data-dir";
+import {
+  ensureWorkspaceDirectorySync,
+  workspaceDirectoryExists,
+} from "../utils/workspace-directory";
 import type {
   AgentRole,
   Company,
@@ -1785,7 +1789,20 @@ export class ControlPlaneStore {
       ? this.workspaceRepo.findById(company.defaultWorkspaceId)
       : undefined;
     if (existingWorkspace?.id) {
-      this.ensureCompanyWorkspaceStructure(existingWorkspace.path);
+      // A saved workspace is a reference, not authorization to restore a folder
+      // deleted in Finder. Only first-time provisioning creates the root.
+      if (workspaceDirectoryExists(existingWorkspace.path)) {
+        for (const entry of [".cowork", "projects", "ops", "research", "artifacts"]) {
+          ensureWorkspaceDirectorySync(
+            existingWorkspace.path,
+            path.join(existingWorkspace.path, entry),
+          );
+        }
+      } else {
+        console.warn(
+          `[ControlPlane] Workspace folder is missing; leaving it deleted: ${existingWorkspace.path}`,
+        );
+      }
       this.backfillCompanyProjectWorkspaces(company.id, existingWorkspace.id);
       return {
         ...company,

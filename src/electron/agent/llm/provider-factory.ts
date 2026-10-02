@@ -94,6 +94,7 @@ export interface OpenRouterImageModel {
 }
 const OPENAI_OAUTH_SUPPORTED_MODELS = new Set([
   "gpt-6-astra",
+  "gpt-6.1-sol",
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-5.6-sol",
@@ -2994,6 +2995,11 @@ export class LLMProviderFactory {
                   description: "GPT-6 Astra for ChatGPT subscription access",
                 },
                 {
+                  key: "gpt-6.1-sol",
+                  displayName: "GPT-6.1 Sol",
+                  description: "GPT-6.1 Sol for ChatGPT subscription access",
+                },
+                {
                   key: "gpt-6-sol",
                   displayName: "GPT-6 Sol",
                   description: "GPT-6 Sol for ChatGPT subscription access",
@@ -3051,6 +3057,11 @@ export class LLMProviderFactory {
                   description: "Flagship model for complex reasoning and coding",
                 },
                 {
+                  key: "gpt-6.1-sol",
+                  displayName: "GPT-6.1 Sol",
+                  description: "Complex coding and agentic workflows",
+                },
+                {
                   key: "gpt-6-sol",
                   displayName: "GPT-6 Sol",
                   description: "Complex coding and agentic workflows",
@@ -3096,7 +3107,7 @@ export class LLMProviderFactory {
           cachedModels && cachedModels.length > 0
             ? [
                 ...defaultOpenAIModels
-                  .filter((model) => model.key === "gpt-6-sol" || model.key === "gpt-6-luna")
+                  .filter((model) => ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"].includes(model.key))
                   .filter((model) => !cachedModels.some((cached) => cached.key === model.key)),
                 ...cachedModels,
               ]
@@ -4184,6 +4195,11 @@ export class LLMProviderFactory {
         name: "GPT-6 Astra",
         description: "Flagship model for complex reasoning and coding",
       },
+      {
+        id: "gpt-6.1-sol",
+        name: "GPT-6.1 Sol",
+        description: "Complex coding and professional work",
+      },
       { id: "gpt-6-sol", name: "GPT-6 Sol", description: "Complex coding and agentic workflows" },
       { id: "gpt-6-luna", name: "GPT-6 Luna", description: "Efficient focused tasks" },
       {
@@ -4232,6 +4248,11 @@ export class LLMProviderFactory {
             id: "gpt-6-astra",
             name: "GPT-6 Astra",
             description: "GPT-6 Astra for ChatGPT subscription access",
+          },
+          {
+            id: "gpt-6.1-sol",
+            name: "GPT-6.1 Sol",
+            description: "GPT-6.1 Sol for ChatGPT subscription access",
           },
           {
             id: "gpt-6-sol",
@@ -4794,7 +4815,28 @@ export class LLMProviderFactory {
       });
     }
 
-    const models = await provider.getAvailableModels();
+    let models: Array<{ id: string; name: string }>;
+    if (resolvedProviderType === "omlx" && provider instanceof OpenAICompatibleProvider) {
+      const discovery = await provider.getAvailableModelsDetailed({ timeoutMs: 5_000 });
+      if (discovery.status !== "success") {
+        const messages: Record<string, string> = {
+          authentication_rejected:
+            "oMLX requires a valid API key. Copy the key from oMLX Security settings into the API Key field, then refresh models again.",
+          valid_empty:
+            "oMLX is reachable but reported no models. Download a chat model in oMLX, then refresh again.",
+          unreachable:
+            "Could not reach oMLX at the configured URL. Check that the server is running and the Base URL matches oMLX settings.",
+          timeout: "oMLX model discovery timed out. Check the server and try again.",
+          invalid_response:
+            "oMLX returned an incompatible model list. Check the Base URL points to its OpenAI-compatible API.",
+          cancelled: "oMLX model discovery was cancelled.",
+        };
+        throw new Error(messages[discovery.status] || "oMLX model discovery failed.");
+      }
+      models = discovery.models;
+    } else {
+      models = await provider.getAvailableModels();
+    }
     const cachedModels = mergeCustomProviderModels(
       entry,
       models.map((model) => ({

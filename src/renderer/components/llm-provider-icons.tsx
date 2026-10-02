@@ -37,6 +37,7 @@ export const LLM_PROVIDER_ICONS: Record<string, ReactNode> = {
   moa: <UsersRound {...S} />,
   "hf-agents": <Zap {...S} />,
   mlx: <Sparkles {...S} />,
+  omlx: <Sparkles {...S} />,
 };
 
 /**

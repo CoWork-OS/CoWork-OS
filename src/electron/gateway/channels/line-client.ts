@@ -23,6 +23,7 @@
 
 import { EventEmitter } from "events";
 import * as http from "http";
+import { readLimitedBody, WebhookBodyTooLargeError } from "./webhook-channel-utils";
 import * as https from "https";
 import * as crypto from "crypto";
 
@@ -236,7 +237,7 @@ export class LineClient extends EventEmitter {
   /**
    * Handle incoming webhook request
    */
-  private handleWebhook(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private async handleWebhook(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     // Only handle POST requests to webhook path
     if (req.method !== "POST" || req.url !== this.options.webhookPath) {
       res.writeHead(404);
@@ -244,40 +245,34 @@ export class LineClient extends EventEmitter {
       return;
     }
 
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-
-    req.on("end", async () => {
-      try {
-        // Verify signature
-        const signature = req.headers["x-line-signature"] as string;
-        if (!signature || !this.verifySignature(body, signature)) {
-          if (this.options.verbose) {
-            console.warn("LINE webhook: Invalid signature");
-          }
-          res.writeHead(401);
-          res.end();
-          return;
+    try {
+      const body = (await readLimitedBody(req)).toString("utf8");
+      // Verify signature
+      const signature = req.headers["x-line-signature"] as string;
+      if (!signature || !this.verifySignature(body, signature)) {
+        if (this.options.verbose) {
+          console.warn("LINE webhook: Invalid signature");
         }
-
-        // Parse and process events
-        const data = JSON.parse(body);
-        if (data.events && Array.isArray(data.events)) {
-          for (const event of data.events) {
-            await this.processEvent(event);
-          }
-        }
-
-        res.writeHead(200);
+        res.writeHead(401);
         res.end();
-      } catch (error) {
-        console.error("LINE webhook processing error:", error);
-        res.writeHead(500);
-        res.end();
+        return;
       }
-    });
+
+      // Parse and process events
+      const data = JSON.parse(body);
+      if (data.events && Array.isArray(data.events)) {
+        for (const event of data.events) {
+          await this.processEvent(event);
+        }
+      }
+
+      res.writeHead(200);
+      res.end();
+    } catch (error) {
+      console.error("LINE webhook processing error:", error);
+      res.writeHead(error instanceof WebhookBodyTooLargeError ? 413 : 500);
+      res.end();
+    }
   }
 
   /**

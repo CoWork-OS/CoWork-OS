@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import fs from "fs";
 import { promises as fsp } from "fs";
 import path from "path";
@@ -57,7 +58,7 @@ async function writeWorkspaceKitState(
   state: KitWorkspaceState,
 ): Promise<void> {
   const statePath = resolveWorkspaceStatePath(workspacePath);
-  await fsp.mkdir(path.dirname(statePath), { recursive: true });
+  await ensureWorkspaceDirectory(workspacePath, path.dirname(statePath));
   await fsp.writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
 }
 

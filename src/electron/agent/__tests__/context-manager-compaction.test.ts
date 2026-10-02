@@ -4,6 +4,10 @@ import type { LLMMessage } from "../llm";
 
 describe("ContextManager.compactMessagesWithMeta", () => {
   it("uses Astra's documented long context window", () => {
+    expect(new ContextManager("gpt-6.1-sol").getModelTokenLimit()).toBe(1_050_000);
+    expect(new ContextManager("openai-codex/gpt-6.1-sol@fast").getModelTokenLimit()).toBe(
+      1_050_000,
+    );
     expect(new ContextManager("gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
     expect(new ContextManager("openai/gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
   });

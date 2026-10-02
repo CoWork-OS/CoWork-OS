@@ -1465,6 +1465,25 @@ export function Settings({
   >({});
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [showAllProviders, setShowAllProviders] = useState(false);
+  const [customModelDiscoveryError, setCustomModelDiscoveryError] = useState<{
+    providerType: LLMProviderType;
+    message: string;
+  } | null>(null);
+  const [providerSearch, setProviderSearch] = useState("");
+  const providerSearchTerms = providerSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const matchingProviders = providers.filter((provider) => {
+    const access = getModelAccessDescriptor(provider.type as LLMProviderType);
+    const searchText = [
+      provider.name,
+      provider.type,
+      access.name,
+      access.label,
+      MODEL_ACCESS_GROUP_LABELS[access.group],
+    ]
+      .join(" ")
+      .toLowerCase();
+    return providerSearchTerms.every((term) => searchText.includes(term));
+  });
   const [routingRuntime, setRoutingRuntime] = useState<LLMRoutingRuntimeState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -3381,6 +3400,7 @@ export function Settings({
     try {
       setLoadingCustomProviderModels(true);
       setTestResult(null);
+      setCustomModelDiscoveryError(null);
       const currentConfig = customProviders[resolvedType] || {};
       let models: Array<{ key: string; displayName: string; description: string }>;
       let discoverySuccess = true;
@@ -3443,11 +3463,13 @@ export function Settings({
       onSettingsChanged?.();
     } catch (error) {
       console.error(`Failed to load models for ${customEntry.name}:`, error);
-      setTestResult({
-        success: false,
-        error:
-          error instanceof Error ? error.message : `Failed to load models for ${customEntry.name}`,
-      });
+      // ipcRenderer.invoke wraps main-process errors; show only the provider's message.
+      const message =
+        error instanceof Error
+          ? error.message.replace(/^Error invoking remote method '[^']+': (?:\w*Error: )?/, "")
+          : `Failed to load models for ${customEntry.name}`;
+      setCustomModelDiscoveryError({ providerType: resolvedType, message });
+      setTestResult({ success: false, error: message });
     } finally {
       setLoadingCustomProviderModels(false);
     }
@@ -5886,12 +5908,35 @@ export function Settings({
           separate.
         </p>
       </div>
+      <div className="llm-provider-search">
+        <Search size={16} aria-hidden="true" />
+        <input
+          type="search"
+          className="settings-input"
+          aria-label="Search providers"
+          placeholder="Search providers..."
+          value={providerSearch}
+          onChange={(event) => setProviderSearch(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && providerSearch) {
+              event.stopPropagation();
+              setProviderSearch("");
+            }
+          }}
+        />
+      </div>
       <div className="llm-provider-groups" aria-label="Model access routes">
+        {providerSearchTerms.length > 0 && matchingProviders.length === 0 && (
+          <p className="settings-description" role="status">
+            No providers match “{providerSearch.trim()}”.
+          </p>
+        )}
         {MODEL_ACCESS_GROUP_ORDER.map((group) => {
-          const groupedProviders = providers.filter(
+          const groupedProviders = matchingProviders.filter(
             (provider) =>
               getModelAccessDescriptor(provider.type as LLMProviderType).group === group &&
-              (showAllProviders ||
+              (providerSearchTerms.length > 0 ||
+                showAllProviders ||
                 isFeaturedProvider(provider.type as LLMProviderType) ||
                 provider.configured ||
                 settings.providerType === provider.type),
@@ -5937,7 +5982,7 @@ export function Settings({
               !provider.configured &&
               settings.providerType !== provider.type,
           ).length;
-          if (hiddenCount === 0) return null;
+          if (providerSearchTerms.length > 0 || hiddenCount === 0) return null;
           return (
             <button
               type="button"
@@ -7678,6 +7723,15 @@ export function Settings({
                     })
                   }
                 />
+              )}
+              {customModelDiscoveryError?.providerType === resolvedProviderType && (
+                <p
+                  className="settings-description"
+                  role="alert"
+                  style={{ color: "var(--color-error)", marginTop: "8px" }}
+                >
+                  {customModelDiscoveryError.message}
+                </p>
               )}
             </div>
           </>

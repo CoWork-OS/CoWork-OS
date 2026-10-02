@@ -10,6 +10,7 @@ import {
 } from "../../security/project-access";
 import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 import { LLMTool } from "../llm/types";
+import { BoundedRegex, RegexDeadlineError } from "./bounded-regex";
 
 const MAX_GREP_OUTPUT_BYTES = 50_000;
 
@@ -126,6 +127,7 @@ export class GrepTools {
       message: `Grep search: "${pattern}"${searchPath ? ` in ${searchPath}` : ""}${globPattern ? ` (${globPattern})` : ""}`,
     });
 
+    const evaluator = new BoundedRegex();
     try {
       if (
         (await this.isDocumentHeavyWorkspace()) &&
@@ -144,6 +146,7 @@ export class GrepTools {
       }
 
       // Compile regex
+      if (pattern.length > 4096) throw new Error("Regex pattern exceeds the 4096-character limit");
       let regex: RegExp;
       try {
         regex = new RegExp(pattern, ignoreCase ? "gi" : "g");
@@ -183,6 +186,7 @@ export class GrepTools {
         globPattern,
         agentRoleId,
         projectAccessCache,
+        evaluator,
       );
       const matches: Array<{
         file: string;
@@ -210,7 +214,12 @@ export class GrepTools {
 
           if (outputMode === "count") {
             // Count matches in file
-            const fileMatches = (content.match(regex) || []).length;
+            const [fileMatches] = await evaluator.evaluate(
+              regex.source,
+              regex.flags,
+              [content],
+              "count",
+            );
             if (fileMatches > 0) {
               totalMatches += fileMatches;
               matches.push({
@@ -220,7 +229,7 @@ export class GrepTools {
             }
           } else if (outputMode === "files_only") {
             // Just check if file has matches
-            if (regex.test(content)) {
+            if ((await evaluator.evaluate(regex.source, regex.flags, [content], "test")).length) {
               totalMatches++;
               matches.push({ file: relativePath });
               if (matches.length >= maxResults) {
@@ -229,9 +238,15 @@ export class GrepTools {
             }
           } else {
             // Content mode - show matching lines
-            for (let i = 0; i < lines.length; i++) {
-              regex.lastIndex = 0; // Reset regex state
-              if (regex.test(lines[i])) {
+            const indices = await evaluator.evaluate(
+              regex.source,
+              regex.flags,
+              lines,
+              "test",
+              Math.max(1, maxResults - matches.length),
+            );
+            for (const i of indices) {
+              {
                 totalMatches++;
 
                 const match: {
@@ -265,7 +280,8 @@ export class GrepTools {
               }
             }
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof RegexDeadlineError) throw error;
           // Skip files we can't read (binary, permissions, etc.)
         }
       }
@@ -305,6 +321,8 @@ export class GrepTools {
         truncated: false,
         error: error.message,
       };
+    } finally {
+      await evaluator.close();
     }
   }
 
@@ -356,11 +374,20 @@ export class GrepTools {
     globPattern: string | undefined,
     agentRoleId: string | null,
     projectAccessCache: Map<string, boolean>,
+    evaluator: BoundedRegex,
   ): Promise<string[]> {
     const files: string[] = [];
     const globRegex = globPattern ? this.globToRegex(globPattern) : null;
 
-    await this.walkDirectory(basePath, basePath, files, globRegex, agentRoleId, projectAccessCache);
+    await this.walkDirectory(
+      basePath,
+      basePath,
+      files,
+      globRegex,
+      agentRoleId,
+      projectAccessCache,
+      evaluator,
+    );
 
     return files;
   }
@@ -375,6 +402,7 @@ export class GrepTools {
     globRegex: RegExp | null,
     agentRoleId: string | null,
     projectAccessCache: Map<string, boolean>,
+    evaluator: BoundedRegex,
     depth: number = 0,
   ): Promise<void> {
     // Limit recursion depth
@@ -419,6 +447,25 @@ export class GrepTools {
       return;
     }
 
+    // Glob candidates are tested in one worker round trip per batch; flush before
+    // recursing so files keep their directory-walk order.
+    const globCandidates: Array<{ fullPath: string; relative: string; name: string }> = [];
+    const flushGlobCandidates = async () => {
+      if (!globRegex || globCandidates.length === 0) return;
+      const batch = globCandidates.splice(0);
+      const matched = new Set(
+        await evaluator.evaluate(
+          globRegex.source,
+          globRegex.flags,
+          batch.flatMap((candidate) => [candidate.relative, candidate.name]),
+          "test",
+        ),
+      );
+      batch.forEach((candidate, index) => {
+        if (matched.has(2 * index) || matched.has(2 * index + 1)) files.push(candidate.fullPath);
+      });
+    };
+
     try {
       const entries = fs.readdirSync(currentPath, { withFileTypes: true });
 
@@ -433,6 +480,7 @@ export class GrepTools {
         }
 
         if (entry.isDirectory()) {
+          await flushGlobCandidates();
           await this.walkDirectory(
             fullPath,
             basePath,
@@ -440,6 +488,7 @@ export class GrepTools {
             globRegex,
             agentRoleId,
             projectAccessCache,
+            evaluator,
             depth + 1,
           );
         } else if (entry.isFile()) {
@@ -460,16 +509,20 @@ export class GrepTools {
 
           // Apply glob filter if specified
           if (globRegex) {
-            const normalizedRelative = relativePath.split(path.sep).join("/");
-            if (!globRegex.test(normalizedRelative) && !globRegex.test(entry.name)) {
-              continue;
-            }
+            globCandidates.push({
+              fullPath,
+              relative: relativePath.split(path.sep).join("/"),
+              name: entry.name,
+            });
+            continue;
           }
 
           files.push(fullPath);
         }
       }
-    } catch {
+      await flushGlobCandidates();
+    } catch (error) {
+      if (error instanceof RegexDeadlineError) throw error;
       // Skip directories we can't read
     }
   }
@@ -552,6 +605,7 @@ export class GrepTools {
    * Convert glob pattern to regex
    */
   private globToRegex(pattern: string): RegExp {
+    if (pattern.length > 1024) throw new Error("Glob pattern exceeds the 1024-character limit");
     const expandedPatterns = this.expandBraces(pattern);
     const regexParts = expandedPatterns.map((p) => this.globPatternToRegex(p));
     const combined = regexParts.length > 1 ? `(${regexParts.join("|")})` : regexParts[0];
@@ -561,9 +615,12 @@ export class GrepTools {
   /**
    * Expand brace patterns
    */
-  private expandBraces(pattern: string): string[] {
+  private expandBraces(pattern: string, budget = { remaining: 128 }): string[] {
     const braceMatch = pattern.match(/\{([^}]+)\}/);
-    if (!braceMatch) return [pattern];
+    if (!braceMatch) {
+      if (--budget.remaining < 0) throw new Error("Glob pattern exceeds the 128-expansion limit");
+      return [pattern];
+    }
 
     const [fullMatch, options] = braceMatch;
     const optionList = options.split(",");
@@ -571,7 +628,7 @@ export class GrepTools {
 
     for (const option of optionList) {
       const expanded = pattern.replace(fullMatch, option.trim());
-      results.push(...this.expandBraces(expanded));
+      results.push(...this.expandBraces(expanded, budget));
     }
 
     return results;

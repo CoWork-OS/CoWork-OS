@@ -43,6 +43,7 @@ describe("Astra pricing", () => {
 
 describe("GPT-6 Sol and Luna pricing", () => {
   it.each([
+    ["gpt-6.1-sol", 2, 10, 0.1, 2.5],
     ["gpt-6-sol", 2, 10, 0.2, 2.5],
     ["gpt-6-luna", 0.1, 0.5, 0.01, 0.125],
   ] as const)(

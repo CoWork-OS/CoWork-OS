@@ -108,6 +108,9 @@ hero:
       text: Security Hardening
       link: /security-hardening
     - theme: alt
+      text: Security Fixes
+      link: /security-fixes-2026-10-02
+    - theme: alt
       text: Access Profiles
       link: /access-profiles
     - theme: alt

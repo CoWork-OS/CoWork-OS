@@ -231,6 +231,14 @@ Security controls:
 - The relay caps pending requests per tunnel.
 - Audit events record metadata only, not full request or response bodies.
 
+Only the client-facing MCP methods `initialize`, `notifications/initialized`,
+`ping`, `tools/list`, `tools/call`, `resources/list`, and `resources/read` are
+forwarded. `shutdown` and unknown methods are blocked regardless of read-only
+mode; `tools/call` requires a nonempty tool name. Allowed tool calls still pass
+the configured tool allowlist and read-only filtering. An empty tool allowlist
+does not grant access to host lifecycle methods. See the
+[security fix record](security-fixes-2026-09-30.md).
+
 Default policy limits:
 
 | Setting            |               Default |
@@ -241,7 +249,7 @@ Default policy limits:
 | `allowedTools`     | empty means all tools |
 | `readOnly`         |               `false` |
 
-Read-only mode uses a conservative tool-name heuristic. It blocks tool names containing write-like tokens such as `write`, `create`, `update`, `delete`, `remove`, `send`, `publish`, `execute`, `run`, `install`, `deploy`, `commit`, and `push`. For stronger production control, use explicit `allowedTools`.
+Read-only mode allows protocol discovery and resource reads, and blocks every `tools/call` request, including allowlisted tools. Tool names and remote annotations cannot prove that an operation has no side effects. To expose selected tools, disable read-only mode and configure an explicit `allowedTools` list after reviewing those tools and their target server.
 
 ## Audit Logs
 
@@ -309,7 +317,7 @@ The relay has a tunnel record, but no local CoWork client is connected. Check:
 Check the relay policy and the local tunnel policy:
 
 - `allowedTools` blocks all tools not listed when non-empty
-- read-only mode blocks write-like tool names
+- read-only mode blocks all tool calls, including ambiguous names and allowlisted mutations
 - request or response size limits may reject large payloads
 - the target task's access profile or administrator policy may deny the tool; choose a valid, sufficiently capable profile on the target node rather than widening the tunnel policy
 

@@ -3552,11 +3552,15 @@ a,
   align-items: center;
   justify-content: flex-end;
   flex-shrink: 0;
-  margin-left: 0;
+  margin-left: auto;
   min-height: 18px;
 }
 
-.cli-task-title-row-awaiting .cli-task-action-wrap {
+.browser-host .cli-task-action-wrap {
+  margin-left: 0;
+}
+
+.browser-host .cli-task-title-row-awaiting .cli-task-action-wrap {
   margin-left: auto;
 }
 
@@ -18353,6 +18357,25 @@ a,
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
+}
+
+.llm-provider-search {
+  position: relative;
+  width: 100%;
+}
+
+.llm-provider-search > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.llm-provider-search .settings-input {
+  width: 100%;
+  padding-left: 36px;
 }
 
 .llm-provider-groups {

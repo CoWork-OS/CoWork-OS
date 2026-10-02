@@ -1,8 +1,5 @@
 import type { SecureMcpTunnelPolicy, TunnelClientMessage, TunnelRelayMessage } from "./types";
 
-const WRITE_TOOL_RE =
-  /(^|[_\-\s])(write|create|update|delete|remove|rename|move|copy|patch|edit|send|post|put|publish|execute|run|install|deploy|commit|push)([_\-\s]|$)/i;
-
 export function parseTunnelRelayMessage(raw: string): TunnelRelayMessage {
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -73,7 +70,32 @@ export function enforceTunnelPolicy(
     return { approved: false, reason: "Request exceeds tunnel size limit" };
   }
 
+  const method = (payload as { method?: unknown } | null)?.method;
+  const allowedMethods = [
+    "initialize",
+    "notifications/initialized",
+    "notifications/cancelled",
+    "ping",
+    "tools/list",
+    "tools/call",
+    "resources/list",
+    "resources/templates/list",
+    "resources/read",
+    "prompts/list",
+    "prompts/get",
+    "completion/complete",
+    "logging/setLevel",
+  ];
+  if (typeof method !== "string" || !allowedMethods.includes(method)) {
+    return {
+      approved: false,
+      reason: `MCP method is not allowed through tunnels: ${String(method)}`,
+    };
+  }
   const toolName = getMcpToolName(payload);
+  if (method === "tools/call" && !toolName) {
+    return { approved: false, reason: "Tool call requires a tool name" };
+  }
   if (!toolName) {
     return { approved: true };
   }
@@ -82,7 +104,10 @@ export function enforceTunnelPolicy(
     return { approved: false, reason: `Tool is not allowed: ${toolName}`, toolName };
   }
 
-  if (policy.readOnly && WRITE_TOOL_RE.test(toolName)) {
+  // Tool names and remote annotations do not establish side-effect freedom.
+  // Until trusted effect metadata is available, read-only tunnels expose only
+  // protocol discovery and resource reads, never arbitrary tools/call requests.
+  if (policy.readOnly) {
     return {
       approved: false,
       reason: `Tool is blocked by read-only policy: ${toolName}`,

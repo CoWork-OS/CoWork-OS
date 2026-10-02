@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { resolveInteractionMode } from "./strategy/interaction-mode";
 import { QUALITY_PASS_SYSTEM_PROMPT, isQualityRewriteSafe } from "./quality-pass-output";
 import {
@@ -6230,7 +6231,7 @@ ${transcript}
     const checkedDailyPath = writeAccess.path;
     const memDir = path.dirname(checkedDailyPath);
     try {
-      await fs.promises.mkdir(memDir, { recursive: true });
+      await ensureWorkspaceDirectory(this.workspace.path, memDir);
     } catch {
       return;
     }

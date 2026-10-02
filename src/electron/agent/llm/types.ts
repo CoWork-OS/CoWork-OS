@@ -262,6 +262,11 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     maxImageBytes: 5 * 1024 * 1024,
     supportedMimeTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
   },
+  omlx: {
+    supportsImages: true,
+    maxImageBytes: 20 * 1024 * 1024,
+    supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  },
   mlx: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   groq: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   kimi: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
@@ -617,6 +622,11 @@ export const OPENAI_MODELS = {
     id: "gpt-6-astra",
     displayName: "GPT-6 Astra",
     description: "Flagship model for complex reasoning and coding",
+  },
+  "gpt-6.1-sol": {
+    id: "gpt-6.1-sol",
+    displayName: "GPT-6.1 Sol",
+    description: "Complex coding and agentic workflows",
   },
   "gpt-6-sol": {
     id: "gpt-6-sol",

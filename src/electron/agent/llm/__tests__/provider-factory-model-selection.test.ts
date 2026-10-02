@@ -180,7 +180,26 @@ describe("LLMProviderFactory model status", () => {
 
     expect(models.filter((model) => model.key === "gpt-6-sol")).toHaveLength(1);
     expect(models.some((model) => model.key === "gpt-6-luna")).toBe(true);
+    expect(models.filter((model) => model.key === "gpt-6.1-sol")).toHaveLength(1);
   });
+
+  it.each(["api_key", "oauth"] as const)(
+    "keeps GPT-6.1 Sol selectable with a stale %s model cache",
+    (authMethod) => {
+      const settings: LLMSettings = {
+        providerType: "openai",
+        modelKey: "gpt-6.1-sol",
+        openai: { authMethod, model: "gpt-6.1-sol" },
+        cachedOpenAIModels: [{ key: "gpt-4o", displayName: "GPT-4o", description: "OpenAI" }],
+      };
+      const status = LLMProviderFactory.getProviderModelStatus(settings);
+      expect(status.currentModel).toBe("gpt-6.1-sol");
+      expect(status.models.filter((model) => model.key === "gpt-6.1-sol")).toHaveLength(1);
+      expect(status.models.find((model) => model.key === "gpt-6.1-sol")?.displayName).toBe(
+        "GPT-6.1 Sol",
+      );
+    },
+  );
 
   it("infers the ChatGPT route for legacy OAuth settings without authMethod", () => {
     const settings: LLMSettings = {
@@ -350,7 +369,7 @@ describe("LLMProviderFactory model status", () => {
     expect(resolved.modelId).toBe("gpt-6-astra");
   });
 
-  it.each(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
+  it.each(["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])(
     "preserves the supported ChatGPT subscription model %s",
     (model) => {
       const settings: LLMSettings = {

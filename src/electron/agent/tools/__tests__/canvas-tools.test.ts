@@ -59,6 +59,23 @@ describe("CanvasTools.pushContent", () => {
     (tools as Any).manager = manager;
   });
 
+  it("rejects foreign-task push, eval, open, and restore targets before any manager effect", async () => {
+    manager.getSession.mockReturnValue({ ...session, taskId: "other-task" });
+    await expect(
+      tools.pushContent("session-1", "<img src='https://attacker.example'>"),
+    ).rejects.toThrow("another task");
+    await expect(
+      tools.evalScript("session-1", "fetch('https://attacker.example')"),
+    ).rejects.toThrow("another task");
+    await expect(tools.openUrl("session-1", "https://attacker.example")).rejects.toThrow(
+      "another task",
+    );
+    await expect(tools.restoreCheckpoint("session-1", "checkpoint")).rejects.toThrow(
+      "another task",
+    );
+    expect(manager.pushContent).not.toHaveBeenCalled();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

@@ -144,7 +144,8 @@ function hasConfiguredApiKeyProvider(
         (settings.providerType === "ollama" && hasText(settings.modelKey))
       );
     case "hf-agents":
-    case "mlx": {
+    case "mlx":
+    case "omlx": {
       const config = settings.customProviders?.[providerType];
       return hasText(config?.baseUrl) && hasText(config?.model);
     }

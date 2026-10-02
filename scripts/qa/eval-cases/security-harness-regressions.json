@@ -2,10 +2,21 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "approval-boundary-sandbox",
-    "taskId": "approval-boundary-sandbox"
+    "incident": "security-scan-43ae56c7",
+    "taskId": "security-scan-43ae56c7"
   },
   "categories": [
+    {
+      "id": "4b0bb34a-77ed-4cfa-bfb6-ef84d70e68e5-confirmed-fix",
+      "prompt": "Regression guard for Canvas owning-task policy and consent across windows/webviews; DNS-pinned bounded HTTP; limited webhook ingress; tunnel method allowlist; bounded ClawHub inflation: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "4b0bb34a-77ed-4cfa-bfb6-ef84d70e68e5",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true
+      }
+    },
     {
       "id": "approval-boundary-sandbox-confirmed-fix",
       "prompt": "Regression guard for Bounded macOS execution denies external network, sibling temporary roots and unsandboxed fallback: replay the original failure class and verify the fix still holds.",
@@ -38,6 +49,17 @@
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true,
         "executableTest": "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts"
+      }
+    },
+    {
+      "id": "security-scan-43ae56c7-confirmed-fix",
+      "prompt": "Regression guard for Bound redirects, regex execution, Pulse input, read-only tunnel calls, and Git import sources: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "security-scan-43ae56c7",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true
       }
     }
   ],

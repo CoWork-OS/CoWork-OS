@@ -467,7 +467,7 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
-  it.each(["gpt-6-sol", "gpt-6-luna"])(
+  it.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
     "routes %s API-key tool calls through Responses",
     async (model) => {
       responsesCreateMock.mockResolvedValue({
@@ -493,6 +493,42 @@ describe("OpenAIProvider structured errors", () => {
       );
     },
   );
+
+  it("uses modern cache fields and supported reasoning for GPT-6.1 Sol API requests", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+    });
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-6.1-sol",
+      openaiApiKey: "sk-test",
+    });
+    await provider.createMessage({
+      ...makeRequest(),
+      model: "openai/gpt-6.1-sol@fast",
+      reasoningEffort: "none",
+      tools: [
+        {
+          name: "lookup",
+          description: "Look up an item",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      promptCache: {
+        mode: "openai_key",
+        cacheKey: "test-cache",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+      },
+    });
+    expect(chatCompletionsCreateMock).not.toHaveBeenCalled();
+    expect(responsesCreateMock.mock.calls[0][0]).toMatchObject({
+      model: "gpt-6.1-sol",
+      reasoning: { effort: "low" },
+      prompt_cache_options: { mode: "implicit", ttl: "30m" },
+      tools: [expect.objectContaining({ name: "lookup" })],
+    });
+  });
 
   it("retries a Responses request without cache controls when the endpoint rejects them", async () => {
     responsesCreateMock
@@ -808,6 +844,7 @@ describe("OpenAIProvider structured errors", () => {
 
   it.each([
     "gpt-6-astra",
+    "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
@@ -829,6 +866,7 @@ describe("OpenAIProvider structured errors", () => {
         id: model,
         api: "openai-codex-responses",
         provider: "openai-codex",
+        ...(model === "gpt-6.1-sol" ? { contextWindow: 1_050_000, maxTokens: 128_000 } : {}),
       }),
       expect.any(Object),
       expect.any(Object),
@@ -1028,8 +1066,9 @@ describe("OpenAIProvider structured errors", () => {
 
     const models = await provider.getAvailableModels();
 
-    expect(models.slice(0, 6).map((model) => model.id)).toEqual([
+    expect(models.slice(0, 7).map((model) => model.id)).toEqual([
       "gpt-6-astra",
+      "gpt-6.1-sol",
       "gpt-6-sol",
       "gpt-6-luna",
       "gpt-5.6-sol",

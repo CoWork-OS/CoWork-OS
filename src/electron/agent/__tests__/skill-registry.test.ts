@@ -11,6 +11,7 @@ import type { CustomSkill, SkillRegistryEntry, SkillSearchResult } from "../../.
 let mockFiles: Map<string, string> = new Map();
 let mockDirs: Set<string> = new Set();
 let mockRmSyncThrowOnceFor: string | null = null;
+let mockGitLinkPath: string | null = null;
 
 function normalizePath(value: string): string {
   const normalized = value.replace(/\\/g, "/").replace(/\/+/g, "/");
@@ -165,6 +166,14 @@ vi.mock("child_process", () => ({
         const targetDir = normalizePath(args[args.length - 1] || "/tmp/clone");
         ensureDir(targetDir);
         const sourceUrl = args[args.length - 2] || "";
+        if (mockGitLinkPath) {
+          if (mockGitLinkPath === "support" || mockGitLinkPath === "skills") {
+            ensureDir(`${targetDir}/${mockGitLinkPath}`);
+            mockFiles.set(`${targetDir}/${mockGitLinkPath}/external-secret.txt`, "outside data");
+          } else {
+            mockFiles.set(`${targetDir}/${mockGitLinkPath}`, "outside data");
+          }
+        }
         if (sourceUrl.includes("nested-skill-repo")) {
           ensureDir(`${targetDir}/skills/karpathy-guidelines`);
           mockFiles.set(
@@ -248,6 +257,14 @@ vi.mock("fs", () => ({
     }),
     lstatSync: vi.fn().mockImplementation((p: string) => {
       const normalized = normalizePath(p);
+      if (mockGitLinkPath && normalized.endsWith(`/${mockGitLinkPath}`)) {
+        return {
+          size: 0,
+          isDirectory: () => false,
+          isFile: () => false,
+          isSymbolicLink: () => true,
+        };
+      }
       if (mockFiles.has(normalized)) {
         return {
           size: Buffer.byteLength(mockFiles.get(normalized) || "", "utf8"),
@@ -334,6 +351,9 @@ vi.mock("fs", () => ({
   }),
   lstatSync: vi.fn().mockImplementation((p: string) => {
     const normalized = normalizePath(p);
+    if (mockGitLinkPath && normalized.endsWith(`/${mockGitLinkPath}`)) {
+      return { size: 0, isDirectory: () => false, isFile: () => false, isSymbolicLink: () => true };
+    }
     if (mockFiles.has(normalized)) {
       return {
         size: Buffer.byteLength(mockFiles.get(normalized) || "", "utf8"),
@@ -366,7 +386,14 @@ vi.mock("fs", () => ({
 
 // Mock fetch
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+global.fetch = (async (...args: Parameters<typeof fetch>) => {
+  const response = await mockFetch(...args);
+  // Older fixtures supplied arrayBuffer only; expose those fixtures as streaming bodies.
+  if (response && !response.body && response.arrayBuffer) {
+    response.body = new Response(await response.arrayBuffer()).body;
+  }
+  return response;
+}) as typeof fetch;
 
 // Dynamic import after mocking
 const { SkillRegistry, resetSkillRegistry } = await import("../skill-registry");
@@ -403,6 +430,7 @@ describe("SkillRegistry", () => {
     vi.clearAllMocks();
     mockFiles.clear();
     mockRmSyncThrowOnceFor = null;
+    mockGitLinkPath = null;
     mockDirs = new Set(["/", "/mock", "/mock/skills", "/mock/user", "/mock/user/data"]);
     mockFetch.mockReset();
     resetSkillRegistry();
@@ -602,6 +630,64 @@ describe("SkillRegistry", () => {
   });
 
   describe("external imports", () => {
+    it("stops a compressed ZIP bomb during inflation rather than allocating the full entry", async () => {
+      const zip = new JSZip();
+      zip.file("SKILL.md", "x".repeat(2 * 1024 * 1024));
+      const bytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+      const loaded = await JSZip.loadAsync(bytes);
+      const wholeEntry = vi.spyOn(loaded.files["SKILL.md"], "async");
+      vi.spyOn(JSZip, "loadAsync").mockResolvedValueOnce(loaded);
+      mockFetch.mockResolvedValueOnce(new Response(bytes));
+      await expect((registry as Any).downloadClawHubFiles("bomb", "1")).rejects.toThrow(
+        "524288-byte limit",
+      );
+      expect(wholeEntry).not.toHaveBeenCalled();
+    });
+
+    it("bounds actual inflation even when ZIP metadata claims the file is tiny", async () => {
+      const zip = new JSZip();
+      zip.file("SKILL.md", "x".repeat(2 * 1024 * 1024));
+      const bytes = Buffer.from(
+        await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }),
+      );
+      const central = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+      bytes.writeUInt32LE(1, central + 24);
+      mockFetch.mockResolvedValueOnce(new Response(bytes));
+      await expect((registry as Any).downloadClawHubFiles("forged", "1")).rejects.toThrow(
+        "524288-byte limit",
+      );
+    });
+
+    it("enforces the cumulative expanded bundle budget across individually valid entries", async () => {
+      const zip = new JSZip();
+      for (let i = 0; i < 11; i++) zip.file(`file-${i}.md`, "x".repeat(512 * 1024));
+      mockFetch.mockResolvedValueOnce(
+        new Response(await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" })),
+      );
+      await expect((registry as Any).downloadClawHubFiles("many", "1")).rejects.toThrow(
+        "byte limit",
+      );
+    });
+
+    it("stops compressed downloads whose actual bytes exceed the limit without content-length", async () => {
+      const cancel = vi.fn();
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new Uint8Array(5 * 1024 * 1024));
+              c.enqueue(new Uint8Array(1));
+            },
+            cancel,
+          }),
+        ),
+      );
+      await expect((registry as Any).downloadClawHubFiles("large", "1")).rejects.toThrow(
+        "5242880-byte limit",
+      );
+      expect(cancel).toHaveBeenCalledOnce();
+    });
+
     it("installs a skill from a raw JSON URL", async () => {
       const mockSkillData = createMockSkill({ id: "remote-json" });
 
@@ -651,6 +737,23 @@ describe("SkillRegistry", () => {
       expect(mockFiles.has(managedPath("imported-bundle/SKILL.md"))).toBe(true);
     });
 
+    it.each(["SKILL.md", "metadata.json", "support", "skills", "manifest.json"])(
+      "rejects Git symlink %s before reading or copying imported data",
+      async (linkPath) => {
+        mockGitLinkPath = linkPath;
+        const fs = await import("fs");
+        const read = vi.mocked(fs.readFileSync);
+        const copy = vi.mocked(fs.copyFileSync);
+        read.mockClear();
+        copy.mockClear();
+        const result = await registry.installFromGit("https://github.com/example/skill-repo");
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("symbolic links");
+        expect(read.mock.calls.some(([file]) => String(file).includes(linkPath))).toBe(false);
+        expect(copy).not.toHaveBeenCalled();
+      },
+    );
+
     it("installs a skill bundle from a git repository", async () => {
       const result = await registry.installFromGit("https://github.com/example/skill-repo");
 
@@ -658,6 +761,41 @@ describe("SkillRegistry", () => {
       expect(result.skill?.id).toBe("git-imported-skill");
       expect(mockFiles.has(managedPath("git-imported-skill.json"))).toBe(true);
       expect(mockFiles.has(managedPath("git-imported-skill/SKILL.md"))).toBe(true);
+    });
+
+    it("rejects real external file and directory symlinks in a Git checkout", async () => {
+      const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
+      const os = await import("node:os");
+      const path = await import("node:path");
+      const fs = await import("fs");
+      const dir = actualFs.mkdtempSync(path.join(os.tmpdir(), "cowork-git-source-"));
+      const outside = actualFs.mkdtempSync(path.join(os.tmpdir(), "cowork-git-outside-"));
+      const originalLstat = vi.mocked(fs.lstatSync).getMockImplementation()!;
+      const originalReaddir = vi.mocked(fs.readdirSync).getMockImplementation()!;
+      try {
+        actualFs.writeFileSync(path.join(outside, "secret.txt"), "outside data");
+        vi.mocked(fs.lstatSync).mockImplementation(actualFs.lstatSync);
+        vi.mocked(fs.readdirSync).mockImplementation(actualFs.readdirSync);
+        for (const name of ["support", "skills", "SKILL.md", "metadata.json", "manifest.json"]) {
+          const link = path.join(dir, name);
+          actualFs.symlinkSync(
+            name.endsWith(".json") || name.endsWith(".md")
+              ? path.join(outside, "secret.txt")
+              : outside,
+            link,
+          );
+          expect(() => (registry as Any).rejectGitImportSymlinks(dir)).toThrow("symbolic links");
+          actualFs.unlinkSync(link);
+        }
+        actualFs.mkdirSync(path.join(dir, "skills"));
+        actualFs.writeFileSync(path.join(dir, "skills", "SKILL.md"), "normal bundle");
+        expect(() => (registry as Any).rejectGitImportSymlinks(dir)).not.toThrow();
+      } finally {
+        vi.mocked(fs.lstatSync).mockImplementation(originalLstat);
+        vi.mocked(fs.readdirSync).mockImplementation(originalReaddir);
+        actualFs.rmSync(dir, { recursive: true, force: true });
+        actualFs.rmSync(outside, { recursive: true, force: true });
+      }
     });
 
     it("rejects SSH-style git URLs before cloning because they cannot be network-policy checked", async () => {

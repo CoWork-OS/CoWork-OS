@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { WorkspaceRepository } from "../database/repository-facades";
 import { CuratedMemoryRepository } from "../database/repository-facades";
 import fs from "fs/promises";
@@ -455,7 +456,7 @@ export class CuratedMemoryService {
           limit: 200,
         });
 
-        await fs.mkdir(root, { recursive: true });
+        await ensureWorkspaceDirectory(workspace.path, root);
         await Promise.all([
           this.syncFile({
             filePath: userPath,

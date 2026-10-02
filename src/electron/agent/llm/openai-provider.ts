@@ -53,6 +53,7 @@ const OPENAI_CODEX_API = "openai-codex-responses";
 const OPENAI_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
   "gpt-6-astra",
+  "gpt-6.1-sol",
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-5.6-sol",
@@ -246,7 +247,7 @@ export class OpenAIProvider implements LLMProvider {
       `Model ${normalizedId} not found in pi-ai registry; using OpenAI Codex model compatibility shim.`,
     );
     const contextWindow =
-      normalizedId.startsWith("gpt-6-") || normalizedId === "gpt-5.4"
+      /^gpt-6(?:\.\d+)?-/.test(normalizedId) || normalizedId === "gpt-5.4"
         ? 1_050_000
         : normalizedId === "gpt-5.5"
           ? 400_000
@@ -338,13 +339,19 @@ export class OpenAIProvider implements LLMProvider {
     const normalizedModelId = this.normalizeCodexModelId(modelId || this.model).toLowerCase();
     return (
       this.forceResponsesApi ||
-      normalizedModelId.startsWith("gpt-6-") ||
+      /^gpt-6(?:\.\d+)?-/.test(normalizedModelId) ||
       normalizedModelId.startsWith("gpt-5")
     );
   }
 
   private getOpenAIReasoningEffort(request: LLMRequest): OpenAIReasoningEffort | undefined {
     const configured = request.reasoningEffort || this.openaiReasoningEffort || "medium";
+    if (
+      this.normalizeCodexModelId(request.model || this.model).toLowerCase() === "gpt-6.1-sol" &&
+      configured === "none"
+    ) {
+      return "low";
+    }
     // The public API exposes Astra's highest setting as `max`; `ultra` is
     // reserved for the ChatGPT subscription compatibility backend.
     return this.authMethod === "api_key" && configured === "ultra" ? "max" : configured;
@@ -919,6 +926,7 @@ export class OpenAIProvider implements LLMProvider {
           }))
           .sort((a, b) => {
             const priority = (id: string) => {
+              if (id === "gpt-6.1-sol") return -4;
               if (id === "gpt-6-astra") return -3;
               if (id === "gpt-6-sol") return -2;
               if (id === "gpt-6-luna") return -1;
@@ -948,6 +956,11 @@ export class OpenAIProvider implements LLMProvider {
         name: "GPT-6 Astra",
         description: "Flagship model for complex reasoning and coding",
       },
+      {
+        id: "gpt-6.1-sol",
+        name: "GPT-6.1 Sol",
+        description: "Complex coding and professional work",
+      },
       { id: "gpt-6-sol", name: "GPT-6 Sol", description: "Complex coding and agentic workflows" },
       { id: "gpt-6-luna", name: "GPT-6 Luna", description: "Efficient focused tasks" },
       { id: "gpt-4o", name: "GPT-4o", description: "Most capable model for complex tasks" },
@@ -965,6 +978,11 @@ export class OpenAIProvider implements LLMProvider {
         id: "gpt-6-astra",
         name: "GPT-6 Astra",
         description: "GPT-6 Astra for ChatGPT subscription access",
+      },
+      {
+        id: "gpt-6.1-sol",
+        name: "GPT-6.1 Sol",
+        description: "GPT-6.1 Sol for ChatGPT subscription access",
       },
       {
         id: "gpt-6-sol",
@@ -1047,6 +1065,7 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId === "o3-mini") return "o3 Mini";
     // ChatGPT internal models
     if (modelId === "gpt-6-astra") return "GPT-6 Astra";
+    if (modelId === "gpt-6.1-sol") return "GPT-6.1 Sol";
     if (modelId === "gpt-6-sol") return "GPT-6 Sol";
     if (modelId === "gpt-6-luna") return "GPT-6 Luna";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol";
@@ -1078,6 +1097,7 @@ export class OpenAIProvider implements LLMProvider {
     if (modelId.includes("o3")) return "Next generation reasoning";
     // ChatGPT internal models
     if (modelId === "gpt-6-astra") return "GPT-6 Astra for ChatGPT subscription access";
+    if (modelId === "gpt-6.1-sol") return "Complex coding and professional work";
     if (modelId === "gpt-6-sol") return "GPT-6 Sol for ChatGPT subscription access";
     if (modelId === "gpt-6-luna") return "GPT-6 Luna for ChatGPT subscription access";
     if (modelId === "gpt-5.6-sol") return "GPT-5.6 Sol for ChatGPT subscription access";

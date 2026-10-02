@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { WORKSPACE_KIT_CONTRACTS } from "./kit-contracts";
@@ -488,7 +489,7 @@ export const writeTemplate = async (
   pathGuard?.(absPath, "write");
   const dir = path.dirname(absPath);
   pathGuard?.(dir, "write");
-  await fs.mkdir(dir, { recursive: true });
+  await ensureWorkspaceDirectory(workspacePath, dir);
 
   if (mode === "missing") {
     try {
@@ -514,7 +515,7 @@ export const ensureDir = async (
 ) => {
   const absPath = path.join(workspacePath, relPath);
   pathGuard?.(absPath, "write");
-  await fs.mkdir(absPath, { recursive: true });
+  await ensureWorkspaceDirectory(workspacePath, absPath);
 };
 
 export const ensureDefaultKitCronJobs = async (

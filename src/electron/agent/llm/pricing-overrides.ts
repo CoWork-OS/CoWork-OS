@@ -12,6 +12,21 @@ import type { ModelPricing } from "./pricing";
  * dated id such as "claude-3-5-sonnet-20241022" resolves to "claude-3-5-sonnet".
  */
 export const PRICING_OVERRIDES: Record<string, ModelPricing> = {
+  // New model absent from the bundled snapshot; official standard rates:
+  // https://developers.openai.com/api/docs/pricing
+  "gpt-6.1-sol": {
+    inputPer1M: 2,
+    outputPer1M: 10,
+    cachedInputPer1M: 0.1,
+    cacheWritePer1M: 2.5,
+    longContext: {
+      thresholdTokens: 272_000,
+      inputPer1M: 4,
+      outputPer1M: 15,
+      cachedInputPer1M: 0.2,
+      cacheWritePer1M: 5,
+    },
+  },
   // Retired Anthropic models (list prices at retirement).
   "claude-sonnet-4": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
   "claude-3-5-sonnet": { inputPer1M: 3.0, outputPer1M: 15.0, cachedInputPer1M: 0.3 },
@@ -38,9 +53,10 @@ export const PRICING_OVERRIDES: Record<string, ModelPricing> = {
 
 /** Overrides that intentionally shadow a catalogue price, with the reason. */
 export const INTENTIONAL_OVERRIDES: Record<string, string> = {
+  "gpt-6.1-sol": "official launch pricing until the bundled catalogue includes this model",
   "gemini-2.5-flash-image": "billed per image by calculateImageCost()",
   "gemini-3-pro-image-preview": "billed per image by calculateImageCost()",
 };
 
 /** Providers that run on the user's machine and never bill per token. */
-export const LOCAL_PROVIDER_TYPES = new Set(["ollama", "mlx", "atomic-chat"]);
+export const LOCAL_PROVIDER_TYPES = new Set(["ollama", "mlx", "omlx", "atomic-chat"]);

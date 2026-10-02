@@ -39,6 +39,50 @@ const mockWorkspace: Workspace = {
 };
 
 describe("GrepTools", () => {
+  it.each(["content", "files_only", "count"] as const)(
+    "terminates catastrophic regex in %s mode while the parent remains responsive",
+    async (outputMode) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-deadline-"));
+      try {
+        fs.writeFileSync(path.join(dir, "sample.txt"), "a".repeat(80) + "!");
+        const tool = new GrepTools(
+          { ...mockWorkspace, path: dir },
+          mockDaemon as Any,
+          "test-task-id",
+        );
+        let ticks = 0;
+        const timer = setInterval(() => ticks++, 20);
+        try {
+          const result = await tool.grep({ pattern: "(a+)+$", outputMode });
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("deadline");
+          expect(ticks).toBeGreaterThan(3);
+        } finally {
+          clearInterval(timer);
+        }
+        fs.writeFileSync(path.join(dir, "sample.txt"), "one\nAlpha alpha\nthree");
+        const control = await tool.grep({
+          pattern: "alpha",
+          ignoreCase: true,
+          outputMode,
+          contextLines: 1,
+        });
+        expect(control.success).toBe(true);
+        expect(control.totalMatches).toBe(outputMode === "count" ? 2 : 1);
+        if (outputMode === "content")
+          expect(control.matches[0]).toMatchObject({
+            line: 2,
+            context: { before: ["one"], after: ["three"] },
+          });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+  it("bounds combinatorial glob expansion", async () => {
+    const tool = new GrepTools(mockWorkspace, mockDaemon as Any, "test-task-id");
+    expect(() => (tool as Any).globToRegex("{a,b}".repeat(20))).toThrow("expansion limit");
+  });
   let grepTools: GrepTools;
 
   beforeEach(() => {

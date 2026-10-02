@@ -2,11 +2,22 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
-import { assertResolvedHostAllowed } from "../../security/address-classes";
+import { pinnedFetch } from "../../security/pinned-fetch";
+import { readBoundedResponse } from "../../security/bounded-response";
+
 import { ProtectedCredentialService } from "../../security/protected-credential-service";
+
+const MAX_HTTP_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const MAX_PROTECTED_CREDENTIAL_PREFIX_LENGTH = 256;
+
+const PUBLIC_REQUEST_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+};
 
 function redactSecret(value: string, secret?: string): string {
   if (!secret) return value;
@@ -69,12 +80,7 @@ export class WebFetchTools {
         throw new Error("Only HTTP and HTTPS URLs are supported");
       }
       this.ensureNetworkAllowed(parsedUrl.toString(), toolName);
-      // evaluateNetworkPolicy can only inspect the literal host. Resolve the
-      // name too, so `evil.test` pointing at 169.254.169.254 or a private
-      // range is refused rather than fetched from the user's host.
-      await assertResolvedHostAllowed(parsedUrl.hostname);
-
-      const response = await fetch(currentUrl, {
+      const response = await pinnedFetch(currentUrl, {
         ...currentInit,
         redirect: "manual",
       });
@@ -88,15 +94,25 @@ export class WebFetchTools {
         return response;
       }
 
+      await response.body?.cancel();
       const nextUrl = new URL(location, parsedUrl);
       if (!["http:", "https:"].includes(nextUrl.protocol)) {
         throw new Error("Only HTTP and HTTPS redirect URLs are supported");
       }
       this.ensureNetworkAllowed(nextUrl.toString(), toolName);
-      await assertResolvedHostAllowed(nextUrl.hostname);
+      currentInit = this.buildRedirectInit(currentInit, response.status);
+
+      // Any caller header can carry a credential. Restore public defaults when
+      // the destination origin changes (including HTTPS downgrades).
+      if (nextUrl.origin !== parsedUrl.origin) {
+        // A preserved POST body may contain the same secret as its headers.
+        if (currentInit.body != null) {
+          throw new Error("Cross-origin redirects with a request body are not allowed");
+        }
+        currentInit = { ...currentInit, headers: { ...PUBLIC_REQUEST_HEADERS } };
+      }
 
       currentUrl = nextUrl.toString();
-      currentInit = this.buildRedirectInit(currentInit, response.status);
     }
 
     throw new Error("Too many redirects");
@@ -314,6 +330,7 @@ export class WebFetchTools {
       credentialPrefix,
     } = input;
     let credentialSecret: string | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `Fetching: ${url}`,
@@ -333,16 +350,13 @@ export class WebFetchTools {
       );
       if (credential.used) credentialSecret = credential.secret;
       const requestHeaders: Record<string, string> = {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
+        ...PUBLIC_REQUEST_HEADERS,
       };
       this.applyProtectedCredentialHeader(requestHeaders, credential);
 
       // Fetch with timeout
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      deadline = setTimeout(() => controller.abort(), 30000);
 
       const response = await this.fetchWithPolicyCheckedRedirects(
         url,
@@ -354,9 +368,8 @@ export class WebFetchTools {
         !credential.used,
       );
 
-      clearTimeout(timeout);
-
       if (!response.ok) {
+        await response.body?.cancel();
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
@@ -366,7 +379,15 @@ export class WebFetchTools {
 
       if (contentType.includes("application/json")) {
         // JSON response - format nicely, with fallback to raw text
-        const rawText = await response.text();
+        const rawText = Buffer.from(
+          await readBoundedResponse(
+            response,
+            MAX_HTTP_RESPONSE_BYTES,
+            "HTTP response",
+            controller.signal,
+            { truncate: true },
+          ),
+        ).toString("utf8");
         try {
           const json = JSON.parse(rawText);
           content = JSON.stringify(json, null, 2);
@@ -377,11 +398,27 @@ export class WebFetchTools {
         title = "JSON Response";
       } else if (contentType.includes("text/plain")) {
         // Plain text
-        content = await response.text();
+        content = Buffer.from(
+          await readBoundedResponse(
+            response,
+            MAX_HTTP_RESPONSE_BYTES,
+            "HTTP response",
+            controller.signal,
+            { truncate: true },
+          ),
+        ).toString("utf8");
         title = "Plain Text";
       } else {
         // HTML - convert to markdown
-        const html = await response.text();
+        const html = Buffer.from(
+          await readBoundedResponse(
+            response,
+            MAX_HTTP_RESPONSE_BYTES,
+            "HTTP response",
+            controller.signal,
+            { truncate: true },
+          ),
+        ).toString("utf8");
         const result = this.htmlToMarkdown(html, selector, includeLinks);
         content = result.content;
         title = result.title;
@@ -429,6 +466,8 @@ export class WebFetchTools {
         contentLength: 0,
         error: errorMessage,
       };
+    } finally {
+      if (deadline !== undefined) clearTimeout(deadline);
     }
   }
 
@@ -469,6 +508,7 @@ export class WebFetchTools {
       credentialPrefix,
     } = input;
     let credentialSecret: string | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
 
     this.daemon.logEvent(this.taskId, "log", {
       message: `HTTP ${method}: ${url}`,
@@ -492,14 +532,14 @@ export class WebFetchTools {
 
       // Setup abort controller for timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      deadline = setTimeout(
+        () => controller.abort(),
+        Math.min(Math.max(Number(timeout) || 30000, 1), 120000),
+      );
 
       // Default headers
       const requestHeaders: Record<string, string> = {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
+        ...PUBLIC_REQUEST_HEADERS,
         ...headers,
       };
       this.applyProtectedCredentialHeader(requestHeaders, credential);
@@ -517,8 +557,6 @@ export class WebFetchTools {
         followRedirects && !credential.used,
       );
 
-      clearTimeout(timeoutId);
-
       // Extract response headers
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
@@ -533,7 +571,14 @@ export class WebFetchTools {
         responseBody = ""; // HEAD requests don't have a body
       } else if (contentType.includes("application/json")) {
         // Try to parse as JSON, fallback to raw text if parsing fails
-        const rawText = await response.text();
+        const rawText = Buffer.from(
+          await readBoundedResponse(
+            response,
+            MAX_HTTP_RESPONSE_BYTES,
+            "HTTP response",
+            controller.signal,
+          ),
+        ).toString("utf8");
         try {
           const json = JSON.parse(rawText);
           responseBody = JSON.stringify(json, null, 2);
@@ -542,7 +587,14 @@ export class WebFetchTools {
           responseBody = rawText;
         }
       } else {
-        responseBody = await response.text();
+        responseBody = Buffer.from(
+          await readBoundedResponse(
+            response,
+            MAX_HTTP_RESPONSE_BYTES,
+            "HTTP response",
+            controller.signal,
+          ),
+        ).toString("utf8");
       }
 
       // Truncate if needed
@@ -594,6 +646,8 @@ export class WebFetchTools {
         contentLength: 0,
         error: errorMessage,
       };
+    } finally {
+      if (deadline !== undefined) clearTimeout(deadline);
     }
   }
 

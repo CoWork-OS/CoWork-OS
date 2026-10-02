@@ -1,3 +1,4 @@
+import { readBoundedResponse } from "../security/bounded-response";
 /**
  * Skill Registry Service
  *
@@ -197,6 +198,55 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+// JSZip's incremental API is public at runtime but absent from its bundled typings.
+interface ZipEntryStream {
+  on(event: "data", listener: (chunk: Uint8Array) => void): ZipEntryStream;
+  on(event: "error", listener: (error: Error) => void): ZipEntryStream;
+  on(event: "end", listener: () => void): ZipEntryStream;
+  pause(): ZipEntryStream;
+  resume(): ZipEntryStream;
+}
+async function readZipEntryWithLimit(
+  entry: JSZip.JSZipObject,
+  limit: number,
+  context: string,
+): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const stream = (
+      entry as JSZip.JSZipObject & { internalStream(type: "uint8array"): ZipEntryStream }
+    ).internalStream("uint8array");
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let settled = false;
+    stream
+      .on("data", (chunk) => {
+        if (settled) return;
+        total += chunk.length;
+        if (total > limit) {
+          settled = true;
+          stream.pause();
+          chunks.length = 0;
+          reject(new Error(`${context} exceeds the ${limit}-byte limit`));
+          return;
+        }
+        chunks.push(chunk);
+      })
+      .on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        stream.pause();
+        chunks.length = 0;
+        reject(error);
+      })
+      .on("end", () => {
+        if (settled) return;
+        settled = true;
+        resolve(Buffer.concat(chunks, total));
+      })
+      .resume();
+  });
+}
+
 function getResponseContentLength(response: Response): number | undefined {
   const headerValue = response.headers?.get?.("content-length");
   if (!headerValue) return undefined;
@@ -211,14 +261,11 @@ async function readResponseBytesWithLimit(
 ): Promise<Uint8Array> {
   const contentLength = getResponseContentLength(response);
   if (contentLength !== undefined && contentLength > maxBytes) {
+    await response.body?.cancel();
     throw new Error(`${context} exceeds the ${maxBytes}-byte import limit`);
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > maxBytes) {
-    throw new Error(`${context} exceeds the ${maxBytes}-byte import limit`);
-  }
-  return bytes;
+  return readBoundedResponse(response, maxBytes, context);
 }
 
 async function readResponseTextWithLimit(
@@ -726,6 +773,9 @@ export class SkillRegistry {
   }
 
   private validateImportBundleDir(rootDir: string): void {
+    if (fs.lstatSync(rootDir).isSymbolicLink()) {
+      throw new Error("Imported skill bundle root must not be a symbolic link");
+    }
     let fileCount = 0;
     let totalBytes = 0;
 
@@ -1173,18 +1223,12 @@ export class SkillRegistry {
       ) {
         continue;
       }
-      const contentBytes = await entry.async("uint8array");
-      if (contentBytes.byteLength > MAX_IMPORTED_SKILL_FILE_BYTES) {
-        throw new Error(
-          `ClawHub bundle file "${normalizedName}" exceeds the ${MAX_IMPORTED_SKILL_FILE_BYTES}-byte limit`,
-        );
-      }
-      totalBytes += contentBytes.byteLength;
-      if (totalBytes > MAX_IMPORTED_SKILL_TOTAL_BYTES) {
-        throw new Error(
-          `ClawHub bundle ${slug}@${version} exceeds the ${MAX_IMPORTED_SKILL_TOTAL_BYTES}-byte limit`,
-        );
-      }
+      const contentBytes = await readZipEntryWithLimit(
+        entry,
+        Math.min(MAX_IMPORTED_SKILL_FILE_BYTES, MAX_IMPORTED_SKILL_TOTAL_BYTES - totalBytes),
+        `ClawHub bundle file "${normalizedName}"`,
+      );
+      totalBytes += contentBytes.length;
       files[normalizedName] = Buffer.from(contentBytes).toString("utf8");
     }
     return files;
@@ -1666,6 +1710,9 @@ export class SkillRegistry {
         { timeout: GIT_CLONE_TIMEOUT_MS },
       );
 
+      // Validate before discovery reads manifests or follows a support directory.
+      this.rejectGitImportSymlinks(tempDir);
+
       const bundleRoot = this.detectSkillBundleRoot(tempDir);
       if (bundleRoot) {
         const skill = this.importSkillBundle(bundleRoot, parsed.url);
@@ -1702,6 +1749,21 @@ export class SkillRegistry {
       };
     } finally {
       this.removeTempDir(tempDir);
+    }
+  }
+
+  private rejectGitImportSymlinks(rootDir: string): void {
+    if (fs.lstatSync(rootDir).isSymbolicLink()) {
+      throw new Error("Git skill import must not contain symbolic links");
+    }
+    for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      const entryPath = path.join(rootDir, entry.name);
+      const stat = fs.lstatSync(entryPath);
+      if (stat.isSymbolicLink()) {
+        throw new Error("Git skill import must not contain symbolic links");
+      }
+      if (stat.isDirectory()) this.rejectGitImportSymlinks(entryPath);
     }
   }
 

@@ -1,3 +1,4 @@
+import { CanvasManager } from "../canvas/canvas-manager";
 import {
   AnnotationRepository,
   ApprovalRepository,
@@ -823,6 +824,9 @@ export class AgentDaemon extends EventEmitter {
     this.orchestrationGraphStore = new OrchestrationGraphStore(db);
     this.eventRepo = new TaskEventRepository(db);
     this.workspaceRepo = new WorkspaceStore(db);
+    CanvasManager.getInstance().setWorkspaceResolver((taskId) =>
+      this.getEffectiveWorkspaceForTask(taskId),
+    );
     this.approvalRepo = new ApprovalRepository(db);
     this.approvalStore = new ApprovalStore(db);
     this.workspacePermissionRuleRepo = new WorkspacePermissionRuleRepository(db);

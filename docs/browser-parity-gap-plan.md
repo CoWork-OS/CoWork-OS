@@ -1,6 +1,10 @@
 # Browser parity gaps and delivery plan
 
-Updated 30 September 2026. This is the consolidated execution backlog for the existing W0–W9 plan. It does not replace or narrow that plan.
+Updated 1 October 2026. This is the consolidated execution backlog for the existing W0–W9 plan. It does not replace or narrow that plan.
+
+## Desktop isolation gate
+
+Browser work must not change native desktop behavior or presentation merely to make the opt-in preview work. A shared composer notice escaped that boundary after merge. The local correction and additional desktop behavior restoration are recorded in [desktop isolation follow-up](qa/browser-desktop-isolation-2026-10-01.md). The original readiness pass did not establish whole-PR desktop neutrality. Native compatibility remains open until shared runtime changes and installed artifacts have independent regression evidence, including desktop runs with browser hosting both disabled and enabled.
 
 ## Current evidence
 
@@ -10,7 +14,7 @@ The checked-in API inventory reports 799 directly referenced renderer bridge nam
 
 Awareness config/belief adapters and persist-before-publication changes are implemented. Eight focused tests passed. The corrected expanded host/UI acceptance passed on 30 September: config readback, deletion denial, Private Mode save/restore, Confirm and authorized Forget. Device collectors, real-task prompt use, restart and load acceptance remain open.
 
-Port 18789 was verified to belong to the installed `/Applications/CoWork OS.app`; it returned HTTP 404 for `/app/` and its manifest. The current isolated branch now serves the shared UI at 18989 using the existing separate Browser QA profile. See [runtime/control audit](qa/browser-control-audit-2026-09-30.md). This closes build identification, not the entire control audit.
+Port 18789 was verified to belong to the installed `/Applications/CoWork OS.app`; it returned HTTP 404 for `/app/` and its manifest. That audit used an isolated preview branch at 18989 with the separate Browser QA profile. After PR #272 merged, local main was rebuilt and used for both the source desktop and QA browser host; installed bundles were not replaced. See [runtime/control audit](qa/browser-control-audit-2026-09-30.md). This closes build identification, not the entire control audit.
 
 ## Point 2 and 3 checkpoint
 
@@ -22,7 +26,7 @@ Point 3's portable settings, MCP lifecycle/registry review, Skill Store imports/
 
 The real MCP fixture call exposed two defects now fixed: built-in tools displaced an explicitly requested integration tool, and a reporting-only reference incorrectly required another call. The latest real-provider browser task displayed External service → Allow once, called `mcp_qa_echo` exactly once, returned `qa_echo:browser-tool-connected`, and completed its reporting step with zero extra tool calls. The fixture was disconnected and disabled afterward. Focused manager tests verify disconnected calls are denied.
 
-The bounded PR readiness pass is complete. See [PR readiness evidence](qa/browser-pr-readiness-2026-09-30.md). Points 2 and 3 have source-checkout acceptance for the workflows above; full release acceptance remains open for structured-input recovery, real multi-tab network interruption, the provider/browser matrix, and installed artifacts. Points 4–10 remain deferred. This branch is an opt-in preview, not a completed parity release.
+The bounded pre-merge PR readiness pass completed; its desktop coverage was limited and the subsequent UI regression required a local isolation correction. See [PR readiness evidence](qa/browser-pr-readiness-2026-09-30.md). Points 2 and 3 have source-checkout acceptance for the workflows above; full release acceptance remains open for structured-input recovery, real multi-tab network interruption, the provider/browser matrix, and installed artifacts. Points 4–10 remain deferred. This branch is an opt-in preview, not a completed parity release.
 
 ## Gaps, repairs, and exit tests
 

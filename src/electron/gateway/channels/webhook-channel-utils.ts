@@ -22,6 +22,7 @@ export function readLimitedBody(
       total += chunk.length;
       if (total > limitBytes) {
         rejected = true;
+        chunks.length = 0;
         reject(new WebhookBodyTooLargeError(limitBytes));
         req.resume();
         return;
@@ -30,6 +31,13 @@ export function readLimitedBody(
     });
     req.on("end", () => {
       if (!rejected) resolve(Buffer.concat(chunks));
+    });
+    req.on("aborted", () => {
+      if (!rejected) {
+        rejected = true;
+        chunks.length = 0;
+        reject(new Error("Webhook body interrupted"));
+      }
     });
     req.on("error", (error) => {
       if (!rejected) reject(error);

@@ -606,6 +606,9 @@ async function ensureCoreBotTeams(): Promise<void> {
 }
 
 app.on("web-contents-created", (_event, contents) => {
+  contents.on("did-attach-webview", (_event, guest) => {
+    CanvasManager.getInstance().attachWebviewNetworkGuards(guest);
+  });
   contents.on("will-attach-webview", (event, webPreferences, params) => {
     delete (webPreferences as Record<string, unknown>).preload;
     delete (webPreferences as Record<string, unknown>).preloadURL;
@@ -622,6 +625,12 @@ app.on("web-contents-created", (_event, contents) => {
     }
 
     const targetUrl = typeof params?.src === "string" ? params.src : "";
+    try {
+      CanvasManager.getInstance().prepareWebview(webPreferences, params);
+    } catch {
+      event.preventDefault();
+      return;
+    }
     const browserWorkbenchService = getBrowserWorkbenchService();
     if (
       !isAllowedWebviewUrl(targetUrl) &&
@@ -2493,6 +2502,8 @@ if (isMacSafeStorageMigrationWorker) {
             if (phase === "run" && managedWorkspace) {
               let runDirectory: ReturnType<typeof createScheduledRunDirectory> | null = null;
               try {
+                // Managed scheduled workspaces are app-owned, so restore a removed root.
+                await fs.mkdir(workspace.path, { recursive: true });
                 runDirectory = createScheduledRunDirectory(workspace.path, {
                   nowMs,
                 });

@@ -2,6 +2,10 @@
 
 This checkpoint covers the bounded readiness pass on `cowork-os/web-preview`. Browser access remains opt-in. It does not close the full browser parity backlog.
 
+## Subsequent desktop regression
+
+After merge, the approval explanation also appeared in the native desktop composer. It was not browser-gated. The earlier native runtime file task and web-disabled HTTP check did not detect this UI regression and must not be interpreted as proof that desktop was unchanged. The local correction and remaining native compatibility work are tracked in the [1 October follow-up](browser-desktop-isolation-2026-10-01.md). The results below remain the historical pre-merge checkpoint.
+
 ## Fixed and observed
 
 - Explicit permitted integration tools survive the built-in tool selection cap. A report-only backticked tool reference no longer requires another invocation; imperative tool steps still require evidence.

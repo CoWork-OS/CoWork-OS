@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
 import * as http from "http";
+import { readLimitedBody, WebhookBodyTooLargeError } from "./webhook-channel-utils";
 import {
   ChannelAdapter,
   ChannelInfo,
@@ -30,17 +31,6 @@ interface WeComSendResponse {
 
 function createError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
-}
-
-function readRequestBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
-  });
 }
 
 function resolveRequestUrl(req: http.IncomingMessage): URL {
@@ -279,7 +269,7 @@ export class WeComAdapter implements ChannelAdapter {
             return;
           }
 
-          const rawBody = await readRequestBody(req);
+          const rawBody = (await readLimitedBody(req)).toString("utf8");
           const xml = this.parseIncomingXml(url, rawBody);
           await this.handleIncomingXml(xml);
           res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
@@ -287,7 +277,9 @@ export class WeComAdapter implements ChannelAdapter {
         } catch (error) {
           const err = createError(error);
           this.handleError(err, "webhook");
-          res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+          res.writeHead(error instanceof WebhookBodyTooLargeError ? 413 : 400, {
+            "Content-Type": "text/plain; charset=utf-8",
+          });
           res.end(err.message);
         }
       });

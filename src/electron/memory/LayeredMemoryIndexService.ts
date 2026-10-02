@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import fs from "fs/promises";
 import path from "path";
 import { DailyLogService } from "./DailyLogService";
@@ -128,9 +129,9 @@ export class LayeredMemoryIndexService {
       return false;
     }
     await Promise.all([
-      fs.mkdir(memoryRoot(workspacePath), { recursive: true }),
-      fs.mkdir(topicsDir(workspacePath), { recursive: true }),
-      fs.mkdir(locksDir(workspacePath), { recursive: true }),
+      ensureWorkspaceDirectory(workspacePath, memoryRoot(workspacePath)),
+      ensureWorkspaceDirectory(workspacePath, topicsDir(workspacePath)),
+      ensureWorkspaceDirectory(workspacePath, locksDir(workspacePath)),
     ]);
     return true;
   }

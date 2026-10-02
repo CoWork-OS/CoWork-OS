@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 /**
  * DailyLogSummarizer — Produces ranked MemoryFragments from daily log summaries.
  *
@@ -62,7 +63,7 @@ export class DailyLogSummarizer {
     ) {
       return;
     }
-    await fs.mkdir(dir, { recursive: true });
+    await ensureWorkspaceDirectory(workspacePath, dir);
     const absPath = this.resolveSummaryPath(workspacePath, dayIso);
     const header = `---\nupdated: ${new Date().toISOString().slice(0, 10)}\nsource: daily_log_synthesizer\nday: ${dayIso}\n---\n\n`;
     await fs.writeFile(absPath, header + summaryContent.trim() + "\n", "utf8");

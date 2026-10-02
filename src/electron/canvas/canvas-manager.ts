@@ -29,8 +29,18 @@ import type {
 import { IPC_CHANNELS } from "../../shared/types";
 import { loadCanvasStore, saveCanvasStore } from "./canvas-store";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { pinnedFetch } from "../security/pinned-fetch";
+import { readBoundedResponse } from "../security/bounded-response";
+import type { Workspace } from "../../shared/types";
+import { registerCanvasProtocol } from "./canvas-protocol";
+import { installCanvasNetworkGuards, isCanvasRequestAllowed } from "./canvas-network-policy";
 
-function getElectronRuntime(): { BrowserWindow: Any; screen: Any; shell: Any } | null {
+function getElectronRuntime(): {
+  BrowserWindow: Any;
+  screen: Any;
+  shell: Any;
+  session: Any;
+} | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     // oxlint-disable-next-line typescript-eslint(no-require-imports)
@@ -43,13 +53,14 @@ function getElectronRuntime(): { BrowserWindow: Any; screen: Any; shell: Any } |
       BrowserWindow: electron.BrowserWindow,
       screen: electron.screen,
       shell: electron.shell,
+      session: electron.session,
     };
   } catch {
     return null;
   }
 }
 
-function requireElectronRuntime(): { BrowserWindow: Any; screen: Any; shell: Any } {
+function requireElectronRuntime(): { BrowserWindow: Any; screen: Any; shell: Any; session: Any } {
   const rt = getElectronRuntime();
   if (!rt) {
     throw new Error(
@@ -237,6 +248,136 @@ export class CanvasManager {
   /**
    * Create a new canvas session
    */
+  private networkSessionIds = new WeakMap<import("electron").Session, string>();
+  private networkGrants = new Map<string, { policy: string; origins: Set<string> }>();
+
+  private getNetworkWorkspace(sessionId: string): Workspace | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status !== "active") return undefined;
+    const workspace = this.workspaceResolver?.(session.taskId);
+    return workspace?.id === session.workspaceId ? workspace : undefined;
+  }
+
+  private getApprovedOrigins(
+    sessionId: string,
+    workspace = this.getNetworkWorkspace(sessionId),
+  ): ReadonlySet<string> {
+    const grant = this.networkGrants.get(sessionId);
+    return workspace && grant?.policy === JSON.stringify(workspace.permissions)
+      ? grant.origins
+      : new Set();
+  }
+
+  /** An approved origin's redirect target joins the on-request grant (http→https, apex→www, SSO). */
+  private extendGrantForRedirect(sessionId: string, fromUrl: string, location: string): void {
+    const workspace = this.getNetworkWorkspace(sessionId);
+    if (workspace?.permissions?.accessNetworkMode !== "on-request") return;
+    const origins = this.getApprovedOrigins(sessionId, workspace);
+    if (!(origins instanceof Set) || !origins.has(new URL(fromUrl).origin)) return;
+    const target = new URL(location, fromUrl);
+    if (["http:", "https:"].includes(target.protocol)) origins.add(target.origin);
+  }
+
+  /** Install on every Canvas partition, including interactive webviews before attachment. */
+  configureSessionNetwork(sessionId: string, electronSession: import("electron").Session): void {
+    if (!this.sessions.has(sessionId)) throw new Error("Canvas session not found");
+    if (this.networkSessionIds.has(electronSession)) return;
+    this.networkSessionIds.set(electronSession, sessionId);
+    const allowed = (url: string) => {
+      try {
+        const workspace = this.getNetworkWorkspace(sessionId);
+        return isCanvasRequestAllowed(
+          sessionId,
+          url,
+          workspace,
+          this.getApprovedOrigins(sessionId, workspace),
+        );
+      } catch {
+        return false;
+      }
+    };
+    registerCanvasProtocol(electronSession.protocol, sessionId);
+    electronSession.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) =>
+      callback({ cancel: !allowed(details.url) }),
+    );
+    // Chromium's independent DNS lookup cannot be used after validation. Route all
+    // HTTP(S) resources through the same pinned transport as the HTTP tools.
+    for (const scheme of ["http", "https"]) {
+      electronSession.protocol.handle(scheme, async (request) => {
+        if (!allowed(request.url))
+          return new Response("Canvas network access denied", { status: 403 });
+        try {
+          const body = ["GET", "HEAD"].includes(request.method)
+            ? undefined
+            : Buffer.from(
+                await readBoundedResponse(
+                  new Response(request.body),
+                  5 * 1024 * 1024,
+                  "Canvas request",
+                  request.signal,
+                ),
+              );
+          const response = await pinnedFetch(request.url, {
+            method: request.method,
+            headers: request.headers,
+            body,
+            signal: request.signal,
+          });
+          const location = response.headers.get("location");
+          if (location && [301, 302, 303, 307, 308].includes(response.status)) {
+            this.extendGrantForRedirect(sessionId, request.url, location);
+          }
+          // node-fetch has already decoded compressed bodies.
+          response.headers.delete("content-encoding");
+          response.headers.delete("content-length");
+          return response;
+        } catch {
+          return new Response("Canvas network request refused", { status: 502 });
+        }
+      });
+    }
+  }
+
+  attachWindowNetworkGuards(sessionId: string, contents: import("electron").WebContents): void {
+    installCanvasNetworkGuards(
+      sessionId,
+      contents,
+      () => this.getNetworkWorkspace(sessionId),
+      (workspace) => this.getApprovedOrigins(sessionId, workspace),
+    );
+  }
+
+  prepareWebview(
+    webPreferences: import("electron").WebPreferences,
+    params: Record<string, string>,
+  ): void {
+    const targetUrl = params.src || "";
+    const requestedPartition = String(params.partition || webPreferences.partition || "");
+    let sessionId: string | undefined;
+    if (/^canvas:/i.test(targetUrl)) sessionId = new URL(targetUrl).hostname;
+    else if (requestedPartition.startsWith("canvas-"))
+      sessionId = requestedPartition.slice("canvas-".length);
+    if (!sessionId) return;
+    const partition = `canvas-${sessionId}`;
+    this.configureSessionNetwork(
+      sessionId,
+      requireElectronRuntime().session.fromPartition(partition),
+    );
+    webPreferences.partition = partition;
+    params.partition = partition;
+  }
+
+  attachWebviewNetworkGuards(guest: import("electron").WebContents): void {
+    const sessionId = this.networkSessionIds.get(guest.session);
+    if (sessionId) this.attachWindowNetworkGuards(sessionId, guest);
+  }
+
+  private workspaceResolver?: (taskId: string) => Workspace | undefined;
+
+  setWorkspaceResolver(resolver: (taskId: string) => Workspace | undefined): void {
+    this.workspaceResolver = resolver;
+  }
+
   async createSession(
     taskId: string,
     workspaceId: string,
@@ -290,6 +431,17 @@ export class CanvasManager {
    */
   getSession(sessionId: string): CanvasSession | undefined {
     return this.sessions.get(sessionId);
+  }
+
+  /** Agent tools may only act on Canvas sessions owned by their task and workspace. */
+  static assertSessionOwner(
+    session: CanvasSession | undefined,
+    taskId: string,
+    workspaceId: string,
+  ): void {
+    if (session && (session.taskId !== taskId || session.workspaceId !== workspaceId)) {
+      throw new Error("Canvas session belongs to another task or workspace");
+    }
   }
 
   /**
@@ -387,7 +539,11 @@ export class CanvasManager {
   /**
    * Open a remote URL inside the canvas window (browser mode)
    */
-  async openUrl(sessionId: string, rawUrl: string, options?: { show?: boolean }): Promise<string> {
+  async openUrl(
+    sessionId: string,
+    rawUrl: string,
+    options?: { show?: boolean; authorizedNetwork?: boolean },
+  ): Promise<string> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       const existingSessions = Array.from(this.sessions.keys());
@@ -401,6 +557,14 @@ export class CanvasManager {
     }
 
     const normalizedUrl = this.normalizeUrl(rawUrl);
+    const workspace = this.getNetworkWorkspace(sessionId);
+    if (options?.authorizedNetwork && workspace?.permissions?.accessNetworkMode === "on-request") {
+      const policy = JSON.stringify(workspace.permissions);
+      const grant = this.networkGrants.get(sessionId);
+      const origins = grant?.policy === policy ? grant.origins : new Set<string>();
+      origins.add(new URL(normalizedUrl).origin);
+      this.networkGrants.set(sessionId, { policy, origins });
+    }
 
     session.mode = "browser";
     session.url = normalizedUrl;
@@ -479,6 +643,8 @@ export class CanvasManager {
         show: false, // Start hidden - only show when user explicitly requests
         // No parent - independent window that won't overlap main app
         webPreferences: {
+          partition: `canvas-${sessionId}`,
+          webSecurity: true,
           preload: path.join(__dirname, "canvas-preload.js"),
           contextIsolation: true,
           nodeIntegration: false,
@@ -487,6 +653,9 @@ export class CanvasManager {
         backgroundColor: "#1a1a2e",
       }) as BrowserWindow;
 
+      const contents = window.webContents;
+      this.configureSessionNetwork(sessionId, contents.session);
+      this.attachWindowNetworkGuards(sessionId, contents);
       this.windows.set(sessionId, window);
       this.windowToSession.set(window.id, sessionId);
 
@@ -642,6 +811,7 @@ export class CanvasManager {
 
     // Update session status
     session.status = "closed";
+    this.networkGrants.delete(sessionId);
 
     // Persist sessions to disk (removes closed sessions)
     await this.persistSessions();

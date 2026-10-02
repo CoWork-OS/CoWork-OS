@@ -15,6 +15,16 @@ vi.mock("electron", () => ({
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+vi.mock("../../../security/pinned-fetch", () => ({
+  pinnedFetch: async (url: string, init: RequestInit) => {
+    const response = await global.fetch(url, init);
+    if (!response.body && typeof response.text === "function") {
+      Object.assign(response, { body: new Response(await response.text()).body });
+    }
+    return response;
+  },
+}));
+
 // Import after mocking
 import { WebFetchTools } from "../web-fetch-tools";
 import { Workspace } from "../../../../shared/types";
@@ -59,6 +69,39 @@ describe("WebFetchTools", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("stops reading oversized bodies at the cap and returns truncated content", async () => {
+    const cancel = vi.fn();
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new Uint8Array(5 * 1024 * 1024));
+            c.enqueue(new Uint8Array(1));
+          },
+          cancel,
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    const result = await webFetchTools.webFetch({ url: "https://example.com", maxLength: 10 });
+    expect(result.success).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("keeps http_request deadline active through a stalled body", async () => {
+    vi.useFakeTimers();
+    try {
+      const cancel = vi.fn();
+      mockFetch.mockResolvedValueOnce(new Response(new ReadableStream({ cancel })));
+      const pending = webFetchTools.httpRequest({ url: "https://example.com", timeout: 10 });
+      await vi.advanceTimersByTimeAsync(11);
+      expect(await pending).toMatchObject({ success: false, error: "Request timed out" });
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   describe("getToolDefinitions", () => {
@@ -1096,6 +1139,74 @@ describe("WebFetchTools", () => {
     });
 
     describe("redirect handling", () => {
+      it.each([
+        "https://other.example/final",
+        "http://example.com/final",
+        "https://example.com:8443/final",
+      ])("strips arbitrary credentials on origin change to %s", async (location) => {
+        mockFetch.mockResolvedValueOnce(new Response("", { status: 302, headers: { location } }));
+        mockFetch.mockResolvedValueOnce(new Response("ok"));
+        const result = await webFetchTools.httpRequest({
+          url: "https://example.com/start",
+          headers: {
+            Authorization: "secret",
+            Cookie: "session=secret",
+            "X-Custom-Token": "secret",
+            Accept: "application/json",
+          },
+        });
+        expect(result.success).toBe(true);
+        const headers = new Headers(mockFetch.mock.calls[1][1].headers);
+        expect(headers.get("authorization")).toBeNull();
+        expect(headers.get("cookie")).toBeNull();
+        expect(headers.get("x-custom-token")).toBeNull();
+        expect(headers.get("accept")).toContain("text/html");
+      });
+      it("preserves same-origin credentials", async () => {
+        mockFetch.mockResolvedValueOnce(
+          new Response("", { status: 307, headers: { location: "/final" } }),
+        );
+        mockFetch.mockResolvedValueOnce(new Response("ok"));
+        expect(
+          (
+            await webFetchTools.httpRequest({
+              url: "https://example.com/start",
+              headers: { "X-Api-Key": "secret" },
+            })
+          ).success,
+        ).toBe(true);
+        expect(new Headers(mockFetch.mock.calls[1][1].headers).get("x-api-key")).toBe("secret");
+      });
+      it.each([301, 302, 307, 308])("blocks body export via PUT redirect %s", async (status) => {
+        mockFetch.mockResolvedValueOnce(
+          new Response("", { status, headers: { location: "https://other.example/final" } }),
+        );
+        const result = await webFetchTools.httpRequest({
+          url: "https://example.com/start",
+          method: "PUT",
+          body: "secret",
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Cross-origin");
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+      it("follows a cross-origin POST 303 without its body", async () => {
+        mockFetch.mockResolvedValueOnce(
+          new Response("", { status: 303, headers: { location: "https://other.example/final" } }),
+        );
+        mockFetch.mockResolvedValueOnce(new Response("ok"));
+        expect(
+          (
+            await webFetchTools.httpRequest({
+              url: "https://example.com/start",
+              method: "POST",
+              body: "secret",
+            })
+          ).success,
+        ).toBe(true);
+        expect(mockFetch.mock.calls[1][1].method).toBe("GET");
+        expect(mockFetch.mock.calls[1][1].body).toBeUndefined();
+      });
       it("should follow redirects by default after policy-checking each destination", async () => {
         mockFetch.mockResolvedValueOnce({
           ok: false,

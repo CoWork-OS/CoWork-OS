@@ -297,6 +297,18 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       "Run local models via hf-agents + llama.cpp. Inference stays local by default; optional remote services follow their own data policies. Setup: (1) pip install huggingface_hub  (2) hf extensions install hf-agents",
   },
   {
+    id: "omlx",
+    name: "oMLX",
+    compatibility: "openai",
+    baseUrl: "http://localhost:8000/v1",
+    defaultModel: "",
+    apiKeyLabel: "API Key (optional)",
+    apiKeyPlaceholder: "Enter your oMLX API key if authentication is enabled",
+    apiKeyOptional: true,
+    description:
+      "Connect to an already-running oMLX server on Apple Silicon. Start oMLX, refresh models, and select a chat model. CoWork does not manage the oMLX server or model downloads.",
+  },
+  {
     id: "mlx",
     name: "MLX (Apple Silicon)",
     compatibility: "openai",

@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
 import * as http from "http";
+import { readLimitedBody, WebhookBodyTooLargeError } from "./webhook-channel-utils";
 import {
   ChannelAdapter,
   ChannelInfo,
@@ -61,17 +62,6 @@ function parseMaybeJson<T>(raw: string): T | null {
 
 function createError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
-}
-
-function readRequestBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk.toString();
-    });
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
-  });
 }
 
 function resolveRequestPath(req: http.IncomingMessage): string {
@@ -282,7 +272,7 @@ export class FeishuAdapter implements ChannelAdapter {
         }
 
         try {
-          const rawBody = await readRequestBody(req);
+          const rawBody = (await readLimitedBody(req)).toString("utf8");
           const payload = this.parseAndVerifyPayload(req, rawBody);
           const payloadEvent =
             typeof payload.event === "object" && payload.event
@@ -307,7 +297,9 @@ export class FeishuAdapter implements ChannelAdapter {
         } catch (error) {
           const err = createError(error);
           this.handleError(err, "webhook");
-          res.writeHead(400, { "Content-Type": "application/json" });
+          res.writeHead(error instanceof WebhookBodyTooLargeError ? 413 : 400, {
+            "Content-Type": "application/json",
+          });
           res.end(JSON.stringify({ code: 1, msg: err.message }));
         }
       });

@@ -8,7 +8,7 @@
  * Example: canvas://abc123-def456/index.html
  */
 
-import { protocol } from "electron";
+import { protocol, type Protocol } from "electron";
 import * as path from "path";
 import * as fs from "fs";
 import { CanvasManager } from "./canvas-manager";
@@ -88,11 +88,16 @@ export function registerCanvasScheme(): void {
  * Register the canvas:// protocol handler
  * Must be called after app.ready
  */
-export function registerCanvasProtocol(): void {
-  protocol.handle("canvas", async (request) => {
+export function registerCanvasProtocol(
+  targetProtocol: Protocol = protocol,
+  allowedSessionId?: string,
+): void {
+  targetProtocol.handle("canvas", async (request) => {
     try {
       const url = new URL(request.url);
       const sessionId = url.hostname;
+      if (!allowedSessionId || sessionId !== allowedSessionId)
+        return createErrorResponse(403, "Forbidden: Different canvas session");
       let filePath = decodeURIComponent(url.pathname);
 
       // Security: prevent path traversal attacks

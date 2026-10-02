@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectorySync } from "../utils/workspace-directory";
 import * as fs from "fs";
 import * as path from "path";
 import type { PermissionRule } from "../../shared/types";
@@ -79,7 +80,7 @@ export function appendWorkspacePermissionManifestRule(
       nextRules.push(normalizedRule);
     }
     const dir = path.dirname(manifestPath);
-    fs.mkdirSync(dir, { recursive: true });
+    ensureWorkspaceDirectorySync(workspacePath, dir);
     fs.writeFileSync(
       manifestPath,
       JSON.stringify(
@@ -118,7 +119,7 @@ export function removeWorkspacePermissionManifestRule(
       return { success: true, manifestPath, removed: false };
     }
     const dir = path.dirname(manifestPath);
-    fs.mkdirSync(dir, { recursive: true });
+    ensureWorkspaceDirectorySync(workspacePath, dir);
     fs.writeFileSync(
       manifestPath,
       JSON.stringify(

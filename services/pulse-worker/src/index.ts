@@ -73,11 +73,35 @@ async function installationKey(id: string, secret: string): Promise<string> {
   return [...new Uint8Array(signed)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function readJson(request: Request): Promise<Record<string, unknown>> {
+export async function readJson(request: Request): Promise<Record<string, unknown>> {
   const length = Number(request.headers.get("content-length") || 0);
   if (length > MAX_BODY_BYTES) throw new Error("body_too_large");
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) throw new Error("body_too_large");
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (reader) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > MAX_BODY_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          throw new Error("body_too_large");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(bytes);
   const value = JSON.parse(text) as unknown;
   if (!record(value)) throw new Error("invalid_json_object");
   return value;

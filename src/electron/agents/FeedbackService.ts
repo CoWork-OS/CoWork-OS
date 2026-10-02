@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectorySync } from "../utils/workspace-directory";
 import { recentTaskEventsOfType } from "./agent-signal-reads";
 import { AgentRoleRepository } from "./agent-repository-facades";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
@@ -273,7 +274,7 @@ export class FeedbackService {
     if (pending.length > 0) {
       try {
         const dirAbs = path.join(workspace.path, FEEDBACK_DIR);
-        fs.mkdirSync(dirAbs, { recursive: true });
+        ensureWorkspaceDirectorySync(workspace.path, dirAbs);
 
         const groups = new Map<string, { absPath: string; entries: FeedbackEntry[] }>();
         for (const entry of pending) {

@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { BrowserProfileNotice } from "./BrowserProfileNotice";
 import {
   getHostCapabilityReason,
   hasHostMethod,
@@ -4855,6 +4856,7 @@ function MainContentComponent({
   const skillsMenuRef = useRef<HTMLDivElement>(null);
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
   const permissionDropdownRef = useRef<HTMLDivElement>(null);
+  const calmAccessMenuRef = useRef<HTMLDivElement>(null);
   // Overflow menu state (welcome view only - no task)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
@@ -9777,6 +9779,25 @@ function MainContentComponent({
                 )}
               </div>
 
+              <BrowserProfileNotice
+                notice={profileConstraintNotice}
+                onReview={() => {
+                  if (isCalm) {
+                    const trigger =
+                      calmAccessMenuRef.current?.querySelector<HTMLButtonElement>(
+                        ".calm-access-button",
+                      );
+                    trigger?.click();
+                    trigger?.focus();
+                    return;
+                  }
+                  setShowPermissionDropdown(true);
+                  permissionDropdownRef.current
+                    ?.querySelector<HTMLButtonElement>(".permission-access-btn")
+                    ?.focus();
+                }}
+              />
+
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
                   <button
@@ -9798,7 +9819,13 @@ function MainContentComponent({
                         selection={displayedInteractionMode}
                         onChange={setInteractionMode}
                       />
-                      <CalmAccessMenu access={calmAccess} placement="up" />
+                      {isBrowserHost ? (
+                        <div ref={calmAccessMenuRef}>
+                          <CalmAccessMenu access={calmAccess} placement="up" />
+                        </div>
+                      ) : (
+                        <CalmAccessMenu access={calmAccess} placement="up" />
+                      )}
                     </>
                   )}
                   <div className="permission-dropdown-container" ref={permissionDropdownRef}>

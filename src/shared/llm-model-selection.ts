@@ -71,6 +71,11 @@ export function getLlmModelReasoningEfforts(
       .toLowerCase()
       .replace(/^(?:openai-codex|openai)\//, "")
       .split("@", 1)[0];
+    if (normalizedModelKey === "gpt-6.1-sol") {
+      return openaiAuthMethod === "oauth"
+        ? [...GPT_6_SOL_LUNA_REASONING_EFFORTS, "ultra"]
+        : GPT_6_SOL_LUNA_REASONING_EFFORTS;
+    }
     if (normalizedModelKey === "gpt-6-astra") {
       return openaiAuthMethod === "oauth"
         ? [...GPT_5_6_REASONING_EFFORTS, "ultra"]

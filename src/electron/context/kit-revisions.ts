@@ -1,6 +1,20 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
+import { ensureWorkspaceDirectorySync } from "../utils/workspace-directory";
+
+function ensureKitDirectory(absPath: string, directory: string): void {
+  let ancestor = path.dirname(absPath);
+  while (path.dirname(ancestor) !== ancestor) {
+    if (path.basename(ancestor) === ".cowork") {
+      ensureWorkspaceDirectorySync(path.dirname(ancestor), directory);
+      return;
+    }
+    ancestor = path.dirname(ancestor);
+  }
+  // Non-kit callers must already have a parent directory, too.
+  ensureWorkspaceDirectorySync(path.dirname(absPath), directory);
+}
 
 export interface KitRevisionMeta {
   file: string;
@@ -56,11 +70,11 @@ export function writeKitFileWithSnapshot(
   // requested file itself is not writable.
   pathGuard?.(absPath, "write");
   const dir = path.dirname(absPath);
-  fs.mkdirSync(dir, { recursive: true });
+  ensureKitDirectory(absPath, dir);
 
   const snapshotRoot = getKitSnapshotRoot(absPath);
   pathGuard?.(snapshotRoot, "write");
-  fs.mkdirSync(snapshotRoot, { recursive: true });
+  ensureKitDirectory(absPath, snapshotRoot);
 
   if (existing !== null) {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");

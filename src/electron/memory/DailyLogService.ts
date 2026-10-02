@@ -1,3 +1,4 @@
+import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 /**
  * DailyLogService — Operational journaling for summary-first memory growth.
  *
@@ -35,7 +36,7 @@ export class DailyLogService {
   static async appendEntry(workspacePath: string, entry: DailyLogEntry): Promise<void> {
     const dayIso = entry.timestamp.slice(0, 10);
     const absPath = this.resolveDailyLogPath(workspacePath, dayIso);
-    await fs.mkdir(path.dirname(absPath), { recursive: true });
+    await ensureWorkspaceDirectory(workspacePath, path.dirname(absPath));
 
     const lines: string[] = [
       `## ${entry.timestamp}`,

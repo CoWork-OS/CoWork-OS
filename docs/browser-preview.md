@@ -2,6 +2,16 @@
 
 The browser application is currently an opt-in development preview. Set `COWORK_WEB_ENABLED=1` before starting a CoWork host. Its routes live on the existing Control Plane listener at `/app/` and, in desktop mode, on an enabled Web Access listener at `/app/`. The default deployment policy accepts only a loopback listener and loopback Host header. The native Control Plane protocol and existing Web Access bearer-token API retain their own authentication.
 
+## Desktop isolation and local builds
+
+The browser preview must preserve native desktop UI and behavior. Its approval explanation, unavailable-action presentation, sidebar adjustments and browser draft recovery belong only to browser clients. They must not be enabled in desktop merely because `COWORK_WEB_ENABLED=1` is set. That environment variable controls host routes; the browser renderer has a separate explicit identity.
+
+An approval explanation in the desktop composer was an unintended shared-component regression. The local correction hides it on desktop without changing approval settings. Related desktop sidebar, composer structure, draft and feedback behavior were restored. See the [isolation follow-up](qa/browser-desktop-isolation-2026-10-01.md) for the patch status, checks and remaining compatibility gate. This is not a claim that all shared runtime changes have been audited.
+
+Updating a source checkout and rebuilding it changes the app launched from that checkout. It does not replace an installed application bundle. Identify the running process, checkout, profile and build before comparing desktop and browser results; preserve existing data and credentials. The browser QA profile is separate from the normal desktop profile.
+
+## Starting the preview
+
 Build the assets with `npm run build:web`. For a disposable Node host, start `node bin/coworkd-node.js --user-data-dir <disposable-dir> --enable-control-plane` with `COWORK_WEB_ENABLED=1`. Its log reports the actual Control Plane address. From a trusted admin client, run `node bin/coworkctl.js --url <ws-url> --token <control-plane-token> call web.pair` to generate a one-use code, then visit `<http-url>/app/` and enter the code. The code expires after 90 seconds. In desktop mode, the enabled Web Access settings panel can generate a code for its own listener. Codes and browser sessions are specific to one listener, profile, and host generation.
 
 Remote exposure requires `COWORK_WEB_PUBLIC_ORIGIN` set to a canonical HTTPS origin and `COWORK_WEB_TRUSTED_PROXY_ADDRESSES` set to the exact address of the TLS-terminating proxy. Forward the original Host and `X-Forwarded-Proto: https`; route `/app/` and `/api/web/v1/` to the same host listener. Browser routes fail closed when the deployment policy does not match the listener and request. A proxy path prefix must rewrite to these host paths while preserving the same prefix on the client side.

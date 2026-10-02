@@ -11,6 +11,13 @@ export function BrowserView({ initialUrl, onBack }: BrowserViewProps) {
   const [url, setUrl] = useState(initialUrl || "");
   const [activeUrl, setActiveUrl] = useState(initialUrl || "");
   const webviewRef = useRef<Any>(null);
+  let canvasPartition: string | undefined;
+  try {
+    const target = new URL(activeUrl);
+    if (target.protocol === "canvas:") canvasPartition = `canvas-${target.hostname}`;
+  } catch {
+    /* URL validation remains in the navigation handler. */
+  }
 
   useEffect(() => {
     if (initialUrl) {
@@ -152,6 +159,8 @@ export function BrowserView({ initialUrl, onBack }: BrowserViewProps) {
       <div className="browser-surface">
         {activeUrl ? (
           <webview
+            key={canvasPartition || "browser-default"}
+            partition={canvasPartition}
             ref={webviewRef}
             src={activeUrl}
             className="browser-webview"

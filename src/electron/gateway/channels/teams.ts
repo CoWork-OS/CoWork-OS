@@ -15,6 +15,7 @@ import {
   MessageFactory,
 } from "botbuilder";
 import * as http from "http";
+import { readLimitedBody, WebhookBodyTooLargeError } from "./webhook-channel-utils";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -168,19 +169,14 @@ export class TeamsAdapter implements ChannelAdapter {
     return new Promise((resolve, reject) => {
       this.server = http.createServer(async (req, res) => {
         if (req.method === "POST" && req.url === "/api/messages") {
-          let body = "";
-          req.on("data", (chunk) => {
-            body += chunk.toString();
-          });
-          req.on("end", async () => {
-            try {
-              await this.processIncomingActivity(req, res, body);
-            } catch (error) {
-              console.error("Error processing Teams message:", error);
-              res.writeHead(500);
-              res.end("Internal Server Error");
-            }
-          });
+          try {
+            const body = (await readLimitedBody(req)).toString("utf8");
+            await this.processIncomingActivity(req, res, body);
+          } catch (error) {
+            console.error("Error processing webhook:", error);
+            res.writeHead(error instanceof WebhookBodyTooLargeError ? 413 : 500);
+            res.end("Internal Server Error");
+          }
         } else if (req.method === "GET" && req.url === "/api/health") {
           // Health check endpoint
           res.writeHead(200, { "Content-Type": "application/json" });

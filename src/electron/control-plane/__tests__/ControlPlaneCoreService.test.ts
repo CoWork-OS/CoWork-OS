@@ -199,6 +199,24 @@ describeWithSqlite("ControlPlaneCoreService", () => {
     expect(links[0]?.isPrimary).toBe(true);
   });
 
+  it("does not recreate a deleted company workspace when provisioning after restart", async () => {
+    const workspace = insertWorkspace("deleted-desktop-project");
+    const company = await service.createCompany({ name: "Deleted Folder Co" });
+    await service.updateCompany(company.id, { defaultWorkspaceId: workspace.id });
+    fs.rmSync(workspace.path, { recursive: true });
+
+    const { default: Database } = await import("better-sqlite3");
+    const { ControlPlaneStore } = await import("../control-plane-sql");
+    const restartedDb = new Database(manager.getDatabasePath());
+    try {
+      const restarted = new ControlPlaneStore(restartedDb, { provision: true });
+      expect(fs.existsSync(workspace.path)).toBe(false);
+      expect(restarted.getCompany(company.id)?.defaultWorkspaceId).toBe(workspace.id);
+    } finally {
+      restartedDb.close();
+    }
+  });
+
   it("creates companies directly with collision-safe names and a single default", async () => {
     const seededCompany = await service.getDefaultCompany();
 

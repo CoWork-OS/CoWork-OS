@@ -2533,9 +2533,12 @@ function SidebarComponent({
                   <span className="cli-task-time" aria-hidden="true">
                     {formatRelativeShort(task.updatedAt || task.createdAt)}
                   </span>
+                  {!isBrowserHost && sessionActions}
                 </span>
               )}
-              {sessionActions && <span className="cli-task-action-wrap">{sessionActions}</span>}
+              {sessionActions && (isBrowserHost || isAwaitingSession) && (
+                <span className="cli-task-action-wrap">{sessionActions}</span>
+              )}
             </div>
           )}
         </div>

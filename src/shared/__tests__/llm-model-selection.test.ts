@@ -21,6 +21,27 @@ describe("llm model selection metadata", () => {
     },
   );
 
+  it.each(["gpt-6.1-sol", "openai/gpt-6.1-sol@fast", "openai-codex/gpt-6.1-sol"])(
+    "exposes GPT-6.1 Sol reasoning capabilities for %s",
+    (model) => {
+      expect(getLlmModelReasoningEfforts("openai", model, "api_key")).toEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ]);
+      expect(getLlmModelReasoningEfforts("openai", model, "oauth")).toEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+      ]);
+    },
+  );
+
   it("keeps Ultra subscription-only for Astra", () => {
     expect(getLlmModelReasoningEfforts("openai", "gpt-6-astra", "api_key")).toEqual([
       "low",

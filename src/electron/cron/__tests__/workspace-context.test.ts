@@ -37,6 +37,8 @@ describe("cron workspace context helpers", () => {
     const workspacePath = path.join(tmpDir, "scheduled-workspaces", "daily-briefing-job-123");
     const nowMs = Date.UTC(2026, 1, 26, 10, 0, 0);
 
+    fs.mkdirSync(workspacePath, { recursive: true });
+
     const first = createScheduledRunDirectory(workspacePath, {
       nowMs,
       keepRecent: 0,

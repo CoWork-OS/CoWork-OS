@@ -980,6 +980,8 @@ export class TaskExecutor {
   private executionToolRunObserved = false;
   private executionToolAttemptObserved = false;
   private executionToolLastError = "";
+  /** A run_command call ran to an exit status (any code), e.g. a failing build. */
+  private commandRunCompletedObserved = false;
   private readonly requiresVisualQARun: boolean;
   private visualQARunObserved = false;
   private allowExecutionWithoutShell = false;
@@ -2027,6 +2029,14 @@ export class TaskExecutor {
     envelope?: Any;
     policyTrace?: Any;
   }): LLMToolResult {
+    if (
+      canonicalizeToolNameUtil(params.toolName) === "run_command" &&
+      typeof params.result?.exitCode === "number" &&
+      (params.result.terminationReason === undefined ||
+        params.result.terminationReason === "normal")
+    ) {
+      this.commandRunCompletedObserved = true;
+    }
     this.emitEvent(
       "tool_result",
       this.attachToolCorrelationMetadata(
@@ -14348,16 +14358,24 @@ ${transcript}
   private hasVerificationToolEvidence(): boolean {
     return hasVerificationToolEvidenceUtil([
       ...(Array.isArray(this.toolResultMemory) ? this.toolResultMemory : []),
-      ...this.getSuccessfulToolNames().map((tool) => ({ tool })),
+      ...this.getVerificationEvidenceToolNames().map((tool) => ({ tool })),
     ]);
   }
 
-  private getSuccessfulToolNames(): string[] {
-    return this.successfulToolUsageCounts instanceof Map
-      ? Array.from(this.successfulToolUsageCounts.entries())
-          .filter(([, count]) => count > 0)
-          .map(([tool]) => tool)
-      : [];
+  /**
+   * Successful tools, plus run_command when a command ran to a non-zero exit
+   * status: a failing build or test run is still evidence for a report of it.
+   */
+  private getVerificationEvidenceToolNames(): string[] {
+    const successfulTools =
+      this.successfulToolUsageCounts instanceof Map
+        ? Array.from(this.successfulToolUsageCounts.entries())
+            .filter(([, count]) => count > 0)
+            .map(([tool]) => tool)
+        : [];
+    return this.commandRunCompletedObserved
+      ? [...successfulTools, "run_command"]
+      : successfulTools;
   }
 
   private responseLooksOperationalOnly(text: string): boolean {
@@ -14680,7 +14698,7 @@ ${transcript}
       bestCandidate,
       planSteps: this.plan?.steps || [],
       toolResultMemory: this.toolResultMemory,
-      successfulTools: this.getSuccessfulToolNames(),
+      successfulTools: this.getVerificationEvidenceToolNames(),
     });
   }
 

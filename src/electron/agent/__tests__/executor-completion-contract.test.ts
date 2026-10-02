@@ -2100,6 +2100,63 @@ End with a final section titled "Verification Evidence".`,
     );
   });
 
+  it("counts a command that ran to a failing exit status as evidence for its report", async () => {
+    const report =
+      "`npm run build` failed with exit code 1 (type error in src/app.ts).\n\nFinal verdict: broken";
+    const createExecutor = () => {
+      const executor = createExecuteHarness({
+        title: "Build health",
+        prompt: "Run npm run build and report the exit code and the final build-health verdict.",
+        lastOutput: report,
+        planStepDescription: "Run the build",
+      });
+      (executor as Any).emitEvent = vi.fn();
+      (executor as Any).emitToolLaneFinished = vi.fn();
+      return executor;
+    };
+    const emitRunCommandResult = (executor: Any, result: Record<string, unknown>) =>
+      executor.emitNormalizedToolExecutionResult({
+        toolName: "run_command",
+        toolUseId: "tool-1",
+        result,
+        rawResult: JSON.stringify(result),
+        correlation: { toolUseId: "tool-1", toolCallIndex: 1, toolBatchPhase: "step" },
+      });
+
+    const ranAndFailed = createExecutor();
+    emitRunCommandResult(ranAndFailed, {
+      success: false,
+      exitCode: 1,
+      stdout: "",
+      stderr: "src/app.ts(3,1): error TS2304",
+      terminationReason: "normal",
+    });
+    await (ranAndFailed as Any).execute();
+    expect(ranAndFailed.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      report,
+      expect.any(Object),
+    );
+
+    const timedOut = createExecutor();
+    emitRunCommandResult(timedOut, {
+      success: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      terminationReason: "timeout",
+    });
+    await (timedOut as Any).execute();
+    expect(timedOut.daemon.completeTask).not.toHaveBeenCalled();
+    expect(timedOut.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
   it("re-prompts once for an evidence-grounded answer when tools ran but the answer cites nothing", async () => {
     const groundedAnswer =
       "According to the fetched pricing page, the Pro plan costs $49 per month and adds SSO and audit logs over the $19 Starter plan.";

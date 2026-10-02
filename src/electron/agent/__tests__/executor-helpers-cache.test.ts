@@ -585,6 +585,26 @@ describe("TaskExecutor read cache invalidation", () => {
     expect(served.content).toBe("export const a = 1;\n");
   });
 
+  it("drops cached reads of a renamed or deleted file whatever the tool-semantics flag", () => {
+    for (const toolSemanticsV2Enabled of [true, false]) {
+      const executor = createFileOpExecutor();
+      executor.toolSemanticsV2Enabled = toolSemanticsV2Enabled;
+      readTwice(executor, "src/a.ts");
+      readTwice(executor, "src/b.ts");
+
+      recordFileOperation(executor, "delete_file", { path: "src/a.ts" }, { success: false });
+      recordFileOperation(
+        executor,
+        "rename_file",
+        { oldPath: "src/b.ts", newPath: "src/c.ts" },
+        { success: false },
+      );
+
+      expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(false);
+      expect(checkFileOperation(executor, "read_file", { path: "src/b.ts" }).blocked).toBe(false);
+    }
+  });
+
   it("keeps cached reads of other files when one file is edited", () => {
     const executor = createFileOpExecutor();
     readTwice(executor, "src/a.ts");

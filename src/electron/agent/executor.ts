@@ -10977,7 +10977,11 @@ ${transcript}
     const tracker = this.fileOperationTracker;
     if (!tracker) return;
     const canonicalToolName = canonicalizeToolNameUtil(toolName);
-    if (this.isFileMutationTool(canonicalToolName)) {
+    // The semantics table covers rename/delete even when the legacy mutation list is in use.
+    if (
+      isFileMutationToolNameUtil(canonicalToolName) ||
+      this.isFileMutationTool(canonicalToolName)
+    ) {
       for (const target of collectMutationTargetPathsUtil(input, result)) {
         tracker.invalidateFileRead?.(target, this.workspace?.path);
       }

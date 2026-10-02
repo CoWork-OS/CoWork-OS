@@ -279,6 +279,12 @@ function parseMaxTokensLimitFromError(error: Any): number | null {
   if (!message) return null;
 
   const patterns = [
+    // Anthropic: "max_tokens: 70000 > 64000, which is the maximum allowed number of output tokens"
+    /max_tokens:\s*\d+\s*>\s*(\d+)/i,
+    // OpenAI: "This model supports at most 16384 completion tokens"
+    /supports at most\s+(\d+)\s+(?:completion|output)\s+tokens/i,
+    // Generic: "max_tokens (70000) exceeds the maximum of 64000"
+    /(?:max_tokens|max_output_tokens|max_completion_tokens|maxOutputTokens)\b[^\n]*?\b(?:exceeds?|greater than|larger than)\b[^0-9\n]*(\d+)/i,
     /model limit of\s+(\d+)/i,
     /lower than\s+(\d+)/i,
     /max(?:imum)?\s+tokens(?:\s+value)?\s+(?:that is\s+)?lower than\s+(\d+)/i,

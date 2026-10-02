@@ -716,81 +716,6 @@ html.visual-calm .calm-sidebar {
   padding-right: 10px;
 }
 
-html.visual-calm .calm-sidebar-header {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 6px 2px 10px;
-}
-
-html.visual-calm .calm-sidebar-brand {
-  padding: 2px 8px 0;
-  font-family: var(--font-ui);
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--calm-text);
-}
-
-html.visual-calm .calm-nav-item {
-  appearance: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 7px 10px;
-  border: none;
-  border-radius: var(--calm-radius-item);
-  background: transparent;
-  color: var(--calm-text);
-  font: 450 14px var(--font-ui);
-  text-align: left;
-  cursor: pointer;
-}
-
-html.visual-calm .calm-nav-item > svg {
-  flex-shrink: 0;
-  color: var(--calm-text-secondary);
-}
-
-html.visual-calm .calm-nav-item:hover {
-  background: var(--calm-surface-hover);
-}
-
-html.visual-calm .calm-nav-item.active {
-  background: var(--calm-surface-muted);
-  font-weight: 600;
-}
-
-html.visual-calm .calm-nav-item-label {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-html.visual-calm .calm-nav-new {
-  background: var(--calm-surface-muted);
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-html.visual-calm .calm-nav-new:hover {
-  background: var(--calm-surface-hover);
-}
-
-html.visual-calm .calm-nav-new-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--calm-ink);
-  color: var(--calm-ink-contrast);
-}
-
 /* Session list typography */
 html.visual-calm .calm-sidebar .sidebar-navigation-section-header,
 html.visual-calm .calm-sidebar .sidebar-date-group {
@@ -1370,7 +1295,6 @@ html.visual-calm .calm-agent-swatch {
 
 /* Menu rows (including footer actions) read left to right. */
 html.visual-calm .calm-popover-item,
-html.visual-calm .calm-nav-item,
 html.visual-calm .calm-build-starter {
   justify-content: flex-start;
 }
@@ -1396,23 +1320,6 @@ html.visual-calm .calm-input:focus,
 .calm-input:focus {
   border-color: rgba(14, 165, 233, 0.7);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.16);
-}
-
-/* Sessions header: plain row, no boxed button chrome. */
-/* The base .cli-new-task-btn rule uses !important, so this has to as well. */
-html.visual-calm .calm-sidebar .cli-sessions-header {
-  border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none;
-}
-
-html.visual-calm .calm-sidebar .cli-sessions-header::before {
-  display: none;
-}
-
-html.visual-calm .calm-sidebar .cli-sessions-header:hover {
-  background: var(--calm-surface-hover) !important;
-  transform: none;
 }
 
 /* macOS forces a translucent sidebar with !important; calm uses its own solid
@@ -1498,35 +1405,11 @@ html.visual-calm .agents-secondary-btn {
 
 /* ---------- Sidebar alignment ---------- */
 
-/* Every nav row uses a 20px icon column so labels share one left edge
-   (the "New" row's filled circle is 20px; line icons are 16px). */
-html.visual-calm .calm-nav-item > svg:first-child {
-  box-sizing: content-box;
-  padding: 0 2px;
-}
-
 /* The Sessions header lines up with the nav rows above it. The base rule
    sets padding with !important. */
 html.visual-calm .calm-sidebar .sidebar-header-sessions {
   padding-left: 2px;
   padding-right: 2px;
-}
-
-html.visual-calm .calm-sidebar .cli-sessions-header {
-  margin: 0 !important;
-  padding: 7px 10px !important;
-  width: 100%;
-}
-
-html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle {
-  gap: 10px;
-  padding: 0;
-}
-
-html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle > svg:first-child,
-html.visual-calm .calm-sidebar .cli-sessions-header .cli-list-header-toggle svg:first-of-type {
-  box-sizing: content-box;
-  padding: 0 2px;
 }
 
 /* Settings nav: selection is a quiet fill, not a 2px ink border (calm maps
@@ -1952,17 +1835,10 @@ html.platform-darwin.theme-light.visual-calm .sidebar.cli-sidebar {
 }
 
 /* Selected and primary rows read as chips on the rail. */
-html.visual-calm .calm-sidebar .calm-nav-item.active,
-html.visual-calm .calm-sidebar .calm-nav-new,
 html.visual-calm .calm-sidebar .cli-task-item.active,
 html.visual-calm .calm-sidebar .cli-task-item.selected {
   background: var(--calm-sidebar-active);
   box-shadow: var(--calm-sidebar-active-shadow);
-}
-
-html.visual-calm .calm-sidebar .calm-nav-new:hover {
-  background: var(--calm-sidebar-active);
-  filter: brightness(0.98);
 }
 
 html.visual-calm .calm-sidebar .calm-segmented {

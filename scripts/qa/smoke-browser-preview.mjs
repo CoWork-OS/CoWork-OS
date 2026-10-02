@@ -622,7 +622,14 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await continueButton.waitFor({ state: "visible" });
     await continueButton.click();
 
-    const inboxButton = page.getByRole("button", { name: "Inbox", exact: true });
+    // Rail items carry their destination; aria-labels can include an unread count.
+    const railButton = (destination) =>
+      page.locator(`.sidebar-rail [data-destination="${destination}"]`);
+    const openMoreItem = async (name) => {
+      await page.locator('.sidebar-rail button[aria-label="More"]').click();
+      await page.getByRole("menuitem", { name, exact: true }).click();
+    };
+    const inboxButton = railButton("inbox");
     try {
       await inboxButton.waitFor({ state: "visible", timeout: 7_000 });
     } catch {
@@ -680,19 +687,18 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await inboxButton.click();
     await page.getByText("Inbox Agent", { exact: true }).waitFor({ state: "visible" });
 
-    await page.getByRole("button", { name: "Automations", exact: true }).click();
+    await railButton("automations").click();
     await page.locator('section[aria-label="Automation Studio"]').waitFor({ state: "visible" });
     await page.getByRole("heading", { name: "Build work that runs itself", exact: true }).waitFor({
       state: "visible",
     });
-    await page.getByRole("button", { name: "Devices", exact: true }).click();
+    await railButton("devices").click();
     await page.getByRole("heading", { name: "Devices", exact: true }).waitFor({ state: "visible" });
-    await page.getByRole("button", { name: "Everyday", exact: true }).click();
+    await openMoreItem("Everyday");
     await page
       .getByRole("heading", { name: "Everyday Agent", exact: true })
       .waitFor({ state: "visible" });
-    await page.getByRole("button", { name: "More", exact: true }).click();
-    await page.getByRole("button", { name: "Ideas", exact: true }).click();
+    await openMoreItem("Ideas");
     await page.getByRole("heading", { name: "Ideas", exact: true }).waitFor({ state: "visible" });
     await inboxButton.click();
     await page.getByText("Inbox Agent", { exact: true }).waitFor({ state: "visible" });
@@ -707,7 +713,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
         new CustomEvent("cowork-browser-workspace-selected", { detail: selected }),
       );
     });
-    await page.getByRole("button", { name: "Git Changes", exact: true }).click();
+    await railButton("gitChanges").click();
     await page
       .getByRole("heading", { name: "Git Changes", exact: true })
       .waitFor({ state: "visible" });
@@ -752,7 +758,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     assert(gitFilesAfterCommit?.includes("browser-artifact.txt"));
     assert(!gitFilesAfterCommit?.includes("ui-git-change.txt"));
 
-    await page.getByRole("button", { name: "New", exact: true }).click();
+    await page.getByRole("button", { name: "New session", exact: true }).click();
     await page
       .getByRole("heading", { name: /Tell me what you want to make/ })
       .waitFor({ state: "visible" });
@@ -764,7 +770,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await projectDialog.getByRole("button", { name: "Create project" }).click();
     await page.getByText("UI smoke project", { exact: true }).first().waitFor({ state: "visible" });
 
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await railButton("agents").click();
     await page.getByRole("button", { name: "Create agent", exact: true }).first().click();
     await page.getByRole("button", { name: "Start blank", exact: true }).click();
     const saveAgent = page.getByRole("button", { name: "Save Agent", exact: true });
@@ -785,7 +791,8 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       }),
     );
     assert(notification?.id, "The host should persist a test notification");
-    await page.getByRole("button", { name: "Notifications", exact: true }).click();
+    // The bell reads "Notifications, N unread" while anything is unread.
+    await page.getByRole("button", { name: /^Notifications(, \d+ unread)?$/ }).click();
     await page.getByText("UI smoke notification", { exact: true }).waitFor({
       state: "visible",
       timeout: 8_000,
@@ -795,17 +802,10 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.getByText("No notifications yet", { exact: true }).waitFor({ state: "visible" });
     // Close the notifications popover before interacting with the sidebar; its
     // backdrop intentionally consumes the first click outside the panel.
-    await page.getByRole("button", { name: "Notifications", exact: true }).click();
+    // The bell reads "Notifications, N unread" while anything is unread.
+    await page.getByRole("button", { name: /^Notifications(, \d+ unread)?$/ }).click();
 
-    const sidebarMoreToggle = page.locator(".sidebar-more-toggle");
-    if ((await sidebarMoreToggle.getAttribute("aria-expanded")) !== "true") {
-      await sidebarMoreToggle.click();
-    }
-    await page.locator(".sidebar-more-items").waitFor({ state: "visible" });
-    const missionControlButton = page
-      .locator(".sidebar-more-items")
-      .getByRole("button", { name: "Mission Control", exact: true });
-    await missionControlButton.click();
+    await openMoreItem("Mission Control");
     for (const name of ["Teams", "Reviews", "Check-in"]) {
       const button = page.getByRole("button", { name, exact: true });
       assert.equal(
@@ -863,7 +863,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       return { taskId, title: "Browser action smoke task" };
     });
     await page.reload();
-    await page.getByRole("button", { name: "Inbox", exact: true }).waitFor({ state: "visible" });
+    await railButton("inbox").waitFor({ state: "visible" });
     try {
       await page.locator(`[data-task-id="${syntheticTask.taskId}"]`).waitFor({ state: "visible" });
     } catch (error) {
@@ -885,7 +885,10 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     const pinAction = page.getByRole("menuitem", { name: "Pin", exact: true });
     assert.equal(await pinAction.isDisabled(), false, "Pin should be an active browser action");
     await pinAction.click();
-    await taskRow.locator(".cli-task-pinned").waitFor({ state: "visible" });
+    // Pinned rows move to the Pinned section without a marker; the menu says Unpin.
+    await taskMenu.click();
+    await page.getByRole("menuitem", { name: "Unpin", exact: true }).waitFor({ state: "visible" });
+    await taskMenu.click();
 
     await taskMenu.click();
     await page.getByRole("menuitem", { name: "Rename", exact: true }).click();
@@ -904,7 +907,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     // A selected task remounts its background panels when returning from Settings.
     // Unsupported optional reads/subscriptions must not masquerade as user actions.
     await taskRow.locator(".cli-task-title").click();
-    await page.locator(".sidebar-footer .settings-btn").click();
+    await page.locator('.sidebar-rail button[aria-label^="Settings"]').click();
     await page.getByRole("button", { name: "Back", exact: true }).click();
     await page.waitForFunction(() => document.querySelector('textarea[aria-label="Message"]') || document.querySelector(".main-content"));
     assert.deepEqual(await page.evaluate(() => window.__coworkBrowserUnsupportedActions), [], "Returning to a selected task must not invoke absent background methods");
@@ -912,7 +915,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
     await taskRow.waitFor({ state: "detached" });
 
-    await page.locator(".sidebar-footer .settings-btn").click();
+    await page.locator('.sidebar-rail button[aria-label^="Settings"]').click();
     await page.getByRole("button", { name: "Integrations", exact: true }).click();
     await page
       .getByRole("heading", {

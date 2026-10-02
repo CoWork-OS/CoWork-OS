@@ -178,11 +178,6 @@ button:focus-visible,
   margin-bottom: 2px;
 }
 
-.visual-oblivion .cli-header-actions button {
-  border-radius: var(--radius-sm);
-  padding: 6px 12px;
-}
-
 .visual-oblivion .cli-btn-text {
   font-family: var(--font-ui);
   font-weight: 500;
@@ -769,14 +764,12 @@ button:focus-visible,
   background: transparent !important;
 }
 
-.theme-light .new-task-btn,
-.theme-light .cli-sessions-header {
+.theme-light .new-task-btn {
   background: rgba(255, 255, 255, 0.8) !important;
   border-color: rgba(0, 0, 0, 0.1) !important;
 }
 
-.theme-light .new-task-btn:hover,
-.theme-light .cli-sessions-header:hover {
+.theme-light .new-task-btn:hover {
   background: rgba(255, 255, 255, 1) !important;
   border-color: var(--color-accent) !important;
 }
@@ -902,10 +895,6 @@ button:focus-visible,
   background: transparent !important;
 }
 
-.theme-light .cli-sidebar-header {
-  background: rgba(255, 255, 255, 0.6) !important;
-}
-
 .theme-light .cli-action-btn {
   background: rgba(255, 255, 255, 0.8) !important;
   border-color: rgba(0, 0, 0, 0.1) !important;
@@ -963,7 +952,6 @@ button:focus-visible,
   background: rgba(0, 0, 0, 0.25);
 }
 
-.theme-light .cli-task-menu,
 .theme-light .task-item-menu {
   background: #ffffff !important;
   background-color: #ffffff !important;
@@ -971,7 +959,6 @@ button:focus-visible,
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.theme-light .cli-task-menu::before,
 .theme-light .task-item-menu::before {
   background: rgba(0, 0, 0, 0.05);
 }
@@ -1294,7 +1281,6 @@ textarea,
 a,
 .task-item,
 .new-task-btn,
-.settings-btn,
 .task-item-more,
 .task-item-menu,
 .task-item-actions,
@@ -1861,11 +1847,6 @@ a,
   padding: 12px 12px 6px 12px;
 }
 
-.sidebar-header-top {
-  padding-top: 44px;
-  /* Space for macOS traffic lights */
-}
-
 .new-task-btn {
   width: 100%;
   padding: 8px 12px;
@@ -1924,11 +1905,6 @@ a,
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-
-/* Ideas tab — above Sessions in sidebar */
-.sidebar-ideas-tab {
-  flex-shrink: 0;
 }
 
 /* ── Ideas panel — extends dp-* Devices theme ────────────────────── */
@@ -2457,26 +2433,6 @@ a,
 
 /* Settings modal styles load with Settings. */
 
-/* Settings button in sidebar footer */
-.settings-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: all 0.15s ease;
-}
-
-.settings-btn:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text);
-}
-
 /* Settings tab styles load with Settings. */
 
 /* CLI Panel Footer */
@@ -2518,30 +2474,6 @@ a,
   background: var(--color-bg-sidebar) !important;
 }
 
-.cli-sidebar-header {
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  height: var(--header-height);
-  background: rgba(0, 0, 0, 0.3);
-  border-bottom: 1px solid var(--color-border-subtle);
-  -webkit-app-region: drag;
-}
-
-.cli-sidebar-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-accent);
-  letter-spacing: 1px;
-}
-
-/* CLI Action Buttons */
-.cli-header-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .cli-action-btn {
   width: 100%;
   display: flex;
@@ -2564,105 +2496,12 @@ a,
   background: rgba(0, 0, 0, 0.12) !important;
 }
 
-.cli-new-task-btn {
-  justify-content: flex-start;
-  padding: 8px 12px !important;
-  height: 34px;
-  min-height: 34px;
-  box-sizing: border-box;
-  background: var(--color-bg-glass) !important;
-  border: 1px solid var(--color-border) !important;
-  color: var(--color-text-secondary) !important;
-  font-size: 13px !important;
-  font-family: var(--font-ui) !important;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  position: relative;
-  overflow: hidden;
-}
-
-.cli-new-task-btn::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
-  background: var(--gradient-glossy);
-  pointer-events: none;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-}
-
-.cli-new-task-btn:hover {
-  background: var(--color-bg-glass-hover) !important;
-  border-color: var(--color-border-light) !important;
-  box-shadow: var(--shadow-sm);
-  color: var(--color-text) !important;
-  transform: none;
-}
-
-.cli-mission-control-btn {
-  justify-content: flex-start;
-}
-
 .cli-btn-bracket {
   color: var(--color-text-muted);
 }
 
-.cli-btn-plus {
-  color: var(--color-accent);
-  font-weight: 600;
-}
-
-.cli-btn-accent {
-  color: var(--color-accent);
-  font-weight: 700;
-  letter-spacing: 0.6px;
-}
-
 .cli-btn-text {
   color: var(--color-text);
-}
-
-.cli-new-task-modern-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 600;
-}
-
-.cli-new-task-modern-plus {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-secondary);
-  font-size: 18px;
-  font-weight: 300;
-  line-height: 1;
-}
-
-.cli-new-task-btn svg {
-  display: none;
-}
-
-.cli-new-task-btn .sidebar-home-btn-icon svg {
-  display: block;
-}
-
-.sidebar-home-btn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  width: 18px;
-  height: 18px;
-}
-
-.sidebar-home-btn-icon-image {
-  width: 18px;
-  height: 18px;
-  display: block;
 }
 
 /* CLI Task List */
@@ -2686,165 +2525,6 @@ a,
   margin: 0 !important;
   padding: 0 !important;
   transform: none !important;
-}
-
-.cli-list-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  letter-spacing: 0.5px;
-}
-
-.cli-sessions-header {
-  margin: 0;
-  padding: 8px 12px;
-  height: 34px;
-  min-height: 34px;
-  box-sizing: border-box;
-  background: var(--color-bg-glass);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-family: var(--font-ui);
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  transition: all 0.2s ease;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  position: relative;
-  overflow: hidden;
-}
-
-.cli-sessions-header::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
-  background: var(--gradient-glossy);
-  pointer-events: none;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-}
-
-.cli-sessions-header:hover {
-  background: var(--color-bg-glass-hover);
-  border-color: var(--color-border-light);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
-  color: var(--color-text);
-}
-
-.cli-list-header .cli-section-prompt {
-  color: var(--color-accent);
-}
-
-.cli-list-header-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  cursor: pointer;
-  text-align: left;
-  position: relative;
-  z-index: 1;
-}
-
-.cli-sessions-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: inherit;
-}
-
-.cli-sessions-title {
-  color: var(--color-text-secondary);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.cli-sessions-collapse-indicator {
-  display: inline-flex;
-  align-items: center;
-  color: var(--color-text-muted) !important;
-  flex-shrink: 0;
-}
-
-.cli-list-header-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.cli-sessions-header .cli-list-header-actions {
-  margin-left: auto;
-  justify-content: flex-end;
-}
-
-.cli-sessions-header .session-filter-toggle,
-.cli-sessions-header .show-failed-toggle {
-  margin-left: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1;
-  border-radius: 0;
-}
-
-.cli-sessions-header .session-filter-toggle:hover,
-.cli-sessions-header .show-failed-toggle:hover {
-  background: transparent;
-  color: var(--color-text-secondary);
-}
-
-.cli-sessions-header .session-filter-toggle.active {
-  color: var(--color-text-secondary);
-}
-
-.cli-sessions-header .sidebar-home-btn-icon.cli-sessions-icon {
-  min-width: 18px;
-  width: auto;
-}
-
-.cli-sessions-header .session-filter-toggle svg {
-  width: 16px;
-  height: 16px;
-}
-
-.cli-sessions-header .session-filter-toggle .filter-count {
-  min-width: 16px;
-  height: 16px;
-  line-height: 16px;
-  font-size: 10px;
-  border-radius: 999px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
 }
 
 .sidebar-sessions-search {
@@ -2889,116 +2569,13 @@ a,
   color: var(--color-text-muted);
 }
 
-/* Minimal sidebar navigation: plain rows, no framed button chrome. */
-.sidebar .cli-new-task-btn::before,
-.sidebar .cli-sessions-header::before {
-  display: none;
-}
-
 .sidebar-header {
   padding: 12px 18px 0;
-}
-
-.sidebar .cli-header-actions.sidebar-nav {
-  gap: 5px;
-}
-
-.sidebar-new-session-btn {
-  height: 34px;
-  min-height: 34px;
-  margin-bottom: 0;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 7px;
-  background: transparent !important;
-  box-shadow: none;
-  color: var(--color-text-secondary) !important;
-}
-
-.sidebar-new-session-btn .cli-new-task-modern-label {
-  gap: 14px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.sidebar-new-session-btn .sidebar-new-session-icon {
-  width: 20px;
-  height: 20px;
-  color: currentColor;
-  opacity: 0.9;
-}
-
-.sidebar-new-session-btn .sidebar-new-session-icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-.sidebar-new-session-btn:hover {
-  transform: none;
-  background: transparent !important;
-  color: var(--color-text) !important;
-}
-
-.sidebar-ideas-tab {
-  flex-shrink: 0;
-  padding: 0 18px 10px;
 }
 
 .sidebar-header-sessions {
   flex-shrink: 0;
   padding: 8px 18px;
-}
-
-.cli-sessions-header {
-  justify-content: flex-start;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 !important;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--color-text-muted);
-}
-
-.cli-sessions-header:hover {
-  transform: none;
-  box-shadow: none;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-secondary);
-}
-
-.cli-sessions-header .cli-new-task-modern-label {
-  flex: 0 1 auto;
-  width: auto;
-  min-width: 0;
-  display: inline-flex;
-  justify-content: flex-start !important;
-  gap: 10px;
-}
-
-.sidebar .cli-sessions-header .cli-list-header-toggle {
-  justify-content: flex-start;
-}
-
-.visual-warm .sidebar .cli-sessions-header span.modern-only,
-.visual-oblivion .sidebar .cli-sessions-header span.modern-only {
-  justify-content: flex-start !important;
-}
-
-.sidebar .cli-sessions-header .sidebar-home-btn-icon.cli-sessions-icon {
-  width: 20px;
-  min-width: 20px;
-  height: 20px;
-}
-
-.cli-sessions-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  font-family: var(--font-ui);
-  line-height: 1;
 }
 
 .sidebar-sessions-search {
@@ -3009,15 +2586,6 @@ a,
   border-radius: 0;
   background: transparent;
   color: var(--color-text-muted);
-}
-
-.cli-sessions-header .show-failed-toggle {
-  max-width: 78px;
-  padding: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.62;
 }
 
 .sidebar-session-action {
@@ -3032,12 +2600,6 @@ a,
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-}
-
-.cli-sessions-header .sidebar-session-action svg {
-  display: block;
-  width: 16px;
-  height: 16px;
 }
 
 .sidebar-session-action:hover,
@@ -3086,22 +2648,6 @@ a,
   border-color: transparent;
   box-shadow: none;
   color: var(--color-text-secondary);
-}
-
-.theme-light .sidebar .sidebar-new-session-btn,
-.theme-light .sidebar .cli-sessions-header {
-  background: transparent !important;
-  border: 0 !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-.theme-light .sidebar .sidebar-new-session-btn:hover,
-.theme-light .sidebar .cli-sessions-header:hover {
-  background: transparent !important;
-  border: 0 !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
 }
 
 .devices-sidebar-panel {
@@ -4110,15 +3656,6 @@ a,
   justify-content: flex-start;
 }
 
-.cli-task-title-truncated {
-  display: block;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: clip;
-  white-space: nowrap;
-  min-width: 0;
-}
-
 .cli-task-agent-name {
   font-weight: 600;
   flex-shrink: 0;
@@ -4266,13 +3803,6 @@ a,
 
 .cli-more-btn svg {
   flex-shrink: 0;
-}
-
-/* CLI Task Menu */
-.cli-task-menu {
-  font-family: var(--font-mono);
-  background: #2d2d30 !important;
-  border: 1px solid var(--color-border) !important;
 }
 
 .cli-menu-option {
@@ -4621,25 +4151,6 @@ a,
   color: var(--color-accent, #22d3ee);
 }
 
-/* Empty state for filtered results */
-.sidebar-empty-filtered {
-  padding: 20px 16px;
-  text-align: center;
-}
-
-.sidebar-empty-filtered .cli-hint {
-  color: var(--color-text-muted, #6b7280);
-  font-size: 12px;
-}
-
-.cli-menu-danger:hover {
-  background: rgba(239, 68, 68, 0.2) !important;
-}
-
-.cli-menu-danger .cli-menu-prefix {
-  color: var(--color-error);
-}
-
 /* CLI Rename Input */
 .cli-rename-input {
   font-family: var(--font-mono) !important;
@@ -4681,74 +4192,6 @@ a,
 /* Settings moved to the rail; drop the footer when it has no wallet or update prompt. */
 .cli-sidebar-footer:empty {
   display: none !important;
-}
-
-.cli-footer-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.cli-footer-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-}
-
-.cli-footer-label {
-  color: var(--color-accent);
-  font-weight: 600;
-}
-
-.cli-footer-value {
-  color: var(--color-text-secondary);
-}
-
-.cli-settings-btn {
-  justify-content: flex-start;
-  font-family: var(--font-ui) !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  color: var(--color-text-secondary) !important;
-  background: transparent !important;
-  border: 0 !important;
-  padding: 0 !important;
-  width: 100% !important;
-  height: 34px !important;
-  min-height: 34px !important;
-  border-radius: 7px !important;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.cli-settings-btn .modern-only {
-  display: inline-flex !important;
-  align-items: center;
-  gap: 14px;
-  font-family: var(--font-ui) !important;
-  font-size: 13px !important;
-  font-weight: 500;
-  color: inherit;
-}
-
-.cli-settings-btn .modern-only svg {
-  flex-shrink: 0;
-  width: 15px;
-  height: 15px;
-  stroke-width: 2px;
-}
-
-.cli-settings-btn:hover {
-  color: var(--color-text) !important;
-  background: transparent !important;
-}
-
-.cli-settings-btn:active,
-.cli-settings-btn:focus,
-.cli-settings-btn:focus-visible {
-  background: transparent !important;
 }
 
 /* Task CLI shell styles load with MainContent. */
@@ -22568,9 +22011,7 @@ a,
 }
 
 .visual-oblivion .cli-panel-title,
-.visual-oblivion .cli-sidebar-title,
-.visual-oblivion .cli-section-title,
-.visual-oblivion .cli-list-header {
+.visual-oblivion .cli-section-title {
   font-family: var(--font-ui);
   letter-spacing: 0.2px;
   text-transform: none;
@@ -22711,12 +22152,7 @@ a,
   text-transform: none;
 }
 
-.visual-oblivion .cli-sessions-header {
-  border-radius: var(--radius-sm);
-}
-
 .visual-oblivion .cli-more-btn,
-.visual-oblivion .cli-task-menu,
 .visual-oblivion .cli-menu-option {
   font-family: var(--font-ui);
 }
@@ -22725,7 +22161,6 @@ a,
   display: none;
 }
 
-.visual-oblivion .cli-footer-label,
 .visual-oblivion .cli-footer-text {
   font-family: var(--font-ui);
   font-size: 12px;
@@ -24574,12 +24009,6 @@ a,
   animation: focusedFadeInUp 0.5s ease 0.4s both;
 }
 
-/* Ensure sidebar date header + task list header align */
-.task-list-header.cli-list-header {
-  display: flex;
-  align-items: center;
-}
-
 /* ==================== FOCUSED MODE: ACTIVE TASK VIEW ==================== */
 
 /* ---- HIDE: elements that add clutter ---- */
@@ -24674,13 +24103,6 @@ a,
   max-width: 85%;
   padding: 10px 14px;
   font-family: var(--font-ui);
-}
-
-.density-focused .cli-new-task-btn,
-.density-focused .cli-sessions-header {
-  padding: 8px 12px !important;
-  height: 34px;
-  min-height: 34px;
 }
 
 .density-focused .chat-bubble.assistant-bubble {
@@ -25392,37 +24814,11 @@ a,
 
 /* ==================== FOCUSED MODE: SIDEBAR ==================== */
 
-/* Hide Mission Control button — advanced feature */
-.density-focused .cli-mission-control-btn {
-  display: none;
-}
-
 /* Hide terminal prompt chars everywhere in sidebar */
 .density-focused .task-list-header .cli-section-prompt,
 .density-focused .sidebar-header .cli-section-prompt,
 .density-focused .new-session-btn .terminal-only {
   display: none;
-}
-
-/* Sidebar header: cleaner */
-.density-focused .cli-header-actions {
-  gap: 6px;
-}
-
-.density-focused .sidebar .cli-header-actions.sidebar-nav {
-  gap: 5px;
-}
-
-.density-focused .sidebar-new-session-btn {
-  height: 34px;
-  min-height: 34px;
-  padding: 0 !important;
-}
-
-.density-focused .cli-sessions-header {
-  height: 28px;
-  min-height: 28px;
-  padding: 0 !important;
 }
 
 .density-focused .task-list-header {
@@ -25606,35 +25002,9 @@ a,
 
 @container (max-width: 280px) {
   .sidebar-header,
-  .sidebar-ideas-tab,
   .sidebar-header-sessions {
     padding-left: 12px;
     padding-right: 12px;
-  }
-
-  .sidebar .cli-header-actions.sidebar-nav {
-    gap: 3px;
-  }
-
-  .sidebar-new-session-btn .cli-new-task-modern-label {
-    gap: 9px;
-  }
-
-  .sidebar-home-btn-icon,
-  .sidebar-new-session-btn .sidebar-new-session-icon {
-    width: 18px;
-    height: 18px;
-  }
-
-  .cli-sessions-header {
-    padding-inline: 0 !important;
-  }
-
-  .cli-list-header .cli-section-title,
-  .cli-sessions-title {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .sidebar-date-group,
@@ -28834,64 +28204,8 @@ html:not(.theme-light) .selected-workspace-main-row {
 }
 
 /* ==================== BOTS SIDEBAR ====================
-   Bots share the session rail, but keep their own lightweight roster surface.
-   The rows deliberately stay flat and compact so the list reads like a
-   directory instead of another stack of cards. */
-.sidebar-session-tabs {
-  display: flex;
-  flex: 0 0 38px;
-  align-items: stretch;
-  gap: 0;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.sidebar-session-tab {
-  position: relative;
-  flex: 1 1 0;
-  min-width: 0;
-  height: 38px;
-  padding: 0 10px;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.sidebar-session-tab:hover {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-hover);
-}
-
-.sidebar-session-tab.active {
-  color: var(--color-text);
-}
-
-.sidebar-session-tab.active::after {
-  content: "";
-  position: absolute;
-  right: 18px;
-  bottom: -1px;
-  left: 18px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--color-accent);
-}
-
-.sidebar-session-tab:focus-visible {
-  z-index: 1;
-  outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
-  outline-offset: -3px;
-}
-
+   The Agents destination swaps the panel to this roster. The rows stay flat
+   and compact so the list reads like a directory instead of a stack of cards. */
 .sidebar-bots-pane {
   display: flex;
   flex: 1 1 auto;
@@ -29406,7 +28720,6 @@ html:not(.theme-light) .selected-workspace-main-row {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-session-tab,
   .sidebar-bot-row,
   .sidebar-bots-search,
   .sidebar-bots-actions .sidebar-session-action {

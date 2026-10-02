@@ -8,8 +8,7 @@
   scrollbar-width: none;
 }
 
-.app-layout:not(.left-collapsed) > .everyday-agent-main,
-.app-layout.left-collapsed > .everyday-agent-main {
+.app-layout:not(.left-collapsed) > .everyday-agent-main {
   overflow-y: auto;
   overflow-x: hidden;
 }

@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "security-scan-43ae56c7",
-    "taskId": "security-scan-43ae56c7"
+    "incident": "security-scan-9f0ff63d",
+    "taskId": "security-scan-9f0ff63d"
   },
   "categories": [
     {
@@ -58,6 +58,17 @@
         "securityHarnessRule": "confirmed-fix",
         "expectedNoSilentBypass": true,
         "expectedFindingFingerprint": "security-scan-43ae56c7",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true
+      }
+    },
+    {
+      "id": "security-scan-9f0ff63d-confirmed-fix",
+      "prompt": "Regression guard for Enforce process filesystem and shell boundaries, bind stored provider credentials to destinations, and bound relay and plugin download failure paths: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "security-scan-9f0ff63d",
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true
       }

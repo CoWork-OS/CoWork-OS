@@ -2263,6 +2263,31 @@ describe("SessionRuntime", () => {
     expect(result.assistantText).toBe("Here is the answer.");
   });
 
+  it("sizes text-turn deadlines from the output budget instead of a fixed 120 s", async () => {
+    const harness = createHarness();
+    const getRetryTimeoutMs = vi.fn(() => 600_000);
+    harness.deps.getRetryTimeoutMs = getRetryTimeoutMs;
+    harness.createMessageWithTimeout.mockResolvedValueOnce({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "A long answer." }],
+      usage: { inputTokens: 10, outputTokens: 900, cachedTokens: 0 },
+    });
+
+    await harness.runtime.runTextLoop({
+      messages: [{ role: "user", content: "Write 4,000 words" }],
+      systemPrompt: "system",
+      initialMaxTokens: 48_000,
+      continuationMaxTokens: 4_096,
+      mode: "follow_up",
+      operationLabel: "test text loop",
+      allowContinuation: true,
+      emptyFallback: "empty",
+    });
+
+    expect(getRetryTimeoutMs).toHaveBeenCalledWith(120_000, 0, false, 48_000);
+    expect(harness.createMessageWithTimeout.mock.calls[0][1]).toBe(600_000);
+  });
+
   it("replays one same-request escalation before continuation recovery in adaptive mode", async () => {
     const previousPolicy = process.env.COWORK_LLM_OUTPUT_POLICY;
     try {

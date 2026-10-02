@@ -1037,6 +1037,82 @@ describe("TaskExecutor provider error classification with real SDK errors", () =
   });
 });
 
+describe("TaskExecutor LLM deadlines and output caps", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function createDeadlineExecutor(observedTps: number | null) {
+    const executor = createRetryExecutor() as Any;
+    executor.observedOutputTokensPerSecond = observedTps;
+    return executor;
+  }
+
+  it("never shortens a deadline on retry", () => {
+    const executor = createDeadlineExecutor(40);
+    const deadlines = [0, 1, 2, 3].map((attempt) =>
+      executor.getRetryTimeoutMs(120_000, attempt, false),
+    );
+    expect(new Set(deadlines).size).toBe(1);
+    expect(deadlines[0]).toBe(120_000);
+  });
+
+  it("sizes a text call's deadline from its output budget and observed throughput", () => {
+    const executor = createDeadlineExecutor(40);
+    // ~5.3K tokens of a 4,000-word answer at 40 tok/s needs more than 120 s.
+    expect(executor.getRetryTimeoutMs(120_000, 0, false, 6_000)).toBe(
+      Math.ceil((6_000 / 40) * 1.3) * 1_000,
+    );
+    // Very large budgets stay bounded.
+    expect(executor.getRetryTimeoutMs(120_000, 0, false, 48_000)).toBe(600_000);
+    // Small budgets keep the base deadline.
+    expect(executor.getRetryTimeoutMs(120_000, 0, false, 1_000)).toBe(120_000);
+  });
+
+  it("keeps an output floor for tool-less requests at low observed throughput", () => {
+    // Local models report low throughput because elapsed time includes prompt
+    // processing; the cap must not shrink to a few hundred tokens.
+    const executor = createDeadlineExecutor(8);
+    const caps = [0, 1, 2].map((attempt) =>
+      executor.applyRetryTokenCap(16_000, attempt, 120_000, false),
+    );
+    expect(caps.every((cap: number) => cap >= 8_192)).toBe(true);
+    expect(new Set(caps).size).toBe(1);
+    expect(executor.applyRetryTokenCap(2_000, 0, 120_000, false)).toBe(2_000);
+  });
+
+  it("retries an identical timed-out request at most once", async () => {
+    vi.useFakeTimers();
+    const executor = createRetryExecutor() as Any;
+    executor.llmCallSequence = 0;
+    executor.providerRetryV2Enabled = true;
+    executor.recordObservedOutputThroughput = vi.fn();
+    executor.provider = { type: "anthropic", createMessage: vi.fn() };
+    executor.modelId = "claude-sonnet-4-6";
+    executor.modelKey = "claude-sonnet-4-6";
+    executor.providerFailoverIndex = 0;
+    executor.providerFailoverSelections = [];
+    executor.appendRoutingFallbackStep = vi.fn();
+    const requestFn = vi
+      .fn()
+      .mockRejectedValue(new Error("Chat-mode follow-up response timed out after 120s"));
+
+    const outcome = callAndCapture(executor.callLLMWithRetry(requestFn, "slow chat reply", 5));
+    await vi.runAllTimersAsync();
+
+    expect((await outcome).error?.message).toMatch(/timed out/);
+    expect(requestFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+function callAndCapture<T>(promise: Promise<T>): Promise<{ value?: T; error?: Any }> {
+  return promise.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+}
+
 describe("TaskExecutor Ollama context budget", () => {
   afterEach(() => {
     vi.restoreAllMocks();

@@ -9051,6 +9051,7 @@ ${transcript}
     let skipRetryDelayOnce = false;
     let deferredPrimaryOutageFailover = false;
     let providerRetryAfterMs: number | undefined;
+    let timeoutReplays = 0;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptNumber = attempt + 1;
@@ -9157,12 +9158,16 @@ ${transcript}
         });
         providerRetryAfterMs = classification.retryAfterMs;
         const errorText = String(error?.message || "").toLowerCase();
-        // Replaying the same prompt after a local-model timeout consumes another full
-        // deadline window without reducing the cause. Callers must split or compact it.
-        const isIdenticalLocalTimeoutRetry =
-          this.provider?.type === "ollama" &&
-          (errorText.includes("timeout") || errorText.includes("timed out"));
-        const isRetryable = !isIdenticalLocalTimeoutRetry && classification.retryable;
+        // Replaying a timed-out request repeats the same wait without reducing the
+        // cause, so it is replayed at most once (never for a local Ollama model,
+        // where it consumes another full deadline window; callers must split or
+        // compact instead). A configured fallback provider may still take over.
+        const isTimeout = classification.reason === "timeout";
+        const isIdenticalLocalTimeoutRetry = isTimeout && this.provider?.type === "ollama";
+        const timeoutReplayExhausted =
+          isTimeout && !isIdenticalLocalTimeoutRetry && timeoutReplays >= 1;
+        const isRetryable =
+          !isIdenticalLocalTimeoutRetry && !timeoutReplayExhausted && classification.retryable;
 
         const retryReason = this.getRetryRouteReason(error);
         const shouldRetryPrimaryProviderFirst =
@@ -9177,9 +9182,10 @@ ${transcript}
               `${operation} (attempt ${attemptNumber}/${maxAttempts}) -> ${this.provider.type}/${this.modelId}`,
           );
         } else if (
-          (isRetryable || classification.failoverEligible) &&
+          (isRetryable || classification.failoverEligible || timeoutReplayExhausted) &&
           this.failoverToNextProvider(retryReason, error)
         ) {
+          timeoutReplays = 0;
           skipRetryDelayOnce = true;
           logger.warn(
             `${this.logTag}[LLM ${llmCallId}] failover: ${operation} ` +
@@ -9195,6 +9201,7 @@ ${transcript}
           );
           throw error;
         }
+        if (isTimeout) timeoutReplays += 1;
 
         this.appendRoutingFallbackStep(
           {
@@ -9256,13 +9263,23 @@ ${transcript}
    */
   private static readonly TOOL_OUTPUT_TOKEN_FLOOR = 8192;
 
+  /**
+   * Output floor for tool-less requests (the same floor plan creation uses).
+   * Throughput is measured over whole requests, prompt processing included, so
+   * a slow local model would otherwise be capped at a few hundred tokens.
+   */
+  private static readonly TEXT_OUTPUT_TOKEN_FLOOR = 8192;
+
+  /**
+   * Retries keep the same cap: shrinking the output budget on a replay only
+   * truncates the answer. Deadlines are sized from this cap instead.
+   */
   private applyRetryTokenCap(
     baseMaxTokens: number,
-    attempt: number,
+    _attempt: number,
     timeoutMs: number,
     hasTools = false,
   ): number {
-    const normalizedAttempt = Number.isFinite(attempt) ? Math.max(0, Math.floor(attempt)) : 0;
     if (
       hasTools &&
       String(process.env.COWORK_LLM_OUTPUT_POLICY || "legacy").toLowerCase() === "adaptive"
@@ -9271,9 +9288,7 @@ ${transcript}
     }
 
     const baselineCap = this.estimateTimeoutBoundOutputTokens(timeoutMs);
-    const retryDecay =
-      normalizedAttempt <= 0 ? 1 : Math.pow(this.getRetryTokenDecayFactor(), normalizedAttempt);
-    let retryAwareCap = Math.max(256, Math.floor(baselineCap * retryDecay));
+    let retryAwareCap = Math.max(TaskExecutor.TEXT_OUTPUT_TOKEN_FLOOR, baselineCap);
 
     if (hasTools) {
       // For tool-bearing requests, ensure we request at least getToolResponseMaxTokens()
@@ -9291,45 +9306,30 @@ ${transcript}
   }
 
   /**
-   * Retries use progressively shorter deadlines to avoid spending several full
-   * timeout windows on one stalled response.
-   *
-   * When `hasTools` is true the base timeout is first raised to cover the full
-   * maxTokens budget at observed throughput — otherwise we abort requests that
-   * are legitimately generating long tool-call payloads (e.g. write_file with
-   * large document content).  Retry decay is also skipped for tool-bearing
-   * requests because a shorter timeout would just guarantee another timeout.
+   * Deadline for one LLM attempt. The base timeout is raised to cover the
+   * request's maxTokens budget at observed throughput (tool calls and text
+   * alike), so a long answer or a large write_file payload is not aborted
+   * mid-generation. Retries never shorten it: a shorter deadline only
+   * guarantees that the replay times out as well.
    */
   private getRetryTimeoutMs(
     baseTimeoutMs: number,
-    attempt: number,
-    hasTools = false,
+    _attempt: number,
+    _hasTools = false,
     maxTokensBudget?: number,
   ): number {
-    const normalizedAttempt = Number.isFinite(attempt) ? Math.max(0, Math.floor(attempt)) : 0;
     let effective = baseTimeoutMs;
 
-    // For tool-bearing requests, ensure the timeout is long enough for the
-    // model to actually produce the full maxTokens budget, but cap at 10 minutes
-    // to avoid unreasonable wait times for very large budgets.
-    const MAX_TOOL_TIMEOUT_MS = 600_000; // 10 minutes
-    if (hasTools && typeof maxTokensBudget === "number" && maxTokensBudget > 0) {
+    // Cap the sized deadline at 10 minutes to avoid unreasonable waits for very
+    // large budgets.
+    const MAX_SIZED_TIMEOUT_MS = 600_000; // 10 minutes
+    if (typeof maxTokensBudget === "number" && maxTokensBudget > 0) {
       const tps = this.getExpectedOutputTokensPerSecond();
       // 1.3× safety margin so we don't race against the wire
       const minNeeded = Math.ceil((maxTokensBudget / tps) * 1.3) * 1_000;
-      effective = Math.min(MAX_TOOL_TIMEOUT_MS, Math.max(effective, minNeeded));
+      effective = Math.max(effective, Math.min(MAX_SIZED_TIMEOUT_MS, minNeeded));
     }
-
-    // For tool-bearing requests, don't decay the timeout on retries:
-    // if the model timed out writing a document, a shorter deadline
-    // guarantees the retry will also time out.
-    if (hasTools || normalizedAttempt <= 0) return effective;
-
-    const decay = this.getRetryTimeoutDecayFactor();
-    const floorRatio = this.getRetryTimeoutFloorRatio();
-    const decayed = Math.floor(effective * Math.pow(decay, normalizedAttempt));
-    const floorMs = Math.max(20_000, Math.floor(effective * floorRatio));
-    return Math.max(floorMs, decayed);
+    return effective;
   }
 
   private estimateTimeoutBoundOutputTokens(timeoutMs: number): number {
@@ -9367,24 +9367,6 @@ ${transcript}
     const configured = Number(process.env.COWORK_LLM_TIMEOUT_SAFETY_FACTOR ?? "0.7");
     if (!Number.isFinite(configured)) return 0.7;
     return Math.min(0.95, Math.max(0.2, configured));
-  }
-
-  private getRetryTokenDecayFactor(): number {
-    const configured = Number(process.env.COWORK_LLM_RETRY_TOKEN_DECAY ?? "0.65");
-    if (!Number.isFinite(configured)) return 0.65;
-    return Math.min(0.95, Math.max(0.3, configured));
-  }
-
-  private getRetryTimeoutDecayFactor(): number {
-    const configured = Number(process.env.COWORK_LLM_RETRY_TIMEOUT_DECAY ?? "0.75");
-    if (!Number.isFinite(configured)) return 0.75;
-    return Math.min(0.95, Math.max(0.35, configured));
-  }
-
-  private getRetryTimeoutFloorRatio(): number {
-    const configured = Number(process.env.COWORK_LLM_RETRY_TIMEOUT_FLOOR_RATIO ?? "0.35");
-    if (!Number.isFinite(configured)) return 0.35;
-    return Math.min(0.9, Math.max(0.15, configured));
   }
 
   private getToolResponseMaxTokens(): number {
@@ -27952,17 +27934,18 @@ You are continuing a previous conversation. The context from the previous conver
             requestedMaxTokens: EXPLICIT_CHAT_MAX_OUTPUT_TOKENS,
           })
         : null;
+      const companionMaxTokens = explicitChatMaxTokens ?? CHAT_REPLY_MAX_OUTPUT_TOKENS;
       const response = await this.callLLMWithRetry(
-        () =>
+        (attempt) =>
           this.createMessageWithTimeout(
             {
               model: this.modelId,
-              maxTokens: explicitChatMaxTokens ?? CHAT_REPLY_MAX_OUTPUT_TOKENS,
+              maxTokens: companionMaxTokens,
               system: systemPrompt,
               messages: [{ role: "user", content: companionUserContent }],
               ...promptCacheExtras,
             },
-            LLM_TIMEOUT_MS,
+            this.getRetryTimeoutMs(LLM_TIMEOUT_MS, attempt, false, companionMaxTokens),
             isThinkMode ? "Think-with-me response" : "Companion response",
             undefined,
             {
@@ -28000,7 +27983,7 @@ You are continuing a previous conversation. The context from the previous conver
               ],
               ...promptCacheExtras,
             },
-            LLM_TIMEOUT_MS,
+            this.getRetryTimeoutMs(LLM_TIMEOUT_MS, 0, false, CHAT_REPLY_MAX_OUTPUT_TOKENS),
             "Companion continuation",
             undefined,
             {

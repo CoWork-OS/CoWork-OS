@@ -405,7 +405,9 @@ describe("TaskExecutor executeStep failure handling", () => {
     const timeout = (executor as Any).getRetryTimeoutMs(120_000, undefined, false, 8_192);
     const tokenCap = (executor as Any).applyRetryTokenCap(16_000, undefined, 120_000, false);
 
-    expect(timeout).toBe(120_000);
+    // An 8K text budget needs more than the 120 s base at the fallback throughput.
+    expect(timeout).toBeGreaterThanOrEqual(120_000);
+    expect(timeout).toBeLessThanOrEqual(600_000);
     expect(Number.isFinite(timeout)).toBe(true);
     expect(Number.isFinite(tokenCap)).toBe(true);
     expect(tokenCap).toBeGreaterThan(0);

@@ -608,6 +608,9 @@ interface RuntimeRecoverySourceFreshness {
 export const CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE =
   "CONTEXT_CAPACITY_RECOVERY_EXHAUSTED" as const;
 
+/** Minimum deadline for a text turn; longer budgets get proportionally more time. */
+const TEXT_TURN_BASE_TIMEOUT_MS = 120_000;
+
 /** Bounds for the one larger retry of a text turn that produced no text. */
 const TEXT_EMPTY_OUTPUT_RETRY_MIN_TOKENS = 8_192;
 const TEXT_EMPTY_OUTPUT_RETRY_MAX_TOKENS = 32_000;
@@ -803,22 +806,25 @@ export class SessionRuntime {
           if (promptCacheExtras.promptCache?.ttl) {
             this.state.promptCache.promptCacheTtl = promptCacheExtras.promptCache.ttl;
           }
+          const maxTokens =
+            emptyOutputRetryMaxTokens ??
+            (continuationPrefix.trim().length > 0
+              ? opts.continuationMaxTokens
+              : opts.initialMaxTokens);
           const response = await this.deps.callLLMWithRetry(
-            () =>
+            (attempt) =>
               this.deps.createMessageWithTimeout(
                 {
                   model: this.deps.getModelMetadata().modelId,
-                  maxTokens:
-                    emptyOutputRetryMaxTokens ??
-                    (continuationPrefix.trim().length > 0
-                      ? opts.continuationMaxTokens
-                      : opts.initialMaxTokens),
+                  maxTokens,
                   system: opts.systemPrompt,
                   messages: requestMessages,
                   ...promptCacheExtras,
                   ...(opts.onStreamProgress ? { onStreamProgress: opts.onStreamProgress } : {}),
                 },
-                120_000,
+                // Sized from the output budget: a fixed 120 s aborted long answers
+                // mid-generation and then replayed them.
+                this.deps.getRetryTimeoutMs(TEXT_TURN_BASE_TIMEOUT_MS, attempt, false, maxTokens),
                 continuationPrefix.trim().length > 0
                   ? `${opts.operationLabel} (continuation)`
                   : opts.operationLabel,

@@ -19,6 +19,27 @@ import {
 } from "./types";
 import { imageToTextFallback } from "./image-utils";
 
+/** Schema keywords Gemini function declarations accept (an OpenAPI subset). */
+const GEMINI_SCHEMA_KEYS = new Set([
+  "type",
+  "format",
+  "title",
+  "description",
+  "nullable",
+  "enum",
+  "items",
+  "minItems",
+  "maxItems",
+  "properties",
+  "required",
+  "minimum",
+  "maximum",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "propertyOrdering",
+]);
+
 /**
  * Google AI Studio (Gemini) provider implementation
  */
@@ -167,14 +188,40 @@ export class GeminiProvider implements LLMProvider {
 
   /**
    * Recursively sanitize schema for Gemini API compatibility.
-   * Gemini requires all nested objects/arrays to have explicit 'type' fields.
+   * Gemini requires all nested objects/arrays to have explicit 'type' fields,
+   * and its function declarations accept only an OpenAPI subset: keywords such
+   * as additionalProperties, oneOf, const or $ref make the whole request fail.
    */
   private sanitizeSchemaForGemini(schema: Any): Any {
     if (!schema || typeof schema !== "object") {
       return schema;
     }
 
-    const result: Any = { ...schema };
+    const result: Any = {};
+    for (const [key, value] of Object.entries(schema)) {
+      if (GEMINI_SCHEMA_KEYS.has(key)) result[key] = value;
+    }
+    // oneOf has the same meaning for a single tool argument; Gemini only knows anyOf.
+    const alternatives = Array.isArray(schema.anyOf) ? schema.anyOf : schema.oneOf;
+    if (Array.isArray(alternatives)) {
+      result.anyOf = alternatives.map((entry: Any) => this.sanitizeSchemaForGemini(entry));
+    }
+    if (
+      result.enum === undefined &&
+      ["string", "number", "boolean"].includes(typeof schema.const)
+    ) {
+      result.enum = [schema.const];
+    }
+    if (typeof result.format === "string") {
+      const type = String(result.type || "").toLowerCase();
+      const allowed =
+        type === "string"
+          ? ["enum", "date-time"]
+          : type === "number" || type === "integer"
+            ? ["int32", "int64", "float", "double"]
+            : [];
+      if (!allowed.includes(result.format)) delete result.format;
+    }
 
     // Ensure type field exists
     if (!result.type) {

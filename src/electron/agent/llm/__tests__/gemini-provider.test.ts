@@ -92,3 +92,48 @@ describe("GeminiProvider blocked responses", () => {
     },
   );
 });
+
+describe("GeminiProvider tool schema sanitizing", () => {
+  it("drops JSON Schema keywords Gemini function declarations reject", () => {
+    const provider = new GeminiProvider({
+      type: "gemini",
+      model: "gemini-2.5-pro",
+      geminiApiKey: "test-key",
+    });
+
+    const [{ functionDeclarations }] = (provider as Any).convertTools([
+      {
+        name: "configure",
+        description: "Configure the job",
+        input_schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            env: { type: "object", additionalProperties: { type: "string" } },
+            target: {
+              oneOf: [
+                { type: "string", format: "uri" },
+                { type: "integer", format: "int64" },
+              ],
+            },
+            mode: { type: "string", const: "fast", default: "fast" },
+            when: { type: "string", format: "date-time", $comment: "ISO time" },
+          },
+          required: ["target"],
+        },
+      },
+    ]);
+    const parameters = functionDeclarations[0].parameters;
+
+    expect(JSON.stringify(parameters)).not.toMatch(
+      /additionalProperties|oneOf|\$comment|"const"|"default"|"uri"/,
+    );
+    expect(parameters.properties.env).toEqual({ type: "object" });
+    expect(parameters.properties.target).toEqual({
+      anyOf: [{ type: "string" }, { type: "integer", format: "int64" }],
+    });
+    expect(parameters.properties.mode).toEqual({ type: "string", enum: ["fast"] });
+    expect(parameters.properties.when).toEqual({ type: "string", format: "date-time" });
+    expect(parameters.required).toEqual(["target"]);
+  });
+});

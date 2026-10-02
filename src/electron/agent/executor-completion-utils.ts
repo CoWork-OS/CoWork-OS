@@ -375,9 +375,15 @@ export function extractExplicitOutputExtensions(taskTitle: string, taskPrompt: s
     while (pathMatch) {
       const prefix = clause.slice(0, pathMatch.index);
       // A path after an input/source cue belongs to the source material, not
-      // the requested deliverable ("create report from notes.txt").
+      // the requested deliverable ("create report from notes.txt", "write a
+      // summary of README.md"). A path right after "as"/"to"/"into"/"at" is
+      // the destination even when the clause names a source first.
+      const namesDestination = /\b(?:as|to|into|at)\s+(?:(?:the|a|an|new)\s+)?(?:file\s+)?$/i.test(
+        prefix,
+      );
       if (
-        !/\b(?:read|from|based\s+on|using|input|source|original|prior|previous|include|including)\b[^.!?\n]{0,60}$/i.test(
+        namesDestination ||
+        !/\b(?:read|from|based\s+on|using|input|source|original|prior|previous|include|including|of|about|for)\b[^.!?\n]{0,60}$/i.test(
           prefix,
         )
       ) {

@@ -339,6 +339,51 @@ describe("TaskExecutor completion contract integration", () => {
     ).toEqual([".md"]);
   });
 
+  it("does not read a file named as the subject of the request as a requested output", () => {
+    for (const prompt of [
+      "Write a summary of README.md",
+      "Create a short summary of notes.txt in chat",
+      "Build a table of the totals in data.csv",
+      "Make a summary of the docs/guide.md file",
+      "Write a short overview about config.json",
+    ]) {
+      expect(extractExplicitOutputExtensions("", prompt)).toEqual([]);
+    }
+  });
+
+  it("keeps explicit output paths, including ones written after an input reference", () => {
+    expect(
+      extractExplicitOutputExtensions(
+        "",
+        "Analyze sales.csv and create a PDF report saved as reports/q3.pdf",
+      ),
+    ).toEqual([".pdf"]);
+    expect(extractExplicitOutputExtensions("", "Write a summary of the meeting to summary.md")).toEqual(
+      [".md"],
+    );
+    expect(
+      extractExplicitOutputExtensions("", "Create a README for the project as README.md"),
+    ).toEqual([".md"]);
+    expect(
+      extractExplicitOutputExtensions("", "Generate a report using data from input.csv to output.md"),
+    ).toEqual([".md"]);
+  });
+
+  it("answers a summary of a named file inline without demanding a new file", async () => {
+    const answer =
+      "README.md describes the CLI setup: install with npm, configure .env, then run `npm start`.";
+    const executor = createExecuteHarness({
+      title: "README summary",
+      prompt: "Write a summary of README.md",
+      lastOutput: answer,
+      planStepDescription: "Read README.md and summarize it",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith("task-1", answer, expect.any(Object));
+  });
+
   it("does not require an input extension during output verification", () => {
     const executor = createExecuteHarness({
       title: "Create an action-items.md report",

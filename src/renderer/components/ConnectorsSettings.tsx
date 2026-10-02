@@ -1121,6 +1121,33 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
     }
   };
 
+  // Open the connector or integration Add Tools pointed at. Hooks must run on every
+  // render, so this sits above the loading return; it waits for settings itself.
+  useEffect(() => {
+    if (!initialSelection || handledSelection.current === initialSelection.id) return;
+    const targetId = initialSelection.targetId || initialSelection.id;
+    const integration = INTEGRATIONS.find((item) => item.key === targetId);
+    if (integration) {
+      setIntegrationModal(integration);
+      handledSelection.current = initialSelection.id;
+      return;
+    }
+    if (!settings) return;
+    const row = connectorRows.find(
+      ({ connector }) =>
+        connector.key === targetId ||
+        connector.registryId === targetId ||
+        connector.name === initialSelection.name,
+    );
+    if (row) {
+      setDetailConnector({ connector: row.connector, config: row.config, status: row.status });
+      handledSelection.current = initialSelection.id;
+    } else {
+      setSearchQuery(initialSelection.name);
+      handledSelection.current = initialSelection.id;
+    }
+  }, [connectorRows, initialSelection, settings]);
+
   if (loading) {
     return <div className="settings-loading">Loading connector settings...</div>;
   }
@@ -1157,31 +1184,6 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
   const showIntegrationResults = activeFilter !== "connected" && filteredIntegrations.length > 0;
   const showConnectorEmpty = filteredRows.length === 0 && !showIntegrationResults;
   const showMcpDivider = showIntegrationResults && filteredRows.length > 0;
-
-  useEffect(() => {
-    if (!initialSelection || handledSelection.current === initialSelection.id) return;
-    const targetId = initialSelection.targetId || initialSelection.id;
-    const integration = INTEGRATIONS.find((item) => item.key === targetId);
-    if (integration) {
-      setIntegrationModal(integration);
-      handledSelection.current = initialSelection.id;
-      return;
-    }
-    if (!settings) return;
-    const row = connectorRows.find(
-      ({ connector }) =>
-        connector.key === targetId ||
-        connector.registryId === targetId ||
-        connector.name === initialSelection.name,
-    );
-    if (row) {
-      setDetailConnector({ connector: row.connector, config: row.config, status: row.status });
-      handledSelection.current = initialSelection.id;
-    } else {
-      setSearchQuery(initialSelection.name);
-      handledSelection.current = initialSelection.id;
-    }
-  }, [connectorRows, initialSelection, settings]);
 
   return (
     <div className="settings-section connector-marketplace">

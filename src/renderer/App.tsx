@@ -1455,6 +1455,21 @@ const SelectedTaskWorkspaceView = memo(
         : null
       : computedArtifactRefreshKey;
 
+    // Above the full-screen returns: hooks must run on every render, including when
+    // a full-screen artifact or browser closes back to the session.
+    const botConversationProjection = useMemo(
+      () =>
+        task?.agentConfig?.botConversation
+          ? deriveBotConversationProjection({
+              task,
+              events: replayControls.replayEvents,
+              childEvents,
+              childTasks,
+            })
+          : null,
+      [childEvents, childTasks, replayControls.replayEvents, task],
+    );
+
     if (visibleBrowserWorkbench?.mode === "fullscreen" && task) {
       const selectedModelLabel =
         availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
@@ -1588,19 +1603,6 @@ const SelectedTaskWorkspaceView = memo(
       workspace?.path &&
       !remoteTaskView,
     );
-    const botConversationProjection = useMemo(
-      () =>
-        task?.agentConfig?.botConversation
-          ? deriveBotConversationProjection({
-              task,
-              events: replayControls.replayEvents,
-              childEvents,
-              childTasks,
-            })
-          : null,
-      [childEvents, childTasks, replayControls.replayEvents, task],
-    );
-
     return (
       <div
         ref={splitLayoutRef}

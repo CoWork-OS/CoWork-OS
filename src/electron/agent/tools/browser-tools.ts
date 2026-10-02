@@ -1766,6 +1766,7 @@ export class BrowserTools {
           action: "navigate",
           url: result.url,
           title: result.title,
+          ...(result.consentDismissed ? { consentDismissed: result.consentDismissed } : {}),
         });
         if (result.isError) {
           const statusText =

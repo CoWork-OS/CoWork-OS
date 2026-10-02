@@ -1,4 +1,4 @@
-import { chromium, Browser, Page, BrowserContext, Locator } from "playwright";
+import { chromium, Browser, Page, BrowserContext, Locator, ElementHandle } from "playwright";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { Workspace } from "../../../shared/types";
@@ -8,6 +8,109 @@ import {
   assertWorkspaceFilesystemAccess,
   type WorkspaceFilesystemAccessOptions,
 } from "../../security/access-profile-paths";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("BrowserService");
+
+/**
+ * Consent auto-dismissal only ever acts inside these consent-manager (CMP) containers, or inside
+ * a dialog whose text is about cookies/consent. Anything else on the page is never clicked.
+ */
+const CONSENT_MANAGER_CONTAINER_SELECTORS = [
+  "#onetrust-banner-sdk",
+  "#onetrust-consent-sdk",
+  "#CybotCookiebotDialog",
+  "#didomi-host",
+  ".qc-cmp2-container",
+  "#usercentrics-root",
+  "#truste-consent-track",
+  ".cc-window",
+];
+const CONSENT_DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"]';
+const CONSENT_DIALOG_TEXT_PATTERN = /\b(?:cookies?|consent|gdpr)\b|privacy choices/i;
+// Buttons only: links inside a banner usually lead to policy pages, never to a consent choice.
+const CONSENT_BUTTON_SELECTOR =
+  'button, [role="button"], input[type="button"], input[type="submit"]';
+// Exact accessible names (case-insensitive, trailing punctuation ignored). Reject or
+// necessary-only choices win over accept-all so the agent never grants more than needed.
+const CONSENT_REJECT_BUTTON_NAMES = new Set([
+  "reject all",
+  "reject all cookies",
+  "reject",
+  "reject cookies",
+  "decline",
+  "decline all",
+  "decline cookies",
+  "deny",
+  "deny all",
+  "refuse all",
+  "disagree",
+  "disagree and close",
+  "continue without accepting",
+  "continue without agreeing",
+  "only necessary",
+  "only necessary cookies",
+  "necessary only",
+  "necessary cookies only",
+  "use necessary cookies only",
+  "only essential cookies",
+  "essential cookies only",
+  "accept only essential cookies",
+  "accept necessary cookies",
+  "required only",
+  "rejeitar tudo",
+  "recusar tudo",
+  "alle ablehnen",
+  "ablehnen",
+  "nur notwendige cookies",
+  "tout refuser",
+  "continuer sans accepter",
+  "rechazar todo",
+  "rifiuta tutto",
+]);
+const CONSENT_ACCEPT_BUTTON_NAMES = new Set([
+  "accept all",
+  "accept all cookies",
+  "accept",
+  "accept cookies",
+  "accept and close",
+  "allow all",
+  "allow all cookies",
+  "allow cookies",
+  "i agree",
+  "agree",
+  "agree and close",
+  "i accept",
+  "yes, i agree",
+  "got it",
+  "ok",
+  "aceitar tudo",
+  "alle akzeptieren",
+  "akzeptieren",
+  "tout accepter",
+  "accepter",
+  "aceptar todo",
+  "aceptar",
+  "accetta tutto",
+  "accetto",
+]);
+const MAX_CONSENT_DIALOGS = 10;
+const MAX_CONSENT_BUTTONS_PER_CONTAINER = 40;
+
+function normalizeConsentButtonName(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.!]+$/, "")
+    .toLowerCase();
+}
+
+/** 0 = reject / necessary-only, 1 = accept, -1 = not a consent choice. */
+function rankConsentButtonName(name: string): number {
+  if (CONSENT_REJECT_BUTTON_NAMES.has(name)) return 0;
+  if (CONSENT_ACCEPT_BUTTON_NAMES.has(name)) return 1;
+  return -1;
+}
 
 export interface BrowserOptions {
   headless?: boolean;
@@ -36,12 +139,23 @@ export interface BrowserOptions {
   debuggerUrl?: string;
 }
 
+export interface ConsentDismissal {
+  /** "clicked" a consent button, or "removed" a CMP banner that offered no recognised choice */
+  action: "clicked" | "removed";
+  /** Accessible name of the clicked button */
+  text?: string;
+  /** Consent-manager container the action was limited to */
+  container: string;
+}
+
 export interface NavigateResult {
   url: string;
   title: string;
   status: number | null;
   /** True if status code indicates an error (4xx or 5xx) */
   isError?: boolean;
+  /** Present when a cookie-consent banner was dismissed after navigation */
+  consentDismissed?: ConsentDismissal;
 }
 
 export interface ScreenshotResult {
@@ -481,7 +595,7 @@ export class BrowserService {
     }
 
     // Auto-dismiss cookie consent popups
-    await this.dismissConsentPopups();
+    const consentDismissed = await this.dismissConsentPopups();
     this.assertPageUrlAllowed(this.page!.url());
 
     return {
@@ -490,158 +604,93 @@ export class BrowserService {
       status,
       // Include error flag for status codes >= 400
       isError: status !== null && status >= 400,
+      ...(consentDismissed ? { consentDismissed } : {}),
     };
   }
 
   /**
-   * Attempt to dismiss cookie consent popups
-   * Tries common patterns found on most websites
+   * Dismiss a cookie-consent banner, if one is showing.
+   *
+   * Only acts inside a known consent-manager container or a dialog that is about cookies or
+   * consent, clicks only buttons whose accessible name exactly matches a known consent choice
+   * (never links), and prefers reject / necessary-only over accept-all. Skipped entirely for an
+   * attached real browser or a persistent profile, where the choice would be made on the user's
+   * behalf and outlive the task.
    */
-  private async dismissConsentPopups(): Promise<void> {
-    if (!this.page) return;
+  private async dismissConsentPopups(): Promise<ConsentDismissal | null> {
+    if (!this.page) return null;
+    if (this.isAttached || this.options.userDataDir) return null;
 
     try {
-      // Common consent button selectors and text patterns
-      const consentButtonSelectors = [
-        // Common button IDs and classes
-        "#L2AGLb", // Google consent "Accept all"
-        "#onetrust-accept-btn-handler",
-        "#accept-all-cookies",
-        "#acceptAllCookies",
-        ".accept-cookies",
-        ".accept-all",
-        '[data-testid="cookie-policy-dialog-accept-button"]',
-        '[data-testid="GDPR-accept"]',
-        ".cookie-consent-accept",
-        ".cookie-banner-accept",
-        ".consent-accept",
-        "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
-        ".cc-accept",
-        ".cc-btn.cc-allow",
-        "#didomi-notice-agree-button",
-        ".evidon-barrier-acceptall",
-        // Aria labels
-        '[aria-label="Accept all cookies"]',
-        '[aria-label="Accept cookies"]',
-        '[aria-label="Accept all"]',
-        '[aria-label="Aceitar tudo"]',
-        '[aria-label="Rejeitar tudo"]',
-        '[aria-label="Reject all"]',
-        // Data attributes
-        '[data-action="accept"]',
-        '[data-consent="accept"]',
-      ];
-
-      // Try each selector
-      for (const selector of consentButtonSelectors) {
-        try {
-          const button = await this.page.$(selector);
-          if (button) {
-            await button.click();
-            console.log(`[BrowserService] Dismissed consent popup using selector: ${selector}`);
-            // Wait a bit for the popup to close
-            await this.page.waitForTimeout(500);
-            return;
-          }
-        } catch {
-          // Selector not found or not clickable, continue
+      const page = this.page;
+      const containers: Array<{ handle: ElementHandle; label: string; isCmp: boolean }> = [];
+      for (const selector of CONSENT_MANAGER_CONTAINER_SELECTORS) {
+        const handle = await page.$(selector).catch(() => null);
+        if (handle) containers.push({ handle, label: selector, isCmp: true });
+      }
+      const dialogs = await page.$$(CONSENT_DIALOG_SELECTOR).catch(() => []);
+      for (const dialog of dialogs.slice(0, MAX_CONSENT_DIALOGS)) {
+        const text = (await dialog.textContent().catch(() => null)) || "";
+        if (CONSENT_DIALOG_TEXT_PATTERN.test(text)) {
+          containers.push({ handle: dialog, label: "cookie consent dialog", isCmp: false });
         }
       }
+      if (containers.length === 0) return null;
 
-      // Try text-based matching for common button texts
-      const buttonTexts = [
-        "Accept all",
-        "Accept All",
-        "Accept all cookies",
-        "Accept All Cookies",
-        "Allow all",
-        "Allow All",
-        "Allow all cookies",
-        "I agree",
-        "I Accept",
-        "Got it",
-        "OK",
-        "Agree",
-        "Accept",
-        "Consent",
-        "Continue",
-        "Yes, I agree",
-        "Reject all",
-        "Reject All",
-        "Rejeitar tudo",
-        "Aceitar tudo",
-        "Recusar tudo",
-        "Accetto",
-        "Akzeptieren",
-        "Accepter",
-        "Aceptar",
-      ];
-
-      for (const text of buttonTexts) {
-        try {
-          // Look for buttons with exact or partial text match
-          const button = await this.page.$(
-            `button:has-text("${text}"), a:has-text("${text}"), [role="button"]:has-text("${text}")`,
-          );
-          if (button) {
-            // Verify the button is visible and in a consent-like context
-            const isVisible = await button.isVisible();
-            if (isVisible) {
-              await button.click();
-              console.log(`[BrowserService] Dismissed consent popup with button text: "${text}"`);
-              await this.page.waitForTimeout(500);
-              return;
-            }
-          }
-        } catch {
-          // Not found, continue
+      let best: { rank: number; button: ElementHandle; text: string; container: string } | null =
+        null;
+      const unrecognisedCmpBanners: string[] = [];
+      for (const container of containers) {
+        const buttons = await container.handle.$$(CONSENT_BUTTON_SELECTOR).catch(() => []);
+        let sawVisibleButton = false;
+        for (const button of buttons.slice(0, MAX_CONSENT_BUTTONS_PER_CONTAINER)) {
+          if (!(await button.isVisible().catch(() => false))) continue;
+          sawVisibleButton = true;
+          const rawName =
+            (await button.getAttribute("aria-label").catch(() => null)) ||
+            (await button.textContent().catch(() => null)) ||
+            (await button.getAttribute("value").catch(() => null)) ||
+            "";
+          const name = normalizeConsentButtonName(rawName);
+          const rank = rankConsentButtonName(name);
+          if (rank < 0 || (best && best.rank <= rank)) continue;
+          best = {
+            rank,
+            button,
+            text: rawName.replace(/\s+/g, " ").trim(),
+            container: container.label,
+          };
+          if (rank === 0) break;
         }
+        if (best?.rank === 0) break;
+        if (container.isCmp && sawVisibleButton) unrecognisedCmpBanners.push(container.label);
       }
 
-      // As a last resort, try to remove common overlay elements via JavaScript
-      await this.page.evaluate(`
+      if (best) {
+        await best.button.click({ timeout: 2_000 });
+        log.info(`Dismissed consent banner with "${best.text}" in ${best.container}`);
+        await page.waitForTimeout(500).catch(() => {});
+        return { action: "clicked", text: best.text, container: best.container };
+      }
+
+      // A consent manager is showing choices we do not recognise (e.g. another language).
+      // Remove only that banner so the page is usable, without granting or refusing consent.
+      if (unrecognisedCmpBanners.length === 0) return null;
+      await page.evaluate(`
         (() => {
-          // Common consent popup container selectors
-          const overlaySelectors = [
-            '#onetrust-consent-sdk',
-            '#onetrust-banner-sdk',
-            '.cookie-consent',
-            '.cookie-banner',
-            '.consent-banner',
-            '.gdpr-consent',
-            '.privacy-consent',
-            '[class*="cookie-consent"]',
-            '[class*="cookie-banner"]',
-            '[class*="consent-modal"]',
-            '[id*="cookie-consent"]',
-            '[id*="cookie-banner"]',
-            '#CybotCookiebotDialog',
-            '.cc-window',
-            '#didomi-host',
-            '.evidon-consent-banner',
-          ];
-
-          for (const selector of overlaySelectors) {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach(el => el.remove());
+          for (const selector of ${JSON.stringify(unrecognisedCmpBanners)}) {
+            document.querySelectorAll(selector).forEach((el) => el.remove());
           }
-
-          // Also remove any fixed/sticky overlays that might be blocking
-          document.querySelectorAll('[style*="position: fixed"], [style*="position:fixed"]').forEach(el => {
-            const text = el.textContent?.toLowerCase() || '';
-            if (text.includes('cookie') || text.includes('consent') || text.includes('privacy') || text.includes('gdpr')) {
-              el.remove();
-            }
-          });
-
-          // Re-enable scrolling if it was disabled
           document.body.style.overflow = '';
           document.documentElement.style.overflow = '';
         })()
       `);
+      log.info(`Removed unrecognised consent banner ${unrecognisedCmpBanners[0]}`);
+      return { action: "removed", container: unrecognisedCmpBanners[0] };
     } catch (error) {
-      // Silently fail - consent popup handling is best-effort
-      console.log("[BrowserService] Could not dismiss consent popup:", error);
+      // Best effort: consent handling must never fail navigation.
+      log.debug("Could not dismiss consent popup:", error);
+      return null;
     }
   }
 

@@ -120,6 +120,44 @@ export const CONTEXT_CAPACITY_ERROR_PATTERNS = [
   /maximum number of input tokens/i,
   /reduce the length of the messages/i,
   /invalid_request_error.*(context|tokens|length)/i,
+  // Anthropic / Vertex: "prompt is too long: 210000 tokens > 200000 maximum"
+  /prompt is too long/i,
+  // Bedrock: "Input is too long for requested model."
+  /input is too long/i,
+  // Gemini: "The input token count (N) exceeds the maximum number of tokens allowed (M)."
+  /input token count[^.]*exceeds/i,
+  // llama.cpp: "the request exceeds the available context size, try increasing it"
+  /exceeds the available context size/i,
+  // Anthropic: "input length and `max_tokens` exceed context limit: N + M > L"
+  /exceeds? (?:the )?context limit/i,
+  // xAI: "This model's maximum prompt length is N but the request contains M tokens."
+  /maximum prompt length/i,
+];
+
+// The requested output size (max_tokens) is over the model's output cap. That is
+// an output-budget problem: compacting the input cannot fix it.
+const OUTPUT_TOKEN_CAP_ERROR_PATTERNS = [
+  /max_tokens:\s*\d+\s*>\s*\d+/i,
+  /maximum allowed number of output tokens/i,
+  /max_(?:completion_)?tokens is too large/i,
+  /supports at most \d+ completion tokens/i,
+  /max(?:imum)?[_ ]?output[_ ]?tokens/i,
+];
+
+// Wording that names the input as too long; it wins over an output-cap match.
+const INPUT_OVERFLOW_ERROR_PATTERNS = [
+  /prompt is too long/i,
+  /input is too long/i,
+  /input too long/i,
+  /prompt too long/i,
+  /context length/i,
+  /context window/i,
+  /context limit/i,
+  /context size/i,
+  /maximum context/i,
+  /input token count/i,
+  /maximum prompt length/i,
+  /reduce the length of the messages/i,
 ];
 
 // Patterns that indicate input-dependent errors (not tool failures)
@@ -256,7 +294,52 @@ export function isContextCapacityError(errorLike: unknown): boolean {
         ? String((errorLike as Any).message || "")
         : "";
   if (!message.trim()) return false;
-  return CONTEXT_CAPACITY_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  if (!CONTEXT_CAPACITY_ERROR_PATTERNS.some((pattern) => pattern.test(message))) return false;
+  const isOutputCapError = OUTPUT_TOKEN_CAP_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  return (
+    !isOutputCapError || INPUT_OVERFLOW_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+  );
+}
+
+/**
+ * Token counts a context-overflow error reports, when it reports them:
+ * `requested` is what the provider counted for the request and `limit` what it
+ * allows. Returns null when the message carries no usable counts.
+ */
+export function parseContextOverflowTokenCounts(
+  errorLike: unknown,
+): { requested: number; limit: number } | null {
+  const message =
+    typeof errorLike === "string"
+      ? errorLike
+      : typeof errorLike === "object" && errorLike !== null
+        ? String((errorLike as Any).message || "")
+        : "";
+  const toNumber = (value: string | undefined) => Number(String(value || "").replace(/,/g, ""));
+  const counts = (requested: number, limit: number) =>
+    Number.isFinite(requested) && Number.isFinite(limit) && limit > 0 && requested > limit
+      ? { requested, limit }
+      : null;
+
+  // Anthropic: "input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000"
+  let match = /(\d[\d,]*)\s*\+\s*(\d[\d,]*)\s*>\s*(\d[\d,]*)/.exec(message);
+  if (match) return counts(toNumber(match[1]) + toNumber(match[2]), toNumber(match[3]));
+  // Anthropic: "prompt is too long: 210000 tokens > 200000 maximum"
+  match = /(\d[\d,]*)\s*tokens?\s*>\s*(\d[\d,]*)/i.exec(message);
+  if (match) return counts(toNumber(match[1]), toNumber(match[2]));
+  // Gemini: "input token count (1100000) exceeds the maximum number of tokens allowed (1048576)"
+  match = /input token count \(?(\d[\d,]*)\)?[^(]*\((\d[\d,]*)\)/i.exec(message);
+  if (match) return counts(toNumber(match[1]), toNumber(match[2]));
+  // OpenAI-compatible: "maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens"
+  match =
+    /maximum (?:context|prompt) length is (\d[\d,]*)[\s\S]*?(?:resulted in|requested(?: about)?|contains) (\d[\d,]*)/i.exec(
+      message,
+    );
+  if (match) return counts(toNumber(match[2]), toNumber(match[1]));
+  // Mistral: "Prompt contains 40000 tokens ... too large for model with 32768 maximum context length"
+  match = /contains (\d[\d,]*) tokens[\s\S]*?with (\d[\d,]*) maximum context length/i.exec(message);
+  if (match) return counts(toNumber(match[1]), toNumber(match[2]));
+  return null;
 }
 
 /**

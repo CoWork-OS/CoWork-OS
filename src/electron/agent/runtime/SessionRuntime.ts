@@ -57,6 +57,7 @@ import {
   FileOperationTracker,
   ToolFailureTracker,
   isContextCapacityError,
+  parseContextOverflowTokenCounts,
 } from "../executor-helpers";
 import { requestLLMResponseWithAdaptiveBudget as requestLLMResponseWithAdaptiveBudgetUtil } from "../executor-llm-turn-utils";
 import { filterToolsByPolicy } from "../tool-policy-engine";
@@ -78,6 +79,9 @@ import type { JevContextCompactionResult } from "../jev/context-compaction-decis
 import { DurableContextService } from "../../memory/DurableContextService";
 import { InputSanitizer } from "../security/input-sanitizer";
 import { findPinnedContextBlockContent, PINNED_CONTEXT_TAGS } from "../pinned-context-blocks";
+
+// Lowest compaction target a provider-overflow retry tightens to.
+const OVERFLOW_RECOVERY_MIN_TARGET_RATIO = 0.05;
 
 interface WebEvidenceEntry {
   tool: "web_search" | "web_fetch";
@@ -2608,6 +2612,32 @@ export class SessionRuntime {
     }
   }
 
+  /**
+   * Compaction target for a provider-overflow retry. Each retry halves the base
+   * target. When the provider reports its own count and limit, the local estimate
+   * evidently undercounts, so the target also drops by the reported overshoot.
+   */
+  private resolveOverflowTargetRatio(
+    error: unknown,
+    attempt: number,
+    currentTokens: number,
+    systemPromptTokens: number,
+  ): number {
+    let ratio = CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO / 2 ** Math.max(0, attempt);
+    const overflow = parseContextOverflowTokenCounts(error);
+    const contextManager = this.deps.getContextManager() as Any;
+    const availableTokens =
+      typeof contextManager?.getAvailableTokens === "function"
+        ? Number(contextManager.getAvailableTokens(systemPromptTokens))
+        : NaN;
+    if (overflow && Number.isFinite(availableTokens) && availableTokens > 0) {
+      const overshoot = overflow.requested - overflow.limit;
+      const targetTokens = currentTokens - Math.ceil(overshoot * 1.1) - 1000;
+      ratio = Math.min(ratio, targetTokens / availableTokens);
+    }
+    return Math.max(OVERFLOW_RECOVERY_MIN_TARGET_RATIO, ratio);
+  }
+
   async recoverFromContextCapacityOverflow(opts: {
     error: unknown;
     messages: LLMMessage[];
@@ -2637,13 +2667,19 @@ export class SessionRuntime {
     }
 
     const tokensBefore = estimateTotalTokens(opts.messages);
+    let targetRatio = this.resolveOverflowTargetRatio(
+      opts.error,
+      opts.attempt,
+      tokensBefore,
+      opts.systemPromptTokens,
+    );
     const installsInHistory = this.state.transcript.conversationHistory === opts.messages;
     const compactionSession = this.beginCompaction({
       trigger: "capacity_recovery",
       phase: "mid_turn",
       reason: "provider_context_capacity_error",
       inputTokens: tokensBefore,
-      targetRatio: CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+      targetRatio,
       extra: {
         phase: opts.phase,
         stepId: opts.stepId,
@@ -2662,21 +2698,38 @@ export class SessionRuntime {
     });
 
     try {
-      const proactive = this.deps
-        .getContextManager()
-        .proactiveCompactWithMeta(
+      const contextManager = this.deps.getContextManager();
+      let proactive = contextManager.proactiveCompactWithMeta(
+        opts.messages,
+        opts.systemPromptTokens,
+        targetRatio,
+      );
+      // The provider rejected this request, so a target the local estimate already
+      // meets is too loose: tighten it until compaction can drop something.
+      while (
+        !proactive.meta.removedMessages.didRemove &&
+        proactive.meta.truncatedToolResults?.didTruncate !== true &&
+        targetRatio > OVERFLOW_RECOVERY_MIN_TARGET_RATIO
+      ) {
+        targetRatio = Math.max(OVERFLOW_RECOVERY_MIN_TARGET_RATIO, targetRatio / 2);
+        proactive = contextManager.proactiveCompactWithMeta(
           opts.messages,
           opts.systemPromptTokens,
-          CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+          targetRatio,
         );
+      }
       let compactedMessages = proactive.messages;
       let removedMessages = proactive.meta.removedMessages.messages;
+      let truncatedToolResults = proactive.meta.truncatedToolResults?.didTruncate === true;
       if (!proactive.meta.removedMessages.didRemove) {
-        const fallback = this.deps
-          .getContextManager()
-          .compactMessagesWithMeta(compactedMessages, opts.systemPromptTokens);
+        const fallback = contextManager.compactMessagesWithMeta(
+          compactedMessages,
+          opts.systemPromptTokens,
+        );
         compactedMessages = fallback.messages;
         removedMessages = fallback.meta.removedMessages.messages;
+        truncatedToolResults =
+          truncatedToolResults || fallback.meta.truncatedToolResults?.didTruncate === true;
       }
       const summaryResult = await this.installCompactionSummary({
         messages: compactedMessages,
@@ -2716,6 +2769,33 @@ export class SessionRuntime {
             reason: exhaustedError.reason,
             retryable: attemptNumber < opts.maxAttempts,
             failureStage: "budget_check",
+            inputTokens: tokensBefore,
+            extra: { phase: opts.phase, stepId: opts.stepId },
+          });
+        }
+        return { recovered: false, exhausted: true, messages: opts.messages };
+      }
+
+      if ((removedMessages.length === 0 && !truncatedToolResults) || tokensAfter >= tokensBefore) {
+        // Nothing could be dropped, so a retry would only resend the same request.
+        this.emitBestEffortEvent("context_capacity_recovery_failed", {
+          phase: opts.phase,
+          stepId: opts.stepId,
+          attempt: attemptNumber,
+          maxAttempts: opts.maxAttempts,
+          reason: "no_reduction_possible",
+          providerError: reason,
+          tokensBefore,
+          tokensAfter,
+        });
+        if (compactionSession) {
+          this.failCompaction({
+            compactionId: compactionSession.compactionId,
+            trigger: "capacity_recovery",
+            phase: "mid_turn",
+            reason: "no_reduction_possible",
+            retryable: false,
+            failureStage: "compact",
             inputTokens: tokensBefore,
             extra: { phase: opts.phase, stepId: opts.stepId },
           });
@@ -2763,7 +2843,7 @@ export class SessionRuntime {
           replacementMessageCount: compactedMessages.length,
           removedMessageCount: removedMessages.length,
           removedApproxTokens: Math.max(0, tokensBefore - tokensAfter),
-          targetRatio: CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+          targetRatio,
           summaryPreview: summaryResult.summaryBlock
             ? this.extractCompactionSummaryText(summaryResult.summaryBlock)
             : undefined,

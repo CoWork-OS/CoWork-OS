@@ -150,6 +150,7 @@ import {
 import {
   ContextManager,
   estimateTokens,
+  estimateToolSchemaTokens,
   estimateTotalTokens,
   truncateToTokens,
   truncateToolResult,
@@ -10413,6 +10414,29 @@ ${transcript}
       terminal_failure_fingerprint: fingerprint,
     });
     return true;
+  }
+
+  /**
+   * Tokens every request spends before the transcript: the system prompt plus the
+   * tool definitions. The context budget has to count both, or compaction starts
+   * too late and the provider rejects requests the estimate says fit. Tools count
+   * for at most half of what the system prompt leaves, so a large catalog on a
+   * small local model still leaves room for the conversation.
+   */
+  private estimateSystemAndToolTokens(): number {
+    const systemPromptTokens = estimateTokens(this.systemPrompt || "");
+    let toolTokens = 0;
+    try {
+      toolTokens = estimateToolSchemaTokens(this.getAvailableTools());
+    } catch {
+      return systemPromptTokens;
+    }
+    const remaining = this.contextManager?.getAvailableTokens?.(systemPromptTokens);
+    const toolCap =
+      typeof remaining === "number" && Number.isFinite(remaining)
+        ? Math.max(0, Math.floor(remaining / 2))
+        : toolTokens;
+    return systemPromptTokens + Math.min(toolTokens, toolCap);
   }
 
   private getRenderedContextRatio(): number {
@@ -31121,7 +31145,7 @@ Return ONLY a JSON object:
       totalTokens: builtPrompt.totalTokens,
     });
 
-    const systemPromptTokens = estimateTokens(this.systemPrompt);
+    const systemPromptTokens = this.estimateSystemAndToolTokens();
 
     try {
       // Each step gets fresh context with its specific instruction
@@ -39594,7 +39618,7 @@ Return ONLY a JSON object:
       totalTokens: builtPrompt.totalTokens,
     });
 
-    const systemPromptTokens = estimateTokens(this.systemPrompt);
+    const systemPromptTokens = this.estimateSystemAndToolTokens();
     const contextPackInjectionEnabled = !!memoryFeatureSettings.contextPackInjectionEnabled;
     const allowSharedContextInjection =
       contextPackInjectionEnabled && (gatewayContext === "private" || allowTrustedSharedMemory);

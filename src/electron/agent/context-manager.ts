@@ -1,4 +1,9 @@
-import { LLMMessage, LLMContent as _LLMContent, LLMToolResult as _LLMToolResult } from "./llm";
+import {
+  LLMMessage,
+  LLMTool,
+  LLMContent as _LLMContent,
+  LLMToolResult as _LLMToolResult,
+} from "./llm";
 import { estimateImageTokens } from "./llm/image-utils";
 import { getModelContextWindow } from "../../shared/model-metadata";
 import { PINNED_CONTEXT_OPEN_TAGS } from "./pinned-context-blocks";
@@ -220,6 +225,23 @@ export function estimateMessageTokens(message: LLMMessage): number {
     }
   }
   return tokens;
+}
+
+/**
+ * Estimate the tokens tool definitions (name, description, input schema) add to
+ * every request that offers them.
+ */
+export function estimateToolSchemaTokens(
+  tools: Array<Pick<LLMTool, "name" | "description" | "input_schema">>,
+): number {
+  let total = 0;
+  for (const tool of tools || []) {
+    total +=
+      estimateTokens(String(tool?.name || "")) +
+      estimateTokens(String(tool?.description || "")) +
+      estimateTokens(JSON.stringify(tool?.input_schema || {}));
+  }
+  return total;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { estimateTokens } from "../context-manager";
 import { TaskExecutor } from "../executor";
 import { FileOperationTracker } from "../executor-helpers";
 import type { LLMResponse } from "../llm";
@@ -356,5 +357,30 @@ describe("knowledge summary", () => {
     expect(summary).toContain("docs/file-2.md");
     expect(summary).not.toContain("docs/file-0.md");
     expect(summary).not.toContain("docs/file-1.md");
+  });
+});
+
+describe("step context budget", () => {
+  it("counts the tool definitions sent with every request", async () => {
+    const executor = createStepExecutor(() => textResponse("The parser drops ISO weeks."));
+    const largeTool = {
+      name: "large_tool",
+      description: "d".repeat(8_000),
+      input_schema: {
+        type: "object",
+        properties: { query: { type: "string", description: "q".repeat(4_000) } },
+      },
+    };
+    executor.getAvailableTools = vi.fn().mockReturnValue([largeTool]);
+    const step: Any = { id: "1", description: "Explain why parseDate fails", status: "pending" };
+    executor.plan = { description: "Fix the date parser", steps: [step] };
+
+    await executor.executeStep(step);
+
+    const [, systemPromptTokens] = executor.contextManager.getContextUtilization.mock.calls[0];
+    // About 3K tokens of tool definitions on top of the system prompt.
+    expect(systemPromptTokens - estimateTokens(executor.systemPrompt)).toBeGreaterThanOrEqual(
+      3_000,
+    );
   });
 });

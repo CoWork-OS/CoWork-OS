@@ -4,7 +4,11 @@ import * as path from "path";
 import { createHash } from "node:crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
-import { BrowserService } from "../browser/browser-service";
+import {
+  BrowserService,
+  paginatePageText,
+  type PageContentOptions,
+} from "../browser/browser-service";
 import {
   BrowserUseApiError,
   BrowserUseCloudClient,
@@ -139,6 +143,21 @@ export class BrowserTools {
       return Math.round(rawTimeout);
     }
     return undefined;
+  }
+
+  private getPageContentOptions(input: unknown): PageContentOptions {
+    const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    const options: PageContentOptions = {};
+    if (typeof toolInput.offset === "number" && Number.isFinite(toolInput.offset)) {
+      options.offset = toolInput.offset;
+    }
+    if (typeof toolInput.max_chars === "number" && Number.isFinite(toolInput.max_chars)) {
+      options.maxChars = toolInput.max_chars;
+    }
+    if (toolInput.scope === "page" || toolInput.scope === "auto") {
+      options.scope = toolInput.scope;
+    }
+    return options;
   }
 
   private getSessionId(input: unknown): string | undefined {
@@ -1035,13 +1054,28 @@ export class BrowserTools {
       {
         name: "browser_get_content",
         description:
-          "Get the text content, links, and forms from the current page. " +
-          "NOTE: For RESEARCH tasks, use web_search first - it is more efficient for finding information across multiple sources. " +
-          "If you just need to read a specific URL, use web_fetch - it is faster and does not require opening a browser. " +
-          "Use this only after browser_navigate when you need JavaScript-rendered content or to inspect forms/links for interaction.",
+          "Get the rendered text, links, forms, and visible interactive elements (with selectors for browser_click/browser_fill) of the current page. " +
+          "Long text is paginated: when truncated is true, call again with offset=nextOffset. " +
+          "For research use web_search; to read a known URL use web_fetch (faster, no browser). " +
+          "Use this after browser_navigate for JavaScript-rendered content or to find elements to interact with.",
         input_schema: {
           type: "object" as const,
           properties: {
+            offset: {
+              type: "number",
+              description:
+                "Character offset to start reading the page text from; pass nextOffset from a truncated result. Default: 0",
+            },
+            max_chars: {
+              type: "number",
+              description: "Maximum characters of page text to return (default 10000, max 25000).",
+            },
+            scope: {
+              type: "string",
+              enum: ["auto", "page"],
+              description:
+                "auto (default): the whole page when it fits, otherwise the main content region first. page: always read the whole page.",
+            },
             session_id: {
               type: "string",
               description: "Optional visible in-app browser workbench session id.",
@@ -1940,20 +1974,24 @@ export class BrowserTools {
           }
         }
         const content = await this.browserService.getContent();
+        const interactive = Array.isArray(content.interactive) ? content.interactive : [];
         return {
           success: true,
           sessionId: "headless",
           tabId: "active",
           url: content.url,
           title: content.title,
-          nodes: content.links.slice(0, 60).map((link) => ({
-            role: "link",
-            name: link.text,
-            text: link.href,
-          })),
+          nodes:
+            interactive.length > 0
+              ? interactive
+              : content.links.slice(0, 60).map((link) => ({
+                  role: "link",
+                  name: link.text,
+                  text: link.href,
+                })),
           refSupport: false,
           message:
-            "Headless snapshot is read-only and does not provide Browser V2 refs. Use selector-based tools or open a visible Browser Workbench session for ref actions.",
+            "Headless snapshot has no Browser V2 refs. Each node carries a CSS selector that browser_click, browser_fill, browser_type, browser_select and browser_get_text accept.",
           consoleSummary: { count: 0, recent: [] },
           networkSummary: { count: 0, recent: [] },
         };
@@ -2006,10 +2044,24 @@ export class BrowserTools {
               url: result.url,
               visible: true,
             });
+            const options = this.getPageContentOptions(input);
+            if (
+              typeof result.text === "string" &&
+              (options.offset !== undefined || options.maxChars !== undefined)
+            ) {
+              const { url, title, text, ...rest } = result;
+              return {
+                success: true,
+                url,
+                title,
+                ...paginatePageText(text, options.offset, options.maxChars),
+                ...rest,
+              };
+            }
             return { success: true, ...result };
           }
         }
-        const result = await this.browserService.getContent();
+        const result = await this.browserService.getContent(this.getPageContentOptions(input));
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "get_content",
           url: result.url,

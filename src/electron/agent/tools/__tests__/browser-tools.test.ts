@@ -879,4 +879,106 @@ describe("BrowserTools browser_navigate", () => {
     expect(result.refSupport).toBe(false);
     expect(result.nodes[0].ref).toBeUndefined();
   });
+
+  it("lists buttons and inputs with usable selectors in the headless snapshot", async () => {
+    const { tools } = makeTools({
+      getSession: vi.fn().mockReturnValue(null),
+    });
+    (tools as Any).browserService = {
+      getContent: vi.fn().mockResolvedValue({
+        url: "https://example.com/signup",
+        title: "Sign up",
+        text: "Create your account",
+        links: [{ text: "Docs", href: "https://example.com/docs" }],
+        forms: [],
+        interactive: [
+          { role: "textbox", name: "Email", selector: "#email", type: "email" },
+          { role: "button", name: "Create account", selector: 'button[name="create"]' },
+          { role: "link", name: "Docs", selector: 'a[href="/docs"]', href: "/docs" },
+        ],
+      }),
+    };
+
+    const result = await tools.executeTool("browser_snapshot", {});
+
+    expect(result.refSupport).toBe(false);
+    expect(result.nodes).toEqual([
+      { role: "textbox", name: "Email", selector: "#email", type: "email" },
+      { role: "button", name: "Create account", selector: 'button[name="create"]' },
+      { role: "link", name: "Docs", selector: 'a[href="/docs"]', href: "/docs" },
+    ]);
+    expect(result.nodes.every((node: Any) => node.ref === undefined)).toBe(true);
+    expect(result.message).toContain("selector");
+  });
+
+  it("passes pagination and scope options to the headless content reader", async () => {
+    const { tools } = makeTools({
+      getSession: vi.fn().mockReturnValue(null),
+    });
+    const getContent = vi.fn().mockResolvedValue({
+      url: "https://example.com/report",
+      title: "Report",
+      textScope: "page",
+      offset: 10_000,
+      totalChars: 30_000,
+      truncated: true,
+      nextOffset: 15_000,
+      text: "...",
+      links: [],
+      forms: [],
+      interactive: [],
+    });
+    (tools as Any).browserService = { getContent };
+
+    const result = await tools.executeTool("browser_get_content", {
+      offset: 10_000,
+      max_chars: 5_000,
+      scope: "page",
+    });
+
+    expect(getContent).toHaveBeenCalledWith({ offset: 10_000, maxChars: 5_000, scope: "page" });
+    expect(result).toMatchObject({ truncated: true, nextOffset: 15_000 });
+  });
+
+  it("paginates visible workbench content when max_chars is requested", async () => {
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue({
+        taskId: "task-1",
+        sessionId: "default",
+        webContentsId: 123,
+      }),
+      getContent: vi.fn().mockResolvedValue({
+        url: "https://example.com/long",
+        title: "Long page",
+        text: "x".repeat(12_000),
+        links: [],
+        forms: [],
+      }),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_get_content", {
+      offset: 4_000,
+      max_chars: 5_000,
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      offset: 4_000,
+      totalChars: 12_000,
+      truncated: true,
+      nextOffset: 9_000,
+    });
+    expect(result.text).toHaveLength(5_000);
+  });
+
+  it("documents pagination options on browser_get_content", () => {
+    const getContentTool = BrowserTools.getToolDefinitions().find(
+      (tool) => tool.name === "browser_get_content",
+    );
+
+    expect(getContentTool?.input_schema.properties).toHaveProperty("offset");
+    expect(getContentTool?.input_schema.properties).toHaveProperty("max_chars");
+    expect(getContentTool?.input_schema.properties).toHaveProperty("scope");
+  });
 });

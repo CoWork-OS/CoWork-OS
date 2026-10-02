@@ -182,13 +182,100 @@ export interface ElementInfo {
   placeholder?: string;
 }
 
-export interface PageContent {
+export interface PageContentOptions {
+  /** Character offset into the page text (use nextOffset from a truncated read) */
+  offset?: number;
+  /** Maximum characters of page text to return */
+  maxChars?: number;
+  /** "auto": whole page when it fits, else the main region; "page": always the whole page */
+  scope?: "auto" | "page";
+}
+
+export interface PageTextWindow {
+  offset: number;
+  totalChars: number;
+  truncated: boolean;
+  /** Offset to pass to read the next chunk; present only when truncated */
+  nextOffset?: number;
+  text: string;
+}
+
+export interface PageContent extends PageTextWindow {
   url: string;
   title: string;
-  text: string;
+  /** Whether text covers the whole page or only its main content region */
+  textScope: "page" | "main";
+  /** Length of the whole-page text when textScope is "main" */
+  pageTextChars?: number;
+  /** Visible buttons, inputs, selects and (capped) links with selectors for click/fill/type */
+  interactive: InteractiveElement[];
   links: Array<{ text: string; href: string }>;
   forms: Array<{ action: string; method: string; inputs: string[] }>;
 }
+
+export const DEFAULT_PAGE_TEXT_CHARS = 10_000;
+export const MAX_PAGE_TEXT_CHARS = 25_000;
+/** A main/article region shorter than this is not treated as the page's main content. */
+const MIN_MAIN_TEXT_CHARS = 200;
+const PAGE_INTERACTIVE_LIMIT = 60;
+const PAGE_INTERACTIVE_LINK_LIMIT = 20;
+
+/** Returns one window of page text plus what is needed to read the rest. */
+export function paginatePageText(
+  fullText: string,
+  offset?: number,
+  maxChars?: number,
+): PageTextWindow {
+  const totalChars = fullText.length;
+  const requestedOffset = Number.isFinite(offset) ? Math.floor(Number(offset)) : 0;
+  const start = Math.min(Math.max(0, requestedOffset), totalChars);
+  const requestedMax = Number.isFinite(maxChars) ? Math.floor(Number(maxChars)) : NaN;
+  const limit =
+    requestedMax > 0 ? Math.min(requestedMax, MAX_PAGE_TEXT_CHARS) : DEFAULT_PAGE_TEXT_CHARS;
+  const end = Math.min(totalChars, start + limit);
+  const truncated = end < totalChars;
+  return {
+    offset: start,
+    totalChars,
+    truncated,
+    ...(truncated ? { nextOffset: end } : {}),
+    text: fullText.slice(start, end),
+  };
+}
+
+/**
+ * Page script for getContent. Text comes from the live, rendered innerText (hidden menus and
+ * templates are excluded) of the body and of the main content region, if the page has one.
+ */
+const PAGE_CONTENT_SCRIPT = `
+  (() => {
+    const MAX_TEXT = 1000000;
+    const collapse = (value) => String(value || "").replace(/\\s+/g, " ").trim().slice(0, MAX_TEXT);
+    let main = document.querySelector('main, [role="main"]');
+    if (!main) {
+      const articles = document.querySelectorAll("article");
+      if (articles.length === 1) main = articles[0];
+    }
+    const anchors = Array.from(document.querySelectorAll("a[href]"));
+    const shown = (el) => el.getClientRects().length > 0;
+    const orderedAnchors = anchors.filter(shown).concat(anchors.filter((el) => !shown(el)));
+    return {
+      bodyText: collapse(document.body ? document.body.innerText : ""),
+      mainText: collapse(main ? main.innerText : ""),
+      links: orderedAnchors.slice(0, 50).map((a) => ({
+        text: (a.textContent || "").trim().slice(0, 100),
+        href: a.href,
+      })).filter((l) => l.text && l.href),
+      forms: Array.from(document.querySelectorAll("form")).slice(0, 10).map((form) => ({
+        action: form.action || "",
+        method: form.method || "get",
+        inputs: Array.from(form.querySelectorAll("input, textarea, select")).slice(0, 20).map((input) => {
+          return input.tagName.toLowerCase() + '[name="' + (input.name || "") + '"][type="' + (input.type || "text") + '"]';
+        }),
+      })),
+    };
+  })()
+`;
 
 /** A visible interactive element and a selector the click/fill/type tools accept for it. */
 export interface InteractiveElement {
@@ -1015,51 +1102,49 @@ export class BrowserService {
   }
 
   /**
-   * Get page content as text
+   * Get page content as text, paginated, plus links, forms and interactive elements
    */
-  async getContent(): Promise<PageContent> {
+  async getContent(options: PageContentOptions = {}): Promise<PageContent> {
     await this.ensurePage();
     this.assertPageUrlAllowed(this.page!.url());
 
     const url = this.page!.url();
     const title = await this.page!.title();
 
-    // Get visible text content
-    const text = (await this.page!.evaluate(`
-      (() => {
-        const body = document.body;
-        const clone = body.cloneNode(true);
-        clone.querySelectorAll('script, style, noscript').forEach(el => el.remove());
-        return clone.innerText.replace(/\\s+/g, ' ').trim().slice(0, 10000);
-      })()
-    `)) as string;
+    const raw = ((await this.page!.evaluate(PAGE_CONTENT_SCRIPT)) || {}) as {
+      bodyText?: string;
+      mainText?: string;
+      links?: Array<{ text: string; href: string }>;
+      forms?: Array<{ action: string; method: string; inputs: string[] }>;
+    };
+    const bodyText = typeof raw.bodyText === "string" ? raw.bodyText : "";
+    const mainText = typeof raw.mainText === "string" ? raw.mainText : "";
+    // When the whole page does not fit in one default read, start from the main content
+    // region so navigation and footer text cannot push it out of view.
+    const useMain =
+      options.scope !== "page" &&
+      bodyText.length > DEFAULT_PAGE_TEXT_CHARS &&
+      mainText.length >= MIN_MAIN_TEXT_CHARS;
+    const textWindow = paginatePageText(
+      useMain ? mainText : bodyText,
+      options.offset,
+      options.maxChars,
+    );
+    const interactive = await this.getInteractiveElements(
+      PAGE_INTERACTIVE_LIMIT,
+      PAGE_INTERACTIVE_LINK_LIMIT,
+    ).catch(() => []);
 
-    // Get links
-    const links = (await this.page!.evaluate(`
-      (() => {
-        const anchors = document.querySelectorAll('a[href]');
-        return Array.from(anchors).slice(0, 50).map(a => ({
-          text: (a.textContent || '').trim().slice(0, 100),
-          href: a.href
-        })).filter(l => l.text && l.href);
-      })()
-    `)) as Array<{ text: string; href: string }>;
-
-    // Get forms
-    const forms = (await this.page!.evaluate(`
-      (() => {
-        const formElements = document.querySelectorAll('form');
-        return Array.from(formElements).slice(0, 10).map(form => ({
-          action: form.action || '',
-          method: form.method || 'get',
-          inputs: Array.from(form.querySelectorAll('input, textarea, select')).slice(0, 20).map(input => {
-            return input.tagName.toLowerCase() + '[name="' + (input.name || '') + '"][type="' + (input.type || 'text') + '"]';
-          })
-        }));
-      })()
-    `)) as Array<{ action: string; method: string; inputs: string[] }>;
-
-    return { url, title, text, links, forms };
+    return {
+      url,
+      title,
+      textScope: useMain ? "main" : "page",
+      ...(useMain ? { pageTextChars: bodyText.length } : {}),
+      ...textWindow,
+      interactive,
+      links: Array.isArray(raw.links) ? raw.links : [],
+      forms: Array.isArray(raw.forms) ? raw.forms : [],
+    };
   }
 
   /**

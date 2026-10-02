@@ -629,6 +629,30 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(compact).toContain("web_fetch");
   });
 
+  it("keeps canonical tool facts when prompt guidance is appended", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-prompting-facts");
+    const tools = registry.getTools();
+    const pick = (name: string) => tools.find((tool) => tool.name === name)!;
+    const [spawnAgent, navigate] = registry.renderToolsForContext(
+      [pick("spawn_agent"), pick("browser_navigate")],
+      {
+        executionMode: "execute",
+        taskDomain: "code",
+        webSearchMode: "live",
+        shellEnabled: true,
+        agentType: "main",
+        workerRole: null,
+        allowUserInput: true,
+      },
+    );
+
+    expect(spawnAgent.description).toContain("Returns immediately");
+    expect(spawnAgent.description).toContain("wait_for_agent");
+    expect(spawnAgent.description).toContain("worker_role");
+    expect(navigate.description).toMatch(/headless/i);
+    expect(navigate.description).not.toContain("By default this opens and controls the visible");
+  });
+
   it("prioritizes local channel history for message summarization", () => {
     const definitions = ChannelTools.getToolDefinitions();
     const listChats = definitions.find((tool) => tool.name === "channel_list_chats");

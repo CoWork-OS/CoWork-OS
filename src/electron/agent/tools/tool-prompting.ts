@@ -6,6 +6,9 @@ import type {
 } from "../llm/types";
 
 const TOOL_DESCRIPTION_CHAR_LIMIT = 420;
+// Appended prompt guidance has its own budget and follows the canonical description, so long
+// guidance can never push out what a tool does, its defaults, or how its results behave.
+const TOOL_PROMPT_GUIDANCE_CHAR_LIMIT = 420;
 const TOOL_COMPACT_DESCRIPTION_CHAR_LIMIT = 220;
 
 export const TOOL_PROMPT_METADATA_VERSION = "tool-prompting:v2";
@@ -48,12 +51,13 @@ function resolvePromptMetadata(
 export function renderToolDescription(tool: LLMTool, context: LLMToolPromptRenderContext): string {
   const resolved = resolvePromptMetadata(tool, context);
   const base = normalizeText(tool.description);
-  const merged = resolved.description
-    ? normalizeText(resolved.description)
-    : resolved.appendDescription
-      ? joinText(resolved.appendDescription, base)
-      : base;
-  return truncateText(merged || base, TOOL_DESCRIPTION_CHAR_LIMIT);
+  const replacement = normalizeText(resolved.description);
+  if (replacement) return truncateText(replacement, TOOL_DESCRIPTION_CHAR_LIMIT);
+  if (!resolved.appendDescription) return truncateText(base, TOOL_DESCRIPTION_CHAR_LIMIT);
+  return joinText(
+    truncateText(base, TOOL_DESCRIPTION_CHAR_LIMIT),
+    truncateText(resolved.appendDescription, TOOL_PROMPT_GUIDANCE_CHAR_LIMIT),
+  );
 }
 
 export function renderCompactToolDescription(
@@ -168,7 +172,7 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
   })),
   browser_navigate: createPromptMetadata(() => ({
     appendDescription:
-      "Use for interactive or JS-heavy pages, app/site testing, login flows, or screenshots. By default this opens and controls the visible in-app browser workbench for the active task; after the user logs in there, continue the same visible session. Do not set headless=true for normal user-facing site testing. Use force_headless/profile/debugger options only when no visible workbench session is available and background browsing is required. Real signed-in Chrome/Edge attach requires explicit user consent. After navigating, inspect with browser_snapshot first when you need to act, or browser_get_content/browser_screenshot when you only need reading or visual evidence.",
+      "Use for interactive or JS-heavy pages, site testing, logins, or screenshots. Reuse an open visible workbench session (e.g. after the user signs in there). In ask mode, visible=true requests the workbench; force_headless, profile and debugger options are for background use. Real signed-in Chrome attach requires explicit user consent. Then use browser_snapshot to act, or browser_get_content/browser_screenshot to read.",
     compactDescription:
       "Use for interactive or JS-heavy pages and visible site testing. Navigate, then inspect immediately.",
   })),

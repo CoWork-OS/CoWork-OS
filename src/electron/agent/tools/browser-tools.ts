@@ -940,15 +940,10 @@ export class BrowserTools {
       {
         name: "browser_navigate",
         description:
-          "Navigate the browser to a URL. By default, CoWork uses background/headless browser control unless settings or the tool input request a visible workbench. " +
-          "If a visible workbench session already exists, continue using it even when profile/browser_channel options are supplied. " +
-          "Optional: set visible=true or browser_surface='visible' when the user wants to watch or interact with the shared browser. " +
-          "Optional: set force_headless=true or browser_surface='headless' when the user explicitly asks for background/headless Playwright. " +
-          "Optional: set profile to use a Playwright browser profile or external signed-in Chrome fallback (not the embedded workbench). " +
-          'Optional: set browser_channel to "chrome" (system Google Chrome) or "brave" (system Brave); default is bundled Chromium. ' +
-          "NOTE: For RESEARCH tasks (finding news, trends, discussions), use web_search instead - it aggregates results from multiple sources. " +
-          "For simply reading a specific URL, use web_fetch - it is faster and lighter. " +
-          "Use browser_navigate ONLY when you need to interact with the page (click, fill forms, take screenshots) or when the page requires JavaScript rendering.",
+          "Navigate the browser to a URL. Routing follows the Browser automation setting: background mode (the default) uses a headless browser; " +
+          "visible mode uses the in-app browser workbench, and an already-open workbench session is always reused. " +
+          "Use web_search for research and web_fetch to simply read a URL; use browser_navigate when you must interact " +
+          "(click, fill, screenshots) or need JavaScript rendering.",
         input_schema: {
           type: "object" as const,
           properties: browserNavigateProperties,

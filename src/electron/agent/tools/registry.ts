@@ -3948,7 +3948,7 @@ Web Fetch (PREFERRED for reading web content):
 
 Browser Automation:
 - For HTML/React/Vite/Next.js page design, editing, and troubleshooting, start the local app when needed and inspect it in the visible in-app browser workbench. Use screenshots, snapshots, mobile/desktop emulation, console/network checks, and interaction tests to catch rendered layout and behavior issues before finalizing.
-- browser_navigate: Navigate to a URL in the visible in-app browser workbench by default. Use it for JS-heavy pages, app/site testing, forms, screenshots, or “use/test/check this website as a normal user” tasks.
+- browser_navigate: Navigate to a URL (a headless background browser by default; the visible in-app workbench in visible mode or once a workbench session is open). Use it for JS-heavy pages, app/site testing, forms, screenshots, or “use/test/check this website as a normal user” tasks.
 - browser_screenshot: Take a screenshot of the page
 - browser_get_content: Get page text, links, and forms (use after navigate, for inspecting interactive elements)
 - browser_click: Click on an element

@@ -135,6 +135,9 @@ export function resolveTaskResultText(opts: {
       const text = normalizeText(payload.message) || normalizeText(payload.content);
       if (!text || isNoiseMessage(text)) continue;
 
+      // Progress commentary ("I'll check X next") is never the run's result.
+      if (payload.phase === "commentary") continue;
+
       if (payload.internal === true) {
         if (text.length > 50 && text.length > bestInternalCandidate.length) {
           bestInternalCandidate = text;

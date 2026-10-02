@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const stylesPath = fileURLToPath(new URL("../MainContent/main-content.css", import.meta.url));
+const pickerStylesPath = fileURLToPath(
+  new URL("../MainContent/model-source-picker.css", import.meta.url),
+);
 
 describe("Model dropdown styles", () => {
   it("provides a compact quick-controls surface alongside the advanced picker", () => {
@@ -23,25 +26,18 @@ describe("Model dropdown styles", () => {
     );
   });
 
-  it("gives model browsing enough width for model metadata and controls", () => {
-    const source = readFileSync(stylesPath, "utf8");
+  it("styles the full picker as one column with source chips and a reasoning row", () => {
+    const source = readFileSync(pickerStylesPath, "utf8");
 
     expect(source).toMatch(
-      /\.model-dropdown\s*\{[^}]*width:\s*min\(560px,\s*calc\(100vw\s*-\s*24px\)\);/s,
+      /\.model-dropdown\.model-dropdown-advanced\s*\{[^}]*width:\s*min\(420px,\s*calc\(100vw\s*-\s*24px\)\);/s,
     );
+    expect(source).toMatch(/\.msp-sources\s*\{[^}]*overflow-x:\s*auto;/s);
+    expect(source).toMatch(/\.msp-list\s*\{[^}]*overflow-y:\s*auto;/s);
+    // Only the model list may shrink; the header, sources, search and footer keep their size.
     expect(source).toMatch(
-      /\.model-dropdown-content\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s+minmax\(185px,\s*0\.75fr\);/s,
+      /\.msp-header,\s*\.msp-sources,\s*\.msp-search,\s*\.msp-footer\s*\{[^}]*flex-shrink:\s*0;/s,
     );
-  });
-
-  it("collapses the picker into a mobile-friendly stacked layout", () => {
-    const source = readFileSync(stylesPath, "utf8");
-
-    expect(source).toMatch(
-      /@media\s*\(max-width:\s*520px\)[\s\S]*?\.model-dropdown-content\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
-    );
-    expect(source).toMatch(
-      /@media\s*\(max-width:\s*520px\)[\s\S]*?\.model-dropdown-sidebar\s*\{[^}]*overflow-x:\s*auto;/s,
-    );
+    expect(source).toMatch(/\.msp-reasoning-option\s*\{[^}]*flex:\s*1 1 0;/s);
   });
 });

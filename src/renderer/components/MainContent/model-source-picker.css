@@ -1,0 +1,313 @@
+/* Full model picker ("Custom" in quick controls): source chips, search, one model list,
+   and reasoning depth for the current model. */
+
+.model-dropdown.model-dropdown-advanced {
+  width: min(420px, calc(100vw - 24px));
+  min-width: 0;
+  max-height: min(560px, calc(100dvh - 140px));
+}
+
+.model-dropdown-panel.msp {
+  --msp-surface: var(--color-bg-elevated);
+  --msp-border: var(--color-border-subtle);
+  --msp-text: var(--color-text-primary, var(--color-text));
+  --msp-text-secondary: var(--color-text-secondary);
+  --msp-text-muted: var(--color-text-muted);
+  --msp-hover: var(--color-bg-hover);
+  --msp-accent: var(--color-accent);
+  --msp-selected: color-mix(in srgb, var(--color-accent) 10%, transparent);
+
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--msp-border);
+  border-radius: 16px;
+  background: var(--msp-surface);
+  box-shadow:
+    0 18px 48px rgba(15, 23, 42, 0.16),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+  color: var(--msp-text);
+  font-family: var(--font-ui);
+}
+
+html.visual-calm .model-dropdown-panel.msp {
+  --msp-surface: var(--calm-surface-raised);
+  --msp-border: var(--calm-border);
+  --msp-text: var(--calm-text);
+  --msp-text-secondary: var(--calm-text-secondary);
+  --msp-text-muted: var(--calm-text-muted);
+  --msp-hover: var(--calm-surface-hover);
+  --msp-accent: var(--calm-accent);
+  --msp-selected: var(--calm-accent-subtle);
+  box-shadow: var(--calm-shadow-pop);
+}
+
+/* --- Header ---------------------------------------------------------------- */
+
+/* The panel is a capped-height column; only the model list may shrink and scroll. */
+.msp-header,
+.msp-sources,
+.msp-search,
+.msp-footer {
+  flex-shrink: 0;
+}
+
+.msp-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 12px 6px 8px;
+}
+
+.msp-title {
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.msp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--msp-text-secondary);
+  cursor: pointer;
+}
+
+.msp-icon-btn:hover {
+  background: var(--msp-hover);
+  color: var(--msp-text);
+}
+
+/* --- Sources --------------------------------------------------------------- */
+
+.msp-sources {
+  display: flex;
+  gap: 6px;
+  padding: 4px 12px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.msp-sources::-webkit-scrollbar {
+  display: none;
+}
+
+.msp-source {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--msp-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--msp-text-secondary);
+  font: 500 12.5px var(--font-ui);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.msp-source:hover {
+  background: var(--msp-hover);
+  color: var(--msp-text);
+}
+
+.msp-source.active {
+  border-color: transparent;
+  background: var(--msp-text);
+  color: var(--msp-surface);
+}
+
+.msp-source-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.msp-source-icon > * {
+  width: 14px;
+  height: 14px;
+}
+
+/* Marks the source the current model comes from. */
+.msp-source-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--msp-accent);
+}
+
+.msp-source.active .msp-source-dot {
+  background: currentColor;
+}
+
+/* --- Search ---------------------------------------------------------------- */
+
+.msp-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 0 10px;
+  height: 34px;
+  border: 1px solid var(--msp-border);
+  border-radius: 10px;
+  color: var(--msp-text-muted);
+}
+
+.msp-search:focus-within {
+  border-color: color-mix(in srgb, var(--msp-accent) 55%, var(--msp-border));
+}
+
+.msp-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--msp-text);
+  font: 400 13.5px var(--font-ui);
+}
+
+.msp-search input::placeholder {
+  color: var(--msp-text-muted);
+}
+
+.msp-search-count {
+  color: var(--msp-text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Model list ------------------------------------------------------------ */
+
+.msp-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 6px 6px;
+}
+
+.msp-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--msp-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.msp-model:hover,
+.msp-model:focus-visible {
+  background: var(--msp-hover);
+  outline: none;
+}
+
+.msp-model.selected,
+.msp-model.selected:hover {
+  background: var(--msp-selected);
+}
+
+.msp-model-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.msp-model-name {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.msp-model.selected .msp-model-name {
+  font-weight: 600;
+}
+
+.msp-model-detail {
+  overflow: hidden;
+  color: var(--msp-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msp-model-check {
+  flex-shrink: 0;
+  color: var(--msp-accent);
+}
+
+.msp-empty {
+  padding: 28px 12px;
+  color: var(--msp-text-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* --- Footer: reasoning depth for the current model ------------------------ */
+
+.msp-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--msp-border);
+}
+
+.msp-reasoning-label {
+  color: var(--msp-text-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.msp-reasoning-options {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--msp-hover);
+}
+
+.msp-reasoning-option {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--msp-text-secondary);
+  font: 500 12px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.msp-reasoning-option:hover {
+  color: var(--msp-text);
+}
+
+.msp-reasoning-option.active {
+  background: var(--msp-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+  color: var(--msp-text);
+  font-weight: 600;
+}

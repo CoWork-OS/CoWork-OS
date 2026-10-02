@@ -9844,7 +9844,12 @@ export class AgentDaemon extends EventEmitter {
         : {};
     if (Array.isArray(payload.inlineFrames) && payload.inlineFrames.length > 0) return;
     if (this.materializedMailComposeFrameTasks.has(event.taskId)) return;
-    if (effectiveType === "assistant_message" && payload.internal === true) return;
+    if (
+      effectiveType === "assistant_message" &&
+      (payload.internal === true || payload.phase === "commentary")
+    ) {
+      return;
+    }
 
     const message =
       effectiveType === "task_completed"

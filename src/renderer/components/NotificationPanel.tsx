@@ -3,10 +3,24 @@ import { createPortal } from "react-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { ThemeIcon } from "./ThemeIcon";
-import { AlertTriangleIcon, CheckIcon, ClockIcon, InfoIcon, XIcon } from "./LineIcons";
+import {
+  AlertTriangle,
+  Check,
+  ChevronRight,
+  Info,
+  MessageSquareReply,
+  Trash2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
 import { hasHostMethods } from "../host/browser-capabilities";
+import {
+  groupNotifications,
+  type NotificationGroup,
+  type NotificationTone,
+} from "../utils/notification-groups";
+import "./notification-panel.css";
 
 const NOTIFICATION_PANEL_METHODS = [
   "listNotifications",
@@ -59,163 +73,7 @@ interface NotificationPanelProps {
   placement?: "title-bar" | "sidebar";
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    position: "relative",
-    zIndex: 9999,
-    overflow: "visible",
-  },
-  panel: {
-    position: "absolute" as const,
-    top: "calc(100% + 8px)",
-    right: 0,
-    width: "360px",
-    maxHeight: "480px",
-    backgroundColor: "var(--color-bg-elevated)",
-    borderRadius: "12px",
-    border: "1px solid var(--color-border)",
-    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.25)",
-    overflow: "hidden",
-    zIndex: 10000,
-  },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "12px 16px",
-    borderBottom: "1px solid var(--color-border)",
-    backgroundColor: "var(--color-bg-secondary)",
-  },
-  headerTitle: {
-    margin: 0,
-    fontSize: "14px",
-    fontWeight: 600,
-    color: "var(--color-text)",
-  },
-  headerActions: {
-    display: "flex",
-    gap: "8px",
-  },
-  headerBtn: {
-    padding: "4px 8px",
-    fontSize: "12px",
-    color: "var(--color-text-secondary)",
-    backgroundColor: "transparent",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    transition: "all 0.15s ease",
-  },
-  list: {
-    maxHeight: "400px",
-    overflowY: "auto" as const,
-    backgroundColor: "var(--color-bg-elevated)",
-  },
-  notificationItem: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "12px",
-    padding: "12px 16px",
-    borderBottom: "1px solid var(--color-border-subtle)",
-    cursor: "pointer",
-    transition: "background-color 0.15s ease",
-    backgroundColor: "var(--color-bg-elevated)",
-  },
-  notificationItemUnread: {
-    backgroundColor: "var(--color-bg-secondary)",
-  },
-  notificationIcon: {
-    width: "32px",
-    height: "32px",
-    borderRadius: "8px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    fontSize: "16px",
-  },
-  notificationContent: {
-    flex: 1,
-    minWidth: 0,
-  },
-  notificationTitle: {
-    margin: 0,
-    fontSize: "13px",
-    fontWeight: 500,
-    color: "var(--color-text)",
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical" as const,
-    overflow: "hidden",
-    lineHeight: 1.35,
-  },
-  notificationBadge: {
-    display: "inline-block",
-    fontSize: "10px",
-    fontWeight: 600,
-    color: "var(--color-text-muted)",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.04em",
-    marginBottom: "2px",
-  },
-  notificationMessage: {
-    margin: "2px 0 0",
-    fontSize: "12px",
-    color: "var(--color-text-secondary)",
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical" as const,
-    overflow: "hidden",
-  },
-  viewBtn: {
-    padding: "4px 10px",
-    fontSize: "11px",
-    fontWeight: 600,
-    color: "var(--color-accent)",
-    backgroundColor: "var(--color-accent-glass)",
-    border: "none",
-    borderRadius: "6px",
-    cursor: "pointer",
-    marginTop: "6px",
-    transition: "all 0.15s ease",
-  },
-  notificationTime: {
-    fontSize: "11px",
-    color: "var(--color-text-muted)",
-    marginTop: "4px",
-  },
-  notificationActions: {
-    display: "flex",
-    gap: "4px",
-    flexShrink: 0,
-  },
-  deleteBtn: {
-    padding: "4px",
-    backgroundColor: "transparent",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    color: "var(--color-text-muted)",
-    opacity: 0,
-    transition: "all 0.15s ease",
-  },
-  emptyState: {
-    padding: "48px 24px",
-    textAlign: "center" as const,
-    color: "var(--color-text-secondary)",
-    backgroundColor: "var(--color-bg-elevated)",
-  },
-  emptyIcon: {
-    fontSize: "32px",
-    marginBottom: "12px",
-    opacity: 0.6,
-    color: "var(--color-text-muted)",
-  },
-  emptyText: {
-    margin: 0,
-    fontSize: "13px",
-  },
-};
+const PANEL_WIDTH = 380;
 
 const BellIcon = ({ color = "#6b7280" }: { color?: string }) => (
   <svg
@@ -234,109 +92,12 @@ const BellIcon = ({ color = "#6b7280" }: { color?: string }) => (
   </svg>
 );
 
-const Icons = {
-  bell: (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-  ),
-  check: (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  ),
-  trash: (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </svg>
-  ),
-  close: (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  ),
-};
-
-const typeIcons: Record<string, { icon: React.ReactNode; bg: string; color: string }> = {
-  task_completed: {
-    icon: <ThemeIcon emoji="✅" icon={<CheckIcon size={14} />} />,
-    bg: "rgba(34, 197, 94, 0.15)",
-    color: "rgb(34, 197, 94)",
-  },
-  task_failed: {
-    icon: <ThemeIcon emoji="❌" icon={<XIcon size={14} />} />,
-    bg: "rgba(239, 68, 68, 0.15)",
-    color: "rgb(239, 68, 68)",
-  },
-  scheduled_task: {
-    icon: <ThemeIcon emoji="⏰" icon={<ClockIcon size={14} />} />,
-    bg: "var(--color-accent-glass)",
-    color: "var(--color-accent)",
-  },
-  input_required: {
-    icon: <ThemeIcon emoji="📝" icon={<InfoIcon size={14} />} />,
-    bg: "rgba(245, 158, 11, 0.15)",
-    color: "rgb(245, 158, 11)",
-  },
-  companion_suggestion: {
-    icon: <ThemeIcon emoji="📬" icon={<InfoIcon size={14} />} />,
-    bg: "rgba(99, 102, 241, 0.15)",
-    color: "rgb(99, 102, 241)",
-  },
-  info: {
-    icon: <ThemeIcon emoji="ℹ️" icon={<InfoIcon size={14} />} />,
-    bg: "rgba(59, 130, 246, 0.15)",
-    color: "rgb(59, 130, 246)",
-  },
-  warning: {
-    icon: <ThemeIcon emoji="⚠️" icon={<AlertTriangleIcon size={14} />} />,
-    bg: "rgba(245, 158, 11, 0.15)",
-    color: "rgb(245, 158, 11)",
-  },
-  error: {
-    icon: <ThemeIcon emoji="🚨" icon={<AlertTriangleIcon size={14} />} />,
-    bg: "rgba(239, 68, 68, 0.15)",
-    color: "rgb(239, 68, 68)",
-  },
+const TONE_ICONS: Record<NotificationTone, LucideIcon> = {
+  success: Check,
+  failure: X,
+  warning: AlertTriangle,
+  request: MessageSquareReply,
+  info: Info,
 };
 
 const notificationMarkdownPlugins = [remarkGfm, remarkBreaks];
@@ -358,12 +119,14 @@ const notificationInlineMarkdownComponents: Components = {
 export function NotificationMarkdownPreview({
   text,
   style,
+  className,
 }: {
   text: string;
   style?: React.CSSProperties;
+  className?: string;
 }) {
   return (
-    <div style={style}>
+    <div style={style} className={className}>
       <ReactMarkdown
         remarkPlugins={notificationMarkdownPlugins}
         components={notificationInlineMarkdownComponents}
@@ -389,54 +152,6 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
-function stripLeadingEmoji(text: string): string {
-  return text.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}][\uFE0F\uFE0E]?\s*/u, "");
-}
-
-/** Humanize technical reason/status strings for display */
-function humanizeStatus(value: string): string {
-  const map: Record<string, string> = {
-    required_decision: "Decision required",
-    required_decision_followup: "Follow-up decision",
-    input_request: "Input needed",
-    user_action_required_disabled: "Action required",
-    user_action_required_tool: "Tool approval needed",
-    shell_permission_required: "Access profile needs command tools",
-    workspace_mismatch: "Workspace confirmation",
-    workspace_required: "Workspace needed",
-    approval_requested: "Approval needed",
-  };
-  return map[value] ?? value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** Extract a cleaner display title: prefer task name, drop redundant attention prefixes */
-function formatNotificationTitle(title: string): {
-  primary: string;
-  badge?: string;
-} {
-  const prefixes = [
-    "Quick check-in · ",
-    "Approval needed · ",
-    "Input needed · ",
-    "Action needed · ",
-  ];
-  let primary = stripLeadingEmoji(title);
-  let badge: string | undefined;
-
-  for (const prefix of prefixes) {
-    if (primary.startsWith(prefix)) {
-      const taskPart = primary.slice(prefix.length).trim();
-      primary = taskPart || primary; // Use task name if non-empty
-      if (taskPart) {
-        badge = prefix.replace(" · ", "").trim();
-      }
-      break;
-    }
-  }
-
-  return { primary, badge };
-}
-
 export function NotificationPanel({
   onNotificationClick,
   placement = "title-bar",
@@ -445,7 +160,6 @@ export function NotificationPanel({
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const bellButtonRef = useRef<HTMLButtonElement>(null);
@@ -459,7 +173,7 @@ export function NotificationPanel({
     const updatePosition = () => {
       const rect = bellButtonRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = 360;
+      const width = PANEL_WIDTH;
       setDropdownPosition({
         top: rect.bottom + 8,
         left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
@@ -554,28 +268,24 @@ export function NotificationPanel({
     }
   };
 
-  const handleNotificationClick = async (notification: AppNotification) => {
+  // Opening a group opens its newest notification and marks the whole group read.
+  const openGroup = async (group: NotificationGroup<AppNotification>) => {
     if (!canUseNotifications) return;
-    if (!notification.read) {
-      try {
-        await window.electronAPI.markNotificationRead(notification.id);
-      } catch (error) {
-        console.error("Failed to mark as read:", error);
-      }
+    const unread = group.items.filter((item) => !item.read);
+    try {
+      await Promise.all(unread.map((item) => window.electronAPI.markNotificationRead(item.id)));
+    } catch (error) {
+      console.error("Failed to mark as read:", error);
     }
-    // Close the panel
     setIsOpen(false);
-    // Trigger callback
-    if (onNotificationClick) {
-      onNotificationClick(notification);
-    }
+    onNotificationClick?.(group.latest);
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const dismissGroup = async (e: React.MouseEvent, group: NotificationGroup<AppNotification>) => {
     e.stopPropagation();
     if (!canUseNotifications) return;
     try {
-      await window.electronAPI.deleteNotification(id);
+      await Promise.all(group.items.map((item) => window.electronAPI.deleteNotification(item.id)));
     } catch (error) {
       console.error("Failed to delete notification:", error);
     }
@@ -585,19 +295,76 @@ export function NotificationPanel({
     unreadCount > 0 ? `Notifications, ${unreadCount > 99 ? "99+" : unreadCount} unread` : null;
   const renderDropdown = (dropdown: ReactNode) =>
     inSidebar ? createPortal(dropdown, document.body) : dropdown;
+  // Position is measured from the bell; everything else is styled in notification-panel.css.
   const dropdownStyle: React.CSSProperties = inSidebar
     ? {
-        ...styles.panel,
         position: "fixed",
         top: dropdownPosition?.top ?? 0,
         left: dropdownPosition?.left ?? 0,
-        right: "auto",
         visibility: dropdownPosition ? "visible" : "hidden",
       }
-    : styles.panel;
+    : { position: "absolute", top: "calc(100% + 8px)", right: 0 };
+  const sections = isOpen ? groupNotifications(notifications) : [];
+
+  const renderGroup = (group: NotificationGroup<AppNotification>) => {
+    const ToneIcon = TONE_ICONS[group.tone];
+    const count = group.items.length;
+    const opensSomething = Boolean(
+      group.latest.taskId || group.latest.suggestionId || group.latest.cronJobId,
+    );
+    return (
+      <div
+        key={group.key}
+        role="button"
+        tabIndex={0}
+        className={`notif-row tone-${group.tone}${group.unread ? " unread" : ""}`}
+        onClick={() => void openGroup(group)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            void openGroup(group);
+          }
+        }}
+        aria-label={`${group.title}${count > 1 ? `, ${count} times` : ""}${group.unread ? ", unread" : ""}`}
+      >
+        <span className="notif-row-icon" aria-hidden="true">
+          <ToneIcon size={14} strokeWidth={2.2} />
+        </span>
+        <div className="notif-row-body">
+          <NotificationMarkdownPreview text={group.title} className="notif-row-title" />
+          {group.message && (
+            <NotificationMarkdownPreview text={group.message} className="notif-row-message" />
+          )}
+          <div className="notif-row-meta">
+            {count > 1 && <span className="notif-row-count">{count}×</span>}
+            {group.tag && <span className="notif-row-tag">{group.tag}</span>}
+            <span>{formatRelativeTime(group.latest.createdAt)}</span>
+          </div>
+        </div>
+        <div className="notif-row-side">
+          {group.needsAction ? (
+            <span className="notif-row-cta">Respond</span>
+          ) : opensSomething ? (
+            <span className="notif-row-open" aria-hidden="true">
+              <ChevronRight size={14} />
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="notif-row-dismiss"
+            onClick={(e) => void dismissGroup(e, group)}
+            title={count > 1 ? `Dismiss all ${count}` : "Dismiss"}
+            aria-label={count > 1 ? `Dismiss all ${count}` : "Dismiss"}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div style={styles.container} ref={panelRef}>
+    <div className="notif-anchor" ref={panelRef}>
       {/* Both placements match their neighbours' icon buttons; unread shows as a dot. */}
       <button
         ref={bellButtonRef}
@@ -622,116 +389,62 @@ export function NotificationPanel({
       {isOpen &&
         canUseNotifications &&
         renderDropdown(
-          <div ref={dropdownRef} style={dropdownStyle}>
-            <div style={styles.header}>
-              <h3 style={styles.headerTitle}>Notifications</h3>
-              <div style={styles.headerActions}>
+          <div
+            ref={dropdownRef}
+            className="notif-panel"
+            style={{ ...dropdownStyle, width: PANEL_WIDTH }}
+            role="dialog"
+            aria-label="Notifications"
+          >
+            <div className="notif-panel-header">
+              <span className="notif-panel-title">Notifications</span>
+              {unreadCount > 0 && (
+                <span className="notif-panel-unread" aria-label={`${unreadCount} unread`}>
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+              <div className="notif-panel-actions">
                 {unreadCount > 0 && (
                   <button
-                    style={styles.headerBtn}
+                    type="button"
+                    className="notif-panel-text-btn"
                     onClick={handleMarkAllRead}
-                    title="Mark all as read"
                   >
-                    {Icons.check} Mark all read
+                    Mark all read
                   </button>
                 )}
                 {notifications.length > 0 && (
-                  <button style={styles.headerBtn} onClick={handleDeleteAll} title="Clear all">
-                    {Icons.trash} Clear all
+                  <button
+                    type="button"
+                    className="notif-panel-icon-btn"
+                    onClick={handleDeleteAll}
+                    title="Clear all notifications"
+                    aria-label="Clear all notifications"
+                  >
+                    <Trash2 size={14} />
                   </button>
                 )}
               </div>
             </div>
 
-            <div style={styles.list}>
-              {notifications.length === 0 ? (
-                <div style={styles.emptyState}>
-                  <div style={styles.emptyIcon}>{Icons.bell}</div>
-                  <p style={styles.emptyText}>No notifications yet</p>
+            <div className="notif-panel-list">
+              {sections.length === 0 ? (
+                <div className="notif-panel-empty">
+                  <BellIcon color="currentColor" />
+                  <p>You're all caught up</p>
+                  <span>Task results, routine runs and requests for your input show up here.</span>
                 </div>
               ) : (
-                notifications.map((notification) => {
-                  const typeConfig = typeIcons[notification.type] || typeIcons.info;
-                  const isHovered = hoveredId === notification.id;
-                  const { primary, badge } = formatNotificationTitle(notification.title);
-                  const isTechnicalReason =
-                    /^[a-z][a-z0-9_]*$/.test(notification.message.trim()) &&
-                    notification.message.includes("_");
-                  const statusBadge = isTechnicalReason
-                    ? humanizeStatus(notification.message)
-                    : null;
-                  const showMessage = !isTechnicalReason && notification.message.trim();
-                  const displayBadge = statusBadge ?? badge;
-
-                  return (
-                    <div
-                      key={notification.id}
-                      style={{
-                        ...styles.notificationItem,
-                        ...(!notification.read ? styles.notificationItemUnread : {}),
-                        backgroundColor: isHovered
-                          ? "var(--color-bg-tertiary)"
-                          : !notification.read
-                            ? "var(--color-bg-secondary)"
-                            : "var(--color-bg-elevated)",
-                      }}
-                      onClick={() => handleNotificationClick(notification)}
-                      onMouseEnter={() => setHoveredId(notification.id)}
-                      onMouseLeave={() => setHoveredId(null)}
-                    >
-                      <div
-                        style={{
-                          ...styles.notificationIcon,
-                          backgroundColor: typeConfig.bg,
-                          color: typeConfig.color,
-                        }}
-                      >
-                        {typeConfig.icon}
-                      </div>
-                      <div style={styles.notificationContent}>
-                        {displayBadge && (
-                          <span style={styles.notificationBadge}>{displayBadge}</span>
-                        )}
-                        <NotificationMarkdownPreview
-                          text={primary}
-                          style={styles.notificationTitle}
-                        />
-                        {showMessage && (
-                          <NotificationMarkdownPreview
-                            text={notification.message}
-                            style={styles.notificationMessage}
-                          />
-                        )}
-                        <span style={styles.notificationTime}>
-                          {formatRelativeTime(notification.createdAt)}
-                        </span>
-                        {notification.type === "input_required" && (
-                          <button
-                            style={styles.viewBtn}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleNotificationClick(notification);
-                            }}
-                          >
-                            View & respond
-                          </button>
-                        )}
-                      </div>
-                      <div style={styles.notificationActions}>
-                        <button
-                          style={{
-                            ...styles.deleteBtn,
-                            opacity: isHovered ? 1 : 0,
-                          }}
-                          onClick={(e) => handleDelete(e, notification.id)}
-                          title="Delete"
-                        >
-                          {Icons.close}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
+                sections.map((section) => (
+                  <section
+                    key={section.id}
+                    className={`notif-section${section.id === "needs-you" ? " needs-you" : ""}`}
+                    aria-label={section.label}
+                  >
+                    <div className="notif-section-label">{section.label}</div>
+                    {section.groups.map(renderGroup)}
+                  </section>
+                ))
               )}
             </div>
           </div>,

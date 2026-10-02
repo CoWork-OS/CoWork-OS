@@ -37,7 +37,7 @@
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
-  /* right-panel.css clips every button; the edge notch sits outside. */
+  /* right-panel.css clips every button; the reorder drop marker sits just outside. */
   overflow: visible;
 }
 
@@ -83,35 +83,25 @@
   color: var(--color-text-secondary);
 }
 
-/* More with its menu open looks pressed; the notch stays on the current destination. */
+/* More with its menu open looks pressed; the current destination keeps its tile. */
 .sidebar-rail-btn.open {
   color: var(--color-text-primary);
 }
 
-/* Active destination: accent icon tile, accent caption, and a notch on the rail edge. */
+/* Active destination: a soft neutral tile and full-strength icon and caption against the
+   muted rest. No accent colour, no edge marker. */
 .sidebar-rail-btn.active {
-  color: var(--rail-accent);
+  color: var(--color-text-primary);
 }
 
-.sidebar-rail-btn.active .sidebar-rail-icon {
-  background: color-mix(in srgb, var(--rail-accent) 15%, transparent);
+.sidebar-rail-btn.active .sidebar-rail-icon,
+.sidebar-rail-btn.active:hover .sidebar-rail-icon {
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
 }
 
 /* Idle weight on purpose: a bolder caption is wider and truncates sooner. */
 .sidebar-rail-btn.active .sidebar-rail-label {
-  color: var(--rail-accent);
-}
-
-.sidebar-rail-btn.active::before {
-  content: "";
-  position: absolute;
-  top: 17px;
-  left: -4px;
-  width: 3px;
-  height: 18px;
-  border-radius: 0 3px 3px 0;
-  background: var(--rail-accent);
-  transform: translateY(-50%);
+  color: var(--color-text-primary);
 }
 
 /* An installable update sits above Settings in the accent colour; one click
@@ -270,9 +260,10 @@ html.visual-calm .sidebar-rail-btn.open .sidebar-rail-icon {
   background: var(--calm-surface-hover);
 }
 
-/* The current destination keeps its accent tile under the pointer. */
-html.visual-calm .sidebar-rail-btn.active .sidebar-rail-icon {
-  background: color-mix(in srgb, var(--rail-accent) 15%, transparent);
+/* The current destination keeps its tile under the pointer. */
+html.visual-calm .sidebar-rail-btn.active .sidebar-rail-icon,
+html.visual-calm .sidebar-rail-btn.active:hover .sidebar-rail-icon {
+  background: color-mix(in srgb, var(--calm-text) 8%, transparent);
 }
 
 html.visual-calm .sidebar-rail-btn.open {
@@ -286,7 +277,7 @@ html.visual-calm .sidebar-rail-btn.open .sidebar-rail-label {
 
 html.visual-calm .sidebar-rail-btn.active,
 html.visual-calm .sidebar-rail-btn.active .sidebar-rail-label {
-  color: var(--rail-accent);
+  color: var(--calm-text);
 }
 
 html.visual-calm .sidebar-rail-btn.sidebar-rail-update,

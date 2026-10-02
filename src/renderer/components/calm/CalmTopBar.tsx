@@ -189,6 +189,21 @@ export function CalmAccessMenu({
           role="menu"
         >
           <div className="calm-popover-heading">What CoWork can do</div>
+          {/* A profile that no longer exists still shows as the current, checked choice. */}
+          {!access.options.some((option) => option.id === access.selectedId) && (
+            <div
+              className="calm-popover-item selected current-only"
+              role="menuitemradio"
+              aria-checked="true"
+              aria-disabled="true"
+            >
+              <Icon size={15} aria-hidden="true" />
+              <span className="calm-popover-item-copy">
+                <span className="calm-popover-item-title">{access.label}</span>
+              </span>
+              <Check size={15} className="calm-popover-item-check" aria-hidden="true" />
+            </div>
+          )}
           {access.options.map((option) => {
             const active = option.id === access.selectedId;
             const OptionIcon = option.danger ? ShieldAlert : ShieldCheck;
@@ -211,7 +226,9 @@ export function CalmAccessMenu({
                 <span className="calm-popover-item-copy">
                   <span className="calm-popover-item-title">{option.label}</span>
                 </span>
-                {active && <Check size={15} aria-hidden="true" />}
+                {active && (
+                  <Check size={15} className="calm-popover-item-check" aria-hidden="true" />
+                )}
               </button>
             );
           })}

@@ -65,7 +65,6 @@ import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWa
 import { LibraryPanel } from "./components/calm/LibraryPanel";
 import { BuildPanel } from "./components/calm/BuildPanel";
 import { GitChangesPanel } from "./components/GitChangesPanel";
-import { CalmAgentSetupHost } from "./components/calm/CalmAgentSetup";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
 import {
   NotificationPanel,
@@ -642,9 +641,6 @@ const EMPTY_RIGHT_PANEL_INPUT = {
   hasActiveChildren: false,
   childTasks: [],
   childEvents: [],
-  runningTasks: [],
-  queuedTasks: [],
-  queueStatus: null,
   highlightOutputPath: null,
 };
 
@@ -822,9 +818,6 @@ type SelectedTaskWorkspaceViewProps = {
     hasActiveChildren: boolean;
     childTasks: Task[];
     childEvents: TaskEvent[];
-    runningTasks: Task[];
-    queuedTasks: Task[];
-    queueStatus: QueueStatus | null;
     highlightOutputPath: string | null;
   };
   onSelectChildTask: (taskId: string) => void;
@@ -1867,11 +1860,7 @@ const SelectedTaskWorkspaceView = memo(
                 hasActiveChildren={rightPanelInput.hasActiveChildren}
                 childTasks={rightPanelInput.childTasks}
                 childEvents={rightPanelInput.childEvents}
-                runningTasks={rightPanelInput.runningTasks}
-                queuedTasks={rightPanelInput.queuedTasks}
-                queueStatus={rightPanelInput.queueStatus}
                 onSelectTask={onSelectTask}
-                onCancelTask={onCancelTaskById}
                 onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
                 onOpenDocumentArtifact={openDocumentArtifact}
                 onOpenPresentationArtifact={openPresentationArtifact}
@@ -3211,22 +3200,30 @@ export function App() {
                 error: null,
               });
             }
-            taskTimelineCacheRef.current.set(taskTimelineCacheKey, {
-              taskId,
-              events: timelinePage.events,
-              cursor: timelinePage.nextCursor,
-              hasMoreHistory: timelinePage.hasMoreHistory,
-              payloadBytes: timelinePage.summary.payloadBytes,
-            });
           }
           pendingToolEventsRef.current = [];
           if (pendingToolEventsFlushTimerRef.current) {
             clearTimeout(pendingToolEventsFlushTimerRef.current);
             pendingToolEventsFlushTimerRef.current = null;
           }
-          setEvents((prev) =>
-            capTaskEvents(mergeSelectedTaskTimelineEvents(taskId, prev, refreshedEvents)),
-          );
+          setEvents((prev) => {
+            const nextEvents = capTaskEvents(
+              mergeSelectedTaskTimelineEvents(taskId, prev, refreshedEvents),
+            );
+            // Cache what is on screen, not just the refreshed page: the page holds only the
+            // newest events, so caching it alone reduced a finished task to its last steps
+            // the next time it was opened. The page cursor still pages correctly — older
+            // pages merge by identity with events already held.
+            if (timelinePage && taskId === selectedTaskIdRef.current) {
+              taskTimelineCacheRef.current.set(taskTimelineCacheKey, {
+                taskId,
+                events: nextEvents,
+                cursor: timelinePage.nextCursor,
+                hasMoreHistory: timelinePage.hasMoreHistory,
+              });
+            }
+            return nextEvents;
+          });
           const latestTimestamp = getLatestEventTimestamp(refreshedEvents);
           taskLastEventTimestampRef.current.set(
             taskId,
@@ -6438,7 +6435,10 @@ export function App() {
           workspace: currentWorkspace,
           verboseSteps: false,
           projectionMode: selectedTaskUsesLiveProjection ? "live" : "inspect",
-          liveWindowSize: 160,
+          // Project every retained event. A 160-event window made earlier steps of a running
+          // task fall out of the feed as new events arrived; capTaskEvents already bounds the
+          // input, and the full projection measured ~1ms slower on a 1,200-event task.
+          liveWindowSize: MAX_TIMELINE_HISTORY_EVENTS,
         }),
       ),
     [
@@ -6491,14 +6491,6 @@ export function App() {
       ),
     [rightPanelChildTasks],
   );
-  const rightPanelRunningTasks = useMemo(
-    () => (queueStatus ? tasks.filter((task) => queueStatus.runningTaskIds.includes(task.id)) : []),
-    [queueStatus, tasks],
-  );
-  const rightPanelQueuedTasks = useMemo(
-    () => (queueStatus ? tasks.filter((task) => queueStatus.queuedTaskIds.includes(task.id)) : []),
-    [queueStatus, tasks],
-  );
   const rightPanelHighlightPath = useMemo(
     () =>
       selectedTaskId && rightPanelHighlight?.taskId === selectedTaskId
@@ -6515,22 +6507,16 @@ export function App() {
       hasActiveChildren: replayControls.isReplayMode ? false : rightPanelHasActiveChildren,
       childTasks: replayControls.isReplayMode ? [] : rightPanelChildTasks,
       childEvents: replayControls.isReplayMode ? [] : childEvents,
-      runningTasks: replayControls.isReplayMode ? [] : rightPanelRunningTasks,
-      queuedTasks: replayControls.isReplayMode ? [] : rightPanelQueuedTasks,
-      queueStatus: replayControls.isReplayMode ? null : queueStatus,
       highlightOutputPath: replayControls.isReplayMode ? null : rightPanelHighlightPath,
     }),
     [
       currentWorkspace,
-      queueStatus,
       replayControls.isReplayMode,
       rightPanelHasActiveChildren,
       rightPanelHighlightPath,
       rightPanelEvents,
       rightPanelChildTasks,
-      rightPanelQueuedTasks,
       rightPanelReplayTask,
-      rightPanelRunningTasks,
       rightPanelSharedTaskEventUi,
       childEvents,
     ],
@@ -8644,7 +8630,6 @@ export function App() {
           {currentWorkspace && currentView === "main" && (
             <QuickTaskFAB onCreateTask={handleQuickTask} />
           )}
-          <CalmAgentSetupHost />
 
           {approveAllSessionWarningOpen ? (
             <ApproveAllSessionWarningDialog

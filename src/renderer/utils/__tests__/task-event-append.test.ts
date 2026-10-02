@@ -327,8 +327,65 @@ describe("capTaskEvents", () => {
 
     const result = capTaskEvents(events, 10, 45 * 1024);
 
-    expect(result.map((event) => event.id)).toContain("structural");
-    expect(result.map((event) => event.id)).toContain("new-large");
-    expect(result.map((event) => event.id)).not.toContain("old-large");
+    expect(result.map((event) => event.id)).toEqual(["old-large", "structural", "new-large"]);
+    // The out-of-budget tool result stays so its tool call keeps a completion, as a preview.
+    const oldLarge = result.find((event) => event.id === "old-large");
+    expect(String(oldLarge?.payload?.content || "").length).toBeLessThan(2 * 1024);
+    expect(String(oldLarge?.payload?.content || "")).toContain("renderer payload truncated");
+    const newLarge = result.find((event) => event.id === "new-large");
+    expect(String(newLarge?.payload?.content || "").length).toBeGreaterThan(30 * 1024);
+  });
+
+  it("keeps timeline v2 tool calls and assistant messages that fall outside the byte budget", () => {
+    // Timeline v2 records tool calls, tool results and assistant messages all as
+    // timeline_step_updated; only legacyType tells them apart. A long task's tool output used
+    // to push every older one of them out, leaving empty step headers behind.
+    const v2 = (id: string, legacyType: string, timestamp: number, payload: object) =>
+      ({
+        ...makeEvent({ id, taskId: "t1", type: "timeline_step_updated", timestamp, payload }),
+        legacyType,
+      }) as TaskEvent;
+    const events = [
+      v2("old-log", "log", 0, { message: "noise" }),
+      v2("old-message", "assistant_message", 1, { message: "Checking the IPC surface." }),
+      v2("old-call", "tool_call", 2, { tool: "run_command", callId: "c1" }),
+      v2("old-result", "tool_result", 3, { callId: "c1", result: "r".repeat(60 * 1024) }),
+      v2("new-call", "tool_call", 5, { tool: "run_command", callId: "c2" }),
+      v2("new-result", "tool_result", 6, { callId: "c2", result: "s".repeat(30 * 1024) }),
+    ];
+
+    const result = capTaskEvents(events, 100, 40 * 1024);
+
+    expect(result.map((event) => event.id)).toEqual([
+      "old-message",
+      "old-call",
+      "old-result",
+      "new-call",
+      "new-result",
+    ]);
+  });
+
+  it("returns the same compacted event objects on repeated caps", () => {
+    const events = [
+      makeEvent({
+        taskId: "t1",
+        type: "tool_result",
+        timestamp: 1,
+        id: "old",
+        payload: { content: "a".repeat(40 * 1024) },
+      }),
+      makeEvent({
+        taskId: "t1",
+        type: "tool_result",
+        timestamp: 2,
+        id: "new",
+        payload: { content: "b".repeat(40 * 1024) },
+      }),
+    ];
+
+    const first = capTaskEvents(events, 10, 45 * 1024);
+    const second = capTaskEvents(first, 10, 45 * 1024);
+
+    expect(second[0]).toBe(first[0]);
   });
 });

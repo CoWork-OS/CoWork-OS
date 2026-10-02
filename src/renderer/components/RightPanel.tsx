@@ -14,7 +14,6 @@ import {
   Workspace,
   TaskEvent,
   PlanStep,
-  QueueStatus,
   SessionChecklistItem,
   SessionChecklistState,
 } from "../../shared/types";
@@ -44,10 +43,7 @@ import { canPreviewDocumentInApp } from "../../shared/document-formats";
 import { canPreviewPresentationInApp } from "../../shared/presentation-formats";
 import {
   getProgressSectionMaterialSignature,
-  getQueueSectionMaterialSignature,
-  getQueueStatusSignature,
   getPlanStepsSignature,
-  getTaskListSignature,
   getVisibleProgressSteps,
 } from "../utils/right-panel-progress";
 import {
@@ -826,11 +822,7 @@ interface RightPanelProps {
   hasActiveChildren?: boolean;
   childTasks?: Task[];
   childEvents?: TaskEvent[];
-  runningTasks?: Task[];
-  queuedTasks?: Task[];
-  queueStatus?: QueueStatus | null;
   onSelectTask?: (taskId: string) => void;
-  onCancelTask?: (taskId: string) => void;
   onOpenSpreadsheetArtifact?: (path: string) => void;
   onOpenDocumentArtifact?: (path: string) => void;
   onOpenPresentationArtifact?: (path: string) => void;
@@ -1054,98 +1046,6 @@ const ProgressSectionContent = memo(
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
-const QueueSectionContent = memo(
-  function QueueSectionContent({
-    expanded,
-    runningTasks,
-    queuedTasks,
-    activeLabel,
-    nextLabel,
-    onSelectTask,
-    onCancelTask,
-    rendererPerfLoggingEnabled,
-  }: {
-    expanded: boolean;
-    runningTasks: Task[];
-    queuedTasks: Task[];
-    activeLabel: string;
-    nextLabel: string;
-    onSelectTask?: (taskId: string) => void;
-    onCancelTask?: (taskId: string) => void;
-    rendererPerfLoggingEnabled: boolean;
-  }) {
-    recordRendererRender("RightPanel.section", "queue", rendererPerfLoggingEnabled);
-    if (!expanded) return null;
-    return (
-      <div className="cli-section-content">
-        {runningTasks.length > 0 && (
-          <div className="cli-queue-group">
-            <div className="cli-context-label">
-              <span className="terminal-only">{activeLabel}</span>
-              <span className="modern-only">Active</span>
-            </div>
-            {runningTasks.map((t) => (
-              <div key={t.id} className="cli-queue-item running">
-                <span className="cli-queue-status">
-                  <span className="terminal-only">[~]</span>
-                  <span className="modern-only">
-                    <span className="queue-status-dot running" />
-                  </span>
-                </span>
-                <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
-                  {t.title || t.prompt}
-                </span>
-                <button
-                  className="cli-queue-cancel"
-                  onClick={() => onCancelTask?.(t.id)}
-                  title="Cancel"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        {queuedTasks.length > 0 && (
-          <div className="cli-queue-group">
-            <div className="cli-context-label">
-              <span className="terminal-only">{nextLabel}</span>
-              <span className="modern-only">Up next</span>
-            </div>
-            {queuedTasks.map((t, i) => (
-              <div key={t.id} className="cli-queue-item queued">
-                <span className="cli-queue-status">
-                  <span className="terminal-only">[{i + 1}]</span>
-                  <span className="modern-only">
-                    <span className="queue-status-pill">{i + 1}</span>
-                  </span>
-                </span>
-                <span className="cli-queue-title" onClick={() => onSelectTask?.(t.id)}>
-                  {t.title || t.prompt}
-                </span>
-                <button
-                  className="cli-queue-cancel"
-                  onClick={() => onCancelTask?.(t.id)}
-                  title="Cancel"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  },
-  (prev, next) =>
-    prev.expanded === next.expanded &&
-    getTaskListSignature(prev.runningTasks) === getTaskListSignature(next.runningTasks) &&
-    getTaskListSignature(prev.queuedTasks) === getTaskListSignature(next.queuedTasks) &&
-    prev.activeLabel === next.activeLabel &&
-    prev.nextLabel === next.nextLabel &&
-    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
-);
-
 const ProgressSection = memo(
   function ProgressSection({
     expanded,
@@ -1222,88 +1122,6 @@ const ProgressSection = memo(
         emptyHintText: next.emptyHintText,
       }) &&
     prev.progressTitleText === next.progressTitleText &&
-    prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
-);
-
-const QueueSection = memo(
-  function QueueSection({
-    visible,
-    expanded,
-    runningTasks,
-    queuedTasks,
-    queueBadgeText,
-    queueTitleText,
-    activeLabel,
-    nextLabel,
-    toggleSection,
-    onSelectTask,
-    onCancelTask,
-    rendererPerfLoggingEnabled,
-  }: {
-    visible: boolean;
-    expanded: boolean;
-    runningTasks: Task[];
-    queuedTasks: Task[];
-    queueBadgeText: string;
-    queueTitleText: string;
-    activeLabel: string;
-    nextLabel: string;
-    toggleSection: () => void;
-    onSelectTask?: (taskId: string) => void;
-    onCancelTask?: (taskId: string) => void;
-    rendererPerfLoggingEnabled: boolean;
-  }) {
-    if (!visible) return null;
-    return (
-      <div className="right-panel-section cli-section">
-        <button
-          type="button"
-          className="cli-section-header"
-          onClick={toggleSection}
-          aria-expanded={expanded}
-        >
-          <span className="cli-section-prompt">&gt;</span>
-          <span className="cli-section-title">
-            <span className="terminal-only">{queueTitleText}</span>
-            <span className="modern-only">Queue</span>
-          </span>
-          <span className="cli-queue-badge">{queueBadgeText}</span>
-          <span className="cli-section-toggle">
-            <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expanded ? "−" : "+"}</span>
-          </span>
-        </button>
-        <QueueSectionContent
-          expanded={expanded}
-          runningTasks={runningTasks}
-          queuedTasks={queuedTasks}
-          activeLabel={activeLabel}
-          nextLabel={nextLabel}
-          onSelectTask={onSelectTask}
-          onCancelTask={onCancelTask}
-          rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-        />
-      </div>
-    );
-  },
-  (prev, next) =>
-    prev.visible === next.visible &&
-    prev.queueBadgeText === next.queueBadgeText &&
-    prev.queueTitleText === next.queueTitleText &&
-    getQueueSectionMaterialSignature({
-      expanded: prev.expanded,
-      runningTasks: prev.runningTasks,
-      queuedTasks: prev.queuedTasks,
-      activeLabel: prev.activeLabel,
-      nextLabel: prev.nextLabel,
-    }) ===
-      getQueueSectionMaterialSignature({
-        expanded: next.expanded,
-        runningTasks: next.runningTasks,
-        queuedTasks: next.queuedTasks,
-        activeLabel: next.activeLabel,
-        nextLabel: next.nextLabel,
-      }) &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
@@ -1676,16 +1494,19 @@ const ContextSection = memo(
                     <span className="terminal-only"># files_read:</span>
                     <span className="modern-only">Files read</span>
                   </div>
-                  {referencedFiles.map((file, index) => (
-                    <div key={`${file}-${index}`} className="cli-context-item">
-                      <ClickableFilePath
-                        path={file}
-                        workspacePath={workspace?.path}
-                        className="cli-context-file"
-                        onOpenViewer={setViewerFilePath}
-                      />
-                    </div>
-                  ))}
+                  {/* Same four-row window as Tools used; the rest scroll. */}
+                  <div className="cli-context-file-list">
+                    {referencedFiles.map((file, index) => (
+                      <div key={`${file}-${index}`} className="cli-context-item">
+                        <ClickableFilePath
+                          path={file}
+                          workspacePath={workspace?.path}
+                          className="cli-context-file"
+                          onOpenViewer={setViewerFilePath}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1853,11 +1674,7 @@ function RightPanelComponent({
   hasActiveChildren = false,
   childTasks = [],
   childEvents = [],
-  runningTasks = [],
-  queuedTasks = [],
-  queueStatus,
   onSelectTask,
-  onCancelTask,
   onOpenSpreadsheetArtifact,
   onOpenDocumentArtifact,
   onOpenPresentationArtifact,
@@ -1894,7 +1711,6 @@ function RightPanelComponent({
     checklist: true,
     collaborativeAgents: true,
     cost: true,
-    queue: true,
     folder: true,
     activeContext: true,
     context: true,
@@ -1956,18 +1772,10 @@ function RightPanelComponent({
     };
   }, []);
 
-  // Queue data
-  const totalQueueActive = (queueStatus?.runningCount || 0) + (queueStatus?.queuedCount || 0);
   const progressTitleText = agentContext.getUiCopy("rightProgressTitle");
   const progressEmptyHintText = agentContext.getUiCopy("rightProgressEmptyHint");
-  const queueTitleText = agentContext.getUiCopy("rightQueueTitle");
-  const queueActiveLabel = agentContext.getUiCopy("rightQueueActiveLabel");
-  const queueNextLabel = agentContext.getUiCopy("rightQueueNextLabel");
   const filesTitleText = agentContext.getUiCopy("rightFilesTitle");
   const contextTitleText = agentContext.getUiCopy("rightContextTitle");
-  const queueBadgeText = `${queueStatus?.runningCount || 0}/${queueStatus?.maxConcurrent || 0}${
-    queueStatus && queueStatus.queuedCount > 0 ? ` +${queueStatus.queuedCount}` : ""
-  }`;
 
   const toggleSection = useCallback((section: keyof typeof expandedSections) => {
     setExpandedSections((prev) => ({
@@ -2358,7 +2166,6 @@ function RightPanelComponent({
     };
   }, [taskIdForCost, taskModelKeyForCost]);
   const showCostSection = Boolean(task) && (taskCostSummary.hasUsage || taskCostEstimate !== null);
-  const showQueueSection = totalQueueActive > 0;
   const showFolderSection = stableFiles.length > 0;
   const showActiveContextSection =
     stableConnectedActiveConnectors.length > 0 && !isLiveExecutionMode;
@@ -2382,26 +2189,6 @@ function RightPanelComponent({
 
     return null;
   }, [sharedTaskEventUi?.latestVisibleTaskEvent, stableChecklistState]);
-  const queueMaterialSignature = useMemo(
-    () =>
-      getQueueSectionMaterialSignature({
-        expanded: expandedSections.queue,
-        runningTasks,
-        queuedTasks,
-        activeLabel: queueActiveLabel,
-        nextLabel: queueNextLabel,
-      }),
-    [expandedSections.queue, runningTasks, queuedTasks, queueActiveLabel, queueNextLabel],
-  );
-  const deferredQueueMaterialSignature = useDeferredValue(queueMaterialSignature);
-  const stableRunningTasks = useStableSnapshotBySignature(
-    runningTasks,
-    deferredQueueMaterialSignature,
-  );
-  const stableQueuedTasks = useStableSnapshotBySignature(
-    queuedTasks,
-    deferredQueueMaterialSignature,
-  );
 
   // Get status indicator (terminal vs modern)
   const getStatusIndicator = (status: string) => {
@@ -2599,22 +2386,6 @@ function RightPanelComponent({
         toggleSection={() => toggleSection("cost")}
       />
 
-      {/* Lineup Section */}
-      <QueueSection
-        visible={showQueueSection}
-        expanded={expandedSections.queue}
-        runningTasks={stableRunningTasks}
-        queuedTasks={stableQueuedTasks}
-        queueBadgeText={queueBadgeText}
-        queueTitleText={queueTitleText}
-        activeLabel={queueActiveLabel}
-        nextLabel={queueNextLabel}
-        toggleSection={() => toggleSection("queue")}
-        onSelectTask={onSelectTask}
-        onCancelTask={onCancelTask}
-        rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-      />
-
       {/* Working Folder Section — only shown when files were touched */}
       <FolderSection
         visible={showFolderSection}
@@ -2702,10 +2473,6 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
     prev.hasActiveChildren === next.hasActiveChildren &&
     areChildTaskStatsEqual(prev.childTasks || [], next.childTasks || []) &&
     areTaskEventListsEqual(prev.childEvents || [], next.childEvents || []) &&
-    getTaskListSignature(prev.runningTasks || []) ===
-      getTaskListSignature(next.runningTasks || []) &&
-    getTaskListSignature(prev.queuedTasks || []) === getTaskListSignature(next.queuedTasks || []) &&
-    getQueueStatusSignature(prev.queueStatus) === getQueueStatusSignature(next.queueStatus) &&
     prev.onOpenSpreadsheetArtifact === next.onOpenSpreadsheetArtifact &&
     prev.onOpenDocumentArtifact === next.onOpenDocumentArtifact &&
     prev.onOpenPresentationArtifact === next.onOpenPresentationArtifact &&
@@ -2713,7 +2480,6 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.highlightOutputPath === next.highlightOutputPath &&
     prev.onSelectTask === next.onSelectTask &&
-    prev.onCancelTask === next.onCancelTask &&
     prev.onHighlightConsumed === next.onHighlightConsumed
   );
 }

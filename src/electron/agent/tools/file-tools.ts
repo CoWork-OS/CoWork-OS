@@ -8,6 +8,7 @@ import {
   Workspace,
   WorkspacePathAliasPolicy,
 } from "../../../shared/types";
+import { countLineChanges } from "../../../shared/line-change-stats";
 import { AgentDaemon } from "../daemon";
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
 import {
@@ -51,6 +52,7 @@ const DEFAULT_READ_WINDOW_CHARS = 300 * 1024; // 300KB default read window
 const MAX_READ_WINDOW_CHARS = 1_000_000; // 1MB max read window
 const MAX_DIR_ENTRIES = 100; // Max files to list per directory
 const MAX_SEARCH_RESULTS = 50; // Max search results
+const WRITE_FILE_LINE_STATS_MAX_BYTES = 1024 * 1024; // Skip line stats when overwriting larger files
 const MAX_NAME_PAD = 48; // Cap for aligned directory listings
 
 interface ReadWindow {
@@ -1598,6 +1600,20 @@ export class FileTools {
       );
       await this.revalidateMutationPath(mutationPath, "parent directory creation", true);
 
+      // Read what is being replaced so the timeline can say "created" vs "edited" and show
+      // line counts. Best effort: a missing, oversized or unreadable file just skips the stats.
+      let existed = false;
+      let previousContent: string | null = null;
+      try {
+        const previousStat = await fs.stat(mutationPath.path);
+        existed = previousStat.isFile();
+        if (existed && previousStat.size <= WRITE_FILE_LINE_STATS_MAX_BYTES) {
+          previousContent = await fs.readFile(mutationPath.path, "utf-8");
+        }
+      } catch {
+        // No previous file: this write creates it.
+      }
+
       // Write file
       await this.runWriteFilePhase("write file contents", requestedPath, options, (signal) =>
         this.writeBoundFile(mutationPath, content, signal),
@@ -1614,6 +1630,11 @@ export class FileTools {
         getWorkspaceRelativePosixPath(this.workspace.path, mutationPath.path) || requestedPath;
 
       // Log artifact
+      const lineStats = existed
+        ? previousContent !== null
+          ? countLineChanges(previousContent, content)
+          : null
+        : countLineChanges("", content);
       this.daemon.logEvent(this.taskId, "file_created", {
         path: reportedPath,
         size: content.length,
@@ -1621,6 +1642,8 @@ export class FileTools {
         contentPreview: preview,
         previewTruncated,
         language: ext,
+        existed,
+        ...(lineStats ? { linesAdded: lineStats.added, linesRemoved: lineStats.removed } : {}),
       });
 
       return {

@@ -390,7 +390,15 @@ try {
   shutdown(1);
 }
 
-electron = spawn(npmCommand, ["run", "dev:electron"], {
+// Opt-in DevTools port for driving the dev app over CDP (e.g. automated UI checks):
+// COWORK_REMOTE_DEBUGGING_PORT=9333 npm run dev. Off unless set.
+const remoteDebuggingPort = Number.parseInt(process.env.COWORK_REMOTE_DEBUGGING_PORT ?? "", 10);
+const electronArgs =
+  Number.isInteger(remoteDebuggingPort) && remoteDebuggingPort > 0 && remoteDebuggingPort < 65536
+    ? ["run", "dev:electron", "--", `--remote-debugging-port=${remoteDebuggingPort}`]
+    : ["run", "dev:electron"];
+
+electron = spawn(npmCommand, electronArgs, {
   cwd: process.cwd(),
   env: childEnv,
   stdio: ["inherit", "pipe", "pipe"],

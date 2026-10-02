@@ -10,8 +10,9 @@ import {
   getLlmReasoningEffortOptions,
 } from "../../../shared/llm-model-selection";
 import { getModelAccessDescriptor } from "../../../shared/model-access";
-import { Check, ChevronLeft, ChevronRight, Search, Settings2, Sparkles } from "lucide-react";
+import { ChevronRight, Sparkles } from "lucide-react";
 import { getLLMProviderIcon } from "../llm-provider-icons";
+import { ModelSourcePicker } from "./ModelSourcePicker";
 import { useIsCalmTheme } from "../../hooks/useIsCalmTheme";
 import type { SettingsTab } from "./main-content-types";
 
@@ -189,16 +190,13 @@ export function ModelDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const [pickerView, setPickerView] = useState<ModelPickerView>("quick");
   const [search, setSearch] = useState("");
-  const [activeProviderMenu, setActiveProviderMenu] = useState<LLMProviderType | null>(null);
   const [providerModelCache, setProviderModelCache] = useState<Record<string, LLMModelInfo[]>>({});
   const [loadingProviderModels, setLoadingProviderModels] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const closeDropdown = useCallback(() => {
     setIsOpen(false);
     setSearch("");
-    setActiveProviderMenu(null);
     setPickerView("quick");
   }, []);
 
@@ -269,10 +267,6 @@ export function ModelDropdown({
       model.description.toLowerCase().includes(normalizedSearch)
     );
   });
-
-  const otherProviders = configuredProviders.filter(
-    (provider) => provider.type !== selectedProvider,
-  );
 
   const loadProviderModels = useCallback(
     async (providerType: LLMProviderType) => {
@@ -351,15 +345,11 @@ export function ModelDropdown({
   const handleOpenAdvanced = () => {
     setPickerView("advanced");
     setSearch("");
-    setActiveProviderMenu(null);
   };
   const handleReturnToQuick = () => {
     setPickerView("quick");
     setSearch("");
-    setActiveProviderMenu(null);
   };
-  const activeProvider = otherProviders.find((provider) => provider.type === activeProviderMenu);
-  const activeProviderModels = activeProvider ? providerModelCache[activeProvider.type] || [] : [];
 
   return (
     <div
@@ -424,8 +414,7 @@ export function ModelDropdown({
       </button>
       {isOpen && (
         <div
-          className={`model-dropdown ${pickerView === "quick" ? "model-dropdown-quick" : ""} ${align === "right" ? "align-right" : ""}`}
-          onMouseLeave={() => setActiveProviderMenu(null)}
+          className={`model-dropdown ${pickerView === "quick" ? "model-dropdown-quick" : "model-dropdown-advanced"} ${align === "right" ? "align-right" : ""}`}
         >
           {pickerView === "quick" ? (
             <QuickModelPicker
@@ -446,234 +435,29 @@ export function ModelDropdown({
               onOpenAdvanced={handleOpenAdvanced}
             />
           ) : (
-            <div className="model-dropdown-panel">
-              <button
-                type="button"
-                className="model-dropdown-back"
-                onClick={handleReturnToQuick}
-                aria-label="Back to quick model controls"
-              >
-                <ChevronLeft size={14} aria-hidden="true" />
-                <span>Quick controls</span>
-              </button>
-              <div className="model-dropdown-header">
-                <div className="model-dropdown-header-copy">
-                  <span className="model-dropdown-kicker">MODEL SOURCE</span>
-                  <div className="model-dropdown-current-provider">
-                    <span>{currentProviderLabel}</span>
-                    <span className="model-dropdown-access-badge">{currentAccess.label}</span>
-                  </div>
-                </div>
-                <div className="model-dropdown-current-selection">
-                  <span className="model-dropdown-current-label">Current model</span>
-                  <strong>{selectedModelLabel}</strong>
-                  {effectiveReasoningEffort && (
-                    <span>
-                      {
-                        reasoningEffortOptions.find(
-                          (option) => option.value === effectiveReasoningEffort,
-                        )?.label
-                      }{" "}
-                      intelligence
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div
-                className="model-dropdown-search"
-                onMouseEnter={() => setActiveProviderMenu(null)}
-              >
-                <Search size={16} aria-hidden="true" />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={`Search ${currentProviderLabel} models...`}
-                  autoFocus
-                />
-              </div>
-              <div className="model-dropdown-content">
-                <section
-                  className="model-dropdown-models"
-                  onMouseEnter={() => setActiveProviderMenu(null)}
-                >
-                  <div className="model-dropdown-section-heading">
-                    <div>
-                      <span className="model-dropdown-section-label">Models</span>
-                      <span className="model-dropdown-section-caption">
-                        {currentProviderLabel} catalog
-                      </span>
-                    </div>
-                    <span className="model-dropdown-count">{filteredModels.length}</span>
-                  </div>
-                  <div className="model-dropdown-list">
-                    {filteredModels.length === 0 ? (
-                      <div className="model-dropdown-no-results">No models match “{search}”</div>
-                    ) : (
-                      filteredModels.map((model) => (
-                        <button
-                          key={model.key}
-                          type="button"
-                          className={`model-dropdown-item ${model.key === selectedModel ? "selected" : ""}`}
-                          onClick={() => selectModel(selectedProvider, model.key, model)}
-                        >
-                          <div className="model-dropdown-item-content">
-                            <span className="model-dropdown-item-name">{model.displayName}</span>
-                            <span className="model-dropdown-item-desc">{model.description}</span>
-                            <span className="model-dropdown-item-key">{model.key}</span>
-                          </div>
-                          {model.key === selectedModel && <Check size={16} aria-hidden="true" />}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </section>
-                <aside className="model-dropdown-sidebar">
-                  {selectedReasoningEfforts.length > 0 && (
-                    <section
-                      className="model-dropdown-sidebar-section"
-                      onMouseEnter={() => setActiveProviderMenu(null)}
-                    >
-                      <div className="model-dropdown-section-heading">
-                        <div>
-                          <span className="model-dropdown-section-label">Intelligence</span>
-                          <span className="model-dropdown-section-caption">Reasoning depth</span>
-                        </div>
-                        <Sparkles size={15} aria-hidden="true" />
-                      </div>
-                      <div className="model-dropdown-reasoning-list">
-                        {reasoningEffortOptions
-                          .filter((option) => selectedReasoningEfforts.includes(option.value))
-                          .map((option) => (
-                            <button
-                              key={option.value}
-                              type="button"
-                              className={`model-dropdown-reasoning-option ${option.value === effectiveReasoningEffort ? "selected" : ""}`}
-                              onClick={() =>
-                                onModelChange({
-                                  providerType: selectedProvider,
-                                  modelKey: selectedModel,
-                                  reasoningEffort: option.value,
-                                })
-                              }
-                            >
-                              <span className="model-dropdown-reasoning-copy">
-                                <span className="model-dropdown-item-name">{option.label}</span>
-                                <span>{REASONING_EFFORT_DESCRIPTIONS[option.value]}</span>
-                              </span>
-                              {option.value === effectiveReasoningEffort && (
-                                <Check size={15} aria-hidden="true" />
-                              )}
-                            </button>
-                          ))}
-                      </div>
-                    </section>
-                  )}
-                  {otherProviders.length > 0 && (
-                    <section className="model-dropdown-sidebar-section model-dropdown-other-providers">
-                      <div className="model-dropdown-section-heading">
-                        <div>
-                          <span className="model-dropdown-section-label">Other sources</span>
-                          <span className="model-dropdown-section-caption">
-                            Browse configured providers
-                          </span>
-                        </div>
-                      </div>
-                      <div className="model-dropdown-provider-list">
-                        {otherProviders.map((provider) => {
-                          const isActive = activeProviderMenu === provider.type;
-                          return (
-                            <div
-                              key={provider.type}
-                              className="model-dropdown-provider-row"
-                              onMouseEnter={() => {
-                                if (align !== "right") {
-                                  setActiveProviderMenu(provider.type);
-                                  void loadProviderModels(provider.type);
-                                }
-                              }}
-                            >
-                              <button
-                                type="button"
-                                aria-expanded={isActive}
-                                className={`model-dropdown-provider-option ${isActive ? "highlighted" : ""}`}
-                                onClick={() => {
-                                  setActiveProviderMenu(provider.type);
-                                  void loadProviderModels(provider.type);
-                                }}
-                              >
-                                <span className="model-dropdown-provider-copy">
-                                  <span className="model-dropdown-item-name">{provider.name}</span>
-                                  <span className="model-dropdown-access-badge">
-                                    {getModelAccessDescriptor(provider.type).label}
-                                  </span>
-                                </span>
-                                <ChevronRight size={15} aria-hidden="true" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  )}
-                </aside>
-              </div>
-              <div
-                className="model-dropdown-footer"
-                onMouseEnter={() => setActiveProviderMenu(null)}
-              >
-                <button
-                  type="button"
-                  className="model-dropdown-provider-btn"
-                  onClick={handleOpenProviders}
-                >
-                  <Settings2 size={14} aria-hidden="true" />
-                  <span>Connect or manage model sources</span>
-                </button>
-              </div>
-            </div>
-          )}
-          {pickerView === "advanced" && activeProvider && (
-            <div className="model-dropdown-submenu">
-              <div className="model-dropdown-submenu-header">
-                <button
-                  type="button"
-                  className="model-dropdown-submenu-back"
-                  onClick={() => setActiveProviderMenu(null)}
-                  aria-label="Back to model sources"
-                >
-                  <ChevronLeft size={13} aria-hidden="true" />
-                  <span>Other sources</span>
-                </button>
-                <span className="model-dropdown-kicker">SWITCH TO</span>
-                <strong>{activeProvider.name}</strong>
-                <span>{activeProviderModels.length} available models</span>
-              </div>
-              <div className="model-dropdown-submenu-list">
-                {loadingProviderModels === activeProvider.type ? (
-                  <div className="model-dropdown-no-results">Loading models…</div>
-                ) : activeProviderModels.length === 0 ? (
-                  <div className="model-dropdown-no-results">No models found</div>
-                ) : (
-                  activeProviderModels.map((model) => (
-                    <button
-                      key={model.key}
-                      type="button"
-                      className="model-dropdown-item"
-                      onClick={() => selectModel(activeProvider.type, model.key, model)}
-                    >
-                      <div className="model-dropdown-item-content">
-                        <span className="model-dropdown-item-name">{model.displayName}</span>
-                        <span className="model-dropdown-item-desc">{model.description}</span>
-                        <span className="model-dropdown-item-key">{model.key}</span>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
+            <ModelSourcePicker
+              providers={configuredProviders}
+              selectedProvider={selectedProvider}
+              selectedModel={selectedModel}
+              selectedReasoningEffort={effectiveReasoningEffort}
+              reasoningOptions={reasoningEffortOptions.filter((option) =>
+                selectedReasoningEfforts.includes(option.value),
+              )}
+              modelsByProvider={providerModelCache}
+              loadingProvider={loadingProviderModels}
+              onLoadProvider={(providerType) => void loadProviderModels(providerType)}
+              onSelectModel={selectModel}
+              onReasoningEffortChange={(reasoningEffort) =>
+                onModelChange({
+                  providerType: selectedProvider,
+                  modelKey: selectedModel,
+                  reasoningEffort,
+                })
+              }
+              onBack={handleReturnToQuick}
+              onClose={closeDropdown}
+              onManageSources={handleOpenProviders}
+            />
           )}
         </div>
       )}

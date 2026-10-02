@@ -351,6 +351,33 @@ html.visual-calm .calm-popover-item.danger > svg:first-child {
   color: #dc2626;
 }
 
+/* The current choice reads at a glance: tinted row, stronger label, accent check. */
+html.visual-calm .calm-popover-item.selected,
+html.visual-calm .calm-popover-item.selected:hover:not(:disabled) {
+  background: var(--calm-accent-subtle);
+}
+
+html.visual-calm .calm-popover-item.selected .calm-popover-item-title {
+  font-weight: 600;
+}
+
+html.visual-calm .calm-popover-item.selected > svg:first-child {
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-popover-item.selected.danger > svg:first-child {
+  color: #dc2626;
+}
+
+html.visual-calm .calm-popover-item > .calm-popover-item-check {
+  flex-shrink: 0;
+  color: var(--calm-accent);
+}
+
+html.visual-calm .calm-popover-item.current-only {
+  cursor: default;
+}
+
 html.visual-calm .calm-popover-item-copy {
   display: flex;
   flex-direction: column;
@@ -1058,185 +1085,13 @@ html.visual-calm .calm-agent-avatar.animated {
   }
 }
 
-html.visual-calm .calm-setup-row {
-  display: flex;
-  justify-content: center;
-  margin-top: 14px;
-}
-
-html.visual-calm .calm-setup-pill {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px 6px 6px;
-  border: none;
-  border-radius: var(--calm-radius-pill);
-  background: var(--calm-surface-muted);
-  color: var(--calm-text);
-  font: 500 13.5px var(--font-ui);
-  cursor: pointer;
-}
-
-html.visual-calm .calm-setup-pill:hover {
-  background: var(--calm-surface-hover);
-}
-
-/* ---------- Dialog ---------- */
-
-.calm-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(20, 20, 18, 0.28);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  animation: calm-fade-in 0.18s ease;
-}
-
-@keyframes calm-fade-in {
-  from {
-    opacity: 0;
-  }
-}
-
-.calm-dialog {
-  position: relative;
-  width: min(440px, 100%);
-  max-height: calc(100vh - 48px);
-  overflow-y: auto;
-  padding: 28px 28px 24px;
-  border-radius: 24px;
-  background: var(--calm-surface-raised, #fff);
-  color: var(--calm-text, #1b1b19);
-  border: 1px solid var(--calm-border, rgba(0, 0, 0, 0.08));
-  box-shadow: var(--calm-shadow-pop, 0 18px 48px rgba(0, 0, 0, 0.18));
-  font-family: var(--font-ui);
-  animation: calm-pop-in 0.2s var(--calm-ease, ease);
-}
-
-.calm-dialog-close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-}
-
-.calm-dialog-title {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  margin: 0 0 4px;
-}
-
-.calm-dialog-subtitle {
-  font-size: 14px;
-  color: var(--calm-text-secondary, #56564f);
-  margin: 0 0 18px;
-}
-
-.calm-field-label {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--calm-text-secondary, #56564f);
-  margin: 14px 0 6px;
-}
-
-.calm-field-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.calm-input {
-  width: 100%;
-  padding: 11px 16px;
-  border-radius: 999px;
-  border: 1px solid var(--calm-border-strong, rgba(0, 0, 0, 0.16));
-  background: var(--calm-surface, #fff);
-  color: var(--calm-text, #1b1b19);
-  font: 400 15px var(--font-ui);
-  outline: none;
-}
-
-.calm-input:focus {
-  border-color: var(--calm-ink, #1b1b19);
-}
-
-.calm-agent-setup-preview {
-  display: flex;
-  justify-content: center;
-  padding: 6px 0 10px;
-}
-
-.calm-agent-swatches {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-}
-
-.calm-agent-swatch {
-  appearance: none;
-  display: inline-flex;
-  padding: 4px;
-  border-radius: 14px;
-  border: 2px solid transparent;
-  background: transparent;
-  cursor: pointer;
-}
-
-.calm-agent-swatch:hover {
-  background: var(--calm-surface-hover, rgba(0, 0, 0, 0.05));
-}
-
-.calm-agent-swatch.active {
-  border-color: var(--calm-ink, #1b1b19);
-}
-
-.calm-dialog-error {
-  margin-top: 12px;
-  font-size: 13px;
-  color: #dc2626;
-}
-
-.calm-dialog-actions {
-  display: flex;
-  justify-content: flex-start;
-  margin-top: 22px;
-}
-
-.calm-primary-button {
-  appearance: none;
-  padding: 11px 22px;
-  border: none;
-  border-radius: 12px;
-  background: var(--calm-ink, #1b1b19);
-  color: var(--calm-ink-contrast, #fff);
-  font: 600 15px var(--font-ui);
-  cursor: pointer;
-}
-
-.calm-primary-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 /* ---------- Fixes from the live walkthrough ---------- */
 
 /* A global button rule adds padding; calm's fixed-size icon buttons need none
    or their icons collapse to zero width. */
 html.visual-calm .calm-icon-button,
-html.visual-calm .calm-send-button,
-html.visual-calm .calm-agent-swatch {
+html.visual-calm .calm-send-button {
   padding: 0;
-}
-
-html.visual-calm .calm-agent-swatch {
-  padding: 4px;
 }
 
 /* Menu rows (including footer actions) read left to right. */
@@ -1253,18 +1108,6 @@ html.visual-calm .calm-main .welcome-input {
   font-family: var(--font-ui) !important;
   font-size: 15.5px;
   letter-spacing: 0;
-}
-
-/* Inputs already change border colour on focus; skip the extra ring. */
-html.visual-calm .calm-input:focus-visible,
-.calm-input:focus-visible {
-  outline: none;
-}
-
-html.visual-calm .calm-input:focus,
-.calm-input:focus {
-  border-color: rgba(14, 165, 233, 0.7);
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.16);
 }
 
 /* macOS forces a translucent sidebar with !important; calm uses its own solid

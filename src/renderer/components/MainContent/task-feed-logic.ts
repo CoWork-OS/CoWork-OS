@@ -47,7 +47,30 @@ export type TaskFeedRow =
       item: any;
       revision: string;
       visiblePerfEventId: string | null;
+    }
+  | {
+      /** "Working for …" / "Worked for …" disclosure at the top of one conversation turn. */
+      kind: "turn-header";
+      key: string;
+      turn: TaskTurnSummary;
+      estimatedHeight: number;
+      revision: string;
+      visiblePerfEventId: null;
     };
+
+export interface TaskTurnSummary {
+  /** "turn:initial" for the task prompt's turn, otherwise "turn:<user message event id>". */
+  id: string;
+  status: "working" | "worked";
+  startedAt: number;
+  /** When the turn's final answer started, or its last activity; null while it runs. */
+  endedAt: number | null;
+  expanded: boolean;
+  /** Only a finished turn with both work and a final answer can fold its work away. */
+  collapsible: boolean;
+}
+
+export const INITIAL_TURN_ID = "turn:initial";
 
 export type SkillModalLaunchMode = "skill_menu" | "slash";
 
@@ -417,7 +440,7 @@ export function createDeliveryEventRow(
 }
 
 export function isMeaningfulLiveTranscriptRow(row: TaskFeedRow): boolean {
-  if (row.kind === "history-control") return false;
+  if (row.kind === "history-control" || row.kind === "turn-header") return false;
   if (row.kind === "leading-command-outputs") return false;
   if (row.kind !== "timeline") return true;
   if (row.item.kind !== "event") return true;
@@ -442,7 +465,9 @@ export function selectVisibleTaskFeedRows(
 ): { visibleFeedRows: TaskFeedRow[]; hiddenLiveFeedRowCount: number } {
   const getHiddenContentRowCount = (visibleRows: TaskFeedRow[]) => {
     const isHiddenStepRow = (row: TaskFeedRow) =>
-      row.kind !== "history-control" && !isConversationMessageRow(row);
+      row.kind !== "history-control" &&
+      row.kind !== "turn-header" &&
+      !isConversationMessageRow(row);
     const totalContentRows = feedRows.filter(isHiddenStepRow).length;
     const visibleContentRows = visibleRows.filter(isHiddenStepRow).length;
     return Math.max(0, totalContentRows - visibleContentRows);
@@ -456,20 +481,23 @@ export function selectVisibleTaskFeedRows(
     };
 
     for (const [rowIndex, row] of feedRows.entries()) {
-      if (row.kind === "history-control") continue;
+      if (row.kind === "history-control" || row.kind === "turn-header") continue;
       if (row.kind === "artifact-stack") {
         pushCandidate(rowIndex, row);
         continue;
       }
-      if (row.kind === "timeline" && row.item.kind === "action_block") {
-        pushCandidate(rowIndex, row);
-        continue;
-      }
+      // Collapsed like a finished turn: activity blocks stay behind the "Worked for" header,
+      // and only the critical events inside them (errors, needed actions) surface. Outputs
+      // are already shown by the artifact stack under the answer.
+      const isActivityBlock = row.kind === "timeline" && row.item.kind === "action_block";
       const rowEvents = getTaskFeedRowEvents(row);
       for (const { event, eventIndex, eventOrder } of rowEvents) {
         const order = rowIndex + eventOrder / 1000;
         const effectiveType = getEffectiveTaskEventType(event);
-        if (effectiveType === "user_message" || effectiveType === "assistant_message") {
+        if (
+          !isActivityBlock &&
+          (effectiveType === "user_message" || effectiveType === "assistant_message")
+        ) {
           const messageRow = createDeliveryEventRow(row, event, eventIndex, eventOrder);
           pushCandidate(order, messageRow);
           if (effectiveType === "assistant_message" && event.payload?.internal !== true) {
@@ -477,7 +505,10 @@ export function selectVisibleTaskFeedRows(
           }
           continue;
         }
-        if (isDeliveryEvent(event, eventStream)) {
+        const surfaces = isActivityBlock
+          ? isDeliveryCriticalEvent(event)
+          : isDeliveryEvent(event, eventStream);
+        if (surfaces) {
           pushCandidate(order, createDeliveryEventRow(row, event, eventIndex, eventOrder));
         }
       }
@@ -485,8 +516,26 @@ export function selectVisibleTaskFeedRows(
 
     const finalAssistantEvent = finalAssistant ? getTaskFeedRowEvent(finalAssistant.row) : null;
     const seenKeys = new Set<string>();
-    const visibleFeedRows = candidates
-      .sort((a, b) => a.order - b.order)
+    const sortedCandidates = candidates.sort((a, b) => a.order - b.order);
+    // Each user message opens a turn; only the turn's last assistant message is its answer.
+    // Earlier ones are progress commentary and stay behind the "Worked for" header.
+    const commentaryCandidates = new Set<(typeof candidates)[number]>();
+    let turnAnswer: (typeof candidates)[number] | null = null;
+    for (const candidate of sortedCandidates) {
+      const type = getTaskFeedRowEventType(candidate.row);
+      if (type === "user_message") {
+        turnAnswer = null;
+      } else if (type === "assistant_message") {
+        if (getTaskFeedRowEvent(candidate.row)?.payload?.internal === true) {
+          commentaryCandidates.add(candidate);
+          continue;
+        }
+        if (turnAnswer) commentaryCandidates.add(turnAnswer);
+        turnAnswer = candidate;
+      }
+    }
+    const visibleFeedRows = sortedCandidates
+      .filter((candidate) => !commentaryCandidates.has(candidate))
       .map((candidate) => candidate.row)
       .filter((row) => {
         const event = getTaskFeedRowEvent(row);
@@ -526,6 +575,7 @@ export function selectVisibleTaskFeedRows(
   const alwaysVisibleIndexes = new Set<number>();
   for (const [index, row] of feedRows.entries()) {
     if (
+      row.kind === "turn-header" ||
       isConversationMessageRow(row) ||
       (row.kind === "timeline" && row.item.kind === "action_block")
     ) {
@@ -674,6 +724,224 @@ export function isRedundantTimelineEvidenceEvent(event: TaskEvent, events: TaskE
   }
 
   return false;
+}
+
+/**
+ * Joins activity blocks that ended up next to each other — typically split by an event the
+ * compact feed hides, such as a file event already listed on its tool call — so one stretch
+ * of work reads as one summary row. The merged row keeps the first block's key and id (its
+ * open/closed state) and the last block's timeline index (which marks the live block).
+ */
+export function mergeAdjacentActivityBlockRows(feedRows: TaskFeedRow[]): TaskFeedRow[] {
+  const merged: TaskFeedRow[] = [];
+  for (const row of feedRows) {
+    const previous = merged[merged.length - 1];
+    const isBlock = row.kind === "timeline" && row.item.kind === "action_block";
+    if (
+      isBlock &&
+      previous?.kind === "timeline" &&
+      previous.item.kind === "action_block" &&
+      row.kind === "timeline"
+    ) {
+      merged[merged.length - 1] = {
+        ...previous,
+        estimatedHeight: Math.max(previous.estimatedHeight, row.estimatedHeight),
+        timelineIndex: row.timelineIndex,
+        item: {
+          ...previous.item,
+          events: [...previous.item.events, ...row.item.events],
+          eventIndices: [...previous.item.eventIndices, ...row.item.eventIndices],
+        },
+        revision: `${previous.revision}+${row.revision}`,
+        visiblePerfEventId: row.visiblePerfEventId ?? previous.visiblePerfEventId,
+      };
+      continue;
+    }
+    merged.push(row);
+  }
+  return merged;
+}
+
+/**
+ * Plan-step start/finish markers ("Step complete: …"). Compact activity rows leave them out
+ * when the block has real actions to show; the plan's progress lives in the Progress panel.
+ * Failures are kept, since they explain what went wrong.
+ */
+export function isPlanStepLifecycleEvent(event: TaskEvent): boolean {
+  const effectiveType = getEffectiveTaskEventType(event);
+  return effectiveType === "step_started" || effectiveType === "step_completed";
+}
+
+const QUIET_LIFECYCLE_EVENT_TYPES = new Set([
+  "task_created",
+  "plan_created",
+  "step_started",
+  "step_completed",
+]);
+
+/**
+ * A compact activity row with no tool activity and only lifecycle markers (task created, plan
+ * made, steps started/finished) would read as an empty "Worked" line, so it is left out.
+ */
+export function isQuietActivityBlock(events: TaskEvent[], toolCallCount: number): boolean {
+  if (toolCallCount > 0 || events.length === 0) return false;
+  return events.every(
+    (event) =>
+      QUIET_LIFECYCLE_EVENT_TYPES.has(getEffectiveTaskEventType(event)) ||
+      event.type === "timeline_group_started" ||
+      event.type === "timeline_group_finished",
+  );
+}
+
+/**
+ * Per-turn "Worked for" headers drive the compact (Verbose off) transcript. Verbose, replay and
+ * conversation-only surfaces keep their own transcript structure.
+ */
+export function shouldUseTurnDisclosures(args: {
+  verboseSteps: boolean;
+  isReplayMode: boolean;
+  isConversationOnlySurface: boolean;
+}): boolean {
+  return !args.verboseSteps && !args.isReplayMode && !args.isConversationOnlySurface;
+}
+
+function getTaskFeedRowTimestamp(row: TaskFeedRow): number | null {
+  if (row.kind !== "timeline") return null;
+  if (row.item.kind === "event") {
+    const timestamp = (row.item.event as TaskEvent).timestamp;
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+  if (row.item.kind === "action_block" && Array.isArray(row.item.events)) {
+    const timestamp = (row.item.events[row.item.events.length - 1] as TaskEvent | undefined)
+      ?.timestamp;
+    return typeof timestamp === "number" && Number.isFinite(timestamp) ? timestamp : null;
+  }
+  return null;
+}
+
+function isTurnAnswerRow(row: TaskFeedRow): boolean {
+  const type = getTaskFeedRowEventType(row);
+  const event = getTaskFeedRowEvent(row);
+  if (!event) return false;
+  // A finished run often shows its final answer on the completion event (the matching
+  // assistant message is folded into it), so a completion that carries summary text counts.
+  if (type === "task_completed" || type === "follow_up_completed") {
+    return getCompletionSummaryText(event).length > 0;
+  }
+  if (type !== "assistant_message") return false;
+  return event.payload?.internal !== true;
+}
+
+/**
+ * Splits the feed into conversation turns — each user message opens one, and the task prompt
+ * opens the first — and gives every turn a "Working for / Worked for" header. A finished turn
+ * folds its work (commentary and activity rows) behind that header unless the user expanded
+ * it, leaving the user message, any critical events, the final answer and what follows it.
+ */
+export function applyTurnDisclosures(
+  feedRows: TaskFeedRow[],
+  options: {
+    isTaskWorking: boolean;
+    taskStartedAt: number;
+    isTurnExpanded: (turnId: string) => boolean;
+    /** The task prompt's turn renders its header outside the feed, above the first row. */
+    omitInitialHeaderRow?: boolean;
+  },
+): { rows: TaskFeedRow[]; turns: TaskTurnSummary[] } {
+  const segments: Array<{ id: string; userRow: TaskFeedRow | null; body: TaskFeedRow[] }> = [];
+  const leading: TaskFeedRow[] = [];
+  let current: (typeof segments)[number] = { id: INITIAL_TURN_ID, userRow: null, body: [] };
+  segments.push(current);
+  for (const row of feedRows) {
+    if (row.kind === "history-control") {
+      leading.push(row);
+      continue;
+    }
+    const event = getTaskFeedRowEvent(row);
+    if (event && getTaskFeedRowEventType(row) === "user_message") {
+      current = { id: `turn:${event.id}`, userRow: row, body: [] };
+      segments.push(current);
+      continue;
+    }
+    current.body.push(row);
+  }
+
+  const rows: TaskFeedRow[] = [...leading];
+  const turns: TaskTurnSummary[] = [];
+  segments.forEach((segment, segmentIndex) => {
+    if (segment.id === INITIAL_TURN_ID && segment.body.length === 0) return;
+    const isRunning = options.isTaskWorking && segmentIndex === segments.length - 1;
+    // The answer is the turn's last assistant message, preferring one that is not a progress
+    // update; a turn that only produced commentary falls back to its last commentary.
+    let answerIndex = -1;
+    if (!isRunning) {
+      let commentaryIndex = -1;
+      for (let index = segment.body.length - 1; index >= 0; index -= 1) {
+        const row = segment.body[index];
+        if (!isTurnAnswerRow(row)) continue;
+        if (getTaskFeedRowEvent(row)?.payload?.phase !== "commentary") {
+          answerIndex = index;
+          break;
+        }
+        if (commentaryIndex < 0) commentaryIndex = index;
+      }
+      if (answerIndex < 0) answerIndex = commentaryIndex;
+    }
+    const work = answerIndex >= 0 ? segment.body.slice(0, answerIndex) : segment.body;
+    const delivered = answerIndex >= 0 ? segment.body.slice(answerIndex) : [];
+    const userTimestamp = segment.userRow ? getTaskFeedRowTimestamp(segment.userRow) : null;
+    const bodyTimestamps = segment.body
+      .map(getTaskFeedRowTimestamp)
+      .filter((timestamp): timestamp is number => timestamp !== null);
+    const startedAt = userTimestamp ?? options.taskStartedAt;
+    const endedAt = isRunning
+      ? null
+      : answerIndex >= 0
+        ? (getTaskFeedRowTimestamp(segment.body[answerIndex]) ?? null)
+        : (bodyTimestamps[bodyTimestamps.length - 1] ?? null);
+    const collapsible = !isRunning && answerIndex >= 0 && work.length > 0;
+    const turn: TaskTurnSummary = {
+      id: segment.id,
+      status: isRunning ? "working" : "worked",
+      startedAt,
+      endedAt,
+      expanded: !collapsible || options.isTurnExpanded(segment.id),
+      collapsible,
+    };
+
+    if (segment.userRow) rows.push(segment.userRow);
+    if (isRunning || work.length > 0) {
+      turns.push(turn);
+      if (!(options.omitInitialHeaderRow && segment.id === INITIAL_TURN_ID)) {
+        rows.push({
+          kind: "turn-header",
+          key: `turn-header:${segment.id}`,
+          turn,
+          estimatedHeight: 34,
+          revision: `${turn.status}:${turn.expanded ? 1 : 0}:${turn.collapsible ? 1 : 0}:${
+            turn.endedAt ?? "live"
+          }`,
+          visiblePerfEventId: null,
+        });
+      }
+    }
+    if (turn.expanded) {
+      rows.push(...work);
+    } else {
+      // Folded work still surfaces what needs attention: failures and requests for action.
+      for (const row of work) {
+        const isActivityBlock = row.kind === "timeline" && row.item.kind === "action_block";
+        for (const { event, eventIndex, eventOrder } of getTaskFeedRowEvents(row)) {
+          if (!isDeliveryCriticalEvent(event)) continue;
+          rows.push(
+            isActivityBlock ? createDeliveryEventRow(row, event, eventIndex, eventOrder) : row,
+          );
+        }
+      }
+    }
+    rows.push(...delivered);
+  });
+  return { rows, turns };
 }
 
 export function estimateTaskFeedRowHeight(

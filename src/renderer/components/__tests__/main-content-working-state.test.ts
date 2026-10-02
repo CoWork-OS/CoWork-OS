@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { Task, TaskEvent, Workspace } from "../../../shared/types";
+import type { EventType, Task, TaskEvent, Workspace } from "../../../shared/types";
 import {
   collectEndOfTaskArtifactCardStacks,
   collectLatestEndOfTaskArtifactCards,
@@ -1875,11 +1875,61 @@ describe("isTaskActivelyWorking", () => {
 
     expect(result.visibleFeedRows.map((row) => row.key)).toEqual([
       "user-1",
-      "action-block-1",
       "assistant-1",
       "end-artifact-stack",
     ]);
-    expect(result.hiddenLiveFeedRowCount).toBe(0);
+    // The activity block sits behind the "Worked for" header.
+    expect(result.hiddenLiveFeedRowCount).toBe(1);
+  });
+
+  it("collapses each turn of the delivery transcript to its user message and final answer", () => {
+    const messageRow = (key: string, timelineIndex: number, type: EventType, message: string) => ({
+      kind: "timeline",
+      key,
+      estimatedHeight: 100,
+      timelineIndex,
+      visiblePerfEventId: key,
+      revision: key,
+      item: {
+        kind: "event",
+        event: makeEvent(key, 100 + timelineIndex, type, { message }),
+      },
+    });
+    const rows = [
+      messageRow("user-1", 0, "user_message", "Audit the IPC handlers"),
+      messageRow("commentary-1", 1, "assistant_message", "Listing the handlers first."),
+      {
+        kind: "timeline",
+        key: "action-block-1",
+        estimatedHeight: 180,
+        timelineIndex: 2,
+        visiblePerfEventId: "error-1",
+        revision: "action-block-1",
+        item: {
+          kind: "action_block",
+          blockId: "action-block-1",
+          eventIndices: [2, 3],
+          events: [
+            makeEvent("call-1", 102, "tool_call", { tool: "run_command" }),
+            makeEvent("error-1", 103, "error", { message: "Command failed" }),
+          ],
+        },
+      },
+      messageRow("answer-1", 4, "assistant_message", "Found two unguarded handlers."),
+      messageRow("user-2", 5, "user_message", "Fix them"),
+      messageRow("commentary-2", 6, "assistant_message", "Editing handlers.ts."),
+      messageRow("answer-2", 7, "assistant_message", "Both handlers now check access."),
+    ] as Any[];
+
+    const result = selectVisibleTaskFeedRows(rows, "delivery");
+
+    expect(result.visibleFeedRows.map((row) => row.key)).toEqual([
+      "user-1",
+      "delivery-event:error-1:3",
+      "answer-1",
+      "user-2",
+      "answer-2",
+    ]);
   });
 
   it("keeps action-required and critical terminal rows in delivery mode", () => {

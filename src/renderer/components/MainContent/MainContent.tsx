@@ -132,7 +132,6 @@ import { CalmAccessMenu, type CalmAccessMenuProps } from "../calm/CalmTopBar";
 import { CalmModeToggle } from "../calm/CalmModeToggle";
 import { CalmBriefingCard } from "../calm/CalmBriefingCard";
 import { CalmAgentAvatar } from "../calm/CalmAgentAvatar";
-import { openCalmAgentSetup } from "../calm/CalmAgentSetup";
 import {
   hasTaskOutputs,
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -186,6 +185,7 @@ import {
   Archive as ArchiveIcon,
   Check as CheckIcon,
   ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Copy,
   Ellipsis,
@@ -294,14 +294,12 @@ import {
   CollapsibleUserBubble,
   MessageCopyButton,
   MessageForkButton,
-  MessageQuoteButton,
   MessageSpeakButton,
   UserMessageImageGallery,
   UserMessageText,
   getIntegrationMentionsSignature,
   isLastAssistantMessageEvent,
   normalizeCommitmentText,
-  createQuotedAssistantMessage,
   summarizeQuotedAssistantMessage,
 } from "./message-ui";
 import { ModelDropdown } from "./ModelDropdown";
@@ -380,6 +378,11 @@ import {
   deriveAgentReasoningPanelState,
   hasAgentReasoningPanelContent,
   selectVisibleTaskFeedRows,
+  applyTurnDisclosures,
+  isPlanStepLifecycleEvent,
+  isQuietActivityBlock,
+  mergeAdjacentActivityBlockRows,
+  shouldUseTurnDisclosures,
   isCompletionSummaryCoveredByAssistantEvent,
   getCommandOutputSessionsRevision,
   collectInlineRunCommandSessionIds,
@@ -490,6 +493,17 @@ import { CanvasPreview } from "../CanvasPreview";
 import { StepFeed } from "../timeline/StepFeed";
 import { ParallelGroupFeed } from "../timeline/ParallelGroupFeed";
 import { ActionBlock } from "../timeline/ActionBlock";
+import { TurnHeader } from "../timeline/TurnHeader";
+import { SelectionReplyPopover } from "./SelectionReplyPopover";
+import {
+  forgetRememberedAccessProfileId,
+  getAccessProfileIdForPermissionMode,
+  readRememberedAccessProfileId,
+  rememberAccessProfileId,
+  resolveNewTaskAccessProfileId,
+} from "../../utils/new-task-access-profile";
+import { FileChangeTitle } from "../timeline/FileChangeTitle";
+import { isFileEventCoveredByToolCall, summarizeFileChange } from "../timeline/file-change-row";
 import { buildActionBlockSummary } from "../timeline/ActionBlockSummary";
 import { TaskStatusStrip } from "../TaskStatusStrip";
 import { buildParallelGroupProjection } from "../timeline/parallel-group-projection";
@@ -802,16 +816,19 @@ function VirtualizedTaskFeedRow({
       if (frame) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const nextHeight = Math.ceil(element.getBoundingClientRect().height);
-        if (nextHeight > 0) {
-          onHeightChange(itemKey, nextHeight);
-          if (
-            visibilityEnabled &&
-            visiblePerfEventId &&
-            visibleNotifiedEventIdRef.current !== visiblePerfEventId
-          ) {
-            visibleNotifiedEventIdRef.current = visiblePerfEventId;
-            markTaskEventVisible({ id: visiblePerfEventId }, "measured-row", visibilityEnabled);
-          }
+        // A row that renders nothing is 0px tall and must report it, or it keeps its estimated
+        // height as a blank gap. A row inside a hidden (display: none) view has no layout boxes
+        // at all; skip it so a hidden feed does not collapse every row to 0.
+        if (nextHeight === 0 && element.getClientRects().length === 0) return;
+        onHeightChange(itemKey, nextHeight);
+        if (
+          nextHeight > 0 &&
+          visibilityEnabled &&
+          visiblePerfEventId &&
+          visibleNotifiedEventIdRef.current !== visiblePerfEventId
+        ) {
+          visibleNotifiedEventIdRef.current = visiblePerfEventId;
+          markTaskEventVisible({ id: visiblePerfEventId }, "measured-row", visibilityEnabled);
         }
       });
     };
@@ -830,7 +847,11 @@ function VirtualizedTaskFeedRow({
     return () => {
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [itemKey, onHeightChange, visibilityEnabled, visiblePerfEventId]);
+    // estimatedHeight is the height the list lays this row out with. When the list drops a
+    // stale measurement (the row's content changed) it falls back to the estimate, and the DOM
+    // may not resize, so ResizeObserver stays quiet; re-measuring on that change keeps the
+    // layout from holding an estimate that leaves a gap or an overlap.
+  }, [estimatedHeight, itemKey, onHeightChange, visibilityEnabled, visiblePerfEventId]);
 
   return (
     <div
@@ -1005,8 +1026,6 @@ const TaskConversationRenderedRows = memo(
       rendererPerfLoggingEnabled,
     );
     void reasoningPanelSignature;
-    void hasMoreTimelineHistory;
-    void timelineHistoryError;
 
     const historyPrependAnchorRef = useRef<{
       taskId: string | undefined;
@@ -1120,12 +1139,17 @@ const TaskConversationRenderedRows = memo(
 
     const flushFeedRowHeights = useCallback(() => {
       feedRowHeightFlushFrameRef.current = null;
+      // Take the batch before calling setState: React may run an updater more than once
+      // (StrictMode, or replaying an interrupted transition) and keeps only the last result.
+      // Clearing the batch inside the updater made that last run see nothing and drop the
+      // measurements, leaving rows at their estimated height.
+      const measured = pendingFeedRowHeightsRef.current;
+      if (measured.size === 0) return;
+      pendingFeedRowHeightsRef.current = new Map();
       setFeedRowHeights((prev) => {
-        if (pendingFeedRowHeightsRef.current.size === 0) return prev;
-
         let changed = false;
         const next = new Map(prev);
-        for (const [itemKey, nextHeight] of pendingFeedRowHeightsRef.current.entries()) {
+        for (const [itemKey, nextHeight] of measured.entries()) {
           const currentHeight = next.get(itemKey);
           if (currentHeight !== undefined && Math.abs(currentHeight - nextHeight) < 2) {
             continue;
@@ -1133,7 +1157,6 @@ const TaskConversationRenderedRows = memo(
           next.set(itemKey, nextHeight);
           changed = true;
         }
-        pendingFeedRowHeightsRef.current.clear();
         if (changed) {
           feedRowHeightsRef.current = next;
         }
@@ -1238,23 +1261,43 @@ const TaskConversationRenderedRows = memo(
       taskId,
       useVirtualizedFeed,
     ]);
+    // A short feed is not virtualized, so the virtual list cannot report reaching the top.
+    // Track it from the scroll container instead; a feed that does not overflow shows its top.
+    const [isNearFeedTop, setIsNearFeedTop] = useState(false);
+    useEffect(() => {
+      const container = mainBodyRef.current;
+      if (useVirtualizedFeed || !container) return;
+      const update = () => {
+        const fitsWithoutScrolling = container.scrollHeight <= container.clientHeight + 1;
+        setIsNearFeedTop(fitsWithoutScrolling || container.scrollTop < 120);
+      };
+      update();
+      container.addEventListener("scroll", update, { passive: true });
+      return () => container.removeEventListener("scroll", update);
+    }, [mainBodyRef, renderableFeedRows.length, useVirtualizedFeed]);
+    // Earlier pages load as the user reaches the top of the step feed in any mode that shows
+    // steps; the summary-only delivery view has no older steps to show.
     useEffect(() => {
       if (
-        transcriptMode !== "inspect" ||
-        !useVirtualizedFeed ||
+        transcriptMode === "delivery" ||
         !hasMoreTimelineHistory ||
         isLoadingTimelineHistory ||
-        isAtBottom ||
-        visibleStartIndex > 2
+        timelineHistoryError
       ) {
         return;
       }
+      const reachedTop = useVirtualizedFeed
+        ? !isAtBottom && visibleStartIndex <= 2
+        : isNearFeedTop;
+      if (!reachedTop) return;
       handleLoadMoreTimelineHistory({ loadAll: false });
     }, [
       handleLoadMoreTimelineHistory,
       hasMoreTimelineHistory,
       isAtBottom,
       isLoadingTimelineHistory,
+      isNearFeedTop,
+      timelineHistoryError,
       transcriptMode,
       useVirtualizedFeed,
       visibleStartIndex,
@@ -1482,9 +1525,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const messageFeedbackMap = props.messageFeedbackMap as Map<string, string>;
   const mainBodyRef = props.mainBodyRef as React.RefObject<HTMLDivElement | null>;
   const onOpenBrowserView = props.onOpenBrowserView as ((url?: string) => void) | undefined;
-  const onQuoteAssistantMessage = props.onQuoteAssistantMessage as
-    | ((quote: QuotedAssistantMessage) => void)
-    | undefined;
   const onForkTaskSessionFromEvent = props.onForkTaskSessionFromEvent as
     | ((event: TaskEvent) => void)
     | undefined;
@@ -1896,9 +1936,33 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       workspace?.path,
     ],
   );
+  const turnDisclosuresEnabled = shouldUseTurnDisclosures({
+    verboseSteps,
+    isReplayMode,
+    isConversationOnlySurface,
+  });
+  // With per-turn headers a finished task is already folded turn by turn, so the transcript
+  // shows every row the turn projection kept instead of the task-wide delivery subset.
+  const feedTranscriptMode: TranscriptMode =
+    turnDisclosuresEnabled && transcriptMode === "delivery" ? "inspect" : transcriptMode;
+  const turnProjectedFeedRows = useMemo(
+    () =>
+      turnDisclosuresEnabled
+        ? applyTurnDisclosures(mergeAdjacentActivityBlockRows(displayFeedRows), {
+            isTaskWorking,
+            taskStartedAt: task?.createdAt ?? 0,
+            isTurnExpanded: (turnId) =>
+              resolveDisclosureExpanded({
+                intent: getDisclosureIntent(disclosureIntents, "group", turnId),
+                isCurrent: false,
+              }),
+          }).rows
+        : displayFeedRows,
+    [disclosureIntents, displayFeedRows, isTaskWorking, task?.createdAt, turnDisclosuresEnabled],
+  );
   const { visibleFeedRows } = useMemo(
-    () => selectVisibleTaskFeedRows(displayFeedRows, transcriptMode),
-    [displayFeedRows, transcriptMode],
+    () => selectVisibleTaskFeedRows(turnProjectedFeedRows, feedTranscriptMode),
+    [feedTranscriptMode, turnProjectedFeedRows],
   );
   const reasoningPanelState = useMemo(
     () =>
@@ -1954,7 +2018,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               if (row.kind === "leading-command-outputs") {
                 return row.revision;
               }
-              if (row.kind === "artifact-stack") {
+              if (row.kind === "artifact-stack" || row.kind === "turn-header") {
                 return row.revision;
               }
 
@@ -2014,6 +2078,14 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
             const renderFeedRow = (row: TaskFeedRow) => {
               if (row.kind === "history-control") {
                 return null;
+              }
+              if (row.kind === "turn-header") {
+                return (
+                  <TurnHeader
+                    turn={row.turn}
+                    onToggle={() => toggleDisclosureIntent("group", row.turn.id, false)}
+                  />
+                );
               }
               if (row.kind === "leading-command-outputs") {
                 return renderCommandOutputs(row.sessions);
@@ -2245,11 +2317,25 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   }
                   return null;
                 }
-                const { summary, iconKind, stepCount, toolCallCount, durationMs, outputTokens } =
-                  buildActionBlockSummary(renderableEvents, events, {
-                    isActive,
-                    showApprovalNarration: verboseSteps,
-                  });
+                const {
+                  summary,
+                  activityPhrase,
+                  iconKind,
+                  stepCount,
+                  toolCallCount,
+                  durationMs,
+                  outputTokens,
+                } = buildActionBlockSummary(renderableEvents, events, {
+                  isActive,
+                  showApprovalNarration: verboseSteps,
+                });
+                if (
+                  !verboseSteps &&
+                  !isActive &&
+                  isQuietActivityBlock(renderableEvents, toolCallCount)
+                ) {
+                  return null;
+                }
                 const projectedActivityGroup = activityGroupsById.get(item.blockId);
                 const expanded = resolveDisclosureExpanded({
                   intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
@@ -2317,13 +2403,30 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       showConnectorAbove={showConnectorAbove}
                       showConnectorBelow={showConnectorBelow}
                       lastStepLabel={lastStepLabel}
-                      compactLabel={summary}
+                      compactLabel={activityPhrase}
                       startedAt={item.events[0]?.timestamp ?? item.timestamp}
                       replay={isReplayMode}
                       minimal={!verboseSteps}
                     >
                       {(() => {
                         const nestedParallelEventIds = new Set<string>();
+                        // Verbose off lists one line per action. Plan-step markers drop out
+                        // when there are actions to list, unless they anchor a parallel group.
+                        const ownsParallelChildren = (idx: number) => {
+                          const next = visibleBlockEvents[idx + 1] as TaskEvent | undefined;
+                          return Boolean(next && parallelGroupsByAnchorEventId.has(next.id));
+                        };
+                        const isHiddenStepMarker = (event: TaskEvent, idx: number) =>
+                          !verboseSteps &&
+                          isPlanStepLifecycleEvent(event) &&
+                          !parallelGroupsByAnchorEventId.has(event.id) &&
+                          !ownsParallelChildren(idx);
+                        const hasActionRows = visibleBlockEvents.some(
+                          (event: TaskEvent, idx: number) =>
+                            !isHiddenStepMarker(event, idx) &&
+                            !suppressedParallelEventIds.has(event.id) &&
+                            shouldRenderTimelineEventInStepFeed(event),
+                        );
                         return visibleBlockEvents.map((event: TaskEvent, idx: number) => {
                           if (nestedParallelEventIds.has(event.id)) return null;
 
@@ -2334,14 +2437,19 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           if (!parallelGroup && !shouldRenderTimelineEventInStepFeed(event)) {
                             return null;
                           }
+                          if (hasActionRows && isHiddenStepMarker(event, idx)) return null;
                           const isLastChild = idx === visibleBlockEvents.length - 1;
                           const showChildConnectorAbove = true;
                           const showChildConnectorBelow = !isLastChild || showConnectorBelow;
 
+                          // A finished command's output opens from its row in compact mode;
+                          // only running commands keep their terminal visible under the list.
                           const perEventCmdSessions = (
                             commandOutputSessionsByInsertIndex.get(eventIndex) ?? []
                           ).filter(
-                            (s: CommandOutputSession) => !inlineRunCommandSessionIds.has(s.id),
+                            (s: CommandOutputSession) =>
+                              !inlineRunCommandSessionIds.has(s.id) &&
+                              (verboseSteps || s.isRunning),
                           );
 
                           if (parallelGroup) {
@@ -2461,12 +2569,30 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           });
                           const toolCallResultEvent = toolCallPairing.completions.get(event.id);
                           const renderEvent = toolCallResultEvent ?? event;
-                          const eventTitle = renderEventTitle(
-                            renderEvent,
-                            workspace?.path,
-                            setViewerFilePath,
-                            agentContext,
-                            { summaryMode: !verboseSteps },
+                          // Compact rows show file changes as "Edited name.ts +3 −1".
+                          const fileChange = verboseSteps
+                            ? null
+                            : summarizeFileChange(
+                                event,
+                                toolCallResultEvent,
+                                events,
+                                workspace?.path,
+                              );
+                          const eventTitle = fileChange ? (
+                            <FileChangeTitle
+                              change={fileChange}
+                              pending={!toolCallResultEvent && isTaskWorking}
+                              workspacePath={workspace?.path}
+                              onOpenViewer={setViewerFilePath}
+                            />
+                          ) : (
+                            renderEventTitle(
+                              renderEvent,
+                              workspace?.path,
+                              setViewerFilePath,
+                              agentContext,
+                              { summaryMode: !verboseSteps },
+                            )
                           );
                           const eventRecapLine = getAgentLifecycleRecapLine(renderEvent);
                           const eventDetails = hasEventDetails(event)
@@ -2478,7 +2604,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 onOpenPresentationArtifact,
                                 onOpenWebArtifact,
                                 onOpenAgent: onOpenChildAgentSidebar ?? onSelectChildTask,
-                                onQuoteAssistantMessage,
                                 onForkTaskSession: isBotConversation
                                   ? undefined
                                   : onForkTaskSessionFromEvent,
@@ -2831,11 +2956,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const cleanedMessageText = cleanAssistantMessageForDisplay(messageText);
                 const inlineFrames = getTaskEventInlineFrames(event);
                 const sourceUserMessage = getPreviousUserMessageText(events, item.eventIndex);
-                const quotedAssistantMessage = createQuotedAssistantMessage(
-                  cleanedMessageText,
-                  event.id,
-                  event.taskId,
-                );
                 const isLastAssistant = isLastAssistantMessageEvent(event, lastAssistantMessage);
                 const assistantStatusLabel =
                   isLastAssistant && !isConversationOnlySurface
@@ -2859,7 +2979,12 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   "Bot";
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
-                    <div className="chat-message assistant-message">
+                    <div
+                      className="chat-message assistant-message"
+                      data-reply-source="assistant"
+                      data-reply-event-id={event.id || undefined}
+                      data-reply-task-id={event.taskId || undefined}
+                    >
                       {agentMessageProtocolReceipt ? (
                         <div
                           className="agent-outbound-message-receipt"
@@ -2936,14 +3061,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               )}
                             </div>
                           )}
+                          {/* Copy with ⌘C and reply by selecting text (SelectionReplyPopover). */}
                           <div className="message-actions">
-                            <MessageCopyButton text={messageText} />
                             <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
-                            {quotedAssistantMessage && onQuoteAssistantMessage && (
-                              <MessageQuoteButton
-                                onQuote={() => onQuoteAssistantMessage(quotedAssistantMessage)}
-                              />
-                            )}
                             {event.id &&
                               onForkTaskSessionFromEvent &&
                               !isBotConversation &&
@@ -3218,7 +3338,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             onOpenPresentationArtifact,
                             onOpenWebArtifact,
                             onOpenAgent: onOpenChildAgentSidebar ?? onSelectChildTask,
-                            onQuoteAssistantMessage,
                             isLastAssistantMessage: isLastAssistantMessageEvent(
                               event,
                               lastAssistantMessage,
@@ -3277,7 +3396,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 task={task}
                 formatTime={formatTime}
                 isReplayMode={isReplayMode}
-                transcriptMode={transcriptMode}
+                transcriptMode={feedTranscriptMode}
                 canReturnToLiveView={defaultTranscriptMode === "live"}
                 onBackToLiveView={returnToDefaultTranscript}
                 reasoningPanel={
@@ -3312,7 +3431,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       expandArtifactStack,
       handleCanvasClose,
       handleMessageFeedback,
-      onQuoteAssistantMessage,
       handleStepFeedback,
       hasMoreTimelineHistory,
       isLoadingTimelineHistory,
@@ -3330,7 +3448,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       onOpenDocumentArtifact,
       onOpenPresentationArtifact,
       onOpenWebArtifact,
-      onQuoteAssistantMessage,
       onSelectChildTask,
       onOpenChildAgentSidebar,
       onViewTaskOutputs,
@@ -3351,6 +3468,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       task?.terminalStatus,
       feedRows,
       transcriptMode,
+      feedTranscriptMode,
       defaultTranscriptMode,
       lastActionBlockTimelineIndex,
       lastAssistantMessage,
@@ -3436,7 +3554,6 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.onOpenDocumentArtifact === next.onOpenDocumentArtifact &&
     prev.onOpenPresentationArtifact === next.onOpenPresentationArtifact &&
     prev.onOpenWebArtifact === next.onOpenWebArtifact &&
-    prev.onQuoteAssistantMessage === next.onQuoteAssistantMessage &&
     prev.onForkTaskSessionFromEvent === next.onForkTaskSessionFromEvent &&
     prev.onSelectChildTask === next.onSelectChildTask &&
     prev.onOpenChildAgentSidebar === next.onOpenChildAgentSidebar &&
@@ -4205,12 +4322,8 @@ function MainContentComponent({
   const [permissionAccessMode, setPermissionAccessMode] = useState<PermissionAccessMode>(
     BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
   );
-  // Older settings may have only a legacy permission mode. Keep the profile
-  // selector visual while omitting an explicit profile from new tasks until
-  // the user chooses a profile, so migration does not silently change the
-  // legacy defaultMode semantics.
-  const [newTaskUsesLegacyPermissionMode, setNewTaskUsesLegacyPermissionMode] = useState(true);
-  const [defaultUsesLegacyPermissionMode, setDefaultUsesLegacyPermissionMode] = useState(true);
+  // The Settings default last applied, to tell a changed default from other settings updates.
+  const loadedDefaultAccessProfileIdRef = useRef<PermissionAccessMode | null>(null);
   const [selectedTaskAccessProfileOverride, setSelectedTaskAccessProfileOverride] = useState<
     AccessProfileId | null | undefined
   >(undefined);
@@ -4228,17 +4341,16 @@ function MainContentComponent({
     };
   } | null>(null);
   const [approvalPromptsEnabled, setApprovalPromptsEnabled] = useState<boolean | null>(null);
-  const newTaskAccessProfileId = newTaskUsesLegacyPermissionMode ? undefined : permissionAccessMode;
+  // New tasks always run under one of the named profiles.
+  const newTaskAccessProfileId = permissionAccessMode;
   const taskAccessProfileId = task?.id
     ? (selectedTaskAccessProfileOverride ?? undefined)
-    : newTaskUsesLegacyPermissionMode
-      ? undefined
-      : permissionAccessMode;
+    : permissionAccessMode;
+  // A task saved before access profiles shows the profile its permission mode runs as.
   const selectedProfileId = task?.id
-    ? (selectedTaskAccessProfileOverride ?? undefined)
-    : newTaskUsesLegacyPermissionMode
-      ? undefined
-      : permissionAccessMode;
+    ? (selectedTaskAccessProfileOverride ??
+      getAccessProfileIdForPermissionMode(task.agentConfig?.permissionMode))
+    : permissionAccessMode;
   const [accessProfiles, setAccessProfiles] = useState<AccessProfileDefinition[]>([]);
   const selectedAccessProfile = useMemo(() => {
     const found = [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].find(
@@ -4263,10 +4375,7 @@ function MainContentComponent({
     selectedAccessProfile,
     approvalPromptsEnabled,
   );
-  const selectedAccessProfileLabel =
-    task?.id && selectedTaskAccessProfileOverride === null
-      ? `Legacy mode${task.agentConfig?.permissionMode ? ` · ${task.agentConfig.permissionMode}` : ""}`
-      : selectedAccessProfile.label;
+  const selectedAccessProfileLabel = selectedAccessProfile.label;
   const profileConstraintNotice = useMemo(() => {
     const notices: string[] = [];
     if (selectedProfileId && selectedAccessProfile.label === "Unavailable access profile") {
@@ -4843,6 +4952,12 @@ function MainContentComponent({
   const [workspacesList, setWorkspacesList] = useState<Workspace[]>([]);
   // Verbose mode - default to summary and persist per user profile.
   const [verboseSteps, setVerboseSteps] = useState(false);
+  // The feed shows a "Worked for" header per turn, so the task-wide duration label is not needed.
+  const turnHeadersShown = shouldUseTurnDisclosures({
+    verboseSteps,
+    isReplayMode,
+    isConversationOnlySurface: isChatTask || isBotConversation,
+  });
   const [commandOutputStyle, setCommandOutputStyle] = useState(readCommandOutputStyle);
   // Code previews expanded by default (true = open, false = collapsed)
   const [codePreviewsExpanded, setCodePreviewsExpanded] = useState(() => {
@@ -5971,18 +6086,27 @@ function MainContentComponent({
       const nextProfiles = Array.isArray(permissionSettings.accessProfiles)
         ? permissionSettings.accessProfiles
         : [];
-      const hasNamedDefault =
-        typeof permissionSettings.defaultAccessProfileId === "string" &&
-        permissionSettings.defaultAccessProfileId.trim().length > 0;
+      // Changing the default in Settings is a manual choice too: it replaces the last pick.
+      const previousDefault = loadedDefaultAccessProfileIdRef.current;
+      loadedDefaultAccessProfileIdRef.current = nextDefault;
+      if (forceSelection && previousDefault !== null && previousDefault !== nextDefault) {
+        forgetRememberedAccessProfileId();
+      }
       setDefaultPermissionAccessMode(nextDefault);
       setAccessProfiles(nextProfiles);
-      setDefaultUsesLegacyPermissionMode(!hasNamedDefault);
-      setNewTaskUsesLegacyPermissionMode(!hasNamedDefault);
+      const availableProfileIds = [...BUILTIN_ACCESS_PROFILES, ...nextProfiles].map(
+        (profile) => profile.id,
+      );
+      const preferredProfileId = resolveNewTaskAccessProfileId({
+        remembered: readRememberedAccessProfileId(),
+        defaultProfileId: nextDefault,
+        availableProfileIds,
+      });
       setPermissionAccessMode((current) =>
         forceSelection ||
         current === BUILTIN_ACCESS_PROFILE_IDS.askForApproval ||
-        ![...BUILTIN_ACCESS_PROFILES, ...nextProfiles].some((profile) => profile.id === current)
-          ? nextDefault
+        !availableProfileIds.includes(current)
+          ? preferredProfileId
           : current,
       );
     };
@@ -6492,9 +6616,18 @@ function MainContentComponent({
       if (!shouldShowTaskEventInStepFeed(event, { verboseSteps })) {
         return false;
       }
+      // Compact rows list each file change once, on its write/edit/delete call. The separate
+      // "Created:"/"Updated:" event stays when it carries a rich preview (image, sheet, page…).
+      if (
+        !verboseSteps &&
+        !getInlinePreviewKindForTaskEvent(event) &&
+        isFileEventCoveredByToolCall(event, events, workspace?.path)
+      ) {
+        return false;
+      }
       return true;
     },
-    [toolCallPairing.claimedResultIds, events, verboseSteps],
+    [toolCallPairing.claimedResultIds, events, verboseSteps, workspace?.path],
   );
 
   // Verbose mode keeps the detailed action header (including its duration metadata) as the
@@ -6684,16 +6817,23 @@ function MainContentComponent({
     };
   }, []);
 
-  const handleQuoteAssistantMessage = useCallback(
-    (quote: QuotedAssistantMessage) => {
-      setQuotedAssistantMessage(quote);
-      recordDraftMutation(onDraftPatch?.({ quotedAssistantMessage: quote }));
-      const input = promptInputRef.current;
-      input?.focus();
-      const cursorPosition = inputValue.length;
-      input?.setSelectionRange(cursorPosition, cursorPosition);
+  // Select text in an assistant message to reply to it (SelectionReplyPopover). The reply goes
+  // out as a follow-up carrying the quote, through the same options the composer sends with.
+  const handleReplyToSelection = useCallback(
+    async (reply: string, quote: QuotedAssistantMessage): Promise<boolean> => {
+      if (!task?.id || !permissionSettingsLoaded) return false;
+      const messageId =
+        globalThis.crypto?.randomUUID?.() ||
+        `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const result = await onSendMessage(reply, undefined, quote, {
+        interactionMode: selectedInteractionMode,
+        returnOnAccepted: true,
+        messageId,
+        ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
+      });
+      return result !== false;
     },
-    [inputValue.length, onDraftPatch, recordDraftMutation],
+    [onSendMessage, permissionSettingsLoaded, selectedInteractionMode, task?.id, taskAccessProfileId],
   );
 
   // Programmatic input updates still need a resize pass.
@@ -7526,8 +7666,15 @@ function MainContentComponent({
         setCollaborativeModeEnabled(false);
         setMultiLlmModeEnabled(false);
         setChronicleEnabledForTask(true);
-        setPermissionAccessMode(defaultPermissionAccessMode);
-        setNewTaskUsesLegacyPermissionMode(defaultUsesLegacyPermissionMode);
+        setPermissionAccessMode(
+          resolveNewTaskAccessProfileId({
+            remembered: readRememberedAccessProfileId(),
+            defaultProfileId: defaultPermissionAccessMode,
+            availableProfileIds: [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].map(
+              (profile) => profile.id,
+            ),
+          }),
+        );
         setMultiLlmConfig(null);
         setVerificationAgentEnabled(false);
         return;
@@ -7672,8 +7819,15 @@ function MainContentComponent({
         setCollaborativeModeEnabled(false);
         setMultiLlmModeEnabled(false);
         setChronicleEnabledForTask(true);
-        setPermissionAccessMode(defaultPermissionAccessMode);
-        setNewTaskUsesLegacyPermissionMode(defaultUsesLegacyPermissionMode);
+        setPermissionAccessMode(
+          resolveNewTaskAccessProfileId({
+            remembered: readRememberedAccessProfileId(),
+            defaultProfileId: defaultPermissionAccessMode,
+            availableProfileIds: [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].map(
+              (profile) => profile.id,
+            ),
+          }),
+        );
         setMultiLlmConfig(null);
         setVerificationAgentEnabled(false);
       } else {
@@ -9191,11 +9345,12 @@ function MainContentComponent({
       );
       if (!profile) return;
 
+      // A pick sticks: new tasks start with it until the user picks another, including a pick
+      // made inside an existing task.
+      rememberAccessProfileId(profileId);
+      setPermissionAccessMode(profileId as PermissionAccessMode);
       if (task?.id) {
         setSelectedTaskAccessProfileOverride(profileId);
-      } else {
-        setNewTaskUsesLegacyPermissionMode(false);
-        setPermissionAccessMode(profileId as PermissionAccessMode);
       }
       setShowPermissionDropdown(false);
 
@@ -10739,14 +10894,6 @@ function MainContentComponent({
               </div>
             )}
             {isCalm && renderCalmSuggestionChips()}
-            {isCalm && agentContext.agentName === "CoWork" && !agentContext.isLoading && (
-              <div className="calm-setup-row">
-                <button type="button" className="calm-setup-pill" onClick={openCalmAgentSetup}>
-                  <CalmAgentAvatar size={22} />
-                  <span>Set up your agent</span>
-                </button>
-              </div>
-            )}
             {isCalm && (
               <CalmBriefingCard
                 workspaceId={workspace?.id}
@@ -10824,7 +10971,6 @@ function MainContentComponent({
       onOpenDocumentArtifact={openDocumentArtifact}
       onOpenPresentationArtifact={openPresentationArtifact}
       onOpenWebArtifact={openWebArtifact}
-      onQuoteAssistantMessage={handleQuoteAssistantMessage}
       botName={botName}
       onForkTaskSessionFromEvent={
         remoteSession ||
@@ -11454,6 +11600,13 @@ function MainContentComponent({
       )}
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
+        {!isBotConversation && (
+          <SelectionReplyPopover
+            containerRef={mainBodyRef}
+            agentName={agentContext.agentName || "CoWork"}
+            onReply={handleReplyToSelection}
+          />
+        )}
         <div className="task-content">
           {/* Always anchor the initial user prompt above the timeline. */}
           {initialPromptBubble}
@@ -11516,9 +11669,9 @@ function MainContentComponent({
 
           {/* Timeline controls - show right after original prompt */}
           {!isBotConversation && (hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
-            <div className="timeline-controls">
+            <div className={`timeline-controls ${turnHeadersShown ? "with-turn-headers" : ""}`}>
               <div className="timeline-controls-status">
-                {canToggleCompletedTranscript ? (
+                {turnHeadersShown ? null : canToggleCompletedTranscript ? (
                   <button
                     type="button"
                     className="timeline-controls-label timeline-controls-label-button with-duration"
@@ -11532,7 +11685,7 @@ function MainContentComponent({
                   >
                     <span>{workDurationLabel}</span>
                     <span className="timeline-controls-label-chevron" aria-hidden="true">
-                      {transcriptMode === "delivery" ? ">" : "v"}
+                      <ChevronRight size={14} strokeWidth={2} />
                     </span>
                   </button>
                 ) : liveActivityHeaderVisible ? null : (

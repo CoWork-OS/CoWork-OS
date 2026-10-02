@@ -20,6 +20,11 @@ export type ActionBlockIconKind =
 export interface ActionBlockSummary {
   /** Short summary for collapsed header, e.g. "Explored 7 files, 6 searches" */
   summary: string;
+  /**
+   * Count-free phrase for the compact (Verbose off) row, e.g. "Read files, ran commands,
+   * searched the web". Kinds always appear in the same order and only the first is capitalized.
+   */
+  activityPhrase: string;
   /** Semantic icon category for the collapsed header. */
   iconKind: ActionBlockIconKind;
   /** Total number of actions in the block */
@@ -144,16 +149,36 @@ export function buildActionBlockSummary(
   const toolOutcomeSeen = new Set<string>();
   let stepCount = 0;
 
-  const blockStart = events[0]?.timestamp ?? 0;
+  let blockStart = events[0]?.timestamp ?? 0;
   let blockEnd = events[events.length - 1]?.timestamp ?? 0;
+
+  // A block summarizes the work between two messages the user can see. Hidden (internal)
+  // step reports do not split that work: treating them as boundaries left a step's tool calls
+  // outside every block, and a finished block — whose own events can be just plan-step markers
+  // logged after those calls — summarized as "Worked".
+  const isVisibleMessageBoundary = (e: TaskEvent) => {
+    const t = getEffectiveTaskEventType(e);
+    if (t === "user_message") return true;
+    return t === "assistant_message" && asObject(e.payload).internal !== true;
+  };
+
+  // Reach back to just after the previous visible message.
+  if (allEventsForLookup && allEventsForLookup.length > 0 && blockStart > 0) {
+    let previousBoundaryTs: number | null = null;
+    for (const e of allEventsForLookup) {
+      const ts = e.timestamp ?? 0;
+      if (ts >= blockStart || !isVisibleMessageBoundary(e)) continue;
+      if (ts > (previousBoundaryTs ?? -1)) previousBoundaryTs = ts;
+    }
+    if (previousBoundaryTs !== null) blockStart = previousBoundaryTs + 1;
+  }
 
   // In summary mode, block may have few events; expand blockEnd to just before next boundary so we capture all tool calls and llm_usage in that phase
   if (allEventsForLookup && allEventsForLookup.length > 0 && blockStart > 0) {
     const nextBoundary = allEventsForLookup.find((e) => {
       const ts = e.timestamp ?? 0;
-      if (ts <= blockStart) return false;
-      const t = getEffectiveTaskEventType(e);
-      return t === "user_message" || t === "assistant_message";
+      if (ts <= blockEnd) return false;
+      return isVisibleMessageBoundary(e);
     });
     if (nextBoundary) {
       const nextTs = (nextBoundary.timestamp ?? 0) - 1;
@@ -292,7 +317,9 @@ export function buildActionBlockSummary(
     (summaryToolCounts.get("read_file") || 0) +
     (summaryToolCounts.get("read_files") || 0) +
     (summaryToolCounts.get("list_directory") || 0) +
-    (summaryToolCounts.get("glob") || 0);
+    (summaryToolCounts.get("glob") || 0) +
+    (summaryToolCounts.get("get_file_info") || 0) +
+    (summaryToolCounts.get("count_text") || 0);
   const searches =
     (summaryToolCounts.get("grep") || 0) +
     (summaryToolCounts.get("search_files") || 0) +
@@ -360,6 +387,8 @@ export function buildActionBlockSummary(
     "read_file",
     "read_files",
     "list_directory",
+    "get_file_info",
+    "count_text",
     "glob",
     "grep",
     "search_files",
@@ -425,15 +454,16 @@ export function buildActionBlockSummary(
     }
   }
 
+  // Follows the order of activityPhrase so the icon matches the phrase's first kind.
   const iconKind: ActionBlockIconKind =
     showApprovalNarration && approvedRequests > 0
       ? "approval"
       : writes > 0
         ? "write"
-        : commands > 0
-          ? "command"
-          : searches > 0 || readFiles > 0
-            ? "search"
+        : searches > 0 || readFiles > 0
+          ? "search"
+          : commands > 0
+            ? "command"
             : webLookups > 0
               ? "web"
               : verificationSteps > 0
@@ -441,6 +471,35 @@ export function buildActionBlockSummary(
                 : generativeSteps > 0
                   ? "generate"
                   : "work";
+
+  const unclassifiedTools = Array.from(summaryToolCounts.entries())
+    .filter(
+      ([tool, count]) => count > 0 && !summarizedToolNames.has(tool) && !isBrowserToolName(tool),
+    )
+    .map(([tool]) => tool);
+  const browserActions = Array.from(summaryToolCounts.entries()).reduce(
+    (sum, [tool, count]) => sum + (isBrowserToolName(tool) ? count : 0),
+    0,
+  );
+  const webRequests = webLookups - browserActions;
+  const phraseParts: string[] = [];
+  if (browserActions > 0) phraseParts.push("used the browser");
+  if (writes > 0) phraseParts.push(writes === 1 ? "edited a file" : "edited files");
+  if (readFiles > 0 || searches > 0) phraseParts.push("read files");
+  if (commands > 0) phraseParts.push(commands === 1 ? "ran a command" : "ran commands");
+  if (webRequests > 0) phraseParts.push("searched the web");
+  if (unclassifiedTools.length > 2) {
+    phraseParts.push("called tools");
+  } else {
+    for (const tool of unclassifiedTools) {
+      const label = friendlyToolLaneCompletedLabel(tool, false);
+      phraseParts.push(label.charAt(0).toLowerCase() + label.slice(1));
+    }
+  }
+  const joinedPhrase = [...new Set(phraseParts)].join(", ");
+  const activityPhrase = joinedPhrase
+    ? joinedPhrase.charAt(0).toUpperCase() + joinedPhrase.slice(1)
+    : "Worked";
 
   if (isActive) {
     if (showApprovalNarration && approvedRequests > 0) {
@@ -549,6 +608,7 @@ export function buildActionBlockSummary(
 
   return {
     summary,
+    activityPhrase,
     iconKind,
     actionCount: totalTools + stepCount || events.length,
     stepCount,

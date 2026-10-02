@@ -13,7 +13,9 @@ const RENDERER_NOISE_EVENT_TYPES = new Set([
 
 const RENDERER_REPLACEABLE_EVENT_TYPES = new Set(["progress_update", "executing", "llm_streaming"]);
 
-const DEFAULT_MAX_EVENTS = 600;
+// Matches the history window App.tsx loads for a selected task (MAX_TIMELINE_HISTORY_EVENTS), so
+// a live task keeps as many events as reopening it would.
+const DEFAULT_MAX_EVENTS = 1200;
 const DEFAULT_MAX_EVENT_PAYLOAD_BYTES = 750 * 1024;
 const LARGE_EVENT_TYPES = new Set([
   "command_output",
@@ -25,9 +27,22 @@ const LARGE_EVENT_TYPES = new Set([
 const LARGE_LEGACY_TYPES = new Set(["command_output", "tool_call", "tool_result"]);
 const MAX_LARGE_EVENT_STRING_CHARS = 32 * 1024;
 const MAX_COMMAND_OUTPUT_CHARS = 16 * 1024;
+// Tool results and command output carry the bulk of a long task's payload bytes. Once the byte
+// budget is exceeded, the ones that fall outside the recent window are shortened to a preview
+// instead of being dropped: dropping them unpaired their tool calls and emptied the step rows.
+const BULKY_EVENT_EFFECTIVE_TYPES = new Set(["tool_result", "command_output"]);
+const COMPACT_EVENT_STRING_CHARS = 1024;
+const compactedEvents = new WeakSet<TaskEvent>();
+// Events are replaced, never mutated, so a payload's size can be cached by event identity. The
+// cap runs on every live append over up to DEFAULT_MAX_EVENTS events.
+const payloadBytesByEvent = new WeakMap<TaskEvent, number>();
 
 function estimateEventPayloadBytes(event: TaskEvent): number {
-  return estimatePayloadBytes(event.payload);
+  const cached = payloadBytesByEvent.get(event);
+  if (cached !== undefined) return cached;
+  const bytes = estimatePayloadBytes(event.payload);
+  payloadBytesByEvent.set(event, bytes);
+  return bytes;
 }
 
 function estimatePayloadBytes(value: unknown, seen = new Set<object>()): number {
@@ -57,19 +72,24 @@ function truncateString(value: string, maxChars: number): string {
   );
 }
 
-function truncatePayloadStrings(value: unknown, maxChars: number): unknown {
+function truncatePayloadStrings(
+  value: unknown,
+  maxChars: number,
+  options: { outputFieldChars?: number } = {},
+): unknown {
   if (typeof value === "string") return truncateString(value, maxChars);
   if (!value || typeof value !== "object") return value;
   if (Array.isArray(value)) {
-    return value.map((entry) => truncatePayloadStrings(entry, maxChars));
+    return value.map((entry) => truncatePayloadStrings(entry, maxChars, options));
   }
+  const outputFieldChars = options.outputFieldChars ?? MAX_COMMAND_OUTPUT_CHARS;
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     const fieldLimit =
       key === "output" || key === "stdout" || key === "stderr" || key === "command"
-        ? MAX_COMMAND_OUTPUT_CHARS
+        ? outputFieldChars
         : maxChars;
-    next[key] = truncatePayloadStrings(entry, fieldLimit);
+    next[key] = truncatePayloadStrings(entry, fieldLimit, options);
   }
   return next;
 }
@@ -100,6 +120,26 @@ function trimRendererEventPayload(event: TaskEvent): TaskEvent {
       MAX_LARGE_EVENT_STRING_CHARS,
     ) as TaskEvent["payload"],
   };
+}
+
+function isBulkyEvent(event: TaskEvent): boolean {
+  return (
+    event.type === "timeline_command_output" ||
+    BULKY_EVENT_EFFECTIVE_TYPES.has(getEffectiveTaskEventType(event))
+  );
+}
+
+function compactBulkyEventPayload(event: TaskEvent): TaskEvent {
+  if (compactedEvents.has(event)) return event;
+  if (estimateEventPayloadBytes(event) <= COMPACT_EVENT_STRING_CHARS) return event;
+  const compacted = {
+    ...event,
+    payload: truncatePayloadStrings(event.payload, COMPACT_EVENT_STRING_CHARS, {
+      outputFieldChars: COMPACT_EVENT_STRING_CHARS,
+    }) as TaskEvent["payload"],
+  };
+  compactedEvents.add(compacted);
+  return compacted;
 }
 
 export function isRendererNoiseEvent(event: TaskEvent): boolean {
@@ -135,20 +175,30 @@ export function capTaskEvents(
   for (let index = eventsForByteCap.length - 1; index >= 0; index -= 1) {
     payloadBytes += estimateEventPayloadBytes(eventsForByteCap[index]);
     if (payloadBytes > maxPayloadBytes) {
-      const structural = eventsForByteCap.filter(
-        (event) => !isRendererNoiseEvent(event) && !shouldTrimPayload(event),
-      );
-      const recent = eventsForByteCap.slice(index + 1);
-      const keepIds = new Set(recent.map((event) => event.id));
-      for (
-        let structuralIndex = structural.length - 1;
-        structuralIndex >= 0;
-        structuralIndex -= 1
-      ) {
-        if (keepIds.size >= maxEvents) break;
-        keepIds.add(structural[structuralIndex].id);
+      // Events before `index` fall outside the byte budget. Noise goes, every other event
+      // stays: bulky ones as compact previews, the rest as-is. The compacted previews get a
+      // budget of their own; past it the oldest are dropped so memory stays bounded.
+      const older: TaskEvent[] = [];
+      let compactBudget = maxPayloadBytes;
+      for (let olderIndex = index; olderIndex >= 0; olderIndex -= 1) {
+        const event = eventsForByteCap[olderIndex];
+        if (isRendererNoiseEvent(event)) continue;
+        if (!isBulkyEvent(event)) {
+          older.push(event);
+          continue;
+        }
+        if (compactBudget <= 0) continue;
+        const compacted = compactBulkyEventPayload(event);
+        compactBudget -= estimateEventPayloadBytes(compacted);
+        older.push(compacted);
       }
-      return eventsForByteCap.filter((event) => keepIds.has(event.id)).slice(-maxEvents);
+      older.reverse();
+      const recent = eventsForByteCap.slice(index + 1);
+      const kept = [...older, ...recent];
+      if (kept.length <= maxEvents) return kept;
+      const olderBudget = Math.max(0, maxEvents - recent.length);
+      const keptOlder = olderBudget > 0 ? older.slice(-olderBudget) : [];
+      return [...keptOlder, ...recent].slice(-maxEvents);
     }
   }
 

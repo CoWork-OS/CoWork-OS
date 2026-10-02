@@ -928,7 +928,8 @@
   scroll-snap-align: end;
 }
 
-.cli-context-tool-usage-list {
+.cli-context-tool-usage-list,
+.cli-context-file-list {
   display: flex;
   flex-direction: column;
   gap: 4px;

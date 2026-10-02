@@ -21983,9 +21983,10 @@ a,
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 30px;
+  /* Fixed to the virtual list's slot (SIDEBAR_SECTION_HEADER_HEIGHT in Sidebar.tsx). */
+  height: 40px;
   box-sizing: border-box;
-  padding: 9px 12px 4px 20px;
+  padding: 12px 12px 4px 20px;
   color: var(--color-text-muted, #6b7280);
   font-family: var(--font-ui);
   font-size: 13px;
@@ -23171,7 +23172,8 @@ a,
   gap: 6px;
 }
 
-.right-panel .cli-context-tool-usage-list {
+.right-panel .cli-context-tool-usage-list,
+.right-panel .cli-context-file-list {
   --right-panel-context-row-height: 34px;
   --right-panel-context-row-gap: 6px;
   gap: var(--right-panel-context-row-gap);
@@ -23184,15 +23186,18 @@ a,
   scrollbar-gutter: stable;
 }
 
-.right-panel .cli-context-tool-usage-list::-webkit-scrollbar {
+.right-panel .cli-context-tool-usage-list::-webkit-scrollbar,
+.right-panel .cli-context-file-list::-webkit-scrollbar {
   width: 6px;
 }
 
-.right-panel .cli-context-tool-usage-list::-webkit-scrollbar-track {
+.right-panel .cli-context-tool-usage-list::-webkit-scrollbar-track,
+.right-panel .cli-context-file-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.right-panel .cli-context-tool-usage-list::-webkit-scrollbar-thumb {
+.right-panel .cli-context-tool-usage-list::-webkit-scrollbar-thumb,
+.right-panel .cli-context-file-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: var(--right-panel-row-border);
 }
@@ -25883,7 +25888,9 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: 14px;
-  line-height: 1;
+  /* overflow is hidden for the ellipsis; the line box must be tall enough for descenders
+     (g, p, y) or they are clipped. */
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

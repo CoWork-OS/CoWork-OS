@@ -108,4 +108,26 @@ describe("resolveTaskResultText", () => {
       "Internal note with details about final output selection and delivery context for downstream channels.",
     );
   });
+
+  it("never returns progress commentary as the run's result", () => {
+    const events: TaskEvent[] = [
+      makeEvent(
+        "assistant_message",
+        { message: "The weekly report is ready: revenue rose 4% and churn held at 2%." },
+        100,
+      ),
+      makeEvent(
+        "assistant_message",
+        {
+          phase: "commentary",
+          message:
+            "I'll double-check the churn figure against the billing export before wrapping up.",
+        },
+        101,
+      ),
+    ];
+
+    const result = resolveTaskResultText({ summary: "", events });
+    expect(result).toBe("The weekly report is ready: revenue rose 4% and churn held at 2%.");
+  });
 });

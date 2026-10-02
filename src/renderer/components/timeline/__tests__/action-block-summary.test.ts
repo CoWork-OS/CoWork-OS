@@ -96,15 +96,60 @@ describe("buildActionBlockSummary", () => {
     );
   });
 
-  it("uses a command icon for file reads with command activity", () => {
+  it("uses the icon of the first phrase kind for file reads with command activity", () => {
     const summary = buildActionBlockSummary([
       toolEvent("read", "read_file", 1000),
       toolEvent("command-1", "run_command", 1100),
       toolEvent("command-2", "run_command", 1200),
     ]);
 
-    expect(summary.iconKind).toBe("command");
+    expect(summary.iconKind).toBe("search");
     expect(summary.summary).toBe("Explored 1 file, ran 2 commands");
+    expect(summary.activityPhrase).toBe("Read files, ran commands");
+  });
+
+  it("builds a count-free activity phrase in a fixed kind order", () => {
+    const summary = buildActionBlockSummary([
+      toolEvent("search", "web_search", 900),
+      toolEvent("command", "run_command", 1000),
+      toolEvent("grep", "grep", 1100),
+      toolEvent("edit", "edit_file", 1200),
+    ]);
+
+    expect(summary.activityPhrase).toBe(
+      "Edited a file, read files, ran a command, searched the web",
+    );
+  });
+
+  it("counts a finished step's tool calls that precede its step markers", () => {
+    // Summary-mode blocks can hold only the plan-step markers, which are logged after the
+    // step's tool calls; the hidden internal step report must not cut those calls off.
+    const allEvents = [
+      event("commentary", "assistant_message", 1000, {
+        message: "Listing the folder next.",
+        phase: "commentary",
+      }),
+      toolEvent("list", "list_directory", 1010),
+      toolEvent("info", "get_file_info", 1020),
+      event("report", "assistant_message", 1100, { message: "Step 2 done.", internal: true }),
+      event("step-done", "step_completed", 1200, { step: { id: "2" } }),
+      event("step-next", "step_started", 1210, { step: { id: "3" } }),
+      event("next-message", "assistant_message", 2000, { message: "Counting lines now." }),
+    ];
+    const blockEvents = allEvents.filter((entry) => entry.id.startsWith("step-"));
+
+    const summary = buildActionBlockSummary(blockEvents, allEvents, { isActive: false });
+
+    expect(summary.toolCallCount).toBe(2);
+    expect(summary.activityPhrase).toBe("Read files");
+  });
+
+  it("falls back to Worked when a block has no classified activity", () => {
+    const summary = buildActionBlockSummary([
+      event("step", "step_started", 1000, { step: { description: "Plan" } }),
+    ]);
+
+    expect(summary.activityPhrase).toBe("Worked");
   });
 
   it("uses a search icon for mixed file exploration and code searches", () => {

@@ -16381,7 +16381,7 @@ ${transcript}
       "- Use tools when they are needed to complete the task.",
       "- Work from the requested outcome and success criteria; choose the shortest reliable path, validate concrete changes when practical, and stop once the task is genuinely complete.",
       '- Do not ask "Should I proceed?" when the available tool flow already handles approvals or execution.',
-      "- Keep routine tool narration minimal; narrate only when the action is sensitive or the extra context helps the user.",
+      "- Keep the user informed as you work: before a batch of tool calls, and whenever you change approach or learn something that changes the plan, write one or two short sentences saying what you are doing next and why. Do not narrate every individual tool call.",
       "",
       "CLOUD STORAGE ROUTING (CRITICAL):",
       "- If the user mentions Box, Dropbox, OneDrive, Google Drive, SharePoint, or Notion, treat that as cloud integration intent unless they explicitly say local/workspace files.",
@@ -31503,6 +31503,12 @@ Return ONLY a JSON object:
             !unrecoveredToolFailureForAssistantOutput &&
             responseHasAssistantText(response.content);
 
+          // Text written alongside tool calls is a progress update ("I'll check X next",
+          // "that failed, switching to Y"), so the user sees it while the work happens. A
+          // step's closing report (no tool calls) stays internal until the final step, as
+          // do verification steps, so unverified conclusions are not presented as answers.
+          const isProgressCommentary =
+            responseHasToolUse && !isPlanVerifyStep && !shouldExposeSessionKickoff;
           const assistantProcessing = this.processAssistantResponseText({
             responseContent: response.content,
             eventPayload: {
@@ -31510,11 +31516,13 @@ Return ONLY a JSON object:
               stepDescription: step.description,
               internal:
                 !shouldExposeSessionKickoff &&
+                !isProgressCommentary &&
                 (isPlanVerifyStep ||
                   !this.isLastVisibleAssistantStep(step) ||
                   unrecoveredPriorPlanFailureForAssistantOutput ||
                   unrecoveredToolFailureForAssistantOutput),
               ...(shouldExposeSessionKickoff ? { kickoffSummary: true } : {}),
+              ...(isProgressCommentary ? { phase: "commentary" } : {}),
             },
             updateLastAssistantText: true,
           });

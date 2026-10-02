@@ -126,21 +126,16 @@ html.visual-calm .app-layout .spreadsheet-resizable-sidebar {
 
 /* ---------- Header ---------- */
 
-/* The header introduces your agent: avatar, name, and what it is doing now.
-   The actions share the name's line so the status runs the full width below. */
+/* One line: the app name, with the header actions at the end. */
 .sidebar-panel-header {
   display: grid;
-  grid-template-areas:
-    "avatar title actions"
-    "avatar status status";
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: 18px auto;
-  align-content: center;
+  grid-template-areas: "title actions";
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   column-gap: 10px;
-  row-gap: 2px;
-  height: 58px;
+  height: 46px;
   flex-shrink: 0;
-  padding: 8px 8px 2px 10px;
+  padding: 6px 8px 6px 10px;
 }
 
 .sidebar-panel-identity,
@@ -148,56 +143,13 @@ html.visual-calm .app-layout .spreadsheet-resizable-sidebar {
   display: contents;
 }
 
-.sidebar-panel-header .sidebar-panel-avatar {
-  grid-area: avatar;
-  align-self: center;
-}
-
 .sidebar-panel-header .sidebar-panel-title {
   grid-area: title;
 }
 
-.sidebar-panel-header .sidebar-panel-status {
-  grid-area: status;
-}
-
-/* 28px buttons centred on the 18px name line. */
 .sidebar-panel-header .sidebar-panel-header-actions {
   grid-area: actions;
-  align-self: center;
-  margin: -5px -2px -5px 0;
-}
-
-.sidebar-panel-avatar {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--sidebar-accent) 18%, var(--sidebar-panel-border));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--sidebar-accent) 10%, var(--sidebar-panel-chip-bg));
-  overflow: visible;
-}
-
-button.sidebar-panel-avatar {
-  cursor: pointer;
-}
-
-button.sidebar-panel-avatar:hover {
-  border-color: color-mix(in srgb, var(--sidebar-accent) 40%, var(--sidebar-panel-border));
-}
-
-.sidebar-panel-avatar .calm-agent-avatar {
-  display: block;
-}
-
-/* Bob gently while sessions are working, in every theme. */
-.sidebar-panel-avatar .calm-agent-avatar.animated {
-  animation: calm-agent-bob 2.4s ease-in-out infinite;
-  transform-origin: 50% 80%;
+  margin-right: -2px;
 }
 
 .sidebar-panel-title {
@@ -211,58 +163,6 @@ button.sidebar-panel-avatar:hover {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.sidebar-panel-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font: 500 11.5px/1.2 var(--font-ui);
-  white-space: nowrap;
-}
-
-.sidebar-panel-status-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.sidebar-panel-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.sidebar-panel-status-working {
-  color: var(--sidebar-live-text);
-}
-
-.sidebar-panel-status-working .sidebar-panel-status-dot {
-  background: var(--sidebar-live);
-  animation: sidebar-live-pulse 1.8s ease-out infinite;
-}
-
-.sidebar-panel-status-needs {
-  color: var(--color-warning);
-}
-
-.theme-light .sidebar-panel-status-needs {
-  color: #b45309;
-}
-
-@keyframes sidebar-live-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--sidebar-live) 50%, transparent);
-  }
-
-  70%,
-  100% {
-    box-shadow: 0 0 0 5px transparent;
-  }
 }
 
 .sidebar-panel-header-actions {
@@ -478,8 +378,11 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   text-transform: uppercase;
 }
 
+/* 12px above, a 24px line (label + action button), 4px below = the 40px row slot
+   (SIDEBAR_SECTION_HEADER_HEIGHT in Sidebar.tsx). */
 .sidebar.sidebar-panel.cli-sidebar .sidebar-navigation-section-header {
-  padding: 14px 8px 5px;
+  height: 40px;
+  padding: 12px 8px 4px;
   color: var(--color-text-muted);
   font-size: 10.5px;
   font-weight: 600;
@@ -1054,8 +957,6 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-panel-status-working .sidebar-panel-status-dot,
-  .sidebar-panel-avatar .calm-agent-avatar.animated,
   .sidebar-panel .cli-task-item:has(.cli-task-status-trailing) .cli-task-title {
     animation: none;
   }

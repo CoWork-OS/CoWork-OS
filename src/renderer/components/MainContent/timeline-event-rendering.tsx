@@ -1,5 +1,5 @@
 import React from "react";
-import type { Task, TaskEvent, QuotedAssistantMessage } from "../../../shared/types";
+import type { Task, TaskEvent } from "../../../shared/types";
 import { getEffectiveTaskEventType, getTimelineErrorText } from "../../utils/task-event-compat";
 import {
   normalizeMarkdownForDisplay,
@@ -54,11 +54,8 @@ import { getAgentMessageReceipt } from "../../utils/agent-message-receipt";
 import {
   DeferredMarkdown,
   HighlightedCodePreview,
-  MessageCopyButton,
   MessageForkButton,
   MessageSpeakButton,
-  MessageQuoteButton,
-  createQuotedAssistantMessage,
 } from "./message-ui";
 import type { CommandOutputSession } from "../../utils/task-event-derived";
 import {
@@ -107,7 +104,7 @@ function getWebEvidenceDisplay(
   }
 }
 
-function ClickableFilePath({
+export function ClickableFilePath({
   path,
   workspacePath,
   className = "",
@@ -1090,7 +1087,6 @@ export function renderEventDetails(
     onOpenDocumentArtifact?: (path: string) => void;
     onOpenPresentationArtifact?: (path: string) => void;
     onOpenWebArtifact?: (path: string) => void;
-    onQuoteAssistantMessage?: (quote: QuotedAssistantMessage) => void;
     onForkTaskSession?: (event: TaskEvent) => void;
     isLastAssistantMessage?: boolean;
     events?: TaskEvent[];
@@ -1111,7 +1107,6 @@ export function renderEventDetails(
   const onOpenDocumentArtifact = options?.onOpenDocumentArtifact;
   const onOpenPresentationArtifact = options?.onOpenPresentationArtifact;
   const onOpenWebArtifact = options?.onOpenWebArtifact;
-  const onQuoteAssistantMessage = options?.onQuoteAssistantMessage;
   const onForkTaskSession = options?.onForkTaskSession;
   const eventStream = options?.events || [];
   const onViewOutputs = options?.onViewOutputs;
@@ -1717,9 +1712,13 @@ export function renderEventDetails(
       );
     case "assistant_message": {
       const linkedMessage = cleanAssistantMessageForDisplay(event.payload.message);
-      const quote = createQuotedAssistantMessage(linkedMessage, event.id, event.taskId);
       return (
-        <div className="event-details assistant-message event-details-scrollable">
+        <div
+          className="event-details assistant-message event-details-scrollable"
+          data-reply-source="assistant"
+          data-reply-event-id={event.id || undefined}
+          data-reply-task-id={event.taskId || undefined}
+        >
           <div className="markdown-content">
             <AssistantMessageContent
               message={linkedMessage}
@@ -1730,11 +1729,7 @@ export function renderEventDetails(
           </div>
           {renderLinkedArtifactCards(linkedMessage)}
           <div className="message-actions">
-            <MessageCopyButton text={event.payload.message} />
             <MessageSpeakButton text={event.payload.message} voiceEnabled={voiceEnabled} />
-            {quote && onQuoteAssistantMessage && (
-              <MessageQuoteButton onQuote={() => onQuoteAssistantMessage(quote)} />
-            )}
             {event.id && onForkTaskSession && options?.isLastAssistantMessage && (
               <MessageForkButton onFork={() => onForkTaskSession(event)} />
             )}

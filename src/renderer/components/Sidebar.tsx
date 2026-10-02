@@ -49,9 +49,6 @@ import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
 import { BotsPane, type BotRole } from "./BotsPane";
 import { useIsCalmTheme } from "../hooks/useIsCalmTheme";
-import { useAgentContext } from "../hooks/useAgentContext";
-import { CalmAgentAvatar } from "./calm/CalmAgentAvatar";
-import { openCalmAgentSetup } from "./calm/CalmAgentSetup";
 import { BUILD_FOCUS_COMPOSER_EVENT } from "./calm/build-events";
 import type { SidebarDestinationId, SidebarPanelTab } from "./sidebar/sidebar-destinations";
 import "./sidebar/sidebar-panel.css";
@@ -63,7 +60,10 @@ const SIDEBAR_DATE_HEADER_HEIGHT = 20;
 const SIDEBAR_FOCUSED_ITEM_HEIGHT = 28;
 const SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT = 26;
 const SIDEBAR_AUTOMATED_HEADER_HEIGHT = 30;
-const SIDEBAR_SECTION_HEADER_HEIGHT = 30;
+// Must match the .sidebar-navigation-section-header height in CSS: rows are absolutely
+// positioned by these slot heights, so a taller header overlaps the row below it.
+const SIDEBAR_SECTION_HEADER_HEIGHT = 40;
+const SIDEBAR_WORKSPACE_EMPTY_HEIGHT = 50;
 const SIDEBAR_WORKSPACE_HEADER_HEIGHT = 30;
 const SIDEBAR_WORKSPACE_SESSION_ACTION_HEIGHT = 28;
 const SIDEBAR_WORKSPACE_SESSION_PREVIEW_COUNT = 6;
@@ -2178,16 +2178,7 @@ function SidebarComponent({
     return null;
   };
 
-  const workingSessionCount = useMemo(
-    () => tasks.filter((task) => !task.parentTaskId && isActiveSessionStatus(task.status)).length,
-    [tasks],
-  );
-  const needsYouCount = useMemo(
-    () => tasks.filter((task) => !task.parentTaskId && isAwaitingSessionStatus(task.status)).length,
-    [tasks],
-  );
-  const agentContext = useAgentContext();
-  const agentName = agentContext.agentName?.trim() || "CoWork";
+
 
   const toggleSessionSearch = () => {
     if (showSessionSearch) {
@@ -2966,40 +2957,8 @@ function SidebarComponent({
       )}
       <div className="sidebar-panel-header">
         <div className="sidebar-panel-identity">
-          {isCalm ? (
-            <button
-              type="button"
-              className="sidebar-panel-avatar"
-              onClick={openCalmAgentSetup}
-              aria-label={`Change ${agentName}'s name and look`}
-              title="Change your agent's name and look"
-            >
-              <CalmAgentAvatar size={26} animated={workingSessionCount > 0} />
-            </button>
-          ) : (
-            <span className="sidebar-panel-avatar" aria-hidden="true">
-              <CalmAgentAvatar size={26} animated={workingSessionCount > 0} />
-            </span>
-          )}
           <div className="sidebar-panel-identity-copy">
-            <span className="sidebar-panel-title">{agentName}</span>
-            <span className="sidebar-panel-status" role="status">
-              {needsYouCount > 0 && (
-                <span className="sidebar-panel-status-item sidebar-panel-status-needs">
-                  <span className="sidebar-panel-status-dot" aria-hidden="true" />
-                  {needsYouCount} {needsYouCount === 1 ? "needs" : "need"} you
-                </span>
-              )}
-              {workingSessionCount > 0 && (
-                <span className="sidebar-panel-status-item sidebar-panel-status-working">
-                  <span className="sidebar-panel-status-dot" aria-hidden="true" />
-                  {workingSessionCount} working
-                </span>
-              )}
-              {needsYouCount === 0 && workingSessionCount === 0 && (
-                <span className="sidebar-panel-status-item">All caught up</span>
-              )}
-            </span>
+            <span className="sidebar-panel-title">CoWork OS</span>
           </div>
         </div>
         <div className="sidebar-panel-header-actions">
@@ -3373,7 +3332,7 @@ function SidebarComponent({
                         row.kind === "section-header"
                           ? SIDEBAR_SECTION_HEADER_HEIGHT
                           : row.kind === "workspace-empty"
-                            ? SIDEBAR_SECTION_HEADER_HEIGHT + 20
+                            ? SIDEBAR_WORKSPACE_EMPTY_HEIGHT
                             : row.kind === "workspace-session-action"
                               ? SIDEBAR_WORKSPACE_SESSION_ACTION_HEIGHT
                               : row.kind === "workspace-header"

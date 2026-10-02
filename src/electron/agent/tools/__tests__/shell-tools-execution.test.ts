@@ -219,6 +219,38 @@ describe.skipIf(process.platform === "win32")("ShellTools execution with real sh
     await waitUntil(() => !isRunning(childPid), 5_000, "the child process to exit");
   }, 20_000);
 
+  it("reports an aborted persistent-shell command as a timeout, not a user stop", async () => {
+    const workspace = createWorkspace();
+    const taskId = `task-${randomUUID()}`;
+    sessions.push({ taskId, workspaceId: workspace.id });
+    const daemon = createDaemon();
+    const shellTools = new ShellTools(workspace, daemon as unknown as AgentDaemon, taskId);
+    const controller = new AbortController();
+
+    const pending = shellTools.runCommand("sleep 30", {
+      cwd: workspacePath,
+      timeout: 60_000,
+      signal: controller.signal,
+    });
+    await waitUntil(
+      () =>
+        daemon.logEvent.mock.calls.some(
+          ([, eventType, payload]) => eventType === "command_output" && payload?.type === "start",
+        ),
+      5_000,
+      "the command to start",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    controller.abort();
+    const result = await waitFor(pending, 8_000, "the aborted command");
+
+    // The executor aborts a call at its own or the step's deadline; "user_stopped"
+    // would tell the model the user interrupted it and not to retry.
+    expect(result).toMatchObject({ success: false, terminationReason: "timeout" });
+    expect(spawnCalls.some(({ args }) => args.includes("sleep 30"))).toBe(false);
+  }, 15_000);
+
   describe("long output", () => {
     const writeNoisyScript = () =>
       writeFile(

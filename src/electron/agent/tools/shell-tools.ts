@@ -1495,6 +1495,12 @@ export class ShellTools {
             truncated: false,
           }),
         });
+        // The session manager reports every stop as user_stopped. When this call
+        // was aborted (at its own or the step's deadline) the user did not stop it.
+        const terminationReason: CommandTerminationReason | undefined =
+          persistentResult.terminationReason === "user_stopped" && options?.signal?.aborted
+            ? "timeout"
+            : persistentResult.terminationReason;
         if (persistentResult.sessionEvent) {
           this.daemon.logEvent(
             this.taskId,
@@ -1524,7 +1530,7 @@ export class ShellTools {
           type: "end",
           exitCode: persistentResult.exitCode,
           success: persistentResult.success,
-          terminationReason: persistentResult.terminationReason,
+          terminationReason,
         });
         if (persistentResult.usedPersistentSession) {
           // Redact before cutting so a secret is never split across the omission.
@@ -1542,7 +1548,7 @@ export class ShellTools {
             stderr: stderr.text,
             exitCode: persistentResult.exitCode,
             truncated: persistentResult.truncated || stdout.truncated || stderr.truncated,
-            terminationReason: persistentResult.terminationReason,
+            terminationReason,
           });
         }
       } catch (error) {

@@ -1,3 +1,4 @@
+import { execFile } from "child_process";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -15,6 +16,9 @@ import { BoundedRegex, RegexDeadlineError } from "./bounded-regex";
 const MAX_GREP_OUTPUT_BYTES = 50_000;
 // Larger files are skipped; their lines would be copied wholesale into the regex worker.
 const MAX_GREP_FILE_BYTES = 1024 * 1024;
+// Listing gitignored paths is an optimization; past these limits grep walks without it.
+const GIT_IGNORE_LIST_TIMEOUT_MS = 5_000;
+const GIT_IGNORE_LIST_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * GrepTools provides powerful regex-based content search
@@ -45,6 +49,7 @@ export class GrepTools {
           "Powerful regex-based content search across files. " +
           'Supports full regex syntax (e.g., "async function.*fetch", "class\\s+\\w+"). ' +
           "Searches text files only; binary formats like PDF/DOCX are skipped. " +
+          "In a git repository, files ignored by .gitignore are skipped unless path names them. " +
           "Use this to find code patterns, function definitions, imports, etc. " +
           "PREFERRED over search_files for content search.",
         input_schema: {
@@ -209,8 +214,8 @@ export class GrepTools {
       }
 
       // Find files to search
-      const files = baseStats.isFile()
-        ? [checkedBasePath]
+      const found = baseStats.isFile()
+        ? { files: [checkedBasePath], gitIgnoredSkipped: 0 }
         : await this.findFilesToSearch(
             checkedBasePath,
             globPattern,
@@ -218,6 +223,7 @@ export class GrepTools {
             projectAccessCache,
             evaluator,
           );
+      const files = found.files;
       const matches: Array<{
         file: string;
         line?: number;
@@ -328,6 +334,11 @@ export class GrepTools {
         }
       }
 
+      if (matches.length === 0 && found.gitIgnoredSkipped > 0) {
+        const note = `${found.gitIgnoredSkipped} files or directories ignored by .gitignore were not searched; pass one as path to search it.`;
+        warning = warning ? `${warning} ${note}` : note;
+      }
+
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "grep",
         result: {
@@ -425,9 +436,10 @@ export class GrepTools {
     agentRoleId: string | null,
     projectAccessCache: Map<string, boolean>,
     evaluator: BoundedRegex,
-  ): Promise<string[]> {
+  ): Promise<{ files: string[]; gitIgnoredSkipped: number }> {
     const files: string[] = [];
     const globRegex = globPattern ? this.globToRegex(globPattern) : null;
+    const gitIgnored = { paths: await this.listGitIgnoredPaths(basePath), skipped: 0 };
 
     await this.walkDirectory(
       basePath,
@@ -437,9 +449,76 @@ export class GrepTools {
       agentRoleId,
       projectAccessCache,
       evaluator,
+      gitIgnored,
     );
 
-    return files;
+    return { files, gitIgnoredSkipped: gitIgnored.skipped };
+  }
+
+  /**
+   * Untracked paths git ignores under `directory` (.gitignore, .git/info/exclude, global
+   * excludes), "/"-separated relative to it, with a trailing "/" for whole directories. Only a
+   * repository found between `directory` and the workspace root counts, so an enclosing repo
+   * (such as a dotfiles repo in the home directory) cannot hide workspace files. A requested
+   * directory that is itself ignored is searched as asked. Any failure means "nothing ignored".
+   */
+  private async listGitIgnoredPaths(directory: string): Promise<Set<string>> {
+    const ignored = new Set<string>();
+    if (!this.hasWorkspaceGitRepository(directory)) return ignored;
+    // Read-only and hardened against repository config: no fsmonitor hook, no optional locks,
+    // no inherited GIT_* overrides, no prompts.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+    );
+    const stdout = await new Promise<string | null>((resolve) => {
+      execFile(
+        "git",
+        [
+          "--no-optional-locks",
+          "--no-pager",
+          "-c",
+          "core.fsmonitor=false",
+          "ls-files",
+          "--others",
+          "--ignored",
+          "--exclude-standard",
+          "--directory",
+          "-z",
+        ],
+        {
+          cwd: directory,
+          encoding: "utf8",
+          timeout: GIT_IGNORE_LIST_TIMEOUT_MS,
+          maxBuffer: GIT_IGNORE_LIST_MAX_BYTES,
+          windowsHide: true,
+          env: { ...env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+        },
+        (error, output) => resolve(error ? null : output),
+      );
+    });
+    const entries = stdout ? stdout.split("\0").filter(Boolean) : [];
+    if (entries.includes("./")) return ignored;
+    for (const entry of entries) ignored.add(entry);
+    return ignored;
+  }
+
+  private hasWorkspaceGitRepository(directory: string): boolean {
+    try {
+      const workspaceRoot = fs.realpathSync(this.workspace.path);
+      let current = fs.realpathSync(directory);
+      const relative = path.relative(workspaceRoot, current);
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        return false;
+      }
+      for (;;) {
+        if (fs.existsSync(path.join(current, ".git"))) return true;
+        const parent = path.dirname(current);
+        if (current === workspaceRoot || parent === current) return false;
+        current = parent;
+      }
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -453,6 +532,7 @@ export class GrepTools {
     agentRoleId: string | null,
     projectAccessCache: Map<string, boolean>,
     evaluator: BoundedRegex,
+    gitIgnored: { paths: ReadonlySet<string>; skipped: number },
     depth: number = 0,
   ): Promise<void> {
     // Limit recursion depth
@@ -499,7 +579,12 @@ export class GrepTools {
 
     // Glob candidates are tested in one worker round trip per batch; flush before
     // recursing so files keep their directory-walk order.
-    const globCandidates: Array<{ fullPath: string; relative: string; name: string }> = [];
+    const globCandidates: Array<{
+      fullPath: string;
+      relative: string;
+      name: string;
+      ignored: boolean;
+    }> = [];
     const flushGlobCandidates = async () => {
       if (!globRegex || globCandidates.length === 0) return;
       const batch = globCandidates.splice(0);
@@ -512,7 +597,9 @@ export class GrepTools {
         ),
       );
       batch.forEach((candidate, index) => {
-        if (matched.has(2 * index) || matched.has(2 * index + 1)) files.push(candidate.fullPath);
+        if (!matched.has(2 * index) && !matched.has(2 * index + 1)) return;
+        if (candidate.ignored) gitIgnored.skipped += 1;
+        else files.push(candidate.fullPath);
       });
     };
 
@@ -521,7 +608,7 @@ export class GrepTools {
 
       for (const entry of entries) {
         const fullPath = path.join(currentPath, entry.name);
-        const relativePath = path.relative(basePath, fullPath);
+        const relativePath = path.relative(basePath, fullPath).split(path.sep).join("/");
 
         if (
           evaluateWorkspaceFilesystemAccess(this.workspace, fullPath, "read").decision !== "allow"
@@ -530,6 +617,10 @@ export class GrepTools {
         }
 
         if (entry.isDirectory()) {
+          if (!skipDirs.includes(entry.name) && gitIgnored.paths.has(`${relativePath}/`)) {
+            gitIgnored.skipped += 1;
+            continue;
+          }
           await flushGlobCandidates();
           await this.walkDirectory(
             fullPath,
@@ -539,6 +630,7 @@ export class GrepTools {
             agentRoleId,
             projectAccessCache,
             evaluator,
+            gitIgnored,
             depth + 1,
           );
         } else if (entry.isFile()) {
@@ -557,13 +649,14 @@ export class GrepTools {
             continue;
           }
 
-          // Apply glob filter if specified
+          // Apply glob filter if specified; ignored files only count as skipped if they match it.
+          const ignored = gitIgnored.paths.has(relativePath);
           if (globRegex) {
-            globCandidates.push({
-              fullPath,
-              relative: relativePath.split(path.sep).join("/"),
-              name: entry.name,
-            });
+            globCandidates.push({ fullPath, relative: relativePath, name: entry.name, ignored });
+            continue;
+          }
+          if (ignored) {
+            gitIgnored.skipped += 1;
             continue;
           }
 

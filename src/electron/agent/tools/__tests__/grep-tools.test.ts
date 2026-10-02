@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 
 // Mock electron
 vi.mock("electron", () => ({
@@ -524,4 +525,76 @@ describe("GrepTools single-file paths", () => {
       expect(result.warning).toMatch(/read_file/);
     },
   );
+});
+
+const gitAvailable = spawnSync("git", ["--version"]).status === 0;
+
+describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const gitRepository = (root: string, ignore: string) => {
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", root]);
+    fs.writeFileSync(path.join(root, ".gitignore"), ignore);
+  };
+
+  const workspaceWithIgnoredFiles = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-gitignore-"));
+    dirs.push(dir);
+    gitRepository(dir, "vendor/\n*.min.js\n");
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.mkdirSync(path.join(dir, "vendor"));
+    fs.writeFileSync(path.join(dir, "src", "app.ts"), "const needle = 1;\n");
+    fs.writeFileSync(path.join(dir, "src", "app.min.js"), "var needle=1;\n");
+    fs.writeFileSync(path.join(dir, "vendor", "lib.js"), "var needle = 2; var vendorOnly = 3;\n");
+    return new GrepTools({ ...mockWorkspace, path: dir }, mockDaemon as Any, "test-task-id");
+  };
+
+  const matchedFiles = (result: { matches: Array<{ file: string }> }) =>
+    result.matches.map((match) => match.file.split(path.sep).join("/")).sort();
+
+  it("skips gitignored files and directories", async () => {
+    const result = await workspaceWithIgnoredFiles().grep({
+      pattern: "needle",
+      outputMode: "files_only",
+    });
+
+    expect(result.success).toBe(true);
+    expect(matchedFiles(result)).toEqual(["src/app.ts"]);
+  });
+
+  it("searches an ignored directory that is requested explicitly", async () => {
+    const result = await workspaceWithIgnoredFiles().grep({
+      pattern: "needle",
+      path: "vendor",
+      outputMode: "files_only",
+    });
+
+    expect(matchedFiles(result)).toEqual(["vendor/lib.js"]);
+  });
+
+  it("says ignored entries were skipped when nothing matches", async () => {
+    const result = await workspaceWithIgnoredFiles().grep({ pattern: "vendorOnly" });
+
+    expect(result.success).toBe(true);
+    expect(result.matches).toEqual([]);
+    expect(result.warning).toMatch(/\.gitignore/);
+  });
+
+  it("ignores the rules of a repository that contains the workspace", async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-parent-repo-"));
+    dirs.push(parent);
+    gitRepository(parent, "*.ts\n");
+    const workspacePath = path.join(parent, "workspace");
+    fs.mkdirSync(workspacePath);
+    fs.writeFileSync(path.join(workspacePath, "app.ts"), "const needle = 1;\n");
+    const tool = new GrepTools({ ...mockWorkspace, path: workspacePath }, mockDaemon as Any, "t");
+
+    const result = await tool.grep({ pattern: "needle", outputMode: "files_only" });
+
+    expect(matchedFiles(result)).toEqual(["app.ts"]);
+  });
 });

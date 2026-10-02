@@ -4013,14 +4013,26 @@ export class TaskExecutor {
       );
     if (hasWorkVerbBeforeVerification) return false;
 
-    if (desc.startsWith("verify")) return true;
-    if (desc.startsWith("verification")) return true;
-    if (/^confirm\s+that\b/.test(desc)) {
-      const continuesWithWork =
-        /\b(?:then|and)\s+(?:create|write|generate|save|edit|update|move|rename|delete|remove|build|implement|apply)\b/.test(
-          desc,
-        );
-      if (!continuesWithWork) return true;
+    // A step that also remediates what it checks ("run the tests to verify the
+    // fix and address any failures", "verify the build and fix any errors") is
+    // work, not a checkpoint that must answer "OK". Only verbs in imperative
+    // position count, so "verify the fix" or "the totals are correct" do not.
+    const requestsRemediation =
+      /(?:^|[,;:]\s*|\b(?:and|then|or|also|please)\s+)(?:fix(?:ing)?|address(?:ing)?|resolv(?:e|ing)|adjust(?:ing)?|updat(?:e|ing)|repair(?:ing)?|patch(?:ing)?|correct(?:ing)?)\b/.test(
+        desc,
+      ) ||
+      /\b(?:then|and)\s+(?:create|write|generate|save|edit|update|move|rename|delete|remove|build|implement|apply)\b/.test(
+        desc,
+      );
+    if (requestsRemediation) return false;
+
+    if (/^(?:verif(?:y|ying|ication)|re-?verify|double[- ]check)\b/.test(desc)) return true;
+    if (/^confirm\s+that\b/.test(desc)) return true;
+    if (/^validate\s+(?:that|whether)\b|^validate\b[^.;\n]{0,80}\bagainst\b/.test(desc)) {
+      return true;
+    }
+    if (/^(?:final|last|end-to-end|sanity)\s+(?:verification|validation|check)\b/.test(desc)) {
+      return true;
     }
     if (desc.startsWith("review")) {
       const hasMutationVerb =
@@ -22804,6 +22816,43 @@ You are continuing a previous conversation. The context from the previous conver
         )
       )
         return true;
+    }
+
+    // A clear final check outcome ("re-ran npm test and all 12 tests now pass")
+    // is a pass even without the literal OK. The latest outcome decides, so an
+    // earlier failure that was fixed does not count, while any remaining
+    // failure ("12 passed, 1 failed", "still fails") or an empty run ("no tests
+    // were found") keeps the check failing.
+    const zeroTestsRan =
+      /\b(?:no|0|zero)\s+(?:tests?|specs?)\s+(?:were\s+|was\s+)?(?:found|ran|run|executed|collected|passed)\b/.test(
+        lower,
+      );
+    const explicitProtocolOutcome =
+      /^(?:fail_blocking|pending_user_action|warn_non_blocking)\b/.test(lower);
+    if (!zeroTestsRan && !explicitProtocolOutcome) {
+      const outcomeClauses = lower.split(/[.;:!?\n]+|,\s*(?:but|however)\b/);
+      for (let index = outcomeClauses.length - 1; index >= 0; index -= 1) {
+        const clause = outcomeClauses[index]
+          .replace(
+            /\b(?:0|no|zero)\s+(?:tests?\s+)?(?:failures?|failed|failing(?:\s+tests?)?|errors?)\b/g,
+            " ",
+          )
+          .trim();
+        if (!clause) continue;
+        if (
+          /\b(?:fail(?:s|ed|ing|ures?)?|errors?|broken|missing|not\s+(?:found|pass\w*)|does\s+not\s+exist|did\s*n[o']t|still\s+red|regress\w*)\b/.test(
+            clause,
+          )
+        ) {
+          break;
+        }
+        if (
+          /\b(?:tests?|specs?|checks?|suites?|build|lint|type-?checks?|compil\w+)\b/.test(clause) &&
+          /\b(?:pass(?:es|ed|ing)?|succeed(?:s|ed)?|successful(?:ly)?|green|clean)\b/.test(clause)
+        ) {
+          return true;
+        }
+      }
     }
 
     // Score-based detection for longer responses (detailed assessments)

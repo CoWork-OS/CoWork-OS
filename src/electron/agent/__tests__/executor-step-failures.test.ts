@@ -4523,6 +4523,94 @@ relationship_memory:
     );
   });
 
+  it("completes a final run-tests-and-fix step that reports the tests now pass", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-verify-fix-"));
+    const target = path.join(tempDir, "sum.ts");
+    fs.writeFileSync(target, "export const sum = (a, b) => a - b;");
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", { command: "npm test" }),
+        toolUseResponse("edit_file", {
+          file_path: "sum.ts",
+          old_string: "a - b",
+          new_string: "a + b",
+        }),
+        toolUseResponse("run_command", { command: "npm test" }),
+        textResponse(
+          "The first test run showed sum() subtracting; I fixed sum.ts to add, re-ran npm test and all 12 tests now pass.",
+        ),
+      ],
+      {},
+    );
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).task.prompt = "Fix the sum bug and make sure the tests pass.";
+    let runs = 0;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "run_command") {
+        runs += 1;
+        return runs === 1
+          ? { success: false, exitCode: 1, stdout: "1 failing: expected 3 got -1", stderr: "" }
+          : { success: true, exitCode: 0, stdout: "12 passing", stderr: "" };
+      }
+      if (name === "edit_file") {
+        fs.writeFileSync(target, "export const sum = (a, b) => a + b;");
+        return { success: true, file_path: "sum.ts", replacements: 1 };
+      }
+      return { success: true };
+    });
+    const step: Any = {
+      id: "2",
+      description: "Run the test suite to verify the fix and address any failures",
+      status: "pending",
+    };
+    (executor as Any).plan = {
+      description: "Plan",
+      steps: [
+        { id: "1", description: "Fix the sum bug in sum.ts", status: "completed" },
+        step,
+      ],
+    };
+
+    try {
+      expect((executor as Any).isVerificationStep(step)).toBe(false);
+      await (executor as Any).executeStep(step);
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fs.readFileSync(target, "utf8")).toContain("a + b");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["All 12 tests now pass.", "completed"],
+    [
+      "Re-ran the suite after the earlier failure; all tests pass and the build is green.",
+      "completed",
+    ],
+    ["42 tests passed, 0 tests failed.", "completed"],
+    ["12 tests passed, 2 failed: test_a and test_b.", "failed"],
+    ["All tests pass except test_login, which still fails.", "failed"],
+    ["No tests were found; the build succeeded.", "failed"],
+  ])("judges a final verification report by its outcome: %s", async (report, expected) => {
+    executor = createExecutorWithStubs(
+      [toolUseResponse("run_command", { command: "npm test" }), textResponse(report)],
+      { run_command: { success: true, exitCode: 0, stdout: "test output" } },
+    );
+    const step: Any = {
+      id: "verify-tests",
+      description: "Verify that the test suite passes",
+      status: "pending",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status, String(step.error || "")).toBe(expected);
+    if (expected === "failed") {
+      expect(String(step.error || "")).toContain("Verification failed");
+    }
+  });
+
   it("fails final verification steps unless the response is exactly OK", async () => {
     executor = createExecutorWithStubs(
       [textResponse("The whitepaper is missing required sections.")],

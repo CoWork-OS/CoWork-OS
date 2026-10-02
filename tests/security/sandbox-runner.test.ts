@@ -195,16 +195,15 @@ describe("SandboxRunner", () => {
   });
 
   describe("Working Directory", () => {
-    it("should use workspace path as default cwd", async () => {
-      const result = await runner.execute("pwd", []);
-      // pwd might show /private/tmp on macOS instead of /tmp
-      if (result.exitCode === 0) {
-        expect(
-          result.stdout.trim() === workspace.path ||
-            result.stdout.trim().includes(path.basename(workspace.path)),
-        ).toBe(true);
-      }
-    });
+    it.skipIf(process.platform !== "darwin")(
+      "should use workspace path as default cwd",
+      async () => {
+        const result = await runner.execute("pwd", []);
+        expect(result.exitCode, result.stderr).toBe(0);
+        // Compare canonical paths because pwd may print /private/var for /var.
+        expect(fs.realpathSync(result.stdout.trim())).toBe(fs.realpathSync(workspace.path));
+      },
+    );
 
     it("should use custom cwd when provided", async () => {
       const tmpDir = os.tmpdir();
@@ -285,39 +284,45 @@ describe("SandboxRunner", () => {
   });
 
   describe("Code Execution", () => {
-    it("should execute Python code", async () => {
-      // Skip if python3 is not installed
+    it.skipIf(process.platform !== "darwin")("should execute Python code", async () => {
       const checkPython = await runner.execute("which", ["python3"]);
-      if (checkPython.exitCode !== 0) {
-        return; // Skip test
-      }
+      expect(checkPython.exitCode, checkPython.stderr).toBe(0);
 
       const result = await runner.executeCode('print("Hello from Python")', "python");
 
+      expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("Hello from Python");
     });
 
-    it("should execute JavaScript code", async () => {
-      // Skip if node is not installed
+    it.skipIf(process.platform !== "darwin")("should execute JavaScript code", async () => {
       const checkNode = await runner.execute("which", ["node"]);
-      if (checkNode.exitCode !== 0) {
-        return; // Skip test
-      }
+      expect(checkNode.exitCode, checkNode.stderr).toBe(0);
 
       const result = await runner.executeCode('console.log("Hello from Node")', "javascript");
 
+      expect(result.exitCode, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("Hello from Node");
     });
 
-    it("should timeout long-running code", async () => {
+    it.skipIf(process.platform !== "darwin")("should timeout long-running code", async () => {
       const checkNode = await runner.execute("which", ["node"]);
-      if (checkNode.exitCode !== 0) {
-        return; // Skip test
+      expect(checkNode.exitCode, checkNode.stderr).toBe(0);
+      const execute = runner.execute.bind(runner);
+      // Keep the actual executeCode source file, interpreter, Seatbelt child,
+      // and SIGKILL path; shorten only its production 60-second deadline.
+      const executeSpy = vi
+        .spyOn(runner, "execute")
+        .mockImplementation((command, args, options) =>
+          execute(command, args, { ...options, timeout: 100 }),
+        );
+      try {
+        const result = await runner.executeCode("while(true) {}", "javascript");
+        expect(result.timedOut).toBe(true);
+        expect(result.killed).toBe(true);
+        expect(result.exitCode).not.toBe(0);
+      } finally {
+        executeSpy.mockRestore();
       }
-
-      const result = await runner.executeCode("while(true) {}", "javascript");
-
-      expect(result.timedOut).toBe(true);
     });
   });
 });

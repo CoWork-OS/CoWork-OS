@@ -14,6 +14,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as crypto from "crypto";
 import { Workspace } from "../../../shared/types";
+import { macOSFilesystemRestrictions } from "./macos-filesystem-policy";
 import {
   ISandbox,
   SandboxType,
@@ -502,6 +503,10 @@ export class MacOSSandbox implements ISandbox {
   ; root before running even shell built-ins such as pwd. Keep this literal so
   ; it does not grant recursive access outside the configured workspace.
   (literal "/")
+  ; These immutable system symlinks must be readable when resolving an
+  ; explicitly permitted path through its /var or /tmp spelling.
+  (literal "/var")
+  (literal "/tmp")
   (subpath "/usr/lib")
   (subpath "/usr/bin")
   (subpath "/bin")
@@ -667,7 +672,15 @@ ${tempWriteRules}
 )
 `;
 
-    return profile;
+    return (
+      profile +
+      macOSFilesystemRestrictions(
+        this.workspace,
+        options,
+        this.getRuntimeTempDir(),
+        finiteFilesystemScope,
+      )
+    );
   }
 
   private resolvePolicyPath(rawPath: string): string {

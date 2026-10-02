@@ -889,7 +889,7 @@ When a user exceeds the maximum attempts:
 ### Command-Tool Sandboxing
 
 On macOS, profile-enabled command tools execute within a generated `sandbox-exec` profile; on Linux and Windows,
-the Docker backend provides the equivalent process boundary when configured. Both backends are
+the Docker backend provides a process boundary when configured. Both backends are
 fed by the same canonical filesystem evaluator:
 
 - Restricts filesystem access to the active workspace and explicitly approved roots
@@ -897,6 +897,18 @@ fed by the same canonical filesystem evaluator:
 - Blocks network access unless the active profile and workspace permit it
 - Fails closed for arbitrary code with domain-scoped egress that the backend cannot enforce
 - Uses a minimal, filtered subprocess environment
+
+The macOS backend also enforces positive read-only filesystem rules, recursive
+Git and policy-path protection, and the separate delete capability. It prevents
+host directory removal and moves because renaming a parent can bypass a protected
+descendant. Private scratch directories remain available for temporary work.
+Use guarded file tools for directory mutations.
+
+Docker checks every host mount against the active filesystem policy. It refuses
+mounts that expose denied descendants, writable mounts that violate read-only or
+delete rules, and writable workspace directory mounts whose future Git and policy
+paths cannot be protected. Read-only host mounts and private container scratch
+remain available. An unsupported policy returns an error before process launch.
 
 **Implementation**: `src/electron/security/access-profile-paths.ts`,
 `src/electron/agent/sandbox/macos-sandbox.ts`, and

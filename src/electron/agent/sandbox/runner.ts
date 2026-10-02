@@ -31,6 +31,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as crypto from "crypto";
 import { Workspace } from "../../../shared/types";
+import { macOSFilesystemRestrictions } from "./macos-filesystem-policy";
 import {
   evaluateWorkspaceFilesystemAccess,
   hasEffectiveFilesystemScope,
@@ -116,7 +117,7 @@ export class SandboxRunner {
     args: string[] = [],
     options: SandboxOptions = {},
   ): Promise<SandboxResult> {
-    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const opts = { ...DEFAULT_OPTIONS, cwd: this.workspace.path, ...options };
 
     const networkError = this.getNetworkAccessError(
       options.allowNetwork === undefined
@@ -399,6 +400,16 @@ export class SandboxRunner {
     validatePathForSandboxProfile(tempDir);
     const escapedTempDir = escapeSandboxProfileString(tempDir);
     const workspaceAliases = this.getPathAliases(workspacePath);
+    const workspaceAncestors = new Set<string>();
+    for (const alias of workspaceAliases) {
+      let ancestor = path.dirname(alias);
+      while (ancestor !== "/") {
+        if (ancestor === "/private" || ancestor.startsWith("/private/")) {
+          workspaceAncestors.add(ancestor);
+        }
+        ancestor = path.dirname(ancestor);
+      }
+    }
     const tempAliases = this.getPathAliases(tempDir);
     const tempReadRules = finiteFilesystemScope
       ? tempAliases.map((alias) => `  (subpath "${escapeSandboxProfileString(alias)}")`).join("\n")
@@ -420,6 +431,9 @@ export class SandboxRunner {
 
 ; Allow reading system libraries and binaries
 (allow file-read*
+  (literal "/")
+  (literal "/var")
+  (literal "/tmp")
   (subpath "/usr/lib")
   (subpath "/usr/bin")
   (subpath "/bin")
@@ -428,6 +442,8 @@ export class SandboxRunner {
   (subpath "/Library/Frameworks")
   (subpath "/Applications/Xcode.app")
   (subpath "/private/var/db")
+  (subpath "/private/var/select")
+${[...workspaceAncestors].map((ancestor) => `  (literal "${escapeSandboxProfileString(ancestor)}")`).join("\n")}
   (literal "/dev/null")
   (literal "/dev/urandom")
   (literal "/dev/random")
@@ -435,7 +451,7 @@ ${tempReadRules}
 )
 
 ; Allow homebrew on macOS
-(allow file-read* (subpath "/opt/homebrew"))
+(allow file-read* (literal "/opt") (subpath "/opt/homebrew"))
 
 `;
     if (permissions.read) {
@@ -556,7 +572,15 @@ ${tempWriteRules}
 )
 `;
 
-    return profile;
+    return (
+      profile +
+      macOSFilesystemRestrictions(
+        this.workspace,
+        options,
+        this.getRuntimeTempDir(),
+        finiteFilesystemScope,
+      )
+    );
   }
 
   /**

@@ -29,6 +29,7 @@ import {
   resolveAccessControlledPath,
 } from "../../security/access-profile-paths";
 import { createSecureTempFile } from "./security-utils";
+import { collectPolicyPathEntries } from "./policy-paths";
 
 /**
  * Docker sandbox configuration
@@ -70,15 +71,6 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
   envPassthrough: ["LANG", "TERM"],
   onProcess: () => undefined,
 };
-
-const PROTECTED_WORKSPACE_WRITE_RELATIVE_PATHS = [
-  ".git",
-  ".cowork",
-  ".env",
-  ".env.local",
-  ".env.production",
-  ".env.development",
-];
 
 interface DockerPathMapping {
   hostPath: string;
@@ -145,18 +137,6 @@ export class DockerSandbox implements ISandbox {
         killed: false,
         timedOut: false,
         error: "Not initialized",
-      };
-    }
-
-    const unsupportedDenyRule = this.getUnsupportedWorkspaceDenyRule();
-    if (unsupportedDenyRule) {
-      return {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Docker sandbox cannot safely mask the denied path inside the workspace: ${unsupportedDenyRule}`,
-        killed: false,
-        timedOut: false,
-        error: "Unsupported access-profile deny rule",
       };
     }
 
@@ -288,13 +268,6 @@ export class DockerSandbox implements ISandbox {
     if (!this.initialized) {
       throw new Error("Docker sandbox not initialized");
     }
-    const unsupportedDenyRule = this.getUnsupportedWorkspaceDenyRule();
-    if (unsupportedDenyRule) {
-      throw new Error(
-        `Docker sandbox cannot safely mask the denied path inside the workspace: ${unsupportedDenyRule}`,
-      );
-    }
-
     const opts = { ...DEFAULT_OPTIONS, ...options };
     const networkError = this.getNetworkAccessError(opts.allowNetwork === true);
     if (networkError) throw new Error(networkError);
@@ -355,30 +328,6 @@ export class DockerSandbox implements ISandbox {
     } finally {
       cleanup();
     }
-  }
-
-  /**
-   * Docker bind-mounts the complete workspace. A nested deny rule cannot be
-   * represented safely by simply omitting an additional mount because the
-   * parent bind mount would still expose that path. Refuse the command rather
-   * than silently widening the effective access profile.
-   */
-  private getUnsupportedWorkspaceDenyRule(): string | undefined {
-    if (this.workspace.permissions.read !== true) return undefined;
-    const workspacePath = path.resolve(this.workspace.path);
-
-    for (const rule of this.workspace.permissions.accessFilesystemRules || []) {
-      if (rule.access !== "deny" || typeof rule.path !== "string") continue;
-      const rawPath = rule.path.trim();
-      if (!rawPath) continue;
-
-      const deniedPath = resolveAccessControlledPath(workspacePath, rawPath);
-      if (isAccessPathWithin(workspacePath, deniedPath)) {
-        return rawPath;
-      }
-    }
-
-    return undefined;
   }
 
   /**
@@ -514,21 +463,12 @@ export class DockerSandbox implements ISandbox {
     // ephemeral mount still lets a task create scratch output without
     // exposing pre-existing host files.
     if (this.workspace.permissions.read === true) {
-      const workspacePath = this.convertToDockerPath(path.resolve(this.workspace.path));
-      const writeMode = this.workspace.permissions.write ? "rw" : "ro";
+      const workspacePath = resolveAccessControlledPath(this.workspace.path, this.workspace.path);
+      const writeMode = this.isSandboxPathAllowed(workspacePath, "write", options) ? "rw" : "ro";
       addMount(workspacePath, "/workspace", writeMode);
     } else {
       const mode = this.workspace.permissions.write ? "rw" : "ro";
-      args.push("--tmpfs", `/workspace:${mode},nosuid,nodev,size=100m`);
-    }
-
-    if (this.workspace.permissions.read === true && this.workspace.permissions.write) {
-      for (const relativePath of PROTECTED_WORKSPACE_WRITE_RELATIVE_PATHS) {
-        const hostPath = path.resolve(this.workspace.path, relativePath);
-        if (!fs.existsSync(hostPath)) continue;
-        const containerPath = `/workspace/${relativePath.replace(/\\/g, "/")}`;
-        addMount(this.convertToDockerPath(hostPath), containerPath, "ro");
-      }
+      args.push("--tmpfs", `/workspace:${mode},nosuid,nodev,mode=1777,size=100m`);
     }
 
     // Set working directory
@@ -540,21 +480,13 @@ export class DockerSandbox implements ISandbox {
     for (const readPath of options.allowedReadPaths || []) {
       const checkedPath = this.assertSandboxPath(readPath, "read", options);
       if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) continue;
-      addMount(
-        this.convertToDockerPath(checkedPath),
-        this.getContainerMountPath(checkedPath),
-        "ro",
-      );
+      addMount(checkedPath, this.getContainerMountPath(checkedPath), "ro");
     }
 
     for (const writePath of options.allowedWritePaths || []) {
       const checkedPath = this.assertSandboxPath(writePath, "write", options);
       if (!fs.existsSync(checkedPath) || this.isPathInsideWorkspace(checkedPath)) continue;
-      addMount(
-        this.convertToDockerPath(checkedPath),
-        this.getContainerMountPath(checkedPath),
-        "rw",
-      );
+      addMount(checkedPath, this.getContainerMountPath(checkedPath), "rw");
     }
 
     // Named profile roots are mounted explicitly. Denied rules are not
@@ -569,11 +501,7 @@ export class DockerSandbox implements ISandbox {
         !this.isExplicitReadOnlyOptionPath(checkedPath, options)
           ? "rw"
           : "ro";
-      addMount(
-        this.convertToDockerPath(checkedPath),
-        this.getContainerMountPath(checkedPath),
-        mode,
-      );
+      addMount(checkedPath, this.getContainerMountPath(checkedPath), mode);
     }
 
     for (const rule of this.workspace.permissions.accessFilesystemRules || []) {
@@ -587,11 +515,7 @@ export class DockerSandbox implements ISandbox {
         !this.isExplicitReadOnlyOptionPath(checkedPath, options)
           ? "rw"
           : "ro";
-      addMount(
-        this.convertToDockerPath(checkedPath),
-        this.getContainerMountPath(checkedPath),
-        mode,
-      );
+      addMount(checkedPath, this.getContainerMountPath(checkedPath), mode);
     }
 
     const legacyAllowedPaths = hasEffectiveFilesystemScope(
@@ -609,15 +533,18 @@ export class DockerSandbox implements ISandbox {
         !this.isExplicitReadOnlyOptionPath(checkedPath, options)
           ? "rw"
           : "ro";
-      addMount(
-        this.convertToDockerPath(checkedPath),
-        this.getContainerMountPath(checkedPath),
-        mode,
-      );
+      addMount(checkedPath, this.getContainerMountPath(checkedPath), mode);
     }
 
+    // Validate the actual final mount set, including caller options, named
+    // roots, positive rules, and legacy roots. Checking only /workspace leaves
+    // the same denied child reachable through a second mount of its parent.
     for (const mount of mounts.values()) {
-      args.push("-v", `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
+      this.assertMountPolicy(mount, options);
+      args.push(
+        "-v",
+        `${this.convertToDockerPath(mount.hostPath)}:${mount.containerPath}:${mount.mode}`,
+      );
     }
 
     // Environment variables
@@ -639,6 +566,90 @@ export class DockerSandbox implements ISandbox {
     }
 
     return args;
+  }
+
+  private assertMountPolicy(
+    mount: { hostPath: string; mode: "ro" | "rw" },
+    options: SandboxOptions = {},
+  ): void {
+    if (this.workspace.permissions.read !== true) {
+      throw new Error(
+        "Docker sandbox cannot expose host mounts when workspace read access is disabled.",
+      );
+    }
+    const hostPath = resolveAccessControlledPath(this.workspace.path, mount.hostPath);
+    const overlap = (other: string): boolean =>
+      isAccessPathWithin(hostPath, other) || isAccessPathWithin(other, hostPath);
+    const rules = (this.workspace.permissions.accessFilesystemRules || []).map((rule) => ({
+      ...rule,
+      path: resolveAccessControlledPath(this.workspace.path, rule.path),
+    }));
+    for (const rule of rules) {
+      if (rule.access === "deny" && overlap(rule.path)) {
+        throw new Error(
+          `Docker sandbox cannot safely mask the denied path inside a host mount: ${rule.path}`,
+        );
+      }
+    }
+    if (mount.mode === "ro") return;
+
+    for (const rule of rules) {
+      if (rule.access !== "read" || !overlap(rule.path)) continue;
+      // A write rule is a union grant, including a parent write rule that
+      // covers a read child. A descendant write rule only covers part of it.
+      const intersection = isAccessPathWithin(hostPath, rule.path) ? rule.path : hostPath;
+      const explicitlyWritable = rules.some(
+        (writeRule) =>
+          writeRule.access === "write" && isAccessPathWithin(writeRule.path, intersection),
+      );
+      if (!explicitlyWritable) {
+        throw new Error(
+          `Docker sandbox cannot safely preserve a read-only path inside a writable host mount: ${rule.path}`,
+        );
+      }
+    }
+
+    // A bind-mounted regular file cannot be unlinked/replaced from inside the
+    // container. Directory mounts expose arbitrary children, including names
+    // created after launch; static read-only overlays cannot secure them.
+    if (fs.existsSync(hostPath) && fs.statSync(hostPath).isFile()) return;
+    const policyPaths = [
+      this.workspace.path,
+      ...(this.workspace.permissions.accessFilesystemRules || []).map((rule) => rule.path),
+      ...(this.workspace.permissions.accessWorkspaceRoots || []),
+      ...(hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions)
+        ? []
+        : this.workspace.permissions.allowedPaths || []),
+      ...(options.allowedReadPaths || []),
+      ...(options.allowedWritePaths || []),
+    ];
+    for (const entry of collectPolicyPathEntries(this.workspace.path, policyPaths)) {
+      // entry already preserves the physical symlink name. Canonicalizing it
+      // again would lose precisely the alias this guard needs to freeze.
+      // The mountpoint itself cannot be replaced from inside the container.
+      const relative = path.relative(hostPath, entry);
+      if (
+        relative &&
+        relative !== ".." &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative)
+      ) {
+        throw new Error(
+          `Docker sandbox cannot preserve policy path resolution inside a writable host mount: ${entry}. Use read-only access or guarded file tools.`,
+        );
+      }
+    }
+    if (this.workspace.permissions.delete !== true || rules.some((rule) => overlap(rule.path))) {
+      throw new Error(
+        `Docker sandbox cannot enforce delete restrictions on a writable host directory: ${hostPath}. Use read-only access or guarded file tools.`,
+      );
+    }
+    const workspacePath = resolveAccessControlledPath(this.workspace.path, this.workspace.path);
+    if (overlap(workspacePath)) {
+      throw new Error(
+        `Docker sandbox cannot protect current and future .git and .cowork/policy paths in a writable workspace mount: ${hostPath}. Use read-only access or guarded file tools.`,
+      );
+    }
   }
 
   private resolveContainerCwd(rawCwd?: string): string {
@@ -697,6 +708,13 @@ export class DockerSandbox implements ISandbox {
     try {
       const candidate = resolveAccessControlledPath(this.workspace.path, rawPath);
       const decision = evaluateWorkspaceFilesystemAccess(this.workspace, candidate, operation);
+      if (
+        decision.reason === "profile_filesystem_denied" ||
+        decision.reason === "protected_path" ||
+        decision.reason === "access_profile_unavailable" ||
+        decision.reason.endsWith("_disabled")
+      )
+        return false;
       return (
         decision.decision === "allow" ||
         this.isRuntimeTemporaryPath(candidate) ||

@@ -244,6 +244,13 @@ file approval, a session “Approve all” shortcut, or a legacy permission mode
 expand it. Temporary-workspace scratch-file compatibility is retained only for
 unprofiled legacy tasks.
 
+Process backends reject filesystem policies they cannot enforce. In particular,
+macOS commands cannot move or remove host directories around protected descendants;
+Docker rejects writable workspace directory mounts and mounts that would expose
+denied or read-only descendants. Private process scratch remains available. See
+[command-tool sandboxing](security-guide.md#command-tool-sandboxing) for backend
+limits and supported alternatives.
+
 ## Network and command behavior
 
 Built-in browser, web, and HTTP tools evaluate profile network and domain rules

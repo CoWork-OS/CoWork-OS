@@ -482,7 +482,11 @@ import {
   preflightValidateAndRepairToolInput as preflightValidateAndRepairToolInputUtil,
   recordToolFailureOutcome as recordToolFailureOutcomeUtil,
 } from "./executor-tool-execution-utils";
-import { SHARED_PROMPT_POLICY_CORE, buildModeDomainContract } from "./executor-prompt-sections";
+import {
+  CODING_WORKFLOW_PROMPT,
+  SHARED_PROMPT_POLICY_CORE,
+  buildModeDomainContract,
+} from "./executor-prompt-sections";
 export { AwaitingUserInputError } from "./executor-helpers";
 export type { CompletionContract } from "./executor-helpers";
 
@@ -920,6 +924,7 @@ export class TaskExecutor {
   private csvArithmeticVerifier?: CsvArithmeticVerifier;
   private csvReportEvidenceVerifier?: CsvReportEvidenceVerifier;
   private activeBasePromptRoutingBlocks?: Set<BasePromptRoutingBlock>;
+  private workspaceGitInfo?: { isRepo: boolean };
   private lastWebFetchFailure: {
     timestamp: number;
     tool: "web_fetch" | "http_request";
@@ -16541,6 +16546,44 @@ ${transcript}
     return `Workspace: ${this.workspace.path}`;
   }
 
+  /**
+   * Reads the workspace root's `.git` entry once per task. Plain file reads only:
+   * running `git` here could execute repository-configured hooks or filters outside
+   * the sandbox and tool policy.
+   */
+  private getWorkspaceGitInfo(): { isRepo: boolean } {
+    if (this.workspaceGitInfo) return this.workspaceGitInfo;
+    let info = { isRepo: false };
+    try {
+      const gitPath = path.join(this.workspace.path, ".git");
+      if (
+        this.workspace.permissions.read &&
+        this.canReadWorkspacePath(gitPath) &&
+        fs.existsSync(gitPath)
+      ) {
+        info = { isRepo: true };
+      }
+    } catch {
+      // Best-effort context; treat unreadable workspaces as non-repositories.
+    }
+    this.workspaceGitInfo = info;
+    return info;
+  }
+
+  private shouldIncludeCodingWorkflowPrompt(
+    executionMode: ExecutionMode,
+    taskDomain: TaskDomain,
+  ): boolean {
+    if (executionMode !== "execute" && executionMode !== "debug" && executionMode !== "verified") {
+      return false;
+    }
+    if (taskDomain === "code") return true;
+    // Unclassified or ops work inside a repository is usually code work too.
+    return (
+      (taskDomain === "general" || taskDomain === "operations") && this.getWorkspaceGitInfo().isRepo
+    );
+  }
+
   private hasExplicitLiveVisualSurfaceIntent(text: string): boolean {
     return /\b(screenshot|screen\s*capture|on\s+screen|current\s+screen|open\s+(?:the\s+)?(?:app|application|browser|preview)|live\s+preview|browser|playwright|visual\s+qa|qa_run|localhost|dev\s+server|rendered\s+(?:page|app|ui)|see\s+how\s+it\s+looks|check\s+in\s+browser|verify\s+in\s+browser|test\s+in\s+browser)\b/i.test(
       text,
@@ -17146,6 +17189,12 @@ ${transcript}
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),
       currentTimePrompt: `Current time: ${getCurrentDateTimeContext()}`,
       modeDomainContractPrompt: buildModeDomainContract(params.executionMode, params.taskDomain),
+      codingWorkflowPrompt: this.shouldIncludeCodingWorkflowPrompt(
+        params.executionMode,
+        params.taskDomain,
+      )
+        ? CODING_WORKFLOW_PROMPT
+        : undefined,
       completionGuidancePrompt: this.buildCompletionGuidancePrompt(),
       roleContext: params.roleContext,
       memoryContext: params.memoryContext,

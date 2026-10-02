@@ -21,6 +21,8 @@ export interface BuildExecutionPromptParams {
   workspaceContextPrompt?: string;
   currentTimePrompt?: string;
   modeDomainContractPrompt?: string;
+  /** Engineering workflow guidance for tasks that edit code (session-scoped). */
+  codingWorkflowPrompt?: string;
   roleContext?: string;
   memoryContext?: string;
   awarenessSnapshot?: string;
@@ -243,6 +245,11 @@ export class ContentBuilder {
             },
           ),
           makeSection("mode_domain", modeDomainContract, 300, {
+            required: true,
+            layerKind: "always",
+            cacheScope: "session",
+          }),
+          makeSection("coding_workflow", params.codingWorkflowPrompt, 300, {
             required: true,
             layerKind: "always",
             cacheScope: "session",

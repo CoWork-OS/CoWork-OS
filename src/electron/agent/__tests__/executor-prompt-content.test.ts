@@ -6,6 +6,9 @@
  * spent on routing that is irrelevant to the task.
  */
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LLMResponse } from "../llm";
 
@@ -451,5 +454,82 @@ describe("data evidence and units guidance", () => {
     expect(captured.stepMessages[0]).toContain("DATA EVIDENCE AND UNITS (REQUIRED)");
     expect(captured.systemPrompts[0]).toContain("YOUR IDENTITY:");
     expect(captured.systemPrompts[0]).not.toContain("DATA EVIDENCE AND UNITS (REQUIRED)");
+  });
+});
+
+function makeGitWorkspace(branch = "main"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-prompt-git-"));
+  fs.mkdirSync(path.join(dir, ".git"));
+  fs.writeFileSync(path.join(dir, ".git", "HEAD"), `ref: refs/heads/${branch}\n`);
+  return dir;
+}
+
+describe("coding workflow guidance", () => {
+  const tempDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("adds a compact CODING WORKFLOW section to code-domain execution prompts", async () => {
+    const executor = makePromptExecutor({
+      title: "Fix failing parseDate test",
+      prompt: CODING_PROMPT,
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+
+    const built = await buildExecutionPrompt(executor);
+    const workflow = sectionText(built, "coding_workflow");
+
+    expect(workflow).toContain("CODING WORKFLOW:");
+    expect(workflow).toMatch(/read the relevant code/i);
+    expect(workflow).toMatch(/minimal, focused changes/i);
+    expect(workflow).toMatch(/git status/i);
+    expect(workflow).toMatch(/uncommitted changes you did not make/i);
+    expect(workflow).toMatch(/run the relevant tests/i);
+    expect(workflow).toMatch(/batch independent read-only tool calls/i);
+    expect(workflow).toMatch(/never claim a check passed unless you ran it/i);
+    expect(workflow).toContain(".cowork/tmp/");
+    expect(estimateTokens(workflow)).toBeLessThanOrEqual(180);
+    expect(
+      built.systemBlocks.find((b) => b.stableKey.startsWith("coding_workflow:")),
+    ).toMatchObject({ scope: "session" });
+  });
+
+  it("adds the section for a general-domain task in a git repository", async () => {
+    const workspacePath = makeGitWorkspace();
+    tempDirs.push(workspacePath);
+    const executor = makePromptExecutor({
+      title: "Rename helper",
+      prompt: "Rename the helper formatDate to formatIsoDate everywhere.",
+      taskDomain: "general",
+      taskIntent: "execution",
+      executionMode: "execute",
+      workspacePath,
+    });
+
+    const built = await buildExecutionPrompt(executor);
+
+    expect(sectionText(built, "coding_workflow")).toContain("CODING WORKFLOW:");
+  });
+
+  it.each([
+    ["a non-code task", "general", "execute"],
+    ["a writing task", "writing", "execute"],
+    ["a read-only analysis of code", "code", "analyze"],
+    ["a plan-only coding request", "code", "plan"],
+  ])("omits the section for %s", async (_label, taskDomain, executionMode) => {
+    const executor = makePromptExecutor({
+      title: "Task",
+      prompt: "Draft a short note about the quarterly offsite agenda.",
+      taskDomain,
+      taskIntent: "execution",
+      executionMode,
+    });
+
+    const built = await buildExecutionPrompt(executor);
+
+    expect(built.prompt).not.toContain("CODING WORKFLOW:");
   });
 });

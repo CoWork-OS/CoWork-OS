@@ -110,6 +110,7 @@ export class GrepTools {
     totalMatches: number;
     filesSearched: number;
     truncated: boolean;
+    truncationReason?: string;
     error?: string;
     warning?: string;
   }> {
@@ -127,7 +128,7 @@ export class GrepTools {
       message: `Grep search: "${pattern}"${searchPath ? ` in ${searchPath}` : ""}${globPattern ? ` (${globPattern})` : ""}`,
     });
 
-    const evaluator = new BoundedRegex();
+    const evaluator = this.createRegexEvaluator();
     try {
       if (
         (await this.isDocumentHeavyWorkspace()) &&
@@ -198,9 +199,10 @@ export class GrepTools {
 
       let totalMatches = 0;
       let truncated = false;
+      let truncationReason: string | undefined;
 
       // Search each file
-      for (const file of files) {
+      for (const [fileIndex, file] of files.entries()) {
         if (truncated) break;
 
         if (evaluateWorkspaceFilesystemAccess(this.workspace, file, "read").decision !== "allow") {
@@ -281,7 +283,18 @@ export class GrepTools {
             }
           }
         } catch (error) {
-          if (error instanceof RegexDeadlineError) throw error;
+          if (error instanceof RegexDeadlineError) {
+            const progress = `after searching ${fileIndex} of ${files.length} files`;
+            // Matches found before the time budget ran out stay useful; only an empty search fails.
+            if (matches.length === 0) {
+              throw new RegexDeadlineError(
+                `${error.message} ${progress} (no matches so far). Narrow path or glob, or simplify the pattern.`,
+              );
+            }
+            truncated = true;
+            truncationReason = `${error.message} ${progress}, so these results are partial. Narrow path or glob to search the remaining files.`;
+            break;
+          }
           // Skip files we can't read (binary, permissions, etc.)
         }
       }
@@ -294,6 +307,7 @@ export class GrepTools {
           totalMatches,
           filesSearched: files.length,
           truncated,
+          ...(truncationReason ? { truncationReason } : {}),
         },
       });
       const budgeted = this.applyOutputBudget(matches);
@@ -305,6 +319,7 @@ export class GrepTools {
         totalMatches,
         filesSearched: files.length,
         truncated: truncated || budgeted.truncated,
+        ...(truncationReason ? { truncationReason } : {}),
       };
     } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -324,6 +339,11 @@ export class GrepTools {
     } finally {
       await evaluator.close();
     }
+  }
+
+  /** Regex evaluator for one grep call (its time budget spans the whole search). */
+  protected createRegexEvaluator(): BoundedRegex {
+    return new BoundedRegex();
   }
 
   private applyOutputBudget<

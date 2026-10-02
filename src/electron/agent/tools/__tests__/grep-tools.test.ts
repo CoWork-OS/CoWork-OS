@@ -16,6 +16,7 @@ vi.mock("electron", () => ({
 
 // Import after mocking
 import { GrepTools } from "../grep-tools";
+import { BoundedRegex, RegexDeadlineError } from "../bounded-regex";
 import { Workspace } from "../../../../shared/types";
 
 // Mock daemon
@@ -368,5 +369,72 @@ describe("GrepTools", () => {
         }),
       );
     });
+  });
+});
+
+/** Lets the first `allowed` regex evaluations run, then reports an exhausted time budget. */
+class BudgetLimitedGrepTools extends GrepTools {
+  constructor(
+    workspace: Workspace,
+    private readonly allowed: number,
+  ) {
+    super(workspace, mockDaemon as Any, "test-task-id");
+  }
+
+  protected override createRegexEvaluator(): BoundedRegex {
+    const evaluator = new BoundedRegex();
+    const evaluate = evaluator.evaluate.bind(evaluator);
+    let remaining = this.allowed;
+    evaluator.evaluate = async (...args: Parameters<BoundedRegex["evaluate"]>) => {
+      if (remaining <= 0) {
+        throw new RegexDeadlineError("Regex search exceeded its total execution budget");
+      }
+      remaining -= 1;
+      return evaluate(...args);
+    };
+    return evaluator;
+  }
+}
+
+describe("GrepTools regex budget exhaustion", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const workspaceWithMatches = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-budget-"));
+    dirs.push(dir);
+    for (const name of ["a.txt", "b.txt", "c.txt"]) {
+      fs.writeFileSync(path.join(dir, name), `intro\nneedle in ${name}\noutro\n`);
+    }
+    return { ...mockWorkspace, path: dir };
+  };
+
+  it.each(["content", "files_only", "count"] as const)(
+    "returns matches found before the budget ran out in %s mode",
+    async (outputMode) => {
+      const tool = new BudgetLimitedGrepTools(workspaceWithMatches(), 1);
+
+      const result = await tool.grep({ pattern: "needle", outputMode });
+
+      expect(result.success).toBe(true);
+      expect(result.matches).toHaveLength(1);
+      expect(result.totalMatches).toBe(1);
+      expect(result.truncated).toBe(true);
+      expect(result.truncationReason).toMatch(/budget/);
+      expect(result.truncationReason).toMatch(/1 of 3 files/);
+    },
+  );
+
+  it("still fails, with progress, when the budget runs out before any match", async () => {
+    const tool = new BudgetLimitedGrepTools(workspaceWithMatches(), 0);
+
+    const result = await tool.grep({ pattern: "needle" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/budget/);
+    expect(result.error).toMatch(/0 of 3 files/);
   });
 });

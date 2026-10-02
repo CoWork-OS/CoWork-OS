@@ -1564,3 +1564,75 @@ describe("WebFetchTools character sets", () => {
     expect(result.content).toContain('"name": "test"');
   });
 });
+
+describe("WebFetchTools paging", () => {
+  let webFetchTools: WebFetchTools;
+  const text = Array.from({ length: 250 }, (_, index) => `${index}`.padStart(10, "-")).join("");
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(GuardrailManager, "isDomainAllowed").mockReturnValue(true);
+    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const fetchPage = (startChar?: number) => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(text, { headers: { "content-type": "text/plain" } }),
+    );
+    return webFetchTools.webFetch({ url: "https://example.com/long", maxLength: 1000, startChar });
+  };
+
+  it("returns consecutive windows that rebuild the whole content", async () => {
+    const first = await fetchPage();
+    expect(first).toMatchObject({ success: true, totalLength: 2500, truncated: true });
+    expect(first.nextStartChar).toBe(1000);
+    expect(first.content).toContain("[Content truncated]");
+    expect(first.content).toContain("startChar=1000");
+
+    const second = await fetchPage(first.nextStartChar);
+    expect(second).toMatchObject({ truncated: true, nextStartChar: 2000, totalLength: 2500 });
+
+    const last = await fetchPage(second.nextStartChar);
+    expect(last).toMatchObject({ success: true, truncated: false, totalLength: 2500 });
+    expect(last.nextStartChar).toBeUndefined();
+    expect(last.content).not.toContain("[Content truncated]");
+
+    const windowText = (content: string) => content.split("\n\n... [Content truncated]")[0];
+    expect(windowText(first.content) + windowText(second.content) + last.content).toBe(text);
+  });
+
+  it("rejects a startChar past the end of the content", async () => {
+    const result = await fetchPage(4000);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("2500");
+  });
+
+  it("redacts a protected credential before cutting the window", async () => {
+    mockProtectedCredentialService.resolveForDestination.mockReturnValue("top-secret");
+    const protectedTools = new WebFetchTools(
+      mockWorkspace,
+      mockDaemon as Any,
+      "test-task-id",
+      mockProtectedCredentialService as Any,
+    );
+    mockFetch.mockResolvedValueOnce(
+      new Response(`${"A".repeat(995)}top-secret${"B".repeat(100)}`, {
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+
+    const result = await protectedTools.webFetch({
+      url: "https://api.example.com/echo",
+      credentialId: "credential-1",
+      maxLength: 1000,
+    });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).not.toContain("top-");
+  });
+});

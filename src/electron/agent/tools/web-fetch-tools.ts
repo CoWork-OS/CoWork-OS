@@ -299,7 +299,13 @@ export class WebFetchTools {
             },
             maxLength: {
               type: "number",
-              description: "Maximum content length to return (default: 50000 characters)",
+              description:
+                "Maximum content length to return per call (default: 50000 characters). Longer content is returned in parts; see startChar.",
+            },
+            startChar: {
+              type: "number",
+              description:
+                "Character offset into the extracted content to start from (default: 0). When a result has truncated: true, call web_fetch again with the same url, selector and includeLinks and startChar set to the returned nextStartChar.",
             },
             credentialId: {
               type: "string",
@@ -390,6 +396,7 @@ export class WebFetchTools {
     selector?: string;
     includeLinks?: boolean;
     maxLength?: number;
+    startChar?: number;
     credentialId?: string;
     credentialHeader?: string;
     credentialPrefix?: string;
@@ -399,17 +406,31 @@ export class WebFetchTools {
     title?: string;
     content: string;
     contentLength: number;
+    /** Length of the whole extracted content; content is the window starting at startChar. */
+    totalLength?: number;
+    startChar?: number;
+    truncated?: boolean;
+    nextStartChar?: number;
     error?: string;
   }> {
     const {
       url,
       selector,
       includeLinks = true,
-      maxLength = 50000,
       credentialId,
       credentialHeader,
       credentialPrefix,
     } = input;
+    const requestedMaxLength = Number(input.maxLength);
+    const maxLength =
+      Number.isFinite(requestedMaxLength) && requestedMaxLength >= 1
+        ? Math.floor(requestedMaxLength)
+        : 50000;
+    const requestedStartChar = Number(input.startChar);
+    const startChar =
+      Number.isFinite(requestedStartChar) && requestedStartChar > 0
+        ? Math.floor(requestedStartChar)
+        : 0;
     let credentialSecret: string | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
 
@@ -515,12 +536,21 @@ export class WebFetchTools {
         title = result.title;
       }
 
-      // Truncate if needed
-      if (content.length > maxLength) {
-        content = content.substring(0, maxLength) + "\n\n... [Content truncated]";
-      }
+      // Redact before cutting the window so a secret split across two windows never leaks in part.
       content = redactSecret(content, credentialSecret);
       title = title ? redactSecret(title, credentialSecret) : title;
+      const totalLength = content.length;
+      if (startChar > totalLength) {
+        throw new Error(
+          `startChar ${startChar} is past the end of the content (${totalLength} characters).`,
+        );
+      }
+      const end = Math.min(totalLength, startChar + maxLength);
+      const truncated = end < totalLength;
+      content = content.slice(startChar, end);
+      if (truncated) {
+        content += `\n\n... [Content truncated] Continue with startChar=${end} (${totalLength} chars total).`;
+      }
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "web_fetch",
@@ -528,7 +558,9 @@ export class WebFetchTools {
           url,
           title,
           contentLength: content.length,
-          truncated: content.length > maxLength,
+          totalLength,
+          startChar,
+          truncated,
         },
       });
 
@@ -538,6 +570,10 @@ export class WebFetchTools {
         title,
         content,
         contentLength: content.length,
+        totalLength,
+        ...(startChar > 0 ? { startChar } : {}),
+        truncated,
+        ...(truncated ? { nextStartChar: end } : {}),
       };
     } catch (error: Any) {
       const errorMessage = redactSecret(

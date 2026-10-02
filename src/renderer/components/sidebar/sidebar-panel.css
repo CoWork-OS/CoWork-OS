@@ -665,6 +665,26 @@ html:not(.theme-light) .sidebar-workspace-tile {
   color: var(--color-text-primary);
 }
 
+/* A row's age shows on hover, beside its menu, at every panel width (the
+   narrow-sidebar rules used to hide it outright). */
+.sidebar-panel .cli-task-time {
+  display: none;
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-panel .cli-task-item:hover .cli-task-time,
+.sidebar-panel .cli-task-item:focus-within .cli-task-time {
+  display: inline;
+}
+
+/* Automated sessions sit under the Automated group, which already says so. */
+.sidebar-panel .cli-task-automation-icon {
+  display: none;
+}
+
 /* Status reads at the end of the row, as with the running spinner. */
 .sidebar-panel .cli-task-branch {
   order: 3;

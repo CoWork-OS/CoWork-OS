@@ -1471,3 +1471,96 @@ describe("WebFetchTools non-HTML content", () => {
     },
   );
 });
+
+describe("WebFetchTools character sets", () => {
+  let webFetchTools: WebFetchTools;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(GuardrailManager, "isDomainAllowed").mockReturnValue(true);
+    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** ASCII text with byte sequences spliced in where `parts` holds arrays. */
+  const bytes = (...parts: Array<string | number[]>) =>
+    new Uint8Array(
+      Buffer.concat(
+        parts.map((part) => (typeof part === "string" ? Buffer.from(part) : Buffer.from(part))),
+      ),
+    );
+  const fetchBody = async (body: Uint8Array<ArrayBuffer>, contentType: string) => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(body, { headers: { "content-type": contentType } }),
+    );
+    return webFetchTools.webFetch({ url: "https://example.com/page" });
+  };
+
+  it("decodes a windows-1251 page named by the Content-Type header", async () => {
+    // "Привет" in windows-1251.
+    const page = bytes(
+      "<html><body><p>",
+      [0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2],
+      "</p></body></html>",
+    );
+
+    const result = await fetchBody(page, "text/html; charset=windows-1251");
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Привет");
+  });
+
+  it("decodes a Shift_JIS page named by <meta charset>", async () => {
+    // "日本語" in Shift_JIS.
+    const page = bytes(
+      '<html><head><meta charset="Shift_JIS"><title>t</title></head><body><p>',
+      [0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea],
+      "</p></body></html>",
+    );
+
+    const result = await fetchBody(page, "text/html");
+
+    expect(result.content).toContain("日本語");
+  });
+
+  it("decodes a page named by a meta http-equiv Content-Type", async () => {
+    // "café" in windows-1252.
+    const page = bytes(
+      '<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">',
+      "</head><body><p>caf",
+      [0xe9],
+      "</p></body></html>",
+    );
+
+    const result = await fetchBody(page, "text/html");
+
+    expect(result.content).toContain("café");
+  });
+
+  it("decodes ISO-8859-9 plain text", async () => {
+    // "ğüşİöç" in ISO-8859-9 (Turkish).
+    const text = bytes([0xf0, 0xfc, 0xfe, 0xdd, 0xf6, 0xe7]);
+
+    const result = await fetchBody(text, "text/plain; charset=ISO-8859-9");
+
+    expect(result.content).toBe("ğüşİöç");
+  });
+
+  it("falls back to UTF-8 for an unknown charset label", async () => {
+    const result = await fetchBody(bytes("naïve"), "text/plain; charset=x-not-a-charset");
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toBe("naïve");
+  });
+
+  it("strips a UTF-8 byte order mark before parsing JSON", async () => {
+    const json = bytes([0xef, 0xbb, 0xbf], '{"name":"test"}');
+
+    const result = await fetchBody(json, "application/json");
+
+    expect(result.content).toContain('"name": "test"');
+  });
+});

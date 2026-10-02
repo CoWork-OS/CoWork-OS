@@ -55,6 +55,31 @@ function looksBinary(body: Uint8Array): boolean {
   return !utf16Bom && body.subarray(0, 8192).includes(0);
 }
 
+/**
+ * Decode a text body: byte order mark first, then the Content-Type charset, then (for HTML) a
+ * <meta charset> or http-equiv declaration near the top. Unknown labels fall back to UTF-8.
+ */
+function decodeTextBody(body: Uint8Array, contentType: string, isHtml: boolean): string {
+  let label: string | undefined;
+  if (body[0] === 0xef && body[1] === 0xbb && body[2] === 0xbf) label = "utf-8";
+  else if (body[0] === 0xff && body[1] === 0xfe) label = "utf-16le";
+  else if (body[0] === 0xfe && body[1] === 0xff) label = "utf-16be";
+  label ??= /;\s*charset\s*=\s*("?)([^";\s]+)\1/i.exec(contentType)?.[2];
+  if (!label && isHtml) {
+    const head = Buffer.from(body.buffer, body.byteOffset, Math.min(body.byteLength, 4096));
+    label = /<meta\s[^>]*?charset\s*=\s*["']?\s*([\w.:+-]+)/i.exec(head.toString("latin1"))?.[1];
+    // A <meta> tag readable as ASCII cannot be in UTF-16, so browsers read such pages as UTF-8.
+    if (label && /^utf-?16/i.test(label)) label = "utf-8";
+  }
+  let decoder: TextDecoder;
+  try {
+    decoder = new TextDecoder(label ?? "utf-8");
+  } catch {
+    decoder = new TextDecoder("utf-8");
+  }
+  return decoder.decode(body);
+}
+
 function isTextLikeMimeType(mimeType: string): boolean {
   return (
     mimeType.startsWith("text/") ||
@@ -469,7 +494,7 @@ export class WebFetchTools {
         );
       } else if (contentType.includes("application/json")) {
         // JSON response - format nicely, with fallback to raw text
-        const rawText = Buffer.from(body).toString("utf8");
+        const rawText = decodeTextBody(body, contentType, false);
         try {
           const json = JSON.parse(rawText);
           content = JSON.stringify(json, null, 2);
@@ -480,11 +505,11 @@ export class WebFetchTools {
         title = "JSON Response";
       } else if (contentType.includes("text/plain")) {
         // Plain text
-        content = Buffer.from(body).toString("utf8");
+        content = decodeTextBody(body, contentType, false);
         title = "Plain Text";
       } else {
         // HTML - convert to markdown
-        const html = Buffer.from(body).toString("utf8");
+        const html = decodeTextBody(body, contentType, true);
         const result = this.htmlToMarkdown(html, selector, includeLinks);
         content = result.content;
         title = result.title;

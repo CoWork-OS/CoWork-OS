@@ -23,6 +23,8 @@ export interface BuildExecutionPromptParams {
   modeDomainContractPrompt?: string;
   /** Engineering workflow guidance for tasks that edit code (session-scoped). */
   codingWorkflowPrompt?: string;
+  /** Strategy contracts that apply to this task (deep work, debug, image, workflow). */
+  taskStrategyPrompt?: string;
   roleContext?: string;
   memoryContext?: string;
   awarenessSnapshot?: string;
@@ -250,6 +252,11 @@ export class ContentBuilder {
             cacheScope: "session",
           }),
           makeSection("coding_workflow", params.codingWorkflowPrompt, 300, {
+            required: true,
+            layerKind: "always",
+            cacheScope: "session",
+          }),
+          makeSection("task_strategy", params.taskStrategyPrompt, 400, {
             required: true,
             layerKind: "always",
             cacheScope: "session",

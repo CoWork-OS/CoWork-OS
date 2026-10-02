@@ -224,6 +224,68 @@ image_generation_contract:
   });
 });
 
+describe("TaskStrategyService buildExecutionStrategyPrompt", () => {
+  it("renders nothing for a routine execution task", () => {
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        taskIntent: "execution",
+        executionMode: "execute",
+        taskDomain: "code",
+      }),
+    ).toBe("");
+  });
+
+  it("renders the deep-work contract without pointing steps at checklist tools", () => {
+    const prompt = TaskStrategyService.buildExecutionStrategyPrompt({
+      taskIntent: "deep_work",
+      deepWorkMode: true,
+      executionMode: "execute",
+      taskDomain: "research",
+    });
+
+    expect(prompt).toContain("TASK STRATEGY:");
+    expect(prompt).toContain("scratchpad_write");
+    expect(prompt).toContain("Validate deliverables against the request");
+    expect(prompt).not.toContain("task_list_");
+  });
+
+  it("renders the workflow and simple image contracts", () => {
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        taskIntent: "workflow",
+        executionMode: "execute",
+        taskDomain: "general",
+      }),
+    ).toContain("Multi-phase workflow");
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        taskIntent: "execution",
+        executionMode: "execute",
+        taskDomain: "media",
+        imageGeneration: "simple",
+      }),
+    ).toContain("call generate_image once");
+  });
+
+  it("only advertises the debug ingest endpoint in debug mode", () => {
+    const ingestUrl = "http://127.0.0.1:4000/cowork-debug/t1/ingest?token=abc";
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        executionMode: "debug",
+        taskDomain: "code",
+        debugIngestUrl: ingestUrl,
+      }),
+    ).toContain(ingestUrl);
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        executionMode: "execute",
+        taskDomain: "code",
+        debugIngestUrl: ingestUrl,
+      }),
+    ).toBe("");
+  });
+});
+
 describe("TaskStrategyService applyToAgentConfig", () => {
   it("adds llmProfileHint when no explicit model override exists", () => {
     const strategy = TaskStrategyService.derive(makeRoute({ intent: "planning" }));

@@ -47,6 +47,10 @@ vi.mock("../../database/SecureSettingsRepository", () => ({
 import { TaskExecutor } from "../executor";
 import { estimateTokens } from "../context-manager";
 import { PersonalityManager } from "../../settings/personality-manager";
+import { CitationTracker } from "../citation/CitationTracker";
+import { closeDebugRuntimeSession } from "../debug/DebugRuntimeServer";
+import { TaskStrategyService } from "../strategy/TaskStrategyService";
+import { IntentRouter } from "../strategy/IntentRouter";
 
 beforeEach(() => {
   secureSettingsStore.clear();
@@ -531,5 +535,170 @@ describe("coding workflow guidance", () => {
     const built = await buildExecutionPrompt(executor);
 
     expect(built.prompt).not.toContain("CODING WORKFLOW:");
+  });
+});
+
+describe("task strategy contracts", () => {
+  const DEBUG_TASK_ID = "task-prompt-content-debug";
+  afterEach(() => {
+    closeDebugRuntimeSession(DEBUG_TASK_ID);
+  });
+
+  it("delivers the deep-work contract to the execution prompt without private or machine-only lines", async () => {
+    const title = "Migrate the build";
+    const rawPrompt =
+      "Migrate the whole build from webpack to vite, update every config, and keep the test suite green.";
+    const route = { ...IntentRouter.route(title, rawPrompt), intent: "deep_work" as const };
+    const strategy = TaskStrategyService.derive(route, undefined, { title, prompt: rawPrompt });
+    const executor = makePromptExecutor({
+      title,
+      prompt: rawPrompt,
+      taskDomain: "code",
+      taskIntent: "deep_work",
+      executionMode: "execute",
+      agentConfig: { deepWorkMode: true },
+    });
+    executor.task.prompt = TaskStrategyService.decoratePrompt(
+      rawPrompt,
+      route,
+      { ...strategy, taskDomain: "code" },
+      "RELATIONSHIP MEMORY (continuity context, not hard constraints):\nIdentity:\n- Preferred name: Almarion.",
+    );
+
+    const built = await buildExecutionPrompt(executor);
+    const strategySection = sectionText(built, "task_strategy");
+
+    expect(strategySection).toContain("TASK STRATEGY:");
+    expect(strategySection).toContain("scratchpad_write");
+    expect(strategySection).toMatch(/run the relevant tests, lint, and build checks/i);
+    expect(built.systemBlocks.find((b) => b.stableKey.startsWith("task_strategy:"))).toMatchObject({
+      scope: "session",
+    });
+    expect(built.prompt).not.toContain("Almarion");
+    expect(built.prompt).not.toMatch(/answer_first=|timeout_finalize_bias=|AGENT_STRATEGY_CONTEXT/);
+  });
+
+  it("delivers the debug contract and the live runtime ingest URL in debug mode", async () => {
+    const executor = makePromptExecutor({
+      title: "Debug checkout crash",
+      prompt: "The checkout page crashes after clicking Pay. Find out why and fix it.",
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "debug",
+    });
+    executor.task.id = DEBUG_TASK_ID;
+
+    const built = await buildExecutionPrompt(executor);
+    const strategySection = sectionText(built, "task_strategy");
+
+    expect(strategySection).toMatch(/debug mode/i);
+    expect(strategySection).toContain("cowork-debug");
+    expect(strategySection).toMatch(
+      new RegExp(`http://127\\.0\\.0\\.1:\\d+/cowork-debug/${DEBUG_TASK_ID}/ingest\\?token=\\w+`),
+    );
+    // The ingest endpoint reports into the timeline, not the model context.
+    expect(strategySection).toMatch(/timeline/i);
+  });
+
+  it("removes the ingest URL from later prompts once the debug session has ended", async () => {
+    const executor = makePromptExecutor({
+      title: "Debug checkout crash",
+      prompt: "The checkout page crashes after clicking Pay. Find out why and fix it.",
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "debug",
+    });
+    executor.task.id = DEBUG_TASK_ID;
+    const first = sectionText(await buildExecutionPrompt(executor), "task_strategy");
+    const firstUrl = first.match(/http:\/\/127\.0\.0\.1:\d+\/\S+/)?.[0];
+    expect(firstUrl).toBeTruthy();
+
+    executor.endDebugRuntimeSessionIfNeeded();
+    await new Promise((resolve) => setImmediate(resolve));
+    const afterEnd = sectionText(await buildExecutionPrompt(executor), "task_strategy");
+
+    expect(afterEnd).not.toContain(String(firstUrl));
+  });
+
+  it("adds no strategy section to a plain execution task", async () => {
+    const executor = makePromptExecutor({
+      title: "Fix failing parseDate test",
+      prompt: CODING_PROMPT,
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+
+    const built = await buildExecutionPrompt(executor);
+
+    expect(built.prompt).not.toContain("TASK STRATEGY:");
+  });
+});
+
+describe("citation guidance", () => {
+  function seedCitations(executor: Any): void {
+    executor.citationTracker = new CitationTracker(executor.task.id);
+    executor.citationTracker.addFromSearch([
+      {
+        title: "Announcing Rust 1.90",
+        url: "https://blog.rust-lang.org/2026/09/18/Rust-1.90.0.html",
+        snippet: "Release announcement",
+      },
+    ]);
+    executor.citationTracker.addFromFetch("https://releases.rs/docs/1.90.0/", "Rust 1.90.0 notes");
+  }
+
+  it("lists collected web sources in the final summary step prompt", async () => {
+    const { executor, captured } = makeStepExecutor({
+      title: "Rust release",
+      prompt: "Research what changed in the latest Rust release and summarize it.",
+      taskDomain: "research",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+    seedCitations(executor);
+    const research: Any = {
+      id: "1",
+      description: "Search the web for the latest Rust release notes.",
+      status: "completed",
+    };
+    const summary: Any = {
+      id: "2",
+      description: "Summarize what changed in the release.",
+      status: "pending",
+    };
+    executor.plan = { description: "Research and summarize", steps: [research, summary] };
+
+    await executor.executeStep(summary);
+
+    expect(captured.systemPrompts[0]).toContain("Sources Collected So Far");
+    expect(captured.systemPrompts[0]).toContain("[1] Announcing Rust 1.90");
+    expect(captured.systemPrompts[0]).toContain("[N] notation");
+  });
+
+  it("keeps the source list out of intermediate research steps", async () => {
+    const { executor, captured } = makeStepExecutor({
+      title: "Rust release",
+      prompt: "Research what changed in the latest Rust release and summarize it.",
+      taskDomain: "research",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+    seedCitations(executor);
+    const research: Any = {
+      id: "1",
+      description: "Search the web for the latest Rust release notes.",
+      status: "pending",
+    };
+    const summary: Any = {
+      id: "2",
+      description: "Summarize what changed in the release.",
+      status: "pending",
+    };
+    executor.plan = { description: "Research and summarize", steps: [research, summary] };
+
+    await executor.executeStep(research);
+
+    expect(captured.systemPrompts[0]).not.toContain("Sources Collected So Far");
   });
 });

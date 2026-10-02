@@ -950,6 +950,7 @@ export class TaskExecutor {
   private waitingForUserInput = false;
   private debugRuntimeSessionStarted = false;
   private debugRuntimeSessionFailed = false;
+  private debugIngestUrl?: string;
   // If the user confirms they want to proceed despite workspace preflight warnings,
   // we should not keep re-pausing on the same gate.
   private workspacePreflightAcknowledged = false;
@@ -15856,9 +15857,10 @@ ${transcript}
     this.debugRuntimeSessionStarted = true;
     try {
       const { startDebugModeSession } = await import("./debug/DebugModeOrchestrator");
-      await startDebugModeSession(this.task.id, (type, payload) => {
+      const { ingestUrl } = await startDebugModeSession(this.task.id, (type, payload) => {
         this.emitEvent(type, payload);
       });
+      this.debugIngestUrl = ingestUrl;
     } catch (error) {
       this.debugRuntimeSessionStarted = false;
       this.debugRuntimeSessionFailed = true;
@@ -15872,6 +15874,10 @@ ${transcript}
 
   private endDebugRuntimeSessionIfNeeded(): void {
     if (!this.debugRuntimeSessionStarted || !this.isDebugMode()) return;
+    // The ingest token dies with the session: drop it from later prompts and let the
+    // next debug turn open a fresh session instead of advertising a dead endpoint.
+    this.debugIngestUrl = undefined;
+    this.debugRuntimeSessionStarted = false;
     void import("./debug/DebugModeOrchestrator")
       .then((m) => m.endDebugModeSession(this.task.id))
       .catch(() => {
@@ -17178,6 +17184,12 @@ ${transcript}
       }
     }
 
+    // Debug instructions point the model at the runtime ingest endpoint, so open the
+    // session before the first debug prompt (follow-ups already open it themselves).
+    if (params.executionMode === "debug" && !this.cancelled) {
+      await this.bootstrapDebugRuntimeIfNeeded();
+    }
+
     return queryOrchestrator.buildExecutionPrompt({
       workspaceId: this.workspace.id,
       workspacePath: this.workspace.path,
@@ -17195,6 +17207,7 @@ ${transcript}
       )
         ? CODING_WORKFLOW_PROMPT
         : undefined,
+      taskStrategyPrompt: this.buildTaskStrategyPrompt(params.executionMode, params.taskDomain),
       completionGuidancePrompt: this.buildCompletionGuidancePrompt(),
       roleContext: params.roleContext,
       memoryContext: params.memoryContext,
@@ -17218,6 +17231,30 @@ ${transcript}
       transcriptContext,
       sectionCache: this.promptSectionCache,
     });
+  }
+
+  private buildTaskStrategyPrompt(executionMode: ExecutionMode, taskDomain: TaskDomain): string {
+    const agentConfig = this.task.agentConfig;
+    return TaskStrategyService.buildExecutionStrategyPrompt({
+      taskIntent: agentConfig?.taskIntent,
+      deepWorkMode: agentConfig?.deepWorkMode === true,
+      executionMode,
+      taskDomain,
+      imageGeneration: this.isSimpleImageGenerationTask()
+        ? "simple"
+        : this.isTerminalImageGenerationTask()
+          ? "grounded"
+          : undefined,
+      debugIngestUrl: this.debugIngestUrl,
+    });
+  }
+
+  /**
+   * Web sources collected so far, for turns that write a user-facing answer. The list
+   * changes as research proceeds, so callers pass it as turn-scoped guidance.
+   */
+  private buildCitationGuidancePrompt(): string {
+    return this.citationTracker?.formatForPrompt({ maxSources: 12 }) || "";
   }
 
   private buildCompletionGuidancePrompt(): string {
@@ -30522,6 +30559,10 @@ Return ONLY a JSON object:
       this.buildIntegrationMentionGuidancePrompt(),
       this.buildLocalModelExecutionGuidancePrompt("execution"),
       adaptiveRecoveryGuidance,
+      !this.isVerificationStep(step) &&
+      (this.isSummaryStep(step) || this.isLastVisibleAssistantStep(step))
+        ? this.buildCitationGuidancePrompt()
+        : undefined,
       // (Data-unit guidance is added once, to the step message, not here.)
       // Only the verification step itself replies with the OK/FAIL protocol;
       // content-producing steps must keep their real answer.
@@ -38992,6 +39033,7 @@ Return ONLY a JSON object:
       this.buildFollowUpTurnGuidancePrompt(executionMessage, quotedAssistantMessage),
       this.buildIntegrationMentionGuidancePrompt(),
       adaptiveRecoveryGuidance,
+      this.buildCitationGuidancePrompt(),
     ]
       .filter(Boolean)
       .join("\n\n");

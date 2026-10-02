@@ -106,6 +106,14 @@ describe("SidebarRail", () => {
     expect(markup).toMatch(/title="Automations \(Ctrl\+1\)"/);
   });
 
+  it("marks Settings as the current page while Settings is open", () => {
+    const open = renderRail({ activeId: null, settingsActive: true });
+    expect(open).toMatch(
+      /class="sidebar-rail-btn active"[^>]*aria-current="page"[^>]*aria-label="Settings"/,
+    );
+    expect(renderRail()).not.toMatch(/aria-current="page"[^>]*aria-label="Settings"/);
+  });
+
   it("lets destinations be dragged, but not More or Settings", () => {
     const markup = renderRail();
     expect(markup).toMatch(/draggable="true"[^>]*aria-label="Home"/);

@@ -30,6 +30,8 @@ import "./sidebar-rail.css";
 
 export interface SidebarRailProps {
   activeId: SidebarDestinationId | null;
+  /** Settings is open; its rail button reads as the current page. */
+  settingsActive?: boolean;
   onNavigate: (id: SidebarDestinationId) => void;
   onOpenSettings: () => void;
   workspaceId?: string;
@@ -169,6 +171,7 @@ function RailButton({
 /** Left rail: labelled destinations, pinned More items, and the More menu. */
 function SidebarRailComponent({
   activeId,
+  settingsActive = false,
   onNavigate,
   onOpenSettings,
   workspaceId,
@@ -432,8 +435,9 @@ function SidebarRailComponent({
 
       <button
         type="button"
-        className="sidebar-rail-btn"
+        className={`sidebar-rail-btn${settingsActive ? " active" : ""}`}
         onClick={onOpenSettings}
+        aria-current={settingsActive ? "page" : undefined}
         aria-label={flagSettings ? "Settings, update available" : "Settings"}
         title={
           flagSettings
@@ -446,6 +450,7 @@ function SidebarRailComponent({
         <RailItemContent
           icon={Settings}
           caption="Settings"
+          active={settingsActive}
           dot={flagSettings ? "update" : undefined}
         />
       </button>

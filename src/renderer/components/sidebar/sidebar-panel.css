@@ -84,6 +84,25 @@ html.visual-calm
   border-top: 1px solid var(--calm-border);
 }
 
+/* Settings sits beside the rail like any view with the panel hidden: it fills
+   the rest of the window as a card with the same edges as the main view. */
+.app-layout-settings > .settings-page {
+  flex: 1;
+  min-width: 0;
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+  border-left: 1px solid var(--color-border-subtle);
+  border-top-left-radius: var(--app-shell-panel-radius);
+  border-bottom-left-radius: var(--app-shell-panel-radius);
+  overflow: hidden;
+}
+
+html.visual-calm .app-layout-settings > .settings-page {
+  border-top: none;
+  border-left-color: var(--calm-border);
+  border-bottom-color: var(--calm-border);
+}
+
 /* The hairline under the navbar runs across the whole session row, including
    around the floating inspector card. Panels that reach the top draw
    their own border on the same pixel row. */

@@ -1853,11 +1853,12 @@ export class TaskExecutor {
     });
   }
 
-  private async summarizeToolBatch(
+  /** Synchronous so a batch label never adds a model round-trip to tool execution. */
+  private summarizeToolBatch(
     phase: "step" | "follow_up" | "verification" | "delegation" | "team",
     reports: ToolScheduleCallReport[],
     assistantIntent?: string,
-  ): Promise<{ semanticSummary: string; source?: "model" | "fallback" } | undefined> {
+  ): { semanticSummary: string; source?: "model" | "fallback" } | undefined {
     if (reports.length <= 0) return undefined;
     const generator =
       this.toolBatchSummaryGenerator ||

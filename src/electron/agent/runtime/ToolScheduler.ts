@@ -40,6 +40,14 @@ function describeSchedulerError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
+
 function buildCancelledToolResult(toolUse: LLMToolUse): LLMToolResult {
   return {
     type: "tool_result",
@@ -487,8 +495,19 @@ export class ToolScheduler {
           batch.calls.some((call) => call.index === report.call.index),
         );
         try {
-          const summary = await params.summarizeBatch(batch, batchReports);
-          if (summary?.semanticSummary) {
+          const summary = params.summarizeBatch(batch, batchReports);
+          if (isPromiseLike(summary)) {
+            // A label is timeline metadata. Never hold tool results or the next
+            // batch on an asynchronous labeler; attach its label if it arrives.
+            summary.then(
+              (lateSummary) => {
+                if (lateSummary?.semanticSummary && !batch.semanticSummary) {
+                  batch.semanticSummary = lateSummary.semanticSummary;
+                }
+              },
+              () => undefined,
+            );
+          } else if (summary?.semanticSummary) {
             batch.semanticSummary = summary.semanticSummary;
           }
         } catch (summaryError) {

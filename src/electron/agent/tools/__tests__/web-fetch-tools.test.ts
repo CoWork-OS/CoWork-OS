@@ -26,8 +26,21 @@ vi.mock("../../../security/pinned-fetch", () => ({
   },
 }));
 
+// Pass-through spy: fetched PDFs must be parsed in the bounded worker, not on the main thread.
+vi.mock("../../../utils/pdf-parser", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../utils/pdf-parser")>();
+  return { ...actual, parsePdfBuffer: vi.fn(actual.parsePdfBuffer) };
+});
+
+vi.mock("../../../utils/bounded-pdf-parser", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../utils/bounded-pdf-parser")>();
+  return { ...actual, parsePdfBufferBounded: vi.fn(actual.parsePdfBufferBounded) };
+});
+
 // Import after mocking
 import { WebFetchTools } from "../web-fetch-tools";
+import { parsePdfBuffer } from "../../../utils/pdf-parser";
+import { PdfParseLimitError, parsePdfBufferBounded } from "../../../utils/bounded-pdf-parser";
 import { Workspace } from "../../../../shared/types";
 import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 
@@ -1426,6 +1439,45 @@ describe("WebFetchTools non-HTML content", () => {
     expect(result.content).toContain("Appendix: budget appropriations");
     expect(result.content).toContain("2 pages");
     expect(result.content).not.toContain("%PDF");
+  });
+
+  it("parses a fetched PDF off the main thread", async () => {
+    respond(await createPdf(["Abstract parsed in the PDF worker."]), "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/paper.pdf" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Abstract parsed in the PDF worker.");
+    expect(parsePdfBuffer).not.toHaveBeenCalled();
+  });
+
+  it("explains a PDF that exceeds the parsing limits", async () => {
+    vi.mocked(parsePdfBufferBounded).mockRejectedValueOnce(
+      new PdfParseLimitError("PDF parsing did not finish within 30 seconds"),
+    );
+    respond(await createPdf(["Never parsed."]), "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/huge.pdf" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("too large or complex");
+    expect(result.error).toContain("did not finish within 30 seconds");
+    expect(result.error).toContain("read_file or parse_document");
+  });
+
+  it("says when the PDF text was cut at the text limit", async () => {
+    vi.mocked(parsePdfBufferBounded).mockResolvedValueOnce({
+      text: "First part of a long document.",
+      numpages: 900,
+      textTruncated: true,
+    });
+    respond(await createPdf(["Placeholder."]), "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/long.pdf" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toMatch(/^\[PDF, 900 pages, text cut at \d+ characters/);
+    expect(result.content).toContain("First part of a long document.");
   });
 
   it("recognizes a PDF served as application/octet-stream", async () => {

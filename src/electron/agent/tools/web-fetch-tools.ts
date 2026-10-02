@@ -4,7 +4,11 @@ import { LLMTool } from "../llm/types";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 import { pinnedFetch } from "../../security/pinned-fetch";
 import { readBoundedResponse } from "../../security/bounded-response";
-import { parsePdfBuffer } from "../../utils/pdf-parser";
+import {
+  DEFAULT_PDF_PARSE_LIMITS,
+  PdfParseLimitError,
+  parsePdfBufferBounded,
+} from "../../utils/bounded-pdf-parser";
 
 import { ProtectedCredentialService } from "../../security/protected-credential-service";
 
@@ -805,15 +809,20 @@ export class WebFetchTools {
 
   /**
    * Extract a fetched PDF's text layer with the same parser read_file uses. Scanned PDFs have no
-   * text layer; read_file/parse_document can OCR them once saved, so point there instead.
+   * text layer; read_file/parse_document can OCR them once saved, so point there instead. The
+   * bytes are untrusted, so they are parsed in a worker under a deadline, heap and text limit.
    */
   private async extractPdfContent(body: Uint8Array): Promise<{ content: string; title: string }> {
-    let parsed: Awaited<ReturnType<typeof parsePdfBuffer>>;
+    let parsed: Awaited<ReturnType<typeof parsePdfBufferBounded>>;
     try {
-      parsed = await parsePdfBuffer(Buffer.from(body.buffer, body.byteOffset, body.byteLength));
+      parsed = await parsePdfBufferBounded(body);
     } catch (error: Any) {
+      const reason =
+        error instanceof PdfParseLimitError
+          ? `The PDF is too large or complex for web_fetch to extract (${error.message}).`
+          : `The URL returned a PDF whose text could not be extracted (${error?.message || "unknown error"}).`;
       throw new Error(
-        `The URL returned a PDF whose text could not be extracted (${error?.message || "unknown error"}). ${SAVE_TO_WORKSPACE_HINT} and read it with read_file or parse_document.`,
+        `${reason} ${SAVE_TO_WORKSPACE_HINT} and read it with read_file or parse_document.`,
       );
     }
     const pageCount = parsed.numpages
@@ -830,9 +839,12 @@ export class WebFetchTools {
         `The PDF (${pageCount}) has no extractable text layer; it may be scanned. ${SAVE_TO_WORKSPACE_HINT} and read it with read_file or parse_document, which can run OCR.`,
       );
     }
+    const cut = parsed.textTruncated
+      ? `, text cut at ${DEFAULT_PDF_PARSE_LIMITS.maxTextChars} characters (read_file or parse_document on a saved copy reads the rest)`
+      : "";
     return {
-      content: `[PDF, ${pageCount}]\n\n${text}`,
-      title: parsed.info?.Title?.trim() || "PDF Document",
+      content: `[PDF, ${pageCount}${cut}]\n\n${text}`,
+      title: parsed.title?.trim() || "PDF Document",
     };
   }
 

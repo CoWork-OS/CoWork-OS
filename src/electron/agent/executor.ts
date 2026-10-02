@@ -167,6 +167,7 @@ import {
   classifyProviderError,
   resolveProviderRetryDelayMs,
 } from "./llm/provider-error-classifier";
+import { getOllamaEffectiveContextWindow } from "./llm/ollama-provider";
 import {
   getProviderImageCaps,
   loadImageFromFile,
@@ -39053,7 +39054,12 @@ Return ONLY a JSON object:
     this.modelKey = selection.modelKey;
     this.llmProfileUsed = selection.llmProfileUsed;
     this.resolvedModelKey = selection.resolvedModelKey;
-    this.contextManager = new ContextManager(selection.contextModelKey || this.modelKey);
+    this.contextManager = new ContextManager(
+      selection.contextModelKey || this.modelKey,
+      selection.providerType === "ollama"
+        ? { contextWindowLimit: () => getOllamaEffectiveContextWindow(selection.modelId) }
+        : undefined,
+    );
   }
 
   private rebuildProviderFailoverSelections(

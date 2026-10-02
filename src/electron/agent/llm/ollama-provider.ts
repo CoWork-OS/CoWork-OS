@@ -18,6 +18,83 @@ function supportsOllamaThinkingControl(model: string): boolean {
   return /^(?:qwen3|deepseek-r1|gpt-oss|magistral)(?:[.:-]|$)/.test(normalized);
 }
 
+/**
+ * Context window requested from Ollama unless COWORK_OLLAMA_NUM_CTX overrides
+ * it. Without num_ctx Ollama runs every model with its server default (4K on
+ * smaller GPUs), silently truncating the system prompt and tool schemas.
+ */
+export const DEFAULT_OLLAMA_NUM_CTX = 32_768;
+const MIN_OLLAMA_NUM_CTX = 2_048;
+// Changing num_ctx or letting the model unload between agent turns forces a
+// reload, so keep both stable for the life of a task.
+const OLLAMA_KEEP_ALIVE = "30m";
+const OLLAMA_SHOW_TIMEOUT_MS = 5_000;
+
+/** Effective windows resolved per model; read by the executor's context budget. */
+const effectiveOllamaContextWindows = new Map<string, number>();
+
+function resolveOllamaNumCtxCap(): number {
+  const configured = Number(process.env.COWORK_OLLAMA_NUM_CTX);
+  return Number.isFinite(configured) && configured >= MIN_OLLAMA_NUM_CTX
+    ? Math.floor(configured)
+    : DEFAULT_OLLAMA_NUM_CTX;
+}
+
+/**
+ * The context window CoWork runs an Ollama model with: the model's own limit
+ * (or an explicit Modelfile num_ctx) bounded by the configured cap. Before the
+ * model has been inspected this is the cap itself.
+ */
+export function getOllamaEffectiveContextWindow(modelId: string): number {
+  return (
+    effectiveOllamaContextWindows.get(String(modelId || "").trim()) ?? resolveOllamaNumCtxCap()
+  );
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  const numeric = typeof value === "string" ? Number(value) : value;
+  return typeof numeric === "number" && Number.isFinite(numeric) && numeric > 0
+    ? Math.floor(numeric)
+    : null;
+}
+
+function readModelContextLength(modelInfo: unknown): number | null {
+  if (!modelInfo || typeof modelInfo !== "object") return null;
+  const info = modelInfo as Record<string, unknown>;
+  const architecture =
+    typeof info["general.architecture"] === "string" ? info["general.architecture"] : "";
+  const direct = architecture ? readPositiveInteger(info[`${architecture}.context_length`]) : null;
+  if (direct) return direct;
+  const key = Object.keys(info).find((name) => name.endsWith(".context_length"));
+  return key ? readPositiveInteger(info[key]) : null;
+}
+
+function readModelfileNumCtx(parameters: unknown): number | null {
+  if (typeof parameters !== "string") return null;
+  const match = parameters.match(/(?:^|\n)\s*num_ctx\s+(\d+)/);
+  return match ? readPositiveInteger(match[1]) : null;
+}
+
+/** Settle with `promise`, or reject with an AbortError as soon as `signal` aborts. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  const abortError = () => new DOMException("The operation was aborted", "AbortError");
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function isUnsupportedThinkingResponse(status: number, message: string): boolean {
   return (
     status === 400 &&
@@ -36,6 +113,7 @@ export class OllamaProvider implements LLMProvider {
   readonly type = "ollama" as const;
   private baseUrl: string;
   private apiKey?: string;
+  private readonly contextWindowByModel = new Map<string, Promise<number>>();
 
   constructor(config: LLMProviderConfig) {
     this.baseUrl = config.ollamaBaseUrl || "http://localhost:11434";
@@ -84,12 +162,18 @@ export class OllamaProvider implements LLMProvider {
       const startTime = Date.now();
 
       const chatUrl = `${this.baseUrl}/api/chat`;
+      const numCtx = await untilAborted(
+        this.resolveNumCtx(request.model, headers),
+        timeoutController.signal,
+      );
       const requestBody: Record<string, unknown> = {
         model: request.model,
         messages,
         stream: false,
+        keep_alive: OLLAMA_KEEP_ALIVE,
         options: {
           num_predict: request.maxTokens,
+          num_ctx: numCtx,
         },
         ...(tools && tools.length > 0 && { tools }),
       };
@@ -150,6 +234,48 @@ export class OllamaProvider implements LLMProvider {
       }
       throw error;
     }
+  }
+
+  /** Resolve (once per model) the num_ctx to run the model with. */
+  private resolveNumCtx(model: string, headers: Record<string, string>): Promise<number> {
+    const key = String(model || "").trim();
+    let pending = this.contextWindowByModel.get(key);
+    if (!pending) {
+      pending = this.lookupContextWindow(key, headers);
+      this.contextWindowByModel.set(key, pending);
+    }
+    return pending;
+  }
+
+  private async lookupContextWindow(
+    model: string,
+    headers: Record<string, string>,
+  ): Promise<number> {
+    const cap = resolveOllamaNumCtxCap();
+    let effective = cap;
+    try {
+      const response = await fetch(`${this.baseUrl}/api/show`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model }),
+        signal: AbortSignal.timeout(OLLAMA_SHOW_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { model_info?: unknown; parameters?: unknown };
+        const modelMax = readModelContextLength(data?.model_info);
+        // An explicit Modelfile num_ctx is the operator's choice; otherwise cap
+        // long-context models so memory use stays predictable.
+        const configured = readModelfileNumCtx(data?.parameters) ?? cap;
+        effective = modelMax ? Math.min(configured, modelMax) : configured;
+      }
+    } catch (error: Any) {
+      console.warn(
+        `[Ollama] Could not read the context length of ${model}; using num_ctx ${cap}:`,
+        error?.message || error,
+      );
+    }
+    effectiveOllamaContextWindows.set(model, effective);
+    return effective;
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {

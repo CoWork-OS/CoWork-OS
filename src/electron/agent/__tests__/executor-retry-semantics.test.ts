@@ -1018,6 +1018,32 @@ describe("TaskExecutor provider error classification with real SDK errors", () =
   });
 });
 
+describe("TaskExecutor Ollama context budget", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("budgets context for the window Ollama runs the model with, not the catalogue window", () => {
+    const executor = createRetryExecutor() as Any;
+    vi.spyOn(LLMProviderFactory, "createProvider").mockReturnValue({
+      type: "ollama",
+      createMessage: vi.fn(),
+    } as Any);
+
+    executor.applyResolvedProviderSelection({
+      providerType: "ollama",
+      modelId: "qwen3:32b",
+      modelKey: "qwen3:32b",
+      llmProfileUsed: "strong",
+      resolvedModelKey: "qwen3:32b",
+      modelSource: "provider_default",
+      warnings: [],
+    });
+
+    expect(executor.contextManager.getModelTokenLimit()).toBe(32_768);
+  });
+});
+
 describe("TaskExecutor planning warmup tool routing", () => {
   it("skips planning warmup tools on OpenRouter failover routes", () => {
     const executor = createRetryExecutor() as Any;

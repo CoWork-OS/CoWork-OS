@@ -12,6 +12,20 @@ describe("ContextManager.compactMessagesWithMeta", () => {
     expect(new ContextManager("openai/gpt-6-astra").getModelTokenLimit()).toBe(1_050_000);
   });
 
+  it("budgets for the runtime context window a local server actually uses", () => {
+    let runtimeWindow = 32_768;
+    const manager = new ContextManager("qwen3:32b", { contextWindowLimit: () => runtimeWindow });
+
+    // The catalogue says 128K, but Ollama only runs the model with num_ctx tokens.
+    expect(new ContextManager("qwen3:32b").getModelTokenLimit()).toBeGreaterThan(32_768);
+    expect(manager.getModelTokenLimit()).toBe(32_768);
+    expect(manager.getAvailableTokens()).toBe(32_768 - 8000);
+
+    runtimeWindow = 16_384;
+    expect(manager.getModelTokenLimit()).toBe(16_384);
+    expect(manager.estimateMaxOutputTokens([], "")).toBe(16_384);
+  });
+
   it("gives Claude 4.6+ and the Claude 5 family their 1M window across id shapes", () => {
     const limit = (key: string) => new ContextManager(key).getModelTokenLimit();
     for (const key of [

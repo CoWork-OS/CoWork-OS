@@ -883,11 +883,27 @@ export class ContextManager {
   private modelKey: string;
   private maxTokens: number;
   private tokenizerInflation: number;
+  private contextWindowLimit?: () => number | undefined;
 
-  constructor(modelKey: string = "default") {
+  /**
+   * @param opts.contextWindowLimit Runtime window the serving backend actually
+   *   uses (for example Ollama's num_ctx); the budget never exceeds it.
+   */
+  constructor(
+    modelKey: string = "default",
+    opts?: { contextWindowLimit?: () => number | undefined },
+  ) {
     this.modelKey = modelKey;
     this.maxTokens = MODEL_LIMITS[modelKey] || inferModelLimit(modelKey) || MODEL_LIMITS.default;
     this.tokenizerInflation = getTokenizerInflation(modelKey);
+    this.contextWindowLimit = opts?.contextWindowLimit;
+  }
+
+  private getContextWindowTokens(): number {
+    const runtimeLimit = this.contextWindowLimit?.();
+    return typeof runtimeLimit === "number" && Number.isFinite(runtimeLimit) && runtimeLimit > 0
+      ? Math.min(this.maxTokens, Math.floor(runtimeLimit))
+      : this.maxTokens;
   }
 
   /**
@@ -896,7 +912,9 @@ export class ContextManager {
    */
   getAvailableTokens(systemPromptTokens: number = 0): number {
     return (
-      Math.floor(this.maxTokens / this.tokenizerInflation) - RESERVED_TOKENS - systemPromptTokens
+      Math.floor(this.getContextWindowTokens() / this.tokenizerInflation) -
+      RESERVED_TOKENS -
+      systemPromptTokens
     );
   }
 
@@ -904,7 +922,7 @@ export class ContextManager {
    * Get the model's estimated total context window.
    */
   getModelTokenLimit(): number {
-    return this.maxTokens;
+    return this.getContextWindowTokens();
   }
 
   /**
@@ -914,7 +932,7 @@ export class ContextManager {
     const inputTokens = Math.ceil(
       estimateTotalTokens(messages, systemPrompt) * this.tokenizerInflation,
     );
-    return Math.max(1, this.maxTokens - inputTokens);
+    return Math.max(1, this.getContextWindowTokens() - inputTokens);
   }
 
   /**

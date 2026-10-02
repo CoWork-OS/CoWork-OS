@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { OllamaProvider } from "../ollama-provider";
+import { OllamaProvider, getOllamaEffectiveContextWindow } from "../ollama-provider";
 import type { LLMRequest } from "../types";
 
 function createRequest(): LLMRequest {
@@ -27,6 +27,27 @@ function mockOllamaResponse(message: Record<string, unknown>, doneReason = "stop
   } as unknown as Response;
 }
 
+function mockShowResponse(body: Record<string, unknown>): Response {
+  return { ok: true, json: vi.fn().mockResolvedValue(body) } as unknown as Response;
+}
+
+/** Answers /api/show with `show` (404 by default) and /api/chat from `chat` in order. */
+function routeOllamaFetch(chat: Response | Response[], show?: Response) {
+  const queue = Array.isArray(chat) ? [...chat] : null;
+  return vi.fn(async (url: string, _init?: RequestInit) => {
+    if (String(url).endsWith("/api/show")) {
+      return show ?? ({ ok: false, status: 404, json: vi.fn() } as unknown as Response);
+    }
+    return queue ? queue.shift() : chat;
+  });
+}
+
+function chatCalls(fetchMock: ReturnType<typeof vi.fn>): Array<[string, RequestInit]> {
+  return fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/chat")) as Array<
+    [string, RequestInit]
+  >;
+}
+
 describe("OllamaProvider reasoning handling", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -34,9 +55,7 @@ describe("OllamaProvider reasoning handling", () => {
   });
 
   it("disables Ollama thinking so reasoning cannot consume the final-answer budget", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockOllamaResponse({ role: "assistant", content: "Done" }));
+    const fetchMock = routeOllamaFetch(mockOllamaResponse({ role: "assistant", content: "Done" }));
     vi.stubGlobal("fetch", fetchMock);
     const provider = new OllamaProvider({
       type: "ollama",
@@ -46,7 +65,7 @@ describe("OllamaProvider reasoning handling", () => {
 
     const response = await provider.createMessage(createRequest());
 
-    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const requestInit = chatCalls(fetchMock)[0]?.[1];
     expect(JSON.parse(String(requestInit.body))).toMatchObject({
       model: "qwen3.8:27b-q8_0",
       think: false,
@@ -57,16 +76,14 @@ describe("OllamaProvider reasoning handling", () => {
   });
 
   it("omits the think field for models without known reasoning support", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(mockOllamaResponse({ role: "assistant", content: "Done" }));
+    const fetchMock = routeOllamaFetch(mockOllamaResponse({ role: "assistant", content: "Done" }));
     vi.stubGlobal("fetch", fetchMock);
     const provider = new OllamaProvider({ type: "ollama", model: "llama3.3:70b" });
     const request = { ...createRequest(), model: "llama3.3:70b" };
 
     await provider.createMessage(request);
 
-    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const requestInit = chatCalls(fetchMock)[0]?.[1];
     expect(JSON.parse(String(requestInit.body))).not.toHaveProperty("think");
   });
 
@@ -101,16 +118,16 @@ describe("OllamaProvider reasoning handling", () => {
       status: 400,
       text: vi.fn().mockResolvedValue("qwen3.8 does not support thinking"),
     } as unknown as Response;
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(unsupportedResponse)
-      .mockResolvedValueOnce(mockOllamaResponse({ role: "assistant", content: "Recovered" }));
+    const fetchMock = routeOllamaFetch([
+      unsupportedResponse,
+      mockOllamaResponse({ role: "assistant", content: "Recovered" }),
+    ]);
     vi.stubGlobal("fetch", fetchMock);
     const provider = new OllamaProvider({ type: "ollama", model: "qwen3.8:27b-q8_0" });
 
     const response = await provider.createMessage(createRequest());
 
-    const retryInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const retryInit = chatCalls(fetchMock)[1]?.[1];
     expect(JSON.parse(String(retryInit.body))).not.toHaveProperty("think");
     expect(response.content).toEqual([{ type: "text", text: "Recovered" }]);
   });
@@ -198,5 +215,89 @@ describe("OllamaProvider reasoning handling", () => {
     const explicitEmptyObject = toolUses[3];
     expect(explicitEmptyObject.input).toEqual({});
     expect(explicitEmptyObject.inputError).toBeUndefined();
+  });
+});
+
+describe("OllamaProvider context window", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    delete process.env.COWORK_OLLAMA_NUM_CTX;
+  });
+
+  it("sends num_ctx from the model's /api/show context length, looked up once per model", async () => {
+    const fetchMock = routeOllamaFetch(
+      mockOllamaResponse({ role: "assistant", content: "Done" }),
+      mockShowResponse({
+        model_info: { "general.architecture": "gemma3", "gemma3.context_length": 16_384 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OllamaProvider({ type: "ollama", model: "gemma3:12b" });
+    const request = { ...createRequest(), model: "gemma3:12b" };
+
+    await provider.createMessage(request);
+    await provider.createMessage(request);
+
+    const showCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/show"));
+    expect(showCalls).toHaveLength(1);
+    expect(JSON.parse(String(showCalls[0][1]?.body))).toMatchObject({ model: "gemma3:12b" });
+    for (const [, init] of chatCalls(fetchMock)) {
+      expect(JSON.parse(String(init.body))).toMatchObject({
+        options: { num_predict: 1024, num_ctx: 16_384 },
+        keep_alive: "30m",
+      });
+    }
+    expect(getOllamaEffectiveContextWindow("gemma3:12b")).toBe(16_384);
+  });
+
+  it("caps long-context models at the default window instead of the server default", async () => {
+    const fetchMock = routeOllamaFetch(
+      mockOllamaResponse({ role: "assistant", content: "Done" }),
+      mockShowResponse({
+        model_info: { "general.architecture": "qwen3", "qwen3.context_length": 262_144 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OllamaProvider({ type: "ollama", model: "qwen3:32b" });
+
+    await provider.createMessage({ ...createRequest(), model: "qwen3:32b" });
+
+    expect(JSON.parse(String(chatCalls(fetchMock)[0][1].body)).options.num_ctx).toBe(32_768);
+    expect(getOllamaEffectiveContextWindow("qwen3:32b")).toBe(32_768);
+  });
+
+  it("honours COWORK_OLLAMA_NUM_CTX as the cap", async () => {
+    process.env.COWORK_OLLAMA_NUM_CTX = "65536";
+    const fetchMock = routeOllamaFetch(
+      mockOllamaResponse({ role: "assistant", content: "Done" }),
+      mockShowResponse({
+        model_info: { "general.architecture": "llama", "llama.context_length": 131_072 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OllamaProvider({ type: "ollama", model: "llama3.3:70b" });
+
+    await provider.createMessage({ ...createRequest(), model: "llama3.3:70b" });
+
+    expect(JSON.parse(String(chatCalls(fetchMock)[0][1].body)).options.num_ctx).toBe(65_536);
+  });
+
+  it("falls back to the default window when /api/show fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).endsWith("/api/show")) throw new TypeError("fetch failed");
+      return mockOllamaResponse({ role: "assistant", content: "Done" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OllamaProvider({ type: "ollama", model: "mistral-small:24b" });
+
+    const response = await provider.createMessage({
+      ...createRequest(),
+      model: "mistral-small:24b",
+    });
+
+    expect(response.content).toEqual([{ type: "text", text: "Done" }]);
+    expect(JSON.parse(String(chatCalls(fetchMock as Any)[0][1].body)).options.num_ctx).toBe(32_768);
   });
 });

@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import PDFDocument from "pdfkit";
 
 // Mock electron
 vi.mock("electron", () => ({
@@ -1376,4 +1377,97 @@ describe("WebFetchTools", () => {
       });
     });
   });
+});
+
+function createPdf(pages: string[]): Promise<Uint8Array<ArrayBuffer>> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 72 });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(new Uint8Array(Buffer.concat(chunks))));
+    doc.on("error", reject);
+    pages.forEach((text, index) => {
+      if (index > 0) doc.addPage();
+      doc.font("Helvetica").fontSize(12).text(text);
+    });
+    doc.end();
+  });
+}
+
+describe("WebFetchTools non-HTML content", () => {
+  let webFetchTools: WebFetchTools;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(GuardrailManager, "isDomainAllowed").mockReturnValue(true);
+    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const respond = (body: BodyInit, contentType: string) =>
+    mockFetch.mockResolvedValueOnce(
+      new Response(body, { headers: { "content-type": contentType } }),
+    );
+
+  it("extracts the text of a PDF instead of converting its bytes as HTML", async () => {
+    const pdf = await createPdf([
+      "Transit ridership grew in every district during the reporting period.",
+      "Appendix: budget appropriations by department.",
+    ]);
+    respond(pdf, "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/report" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Transit ridership grew in every district");
+    expect(result.content).toContain("Appendix: budget appropriations");
+    expect(result.content).toContain("2 pages");
+    expect(result.content).not.toContain("%PDF");
+  });
+
+  it("recognizes a PDF served as application/octet-stream", async () => {
+    respond(await createPdf(["Octet stream paper abstract text."]), "application/octet-stream");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/paper.pdf" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Octet stream paper abstract text.");
+  });
+
+  it("points images to the image analysis tool", async () => {
+    respond(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]), "image/png");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/chart.png" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("image/png");
+    expect(result.error).toContain("analyze_image");
+  });
+
+  it("points office documents to read_file", async () => {
+    respond(
+      new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0]),
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/brief.docx" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("read_file");
+  });
+
+  it.each(["application/zip", "application/octet-stream"])(
+    "rejects other binary bodies served as %s",
+    async (contentType) => {
+      respond(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x08, 0x00]), contentType);
+
+      const result = await webFetchTools.webFetch({ url: "https://example.com/archive" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/binary/i);
+    },
+  );
 });

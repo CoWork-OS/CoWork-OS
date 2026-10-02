@@ -485,6 +485,7 @@ import {
 import {
   detectTestRequirement as detectTestRequirementUtil,
   extractNamedTestCommands as extractNamedTestCommandsUtil,
+  isBuildCheckCommand as isBuildCheckCommandUtil,
   isTestCommand as isTestCommandUtil,
   promptIsWatchSkipRecommendationTask as promptIsWatchSkipRecommendationTaskUtil,
   promptRequestsDecision as promptRequestsDecisionUtil,
@@ -11917,6 +11918,36 @@ ${transcript}
     if (isTestCommandUtil(command)) return true;
     const normalized = command.replace(/\s+/g, " ").trim();
     return (this.namedTestCommands || []).some((named) => normalized.includes(named));
+  }
+
+  /**
+   * Track test and build/check commands whose latest run in a step failed. Only
+   * a later successful run of the same command, or of another command of the
+   * same kind (tests for tests, build/check for build/check), clears a failure:
+   * a read or an edit after a red test run is not evidence that the tests pass.
+   */
+  private trackVerificationCommandOutcome(
+    unresolved: Map<string, string>,
+    input: Any,
+    succeeded: boolean,
+  ): void {
+    const command =
+      typeof input?.command === "string" ? input.command.replace(/\s+/g, " ").trim() : "";
+    if (!command) return;
+    const kind = this.isTestCommand(command)
+      ? "test"
+      : isBuildCheckCommandUtil(command)
+        ? "build"
+        : null;
+    if (!succeeded) {
+      if (kind) unresolved.set(kind, command);
+      return;
+    }
+    for (const [failedKind, failedCommand] of unresolved) {
+      if (failedKind === kind || failedCommand === command) {
+        unresolved.delete(failedKind);
+      }
+    }
   }
 
   /**
@@ -31876,6 +31907,10 @@ Return ONLY a JSON object:
       let pauseAfterNextAssistantMessageReason: string | null = null;
       let hadRunCommandFailure = false;
       let hadToolSuccessAfterRunCommandFailure = false;
+      // Test/build commands whose latest run failed, by kind (see
+      // trackVerificationCommandOutcome). Enforced for mutation steps.
+      const unresolvedVerificationCommandFailures = new Map<string, string>();
+      let verificationRerunNudgeInjected = false;
       const expectsImageVerification = stepContract.verificationMode === "image_file";
       const imageVerificationSince =
         typeof this.task.createdAt === "number"
@@ -32687,6 +32722,39 @@ Return ONLY a JSON object:
                         ? `Perform the required mutation now: ${describeRequiredToolsForNudge(pendingRequiredTools).join("; ")}. `
                         : "Perform a write_file/edit_file/create_document/canvas mutation now. ") +
                       "After the mutation succeeds, then provide the final confirmation.",
+                  ),
+                },
+              ],
+            });
+            continueLoop = true;
+            state.messages = messages;
+            return { continueLoop, emptyResponseCount };
+          }
+          if (
+            response.stopReason === "end_turn" &&
+            stepContract.requiresMutation &&
+            !responseHasToolUse &&
+            !assistantAskedQuestion &&
+            !verificationRerunNudgeInjected &&
+            unresolvedVerificationCommandFailures.size > 0
+          ) {
+            // One reminder before the step fails on a red test/build run that was
+            // never re-run: a fix is not done while its last check is failing.
+            verificationRerunNudgeInjected = true;
+            const failedCommands = Array.from(unresolvedVerificationCommandFailures.values());
+            emptyResponseCount = appendAssistantResponseToConversationUtil(
+              messages,
+              response,
+              emptyResponseCount,
+            );
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: this.sanitizeFallbackInstruction(
+                    `The last run of ${failedCommands.map((command) => `\`${command}\``).join(", ")} failed and has not been re-run successfully since. ` +
+                      "Re-run it now to confirm the change works, or state plainly that it still fails and why.",
                   ),
                 },
               ],
@@ -33944,6 +34012,13 @@ Return ONLY a JSON object:
                           if (content.name === "run_command") {
                             hadRunCommandFailure = true;
                           }
+                          if (canonicalContentName === "run_command") {
+                            this.trackVerificationCommandOutcome(
+                              unresolvedVerificationCommandFailures,
+                              content.input,
+                              false,
+                            );
+                          }
 
                           const pauseReason = getUserActionRequiredPauseReason(
                             content.name,
@@ -34340,6 +34415,13 @@ Return ONLY a JSON object:
                           hadRunCommandFailure = true;
                         } else if (hadRunCommandFailure && toolSucceeded) {
                           hadToolSuccessAfterRunCommandFailure = true;
+                        }
+                        if (canonicalContentName === "run_command") {
+                          this.trackVerificationCommandOutcome(
+                            unresolvedVerificationCommandFailures,
+                            content.input,
+                            toolSucceeded,
+                          );
                         }
 
                         if (
@@ -36764,6 +36846,25 @@ Return ONLY a JSON object:
         stepFailed = true;
         if (!lastFailureReason) {
           lastFailureReason = "run_command failed and no subsequent tool succeeded.";
+        }
+      }
+      if (stepContract.requiresMutation && unresolvedVerificationCommandFailures.size > 0) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          // The command text stays out of the reason: failure classifiers scan
+          // it for words like "login" or "auth" and would treat it as a user
+          // blocker. The commands go to the event log instead.
+          const failedKinds = Array.from(unresolvedVerificationCommandFailures.keys()).map(
+            (kind) => (kind === "test" ? "test" : "build/check"),
+          );
+          lastFailureReason =
+            `run_command failed: the last ${failedKinds.join(" and ")} run did not pass, ` +
+            "and no later run of an equivalent command succeeded.";
+          this.emitEvent("log", {
+            metric: "step_unresolved_verification_command_failure",
+            stepId: step.id,
+            commands: Array.from(unresolvedVerificationCommandFailures.values()),
+          });
         }
       }
 

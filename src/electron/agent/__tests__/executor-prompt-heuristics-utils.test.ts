@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   detectTestRequirement,
   extractNamedTestCommands,
+  isBuildCheckCommand,
   isTestCommand,
 } from "../executor-prompt-heuristics-utils";
 
@@ -109,6 +110,42 @@ describe("isTestCommand", () => {
     "pip install pytest-xdist",
   ])("does not treat %s as a test run", (command) => {
     expect(isTestCommand(command)).toBe(false);
+  });
+});
+
+describe("isBuildCheckCommand", () => {
+  it.each([
+    "npm run build",
+    "pnpm lint",
+    "yarn run typecheck",
+    "npm run build:prod",
+    "npx tsc --noEmit",
+    "tsc -p tsconfig.json",
+    "eslint src",
+    "ruff check .",
+    "mypy app",
+    "go build ./...",
+    "go vet ./...",
+    "cargo check",
+    "cargo clippy",
+    "./gradlew build",
+    "mvn -q package",
+    "cd web && npm run lint",
+    "node_modules/.bin/eslint src",
+  ])("recognizes %s", (command) => {
+    expect(isBuildCheckCommand(command)).toBe(true);
+  });
+
+  it.each([
+    "npm test",
+    "npm install",
+    "grep -rn build src",
+    "cat tsconfig.json",
+    "ls build",
+    "git status",
+    "pip install mypy",
+  ])("does not treat %s as a build or check", (command) => {
+    expect(isBuildCheckCommand(command)).toBe(false);
   });
 });
 

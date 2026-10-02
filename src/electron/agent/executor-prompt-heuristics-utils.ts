@@ -116,6 +116,22 @@ export function isTestCommand(command: string): boolean {
   return TEST_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+const BUILD_CHECK_COMMAND_PATTERNS: RegExp[] = [
+  /\b(?:npm|pnpm|yarn|bun)\b(?:\s+(?:-{1,2}[\w-]+(?:=\S+)?|(?:workspace|--filter|-F|--prefix|-C|--dir)\s+\S+|run|run-script|-r|--recursive))*\s+(?:build|lint|typecheck|type-check|check|compile)(?:[:-][\w:-]+)?(?=\s|$)/i,
+  // Compilers, type checkers and linters count at command position only, so
+  // "pip install mypy" or "cat tsconfig.json" is not mistaken for a check.
+  /(?:^|[;&|(]\s*|\b(?:npx|bunx|pnpm(?:\s+(?:exec|dlx))?|yarn|uv\s+run|poetry\s+run|python3?\s+-m)\s+)(?:[\w.-]*\/)*(?:tsc|eslint|oxlint|mypy|pyright|ruff|flake8|pylint|golangci-lint)(?=\s|$)/i,
+  /\b(?:go|cargo|dotnet|swift)\s+(?:build|check|vet|clippy)\b/i,
+  /\bmvnw?\b[^|;&\n]*\b(?:compile|package)\b/i,
+  /\bgradlew?\b[^|;&\n]*\b(?:build|assemble)\b/i,
+];
+
+/** Build, compile, type-check, and lint commands (a failing run means the code is not done). */
+export function isBuildCheckCommand(command: string): boolean {
+  const normalized = command.replace(/\s+/g, " ").trim();
+  return BUILD_CHECK_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 export function promptRequiresDirectAnswer(taskTitle: string, taskPrompt: string): boolean {
   const prompt = `${taskTitle}\n${taskPrompt}`.toLowerCase();
   if (prompt.includes("?")) return true;

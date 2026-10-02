@@ -5905,3 +5905,146 @@ relationship_memory:
     expect(mockTracker.recordFileCreation).toHaveBeenCalledWith("/tmp/test-output.md");
   });
 });
+
+describe("TaskExecutor step loop control", () => {
+  let originalConsoleLog: typeof console.log;
+  let originalConsoleError: typeof console.error;
+  const tempDirs: string[] = [];
+
+  beforeAll(() => {
+    originalConsoleLog = console.log;
+    originalConsoleError = console.error;
+    console.log = () => {};
+    console.error = () => {};
+  });
+
+  afterAll(() => {
+    console.log = originalConsoleLog;
+    console.error = originalConsoleError;
+    for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function toolCall(name: string, input: Record<string, Any>, id: string): LLMResponse {
+    return { stopReason: "tool_use", content: [{ type: "tool_use", id, name, input }] };
+  }
+
+  /**
+   * An executor whose workspace holds src/auth/login.ts, so an edit_file call
+   * leaves real mutation evidence. `handlers` overrides individual tool results.
+   */
+  function createCodeStepExecutor(
+    responses: LLMResponse[],
+    handlers: Record<string, (input: Any) => Any> = {},
+  ) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-loop-control-"));
+    tempDirs.push(tempDir);
+    fs.mkdirSync(path.join(tempDir, "src", "auth"), { recursive: true });
+    const target = path.join(tempDir, "src", "auth", "login.ts");
+    fs.writeFileSync(target, "export const login = (user) => user.name;\n");
+    const executor = createExecutorWithStubs(responses, {});
+    (executor as Any).workspace.path = tempDir;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string, input: Any) => {
+      if (handlers[name]) return handlers[name](input);
+      if (name === "edit_file") {
+        fs.writeFileSync(target, "export const login = (user) => user?.name;\n");
+        return { success: true, file_path: "src/auth/login.ts", replacements: 1 };
+      }
+      if (name === "read_file") {
+        return { success: true, path: input?.path, content: "export const login = (user) => user.name;" };
+      }
+      return { success: true };
+    });
+    return executor;
+  }
+
+  const userTexts = (executor: Any): string[] =>
+    ((executor.conversationHistory || []) as Any[])
+      .filter((entry) => entry.role === "user")
+      .flatMap((entry) => (Array.isArray(entry.content) ? entry.content : [entry.content]))
+      .map((block: Any) => (typeof block === "string" ? block : String(block?.text || "")));
+
+  const fixLoginEdit = {
+    file_path: "src/auth/login.ts",
+    old_string: "user.name",
+    new_string: "user?.name",
+  };
+
+  describe("run_command failures", () => {
+    it("does not treat a later read as recovery from a failing test run", async () => {
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          toolCall("run_command", { command: "npm test -- login" }, "c1"),
+          toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+          textResponse("Fixed the null check in login.ts; the login flow works now."),
+        ],
+        {
+          run_command: () => ({ success: false, exitCode: 1, stdout: "1 failing", stderr: "" }),
+        },
+      );
+      const step: Any = {
+        id: "fix-red-tests",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("run_command failed: the last test run did not pass");
+      expect(userTexts(executor).some((text) => text.includes("has not been re-run"))).toBe(true);
+      // The failure is recoverable like any other failed command.
+      expect((executor as Any).shouldAutoPlanRecovery(step, String(step.error || ""))).toBe(true);
+    });
+
+    it("clears a failing test run once the tests pass after the fix", async () => {
+      let runs = 0;
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("run_command", { command: "npm test -- login" }, "c1"),
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          toolCall("run_command", { command: "npm test" }, "c2"),
+          textResponse("Fixed the null check in login.ts; npm test passes."),
+        ],
+        {
+          run_command: () =>
+            ++runs === 1
+              ? { success: false, exitCode: 1, stdout: "1 failing", stderr: "" }
+              : { success: true, exitCode: 0, stdout: "12 passing", stderr: "" },
+        },
+      );
+      const step: Any = {
+        id: "fix-green-tests",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+    });
+
+    it("still lets a later tool recover from a failed search command", async () => {
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("run_command", { command: "grep -rn nullCheck src" }, "c1"),
+          toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          textResponse("Fixed the null check in login.ts."),
+        ],
+        {
+          run_command: () => ({ success: false, exitCode: 1, stdout: "", stderr: "" }),
+        },
+      );
+      const step: Any = {
+        id: "fix-after-grep",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+    });
+  });
+});

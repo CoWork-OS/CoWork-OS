@@ -228,6 +228,8 @@ describe("AgentDaemon follow-up permission overrides", () => {
       undefined,
       undefined,
       undefined,
+      "follow_up",
+      undefined,
       undefined,
     );
   });
@@ -323,6 +325,8 @@ describe("AgentDaemon follow-up permission overrides", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
+      "follow_up",
       undefined,
       undefined,
     );

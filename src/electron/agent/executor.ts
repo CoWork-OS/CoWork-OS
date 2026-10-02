@@ -151,6 +151,7 @@ import {
   estimateTokens,
   estimateTotalTokens,
   truncateToTokens,
+  truncateToolResult,
 } from "./context-manager";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
@@ -277,6 +278,8 @@ import {
   ToolCallDeduplicator,
   ToolFailureTracker,
   FileOperationTracker,
+  collectMutationTargetPaths as collectMutationTargetPathsUtil,
+  toolMayChangeFilesImplicitly as toolMayChangeFilesImplicitlyUtil,
   withTimeout,
   calculateBackoffDelay,
   sleep,
@@ -478,6 +481,7 @@ import {
   isAdvisoryToolFailureResult as isAdvisoryToolFailureResultUtil,
   isEffectivelyIdempotentToolCall as isEffectivelyIdempotentToolCallUtil,
   isHardToolFailure as isHardToolFailureUtil,
+  markCachedToolResult as markCachedToolResultUtil,
   normalizeToolUseName as normalizeToolUseNameUtil,
   preflightValidateAndRepairToolInput as preflightValidateAndRepairToolInputUtil,
   recordToolFailureOutcome as recordToolFailureOutcomeUtil,
@@ -10868,17 +10872,28 @@ ${transcript}
     input: Any,
     batchCreatedPaths?: Set<string>,
   ): { blocked: boolean; reason?: string; suggestion?: string; cachedResult?: string } {
+    // Calls are prepared before any of them runs, so a mutation scheduled earlier in this
+    // batch must drop cached reads of its targets now; a later read of the same file then
+    // runs for real after the mutation instead of being answered with pre-mutation content.
+    this.invalidateReadCacheForTool(toolName, input);
+
     // Check for redundant file reads
     if (toolName === "read_file" && input?.path) {
-      const check = this.fileOperationTracker.checkFileRead(input.path);
+      const check = this.fileOperationTracker.checkFileRead(input.path, input);
       if (check.blocked) {
         logger.info(`${this.logTag} Blocking redundant file read: ${input.path}`);
         if (check.cachedResult) {
+          const ageSeconds = Math.max(0, Math.round((check.cachedAgeMs || 0) / 1000));
           return {
             blocked: true,
             reason: check.reason,
             suggestion: check.suggestion,
-            cachedResult: check.cachedResult,
+            cachedResult: markCachedToolResultUtil(
+              OutputFilter.sanitizeToolResult("read_file", check.cachedResult),
+              `Served from cache: an identical read_file call (same path and window) ran ` +
+                `${ageSeconds}s ago and no tool in this task has changed the file since. ` +
+                "To read another part of the file, use a different startChar.",
+            ),
           };
         }
         return check;
@@ -10951,6 +10966,26 @@ ${transcript}
     return { blocked: false };
   }
 
+  /**
+   * Drop cached read_file results a tool call may make stale: every file a mutation tool
+   * names (whether or not it succeeds), or all cached reads after a tool that can change
+   * files without naming them (shell commands, code execution, sub-agents, integrations).
+   */
+  private invalidateReadCacheForTool(toolName: string, input: Any, result?: Any): void {
+    const tracker = this.fileOperationTracker;
+    if (!tracker) return;
+    const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    if (this.isFileMutationTool(canonicalToolName)) {
+      for (const target of collectMutationTargetPathsUtil(input, result)) {
+        tracker.invalidateFileRead?.(target, this.workspace?.path);
+      }
+      return;
+    }
+    if (toolMayChangeFilesImplicitlyUtil(canonicalToolName)) {
+      tracker.invalidateAllFileReads?.();
+    }
+  }
+
   private getBatchCreatedPathReservation(toolName: string, input: Any): string | null {
     const fileCreationTools = new Set(["write_file", "copy_file", "generate_video"]);
     if (!(fileCreationTools.has(toolName) || isArtifactGenerationToolNameUtil(toolName))) {
@@ -11001,9 +11036,13 @@ ${transcript}
       const readFailed = result && typeof result === "object" && (result as Any).success === false;
       if (!readFailed) {
         const readResult = typeof result === "string" ? result : JSON.stringify(result);
-        this.fileOperationTracker.recordFileRead(input.path, readResult);
+        // Cache what the model was shown (bounded and valid), keyed by the read window.
+        this.fileOperationTracker.recordFileRead(input.path, truncateToolResult(readResult), input);
       }
     }
+
+    // A mutation attempt (even a failed one) or a command makes cached reads unreliable.
+    this.invalidateReadCacheForTool(toolName, input, result);
 
     // Record directory listings
     if (toolName === "list_directory" && input?.path) {

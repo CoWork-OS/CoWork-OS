@@ -1199,20 +1199,75 @@ export class ToolFailureTracker {
 
 // ===== File Operation Tracker =====
 
+const MUTATION_TARGET_INPUT_KEYS = [
+  "path",
+  "file_path",
+  "filename",
+  "destPath",
+  "destination",
+  "newPath",
+  "oldPath",
+  "sourcePath",
+  "targetPath",
+  "outputPath",
+  "output_path",
+];
+
+/** Every file path a file-mutating tool call names, in its input or its reported result. */
+export function collectMutationTargetPaths(input: unknown, result?: unknown): string[] {
+  const paths = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === "string" && value.trim()) paths.add(value.trim());
+  };
+  if (input && typeof input === "object") {
+    for (const key of MUTATION_TARGET_INPUT_KEYS) add((input as Record<string, unknown>)[key]);
+  }
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+    add(record.path);
+    if (Array.isArray(record.outputPaths)) record.outputPaths.forEach(add);
+  }
+  return Array.from(paths);
+}
+
+// Common exploration tools that never write files but are not "read-only" by name.
+const NON_MUTATING_EXPLORATION_TOOLS = new Set([
+  "grep",
+  "glob",
+  "parse_document",
+  "web_fetch",
+  "count_text",
+  "text_metrics",
+]);
+
+/**
+ * Whether a tool can change workspace files without naming them in its input, such as
+ * shell commands, code execution, sub-agents, or integrations. File-mutation tools name
+ * their targets and read-only tools change nothing, so neither counts.
+ */
+export function toolMayChangeFilesImplicitly(toolName: string): boolean {
+  const canonicalToolName = canonicalizeToolName(toolName);
+  if (isFileMutationToolName(canonicalToolName)) return false;
+  if (ToolCallDeduplicator.isIdempotentTool(canonicalToolName)) return false;
+  return !NON_MUTATING_EXPLORATION_TOOLS.has(canonicalToolName);
+}
+
 /**
  * Tracks file operations to detect redundant reads and duplicate file creations
  * Helps prevent the agent from reading the same file multiple times or
  * creating multiple versions of the same document
  */
 export class FileOperationTracker {
-  // Track files that have been read (path -> { count, lastReadTime, contentSummary })
+  // Track files that have been read (path -> { count, lastReadTime, contentSummary }).
+  // Repeat-read throttling and cached results are kept per read window, so a cached
+  // result is only ever served for the identical read_file call.
   private readFiles: Map<
     string,
     {
       count: number;
       lastReadTime: number;
       contentLength: number;
-      cachedResult?: string;
+      windows: Map<string, { count: number; lastReadTime: number; cachedResult?: string }>;
     }
   > = new Map();
   // Track files that have been created (normalized name -> full path)
@@ -1227,22 +1282,47 @@ export class FileOperationTracker {
 
   private readonly maxReadsPerFile: number = 2;
   private readonly readCooldownMs: number = 30000; // 30 seconds between reads of same file
-  private readonly maxCachedReadResultLength: number = 20000;
+  // Large enough for a budget-bounded read result (see truncateToolResult); a longer
+  // result is not cached rather than cached in a cut-down, invalid form.
+  private readonly maxCachedReadResultLength: number = 130_000;
   private readonly maxListingsPerDir: number = 2;
   private readonly listingCooldownMs: number = 60000; // 60 seconds between listings of same directory
 
   /**
-   * Check if a file read should be blocked (redundant read)
+   * Identity of a read_file call apart from its path: the requested window
+   * (startChar/maxChars) and any other options, normalized so equivalent calls match.
+   */
+  private buildReadWindowKey(input?: unknown): string {
+    if (!input || typeof input !== "object") return "{}";
+    const params: Record<string, unknown> = {};
+    for (const key of Object.keys(input).sort()) {
+      if (key === "path") continue;
+      const value = (input as Record<string, unknown>)[key];
+      if (value === undefined || value === null || value === "") continue;
+      const numeric = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+      params[key] = typeof numeric === "number" && Number.isFinite(numeric) ? numeric : value;
+    }
+    if (typeof params.startChar === "number" && params.startChar <= 0) delete params.startChar;
+    return JSON.stringify(params);
+  }
+
+  /**
+   * Check if a file read should be blocked (redundant read). Only an identical call
+   * (same path and window) counts as a repeat, and only its own result is returned.
    * @returns Object with blocked flag and reason if blocked
    */
-  checkFileRead(filePath: string): {
+  checkFileRead(
+    filePath: string,
+    input?: unknown,
+  ): {
     blocked: boolean;
     reason?: string;
     suggestion?: string;
     cachedResult?: string;
+    cachedAgeMs?: number;
   } {
     const normalized = this.normalizePath(filePath);
-    const existing = this.readFiles.get(normalized);
+    const existing = this.readFiles.get(normalized)?.windows.get(this.buildReadWindowKey(input));
     const now = Date.now();
 
     if (existing) {
@@ -1256,14 +1336,18 @@ export class FileOperationTracker {
         return { blocked: false };
       }
 
-      // If file was read recently (within cooldown), block
-      if (timeSinceLastRead < this.readCooldownMs && existing.count >= this.maxReadsPerFile) {
+      // If the same window was read recently (within cooldown), block
+      if (existing.count >= this.maxReadsPerFile) {
         return {
           blocked: true,
-          reason: `File "${filePath}" was already read ${existing.count} times in the last ${this.readCooldownMs / 1000}s`,
+          reason:
+            `read_file was already called ${existing.count} times for "${filePath}" with the ` +
+            `same window in the last ${this.readCooldownMs / 1000}s`,
           suggestion:
-            "Use the content from the previous read instead of reading the file again. If you need specific parts, describe what you need.",
+            "Use the content from the previous read instead of reading the same window again. " +
+            "To read a different part of the file, call read_file with a different startChar.",
           cachedResult: existing.cachedResult,
+          cachedAgeMs: timeSinceLastRead,
         };
       }
     }
@@ -1272,34 +1356,30 @@ export class FileOperationTracker {
   }
 
   /**
-   * Record a file read operation
+   * Record a file read operation. `input` is the read_file input that produced the
+   * result, so later checks can tell windows of the same file apart.
    */
-  recordFileRead(filePath: string, content: string): void {
+  recordFileRead(filePath: string, content: string, input?: unknown): void {
     const normalized = this.normalizePath(filePath);
-    const existing = this.readFiles.get(normalized);
     const now = Date.now();
     const safeContent = typeof content === "string" ? content : String(content ?? "");
     const contentLength = safeContent.length;
-    const truncatedContent =
-      contentLength > this.maxCachedReadResultLength
-        ? `${safeContent.slice(0, this.maxCachedReadResultLength)}\n\n[... cached content truncated ...]`
-        : safeContent;
 
-    if (existing) {
-      existing.count++;
-      existing.lastReadTime = now;
-      existing.contentLength = contentLength;
-      if (truncatedContent) {
-        existing.cachedResult = truncatedContent;
-      }
-    } else {
-      this.readFiles.set(normalized, {
-        count: 1,
-        lastReadTime: now,
-        contentLength,
-        cachedResult: truncatedContent,
-      });
+    let entry = this.readFiles.get(normalized);
+    if (!entry) {
+      entry = { count: 0, lastReadTime: now, contentLength, windows: new Map() };
+      this.readFiles.set(normalized, entry);
     }
+    entry.count++;
+    entry.lastReadTime = now;
+    entry.contentLength = contentLength;
+
+    const windowKey = this.buildReadWindowKey(input);
+    const window = entry.windows.get(windowKey) || { count: 0, lastReadTime: now };
+    window.count++;
+    window.lastReadTime = now;
+    window.cachedResult = contentLength <= this.maxCachedReadResultLength ? safeContent : undefined;
+    entry.windows.set(windowKey, window);
 
     this.incrementOperation("read_file");
   }
@@ -1510,11 +1590,37 @@ export class FileOperationTracker {
   }
 
   /**
-   * Invalidate cached read tracking for a file that was modified.
+   * Invalidate cached read tracking for a file that was modified. With a workspace root,
+   * absolute and workspace-relative spellings of the same file are matched too.
    */
-  invalidateFileRead(filePath: string): void {
+  invalidateFileRead(filePath: string, workspaceRoot?: string): void {
     const normalized = this.normalizePath(filePath);
     this.readFiles.delete(normalized);
+    const target = this.comparablePath(filePath, workspaceRoot);
+    for (const key of Array.from(this.readFiles.keys())) {
+      if (this.comparablePath(key, workspaceRoot) === target) {
+        this.readFiles.delete(key);
+      }
+    }
+  }
+
+  private comparablePath(filePath: string, workspaceRoot?: string): string {
+    let comparable = this.normalizePath(filePath).replace(/\/{2,}/g, "/");
+    const root = workspaceRoot ? this.normalizePath(workspaceRoot).replace(/\/+$/, "") : "";
+    if (root && comparable.startsWith(`${root}/`)) {
+      comparable = comparable.slice(root.length + 1);
+    }
+    return comparable.replace(/^(?:\.\/)+/, "");
+  }
+
+  /**
+   * Drop every cached read result (but keep the list of files read) after a tool
+   * that can change files without naming them, such as a shell command.
+   */
+  invalidateAllFileReads(): void {
+    for (const entry of this.readFiles.values()) {
+      entry.windows.clear();
+    }
   }
 
   /**
@@ -1610,7 +1716,12 @@ export class FileOperationTracker {
     // Restore read files (minimal info - we know they were read but not full details)
     if (state.readFiles) {
       for (const filePath of state.readFiles) {
-        this.readFiles.set(filePath, { count: 1, lastReadTime: now, contentLength: 0 });
+        this.readFiles.set(filePath, {
+          count: 1,
+          lastReadTime: now,
+          contentLength: 0,
+          windows: new Map(),
+        });
       }
     }
 

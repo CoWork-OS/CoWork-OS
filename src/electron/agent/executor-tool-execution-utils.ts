@@ -836,6 +836,30 @@ export function buildCancellationToolResult(opts: {
   };
 }
 
+/**
+ * Label a result served from a cache instead of a new tool run. A JSON object result
+ * gets a leading `_cached` field (the rest stays byte-identical and parseable); any
+ * other result gets a one-line prefix.
+ */
+export function markCachedToolResult(content: string, note: string): string {
+  const leadingWhitespace = /^\s*/.exec(content)?.[0] || "";
+  const body = content.slice(leadingWhitespace.length);
+  if (body.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if ("_cached" in parsed) return content;
+        if (Object.keys(parsed).length > 0) {
+          return `${leadingWhitespace}{"_cached":${JSON.stringify(note)},${body.slice(1)}`;
+        }
+      }
+    } catch {
+      // Not JSON: fall through to the text prefix.
+    }
+  }
+  return `[cached] ${note}\n${content}`;
+}
+
 export function buildRedundantFileOperationToolResult(opts: {
   toolUseId: string;
   fileOpCheck: { cachedResult?: string; reason?: string; suggestion?: string };

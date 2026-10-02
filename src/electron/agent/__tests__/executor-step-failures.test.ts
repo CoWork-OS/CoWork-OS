@@ -9,7 +9,7 @@ import os from "node:os";
 import { checkpointCrashRoundTrip } from "../../../../tests/helpers/checkpoint-crash-roundtrip";
 import { AwaitingUserInputError, TaskExecutor } from "../executor";
 import type { LLMResponse } from "../llm";
-import { FileOperationTracker } from "../executor-helpers";
+import { FileOperationTracker, ToolCallDeduplicator } from "../executor-helpers";
 import { fromOpenAICompatibleResponse } from "../llm/openai-compatible";
 import { ContextCapacityExhaustedError } from "../runtime/SessionRuntime";
 
@@ -3812,6 +3812,52 @@ relationship_memory:
       ]),
       undefined,
     );
+  });
+
+  it("runs a read that follows an edit of the same file in one batch instead of serving cached content", async () => {
+    executor = createExecutorWithStubs(
+      [
+        multiToolUseResponse([
+          {
+            name: "edit_file",
+            input: { file_path: "src/app.ts", old_string: "old();", new_string: "fresh();" },
+          },
+          { name: "read_file", input: { path: "src/app.ts" } },
+        ]),
+        textResponse("Updated src/app.ts to call fresh()."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    const staleRead = JSON.stringify({ content: "old();\n", size: 7, path: "src/app.ts" });
+    runtime.fileOperationTracker = new FileOperationTracker();
+    runtime.fileOperationTracker.recordFileRead("src/app.ts", staleRead, { path: "src/app.ts" });
+    runtime.fileOperationTracker.recordFileRead("src/app.ts", staleRead, { path: "src/app.ts" });
+    runtime.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    delete runtime.checkFileOperation;
+    delete runtime.recordFileOperation;
+    runtime.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file") return { success: true, file_path: "src/app.ts", replacements: 1 };
+      if (name === "read_file") return { content: "fresh();\n", size: 9, path: "src/app.ts" };
+      return { success: true };
+    });
+    const step: Any = {
+      id: "edit-then-read",
+      description: "Update src/app.ts to call fresh() and check the result",
+      status: "pending",
+    };
+
+    await runtime.executeStep(step);
+
+    const executedTools = runtime.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0]);
+    expect(executedTools).toEqual(["edit_file", "read_file"]);
+    const results = runtime.conversationHistory.flatMap((message: Any) =>
+      Array.isArray(message.content)
+        ? message.content.filter((block: Any) => block.type === "tool_result")
+        : [],
+    );
+    const readResult = results.find((result: Any) => result.tool_use_id === "tool-1-read_file");
+    expect(JSON.parse(readResult.content).content).toBe("fresh();\n");
   });
 
   it("rejects malformed provider calls while executing valid siblings and preserving the snapshot", async () => {

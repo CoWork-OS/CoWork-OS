@@ -245,6 +245,138 @@ describe("FileOperationTracker cache invalidation", () => {
   });
 });
 
+describe("FileOperationTracker read windows", () => {
+  it("never answers a read of one window with another window's content", () => {
+    const tracker = new FileOperationTracker();
+    tracker.recordFileRead("src/big.ts", "chunk-0", { path: "src/big.ts", startChar: 0 });
+    tracker.recordFileRead("src/big.ts", "chunk-1", { path: "src/big.ts", startChar: 20000 });
+
+    const next = tracker.checkFileRead("src/big.ts", { path: "src/big.ts", startChar: 40000 });
+
+    expect(next.blocked).toBe(false);
+    expect(next.cachedResult).toBeUndefined();
+  });
+
+  it("serves a repeated identical read with that read's own content", () => {
+    const tracker = new FileOperationTracker();
+    tracker.recordFileRead("src/big.ts", "chunk-0", { path: "src/big.ts" });
+    tracker.recordFileRead("src/big.ts", "chunk-1", { path: "src/big.ts", startChar: 20000 });
+    tracker.recordFileRead("src/big.ts", "chunk-1", { path: "src/big.ts", startChar: "20000" });
+
+    const repeat = tracker.checkFileRead("src/big.ts", { path: "src/big.ts", startChar: 20000 });
+    expect(repeat.blocked).toBe(true);
+    expect(repeat.cachedResult).toBe("chunk-1");
+    // The first window was read once, so reading it again is not throttled.
+    expect(tracker.checkFileRead("src/big.ts", { path: "src/big.ts", startChar: 0 }).blocked).toBe(
+      false,
+    );
+  });
+});
+
+describe("TaskExecutor read cache invalidation", () => {
+  const readResult = {
+    content: "export const a = 1;\n",
+    size: 20,
+    truncated: false,
+    path: "src/a.ts",
+    window: { start: 0, end: 20, total: 20 },
+  };
+
+  function createFileOpExecutor(): Any {
+    const fakeThis: Any = Object.create(TaskExecutor.prototype);
+    fakeThis.fileOperationTracker = new FileOperationTracker();
+    fakeThis.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    fakeThis.workspace = { path: "/workspace" };
+    fakeThis.logTag = "[Executor:test]";
+    return fakeThis;
+  }
+
+  function checkFileOperation(executor: Any, toolName: string, input: Any, batch = new Set()) {
+    return (TaskExecutor as Any).prototype.checkFileOperation.call(
+      executor,
+      toolName,
+      input,
+      batch,
+    );
+  }
+
+  function recordFileOperation(executor: Any, toolName: string, input: Any, result: Any) {
+    (TaskExecutor as Any).prototype.recordFileOperation.call(executor, toolName, input, result);
+  }
+
+  function readTwice(executor: Any, filePath = "src/a.ts") {
+    recordFileOperation(executor, "read_file", { path: filePath }, readResult);
+    recordFileOperation(executor, "read_file", { path: filePath }, readResult);
+  }
+
+  it("labels a cached read_file result explicitly and keeps it valid JSON", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+
+    const check = checkFileOperation(executor, "read_file", { path: "src/a.ts" });
+
+    expect(check.blocked).toBe(true);
+    const served = JSON.parse(check.cachedResult);
+    expect(served._cached).toMatch(/identical read_file call \(same path and window\)/);
+    expect(served.content).toBe(readResult.content);
+    expect(served.window).toEqual(readResult.window);
+  });
+
+  it("does not serve cached content after a failed edit of the file", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+
+    recordFileOperation(
+      executor,
+      "edit_file",
+      { file_path: "/workspace/src/a.ts", old_string: "a = 2", new_string: "a = 3" },
+      { success: false, error: "old_string not found" },
+    );
+
+    expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(false);
+  });
+
+  it("does not answer a read from cache when an earlier call in the same batch edits the file", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+    const batch = new Set<string>();
+
+    const edit = checkFileOperation(
+      executor,
+      "edit_file",
+      { file_path: "src/a.ts", old_string: "a = 1", new_string: "a = 2" },
+      batch,
+    );
+    const read = checkFileOperation(executor, "read_file", { path: "src/a.ts" }, batch);
+
+    expect(edit.blocked).toBe(false);
+    expect(read.blocked).toBe(false);
+  });
+
+  it("drops every cached read after a shell command", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+
+    recordFileOperation(executor, "run_command", { command: "npm run fmt" }, { exitCode: 0 });
+
+    expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(false);
+  });
+
+  it("keeps cached reads of other files when one file is edited", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor, "src/a.ts");
+
+    recordFileOperation(
+      executor,
+      "edit_file",
+      { file_path: "src/b.ts", old_string: "b = 1", new_string: "b = 2" },
+      { success: true, file_path: "src/b.ts", replacements: 1 },
+    );
+
+    expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(true);
+  });
+});
+
 describe("ToolFailureTracker browser HTTP status handling", () => {
   it("treats browser HTTP status failures as input-dependent (no immediate disable)", () => {
     const tracker = new ToolFailureTracker();

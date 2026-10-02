@@ -202,6 +202,33 @@ describe("MacOSSandbox", () => {
     }
   });
 
+  it("keeps the start and the end of long command output", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const sandbox = new MacOSSandbox(makeWorkspace());
+
+    const resultPromise = sandbox.execute("npm test", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+      maxOutputSize: 1_000,
+    });
+    proc.stdout?.emit("data", Buffer.from(`RUN v1\n${"ok\n".repeat(2_000)}`));
+    proc.stdout?.emit("data", Buffer.from("FAIL src/x.test.ts > adds\n"));
+    proc.stderr?.emit("data", Buffer.from("short stderr"));
+    proc.emit("close", 1, null);
+    const result = await resultPromise;
+
+    expect(result.stdout.startsWith("RUN v1")).toBe(true);
+    expect(result.stdout).toContain("FAIL src/x.test.ts > adds");
+    expect(result.stdout).toMatch(/\[Output truncated\] \[\.\.\. \d+ chars omitted \.\.\.\]/);
+    expect(result.stdout.length).toBeLessThan(1_100);
+    expect(result.stderr).toBe("short stderr");
+    expect(result.truncated).toBe(true);
+  });
+
   it("reports nonzero sandbox process exits", async () => {
     spawnMock.mockImplementationOnce(() =>
       makeChildProcess({ closeCode: 2, stderr: "command failed\n" }),

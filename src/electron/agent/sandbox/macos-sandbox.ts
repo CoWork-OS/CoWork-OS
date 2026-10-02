@@ -34,6 +34,7 @@ import {
   validatePathForSandboxProfile,
 } from "./security-utils";
 import { applyNonInteractiveEnvDefaults } from "./non-interactive-env";
+import { BoundedOutputBuffer } from "./bounded-output";
 
 /**
  * Default sandbox options
@@ -167,8 +168,9 @@ export class MacOSSandbox implements ISandbox {
     opts.onProcess?.(proc);
 
     return new Promise((resolve) => {
-      let stdout = "";
-      let stderr = "";
+      // Keep the start and the end of long output; errors and summaries print last.
+      const stdout = new BoundedOutputBuffer(opts.maxOutputSize);
+      const stderr = new BoundedOutputBuffer(opts.maxOutputSize);
       let killed = false;
       let timedOut = false;
 
@@ -178,34 +180,18 @@ export class MacOSSandbox implements ISandbox {
         killProcessGroup(proc);
       }, opts.timeout);
 
-      proc.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stdout.length + chunk.length <= opts.maxOutputSize) {
-          stdout += chunk;
-        } else if (stdout.length < opts.maxOutputSize) {
-          stdout += chunk.slice(0, opts.maxOutputSize - stdout.length);
-          stdout += "\n[Output truncated]";
-        }
-      });
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stderr.length + chunk.length <= opts.maxOutputSize) {
-          stderr += chunk;
-        } else if (stderr.length < opts.maxOutputSize) {
-          stderr += chunk.slice(0, opts.maxOutputSize - stderr.length);
-          stderr += "\n[Output truncated]";
-        }
-      });
+      proc.stdout?.on("data", (data: Buffer) => stdout.append(data.toString()));
+      proc.stderr?.on("data", (data: Buffer) => stderr.append(data.toString()));
 
       proc.on("close", (code) => {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: code ?? 1,
-          stdout,
-          stderr,
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
           killed,
           timedOut,
+          truncated: stdout.truncated || stderr.truncated,
         });
       });
 
@@ -213,11 +199,12 @@ export class MacOSSandbox implements ISandbox {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: 1,
-          stdout,
+          stdout: stdout.toString(),
           stderr: err.message,
           killed,
           timedOut,
           error: err.message,
+          truncated: stdout.truncated,
         });
       });
     });

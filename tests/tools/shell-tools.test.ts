@@ -263,6 +263,37 @@ describe("ShellTools auto-approval", () => {
     expect(sanitized).not.toContain("winner castle crop");
   });
 
+  describe("secret key byte arrays", () => {
+    const bytes = (count: number, seed = 7) =>
+      Array.from({ length: count }, (_, index) => (index * 37 + seed) % 256);
+    const sanitize = (output: string): string =>
+      (
+        shellTools as unknown as { sanitizeCommandOutput(output: string): string }
+      ).sanitizeCommandOutput(output);
+
+    it("redacts key-sized byte arrays such as a Solana id.json keypair", () => {
+      const keypair = `[${bytes(64).join(",")}]`;
+      const seed = `[${bytes(32).join(", ")}]`;
+
+      expect(sanitize(keypair)).toBe("[REDACTED_SECRET_KEY_ARRAY]");
+      expect(sanitize(`seed: ${seed}\n`)).toBe("seed: [REDACTED_SECRET_KEY_ARRAY]\n");
+    });
+
+    it("redacts other byte arrays printed under a secret or private key label", () => {
+      const output = `secretKey: Uint8Array(48) [\n  ${bytes(48).join(",\n  ")}\n]`;
+
+      expect(sanitize(output)).toBe("secretKey: Uint8Array(48) [REDACTED_SECRET_KEY_ARRAY]");
+    });
+
+    it("leaves ordinary lists of small numbers alone", () => {
+      const ages = `[${Array.from({ length: 50 }, (_, index) => 18 + (index % 60)).join(", ")}]`;
+      const ids = `[${Array.from({ length: 64 }, (_, index) => 100 + index * 13).join(",")}]`;
+
+      expect(sanitize(`${ages}\n`)).toBe(`${ages}\n`);
+      expect(sanitize(ids)).toBe(ids);
+    });
+  });
+
   it("uses a single approval bundle for safe command sequences when enabled", async () => {
     vi.spyOn(BuiltinToolsSettingsManager, "getRunCommandApprovalMode").mockReturnValue(
       "single_bundle",

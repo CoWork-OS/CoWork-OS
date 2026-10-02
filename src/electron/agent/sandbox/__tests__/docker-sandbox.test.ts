@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import type { Workspace } from "../../../../shared/types";
 
 const spawnMock = vi.hoisted(() => vi.fn());
@@ -200,6 +202,29 @@ describe("DockerSandbox access-profile enforcement", () => {
     expect(
       args.some((arg) => arg.startsWith(`${fs.realpathSync(output)}:`) && arg.endsWith(":rw")),
     ).toBe(true);
+  });
+
+  it("keeps the start and the end of long command output", async () => {
+    const { workspace } = fixture();
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementation(() => proc);
+    const sandbox = new DockerSandbox(workspace);
+    Object.assign(sandbox, { initialized: true });
+
+    const resultPromise = sandbox.execute("npm test", [], { maxOutputSize: 1_000 });
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled());
+    proc.stdout?.emit("data", Buffer.from(`RUN v1\n${"ok\n".repeat(2_000)}`));
+    proc.stdout?.emit("data", Buffer.from("FAIL src/x.test.ts > adds\n"));
+    proc.emit("close", 1, null);
+    const result = await resultPromise;
+
+    expect(result.stdout.startsWith("RUN v1")).toBe(true);
+    expect(result.stdout).toContain("FAIL src/x.test.ts > adds");
+    expect(result.stdout).toContain("[Output truncated]");
+    expect(result.truncated).toBe(true);
   });
 
   it("runs commands with non-interactive defaults without overriding configured values", () => {

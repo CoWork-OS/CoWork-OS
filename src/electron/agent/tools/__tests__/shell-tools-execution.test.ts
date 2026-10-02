@@ -219,6 +219,52 @@ describe.skipIf(process.platform === "win32")("ShellTools execution with real sh
     await waitUntil(() => !isRunning(childPid), 5_000, "the child process to exit");
   }, 20_000);
 
+  describe("long output", () => {
+    const writeNoisyScript = () =>
+      writeFile(
+        path.join(workspacePath, "noisy.sh"),
+        'echo BEGIN\nhead -c 300000 /dev/zero | tr "\\0" "x"\necho\necho "SUMMARY: 3 failed"\n',
+      );
+
+    it("keeps the end of long one-shot command output", async () => {
+      await writeNoisyScript();
+      const shellTools = new ShellTools(
+        createWorkspace(),
+        createDaemon() as unknown as AgentDaemon,
+        `task-${randomUUID()}`,
+      );
+
+      // The redirect routes the command to the one-shot spawn path.
+      const result = await shellTools.runCommand("sh noisy.sh 2>&1", { cwd: workspacePath });
+
+      expect(result.stdout.startsWith("BEGIN")).toBe(true);
+      expect(result.stdout).toContain("SUMMARY: 3 failed");
+      expect(result.stdout).toMatch(/\[Output truncated\] \[\.\.\. \d+ chars omitted \.\.\.\]/);
+      expect(result.stdout.length).toBeLessThan(110 * 1024);
+      expect(result.truncated).toBe(true);
+    });
+
+    it("bounds long persistent shell output and keeps its end", async () => {
+      await writeNoisyScript();
+      const workspace = createWorkspace();
+      const taskId = `task-${randomUUID()}`;
+      sessions.push({ taskId, workspaceId: workspace.id });
+      const shellTools = new ShellTools(
+        workspace,
+        createDaemon() as unknown as AgentDaemon,
+        taskId,
+      );
+
+      const result = await shellTools.runCommand("sh noisy.sh", { cwd: workspacePath });
+
+      expect(spawnCalls.some(({ args }) => args.includes("sh noisy.sh"))).toBe(false);
+      expect(result.stdout.startsWith("BEGIN")).toBe(true);
+      expect(result.stdout).toContain("SUMMARY: 3 failed");
+      expect(result.stdout.length).toBeLessThan(110 * 1024);
+      expect(result.truncated).toBe(true);
+    });
+  });
+
   describe("non-interactive environment", () => {
     const defaults = [
       "GIT_TERMINAL_PROMPT=0",

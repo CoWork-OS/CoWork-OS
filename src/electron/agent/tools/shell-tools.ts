@@ -9,6 +9,7 @@ import { BuiltinToolsSettingsManager, type RunCommandApprovalMode } from "./buil
 import { ShellSessionManager, isLikelyInteractiveCommand } from "./shell-session-manager";
 import { createSandbox } from "../sandbox/sandbox-factory";
 import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
+import { OUTPUT_TRUNCATED_MARKER, boundOutput } from "../sandbox/bounded-output";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { createLogger } from "../../utils/logger";
 
@@ -117,11 +118,6 @@ const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: str
       /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)? PRIVATE KEY-----/g,
     replacement: "[REDACTED_PRIVATE_KEY]",
   },
-  {
-    // Common JSON-secret-key shape (e.g., Solana id.json).
-    pattern: /\[(?:\s*\d{1,3}\s*,){31,}\s*\d{1,3}\s*\]/g,
-    replacement: "[REDACTED_SECRET_KEY_ARRAY]",
-  },
   // OpenAI-style API keys
   { pattern: /\bsk-[A-Za-z0-9_-]{16,}\b/g, replacement: "[REDACTED_API_KEY]" },
   // Anthropic API keys
@@ -144,6 +140,29 @@ const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: str
     replacement: "$1[REDACTED]$3",
   },
 ];
+
+// JSON byte-array secret keys (e.g., a Solana id.json keypair). Only arrays of
+// 32+ byte values (0-255) qualify, and only when key-sized (32 or 64 bytes) or
+// printed under a secret/private/seed label, so ordinary number lists such as
+// `print(df.age.tolist())` stay readable.
+const SECRET_KEY_ARRAY_CANDIDATE = /\[(?:\s*\d{1,3}\s*,){31,}\s*\d{1,3}\s*\]/g;
+const SECRET_KEY_BYTE_LENGTHS = new Set([32, 64]);
+const SECRET_KEY_LABEL = /secret|private|seed|key ?pair|mnemonic|signing/i;
+const SECRET_KEY_LABEL_WINDOW = 80;
+
+function redactSecretKeyArrays(output: string): string {
+  return output.replace(SECRET_KEY_ARRAY_CANDIDATE, (match: string, offset: number) => {
+    const values = match
+      .slice(1, -1)
+      .split(",")
+      .map((value) => Number(value.trim()));
+    if (values.some((value) => !Number.isInteger(value) || value > 255)) return match;
+    const label = output.slice(Math.max(0, offset - SECRET_KEY_LABEL_WINDOW), offset);
+    return SECRET_KEY_BYTE_LENGTHS.has(values.length) || SECRET_KEY_LABEL.test(label)
+      ? "[REDACTED_SECRET_KEY_ARRAY]"
+      : match;
+  });
+}
 
 /**
  * Validate that a PID is a safe positive integer
@@ -1017,8 +1036,9 @@ export class ShellTools {
         stderr,
         exitCode: result.exitCode,
         truncated:
-          result.stdout.includes("[Output truncated]") ||
-          result.stderr.includes("[Output truncated]"),
+          result.truncated ??
+          (result.stdout.includes(OUTPUT_TRUNCATED_MARKER) ||
+            result.stderr.includes(OUTPUT_TRUNCATED_MARKER)),
         terminationReason,
       };
     } finally {
@@ -1507,12 +1527,21 @@ export class ShellTools {
           terminationReason: persistentResult.terminationReason,
         });
         if (persistentResult.usedPersistentSession) {
+          // Redact before cutting so a secret is never split across the omission.
+          const stdout = boundOutput(
+            this.sanitizeCommandOutput(persistentResult.stdout),
+            MAX_OUTPUT_SIZE,
+          );
+          const stderr = boundOutput(
+            this.sanitizeCommandOutput(persistentResult.stderr),
+            MAX_OUTPUT_SIZE,
+          );
           return this.recordVerificationCommandResult(verificationCommandKey, {
             success: persistentResult.success,
-            stdout: this.sanitizeCommandOutput(persistentResult.stdout),
-            stderr: this.sanitizeCommandOutput(persistentResult.stderr),
+            stdout: stdout.text,
+            stderr: stderr.text,
             exitCode: persistentResult.exitCode,
-            truncated: persistentResult.truncated,
+            truncated: persistentResult.truncated || stdout.truncated || stderr.truncated,
             terminationReason: persistentResult.terminationReason,
           });
         }
@@ -1892,16 +1921,11 @@ export class ShellTools {
   }
 
   /**
-   * Truncate output to prevent context overflow
+   * Truncate output to prevent context overflow. Keeps the start and the end:
+   * errors, failing tests and summaries are printed last.
    */
   private truncateOutput(output: string): string {
-    if (output.length <= MAX_OUTPUT_SIZE) {
-      return output;
-    }
-    return (
-      output.slice(0, MAX_OUTPUT_SIZE) +
-      `\n\n[... Output truncated. Showing first ${Math.round(MAX_OUTPUT_SIZE / 1024)}KB ...]`
-    );
+    return boundOutput(output, MAX_OUTPUT_SIZE).text;
   }
 
   /**
@@ -1913,7 +1937,7 @@ export class ShellTools {
     for (const { pattern, replacement } of SHELL_OUTPUT_REDACTION_PATTERNS) {
       sanitized = sanitized.replace(pattern, replacement);
     }
-    return sanitized;
+    return redactSecretKeyArrays(sanitized);
   }
 }
 

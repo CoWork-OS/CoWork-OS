@@ -238,6 +238,139 @@ describe("TaskExecutor chat mode", () => {
     },
   );
 
+  async function runFollowUpMaxTokensTurn(remainingTurns: number) {
+    const outcome: { decision?: Any; messages: Any[]; executor?: Any } = { messages: [] };
+    const task = {
+      id: "follow-up-max-tokens",
+      status: "executing",
+      title: "Write the report",
+      prompt: "Write the report",
+      agentConfig: {
+        executionMode: "plan",
+        interactionMode: { mode: "smart" },
+        retainMemory: false,
+      },
+    };
+    const runtime = {
+      setRecoveryRequestActive: vi.fn(),
+      runFollowUpLoop: vi.fn(async ({ messages, policy }: Any) => {
+        const state = {
+          mode: "follow_up",
+          iterationCount: 1,
+          messages,
+          emptyResponseCount: 0,
+          continueLoop: true,
+        };
+        const prepared = await policy.requestResponse(state);
+        outcome.decision = await policy.handleResponse(prepared, state);
+        outcome.messages = state.messages;
+        return { messages: state.messages, iterations: 1, emptyResponseCount: 0 };
+      }),
+    };
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    outcome.executor = executor;
+    executor.task = task;
+    executor.workspace = {
+      id: "workspace-1",
+      path: "/tmp/workspace",
+      permissions: { read: false, write: false, delete: false, network: false, shell: false },
+    };
+    executor.provider = { type: "anthropic" };
+    executor.conversationHistory = [{ role: "user", content: "Write the report" }];
+    executor.daemon = { getTask: vi.fn(() => task), updateTaskStatus: vi.fn() };
+    executor.getSessionRuntime = () => runtime;
+    executor.refreshProviderIfSettingsChanged = vi.fn();
+    executor.ensureProviderFailoverSelectionsContext = vi.fn();
+    executor.getPendingSkillParameterCollection = () => null;
+    executor.handleGoalSlashFollowUp = () => ({ handled: false });
+    executor.isRecoveryIntent = () => false;
+    executor.isCapabilityUpgradeIntent = () => false;
+    executor.isRedirectIntent = () => false;
+    executor.isDebugMode = () => false;
+    executor.preflightShellExecutionCheck = () => false;
+    executor.isExplicitChatExecutionMode = () => false;
+    executor.isKnownContextInformationalFollowUp = () => false;
+    executor.getEffectiveExecutionMode = () => "plan";
+    executor.getEffectiveTaskDomain = () => "general";
+    executor.getEffectiveTaskPathRootPolicy = () => "none";
+    executor.getLoopGuardrailForMode = () => ({});
+    executor.followUpRequiresCommandExecution = () => false;
+    executor.followUpRequiresCanvasAction = () => false;
+    executor.loadExecutionPromptMemoryFeatures = () => ({ contextPackInjectionEnabled: false });
+    executor.getRoleContextPrompt = () => "";
+    executor.getInfraContextPrompt = () => "";
+    executor.buildAdaptiveRecoveryTurnGuidance = async () => "";
+    executor.buildFollowUpTurnGuidancePrompt = () => "";
+    executor.buildIntegrationMentionGuidancePrompt = () => "";
+    executor.buildExecutionSystemPrompt = async () => ({
+      systemBlocks: [],
+      memoryIndexInjected: false,
+      topicCount: 0,
+      droppedSections: [],
+      truncatedSections: [],
+      totalTokens: 0,
+    });
+    executor.setPromptCacheContext = () => "system";
+    executor.fileOperationTracker = { getKnowledgeSummary: () => "" };
+    executor.toolRegistry = { setCanvasSessionCutoff: vi.fn() };
+    executor.toolCallDeduplicator = { reset: vi.fn() };
+    executor.turnSuccessfulToolUsageCounts = new Map();
+    executor.emitEvent = vi.fn();
+    executor.updateConversationHistory = vi.fn();
+    executor.saveConversationSnapshot = vi.fn(() => true);
+    executor.finalizeSuccessfulFollowUp = vi.fn();
+    executor.getRemainingTurnBudget = () => remainingTurns;
+    executor.requestLLMResponseWithAdaptiveBudget = vi.fn(async () => ({
+      response: {
+        stopReason: "max_tokens",
+        content: [
+          { type: "text", text: "Writing the report." },
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "write_file",
+            input: { path: "report.md", content: "partial" },
+          },
+        ],
+      },
+      availableTools: [],
+      outputBudget: { continuationAllowed: true, truncationClassification: null },
+    }));
+
+    await (TaskExecutor as Any).prototype.sendMessageUnified.call(
+      executor,
+      "Write the report",
+      undefined,
+      undefined,
+      {
+        messageContext: { messageSource: "web", messageId: "max-tokens-follow-up" },
+        suppressUserMessageEvent: true,
+        transcriptAlreadyContainsMessage: true,
+      },
+    );
+    return outcome;
+  }
+
+  it("retries a follow-up whose tool call was cut off by max_tokens instead of ending the turn", async () => {
+    const { decision, messages } = await runFollowUpMaxTokensTurn(20);
+
+    expect(decision).toMatchObject({ continueLoop: true, repeatIteration: true });
+    expect(messages.at(-1).role).toBe("user");
+    expect(JSON.stringify(messages.at(-1).content)).toMatch(/discarded/);
+  });
+
+  it("shows the cut-off follow-up response when it cannot be retried", async () => {
+    const { decision, executor } = await runFollowUpMaxTokensTurn(0);
+
+    expect(decision).toMatchObject({ continueLoop: false });
+    const assistantMessages = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "assistant_message")
+      .map(([, payload]: [string, Any]) => String(payload.message));
+    expect(assistantMessages).toEqual([
+      expect.stringMatching(/^Writing the report\.\n\n.*output token limit/s),
+    ]);
+  });
+
   it.each([true, false])(
     "records direct follow-up dispatch around the real ordinary provider boundary (snapshot saved=%s)",
     async (snapshotSaved) => {

@@ -532,6 +532,56 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect(String(thrown?.message || step.error)).toMatch(/declined/i);
   });
 
+  it("retries a truncated tool call instead of failing the step on the first max_tokens", async () => {
+    const truncatedWrite: LLMResponse = {
+      stopReason: "max_tokens",
+      content: [
+        { type: "text", text: "Writing the notes now." },
+        {
+          type: "tool_use",
+          id: "t1",
+          name: "write_file",
+          input: { path: "notes.md", content: "# Notes\npartial" },
+        },
+      ],
+    };
+    executor = createExecutorWithStubs(
+      [
+        truncatedWrite,
+        toolUseResponse("write_file", { path: "notes.md", content: "# Notes\nshort" }),
+        textResponse("Saved the notes to notes.md."),
+      ],
+      {},
+    );
+    const step: Any = { id: "1", description: "Write notes.md", status: "pending" };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status).not.toBe("failed");
+    expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(3);
+    // The truncated call never ran; only the re-issued write did.
+    const writes = (executor as Any).toolRegistry.executeTool.mock.calls.filter(
+      ([name]: [string]) => name === "write_file",
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0][1]).toMatchObject({ content: "# Notes\nshort" });
+  });
+
+  it("does not claim repeated recovery attempts when a truncation cannot be retried", async () => {
+    executor = createExecutorWithStubs(
+      [{ stopReason: "max_tokens", content: [{ type: "text", text: "partial" }] }],
+      {},
+    );
+    (executor as Any).getRemainingTurnBudget = vi.fn().mockReturnValue(0);
+    const step: Any = { id: "1", description: "Summarize the findings", status: "pending" };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status).toBe("failed");
+    expect(String(step.error)).toContain("output token limit");
+    expect(String(step.error)).not.toMatch(/\(\d+ recovery attempts\)/);
+  });
+
   it("fails before provider dispatch when retained context exceeds the hard budget", async () => {
     executor = createExecutorWithStubs([textResponse("provider must not run")], {});
     const contextError = new ContextCapacityExhaustedError({

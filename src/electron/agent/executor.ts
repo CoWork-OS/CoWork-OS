@@ -386,6 +386,7 @@ import {
 } from "./agent-policy";
 import {
   appendAssistantResponseToConversation as appendAssistantResponseToConversationUtil,
+  buildMaxTokensExhaustedNotice as buildMaxTokensExhaustedNoticeUtil,
   computeToolFailureDecision as computeToolFailureDecisionUtil,
   handleMaxTokensRecovery as handleMaxTokensRecoveryUtil,
   injectToolRecoveryHint as injectToolRecoveryHintUtil,
@@ -20293,7 +20294,8 @@ You are continuing a previous conversation. The context from the previous conver
       lower.includes("allowed paths") ||
       lower.includes("syntax error") ||
       lower.includes("disabled") ||
-      lower.includes("not available")
+      lower.includes("not available") ||
+      lower.includes("exceeded the output token limit")
     );
   }
 
@@ -32449,7 +32451,7 @@ Return ONLY a JSON object:
             maxRecoveries: maxMaxTokensRecoveries,
             remainingTurns: remainingTurnsAfterResponse,
             minTurnsRequiredForRetry: 0,
-            allowRetry: outputBudget?.continuationAllowed !== false && responseHasToolUse !== true,
+            allowRetry: outputBudget?.continuationAllowed !== false || responseHasToolUse === true,
             eventPayload: {
               stepId: step.id,
               hadToolUse: responseHasToolUse,
@@ -32481,8 +32483,11 @@ Return ONLY a JSON object:
           }
           if (maxTokensDecision.action === "exhausted") {
             stepFailed = true;
+            const maxTokensRecoveryAttempts = Math.max(0, maxTokensDecision.recoveryCount - 1);
             lastFailureReason =
-              `Response repeatedly exceeded the output token limit (${maxMaxTokensRecoveries} recovery attempts). ` +
+              (maxTokensRecoveryAttempts > 0
+                ? `Response repeatedly exceeded the output token limit (${maxTokensRecoveryAttempts} recovery attempts). `
+                : "Response exceeded the output token limit with no turns left to retry it. ") +
               "The step may require simpler sub-steps or fewer parallel tool calls.";
             continueLoop = false;
             return { continueLoop, emptyResponseCount };
@@ -40473,7 +40478,7 @@ Return ONLY a JSON object:
             maxRecoveries: maxMaxTokensRecoveries,
             remainingTurns: remainingTurnsAfterResponse,
             minTurnsRequiredForRetry: 0,
-            allowRetry: outputBudget?.continuationAllowed !== false && responseHasToolUse !== true,
+            allowRetry: outputBudget?.continuationAllowed !== false || responseHasToolUse === true,
             logPrefix: "Follow-up:",
             eventPayload: {
               context: "follow_up",
@@ -40501,6 +40506,9 @@ Return ONLY a JSON object:
             return { continueLoop, emptyResponseCount };
           }
           if (maxTokensDecision.action === "exhausted") {
+            this.emitEvent("assistant_message", {
+              message: buildMaxTokensExhaustedNoticeUtil(response),
+            });
             continueLoop = false;
             return { continueLoop, emptyResponseCount };
           }

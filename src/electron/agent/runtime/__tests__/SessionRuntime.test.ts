@@ -2287,7 +2287,8 @@ describe("SessionRuntime", () => {
       });
 
       expect(harness.createMessageWithTimeout).toHaveBeenCalledTimes(2);
-      expect(harness.createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(8_000);
+      // Initial agentic budget (raised from 8K so a first-call file write is not cut off).
+      expect(harness.createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(16_000);
       expect(harness.createMessageWithTimeout.mock.calls[1][0].maxTokens).toBe(64_000);
       expect(result.response.stopReason).toBe("end_turn");
       expect(result.outputBudget.escalationAttempted).toBe(true);

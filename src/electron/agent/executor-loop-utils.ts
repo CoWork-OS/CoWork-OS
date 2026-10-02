@@ -1,4 +1,5 @@
 import type { LLMMessage, LLMToolResult } from "./llm";
+import { MAX_TOKENS_RECOVERY_PROMPT_PREFIX } from "./llm/output-token-policy";
 
 export interface ToolLoopCall {
   tool: string;
@@ -126,23 +127,41 @@ export function appendRecoveryAssistantMessage(
   });
 }
 
-export function appendMaxTokensRecoveryUserMessage(messages: LLMMessage[]): void {
+export function appendMaxTokensRecoveryUserMessage(
+  messages: LLMMessage[],
+  opts: { truncatedToolCall?: boolean } = {},
+): void {
+  // A truncated tool call is dropped before this prompt, so the model must
+  // re-issue the work in smaller calls. For text, "continue where you left off"
+  // produced a second fragment that replaced the first in the recorded answer,
+  // so the model is asked for the whole answer again (with a larger budget).
+  const text = opts.truncatedToolCall
+    ? `${MAX_TOKENS_RECOVERY_PROMPT_PREFIX}, so its unfinished tool call was discarded and did not run. ` +
+      "Re-issue the work in smaller pieces:\n" +
+      "1. Split large file content across MULTIPLE write_file or edit_file calls " +
+      "(write the first part now, then append the rest in follow-up calls).\n" +
+      "2. Reduce parallel tool calls to only what is necessary.\n" +
+      "3. Keep any text before the tool call short."
+    : `${MAX_TOKENS_RECOVERY_PROMPT_PREFIX} before it finished. ` +
+      "Reply with the complete response again from the beginning, written more concisely so it " +
+      "fits in a single message. Do not mention the earlier attempt.";
   messages.push({
     role: "user",
-    content: [
-      {
-        type: "text",
-        text:
-          "Your response was cut off because it exceeded the output token limit. " +
-          "You MUST reduce the size of your next response. Strategies:\n" +
-          "1. If writing a file, split the content across MULTIPLE write_file calls " +
-          "(e.g., write the first half now, then the second half in the next turn).\n" +
-          "2. Reduce parallel tool calls to only what is necessary (use serial calls when output pressure is high).\n" +
-          "3. Write shorter, more concise content.\n" +
-          "Continue from where you left off.",
-      },
-    ],
+    content: [{ type: "text", text }],
   });
+}
+
+/** Visible text for a turn that stopped on max_tokens and could not be retried. */
+export function buildMaxTokensExhaustedNotice(response: Any): string {
+  const partial = ((response?.content || []) as Any[])
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => String(block.text))
+    .join("\n")
+    .trim();
+  const notice =
+    "This response was cut off because it exceeded the output token limit and could not be " +
+    "completed in this turn. Ask me to continue, or split the request into smaller parts.";
+  return partial ? `${partial}\n\n${notice}` : notice;
 }
 
 export function handleMaxTokensRecovery(opts: {
@@ -203,7 +222,9 @@ export function handleMaxTokensRecovery(opts: {
   }
 
   appendRecoveryAssistantMessage(opts.messages, opts.response);
-  appendMaxTokensRecoveryUserMessage(opts.messages);
+  appendMaxTokensRecoveryUserMessage(opts.messages, {
+    truncatedToolCall: (opts.response.content || []).some((c: Any) => c?.type === "tool_use"),
+  });
   return { action: "retry", recoveryCount: nextRecoveryCount };
 }
 

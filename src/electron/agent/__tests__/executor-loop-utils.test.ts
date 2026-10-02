@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { LLMMessage } from "../llm";
 import {
   appendAssistantResponseToConversation,
+  buildMaxTokensExhaustedNotice,
   computeToolFailureDecision,
   handleMaxTokensRecovery,
   maybeInjectLowProgressNudge,
@@ -433,5 +434,67 @@ describe("executor-loop-utils guardrails", () => {
 
     expect(emptyCount).toBe(0);
     expect(messages[1]).toEqual({ role: "assistant", content: [{ type: "text", text: "done" }] });
+  });
+
+  it("retries a truncated tool call with split-the-write instructions", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Write the report" }];
+    const result = handleMaxTokensRecovery({
+      response: {
+        stopReason: "max_tokens",
+        content: [
+          { type: "text", text: "Writing the report now." },
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "write_file",
+            input: { path: "report.md", content: "# Report\npartial" },
+          },
+        ],
+      },
+      messages,
+      recoveryCount: 0,
+      maxRecoveries: 3,
+      remainingTurns: 10,
+      minTurnsRequiredForRetry: 0,
+      log: vi.fn(),
+      emitMaxTokensRecovery: vi.fn(),
+    });
+
+    expect(result).toEqual({ action: "retry", recoveryCount: 1 });
+    // The truncated call is dropped (it never ran); the text is kept.
+    expect(messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "Writing the report now." }],
+    });
+    const instruction = JSON.stringify(messages[2]);
+    expect(messages[2].role).toBe("user");
+    expect(instruction).toMatch(/discarded/);
+    expect(instruction).toMatch(/multiple/i);
+  });
+
+  it("asks for the complete answer again after a text-only truncation", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Explain the findings" }];
+    handleMaxTokensRecovery({
+      response: { stopReason: "max_tokens", content: [{ type: "text", text: "PART-ONE" }] },
+      messages,
+      recoveryCount: 0,
+      maxRecoveries: 3,
+      remainingTurns: 10,
+      log: vi.fn(),
+      emitMaxTokensRecovery: vi.fn(),
+    });
+
+    // A "continue where you left off" reply would replace the first part in the
+    // recorded output, so the model is asked for the whole answer instead.
+    const instruction = JSON.stringify(messages.at(-1));
+    expect(instruction).toMatch(/complete response/i);
+    expect(instruction).not.toMatch(/continue from where you left off/i);
+  });
+
+  it("keeps the partial text visible when a truncated turn cannot be retried", () => {
+    expect(
+      buildMaxTokensExhaustedNotice({ content: [{ type: "text", text: "Section one" }] }),
+    ).toMatch(/^Section one\n\n.*output token limit/s);
+    expect(buildMaxTokensExhaustedNotice({ content: [] })).toMatch(/output token limit/);
   });
 });

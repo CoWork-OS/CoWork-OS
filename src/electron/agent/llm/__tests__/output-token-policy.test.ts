@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { handleMaxTokensRecovery } from "../../executor-loop-utils";
 import {
   buildReasoningExhaustedGuidance,
   classifyOutputTruncation,
@@ -23,6 +24,53 @@ describe("output-token-policy", () => {
         },
       ]),
     ).toBe("tool_followup");
+  });
+
+  it("gives the first agentic call room for a large tool call", () => {
+    const resolve = (providerType: string, modelId: string) =>
+      resolveOutputTokenBudget({
+        providerType,
+        modelId,
+        messages: [{ role: "user", content: "step context" }],
+        system: "system",
+        contextManager: { estimateMaxOutputTokens: () => 500_000 } as Any,
+        taskMaxTokens: null,
+        requestKind: "agentic_main",
+        phase: "initial",
+      }).transport.value;
+
+    expect(resolve("anthropic", "claude-sonnet-4-5")).toBeGreaterThanOrEqual(16_000);
+    // Thinking/reasoning models spend part of the budget before the answer.
+    expect(resolve("openai", "gpt-5.5")).toBeGreaterThanOrEqual(32_000);
+    expect(resolve("anthropic", "claude-opus-5-5")).toBeGreaterThanOrEqual(32_000);
+    // Known model caps still apply.
+    expect(resolve("anthropic", "claude-3-5-sonnet-20241022")).toBe(8_192);
+  });
+
+  it("escalates the request that follows a max_tokens recovery prompt", () => {
+    const messages = [{ role: "user", content: "step context" }] as Any[];
+    handleMaxTokensRecovery({
+      response: { stopReason: "max_tokens", content: [{ type: "text", text: "partial" }] },
+      messages,
+      recoveryCount: 0,
+      maxRecoveries: 3,
+      log: () => undefined,
+      emitMaxTokensRecovery: () => undefined,
+    });
+
+    const requestKind = inferOutputBudgetRequestKind(messages);
+    expect(requestKind).toBe("continuation");
+    const budget = resolveOutputTokenBudget({
+      providerType: "anthropic",
+      modelId: "claude-sonnet-4-5",
+      messages,
+      system: "system",
+      contextManager: { estimateMaxOutputTokens: () => 500_000 } as Any,
+      taskMaxTokens: null,
+      requestKind,
+      phase: "initial",
+    });
+    expect(budget.transport.value).toBe(64_000);
   });
 
   it("routes OpenRouter Anthropic models through Anthropic-style defaults", () => {
@@ -95,7 +143,8 @@ describe("output-token-policy", () => {
       phase: "initial",
     });
 
-    expect(budget.policyDefault).toBe(16_000);
+    // gpt-5.4 reasons before answering, so its tool follow-up default is 32K.
+    expect(budget.policyDefault).toBe(32_000);
     expect(budget.transport.value).toBe(2_048);
   });
 
@@ -153,6 +202,14 @@ describe("output-token-policy", () => {
     ).toBe("reasoning_exhausted");
     expect(
       classifyOutputTruncation([{ type: "text", text: "<think>x</think>Answer" } as Any]),
+    ).toBe("visible_partial_output");
+  });
+
+  it("classifies a cut-off tool call as visible output rather than exhausted reasoning", () => {
+    expect(
+      classifyOutputTruncation([
+        { type: "tool_use", id: "t1", name: "write_file", input: { path: "a.md" } } as Any,
+      ]),
     ).toBe("visible_partial_output");
   });
 

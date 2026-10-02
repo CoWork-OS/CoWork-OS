@@ -67,7 +67,11 @@ export interface ResolvedOutputTokenBudget {
   localRequestBudget?: LocalRequestTokenBudget;
 }
 
-const DEFAULT_AGENTIC_INITIAL_MAX_TOKENS = 8_000;
+// The first call of a step often writes a whole file in one tool call; 8K cut
+// those off and failed the step. Thinking/reasoning models spend part of the
+// budget before the answer, so they start higher.
+const DEFAULT_AGENTIC_INITIAL_MAX_TOKENS = 16_000;
+const DEFAULT_REASONING_INITIAL_MAX_TOKENS = 32_000;
 const DEFAULT_AGENTIC_ESCALATED_MAX_TOKENS = 48_000;
 const DEFAULT_TOOL_FOLLOW_UP_INITIAL_MAX_TOKENS = 16_000;
 const DEFAULT_GENERIC_ESCALATED_MAX_TOKENS = 16_000;
@@ -112,6 +116,14 @@ function readEnvLimit(name: string): number | null {
   }
   return Math.min(normalized, MAX_ENV_OUTPUT_TOKEN_OVERRIDE);
 }
+
+/**
+ * Opening of the user turn sent after a response stopped on max_tokens (see
+ * appendMaxTokensRecoveryUserMessage). The request that answers it gets the
+ * escalated output budget.
+ */
+export const MAX_TOKENS_RECOVERY_PROMPT_PREFIX =
+  "Your previous response was cut off by the output token limit";
 
 function isOpenAIReasoningModel(modelId: string): boolean {
   const normalized = String(modelId || "")
@@ -231,12 +243,22 @@ function getKnownHardCap(
   return null;
 }
 
+/** Models that think/reason before answering unless told not to. */
+function isThinkingByDefaultModel(modelId: string): boolean {
+  const normalized = String(modelId || "").toLowerCase();
+  return (
+    isOpenAIReasoningModel(normalized) ||
+    /claude-(?:(?:opus|sonnet|haiku)-[5-9]|fable|mythos)/.test(normalized)
+  );
+}
+
 function getPolicyDefault(
   requestKind: OutputBudgetRequestKind,
   providerFamily: OutputBudgetProviderFamily,
   routedFamily: Exclude<OutputBudgetProviderFamily, "openrouter"> | null,
   phase: "initial" | "escalated",
   localProfile?: LocalModelExecutionProfile | null,
+  modelId = "",
 ): number {
   if (localProfile) {
     if (phase === "escalated") return localProfile.finalOutputTokens;
@@ -249,20 +271,23 @@ function getPolicyDefault(
   const escalatedOverride = readEnvLimit("COWORK_LLM_AGENTIC_ESCALATED_MAX_TOKENS");
   const effectiveFamily = routedFamily ?? providerFamily;
 
-  if (phase === "escalated") {
+  // The request after a max_tokens truncation retries with the escalated budget
+  // so the same output does not get cut off again.
+  if (phase === "escalated" || requestKind === "continuation") {
     if (escalatedOverride !== null) return escalatedOverride;
     if (effectiveFamily === "anthropic") return DEFAULT_ANTHROPIC_ESCALATED_MAX_TOKENS;
     if (effectiveFamily === "generic") return DEFAULT_GENERIC_ESCALATED_MAX_TOKENS;
     return DEFAULT_AGENTIC_ESCALATED_MAX_TOKENS;
   }
 
-  if (requestKind === "tool_followup" || requestKind === "continuation") {
-    if (initialOverride !== null) return initialOverride;
-    return DEFAULT_TOOL_FOLLOW_UP_INITIAL_MAX_TOKENS;
-  }
-
   if (initialOverride !== null) return initialOverride;
-  return DEFAULT_AGENTIC_INITIAL_MAX_TOKENS;
+  const reasoningFloor = isThinkingByDefaultModel(modelId)
+    ? DEFAULT_REASONING_INITIAL_MAX_TOKENS
+    : 0;
+  if (requestKind === "tool_followup") {
+    return Math.max(DEFAULT_TOOL_FOLLOW_UP_INITIAL_MAX_TOKENS, reasoningFloor);
+  }
+  return Math.max(DEFAULT_AGENTIC_INITIAL_MAX_TOKENS, reasoningFloor);
 }
 
 function stripThinkingBlocks(text: string): string {
@@ -283,7 +308,25 @@ export function isAdaptiveOutputTokenPolicyEnabled(): boolean {
   return getOutputTokenPolicyMode() === "adaptive";
 }
 
+function messageText(message: LLMMessage | undefined): string {
+  if (!message) return "";
+  if (typeof message.content === "string") return message.content;
+  return (message.content as Any[])
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => String(block.text))
+    .join("\n");
+}
+
 export function inferOutputBudgetRequestKind(messages: LLMMessage[]): OutputBudgetRequestKind {
+  // Answering a max_tokens recovery prompt: any user turn since the last
+  // assistant turn that opens with the recovery prompt.
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") break;
+    if (messageText(message).trimStart().startsWith(MAX_TOKENS_RECOVERY_PROMPT_PREFIX)) {
+      return "continuation";
+    }
+  }
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const content = messages[index]?.content;
     if (!Array.isArray(content)) continue;
@@ -364,6 +407,7 @@ export function resolveOutputTokenBudget(input: OutputTokenPolicyInput): Resolve
     routedFamily,
     input.phase,
     localProfile,
+    input.modelId,
   );
   const knownHardCap = getKnownHardCap(providerFamily, routedFamily, input.modelId);
 
@@ -436,6 +480,10 @@ export function classifyOutputTruncation(
   content: LLMContent[] | undefined,
 ): OutputTruncationClassification {
   const blocks = Array.isArray(content) ? content : [];
+  // A cut-off tool call is visible output, not exhausted reasoning.
+  if (blocks.some((block: Any) => block?.type === "tool_use")) {
+    return "visible_partial_output";
+  }
   const text = blocks
     .filter((block: Any) => block?.type === "text" && typeof block?.text === "string")
     .map((block: Any) => String(block.text))

@@ -28,15 +28,17 @@ import {
   ScheduledMessageStore,
   SkillStore,
   TaskSessionMetadataStore,
-  TaskAdmissionStore,
-  BrowserTaskCancelReceiptStore,
-  BrowserGitMutationReceiptStore,
   TaskEventRepository,
   TaskStore,
   WorkspacePermissionRuleStore,
   WorkspaceStore,
   WorktreeInfoStore,
 } from "./repositories";
+import {
+  BrowserGitMutationReceiptStore,
+  BrowserTaskCancelReceiptStore,
+  TaskAdmissionStore,
+} from "./browser-host-sql";
 import { ComposerDraftStore } from "./composer-draft-repository";
 import { TaskLabelStore } from "./TaskLabelRepository";
 import { DeviceProfileStore } from "./DeviceProfileRepository";

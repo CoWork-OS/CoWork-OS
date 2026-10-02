@@ -159,6 +159,12 @@ class FakeDb {
     if (normalized.includes("select * from everyday_agent_action_previews where id = ?")) {
       return this.previews.find((row) => row.id === args[0]);
     }
+    if (
+      normalized.includes("select preview_json from everyday_agent_action_previews where id = ?")
+    ) {
+      const row = this.previews.find((preview) => preview.id === args[0]);
+      return row ? { preview_json: row.preview_json } : undefined;
+    }
     if (normalized.includes("select count(*) as count from everyday_agent_action_previews")) {
       return { count: this.previews.length };
     }
@@ -515,6 +521,26 @@ describe("EverydayAgentService", () => {
     const revoked = await service.revokeCapability("browser");
     expect(revoked.profile.capabilitySettings.browser.enabled).toBe(false);
     expect(revoked.profile.revokedCapabilities).toContain("browser");
+  });
+
+  it("reads a stored preview's JSON without consulting admin policies", async () => {
+    await service.acceptConsent({ enabled: true, workspaceId: "ws-1" });
+    const preview = await service.previewAction({
+      title: "Schedule meeting",
+      action: "Create event on calendar",
+      capability: "calendar",
+      workspaceId: "ws-1",
+    });
+    policyMocks.loadPoliciesStrict.mockClear();
+
+    const json = await service.getActionPreviewJson(preview.id);
+    expect(JSON.parse(json ?? "null")).toMatchObject({
+      id: preview.id,
+      profileId: preview.profileId,
+      workspaceId: "ws-1",
+    });
+    expect(policyMocks.loadPoliciesStrict).not.toHaveBeenCalled();
+    await expect(service.getActionPreviewJson("missing")).resolves.toBeNull();
   });
 
   it("returns the same preview for duplicate side-effect proposals", async () => {

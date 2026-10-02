@@ -30,15 +30,17 @@ import type {
   ScheduledMessageStore,
   SkillStore,
   TaskSessionMetadataStore,
-  TaskAdmissionStore,
-  BrowserTaskCancelReceiptStore,
-  BrowserGitMutationReceiptStore,
   TaskEventRepository as TaskEventRepositoryStore,
   TaskStore,
   WorkspacePermissionRuleStore,
   WorkspaceStore,
   WorktreeInfoStore,
 } from "./repositories";
+import type {
+  BrowserGitMutationReceiptStore,
+  BrowserTaskCancelReceiptStore,
+  TaskAdmissionStore,
+} from "./browser-host-sql";
 import type { ComposerDraftStore } from "./composer-draft-repository";
 import type { TaskLabelStore } from "./TaskLabelRepository";
 import type { DeviceProfileStore } from "./DeviceProfileRepository";

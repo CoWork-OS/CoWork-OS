@@ -21,7 +21,6 @@ import {
   TaskRepository,
   WorkspaceRepository,
 } from "../../electron/database/repository-facades";
-import { TaskStore } from "../../electron/database/repositories";
 import { MCPSettingsManager } from "../../electron/mcp/settings";
 import { getCustomSkillLoader } from "../../electron/agent/custom-skill-loader";
 import { getSkillRegistry } from "../../electron/agent/skill-registry";
@@ -2422,7 +2421,6 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
   const templates = new AgentTemplateService();
   const agentBuilder = options.agentBuilderService || new AgentBuilderService();
   const imageProfiles = options.imageGenProfileService || new ImageGenProfileService();
-  const taskStore = new TaskStore(db);
   const definitions: BrowserDesktopDefinitions = {};
   definitions.forkTaskSession = {
     capability: "tasks.create",
@@ -2533,14 +2531,14 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
         return { id: task.id };
       },
       sendTaskMessage: async (params) => {
-        if (!taskStore.findById(params.taskId))
+        if (!(await taskRepository.findById(params.taskId)))
           throw new Error(`Target task not found: ${params.taskId}`);
         return agentDaemon.sendMessage(params.taskId, params.message, undefined, undefined, {
           agentConfigOverride: params.agentConfig,
         });
       },
-      getTaskSnapshot: (taskId) => {
-        const task = taskStore.findById(taskId);
+      getTaskSnapshot: async (taskId) => {
+        const task = await taskRepository.findById(taskId);
         return task
           ? {
               status: task.status,
@@ -4306,7 +4304,7 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
             "A target task is required for a follow-up job.",
             400,
           );
-        const task = taskStore.findById(job.targetTaskId);
+        const task = await taskRepository.findById(job.targetTaskId);
         if (!task || task.workspaceId !== job.workspaceId)
           throw new WebApplicationError(
             "FORBIDDEN",
@@ -4553,7 +4551,7 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
           );
         if (input.action.config.runMode === "thread_follow_up") {
           const targetTaskId = input.action.config.targetTaskId;
-          const task = targetTaskId ? taskStore.findById(targetTaskId) : null;
+          const task = targetTaskId ? await taskRepository.findById(targetTaskId) : null;
           if (!task || task.workspaceId !== input.workspaceId)
             throw new WebApplicationError(
               "FORBIDDEN",
@@ -4592,7 +4590,7 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
           );
         if (next.action.config.runMode === "thread_follow_up") {
           const targetTaskId = next.action.config.targetTaskId;
-          const task = targetTaskId ? taskStore.findById(targetTaskId) : null;
+          const task = targetTaskId ? await taskRepository.findById(targetTaskId) : null;
           if (!task || task.workspaceId !== next.workspaceId)
             throw new WebApplicationError(
               "FORBIDDEN",
@@ -4853,14 +4851,13 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
     memory,
     async ([request]) => {
       const input = validateEverydayApprove(request);
-      const row = db
-        .prepare("SELECT preview_json FROM everyday_agent_action_previews WHERE id = ?")
-        .get(input.previewId) as { preview_json?: string } | undefined;
-      if (!row?.preview_json)
+      // Read through the services unit so the lookup runs off the host thread.
+      const previewJson = await everyday.getActionPreviewJson(input.previewId);
+      if (!previewJson)
         throw new WebApplicationError("INVALID_REQUEST", "Everyday Agent preview not found.", 400);
       let preview: RecordLike;
       try {
-        preview = JSON.parse(row.preview_json) as RecordLike;
+        preview = JSON.parse(previewJson) as RecordLike;
       } catch {
         throw new Error("Everyday Agent preview is unreadable.");
       }

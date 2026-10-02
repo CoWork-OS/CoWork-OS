@@ -9,6 +9,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/database/browser-(host|replay)-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Browser host stores and reads: idempotent task admission, task-cancel and Git-mutation receipts (browser-host-sql), and the timeline replay and artifact page statements behind TaskEventRepository and ArtifactStore (browser-replay-sql). Storage-domain units behind the async facades in repository-facades.ts; nothing calls them on the host outside a unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/telemetry/pulse-store-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Pulse transaction groups: worker when settings are routed there, host transaction otherwise.",

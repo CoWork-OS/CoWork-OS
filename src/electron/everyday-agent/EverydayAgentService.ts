@@ -618,6 +618,14 @@ export class EverydayAgentStore {
     return { profile: next, compiledPolicy: this.compilePolicy(next) };
   }
 
+  /** A stored preview's raw JSON, or `null` when there is none. Read-only. */
+  getActionPreviewJson(previewId: string): string | null {
+    const row = this.db
+      .prepare("SELECT preview_json FROM everyday_agent_action_previews WHERE id = ?")
+      .get(previewId) as { preview_json?: unknown } | undefined;
+    return typeof row?.preview_json === "string" && row.preview_json ? row.preview_json : null;
+  }
+
   previewAction(input: EverydayActionPreviewInput): EverydayActionPreview {
     if (!input || typeof input.title !== "string" || typeof input.action !== "string") {
       throw new Error("Action preview requires a title and action");

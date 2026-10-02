@@ -6,8 +6,8 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1507,
-    "getDatabase": 130,
+    "prepare": 1524,
+    "getDatabase": 132,
     "runtimeImport": 50
   },
   "files": {
@@ -23,7 +23,7 @@
       "getDatabase": 1
     },
     "src/daemon/main.ts": {
-      "getDatabase": 9
+      "getDatabase": 10
     },
     "src/electron/acp/acp-sql.ts": {
       "prepare": 5
@@ -176,6 +176,12 @@
     "src/electron/database/async/statement-commands.ts": {
       "prepare": 1
     },
+    "src/electron/database/browser-host-sql.ts": {
+      "prepare": 9
+    },
+    "src/electron/database/browser-replay-sql.ts": {
+      "prepare": 5
+    },
     "src/electron/database/composer-draft-repository.ts": {
       "prepare": 12,
       "runtimeImport": 1
@@ -199,7 +205,7 @@
       "prepare": 3
     },
     "src/electron/database/repositories.ts": {
-      "prepare": 283,
+      "prepare": 285,
       "runtimeImport": 1
     },
     "src/electron/database/schema.ts": {
@@ -245,7 +251,7 @@
       "prepare": 25
     },
     "src/electron/everyday-agent/EverydayAgentService.ts": {
-      "prepare": 21
+      "prepare": 22
     },
     "src/electron/file-hub/file-hub-sql.ts": {
       "prepare": 2
@@ -288,7 +294,7 @@
       "prepare": 1
     },
     "src/electron/main.ts": {
-      "getDatabase": 36
+      "getDatabase": 37
     },
     "src/electron/managed/managed-sql.ts": {
       "prepare": 15

@@ -10,7 +10,7 @@ import type {
   TaskAdmissionMediaMetadata,
   TaskAdmissionReceiptLookup,
   TaskAdmissionStoreOutcome,
-} from "../database/repositories";
+} from "../database/browser-host-sql";
 
 const MAX_OPERATION_KEY_LENGTH = 200;
 const MAX_CANONICAL_PAYLOAD_LENGTH = 4_000_000;

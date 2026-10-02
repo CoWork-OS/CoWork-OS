@@ -50,6 +50,11 @@ export const EVERYDAY_AGENT_UNITS = {
     readonly: false,
     context: policiesArg,
   }),
+  // Admin policies are not consulted; callers pass null.
+  everydayAgent_getActionPreviewJson: contextStoreUnit(everydayAgentStore, "getActionPreviewJson", {
+    readonly: true,
+    context: policiesArg,
+  }),
   everydayAgent_previewAction: contextStoreUnit(everydayAgentStore, "previewAction", {
     readonly: false,
     context: policiesArg,

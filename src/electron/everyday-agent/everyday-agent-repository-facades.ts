@@ -97,6 +97,11 @@ export class EverydayAgentService {
     return this.sql.unit("everydayAgent_clearData", [loadPoliciesStrict(), request]);
   }
 
+  /** A stored preview's raw JSON, or `null`. Does not consult the admin policies. */
+  getActionPreviewJson(previewId: string): Promise<string | null> {
+    return this.sql.unit("everydayAgent_getActionPreviewJson", [null, previewId]);
+  }
+
   previewAction(input: EverydayActionPreviewInput): Promise<EverydayActionPreview> {
     return this.sql.unit("everydayAgent_previewAction", [loadPoliciesStrict(), input]);
   }

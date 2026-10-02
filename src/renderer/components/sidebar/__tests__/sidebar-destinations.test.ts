@@ -7,6 +7,7 @@ import {
   getSidebarDestination,
   getSidebarRailLayout,
   getSidebarRailShortcutTargets,
+  isCustomSidebarRailOrder,
   isSidebarDestinationAvailable,
   moveSidebarDestination,
   readPinnedSidebarDestinations,
@@ -125,6 +126,23 @@ describe("rail shortcuts and reordering", () => {
       "automations",
     ]);
     expect(moveSidebarDestination([...list], "home", "ideas", "after")).toEqual([...list]);
+  });
+
+  it("treats an order matching the default as not custom", () => {
+    const context = { isCalm: false, isBrowserHost: false };
+    expect(isCustomSidebarRailOrder(context, [])).toBe(false);
+    expect(isCustomSidebarRailOrder(context, ["home", "inbox", "agents"])).toBe(false);
+    expect(isCustomSidebarRailOrder(context, ["inbox", "home"])).toBe(true);
+    // Calm's Library sits last by default, so naming it last isn't custom either.
+    expect(
+      isCustomSidebarRailOrder({ isCalm: true, isBrowserHost: false }, [
+        "home",
+        "inbox",
+        "agents",
+        "automations",
+        "library",
+      ]),
+    ).toBe(false);
   });
 
   it("shifts an item one place and stops at the ends", () => {

@@ -210,6 +210,19 @@ export function getSidebarRailLayout(
   return { rail, pinned, more };
 }
 
+/**
+ * Whether `railOrder` puts the fixed items in anything but the theme's default
+ * order. Moving items back where they started doesn't count.
+ */
+export function isCustomSidebarRailOrder(
+  context: SidebarDestinationContext,
+  railOrder: readonly SidebarDestinationId[],
+): boolean {
+  const ordered = getSidebarRailLayout(context, [], railOrder).rail;
+  const defaults = getSidebarRailLayout(context, []).rail;
+  return ordered.some((destination, index) => destination.id !== defaults[index]?.id);
+}
+
 /** Destinations ⌘1–⌘9 open: the rail top to bottom, pinned items included. */
 export const SIDEBAR_RAIL_SHORTCUT_LIMIT = 9;
 

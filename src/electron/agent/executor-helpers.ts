@@ -1589,6 +1589,10 @@ export class FileOperationTracker {
     if (!entry) {
       entry = { count: 0, lastReadTime: now, contentLength, windows: new Map() };
       this.readFiles.set(normalized, entry);
+    } else {
+      // Re-insert so the map stays ordered from least to most recently read.
+      this.readFiles.delete(normalized);
+      this.readFiles.set(normalized, entry);
     }
     entry.count++;
     entry.lastReadTime = now;
@@ -1889,21 +1893,22 @@ export class FileOperationTracker {
   getKnowledgeSummary(): string {
     const parts: string[] = [];
 
-    // List files that have been read
+    // The maps are in insertion order, so the most recent entries are at the end.
+    // List files that have been read (10 most recent, newest first)
     if (this.readFiles.size > 0) {
-      const files = Array.from(this.readFiles.keys()).slice(0, 10); // Limit to 10 most recent
+      const files = Array.from(this.readFiles.keys()).slice(-10).reverse();
       parts.push(`Files already read: ${files.join(", ")}`);
     }
 
     // List files that have been created
     if (this.createdFilePaths.size > 0) {
-      const created = Array.from(this.createdFilePaths.values()).slice(0, 10);
+      const created = Array.from(this.createdFilePaths.values()).slice(-10).reverse();
       parts.push(`Files created: ${created.join(", ")}`);
     }
 
     // List directories that have been explored
     if (this.directoryListings.size > 0) {
-      const dirs = Array.from(this.directoryListings.keys()).slice(0, 5);
+      const dirs = Array.from(this.directoryListings.keys()).slice(-5).reverse();
       parts.push(`Directories explored: ${dirs.join(", ")}`);
     }
 

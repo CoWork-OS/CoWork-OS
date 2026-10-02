@@ -524,6 +524,28 @@ const CLOUD_STORAGE_PROVIDER_MENTION_REGEX =
 const PLANNING_TURN_GUIDANCE_MAX_TOKENS = 3600;
 // Room the planning tool catalog keeps even when the other planning guidance is long.
 const PLANNING_TOOL_CATALOG_MIN_CHARS = 2500;
+
+// Step text that targets a web page and acts on it (fill a form, click, log in)
+// needs the browser interaction tools, not only navigation and page reading.
+const WEB_PAGE_TARGET_PATTERN =
+  /\bhttps?:\/\/|\bwww\.|\blocalhost\b|\b[a-z0-9-]+\.(?:com|org|net|io|dev|app|ai|co|edu|gov)\b|\b(?:website|web\s*page|web\s*app|web\s*site|browser|portal)\b|\b(?:contact|signup|sign-up|login|log-in|registration|checkout|web|online)\s+form\b/i;
+const WEB_PAGE_INTERACTION_PATTERN =
+  /\b(?:click|tap|fill(?:\s+(?:in|out))?|type|enter|submit|press|select|choose|tick|toggle|log\s*in|sign\s*in|sign\s*up|register|upload|scroll|hover)\b/i;
+const WEB_PAGE_INTERACTION_TOOLS = [
+  "browser_snapshot",
+  "browser_click",
+  "browser_fill",
+  "browser_type",
+  "browser_press",
+  "browser_select",
+];
+const REPO_STATUS_INTENT_PATTERN =
+  /\bgit\s+(?:status|diff|log|show|changes?)\b|\b(?:uncommitted|unstaged|staged)\s+(?:changes?|files?|edits?)\b|\bworking\s+(?:tree|copy)\b|\b(?:review|show|inspect|check|summari[sz]e|list)\s+(?:the\s+)?(?:diff|changes|changed\s+files)\b|\bwhat\s+(?:has\s+)?changed\b/i;
+
+function hasWebPageInteractionIntent(text: string): boolean {
+  return WEB_PAGE_TARGET_PATTERN.test(text) && WEB_PAGE_INTERACTION_PATTERN.test(text);
+}
+
 const EXPLICIT_CHAT_MAX_OUTPUT_TOKENS = 48_000;
 const EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW = 16;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_MESSAGE_COUNT = 24;
@@ -17692,7 +17714,7 @@ ${transcript}
     const analysis = new Set<string>([
       ...always,
       "parse_document",
-      "read_multiple_files",
+      "read_files",
       "web_search",
       "web_fetch",
       "http_request",
@@ -17752,6 +17774,13 @@ ${transcript}
         : stepKind === "verification"
           ? verification
           : analysis;
+    if (stepKind === "verification" && taskDomain === "code") {
+      // Verification steps have no recovery step of their own: a failed check is
+      // retried once and the step context asks the model to fix what it finds,
+      // which run_command's guidance ("fix the cause, then rerun") also expects.
+      base.add("edit_file");
+      base.add("write_file");
+    }
 
     const nativeGuiGuard = this.getNativeGuiGuardForStepText(stepText);
     if (nativeGuiGuard.nativeGuiIntent) {
@@ -17816,7 +17845,40 @@ ${transcript}
       base.add("channel_list_chats");
       base.add("channel_history");
     }
+    // Intent-scoped additions. Names that are not registered or not permitted
+    // are dropped later, when the allowlist is intersected with available tools.
+    if (hasWebPageInteractionIntent(stepText || "")) {
+      for (const toolName of WEB_PAGE_INTERACTION_TOOLS) base.add(toolName);
+    }
+    if (this.stepTextInvokesSkill(stepText || "")) {
+      base.add("Skill");
+    }
+    if (REPO_STATUS_INTENT_PATTERN.test(String(stepText || ""))) {
+      base.add("git_status");
+      base.add("git_diff");
+    }
     return base;
+  }
+
+  /** True when the text explicitly asks to use a model-invocable skill by id or name. */
+  private stepTextInvokesSkill(stepText: string): boolean {
+    const normalizedText = this.normalizeSkillInvocationQuery(stepText);
+    if (!normalizedText) return false;
+    try {
+      const skillLoader = getCustomSkillLoader() as Any;
+      if (typeof skillLoader?.listModelInvocableSkills !== "function") return false;
+      const skills: Any[] = skillLoader.listModelInvocableSkills();
+      return skills.some((skill) =>
+        [skill?.id, skill?.name].some(
+          (target) =>
+            typeof target === "string" &&
+            target.trim().length > 0 &&
+            this.matchesExplicitSkillInvocationTarget(normalizedText, target),
+        ),
+      );
+    } catch {
+      return false;
+    }
   }
 
   private hasMessagingChannelIntent(text: string): boolean {
@@ -18082,7 +18144,6 @@ ${transcript}
         "parse_document",
         "read_file",
         "read_files",
-        "read_multiple_files",
         "get_file_info",
         "count_text",
         "text_metrics",
@@ -22093,6 +22154,8 @@ You are continuing a previous conversation. The context from the previous conver
       } catch {
         // The read manifest is still useful when the file is no longer available.
       }
+      // Re-insert so the tracker stays ordered from least to most recently read.
+      this.filesReadTracker.delete(normalizeTrackedPath(filePath));
       this.filesReadTracker.set(normalizeTrackedPath(filePath), entry);
     };
     if (toolName === "read_file") {
@@ -22119,7 +22182,8 @@ You are continuing a previous conversation. The context from the previous conver
 
   private getFilesReadSummary(maxEntries = 30): string {
     if (this.filesReadTracker.size === 0) return "";
-    const entries = Array.from(this.filesReadTracker.entries()).slice(-maxEntries);
+    // Most recent reads first.
+    const entries = Array.from(this.filesReadTracker.entries()).slice(-maxEntries).reverse();
     return entries
       .map(([filePath, info]) => `- ${filePath} (step: ${info.step}, ${info.sizeBytes}B)`)
       .join("\n");
@@ -31029,7 +31093,7 @@ Return ONLY a JSON object:
       // Add accumulated knowledge from previous steps (discovered files, directories, etc.)
       const knowledgeSummary = this.fileOperationTracker.getKnowledgeSummary();
       if (knowledgeSummary) {
-        stepContext += `\n\nKNOWLEDGE FROM PREVIOUS STEPS (use this instead of re-reading/re-listing):\n${knowledgeSummary}`;
+        stepContext += `\n\nKNOWLEDGE FROM PREVIOUS STEPS (paths only; file contents from earlier steps are not in this step's context):\n${knowledgeSummary}`;
       }
 
       const toolResultSummary = this.getRecentToolResultSummary();
@@ -31057,14 +31121,15 @@ Return ONLY a JSON object:
         }
       }
 
-      // Inject files-read manifest so the agent knows which files have already been loaded.
-      // This prevents redundant individual read_file calls across steps.
+      // Each step starts with a fresh message list, so earlier reads are only a
+      // manifest here: the model must re-read whatever it needs to rely on or edit.
       if (completedSteps.length > 0 && this.filesReadTracker.size > 0) {
         const filesReadSummary = this.getFilesReadSummary();
         if (filesReadSummary) {
           stepContext +=
-            `\n\nFILES ALREADY READ (previous steps — do NOT re-read these; their content is in context or scratchpad. ` +
-            `Use read_files with glob patterns for batch reading when you need multiple files):\n` +
+            `\n\nPREVIOUSLY READ FILES (newest first; their contents are NOT in this step's context — ` +
+            `re-read the exact ranges you need before relying on or editing them, and use read_files ` +
+            `with glob patterns to batch several files):\n` +
             filesReadSummary;
         }
       }
@@ -31123,6 +31188,10 @@ Return ONLY a JSON object:
         }
         if (isLastStep) {
           stepContext += `- This is the FINAL step.\n`;
+        }
+        if (this.getEffectiveTaskDomain() === "code") {
+          // Code verification steps can edit files (see buildStepToolAllowlist).
+          stepContext += `- If a check fails because of a defect in this task's own changes, fix it, rerun the check, and report the final result.\n`;
         }
         if (this.lastNonVerificationOutput) {
           stepContext += `\n\nMOST RECENT DELIVERABLE (use this for verification):\n${this.lastNonVerificationOutput}`;

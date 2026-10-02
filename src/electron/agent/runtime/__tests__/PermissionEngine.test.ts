@@ -950,6 +950,57 @@ describe("PermissionEngine", () => {
       expect(result.reason.type).toBe("other");
     });
 
+    it.each(['grep -rn "fetch(" src', "rg axios src", 'git commit -m "fix: retry fetch on 503"'])(
+      "does not treat the local command %s as a network boundary",
+      (command) => {
+        for (const accessNetworkMode of ["on-request", "disabled"] as const) {
+          const result = evaluate({
+            workspace: namedWorkspace({ accessNetworkMode }),
+            toolName: "run_command",
+            approvalType: "run_command",
+            command,
+            mode: "default",
+          });
+          expect(result.decision, accessNetworkMode).toBe("allow");
+        }
+      },
+    );
+
+    it("classifies the command as written, not with its newlines collapsed", () => {
+      // Collapsing whitespace merged the heredoc body into the command line, so
+      // a documentation URL written to a file looked like network access.
+      const result = evaluate({
+        workspace: namedWorkspace({ accessNetworkMode: "disabled" }),
+        toolName: "run_command",
+        approvalType: "run_command",
+        command: [
+          "cat > notes/setup.md <<'EOF'",
+          "Clone from https://github.com/CoWork-OS/CoWork-OS.git",
+          "EOF",
+        ].join("\n"),
+        mode: "default",
+      });
+
+      expect(result.decision).toBe("allow");
+    });
+
+    it("keeps shell commands that reach the network behind the network boundary", () => {
+      const evaluateCurl = (accessNetworkMode: "on-request" | "disabled") =>
+        evaluate({
+          workspace: namedWorkspace({ accessNetworkMode }),
+          toolName: "run_command",
+          approvalType: "run_command",
+          command: "curl https://example.com",
+          mode: "default",
+        });
+
+      expect(evaluateCurl("on-request").decision).toBe("ask");
+      expect(evaluateCurl("disabled")).toMatchObject({
+        decision: "deny",
+        reason: { type: "workspace_capability", capability: "network" },
+      });
+    });
+
     it("treats user and automatic reviewers identically for the same non-read boundary", () => {
       const user = evaluate({
         workspace: namedWorkspace({ accessReviewer: "user" }),

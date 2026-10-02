@@ -1127,9 +1127,8 @@ export class PermissionEngine {
   private static buildFacts(request: PermissionEngineRequest): PermissionFacts {
     const toolName = canonicalizeToolName(String(request.toolName || "").trim());
     const approvalType = request.approvalType;
-    const normalizedCommand = normalizeCommandPrefix(
-      request.command || this.extractCommand(request.toolInput),
-    );
+    const rawCommand = request.command || this.extractCommand(request.toolInput);
+    const normalizedCommand = normalizeCommandPrefix(rawCommand);
     const normalizedPath = this.normalizePathAgainstWorkspace(
       request.workspace.path,
       request.path || this.extractPath(request.toolInput),
@@ -1199,7 +1198,9 @@ export class PermissionEngine {
       NETWORK_TOOL_NAMES.has(toolName) ||
       (toolName === "http_request" && isHttpRequestReadOnly) ||
       isCodeExecutionNetworkAccess ||
-      (isShell && isLikelyNetworkShellCommand(normalizedCommand));
+      // Classify the command as written, as ShellTools does: collapsing its
+      // newlines merges heredoc bodies and separate commands into one line.
+      (isShell && isLikelyNetworkShellCommand(rawCommand));
     const isNonWorkspaceInteraction = this.isNonWorkspaceInteractionTool(toolName, approvalType);
     const isMcp = toolName.startsWith("mcp_");
     const isMutatingTool = this.isMutatingTool(toolName);

@@ -19099,6 +19099,13 @@ You are continuing a previous conversation. The context from the previous conver
    * it can be answered from the completed task context. This prevents a user
    * asking "What does that command do?" from accidentally launching a command
    * or reopening a shell approval dialog.
+   *
+   * The chat path has no tools, a small output budget, and a truncated history,
+   * so it is reserved for genuine questions about finished work. A message that
+   * asks for work in any sentence ("Do it", "If not, add it."), answers an
+   * offer from the previous reply, or asks about the current state of the work
+   * ("Why is the test still failing?", "Is it working now?") stays on the
+   * tool-enabled follow-up path.
    */
   private isKnownContextInformationalFollowUp(message: string): boolean {
     const lower = String(message || "")
@@ -19112,28 +19119,120 @@ You are continuing a previous conversation. The context from the previous conver
       /^(?:can|could|would)\s+you\s+explain\b/.test(lower);
     if (!informationalLead) return false;
 
+    // "Want me to apply the fix?" turns the next message into an answer to an
+    // offer of work, even when the user phrases it as a question.
+    if (this.previousReplyInvitesAction()) return false;
+
+    // An explicit work request in any sentence wins over the interrogative lead.
+    if (this.followUpRequestsWork(lower)) return false;
+
     // These cues mean the user is asking for new evidence rather than an
     // explanation of the already-completed task. Keep the normal tool-enabled
     // follow-up path for them.
     const newEvidenceCue =
-      /\b(?:today|latest|current|recent|search|look\s+up|find|fetch|read|open|inspect|review|file|folder|directory|workspace|repository|repo|readme|source|url|website|webpage|\.json|\.md|\.txt|\.csv|\.pdf)\b/.test(
+      /\b(?:today|latest|current|recent|search|look\s+up|find|fetch|read|open|inspect|review|file|folder|directory|workspace|repository|repo|readme|source|url|website|webpage|\.json|\.md|\.txt|\.csv|\.pdf|\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|rb|php|cs|swift|ya?ml|toml|lock|log|env|sh|sql|css|html))\b/.test(
         lower,
       );
     if (newEvidenceCue) return false;
 
-    // An explicit imperative request wins over the interrogative heuristic.
+    return !this.followUpAsksAboutWorkState(lower);
+  }
+
+  /** Whether the latest reply ended by asking a question or offering more work. */
+  private previousReplyInvitesAction(): boolean {
+    return [this.lastNonVerificationOutput, this.lastAssistantOutput].some((output) => {
+      const tail = String(output || "")
+        .trim()
+        .slice(-400)
+        .toLowerCase();
+      if (!tail) return false;
+      if (/\?[\s)\]*_`'"’”]*$/.test(tail)) return true;
+      return /\b(?:want\s+me\s+to|would\s+you\s+like\s+me\s+to|do\s+you\s+want\s+me\s+to|should\s+i|shall\s+i|let\s+me\s+know\s+if\s+you(?:['’]d|\s+would)?\s+(?:like|want)|i\s+can\s+(?:also\s+)?(?:go\s+ahead|apply|fix|add|update|implement|run|make|create|change|write))\b/.test(
+        tail,
+      );
+    });
+  }
+
+  /**
+   * Detect a request for work in any sentence of a follow-up: a leading
+   * imperative ("Do the same for the remaining files", "If not, add it."), a
+   * modal request ("Can you run npm test?"), a suggestion ("How about adding
+   * tests?"), or an imperative coordinated with an explanation ("Explain and
+   * fix the lint errors").
+   */
+  private followUpRequestsWork(lower: string): boolean {
+    const workVerb =
+      "(?:do|fix|add|apply|make|change|update|try|check|use|run|implement|remove|rename|continue|proceed|retry|go\\s+ahead|create|write|edit|delete|install|build|deploy|refactor|move|replace|revert|undo|commit|push|test|verify|debug|investigate|look\\s+(?:at|into)|show|rerun|re-run|redo|finish|handle|resolve|clean\\s+up|upgrade|convert|migrate|rewrite|extend|enable|disable|keep|start|stop|restart|open|find|search)";
+    const leadingWorkVerb = new RegExp(`^${workVerb}\\b`);
+    const modalWorkRequest = new RegExp(
+      `\\b(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?(?:also\\s+)?${workVerb}\\b`,
+    );
+    const coordinatedWorkVerb = new RegExp(
+      `\\b(?:and|then)\\s+(?:then\\s+)?(?:please\\s+)?(?:also\\s+)?${workVerb}\\b`,
+    );
+    const sentences = lower
+      .split(/(?<=[.!?;])\s+|\n+/)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean);
+    for (const sentence of sentences) {
+      const clause = sentence.replace(
+        /^(?:(?:and|also|then|so|now|ok(?:ay)?|alright|great|cool|yes|yeah|yep|sure|please|pls|just|if\s+(?:not|so|yes|needed|necessary|possible)|otherwise|in\s+that\s+case)\b[\s,]*)+/,
+        "",
+      );
+      if (leadingWorkVerb.test(clause)) {
+        // "Do we use Redis?" is a question and "Do not ..." is a constraint;
+        // any other leading "do" is the imperative ("Do it", "Do the same").
+        const nonImperativeDo =
+          /^do\b/.test(clause) &&
+          (/\?\s*$/.test(clause) || /^do\s+(?:you|we|i|they|not)\b/.test(clause));
+        if (!nonImperativeDo) return true;
+      }
+      if (/^(?:how|what)\s+about\b/.test(clause)) return true;
+      if (modalWorkRequest.test(clause)) return true;
+      if (/^(?:explain|tell\s+me|show\s+me|describe)\b/.test(clause)) {
+        if (coordinatedWorkVerb.test(clause)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Status questions about the work ("Is it working now?", "Which tests fail?")
+   * need fresh evidence. A question about what a command itself does ("What does
+   * the test command actually run?") can still be answered from context.
+   */
+  private followUpAsksAboutWorkState(lower: string): boolean {
     if (
-      /^(?:please\s+|go\s+ahead\s+|just\s+)?(?:run|execute|install|build|deploy|create|launch|start|set\s+up|setup)\b/.test(
-        lower,
-      ) ||
-      /^(?:can|could|would)\s+you\s+(?:run|execute|install|build|deploy|create|launch|start)\b/.test(
+      /\b(?:fail(?:s|ed|ing|ure|ures)?|errors?|still|broken|broke|break(?:s|ing)?|crash(?:es|ed|ing)?|now|anymore)\b/.test(
         lower,
       )
     ) {
-      return false;
+      return true;
     }
-
-    return true;
+    if (
+      /\bwork(?:s|ed|ing)?\b/.test(lower) &&
+      !/^how\s+(?:does|do|did|would|will|should)\b[^?]*\bwork\s*\??$/.test(lower)
+    ) {
+      return true;
+    }
+    if (
+      /\b(?:other|remaining)\s+(?:places?|files?|spots?|instances?|occurrences?|callers?|usages?|components?|modules?|tests?|endpoints?|pages?)\b|\banywhere\s+else\b|\belsewhere\b/.test(
+        lower,
+      )
+    ) {
+      return true;
+    }
+    // Present-tense questions about the user's own project ask about its
+    // current contents ("Do we use Redis?"), not about the finished task.
+    if (/^(?:do|does|are|is|have|has)\s+(?:we|our)\b/.test(lower)) return true;
+    if (/\b(?:tests?|builds?|lint|linter|logs?|coverage|ci)\b/.test(lower)) {
+      const asksWhatSomethingDoes =
+        /^what\s+(?:does|do|did|would|will)\s+.+?\s+(?:actually\s+|really\s+|exactly\s+)?(?:do|run|mean|cover|check|contain|include)\s*\??$/.test(
+          lower,
+        );
+      if (!asksWhatSomethingDoes) return true;
+    }
+    return false;
   }
 
   private followUpRequiresCanvasAction(message: string): boolean {

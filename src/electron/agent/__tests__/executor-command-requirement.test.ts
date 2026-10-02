@@ -237,3 +237,73 @@ describe("TaskExecutor command execution requirement detection", () => {
     expect(requires).toBe(true);
   });
 });
+
+describe("TaskExecutor known-context informational follow-up routing", () => {
+  const completedCodingSummary =
+    "I updated Header.tsx and ran the tests. Two parser tests are still failing in parser.test.ts.";
+
+  const isInformationalFollowUp = (message: string, lastOutput = completedCodingSummary) => {
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.getEffectiveTaskDomain = () => "code";
+    fakeThis.getEffectiveExecutionMode = () => "execute";
+    fakeThis.lastNonVerificationOutput = lastOutput;
+    fakeThis.lastAssistantOutput = lastOutput;
+    return (TaskExecutor as Any).prototype.isKnownContextInformationalFollowUp.call(
+      fakeThis,
+      message,
+    );
+  };
+
+  it.each([
+    "Do it",
+    "Do it.",
+    "Do the same for the remaining files",
+    "Why is the test still failing?",
+    "Why does the build still fail after your change?",
+    "Is it working now?",
+    "Which tests fail now?",
+    "What's the coverage now?",
+    "What does the build log say?",
+    "Are there other places that need the same fix?",
+    "What about the mobile layout? Fix that too.",
+    "How about adding unit tests for the parser as well?",
+    "Does the API handle pagination? If not, add it.",
+    "Is there a memory leak in the worker? Please check.",
+    "Where is the config loaded? Change it to use env vars.",
+    "Explain and fix the remaining lint errors",
+    "Tell me what broke and then update the snapshot.",
+    "Do we use Redis for the session cache?",
+    "Can you run npm test now?",
+  ])("keeps work and work-status follow-ups on the tool-enabled path: %s", (message) => {
+    expect(isInformationalFollowUp(message)).toBe(false);
+  });
+
+  it.each([
+    "What does the test command actually run?",
+    "Why did you choose a debounce instead of a throttle?",
+    "What does that flag mean?",
+    "Explain the change you made to the header",
+    "How does the retry logic work?",
+    "Can you explain the difference between the two approaches?",
+    "Which of the two options is faster?",
+  ])("answers genuine questions about the finished work from context: %s", (message) => {
+    expect(isInformationalFollowUp(message)).toBe(true);
+  });
+
+  it.each([
+    [
+      "I fixed the header. Want me to apply the same fix to the footer?",
+      "What would that involve?",
+    ],
+    [
+      "The parser now handles empty input. I can also add tests for it. Let me know if you'd like me to.",
+      "Why would we need them?",
+    ],
+    ["Should I go ahead and update the remaining components?", "Is that safe?"],
+  ])(
+    "does not answer from chat after the previous reply offered work (%s)",
+    (lastOutput, message) => {
+      expect(isInformationalFollowUp(message, lastOutput)).toBe(false);
+    },
+  );
+});

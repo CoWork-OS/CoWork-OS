@@ -200,6 +200,7 @@ import {
 } from "../security/access-profile-paths";
 import { IntentRouter } from "./strategy/IntentRouter";
 import { TaskStrategyService } from "./strategy/TaskStrategyService";
+import { asksAboutProjectBehavior, referencesOwnWorkspace } from "./strategy/code-signals";
 import { CitationTracker } from "./citation/CitationTracker";
 import { WorkflowDecomposer, workflowPhaseTypeToCapability } from "./strategy/WorkflowDecomposer";
 import { scorePlanStepIntentAlignment, scoreStepIntentOverlap } from "./step-intent-alignment";
@@ -27565,11 +27566,38 @@ You are continuing a previous conversation. The context from the previous conver
 
   private shouldEmitAnswerFirst(): boolean {
     const directResponseMode = this.getTaskStrategySnapshot()?.directResponseMode;
-    if (directResponseMode === "terminal_quick_answer") return true;
     if (directResponseMode === "brief_status_then_execute" || directResponseMode === "companion") {
       return false;
     }
-    return /\banswer_first=true\b/i.test(String(this.task?.prompt || ""));
+    const answerFirstRequested =
+      directResponseMode === "terminal_quick_answer" ||
+      /\banswer_first=true\b/i.test(String(this.task?.prompt || ""));
+    return answerFirstRequested && !this.answerFirstNeedsWorkspaceEvidence();
+  }
+
+  /**
+   * The answer-first reply is written without tools and the short-circuits then
+   * finalize it as the task result. A question about the user's own project
+   * ("Where is the rate limiter configured?", "Is our password hashing secure
+   * enough?") would get an answer about code that was never read, so it takes
+   * the normal read-only analysis path instead. Temporary workspaces have no
+   * project to read and keep the fast path for general-knowledge questions.
+   */
+  private answerFirstNeedsWorkspaceEvidence(): boolean {
+    const workspace = this.workspace;
+    if (!workspace || workspace.isTemp || isTempWorkspaceId(String(workspace.id || ""))) {
+      return false;
+    }
+    const prompt = this.getContractPrompt();
+    if (referencesOwnWorkspace(prompt)) return true;
+    if (this.getEffectiveTaskDomain() !== "code" && !asksAboutProjectBehavior(prompt)) {
+      return false;
+    }
+    const signals = this.getWorkspaceSignals();
+    return (
+      !signals.readFailed &&
+      (signals.hasProjectMarkers || signals.hasCodeFiles || signals.hasAppDirs)
+    );
   }
 
   private shouldPreferBestEffortCompletion(): boolean {

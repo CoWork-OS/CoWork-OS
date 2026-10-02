@@ -1320,3 +1320,112 @@ describe("TaskExecutor chat mode", () => {
     expect(executor.finalizeTaskBestEffort).toHaveBeenCalledWith("summary");
   });
 });
+
+describe("TaskExecutor answer-first workspace grounding", () => {
+  const quickAnswer =
+    "Most likely Safari drops the session cookie because it is set as a third-party cookie; set SameSite=None; Secure and serve the auth endpoint from the same site.";
+
+  const createAnswerFirstExecutor = (
+    prompt: string,
+    options: { isTemp?: boolean; looksLikeProject?: boolean; taskDomain?: string } = {},
+  ) => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const taskDomain = options.taskDomain ?? "general";
+    executor.task = {
+      id: "answer-first",
+      title: prompt,
+      prompt,
+      rawPrompt: prompt,
+      createdAt: Date.now(),
+      agentConfig: {
+        executionMode: "plan",
+        executionModeSource: "strategy",
+        conversationMode: "hybrid",
+        taskIntent: "advice",
+        taskDomain,
+        taskStrategySnapshot: {
+          taskIntent: "advice",
+          conversationMode: "hybrid",
+          executionMode: "plan",
+          taskDomain,
+          directResponseMode: "terminal_quick_answer",
+          preflightGates: [],
+          workflowMode: "none",
+          confidence: 0.7,
+          overrides: [],
+        },
+      },
+    };
+    executor.workspace = {
+      id: options.isTemp ? "temp-workspace" : "ws-project",
+      path: "/workspace/project",
+      isTemp: options.isTemp === true,
+      permissions: { read: true, write: true, delete: false, network: true, shell: false },
+    };
+    const looksLikeProject = options.looksLikeProject ?? true;
+    executor.getWorkspaceSignals = vi.fn(() => ({
+      hasEntries: true,
+      hasProjectMarkers: looksLikeProject,
+      hasCodeFiles: looksLikeProject,
+      hasAppDirs: looksLikeProject,
+    }));
+    executor.hasDirectAnswerReady = vi.fn().mockReturnValue(true);
+    executor.getBestFinalResponseCandidate = vi.fn().mockReturnValue(quickAnswer);
+    executor.buildCompletionContract = vi.fn().mockReturnValue({
+      requiresExecutionEvidence: false,
+      requiresArtifactEvidence: false,
+      requiresVerificationEvidence: false,
+    });
+    executor.lastAssistantOutput = quickAnswer;
+    executor.lastNonVerificationOutput = quickAnswer;
+    return executor;
+  };
+
+  const answerFirstDecisions = (executor: Any) => ({
+    emit: (TaskExecutor as Any).prototype.shouldEmitAnswerFirst.call(executor),
+    afterAnswerFirst: (TaskExecutor as Any).prototype.shouldShortCircuitAfterAnswerFirst.call(
+      executor,
+    ),
+    simpleNonExecute: (TaskExecutor as Any).prototype.shouldShortCircuitSimpleNonExecuteAnswer.call(
+      executor,
+    ),
+  });
+
+  it.each([
+    ["Where is the rate limiter configured?", "general"],
+    ["Which of our API endpoints lack auth checks?", "code"],
+    ["Does this project support Node 22?", "code"],
+    ["Is our password hashing secure enough?", "general"],
+    ["Why does login fail on Safari?", "general"],
+    ["Why is the dashboard so slow to load?", "general"],
+    ["What does `parseConfig` return when the file is missing?", "code"],
+    ["Bu projede rate limiter nerede yapılandırılıyor?", "general"],
+  ])(
+    "does not quick-answer a question about the real project workspace: %s",
+    (prompt, taskDomain) => {
+      const executor = createAnswerFirstExecutor(prompt, { taskDomain });
+
+      expect(answerFirstDecisions(executor)).toEqual({
+        emit: false,
+        afterAnswerFirst: false,
+        simpleNonExecute: false,
+      });
+    },
+  );
+
+  it.each([
+    ["What is the capital of France?", { isTemp: false }],
+    ["How should I structure my week?", { isTemp: false }],
+    ["What is the capital of France?", { isTemp: true }],
+    ["Where is the rate limiter configured?", { isTemp: true }],
+    ["Why does login fail on Safari?", { isTemp: false, looksLikeProject: false }],
+  ])("keeps the quick-answer fast path for %s (%o)", (prompt, options) => {
+    const executor = createAnswerFirstExecutor(prompt, options);
+
+    expect(answerFirstDecisions(executor)).toEqual({
+      emit: true,
+      afterAnswerFirst: true,
+      simpleNonExecute: true,
+    });
+  });
+});

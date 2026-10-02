@@ -924,7 +924,7 @@ export class TaskExecutor {
   private csvArithmeticVerifier?: CsvArithmeticVerifier;
   private csvReportEvidenceVerifier?: CsvReportEvidenceVerifier;
   private activeBasePromptRoutingBlocks?: Set<BasePromptRoutingBlock>;
-  private workspaceGitInfo?: { isRepo: boolean };
+  private workspaceGitInfo?: { isRepo: boolean; branch?: string; detachedHead?: boolean };
   private lastWebFetchFailure: {
     timestamp: number;
     tool: "web_fetch" | "http_request";
@@ -16559,7 +16559,38 @@ ${transcript}
   }
 
   private buildExecutionWorkspaceContextPrompt(): string {
-    return `Workspace: ${this.workspace.path}`;
+    return [`Workspace: ${this.workspace.path}`, this.buildExecutionEnvironmentPrompt()]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  /**
+   * Host facts the model otherwise guesses (OS, run_command shell syntax, repository
+   * branch). They are stable for the task, so they live in the cached workspace section.
+   */
+  private buildExecutionEnvironmentPrompt(): string {
+    const platform = process.platform;
+    const shellEnabled = this.workspace.permissions.shell === true;
+    let environment: string;
+    if (platform === "win32") {
+      // Sandboxed commands may run in a Docker (Linux) container; host commands use
+      // PowerShell (shell-tools resolveShellForCommandExecution).
+      environment = shellEnabled
+        ? "Environment: Windows. run_command uses PowerShell on this machine (cmd.exe only if PowerShell is missing), so use PowerShell syntax and Windows paths, not bash; commands sandboxed in Docker run /bin/sh in a Linux container instead."
+        : "Environment: Windows.";
+    } else {
+      const osName = platform === "darwin" ? "macOS" : platform === "linux" ? "Linux" : platform;
+      environment = shellEnabled
+        ? `Environment: ${osName}. run_command uses a POSIX shell, so use sh-compatible syntax.`
+        : `Environment: ${osName}.`;
+    }
+    const git = this.task.worktreeBranch ? undefined : this.getWorkspaceGitInfo();
+    const gitLine = git?.branch
+      ? `Git: repository on branch "${git.branch}" at task start.`
+      : git?.detachedHead
+        ? "Git: repository with a detached HEAD at task start."
+        : "";
+    return [environment, gitLine].filter(Boolean).join("\n");
   }
 
   /**
@@ -16567,9 +16598,9 @@ ${transcript}
    * running `git` here could execute repository-configured hooks or filters outside
    * the sandbox and tool policy.
    */
-  private getWorkspaceGitInfo(): { isRepo: boolean } {
+  private getWorkspaceGitInfo(): { isRepo: boolean; branch?: string; detachedHead?: boolean } {
     if (this.workspaceGitInfo) return this.workspaceGitInfo;
-    let info = { isRepo: false };
+    let info: { isRepo: boolean; branch?: string; detachedHead?: boolean } = { isRepo: false };
     try {
       const gitPath = path.join(this.workspace.path, ".git");
       if (
@@ -16578,9 +16609,18 @@ ${transcript}
         fs.existsSync(gitPath)
       ) {
         info = { isRepo: true };
+        // Worktrees and submodules use a `.git` file pointing at a git dir that is
+        // usually outside the workspace; only a plain `.git` directory is read.
+        const headPath = path.join(gitPath, "HEAD");
+        if (fs.statSync(gitPath).isDirectory() && this.canReadWorkspacePath(headPath)) {
+          const head = fs.readFileSync(headPath, "utf8").trim();
+          const branch = /^ref:\s*refs\/heads\/([\w./-]{1,100})$/.exec(head)?.[1];
+          if (branch) info.branch = branch;
+          else if (/^[0-9a-f]{40,64}$/i.test(head)) info.detachedHead = true;
+        }
       }
     } catch {
-      // Best-effort context; treat unreadable workspaces as non-repositories.
+      // Best-effort context; leave unknown repository details out of the prompt.
     }
     this.workspaceGitInfo = info;
     return info;

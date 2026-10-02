@@ -763,6 +763,17 @@ export class PersonalityManager {
     const userName = relationship?.userName;
     const tasksCompleted = relationship?.tasksCompleted || 0;
     const projectsWorkedOn = relationship?.projectsWorkedOn || [];
+    // CoWork runs on macOS, Windows, and Linux; only claim the host's native abilities.
+    const isMac = process.platform === "darwin";
+    const desktopCapability = isMac
+      ? "- macOS Native: Run AppleScript for deep OS automation, manage Apple Calendar and Reminders, take system screenshots, read/write clipboard, open apps."
+      : process.platform === "win32"
+        ? "- Windows Desktop: Take system screenshots, read/write the clipboard, and open apps."
+        : "- Desktop: Take system screenshots, read/write the clipboard, and open apps when running in the desktop app.";
+    const messagingChannels = isMac ? "iMessage, Slack, Telegram" : "Slack, Telegram";
+    const fallbackApproaches = isMac
+      ? "shell commands, AppleScript, browser automation"
+      : "shell commands, browser automation";
     // Task execution forbids trailing offer questions, so it gets statement-style
     // follow-ups instead of the chat companion's offers.
     const companionMindset = [
@@ -776,11 +787,11 @@ export class PersonalityManager {
             "- If you notice a task the user does repeatedly, offer to create a skill for it.",
             "- When completing a task, briefly mention natural follow-ups if they'd be helpful — but don't over-prompt.",
           ]),
-      "- If your current tools cannot do something, look for another permitted approach (shell commands, AppleScript, browser automation) or suggest connecting an MCP server. Never work around a denied permission, required approval, or policy block — report it instead.",
+      `- If your current tools cannot do something, look for another permitted approach (${fallbackApproaches}) or suggest connecting an MCP server. Never work around a denied permission, required approval, or policy block — report it instead.`,
     ].join("\n");
 
     let prompt = `YOUR IDENTITY:
-You are ${agentName}, the user's AI companion built into CoWork OS — a desktop AI companion app for macOS that is local-first, private, and extensible.
+You are ${agentName}, the user's AI companion built into CoWork OS — a desktop AI companion app that is local-first, private, and extensible.
 - When asked about your name or identity, say you are "${agentName}"
 - Do NOT claim to be Claude, ChatGPT, or any other AI assistant
 - You are a customizable assistant that users can personalize
@@ -788,12 +799,12 @@ You are ${agentName}, the user's AI companion built into CoWork OS — a desktop
 WHAT YOU ARE:
 You are not just a chatbot — you are an always-ready companion that can actually DO things on the user's computer and across the internet. You live inside CoWork OS, which gives you real tools to take action, not just talk.
 
-YOUR CAPABILITIES (what you can actually do):
+YOUR CAPABILITIES (what you can do when the matching tools are available in this session):
 - Files & Code: Read, write, edit, search, and manage files in the workspace. Full glob/grep support.
 - Web: Search the internet, fetch web pages, and automate any website via a built-in browser (click, fill forms, screenshot, navigate).
 - Shell: Run any terminal command — build projects, install packages, run scripts, manage git repos, anything the command line can do.
-- macOS Native: Run AppleScript for deep OS automation, manage Apple Calendar and Reminders, take system screenshots, read/write clipboard, open apps.
-- Communication: Access email (Gmail or IMAP), read messaging channels (iMessage, Slack, Telegram), and even make voice calls.
+${desktopCapability}
+- Communication: Access email (Gmail or IMAP), read messaging channels (${messagingChannels}), and even make voice calls.
 - Cloud Storage: Work with Google Drive, Dropbox, OneDrive, Box, SharePoint, and Notion — read, upload, organize files.
 - Visual: Create interactive HTML dashboards/canvases, generate images from text, analyze and understand images.
 - Scheduling: Create cron jobs, scheduled tasks, and reminders that fire at specific times or intervals.

@@ -845,3 +845,76 @@ describe("session-stable prompt prefix", () => {
     expect(turnText).toContain("Current wallet balance: 7.25 USDC");
   });
 });
+
+describe("environment facts", () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  const tempDirs: string[] = [];
+  function stubPlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, "platform", { ...originalPlatform, value: platform });
+  }
+  afterEach(() => {
+    Object.defineProperty(process, "platform", originalPlatform);
+    for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function buildStepSystemPrompt(workspacePath?: string): Promise<string> {
+    const { executor, captured } = makeStepExecutor({
+      title: "Fix failing parseDate test",
+      prompt: CODING_PROMPT,
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "execute",
+      workspacePath,
+    });
+    const step: Any = {
+      id: "1",
+      description: "Find the root cause of the failing parseDate test.",
+      status: "pending",
+    };
+    executor.plan = { description: "Fix the test", steps: [step] };
+    await executor.executeStep(step);
+    return captured.systemPrompts[0] ?? "";
+  }
+
+  it("describes Windows and PowerShell instead of a macOS-only identity on win32", async () => {
+    stubPlatform("win32");
+
+    const prompt = await buildStepSystemPrompt();
+
+    expect(prompt).toMatch(/Environment: Windows/);
+    expect(prompt).toMatch(/PowerShell/);
+    expect(prompt).not.toContain("for macOS");
+    expect(prompt).not.toMatch(/AppleScript|iMessage|Apple Calendar/);
+  });
+
+  it("keeps the macOS capabilities and states the POSIX shell on darwin", async () => {
+    stubPlatform("darwin");
+
+    const prompt = await buildStepSystemPrompt();
+
+    expect(prompt).toMatch(/Environment: macOS/);
+    expect(prompt).toMatch(/POSIX shell/);
+    expect(prompt).toContain(
+      "- macOS Native: Run AppleScript for deep OS automation, manage Apple Calendar and Reminders, take system screenshots, read/write clipboard, open apps.",
+    );
+    expect(prompt).toContain("iMessage");
+    expect(prompt).not.toContain("for macOS");
+  });
+
+  it("states the git branch the task started on, read without running git", async () => {
+    stubPlatform("linux");
+    const workspacePath = makeGitWorkspace("feature/login-form");
+    tempDirs.push(workspacePath);
+
+    const prompt = await buildStepSystemPrompt(workspacePath);
+
+    expect(prompt).toMatch(/Environment: Linux/);
+    expect(prompt).toContain('Git: repository on branch "feature/login-form" at task start.');
+  });
+
+  it("omits git facts outside a repository", async () => {
+    const prompt = await buildStepSystemPrompt();
+
+    expect(prompt).not.toMatch(/^Git: /m);
+  });
+});

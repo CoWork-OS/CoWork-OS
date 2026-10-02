@@ -550,6 +550,25 @@ describe("PersonalityManager - agent name", () => {
       }
     });
 
+    it("describes the host platform instead of always claiming macOS", () => {
+      const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+      try {
+        Object.defineProperty(process, "platform", { ...originalPlatform, value: "win32" });
+        const windowsPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+        Object.defineProperty(process, "platform", { ...originalPlatform, value: "darwin" });
+        const macPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+
+        expect(windowsPrompt).not.toContain("for macOS");
+        expect(windowsPrompt).not.toMatch(/AppleScript|iMessage|Apple Calendar/);
+        expect(windowsPrompt).toContain("Windows Desktop:");
+        expect(macPrompt).not.toContain("for macOS");
+        expect(macPrompt).toContain("Run AppleScript for deep OS automation");
+        expect(macPrompt).toContain("iMessage");
+      } finally {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    });
+
     it("should include instructions to ask for name when user is unknown", () => {
       const prompt = PersonalityManager.getIdentityPrompt();
 

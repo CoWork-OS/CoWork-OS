@@ -471,6 +471,7 @@ import {
 } from "./executor-canvas-utils";
 import {
   detectTestRequirement as detectTestRequirementUtil,
+  extractNamedTestCommands as extractNamedTestCommandsUtil,
   isTestCommand as isTestCommandUtil,
   promptIsWatchSkipRecommendationTask as promptIsWatchSkipRecommendationTaskUtil,
   promptRequestsDecision as promptRequestsDecisionUtil,
@@ -974,8 +975,11 @@ export class TaskExecutor {
     status?: number;
   } | null = null;
   private readonly requiresTestRun: boolean;
+  private namedTestCommands: string[] = [];
   private testRunObserved = false;
   private testRunSuccessful = false;
+  private lastTestRunCommand = "";
+  private testRunInvalidatedByPath = "";
   private readonly requiresExecutionToolRun: boolean;
   private executionToolRunObserved = false;
   private executionToolAttemptObserved = false;
@@ -8171,6 +8175,7 @@ ${transcript}
     this.getSessionRuntime().setRecoveryRequestActive(this.isRecoveryIntent(this.lastUserMessage));
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${canonicalPrompt}`);
+    this.namedTestCommands = extractNamedTestCommandsUtil(`${task.title}\n${canonicalPrompt}`);
     this.requiresVisualQARun = this.detectVisualQARequirement(`${task.title}\n${canonicalPrompt}`);
     this.requiresExecutionToolRun = this.detectExecutionRequirement(
       `${task.title}\n${canonicalPrompt}`,
@@ -11290,6 +11295,10 @@ ${transcript}
           this.fileOperationTracker.invalidateDirectoryListing(parentDir);
         }
       }
+      this.invalidateTestRunAfterMutation(
+        toolName,
+        typeof changedPath === "string" ? changedPath : "",
+      );
 
       // Reads, searches and commands (e.g. a failing test run) may now give a different
       // result, so repeating them is no longer a duplicate.
@@ -11772,9 +11781,14 @@ ${transcript}
   }
 
   /**
-   * Detect whether the task requires running tests based on the user prompt/title
+   * Detect whether the task requires running tests based on the user prompt/title.
+   * Plan/analyze/chat turns cannot run commands, and writing/research tasks only
+   * talk about tests, so neither carries a test-run obligation.
    */
   private detectTestRequirement(prompt: string): boolean {
+    if (!this.isExecuteLikeToolMode()) return false;
+    const domain = this.getEffectiveTaskDomain();
+    if (domain === "writing" || domain === "research") return false;
     return detectTestRequirementUtil(prompt);
   }
 
@@ -11883,14 +11897,18 @@ ${transcript}
   }
 
   /**
-   * Determine if a shell command is a test command
+   * Determine if a shell command is a test command. The exact test command the
+   * prompt names ("run `./scripts/ci.sh`") counts even for unknown runners.
    */
   private isTestCommand(command: string): boolean {
-    return isTestCommandUtil(command);
+    if (isTestCommandUtil(command)) return true;
+    const normalized = command.replace(/\s+/g, " ").trim();
+    return (this.namedTestCommands || []).some((named) => normalized.includes(named));
   }
 
   /**
-   * Record command execution metadata (used for test-run enforcement)
+   * Record command execution metadata (used for test-run enforcement). The
+   * latest test run decides the outcome: a failing re-run clears an earlier pass.
    */
   private recordCommandExecution(toolName: string, input: Any, result: Any): void {
     if (toolName !== "run_command") return;
@@ -11899,10 +11917,50 @@ ${transcript}
 
     if (this.isTestCommand(command)) {
       this.testRunObserved = true;
-      if (!(result && result.success === false)) {
-        this.testRunSuccessful = true;
-      }
+      this.testRunSuccessful = !(result && result.success === false);
+      this.lastTestRunCommand = command.replace(/\s+/g, " ").trim().slice(0, 160);
+      this.testRunInvalidatedByPath = "";
     }
+  }
+
+  /** A later source edit makes an earlier passing test run stale. */
+  private invalidateTestRunAfterMutation(toolName: string, changedPath: string): void {
+    if (!this.testRunSuccessful) return;
+    const canonical = canonicalizeToolNameUtil(toolName);
+    if (
+      !["write_file", "edit_file", "copy_file", "rename_file", "delete_file"].includes(canonical)
+    ) {
+      return;
+    }
+    // Notes and reports written after the tests (CHANGES.md, summary.txt)
+    // cannot affect the test outcome.
+    if (/\.(?:md|mdx|markdown|txt|rst|adoc|docx?|pdf|pptx|odt|rtf)$/i.test(changedPath.trim())) {
+      return;
+    }
+    this.testRunSuccessful = false;
+    this.testRunInvalidatedByPath = changedPath.trim() || "workspace files";
+  }
+
+  /** Why the latest observed test run does not count as passing. */
+  private describeStaleOrFailedTestRun(): string {
+    if (this.testRunInvalidatedByPath) {
+      return `Files changed after the last passing test run (${this.testRunInvalidatedByPath}); re-run the tests after the final edit.`;
+    }
+    return this.lastTestRunCommand ? `The last test run (${this.lastTestRunCommand}) failed.` : "";
+  }
+
+  /** Why the task's test-run requirement is not met yet, or null when it is. */
+  private getUnmetTestRunRequirement(): string | null {
+    if (!this.requiresTestRun || this.testRunSuccessful) return null;
+    if (!this.testRunObserved) {
+      return "Task required running tests, but no test command was executed.";
+    }
+    return [
+      "Task required running tests, but no test command completed successfully.",
+      this.describeStaleOrFailedTestRun(),
+    ]
+      .filter(Boolean)
+      .join(" ");
   }
 
   private recordQAExecution(toolName: string, result: Any): void {
@@ -12680,8 +12738,12 @@ ${transcript}
     const arithmeticWarning = this.csvArithmeticVerifier?.getWarning();
     if (arithmeticWarning) lines.push(`- ${arithmeticWarning}`);
 
-    if (newRunStartedAt === undefined && this.requiresTestRun && !this.testRunObserved) {
-      lines.push("- A real test run is still required before finishing.");
+    if (newRunStartedAt === undefined && this.getUnmetTestRunRequirement()) {
+      lines.push(
+        this.testRunObserved
+          ? `- A passing test run is still required before finishing. ${this.describeStaleOrFailedTestRun()}`.trimEnd()
+          : "- A real test run is still required before finishing.",
+      );
     }
     if (
       newRunStartedAt === undefined &&
@@ -28762,11 +28824,9 @@ You are continuing a previous conversation. The context from the previous conver
 
       if (this.cancelled) return;
 
-      if (this.requiresTestRun && !this.testRunObserved) {
-        throw new Error("Task required running tests, but no test command was executed.");
-      }
-      if (this.requiresTestRun && !this.testRunSuccessful) {
-        throw new Error("Task required running tests, but no test command completed successfully.");
+      const unmetTestRunRequirement = this.getUnmetTestRunRequirement();
+      if (unmetTestRunRequirement) {
+        throw new Error(unmetTestRunRequirement);
       }
       if (this.shouldEnforceVisualQARequirement() && !this.visualQARunObserved) {
         throw new Error(

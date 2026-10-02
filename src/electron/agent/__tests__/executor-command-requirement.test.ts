@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor command execution requirement detection", () => {
@@ -337,4 +337,108 @@ describe("TaskExecutor known-context informational follow-up routing", () => {
       expect(isInformationalFollowUp(message, lastOutput)).toBe(false);
     },
   );
+});
+
+describe("TaskExecutor test-run requirement", () => {
+  function createTestRunExecutor(prompt: string): Any {
+    const executor: Any = Object.create(TaskExecutor.prototype);
+    executor.task = { id: "task-1", title: "Fix the sum bug", prompt };
+    executor.workspace = { path: "/tmp/workspace" };
+    executor.toolSemanticsV2Enabled = true;
+    executor.lastUserMessage = prompt;
+    executor.fileOperationTracker = {
+      recordFileRead: vi.fn(),
+      recordFileCreation: vi.fn(),
+      invalidateFileRead: vi.fn(),
+      invalidateDirectoryListing: vi.fn(),
+    };
+    executor.toolCallDeduplicator = {
+      clearReadOnlyHistory: vi.fn(),
+      clearHistoryAfterWorkspaceMutation: vi.fn(),
+    };
+    executor.getEffectiveTaskDomain = () => "code";
+    executor.getEffectiveExecutionMode = () => "execute";
+    executor.requiresTestRun = executor.detectTestRequirement(prompt);
+    executor.testRunObserved = false;
+    executor.testRunSuccessful = false;
+    return executor;
+  }
+
+  it("does not require a test run in plan mode or for writing tasks", () => {
+    const prompt = "Fix the date parser and run the test suite.";
+    const executor: Any = Object.create(TaskExecutor.prototype);
+    executor.getEffectiveTaskDomain = () => "code";
+    executor.getEffectiveExecutionMode = () => "plan";
+    expect(executor.detectTestRequirement(prompt)).toBe(false);
+    executor.getEffectiveExecutionMode = () => "execute";
+    expect(executor.detectTestRequirement(prompt)).toBe(true);
+    executor.getEffectiveTaskDomain = () => "writing";
+    expect(executor.detectTestRequirement(prompt)).toBe(false);
+  });
+
+  it("requires a passing test run after the last source edit", () => {
+    const executor = createTestRunExecutor("Fix the sum bug in sum.ts and run npm test.");
+    expect(executor.requiresTestRun).toBe(true);
+    expect(executor.getUnmetTestRunRequirement()).toBe(
+      "Task required running tests, but no test command was executed.",
+    );
+
+    executor.recordCommandExecution(
+      "run_command",
+      { command: "npm test" },
+      { success: true, exitCode: 0 },
+    );
+    expect(executor.getUnmetTestRunRequirement()).toBeNull();
+
+    executor.recordFileOperation(
+      "edit_file",
+      { file_path: "src/sum.ts", old_string: "a - b", new_string: "a + b" },
+      { success: true },
+    );
+    const staleReason = executor.getUnmetTestRunRequirement();
+    expect(staleReason).toContain("no test command completed successfully.");
+    expect(staleReason).toContain("Files changed after the last passing test run (src/sum.ts)");
+    expect(executor.buildPreFinalizationReminder(undefined)).toContain(
+      "A passing test run is still required before finishing.",
+    );
+
+    // Notes written after the passing run do not invalidate it.
+    executor.recordCommandExecution(
+      "run_command",
+      { command: "npm test" },
+      { success: true, exitCode: 0 },
+    );
+    executor.recordFileOperation(
+      "write_file",
+      { path: "CHANGES.md", content: "Fixed sum()." },
+      { success: true, path: "CHANGES.md" },
+    );
+    expect(executor.getUnmetTestRunRequirement()).toBeNull();
+  });
+
+  it("lets a failing re-run override an earlier passing run", () => {
+    const executor = createTestRunExecutor("Fix the parser and make sure all tests still pass.");
+    executor.recordCommandExecution("run_command", { command: "pytest -q" }, { success: true });
+    executor.recordCommandExecution(
+      "run_command",
+      { command: "pytest -q" },
+      { success: false, exitCode: 1 },
+    );
+    expect(executor.getUnmetTestRunRequirement()).toBe(
+      "Task required running tests, but no test command completed successfully. The last test run (pytest -q) failed.",
+    );
+  });
+
+  it("accepts the exact test command named by the prompt", () => {
+    const executor = createTestRunExecutor(
+      "Fix the parser, then run `./scripts/ci.sh --fast` and make sure the tests pass.",
+    );
+    executor.namedTestCommands = ["./scripts/ci.sh --fast"];
+    executor.recordCommandExecution(
+      "run_command",
+      { command: "bash ./scripts/ci.sh --fast" },
+      { success: true, exitCode: 0 },
+    );
+    expect(executor.getUnmetTestRunRequirement()).toBeNull();
+  });
 });

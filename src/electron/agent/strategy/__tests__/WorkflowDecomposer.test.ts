@@ -59,6 +59,48 @@ describe("WorkflowDecomposer", () => {
     expect(phases!.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("does not split inside names or phrases that contain 'next'", () => {
+    const phases = WorkflowDecomposer.decompose(
+      "Build a Next.js dashboard with auth, then write tests for the login flow and deploy it to Vercel.",
+      defaultRoute,
+    );
+    expect(phases?.map((phase) => phase.prompt)).toEqual([
+      "Build a Next.js dashboard with auth,",
+      "write tests for the login flow and deploy it to Vercel.",
+    ]);
+
+    const releasePhases = WorkflowDecomposer.decompose(
+      "Create a landing page for the next release, then test it in the browser and publish it.",
+      defaultRoute,
+    );
+    expect(releasePhases?.map((phase) => phase.prompt)).toEqual([
+      "Create a landing page for the next release,",
+      "test it in the browser and publish it.",
+    ]);
+
+    // "next" before a noun that is also an action verb is still an adjective.
+    const buildPhases = WorkflowDecomposer.decompose(
+      "Review the next build output, then fix the failing step.",
+      defaultRoute,
+    );
+    expect(buildPhases?.map((phase) => phase.prompt)).toEqual([
+      "Review the next build output,",
+      "fix the failing step.",
+    ]);
+  });
+
+  it("still splits on clause-initial 'next' and 'finally' connectors", () => {
+    const phases = WorkflowDecomposer.decompose(
+      "Research the top competitors. Next, create a comparison table.\nFinally, email it to the team.",
+      defaultRoute,
+    );
+    expect(phases?.map((phase) => phase.prompt)).toEqual([
+      "Research the top competitors.",
+      "create a comparison table.",
+      "email it to the team.",
+    ]);
+  });
+
   it("does not split a 'then' that separates literal lines from a later verification action", () => {
     const prompt =
       "Use write_file to create qa-roundtrip.txt with exactly two lines: CoWork task round-trip, then profile-safe QA. Use read_file on the same path to verify it.";

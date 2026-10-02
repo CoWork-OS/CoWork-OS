@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DocumentTools } from "../document-tools";
 import { compileLatex } from "../../../utils/document-generators/latex-compiler";
 import { generatePDF } from "../../../utils/document-generators/pdf-generator";
+import { generateXLSX } from "../../../utils/document-generators/xlsx-generator";
 import { generatePPTX } from "../../../utils/document-generators/pptx-generator";
 
 // Mock the generator modules since they depend on external packages
@@ -157,15 +158,62 @@ describe("DocumentTools", () => {
     );
   });
 
-  it("generateDocument sanitizes filenames", async () => {
-    const tools = new DocumentTools("/workspace", "task-1");
+  it("generateDocument keeps traversal inside the workspace", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-doc-names-"));
+    try {
+      const tools = new DocumentTools(workspace, "task-1");
 
-    const result = await tools.generateDocument({
-      filename: "../../../etc/evil.pdf",
-    });
+      const result = await tools.generateDocument({
+        filename: "../../../etc/evil.pdf",
+      });
 
-    // sanitizeFilename should strip path traversal via path.basename
-    expect(result.success).toBe(true);
+      // ".." cannot climb above the workspace root.
+      expect(result.success).toBe(true);
+      expect(generatePDF).toHaveBeenLastCalledWith(
+        path.join(workspace, "etc", "evil.pdf"),
+        expect.anything(),
+      );
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("generated files keep requested subfolders and non-ASCII letters", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-doc-names-"));
+    try {
+      const tools = new DocumentTools(workspace, "task-1");
+
+      await tools.generateDocument({ filename: "raporlar/Şubat İstanbul 報告.pdf", markdown: "x" });
+      expect(generatePDF).toHaveBeenLastCalledWith(
+        path.join(workspace, "raporlar", "Şubat İstanbul 報告.pdf"),
+        expect.anything(),
+      );
+      expect(fs.statSync(path.join(workspace, "raporlar")).isDirectory()).toBe(true);
+
+      await tools.generatePresentation({ filename: "decks/../q3: plan?.pptx", slides: [] });
+      expect(generatePPTX).toHaveBeenLastCalledWith(
+        path.join(workspace, "q3_ plan_.pptx"),
+        expect.anything(),
+      );
+
+      await tools.generateSpreadsheet({
+        filename: path.join(workspace, "exports", "Müşteriler.xlsx"),
+        sheets: [],
+      });
+      expect(generateXLSX).toHaveBeenLastCalledWith(
+        path.join(workspace, "exports", "Müşteriler.xlsx"),
+        expect.anything(),
+      );
+
+      // An absolute path outside the workspace keeps only its file name.
+      await tools.generateDocument({ filename: "/somewhere/else/report.pdf", markdown: "x" });
+      expect(generatePDF).toHaveBeenLastCalledWith(
+        path.join(workspace, "report.pdf"),
+        expect.anything(),
+      );
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it("compileLatex calls the compiler and registers the PDF artifact with source metadata", async () => {

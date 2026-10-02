@@ -38,9 +38,62 @@ type ExternalFileApprovalConsumer = (
   operation: AccessFilesystemOperation,
 ) => boolean;
 
-function sanitizeFilename(raw: string, maxLen = 80): string {
-  const base = path.basename(String(raw || "").trim() || "document");
-  return base.replace(/[^a-zA-Z0-9_\-. ]/g, "_").slice(0, maxLen);
+/** Characters reserved in file names on some platform, or invisible ones. */
+const RESERVED_NAME_CHARACTERS = /[<>:"|?*\p{Cc}\p{Cf}]/gu;
+const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+
+function sanitizePathSegment(segment: string, maxLen: number): string {
+  let name = segment
+    .normalize("NFC")
+    .replace(RESERVED_NAME_CHARACTERS, "_")
+    .trim()
+    // Windows drops trailing dots and spaces.
+    .replace(/[. ]+$/, "");
+  if (WINDOWS_DEVICE_NAME.test(name)) name = `_${name}`;
+  // Shorten the name before its extension, and stay well under 255 bytes.
+  const extension = path.extname(name).length <= 16 ? path.extname(name) : "";
+  const stem = Array.from(name.slice(0, name.length - extension.length));
+  while (
+    stem.length > 1 &&
+    (stem.length + extension.length > maxLen || Buffer.byteLength(stem.join("") + extension) > 240)
+  ) {
+    stem.pop();
+  }
+  return stem.join("") + extension;
+}
+
+/**
+ * The workspace-relative path for a requested output file. Subfolders and
+ * non-ASCII letters are kept; ".." cannot climb above the workspace, an
+ * absolute path outside the workspace keeps only its file name, and
+ * characters reserved on common filesystems are replaced.
+ */
+function sanitizeFilename(
+  raw: string,
+  workspacePath: string,
+  fallbackName: string,
+  maxLen = 80,
+): string {
+  let requested = String(raw || "").trim();
+  if (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) {
+    const relative = path.relative(path.resolve(workspacePath), path.resolve(requested));
+    const inside =
+      relative !== "" &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative);
+    requested = inside ? relative : requested.split(/[\\/]/).pop() || "";
+  }
+  const segments: string[] = [];
+  for (const part of requested.split(/[\\/]+/)) {
+    if (part === "..") {
+      segments.pop();
+    } else if (part && part !== ".") {
+      const name = sanitizePathSegment(part, maxLen);
+      if (name) segments.push(name);
+    }
+  }
+  return segments.length > 0 ? path.join(...segments) : fallbackName;
 }
 
 export class DocumentTools {
@@ -142,6 +195,21 @@ export class DocumentTools {
     }
 
     return preserveLexicalMacAlias(resolved, access.path);
+  }
+
+  /**
+   * The checked workspace path for a generated file; a requested subfolder
+   * is created once the path is allowed.
+   */
+  private async prepareOutputPath(requested: unknown, fallbackName: string): Promise<string> {
+    const relative = sanitizeFilename(String(requested ?? ""), this.workspacePath, fallbackName);
+    const outputPath = path.join(this.workspacePath, relative);
+    await this.assertPathAllowed(outputPath, "write");
+    const directory = path.dirname(outputPath);
+    if (directory !== path.resolve(this.workspacePath)) {
+      await fs.promises.mkdir(directory, { recursive: true });
+    }
+    return outputPath;
   }
 
   private async normalizePresentationAssets(assets: unknown): Promise<Any[]> {
@@ -635,9 +703,7 @@ export class DocumentTools {
   }
 
   async generateDocument(input: Any): Promise<Any> {
-    const filename = sanitizeFilename(input.filename || "document.pdf");
-    const outputPath = path.join(this.workspacePath, filename);
-    await this.assertPathAllowed(outputPath, "write");
+    const outputPath = await this.prepareOutputPath(input.filename, "document.pdf");
 
     const result = await generatePDF(outputPath, {
       title: input.title,
@@ -682,9 +748,7 @@ export class DocumentTools {
   }
 
   async generatePresentation(input: Any): Promise<Any> {
-    const filename = sanitizeFilename(input.filename || "presentation.pptx");
-    const outputPath = path.join(this.workspacePath, filename);
-    await this.assertPathAllowed(outputPath, "write");
+    const outputPath = await this.prepareOutputPath(input.filename, "presentation.pptx");
 
     const result = await generatePPTX(outputPath, {
       title: input.title,
@@ -728,9 +792,7 @@ export class DocumentTools {
   }
 
   async generateSpreadsheet(input: Any): Promise<Any> {
-    const filename = sanitizeFilename(input.filename || "data.xlsx");
-    const outputPath = path.join(this.workspacePath, filename);
-    await this.assertPathAllowed(outputPath, "write");
+    const outputPath = await this.prepareOutputPath(input.filename, "data.xlsx");
 
     const result = await generateXLSX(outputPath, {
       title: input.title,
@@ -767,9 +829,7 @@ export class DocumentTools {
   }
 
   async generateEPUB(input: Any): Promise<Any> {
-    const filename = sanitizeFilename(input.filename || "novel.epub");
-    const outputPath = path.join(this.workspacePath, filename);
-    await this.assertPathAllowed(outputPath, "write");
+    const outputPath = await this.prepareOutputPath(input.filename, "novel.epub");
 
     const result = await generateEPUB(outputPath, {
       title: String(input.title || "Untitled"),
@@ -794,9 +854,7 @@ export class DocumentTools {
   }
 
   async generateLandingPage(input: Any): Promise<Any> {
-    const filename = sanitizeFilename(input.filename || "index.html");
-    const outputPath = path.join(this.workspacePath, filename);
-    await this.assertPathAllowed(outputPath, "write");
+    const outputPath = await this.prepareOutputPath(input.filename, "index.html");
 
     const result = await generateLandingPage(outputPath, {
       title: String(input.title || "Untitled"),
@@ -824,9 +882,7 @@ export class DocumentTools {
 
   async generateNarrationAudio(input: Any): Promise<Any> {
     const MAX_NARRATION_TEXT_LENGTH = 25_000; // TTS providers typically limit input
-    const filename = sanitizeFilename(input.filename || "narration.mp3");
-    const outputPath = path.join(this.workspacePath, filename);
-    await this.assertPathAllowed(outputPath, "write");
+    const outputPath = await this.prepareOutputPath(input.filename, "narration.mp3");
     const text = String(input.text || "").trim();
 
     if (!text) {

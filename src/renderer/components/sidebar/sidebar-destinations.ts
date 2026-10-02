@@ -40,8 +40,6 @@ export interface SidebarDestinationContext {
 export interface SidebarDestination {
   id: SidebarDestinationId;
   label: string;
-  /** Shorter caption for the rail when `label` doesn't fit under the icon. */
-  railLabel?: string;
   icon: ComponentType<{ size?: number; strokeWidth?: number }>;
   /** `rail` items are always on the rail; `more` items live in the More menu and can be pinned. */
   placement: "rail" | "more";
@@ -78,7 +76,6 @@ export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
   {
     id: "automations",
     label: "Automations",
-    railLabel: "Automate",
     icon: Workflow,
     placement: "rail",
     views: ["automations"],
@@ -97,7 +94,6 @@ export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
   {
     id: "gitChanges",
     label: "Git Changes",
-    railLabel: "Changes",
     icon: GitBranch,
     placement: "rail",
     views: ["git"],
@@ -123,7 +119,6 @@ export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
   {
     id: "missionControl",
     label: "Mission Control",
-    railLabel: "Missions",
     icon: Users,
     placement: "more",
     views: ["missionControl"],

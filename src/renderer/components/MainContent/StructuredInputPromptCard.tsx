@@ -123,7 +123,9 @@ export function StructuredInputPromptCard({
       const selected = selectedOptionByQuestion[activeQuestion.id] ?? 0;
       const optionCount = getActiveOptionCount();
 
-      if (/^[1-4]$/.test(event.key) && !typingInInput) {
+      // Modified digits are app shortcuts (⌘1–⌘9 open rail destinations), not option picks.
+      const modified = event.metaKey || event.ctrlKey || event.altKey;
+      if (/^[1-4]$/.test(event.key) && !typingInInput && !modified) {
         const nextIndex = Number(event.key) - 1;
         if (nextIndex < optionCount) {
           event.preventDefault();

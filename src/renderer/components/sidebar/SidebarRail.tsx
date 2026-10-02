@@ -45,28 +45,21 @@ export interface SidebarRailProps {
   initialRailOrder?: SidebarDestinationId[];
 }
 
-/** Icon with its caption underneath; the caption is visual, the button's label is spoken. */
+/** Icon only; the button's label is spoken and its `data-tooltip` shows on hover. */
 function RailItemContent({
   icon: Icon,
-  caption,
   active = false,
   dot,
 }: {
   icon: ComponentType<{ size?: number; strokeWidth?: number }>;
-  caption: string;
   active?: boolean;
   dot?: "unread" | "update";
 }) {
   return (
-    <>
-      <span className="sidebar-rail-icon" aria-hidden="true">
-        <Icon size={18} strokeWidth={active ? 2.1 : 1.75} />
-        {dot && <span className={`sidebar-rail-dot sidebar-rail-dot-${dot}`} />}
-      </span>
-      <span className="sidebar-rail-label" aria-hidden="true">
-        {caption}
-      </span>
-    </>
+    <span className="sidebar-rail-icon" aria-hidden="true">
+      <Icon size={16} strokeWidth={active ? 2.1 : 1.75} />
+      {dot && <span className={`sidebar-rail-dot sidebar-rail-dot-${dot}`} />}
+    </span>
   );
 }
 
@@ -155,12 +148,11 @@ function RailButton({
       aria-current={active ? "page" : undefined}
       aria-label={badge > 0 ? `${name}, ${badge} unread` : name}
       aria-keyshortcuts={shortcut?.keys}
-      title={shortcut ? `${name} (${shortcut.label})` : name}
+      data-tooltip={shortcut ? `${name} (${shortcut.label})` : name}
       data-destination={destination.id}
     >
       <RailItemContent
         icon={destination.icon}
-        caption={destination.railLabel ?? destination.label}
         active={active}
         dot={badge > 0 ? "unread" : undefined}
       />
@@ -168,7 +160,7 @@ function RailButton({
   );
 }
 
-/** Left rail: labelled destinations, pinned More items, and the More menu. */
+/** Left rail: icon-only destinations, pinned More items, and the More menu. */
 function SidebarRailComponent({
   activeId,
   settingsActive = false,
@@ -340,8 +332,9 @@ function SidebarRailComponent({
             aria-haspopup="menu"
             aria-expanded={moreOpen}
             aria-label="More"
+            data-tooltip={moreOpen ? undefined : "More"}
           >
-            <RailItemContent icon={Ellipsis} caption="More" active={activeIsHiddenInMore} />
+            <RailItemContent icon={Ellipsis} active={activeIsHiddenInMore} />
           </button>
           {moreOpen && (
             <div
@@ -427,9 +420,9 @@ function SidebarRailComponent({
           className="sidebar-rail-btn sidebar-rail-update"
           onClick={onViewUpdate}
           aria-label="Update available"
-          title="An update is ready. Open update settings"
+          data-tooltip="An update is ready. Open update settings"
         >
-          <RailItemContent icon={CircleArrowUp} caption="Update" />
+          <RailItemContent icon={CircleArrowUp} />
         </button>
       )}
 
@@ -439,17 +432,16 @@ function SidebarRailComponent({
         onClick={onOpenSettings}
         aria-current={settingsActive ? "page" : undefined}
         aria-label={flagSettings ? "Settings, update available" : "Settings"}
-        title={
+        data-tooltip={
           flagSettings
             ? updateSupported
               ? "Update available"
               : "An update is available but needs a newer macOS"
-            : undefined
+            : "Settings"
         }
       >
         <RailItemContent
           icon={Settings}
-          caption="Settings"
           active={settingsActive}
           dot={flagSettings ? "update" : undefined}
         />

@@ -75,17 +75,17 @@ describe("SidebarRail", () => {
     expect(markup).toContain('aria-label="Library"');
   });
 
-  it("captions each destination under its icon, using the short rail label", () => {
+  it("shows icons only, naming each destination in its tooltip", () => {
     const markup = renderRail({ initialPinnedIds: ["missionControl"] });
-    expect(markup).toContain('class="sidebar-rail-label" aria-hidden="true">Home</span>');
-    expect(markup).toContain('class="sidebar-rail-label" aria-hidden="true">Missions</span>');
-    expect(markup).toMatch(/aria-label="Mission Control"[^>]*title="Mission Control \(Ctrl\+5\)"/);
+    expect(markup).not.toContain("sidebar-rail-label");
+    expect(markup).toMatch(/aria-label="Mission Control"[^>]*data-tooltip="Mission Control \(Ctrl\+5\)"/);
+    expect(markup).toMatch(/aria-label="More"[^>]*data-tooltip="More"/);
   });
 
   it("numbers the rail for Ctrl+1–9, pinned items included", () => {
     const markup = renderRail();
-    expect(markup).toMatch(/aria-keyshortcuts="Control\+1" title="Home \(Ctrl\+1\)"/);
-    expect(markup).toMatch(/aria-keyshortcuts="Control\+5" title="Devices \(Ctrl\+5\)"/);
+    expect(markup).toMatch(/aria-keyshortcuts="Control\+1" data-tooltip="Home \(Ctrl\+1\)"/);
+    expect(markup).toMatch(/aria-keyshortcuts="Control\+5" data-tooltip="Devices \(Ctrl\+5\)"/);
     // More and Settings aren't destinations to number.
     expect(markup).not.toMatch(/aria-label="More"[^>]*aria-keyshortcuts/);
     expect(markup).not.toMatch(/aria-label="Settings"[^>]*aria-keyshortcuts/);
@@ -94,7 +94,7 @@ describe("SidebarRail", () => {
   it("uses ⌘ on macOS", () => {
     vi.stubGlobal("window", { electronAPI: { getPlatform: () => "darwin" } });
     const markup = renderRail();
-    expect(markup).toMatch(/aria-keyshortcuts="Meta\+2" title="Inbox \(⌘2\)"/);
+    expect(markup).toMatch(/aria-keyshortcuts="Meta\+2" data-tooltip="Inbox \(⌘2\)"/);
   });
 
   it("follows a saved order, and the shortcuts follow it", () => {
@@ -103,7 +103,7 @@ describe("SidebarRail", () => {
       markup.indexOf(`aria-label="${label}"`),
     );
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(markup).toMatch(/title="Automations \(Ctrl\+1\)"/);
+    expect(markup).toMatch(/data-tooltip="Automations \(Ctrl\+1\)"/);
   });
 
   it("marks Settings as the current page while Settings is open", () => {

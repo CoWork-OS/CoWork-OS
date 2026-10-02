@@ -207,6 +207,9 @@ export function handleMaxTokensRecovery(opts: {
   return { action: "retry", recoveryCount: nextRecoveryCount };
 }
 
+export const EMPTY_RESPONSE_NUDGE =
+  "Your last response was empty. Continue the task: call the next tool or give your final answer.";
+
 export function appendAssistantResponseToConversation(
   messages: LLMMessage[],
   response: Any,
@@ -223,9 +226,12 @@ export function appendAssistantResponseToConversation(
     return 0;
   }
 
+  // Answer an empty reply with a user nudge. A synthetic assistant placeholder
+  // would leave the transcript ending on an assistant turn (a prefill), which
+  // Claude 4.6+ models reject with HTTP 400 on the next request.
   messages.push({
-    role: "assistant",
-    content: [{ type: "text", text: "I understand. Let me continue." }],
+    role: "user",
+    content: [{ type: "text", text: EMPTY_RESPONSE_NUDGE }],
   });
   return emptyResponseCount + 1;
 }

@@ -2186,6 +2186,46 @@ describe("SessionRuntime", () => {
     expect(harness.runtime.state.loop.lifetimeTurnCount).toBe(2);
   });
 
+  it("continues a max_tokens text turn with a user turn instead of an assistant prefill", async () => {
+    const harness = createHarness();
+    harness.createMessageWithTimeout
+      .mockResolvedValueOnce({
+        stopReason: "max_tokens",
+        content: [{ type: "text", text: "Hello" }],
+        usage: { inputTokens: 10, outputTokens: 5, cachedTokens: 0 },
+      })
+      .mockResolvedValueOnce({
+        stopReason: "end_turn",
+        content: [{ type: "text", text: " world" }],
+        usage: { inputTokens: 6, outputTokens: 4, cachedTokens: 0 },
+      });
+
+    const result = await harness.runtime.runTextLoop({
+      messages: [{ role: "user", content: "Start" }],
+      systemPrompt: "system",
+      initialMaxTokens: 64,
+      continuationMaxTokens: 32,
+      mode: "follow_up",
+      operationLabel: "test text loop",
+      allowContinuation: true,
+      emptyFallback: "empty",
+    });
+
+    const continuationMessages = harness.createMessageWithTimeout.mock.calls[1][0].messages;
+    // Claude 4.6+ rejects a trailing assistant turn (prefill) with HTTP 400.
+    expect(continuationMessages.at(-1).role).toBe("user");
+    expect(continuationMessages.at(-2)).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    expect(result.assistantText).toBe("Hello world");
+    // The stored transcript keeps one joined assistant answer, not the nudge.
+    expect(result.messages).toEqual([
+      { role: "user", content: "Start" },
+      { role: "assistant", content: [{ type: "text", text: "Hello world" }] },
+    ]);
+  });
+
   it("replays one same-request escalation before continuation recovery in adaptive mode", async () => {
     const previousPolicy = process.env.COWORK_LLM_OUTPUT_POLICY;
     try {

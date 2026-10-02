@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LLMMessage } from "../llm";
 import {
+  appendAssistantResponseToConversation,
   computeToolFailureDecision,
   handleMaxTokensRecovery,
   maybeInjectLowProgressNudge,
@@ -403,5 +404,34 @@ describe("executor-loop-utils guardrails", () => {
         hadToolCalls: false,
       }),
     ).toBe(false);
+  });
+
+  it("answers an empty response with a user nudge instead of an assistant placeholder", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Do the task" }];
+
+    const emptyCount = appendAssistantResponseToConversation(
+      messages,
+      { content: [], stopReason: "end_turn" },
+      0,
+    );
+
+    expect(emptyCount).toBe(1);
+    expect(messages).toHaveLength(2);
+    // A trailing assistant turn is an assistant prefill, which Claude 4.6+ rejects.
+    expect(messages[1].role).toBe("user");
+    expect(JSON.stringify(messages[1].content)).toContain("empty");
+  });
+
+  it("appends non-empty assistant content and resets the empty-response count", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Do the task" }];
+
+    const emptyCount = appendAssistantResponseToConversation(
+      messages,
+      { content: [{ type: "text", text: "done" }], stopReason: "end_turn" },
+      2,
+    );
+
+    expect(emptyCount).toBe(0);
+    expect(messages[1]).toEqual({ role: "assistant", content: [{ type: "text", text: "done" }] });
   });
 });

@@ -20,6 +20,7 @@ import {
   normalizeSystemBlocks,
 } from "./prompt-cache";
 import { isOpenCodeGoBaseUrl, normalizeOpenCodeGoModelId } from "./opencode-go-routing";
+import { ensureNoTrailingAssistantPrefill } from "./assistant-prefill";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -115,8 +116,11 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
     const model = this.normalizeModelForEndpoint(request.model || this.defaultModel);
-    const normalizedMessages = assertNormalizedTurnTranscript(request.messages, (message) =>
-      console.warn(`[${this.providerName}] ${message}`),
+    const normalizedMessages = ensureNoTrailingAssistantPrefill(
+      assertNormalizedTurnTranscript(request.messages, (message) =>
+        console.warn(`[${this.providerName}] ${message}`),
+      ),
+      model,
     );
     const requestedPromptCache =
       request.promptCache?.mode === "disabled" || !this.managedPromptCacheSupported

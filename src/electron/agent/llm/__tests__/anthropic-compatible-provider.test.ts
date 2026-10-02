@@ -227,6 +227,32 @@ describe("AnthropicCompatibleProvider tool sequencing", () => {
     });
   });
 
+  it("never ends a request with an assistant prefill turn for Claude models that reject it", async () => {
+    const provider = new AnthropicCompatibleProvider({
+      type: "anthropic-compatible",
+      providerName: "Anthropic-Compatible",
+      apiKey: "test-key",
+      baseUrl: "https://example.com/anthropic",
+      defaultModel: "claude-opus-4-6",
+    });
+
+    await provider.createMessage({
+      model: "claude-opus-4-6",
+      maxTokens: 64,
+      system: "system",
+      messages: [
+        { role: "user", content: "start" },
+        { role: "assistant", content: [{ type: "text", text: "partial" }] },
+      ],
+    });
+
+    expect(capturedBody.messages.at(-1).role).toBe("user");
+    expect(capturedBody.messages.at(-2)).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "partial" }],
+    });
+  });
+
   it("omits assistant tool_use blocks when the next user turn does not immediately return a matching tool_result", async () => {
     const provider = new AnthropicCompatibleProvider({
       type: "minimax-portal",

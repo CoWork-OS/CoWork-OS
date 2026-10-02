@@ -20,6 +20,7 @@ import {
   isPromptCacheRequestUnsupportedError,
   normalizeSystemBlocks,
 } from "./prompt-cache";
+import { ensureNoTrailingAssistantPrefill } from "./assistant-prefill";
 import { createLogger } from "../../utils/logger";
 
 /**
@@ -231,7 +232,10 @@ export class AnthropicProvider implements LLMProvider {
       model,
       max_tokens: request.maxTokens,
       system: this.buildSystemPayload(request, promptCache),
-      messages: this.buildMessagesPayload(request.messages, promptCache),
+      messages: this.buildMessagesPayload(
+        ensureNoTrailingAssistantPrefill(request.messages, model),
+        promptCache,
+      ),
       ...(tools && { tools }),
     };
 
@@ -255,7 +259,10 @@ export class AnthropicProvider implements LLMProvider {
       model,
       max_tokens: request.maxTokens,
       system: this.buildSystemPayload(request, promptCache),
-      messages: this.buildMessagesPayload(request.messages, promptCache),
+      messages: this.buildMessagesPayload(
+        ensureNoTrailingAssistantPrefill(request.messages, model),
+        promptCache,
+      ),
       ...(tools && { tools }),
     };
 

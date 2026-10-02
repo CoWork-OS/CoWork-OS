@@ -926,6 +926,69 @@ describe("TaskExecutor chat mode", () => {
     expect(createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(48_000);
   });
 
+  it("continues a truncated companion response without an assistant prefill turn", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const createMessageWithTimeout = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "First half" }],
+        stopReason: "max_tokens",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: " second half." }],
+        stopReason: "end_turn",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      });
+
+    executor.task = {
+      id: "task-companion-continuation",
+      title: "Chat session",
+      prompt: "Tell me a story",
+      userPrompt: "Tell me a story",
+      rawPrompt: "Tell me a story",
+      createdAt: Date.now(),
+      agentConfig: { conversationMode: "chat" },
+    };
+    executor.workspace = {
+      id: "ws-companion-continuation",
+      path: "/tmp",
+      isTemp: true,
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    };
+    executor.daemon = { updateTaskStatus: vi.fn(), updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.getRoleContextPrompt = vi.fn().mockReturnValue("");
+    executor.buildUserProfileBlock = vi.fn().mockReturnValue("");
+    executor.buildUserContent = vi.fn().mockResolvedValue("Tell me a story");
+    executor.callLLMWithRetry = vi.fn(async (fn: Any) => fn());
+    executor.createMessageWithTimeout = createMessageWithTimeout;
+    executor.updateTracking = vi.fn();
+    executor.updateConversationHistory = vi.fn();
+    executor.saveConversationSnapshot = vi.fn();
+    executor.finalizeTaskBestEffort = vi.fn();
+    executor.capturePlaybookOutcome = vi.fn();
+    executor.generateCompanionFallbackResponse = vi.fn().mockReturnValue("fallback");
+    executor.getCumulativeInputTokens = vi.fn().mockReturnValue(0);
+    executor.getCumulativeOutputTokens = vi.fn().mockReturnValue(0);
+    executor.taskCompleted = false;
+    executor.cancelled = false;
+
+    await (TaskExecutor as Any).prototype.handleCompanionPrompt.call(executor);
+
+    expect(createMessageWithTimeout).toHaveBeenCalledTimes(2);
+    const continuationMessages = createMessageWithTimeout.mock.calls[1][0].messages;
+    expect(continuationMessages.at(-1).role).toBe("user");
+    expect(continuationMessages.at(-2)).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "First half" }],
+    });
+    const assistantMessages = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "assistant_message")
+      .map(([, payload]: [string, Any]) => String(payload.message));
+    expect(assistantMessages).toEqual(["First half second half."]);
+  });
+
   it("replaces unexecuted tool-call syntax in chat streaming events", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.cancelled = false;

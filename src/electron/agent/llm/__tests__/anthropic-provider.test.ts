@@ -178,4 +178,50 @@ describe("AnthropicProvider", () => {
     );
     expect(anthropicStreamFinalMessageMock).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["claude-opus-4-6", "claude-sonnet-5"])(
+    "never ends a %s request with an assistant prefill turn",
+    async (model) => {
+      const provider = new AnthropicProvider({
+        type: "anthropic",
+        model,
+        anthropicApiKey: "sk-ant-api-test",
+      });
+
+      await provider.createMessage({
+        ...makeRequest(),
+        model,
+        messages: [
+          { role: "user", content: "Write the report" },
+          { role: "assistant", content: [{ type: "text", text: "Section one is" }] },
+        ],
+      });
+
+      const sent = anthropicCreateMock.mock.calls[0][0].messages;
+      expect(sent.at(-1).role).toBe("user");
+      expect(sent.at(-2)).toEqual({
+        role: "assistant",
+        content: [{ type: "text", text: "Section one is" }],
+      });
+    },
+  );
+
+  it("keeps assistant prefill for models that still support it", async () => {
+    const provider = new AnthropicProvider({
+      type: "anthropic",
+      model: "claude-haiku-4-5",
+      anthropicApiKey: "sk-ant-api-test",
+    });
+
+    await provider.createMessage({
+      ...makeRequest(),
+      model: "claude-haiku-4-5",
+      messages: [
+        { role: "user", content: "Return JSON" },
+        { role: "assistant", content: [{ type: "text", text: "{" }] },
+      ],
+    });
+
+    expect(anthropicCreateMock.mock.calls[0][0].messages.at(-1).role).toBe("assistant");
+  });
 });

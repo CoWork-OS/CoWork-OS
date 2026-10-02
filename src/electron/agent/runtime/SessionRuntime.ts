@@ -608,6 +608,11 @@ interface RuntimeRecoverySourceFreshness {
 export const CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE =
   "CONTEXT_CAPACITY_RECOVERY_EXHAUSTED" as const;
 
+/** Sent after a partial text answer that stopped on max_tokens. */
+export const TEXT_CONTINUATION_PROMPT =
+  "Your previous message was cut off by the output limit. Continue exactly where it stopped, " +
+  "mid-word or mid-sentence if needed. Do not repeat what you already wrote.";
+
 export class ContextCapacityExhaustedError extends Error {
   readonly code = CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE;
   readonly phase: "step" | "follow_up";
@@ -767,13 +772,19 @@ export class SessionRuntime {
       },
       {
         requestResponse: async () => {
-          const requestMessages =
+          // Continue with the partial answer followed by a user turn: ending the
+          // request on the assistant turn (prefill) is rejected by Claude 4.6+.
+          const requestMessages: LLMMessage[] =
             continuationPrefix.trim().length > 0
               ? [
                   ...messages,
                   {
                     role: "assistant" as const,
                     content: [{ type: "text" as const, text: continuationPrefix }],
+                  },
+                  {
+                    role: "user" as const,
+                    content: [{ type: "text" as const, text: TEXT_CONTINUATION_PROMPT }],
                   },
                 ]
               : messages;

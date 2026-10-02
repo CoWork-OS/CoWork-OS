@@ -109,6 +109,7 @@ import {
   SessionRuntime,
   CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE,
   ContextCapacityExhaustedError,
+  TEXT_CONTINUATION_PROMPT,
   type SessionRuntimeCompactionLifecycleHandle,
   type SessionRuntimeState,
   type SessionRuntimeTaskProjection,
@@ -27975,9 +27976,11 @@ You are continuing a previous conversation. The context from the previous conver
               model: this.modelId,
               maxTokens: 400,
               system: systemPrompt,
+              // End on a user turn: Claude 4.6+ rejects assistant prefill.
               messages: [
                 { role: "user", content: companionUserContent },
                 { role: "assistant", content: [{ type: "text", text }] },
+                { role: "user", content: [{ type: "text", text: TEXT_CONTINUATION_PROMPT }] },
               ],
               ...promptCacheExtras,
             },

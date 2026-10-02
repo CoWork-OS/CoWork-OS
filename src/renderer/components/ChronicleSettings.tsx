@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { History, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
+import { hasHostMethods } from "../host/browser-capabilities";
+import { DesktopOnlyCard } from "./DesktopOnlyCard";
 import type {
   ChronicleCaptureScope,
   ChronicleCaptureStatus,
@@ -52,7 +54,27 @@ function captureScopeLabel(scope: ChronicleCaptureScope): string {
   return scope === "all_displays" ? "All displays" : "Frontmost display";
 }
 
+const CHRONICLE_METHODS = [
+  "getChronicleSettings",
+  "getChronicleStatus",
+  "saveChronicleSettings",
+] as const;
+
+/** Chronicle captures this machine's screen, so a browser session shows a note instead. */
 export function ChronicleSettingsCard() {
+  if (!hasHostMethods(...CHRONICLE_METHODS)) {
+    return (
+      <DesktopOnlyCard
+        icon={<History size={18} strokeWidth={1.5} />}
+        title="Chronicle"
+        description="Chronicle captures recent screen context on the desktop running CoWork. Configure it in the desktop app."
+      />
+    );
+  }
+  return <ChronicleSettingsPanel />;
+}
+
+function ChronicleSettingsPanel() {
   const [settings, setSettings] = useState<ChronicleSettings>(DEFAULT_SETTINGS);
   const [status, setStatus] = useState<ChronicleCaptureStatus | null>(null);
   const [loading, setLoading] = useState(true);

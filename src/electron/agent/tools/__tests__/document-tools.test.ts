@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { describe, expect, it, vi } from "vitest";
 import { DocumentTools } from "../document-tools";
 import { compileLatex } from "../../../utils/document-generators/latex-compiler";
+import { generatePDF } from "../../../utils/document-generators/pdf-generator";
 import { generatePPTX } from "../../../utils/document-generators/pptx-generator";
 
 // Mock the generator modules since they depend on external packages
@@ -122,6 +123,37 @@ describe("DocumentTools", () => {
       "task-1",
       "/workspace/report.pdf",
       "application/pdf",
+    );
+  });
+
+  it("generateDocument reports an HTML fallback as a recoverable failure, not a PDF", async () => {
+    vi.mocked(generatePDF).mockResolvedValueOnce({
+      success: false,
+      path: "/workspace/report.html",
+      size: 2048,
+      format: "html",
+      error: "No Chrome, Chromium, Edge, or Brave browser was found to render the PDF",
+    });
+    const registerArtifact = vi.fn();
+    const tools = new DocumentTools("/workspace", "task-1", registerArtifact);
+
+    const result = await tools.generateDocument({ filename: "report.pdf", markdown: "# Report" });
+
+    expect(result).toMatchObject({
+      success: false,
+      recoverableFallback: true,
+      nonBlocking: true,
+      format: "html",
+      path: "/workspace/report.html",
+    });
+    expect(result.error).toMatch(/PDF was not generated: No Chrome/);
+    expect(result.fallbackHint).toMatch(/create_document/);
+    expect(result.message).not.toMatch(/Document generated/);
+    expect(registerArtifact).toHaveBeenCalledWith(
+      "task-1",
+      "/workspace/report.html",
+      "text/html",
+      expect.objectContaining({ requestedFormat: "pdf" }),
     );
   });
 

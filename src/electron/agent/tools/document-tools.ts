@@ -646,6 +646,28 @@ export class DocumentTools {
       sections: input.sections,
     });
 
+    if (result.format === "html") {
+      // No browser could print the PDF. The HTML copy is a real workspace
+      // file, but it is not what was asked for, so this is not a success.
+      this.registerArtifact?.(this.taskId, result.path, "text/html", {
+        requestedFormat: "pdf",
+        fallback: true,
+      });
+      return {
+        success: false,
+        recoverableFallback: true,
+        nonBlocking: true,
+        error: `PDF was not generated: ${String(result.error).replace(/\.+$/, "")}. The content was saved as HTML instead.`,
+        path: result.path,
+        size: result.size,
+        format: "html",
+        fallbackHint:
+          'Use create_document with format "pdf", which renders without a browser, or install ' +
+          "Chrome, Chromium, Edge, or Brave and retry. Tell the user no PDF was produced.",
+        message: `PDF was not generated; saved ${path.basename(result.path)} (HTML) instead.`,
+      };
+    }
+
     if (result.success && this.registerArtifact) {
       const mime = result.path.endsWith(".pdf") ? "application/pdf" : "text/html";
       this.registerArtifact(this.taskId, result.path, mime);

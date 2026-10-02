@@ -721,6 +721,9 @@ function applyDomainGate(
   domain: TaskDomain,
   shellEnabled?: boolean,
 ): string | null {
+  if (toolName === "execute_code" && shellEnabled === false) {
+    return 'Tool "execute_code" is blocked because workspace shell capability is disabled.';
+  }
   if (domain === "auto" || domain === "code" || domain === "operations") return null;
 
   if (toolName === "run_command" || toolName === "run_applescript" || toolName === "execute_code") {

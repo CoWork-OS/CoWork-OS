@@ -1869,6 +1869,7 @@ export class ToolRegistry {
     ) {
       return "network_access";
     }
+    if (canonicalToolName === "execute_code") return "run_command";
     if (canonicalToolName === "delete_file") return "delete_file";
     if (canonicalToolName === "get_current_location") return "location_access";
     if (canonicalToolName === "web_fetch") return "network_access";

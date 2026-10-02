@@ -28,6 +28,24 @@ function evaluate(input: Partial<Parameters<typeof PermissionEngine.evaluate>[0]
 }
 
 describe("PermissionEngine", () => {
+  it.each([false, true])(
+    "enforces shell capability for execute_code with network=%s",
+    (network) => {
+      const toolInput = { language: "python", code: "print(1)", allow_network: network };
+      const result = evaluate({
+        toolName: "execute_code",
+        approvalType: network ? "network_access" : "run_command",
+        mode: "bypass_permissions",
+        toolInput,
+        workspace: { ...workspace, permissions: { ...workspace.permissions, shell: false } },
+      });
+      expect(result.decision).toBe("deny");
+      expect(result.reason).toMatchObject({ type: "workspace_capability", capability: "shell" });
+      expect(evaluate({ toolName: "execute_code", toolInput }).decision).toBe("ask");
+      expect(evaluate({ toolName: "execute_code", toolInput, mode: "plan" }).decision).toBe("deny");
+    },
+  );
+
   it("applies explicit tool rules", () => {
     const result = evaluate({
       toolName: "open_url",

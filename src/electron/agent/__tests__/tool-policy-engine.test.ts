@@ -7,6 +7,26 @@ import {
 } from "../tool-policy-engine";
 
 describe("tool-policy-engine request_user_input gating", () => {
+  it.each(["auto", "code", "operations"] as const)(
+    "requires shell for execute_code in %s",
+    (taskDomain) => {
+      expect(
+        evaluateToolPolicy("execute_code", {
+          executionMode: "execute",
+          taskDomain,
+          shellEnabled: false,
+        }).decision,
+      ).toBe("deny");
+      expect(
+        evaluateToolPolicy("execute_code", {
+          executionMode: "execute",
+          taskDomain,
+          shellEnabled: true,
+        }).decision,
+      ).toBe("allow");
+    },
+  );
+
   it("denies all tools in chat mode", () => {
     const decision = evaluateToolPolicy("read_file", {
       executionMode: "chat",

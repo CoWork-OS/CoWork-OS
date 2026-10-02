@@ -511,6 +511,38 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect((registry as Any).getApprovalTypeForTool("Skill")).toBeNull();
   });
 
+  it.each([false, true])(
+    "denies code before dispatch when shell is disabled (network=%s)",
+    async (allowNetwork) => {
+      const workspace = createWorkspace();
+      workspace.permissions.shell = false;
+      const executeCode = vi.fn();
+      const daemon = {
+        ...createDaemon(),
+        evaluateToolPermission: vi.fn((_taskId: string, request: Any) =>
+          PermissionEngine.evaluate({
+            workspace,
+            toolName: request.toolName,
+            toolInput: request.details?.params,
+            approvalType: request.approvalType,
+            mode: "bypass_permissions",
+            rules: [],
+          }),
+        ),
+      };
+      const registry = new ToolRegistry(workspace, daemon as Any, "code-shell-disabled");
+      (registry as Any)._codeExecTools = { executeCode };
+      await expect(
+        registry.executeToolWithRuntime("execute_code", {
+          language: "python",
+          code: "print(1)",
+          allow_network: allowNetwork,
+        }),
+      ).rejects.toThrow();
+      expect(executeCode).not.toHaveBeenCalled();
+    },
+  );
+
   it("does not pre-classify local reads as external services and keeps safe network reads scoped", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-safe-read-approval");
 
@@ -522,7 +554,7 @@ describe("ToolRegistry tool catalog versioning", () => {
       "network_access",
     );
     expect((registry as Any).getApprovalTypeForTool("execute_code", { allow_network: false })).toBe(
-      null,
+      "run_command",
     );
     expect((registry as Any).getApprovalTypeForTool("http_request", { method: "GET" })).toBe(
       "network_access",

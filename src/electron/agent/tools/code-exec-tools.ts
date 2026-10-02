@@ -73,6 +73,9 @@ export class CodeExecTools {
   }
 
   async executeCode(input: CodeExecInput): Promise<CodeExecResult> {
+    if (this.workspace.permissions?.shell !== true) {
+      throw new Error("execute_code requires workspace shell permission.");
+    }
     this.assertNetworkExecutionAllowed(input);
     const sandbox = await this.getSandbox();
     const permissions = this.workspace.permissions || ({} as Workspace["permissions"]);

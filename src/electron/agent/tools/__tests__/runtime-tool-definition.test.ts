@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { getDefaultRuntimeToolMetadata, withRuntimeToolMetadata } from "../runtime-tool-definition";
 
 describe("runtime tool definition metadata", () => {
+  it("routes arbitrary code through shell approval", () => {
+    const metadata = getDefaultRuntimeToolMetadata("execute_code");
+    expect(metadata.readOnly).toBe(false);
+    expect(metadata.approvalKind).toBe("shell_sensitive");
+    expect(metadata.capabilityTags).toContain("shell");
+  });
+
   it("marks core read tools as parallel-safe and read-only", () => {
     const metadata = getDefaultRuntimeToolMetadata("read_file");
     expect(metadata.readOnly).toBe(true);

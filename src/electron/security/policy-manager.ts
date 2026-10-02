@@ -551,7 +551,7 @@ export function isToolAllowedQuick(
   if (SecurityPolicyManager.isToolInGroup(toolName, "group:write") && !permissions.write) {
     return false;
   }
-  if (toolName === "run_command" && !permissions.shell) {
+  if ((toolName === "run_command" || toolName === "execute_code") && !permissions.shell) {
     return false;
   }
   if (

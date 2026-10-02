@@ -1137,7 +1137,8 @@ export class PermissionEngine {
     const normalizedServerName = normalizeServerName(request.serverName || "");
     const normalizedDomain = extractDomainFromUrl(extractUrlFromToolInput(request.toolInput)) || "";
     const isHttpRequestReadOnly = this.isReadOnlyHttpRequest(request.toolInput, toolName);
-    const isShell = approvalType === "run_command" || toolName === "run_command";
+    const isShell =
+      approvalType === "run_command" || toolName === "run_command" || toolName === "execute_code";
     const isExternalFileAccess = approvalType === "external_file_access";
     const isDeleteLike =
       approvalType === "delete_file" ||

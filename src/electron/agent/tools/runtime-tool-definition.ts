@@ -209,7 +209,7 @@ function inferCapabilityTags(toolName: string): RuntimeToolCapabilityTag[] {
   const exposure = getToolExposureMetadata(toolName);
   tags.add(exposure.lane as RuntimeToolCapabilityTag);
   if (toolName.startsWith("mcp_")) tags.add("mcp");
-  if (toolName === "run_command") tags.add("shell");
+  if (toolName === "run_command" || toolName === "execute_code") tags.add("shell");
   if (toolName.startsWith("browser_")) tags.add("browser");
   if (toolName.startsWith("canvas_")) tags.add("artifact");
   if (toolName.endsWith("_action")) tags.add("integration");
@@ -280,7 +280,7 @@ function inferApprovalKind(toolName: string, readOnly: boolean): RuntimeToolAppr
   ) {
     return "none";
   }
-  if (toolName === "run_command") return "shell_sensitive";
+  if (toolName === "run_command" || toolName === "execute_code") return "shell_sensitive";
   if (toolName === "analyze_image" || toolName === "read_pdf_visual") return "data_export";
   if (
     toolName === "delete_file" ||

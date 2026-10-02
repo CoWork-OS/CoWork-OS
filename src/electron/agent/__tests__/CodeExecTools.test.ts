@@ -24,7 +24,16 @@ vi.mock("../sandbox/sandbox-factory", () => ({
   }),
 }));
 
-const fakeWorkspace = { id: "ws-1", name: "test", path: "/tmp/test", createdAt: 0, lastUsedAt: 0 };
+// execute_code is gated on shell permission (covered in tools/__tests__/code-exec-tools.test.ts);
+// these tests exercise sandbox selection and execution, so the workspace grants it.
+const fakeWorkspace = {
+  id: "ws-1",
+  name: "test",
+  path: "/tmp/test",
+  createdAt: 0,
+  lastUsedAt: 0,
+  permissions: { read: true, write: true, delete: false, shell: true, network: false },
+};
 
 describe("CodeExecTools", () => {
   it("executes shell code and returns stdout", async () => {

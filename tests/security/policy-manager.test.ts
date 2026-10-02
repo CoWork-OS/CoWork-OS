@@ -57,6 +57,13 @@ function createMockGuardrails(overrides: Partial<GuardrailSettings> = {}): Guard
 }
 
 describe("SecurityPolicyManager", () => {
+  it("filters execute_code on shell permission", () => {
+    const denied = createMockWorkspace({ shell: false });
+    expect(isToolAllowedQuick("execute_code", denied)).toBe(false);
+    const allowed = createMockWorkspace({ shell: true });
+    expect(isToolAllowedQuick("execute_code", allowed)).toBe(true);
+  });
+
   describe("Constructor and Initialization", () => {
     it("should create a policy manager with workspace context", () => {
       const workspace = createMockWorkspace();

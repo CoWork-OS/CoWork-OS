@@ -232,6 +232,10 @@ canonicalized before execution so symlinks and path traversal cannot escape the 
 Domain-scoped network rules are enforced for built-in network tools; arbitrary shell networking is
 denied when the active sandbox cannot enforce those domains.
 
+`execute_code` requires the same command-tool capability and approval handling as
+shell execution for every supported language. Its separate network request still
+requires network permission.
+
 ### Browser Automation
 
 The app includes Playwright for web automation:

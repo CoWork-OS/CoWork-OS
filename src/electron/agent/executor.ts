@@ -31956,7 +31956,9 @@ Return ONLY a JSON object:
       let bootstrapMutationSucceeded = false;
       let mutationStarvationExploratoryStreak = 0;
       let mutationStarvationEscalated = false;
-      let mutationStarvationToolGateTurnsRemaining = 0;
+      // The single iteration whose exploration-only calls the guard blocks. Keyed
+      // by iteration number so the block expires even when that turn returns early.
+      let mutationStarvationToolGateIteration = 0;
       let localModelStepFinalizationForced = false;
       const MUTATION_STARVATION_THRESHOLD = 3;
       // Varied failure detection: non-resetting per-tool failure counter (not reset on success)
@@ -32851,7 +32853,9 @@ Return ONLY a JSON object:
           let fatalToolError: unknown;
           let batchSemanticSummary = "";
           let simpleImageGenerationStopAfterTool = false;
-          const mutationStarvationToolGateActive = mutationStarvationToolGateTurnsRemaining > 0;
+          const mutationStarvationToolGateActive =
+            mutationStarvationToolGateIteration > 0 &&
+            mutationStarvationToolGateIteration === iterationCount;
           const forceFinalizeWithoutTools =
             (this.guardrailPhaseAEnabled &&
               responseHasToolUse &&
@@ -33040,10 +33044,12 @@ Return ONLY a JSON object:
                     !mutationSatisfiedAtToolGate
                   ) {
                     const requiredMutationGateActive = hasPendingRequiredMutationToolsForIteration;
-                    // An equivalent tool (edit_file for a pending write_file) makes
-                    // progress on the requirement and must not be blocked.
+                    // Only read/list/search calls are held back. Test runs and other
+                    // actions are progress, and an equivalent tool (edit_file for a
+                    // pending write_file) works on the requirement itself.
                     const shouldBlockForRequiredMutation =
                       requiredMutationGateActive &&
+                      this.isMutationExploratoryTool(canonicalContentName) &&
                       !pendingRequiredMutationToolSetForIteration.has(canonicalContentName) &&
                       getEquivalentRequiredToolsForCall(
                         pendingRequiredMutationToolSetForIteration,
@@ -33062,7 +33068,7 @@ Return ONLY a JSON object:
                         tool: content.name,
                         reason: "mutation_starvation_guard",
                         message: shouldBlockForRequiredMutation
-                          ? "Mutation starvation guard is active: non-required tools are blocked until required mutation tools run."
+                          ? "Mutation starvation guard is active: exploration-only tools are blocked for this turn; run the required mutation tools."
                           : "Mutation starvation guard is active: exploration-only tools are temporarily blocked until a write/canvas mutation occurs.",
                       });
                       return {
@@ -36389,46 +36395,34 @@ Return ONLY a JSON object:
             currentStepBrowserVerificationObserved:
               currentStepBrowserVerificationObservedForCheckpoint,
           });
-          if (mutationStarvationToolGateTurnsRemaining > 0) {
-            mutationStarvationToolGateTurnsRemaining -= 1;
-          }
           if (
             !stepFailed &&
             stepContract.requiresMutation &&
             !mutationSatisfiedForCheckpoint &&
             !priorMutationReuseAtCheckpoint.satisfied
           ) {
-            if (
+            const mutationAttemptedForStarvation =
               hasRequiredMutationToolContractAtCheckpoint &&
               pendingRequiredMutationToolsAtCheckpoint.length > 0
-            ) {
-              if (
-                hasRequiredMutationToolUseThisIteration ||
-                requiredMutationAttemptedForCheckpoint
-              ) {
-                mutationStarvationExploratoryStreak = 0;
-              } else if (responseHasToolUse) {
-                mutationStarvationExploratoryStreak += 1;
-              }
-            } else {
-              if (
-                hasMutationToolUseThisIteration ||
-                mutationAttempted ||
-                bootstrapMutationSucceeded
-              ) {
-                mutationStarvationExploratoryStreak = 0;
-              } else if (responseHasToolUse && exploratoryOnlyToolUseThisIteration) {
-                mutationStarvationExploratoryStreak += 1;
-              } else if (responseHasToolUse) {
-                mutationStarvationExploratoryStreak = 0;
-              }
+                ? hasRequiredMutationToolUseThisIteration || requiredMutationAttemptedForCheckpoint
+                : hasMutationToolUseThisIteration ||
+                  mutationAttempted ||
+                  bootstrapMutationSucceeded;
+            if (mutationAttemptedForStarvation) {
+              mutationStarvationExploratoryStreak = 0;
+            } else if (responseHasToolUse && exploratoryOnlyToolUseThisIteration) {
+              mutationStarvationExploratoryStreak += 1;
+            } else if (responseHasToolUse) {
+              // A test run, build, or other non-exploratory call is investigation
+              // progress (often the reproduction a fix needs), not starvation.
+              mutationStarvationExploratoryStreak = 0;
             }
             if (
               mutationStarvationExploratoryStreak >= MUTATION_STARVATION_THRESHOLD &&
               !mutationStarvationEscalated
             ) {
               mutationStarvationEscalated = true;
-              mutationStarvationToolGateTurnsRemaining = 1;
+              mutationStarvationToolGateIteration = iterationCount + 1;
               const preferredTarget =
                 this.getPreferredMutationTargetPath(step, stepContract) || ".";
               this.emitEvent("step_contract_escalated", {
@@ -36466,7 +36460,7 @@ Return ONLY a JSON object:
             }
           } else {
             mutationStarvationExploratoryStreak = 0;
-            mutationStarvationToolGateTurnsRemaining = 0;
+            mutationStarvationToolGateIteration = 0;
           }
           const creationHeavyStep =
             this.isScaffoldCreateStep(step) ||

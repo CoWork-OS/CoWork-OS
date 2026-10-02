@@ -5941,6 +5941,10 @@ describe("TaskExecutor step loop control", () => {
     fs.mkdirSync(path.join(tempDir, "src", "auth"), { recursive: true });
     const target = path.join(tempDir, "src", "auth", "login.ts");
     fs.writeFileSync(target, "export const login = (user) => user.name;\n");
+    // An mtime after the step started would make any successful run_command
+    // look like a verified workspace write of the target.
+    const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    fs.utimesSync(target, anHourAgo, anHourAgo);
     const executor = createExecutorWithStubs(responses, {});
     (executor as Any).workspace.path = tempDir;
     executor.toolRegistry.executeTool = vi.fn(async (name: string, input: Any) => {
@@ -5968,6 +5972,94 @@ describe("TaskExecutor step loop control", () => {
     old_string: "user.name",
     new_string: "user?.name",
   };
+
+  describe("mutation starvation guard", () => {
+    const fixStep = (id: string): Any => ({
+      id,
+      description: "Fix the null check bug in src/auth/login.ts",
+      status: "pending",
+    });
+    const starvationBlocks = (executor: Any) =>
+      executor.daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "tool_blocked" && call[2]?.reason === "mutation_starvation_guard",
+      );
+    const executedTools = (executor: Any): string[] =>
+      executor.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0]);
+
+    it("lets a fix step investigate with reads and a test run before its first edit", async () => {
+      const executor = createCodeStepExecutor([
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+        toolCall("run_command", { command: "npm test -- login" }, "c1"),
+        toolCall("read_file", { path: "src/auth/token.ts" }, "r3"),
+        toolCall("glob", { path: "src", pattern: "**/*auth*" }, "g1"),
+        toolCall("read_file", { path: "src/auth/__tests__/login.test.ts" }, "r4"),
+        toolCall("edit_file", fixLoginEdit, "e1"),
+        textResponse("Fixed the null check in src/auth/login.ts."),
+      ]);
+      const step = fixStep("investigate-then-fix");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executedTools(executor)).toEqual([
+        "read_file",
+        "read_file",
+        "run_command",
+        "read_file",
+        "glob",
+        "read_file",
+        "edit_file",
+      ]);
+      expect(starvationBlocks(executor)).toEqual([]);
+    });
+
+    it("blocks exploration for at most one turn after the guard fires", async () => {
+      const executor = createCodeStepExecutor([
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        toolCall("list_directory", { path: "src/auth" }, "l1"),
+        toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+        toolCall("read_file", { path: "src/auth/token.ts" }, "r3"),
+        toolCall("read_file", { path: "src/auth/token.ts" }, "r4"),
+        toolCall("edit_file", fixLoginEdit, "e1"),
+        textResponse("Fixed the null check in src/auth/login.ts."),
+      ]);
+      const step = fixStep("starvation-one-turn");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(starvationBlocks(executor)).toHaveLength(1);
+      expect(executedTools(executor)).toEqual([
+        "read_file",
+        "list_directory",
+        "read_file",
+        "read_file",
+        "edit_file",
+      ]);
+      expect(userTexts(executor).some((text) => text.includes("Mutation starvation guard"))).toBe(
+        true,
+      );
+    });
+
+    it("does not block a test run while the guard is active", async () => {
+      const executor = createCodeStepExecutor([
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        toolCall("list_directory", { path: "src/auth" }, "l1"),
+        toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+        toolCall("run_command", { command: "npm test -- login" }, "c1"),
+        toolCall("edit_file", fixLoginEdit, "e1"),
+        textResponse("Fixed the null check in src/auth/login.ts."),
+      ]);
+      const step = fixStep("starvation-allows-tests");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(starvationBlocks(executor)).toEqual([]);
+      expect(executedTools(executor)).toContain("run_command");
+    });
+  });
 
   describe("run_command failures", () => {
     it("does not treat a later read as recovery from a failing test run", async () => {

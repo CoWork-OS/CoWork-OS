@@ -1494,12 +1494,50 @@ export class AgentDaemon extends EventEmitter {
     return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
   }
 
+  /**
+   * Whether a task's workspace is a code project. Action requests with no
+   * domain cue ("Integrate Stripe checkout") are code tasks there. Temporary
+   * workspaces and paths the access policy does not let us read never count.
+   */
+  private isCodeProjectWorkspace(workspaceId: string | undefined): boolean {
+    if (!workspaceId || isTempWorkspaceId(workspaceId)) return false;
+    try {
+      const workspace = this.workspaceRepo.findById(workspaceId);
+      if (!workspace || workspace.isTemp || !workspace.path) return false;
+      const access = evaluateWorkspaceFilesystemAccess(workspace, workspace.path, "read");
+      if (access.decision !== "allow") return false;
+      const projectMarkers = [
+        ".git",
+        "package.json",
+        "tsconfig.json",
+        "deno.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "setup.py",
+        "Cargo.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "Gemfile",
+        "composer.json",
+        "mix.exs",
+        "CMakeLists.txt",
+        "Makefile",
+      ];
+      return projectMarkers.some((marker) => fs.existsSync(path.join(workspace.path, marker)));
+    } catch {
+      return false;
+    }
+  }
+
   private deriveTaskStrategy(input: {
     title: string;
     prompt: string;
     routingPrompt?: string;
     agentConfig?: AgentConfig;
     lastProgressScore?: number;
+    workspaceId?: string;
   }): {
     route: IntentRoute;
     strategy: DerivedTaskStrategy;
@@ -1523,6 +1561,7 @@ export class AgentDaemon extends EventEmitter {
       title: input.title,
       prompt: input.prompt,
       lastProgressScore: input.lastProgressScore,
+      isCodeProjectWorkspace: () => this.isCodeProjectWorkspace(input.workspaceId),
     });
     const agentConfig = TaskStrategyService.applyToAgentConfig(input.agentConfig, strategy);
     const hasExplicitModelOverride =
@@ -1619,6 +1658,7 @@ export class AgentDaemon extends EventEmitter {
       routingPrompt: task.rawPrompt || task.userPrompt || task.prompt,
       agentConfig: task.agentConfig,
       lastProgressScore: task.lastProgressScore,
+      workspaceId: task.workspaceId,
     });
     let nextAgentConfig = derived.agentConfig;
     let agentConfigChanged = derived.agentConfigChanged;
@@ -4339,6 +4379,7 @@ export class AgentDaemon extends EventEmitter {
       prompt: params.prompt,
       routingPrompt: params.prompt,
       agentConfig: taskAgentConfig,
+      workspaceId: params.workspaceId,
     });
     const isCronTask = params.source === "cron";
     const cronBudgetProfile = isCronTask

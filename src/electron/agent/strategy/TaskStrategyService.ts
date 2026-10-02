@@ -183,7 +183,13 @@ export class TaskStrategyService {
   static derive(
     route: IntentRoute,
     existing?: AgentConfig,
-    taskContext?: { title?: string; prompt?: string; lastProgressScore?: number },
+    taskContext?: {
+      title?: string;
+      prompt?: string;
+      lastProgressScore?: number;
+      /** Lazily reports whether the task's workspace is a code project. */
+      isCodeProjectWorkspace?: () => boolean;
+    },
   ): DerivedTaskStrategy {
     const defaults: Record<
       IntentRoute["intent"],
@@ -345,7 +351,9 @@ export class TaskStrategyService {
         ? existingExecutionMode
         : inferredExecutionMode;
     const taskDomain =
-      existing?.taskDomain && existing.taskDomain !== "auto" ? existing.taskDomain : route.domain;
+      existing?.taskDomain && existing.taskDomain !== "auto"
+        ? existing.taskDomain
+        : this.resolveRoutedDomain(route, taskContext?.isCodeProjectWorkspace);
     const strictConstraintArtifactTask = this.isStrictConstraintArtifactTask(
       `${taskContext?.title || ""}\n${taskContext?.prompt || ""}`,
     );
@@ -414,6 +422,31 @@ export class TaskStrategyService {
       llmProfileHint,
       snapshot,
     };
+  }
+
+  /**
+   * An action request with no domain cue ("Integrate Stripe checkout", or a
+   * request in a language the router has no vocabulary for) is a code change
+   * when the workspace is a code project. Left as "general" it ran under the
+   * non-code loop guards (a stop-calling-tools nudge after 5 tool turns) and
+   * could not use git mutation tools.
+   */
+  private static resolveRoutedDomain(
+    route: IntentRoute,
+    isCodeProjectWorkspace?: () => boolean,
+  ): TaskDomain {
+    if (route.domain !== "general" || !isCodeProjectWorkspace) return route.domain;
+    const actionIntent =
+      route.intent === "execution" ||
+      route.intent === "workflow" ||
+      route.intent === "deep_work" ||
+      route.intent === "redirect";
+    if (!actionIntent) return route.domain;
+    try {
+      return isCodeProjectWorkspace() ? "code" : route.domain;
+    } catch {
+      return route.domain;
+    }
   }
 
   private static deriveDirectResponseMode(params: {
@@ -832,10 +865,25 @@ export class TaskStrategyService {
       return new Set(["*"]);
     }
 
-    // Chat / thinking: keep the lightweight discovery path so sessions can still
-    // surface deferred MCP/integration capabilities when the user asks about them.
-    if (intent === "chat" || intent === "thinking") {
+    // Chat: keep the lightweight discovery path so sessions can still surface
+    // deferred MCP/integration capabilities when the user asks about them.
+    if (intent === "chat") {
       return new Set(["tool_search"]);
+    }
+
+    // Thinking ("help me figure out why the app crashes on startup") reasons
+    // about the user's own material, so it may read the workspace but not change it.
+    if (intent === "thinking") {
+      return new Set([
+        "tool_search",
+        "read_file",
+        "read_files",
+        "list_directory",
+        "get_file_info",
+        "search_files",
+        "glob",
+        "grep",
+      ]);
     }
 
     // Advice and planning: core + web + documents

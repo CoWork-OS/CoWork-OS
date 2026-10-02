@@ -121,6 +121,54 @@ describe("TaskStrategyService getRelevantToolSet", () => {
     const chat = TaskStrategyService.getRelevantToolSet("chat");
     expect(chat.has("tool_search")).toBe(true);
   });
+
+  it("lets thinking tasks read the workspace without mutating it", () => {
+    const thinking = TaskStrategyService.getRelevantToolSet("thinking", "code");
+    for (const tool of ["tool_search", "read_file", "list_directory", "glob", "grep"]) {
+      expect(thinking.has(tool)).toBe(true);
+    }
+    expect(thinking.has("search_files")).toBe(true);
+    for (const tool of ["write_file", "edit_file", "delete_file", "run_command"]) {
+      expect(thinking.has(tool)).toBe(false);
+    }
+  });
+});
+
+describe("TaskStrategyService code-project domain", () => {
+  const deriveDomain = (
+    prompt: string,
+    isCodeProjectWorkspace: boolean,
+    existing?: Parameters<typeof TaskStrategyService.derive>[1],
+  ) => {
+    const route = IntentRouter.route("", prompt);
+    const strategy = TaskStrategyService.derive(route, existing, {
+      title: "",
+      prompt,
+      isCodeProjectWorkspace: () => isCodeProjectWorkspace,
+    });
+    return { route, strategy };
+  };
+
+  it("treats a cue-less action request in a code project as a code task", () => {
+    const { route, strategy } = deriveDomain("Integrate Stripe checkout", true);
+
+    expect(route.domain).toBe("general");
+    expect(strategy.taskDomain).toBe("code");
+    expect(strategy.snapshot.taskDomain).toBe("code");
+  });
+
+  it.each([
+    ["Integrate Stripe checkout", false, undefined],
+    ["How should I structure my week?", true, undefined],
+    ["Integrate Stripe checkout", true, { taskDomain: "general" as const }],
+  ])(
+    "keeps the routed or explicit domain for %s (code project=%s, existing=%o)",
+    (prompt, isCodeProjectWorkspace, existing) => {
+      const { route, strategy } = deriveDomain(prompt, isCodeProjectWorkspace, existing);
+
+      expect(strategy.taskDomain).toBe(existing?.taskDomain ?? route.domain);
+    },
+  );
 });
 
 describe("TaskStrategyService decoratePrompt", () => {

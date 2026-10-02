@@ -13,6 +13,8 @@ import { LLMTool } from "../llm/types";
 import { BoundedRegex, RegexDeadlineError } from "./bounded-regex";
 
 const MAX_GREP_OUTPUT_BYTES = 50_000;
+// Larger files are skipped; their lines would be copied wholesale into the regex worker.
+const MAX_GREP_FILE_BYTES = 1024 * 1024;
 
 /**
  * GrepTools provides powerful regex-based content search
@@ -165,13 +167,31 @@ export class GrepTools {
         throw new Error("Access denied by project access rules");
       }
 
+      // A path naming one file searches just that file, under the same limits as a directory walk.
+      const baseStats = fs.statSync(checkedBasePath);
+      if (baseStats.isFile()) {
+        const unsearchable = this.isBinaryFile(checkedBasePath)
+          ? "is a binary or document file and the grep tool only searches text files"
+          : baseStats.size > MAX_GREP_FILE_BYTES
+            ? "is larger than 1 MB, which the grep tool does not search"
+            : null;
+        if (unsearchable) {
+          return {
+            success: true,
+            pattern,
+            matches: [],
+            totalMatches: 0,
+            filesSearched: 0,
+            truncated: false,
+            warning: `${searchPath} ${unsearchable}. Use read_file to read it.`,
+          };
+        }
+      }
+
       // Judge the directory actually being searched. Its text files are still searched; the
       // warning only explains why PDF/DOCX content cannot match.
       let warning: string | undefined;
-      if (
-        fs.statSync(checkedBasePath).isDirectory() &&
-        (await this.isDocumentHeavyWorkspace(checkedBasePath))
-      ) {
+      if (baseStats.isDirectory() && (await this.isDocumentHeavyWorkspace(checkedBasePath))) {
         if (globPattern && /\.(pdf|docx)\b/i.test(globPattern)) {
           return {
             success: true,
@@ -189,13 +209,15 @@ export class GrepTools {
       }
 
       // Find files to search
-      const files = await this.findFilesToSearch(
-        checkedBasePath,
-        globPattern,
-        agentRoleId,
-        projectAccessCache,
-        evaluator,
-      );
+      const files = baseStats.isFile()
+        ? [checkedBasePath]
+        : await this.findFilesToSearch(
+            checkedBasePath,
+            globPattern,
+            agentRoleId,
+            projectAccessCache,
+            evaluator,
+          );
       const matches: Array<{
         file: string;
         line?: number;
@@ -530,7 +552,7 @@ export class GrepTools {
           try {
             const stats = fs.statSync(fullPath);
             // Skip files larger than 1MB
-            if (stats.size > 1024 * 1024) continue;
+            if (stats.size > MAX_GREP_FILE_BYTES) continue;
           } catch {
             continue;
           }

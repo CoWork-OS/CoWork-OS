@@ -487,3 +487,41 @@ describe("GrepTools document-heavy directories", () => {
     expect(result.warning).toMatch(/read_file/);
   });
 });
+
+describe("GrepTools single-file paths", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const workspaceWithFiles = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-file-path-"));
+    dirs.push(dir);
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.writeFileSync(path.join(dir, "src", "app.ts"), "const a = 1;\nconst needle = 2;\n");
+    fs.writeFileSync(path.join(dir, "src", "other.ts"), "const needle = 3;\n");
+    fs.writeFileSync(path.join(dir, "brief.pdf"), "%PDF-1.4 needle");
+    fs.writeFileSync(path.join(dir, "big.log"), `${"x".repeat(1024 * 1024)}\nneedle\n`);
+    return new GrepTools({ ...mockWorkspace, path: dir }, mockDaemon as Any, "test-task-id");
+  };
+
+  it("searches only the file named by path", async () => {
+    const result = await workspaceWithFiles().grep({ pattern: "needle", path: "src/app.ts" });
+
+    expect(result.success).toBe(true);
+    expect(result.filesSearched).toBe(1);
+    expect(result.matches).toEqual([{ file: "src/app.ts", line: 2, content: "const needle = 2;" }]);
+  });
+
+  it.each(["brief.pdf", "big.log"])(
+    "explains why a named file %s cannot be searched",
+    async (name) => {
+      const result = await workspaceWithFiles().grep({ pattern: "needle", path: name });
+
+      expect(result.success).toBe(true);
+      expect(result.matches).toEqual([]);
+      expect(result.warning).toMatch(/read_file/);
+    },
+  );
+});

@@ -32,6 +32,7 @@ import { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
 import {
+  mapResponsesApiStopReason,
   parseOpenAICompatibleToolArguments,
   toOpenAICompatibleMessages,
 } from "./openai-compatible";
@@ -563,12 +564,7 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     const hasToolUse = content.some((item) => item.type === "tool_use");
-    const incompleteReason = String(response?.incomplete_details?.reason || "");
-    const stopReason: LLMResponse["stopReason"] = hasToolUse
-      ? "tool_use"
-      : incompleteReason === "max_output_tokens" || response?.status === "incomplete"
-        ? "max_tokens"
-        : "end_turn";
+    const stopReason = mapResponsesApiStopReason(response, hasToolUse);
 
     const usage = response?.usage;
     // Tag with the id we requested (and replay against), not response.model, which the
@@ -1370,7 +1366,7 @@ export class OpenAIProvider implements LLMProvider {
       case "length":
         return "max_tokens";
       case "content_filter":
-        return "stop_sequence";
+        return "refusal";
       default:
         return "end_turn";
     }

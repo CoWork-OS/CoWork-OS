@@ -10,6 +10,7 @@ import {
 import { GoogleGenerativeAIFetchError } from "@google/generative-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  LLMRefusalError,
   MAX_PROVIDER_RETRY_AFTER_MS,
   classifyProviderError,
   resolveProviderRetryDelayMs,
@@ -233,6 +234,14 @@ describe("classifyProviderError", () => {
       reason: "cancelled",
     });
     expect(classifyProviderError(null)).toMatchObject({ retryable: false, reason: "unknown" });
+  });
+
+  it("never retries or fails over a safety refusal", () => {
+    expect(classifyProviderError(new LLMRefusalError())).toMatchObject({
+      retryable: false,
+      failoverEligible: false,
+      reason: "refusal",
+    });
   });
 
   it("parses HTTP-date retry-after headers", () => {

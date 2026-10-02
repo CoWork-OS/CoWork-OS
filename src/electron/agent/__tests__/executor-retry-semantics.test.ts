@@ -4,6 +4,7 @@ import { ThrottlingException } from "@aws-sdk/client-bedrock-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 import { LLMProviderFactory } from "../llm";
+import { LLMRefusalError } from "../llm/provider-error-classifier";
 
 function createRetryExecutor(overrides?: {
   successCriteria?: Any;
@@ -991,6 +992,24 @@ describe("TaskExecutor provider error classification with real SDK errors", () =
     expect(outcome.error).toBeUndefined();
     expect(executor.provider.type).toBe("anthropic");
     expect(requestFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces a provider refusal without retrying or failing over", async () => {
+    const executor = createCallExecutor(
+      { providerType: "anthropic", modelId: "claude-sonnet-4-6" },
+      { providerType: "openai", modelId: "gpt-5.5" },
+    );
+    const requestFn = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "" }],
+      stopReason: "refusal",
+      usage: { inputTokens: 10, outputTokens: 0 },
+    });
+
+    const outcome = await settle(executor.callLLMWithRetry(requestFn, "refusal", 5));
+
+    expect(outcome.error).toBeInstanceOf(LLMRefusalError);
+    expect(requestFn).toHaveBeenCalledTimes(1);
+    expect(executor.provider.type).toBe("anthropic");
   });
 
   it("waits at least the provider's retry-after before retrying", async () => {

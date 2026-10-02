@@ -18,6 +18,7 @@ import {
   buildOpenAICompatibleSystemMessages,
   createToolCallIdMapper,
   fromOpenAICompatibleResponse,
+  mapResponsesApiStopReason,
   parseOpenAICompatibleToolArguments,
   toOpenAICompatibleMessages,
   toOpenAICompatibleTools,
@@ -562,7 +563,7 @@ export class AzureOpenAIProvider implements LLMProvider {
           finishReason = "end_turn";
           break;
         case "content_filter":
-          finishReason = "stop_sequence";
+          finishReason = "refusal";
           break;
         default:
           break;
@@ -772,6 +773,7 @@ export class AzureOpenAIProvider implements LLMProvider {
           }
           break;
         }
+        case "response.incomplete":
         case "response.completed":
           completedResponse = payload.response;
           if (payload.response?.usage) {
@@ -921,7 +923,7 @@ export class AzureOpenAIProvider implements LLMProvider {
 
     return {
       content,
-      stopReason: sawToolCall ? "tool_use" : "end_turn",
+      stopReason: mapResponsesApiStopReason(response, sawToolCall),
       usage: response?.usage
         ? {
             inputTokens: response.usage.input_tokens ?? 0,

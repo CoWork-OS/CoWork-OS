@@ -164,6 +164,7 @@ import { PersonalityManager } from "../settings/personality-manager";
 import { detectContextMode } from "./context-mode-detector";
 import { calculateCost, formatCost, getCacheTokenAccounting, isModelPriced } from "./llm/pricing";
 import {
+  LLMRefusalError,
   classifyProviderError,
   resolveProviderRetryDelayMs,
 } from "./llm/provider-error-classifier";
@@ -8984,9 +8985,12 @@ ${transcript}
       });
       this.finalizeSuccessfulFollowUp(previousStatus);
     } catch (error: Any) {
-      const fallback = isThinkMode
-        ? "I wasn't able to process that follow-up. Could you try rephrasing your question?"
-        : this.generateCompanionFallbackResponse(message);
+      const fallback =
+        error instanceof LLMRefusalError
+          ? error.message
+          : isThinkMode
+            ? "I wasn't able to process that follow-up. Could you try rephrasing your question?"
+            : this.generateCompanionFallbackResponse(message);
       this.emitEvent("assistant_message", { message: fallback });
       this.lastAssistantOutput = fallback;
       this.lastNonVerificationOutput = fallback;
@@ -9087,6 +9091,11 @@ ${transcript}
         }
 
         const response = await requestFn(attempt);
+        if (response?.stopReason === "refusal") {
+          // A safety refusal or content filter is final for this request. Treating it
+          // as an unfinished turn made the loops re-ask until their budget ran out.
+          throw new LLMRefusalError();
+        }
         const elapsedMs = Date.now() - attemptStart;
         const stopReason = response?.stopReason;
         const contentBlocks = Array.isArray(response?.content) ? response.content.length : 0;
@@ -28041,9 +28050,12 @@ You are continuing a previous conversation. The context from the previous conver
       // Companion best-effort completion is not evidence of a successful execution.
       this.finalizeTaskBestEffort(resultSummary);
     } catch (error: Any) {
-      const assistantText = isThinkMode
-        ? "I wasn't able to process that right now. Could you try rephrasing, or let me know what specific aspect you'd like to think through?"
-        : this.generateCompanionFallbackResponse(rawPrompt);
+      const assistantText =
+        error instanceof LLMRefusalError
+          ? error.message
+          : isThinkMode
+            ? "I wasn't able to process that right now. Could you try rephrasing, or let me know what specific aspect you'd like to think through?"
+            : this.generateCompanionFallbackResponse(rawPrompt);
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
       this.lastNonVerificationOutput = assistantText;

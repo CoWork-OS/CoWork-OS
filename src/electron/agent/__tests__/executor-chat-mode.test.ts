@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { LLMRefusalError } from "../llm/provider-error-classifier";
 import { DurableContextService } from "../../memory/DurableContextService";
 
 vi.mock("electron", () => ({
@@ -162,6 +163,40 @@ describe("TaskExecutor chat mode", () => {
     expect(executor.conversationHistory.filter((message: Any) => message.role === "user")).toEqual(
       history,
     );
+  });
+
+  it("shows the provider refusal instead of the canned companion fallback", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "chat-refusal",
+      agentConfig: { conversationMode: "chat", retainMemory: false },
+    };
+    executor.workspace = { id: "workspace-1", path: "/tmp/workspace" };
+    executor.provider = { type: "anthropic" };
+    executor.conversationHistory = [];
+    executor.getRoleContextPrompt = () => "";
+    executor.buildUserProfileBlock = () => "";
+    executor.buildChatOrThinkSystemBlocks = () => [];
+    executor.setPromptCacheContext = () => "system";
+    executor.getEffectiveExecutionMode = () => "execute";
+    executor.getEffectiveTaskDomain = () => "general";
+    executor.isExplicitChatExecutionMode = () => false;
+    executor.emitEvent = vi.fn();
+    executor.saveConversationSnapshot = vi.fn(() => false);
+    executor.restoreFollowUpStatusAfterFailure = vi.fn();
+    executor.generateCompanionFallbackResponse = () => "Hey! How can I help?";
+    executor.updateConversationHistory = vi.fn();
+    executor.buildUserContent = vi.fn(async (message: string) => message);
+    executor.runTextTurnKernel = vi.fn().mockRejectedValue(new LLMRefusalError());
+
+    await (TaskExecutor as Any).prototype.respondInChatMode.call(executor, "Explain this");
+
+    const assistantMessages = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "assistant_message")
+      .map(([, payload]: [string, Any]) => String(payload.message));
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]).toMatch(/declined/i);
+    expect(assistantMessages[0]).not.toContain("How can I help");
   });
 
   it.each(["chat", "think"])(

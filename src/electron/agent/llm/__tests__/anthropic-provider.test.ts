@@ -224,4 +224,26 @@ describe("AnthropicProvider", () => {
 
     expect(anthropicCreateMock.mock.calls[0][0].messages.at(-1).role).toBe("assistant");
   });
+
+  it.each([
+    ["refusal", "refusal"],
+    ["model_context_window_exceeded", "max_tokens"],
+    ["pause_turn", "max_tokens"],
+    ["end_turn", "end_turn"],
+  ])("maps the %s stop reason to %s", async (stopReason, expected) => {
+    anthropicCreateMock.mockResolvedValueOnce({
+      content: [{ type: "text", text: "partial" }],
+      stop_reason: stopReason,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    const provider = new AnthropicProvider({
+      type: "anthropic",
+      model: "claude-sonnet-4-6",
+      anthropicApiKey: "sk-ant-api-test",
+    });
+
+    const response = await provider.createMessage(makeRequest());
+
+    expect(response.stopReason).toBe(expected);
+  });
 });

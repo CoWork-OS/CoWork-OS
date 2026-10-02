@@ -73,3 +73,22 @@ describe("GeminiProvider stop reasons", () => {
     expect(response.stopReason).toBe("end_turn");
   });
 });
+
+describe("GeminiProvider blocked responses", () => {
+  it.each(["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "OTHER"])(
+    "reports finishReason %s as a refusal",
+    (finishReason) => {
+      const provider = new GeminiProvider({
+        type: "gemini",
+        model: "gemini-2.5-pro",
+        geminiApiKey: "test-key",
+      });
+
+      const response = (provider as Any).convertResponse({
+        candidates: [{ finishReason, content: { parts: [] } }],
+      });
+
+      expect(response.stopReason).toBe("refusal");
+    },
+  );
+});

@@ -474,6 +474,13 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         return "max_tokens";
       case "stop_sequence":
         return "stop_sequence";
+      case "refusal":
+        return "refusal";
+      // The context window, not max_tokens, cut the answer off: recover like a truncation.
+      case "model_context_window_exceeded":
+      // A resumable server-side pause: continue the turn like a truncated one.
+      case "pause_turn":
+        return "max_tokens";
       default:
         return "end_turn";
     }

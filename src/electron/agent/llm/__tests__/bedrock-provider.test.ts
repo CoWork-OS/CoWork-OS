@@ -401,3 +401,30 @@ describe("BedrockProvider", () => {
     expect(retryInput.inferenceConfig.maxTokens).toBe(4096);
   });
 });
+
+describe("BedrockProvider stop reasons", () => {
+  const convert = (stopReason: string) =>
+    (new BedrockProvider(config) as Any).convertResponse({
+      output: { message: { content: [{ text: "partial" }] } },
+      stopReason,
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+
+  it.each([
+    ["content_filtered", "refusal"],
+    ["guardrail_intervened", "refusal"],
+    ["model_context_window_exceeded", "max_tokens"],
+    ["end_turn", "end_turn"],
+  ])("maps %s to %s", (stopReason, expected) => {
+    expect(convert(stopReason).stopReason).toBe(expected);
+  });
+
+  it.each(["malformed_model_output", "malformed_tool_use"])(
+    "raises a retryable error for %s instead of accepting the output as final",
+    (stopReason) => {
+      expect(() => convert(stopReason)).toThrow(
+        expect.objectContaining({ retryable: true, code: stopReason }),
+      );
+    },
+  );
+});

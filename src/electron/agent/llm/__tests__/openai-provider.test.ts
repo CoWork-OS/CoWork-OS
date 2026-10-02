@@ -299,6 +299,40 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
+  it("reports content-filtered Responses output as a refusal", async () => {
+    responsesCreateMock.mockResolvedValue({
+      status: "incomplete",
+      incomplete_details: { reason: "content_filter" },
+      output: [],
+      usage: { input_tokens: 10, output_tokens: 0 },
+    });
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    const response = await provider.createMessage({ ...makeRequest(), model: "gpt-5.5" });
+
+    expect(response.stopReason).toBe("refusal");
+  });
+
+  it("reports a content-filtered chat completion as a refusal", async () => {
+    chatCompletionsCreateMock.mockResolvedValue({
+      choices: [{ message: { content: "" }, finish_reason: "content_filter" }],
+      usage: { prompt_tokens: 10, completion_tokens: 0 },
+    });
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-4o",
+      openaiApiKey: "sk-test",
+    });
+
+    const response = await provider.createMessage({ ...makeRequest(), model: "gpt-4o" });
+
+    expect(response.stopReason).toBe("refusal");
+  });
+
   it("uses Responses API controls for other GPT-5-family OpenAI API-key models", async () => {
     responsesCreateMock.mockResolvedValue({
       output: [

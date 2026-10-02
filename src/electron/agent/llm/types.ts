@@ -388,7 +388,12 @@ export interface LLMResponse {
   content: LLMContent[];
   /** Opaque reasoning state to carry on the assistant message (see reasoning-replay.ts). */
   reasoning?: LLMReasoningItem[];
-  stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
+  /**
+   * `refusal`: the provider's safety system declined or filtered the response
+   * (Anthropic refusal, OpenAI/Azure content_filter, Gemini SAFETY and similar,
+   * Bedrock guardrails). Repeating the request will not produce an answer.
+   */
+  stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
   usage?: {
     inputTokens: number;
     outputTokens: number;

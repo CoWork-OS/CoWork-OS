@@ -509,6 +509,29 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect(step.error).toBeDefined();
   });
 
+  it("ends the step on a provider safety refusal instead of re-asking until the loop budget", async () => {
+    executor = createExecutorWithStubs([], {});
+    // Exercise the real retry path so the provider outcome is classified.
+    executor.callLLMWithRetry = (TaskExecutor.prototype as Any).callLLMWithRetry;
+    const createMessageWithTimeout = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "" }],
+      stopReason: "refusal",
+      usage: { inputTokens: 10, outputTokens: 0 },
+    });
+    (executor as Any).createMessageWithTimeout = createMessageWithTimeout;
+
+    const step: Any = { id: "1", description: "Summarize the findings", status: "pending" };
+    let thrown: Any;
+    try {
+      await (executor as Any).executeStep(step);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(String(thrown?.message || step.error)).toMatch(/declined/i);
+  });
+
   it("fails before provider dispatch when retained context exceeds the hard budget", async () => {
     executor = createExecutorWithStubs([textResponse("provider must not run")], {});
     const contextError = new ContextCapacityExhaustedError({

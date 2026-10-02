@@ -13,6 +13,7 @@
 
 export type ProviderErrorReason =
   | "cancelled"
+  | "refusal"
   | "explicit_retryable"
   | "explicit_non_retryable"
   | "quota_exhausted"
@@ -56,6 +57,25 @@ export interface ClassifyProviderErrorOptions {
    * stream-interruption messages ("terminated", "socket hang up", ...).
    */
   legacyRetrySemantics?: boolean;
+}
+
+export const LLM_REFUSAL_MESSAGE =
+  "The model declined to respond to this request (a provider safety refusal or content " +
+  "filter stopped it). Rephrase the request or choose a different model.";
+
+/**
+ * A response the provider's safety system declined or filtered (stop reason
+ * `refusal`). Repeating the request, or sending it to a fallback provider, is
+ * not attempted automatically.
+ */
+export class LLMRefusalError extends Error {
+  readonly code = "model_refusal";
+  readonly retryable = false;
+
+  constructor(message: string = LLM_REFUSAL_MESSAGE) {
+    super(message);
+    this.name = "LLMRefusalError";
+  }
 }
 
 /** Upper bound for a provider-requested retry delay honoured inside one call. */
@@ -343,6 +363,9 @@ export function classifyProviderError(
 
   if (top.name === "AbortError" || text.trim() === "request cancelled") {
     return classify(false, "cancelled");
+  }
+  if (identifiers.has("model_refusal")) {
+    return classify(false, "refusal");
   }
   if (isQuotaExhausted(status, identifiers, text)) {
     return classify(false, "quota_exhausted", true);

@@ -501,3 +501,43 @@ describe("AnthropicCompatibleProvider prompt caching", () => {
     );
   });
 });
+
+describe("AnthropicCompatibleProvider stop reasons", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["refusal", "refusal"],
+    ["model_context_window_exceeded", "max_tokens"],
+    ["pause_turn", "max_tokens"],
+  ])("maps the %s stop reason to %s", async (stopReason, expected) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          content: [{ type: "text", text: "partial" }],
+          stop_reason: stopReason,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+      })),
+    );
+    const provider = new AnthropicCompatibleProvider({
+      type: "anthropic-compatible",
+      providerName: "Anthropic-Compatible",
+      apiKey: "test-key",
+      baseUrl: "https://example.com/anthropic",
+      defaultModel: "claude-sonnet-4-6",
+    });
+
+    const response = await provider.createMessage({
+      model: "claude-sonnet-4-6",
+      maxTokens: 64,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(response.stopReason).toBe(expected);
+  });
+});

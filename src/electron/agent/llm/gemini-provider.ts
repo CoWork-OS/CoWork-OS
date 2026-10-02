@@ -309,10 +309,16 @@ export class GeminiProvider implements LLMProvider {
         return "end_turn";
       case "MAX_TOKENS":
         return "max_tokens";
+      // Blocked or filtered generations. These were reported as stop_sequence, which
+      // the loops treat as an unfinished turn and re-ask until their budget runs out.
       case "SAFETY":
       case "RECITATION":
+      case "LANGUAGE":
+      case "BLOCKLIST":
+      case "PROHIBITED_CONTENT":
+      case "SPII":
       case "OTHER":
-        return "stop_sequence";
+        return "refusal";
       default:
         // Check if we have function calls (tool use)
         return "end_turn";

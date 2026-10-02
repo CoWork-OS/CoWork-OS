@@ -288,9 +288,12 @@ export class GeminiProvider implements LLMProvider {
       content.push({ type: "text", text: "" });
     }
 
+    // Gemini reports finishReason STOP for a turn that ends in function calls.
+    const hasFunctionCall = content.some((block) => block.type === "tool_use");
+    const stopReason = this.mapStopReason(candidate.finishReason);
     return {
       content,
-      stopReason: this.mapStopReason(candidate.finishReason),
+      stopReason: hasFunctionCall && stopReason === "end_turn" ? "tool_use" : stopReason,
       usage: response.usageMetadata
         ? {
             inputTokens: response.usageMetadata.promptTokenCount || 0,

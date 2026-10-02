@@ -47,5 +47,17 @@ export function normalizeResponseToolMetadata(response: LLMResponse): LLMRespons
       },
     };
   });
-  return changed ? { ...response, content } : response;
+  // Gemini (finishReason STOP) and several OpenAI-compatible servers report a
+  // turn that ends in tool calls as a normal stop. The loops treat end_turn as
+  // "answer complete", so they would run the tools once and return the preamble
+  // text as the answer. A response that carries tool calls is a tool_use turn.
+  const stopReason =
+    content.some((block) => block.type === "tool_use") &&
+    (response.stopReason === "end_turn" ||
+      response.stopReason === "stop_sequence" ||
+      response.stopReason === undefined)
+      ? "tool_use"
+      : response.stopReason;
+  if (!changed && stopReason === response.stopReason) return response;
+  return { ...response, content, stopReason };
 }

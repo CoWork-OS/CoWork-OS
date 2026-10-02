@@ -24,6 +24,28 @@ describe("provider tool metadata boundary", () => {
       inputError: { code: "invalid_shape" },
     });
   });
+  it.each(["end_turn", "stop_sequence", undefined])(
+    "reports a response with tool calls as tool_use when the provider said %s",
+    (stopReason) => {
+      const result = normalizeResponseToolMetadata({
+        content: [{ type: "text", text: "I'll read the log first." }, tool("call_1")],
+        stopReason,
+      } as LLMResponse);
+      expect(result.stopReason).toBe("tool_use");
+    },
+  );
+  it("leaves max_tokens and tool-free responses alone", () => {
+    expect(
+      normalizeResponseToolMetadata({ content: [tool("call_1")], stopReason: "max_tokens" })
+        .stopReason,
+    ).toBe("max_tokens");
+    expect(
+      normalizeResponseToolMetadata({
+        content: [{ type: "text", text: "done" }],
+        stopReason: "end_turn",
+      }).stopReason,
+    ).toBe("end_turn");
+  });
   it.each([undefined, null, {}, { content: {} }, { content: [null] }])(
     "rejects malformed response envelopes before dispatch",
     (response) => {

@@ -17,6 +17,7 @@ vi.mock("electron", () => ({
 let mockStoredSettings: any = undefined;
 const mockRepositorySave = vi.fn().mockImplementation((_category: string, settings: any) => {
   mockStoredSettings = settings;
+  return true;
 });
 const mockRepositoryLoad = vi.fn().mockImplementation(() => mockStoredSettings);
 const mockRepositoryExists = vi.fn().mockImplementation(() => mockStoredSettings !== undefined);
@@ -152,6 +153,23 @@ describe("BuiltinToolsSettingsManager", () => {
   });
 
   describe("saveSettings", () => {
+    it("does not cache settings when the repository rejects the save", () => {
+      const original = BuiltinToolsSettingsManager.loadSettings();
+      const updated = {
+        ...original,
+        categories: {
+          ...original.categories,
+          browser: { ...original.categories.browser, enabled: false },
+        },
+      };
+      mockRepositorySave.mockReturnValueOnce(false);
+
+      expect(() => BuiltinToolsSettingsManager.saveSettings(updated)).toThrow(
+        "Built-in tool settings could not be saved.",
+      );
+      expect(BuiltinToolsSettingsManager.loadSettings()).toBe(original);
+    });
+
     it("should save settings to the repository", () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.categories.browser.enabled = false;

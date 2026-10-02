@@ -6,8 +6,8 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1507,
-    "getDatabase": 130,
+    "prepare": 1525,
+    "getDatabase": 132,
     "runtimeImport": 50
   },
   "files": {
@@ -23,7 +23,7 @@
       "getDatabase": 1
     },
     "src/daemon/main.ts": {
-      "getDatabase": 9
+      "getDatabase": 10
     },
     "src/electron/acp/acp-sql.ts": {
       "prepare": 5
@@ -199,7 +199,7 @@
       "prepare": 3
     },
     "src/electron/database/repositories.ts": {
-      "prepare": 283,
+      "prepare": 300,
       "runtimeImport": 1
     },
     "src/electron/database/schema.ts": {
@@ -288,7 +288,7 @@
       "prepare": 1
     },
     "src/electron/main.ts": {
-      "getDatabase": 36
+      "getDatabase": 37
     },
     "src/electron/managed/managed-sql.ts": {
       "prepare": 15
@@ -444,6 +444,9 @@
       "getDatabase": 3
     },
     "src/renderer/components/timeline/SemanticTimeline.tsx": {
+      "prepare": 1
+    },
+    "src/host/services/browser-navigation-methods.ts": {
       "prepare": 1
     }
   }

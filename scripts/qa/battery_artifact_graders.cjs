@@ -261,11 +261,7 @@ function parseXml(source, partName) {
     throw new Error(`DTD/entity declarations are not accepted in ${partName}`);
   const parserErrors = [];
   const parser = new DOMParser({
-    errorHandler: {
-      warning: (message) => parserErrors.push(String(message)),
-      error: (message) => parserErrors.push(String(message)),
-      fatalError: (message) => parserErrors.push(String(message)),
-    },
+    onError: (_level, message) => parserErrors.push(String(message)),
   });
   const document = parser.parseFromString(source, "application/xml");
   if (parserErrors.length) throw new Error(`Malformed XML in ${partName}: ${parserErrors[0]}`);

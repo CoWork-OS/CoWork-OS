@@ -193,6 +193,123 @@ describe("TaskExecutor completion contract integration", () => {
     ).toBe(true);
   });
 
+  describe("verification evidence from evidence-producing tools", () => {
+    const evidencedAnswers = [
+      "Yes. The Pro plan includes SAML SSO; the pricing page lists it under Pro features alongside audit logs, while the Starter plan does not include it.",
+      "No — SSO is only offered on the Enterprise tier. The Pro plan lists SCIM-free team management, priority support and 50 GB storage.",
+    ];
+    const neutralSteps = [
+      "Fetch the pricing page",
+      "Open https://example.com/pricing and extract the plan feature lists",
+      "Answer whether the Pro plan includes SSO",
+    ];
+    const fabricatedReport =
+      "`npm test`: passed, exit 0\n`npm run build`: passed, exit 0\n\nFinal verdict: green";
+
+    it.each([
+      ["web_fetch"],
+      ["browser_navigate", "browser_get_content"],
+      ["scrape_page"],
+      ["parse_document"],
+      ["read_pdf_visual"],
+      ["mcp_notion_get_page"],
+      ["notion_action"],
+      ["git_log"],
+      ["execute_code"],
+    ])("accepts a direct answer backed by %s regardless of step wording", (...tools) => {
+      for (const bestCandidate of evidencedAnswers) {
+        for (const description of neutralSteps) {
+          expect(
+            hasVerificationEvidence({
+              bestCandidate,
+              planSteps: [{ status: "completed", description }],
+              successfulTools: tools,
+            }),
+          ).toBe(true);
+          expect(
+            hasVerificationEvidence({
+              bestCandidate,
+              planSteps: [{ status: "completed", description }],
+              toolResultMemory: tools.map((tool) => ({ tool })),
+            }),
+          ).toBe(true);
+        }
+      }
+    });
+
+    it("rejects a fabricated command report when no tool ran", () => {
+      expect(responseHasExecutionReportEvidenceSignal(fabricatedReport)).toBe(true);
+      expect(hasVerificationEvidence({ bestCandidate: fabricatedReport })).toBe(false);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: [{ status: "completed", description: "Verify the build and tests" }],
+        }),
+      ).toBe(false);
+    });
+
+    it("requires a command or API tool before reported command results count", () => {
+      const steps = [{ status: "completed", description: "Check build health" }];
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: steps,
+          successfulTools: ["read_file", "glob"],
+        }),
+      ).toBe(false);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: steps,
+          successfulTools: ["read_file", "run_command"],
+        }),
+      ).toBe(true);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: steps,
+          successfulTools: ["execute_code"],
+        }),
+      ).toBe(true);
+    });
+
+    it("does not count writes, orchestration, or self-state reads as evidence", () => {
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: evidencedAnswers[0],
+          planSteps: [{ status: "completed", description: "Review the pricing page" }],
+          successfulTools: [
+            "write_file",
+            "create_document",
+            "scratchpad_read",
+            "search_memories",
+            "task_list_list",
+            "spawn_agent",
+            "canvas_push",
+            "revise_plan",
+          ],
+        }),
+      ).toBe(false);
+    });
+
+    it("still rejects an operational status even when evidence tools ran", () => {
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: "Done.",
+          planSteps: [{ status: "completed", description: "Fetch the pricing page" }],
+          successfulTools: ["web_fetch"],
+        }),
+      ).toBe(false);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: "Created: pricing-notes.md",
+          planSteps: [{ status: "completed", description: "Fetch the pricing page" }],
+          successfulTools: ["web_fetch"],
+        }),
+      ).toBe(false);
+    });
+  });
+
   it("keeps bounded read content for later plan steps", () => {
     const executor = createExecuteHarness({
       title: "Extract a report",
@@ -1863,6 +1980,145 @@ End with a final section titled "Verification Evidence".`,
         error: expect.stringContaining("missing verification evidence"),
       }),
     );
+  });
+
+  it("completes a browsed-page answer whose wording has no review phrasing", async () => {
+    const answer =
+      "Yes. The Pro plan includes SAML SSO; the pricing page lists it under Pro features alongside audit logs, while the Starter plan does not include it.";
+    const executor = createExecuteHarness({
+      title: "Pricing check",
+      prompt: "Review https://example.com/pricing and tell me whether the Pro plan includes SSO.",
+      lastOutput: answer,
+      planStepDescription: "Fetch the pricing page",
+    });
+    (executor as Any).successfulToolUsageCounts = new Map([
+      ["browser_navigate", 1],
+      ["browser_get_content", 1],
+    ]);
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      answer,
+      expect.any(Object),
+    );
+  });
+
+  it("fails a fabricated command report when no tool ran", async () => {
+    const executor = createExecuteHarness({
+      title: "Build health",
+      prompt:
+        "Check build health: run npm test and npm run build, then report exit codes and the final build-health verdict.",
+      lastOutput:
+        "`npm test`: passed, exit 0\n`npm run build`: passed, exit 0\n\nFinal verdict: green",
+      planStepDescription: "Run the build and test commands",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("re-prompts once for an evidence-grounded answer when tools ran but the answer cites nothing", async () => {
+    const groundedAnswer =
+      "According to the fetched pricing page, the Pro plan costs $49 per month and adds SSO and audit logs over the $19 Starter plan.";
+    const executor = createExecuteHarness({
+      title: "Pricing review",
+      prompt: "Review https://example.com/pricing and summarize how the plans differ.",
+      lastOutput: "The Pro plan costs $49 per month and adds SSO and audit logs over Starter.",
+      planStepDescription: "Fetch the pricing page",
+    });
+    (executor as Any).toolResultMemory = [
+      {
+        tool: "web_fetch",
+        summary: "Pro: $49/month, SAML SSO, audit logs. Starter: $19/month.",
+        timestamp: Date.now(),
+      },
+    ];
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: groundedAnswer }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+    (executor as Any).emitEvent = vi.fn();
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledWith(
+      expect.objectContaining({ maxTokens: 1200 }),
+      35_000,
+      "Final answer verification synthesis",
+    );
+    const synthesisPrompt = (executor as Any).createMessageWithTimeout.mock.calls[0][0].messages[0]
+      .content[0].text as string;
+    expect(synthesisPrompt).toContain("Pro: $49/month, SAML SSO, audit logs.");
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      groundedAnswer,
+      expect.any(Object),
+    );
+  });
+
+  it("keeps failing when the single verification re-prompt still cites no evidence", async () => {
+    const executor = createExecuteHarness({
+      title: "Pricing review",
+      prompt: "Review https://example.com/pricing and summarize how the plans differ.",
+      lastOutput: "The Pro plan costs $49 per month and adds SSO and audit logs over Starter.",
+      planStepDescription: "Fetch the pricing page",
+    });
+    (executor as Any).toolResultMemory = [
+      { tool: "web_fetch", summary: "Pro: $49/month. Starter: $19/month.", timestamp: Date.now() },
+    ];
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: "The plans differ in price and features." }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("does not re-prompt for verification evidence when no evidence tool ran", async () => {
+    const executor = createExecuteHarness({
+      title: "Video decision",
+      prompt:
+        "Transcribe this video and then let me know if I should spend my time watching it or skip it.",
+      lastOutput: "You should skip it because it repeats beginner concepts.",
+      planStepDescription: "Transcribe the video",
+    });
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: "Based on the transcript, you should skip it." }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "Final answer verification synthesis",
+    );
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
   });
 
   it("accepts structured documentation-drift reports when repo evidence tools were used", async () => {

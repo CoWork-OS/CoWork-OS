@@ -1,7 +1,15 @@
 import * as path from "path";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
+import { TOOL_GROUPS, type RuntimeToolResultKind } from "../../shared/types";
 import type { CompletionContract } from "./executor-helpers";
 import { CANONICAL_ARTIFACT_PATH_REGEX, extractArtifactExtensionsFromText } from "./step-contract";
+import {
+  canonicalizeToolName,
+  isArtifactGenerationToolName,
+  isCanonicalWriteToolName,
+  isFileMutationToolName,
+} from "./tool-semantics";
+import { getDefaultRuntimeToolMetadata } from "./tools/runtime-tool-definition";
 
 const ARTIFACT_CREATION_VERB_REGEX =
   /\b(create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)\b/;
@@ -29,6 +37,29 @@ const VERIFICATION_TOOL_EVIDENCE = new Set([
   // source extraction internally rather than through a model tool call. Treat
   // that extraction as verification evidence for its completed review step.
   "bounded_document_extract",
+]);
+// Content-gathering tools whose names do not follow the read_/list_/get_/
+// search_ conventions the runtime metadata infers read-only results from.
+const CONTENT_GATHERING_TOOL_REGEX =
+  /^(?:scrape_|qa_|youtube_)|^(?:parse_document|read_pdf_visual|analyze_image|execute_code)$/;
+// Lanes whose tools act on the agent's own state rather than observe the task.
+const NON_EVIDENCE_TOOL_LANES = new Set(["memory", "orchestration", "admin", "artifact"]);
+const SELF_STATE_TOOL_REGEX = /^task_list_/;
+const EVIDENCE_RESULT_KINDS = new Set<RuntimeToolResultKind>([
+  "read",
+  "search",
+  "command",
+  "browser",
+  "integration",
+]);
+const READ_GROUP_TOOLS = new Set<string>(TOOL_GROUPS["group:read"]);
+// Tools that can actually produce the command output or API responses an
+// execution report claims (exit codes, HTTP statuses, pass/fail results).
+const COMMAND_OR_API_EVIDENCE_TOOLS = new Set([
+  "run_command",
+  "execute_code",
+  "http_request",
+  "web_fetch",
 ]);
 
 export function normalizePromptForContracts(taskPrompt: string): string {
@@ -726,17 +757,45 @@ export function responseHasReviewReportEvidenceSignal(text: string): boolean {
   return matchedFieldCount >= 4 && hasMismatchOrFinding && hasSuggestedDocChange && hasPriority;
 }
 
+/**
+ * Returns true when a successful call of this tool observed something about the
+ * task (read, searched, fetched, browsed, queried, or executed), based on the
+ * tool's runtime semantics rather than a fixed list of names. Writes, artifact
+ * generators, orchestration, and reads of the agent's own memory or checklist
+ * are not evidence.
+ */
+export function isVerificationEvidenceTool(toolName: string): boolean {
+  const canonical = canonicalizeToolName(
+    String(toolName || "")
+      .trim()
+      .toLowerCase(),
+  );
+  if (!canonical) return false;
+  if (VERIFICATION_TOOL_EVIDENCE.has(canonical)) return true;
+  if (
+    isFileMutationToolName(canonical) ||
+    isArtifactGenerationToolName(canonical) ||
+    isCanonicalWriteToolName(canonical)
+  ) {
+    return false;
+  }
+  if (CONTENT_GATHERING_TOOL_REGEX.test(canonical)) return true;
+  if (SELF_STATE_TOOL_REGEX.test(canonical)) return false;
+  const runtime = getDefaultRuntimeToolMetadata(canonical);
+  if (runtime.capabilityTags.some((tag) => NON_EVIDENCE_TOOL_LANES.has(tag))) return false;
+  return (
+    READ_GROUP_TOOLS.has(canonical) ||
+    runtime.readOnly ||
+    EVIDENCE_RESULT_KINDS.has(runtime.resultKind) ||
+    runtime.capabilityTags.includes("integration")
+  );
+}
+
 export function hasVerificationToolEvidence(
   toolResultMemory: Array<{ tool: string }> | undefined,
 ): boolean {
   if (!Array.isArray(toolResultMemory) || toolResultMemory.length === 0) return false;
-  return toolResultMemory.some((entry) =>
-    VERIFICATION_TOOL_EVIDENCE.has(
-      String(entry.tool || "")
-        .trim()
-        .toLowerCase(),
-    ),
-  );
+  return toolResultMemory.some((entry) => isVerificationEvidenceTool(entry.tool));
 }
 
 export function responseLooksOperationalOnly(text: string): boolean {
@@ -929,33 +988,57 @@ export function hasArtifactEvidence(opts: {
   );
 }
 
+/**
+ * A direct conclusion ("Yes. The Pro plan includes SSO…", "3 unique attendees")
+ * rather than a status line. Only meaningful together with tool evidence.
+ */
+function responseStatesConclusion(text: string): boolean {
+  const normalized = String(text || "").trim();
+  if (!normalized || responseLooksOperationalOnly(normalized)) return false;
+  return responseHasDecisionSignal(normalized) || responseHasConcreteResultSignal(normalized);
+}
+
 export function hasVerificationEvidence(opts: {
   bestCandidate: string;
   planSteps?: Array<{ status?: string; description?: string }>;
   toolResultMemory?: Array<{ tool: string }>;
   successfulTools?: string[];
 }): boolean {
+  const toolNames = [
+    ...(opts.toolResultMemory || []).map((entry) => entry.tool),
+    ...(opts.successfulTools || []),
+  ].map((tool) =>
+    canonicalizeToolName(
+      String(tool || "")
+        .trim()
+        .toLowerCase(),
+    ),
+  );
+  // Verification needs something the run actually observed. Wording alone
+  // (including a well-formed command report) is easy to produce without work.
+  if (!toolNames.some((tool) => isVerificationEvidenceTool(tool))) return false;
+
+  // Reported command results or API responses count only when a tool that can
+  // produce them ran; reading package.json does not show that `npm test` passed.
+  if (
+    responseHasExecutionReportEvidenceSignal(opts.bestCandidate) &&
+    !toolNames.some((tool) => COMMAND_OR_API_EVIDENCE_TOOLS.has(tool))
+  ) {
+    return false;
+  }
+
   const hasCompletedReviewStep = !!opts.planSteps?.some(
     (step) =>
       step.status === "completed" &&
       (isVerificationStepDescription(step.description || "") ||
         COMPLETED_REVIEW_STEP_REGEX.test(step.description || "")),
   );
-  const hasToolEvidence = hasVerificationToolEvidence([
-    ...(opts.toolResultMemory || []),
-    ...(opts.successfulTools || []).map((tool) => ({ tool })),
-  ]);
-
-  if (responseHasExecutionReportEvidenceSignal(opts.bestCandidate)) {
-    return true;
-  }
-
   return (
-    hasToolEvidence &&
-    (hasCompletedReviewStep ||
-      responseHasVerificationSignal(opts.bestCandidate) ||
-      responseHasReasonedConclusionSignal(opts.bestCandidate) ||
-      responseHasReviewReportEvidenceSignal(opts.bestCandidate))
+    hasCompletedReviewStep ||
+    responseHasVerificationSignal(opts.bestCandidate) ||
+    responseHasReasonedConclusionSignal(opts.bestCandidate) ||
+    responseHasReviewReportEvidenceSignal(opts.bestCandidate) ||
+    responseStatesConclusion(opts.bestCandidate)
   );
 }
 

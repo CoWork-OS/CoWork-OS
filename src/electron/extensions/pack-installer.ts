@@ -17,6 +17,7 @@ import { app } from "electron";
 import { InstallSecurityOutcome } from "../../shared/types";
 import { getCapabilityBundleSecurityService } from "../security/capability-bundle-security";
 import { assertNetworkPolicyAllowed } from "../security/network-policy";
+import { readBoundedResponse } from "../security/bounded-response";
 import { validateManifest } from "./loader";
 import { PluginManifest } from "./types";
 
@@ -32,6 +33,7 @@ const GIT_CLONE_TIMEOUT_MS = 60_000;
 
 /** Maximum manifest download timeout (15 seconds) */
 const FETCH_TIMEOUT_MS = 15_000;
+const MAX_MANIFEST_BYTES = 1024 * 1024;
 const securityService = getCapabilityBundleSecurityService();
 
 export interface InstallProgress {
@@ -436,14 +438,23 @@ export async function installFromUrl(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+    let manifestData: unknown;
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        await response.body?.cancel();
+        return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+      }
+      const body = await readBoundedResponse(
+        response,
+        MAX_MANIFEST_BYTES,
+        "Plugin manifest",
+        controller.signal,
+      );
+      manifestData = JSON.parse(new TextDecoder().decode(body));
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const manifestData = await response.json();
 
     notify({ status: "validating", progress: 50, message: "Validating manifest..." });
 

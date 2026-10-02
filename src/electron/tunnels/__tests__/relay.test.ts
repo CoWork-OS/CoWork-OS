@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { startTunnelRelayServer, type TunnelRelayServer } from "../relay";
 
@@ -13,6 +14,30 @@ afterEach(async () => {
 });
 
 describe("secure MCP tunnel relay", () => {
+  it.each([
+    { target: "/v1/tunnels/connect?tunnel_id=missing", host: ":" },
+    { target: "http://[", host: "relay.example" },
+  ])("survives malformed upgrade routing $target / $host", async ({ target, host }) => {
+    relay = await startTunnelRelayServer({ port: 0, adminToken: ADMIN_TOKEN });
+    const port = relay.port;
+    await new Promise<void>((resolve, reject) => {
+      const socket = connect(port, "127.0.0.1", () => {
+        socket.write(
+          `GET ${target} HTTP/1.1\r\nHost: ${host}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`,
+        );
+      });
+      socket.on("data", () => {});
+      socket.once("error", reject);
+      socket.once("close", () => resolve());
+      socket.setTimeout(2000, () => {
+        socket.destroy();
+        reject(new Error("Upgrade socket stayed open"));
+      });
+    });
+    // The listener remains available for an authenticated ordinary request.
+    await createTunnel(port);
+  });
+
   it("requires an admin token to create relay tunnel credentials", async () => {
     relay = await startTunnelRelayServer({ port: 0 });
     const response = await fetch(`http://127.0.0.1:${relay.port}/v1/tunnels`, {

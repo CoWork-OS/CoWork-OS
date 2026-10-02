@@ -74,7 +74,14 @@ export async function startTunnelRelayServer(
   });
 
   server.on("upgrade", (req, socket, head) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+    let url: URL;
+    try {
+      // Routing uses only the request target; an untrusted Host is not a URL base.
+      url = new URL(req.url || "/", "http://127.0.0.1");
+    } catch {
+      socket.destroy();
+      return;
+    }
     if (url.pathname !== "/v1/tunnels/connect") {
       socket.destroy();
       return;

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Process sandbox policy**: enforce read-only subtrees, recursive Git/policy protections, and separate delete authority across macOS process backends; reject Docker mount configurations that cannot enforce those boundaries. Host directory moves/removals require guarded file tools on macOS.
 - **Code execution permission**: require shell capability and shell approval handling for Python, JavaScript, and shell `execute_code` calls.
+- **Saved provider credentials**: bind credential reuse to the configured endpoint during model discovery, connection tests, and settings saves; changed destinations require replacement credentials.
 - **HTTP redirect credentials**: replace caller headers with public defaults on origin changes and reject cross-origin redirects that preserve a request body.
 - **Grep execution limits**: move regex and glob matching into a terminable worker with a 500 ms per-job deadline, and cap pattern size and brace expansion.
 - **Pulse request limits**: enforce the 16 KiB body cap while streaming, canceling oversized input before complete buffering.

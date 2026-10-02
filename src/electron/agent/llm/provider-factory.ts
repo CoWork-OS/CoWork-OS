@@ -77,6 +77,7 @@ import { recommendChatGPTModelForPlan } from "../../../shared/chatgpt-plan";
 import { normalizePromptCachingSettings } from "./prompt-cache";
 import { wrapProviderWithLocalInferenceAdmission } from "./local-inference-admission";
 import { isLocalInferenceProvider } from "../runtime/local-model-execution-profile";
+import { PROVIDER_DEFAULT_BASE_URLS, resolveEndpointCredential } from "./credential-binding";
 
 const LEGACY_SETTINGS_FILE = "llm-settings.json";
 const MASKED_VALUE = "***configured***";
@@ -3845,6 +3846,13 @@ export class LLMProviderFactory {
   ): Promise<Array<{ name: string; size: number; modified: string }>> {
     const settings = this.loadSettings();
     const url = baseUrl || settings.ollama?.baseUrl || "http://localhost:11434";
+    const apiKey = resolveEndpointCredential({
+      saved: settings.ollama?.apiKey,
+      endpoint: url,
+      savedEndpoint: settings.ollama?.baseUrl,
+      defaultEndpoint: PROVIDER_DEFAULT_BASE_URLS.ollama,
+      label: "Ollama",
+    });
 
     try {
       console.log(`[ProviderFactory] Fetching Ollama models from ${url}...`);
@@ -3852,7 +3860,7 @@ export class LLMProviderFactory {
         type: "ollama",
         model: "",
         ollamaBaseUrl: url,
-        ollamaApiKey: settings.ollama?.apiKey,
+        ollamaApiKey: apiKey,
       });
       const models = await provider.getAvailableModels();
       console.log(`[ProviderFactory] Fetched ${models.length} models from Ollama`);
@@ -4035,9 +4043,16 @@ export class LLMProviderFactory {
     const settings = this.loadSettings();
     // Normalize empty strings to undefined
     const normalizedApiKey = apiKey?.trim() || undefined;
-    const key = normalizedApiKey || settings.openrouter?.apiKey;
     const normalizedBaseUrl = baseUrl?.trim() || undefined;
     const resolvedBaseUrl = normalizedBaseUrl || settings.openrouter?.baseUrl;
+    const key = resolveEndpointCredential({
+      explicit: normalizedApiKey,
+      saved: settings.openrouter?.apiKey,
+      endpoint: resolvedBaseUrl,
+      savedEndpoint: settings.openrouter?.baseUrl,
+      defaultEndpoint: PROVIDER_DEFAULT_BASE_URLS.openrouter,
+      label: "OpenRouter",
+    });
 
     const defaultModels = [
       {
@@ -4106,16 +4121,23 @@ export class LLMProviderFactory {
     baseUrl?: string,
   ): Promise<OpenRouterImageModel[]> {
     const settings = this.loadSettings();
-    const key =
-      apiKey?.trim() ||
-      settings.imageGeneration?.openrouter?.apiKey?.trim() ||
-      settings.openrouter?.apiKey?.trim();
     const resolvedBaseUrl = (
       baseUrl?.trim() ||
       settings.imageGeneration?.openrouter?.baseUrl?.trim() ||
       settings.openrouter?.baseUrl?.trim() ||
       "https://openrouter.ai/api/v1"
     ).replace(/\/+$/, "");
+    const savedImageKey = settings.imageGeneration?.openrouter?.apiKey?.trim();
+    const key = resolveEndpointCredential({
+      explicit: apiKey,
+      saved: savedImageKey || settings.openrouter?.apiKey,
+      endpoint: resolvedBaseUrl,
+      savedEndpoint: savedImageKey
+        ? settings.imageGeneration?.openrouter?.baseUrl?.trim() || settings.openrouter?.baseUrl
+        : settings.openrouter?.baseUrl,
+      defaultEndpoint: PROVIDER_DEFAULT_BASE_URLS.openrouter,
+      label: "OpenRouter image",
+    });
     const defaultModels: OpenRouterImageModel[] = [
       {
         id: "meta/muse-image",
@@ -4362,9 +4384,16 @@ export class LLMProviderFactory {
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
-    const key = normalizedApiKey || settings.groq?.apiKey;
     const normalizedBaseUrl = baseUrl?.trim() || undefined;
     const resolvedBaseUrl = normalizedBaseUrl || settings.groq?.baseUrl;
+    const key = resolveEndpointCredential({
+      explicit: normalizedApiKey,
+      saved: settings.groq?.apiKey,
+      endpoint: resolvedBaseUrl,
+      savedEndpoint: settings.groq?.baseUrl,
+      defaultEndpoint: PROVIDER_DEFAULT_BASE_URLS.groq,
+      label: "Groq",
+    });
 
     const defaultModels = [
       { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant" },
@@ -4398,9 +4427,16 @@ export class LLMProviderFactory {
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
-    const key = normalizedApiKey || settings.xai?.apiKey;
     const normalizedBaseUrl = baseUrl?.trim() || undefined;
     const resolvedBaseUrl = normalizedBaseUrl || settings.xai?.baseUrl;
+    const key = resolveEndpointCredential({
+      explicit: normalizedApiKey,
+      saved: settings.xai?.apiKey,
+      endpoint: resolvedBaseUrl,
+      savedEndpoint: settings.xai?.baseUrl,
+      defaultEndpoint: PROVIDER_DEFAULT_BASE_URLS.xai,
+      label: "xAI",
+    });
 
     const defaultModels = [
       { id: "grok-4.3", name: "Grok 4.3" },
@@ -4436,9 +4472,16 @@ export class LLMProviderFactory {
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
-    const key = normalizedApiKey || settings.kimi?.apiKey;
     const normalizedBaseUrl = baseUrl?.trim() || undefined;
     const resolvedBaseUrl = normalizedBaseUrl || settings.kimi?.baseUrl;
+    const key = resolveEndpointCredential({
+      explicit: normalizedApiKey,
+      saved: settings.kimi?.apiKey,
+      endpoint: resolvedBaseUrl,
+      savedEndpoint: settings.kimi?.baseUrl,
+      defaultEndpoint: PROVIDER_DEFAULT_BASE_URLS.kimi,
+      label: "Kimi",
+    });
 
     const defaultModels = [
       { id: "kimi-k2.5", name: "Kimi K2.5" },
@@ -4478,9 +4521,16 @@ export class LLMProviderFactory {
   ): Promise<Array<{ id: string; name: string }>> {
     const settings = this.loadSettings();
     const normalizedApiKey = apiKey?.trim() || undefined;
-    const key = normalizedApiKey || settings.deepseek?.apiKey;
     const normalizedBaseUrl = baseUrl?.trim() || undefined;
     const resolvedBaseUrl = normalizedBaseUrl || settings.deepseek?.baseUrl;
+    const key = resolveEndpointCredential({
+      explicit: normalizedApiKey,
+      saved: settings.deepseek?.apiKey,
+      endpoint: resolvedBaseUrl,
+      savedEndpoint: settings.deepseek?.baseUrl,
+      defaultEndpoint: PROVIDER_DEFAULT_BASE_URLS.deepseek,
+      label: "DeepSeek",
+    });
 
     const defaultModels = [{ id: "deepseek-chat", name: "DeepSeek Chat" }];
 
@@ -4725,7 +4775,6 @@ export class LLMProviderFactory {
     const settings = this.loadSettings();
     const existingConfig =
       getCustomProviderConfig(settings.customProviders, resolvedProviderType) || {};
-    const apiKey = overrides?.apiKey?.trim() || existingConfig.apiKey || "";
     const baseUrl = overrides?.baseUrl?.trim() || existingConfig.baseUrl || entry.baseUrl || "";
     const documentedModels = getKnownCustomProviderModels(entry);
     const selectedModel = existingConfig.model?.trim();
@@ -4775,6 +4824,17 @@ export class LLMProviderFactory {
       return mergeCustomProviderModels(entry, existingConfig.cachedModels, fallbackCachedModels);
     }
 
+    // Static catalogs above do not send credentials. Bind only before creating
+    // a provider that can contact the selected destination.
+    const apiKey =
+      resolveEndpointCredential({
+        explicit: overrides?.apiKey,
+        saved: existingConfig.apiKey,
+        endpoint: baseUrl,
+        savedEndpoint: existingConfig.baseUrl,
+        defaultEndpoint: entry.baseUrl,
+        label: entry.name,
+      }) || "";
     let provider:
       | AnthropicCompatibleProvider
       | OpenAICompatibleProvider
@@ -4888,8 +4948,16 @@ export class LLMProviderFactory {
     const entry = getCustomProviderEntry("atomic-chat");
     const settings = this.loadSettings();
     const existingConfig = getCustomProviderConfig(settings.customProviders, "atomic-chat") || {};
-    const apiKey = overrides?.apiKey?.trim() || existingConfig.apiKey || "";
     const baseUrl = overrides?.baseUrl?.trim() || existingConfig.baseUrl || entry?.baseUrl || "";
+    const apiKey =
+      resolveEndpointCredential({
+        explicit: overrides?.apiKey,
+        saved: existingConfig.apiKey,
+        endpoint: baseUrl,
+        savedEndpoint: existingConfig.baseUrl,
+        defaultEndpoint: entry?.baseUrl,
+        label: "Atomic Chat",
+      }) || "";
 
     if (!entry || !baseUrl) {
       return {

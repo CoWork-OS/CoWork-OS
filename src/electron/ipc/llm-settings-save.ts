@@ -1,4 +1,8 @@
 import type { LLMSettingsData } from "../../shared/types";
+import {
+  assertSettingsCredentialDestinations,
+  explicitCredentialPaths,
+} from "../agent/llm/credential-binding";
 
 function mergeProviderSettings<T extends object>(incoming?: T, existing?: T): T | undefined {
   if (!incoming && !existing) return undefined;
@@ -144,6 +148,7 @@ function normalizeJevSettings(
 export function buildSavedLLMSettings(
   validated: LLMSettingsData,
   existingSettings: LLMSettingsData,
+  credentialReplacements: ReadonlySet<string> = explicitCredentialPaths(validated),
 ): LLMSettingsData {
   const existingOpenAISettings = existingSettings.openai;
   const incomingOpenAISettings = validated.openai;
@@ -193,7 +198,7 @@ export function buildSavedLLMSettings(
     };
   }
 
-  return {
+  const next: LLMSettingsData = {
     providerType: validated.providerType,
     modelKey: validated.modelKey,
     fallbackProviders: Object.prototype.hasOwnProperty.call(validated, "fallbackProviders")
@@ -253,4 +258,6 @@ export function buildSavedLLMSettings(
     cachedDeepSeekModels: existingSettings.cachedDeepSeekModels,
     cachedOpenAICompatibleModels: existingSettings.cachedOpenAICompatibleModels,
   };
+  assertSettingsCredentialDestinations(next, existingSettings, credentialReplacements);
+  return next;
 }

@@ -7,6 +7,12 @@ import { RuntimeVisibilityService } from "../../electron/agent/RuntimeVisibility
 import { testJevProvider } from "../../electron/agent/jev";
 import { buildSavedLLMSettings } from "../../electron/ipc/llm-settings-save";
 import {
+  assertSettingsCredentialDestinations,
+  CredentialDestinationError,
+  explicitCredentialPaths,
+  isCredentialQueryKey,
+} from "../../electron/agent/llm/credential-binding";
+import {
   JevTestProviderRequestSchema,
   GuardrailSettingsSchema,
   PermissionSettingsSchema,
@@ -186,21 +192,6 @@ const ModelSelectionSchema = z.union([
 
 const SECRET_KEY =
   /(?:api.?key|access.?key|secret|password|credential|authorization|bearer|subscription.?token|access.?token|refresh.?token|id.?token)/i;
-const AUTH_QUERY_KEYS = new Set([
-  "key",
-  "apikey",
-  "token",
-  "accesstoken",
-  "refreshtoken",
-  "idtoken",
-  "subscriptiontoken",
-  "bearertoken",
-  "authorization",
-  "password",
-  "secret",
-  "clientsecret",
-  "credential",
-]);
 const HOST_ONLY_OAUTH_KEYS = new Set([
   "accessToken",
   "refreshToken",
@@ -232,16 +223,7 @@ function invalid(message = "Invalid browser action arguments."): never {
 }
 
 function isAuthQueryKey(key: string): boolean {
-  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return (
-    AUTH_QUERY_KEYS.has(normalized) ||
-    normalized.endsWith("apikey") ||
-    normalized.endsWith("token") ||
-    normalized.endsWith("authorization") ||
-    normalized.endsWith("password") ||
-    normalized.endsWith("secret") ||
-    normalized.endsWith("credential")
-  );
+  return isCredentialQueryKey(key);
 }
 
 function redactUrlQueryCredentials(raw: string): string {
@@ -422,7 +404,21 @@ function define(
     validate?: (args: unknown[]) => unknown[];
   } = {},
 ) {
-  return { ...options, handler };
+  const handleError = (error: unknown): never => {
+    if (error instanceof CredentialDestinationError) return invalid(error.message);
+    throw error;
+  };
+  return {
+    ...options,
+    handler: (args: unknown[]) => {
+      try {
+        const result = handler(args);
+        return result instanceof Promise ? result.catch(handleError) : result;
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+  };
 }
 
 function redactSecrets<T>(value: T): T {
@@ -545,8 +541,11 @@ function applySettingsPath(
     parent = parent[segment] as Record<string, unknown>;
   }
   const field = path[path.length - 1];
-  if (operation === "remove") delete parent[field];
-  else parent[field] = value;
+  if (operation === "remove") {
+    // Keep endpoint deletion explicit through the subsequent provider merge.
+    if (isUrlSettingKey(field)) parent[field] = undefined;
+    else delete parent[field];
+  } else parent[field] = value;
 }
 
 function applyProviderSettingsPatch(
@@ -929,7 +928,14 @@ export function createBrowserSettingsDefinitions(
         const patched = applyProviderSettingsPatch(existing as LLMSettingsData, patch);
         const restoredUrls = restoreSettingsUrlQueryCredentials(patched, existing);
         const validated = LLMSettingsSchema.parse(restoredUrls) as LLMSettingsData;
-        const merged = buildSavedLLMSettings(validated, existing as unknown as LLMSettingsData);
+        const replacements = new Set(
+          patch.replaceSecrets.map((change) => JSON.stringify(change.path)),
+        );
+        const merged = buildSavedLLMSettings(
+          validated,
+          existing as unknown as LLMSettingsData,
+          replacements,
+        );
         LLMProviderFactory.saveSettings(merged as never);
         return {
           success: true,
@@ -1502,6 +1508,14 @@ export function createBrowserSettingsDefinitions(
           restoreSettingsUrlQueryCredentials(incoming, saved),
           saved,
         ) as LLMSettingsData;
+        const replacements = explicitCredentialPaths(incoming);
+        // Host-managed OAuth fields were ignored by the merge and are not replacements.
+        for (const path of replacements) {
+          if (JSON.parse(path).some((key: string) => HOST_ONLY_OAUTH_KEYS.has(key))) {
+            replacements.delete(path);
+          }
+        }
+        assertSettingsCredentialDestinations(effective, saved, replacements);
         // Provider tests use the same host-side credentials and model resolution as a local save,
         // while they never persist this draft.
         await validateSettingsUrls(effective as unknown as Record<string, unknown>, false);

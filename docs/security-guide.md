@@ -555,6 +555,12 @@ Your API keys are:
 5. Never passed to shell commands or subprocesses
 6. Checksummed for integrity verification
 
+Saved provider credentials remain bound to their configured endpoint during model
+discovery, connection tests, and settings saves. Changing the destination requires
+a replacement credential; leaving the key blank only reuses it for the saved
+destination. This also covers credentials inherited by image/video settings and
+custom providers.
+
 ### Media and File Validation
 
 CoWork also applies guardrails before certain file and media operations reach external providers:

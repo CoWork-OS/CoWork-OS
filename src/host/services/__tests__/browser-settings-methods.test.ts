@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LLMProviderFactory } from "../../../electron/agent/llm";
 import { MCPSettingsManager } from "../../../electron/mcp/settings";
 import { GuardrailManager } from "../../../electron/guardrails/guardrail-manager";
@@ -10,6 +10,17 @@ import { GoogleWorkspaceSettingsManager } from "../../../electron/settings/googl
 import { WebApplicationError } from "../../web/WebApplication";
 import { createBrowserSettingsDefinitions } from "../browser-settings-methods";
 import { createLLMSettingsPatch } from "../../../shared/host-api/llm-settings-patch";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "203.0.113.10", family: 4 }]),
+}));
+
+beforeEach(() => {
+  vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+    providerType: "openai",
+    modelKey: "gpt-4o",
+  } as never);
+});
 
 const context = {} as never;
 
@@ -516,6 +527,190 @@ describe("browser Settings definitions", () => {
       /private or metadata/,
     );
     expect(listModels).not.toHaveBeenCalled();
+  });
+
+  it.each(["openrouter", "groq", "xai", "deepseek", "kimi", "ollama", "openaiCompatible"])(
+    "rejects preserving a saved %s key when testing or saving another endpoint",
+    async (provider) => {
+      const old = {
+        providerType: provider === "openaiCompatible" ? "openai-compatible" : provider,
+        modelKey: "model",
+        [provider]: { apiKey: "saved-key", baseUrl: "https://saved.example/v1" },
+      };
+      vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(old as never);
+      const save = vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+      const test = vi
+        .spyOn(LLMProviderFactory, "testProvider")
+        .mockResolvedValue({ success: true });
+      const draft = { ...old, [provider]: { baseUrl: "https://changed.example/v1", apiKey: "" } };
+      await expect(call("testLLMProvider", [draft])).rejects.toMatchObject({
+        code: "INVALID_REQUEST",
+        statusCode: 400,
+        message: expect.stringMatching(/replacement credential/),
+      });
+      await expect(
+        call("saveLLMSettings", [
+          {
+            set: [{ path: [provider, "baseUrl"], value: "https://changed.example/v1" }],
+            remove: [],
+            replaceSecrets: [],
+          },
+          await getProviderSettingsRevision(),
+        ]),
+      ).rejects.toThrow(/replacement credential/);
+      expect(test).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+      await call("testLLMProvider", [
+        { ...draft, [provider]: { ...draft[provider], apiKey: "new-key" } },
+      ]);
+      expect(test).toHaveBeenCalledOnce();
+      expect(JSON.stringify(test.mock.calls)).toContain("new-key");
+      expect(JSON.stringify(test.mock.calls)).not.toContain("saved-key");
+      await call("saveLLMSettings", [
+        {
+          set: [{ path: [provider, "baseUrl"], value: "https://changed.example/v1" }],
+          remove: [],
+          replaceSecrets: [{ path: [provider, "apiKey"], value: "new-key" }],
+        },
+        await getProviderSettingsRevision(),
+      ]);
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          [provider]: expect.objectContaining({
+            apiKey: "new-key",
+            baseUrl: "https://changed.example/v1",
+          }),
+        }),
+      );
+    },
+  );
+
+  it("preserves saved keys and hidden query credentials for same-endpoint tests and saves", async () => {
+    const old = {
+      providerType: "openrouter",
+      modelKey: "model",
+      openrouter: {
+        apiKey: "saved-key",
+        baseUrl: "https://saved.example/v1?api_key=hidden&tenant=one",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(old as never);
+    const test = vi.spyOn(LLMProviderFactory, "testProvider").mockResolvedValue({ success: true });
+    const save = vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+    await call("testLLMProvider", [
+      { ...old, openrouter: { apiKey: "", baseUrl: "https://saved.example/v1?tenant=one" } },
+    ]);
+    expect(test).toHaveBeenCalledWith(expect.objectContaining({ openrouterApiKey: "saved-key" }));
+    await call("saveLLMSettings", [
+      {
+        set: [{ path: ["openrouter", "baseUrl"], value: "https://saved.example/v1?tenant=one" }],
+        remove: [],
+        replaceSecrets: [],
+      },
+      await getProviderSettingsRevision(),
+    ]);
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ openrouter: expect.objectContaining({ apiKey: "saved-key" }) }),
+    );
+    expect(JSON.stringify(save.mock.calls)).toContain("hidden");
+  });
+
+  it.each(["remove", "blank"])(
+    "binds saved keys across endpoint %s and default transitions",
+    async (operation) => {
+      const old = {
+        providerType: "openrouter",
+        modelKey: "model",
+        openrouter: { apiKey: "saved-key", baseUrl: "https://saved.example/v1" },
+      };
+      vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(old as never);
+      const save = vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+      const patch = {
+        set: operation === "blank" ? [{ path: ["openrouter", "baseUrl"], value: "" }] : [],
+        remove: operation === "remove" ? [["openrouter", "baseUrl"]] : [],
+        replaceSecrets: [] as Array<{ path: string[]; value: string }>,
+      };
+      const revision = await getProviderSettingsRevision();
+      await expect(call("saveLLMSettings", [patch, revision])).rejects.toThrow(
+        /replacement credential/,
+      );
+      expect(save).not.toHaveBeenCalled();
+      patch.replaceSecrets.push({ path: ["openrouter", "apiKey"], value: "default-endpoint-key" });
+      await call("saveLLMSettings", [patch, revision]);
+      expect(save.mock.calls[0][0].openrouter).toMatchObject({
+        apiKey: "default-endpoint-key",
+        baseUrl: undefined,
+      });
+    },
+  );
+
+  it.each([
+    ["imageGeneration", "openrouter", "baseUrl", "openrouter", "baseUrl"],
+    ["imageGeneration", "azure", "imageEndpoint", "azure", "endpoint"],
+    ["videoGeneration", "azure", "videoEndpoint", "azure", "endpoint"],
+  ])(
+    "binds %s %s fallback keys to the saved endpoint",
+    async (group, provider, urlField, parent, parentUrl) => {
+      const old = {
+        providerType: parent,
+        modelKey: "model",
+        [parent]: { apiKey: "saved-key", [parentUrl]: "https://saved.example/v1" },
+      };
+      vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(old as never);
+      const save = vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+      await expect(
+        call("saveLLMSettings", [
+          {
+            set: [{ path: [group, provider, urlField], value: "https://changed.example/v1" }],
+            remove: [],
+            replaceSecrets: [],
+          },
+          await getProviderSettingsRevision(),
+        ]),
+      ).rejects.toThrow(/replacement credential/);
+      expect(save).not.toHaveBeenCalled();
+    },
+  );
+
+  it("binds custom-provider saved keys and host-managed xAI OAuth after final settings merges", async () => {
+    const old = {
+      providerType: "atomic-chat",
+      modelKey: "model",
+      customProviders: {
+        "atomic-chat": { apiKey: "saved-key", baseUrl: "https://saved.example/v1" },
+      },
+      xai: {
+        authMethod: "oauth",
+        accessToken: "saved-access",
+        refreshToken: "saved-refresh",
+        baseUrl: "https://saved.example/v1",
+      },
+    };
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(old as never);
+    const save = vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+    const test = vi.spyOn(LLMProviderFactory, "testProvider").mockResolvedValue({ success: true });
+    await expect(
+      call("testLLMProvider", [
+        {
+          providerType: "atomic-chat",
+          modelKey: "model",
+          customProviders: { "atomic-chat": { baseUrl: "https://changed.example/v1" } },
+        },
+      ]),
+    ).rejects.toThrow(/replacement credential/);
+    for (const path of [
+      ["customProviders", "atomic-chat", "baseUrl"],
+      ["xai", "baseUrl"],
+    ]) {
+      await expect(
+        call("saveLLMSettings", [
+          { set: [{ path, value: "https://changed.example/v1" }], remove: [], replaceSecrets: [] },
+          await getProviderSettingsRevision(),
+        ]),
+      ).rejects.toThrow(/replacement credential/);
+    }
+    expect(save).not.toHaveBeenCalled();
+    expect(test).not.toHaveBeenCalled();
   });
 
   it("scrubs unsaved API keys from provider results and the persisted model cache", async () => {

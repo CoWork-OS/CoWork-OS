@@ -91,7 +91,10 @@ function stripScriptControlCodes(text: string): string {
 
 // Limits to prevent runaway commands
 const MAX_TIMEOUT = 5 * 60 * 1000; // 5 minutes max
-const DEFAULT_TIMEOUT = 60 * 1000; // 1 minute default
+const DEFAULT_TIMEOUT = 2 * 60 * 1000; // 2 minutes default, as the run_command schema documents
+// Kill commands this long before the executor's own tool deadline so a timed-out
+// command still returns its partial output instead of a bare tool timeout.
+const EXECUTOR_DEADLINE_GRACE_MS = 3_000;
 const MAX_OUTPUT_SIZE = 100 * 1024; // 100KB max output
 const UNSANDBOXED_SHELL_OVERRIDE_ENV = "COWORK_ALLOW_UNSANDBOXED_SHELL";
 
@@ -404,6 +407,31 @@ function buildSafeShellPath(platform: NodeJS.Platform, envPath: string | undefin
   return Array.from(new Set([...basePaths, ...inheritedPaths])).join(path.delimiter);
 }
 
+function positiveFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Kill timeout for a run_command call: an explicit input timeout (timeout,
+ * timeout_ms, timeout_seconds) wins; otherwise the executor's budget for the
+ * call (runtime.timeoutMs) minus a grace period; otherwise the default.
+ */
+export function resolveRunCommandTimeoutMs(input: unknown, runtimeTimeoutMs?: unknown): number {
+  const source = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const timeoutSeconds = positiveFiniteNumber(source.timeout_seconds);
+  const explicitMs =
+    positiveFiniteNumber(source.timeout) ??
+    positiveFiniteNumber(source.timeout_ms) ??
+    (timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000);
+  const budgetMs = positiveFiniteNumber(runtimeTimeoutMs);
+  const resolvedMs =
+    explicitMs ??
+    (budgetMs === undefined
+      ? DEFAULT_TIMEOUT
+      : Math.max(budgetMs - EXECUTOR_DEADLINE_GRACE_MS, Math.ceil(budgetMs / 2)));
+  return Math.min(Math.round(resolvedMs), MAX_TIMEOUT);
+}
+
 /**
  * Get the shell arguments for running a command string.
  * Unix shells use -c, PowerShell uses -Command, cmd.exe uses /c.
@@ -555,7 +583,7 @@ function getDescendantPidsWindows(parentPid: number): number[] {
 
 /**
  * Kill a process and all its descendants
- * Sends the signal to children first, then to the parent (bottom-up killing)
+ * Enumerates the tree first, then signals the parent before its descendants
  * Only kills processes owned by the current user for security
  */
 function killProcessTree(pid: number, signal: NodeJS.Signals): void {
@@ -574,9 +602,20 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
     return;
   }
 
+  // Enumerate while the parent is alive; its children are reparented once it dies.
   const descendants = getDescendantPids(pid);
 
-  // Kill descendants first (in reverse order, deepest children first)
+  // Signal the parent first: a shell whose running child dies before the shell
+  // itself is signalled goes on to the next command of its script.
+  if (isProcessOwnedByCurrentUser(pid)) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Process may have already exited
+    }
+  }
+
+  // Then the descendants, deepest children first
   for (const descendantPid of descendants.reverse()) {
     // Double-check ownership before killing each process
     if (isProcessOwnedByCurrentUser(descendantPid)) {
@@ -585,15 +624,6 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
       } catch {
         // Process may have already exited
       }
-    }
-  }
-
-  // Kill the parent process (also verify ownership)
-  if (isProcessOwnedByCurrentUser(pid)) {
-    try {
-      process.kill(pid, signal);
-    } catch {
-      // Process may have already exited
     }
   }
 }
@@ -1041,8 +1071,10 @@ export class ShellTools {
   /**
    * Kill the currently running command and all its child processes
    * @param force - If true, send SIGKILL immediately. Otherwise, try SIGINT first, then SIGTERM, then SIGKILL.
+   * @param initiator - "system" stops a command that timed out or whose tool call was aborted;
+   *   the caller reports why, and the command is not reported as stopped by the user.
    */
-  killProcess(force: boolean = false): boolean {
+  killProcess(force: boolean = false, initiator: "user" | "system" = "user"): boolean {
     if (!this.activeProcess || this.activeProcess.killed) {
       return false;
     }
@@ -1063,7 +1095,8 @@ export class ShellTools {
     const currentSessionId = this.processSessionId;
 
     // Mark this as a user-initiated kill so the close handler can signal the agent
-    this.userKillRequested = true;
+    const byUser = initiator === "user";
+    if (byUser) this.userKillRequested = true;
 
     if (force) {
       // Force kill - immediate SIGKILL to entire process tree
@@ -1072,10 +1105,12 @@ export class ShellTools {
 
       try {
         killProcessTree(pid, "SIGKILL");
-        this.daemon.logEvent(this.taskId, "command_output", {
-          type: "error",
-          output: "\n[Process tree force killed by user]\n",
-        });
+        if (byUser) {
+          this.daemon.logEvent(this.taskId, "command_output", {
+            type: "error",
+            output: "\n[Process tree force killed by user]\n",
+          });
+        }
         return true;
       } catch (error) {
         log.error("Failed to force kill process tree:", error);
@@ -1089,10 +1124,12 @@ export class ShellTools {
     try {
       // Send SIGINT (Ctrl+C) to gracefully interrupt the process tree
       killProcessTree(pid, "SIGINT");
-      this.daemon.logEvent(this.taskId, "command_output", {
-        type: "error",
-        output: "\n^C [Process tree interrupted by user]\n",
-      });
+      if (byUser) {
+        this.daemon.logEvent(this.taskId, "command_output", {
+          type: "error",
+          output: "\n^C [Process tree interrupted by user]\n",
+        });
+      }
 
       // Set up escalation: if still running after 2s, send SIGTERM to tree
       // If still running after 4s, send SIGKILL to tree
@@ -1605,6 +1642,7 @@ export class ShellTools {
       let stdout = "";
       let stderr = "";
       let killed = false;
+      let aborted = false;
 
       // Increment session ID to invalidate any pending escalation timeouts from previous commands
       this.processSessionId++;
@@ -1621,16 +1659,33 @@ export class ShellTools {
       // Store reference to active process for stdin support
       this.activeProcess = child;
 
-      // Set timeout
+      // Set timeout. Kill the whole process tree at once: signalling only the shell
+      // leaves its children running and holding the output pipes (and this call)
+      // open, and background jobs ignore SIGINT.
       const timeoutId = setTimeout(() => {
         killed = true;
-        child.kill("SIGTERM");
         this.daemon.logEvent(this.taskId, "command_output", {
           command,
           type: "error",
           output: `\n[Command timed out after ${timeout / 1000}s]\n`,
         });
+        this.killProcess(true, "system");
       }, timeout);
+
+      // The executor aborts the call at its own deadline or on cancellation; stop
+      // the command then too instead of leaving it running unobserved.
+      const onAbort = () => {
+        if (killed || aborted) return;
+        aborted = true;
+        this.daemon.logEvent(this.taskId, "command_output", {
+          command,
+          type: "error",
+          output: "\n[Command stopped because the tool call was aborted]\n",
+        });
+        this.killProcess(true, "system");
+      };
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options?.signal?.aborted) onAbort();
 
       // Stream stdout
       child.stdout.on("data", (data: Buffer) => {
@@ -1664,6 +1719,7 @@ export class ShellTools {
 
       child.on("close", (code: number | null) => {
         clearTimeout(timeoutId);
+        options?.signal?.removeEventListener("abort", onAbort);
         this.activeProcess = null; // Clear active process reference
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();
@@ -1672,7 +1728,7 @@ export class ShellTools {
         let terminationReason: CommandTerminationReason = "normal";
         if (this.userKillRequested) {
           terminationReason = "user_stopped";
-        } else if (killed) {
+        } else if (killed || aborted) {
           terminationReason = "timeout";
         }
 
@@ -1723,6 +1779,7 @@ export class ShellTools {
 
       child.on("error", (error: Error) => {
         clearTimeout(timeoutId);
+        options?.signal?.removeEventListener("abort", onAbort);
         this.activeProcess = null; // Clear active process reference
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();

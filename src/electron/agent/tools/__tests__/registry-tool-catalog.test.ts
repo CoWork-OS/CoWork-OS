@@ -881,3 +881,51 @@ describe("registered workspace operations without approval interruptions", () =>
     },
   );
 });
+
+describe("run_command kill timeout", () => {
+  const runHandler = async (input: Record<string, unknown>, runtime?: Record<string, unknown>) => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-shell-timeout");
+    const internals = registry as Any;
+    const runCommand = vi
+      .spyOn(internals.shellTools, "runCommand")
+      .mockResolvedValue({ success: true } as Any);
+    await internals.handlerRegistry.execute("run_command", {
+      request: { name: "run_command", input, runtime },
+    });
+    return runCommand;
+  };
+
+  it("uses the executor budget minus a grace period when the call sets no timeout", async () => {
+    const runCommand = await runHandler({ command: "npm run build" }, { timeoutMs: 300_000 });
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "npm run build",
+      expect.objectContaining({ timeout: 297_000 }),
+    );
+  });
+
+  it("honors explicit timeout aliases from the tool input", async () => {
+    const fromSeconds = await runHandler(
+      { command: "npm test", timeout_seconds: 120 },
+      { timeoutMs: 120_000 },
+    );
+    expect(fromSeconds).toHaveBeenCalledWith(
+      "npm test",
+      expect.objectContaining({ timeout: 120_000 }),
+    );
+
+    const fromMs = await runHandler({ command: "make", timeout_ms: 90_000 });
+    expect(fromMs).toHaveBeenCalledWith("make", expect.objectContaining({ timeout: 90_000 }));
+  });
+
+  it("falls back to the documented 120s default and clamps to the 300s maximum", async () => {
+    const withoutBudget = await runHandler({ command: "git status" });
+    expect(withoutBudget).toHaveBeenCalledWith(
+      "git status",
+      expect.objectContaining({ timeout: 120_000 }),
+    );
+
+    const oversized = await runHandler({ command: "npm ci", timeout: 900_000 });
+    expect(oversized).toHaveBeenCalledWith("npm ci", expect.objectContaining({ timeout: 300_000 }));
+  });
+});

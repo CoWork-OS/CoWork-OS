@@ -937,10 +937,22 @@ export class ShellSessionManager {
     const commandPromise = new Promise<ShellCommandResult>((resolve, reject) => {
       session.busy = true;
       const timeout = setTimeout(() => {
+        // The command already reached the shell and may have run, so report a
+        // timeout with its partial output rather than an error a caller could
+        // answer by running the command a second time.
+        const partialOutput = this.parseShellOutput(session.buffer, session).visible;
         session.busy = false;
         session.pending = session.pending.filter((item) => item.commandId !== commandId);
         void this.invalidateRuntime(session, "Persistent shell command timed out.");
-        reject(new Error("Persistent shell command timed out."));
+        resolve({
+          success: false,
+          stdout: partialOutput,
+          stderr: `Command timed out after ${Math.round(commandTimeoutMs / 1000)}s.`,
+          exitCode: null,
+          terminationReason: "timeout",
+          usedPersistentSession: true,
+          sessionId: session.info.id,
+        });
       }, commandTimeoutMs);
 
       session.pending.push({
@@ -970,7 +982,16 @@ export class ShellSessionManager {
         clearTimeout(timeout);
         session.busy = false;
         session.pending = session.pending.filter((item) => item.commandId !== commandId);
-        reject(error);
+        // Part of the command may already have run; do not invite a re-run.
+        resolve({
+          success: false,
+          stdout: this.parseShellOutput(session.buffer, session).visible,
+          stderr: `Persistent shell failed while running the command: ${error.message}`,
+          exitCode: null,
+          terminationReason: "error",
+          usedPersistentSession: true,
+          sessionId: session.info.id,
+        });
       });
     });
     return commandPromise.finally(() => {

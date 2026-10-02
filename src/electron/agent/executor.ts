@@ -10944,6 +10944,18 @@ ${transcript}
     return () => clearInterval(timer);
   }
 
+  /**
+   * Outer deadline for one tool call. run_command asks for approval inside its
+   * handler and starts its kill timer (derived from toolTimeoutMs) only once the
+   * command runs, so its outer deadline also covers the approval wait. Without
+   * that, a command approved late is cut off shortly after it starts.
+   */
+  private getOuterToolTimeoutMs(toolName: string, toolTimeoutMs: number): number {
+    return toolName === "run_command"
+      ? toolTimeoutMs + TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS
+      : toolTimeoutMs;
+  }
+
   private async executeToolWithHeartbeat(
     toolName: string,
     input: unknown,
@@ -10995,7 +11007,7 @@ ${transcript}
           },
           `${toolName}:${Date.now()}`,
         ),
-        toolTimeoutMs,
+        this.getOuterToolTimeoutMs(toolName, toolTimeoutMs),
         `Tool ${toolName}`,
         () => toolAbort.abort(),
       );

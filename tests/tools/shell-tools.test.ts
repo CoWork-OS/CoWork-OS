@@ -357,6 +357,16 @@ describe("ShellTools auto-approval", () => {
     expect(violations).toHaveLength(0);
   });
 
+  it("defaults the kill timeout to the 120s documented in the run_command schema", async () => {
+    await shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd() });
+
+    expect(sandboxMocks.sandbox.execute).toHaveBeenCalledWith(
+      SAFE_CMD_1,
+      [],
+      expect.objectContaining({ timeout: 120_000 }),
+    );
+  });
+
   it("disables shell sandbox networking by default even when workspace network is enabled", async () => {
     await shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd() });
 

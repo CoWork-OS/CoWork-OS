@@ -158,6 +158,72 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     timeoutSpy.mockRestore();
   });
 
+  describe("outer deadline", () => {
+    const createExecutor = (executeTool: () => Promise<unknown>) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.task = { id: "task-1", agentConfig: { deepWorkMode: false } };
+      executor.abortController = new AbortController();
+      executor.streamingToolExecutor = null;
+      executor.currentStepId = null;
+      executor.getSchedulerSpecForTool = vi.fn(() => ({
+        concurrencyClass: "exclusive",
+        idempotent: false,
+      }));
+      executor.getToolPolicyContext = vi.fn(() => ({}));
+      executor.toolExecutionCoordinator = { executeTool: vi.fn(executeTool) };
+      return executor;
+    };
+    // 100s waiting for the user to approve, then a 110s build.
+    const approvedLateBuild = () =>
+      new Promise((resolve) =>
+        setTimeout(
+          () => resolve({ result: { success: true }, durationMs: 210_000, resultJson: "{}" }),
+          210_000,
+        ),
+      );
+
+    it("does not let a run_command approval wait cut off the approved command", async () => {
+      vi.useFakeTimers();
+      try {
+        const executor = createExecutor(approvedLateBuild);
+        const outcome = executor
+          .executeToolWithHeartbeat("run_command", { command: "npm run build" }, 120_000)
+          .then(
+            (value: Any) => ({ value }),
+            (error: Error) => ({ error }),
+          );
+
+        await vi.advanceTimersByTimeAsync(210_000);
+
+        await expect(outcome).resolves.toEqual({
+          value: expect.objectContaining({ result: { success: true } }),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps other tools on their own budget", async () => {
+      vi.useFakeTimers();
+      try {
+        const executor = createExecutor(approvedLateBuild);
+        const outcome = executor
+          .executeToolWithHeartbeat("web_fetch", { url: "https://example.com" }, 120_000)
+          .then(
+            (value: Any) => ({ value }),
+            (error: Error) => ({ error }),
+          );
+
+        await vi.advanceTimersByTimeAsync(210_000);
+
+        const settled = (await outcome) as { error?: Error };
+        expect(settled.error?.message).toMatch(/timed out after 120s/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("does not let approval review consume the ordinary tool timeout", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { deepWorkMode: false } };

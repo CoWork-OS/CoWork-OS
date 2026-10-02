@@ -50,7 +50,7 @@ import { EditTools } from "./edit-tools";
 import { MontyTools } from "./monty-tools";
 import { TextTools } from "./text-tools";
 import { BrowserTools } from "./browser-tools";
-import { ShellTools } from "./shell-tools";
+import { ShellTools, resolveRunCommandTimeoutMs } from "./shell-tools";
 import { ImageTools } from "./image-tools";
 import { VideoTools } from "./video-tools";
 import { YouTubeTools } from "./youtube-tools";
@@ -2637,6 +2637,9 @@ export class ToolRegistry {
       async ({ request }) =>
         this.shellTools.runCommand(request.input.command, {
           ...request.input,
+          // Kill the command within the executor's budget for this call (which
+          // infers longer budgets for builds and tests) rather than a fixed default.
+          timeout: resolveRunCommandTimeoutMs(request.input, request.runtime?.timeoutMs),
           signal:
             request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
         }),
@@ -4555,6 +4558,7 @@ ${skillDescriptions}`;
     if (name === "run_command")
       return await this.shellTools.runCommand(input.command, {
         ...input,
+        timeout: resolveRunCommandTimeoutMs(input, _runtime?.timeoutMs),
         signal: _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
       });
 

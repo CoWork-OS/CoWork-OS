@@ -94,6 +94,50 @@ describe("shell-session-manager", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "reports a timed-out command with its partial output instead of throwing",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID();
+      const workspaceId = randomUUID();
+      try {
+        const result = await waitFor(
+          manager.runCommand({
+            taskId,
+            workspaceId,
+            workspacePath: testUserDataDir,
+            command: "echo started; sleep 20",
+            timeoutMs: 1_000,
+            fallbackRunner: async () => ({
+              success: false,
+              stdout: "",
+              stderr: "Persistent shell fallback requested.",
+              exitCode: null,
+              terminationReason: "error",
+            }),
+          }),
+          8_000,
+          "the timed-out shell command",
+        );
+
+        // The command already reached the shell; callers must not re-run it.
+        expect(result).toMatchObject({
+          success: false,
+          exitCode: null,
+          terminationReason: "timeout",
+          usedPersistentSession: true,
+        });
+        expect(result.stdout).toContain("started");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+    15_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
     "stops the persistent shell process tree when the command signal is aborted",
     async () => {
       await mkdir(testUserDataDir, { recursive: true });

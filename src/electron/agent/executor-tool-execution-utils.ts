@@ -554,7 +554,7 @@ function clipFailureText(text: string, headChars: number, tailChars: number): st
   return [head, marker, tail].filter(Boolean).join("\n");
 }
 
-function clipCommandOutputForFailure(text: string, headChars: number, tailChars: number): string {
+function clipCommandOutput(text: string, headChars: number, tailChars: number): string {
   return clipFailureText(text.replace(ANSI_CSI_SEQUENCE_REGEX, ""), headChars, tailChars);
 }
 
@@ -625,14 +625,10 @@ function buildToolFailurePayload(
     payload.terminationReason = source.terminationReason;
   }
   if (typeof source.stderr === "string" && source.stderr.trim()) {
-    payload.stderr = clipCommandOutputForFailure(
-      source.stderr,
-      0,
-      TOOL_FAILURE_STDERR_TAIL_CHARS * scale,
-    );
+    payload.stderr = clipCommandOutput(source.stderr, 0, TOOL_FAILURE_STDERR_TAIL_CHARS * scale);
   }
   if (typeof source.stdout === "string" && source.stdout.trim()) {
-    payload.stdout = clipCommandOutputForFailure(
+    payload.stdout = clipCommandOutput(
       source.stdout,
       TOOL_FAILURE_STDOUT_HEAD_CHARS * scale,
       TOOL_FAILURE_STDOUT_TAIL_CHARS * scale,
@@ -658,6 +654,40 @@ function buildToolFailurePayload(
   }
 
   return payload;
+}
+
+// A long successful run_command result would reach the generic tool-result
+// budget, which cuts head-only and drops the summary at the end of a build or
+// test log. Its stdout/stderr are bounded head+tail before that.
+const RUN_COMMAND_RESULT_MAX_CHARS = 32_000;
+const RUN_COMMAND_STDOUT_HEAD_CHARS = 4_000;
+const RUN_COMMAND_STDOUT_TAIL_CHARS = 20_000;
+const RUN_COMMAND_STDERR_TAIL_CHARS = 6_000;
+
+function boundRunCommandOutputForModel(toolName: string, rawResult: string): string {
+  if (toolName !== "run_command" || rawResult.length <= RUN_COMMAND_RESULT_MAX_CHARS) {
+    return rawResult;
+  }
+  const parsed = safeJsonParseValue(rawResult);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return rawResult;
+  let scale = 1;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const bounded = { ...parsed };
+    if (typeof parsed.stdout === "string") {
+      bounded.stdout = clipCommandOutput(
+        parsed.stdout,
+        RUN_COMMAND_STDOUT_HEAD_CHARS * scale,
+        RUN_COMMAND_STDOUT_TAIL_CHARS * scale,
+      );
+    }
+    if (typeof parsed.stderr === "string") {
+      bounded.stderr = clipCommandOutput(parsed.stderr, 0, RUN_COMMAND_STDERR_TAIL_CHARS * scale);
+    }
+    const serialized = JSON.stringify(bounded);
+    if (serialized.length <= RUN_COMMAND_RESULT_MAX_CHARS) return serialized;
+    scale *= (RUN_COMMAND_RESULT_MAX_CHARS / serialized.length) * 0.9;
+  }
+  return rawResult;
 }
 
 /**
@@ -785,7 +815,9 @@ export function buildNormalizedToolResult(opts: {
         rawResult: opts.rawResult,
       })
     : opts.rawResult;
-  const truncatedResult = truncateToolResult(rawResultForModel);
+  const truncatedResult = truncateToolResult(
+    boundRunCommandOutputForModel(opts.toolName, rawResultForModel),
+  );
   let sanitizedResult = opts.sanitizeToolResult(opts.toolName, truncatedResult);
   const includeTerminationContext =
     opts.includeRunCommandTerminationContext === true && opts.toolName === "run_command";

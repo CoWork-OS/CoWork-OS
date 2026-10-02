@@ -483,6 +483,37 @@ describe("tool failure normalization", () => {
     });
   });
 
+  it("keeps the summary at the end of long successful run_command output", () => {
+    const result = {
+      success: true,
+      stdout: `RUN v3\n${"✓ src/ok.test.ts > passes\n".repeat(4_000)}Tests  4000 passed (4000)\n`,
+      stderr: "",
+      exitCode: 0,
+      terminationReason: "normal",
+      truncated: false,
+    };
+    const rawResult = JSON.stringify({ ...result, _modelReminder: "Keep going." });
+
+    const normalized = buildNormalizedToolResult({
+      toolName: "run_command",
+      toolUseId: "tool-long-success",
+      result,
+      rawResult,
+      sanitizeToolResult: (_toolName, resultText) => resultText,
+      getToolFailureReason,
+      includeRunCommandTerminationContext: true,
+    });
+    const parsed = JSON.parse(normalized.toolResult.content);
+
+    expect(normalized.toolResult.is_error).toBe(false);
+    expect(normalized.toolResult.content.length).toBeLessThan(40_000);
+    expect(parsed.stdout.startsWith("RUN v3")).toBe(true);
+    expect(parsed.stdout).toContain("Tests  4000 passed (4000)");
+    expect(parsed.stdout).toMatch(/\[\.\.\. \d+ chars omitted \.\.\.\]/);
+    expect(parsed._modelReminder).toBe("Keep going.");
+    expect(parsed.exitCode).toBe(0);
+  });
+
   it("uses local-model network compaction only when requested", () => {
     const largeReadme = `# Project\n\n${"Details about the project.\n".repeat(5000)}`;
     const rawResult = JSON.stringify({

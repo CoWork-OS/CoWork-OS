@@ -20834,7 +20834,7 @@ You are continuing a previous conversation. The context from the previous conver
 2. ONLY use create_document/generate_document when the user EXPLICITLY requests Word, DOCX, or PDF format.
 3. create_document parameters: filename, format ('docx' or 'pdf'), content (array of blocks)
    generate_document parameters: filename plus markdown or sections
-4. Content blocks: { type: 'heading'|'paragraph'|'list', text: '...', level?: 1-6 }`;
+4. Content blocks: { type: 'heading'|'paragraph'|'code', text: '...', level?: 1-6 }, { type: 'list', items: ['...'] }, { type: 'table', rows: [['Header', ...], ['Cell', ...]] }`;
       }
 
       // Log the analysis result

@@ -643,6 +643,16 @@ describe("ToolRegistry tool catalog versioning", () => {
     }
   });
 
+  it("advertises the table, list and code blocks create_document renders", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-document-schema");
+    const createDocument = registry.getTools().find((tool) => tool.name === "create_document");
+    const block = createDocument!.input_schema.properties.content.items.properties;
+
+    expect(block.type.enum).toEqual(["heading", "paragraph", "list", "table", "code"]);
+    expect(block.items.items.type).toBe("string");
+    expect(block.rows.items.items.type).toBe("string");
+  });
+
   it("keeps canonical tool facts when prompt guidance is appended", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-prompting-facts");
     const tools = registry.getTools();

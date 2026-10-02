@@ -7068,13 +7068,31 @@ ${skillDescriptions}`;
             format: { type: "string", enum: ["docx", "pdf"], description: "Output format" },
             content: {
               type: "array",
-              description: "Document content blocks",
+              description:
+                "Document content blocks. heading/paragraph/code use text; list uses items; table uses rows.",
               items: {
                 type: "object",
                 properties: {
-                  type: { type: "string", enum: ["heading", "paragraph", "list"] },
-                  text: { type: "string" },
+                  type: {
+                    type: "string",
+                    enum: ["heading", "paragraph", "list", "table", "code"],
+                  },
+                  text: {
+                    type: "string",
+                    description: "Block text (not needed for list or table blocks)",
+                  },
                   level: { type: "number", description: "For headings: 1-6" },
+                  items: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "For lists: one string per list item",
+                  },
+                  rows: {
+                    type: "array",
+                    items: { type: "array", items: { type: "string" } },
+                    description: "For tables: rows of cell text; the first row is the header",
+                  },
+                  language: { type: "string", description: "For code blocks: language name" },
                 },
               },
             },

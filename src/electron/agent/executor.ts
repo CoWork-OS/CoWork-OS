@@ -19564,14 +19564,43 @@ You are continuing a previous conversation. The context from the previous conver
       return false;
     }
 
+    // Authoring a script or CLI is not a request to execute it: "Create a
+    // Python script that deletes old logs" must not push the agent into
+    // running a (possibly destructive) script the user only asked to write.
+    // Unless the request runs the authored artifact ("and run it", "execute
+    // the script"), judge execution intent on the rest of the request only.
+    // "Build the CLI" usually means compiling it, so "build" counts as
+    // authoring only with an indefinite object ("build a CLI tool that ...").
+    const scriptAuthoringPhrase =
+      /\b(?:(?:create|write|generate|make|author|draft|implement|add)\s+(?:(?:a|an|the|new|small|simple|quick)\s+)*|build\s+(?:a|an|new)\s+)(?:[\w.+#/-]+\s+){0,3}?(?:scripts?|cli|command[- ]line\s+tools?)\b/;
+    let intentText = lower;
+    let scriptAuthoringOnly = false;
+    if (scriptAuthoringPhrase.test(lower)) {
+      const affirmativeText = lower.replace(
+        /\b(?:i['’]?ll|i\s+will|i['’]?m\s+going\s+to|we['’]?ll|we\s+will|do\s+not|don['’]?t|never|without|no\s+need\s+to)\b[^.;!?\n]*/g,
+        " ",
+      );
+      const runsAuthoredArtifact =
+        /\b(?:run|execute|invoke|launch|deploy|install|schedule)\s+(?:it|them|(?:the|this|that|your)\s+(?:new\s+)?(?:[\w.-]+\s+)?(?:scripts?|cli|tools?))\b/.test(
+          affirmativeText,
+        );
+      if (!runsAuthoredArtifact) {
+        scriptAuthoringOnly = true;
+        intentText = affirmativeText.replace(new RegExp(scriptAuthoringPhrase.source, "g"), " ");
+      }
+    }
+
     const executionVerb =
       /\b(?:run|execute|install|build|deploy|create|mint|airdrop|launch|start|set\s*up|setup|troubleshoot|diagnose|debug)\b/.test(
-        lower,
+        intentText,
       );
     const executionTarget =
       /\b(?:command|commands|cli|terminal|script|solana|devnet|npm|pnpm|yarn|ssh|ping|nc|netcat|traceroute|mtr)\b/.test(
-        lower,
+        intentText,
       );
+    // The diagnostic cues below describe the script's behavior when the
+    // request only authors it ("retry on connection errors").
+    if (scriptAuthoringOnly) return executionVerb && executionTarget;
     const shellDiagnosticCommandMentioned =
       /\b(?:ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap|ifconfig|ipconfig|route)\b/.test(
         lower,

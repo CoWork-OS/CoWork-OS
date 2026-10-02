@@ -14,6 +14,37 @@ describe("TaskExecutor command execution requirement detection", () => {
     expect(executor.followUpRequiresCommandExecution(message)).toBe(false);
   });
 
+  it.each([
+    "Create a Python script that deletes log files older than 30 days in ~/logs",
+    "Write a bash script that renames all photos in ~/Pictures by date, I'll run it myself later",
+    "Create a deploy script for our staging server",
+    "Build a CLI script in Python that bulk-emails our customer list",
+    "Write a build script that runs the tests before packaging",
+    "Create a cleanup script but do not run it",
+  ])("does not require execution for authoring a script: %s", (message) => {
+    const executor: Any = Object.create(TaskExecutor.prototype);
+    executor.getEffectiveTaskDomain = () => "code";
+    executor.getEffectiveExecutionMode = () => "execute";
+    expect(executor.followUpRequiresCommandExecution(message)).toBe(false);
+    expect(executor.detectExecutionRequirement(message)).toBe(false);
+  });
+
+  it.each([
+    "Create a Python script that prunes old log files and run it against ~/logs",
+    "Write a migration script, then execute it on the staging database",
+    "Create the deploy script and run the script for staging",
+    "Run the cleanup script in scripts/cleanup.sh",
+    "Install the solana cli and create a devnet wallet",
+    "Set up the Solana CLI",
+    "Build the CLI",
+    "Create a backup script, then run npm test",
+  ])("still requires execution when the request asks to run the artifact: %s", (message) => {
+    const executor: Any = Object.create(TaskExecutor.prototype);
+    executor.getEffectiveTaskDomain = () => "code";
+    executor.getEffectiveExecutionMode = () => "execute";
+    expect(executor.followUpRequiresCommandExecution(message)).toBe(true);
+  });
+
   it("keeps an allowed command requirement when only a specific command is prohibited", () => {
     const executor: Any = Object.create(TaskExecutor.prototype);
     executor.getEffectiveTaskDomain = () => "operations";

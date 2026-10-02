@@ -500,6 +500,10 @@ const DEFAULT_PROMPT_SECTION_BUDGETS = {
 } as const;
 
 const EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET = 6800;
+type BasePromptRoutingBlock = "cloud_storage" | "messaging" | "maps" | "pdf" | "rich_surfaces";
+// Same provider list the IntentRouter uses for its cloud-storage signals.
+const CLOUD_STORAGE_PROVIDER_MENTION_REGEX =
+  /\b(box|dropbox|one[\s-]?drive|google drive|sharepoint|notion|i[\s-]?cloud(?:\s+drive)?)\b/i;
 const EXPLICIT_CHAT_MAX_OUTPUT_TOKENS = 48_000;
 const EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW = 16;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_MESSAGE_COUNT = 24;
@@ -915,6 +919,7 @@ export class TaskExecutor {
   private fileMutationVerifier: FileMutationVerifier;
   private csvArithmeticVerifier?: CsvArithmeticVerifier;
   private csvReportEvidenceVerifier?: CsvReportEvidenceVerifier;
+  private activeBasePromptRoutingBlocks?: Set<BasePromptRoutingBlock>;
   private lastWebFetchFailure: {
     timestamp: number;
     tool: "web_fetch" | "http_request";
@@ -15510,6 +15515,16 @@ ${transcript}
     ) {
       return undefined;
     }
+    // Code tasks say "data layer", "summary table", or "price calculation" without
+    // reporting on data. Keep the guidance only when they name a tabular data source.
+    if (
+      this.getEffectiveTaskDomain() === "code" &&
+      !/\b(?:csv|tsv|xlsx?|spreadsheets?|workbooks?|datasets?)\b|\.(?:csv|tsv|xlsx?)\b/i.test(
+        taskText,
+      )
+    ) {
+      return undefined;
+    }
 
     const guidance = [
       "DATA EVIDENCE AND UNITS (REQUIRED): Report only facts supported by supplied fields or transparent calculations from them.",
@@ -16380,8 +16395,35 @@ ${transcript}
     }
   }
 
+  /**
+   * Routing blocks in the base instruction only matter for some tasks, so each one is
+   * gated behind its existing intent detector. Once a block applies it stays on for the
+   * rest of the session: later follow-ups keep the guidance and the cached prompt
+   * prefix does not flip back and forth between turns.
+   */
+  private getActiveBasePromptRoutingBlocks(): Set<BasePromptRoutingBlock> {
+    const active = (this.activeBasePromptRoutingBlocks ??= new Set<BasePromptRoutingBlock>());
+    const text = [this.task?.title, this.getContractPrompt(), this.lastUserMessage]
+      .filter(Boolean)
+      .join("\n");
+    if (CLOUD_STORAGE_PROVIDER_MENTION_REGEX.test(text)) active.add("cloud_storage");
+    if (this.hasMessagingChannelIntent(text)) active.add("messaging");
+    if (this.hasLocalErrandLocationIntent(text)) active.add("maps");
+    if (this.hasUploadedPdfAttachmentContext() || /\bpdfs?\b|\.pdf\b/i.test(text)) {
+      active.add("pdf");
+    }
+    // Inline answer surfaces suit answer-style work (status, metrics, comparisons);
+    // code and writing deliverables only need them when the task asks for visuals.
+    const taskDomain = this.getEffectiveTaskDomain();
+    if (this.isVisualCanvasTask() || (taskDomain !== "code" && taskDomain !== "writing")) {
+      active.add("rich_surfaces");
+    }
+    return active;
+  }
+
   private buildExecutionBaseInstructionPrompt(): string {
     const novelistConstraintPrompt = this.buildNovelistConstraintPrompt();
+    const routing = this.getActiveBasePromptRoutingBlocks();
     return [
       "You are the user's autonomous AI companion. You have real tools and you use them to complete the requested work, not just describe what could be done.",
       "",
@@ -16391,15 +16433,23 @@ ${transcript}
       '- Do not ask "Should I proceed?" when the available tool flow already handles approvals or execution.',
       "- Keep the user informed as you work: before a batch of tool calls, and whenever you change approach or learn something that changes the plan, write one or two short sentences saying what you are doing next and why. Do not narrate every individual tool call.",
       "",
-      "CLOUD STORAGE ROUTING (CRITICAL):",
-      "- If the user mentions Box, Dropbox, OneDrive, Google Drive, SharePoint, or Notion, treat that as cloud integration intent unless they explicitly say local/workspace files.",
-      '- Do not interpret provider names like "box" or "dropbox" as local directories.',
-      "",
-      "MESSAGING CHANNEL ROUTING (CRITICAL):",
-      "- For requests to read, search, or summarize messages from WhatsApp or another messaging channel, use channel_list_chats first and then channel_history when those tools are available.",
-      "- Prefer the connected local channel message log over browser automation; it avoids a second sign-in session and can identify the relevant chats without sending or modifying messages.",
-      "- Use web.whatsapp.com or another channel web app only when the channel tools report unavailable/empty or the user explicitly asks to use the web app.",
-      "",
+      ...(routing.has("cloud_storage")
+        ? [
+            "CLOUD STORAGE ROUTING (CRITICAL):",
+            "- If the user mentions Box, Dropbox, OneDrive, Google Drive, SharePoint, or Notion, treat that as cloud integration intent unless they explicitly say local/workspace files.",
+            '- Do not interpret provider names like "box" or "dropbox" as local directories.',
+            "",
+          ]
+        : []),
+      ...(routing.has("messaging")
+        ? [
+            "MESSAGING CHANNEL ROUTING (CRITICAL):",
+            "- For requests to read, search, or summarize messages from WhatsApp or another messaging channel, use channel_list_chats first and then channel_history when those tools are available.",
+            "- Prefer the connected local channel message log over browser automation; it avoids a second sign-in session and can identify the relevant chats without sending or modifying messages.",
+            "- Use web.whatsapp.com or another channel web app only when the channel tools report unavailable/empty or the user explicitly asks to use the web app.",
+            "",
+          ]
+        : []),
       "PATH DISCOVERY (CRITICAL):",
       "- When a task mentions a folder or path, search for it before concluding it is missing.",
       "- If the user gave a partial path, explore with file-discovery tools before stopping.",
@@ -16411,34 +16461,50 @@ ${transcript}
       "- Do not ask the user to fetch URLs, page content, or local data that your tools can retrieve directly.",
       "- If the user asks to add or change a tool capability, treat it as actionable work: implement the minimal safe change or take the best fallback path and report the limitation clearly.",
       "",
-      "LOCAL LOCATION AND MAPS ROUTING (CRITICAL):",
-      "- For prompts like 'near me', 'walk nearby', 'closest open', or 'where can I buy/get X before Y', request current desktop location with get_current_location first.",
-      "- After location permission succeeds, use the Maps MCP ranking/search tools, preferably mcp_maps.rank_nearby_options for urgent local errands.",
-      "- Do not ask for an address before trying get_current_location. Ask for a typed address only if location permission is denied, unavailable, times out, or the Maps connector is not available.",
-      "- If get_current_location times out once, do not retry it in the same task; immediately ask for a typed address, venue, or nearby landmark.",
-      "- In the final answer, give the top recommendation, walking time, why it matches, open-status confidence, and a map/source link when available.",
-      "",
-      "ATTACHED PDFS:",
-      "- Uploaded PDFs may include only a compact excerpt in the user message.",
-      "- If the user asks to summarize, answer questions from, extract from, compare, or transform an attached PDF and the answer depends on more than the excerpt, call parse_document with the attached workspace-relative path before answering.",
-      "- Use read_pdf_visual only for layout, formatting, page appearance, visual scan, chart/diagram appearance, or other explicitly visual PDF questions.",
-      "",
+      ...(routing.has("maps")
+        ? [
+            "LOCAL LOCATION AND MAPS ROUTING (CRITICAL):",
+            "- For prompts like 'near me', 'walk nearby', 'closest open', or 'where can I buy/get X before Y', request current desktop location with get_current_location first.",
+            "- After location permission succeeds, use the Maps MCP ranking/search tools, preferably mcp_maps.rank_nearby_options for urgent local errands.",
+            "- Do not ask for an address before trying get_current_location. Ask for a typed address only if location permission is denied, unavailable, times out, or the Maps connector is not available.",
+            "- If get_current_location times out once, do not retry it in the same task; immediately ask for a typed address, venue, or nearby landmark.",
+            "- In the final answer, give the top recommendation, walking time, why it matches, open-status confidence, and a map/source link when available.",
+            "",
+          ]
+        : []),
+      ...(routing.has("pdf")
+        ? [
+            "ATTACHED PDFS:",
+            "- Uploaded PDFs may include only a compact excerpt in the user message.",
+            "- If the user asks to summarize, answer questions from, extract from, compare, or transform an attached PDF and the answer depends on more than the excerpt, call parse_document with the attached workspace-relative path before answering.",
+            "- Use read_pdf_visual only for layout, formatting, page appearance, visual scan, chart/diagram appearance, or other explicitly visual PDF questions.",
+            "",
+          ]
+        : []),
       "COMMUNICATION:",
       "- Use plain-language progress and outcomes unless the user asks for deeper technical detail.",
       TASK_KICKOFF_PROMPT_RULES,
       "- Do not append trailing offer questions by default.",
       "",
-      "RICH INLINE SURFACES:",
-      "- When the best answer is a compact visual surface such as a chart card, metric summary, progress/status panel, comparison, calculator, timeline, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
-      "- Do not print custom frame markup in your message. Mention the result in normal prose and let the artifact/preview system display it.",
-      "- For full web pages, landing pages, websites, app designs, or user-requested standalone HTML files, keep the normal web artifact flow: create the HTML output and summarize it; do not try to force an inline frame.",
-      "- Inline surfaces may be static or animated. Use animation only when it clarifies state or progress.",
-      RICH_FRAME_DESIGN_LANGUAGE_PROMPT,
-      "",
+      ...(routing.has("rich_surfaces")
+        ? [
+            "RICH INLINE SURFACES:",
+            "- When the best answer is a compact visual surface such as a chart card, metric summary, progress/status panel, comparison, calculator, timeline, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
+            "- Do not print custom frame markup in your message. Mention the result in normal prose and let the artifact/preview system display it.",
+            "- For full web pages, landing pages, websites, app designs, or user-requested standalone HTML files, keep the normal web artifact flow: create the HTML output and summarize it; do not try to force an inline frame.",
+            "- Inline surfaces may be static or animated. Use animation only when it clarifies state or progress.",
+            RICH_FRAME_DESIGN_LANGUAGE_PROMPT,
+            "",
+          ]
+        : []),
       "HONESTY & UNCERTAINTY:",
       "- State uncertainty explicitly when it matters.",
       "- Never fabricate tool outputs or claim a tool succeeded when it did not.",
-      "- For PDF extraction, do not claim the built-in reader was incomplete, that OCR is needed, or that alternate extraction is being tried unless a tool result explicitly reports partial/empty extraction or OCR fallback.",
+      ...(routing.has("pdf")
+        ? [
+            "- For PDF extraction, do not claim the built-in reader was incomplete, that OCR is needed, or that alternate extraction is being tried unless a tool result explicitly reports partial/empty extraction or OCR fallback.",
+          ]
+        : []),
       "",
       "FINAL ANSWER CONTRACT:",
       "- Always end a task or turn with a text response.",
@@ -30407,7 +30473,7 @@ Return ONLY a JSON object:
       this.buildIntegrationMentionGuidancePrompt(),
       this.buildLocalModelExecutionGuidancePrompt("execution"),
       adaptiveRecoveryGuidance,
-      this.getDataUnitGuidance(),
+      // (Data-unit guidance is added once, to the step message, not here.)
       // Only the verification step itself replies with the OK/FAIL protocol;
       // content-producing steps must keep their real answer.
       this.isVerificationStep(step) && !this.isReadOnlyFactFindingVerificationStep(step)

@@ -95,4 +95,34 @@ describe("executor-prompt-sections", () => {
     expect(result.droppedSections).not.toContain("turn_guidance");
     expect(result.prompt).toContain("PLANNER_JSON_CONTRACT_REQUIRED");
   });
+
+  it("drops memory, awareness, personality, and guidelines before optional turn guidance", async () => {
+    const result = await ContentBuilder.buildExecutionPrompt({
+      workspaceId: "ws-1",
+      workspacePath: "/tmp",
+      taskPrompt: "Fix the failing test",
+      identityPrompt: "Identity",
+      safetyCorePrompt: "Safety",
+      baseInstructionPrompt: "Base",
+      inputPolicyPrompt: "Input",
+      workspaceContextPrompt: "Workspace",
+      currentTimePrompt: "Now",
+      modeDomainContractPrompt: "Mode",
+      webSearchModeContract: "Web",
+      memoryContext: "memory ".repeat(600),
+      awarenessSnapshot: "awareness ".repeat(300),
+      personalityPrompt: "persona ".repeat(300),
+      guidelinesPrompt: "guideline ".repeat(300),
+      turnGuidancePrompt: "INTERNAL VERIFICATION RESPONSE (REQUIRED): reply OK",
+      executionMode: "execute",
+      taskDomain: "code",
+      totalBudgetTokens: 400,
+    });
+
+    expect(result.droppedSections).toEqual(
+      expect.arrayContaining(["memory_context", "awareness_snapshot", "personality", "guidelines"]),
+    );
+    expect(result.droppedSections).not.toContain("turn_guidance");
+    expect(result.prompt).toContain("INTERNAL VERIFICATION RESPONSE (REQUIRED)");
+  });
 });

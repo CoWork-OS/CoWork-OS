@@ -317,7 +317,10 @@ export class ContentBuilder {
             params.turnGuidanceMaxTokens ?? 1100,
             {
               required: params.turnGuidanceRequired === true,
-              dropPriority: 10,
+              // Turn guidance carries step protocols (verification replies, recovery,
+              // local-model limits), so it outlives memory, awareness, persona,
+              // guidelines, and infra context when the budget overflows.
+              dropPriority: 2.5,
               layerKind: params.turnGuidanceRequired === true ? "always" : "optional",
               cacheScope: "turn",
             },

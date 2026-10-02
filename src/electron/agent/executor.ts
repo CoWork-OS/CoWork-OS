@@ -431,6 +431,7 @@ import {
   deriveStepContractMode,
   isArtifactPathLikeToken,
   isLikelyCommandSnippet,
+  descriptionCreatesFormatArtifact,
   descriptionHasArtifactCue,
   descriptionHasChecklistReportCue,
   descriptionHasDiscoveryIntent,
@@ -440,6 +441,7 @@ import {
   descriptionHasScaffoldIntent,
   descriptionHasSummaryCue,
   descriptionHasWriteIntent,
+  descriptionNamesCodeSourceFile,
   extractArtifactExtensionsFromText,
   extractArtifactPathCandidates,
   hasArtifactExtensionMention,
@@ -447,6 +449,10 @@ import {
   type StepContractEnforcementLevel,
   type StepContractMode,
 } from "./step-contract";
+import {
+  describeRequiredToolsForNudge,
+  getEquivalentRequiredToolsForCall,
+} from "./required-tool-equivalence";
 import {
   detectWorkspacePathAlias,
   detectTaskRootPathRewrite,
@@ -12403,18 +12409,24 @@ ${transcript}
       addRequiredToolIfKnown(tool);
     }
 
-    const documentIntent =
-      /\b(word document|docx|pdf)\b/.test(desc) &&
-      /\b(create|generate|write|save|produce|export)\b/.test(desc);
-    if (documentIntent) {
-      required.add(canonicalizeToolNameUtil(this.normalizeToolName("create_document").name));
+    // Document/spreadsheet generators are required only when the format is the
+    // object being created and the step is not about a named source file:
+    // "Implement the PDF export feature in src/export/pdf.ts" or "Make the xlsx
+    // parser in src/xlsx.ts handle merged cells" are code edits. A generator the
+    // registry does not offer could never satisfy the contract.
+    const codeSourceTargetNamed = descriptionNamesCodeSourceFile(desc);
+    const addRequiredGeneratorIfAvailable = (toolName: string): void => {
+      if (codeSourceTargetNamed) return;
+      if (availableTools.size > 0 && !availableTools.has(canonicalizeToolNameUtil(toolName))) {
+        return;
+      }
+      addRequiredToolIfKnown(toolName);
+    };
+    if (descriptionCreatesFormatArtifact(desc, "document")) {
+      addRequiredGeneratorIfAvailable("create_document");
     }
-
-    const spreadsheetIntent =
-      /\b(spreadsheet|excel|xlsx|workbook)\b/.test(desc) &&
-      /\b(create|generate|write|save|produce|export|build|make)\b/.test(desc);
-    if (spreadsheetIntent) {
-      addRequiredToolIfKnown("create_spreadsheet");
+    if (descriptionCreatesFormatArtifact(desc, "spreadsheet")) {
+      addRequiredGeneratorIfAvailable("create_spreadsheet");
     }
 
     const requiresRunCommandEvidence =
@@ -12529,11 +12541,12 @@ ${transcript}
     const summaryLike = descriptionHasSummaryCue(desc);
     const readOnlyLike = descriptionHasReadOnlyIntent(desc);
     const specializedArtifactMention =
-      /\.(docx|pdf|xlsx|pptx)\b/.test(desc) ||
-      /\.(mp4|mov|webm)\b/.test(desc) ||
-      /\b(word document|docx|pdf|spreadsheet|excel|slides?|powerpoint|video|clip|footage)\b/.test(
-        desc,
-      );
+      !codeSourceTargetNamed &&
+      (/\.(docx|pdf|xlsx|pptx)\b/.test(desc) ||
+        /\.(mp4|mov|webm)\b/.test(desc) ||
+        /\b(word document|docx|pdf|spreadsheet|excel|slides?|powerpoint|video|clip|footage)\b/.test(
+          desc,
+        ));
     if (
       fileArtifactMentioned &&
       hasWriteIntent &&
@@ -12814,6 +12827,51 @@ ${transcript}
     return Array.from(orderedUnique.values()).join(" · ");
   }
 
+  /**
+   * Hint for a pending write_file requirement at the first-write checkpoint.
+   * Starter content is only safe for a new file; an existing target is edited in
+   * place rather than rewritten from memory.
+   */
+  private buildFirstWriteCheckpointHint(
+    pendingRequiredTools: string[],
+    suggestedPathCandidate: string,
+  ): string {
+    if (!pendingRequiredTools.includes("write_file")) return "";
+    if (!suggestedPathCandidate) {
+      return "Call write_file now with a concrete workspace-relative target path and minimal valid starter content (do not use /workspace/... aliases). ";
+    }
+    let targetIsExistingFile = false;
+    const targetPath = path.resolve(this.workspace.path, suggestedPathCandidate);
+    try {
+      targetIsExistingFile =
+        this.canReadWorkspacePath(targetPath) && fs.statSync(targetPath).isFile();
+    } catch {
+      targetIsExistingFile = false;
+    }
+    return targetIsExistingFile
+      ? `"${suggestedPathCandidate}" already exists: change it in place with edit_file instead of rewriting it. `
+      : `Call write_file now using workspace-relative path "${suggestedPathCandidate}" with minimal valid starter content (do not use /workspace/... aliases). `;
+  }
+
+  /** Whether the raw tool registry offers a tool; unknown registries count as available. */
+  private isRegistryToolAvailable(toolName: string): boolean {
+    try {
+      const tools =
+        this.toolRegistry && typeof this.toolRegistry.getTools === "function"
+          ? (this.toolRegistry.getTools() as Any[])
+          : [];
+      if (tools.length === 0) return true;
+      const wanted = canonicalizeToolNameUtil(toolName);
+      return tools.some(
+        (tool) =>
+          typeof tool?.name === "string" &&
+          canonicalizeToolNameUtil(this.normalizeToolName(tool.name).name) === wanted,
+      );
+    } catch {
+      return true;
+    }
+  }
+
   private resolveStepExecutionContract(step: PlanStep): StepExecutionContract {
     const descriptionRaw = String(step.description || "");
     const description = descriptionRaw.toLowerCase();
@@ -12842,10 +12900,12 @@ ${transcript}
     const verificationMode = this.resolveVerificationModeForStep(step);
     const verificationStep = this.isVerificationStep(step);
     const taskPresentationArtifactIntent = this.taskRequestsPresentationArtifactOutput();
+    const codeSourceTargetNamed = descriptionNamesCodeSourceFile(description);
     const presentationArtifactIntent =
       !verificationStep &&
+      !codeSourceTargetNamed &&
       this.stepRequestsPresentationArtifactOutput(description, taskPresentationArtifactIntent);
-    if (presentationArtifactIntent) {
+    if (presentationArtifactIntent && this.isRegistryToolAvailable("create_presentation")) {
       requiredTools.add(canonicalizeToolNameUtil("create_presentation"));
     }
     const verificationPathDecisions = this.getVerificationArtifactPathDecisions(step);
@@ -13010,7 +13070,7 @@ ${transcript}
       artifactKind = "file";
     } else if (
       requiredTools.has("create_document") ||
-      /\b(docx|pdf|word document)\b/.test(description)
+      (!codeSourceTargetNamed && /\b(docx|pdf|word document)\b/.test(description))
     ) {
       artifactKind = "document";
     } else if (requiredTools.has("create_spreadsheet")) {
@@ -13059,6 +13119,12 @@ ${transcript}
       if (artifactKind !== "none" && !requiresArtifactEvidence) {
         artifactKind = "none";
       }
+    }
+    // write_file and edit_file are one requirement (either satisfies it). Keep
+    // the one that matches the step so nudges never ask for a full rewrite of a
+    // file the step only edits.
+    if (requiredTools.has("write_file") && requiredTools.has("edit_file")) {
+      requiredTools.delete(directFileMutationIntent ? "write_file" : "edit_file");
     }
 
     return {
@@ -32436,7 +32502,7 @@ Return ONLY a JSON object:
                   stepContract.requiresMutation &&
                   !mutationSatisfiedForNudge &&
                   pendingRequiredTools.length > 0,
-                requiredToolNames: pendingRequiredTools,
+                requiredToolNames: describeRequiredToolsForNudge(pendingRequiredTools),
                 sanitizeMessageText: (text) => this.sanitizeFallbackInstruction(text),
                 minToolUseStreak: stopReasonToolUseStreakThreshold,
                 minMaxTokenStreak: loopGuardrail.stopReasonMaxTokenStreak,
@@ -32577,7 +32643,7 @@ Return ONLY a JSON object:
                     "Do not finalize this step with text-only output. " +
                       `A real workspace/canvas mutation is still required${preferredTarget ? ` for target "${preferredTarget}"` : ""}. ` +
                       (pendingRequiredTools.length > 0
-                        ? `Use one of these required mutation tools now: ${pendingRequiredTools.join(", ")}. `
+                        ? `Perform the required mutation now: ${describeRequiredToolsForNudge(pendingRequiredTools).join("; ")}. `
                         : "Perform a write_file/edit_file/create_document/canvas mutation now. ") +
                       "After the mutation succeeds, then provide the final confirmation.",
                   ),
@@ -32865,9 +32931,16 @@ Return ONLY a JSON object:
                     !mutationSatisfiedAtToolGate
                   ) {
                     const requiredMutationGateActive = hasPendingRequiredMutationToolsForIteration;
+                    // An equivalent tool (edit_file for a pending write_file) makes
+                    // progress on the requirement and must not be blocked.
                     const shouldBlockForRequiredMutation =
                       requiredMutationGateActive &&
-                      !pendingRequiredMutationToolSetForIteration.has(canonicalContentName);
+                      !pendingRequiredMutationToolSetForIteration.has(canonicalContentName) &&
+                      getEquivalentRequiredToolsForCall(
+                        pendingRequiredMutationToolSetForIteration,
+                        canonicalContentName,
+                        content.input,
+                      ).length === 0;
                     const shouldBlockForExplorationOnly =
                       !requiredMutationGateActive &&
                       this.isMutationExploratoryTool(canonicalContentName) &&
@@ -32893,12 +32966,12 @@ Return ONLY a JSON object:
                             tool_use_id: content.id,
                             content: JSON.stringify({
                               error: shouldBlockForRequiredMutation
-                                ? `Mutation starvation guard active: required mutation tools pending (${pendingRequiredMutationToolsForIteration.join(", ")}).`
+                                ? `Mutation starvation guard active: required mutation pending (${describeRequiredToolsForNudge(pendingRequiredMutationToolsForIteration).join("; ")}).`
                                 : "Mutation starvation guard active: perform a mutation now instead of further read/list exploration.",
                               blocked: true,
                               reason: "mutation_starvation_guard",
                               requiredAction: shouldBlockForRequiredMutation
-                                ? `Use one of [${pendingRequiredMutationToolsForIteration.join(", ")}] targeting "${preferredTarget}" now.`
+                                ? `Use ${describeRequiredToolsForNudge(pendingRequiredMutationToolsForIteration).join(" or ")} targeting "${preferredTarget}" now.`
                                 : `Use write_file/edit_file/canvas mutation targeting "${preferredTarget}" now.`,
                             }),
                             is_error: true,
@@ -32915,6 +32988,13 @@ Return ONLY a JSON object:
                       stepId: step.id,
                       tool: canonicalContentName,
                     });
+                  }
+                  for (const equivalentTool of getEquivalentRequiredToolsForCall(
+                    stepContract.requiredTools,
+                    canonicalContentName,
+                    content.input,
+                  )) {
+                    requiredToolsAttempted.add(equivalentTool);
                   }
 
                   const isExecutionToolCall = this.isExecutionTool(content.name);
@@ -34180,6 +34260,22 @@ Return ONLY a JSON object:
                               tool: canonicalContentName,
                             });
                           }
+                          // An equivalent tool satisfies the same requirement (edit_file for
+                          // write_file, search_files or `rg` via run_command for grep).
+                          for (const equivalentTool of getEquivalentRequiredToolsForCall(
+                            stepContract.requiredTools,
+                            canonicalContentName,
+                            content.input,
+                          )) {
+                            if (requiredToolsSucceeded.has(equivalentTool)) continue;
+                            requiredToolsSucceeded.add(equivalentTool);
+                            this.emitEvent("log", {
+                              metric: "required_tool_satisfied_by_equivalent",
+                              stepId: step.id,
+                              tool: equivalentTool,
+                              via_tool: canonicalContentName,
+                            });
+                          }
                           const currentFailures =
                             this.crossStepToolFailures.get(canonicalContentName) || 0;
                           if (currentFailures > 0) {
@@ -34563,9 +34659,16 @@ Return ONLY a JSON object:
               !mutationSatisfiedAtToolGate
             ) {
               const requiredMutationGateActive = hasPendingRequiredMutationToolsForIteration;
+              // An equivalent tool (edit_file for a pending write_file) makes
+              // progress on the requirement and must not be blocked.
               const shouldBlockForRequiredMutation =
                 requiredMutationGateActive &&
-                !pendingRequiredMutationToolSetForIteration.has(canonicalContentName);
+                !pendingRequiredMutationToolSetForIteration.has(canonicalContentName) &&
+                getEquivalentRequiredToolsForCall(
+                  pendingRequiredMutationToolSetForIteration,
+                  canonicalContentName,
+                  content.input,
+                ).length === 0;
               const shouldBlockForExplorationOnly =
                 !requiredMutationGateActive &&
                 this.isMutationExploratoryTool(canonicalContentName) &&
@@ -34588,12 +34691,12 @@ Return ONLY a JSON object:
                 tool_use_id: content.id,
                 content: JSON.stringify({
                   error: shouldBlockForRequiredMutation
-                    ? `Mutation starvation guard active: required mutation tools pending (${pendingRequiredMutationToolsForIteration.join(", ")}).`
+                    ? `Mutation starvation guard active: required mutation pending (${describeRequiredToolsForNudge(pendingRequiredMutationToolsForIteration).join("; ")}).`
                     : "Mutation starvation guard active: perform a mutation now instead of further read/list exploration.",
                   blocked: true,
                   reason: "mutation_starvation_guard",
                   requiredAction: shouldBlockForRequiredMutation
-                    ? `Use one of [${pendingRequiredMutationToolsForIteration.join(", ")}] targeting "${preferredTarget}" now.`
+                    ? `Use ${describeRequiredToolsForNudge(pendingRequiredMutationToolsForIteration).join(" or ")} targeting "${preferredTarget}" now.`
                     : `Use write_file/edit_file/canvas mutation targeting "${preferredTarget}" now.`,
                 }),
                 is_error: true,
@@ -34609,6 +34712,13 @@ Return ONLY a JSON object:
                 stepId: step.id,
                 tool: canonicalContentName,
               });
+            }
+            for (const equivalentTool of getEquivalentRequiredToolsForCall(
+              stepContract.requiredTools,
+              canonicalContentName,
+              content.input,
+            )) {
+              requiredToolsAttempted.add(equivalentTool);
             }
 
             const isExecutionToolCall = this.isExecutionTool(content.name);
@@ -35500,6 +35610,22 @@ Return ONLY a JSON object:
                     tool: canonicalContentName,
                   });
                 }
+                // An equivalent tool satisfies the same requirement (edit_file for
+                // write_file, search_files or `rg` via run_command for grep).
+                for (const equivalentTool of getEquivalentRequiredToolsForCall(
+                  stepContract.requiredTools,
+                  canonicalContentName,
+                  content.input,
+                )) {
+                  if (requiredToolsSucceeded.has(equivalentTool)) continue;
+                  requiredToolsSucceeded.add(equivalentTool);
+                  this.emitEvent("log", {
+                    metric: "required_tool_satisfied_by_equivalent",
+                    stepId: step.id,
+                    tool: equivalentTool,
+                    via_tool: canonicalContentName,
+                  });
+                }
                 // Heal cross-step failure counter: each success offsets one prior failure.
                 // This prevents site-specific errors (e.g. web_fetch 403 on paywalled sites)
                 // from permanently blocking a tool that works fine for other URLs.
@@ -36205,7 +36331,7 @@ Return ONLY a JSON object:
                       `Mutation starvation guard: this step is stuck in read/list exploration. ` +
                         `Perform a write/canvas mutation now (target "${preferredTarget}") and avoid further exploratory-only tools until mutation succeeds.` +
                         (pendingRequiredMutationToolsAtCheckpoint.length > 0
-                          ? ` Pending required mutation tools: ${pendingRequiredMutationToolsAtCheckpoint.join(", ")}.`
+                          ? ` Pending required mutation: ${describeRequiredToolsForNudge(pendingRequiredMutationToolsAtCheckpoint).join("; ")}.`
                           : ""),
                     ),
                   },
@@ -36244,14 +36370,12 @@ Return ONLY a JSON object:
             const suggestedPathCandidate = this.getPreferredMutationTargetPath(step, stepContract);
             const requiredToolHint =
               pendingRequiredTools.length > 0
-                ? `Required tools still missing: ${pendingRequiredTools.join(", ")}. `
+                ? `Required tools still missing: ${describeRequiredToolsForNudge(pendingRequiredTools).join("; ")}. `
                 : "";
-            const writeFileHint =
-              pendingRequiredTools.includes("write_file") && suggestedPathCandidate
-                ? `Call write_file now using workspace-relative path "${suggestedPathCandidate}" with minimal valid starter content (do not use /workspace/... aliases). `
-                : pendingRequiredTools.includes("write_file")
-                  ? "Call write_file now with a concrete workspace-relative target path and minimal valid starter content (do not use /workspace/... aliases). "
-                  : "";
+            const writeFileHint = this.buildFirstWriteCheckpointHint(
+              pendingRequiredTools,
+              suggestedPathCandidate,
+            );
             this.emitEvent("step_contract_escalated", {
               stepId: step.id,
               reason: "first_write_checkpoint_no_attempt",

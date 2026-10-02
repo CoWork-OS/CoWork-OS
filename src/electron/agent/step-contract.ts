@@ -324,6 +324,59 @@ export function descriptionHasChecklistReportCue(text: string): boolean {
   return /\b(checklist|scorecard|qa|audit|report)\b/.test(desc);
 }
 
+// A named source file makes a step about code even when it mentions a document
+// format ("the PDF export feature in src/export/pdf.ts"). Framework names such
+// as "Next.js" are not file targets.
+const CODE_SOURCE_TARGET_REGEX =
+  /(?:^|[\s`'"(])(?!(?:next|node|nuxt|vue|react|express|three|d3|chart|angular|ember|alpine|solid|socket)\.js\b)[\w./-]*[\w-]\.(?:tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|kts|swift|rb|php|cs|cpp|cc|c|h|hpp|scala|vue|svelte|dart|sh)(?=$|[\s`'"),.;:!?\]])/i;
+
+export function descriptionNamesCodeSourceFile(text: string): boolean {
+  return CODE_SOURCE_TARGET_REGEX.test(String(text || ""));
+}
+
+export type GeneratedArtifactFormat = "document" | "spreadsheet";
+
+const GENERATED_FORMAT_NOUNS: Record<GeneratedArtifactFormat, string> = {
+  document: String.raw`word\s+documents?|docx|pdfs?|[\w./-]*[\w-]\.(?:pdf|docx)`,
+  spreadsheet: String.raw`spreadsheets?|excel|xlsx|workbooks?|[\w./-]*[\w-]\.xlsx`,
+};
+const ARTIFACT_CREATION_VERB =
+  String.raw`(?:create|generate|write|save|produce|export|build|make|draft|prepare|compile|render)`;
+const OBJECT_STOP_WORD =
+  String.raw`(?:that|which|to|for|in|into|from|with|of|and|or|as|on|by|at|using|via|about|then)`;
+// The format noun is the created object ("a PDF report", "PDF invoices", "an
+// Excel workbook") unless it only describes a software component ("the xlsx
+// parser", "a PDF export feature", "a PDF viewer").
+const NOT_SOFTWARE_COMPONENT_MODIFIER =
+  String.raw`(?![\w-])(?!\s+(?:parser|parsing|export(?:er|ing)?(?!\s+of\b)|import(?:er|ing)?|` +
+  String.raw`feature|button|viewer|preview|reader|writer|library|lib|module|component|endpoint|` +
+  String.raw`api|support|generat(?:or|ion)|handler|service|function|method|class|plugin|` +
+  String.raw`integration|convert(?:er|ion)|render(?:er|ing)|engine|util(?:ity|ities)?|helper|` +
+  String.raw`pipeline|logic|tests?)\b)`;
+
+/**
+ * True when a document/spreadsheet format is the object being created ("create
+ * a PDF report", "export the results to Excel"), not a modifier of a code object
+ * ("make the xlsx parser handle merged cells") or an input ("read the PDF spec").
+ */
+export function descriptionCreatesFormatArtifact(
+  text: string,
+  format: GeneratedArtifactFormat,
+): boolean {
+  const desc = String(text || "").toLowerCase();
+  const noun = GENERATED_FORMAT_NOUNS[format];
+  const createdObject = new RegExp(
+    String.raw`\b${ARTIFACT_CREATION_VERB}\s+(?:(?:a|an|the|new|final|single|separate|one|\d+)\s+)*` +
+      String.raw`(?:(?!${OBJECT_STOP_WORD}\b)[\w'-]+\s+){0,3}?(?:${noun})${NOT_SOFTWARE_COMPONENT_MODIFIER}`,
+  );
+  const convertedInto = new RegExp(
+    String.raw`\b(?:export|save|convert|output|render|write|turn|transform|compile)\b` +
+      String.raw`(?:(?!\b(?:that|which)\b)[^.;!?\n]){0,60}?\b(?:to|as|into)\s+` +
+      String.raw`(?:(?:a|an|the|new|final|single)\s+)*(?:${noun})(?![\w-])`,
+  );
+  return createdObject.test(desc) || convertedInto.test(desc);
+}
+
 export function deriveStepContractMode(opts: {
   description: string;
   requiresMutation: boolean;

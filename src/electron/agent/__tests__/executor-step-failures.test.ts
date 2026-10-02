@@ -2878,6 +2878,241 @@ relationship_memory:
     }
   });
 
+  async function runSingleFileMutationStep(opts: {
+    description: string;
+    tool: "edit_file" | "write_file";
+    relPath: string;
+    responses?: LLMResponse[];
+  }): Promise<{ step: Any; fileNow: string }> {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-equivalent-mutation-"));
+    const target = path.join(tempDir, opts.relPath);
+    fs.writeFileSync(target, "value = 1");
+    const input =
+      opts.tool === "edit_file"
+        ? { file_path: opts.relPath, old_string: "value = 1", new_string: "value = 2" }
+        : { path: opts.relPath, content: "value = 2" };
+    executor = createExecutorWithStubs(
+      opts.responses || [
+        toolUseResponse(opts.tool, input),
+        textResponse(`Updated ${opts.relPath} as requested.`),
+      ],
+      {},
+    );
+    (executor as Any).toolRegistry.getTools = () => (executor as Any).getAvailableTools();
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).task.prompt = opts.description;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file" || name === "write_file") {
+        fs.writeFileSync(target, "value = 2");
+        return name === "edit_file"
+          ? { success: true, file_path: opts.relPath, replacements: 1 }
+          : { success: true, path: opts.relPath, bytesWritten: 9 };
+      }
+      return { success: true };
+    });
+    const step: Any = {
+      id: "equivalent-mutation",
+      description: opts.description,
+      status: "pending",
+    };
+    try {
+      await (executor as Any).executeStep(step);
+      return { step, fileNow: fs.readFileSync(target, "utf8") };
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  it.each([
+    ["Fix the failing assertion in parser.test.ts", "edit_file", "parser.test.ts"],
+    ["Remove the unused import from a.ts", "edit_file", "a.ts"],
+    ["Fix the null check in parser.ts", "write_file", "parser.ts"],
+    ["Make the xlsx parser in xlsx.ts handle merged cells", "edit_file", "xlsx.ts"],
+    ["Implement the PDF export feature in pdf-export.ts", "write_file", "pdf-export.ts"],
+  ] as const)(
+    "accepts an equivalent file mutation for %s (via %s)",
+    async (description, tool, relPath) => {
+      const { step, fileNow } = await runSingleFileMutationStep({ description, tool, relPath });
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fileNow).toBe("value = 2");
+    },
+  );
+
+  it("never requires both write_file and edit_file and keeps generators out of code steps", () => {
+    executor = createExecutorWithStubs([], {});
+    (executor as Any).toolRegistry.getTools = () => (executor as Any).getAvailableTools();
+    const required = (description: string): string[] =>
+      Array.from(
+        (executor as Any).resolveStepExecutionContract({
+          id: "contract",
+          description,
+          status: "pending",
+        }).requiredTools,
+      );
+
+    for (const description of [
+      "Fix the failing test in parser.test.ts",
+      "Remove the unused import from src/a.ts",
+      "Update config.json to add the timeout key",
+      "Write unit tests for the CSV importer in csv.test.ts",
+    ]) {
+      const tools = required(description);
+      expect(tools.includes("write_file") && tools.includes("edit_file"), description).toBe(false);
+    }
+    expect(required("Fix the failing test in parser.test.ts")).toEqual(["edit_file"]);
+    expect(required("Make the xlsx parser in src/xlsx.ts handle merged cells")).not.toContain(
+      "create_spreadsheet",
+    );
+    expect(
+      required("Update the Excel export in src/exporter.ts to add a date column"),
+    ).not.toContain("create_spreadsheet");
+    expect(required("Implement the PDF export feature in src/export/pdf.ts")).not.toContain(
+      "create_document",
+    );
+    expect(
+      required("Read the PDF spec in docs/spec.pdf and write a summary to notes.md"),
+    ).not.toContain("create_document");
+    expect(required("Generate a PDF report of the Q3 sales figures")).toContain("create_document");
+    expect(required("Generate PDF invoices for each customer")).toContain("create_document");
+    expect(required("Build a PDF viewer component for the invoice page")).not.toContain(
+      "create_document",
+    );
+    expect(required("Export the cleaned results to an Excel workbook")).toContain(
+      "create_spreadsheet",
+    );
+
+    // A generator the registry does not offer can never satisfy the contract.
+    (executor as Any).toolRegistry.getTools = () => [{ name: "write_file" }, { name: "edit_file" }];
+    expect(required("Generate a PDF report of the Q3 sales figures")).not.toContain(
+      "create_document",
+    );
+  });
+
+  it.each([
+    ["search_files", { query: "getUser", path: "src" }],
+    ["run_command", { command: "rg -n getUser src" }],
+  ] as const)("satisfies an explicit grep requirement with %s", async (tool, input) => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse(tool, input),
+        textResponse("Found 2 usages of getUser: src/a.ts:10 and src/b.ts:22."),
+      ],
+      {},
+    );
+    (executor as Any).toolRegistry.getTools = () => [
+      { name: "grep" },
+      { name: "search_files" },
+      { name: "run_command" },
+      { name: "read_file" },
+    ];
+    executor.toolRegistry.executeTool = vi.fn(async () => ({
+      success: true,
+      matches: [{ path: "src/a.ts", line: 10 }],
+      stdout: "src/a.ts:10:getUser",
+      exitCode: 0,
+    }));
+    const step: Any = {
+      id: "grep-equivalent",
+      description: "Use grep to find all usages of getUser in src",
+      status: "pending",
+    };
+    expect(Array.from((executor as Any).resolveStepExecutionContract(step).requiredTools)).toEqual([
+      "grep",
+    ]);
+    await (executor as Any).executeStep(step);
+    expect(step.status, String(step.error || "")).toBe("completed");
+  });
+
+  it("names the file-change group instead of write_file when nudging an edit step", async () => {
+    const { step } = await runSingleFileMutationStep({
+      description: "Remove the unused import from a.ts",
+      tool: "edit_file",
+      relPath: "a.ts",
+      responses: [
+        textResponse("I removed the unused import."),
+        toolUseResponse("edit_file", {
+          file_path: "a.ts",
+          old_string: "value = 1",
+          new_string: "value = 2",
+        }),
+        textResponse("Removed the unused import from a.ts."),
+      ],
+    });
+    expect(step.status, String(step.error || "")).toBe("completed");
+    const nudge = ((executor as Any).conversationHistory as Any[])
+      .filter((entry) => entry.role === "user")
+      .flatMap((entry) => (Array.isArray(entry.content) ? entry.content : []))
+      .map((block: Any) => String(block?.text || ""))
+      .find((text: string) => text.includes("Do not finalize this step with text-only output."));
+    expect(nudge).toContain("edit_file for targeted edits to an existing file");
+    expect(nudge).not.toMatch(/required mutation tools now: write_file/);
+  });
+
+  it("names the file-change group when the mutation starvation guard fires", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-existing-target-"));
+    fs.writeFileSync(path.join(tempDir, "README.md"), "# Project\n\nExisting docs.\n");
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("read_file", { path: "README.md" }),
+        toolUseResponse("list_directory", { path: "." }),
+        toolUseResponse("read_file", { path: "README.md" }),
+        toolUseResponse("edit_file", {
+          file_path: "README.md",
+          old_string: "Existing docs.",
+          new_string: "Existing docs.\n\n## Usage\n\nRun the app.",
+        }),
+        textResponse("Added a usage section to README.md."),
+      ],
+      {},
+    );
+    (executor as Any).workspace.path = tempDir;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file") {
+        fs.appendFileSync(path.join(tempDir, "README.md"), "\n## Usage\n\nRun the app.\n");
+        return { success: true, file_path: "README.md", replacements: 1 };
+      }
+      if (name === "read_file") {
+        return { success: true, path: "README.md", content: "# Project" };
+      }
+      return { success: true, files: ["README.md"] };
+    });
+    const step: Any = {
+      id: "existing-target",
+      description: "Add a usage section to README.md",
+      status: "pending",
+    };
+    try {
+      expect(
+        Array.from((executor as Any).resolveStepExecutionContract(step).requiredTools),
+      ).toEqual(["write_file"]);
+      await (executor as Any).executeStep(step);
+      // edit_file satisfies the write_file requirement.
+      expect(step.status, String(step.error || "")).toBe("completed");
+      const starvationNudge = ((executor as Any).conversationHistory as Any[])
+        .filter((entry) => entry.role === "user")
+        .flatMap((entry) => (Array.isArray(entry.content) ? entry.content : []))
+        .map((block: Any) => String(block?.text || ""))
+        .find((text: string) => text.includes("Mutation starvation guard"));
+      expect(starvationNudge).toContain("edit_file for targeted edits to an existing file");
+      expect(starvationNudge).not.toContain("Pending required mutation tools: write_file");
+
+      // The first-write checkpoint must not ask for starter content in an existing file.
+      const existingHint = (executor as Any).buildFirstWriteCheckpointHint(
+        ["write_file"],
+        "README.md",
+      );
+      expect(existingHint).toContain(
+        '"README.md" already exists: change it in place with edit_file',
+      );
+      expect(existingHint).not.toContain("starter content");
+      expect(
+        (executor as Any).buildFirstWriteCheckpointHint(["write_file"], "docs/NEW.md"),
+      ).toContain("minimal valid starter content");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("still fails true inspection steps when they mutate the workspace", async () => {
     executor = createExecutorWithStubs(
       [

@@ -29,6 +29,8 @@ export interface BuildExecutionPromptParams {
   memoryContext?: string;
   awarenessSnapshot?: string;
   infraContext?: string;
+  /** Volatile infra status (wallet balance); turn-scoped so it cannot bust the cache. */
+  infraStatusPrompt?: string;
   visualQAContext?: string;
   personalityPrompt?: string;
   guidelinesPrompt?: string;
@@ -306,6 +308,12 @@ export class ContentBuilder {
             dropPriority: 3,
             layerKind: "optional",
             cacheScope: "session",
+          }),
+          makeSection("infra_status", params.infraStatusPrompt, 60, {
+            required: false,
+            dropPriority: 3,
+            layerKind: "optional",
+            cacheScope: "turn",
           }),
           makeSection("visual_qa", params.visualQAContext, 500, {
             required: false,

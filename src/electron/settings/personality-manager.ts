@@ -807,10 +807,14 @@ ${companionMindset}`;
     // Add user relationship context
     if (userName) {
       prompt += `\n\nUSER CONTEXT:
-- The user's name is "${userName}"
-- You have completed ${tasksCompleted} tasks together`;
-      if (projectsWorkedOn.length > 0) {
-        prompt += `\n- Projects worked on: ${projectsWorkedOn.slice(-5).join(", ")}`;
+- The user's name is "${userName}"`;
+      // The counters change on every completed task. Execution prompts cache this
+      // block as their stable prefix, so the history stays on chat replies only.
+      if (surface === "chat") {
+        prompt += `\n- You have completed ${tasksCompleted} tasks together`;
+        if (projectsWorkedOn.length > 0) {
+          prompt += `\n- Projects worked on: ${projectsWorkedOn.slice(-5).join(", ")}`;
+        }
       }
       prompt += `\n\nIMPORTANT NAME RULES:
 - ALWAYS address the user as "${userName}" — this is their confirmed preferred name.

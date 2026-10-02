@@ -505,6 +505,26 @@ describe("PersonalityManager - agent name", () => {
       expect(prompt).toContain("project-a");
     });
 
+    it("keeps changing relationship counters out of the execution identity", () => {
+      mockStoredSettings = {
+        relationship: {
+          userName: "Alice",
+          tasksCompleted: 25,
+          projectsWorkedOn: ["project-a", "project-b"],
+        },
+      };
+      PersonalityManager.clearCache();
+
+      const before = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+      PersonalityManager.recordTaskCompleted("project-c");
+      const after = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+
+      expect(after).toBe(before);
+      expect(after).toContain('The user\'s name is "Alice"');
+      expect(after).not.toContain("tasks together");
+      expect(after).not.toContain("project-a");
+    });
+
     it('should include instructions for handling "who am I" when user name is set', () => {
       mockStoredSettings = { relationship: { userName: "Bob" } };
       PersonalityManager.clearCache();

@@ -8429,9 +8429,8 @@ ${transcript}
         );
       }
 
-      if (status.wallet?.balanceUsdc) {
-        lines.push(`Current wallet balance: ${status.wallet.balanceUsdc} USDC`);
-      }
+      // The wallet balance changes between turns; it is sent as turn-scoped context
+      // (getInfraWalletStatusPrompt) so it does not invalidate this cached section.
 
       lines.push(
         "Payment and domain registration tools require explicit user approval before execution.",
@@ -8445,6 +8444,17 @@ ${transcript}
       return lines.join("\n");
     } catch (error) {
       logger.warn("[Executor] Failed to build infra context prompt:", error);
+      return "";
+    }
+  }
+
+  private getInfraWalletStatusPrompt(): string {
+    try {
+      if (!InfraSettingsManager.loadSettings().enabled) return "";
+      const status = this.infraContextProvider.getStatus();
+      if (!status.enabled || !status.wallet?.balanceUsdc) return "";
+      return `Current wallet balance: ${status.wallet.balanceUsdc} USDC`;
+    } catch {
       return "";
     }
   }
@@ -17213,6 +17223,7 @@ ${transcript}
       memoryContext: params.memoryContext,
       awarenessSnapshot: params.awarenessSnapshot,
       infraContext: params.infraContext,
+      infraStatusPrompt: params.infraContext ? this.getInfraWalletStatusPrompt() : undefined,
       visualQAContext: params.visualQAContext,
       personalityPrompt: params.personalityPrompt,
       guidelinesPrompt: params.guidelinesPrompt,

@@ -246,4 +246,40 @@ describe("AnthropicProvider", () => {
 
     expect(response.stopReason).toBe(expected);
   });
+
+  it.each(["5m", "1h"] as const)(
+    "pins the static system prefix with an explicit breakpoint under automatic caching (%s)",
+    async (ttl) => {
+      const provider = new AnthropicProvider({
+        type: "anthropic",
+        model: "claude-sonnet-4-6",
+        anthropicApiKey: "sk-ant-api-test",
+      });
+
+      await provider.createMessage({
+        ...makeRequest(),
+        system: "Stable instructions\n\nCurrent time: now",
+        systemBlocks: [
+          { text: "Stable instructions", scope: "session", cacheable: true, stableKey: "id:1" },
+          { text: "Current time: now", scope: "turn", cacheable: false, stableKey: "time:1" },
+        ],
+        promptCache: { mode: "anthropic_auto", ttl, explicitRecentMessages: 3 },
+      });
+
+      const payload = anthropicCreateMock.mock.calls[0][0];
+      const marker = ttl === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" };
+      // Automatic caching follows the conversation tail; the explicit marker keeps
+      // a guaranteed read point on the stable system prefix (same TTL, so the
+      // longer-TTL-first ordering rule holds).
+      expect(payload.cache_control).toEqual(marker);
+      expect(payload.system[0]).toEqual({
+        type: "text",
+        text: "Stable instructions",
+        cache_control: marker,
+      });
+      expect(payload.system[1].cache_control).toBeUndefined();
+      const breakpoints = JSON.stringify(payload).split('"cache_control"').length - 1;
+      expect(breakpoints).toBeLessThanOrEqual(4);
+    },
+  );
 });

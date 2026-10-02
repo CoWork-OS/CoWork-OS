@@ -293,7 +293,13 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     const parts = convertSystemBlocksToTextParts(request.system, request.systemBlocks);
-    if (promptCache?.mode === "anthropic_explicit") {
+    // Explicit mode marks the system prefix and recent turns. Automatic mode's
+    // single top-level breakpoint follows the conversation tail, so the static
+    // system prefix also gets its own marker: a read point that survives
+    // whatever changes later in the transcript. Two breakpoints stay within the
+    // limit of four, and both use the request TTL so the longer-TTL-first
+    // ordering rule holds.
+    if (promptCache?.mode === "anthropic_explicit" || promptCache?.mode === "anthropic_auto") {
       applyExplicitSystemBlockMarker(parts, blocks, promptCache.ttl);
     }
 

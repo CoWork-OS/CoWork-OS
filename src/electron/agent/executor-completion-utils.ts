@@ -984,8 +984,12 @@ export function getFinalOutcomeGuardError(opts: {
   }
 
   if (!opts.hasArtifactEvidence) {
+    // A substantive inline answer may stand in for an inferred deliverable
+    // ("write a summary report"), but never for an explicitly requested output
+    // path or format: a claim to have written it is not the file.
+    const explicitOutputRequested = opts.contract.requiredArtifactExtensions.length > 0;
     const hasSubstantiveText = opts.bestCandidate.trim().length >= 50;
-    if (!(hasSubstantiveText && opts.createdFiles.length === 0)) {
+    if (explicitOutputRequested || !(hasSubstantiveText && opts.createdFiles.length === 0)) {
       const requested = opts.contract.requiredArtifactExtensions.join(", ");
       return requested
         ? `Task missing artifact evidence: expected an output artifact (${requested}) but no matching created file was detected.`

@@ -4,9 +4,11 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 import {
+  buildCompletionContract,
   buildCompletionGuidancePrompt,
   detectReadOnlyConstraint,
   extractExplicitOutputExtensions,
+  getFinalOutcomeGuardError,
   hasUnrecoveredBlockingPlanFailureForAssistantOutput,
   hasUnrecoveredToolFailureForAssistantOutput,
   hasVerificationEvidence,
@@ -1329,6 +1331,67 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
         status: "failed",
         error: expect.stringContaining("missing artifact evidence"),
       }),
+    );
+  });
+
+  it("does not let a long claim replace an explicitly requested output file", async () => {
+    const claim = "I created reports/q3.pdf with the quarterly analysis.";
+    expect(claim.length).toBeGreaterThanOrEqual(50);
+    const executor = createExecuteHarness({
+      title: "Quarterly report",
+      prompt: "Analyze sales.csv and create a PDF report saved as reports/q3.pdf",
+      lastOutput: claim,
+      createdFiles: [],
+      planStepDescription: "Write the PDF report",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing artifact evidence"),
+      }),
+    );
+  });
+
+  it("keeps the inline-answer exemption only for inferred artifact contracts", () => {
+    const guard = (prompt: string, bestCandidate: string, createdFiles: string[] = []) => {
+      const contract = buildCompletionContract({
+        taskTitle: "Report",
+        taskPrompt: prompt,
+        requiresDirectAnswer: false,
+        requiresDecisionSignal: false,
+        isWatchSkipRecommendationTask: false,
+      });
+      return getFinalOutcomeGuardError({
+        contract,
+        preferBestEffortCompletion: false,
+        softDeadlineTriggered: false,
+        cancelReason: null,
+        bestCandidate,
+        hasExecutionEvidence: true,
+        hasArtifactEvidence: false,
+        createdFiles,
+        responseDirectlyAddressesPrompt: () => true,
+        fallbackContainsDirectAnswer: () => true,
+        hasVerificationEvidence: () => true,
+      });
+    };
+    const longAnswer =
+      "Revenue grew 12% quarter over quarter, led by the enterprise tier; churn held at 3%.";
+
+    expect(guard("Write a summary report of the launch feedback.", longAnswer)).toBeNull();
+    expect(guard("Export the summary to summary.md", longAnswer)).toMatch(
+      /missing artifact evidence.*\.md/,
+    );
+    expect(guard("Create a spreadsheet of the open invoices.", longAnswer)).toMatch(
+      /missing artifact evidence.*\.xlsx/,
+    );
+    expect(guard("Write a summary report of the launch feedback.", longAnswer, ["notes.txt"])).toMatch(
+      /missing artifact evidence/,
     );
   });
 

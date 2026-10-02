@@ -33,6 +33,7 @@ import {
   escapeSandboxProfileString,
   validatePathForSandboxProfile,
 } from "./security-utils";
+import { applyNonInteractiveEnvDefaults } from "./non-interactive-env";
 
 /**
  * Default sandbox options
@@ -477,7 +478,7 @@ export class MacOSSandbox implements ISandbox {
       "/sbin",
     ].join(":");
 
-    return safeEnv;
+    return applyNonInteractiveEnvDefaults(safeEnv);
   }
 
   /**

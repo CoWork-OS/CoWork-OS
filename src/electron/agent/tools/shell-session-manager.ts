@@ -4,6 +4,7 @@ import * as fsPromises from "fs/promises";
 import * as path from "path";
 import { execFileSync, spawn, type ChildProcess } from "child_process";
 import { getUserDataDir } from "../../utils/user-data-dir";
+import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
 import type {
   CommandTerminationReason,
   ShellSessionInfo,
@@ -587,7 +588,7 @@ export class ShellSessionManager {
     const child = spawn(shell, args, {
       cwd: runtime.info.cwd || workspacePath,
       detached: process.platform !== "win32",
-      env: {
+      env: applyNonInteractiveEnvDefaults({
         ...process.env,
         HOME: process.env.HOME || "",
         SHELL: shell,
@@ -598,7 +599,7 @@ export class ShellSessionManager {
         PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         LANG: process.env.LANG || "en_US.UTF-8",
         TERM: process.env.TERM || "xterm-256color",
-      },
+      }),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -920,7 +921,9 @@ export class ShellSessionManager {
       request.command,
       heredocMarker,
       ")",
-      'eval "$__COWORK_COMMAND"',
+      // The shell's stdin carries this wrapper; an agent command reading stdin
+      // would consume it and hang, so it gets an empty stdin instead.
+      request.scope === "tab" ? 'eval "$__COWORK_COMMAND"' : 'eval "$__COWORK_COMMAND" </dev/null',
       "__cowork_exit_code=$?",
       "printf '\\n__COWORK_STATE_START__\\n'",
       "printf '__COWORK_CWD__:%s\\n' \"$(pwd -P)\"",

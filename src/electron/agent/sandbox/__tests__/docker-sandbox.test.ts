@@ -202,6 +202,26 @@ describe("DockerSandbox access-profile enforcement", () => {
     ).toBe(true);
   });
 
+  it("runs commands with non-interactive defaults without overriding configured values", () => {
+    const { workspace } = fixture();
+    const sandbox = new DockerSandbox(workspace, { env: { PAGER: "more" } });
+    const args = (sandbox as Any).buildDockerArgs({}) as string[];
+    const envValues = args.filter((_arg, index) => args[index - 1] === "-e");
+
+    expect(envValues).toEqual(
+      expect.arrayContaining([
+        "GIT_TERMINAL_PROMPT=0",
+        "GIT_EDITOR=true",
+        "GIT_PAGER=cat",
+        "PIP_NO_INPUT=1",
+        "DEBIAN_FRONTEND=noninteractive",
+        "PAGER=more",
+      ]),
+    );
+    expect(envValues).not.toContain("PAGER=cat");
+    expect(envValues.some((value) => value.startsWith("CI="))).toBe(false);
+  });
+
   it("does not let explicit temporary write options expose a protected workspace file", () => {
     const { workspace } = fixture();
     workspace.permissions.write = true;

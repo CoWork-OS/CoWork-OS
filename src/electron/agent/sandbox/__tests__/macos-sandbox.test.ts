@@ -175,6 +175,33 @@ describe("MacOSSandbox", () => {
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("runs commands with non-interactive defaults without overriding passed-through values", async () => {
+    const previousPager = process.env.PAGER;
+    process.env.PAGER = "less";
+    try {
+      const sandbox = new MacOSSandbox(makeWorkspace());
+      await sandbox.execute("git commit", [], {
+        cwd: "/tmp/cowork workspace",
+        timeout: 1000,
+        envPassthrough: ["PATH", "HOME", "PAGER"],
+      });
+
+      const [, , options] = spawnMock.mock.calls[0];
+      expect(options.env).toMatchObject({
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_EDITOR: "true",
+        GIT_PAGER: "cat",
+        PAGER: "less",
+        PIP_NO_INPUT: "1",
+        DEBIAN_FRONTEND: "noninteractive",
+      });
+      expect(options.env.CI).toBeUndefined();
+    } finally {
+      if (previousPager === undefined) delete process.env.PAGER;
+      else process.env.PAGER = previousPager;
+    }
+  });
+
   it("reports nonzero sandbox process exits", async () => {
     spawnMock.mockImplementationOnce(() =>
       makeChildProcess({ closeCode: 2, stderr: "command failed\n" }),

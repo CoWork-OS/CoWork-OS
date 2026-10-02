@@ -94,6 +94,49 @@ describe("shell-session-manager", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "gives commands an empty stdin instead of the shell's own command stream",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID();
+      const workspaceId = randomUUID();
+      const run = (command: string) =>
+        waitFor(
+          manager.runCommand({
+            taskId,
+            workspaceId,
+            workspacePath: testUserDataDir,
+            command,
+            timeoutMs: 5_000,
+            fallbackRunner: async () => ({
+              success: false,
+              stdout: "",
+              stderr: "Persistent shell fallback requested.",
+              exitCode: null,
+              terminationReason: "error",
+            }),
+          }),
+          8_000,
+          `the ${command} command`,
+        );
+      try {
+        // `cat` used to read the rest of the wrapper script and hang until the timeout.
+        const result = await run("cat");
+        expect(result).toMatchObject({ success: true, exitCode: 0, terminationReason: "normal" });
+        expect(result.stdout).toBe("");
+
+        const next = await run("echo still-usable");
+        expect(next.stdout).toBe("still-usable");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
     "reports a timed-out command with its partial output instead of throwing",
     async () => {
       await mkdir(testUserDataDir, { recursive: true });

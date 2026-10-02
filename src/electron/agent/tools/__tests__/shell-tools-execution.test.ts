@@ -218,4 +218,60 @@ describe.skipIf(process.platform === "win32")("ShellTools execution with real sh
     expect(result.stdout).not.toContain("finished");
     await waitUntil(() => !isRunning(childPid), 5_000, "the child process to exit");
   }, 20_000);
+
+  describe("non-interactive environment", () => {
+    const defaults = [
+      "GIT_TERMINAL_PROMPT=0",
+      "GIT_EDITOR=true",
+      "GIT_PAGER=cat",
+      "PIP_NO_INPUT=1",
+      "DEBIAN_FRONTEND=noninteractive",
+    ];
+
+    it("sets non-interactive defaults for one-shot commands, keeping explicit values", async () => {
+      const shellTools = new ShellTools(
+        createWorkspace(),
+        createDaemon() as unknown as AgentDaemon,
+        `task-${randomUUID()}`,
+      );
+
+      // The pipe routes the command to the one-shot spawn path.
+      const result = await shellTools.runCommand("env | sort", {
+        cwd: workspacePath,
+        env: { PAGER: "less" },
+      });
+
+      const lines = result.stdout.split("\n");
+      expect(lines).toEqual(expect.arrayContaining([...defaults, "PAGER=less"]));
+      expect(lines).not.toContain("PAGER=cat");
+      expect(lines.some((line) => line.startsWith("CI="))).toBe(false);
+    });
+
+    it("sets non-interactive defaults in the persistent shell, keeping inherited values", async () => {
+      const previous = { PAGER: process.env.PAGER, GIT_EDITOR: process.env.GIT_EDITOR };
+      process.env.PAGER = "less";
+      delete process.env.GIT_EDITOR;
+      try {
+        const workspace = createWorkspace();
+        const taskId = `task-${randomUUID()}`;
+        sessions.push({ taskId, workspaceId: workspace.id });
+        const shellTools = new ShellTools(
+          workspace,
+          createDaemon() as unknown as AgentDaemon,
+          taskId,
+        );
+
+        const result = await shellTools.runCommand("env", { cwd: workspacePath });
+
+        const lines = result.stdout.split("\n");
+        expect(spawnCalls.some(({ args }) => args.includes("env"))).toBe(false);
+        expect(lines).toEqual(expect.arrayContaining([...defaults, "PAGER=less"]));
+      } finally {
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    });
+  });
 });

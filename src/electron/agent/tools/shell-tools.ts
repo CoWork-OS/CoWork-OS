@@ -8,6 +8,7 @@ import { GuardrailManager, containsShellControlOperator } from "../../guardrails
 import { BuiltinToolsSettingsManager, type RunCommandApprovalMode } from "./builtin-settings";
 import { ShellSessionManager, isLikelyInteractiveCommand } from "./shell-session-manager";
 import { createSandbox } from "../sandbox/sandbox-factory";
+import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { createLogger } from "../../utils/logger";
 
@@ -1590,6 +1591,8 @@ export class ShellTools {
             TMPDIR: process.env.TMPDIR || "/tmp",
             ...options?.env,
           };
+    // Nobody is at a terminal to answer prompts; explicit options.env values win.
+    applyNonInteractiveEnvDefaults(safeEnv);
 
     // Forward auth keys and runtime config for CLI agent commands.
     if (isCliAgentCommand && process.platform !== "win32") {

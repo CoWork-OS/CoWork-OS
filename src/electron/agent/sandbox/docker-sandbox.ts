@@ -30,6 +30,7 @@ import {
 } from "../../security/access-profile-paths";
 import { createSecureTempFile } from "./security-utils";
 import { collectPolicyPathEntries } from "./policy-paths";
+import { NON_INTERACTIVE_COMMAND_ENV } from "./non-interactive-env";
 
 /**
  * Docker sandbox configuration
@@ -557,6 +558,15 @@ export class DockerSandbox implements ISandbox {
     // Add custom environment
     for (const [key, value] of Object.entries(this.config.env)) {
       args.push("-e", `${key}=${value}`);
+    }
+
+    // Non-interactive defaults for anything not passed through or configured above
+    const setEnvKeys = new Set([
+      ...(options.envPassthrough || []).filter((envKey) => process.env[envKey]),
+      ...Object.keys(this.config.env),
+    ]);
+    for (const [key, value] of Object.entries(NON_INTERACTIVE_COMMAND_ENV)) {
+      if (!setEnvKeys.has(key)) args.push("-e", `${key}=${value}`);
     }
 
     // User mapping (run as current user to avoid permission issues)

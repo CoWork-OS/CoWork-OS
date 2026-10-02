@@ -677,6 +677,29 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(navigate.description).not.toContain("By default this opens and controls the visible");
   });
 
+  it("tells the model that run_command runs non-interactively", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-noninteractive");
+    const runCommand = registry.getTools().find((tool) => tool.name === "run_command")!;
+    const renderContext = {
+      executionMode: "execute" as const,
+      taskDomain: "code" as const,
+      webSearchMode: "live" as const,
+      shellEnabled: true,
+      agentType: "main" as const,
+      workerRole: null,
+      allowUserInput: true,
+    };
+    // The rendered description (base text, then appended guidance) is what the model sees.
+    const rendered = registry.renderToolsForContext([runCommand], renderContext)[0];
+    const compact = registry.getToolDescriptions(["run_command"], { renderContext });
+
+    for (const description of [runCommand.description, rendered.description, compact]) {
+      expect(description).toMatch(/non-interactive/i);
+      expect(description).toContain("--yes");
+    }
+    expect(rendered.description).toContain("servers and watchers block until the timeout");
+  });
+
   it("prioritizes local channel history for message summarization", () => {
     const definitions = ChannelTools.getToolDefinitions();
     const listChats = definitions.find((tool) => tool.name === "channel_list_chats");

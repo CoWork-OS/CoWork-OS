@@ -10372,6 +10372,11 @@
   background: transparent;
 }
 
+/* Outranks the light theme's translucent-white input background, which would veil the fill. */
+.model-quick-effort-shell .model-quick-effort-range {
+  background: transparent;
+}
+
 .model-quick-effort-markers {
   position: absolute;
   z-index: 1;

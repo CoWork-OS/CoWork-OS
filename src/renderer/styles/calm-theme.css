@@ -1699,7 +1699,7 @@ html.visual-calm .model-quick-effort-shell::after {
   background-image:
     radial-gradient(circle at 3.5px 3.5px, rgba(255, 255, 255, 0.28) 1.1px, transparent 1.5px),
     linear-gradient(90deg, var(--calm-effort-from), var(--calm-effort-to));
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--calm-effort-to) 35%, transparent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--calm-effort-to) 45%, transparent);
 }
 
 html.visual-calm .model-quick-effort-markers span {
@@ -1710,7 +1710,7 @@ html.visual-calm .model-quick-effort-markers span {
 
 html.visual-calm .model-quick-effort-range::-webkit-slider-thumb {
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--calm-effort-to) 55%, white),
+    0 0 0 3px var(--calm-effort-to),
     0 2px 6px rgba(24, 24, 20, 0.25);
 }
 
@@ -1718,7 +1718,7 @@ html.visual-calm .model-quick-effort-range:hover::-webkit-slider-thumb,
 html.visual-calm .model-quick-effort-range:focus-visible::-webkit-slider-thumb,
 html.visual-calm .model-quick-effort-range:active::-webkit-slider-thumb {
   box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--calm-effort-to) 65%, white),
+    0 0 0 4px var(--calm-effort-to),
     0 3px 10px rgba(24, 24, 20, 0.28);
 }
 

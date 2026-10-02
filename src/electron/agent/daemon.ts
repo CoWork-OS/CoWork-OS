@@ -39,10 +39,9 @@ import {
   TaskAdmissionService,
 } from "../control-plane/task-admission-service";
 import type Database from "better-sqlite3";
+import type { TaskAdmissionInput, TaskAdmissionMediaMetadata } from "../database/browser-host-sql";
 import {
   TaskStore,
-  type TaskAdmissionInput,
-  type TaskAdmissionMediaMetadata,
   TaskEventRepository,
   WorkspaceStore,
   MemoryType,

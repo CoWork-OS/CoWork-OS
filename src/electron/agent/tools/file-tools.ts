@@ -2283,6 +2283,7 @@ export class FileTools {
     matches: Array<{ path: string; type: "filename" | "content" }>;
     totalFound: number;
     truncated?: boolean;
+    truncationReason?: string;
   }> {
     // Validate input
     if (!query || typeof query !== "string") {
@@ -2300,9 +2301,16 @@ export class FileTools {
     const matches: Array<{ path: string; type: "filename" | "content" }> = [];
     let filesSearched = 0;
     const maxFilesToSearch = 500; // Limit files to search for performance
+    // Set when the file cap stops the walk with entries left, so an empty or short result is
+    // not reported as a complete search.
+    let fileCapReached = false;
+    const shouldStop = () => {
+      if (filesSearched >= maxFilesToSearch) fileCapReached = true;
+      return matches.length >= MAX_SEARCH_RESULTS || fileCapReached;
+    };
 
     const searchRecursive = async (dir: string) => {
-      if (matches.length >= MAX_SEARCH_RESULTS || filesSearched >= maxFilesToSearch) {
+      if (shouldStop()) {
         return;
       }
 
@@ -2314,7 +2322,7 @@ export class FileTools {
       }
 
       for (const entry of entries) {
-        if (matches.length >= MAX_SEARCH_RESULTS || filesSearched >= maxFilesToSearch) {
+        if (shouldStop()) {
           break;
         }
 
@@ -2378,7 +2386,14 @@ export class FileTools {
       return {
         matches: matches.slice(0, MAX_SEARCH_RESULTS),
         totalFound: matches.length,
-        truncated: matches.length >= MAX_SEARCH_RESULTS,
+        truncated: matches.length >= MAX_SEARCH_RESULTS || fileCapReached,
+        ...(fileCapReached
+          ? {
+              truncationReason:
+                `Stopped after searching ${maxFilesToSearch} files; later files were not checked, so a missing match does not mean the text is absent. ` +
+                "Use grep (file contents) or glob (file names) with a narrower path to search the rest.",
+            }
+          : {}),
       };
     } catch (error) {
       throw new Error(`Search failed: ${(error as Error).message}`);

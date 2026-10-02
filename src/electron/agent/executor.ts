@@ -163,6 +163,10 @@ import { PersonalityManager } from "../settings/personality-manager";
 import { detectContextMode } from "./context-mode-detector";
 import { calculateCost, formatCost, getCacheTokenAccounting, isModelPriced } from "./llm/pricing";
 import {
+  classifyProviderError,
+  resolveProviderRetryDelayMs,
+} from "./llm/provider-error-classifier";
+import {
   getProviderImageCaps,
   loadImageFromFile,
   validateImageForProvider,
@@ -278,7 +282,6 @@ import {
   COMPACTION_TOOL_USE_CLAMP,
   COMPACTION_TOOL_RESULT_CLAMP,
   isContextCapacityError,
-  isNonRetryableLLMError,
   isInputDependentError as _isInputDependentError,
   isRecoverablePathDriftError as _isRecoverablePathDriftError,
   getCurrentDateString as _getCurrentDateString,
@@ -9036,6 +9039,7 @@ ${transcript}
     let lastError: Error | null = null;
     let skipRetryDelayOnce = false;
     let deferredPrimaryOutageFailover = false;
+    let providerRetryAfterMs: number | undefined;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptNumber = attempt + 1;
@@ -9054,7 +9058,10 @@ ${transcript}
               delayMs: 0,
             });
           } else {
-            const delay = calculateBackoffDelay(attempt - 1);
+            const delay = resolveProviderRetryDelayMs(
+              calculateBackoffDelay(attempt - 1),
+              providerRetryAfterMs,
+            );
             logger.info(
               `${this.logTag} Retry attempt ${attempt}/${maxAttempts - 1} for ${operation} after ${delay}ms`,
             );
@@ -9118,12 +9125,8 @@ ${transcript}
         const errorMessage = error?.message || "Unknown error";
         const isCancellation = errorMessage === "Request cancelled" || error.name === "AbortError";
 
-        // Don't retry on cancellation or non-retryable LLM errors (429/rate limit are retryable)
-        if (
-          isCancellation ||
-          error.name === "AbortError" ||
-          isNonRetryableLLMError(error.message)
-        ) {
+        // Don't retry on cancellation
+        if (isCancellation || error.name === "AbortError") {
           logger.info(
             `${this.logTag}[LLM ${llmCallId}] terminal failure: ${operation} ` +
               `(attempt ${attemptNumber}/${maxAttempts}, ${elapsedMs}ms, cancellation=${isCancellation}) -> ${errorMessage}`,
@@ -9131,42 +9134,19 @@ ${transcript}
           throw error;
         }
 
-        // Check if it's a retryable error (rate limit, timeout, network error)
+        // Rate limits, overload (529), 5xx, timeouts and transport failures are
+        // retryable; an exhausted quota is not, though another provider may serve it.
+        const classification = classifyProviderError(error, {
+          legacyRetrySemantics: !this.providerRetryV2Enabled,
+        });
+        providerRetryAfterMs = classification.retryAfterMs;
         const errorText = String(error?.message || "").toLowerCase();
-        const errorCode = String(error?.code || error?.cause?.code || "").toLowerCase();
         // Replaying the same prompt after a local-model timeout consumes another full
         // deadline window without reducing the cause. Callers must split or compact it.
         const isIdenticalLocalTimeoutRetry =
           this.provider?.type === "ollama" &&
           (errorText.includes("timeout") || errorText.includes("timed out"));
-        const isRetryable =
-          !isIdenticalLocalTimeoutRetry &&
-          ((this.providerRetryV2Enabled && error?.retryable === true) ||
-            errorText.includes("timeout") ||
-            errorText.includes("timed out") ||
-            errorText.includes("429") ||
-            errorText.includes("rate limit") ||
-            errorCode === "econnreset" ||
-            errorCode === "etimedout" ||
-            errorCode === "enotfound" ||
-            errorCode === "eai_again" ||
-            errorCode === "econnrefused" ||
-            errorText.includes("econnreset") ||
-            errorText.includes("etimedout") ||
-            errorText.includes("enotfound") ||
-            errorText.includes("eai_again") ||
-            errorText.includes("econnrefused") ||
-            (this.providerRetryV2Enabled && errorText.includes("terminated")) ||
-            (this.providerRetryV2Enabled && errorText.includes("stream disconnected")) ||
-            (this.providerRetryV2Enabled && errorText.includes("connection reset")) ||
-            (this.providerRetryV2Enabled && errorText.includes("unexpected eof")) ||
-            (this.providerRetryV2Enabled && errorText.includes("socket hang up")) ||
-            errorText.includes("network") ||
-            error.status === 429 ||
-            error.status === 408 ||
-            error.status === 503 ||
-            error.status === 502 ||
-            error.status === 504);
+        const isRetryable = !isIdenticalLocalTimeoutRetry && classification.retryable;
 
         const retryReason = this.getRetryRouteReason(error);
         const shouldRetryPrimaryProviderFirst =
@@ -9180,7 +9160,10 @@ ${transcript}
             `${this.logTag}[LLM ${llmCallId}] retaining primary provider for one local retry: ` +
               `${operation} (attempt ${attemptNumber}/${maxAttempts}) -> ${this.provider.type}/${this.modelId}`,
           );
-        } else if (isRetryable && this.failoverToNextProvider(retryReason, error)) {
+        } else if (
+          (isRetryable || classification.failoverEligible) &&
+          this.failoverToNextProvider(retryReason, error)
+        ) {
           skipRetryDelayOnce = true;
           logger.warn(
             `${this.logTag}[LLM ${llmCallId}] failover: ${operation} ` +
@@ -25714,41 +25697,8 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private isTransientProviderError(error: Any): boolean {
-    if (!error) return false;
-    if (error.retryable === false) return false;
-    if (error.retryable === true) return true;
-    const message = String(error.message || "").toLowerCase();
-    const code = error.cause?.code || error.code;
-    const retryableCodes = new Set([
-      "ECONNRESET",
-      "ETIMEDOUT",
-      "ENOTFOUND",
-      "EAI_AGAIN",
-      "ECONNREFUSED",
-      "ERR_STREAM_PREMATURE_CLOSE",
-      "EPIPE",
-      "ECONNABORTED",
-    ]);
-    if (code && retryableCodes.has(code)) return true;
-    // 429 / rate limit are transient — retry after delay
-    if (/429|rate limit|too many requests|free-models-per-min/.test(message)) return true;
-    if (
-      /service_unavailable_error|server_is_overloaded|server is overloaded|servers are currently overloaded|temporarily unavailable/.test(
-        message,
-      )
-    ) {
-      return true;
-    }
-    return (
-      message.includes("fetch failed") ||
-      message.includes("network") ||
-      message.includes("timeout") ||
-      message.includes("socket hang up") ||
-      message.includes("terminated") ||
-      message.includes("stream disconnected") ||
-      message.includes("connection reset") ||
-      message.includes("unexpected eof")
-    );
+    // An explicit retryable=false stamp (bounded retries already spent) stays final.
+    return classifyProviderError(error, { respectExplicitNonRetryable: true }).retryable;
   }
 
   private async dispatchMentionedAgentsAfterPlanning(): Promise<void> {
@@ -39147,6 +39097,7 @@ Return ONLY a JSON object:
   private getRetryRouteReason(error: Any): LLMRoutingReason {
     const message = String(error?.message || "").toLowerCase();
     const errorCode = String(error?.code || error?.cause?.code || "").toLowerCase();
+    const classifiedReason = classifyProviderError(error).reason;
     if (error?.status === 429 || message.includes("rate limit") || message.includes("quota")) {
       return "quota";
     }
@@ -39186,7 +39137,11 @@ Return ONLY a JSON object:
       error?.status === 408 ||
       error?.status === 502 ||
       error?.status === 503 ||
-      error?.status === 504
+      error?.status === 504 ||
+      classifiedReason === "overloaded" ||
+      classifiedReason === "server_error" ||
+      classifiedReason === "timeout" ||
+      classifiedReason === "connection"
     ) {
       return "provider_outage";
     }

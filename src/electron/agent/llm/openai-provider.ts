@@ -36,6 +36,7 @@ import {
   toOpenAICompatibleMessages,
 } from "./openai-compatible";
 import { resolveOutputTokenParamName } from "./output-token-policy";
+import { classifyProviderError } from "./provider-error-classifier";
 import {
   buildOpenAIPromptCacheFields,
   extractOpenAICompatibleCacheUsage,
@@ -167,48 +168,17 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  private isTransientInterruptionMessage(message: string): boolean {
-    const normalized = String(message || "").toLowerCase();
-    if (!normalized) return false;
-    return (
-      normalized.includes("terminated") ||
-      normalized.includes("stream disconnected") ||
-      normalized.includes("connection reset") ||
-      normalized.includes("unexpected eof") ||
-      normalized.includes("socket hang up") ||
-      normalized.includes("fetch failed") ||
-      normalized.includes("failed to fetch")
-    );
-  }
-
-  private isRetryableProviderMessage(message: string, code?: string): boolean {
-    const normalized = String(message || "").toLowerCase();
-    const normalizedCode = String(code || "").toLowerCase();
-    return (
-      normalizedCode === "service_unavailable_error" ||
-      normalizedCode === "server_is_overloaded" ||
-      normalized.includes("service_unavailable_error") ||
-      normalized.includes("server_is_overloaded") ||
-      normalized.includes("server is overloaded") ||
-      normalized.includes("servers are currently overloaded") ||
-      normalized.includes("temporarily unavailable")
-    );
-  }
-
   private toStructuredProviderError(error: Any, phase: OpenAIProviderErrorPhase): Error {
     const message = String(error?.message || "OpenAI request failed");
     const wrapped = new OpenAIProviderError(message);
+    const classification = classifyProviderError(error);
     wrapped.name = error?.name || "OpenAIProviderError";
     wrapped.phase = phase;
-    wrapped.code = String(error?.code || error?.cause?.code || "").trim() || undefined;
-    wrapped.retryable =
-      this.isTransientInterruptionMessage(message) ||
-      this.isRetryableProviderMessage(message, wrapped.code) ||
-      wrapped.code === "ECONNRESET" ||
-      wrapped.code === "ETIMEDOUT" ||
-      wrapped.code === "ENOTFOUND" ||
-      wrapped.code === "EAI_AGAIN" ||
-      wrapped.code === "ECONNREFUSED";
+    wrapped.code =
+      String(error?.code || error?.cause?.code || classification.code || "").trim() || undefined;
+    // SDK connection errors ("Connection error.") carry their errno several causes
+    // deep, and an exhausted quota arrives as a 429; the shared classifier handles both.
+    wrapped.retryable = classification.retryable;
     if (error?.status !== undefined) {
       (wrapped as Any).status = error.status;
     }

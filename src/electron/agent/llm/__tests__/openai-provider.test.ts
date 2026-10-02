@@ -792,6 +792,61 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
+  it("marks SDK connection errors from API-key requests as retryable", async () => {
+    const { APIConnectionError } = await vi.importActual<typeof import("openai")>("openai");
+    responsesCreateMock.mockRejectedValue(
+      new APIConnectionError({
+        cause: new TypeError("fetch failed", {
+          cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.openai.com"), {
+            code: "ENOTFOUND",
+          }),
+        }),
+      }),
+    );
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    await expect(
+      provider.createMessage({ ...makeRequest(), model: "gpt-5.5" }),
+    ).rejects.toMatchObject({
+      message: "Connection error.",
+      retryable: true,
+      phase: "api_key",
+      code: "ENOTFOUND",
+    });
+  });
+
+  it("does not mark an exhausted quota as retryable even though it is a 429", async () => {
+    const { APIError } = await vi.importActual<typeof import("openai")>("openai");
+    responsesCreateMock.mockRejectedValue(
+      APIError.generate(
+        429,
+        {
+          error: {
+            message: "You exceeded your current quota, please check your plan and billing details.",
+            type: "insufficient_quota",
+            code: "insufficient_quota",
+            param: null,
+          },
+        },
+        undefined,
+        new Headers(),
+      ),
+    );
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    await expect(
+      provider.createMessage({ ...makeRequest(), model: "gpt-5.5" }),
+    ).rejects.toMatchObject({ retryable: false, status: 429, code: "insufficient_quota" });
+  });
+
   it("marks temporarily unavailable provider errors as retryable", async () => {
     completeMock.mockRejectedValue(new Error("The provider is temporarily unavailable"));
 

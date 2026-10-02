@@ -2,44 +2,16 @@
  * Tests for TaskExecutor transient provider error detection
  */
 
+import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
+import { ServiceUnavailableException, ThrottlingException } from "@aws-sdk/client-bedrock-runtime";
 import { describe, it, expect } from "vitest";
+import { TaskExecutor } from "../executor";
 
-// Test the isTransientProviderError logic directly (must match executor implementation)
+// Exercise the executor's real predicate rather than a copy of it.
 function isTransientProviderError(error: Any): boolean {
-  if (!error) return false;
-  if (error.retryable === true) return true;
-  const message = String(error.message || "").toLowerCase();
-  const code = error.cause?.code || error.code;
-  const retryableCodes = new Set([
-    "ECONNRESET",
-    "ETIMEDOUT",
-    "ENOTFOUND",
-    "EAI_AGAIN",
-    "ECONNREFUSED",
-    "ERR_STREAM_PREMATURE_CLOSE",
-    "EPIPE",
-    "ECONNABORTED",
-  ]);
-  if (code && retryableCodes.has(code)) return true;
-  // 429 / rate limit are transient — retry after delay
-  if (/429|rate limit|too many requests|free-models-per-min/.test(message)) return true;
-  if (
-    /service_unavailable_error|server_is_overloaded|server is overloaded|servers are currently overloaded|temporarily unavailable/.test(
-      message,
-    )
-  ) {
-    return true;
-  }
-  return (
-    message.includes("fetch failed") ||
-    message.includes("network") ||
-    message.includes("timeout") ||
-    message.includes("socket hang up") ||
-    message.includes("terminated") ||
-    message.includes("stream disconnected") ||
-    message.includes("connection reset") ||
-    message.includes("unexpected eof")
-  );
+  const executor = Object.create(TaskExecutor.prototype) as Any;
+  return executor.isTransientProviderError(error);
 }
 
 describe("isTransientProviderError", () => {
@@ -198,6 +170,92 @@ describe("isTransientProviderError", () => {
     it("should trust structured retryable provider errors", () => {
       const error = { message: "provider interruption", retryable: true };
       expect(isTransientProviderError(error)).toBe(true);
+    });
+  });
+  describe("real provider SDK errors", () => {
+    const connectionFailure = () =>
+      new TypeError("fetch failed", {
+        cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.anthropic.com"), {
+          code: "ENOTFOUND",
+        }),
+      });
+
+    it("treats an Anthropic 529 overloaded_error as transient", () => {
+      const error = Anthropic.APIError.generate(
+        529,
+        { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+        undefined,
+        new Headers({ "request-id": "req_1" }),
+      );
+      expect(isTransientProviderError(error)).toBe(true);
+    });
+
+    it("treats an Anthropic 500 api_error as transient", () => {
+      const error = Anthropic.APIError.generate(
+        500,
+        { type: "error", error: { type: "api_error", message: "Internal server error" } },
+        undefined,
+        new Headers({ "request-id": "req_1" }),
+      );
+      expect(isTransientProviderError(error)).toBe(true);
+    });
+
+    it("treats SDK connection errors with a nested errno as transient", () => {
+      expect(
+        isTransientProviderError(new Anthropic.APIConnectionError({ cause: connectionFailure() })),
+      ).toBe(true);
+      expect(
+        isTransientProviderError(new OpenAI.APIConnectionError({ cause: connectionFailure() })),
+      ).toBe(true);
+    });
+
+    it("treats Bedrock throttling and unavailability as transient", () => {
+      expect(
+        isTransientProviderError(
+          new ThrottlingException({
+            message: "Too many requests, please wait before trying your request again.",
+            $metadata: { httpStatusCode: 429 },
+          }),
+        ),
+      ).toBe(true);
+      expect(
+        isTransientProviderError(
+          new ServiceUnavailableException({
+            message: "Bedrock is unable to process your request.",
+            $metadata: { httpStatusCode: 503 },
+          }),
+        ),
+      ).toBe(true);
+    });
+
+    it("does not treat an exhausted OpenAI quota as transient even though it is a 429", () => {
+      const error = OpenAI.APIError.generate(
+        429,
+        {
+          error: {
+            message: "You exceeded your current quota, please check your plan and billing details.",
+            type: "insufficient_quota",
+            code: "insufficient_quota",
+            param: null,
+          },
+        },
+        undefined,
+        new Headers(),
+      );
+      expect(isTransientProviderError(error)).toBe(false);
+    });
+
+    it("keeps an explicit retryable=false stamp authoritative over the status", () => {
+      const error = Object.assign(
+        Anthropic.APIError.generate(
+          529,
+          { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+          undefined,
+          new Headers(),
+        ),
+        { retryable: false },
+      );
+      expect(isTransientProviderError(error)).toBe(false);
     });
   });
 });

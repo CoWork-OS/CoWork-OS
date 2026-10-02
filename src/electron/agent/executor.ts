@@ -28317,8 +28317,8 @@ You are continuing a previous conversation. The context from the previous conver
     );
     const personalityPrompt = personalityIdOverride
       ? PersonalityManager.getPersonalityPromptById(personalityIdOverride)
-      : PersonalityManager.getPersonalityPrompt(contextMode);
-    const identityPrompt = PersonalityManager.getIdentityPrompt();
+      : PersonalityManager.getPersonalityPrompt(contextMode, { surface: "execution" });
+    const identityPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
 
     const roleContext = this.getRoleContextPrompt();
     const gatewayContext = this.task.agentConfig?.gatewayContext ?? "private";
@@ -30405,8 +30405,8 @@ Return ONLY a JSON object:
     );
     const personalityPrompt = personalityIdOverride
       ? PersonalityManager.getPersonalityPromptById(personalityIdOverride)
-      : PersonalityManager.getPersonalityPrompt(contextMode);
-    const identityPrompt = PersonalityManager.getIdentityPrompt();
+      : PersonalityManager.getPersonalityPrompt(contextMode, { surface: "execution" });
+    const identityPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
 
     // ── Synthesized Memory Context ───────────────────────────────────
     // Uses MemorySynthesizer to collect, deduplicate, and rank context
@@ -38979,8 +38979,8 @@ Return ONLY a JSON object:
     const personalityIdOverride = this.task.agentConfig?.personalityId;
     const personalityPrompt = personalityIdOverride
       ? PersonalityManager.getPersonalityPromptById(personalityIdOverride)
-      : PersonalityManager.getPersonalityPrompt(contextMode);
-    const identityPrompt = PersonalityManager.getIdentityPrompt();
+      : PersonalityManager.getPersonalityPrompt(contextMode, { surface: "execution" });
+    const identityPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
     const isSubAgentTask = (this.task.agentType ?? "main") === "sub" || !!this.task.parentTaskId;
     const retainMemory = this.task.agentConfig?.retainMemory ?? !isSubAgentTask;
     const gatewayContext = this.task.agentConfig?.gatewayContext ?? "private";

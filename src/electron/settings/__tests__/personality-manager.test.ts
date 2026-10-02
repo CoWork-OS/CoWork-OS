@@ -516,6 +516,20 @@ describe("PersonalityManager - agent name", () => {
       expect(prompt).toContain("NOT system-derived info");
     });
 
+    it("does not ask task execution to append offers or work around denied permissions", () => {
+      const chatPrompt = PersonalityManager.getIdentityPrompt();
+      const executionPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+
+      expect(chatPrompt).toMatch(/offer to automate recurring work/i);
+      expect(executionPrompt).not.toMatch(/offer to automate recurring work/i);
+      expect(executionPrompt).not.toMatch(/offer to create a skill/i);
+      expect(executionPrompt).toMatch(/statement, not a (?:trailing )?question/i);
+      for (const prompt of [chatPrompt, executionPrompt]) {
+        expect(prompt).not.toContain("exhausting all creative paths");
+        expect(prompt).toMatch(/never work around a denied permission/i);
+      }
+    });
+
     it("should include instructions to ask for name when user is unknown", () => {
       const prompt = PersonalityManager.getIdentityPrompt();
 
@@ -686,6 +700,39 @@ describe("PersonalityManager - personas", () => {
       expect(prompt).toContain("CHARACTER OVERLAY - JARVIS STYLE");
       expect(prompt).toContain("sophisticated");
     });
+
+    it("keeps conversational persona lines in chat but not in task execution", () => {
+      mockStoredSettings = { activePersonality: "professional", activePersona: "companion" };
+      PersonalityManager.clearCache();
+
+      const chatPrompt = PersonalityManager.getPersonalityPrompt();
+      const executionPrompt = PersonalityManager.getPersonalityPrompt(undefined, {
+        surface: "execution",
+      });
+
+      expect(chatPrompt).toContain("Ask soft, clarifying questions that invite reflection");
+      expect(chatPrompt).toContain("uplifting acknowledgement");
+      expect(executionPrompt).toContain("CHARACTER OVERLAY - COMPANION STYLE");
+      expect(executionPrompt).toContain("Be warm, curious, and emotionally attuned");
+      expect(executionPrompt).not.toMatch(/clarifying questions/i);
+      expect(executionPrompt).not.toMatch(/uplifting acknowledgement/i);
+    });
+
+    it.each(["intern", "sensei", "jarvis"] as const)(
+      "drops question-asking and offer lines from the %s overlay in task execution",
+      (persona) => {
+        mockStoredSettings = { activePersonality: "professional", activePersona: persona };
+        PersonalityManager.clearCache();
+
+        const executionPrompt = PersonalityManager.getPersonalityPrompt(undefined, {
+          surface: "execution",
+        });
+
+        expect(executionPrompt).toContain("CHARACTER OVERLAY");
+        expect(executionPrompt).not.toMatch(/clarifying questions|Socratic questioning/i);
+        expect(executionPrompt).not.toMatch(/offer proactive suggestions/i);
+      },
+    );
 
     it("should not include persona prompt for none persona", () => {
       mockStoredSettings = {

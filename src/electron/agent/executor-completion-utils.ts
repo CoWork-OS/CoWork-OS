@@ -409,7 +409,7 @@ export function buildCompletionGuidancePrompt(opts: {
     "TASK COMPLETION GUIDANCE:",
     "- When you create or modify files, use the appropriate write tool — do not describe what you would write without actually writing it.",
     "- If a tool call fails, report the failure honestly and try an alternative approach. Never fabricate tool output.",
-    "- End with a substantive summary of what was accomplished, not just a status message.",
+    "- End with a substantive summary of what was accomplished, not just a status message (internal verification steps use their own OK/FAIL reply format instead).",
   ];
 
   if (opts.hasReadOnlyConstraint) {

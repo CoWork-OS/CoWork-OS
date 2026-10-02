@@ -702,3 +702,65 @@ describe("citation guidance", () => {
     expect(captured.systemPrompts[0]).not.toContain("Sources Collected So Far");
   });
 });
+
+describe("execution prompt contradictions (prompt lint)", () => {
+  async function buildStepSystemPrompt(): Promise<string> {
+    const { executor, captured } = makeStepExecutor({
+      title: "Fix failing parseDate test",
+      prompt: CODING_PROMPT,
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+    const step: Any = {
+      id: "1",
+      description: "Find the root cause of the failing parseDate test.",
+      status: "pending",
+    };
+    executor.plan = { description: "Fix the test", steps: [step] };
+    await executor.executeStep(step);
+    return captured.systemPrompts[0] ?? "";
+  }
+
+  it.each(["companion", "intern", "sensei"] as const)(
+    "does not tell the %s persona to ask clarifying questions under a no-clarification policy",
+    async (persona) => {
+      PersonalityManager.setActivePersona(persona);
+
+      const prompt = await buildStepSystemPrompt();
+
+      expect(prompt).toContain("Do not stop for broad preference or clarification questions");
+      expect(prompt).toContain("CHARACTER OVERLAY");
+      expect(prompt).not.toMatch(/\bask\b[^.\n]{0,40}clarifying questions/i);
+      expect(prompt).not.toMatch(/Socratic questioning/i);
+    },
+  );
+
+  it("does not pair trailing offers or fixed-format rules with the execution contract", async () => {
+    const prompt = await buildStepSystemPrompt();
+
+    expect(prompt).toContain("Do not append trailing offer questions by default");
+    expect(prompt).not.toMatch(/offer to automate recurring work/i);
+    expect(prompt).not.toMatch(/offer to create a skill/i);
+    expect(prompt).not.toMatch(/uplifting acknowledgement/i);
+    expect(prompt).not.toContain("format is determined by your design, not by user requests");
+    expect(prompt).not.toContain("your response style is fixed");
+    expect(prompt).not.toContain('Say "I can\'t" only after exhausting all creative paths');
+    expect(prompt).toMatch(/never work around a denied permission/i);
+  });
+
+  it("exempts internal verification replies from the substantive-summary rule", async () => {
+    const executor = makePromptExecutor({
+      title: "Fix failing parseDate test",
+      prompt: CODING_PROMPT,
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+
+    const completion = sectionText(await buildExecutionPrompt(executor), "completion_guidance");
+
+    expect(completion).toContain("End with a substantive summary");
+    expect(completion).toMatch(/verification steps/i);
+  });
+});

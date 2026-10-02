@@ -3,7 +3,7 @@ import type { LLMResponse } from "./types";
 import { DatabaseManager } from "../../database/schema";
 import { UsageInsightsProjector } from "../../reports/UsageInsightsProjector";
 import { normalizeLlmProviderType } from "../../../shared/llmProviderDisplay";
-import { calculateCost, getCacheTokenAccounting } from "./pricing";
+import { calculateCost } from "./pricing";
 import type { LlmCallRow } from "../../database/llm-call-events";
 import { serviceStatements } from "../../database/service-statements";
 
@@ -60,7 +60,7 @@ export function prepareLlmCallSuccess(
           outputTokens,
           cachedTokens,
           cacheWriteTokens,
-          getCacheTokenAccounting(providerType, modelId),
+          "inclusive",
           {
             providerType,
             cacheTtl: usage?.cacheWriteTtl,

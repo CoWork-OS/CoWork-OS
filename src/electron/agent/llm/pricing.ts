@@ -42,6 +42,11 @@ export interface CacheCostOptions {
   cacheTtl?: "5m" | "1h";
 }
 
+/**
+ * Counter layout a provider's usage was recorded with before every adapter was
+ * normalized to the inclusive LLMResponse.usage contract. Live usage is always
+ * inclusive; this is for re-pricing older stored usage rows.
+ */
 export function getCacheTokenAccounting(
   providerType?: string | null,
   modelId?: string | null,
@@ -201,12 +206,11 @@ export function calculateCost(
   // they are disjoint; treat them as additive in that case.
   const safeCached = Math.max(0, cachedTokens);
   const safeCacheWrite = Math.max(0, cacheWriteTokens);
+  // Counters that do not fit inside inputTokens cannot be a subset of it, even
+  // when the route is declared inclusive; treating them as inclusive would bill a
+  // negative regular-input charge.
   const cacheCountersAreInclusive =
-    cacheTokenAccounting === "inclusive"
-      ? true
-      : cacheTokenAccounting === "disjoint"
-        ? false
-        : safeCached + safeCacheWrite <= inputTokens;
+    cacheTokenAccounting === "disjoint" ? false : safeCached + safeCacheWrite <= inputTokens;
   const regularInputTokens = cacheCountersAreInclusive
     ? inputTokens - safeCached - safeCacheWrite
     : inputTokens;

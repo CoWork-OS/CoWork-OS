@@ -162,7 +162,7 @@ import { loadPolicies } from "../admin/policies";
 import { resolveEffectiveAccessProfile } from "../security/access-profile-resolver";
 import { PersonalityManager } from "../settings/personality-manager";
 import { detectContextMode } from "./context-mode-detector";
-import { calculateCost, formatCost, getCacheTokenAccounting, isModelPriced } from "./llm/pricing";
+import { calculateCost, formatCost, isModelPriced } from "./llm/pricing";
 import {
   LLMRefusalError,
   classifyProviderError,
@@ -10637,7 +10637,7 @@ ${transcript}
       safeOutput,
       safeCached,
       safeCacheWrite,
-      getCacheTokenAccounting(this.provider?.type, this.modelId),
+      "inclusive",
       {
         providerType: this.provider?.type,
         cacheTtl: cacheWriteTtl || this.promptCacheTtl,
@@ -10656,7 +10656,9 @@ ${transcript}
       );
     }
 
-    this.totalInputTokens += safeInput;
+    // New input only (cache reads excluded): the token budget measures the same
+    // work for every provider.
+    this.totalInputTokens += Math.max(0, safeInput - safeCached);
     this.totalOutputTokens += safeOutput;
     this.totalCost += deltaCost;
     this.iterationCount++;

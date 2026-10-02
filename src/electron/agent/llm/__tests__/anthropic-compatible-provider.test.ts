@@ -360,7 +360,8 @@ describe("AnthropicCompatibleProvider prompt caching", () => {
       { type: "text", text: "Current time: 2026-04-04T10:00:00Z" },
     ]);
     expect(response.usage).toEqual({
-      inputTokens: 100,
+      // Inclusive usage contract: 100 uncached + 60 cache reads + 40 cache writes.
+      inputTokens: 200,
       outputTokens: 25,
       cachedTokens: 60,
       cacheWriteTokens: 40,

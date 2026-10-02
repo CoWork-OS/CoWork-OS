@@ -141,7 +141,8 @@ describe("BedrockProvider", () => {
       { cachePoint: { type: "default", ttl: "1h" } },
     ]);
     expect(response.usage).toEqual({
-      inputTokens: 100,
+      // Inclusive usage contract: 100 uncached + 60 cache reads + 40 cache writes.
+      inputTokens: 200,
       outputTokens: 20,
       cachedTokens: 60,
       cacheWriteTokens: 40,
@@ -427,4 +428,26 @@ describe("BedrockProvider stop reasons", () => {
       );
     },
   );
+});
+
+describe("BedrockProvider usage", () => {
+  it("reports cache reads and writes inside inputTokens", () => {
+    const response = (new BedrockProvider(config) as Any).convertResponse({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+      usage: {
+        inputTokens: 1_000,
+        outputTokens: 50,
+        cacheReadInputTokens: 9_000,
+        cacheWriteInputTokens: 500,
+      },
+    });
+
+    expect(response.usage).toMatchObject({
+      inputTokens: 10_500,
+      outputTokens: 50,
+      cachedTokens: 9_000,
+      cacheWriteTokens: 500,
+    });
+  });
 });

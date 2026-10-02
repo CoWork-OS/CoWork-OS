@@ -7,6 +7,7 @@ import {
   computeToolSchemaHash,
   buildSystemBlock,
   extractAnthropicUsage,
+  extractPiAiUsage,
   isPromptCacheRequestUnsupportedError,
   buildOpenAIPromptCacheFields,
   mapPromptCacheTtlToOpenAIRetention,
@@ -421,11 +422,34 @@ describe("prompt-cache stable prefix hashing", () => {
         cache_creation: { ephemeral_1h_input_tokens: 80 },
       }),
     ).toMatchObject({
-      inputTokens: 100,
+      // Inclusive usage contract: cache reads and writes are part of inputTokens.
+      inputTokens: 200,
       cachedTokens: 20,
       cacheWriteTokens: 80,
       cacheWriteTtl: "1h",
     });
+  });
+
+  it("folds Anthropic's disjoint cache counters into inclusive input usage", () => {
+    expect(
+      extractAnthropicUsage({
+        input_tokens: 10_000,
+        output_tokens: 1_000,
+        cache_read_input_tokens: 90_000,
+      }),
+    ).toEqual({ inputTokens: 100_000, outputTokens: 1_000, cachedTokens: 90_000 });
+  });
+
+  it("folds pi-ai's disjoint cache counters into inclusive input usage", () => {
+    expect(
+      extractPiAiUsage({ input: 1_000, output: 50, cacheRead: 9_000, cacheWrite: 500 }),
+    ).toEqual({
+      inputTokens: 10_500,
+      outputTokens: 50,
+      cachedTokens: 9_000,
+      cacheWriteTokens: 500,
+    });
+    expect(extractPiAiUsage(undefined)).toBeUndefined();
   });
 
   it("only disables caching for errors that identify cache request incompatibility", () => {

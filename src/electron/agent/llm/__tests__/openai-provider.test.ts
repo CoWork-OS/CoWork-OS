@@ -804,6 +804,19 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
+  it("reports ChatGPT subscription usage with cache reads included in inputTokens", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1_000, output: 50, cacheRead: 9_000, cacheWrite: 0 },
+    });
+    const provider = new OpenAIProvider(makeConfig());
+
+    const response = await provider.createMessage(makeRequest());
+
+    expect(response.usage).toEqual({ inputTokens: 10_000, outputTokens: 50, cachedTokens: 9_000 });
+  });
+
   it("marks terminated OAuth stopReason errors as retryable", async () => {
     completeMock.mockResolvedValue({
       stopReason: "error",

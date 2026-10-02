@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { LLMMessage } from "../../llm";
 import { estimateTotalTokens } from "../../context-manager";
+import { fromOpenAICompatibleResponse } from "../../llm/openai-compatible";
+import { extractAnthropicUsage } from "../../llm/prompt-cache";
 import { FileOperationTracker, ToolFailureTracker } from "../../executor-helpers";
 import { DurableContextService } from "../../../memory/DurableContextService";
 import {
@@ -2325,6 +2327,39 @@ describe("SessionRuntime", () => {
         process.env.COWORK_LLM_OUTPUT_POLICY = previousPolicy;
       }
     }
+  });
+
+  it("counts the same new tokens toward the budget for equivalent Anthropic and OpenAI work", () => {
+    // One turn re-reading a 100K-token prompt with 90K served from cache.
+    const anthropicUsage = extractAnthropicUsage({
+      input_tokens: 10_000,
+      output_tokens: 1_000,
+      cache_read_input_tokens: 90_000,
+    })!;
+    const openAIUsage = fromOpenAICompatibleResponse({
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 100_000,
+        completion_tokens: 1_000,
+        prompt_tokens_details: { cached_tokens: 90_000 },
+      },
+    }).usage!;
+
+    const budgetInput = (usage: typeof anthropicUsage) => {
+      const harness = createHarness();
+      harness.runtime.updateTracking(
+        usage.inputTokens,
+        usage.outputTokens,
+        usage.cachedTokens,
+        usage.cacheWriteTokens,
+      );
+      return (
+        harness.runtime.getCumulativeInputTokens() + harness.runtime.getCumulativeOutputTokens()
+      );
+    };
+
+    expect(budgetInput(anthropicUsage)).toBe(11_000);
+    expect(budgetInput(openAIUsage)).toBe(11_000);
   });
 
   it("preserves cache-write TTL in usage telemetry", async () => {

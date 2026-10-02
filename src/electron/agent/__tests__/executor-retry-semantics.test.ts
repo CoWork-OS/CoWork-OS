@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 import { LLMProviderFactory } from "../llm";
 import { LLMRefusalError } from "../llm/provider-error-classifier";
+import { fromOpenAICompatibleResponse } from "../llm/openai-compatible";
+import { extractAnthropicUsage, extractPiAiUsage } from "../llm/prompt-cache";
 
 function createRetryExecutor(overrides?: {
   successCriteria?: Any;
@@ -1112,6 +1114,81 @@ function callAndCapture<T>(promise: Promise<T>): Promise<{ value?: T; error?: An
     (error) => ({ error }),
   );
 }
+
+describe("TaskExecutor token budget accounting", () => {
+  function trackUsage(
+    providerType: string,
+    modelId: string,
+    usage: { inputTokens: number; outputTokens: number; cachedTokens?: number },
+  ) {
+    const executor = createRetryExecutor() as Any;
+    executor.provider = { type: providerType };
+    executor.modelId = modelId;
+    executor.modelKey = modelId;
+    executor.unpricedModelIds = new Set();
+    executor.totalInputTokens = 0;
+    executor.totalOutputTokens = 0;
+    executor.totalCost = 0;
+    executor.usageOffsetInputTokens = 0;
+    executor.usageOffsetOutputTokens = 0;
+    executor.usageOffsetCost = 0;
+    executor.iterationCount = 0;
+    executor.globalTurnCount = 0;
+    executor.lifetimeTurnCount = 0;
+    executor.describeCostCap = () => ({ costLimit: null, costLimitSource: "none" });
+    (TaskExecutor.prototype as Any).updateTracking.call(
+      executor,
+      usage.inputTokens,
+      usage.outputTokens,
+      usage.cachedTokens ?? 0,
+      0,
+    );
+    return {
+      budgetTokens: executor.getCumulativeInputTokens() + executor.getCumulativeOutputTokens(),
+      cost: executor.getCumulativeCost(),
+    };
+  }
+
+  it("feeds the token guard the same new tokens for equivalent Anthropic and OpenAI work", () => {
+    // One turn over a 100K-token prompt, 90K of it served from the prompt cache.
+    const anthropic = trackUsage(
+      "anthropic",
+      "claude-sonnet-4-6",
+      extractAnthropicUsage({
+        input_tokens: 10_000,
+        output_tokens: 1_000,
+        cache_read_input_tokens: 90_000,
+      })!,
+    );
+    const openAI = trackUsage(
+      "openai",
+      "gpt-5.4",
+      fromOpenAICompatibleResponse({
+        choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 100_000,
+          completion_tokens: 1_000,
+          prompt_tokens_details: { cached_tokens: 90_000 },
+        },
+      }).usage!,
+    );
+
+    expect(anthropic.budgetTokens).toBe(11_000);
+    expect(openAI.budgetTokens).toBe(11_000);
+    expect(anthropic.cost).toBeGreaterThan(0);
+    expect(openAI.cost).toBeGreaterThan(0);
+  });
+
+  it("never records a negative cost for ChatGPT subscription usage with cache reads", () => {
+    const usage = extractPiAiUsage({
+      input: 1_000,
+      output: 100,
+      cacheRead: 90_000,
+      cacheWrite: 0,
+    })!;
+    expect(trackUsage("openai", "gpt-5.4", usage).cost).toBeGreaterThan(0);
+  });
+});
 
 describe("TaskExecutor Ollama context budget", () => {
   afterEach(() => {

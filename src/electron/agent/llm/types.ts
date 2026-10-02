@@ -394,12 +394,19 @@ export interface LLMResponse {
    * Bedrock guardrails). Repeating the request will not produce an answer.
    */
   stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
+  /**
+   * Usage contract shared by every adapter: `inputTokens` counts every prompt
+   * token the provider processed, including tokens read from and written to its
+   * prompt cache, and the cache counters are subsets of it. Adapters for APIs
+   * that report disjoint counters (Anthropic, Bedrock, pi-ai) fold them in.
+   * Budgets count "new" tokens as inputTokens - cachedTokens + outputTokens.
+   */
   usage?: {
     inputTokens: number;
     outputTokens: number;
     /** Tokens served from the provider's prompt cache (subset of inputTokens). */
     cachedTokens?: number;
-    /** Tokens used to create or extend a provider-side prompt cache entry. */
+    /** Tokens used to create or extend a provider-side prompt cache entry (subset of inputTokens). */
     cacheWriteTokens?: number;
     /** TTL reported by the provider for the cache write, when available. */
     cacheWriteTtl?: "5m" | "1h";

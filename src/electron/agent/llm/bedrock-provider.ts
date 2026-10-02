@@ -831,12 +831,15 @@ export class BedrockProvider implements LLMProvider {
             ?.ttl
         : undefined;
 
+    const cacheReadTokens = Number(response.usage?.cacheReadInputTokens || 0);
     return {
       content,
       stopReason: this.mapStopReason(response.stopReason),
       usage: response.usage
         ? {
-            inputTokens: response.usage.inputTokens || 0,
+            // Converse reports cache reads/writes outside inputTokens; the shared
+            // usage contract counts them inside it.
+            inputTokens: (response.usage.inputTokens || 0) + cacheReadTokens + cacheWriteTokens,
             outputTokens: response.usage.outputTokens || 0,
             cachedTokens: response.usage.cacheReadInputTokens || undefined,
             cacheWriteTokens: cacheWriteTokens || undefined,

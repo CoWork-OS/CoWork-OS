@@ -41,6 +41,7 @@ import { classifyProviderError } from "./provider-error-classifier";
 import {
   buildOpenAIPromptCacheFields,
   extractOpenAICompatibleCacheUsage,
+  extractPiAiUsage,
   isPromptCacheRequestUnsupportedError,
   mapPromptCacheTtlToPiAiRetention,
   prependVolatileSystemContextToMessages,
@@ -1277,14 +1278,7 @@ export class OpenAIProvider implements LLMProvider {
       content,
       ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason,
-      usage: response.usage
-        ? {
-            inputTokens: response.usage.input || 0,
-            outputTokens: response.usage.output || 0,
-            cachedTokens: response.usage.cacheRead || undefined,
-            cacheWriteTokens: response.usage.cacheWrite || undefined,
-          }
-        : undefined,
+      usage: extractPiAiUsage(response.usage),
     };
   }
 

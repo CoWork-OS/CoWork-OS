@@ -51,7 +51,7 @@ import type {
   StreamProgressCallback,
 } from "../llm";
 import { estimateTokens, estimateTotalTokens, type ContextManager } from "../context-manager";
-import { calculateCost, getCacheTokenAccounting, isModelPriced } from "../llm/pricing";
+import { calculateCost, isModelPriced } from "../llm/pricing";
 import { sanitizeToolCallHistory } from "../llm/openai-compatible";
 import {
   FileOperationTracker,
@@ -1141,10 +1141,7 @@ export class SessionRuntime {
       safeOutput,
       safeCached,
       safeCacheWrite,
-      getCacheTokenAccounting(
-        this.deps.getModelMetadata().providerType,
-        this.deps.getModelMetadata().modelId,
-      ),
+      "inclusive",
       {
         providerType: this.deps.getModelMetadata().providerType,
         cacheTtl: cacheWriteTtl || this.state.promptCache.promptCacheTtl,
@@ -1155,7 +1152,10 @@ export class SessionRuntime {
     const costKnown = isModelPriced(modelId, providerType);
     if (!costKnown && (safeInput > 0 || safeOutput > 0)) this.unpricedModelIds.add(modelId);
 
-    this.state.usage.totalInputTokens += safeInput;
+    // Count new input only (cache reads excluded) so the token budget measures the
+    // same work for every provider: OpenAI re-reports the whole cached prompt
+    // each turn while Anthropic's raw counters did not.
+    this.state.usage.totalInputTokens += Math.max(0, safeInput - safeCached);
     this.state.usage.totalOutputTokens += safeOutput;
     this.state.usage.totalCost += deltaCost;
     this.recordLlmTurn();

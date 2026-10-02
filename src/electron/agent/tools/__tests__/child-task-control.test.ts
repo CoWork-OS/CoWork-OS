@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Task, TaskEvent, Workspace } from "../../../../shared/types";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
 
@@ -1550,5 +1550,145 @@ describe("ToolRegistry child task control tools", () => {
 
     expect(inferredCall.workerRole).toBe("researcher");
     expect(inferredCall.prompt).toContain("Resolved worker role: Researcher");
+  });
+
+  describe("orchestrate_agents", () => {
+    const parentTask = {
+      id: "parent-task",
+      title: "Parent",
+      prompt: "x",
+      status: "executing",
+      workspaceId: "ws-1",
+      createdAt: 1,
+      updatedAt: 1,
+      depth: 0,
+    };
+    const tasks = [1, 2, 3, 4].map((index) => ({
+      prompt: `Review vendor ${index} pricing notes`,
+      title: `Vendor ${index}`,
+    }));
+    const node = (index: number, overrides: Record<string, unknown> = {}) => ({
+      id: `node-${index}`,
+      runId: "run-1",
+      key: `batch-${index}`,
+      title: `Vendor ${index}`,
+      status: "running",
+      publicHandle: `child-${index}`,
+      ...overrides,
+    });
+
+    let prevLimit: string | undefined;
+    let prevPhaseC: string | undefined;
+    beforeEach(() => {
+      prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+      prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+      process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+    });
+    afterEach(() => {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    });
+
+    it("queues tasks beyond the active child limit instead of rejecting them", async () => {
+      const queued = node(4, { status: "ready", publicHandle: undefined });
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), queued],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), node(4)],
+        }),
+        waitForDelegatedNode: vi.fn(async (_root: string, handle: string) => ({
+          success: true,
+          status: "completed",
+          message: "Delegated work completed successfully",
+          resultSummary: `summary for ${handle}`,
+        })),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks });
+
+      expect(result.success).toBe(true);
+      expect(daemon.createOrchestrationGraphRun).toHaveBeenCalledWith(
+        expect.objectContaining({ maxParallel: 3 }),
+      );
+      expect(daemon.createOrchestrationGraphRun.mock.calls[0][0].nodes).toHaveLength(4);
+      expect(result.completed).toBe(4);
+      expect(result.results.map((entry: Any) => entry.task_id)).toEqual([
+        "child-1",
+        "child-2",
+        "child-3",
+        "child-4",
+      ]);
+      expect(daemon.waitForDelegatedNode).toHaveBeenCalledWith(
+        "parent-task",
+        "child-4",
+        expect.any(Number),
+      );
+    });
+
+    it("reports tasks that never started before the timeout as queued", async () => {
+      const queued = node(4, { status: "ready", publicHandle: undefined });
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), queued],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), queued],
+        }),
+        waitForDelegatedNode: vi.fn().mockResolvedValue({
+          success: true,
+          status: "completed",
+          message: "Delegated work completed successfully",
+        }),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", {
+        tasks,
+        timeout_seconds: 1,
+      });
+
+      expect(result.results[3]).toMatchObject({ title: "Vendor 4", status: "queued" });
+      expect(daemon.waitForDelegatedNode).toHaveBeenCalledTimes(3);
+      expect(result.run_id).toBe("run-1");
+      expect(result.message).toContain("get_orchestration_status");
+    });
+
+    it("returns a coded error when no child-agent slot is free", async () => {
+      const activeChild = {
+        ...parentTask,
+        id: "child-active",
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      };
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([activeChild, activeChild, activeChild]),
+        createOrchestrationGraphRun: vi.fn(),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("FANOUT_LIMIT_REACHED");
+      expect(result.message).toContain("3/3");
+      expect(daemon.createOrchestrationGraphRun).not.toHaveBeenCalled();
+    });
   });
 });

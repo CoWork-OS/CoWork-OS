@@ -99,7 +99,7 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
   })),
   orchestrate_agents: createPromptMetadata(() => ({
     appendDescription:
-      "Launch 2-8 independent delegated tasks in parallel. Use only when tasks do not block each other and can be summarized separately before synthesis.",
+      "Launch 2-8 independent delegated tasks; up to the active child-agent limit (3 by default) run in parallel and the rest queue. Use only when tasks do not block each other and can be summarized separately before synthesis.",
     compactDescription:
       "Run 2-8 independent delegated tasks in parallel. Do not split one blocking serial task across nodes.",
   })),

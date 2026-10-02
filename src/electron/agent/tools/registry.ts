@@ -28,6 +28,7 @@ import {
   WorkspacePathAliasPolicy,
   WorkerRoleKind,
   AgentMessageDeliveryStatus,
+  OrchestrationGraphNode,
 } from "../../../shared/types";
 import {
   allowsStructuredHumanInput,
@@ -11392,7 +11393,61 @@ ${skillDescriptions}`;
   }
 
   /**
+   * Waits for one orchestration node. Nodes beyond the run's maxParallel stay queued, without a
+   * public handle, until the graph engine dispatches them as earlier nodes finish.
+   */
+  private async waitForOrchestrationNode(
+    runId: string,
+    created: OrchestrationGraphNode,
+    deadline: number,
+  ): Promise<{
+    task_id: string;
+    title: string;
+    status: string;
+    result_summary?: string;
+    error?: string;
+  }> {
+    const handleOf = (candidate: OrchestrationGraphNode) =>
+      candidate.publicHandle || candidate.taskId || candidate.remoteTaskId;
+    const isTerminal = (status: OrchestrationGraphNode["status"]) =>
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled" ||
+      status === "blocked";
+
+    let node = created;
+    while (!handleOf(node) && !isTerminal(node.status) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, deadline - Date.now())));
+      const latest = await this.daemon.getOrchestrationGraphSnapshot(runId);
+      node = latest?.nodes.find((candidate) => candidate.id === created.id) ?? node;
+    }
+
+    const handle = handleOf(node);
+    if (!handle) {
+      const terminal = isTerminal(node.status);
+      return {
+        task_id: node.id,
+        title: node.title,
+        status: terminal ? node.status : "queued",
+        result_summary: node.summary || node.output,
+        error: node.error || (terminal ? undefined : "NOT_STARTED_BEFORE_TIMEOUT"),
+      };
+    }
+
+    const remainingSeconds = Math.max(1, Math.round((deadline - Date.now()) / 1000));
+    const result = await this.daemon.waitForDelegatedNode(this.taskId, handle, remainingSeconds);
+    return {
+      task_id: handle,
+      title: node.title,
+      status: result.status,
+      result_summary: result.resultSummary,
+      error: result.error,
+    };
+  }
+
+  /**
    * Orchestrate multiple agents in parallel: spawn all, wait for all, return combined results.
+   * Tasks beyond the free child-agent slots are queued by the graph and start as slots free up.
    */
   private async orchestrateAgents(input: {
     tasks: Array<{
@@ -11416,6 +11471,10 @@ ${skillDescriptions}`;
     completed: number;
     failed: number;
     message: string;
+    error?: string;
+    run_id?: string;
+    max_parallel?: number;
+    queued?: number;
   }> {
     const { tasks, timeout_seconds = 300 } = input;
 
@@ -11436,17 +11495,25 @@ ${skillDescriptions}`;
     const activeChildTasks = (await this.daemon.getChildTasks(this.taskId)).filter((task) =>
       ACTIVE_CHILD_AGENT_STATUSES.has(task.status),
     );
-    if (phaseCEnabled && activeChildTasks.length + tasks.length > activeSubAgentLimit) {
+    // The fan-out limit caps how many children run at once, not how many tasks one call may
+    // queue: the graph runs at most the free slots in parallel and starts the rest as they finish.
+    const freeSlots = activeSubAgentLimit - activeChildTasks.length;
+    if (phaseCEnabled && freeSlots <= 0) {
       return {
         success: false,
         results: [],
         completed: 0,
         failed: 0,
+        error: "FANOUT_LIMIT_REACHED",
         message:
-          `Cannot orchestrate agents: active child-agent limit would be exceeded ` +
-          `(${activeChildTasks.length + tasks.length}/${activeSubAgentLimit}).`,
+          `Cannot orchestrate agents: active child-agent limit reached ` +
+          `(${activeChildTasks.length}/${activeSubAgentLimit}). ` +
+          `Wait for existing child agents to finish before orchestrating more.`,
       };
     }
+    const maxParallel = phaseCEnabled
+      ? Math.max(1, Math.min(tasks.length, freeSlots))
+      : tasks.length;
 
     const currentDepth = await this.getCurrentTaskDepth();
     if (currentDepth >= 3) {
@@ -11455,6 +11522,7 @@ ${skillDescriptions}`;
         results: [],
         completed: 0,
         failed: 0,
+        error: "MAX_DEPTH_REACHED",
         message: "Cannot orchestrate agents: maximum nesting depth (3) reached.",
       };
     }
@@ -11494,7 +11562,7 @@ ${skillDescriptions}`;
       rootTaskId: this.taskId,
       workspaceId: this.workspace.id,
       kind: "delegation",
-      maxParallel: tasks.length,
+      maxParallel,
       metadata: { createdBy: "orchestrate_agents" },
       nodes: preparedNodes.map((entry) => entry.node),
     });
@@ -11509,27 +11577,27 @@ ${skillDescriptions}`;
     }> = [];
 
     for (const node of snapshot.nodes) {
-      const handle = node.publicHandle || node.taskId || node.remoteTaskId || node.id;
-      const remainingSeconds = Math.max(1, Math.round((deadline - Date.now()) / 1000));
-      const result = await this.daemon.waitForDelegatedNode(this.taskId, handle, remainingSeconds);
-      results.push({
-        task_id: handle,
-        title: node.title,
-        status: result.status,
-        result_summary: result.resultSummary,
-        error: result.error,
-      });
+      results.push(await this.waitForOrchestrationNode(snapshot.run.id, node, deadline));
     }
 
     const completed = results.filter((r) => r.status === "completed").length;
     const failed = results.filter((r) => r.status !== "completed").length;
+    const queued = results.filter((r) => r.status === "queued").length;
+    const queuedNote =
+      queued > 0
+        ? ` ${queued} queued task(s) had not started before the timeout; they start as child-agent ` +
+          `slots free up. Track them with get_orchestration_status run_id=${snapshot.run.id}.`
+        : "";
 
     return {
       success: completed > 0,
       results,
       completed,
       failed,
-      message: `Orchestration complete: ${completed}/${results.length} succeeded`,
+      run_id: snapshot.run.id,
+      max_parallel: maxParallel,
+      ...(queued > 0 ? { queued } : {}),
+      message: `Orchestration complete: ${completed}/${results.length} succeeded` + queuedNote,
     };
   }
 
@@ -13476,7 +13544,9 @@ ${skillDescriptions}`;
           properties: {
             tasks: {
               type: "array",
-              description: "Array of sub-tasks to execute in parallel (2-8 tasks)",
+              description:
+                "Array of 2-8 independent sub-tasks. At most the active child-agent limit (3 by default) run at once; " +
+                "the rest are queued and start as earlier ones finish, so allow a longer timeout_seconds for large batches.",
               items: {
                 type: "object",
                 properties: {

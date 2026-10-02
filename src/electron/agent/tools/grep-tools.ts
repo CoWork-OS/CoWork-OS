@@ -130,22 +130,6 @@ export class GrepTools {
 
     const evaluator = this.createRegexEvaluator();
     try {
-      if (
-        (await this.isDocumentHeavyWorkspace()) &&
-        (!globPattern || /\.(pdf|docx)\b/i.test(globPattern))
-      ) {
-        return {
-          success: true,
-          pattern,
-          matches: [],
-          totalMatches: 0,
-          filesSearched: 0,
-          truncated: false,
-          warning:
-            "Workspace appears document-heavy (PDF/DOCX/PPTX). The grep tool only searches text files. Use read_file for those documents.",
-        };
-      }
-
       // Compile regex
       if (pattern.length > 4096) throw new Error("Regex pattern exceeds the 4096-character limit");
       let regex: RegExp;
@@ -179,6 +163,29 @@ export class GrepTools {
       // If the user tries to search directly within a denied project, block early.
       if (await this.isDeniedByProjectAccess(checkedBasePath, agentRoleId, projectAccessCache)) {
         throw new Error("Access denied by project access rules");
+      }
+
+      // Judge the directory actually being searched. Its text files are still searched; the
+      // warning only explains why PDF/DOCX content cannot match.
+      let warning: string | undefined;
+      if (
+        fs.statSync(checkedBasePath).isDirectory() &&
+        (await this.isDocumentHeavyWorkspace(checkedBasePath))
+      ) {
+        if (globPattern && /\.(pdf|docx)\b/i.test(globPattern)) {
+          return {
+            success: true,
+            pattern,
+            matches: [],
+            totalMatches: 0,
+            filesSearched: 0,
+            truncated: false,
+            warning:
+              "The grep tool only searches text files, so PDF/DOCX documents cannot match. Use read_file for those documents.",
+          };
+        }
+        warning =
+          "Search path appears document-heavy (PDF/DOCX/PPTX). The grep tool only searched its text files; use read_file for those documents.";
       }
 
       // Find files to search
@@ -320,6 +327,7 @@ export class GrepTools {
         filesSearched: files.length,
         truncated: truncated || budgeted.truncated,
         ...(truncationReason ? { truncationReason } : {}),
+        ...(warning ? { warning } : {}),
       };
     } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -655,11 +663,13 @@ export class GrepTools {
   }
 
   /**
-   * Heuristic: detect workspaces dominated by PDF/DOCX files
+   * Heuristic: detect directories (the workspace root by default) dominated by PDF/DOCX files
    */
-  private async isDocumentHeavyWorkspace(): Promise<boolean> {
+  private async isDocumentHeavyWorkspace(
+    directory: string = this.workspace.path,
+  ): Promise<boolean> {
     try {
-      const entries = await fsPromises.readdir(this.workspace.path, { withFileTypes: true });
+      const entries = await fsPromises.readdir(directory, { withFileTypes: true });
       let fileCount = 0;
       let docCount = 0;
       const maxEntries = 200;

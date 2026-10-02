@@ -438,3 +438,52 @@ describe("GrepTools regex budget exhaustion", () => {
     expect(result.error).toMatch(/0 of 3 files/);
   });
 });
+
+describe("GrepTools document-heavy directories", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const documentHeavyWorkspace = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-documents-"));
+    dirs.push(dir);
+    for (let index = 0; index < 6; index += 1) {
+      fs.writeFileSync(path.join(dir, `report-${index}.pdf`), "%PDF-1.4 placeholder");
+    }
+    fs.writeFileSync(path.join(dir, "notes.txt"), "first\nneedle in notes\n");
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.writeFileSync(path.join(dir, "src", "app.ts"), "export const needle = 1;\n");
+    return new GrepTools({ ...mockWorkspace, path: dir }, mockDaemon as Any, "test-task-id");
+  };
+
+  it("judges the requested path, not the workspace root", async () => {
+    const result = await documentHeavyWorkspace().grep({ pattern: "needle", path: "src" });
+
+    expect(result.success).toBe(true);
+    expect(result.matches).toEqual([
+      { file: "src/app.ts", line: 1, content: "export const needle = 1;" },
+    ]);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("still searches the text files of a document-heavy directory and warns about the rest", async () => {
+    const result = await documentHeavyWorkspace().grep({
+      pattern: "needle",
+      outputMode: "files_only",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.matches.map((match) => match.file).sort()).toEqual(["notes.txt", "src/app.ts"]);
+    expect(result.warning).toMatch(/document-heavy/);
+  });
+
+  it("skips the search when the glob only targets PDF or DOCX files", async () => {
+    const result = await documentHeavyWorkspace().grep({ pattern: "needle", glob: "*.pdf" });
+
+    expect(result.success).toBe(true);
+    expect(result.matches).toEqual([]);
+    expect(result.warning).toMatch(/read_file/);
+  });
+});

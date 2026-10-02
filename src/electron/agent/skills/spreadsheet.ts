@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import ExcelJS from "exceljs";
 import { Workspace } from "../../../shared/types";
+import { normalizeSpreadsheetCell } from "../../utils/document-generators/spreadsheet-cells";
 
 export interface SheetData {
   name: string;
@@ -55,18 +56,14 @@ export class SpreadsheetBuilder {
       // Add all rows
       for (let rowIndex = 0; rowIndex < sheetData.data.length; rowIndex++) {
         const rowData = sheetData.data[rowIndex];
+        const isHeaderRow = rowIndex === 0 && sheetData.hasHeader !== false;
 
-        // The tool schema for create_spreadsheet uses strings for cell values, so
-        // formulas are commonly provided as strings like "=SUM(A1:A2)". ExcelJS
-        // requires formulas to be passed as objects: { formula: "SUM(A1:A2)" }.
-        const normalizedRowData = rowData.map((cell) => {
-          if (typeof cell !== "string") return cell;
-          const trimmed = cell.trim();
-          if (trimmed.startsWith("=") && trimmed.length > 1) {
-            return { formula: trimmed.slice(1) };
-          }
-          return cell;
-        });
+        // Models send cells as strings: "=SUM(A1:A2)" must become an ExcelJS formula object
+        // and "1200" a number, or every formula over the data computes 0. Header labels that
+        // look numeric (e.g. a "2024" column) stay text.
+        const normalizedRowData = rowData.map((cell) =>
+          normalizeSpreadsheetCell(cell, { coerceNumbers: !isHeaderRow }),
+        );
 
         const row = worksheet.addRow(normalizedRowData);
 

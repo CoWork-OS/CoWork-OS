@@ -5,6 +5,7 @@
  */
 
 import * as fs from "fs";
+import { normalizeSpreadsheetCell } from "./spreadsheet-cells";
 
 interface SheetDefinition {
   name: string;
@@ -64,7 +65,8 @@ export async function generateXLSX(
 
     // Data rows
     for (const rowData of sheetDef.rows) {
-      const row = sheet.addRow(rowData);
+      // "=..." strings become formulas and numeric text becomes numbers (see spreadsheet-cells).
+      const row = sheet.addRow(rowData.map((cell) => normalizeSpreadsheetCell(cell)));
       row.eachCell((cell) => {
         cell.font = { size: 11 };
         cell.alignment = { vertical: "middle" };

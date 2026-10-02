@@ -267,6 +267,13 @@ function getApprovalTypeForRuntimeKind(
 
 const MCP_PAYMENT_AMOUNT_TYPES = new Set(["number", "integer", "string"]);
 
+// Untyped on purpose: a cell may be a number, boolean, null or string. (Providers that need a
+// type, such as Gemini, fall back to string; numeric text is converted when the file is written.)
+const SPREADSHEET_CELL_SCHEMA = {
+  description:
+    "Cell value: a number, boolean, null, or text. Text starting with = is a formula (e.g. =SUM(B2:B5)).",
+};
+
 const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
   "spawn_agent",
   "wait_for_agent",
@@ -7026,7 +7033,7 @@ ${skillDescriptions}`;
                     items: {
                       type: "array",
                       description: "Row of cell values",
-                      items: { type: "string", description: "Cell value" },
+                      items: { ...SPREADSHEET_CELL_SCHEMA },
                     },
                   },
                   headers: {
@@ -7040,7 +7047,7 @@ ${skillDescriptions}`;
                     items: {
                       type: "array",
                       description: "Row of cell values",
-                      items: { type: "string", description: "Cell value" },
+                      items: { ...SPREADSHEET_CELL_SCHEMA },
                     },
                   },
                 },

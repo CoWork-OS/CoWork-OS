@@ -629,6 +629,20 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(compact).toContain("web_fetch");
   });
 
+  it("lets create_spreadsheet cells carry numbers, booleans and nulls, not only strings", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-spreadsheet");
+    const createSpreadsheet = registry
+      .getTools()
+      .find((tool) => tool.name === "create_spreadsheet");
+    const sheet = createSpreadsheet!.input_schema.properties.sheets.items.properties;
+
+    for (const cell of [sheet.data.items.items, sheet.rows.items.items]) {
+      expect(cell.type).toBeUndefined();
+      expect(cell.description).toMatch(/number/i);
+      expect(cell.description).toContain("=");
+    }
+  });
+
   it("keeps canonical tool facts when prompt guidance is appended", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-prompting-facts");
     const tools = registry.getTools();

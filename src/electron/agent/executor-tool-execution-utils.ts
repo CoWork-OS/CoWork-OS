@@ -470,28 +470,217 @@ export function formatToolInputForLog(input: Any, maxLength = 200): string {
   }
 }
 
-function prependRunCommandTerminationContext(sanitizedResult: string, result: Any): string {
-  if (!result || !result.terminationReason) return sanitizedResult;
+function getRunCommandTerminationContext(result: Any): string {
+  if (!result || !result.terminationReason) return "";
 
-  let contextPrefix = "";
   switch (result.terminationReason) {
     case "user_stopped":
-      contextPrefix =
+      return (
         "[USER STOPPED] The user intentionally interrupted this command. " +
-        "Do not retry automatically. Ask the user if they want you to continue or try a different approach.\n\n";
-      break;
+        "Do not retry automatically. Ask the user if they want you to continue or try a different approach."
+      );
     case "timeout":
-      contextPrefix =
+      return (
         "[TIMEOUT] Command exceeded time limit. " +
-        "Consider: 1) Breaking into smaller steps, 2) Using a longer timeout if available, 3) Asking the user to run this manually.\n\n";
-      break;
+        "Consider: 1) Breaking into smaller steps, 2) Using a longer timeout if available, 3) Asking the user to run this manually."
+      );
     case "error":
-      contextPrefix =
-        "[EXECUTION ERROR] The command could not be spawned or executed properly.\n\n";
-      break;
+      return "[EXECUTION ERROR] The command could not be spawned or executed properly.";
+    default:
+      return "";
+  }
+}
+
+function prependRunCommandTerminationContext(sanitizedResult: string, result: Any): string {
+  const context = getRunCommandTerminationContext(result);
+  return context ? `${context}\n\n${sanitizedResult}` : sanitizedResult;
+}
+
+// Failed tool results are the model's only view of why a call failed, so they
+// carry bounded diagnostics instead of a bare error string. Command output is
+// tail-biased: test failures, compiler errors and tracebacks print last.
+const TOOL_FAILURE_PAYLOAD_MAX_CHARS = 16_000;
+const TOOL_FAILURE_ERROR_MAX_CHARS = 4_000;
+const TOOL_FAILURE_DISPLAY_MAX_CHARS = 4_000;
+const TOOL_FAILURE_URL_MAX_CHARS = 2_000;
+const TOOL_FAILURE_STDERR_TAIL_CHARS = 8_000;
+const TOOL_FAILURE_STDOUT_HEAD_CHARS = 1_500;
+const TOOL_FAILURE_STDOUT_TAIL_CHARS = 6_000;
+const TOOL_FAILURE_DETAIL_MAX_CHARS = 2_000;
+const TOOL_FAILURE_RESULT_ITEMS_MAX = 8;
+const TOOL_FAILURE_DETAIL_FIELDS = [
+  "message",
+  "hint",
+  "suggestion",
+  "details",
+  "status",
+  "reason",
+  "missing",
+  "missing_requirements",
+  "missing_tools",
+  "missing_items",
+  "task_id",
+  "taskId",
+  "completed",
+  "failed",
+] as const;
+// Per-child fields kept for orchestrate_agents-style results; caps keep each item near 1.5K.
+const TOOL_FAILURE_RESULT_ITEM_FIELDS: ReadonlyArray<readonly [string, number]> = [
+  ["task_id", 120],
+  ["taskId", 120],
+  ["title", 200],
+  ["status", 60],
+  ["error", 500],
+  ["summary", 700],
+  ["result_summary", 700],
+];
+
+const ANSI_CSI_SEQUENCE_REGEX = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+
+/** Keep the start and end of `text`, cut at line boundaries when one is close. */
+function clipFailureText(text: string, headChars: number, tailChars: number): string {
+  const headBudget = Math.max(0, Math.floor(headChars));
+  const tailBudget = Math.max(0, Math.floor(tailChars));
+  if (text.length <= headBudget + tailBudget) return text;
+  let head = text.slice(0, headBudget);
+  const lastHeadBreak = head.lastIndexOf("\n");
+  if (lastHeadBreak >= headBudget * 0.75) head = head.slice(0, lastHeadBreak);
+  let tail = tailBudget > 0 ? text.slice(-tailBudget) : "";
+  const firstTailBreak = tail.indexOf("\n");
+  if (firstTailBreak >= 0 && firstTailBreak <= tailBudget * 0.25) {
+    tail = tail.slice(firstTailBreak + 1);
+  }
+  const marker = `[... ${text.length - head.length - tail.length} chars omitted ...]`;
+  return [head, marker, tail].filter(Boolean).join("\n");
+}
+
+function clipCommandOutputForFailure(text: string, headChars: number, tailChars: number): string {
+  return clipFailureText(text.replace(ANSI_CSI_SEQUENCE_REGEX, ""), headChars, tailChars);
+}
+
+function boundFailureDetailValue(value: unknown, maxChars: number): unknown {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? clipFailureText(trimmed, maxChars * 0.6, maxChars * 0.4) : undefined;
+  }
+  if (typeof value !== "object") return undefined;
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+  if (typeof serialized !== "string") return undefined;
+  return serialized.length <= maxChars
+    ? value
+    : clipFailureText(serialized, maxChars * 0.6, maxChars * 0.4);
+}
+
+function reduceFailureResultItem(item: unknown, scale: number): unknown {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return boundFailureDetailValue(item, 1_500 * scale);
+  }
+  const source = item as Record<string, unknown>;
+  const reduced: Record<string, unknown> = {};
+  for (const [key, maxChars] of TOOL_FAILURE_RESULT_ITEM_FIELDS) {
+    const bounded = boundFailureDetailValue(source[key], maxChars * scale);
+    if (bounded !== undefined) reduced[key] = bounded;
+  }
+  return reduced;
+}
+
+function buildToolFailurePayload(
+  result: Any,
+  failure: NormalizedToolFailureReason,
+  guidance: string,
+  scale: number,
+): Record<string, unknown> {
+  const source: Record<string, Any> = result && typeof result === "object" ? result : {};
+  const errorText = failure.message;
+  const payload: Record<string, unknown> = {
+    error: clipFailureText(
+      errorText,
+      Math.max(TOOL_FAILURE_ERROR_MAX_CHARS * scale * 0.5, 250),
+      Math.max(TOOL_FAILURE_ERROR_MAX_CHARS * scale * 0.5, 250),
+    ),
+  };
+  if (failure.kind) payload.kind = failure.kind;
+  if (failure.display) {
+    payload.display = clipFailureText(
+      failure.display,
+      TOOL_FAILURE_DISPLAY_MAX_CHARS * scale * 0.25,
+      TOOL_FAILURE_DISPLAY_MAX_CHARS * scale * 0.75,
+    );
+  }
+  if (failure.code) payload.code = failure.code;
+  if (source.url) payload.url = boundFailureDetailValue(source.url, TOOL_FAILURE_URL_MAX_CHARS);
+  if (guidance) payload.guidance = guidance;
+
+  if (typeof source.exitCode === "number" || source.exitCode === null) {
+    payload.exitCode = source.exitCode;
+  }
+  if (typeof source.terminationReason === "string" && source.terminationReason) {
+    payload.terminationReason = source.terminationReason;
+  }
+  if (typeof source.stderr === "string" && source.stderr.trim()) {
+    payload.stderr = clipCommandOutputForFailure(
+      source.stderr,
+      0,
+      TOOL_FAILURE_STDERR_TAIL_CHARS * scale,
+    );
+  }
+  if (typeof source.stdout === "string" && source.stdout.trim()) {
+    payload.stdout = clipCommandOutputForFailure(
+      source.stdout,
+      TOOL_FAILURE_STDOUT_HEAD_CHARS * scale,
+      TOOL_FAILURE_STDOUT_TAIL_CHARS * scale,
+    );
+  }
+  if (typeof source.truncated === "boolean") payload.truncated = source.truncated;
+
+  for (const key of TOOL_FAILURE_DETAIL_FIELDS) {
+    if (key in payload || !(key in source)) continue;
+    const value = source[key];
+    if (typeof value === "string" && value.trim() === errorText) continue;
+    const bounded = boundFailureDetailValue(value, TOOL_FAILURE_DETAIL_MAX_CHARS * scale);
+    if (bounded !== undefined) payload[key] = bounded;
   }
 
-  return contextPrefix ? contextPrefix + sanitizedResult : sanitizedResult;
+  if (Array.isArray(source.results) && source.results.length > 0) {
+    payload.results = source.results
+      .slice(0, TOOL_FAILURE_RESULT_ITEMS_MAX)
+      .map((item: unknown) => reduceFailureResultItem(item, scale));
+    if (source.results.length > TOOL_FAILURE_RESULT_ITEMS_MAX) {
+      payload.results_omitted = source.results.length - TOOL_FAILURE_RESULT_ITEMS_MAX;
+    }
+  }
+
+  return payload;
+}
+
+/**
+ * Serialize a failed tool result for the model: the error first, then bounded
+ * diagnostics. Field caps shrink proportionally until the JSON fits, so escaped
+ * control characters cannot push the payload past its budget.
+ */
+function serializeToolFailureForModel(
+  result: Any,
+  failure: NormalizedToolFailureReason,
+  guidance: string,
+): string {
+  let scale = 1;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const serialized = JSON.stringify(buildToolFailurePayload(result, failure, guidance, scale));
+    if (serialized.length <= TOOL_FAILURE_PAYLOAD_MAX_CHARS) return serialized;
+    scale *= (TOOL_FAILURE_PAYLOAD_MAX_CHARS / serialized.length) * 0.9;
+  }
+  return JSON.stringify({
+    error: clipFailureText(failure.message, 500, 500),
+    ...(guidance ? { guidance } : {}),
+    diagnostics_omitted: true,
+  });
 }
 
 function normalizeImageMimeType(value: unknown): LLMImageMimeType | null {
@@ -598,8 +787,10 @@ export function buildNormalizedToolResult(opts: {
     : opts.rawResult;
   const truncatedResult = truncateToolResult(rawResultForModel);
   let sanitizedResult = opts.sanitizeToolResult(opts.toolName, truncatedResult);
+  const includeTerminationContext =
+    opts.includeRunCommandTerminationContext === true && opts.toolName === "run_command";
 
-  if (opts.includeRunCommandTerminationContext && opts.toolName === "run_command") {
+  if (includeTerminationContext) {
     sanitizedResult = prependRunCommandTerminationContext(sanitizedResult, opts.result);
   }
 
@@ -612,21 +803,24 @@ export function buildNormalizedToolResult(opts: {
   const companion = !resultIsError
     ? buildComputerUseCompanionContent(opts.toolName, opts.result)
     : null;
+  // Failure diagnostics go through the same sanitizer as success payloads.
+  const failureContent =
+    normalizedFailure && !advisoryFallbackFailure
+      ? opts.sanitizeToolResult(
+          opts.toolName,
+          serializeToolFailureForModel(
+            opts.result,
+            normalizedFailure,
+            includeTerminationContext ? getRunCommandTerminationContext(opts.result) : "",
+          ),
+        )
+      : null;
 
   return {
     toolResult: {
       type: "tool_result",
       tool_use_id: opts.toolUseId,
-      content:
-        resultIsError && !advisoryFallbackFailure
-          ? JSON.stringify({
-              error: toolFailureReason,
-              ...(normalizedFailure?.kind ? { kind: normalizedFailure.kind } : {}),
-              ...(normalizedFailure?.display ? { display: normalizedFailure.display } : {}),
-              ...(normalizedFailure?.code ? { code: normalizedFailure.code } : {}),
-              ...(opts.result?.url ? { url: opts.result.url } : {}),
-            })
-          : companion?.compactResult || sanitizedResult,
+      content: failureContent ?? (companion?.compactResult || sanitizedResult),
       is_error: resultIsError && !advisoryFallbackFailure,
       ...(companion ? { companion_user_content: companion.companionUserContent } : {}),
     },

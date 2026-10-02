@@ -53,6 +53,47 @@ describe("shell-session-manager", () => {
   });
 
   it.skipIf(process.platform === "win32")(
+    "reports a completed command with a non-zero exit as a normal termination",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID();
+      const workspaceId = randomUUID();
+      try {
+        const result = await manager.runCommand({
+          taskId,
+          workspaceId,
+          workspacePath: testUserDataDir,
+          command: "echo compiled; sh -c 'exit 3'",
+          timeoutMs: 10_000,
+          fallbackRunner: async () => ({
+            success: false,
+            stdout: "",
+            stderr: "Persistent shell fallback requested.",
+            exitCode: null,
+            terminationReason: "error",
+          }),
+        });
+
+        // "error" means the command could not be spawned; this one ran and exited 3.
+        expect(result).toMatchObject({
+          success: false,
+          exitCode: 3,
+          terminationReason: "normal",
+          usedPersistentSession: true,
+        });
+        expect(result.stdout).toContain("compiled");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        // Session state persistence may still be flushing into the directory.
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+    15_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
     "stops the persistent shell process tree when the command signal is aborted",
     async () => {
       await mkdir(testUserDataDir, { recursive: true });

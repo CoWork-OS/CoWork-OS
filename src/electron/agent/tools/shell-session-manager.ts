@@ -712,7 +712,10 @@ export class ShellSessionManager {
       stdout: parsed.visible,
       stderr: "",
       exitCode: parsed.exitCode,
-      terminationReason: parsed.exitCode === 0 ? "normal" : ("error" as CommandTerminationReason),
+      // The command ran to completion; a non-zero exit is still a normal
+      // termination ("error" is reserved for commands that could not run).
+      terminationReason:
+        parsed.exitCode === null ? ("error" as CommandTerminationReason) : "normal",
       usedPersistentSession: true,
       sessionId: runtime.info.id,
       sessionEvent,

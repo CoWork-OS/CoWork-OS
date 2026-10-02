@@ -9,7 +9,10 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
-import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  isAccessPathWithin,
+} from "../../security/access-profile-paths";
 import { LLMTool } from "../llm/types";
 import { BoundedRegex, RegexDeadlineError } from "./bounded-regex";
 
@@ -19,6 +22,37 @@ const MAX_GREP_FILE_BYTES = 1024 * 1024;
 // Listing gitignored paths is an optimization; past these limits grep walks without it.
 const GIT_IGNORE_LIST_TIMEOUT_MS = 5_000;
 const GIT_IGNORE_LIST_MAX_BYTES = 8 * 1024 * 1024;
+// A `.git` file ("gitdir: <path>") or `commondir` file holds one path; anything larger is not one.
+const MAX_GIT_POINTER_FILE_BYTES = 4096;
+
+/** Explicit --git-dir skips git's own "dubious ownership" check, so it is repeated here. */
+function isOwnedByCurrentUser(stats: fs.Stats): boolean {
+  return typeof process.getuid !== "function" || stats.uid === process.getuid();
+}
+
+/**
+ * The real directory named by a git pointer file (a `.git` file's "gitdir: <path>", or a git
+ * directory's `commondir`), resolved against `baseDir` as git does. Null unless it is a
+ * directory owned by the current user inside `workspaceRoot`.
+ */
+function resolveContainedGitPointer(
+  file: string,
+  prefix: string,
+  baseDir: string,
+  workspaceRoot: string,
+): string | null {
+  const stats = fs.lstatSync(file);
+  if (!stats.isFile() || stats.size > MAX_GIT_POINTER_FILE_BYTES) return null;
+  const content = fs.readFileSync(file, "utf8").replace(/[\r\n]+$/, "");
+  if (!content.startsWith(prefix) || content.length === prefix.length) return null;
+  const target = fs.realpathSync(path.resolve(baseDir, content.slice(prefix.length)));
+  const targetStats = fs.statSync(target);
+  return targetStats.isDirectory() &&
+    isOwnedByCurrentUser(targetStats) &&
+    isAccessPathWithin(workspaceRoot, target)
+    ? target
+    : null;
+}
 
 /**
  * GrepTools provides powerful regex-based content search
@@ -464,9 +498,12 @@ export class GrepTools {
    */
   private async listGitIgnoredPaths(directory: string): Promise<Set<string>> {
     const ignored = new Set<string>();
-    if (!this.hasWorkspaceGitRepository(directory)) return ignored;
+    const repository = this.findWorkspaceGitRepository(directory);
+    if (!repository) return ignored;
     // Read-only and hardened against repository config: no fsmonitor hook, no optional locks,
-    // no inherited GIT_* overrides, no prompts.
+    // no inherited GIT_* overrides, no prompts. The repository is named explicitly (git does no
+    // discovery, and --work-tree overrides core.worktree), so it cannot be redirected outside
+    // the workspace.
     const env = Object.fromEntries(
       Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
     );
@@ -474,6 +511,8 @@ export class GrepTools {
       execFile(
         "git",
         [
+          `--git-dir=${repository.gitDir}`,
+          `--work-tree=${repository.workTree}`,
           "--no-optional-locks",
           "--no-pager",
           "-c",
@@ -486,12 +525,18 @@ export class GrepTools {
           "-z",
         ],
         {
-          cwd: directory,
+          cwd: repository.searchDir,
           encoding: "utf8",
           timeout: GIT_IGNORE_LIST_TIMEOUT_MS,
           maxBuffer: GIT_IGNORE_LIST_MAX_BYTES,
           windowsHide: true,
-          env: { ...env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+          env: {
+            ...env,
+            // The validated common directory, so git does not re-read the commondir file.
+            GIT_COMMON_DIR: repository.commonDir,
+            GIT_OPTIONAL_LOCKS: "0",
+            GIT_TERMINAL_PROMPT: "0",
+          },
         },
         (error, output) => resolve(error ? null : output),
       );
@@ -502,22 +547,49 @@ export class GrepTools {
     return ignored;
   }
 
-  private hasWorkspaceGitRepository(directory: string): boolean {
+  /**
+   * The repository nearest to `directory` between it and the workspace root, with real paths.
+   * Its `.git` must be a directory or a `.git` file ("gitdir: <path>", as in submodules and
+   * linked worktrees), and its git directory and any `commondir` must resolve inside the
+   * workspace and be owned by the current user. Otherwise a planted `.git` file, symlink or
+   * `commondir` would make git read config, index and excludes from outside the workspace, so
+   * the grep runs without .gitignore filtering instead.
+   */
+  private findWorkspaceGitRepository(
+    directory: string,
+  ): { gitDir: string; commonDir: string; workTree: string; searchDir: string } | null {
     try {
       const workspaceRoot = fs.realpathSync(this.workspace.path);
-      let current = fs.realpathSync(directory);
+      const searchDir = fs.realpathSync(directory);
+      let current = searchDir;
       const relative = path.relative(workspaceRoot, current);
       if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-        return false;
+        return null;
       }
       for (;;) {
-        if (fs.existsSync(path.join(current, ".git"))) return true;
+        const dotGit = path.join(current, ".git");
+        const dotGitStats = fs.lstatSync(dotGit, { throwIfNoEntry: false });
+        if (dotGitStats) {
+          if (!isOwnedByCurrentUser(dotGitStats)) return null;
+          const gitDir = dotGitStats.isDirectory()
+            ? dotGit
+            : dotGitStats.isFile()
+              ? resolveContainedGitPointer(dotGit, "gitdir: ", current, workspaceRoot)
+              : null;
+          if (!gitDir) return null;
+          const commonDirFile = path.join(gitDir, "commondir");
+          const commonDir = fs.lstatSync(commonDirFile, { throwIfNoEntry: false })
+            ? resolveContainedGitPointer(commonDirFile, "", gitDir, workspaceRoot)
+            : gitDir;
+          if (!commonDir) return null;
+          return { gitDir, commonDir, workTree: current, searchDir };
+        }
         const parent = path.dirname(current);
-        if (current === workspaceRoot || parent === current) return false;
+        if (current === workspaceRoot || parent === current) return null;
         current = parent;
       }
     } catch {
-      return false;
+      return null;
     }
   }
 

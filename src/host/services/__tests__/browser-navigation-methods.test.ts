@@ -396,6 +396,55 @@ describe("browser navigation desktop methods", () => {
     ]);
   });
 
+  it("lets a scheduled follow-up target only a task in its own workspace", async () => {
+    const other = new WorkspaceStore(db).create("Other", path.join(tempDir, "other"), {
+      read: true,
+      write: true,
+      delete: false,
+      network: false,
+      shell: false,
+    });
+    const tasks = new TaskStore(db);
+    const own = tasks.create({
+      title: "Own thread",
+      prompt: "Own",
+      status: "completed",
+      workspaceId: workspace.id,
+    } as never);
+    const foreign = tasks.create({
+      title: "Other thread",
+      prompt: "Other",
+      status: "completed",
+      workspaceId: other.id,
+    } as never);
+    const add = vi.fn(async (job: Record<string, unknown>) => ({
+      ok: true,
+      job: { ...job, id: "cron-1", state: { runHistory: [] } },
+    }));
+    const cronService = { add } as unknown as CronService;
+    const defs = definitions(undefined, undefined, undefined, undefined, undefined, cronService);
+    const job = (targetTaskId: string) => ({
+      name: "Morning nudge",
+      enabled: true,
+      accessProfileId: "ask_for_approval",
+      workspaceId: workspace.id,
+      taskPrompt: "Continue.",
+      runMode: "thread_follow_up",
+      targetTaskId,
+      schedule: { kind: "every", everyMs: 60 * 60 * 1000, anchorMs: Date.now() },
+      delivery: { enabled: false },
+    });
+
+    await expect(invoke(defs, "addCronJob", [job(own.id)])).resolves.toMatchObject({ ok: true });
+    await expect(invoke(defs, "addCronJob", [job(foreign.id)])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(invoke(defs, "addCronJob", [job("missing-task")])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(add).toHaveBeenCalledTimes(1);
+  });
+
   it("sends only the fixed scheduled-task test message through an enabled host channel", async () => {
     const gateway = {
       getChannel: vi.fn(async (id: string) => ({
@@ -1090,5 +1139,45 @@ describe("browser navigation desktop methods", () => {
     await expect(
       invoke(defs, "everydayAgentListReceipts", [{ profileId: "other-profile" }]),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("checks an Everyday preview's profile and workspace before approving it", async () => {
+    const hidden = new WorkspaceStore(db).create("Hidden", path.join(tempDir, "hidden"), {
+      read: true,
+      write: true,
+      delete: false,
+      network: false,
+      shell: false,
+    });
+    const previews: Record<string, string> = {
+      visible: JSON.stringify({ profileId: "profile-local", workspaceId: workspace.id }),
+      global: JSON.stringify({ profileId: "profile-local" }),
+      hidden: JSON.stringify({ profileId: "profile-local", workspaceId: hidden.id }),
+      foreign: JSON.stringify({ profileId: "other-profile", workspaceId: workspace.id }),
+      broken: "{not json",
+    };
+    const getActionPreviewJson = vi.fn(async (id: string) => previews[id] ?? null);
+    const approveAction = vi.fn(async ({ previewId }: { previewId: string }) => ({
+      id: `receipt-${previewId}`,
+    }));
+    Object.assign(everyday, { getActionPreviewJson, approveAction });
+    const defs = definitions(async (id) =>
+      id === hidden.id ? null : workspaceRepository.findById(id),
+    );
+    const approve = (previewId: string) =>
+      invoke(defs, "everydayAgentApproveAction", [{ previewId }]);
+
+    await expect(approve("visible")).resolves.toEqual({ id: "receipt-visible" });
+    await expect(approve("global")).resolves.toEqual({ id: "receipt-global" });
+    await expect(approve("missing")).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    await expect(approve("broken")).rejects.toThrow("Everyday Agent preview is unreadable.");
+    await expect(approve("foreign")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(approve("hidden")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // The preview is read through the async facade, and only allowed previews are approved.
+    expect(getActionPreviewJson).toHaveBeenCalledWith("visible");
+    expect(approveAction.mock.calls.map(([input]) => input.previewId)).toEqual([
+      "visible",
+      "global",
+    ]);
   });
 });

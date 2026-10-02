@@ -201,3 +201,96 @@ describe("AgentDaemon follow-up startup recovery", () => {
     expect(runtime.requeueFollowUpAtTurnBoundary).not.toHaveBeenCalled();
   });
 });
+
+describe("AgentDaemon follow-up turn-boundary drain", () => {
+  it.each([
+    ["ends while the receipt commits", false],
+    ["keeps running", true],
+  ])("drains a busy-path follow-up only when the turn %s", async (_label, stillRunning) => {
+    const task = {
+      id: "850e8400-e29b-41d4-a716-446655440000",
+      title: "Running task",
+      workspaceId: "workspace-1",
+      agentConfig: {},
+    };
+    const workspace = {
+      id: "workspace-1",
+      name: "Workspace",
+      path: "/tmp/workspace",
+      permissions: { read: true, write: true, delete: false, network: true, shell: false },
+      createdAt: Date.now(),
+    };
+    const executor = {
+      isRunning: true,
+      updateTaskAgentConfig: vi.fn(),
+      updateWorkspace: vi.fn(),
+      queueFollowUp: vi.fn(),
+    };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      activeTasks: new Map([[task.id, { executor, lastAccessed: 0, status: "active" }]]),
+      taskRepo: { findById: vi.fn().mockReturnValue(task), update: vi.fn(), touch: vi.fn() },
+      workspaceRepo: { findById: vi.fn().mockReturnValue(workspace) },
+      annotationRepo: { listOpenByTask: vi.fn().mockReturnValue([]) },
+      logEvent: vi.fn(),
+      // The executor's turn (and its post-run drain) finishes during the commit.
+      timelineRowsCommitted: vi.fn(async () => {
+        executor.isRunning = stillRunning;
+      }),
+      processOrphanedFollowUps: vi.fn(),
+    }) as Any;
+
+    const result = await AgentDaemon.prototype.sendMessage.call(
+      daemonLike,
+      task.id,
+      "Also check the CSV header",
+    );
+
+    expect(result).toMatchObject({ queued: true, deliveryStatus: "queued" });
+    expect(executor.queueFollowUp).toHaveBeenCalledTimes(1);
+    if (stillRunning) {
+      expect(daemonLike.processOrphanedFollowUps).not.toHaveBeenCalled();
+    } else {
+      expect(daemonLike.processOrphanedFollowUps).toHaveBeenCalledWith(task.id, executor);
+      expect(executor.queueFollowUp.mock.invocationCallOrder[0]).toBeLessThan(
+        daemonLike.processOrphanedFollowUps.mock.invocationCallOrder[0],
+      );
+    }
+  });
+
+  it("drains a follow-up queued after the final take of a running drain", async () => {
+    const queue: Any[] = [{ message: "First" }];
+    const daemonLike = Object.create(AgentDaemon.prototype) as Any;
+    let lateArrivalQueued = false;
+    const executor = {
+      isRunning: false,
+      takeNextFollowUpAtTurnBoundary: vi.fn(() => {
+        const next = queue.shift();
+        if (!next && !lateArrivalQueued) {
+          // A busy-path follow-up lands right after this empty take. Its own
+          // drain attempt sees the running drain and leaves the item to it.
+          lateArrivalQueued = true;
+          queue.push({ message: "Late" });
+          daemonLike.processOrphanedFollowUps("task", executor);
+        }
+        return next;
+      }),
+      get hasPendingFollowUps() {
+        return queue.length > 0;
+      },
+      suppressNextUserMessageEvent: vi.fn(),
+    };
+    daemonLike.drainingFollowUps = new Set();
+    daemonLike.logEvent = vi.fn();
+    daemonLike.sendMessage = vi.fn().mockResolvedValue({ queued: false });
+
+    daemonLike.processOrphanedFollowUps("task", executor);
+
+    await vi.waitFor(() => expect(daemonLike.sendMessage).toHaveBeenCalledTimes(2));
+    expect(daemonLike.sendMessage.mock.calls.map((call: Any[]) => call[1])).toEqual([
+      "First",
+      "Late",
+    ]);
+    await vi.waitFor(() => expect(daemonLike.drainingFollowUps.has("task")).toBe(false));
+    expect(queue).toHaveLength(0);
+  });
+});

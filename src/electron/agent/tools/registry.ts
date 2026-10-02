@@ -405,30 +405,30 @@ function parseBooleanEnv(envName: string, fallback = true): boolean {
   return fallback;
 }
 
-function isExtractionLikePrompt(prompt: string): boolean {
+// An explicit document to extract from: an HTML/document file, a page source/markup, or the DOM.
+const EXTRACTION_SOURCE_PATTERN =
+  /\.(?:x?html?|mhtml|pdf|docx?|epub|rtf)\b|\b(?:raw html|html (?:page|file|source|document|markup)|(?:web ?page|website|page) source|saved (?:web ?)?page|saved as html|(?:html|page) markup|dom)\b/;
+const EXTRACTION_VERB_PATTERN =
+  /\bextract(?:s|ed|ing|ion)?\b|\bmeaningful content\b|\bknowledge[-\s]?base\b|\bconvert\b[^.]{0,80}?\b(?:to|into) (?:clean )?(?:markdown|md|plain text)\b/;
+// Work that needs the tools extraction mode removes (shell, edits, web search).
+const NON_EXTRACTION_WORK_PATTERN =
+  /\b(?:run|rerun|execute|tests?|testing|build|compile|lint|edit|modify|refactor|implement|fix|patch|debug|install|deploy|commit|migrate|research|search (?:the )?(?:web|internet|online)|web[_ ]search|web[_ ]fetch|google|look up|browse)\b/;
+
+/**
+ * Whether a delegated prompt is a read-only extraction from an explicit source document. Such
+ * children get a minimal tool set and a JSON-only answer contract, so this must not match
+ * implementation, verification, web research, or prompts that ask to run, test, edit or build.
+ */
+export function isExtractionLikePrompt(prompt: string, workerRole?: WorkerRoleKind): boolean {
   const normalized = String(prompt || "").toLowerCase();
   if (!normalized) return false;
+  if (workerRole && workerRole !== "researcher") return false;
 
-  const hasHtmlSignal =
-    /(?:\.html?\b|\.xhtml\b)/i.test(normalized) ||
-    normalized.includes("html page") ||
-    normalized.includes("saved as html") ||
-    normalized.includes("raw html") ||
-    normalized.includes("page source") ||
-    normalized.includes("webpage source") ||
-    normalized.includes("web page source") ||
-    normalized.includes("markup") ||
-    normalized.includes("dom");
-  const hasFileReadSignal =
-    /\bread\b.{0,40}\b(file|document|page|source)\b/i.test(normalized) ||
-    normalized.includes("from the workspace") ||
-    normalized.includes("in the workspace");
-  const hasExtractionSignal =
-    /\bextract|extraction|summari(?:ze|sation)|convert|transform|clean|normalize|meaningful content|knowledge[-\s]?base|markdown\b/i.test(
-      normalized,
-    );
-
-  return hasExtractionSignal && (hasHtmlSignal || hasFileReadSignal);
+  return (
+    EXTRACTION_VERB_PATTERN.test(normalized) &&
+    EXTRACTION_SOURCE_PATTERN.test(normalized) &&
+    !NON_EXTRACTION_WORK_PATTERN.test(normalized)
+  );
 }
 
 function applyExtractionOutputContract(prompt: string): string {
@@ -10908,11 +10908,11 @@ ${skillDescriptions}`;
       personalityPref === "same"
         ? undefined
         : (resolvePersonalityPreference(personality) ?? "concise");
-    const extractionMode = phaseCEnabled && isExtractionLikePrompt(prompt);
     const workerRole = resolveDelegationWorkerRole({
       requestedRole: worker_role,
       prompt,
     });
+    const extractionMode = phaseCEnabled && isExtractionLikePrompt(prompt, workerRole);
 
     const agentConfig: AgentConfig = {
       maxTurns: normalizedMaxTurns,

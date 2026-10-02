@@ -1288,6 +1288,57 @@ describe("ToolRegistry child task control tools", () => {
     }
   });
 
+  it("spawn_agent keeps full tools and a free-form answer for ordinary research prompts", async () => {
+    const prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+    const prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+    process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+    process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+
+    try {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createChildTask: vi.fn().mockResolvedValue({
+          id: "child-3",
+          title: "Competitor pricing",
+          prompt: "x",
+          status: "pending",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: "parent-task",
+          agentType: "sub",
+          depth: 1,
+        }),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", {
+        prompt: "Research the top 5 competitors in the ed-tech domain and summarize their pricing",
+      });
+
+      expect(result.success).toBe(true);
+      const call = daemon.createChildTask.mock.calls[0][0];
+      expect(call.prompt).not.toContain("[EXTRACTION_OUTPUT_CONTRACT_V1]");
+      expect(call.prompt).not.toContain("strict JSON");
+      expect(call.agentConfig?.allowedTools).toBeUndefined();
+      expect(call.agentConfig.toolRestrictions).toContain("spawn_agent");
+    } finally {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    }
+  });
+
   it("spawn_agent persists explicit acpx runtime requests into agentConfig", async () => {
     const daemon = {
       getTaskById: vi.fn().mockResolvedValue({

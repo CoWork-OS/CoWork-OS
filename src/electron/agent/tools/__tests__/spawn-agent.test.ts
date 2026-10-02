@@ -14,9 +14,11 @@ import type {
 } from "../../../../shared/types";
 import {
   isExplicitCodexSpawnRequest,
+  isExtractionLikePrompt,
   resolveExternalRuntimePermissionMode,
   resolveSpawnAgentExternalRuntime,
 } from "../registry";
+import { resolveDelegationWorkerRole } from "../../runtime/worker-role-registry";
 
 // Helper functions that mirror the implementation in registry.ts
 function resolveModelPreference(preference: string | undefined, currentModelKey?: string): string {
@@ -558,6 +560,56 @@ describe("child task creation params", () => {
     expect(params.depth).toBe(2);
     expect(params.agentType).toBe("sub");
     expect(params.agentConfig.modelKey).toBe("haiku-3-5");
+  });
+});
+
+describe("isExtractionLikePrompt", () => {
+  const classify = (prompt: string, requestedRole?: string) =>
+    isExtractionLikePrompt(prompt, resolveDelegationWorkerRole({ requestedRole, prompt }));
+
+  it("does not treat ordinary research, refactor, or cleanup prompts as extraction", () => {
+    const prompts = [
+      "Research the top 5 competitors in the ed-tech domain and summarize their pricing",
+      "Refactor src/domain/orders.ts: convert the callbacks to async/await and run the tests",
+      "Clean up the random test-data generator and normalize field names, then run npm test",
+      "Summarize the freedom-of-information request log in the workspace",
+    ];
+    for (const prompt of prompts) {
+      expect(classify(prompt), prompt).toBe(false);
+      expect(isExtractionLikePrompt(prompt), prompt).toBe(false);
+    }
+  });
+
+  it("only treats the word DOM, not words containing it, as an extraction source", () => {
+    expect(isExtractionLikePrompt("Read the DOM and extract the product table")).toBe(true);
+    expect(isExtractionLikePrompt("Read the domain notes and extract the owner list")).toBe(false);
+    expect(isExtractionLikePrompt("Read random.json and extract the seed values")).toBe(false);
+  });
+
+  it("keeps extraction mode for explicit HTML and page-source extraction", () => {
+    expect(
+      classify(
+        'Read "temp-writing-rules.html" in the workspace and extract meaningful content to markdown.',
+      ),
+    ).toBe(true);
+    expect(
+      classify(
+        "Read the saved page source from the workspace and extract meaningful content into markdown sections.",
+      ),
+    ).toBe(true);
+  });
+
+  it("never applies to implementer or verifier roles, or to web research", () => {
+    const prompt = "Read export.html and extract the pricing table into pricing.md";
+    expect(classify(prompt)).toBe(true);
+    expect(classify(prompt, "implementer")).toBe(false);
+    expect(classify(prompt, "verifier")).toBe(false);
+    expect(
+      classify("Research competitor pricing online and extract the plans from each page source"),
+    ).toBe(false);
+    expect(classify("Read page.html, extract the steps, then edit the README and build it")).toBe(
+      false,
+    );
   });
 });
 

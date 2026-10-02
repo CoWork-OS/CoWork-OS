@@ -123,4 +123,35 @@ describe("FileMutationVerifier", () => {
       "f.txt",
     ]);
   });
+
+  it("reports the destination of failed copy_file and rename_file calls", () => {
+    const verifier = new FileMutationVerifier();
+    verifier.recordMutationResult({
+      toolName: "copy_file",
+      input: { sourcePath: "templates/report.docx", destPath: "out/report.docx" },
+      succeeded: false,
+      error: "Destination directory does not exist",
+    });
+    verifier.recordMutationResult({
+      toolName: "rename_file",
+      input: { oldPath: "draft.md", newPath: "archive/draft.md" },
+      succeeded: false,
+      error: "Permission denied",
+    });
+
+    expect(verifier.getFailedMutations().map((m) => m.targetPath)).toEqual([
+      "out/report.docx",
+      "archive/draft.md",
+    ]);
+    const footer = verifier.buildAdvisoryFooter();
+    expect(footer).toContain('copy_file("out/report.docx")');
+    expect(footer).toContain('rename_file("archive/draft.md")');
+
+    verifier.recordMutationResult({
+      toolName: "copy_file",
+      input: { sourcePath: "templates/report.docx", destPath: "out/report.docx" },
+      succeeded: true,
+    });
+    expect(verifier.getFailedMutations().map((m) => m.targetPath)).toEqual(["archive/draft.md"]);
+  });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { FileMutationVerifier } from "../file-mutation-verifier";
 
 function getWaivableStepIds(
   steps: Array<{ id: string; description: string; status: string; kind?: string }>,
@@ -369,6 +370,125 @@ describe("TaskExecutor verification terminal status mapping", () => {
         terminalStatus: "partial_success",
         failureClass: "optional_enrichment",
       }),
+    );
+  });
+});
+
+describe("TaskExecutor completion notes for partial outcomes", () => {
+  function createBestEffortExecutor(): Any {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-1",
+      title: "Compare vendor pricing",
+      prompt: "Compare vendor pricing",
+      status: "executing",
+      createdAt: Date.now(),
+    };
+    executor.daemon = { completeTask: vi.fn() };
+    executor.verificationOutcomeV2Enabled = false;
+    executor.budgetConstrainedFailedStepIds = new Set();
+    executor.stopProgressJournal = vi.fn();
+    executor.saveConversationSnapshot = vi.fn();
+    executor.getWaivableFailedStepIdsAtCompletion = vi.fn().mockReturnValue([]);
+    executor.getNonBlockingFailedStepIdsAtCompletion = vi.fn().mockReturnValue([]);
+    executor.buildTaskOutputSummary = vi.fn().mockReturnValue(undefined);
+    executor.getBudgetUsage = vi.fn().mockReturnValue({
+      turns: 1,
+      lifetimeTurns: 1,
+      toolCalls: 2,
+      webSearchCalls: 0,
+      duplicatesBlocked: 0,
+    });
+    executor.emitEvent = vi.fn();
+    executor.emitRunSummary = vi.fn();
+    executor.continuationCount = 0;
+    executor.continuationWindow = 1;
+    executor.lifetimeTurnCount = 1;
+    executor.terminalStatus = "ok";
+    executor.failureClass = undefined;
+    executor.plan = {
+      description: "Plan",
+      steps: [
+        { id: "collect", description: "Collect pricing from vendor sites", status: "completed" },
+        { id: "compare", description: "Compare plans across vendors", status: "pending" },
+      ],
+    };
+    return executor;
+  }
+
+  it("states why a timed-out run stopped and which writes failed", () => {
+    const executor = createBestEffortExecutor();
+    const answer = "Vendor A Pro is $49/month; Vendor B pricing was not collected.";
+    executor.buildResultSummary = vi.fn().mockReturnValue(answer);
+    executor.fileMutationVerifier = new FileMutationVerifier();
+    executor.fileMutationVerifier.recordMutationResult({
+      toolName: "write_file",
+      input: { path: "comparison.md" },
+      succeeded: false,
+      error: "ENOSPC: no space left on device",
+    });
+    const reason = "Soft deadline reached during execution. Finalizing with best-effort answer.";
+
+    (TaskExecutor as Any).prototype.finalizeTaskBestEffort.call(executor, answer, reason, {
+      terminalKind: "timed_out",
+      reason,
+      failureClass: "budget_exhausted",
+      incompleteStepIds: ["compare"],
+    });
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
+    expect(metadata).toMatchObject({ terminalStatus: "partial_success", terminalKind: "timed_out" });
+    expect(summary.startsWith(answer)).toBe(true);
+    expect(summary).toContain("Completion notes:");
+    expect(summary).toContain("Soft deadline reached during execution.");
+    expect(summary).toContain('"Compare plans across vendors"');
+    expect(summary).toContain('write_file("comparison.md"): ENOSPC: no space left on device');
+    expect(executor.task.resultSummary).toBe(summary);
+  });
+
+  it("names the error behind a partial-success finalization", () => {
+    const executor = createBestEffortExecutor();
+    const partialText = "Collected 3 of 5 vendor price lists: A $49, B $39, C $59 per month.";
+    executor.buildResultSummary = vi.fn().mockReturnValue(partialText);
+    executor.shouldFinalizeAsPartialSuccess = vi.fn(() => true);
+    executor.getPartialSuccessSummary = vi.fn(() => partialText);
+    executor.classifyPartialSuccessFailureClass = vi.fn(() => "tool_error");
+
+    const finalized = (TaskExecutor as Any).prototype.maybeFinalizeAsPartialSuccess.call(
+      executor,
+      new Error("web_fetch failed: 403 Forbidden for https://vendor-d.example/pricing"),
+    );
+
+    expect(finalized).toBe(true);
+    const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
+    expect(metadata).toMatchObject({
+      terminalStatus: "partial_success",
+      failureClass: "tool_error",
+      terminalStatusReason: "Execution completed with partial results.",
+    });
+    expect(summary.startsWith(partialText)).toBe(true);
+    expect(summary).toContain("Completion notes:");
+    expect(summary).toContain(
+      "web_fetch failed: 403 Forbidden for https://vendor-d.example/pricing",
+    );
+  });
+
+  it("leaves a clean completion summary unchanged", () => {
+    const executor = createBestEffortExecutor();
+    executor.plan.steps[1].status = "completed";
+    executor.buildResultSummary = vi.fn().mockReturnValue("All vendors compared.");
+
+    (TaskExecutor as Any).prototype.finalizeTaskBestEffort.call(
+      executor,
+      "All vendors compared.",
+      "Simple non-execute prompt answered directly via answer-first short-circuit.",
+    );
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      "All vendors compared.",
+      expect.objectContaining({ terminalStatus: "ok" }),
     );
   });
 });

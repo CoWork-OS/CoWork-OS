@@ -10240,7 +10240,10 @@ ${transcript}
       reason: this.getPartialSuccessReason(error),
       failureClass,
     });
-    this.finalizeTaskBestEffort(partialText, terminalState.reason, terminalState);
+    this.finalizeTaskBestEffort(partialText, terminalState.reason, {
+      ...terminalState,
+      completionCause: String((error as Any)?.message || error || "").split("\n")[0],
+    });
     return true;
   }
 
@@ -14988,6 +14991,75 @@ ${transcript}
     return "";
   }
 
+  /**
+   * Short, factual notes for a partial outcome, so the completed summary says
+   * why the task finished with warnings instead of showing only the model's
+   * earlier text: the stop reason and cause, failed or waived steps with their
+   * recorded errors, unfinished steps, and a non-blocking verification warning.
+   */
+  private buildCompletionNotes(params: {
+    terminalStatus: Task["terminalStatus"];
+    reason?: string;
+    cause?: string;
+    waivedStepIds: string[];
+  }): string {
+    if (params.terminalStatus !== "partial_success") return "";
+    const maxListedSteps = 4;
+    const compact = (value: unknown, maxLength: number): string => {
+      const text = String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
+    };
+    const lines: string[] = [];
+    const reason = compact(params.reason, 240);
+    if (reason) lines.push(`- ${reason}`);
+    const cause = compact(params.cause, 240);
+    if (cause && cause !== reason) lines.push(`- Cause: ${cause}`);
+
+    const steps = this.plan?.steps || [];
+    const waived = new Set(params.waivedStepIds.map((stepId) => String(stepId || "").trim()));
+    const recovered = new Set(this.getResolvedRecoveredFailureStepIds());
+    const failedSteps = steps.filter(
+      (step) => step.status === "failed" && !recovered.has(String(step.id || "").trim()),
+    );
+    for (const step of failedSteps.slice(0, maxListedSteps)) {
+      const outcome = waived.has(String(step.id || "").trim()) ? "failed (waived)" : "failed";
+      const error = compact(step.error, 200) || "no error was recorded";
+      lines.push(`- Step "${compact(step.description, 120)}" ${outcome}: ${error}`);
+    }
+    if (failedSteps.length > maxListedSteps) {
+      lines.push(`- ${failedSteps.length - maxListedSteps} more failed step(s) not listed.`);
+    }
+    const unfinished = steps.filter(
+      (step) => step.status === "pending" || step.status === "in_progress",
+    );
+    if (unfinished.length > 0) {
+      const listed = unfinished
+        .slice(0, maxListedSteps)
+        .map((step) => `"${compact(step.description, 80)}"`)
+        .join(", ");
+      const more =
+        unfinished.length > maxListedSteps ? ` and ${unfinished.length - maxListedSteps} more` : "";
+      lines.push(`- Not finished: ${listed}${more}.`);
+    }
+    const verification = this.completionVerificationMetadata;
+    if (verification?.verificationOutcome === "warn_non_blocking") {
+      const message = compact(verification.verificationMessage, 240);
+      if (message) lines.push(`- Verification warning: ${message}`);
+    }
+
+    return lines.length > 0 ? ["Completion notes:", ...lines].join("\n") : "";
+  }
+
+  /** The summary the user sees, with completion notes and the file-mutation footer. */
+  private appendCompletionFooters(summary: string, completionNotes: string): string {
+    return [summary, completionNotes, this.fileMutationVerifier?.buildAdvisoryFooter()]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
   private finalizeTask(resultSummary?: string): void {
     if (this.getEffectiveExecutionMode() === "chat") {
       this.finalizeChatTurn();
@@ -15030,8 +15102,11 @@ ${transcript}
     this.task.dependencyOutcome = reliabilityOutcomes.dependencyOutcome;
     this.task.failureDomains = reliabilityOutcomes.failureDomains;
     this.task.stopReasons = reliabilityOutcomes.stopReasons;
-    const mutationFooter = this.fileMutationVerifier?.buildAdvisoryFooter();
-    this.task.resultSummary = mutationFooter ? `${summary}\n\n${mutationFooter}` : summary;
+    const finalSummary = this.appendCompletionFooters(
+      summary,
+      this.buildCompletionNotes({ terminalStatus, waivedStepIds: waivableFailedStepIds }),
+    );
+    this.task.resultSummary = finalSummary;
     const outputSummary = this.buildTaskOutputSummary();
     this.persistBestKnownOutcome(this.task.resultSummary, terminalStatus, failureClass);
     const goalAgentConfig = this.applyGoalTerminalState(summary, terminalStatus);
@@ -15051,7 +15126,7 @@ ${transcript}
       this.emitEvent("citations_collected", { citations });
     }
     void Promise.resolve(
-      this.daemon.completeTask(this.task.id, summary, {
+      this.daemon.completeTask(this.task.id, finalSummary, {
         terminalStatus,
         failureClass: this.task.failureClass,
         ...(goalAgentConfig ? { agentConfig: goalAgentConfig } : {}),
@@ -15100,6 +15175,8 @@ ${transcript}
     metadata?: {
       terminalStatus?: Task["terminalStatus"];
       failureClass?: Task["failureClass"];
+      /** Underlying error shown in the completion notes; not used for gating. */
+      completionCause?: string;
     } & Partial<TerminalState>,
   ): void {
     if (this.getEffectiveExecutionMode() === "chat") {
@@ -15177,9 +15254,23 @@ ${transcript}
     this.task.dependencyOutcome = reliabilityOutcomes.dependencyOutcome;
     this.task.failureDomains = reliabilityOutcomes.failureDomains;
     this.task.stopReasons = reliabilityOutcomes.stopReasons;
-    this.task.resultSummary = summary;
+    const finalSummary = this.appendCompletionFooters(
+      summary,
+      this.buildCompletionNotes({
+        terminalStatus: this.task.terminalStatus,
+        reason: explicitTerminalState?.reason || reason,
+        cause: metadata?.completionCause,
+        waivedStepIds: waivableFailedStepIds,
+      }),
+    );
+    this.task.resultSummary = finalSummary;
     const outputSummary = this.buildTaskOutputSummary();
-    this.persistBestKnownOutcome(summary, this.task.terminalStatus, this.task.failureClass, reason);
+    this.persistBestKnownOutcome(
+      finalSummary,
+      this.task.terminalStatus,
+      this.task.failureClass,
+      reason,
+    );
     const goalAgentConfig = this.applyGoalTerminalState(summary, this.task.terminalStatus);
     const verificationMetadata =
       this.verificationOutcomeV2Enabled && this.completionVerificationMetadata
@@ -15212,7 +15303,7 @@ ${transcript}
       });
     }
     void Promise.resolve(
-      this.daemon.completeTask(this.task.id, summary, {
+      this.daemon.completeTask(this.task.id, finalSummary, {
         terminalStatus: this.task.terminalStatus,
         failureClass: this.task.failureClass,
         ...(explicitTerminalState

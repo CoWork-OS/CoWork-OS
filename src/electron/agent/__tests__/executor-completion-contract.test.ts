@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { FileMutationVerifier } from "../file-mutation-verifier";
 import {
   buildCompletionContract,
   buildCompletionGuidancePrompt,
@@ -1451,6 +1452,78 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     );
   });
 
+  it("explains a waived verification failure in the completed summary", async () => {
+    const answer =
+      "Release notes for v2.3: faster sync, a new export dialog, and fewer crashes on startup.";
+    const executor = createExecuteHarness({
+      title: "Release notes",
+      prompt: [
+        "[AGENT_STRATEGY_CONTEXT_V1]",
+        "timeout_finalize_bias=true",
+        "[/AGENT_STRATEGY_CONTEXT_V1]",
+        "Draft release notes for v2.3 in chat and run the test suite.",
+      ].join("\n"),
+      lastOutput: answer,
+    });
+    executor.createPlan = vi.fn(async function createPlanStub(this: Any) {
+      this.plan = {
+        description: "Plan",
+        steps: [
+          { id: "1", description: "Draft the release notes", status: "pending" },
+          {
+            id: "2",
+            description: "Verify: run the test suite",
+            status: "pending",
+            kind: "verification",
+          },
+        ],
+      };
+    });
+    executor.executePlan = vi.fn(async function executePlanStub(this: Any) {
+      const [draft, verify] = this.plan.steps;
+      draft.status = "completed";
+      verify.status = "failed";
+      verify.error = "npm test exited with code 1: 2 tests failed in sync.spec.ts";
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
+    expect(metadata).toMatchObject({ terminalStatus: "partial_success", waiveFailedStepIds: ["2"] });
+    expect(summary.startsWith(answer)).toBe(true);
+    expect(summary).toContain("Completion notes:");
+    expect(summary).toContain('"Verify: run the test suite"');
+    expect(summary).toContain("npm test exited with code 1: 2 tests failed in sync.spec.ts");
+  });
+
+  it("passes the file-mutation footer to completeTask, not only the in-memory task", async () => {
+    const answer = "The deploy script builds the app and uploads the bundle to the CDN.";
+    const executor = createExecuteHarness({
+      title: "Deploy script",
+      prompt: "Explain what the deploy script does.",
+      lastOutput: answer,
+    });
+    (executor as Any).fileMutationVerifier = new FileMutationVerifier();
+    (executor as Any).fileMutationVerifier.recordMutationResult({
+      toolName: "write_file",
+      input: { path: "docs/deploy.md" },
+      succeeded: false,
+      error: "EACCES: permission denied",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
+    expect(metadata).toMatchObject({ terminalStatus: "ok" });
+    expect(summary.startsWith(answer)).toBe(true);
+    expect(summary).not.toContain("Completion notes:");
+    expect(summary).toContain("File-mutation verifier: 1 file(s) were NOT modified");
+    expect(summary).toContain('write_file("docs/deploy.md"): EACCES: permission denied');
+    expect((executor as Any).task.resultSummary).toBe(summary);
+  });
+
   it("does not let a long claim replace an explicitly requested output file", async () => {
     const claim = "I created reports/q3.pdf with the quarterly analysis.";
     expect(claim.length).toBeGreaterThanOrEqual(50);
@@ -2819,10 +2892,13 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
 
     expect(executor.daemon.completeTask).toHaveBeenCalledWith(
       "task-1",
-      "Refined the app shell.",
+      expect.stringMatching(/^Refined the app shell\.\n\nCompletion notes:\n/),
       expect.objectContaining({
         waiveFailedStepIds: expect.arrayContaining(["2"]),
       }),
+    );
+    expect(executor.daemon.completeTask.mock.calls[0][1]).toContain(
+      'Step "Refine the experience" failed (waived)',
     );
   });
 
@@ -2859,7 +2935,7 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
 
     expect(executor.daemon.completeTask).toHaveBeenCalledWith(
       "task-1",
-      "Found repository stats from web sources.",
+      expect.stringMatching(/^Found repository stats from web sources\.\n\nCompletion notes:\n/),
       expect.objectContaining({
         terminalKind: "timed_out",
         terminalStatus: "partial_success",
@@ -2867,6 +2943,9 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
         waiveFailedStepIds: [],
       }),
     );
+    const summary = executor.daemon.completeTask.mock.calls[0][1];
+    expect(summary).toContain("Soft deadline reached during execution.");
+    expect(summary).toContain("Step soft-deadline reached after 810s");
   });
 
   it("finalizes soft-deadline runs without waiting on LLM recovery", async () => {

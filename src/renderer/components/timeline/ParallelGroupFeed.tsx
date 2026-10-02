@@ -150,19 +150,20 @@ export function ParallelGroupFeed({
   replay = false,
 }: ParallelGroupFeedProps) {
   void _formatTime;
+  const isActive =
+    isActiveStatus(group.status) || group.lanes.some((lane) => isActiveStatus(lane.status));
+  // Hooks run before the empty-group return: a group can gain lanes while it streams.
+  const indicator = useMemo(() => buildIndicatorForStatus(group.status), [group.status]);
+  const groupTitle = useMemo(() => buildParallelGroupTitle(group, isActive), [group, isActive]);
+
   if (group.lanes.length === 0) {
     return null;
   }
 
   const singleLane = group.lanes.length === 1 ? group.lanes[0] : null;
   const isBrowserGroup = isBrowserToolGroup(group);
-  const isActive =
-    isActiveStatus(group.status) || group.lanes.some((lane) => isActiveStatus(lane.status));
   const showImageGenerationFrame = hasActiveImageGenerationLane(group);
   const hasExpandableDetails = group.lanes.length > 1 || isBrowserGroup;
-
-  const indicator = useMemo(() => buildIndicatorForStatus(group.status), [group.status]);
-  const groupTitle = useMemo(() => buildParallelGroupTitle(group, isActive), [group, isActive]);
 
   if (singleLane && !isBrowserGroup) {
     return (

@@ -58,6 +58,8 @@ const CHRONICLE_METHODS = [
   "getChronicleSettings",
   "getChronicleStatus",
   "saveChronicleSettings",
+  "openComputerUseScreenRecordingSettings",
+  "openComputerUseAccessibilitySettings",
 ] as const;
 
 /** Chronicle captures this machine's screen, so a browser session shows a note instead. */

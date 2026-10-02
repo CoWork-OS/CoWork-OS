@@ -36,6 +36,24 @@ describe("desktop-only settings cards", () => {
     expect(computerUse).not.toContain("Loading computer use");
   });
 
+  it("keep Chronicle desktop-only when the host lacks its permission-settings openers", () => {
+    vi.stubGlobal("window", {
+      coworkBrowserHost: true,
+      coworkBrowserHostInfo: {
+        desktopMethods: {
+          getChronicleSettings: { mutation: false },
+          getChronicleStatus: { mutation: false },
+          saveChronicleSettings: { mutation: true },
+        },
+      },
+      electronAPI: {},
+    });
+
+    const chronicle = renderToStaticMarkup(React.createElement(ChronicleSettingsCard));
+    expect(chronicle).toContain("Configure it in the desktop app.");
+    expect(chronicle).not.toContain("Loading Chronicle");
+  });
+
   it("render the full cards on the desktop", () => {
     vi.stubGlobal("window", { electronAPI: {} });
 

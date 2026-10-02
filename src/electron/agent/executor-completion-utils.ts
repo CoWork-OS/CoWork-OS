@@ -478,8 +478,9 @@ export function buildCompletionGuidancePrompt(opts: {
  * the task should produce text output only, not file artifacts.
  *
  * "read-only" alone is NOT matched — it must appear as a constraint declaration
- * (e.g. "this is read-only", "read-only mode"), not as a subject to fix
- * (e.g. "fix the read-only permission", "database is in read-only mode, fix it").
+ * (e.g. "this is read-only", "read-only review", "work in read-only mode"), not
+ * as an attribute of a deliverable ("add a read-only mode toggle") or a subject
+ * to fix (e.g. "fix the read-only permission", "database is in read-only mode, fix it").
  */
 export function detectReadOnlyConstraint(prompt: string): boolean {
   const lower = String(prompt || "").toLowerCase();
@@ -502,11 +503,27 @@ export function detectReadOnlyConstraint(prompt: string): boolean {
     );
   if (hasScopedOtherFileRestriction && explicitlyRequestsFileOutput) return false;
 
-  // Explicit "do not" / "don't" constraints — unambiguous
+  // Explicit "do not" / "don't" constraints are global only when they are not
+  // narrowed to a scope: "don't edit files under vendor/", "do not make
+  // changes to the database schema", "no file changes beyond package.json" and
+  // "without modifying its public signature" all permit the requested change.
+  const wholeWorkspace =
+    String.raw`(?:(?:this|the|your|my|our|any)\s+)?(?:repo(?:sitory)?|workspace|project|` +
+    String.raw`code(?:base)?|working\s+(?:tree|copy|directory)|file\s*system|disk)\b`;
+  const unscoped =
+    String.raw`(?!\s+(?:(?:outside|other\s+than|except|besides|beyond|apart\s+from|that|which|` +
+    String.raw`from|of|matching|named|like|for)\b|(?:in|under|inside|within|to|on)\b` +
+    String.raw`(?!\s+${wholeWorkspace})))`;
   const hasExplicitConstraint =
-    /\b(?:do\s+not\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|do\s+not\s+make\s+(?:any\s+)?changes|no\s+file\s+changes|without\s+(?:editing|modifying|creating)|don'?t\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|situational\s+awareness\s+(?:only|mode))\b/.test(
-      lower,
-    );
+    new RegExp(
+      String.raw`\b(?:do\s+not|don'?t)\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?\b${unscoped}`,
+    ).test(lower) ||
+    new RegExp(String.raw`\bdo\s+not\s+make\s+(?:any\s+)?changes\b${unscoped}`).test(lower) ||
+    new RegExp(String.raw`\bno\s+file\s+changes\b${unscoped}`).test(lower) ||
+    new RegExp(
+      String.raw`\bwithout\s+(?:editing|modifying|creating)(?:\s*(?:[.!?;,\n]|$)|\s+anything\b(?!\s+else\b)|\s+(?:any\s+|the\s+)?files?\b${unscoped}|\s+${wholeWorkspace})`,
+    ).test(lower) ||
+    /\bsituational\s+awareness\s+(?:only|mode)\b/.test(lower);
   if (hasExplicitConstraint) return true;
 
   // A coordinated prohibition such as "do not create, write, edit, move, or
@@ -524,9 +541,29 @@ export function detectReadOnlyConstraint(prompt: string): boolean {
     );
   if (hasNegatedFileOperationList && !requestsChangeOutsideProhibition) return true;
 
-  // "read-only" requires constraint context — must NOT be preceded by fix/debug verbs
-  // "fix the read-only issue" → false, "this task is read-only" → true
-  if (/\bread[- ]only\b/.test(lower)) {
+  // "read-only" counts only when it frames the task itself ("this task is
+  // read-only", "read-only review: ...", "stay read-only", "Read-only."). As an
+  // attribute of something to build ("a read-only mode toggle", "make the field
+  // read-only", "a read-only Postgres user") it describes the deliverable.
+  // It must also not be the subject of a fix ("fix the read-only issue").
+  const readOnly = String.raw`read[- ]only\b`;
+  const readOnlyTaskFraming =
+    new RegExp(
+      String.raw`\b(?:this|everything|task|request|job|session|review|analysis|audit|investigation|inspection|exploration|pass|assessment)\s+(?:is|should\s+be|must\s+be|will\s+be|stays?|remains?)\s+(?:strictly\s+|purely\s+|completely\s+|entirely\s+)?${readOnly}`,
+    ).test(lower) ||
+    new RegExp(
+      String.raw`(?:^|[.!?;:\n]\s*|\b(?:please|and|but|you|we)\s+(?:(?:must|should|will|need\s+to)\s+)?)(?:stay|remain|work|operate|proceed|act)\s+(?:strictly\s+|purely\s+)?(?:in\s+)?${readOnly}`,
+    ).test(lower) ||
+    new RegExp(
+      String.raw`\b${readOnly}\s+(?:task|request|review|analysis|audit|investigation|inspection|exploration|pass|assessment|session)\b`,
+    ).test(lower) ||
+    new RegExp(String.raw`\b(?:you(?:'re|\s+are)|we(?:'re|\s+are))\s+(?:in\s+)?${readOnly}`).test(
+      lower,
+    ) ||
+    new RegExp(String.raw`(?:^|[.!?\n]\s*)${readOnly}(?:\s+only\b)?\s*(?:[:.,!;\-–—]|$)`).test(
+      lower,
+    );
+  if (readOnlyTaskFraming) {
     const isSubjectToFix =
       /\b(?:fix|repair|resolve|debug|troubleshoot|diagnose|investigate|restore|change|update|remove|disable|toggle|switch)\b[^.!?\n]{0,40}\bread[- ]only\b/.test(
         lower,

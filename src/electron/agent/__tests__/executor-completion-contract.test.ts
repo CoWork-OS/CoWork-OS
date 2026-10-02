@@ -3203,6 +3203,35 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
       ),
     ).toBe(true);
   });
+
+  it.each([
+    "Refactor parseDate in src/date.ts without modifying its public signature.",
+    "Fix the login bug. Do not make changes to the database schema.",
+    "Fix the failing test. Don't edit files under vendor/.",
+    "Implement the cache layer. Do not create files outside src/cache.",
+    "Bump the version to 2.1.0; no file changes beyond package.json.",
+    "Update the README without creating new files.",
+    "Add a read-only mode toggle to the editor settings.",
+    "Make the `email` field read-only in the profile form.",
+    "Mount the config volume as read-only in docker-compose.yml.",
+    "Create a read-only Postgres user for the analytics dashboard.",
+    "Give the reporting service read-only access to the orders table.",
+  ])("does not treat a scoped prohibition or read-only feature as read-only: %s", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(false);
+  });
+
+  it.each([
+    "Review the auth module and report issues. Do not edit any files.",
+    "This is read-only: explain how the scheduler works.",
+    "Read-only review: list the risky migrations in this repo.",
+    "Stay read-only and summarize the open pull requests.",
+    "Explain the build pipeline without modifying anything.",
+    "Inspect the deployment config. Do not make any changes.",
+    "Audit the logging setup without editing any files.",
+    "Do not make any changes to the codebase; just describe the module layout.",
+  ])("keeps a genuine read-only constraint: %s", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(true);
+  });
 });
 
 describe("buildCompletionGuidancePrompt", () => {

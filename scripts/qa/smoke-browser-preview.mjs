@@ -176,14 +176,16 @@ async function startSyntheticOpenAIStub() {
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
-    async waitForRequest(predicate, timeoutMs = 15_000) {
+    async waitForRequest(predicate, timeoutMs = 15_000, timeoutMessage) {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         const match = requests.find(predicate);
         if (match) return match;
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      assert.fail(`Synthetic provider request was not observed within ${timeoutMs}ms`);
+      assert.fail(
+        timeoutMessage?.() ?? `Synthetic provider request was not observed within ${timeoutMs}ms`,
+      );
     },
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
@@ -1966,23 +1968,32 @@ async function main() {
       followUpReceipt.messageId,
     );
     assert(followUpRowsAcrossTabs.length >= 1, "The follow-up receipt was not durably journaled");
-    await waitForTaskTerminal({
-      base,
-      cookie,
-      csrfToken: session.csrfToken,
-      apiVersion: manifest.apiVersion,
-      taskId,
-    });
+    const syntheticTaskTerminal = () =>
+      waitForTaskTerminal({
+        base,
+        cookie,
+        csrfToken: session.csrfToken,
+        apiVersion: manifest.apiVersion,
+        taskId,
+      });
+    await syntheticTaskTerminal();
+    // A follow-up admitted while the first turn runs is queued and drained after
+    // that turn ends, so the first turn's completed status can be read before
+    // the follow-up reaches the provider. Wait for the follow-up request itself,
+    // then for the end of the turn that carried it.
+    await syntheticProvider.waitForRequest(
+      (request) => request.followUpMessageCopies > 0,
+      30_000,
+      () =>
+        `No synthetic provider request contained the admitted follow-up outside recalled context: ${JSON.stringify(syntheticProvider.requests)}`,
+    );
+    await syntheticTaskTerminal();
     assert(
       syntheticProvider.requests.length >= 2,
       `Both the initial task and its follow-up must reach the local synthetic provider; calls=${syntheticProvider.requests.length}`,
     );
     const followUpProviderRequests = syntheticProvider.requests.filter(
       (request) => request.followUpMessageCopies > 0,
-    );
-    assert(
-      followUpProviderRequests.length >= 1,
-      `No synthetic provider request contained the admitted follow-up outside recalled context: ${JSON.stringify(syntheticProvider.requests)}`,
     );
     assert(
       followUpProviderRequests.every((request) => request.followUpMessageCopies === 1),

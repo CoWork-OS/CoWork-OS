@@ -35,7 +35,7 @@ import {
   parseOpenAICompatibleToolArguments,
   toOpenAICompatibleMessages,
 } from "./openai-compatible";
-import { resolveOutputTokenParamName } from "./output-token-policy";
+import { resolveOutputTokenParamName, withReasoningOutputHeadroom } from "./output-token-policy";
 import { classifyProviderError } from "./provider-error-classifier";
 import {
   buildOpenAIPromptCacheFields,
@@ -472,7 +472,9 @@ export class OpenAIProvider implements LLMProvider {
         this.normalizeCodexModelId(request.model || this.model || DEFAULT_CODEX_MODEL),
       ),
       ...(instructions ? { instructions } : {}),
-      max_output_tokens: request.maxTokens,
+      max_output_tokens: reasoningEffort
+        ? withReasoningOutputHeadroom(request.maxTokens, reasoningEffort)
+        : request.maxTokens,
       ...(reasoningEffort
         ? {
             reasoning: { effort: reasoningEffort },
@@ -708,9 +710,11 @@ export class OpenAIProvider implements LLMProvider {
         codexModelId,
       );
       const configuredReasoningEffort = this.getOpenAIReasoningEffort(request);
+      const piAiReasoningEffort =
+        configuredReasoningEffort === "none" ? "medium" : configuredReasoningEffort;
       const response = await piAiComplete(model, context, {
         apiKey,
-        maxTokens: request.maxTokens,
+        maxTokens: withReasoningOutputHeadroom(request.maxTokens, piAiReasoningEffort),
         signal: request.signal,
         cacheRetention,
         ...(sessionId ? { sessionId } : {}),
@@ -722,8 +726,7 @@ export class OpenAIProvider implements LLMProvider {
               }),
             }
           : {}),
-        reasoningEffort:
-          configuredReasoningEffort === "none" ? "medium" : configuredReasoningEffort,
+        reasoningEffort: piAiReasoningEffort,
         textVerbosity: this.getOpenAITextVerbosity(request),
       });
 

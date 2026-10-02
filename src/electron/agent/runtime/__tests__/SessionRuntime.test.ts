@@ -2226,6 +2226,43 @@ describe("SessionRuntime", () => {
     ]);
   });
 
+  it("retries a text turn once with a larger budget when reasoning used up the output budget", async () => {
+    const harness = createHarness();
+    harness.createMessageWithTimeout
+      .mockResolvedValueOnce({
+        stopReason: "max_tokens",
+        content: [],
+        usage: { inputTokens: 10, outputTokens: 260, cachedTokens: 0 },
+      })
+      .mockResolvedValueOnce({
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Here is the answer." }],
+        usage: { inputTokens: 10, outputTokens: 900, cachedTokens: 0 },
+      });
+
+    const result = await harness.runtime.runTextLoop({
+      messages: [{ role: "user", content: "Question" }],
+      systemPrompt: "system",
+      initialMaxTokens: 260,
+      continuationMaxTokens: 400,
+      mode: "follow_up",
+      operationLabel: "test text loop",
+      allowContinuation: true,
+      emptyFallback: "canned fallback",
+    });
+
+    expect(harness.createMessageWithTimeout).toHaveBeenCalledTimes(2);
+    const firstBudget = harness.createMessageWithTimeout.mock.calls[0][0].maxTokens;
+    const retryBudget = harness.createMessageWithTimeout.mock.calls[1][0].maxTokens;
+    expect(firstBudget).toBe(260);
+    expect(retryBudget).toBeGreaterThanOrEqual(8_192);
+    // The retry repeats the same request rather than continuing an empty answer.
+    expect(harness.createMessageWithTimeout.mock.calls[1][0].messages).toEqual([
+      { role: "user", content: "Question" },
+    ]);
+    expect(result.assistantText).toBe("Here is the answer.");
+  });
+
   it("replays one same-request escalation before continuation recovery in adaptive mode", async () => {
     const previousPolicy = process.env.COWORK_LLM_OUTPUT_POLICY;
     try {

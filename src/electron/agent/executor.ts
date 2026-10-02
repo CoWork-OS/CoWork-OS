@@ -561,6 +561,10 @@ function hasWebPageInteractionIntent(text: string): boolean {
 }
 
 const EXPLICIT_CHAT_MAX_OUTPUT_TOKENS = 48_000;
+// Chat/think replies outside explicit chat sessions. Brevity comes from the
+// prompt rules; a tiny cap is spent on hidden reasoning by thinking models and
+// returns no text at all.
+const CHAT_REPLY_MAX_OUTPUT_TOKENS = 4_096;
 const EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW = 16;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_MESSAGE_COUNT = 24;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_TOKENS = 12_000;
@@ -8938,8 +8942,8 @@ ${transcript}
       const turnResult = await this.runTextTurnKernel({
         messages,
         systemPrompt,
-        initialMaxTokens: chatMaxTokens ?? (isThinkMode ? 2048 : 260),
-        continuationMaxTokens: 400,
+        initialMaxTokens: chatMaxTokens ?? CHAT_REPLY_MAX_OUTPUT_TOKENS,
+        continuationMaxTokens: CHAT_REPLY_MAX_OUTPUT_TOKENS,
         mode: "follow_up",
         operationLabel: isThinkMode
           ? "Think-with-me follow-up response"
@@ -27941,7 +27945,7 @@ You are continuing a previous conversation. The context from the previous conver
           this.createMessageWithTimeout(
             {
               model: this.modelId,
-              maxTokens: explicitChatMaxTokens ?? (isThinkMode ? 2048 : 800),
+              maxTokens: explicitChatMaxTokens ?? CHAT_REPLY_MAX_OUTPUT_TOKENS,
               system: systemPrompt,
               messages: [{ role: "user", content: companionUserContent }],
               ...promptCacheExtras,
@@ -27974,7 +27978,7 @@ You are continuing a previous conversation. The context from the previous conver
           const contResponse = await this.createMessageWithTimeout(
             {
               model: this.modelId,
-              maxTokens: 400,
+              maxTokens: CHAT_REPLY_MAX_OUTPUT_TOKENS,
               system: systemPrompt,
               // End on a user turn: Claude 4.6+ rejects assistant prefill.
               messages: [

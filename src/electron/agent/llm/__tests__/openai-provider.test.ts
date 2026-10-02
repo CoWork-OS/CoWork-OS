@@ -198,7 +198,8 @@ describe("OpenAIProvider structured errors", () => {
       expect.objectContaining({
         model: "gpt-5.5",
         instructions: "Stable instructions",
-        max_output_tokens: 128,
+        // 128 tokens at high effort would be spent entirely on hidden reasoning.
+        max_output_tokens: 128 + 4_096,
         reasoning: { effort: "high" },
         text: { verbosity: "low" },
         prompt_cache_key: "stable-prefix-hash",
@@ -257,6 +258,45 @@ describe("OpenAIProvider structured errors", () => {
         cacheWriteTokens: 40,
       },
     });
+  });
+
+  it("reserves reasoning headroom when a Responses request has a small output budget", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output: [{ type: "message", content: [{ type: "output_text", text: "Hi there" }] }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    await provider.createMessage({ ...makeRequest(), model: "gpt-5.5", maxTokens: 260 });
+    await provider.createMessage({ ...makeRequest(), model: "gpt-5.5", maxTokens: 16_000 });
+
+    // Hidden reasoning counts against max_output_tokens; at the default medium
+    // effort a 260-token cap is spent on reasoning and returns no text.
+    const smallBody = responsesCreateMock.mock.calls[0][0];
+    expect(smallBody.reasoning).toEqual({ effort: "medium" });
+    expect(smallBody.max_output_tokens).toBe(260 + 2_048);
+    expect(responsesCreateMock.mock.calls[1][0].max_output_tokens).toBe(16_000);
+  });
+
+  it("reserves reasoning headroom for small ChatGPT subscription budgets", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    const provider = new OpenAIProvider(makeConfig());
+
+    await provider.createMessage({ ...makeRequest(), maxTokens: 260 });
+
+    expect(completeMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({ maxTokens: 260 + 2_048, reasoningEffort: "medium" }),
+    );
   });
 
   it("uses Responses API controls for other GPT-5-family OpenAI API-key models", async () => {

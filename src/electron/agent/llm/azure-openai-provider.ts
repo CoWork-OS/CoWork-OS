@@ -28,6 +28,7 @@ import {
   isPromptCacheRequestUnsupportedError,
   splitSystemBlocksForOpenAIPrefix,
 } from "./prompt-cache";
+import { withReasoningOutputHeadroom } from "./output-token-policy";
 import { createLogger } from "../../utils/logger";
 
 const logger = createLogger("azure-openai");
@@ -1018,14 +1019,25 @@ export class AzureOpenAIProvider implements LLMProvider {
     return wrapped;
   }
 
-  async createMessage(request: LLMRequest): Promise<LLMResponse> {
+  async createMessage(originalRequest: LLMRequest): Promise<LLMResponse> {
+    const requestedReasoningEffort = this.getReasoningEffort();
+    // With reasoning configured, hidden reasoning counts against the output cap;
+    // keep small caps from being spent entirely before any text is produced.
+    const request: LLMRequest = requestedReasoningEffort
+      ? {
+          ...originalRequest,
+          maxTokens: withReasoningOutputHeadroom(
+            originalRequest.maxTokens,
+            requestedReasoningEffort,
+          ),
+        }
+      : originalRequest;
     try {
       const chatUrl = this.getChatCompletionsUrl();
       const responsesUrl = this.getResponsesUrl();
       const model = request.model || this.deployment;
       const startedAt = Date.now();
       const shouldStream = request.onStreamProgress !== undefined;
-      const requestedReasoningEffort = this.getReasoningEffort();
       const fallbackReasoningEffort = this.getFallbackReasoningEffort(requestedReasoningEffort);
 
       const runResponses = async (
@@ -1171,7 +1183,7 @@ export class AzureOpenAIProvider implements LLMProvider {
           model: request.model,
           status: error?.status,
         });
-        return this.createMessage({ ...request, promptCache: undefined });
+        return this.createMessage({ ...originalRequest, promptCache: undefined });
       }
 
       const structuredError = this.toStructuredProviderError(error);

@@ -608,6 +608,10 @@ interface RuntimeRecoverySourceFreshness {
 export const CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE =
   "CONTEXT_CAPACITY_RECOVERY_EXHAUSTED" as const;
 
+/** Bounds for the one larger retry of a text turn that produced no text. */
+const TEXT_EMPTY_OUTPUT_RETRY_MIN_TOKENS = 8_192;
+const TEXT_EMPTY_OUTPUT_RETRY_MAX_TOKENS = 32_000;
+
 /** Sent after a partial text answer that stopped on max_tokens. */
 export const TEXT_CONTINUATION_PROMPT =
   "Your previous message was cut off by the output limit. Continue exactly where it stopped, " +
@@ -762,6 +766,8 @@ export class SessionRuntime {
     let continuationPrefix = "";
     let continuationAttempts = 0;
     let assistantText = "";
+    // Set once when reasoning spent the whole budget and produced no text.
+    let emptyOutputRetryMaxTokens: number | null = null;
 
     const outcome = await new TurnKernel(
       {
@@ -803,9 +809,10 @@ export class SessionRuntime {
                 {
                   model: this.deps.getModelMetadata().modelId,
                   maxTokens:
-                    continuationPrefix.trim().length > 0
+                    emptyOutputRetryMaxTokens ??
+                    (continuationPrefix.trim().length > 0
                       ? opts.continuationMaxTokens
-                      : opts.initialMaxTokens,
+                      : opts.initialMaxTokens),
                   system: opts.systemPrompt,
                   messages: requestMessages,
                   ...promptCacheExtras,
@@ -836,6 +843,24 @@ export class SessionRuntime {
         },
         handleResponse: async ({ response }, state) => {
           const text = this.extractTextFromLLMContent(response.content || []);
+          if (
+            response.stopReason === "max_tokens" &&
+            !text.trim() &&
+            emptyOutputRetryMaxTokens === null
+          ) {
+            // Hidden reasoning consumed the whole output budget. Repeat the same
+            // request once with a larger budget instead of returning the canned
+            // empty fallback.
+            const spentBudget =
+              continuationPrefix.trim().length > 0
+                ? opts.continuationMaxTokens
+                : opts.initialMaxTokens;
+            emptyOutputRetryMaxTokens = Math.min(
+              TEXT_EMPTY_OUTPUT_RETRY_MAX_TOKENS,
+              Math.max(TEXT_EMPTY_OUTPUT_RETRY_MIN_TOKENS, spentBudget * 4),
+            );
+            return { continueLoop: true, emptyResponseCount: 0, repeatIteration: true };
+          }
           if (
             opts.allowContinuation &&
             response.stopReason === "max_tokens" &&

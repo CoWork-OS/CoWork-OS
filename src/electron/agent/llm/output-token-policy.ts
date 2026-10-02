@@ -294,6 +294,33 @@ export function inferOutputBudgetRequestKind(messages: LLMMessage[]): OutputBudg
   return "agentic_main";
 }
 
+/** Below this cap, hidden reasoning can consume the whole output budget. */
+const SMALL_REASONING_OUTPUT_BUDGET_TOKENS = 4_096;
+
+/**
+ * Reasoning models (GPT-5/6 Responses, the ChatGPT backend) count hidden
+ * reasoning against the output cap. A short chat turn or side call at the
+ * configured effort can spend the whole cap on reasoning and come back
+ * "incomplete" with no text, so small caps get headroom sized to the effort.
+ * Caps of 4K and above are left unchanged.
+ */
+export function withReasoningOutputHeadroom(maxTokens: number, effort?: string): number {
+  if (!Number.isFinite(maxTokens) || maxTokens <= 0) return maxTokens;
+  if (maxTokens >= SMALL_REASONING_OUTPUT_BUDGET_TOKENS) return maxTokens;
+  const normalized = String(effort || "medium").toLowerCase();
+  const headroom =
+    normalized === "none" || normalized === "minimal"
+      ? 0
+      : normalized === "low"
+        ? 1_024
+        : normalized === "medium"
+          ? 2_048
+          : normalized === "high"
+            ? 4_096
+            : 8_192;
+  return maxTokens + headroom;
+}
+
 export function resolveOutputTokenParamName(opts: {
   providerType: LLMProviderType | string;
   modelId: string;

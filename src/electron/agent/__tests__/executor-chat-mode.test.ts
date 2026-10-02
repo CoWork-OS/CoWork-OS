@@ -164,6 +164,45 @@ describe("TaskExecutor chat mode", () => {
     );
   });
 
+  it.each(["chat", "think"])(
+    "gives %s-mode follow-ups an output budget that hidden reasoning cannot exhaust",
+    async (conversationMode) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.task = {
+        id: `chat-budget-${conversationMode}`,
+        agentConfig: { conversationMode, retainMemory: false },
+      };
+      executor.workspace = { id: "workspace-1", path: "/tmp/workspace" };
+      executor.provider = { type: "openai" };
+      executor.conversationHistory = [];
+      executor.getRoleContextPrompt = () => "";
+      executor.buildUserProfileBlock = () => "";
+      executor.buildChatOrThinkSystemBlocks = () => [];
+      executor.setPromptCacheContext = () => "system";
+      executor.getEffectiveExecutionMode = () => "execute";
+      executor.getEffectiveTaskDomain = () => "general";
+      executor.isExplicitChatExecutionMode = () => false;
+      executor.emitEvent = vi.fn();
+      executor.saveConversationSnapshot = vi.fn(() => false);
+      executor.finalizeSuccessfulFollowUp = vi.fn();
+      executor.generateCompanionFallbackResponse = () => "fallback";
+      executor.responseLooksLikeUnexecutedToolCall = () => false;
+      executor.updateConversationHistory = vi.fn();
+      executor.buildUserContent = vi.fn(async (message: string) => message);
+      const runTextTurnKernel = vi.fn(async ({ messages }: Any) => ({
+        assistantText: "reply",
+        messages: [...messages, { role: "assistant", content: "reply" }],
+      }));
+      executor.runTextTurnKernel = runTextTurnKernel;
+
+      await (TaskExecutor as Any).prototype.respondInChatMode.call(executor, "How are you?");
+
+      const turn = runTextTurnKernel.mock.calls[0][0];
+      expect(turn.initialMaxTokens).toBeGreaterThanOrEqual(4_096);
+      expect(turn.continuationMaxTokens).toBeGreaterThanOrEqual(4_096);
+    },
+  );
+
   it.each([true, false])(
     "records direct follow-up dispatch around the real ordinary provider boundary (snapshot saved=%s)",
     async (snapshotSaved) => {

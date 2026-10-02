@@ -1644,3 +1644,60 @@ describe("edit numbered-view prefixes", () => {
     expect(bytes.toString("utf8")).toBe("one\ntwo\nthree\nfour\n");
   });
 });
+
+describe("edit miss diagnostics", () => {
+  const source = [
+    "function main() {",
+    "    if (ready) {",
+    "        const total = computeTotal(items);",
+    "        report(total);",
+    "    }",
+    "}",
+    "",
+  ].join("\n");
+
+  it("reports where the text is when only whitespace or indentation differs", async () => {
+    const { result, bytes } = await editFixture(source, {
+      old_string: "if (ready) {\n  const total = computeTotal(items);\n  report(total);\n}",
+      new_string: "if (ready) {}",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("old_string not found");
+    expect(result.error).toContain("lines 2-5");
+    expect(result.error).toMatch(/whitespace or indentation/i);
+    expect(result.error).toContain(
+      "    if (ready) {\n        const total = computeTotal(items);\n        report(total);\n    }",
+    );
+    expect(bytes.toString("utf8")).toBe(source);
+  });
+
+  it("points at the most similar line and its first difference for a near miss", async () => {
+    const { result } = await editFixture(source, {
+      old_string: "        const total = computeTotl(items);",
+      new_string: "        const total = sum(items);",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("line 3");
+    expect(result.error).toContain("const total = computeTotal(items);");
+    expect(result.error).toContain("computeTotl");
+  });
+
+  it("says so when nothing in the file resembles old_string", async () => {
+    const { result } = await editFixture(source, {
+      old_string: "zebra quantum xylophone",
+      new_string: "anything",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no similar text/i);
+  });
+
+  it("calls out stale line-number prefixes", async () => {
+    const { result } = await editFixture(source, {
+      old_string: "    12\t        report(total);",
+      new_string: "        report(total, true);",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/line-number prefix/i);
+    expect(result.error).toContain("line 4");
+  });
+});

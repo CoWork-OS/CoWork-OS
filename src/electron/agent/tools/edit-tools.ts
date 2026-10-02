@@ -360,6 +360,142 @@ function buildEditMatchCandidates(
   return candidates;
 }
 
+// Miss diagnostics scan the whole file; beyond this size they would cost more than they help.
+const EDIT_MISS_ANALYSIS_MAX_CHARS = 4 * 1024 * 1024;
+const EDIT_MISS_EXCERPT_MAX_LINES = 12;
+const EDIT_MISS_EXCERPT_MAX_LINE_CHARS = 240;
+const EDIT_MISS_MIN_SIMILARITY = 0.5;
+const WORD_TOKEN_PATTERN = /[\p{L}\p{N}_]+/gu;
+
+function formatLineRange(startLine: number, endLine: number): string {
+  return startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`;
+}
+
+function clipForMessage(value: string): string {
+  return value.length > EDIT_MISS_EXCERPT_MAX_LINE_CHARS
+    ? `${value.slice(0, EDIT_MISS_EXCERPT_MAX_LINE_CHARS)}…`
+    : value;
+}
+
+/** Offset in text of the character at compactIndex in text with all whitespace removed. */
+function offsetOfCompactIndex(text: string, compactIndex: number): number {
+  const whitespace = /\s+/g;
+  let removed = 0;
+  for (
+    let match = whitespace.exec(text);
+    match && match.index - removed <= compactIndex;
+    match = whitespace.exec(text)
+  ) {
+    removed += match[0].length;
+  }
+  return compactIndex + removed;
+}
+
+function findWhitespaceInsensitiveMatch(
+  text: string,
+  target: string,
+): { startLine: number; endLine: number } | null {
+  const compactTarget = target.replace(/\s+/g, "");
+  if (!compactTarget) return null;
+  const compactIndex = text.replace(/\s+/g, "").indexOf(compactTarget);
+  if (compactIndex === -1) return null;
+  const start = offsetOfCompactIndex(text, compactIndex);
+  const end = offsetOfCompactIndex(text, compactIndex + compactTarget.length - 1);
+  return { startLine: lineNumberAt(text, start), endLine: lineNumberAt(text, end) };
+}
+
+/** Window of file lines sharing the most words with target (multiset overlap), if any is close. */
+function findMostSimilarLines(
+  lines: string[],
+  targetLines: string[],
+): { startLine: number; endLine: number; score: number } | null {
+  const targetTokens = targetLines.join("\n").match(WORD_TOKEN_PATTERN) ?? [];
+  if (targetTokens.length === 0 || lines.length === 0) return null;
+  const targetCounts = new Map<string, number>();
+  for (const token of targetTokens) targetCounts.set(token, (targetCounts.get(token) ?? 0) + 1);
+  const lineStats = lines.map((line) => {
+    const tokens = line.match(WORD_TOKEN_PATTERN) ?? [];
+    return { total: tokens.length, shared: tokens.filter((token) => targetCounts.has(token)) };
+  });
+
+  const windowSize = Math.min(targetLines.length, lines.length);
+  const windowCounts = new Map<string, number>();
+  let overlap = 0;
+  let windowTotal = 0;
+  const apply = (stats: { total: number; shared: string[] }, delta: 1 | -1) => {
+    windowTotal += delta * stats.total;
+    for (const token of stats.shared) {
+      const cap = targetCounts.get(token) ?? 0;
+      const before = windowCounts.get(token) ?? 0;
+      windowCounts.set(token, before + delta);
+      overlap += Math.min(before + delta, cap) - Math.min(before, cap);
+    }
+  };
+
+  let best: { startLine: number; endLine: number; score: number } | null = null;
+  for (let end = 0; end < lineStats.length; end += 1) {
+    apply(lineStats[end], 1);
+    if (end >= windowSize) apply(lineStats[end - windowSize], -1);
+    if (end < windowSize - 1) continue;
+    const score = overlap / Math.max(targetTokens.length, windowTotal);
+    if (!best || score > best.score) {
+      best = { startLine: end - windowSize + 2, endLine: end + 1, score };
+    }
+  }
+  return best && best.score >= EDIT_MISS_MIN_SIMILARITY ? best : null;
+}
+
+/**
+ * Explain an old_string miss with the closest region of the file, so the model can copy the
+ * current text instead of re-reading the whole file and guessing again.
+ */
+function describeEditMiss(text: string, oldString: string): string {
+  const base =
+    "old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).";
+  if (text.length > EDIT_MISS_ANALYSIS_MAX_CHARS) {
+    return `${base} The file is too large to search for a closest match; use grep to locate the text, then read those lines and copy them exactly.`;
+  }
+
+  const stripped = stripLineNumberPrefixes(oldString);
+  const prefix = stripped ? LINE_NUMBER_PREFIX_PATTERN.exec(oldString)?.[0] : undefined;
+  const prefixNote = prefix
+    ? ` old_string seems to start each line with a line-number prefix such as ${JSON.stringify(prefix)}; those numbers are not part of the file.`
+    : "";
+  const target = (stripped?.text ?? oldString).replace(/\r\n/g, "\n");
+  const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+  const excerpt = (startLine: number, endLine: number) => {
+    const last = Math.min(endLine, startLine + EDIT_MISS_EXCERPT_MAX_LINES - 1);
+    const shown = lines.slice(startLine - 1, last).map(clipForMessage);
+    if (endLine > last) shown.push(`[... ${endLine - last} more lines ...]`);
+    return `The exact current text of ${formatLineRange(startLine, endLine)} is:\n${shown.join("\n")}`;
+  };
+
+  const whitespaceMatch = findWhitespaceInsensitiveMatch(text, target);
+  if (whitespaceMatch) {
+    const range = formatLineRange(whitespaceMatch.startLine, whitespaceMatch.endLine);
+    if (prefix && text.replace(/\r\n/g, "\n").includes(target)) {
+      return `${base}${prefixNote} Without them the text is at ${range}; remove the prefixes from old_string.`;
+    }
+    return `${base}${prefixNote} The same text is at ${range}, but its whitespace or indentation differs. ${excerpt(whitespaceMatch.startLine, whitespaceMatch.endLine)}`;
+  }
+
+  const targetLines = target.split("\n");
+  if (targetLines.length > 1 && targetLines[targetLines.length - 1] === "") targetLines.pop();
+  const similar = findMostSimilarLines(lines, targetLines);
+  if (similar) {
+    let difference = "";
+    for (let index = 0; index < targetLines.length; index += 1) {
+      const fileLine = lines[similar.startLine - 1 + index];
+      if (fileLine === undefined || fileLine === targetLines[index]) continue;
+      difference = ` First difference at line ${similar.startLine + index}: the file has ${JSON.stringify(clipForMessage(fileLine))} where old_string has ${JSON.stringify(clipForMessage(targetLines[index]))}.`;
+      break;
+    }
+    return `${base}${prefixNote} The most similar text is at ${formatLineRange(similar.startLine, similar.endLine)} (${Math.round(similar.score * 100)}% of words in common).${difference} ${excerpt(similar.startLine, similar.endLine)}`;
+  }
+
+  return `${base}${prefixNote} No similar text was found in the file; re-read it (it may have changed) before retrying.`;
+}
+
 /**
  * EditTools provides surgical file editing capabilities
  * Similar to Claude Code's Edit tool for precise string replacements
@@ -749,9 +885,7 @@ export class EditTools {
         replacements: 1,
       };
     }
-    throw new Error(
-      "old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).",
-    );
+    throw new Error(describeEditMiss(content, oldString));
   }
 
   protected async revalidateEditTarget(options: {

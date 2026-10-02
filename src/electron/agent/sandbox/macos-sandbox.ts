@@ -48,6 +48,23 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
   onProcess: () => undefined,
 };
 
+/**
+ * Kill a sandboxed command together with every process it started. Signalling
+ * only the shell leaves its children running, and they keep the output pipes
+ * (and the caller waiting on them) open.
+ */
+function killProcessGroup(proc: ChildProcess): void {
+  if (proc.pid) {
+    try {
+      process.kill(-proc.pid, "SIGKILL");
+      return;
+    } catch {
+      // The group may already be gone; fall back to the direct child.
+    }
+  }
+  proc.kill("SIGKILL");
+}
+
 const PROTECTED_WORKSPACE_WRITE_RELATIVE_PATHS = [
   ".git",
   ".cowork",
@@ -132,6 +149,8 @@ export class MacOSSandbox implements ISandbox {
       cwd,
       env,
       shell: false,
+      // Lead a new process group so a timeout can stop the whole command.
+      detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     };
 
@@ -155,7 +174,7 @@ export class MacOSSandbox implements ISandbox {
       const timeoutHandle = setTimeout(() => {
         timedOut = true;
         killed = true;
-        proc.kill("SIGKILL");
+        killProcessGroup(proc);
       }, opts.timeout);
 
       proc.stdout?.on("data", (data: Buffer) => {

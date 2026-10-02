@@ -587,6 +587,11 @@ html.visual-calm .calm-main .lets-go-btn::after {
   display: none;
 }
 
+/* The base .lets-go-btn svg rule hardcodes a dark stroke; follow the ink contrast color instead. */
+html.visual-calm .calm-main .lets-go-btn svg {
+  stroke: currentColor;
+}
+
 html.visual-calm .calm-main .lets-go-btn:disabled {
   background: var(--calm-surface-muted);
   color: var(--calm-text-muted);

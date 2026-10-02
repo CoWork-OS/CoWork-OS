@@ -180,6 +180,11 @@ import {
   resolvePromptCacheProviderFamily,
 } from "./llm/prompt-cache";
 import { assertNormalizedTurnTranscript } from "./runtime/turn-transcript-normalizer";
+import {
+  PINNED_CONTEXT_TAGS,
+  removePinnedContextBlock,
+  upsertPinnedContextBlock,
+} from "./pinned-context-blocks";
 import { getCustomSkillLoader } from "./custom-skill-loader";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
@@ -1359,14 +1364,16 @@ export class TaskExecutor {
     );
   }
 
-  private static readonly PINNED_MEMORY_RECALL_TAG = "<cowork_memory_recall>";
-  private static readonly PINNED_MEMORY_RECALL_CLOSE_TAG = "</cowork_memory_recall>";
-  private static readonly PINNED_COMPACTION_SUMMARY_TAG = "<cowork_compaction_summary>";
-  private static readonly PINNED_COMPACTION_SUMMARY_CLOSE_TAG = "</cowork_compaction_summary>";
-  private static readonly PINNED_SHARED_CONTEXT_TAG = "<cowork_shared_context>";
-  private static readonly PINNED_SHARED_CONTEXT_CLOSE_TAG = "</cowork_shared_context>";
-  private static readonly PINNED_USER_PROFILE_TAG = "<cowork_user_profile>";
-  private static readonly PINNED_USER_PROFILE_CLOSE_TAG = "</cowork_user_profile>";
+  private static readonly PINNED_MEMORY_RECALL_TAG = PINNED_CONTEXT_TAGS.memoryRecall.open;
+  private static readonly PINNED_MEMORY_RECALL_CLOSE_TAG = PINNED_CONTEXT_TAGS.memoryRecall.close;
+  private static readonly PINNED_COMPACTION_SUMMARY_TAG =
+    PINNED_CONTEXT_TAGS.compactionSummary.open;
+  private static readonly PINNED_COMPACTION_SUMMARY_CLOSE_TAG =
+    PINNED_CONTEXT_TAGS.compactionSummary.close;
+  private static readonly PINNED_SHARED_CONTEXT_TAG = PINNED_CONTEXT_TAGS.sharedContext.open;
+  private static readonly PINNED_SHARED_CONTEXT_CLOSE_TAG = PINNED_CONTEXT_TAGS.sharedContext.close;
+  private static readonly PINNED_USER_PROFILE_TAG = PINNED_CONTEXT_TAGS.userProfile.open;
+  private static readonly PINNED_USER_PROFILE_CLOSE_TAG = PINNED_CONTEXT_TAGS.userProfile.close;
 
   private static readonly BROWSER_TOOL_TIMEOUT_MS = BROWSER_TOOL_TIMEOUT_BUDGET_MS;
   private static readonly APPROVAL_GATED_TOOL_TIMEOUT_MS = APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS;
@@ -1375,59 +1382,16 @@ export class TaskExecutor {
   private static readonly RUN_COMMAND_DEFAULT_TIMEOUT_MS = 120 * 1000;
   private static readonly RUN_COMMAND_HEAVY_TIMEOUT_MS = 5 * 60 * 1000;
 
+  /**
+   * Insert or replace a pinned block. Blocks are located by their tags even after
+   * consolidateConsecutiveUserMessages merged them into another user message, so
+   * repeated turns update one copy instead of stacking new ones.
+   */
   private upsertPinnedUserBlock(
     messages: LLMMessage[],
     opts: { tag: string; content: string; insertAfterTag?: string },
   ): void {
-    const findIdx = (tag: string) =>
-      messages.findIndex(
-        (m) => typeof m.content === "string" && m.content.trimStart().startsWith(tag),
-      );
-
-    const idx = findIdx(opts.tag);
-    if (idx >= 0) {
-      messages[idx] = { role: "user", content: opts.content };
-      return;
-    }
-
-    // Default insertion: immediately after the first user message (task/step context).
-    let insertAt = Math.min(1, messages.length);
-    if (opts.insertAfterTag) {
-      const afterIdx = findIdx(opts.insertAfterTag);
-      if (afterIdx >= 0) insertAt = afterIdx + 1;
-    }
-
-    insertAt = this.resolveSafePinnedInsertIndex(messages, insertAt);
-    messages.splice(insertAt, 0, { role: "user", content: opts.content });
-  }
-
-  private resolveSafePinnedInsertIndex(messages: LLMMessage[], desiredIndex: number): number {
-    let insertAt = Math.max(0, Math.min(desiredIndex, messages.length));
-
-    while (insertAt > 0 && insertAt < messages.length) {
-      const prev = messages[insertAt - 1];
-      const next = messages[insertAt];
-      const splitsToolPair =
-        prev?.role === "assistant" &&
-        this.messageHasToolUse(prev) &&
-        next?.role === "user" &&
-        this.messageHasToolResult(next);
-
-      if (!splitsToolPair) break;
-      insertAt++;
-    }
-
-    return insertAt;
-  }
-
-  private messageHasToolUse(message: LLMMessage | undefined): boolean {
-    if (!message || !Array.isArray(message.content)) return false;
-    return message.content.some((block: Any) => block?.type === "tool_use");
-  }
-
-  private messageHasToolResult(message: LLMMessage | undefined): boolean {
-    if (!message || !Array.isArray(message.content)) return false;
-    return message.content.some((block: Any) => block?.type === "tool_result");
+    upsertPinnedContextBlock(messages, opts);
   }
 
   /**
@@ -5021,10 +4985,7 @@ export class TaskExecutor {
   }
 
   private removePinnedUserBlock(messages: LLMMessage[], tag: string): void {
-    const idx = messages.findIndex(
-      (m) => typeof m.content === "string" && m.content.trimStart().startsWith(tag),
-    );
-    if (idx >= 0) messages.splice(idx, 1);
+    removePinnedContextBlock(messages, tag);
   }
 
   /**
@@ -5871,6 +5832,8 @@ export class TaskExecutor {
     removedMessages: LLMMessage[];
     maxOutputTokens: number;
     contextLabel: string;
+    /** Summary from an earlier compaction that the new block replaces. */
+    previousSummary?: string;
   }): Promise<string> {
     const removed = opts.removedMessages;
     if (!removed || removed.length === 0) return "";
@@ -5881,6 +5844,29 @@ export class TaskExecutor {
       COMPACTION_SUMMARY_MAX_INPUT_CHARS,
     );
     const contextLabel = opts.contextLabel || "task";
+
+    // Framing inspired by Codex CLI's "handoff to another LLM" pattern:
+    // the summary is presented as a handoff document that another agent produced,
+    // which primes the model to treat it as authoritative context rather than a
+    // lossy cache of its own memory.
+    const SESSION_PREAMBLE =
+      "This session is being continued from earlier context that was compacted due to token limits. " +
+      "A previous agent produced the structured summary below to hand off the work. " +
+      "Use this to build on the work that has already been done and avoid duplicating effort.\n\n";
+
+    // The new block replaces the previous one, so its facts must be carried forward.
+    const previousSummary = truncateToTokens(
+      String(opts.previousSummary || "")
+        .replace(SESSION_PREAMBLE.trim(), "")
+        .trim(),
+      COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS + 2000,
+    );
+    const previousSummarySection = previousSummary
+      ? `Previous summary (from an earlier compaction; the dropped transcript below continues from it). Merge both into one summary: keep every fact that still applies, and let newer information replace outdated state, especially in Current State and Recommended Next Step:
+${previousSummary}
+
+`
+      : "";
 
     const system =
       "You are a session continuity specialist. You produce comprehensive, structured summaries that allow an AI agent to seamlessly continue a session from compacted context. Your summaries are thorough — you preserve all user messages, key decisions, files changed, errors encountered, and pending work. You never omit details that would cause the agent to repeat work or misunderstand the current state.";
@@ -5918,7 +5904,7 @@ export class TaskExecutor {
 
 Context: ${contextLabel}
 
-Dropped transcript:
+${previousSummarySection}Dropped transcript:
 ${transcript}
 `;
 
@@ -5936,23 +5922,21 @@ ${transcript}
       Math.min(opts.maxOutputTokens, scaledMax),
     );
 
-    // Framing inspired by Codex CLI's "handoff to another LLM" pattern:
-    // the summary is presented as a handoff document that another agent produced,
-    // which primes the model to treat it as authoritative context rather than a
-    // lossy cache of its own memory.
-    const SESSION_PREAMBLE =
-      "This session is being continued from earlier context that was compacted due to token limits. " +
-      "A previous agent produced the structured summary below to hand off the work. " +
-      "Use this to build on the work that has already been done and avoid duplicating effort.\n\n";
-
     const buildDeterministicFallback = (): string => {
       const rawTranscript = InputSanitizer.sanitizeMemoryContent(transcript).trim();
       const fallbackBody =
         rawTranscript || `Dropped ${removed.length} messages without text content.`;
-      const fallback = truncateToTokens(fallbackBody, Math.max(1, outputBudget - 32));
+      const bodyBudget = Math.max(1, outputBudget - 32);
+      const earlierSummary = previousSummary
+        ? `Earlier summary:\n${truncateToTokens(previousSummary, Math.floor(bodyBudget / 2))}\n\n`
+        : "";
+      const fallback = truncateToTokens(
+        fallbackBody,
+        Math.max(1, bodyBudget - estimateTokens(earlierSummary)),
+      );
       return [
         TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG,
-        SESSION_PREAMBLE + `Dropped context (raw, truncated):\n${fallback}`,
+        SESSION_PREAMBLE + earlierSummary + `Dropped context (raw, truncated):\n${fallback}`,
         TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG,
       ].join("\n");
     };

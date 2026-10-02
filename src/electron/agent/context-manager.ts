@@ -1,6 +1,7 @@
 import { LLMMessage, LLMContent as _LLMContent, LLMToolResult as _LLMToolResult } from "./llm";
 import { estimateImageTokens } from "./llm/image-utils";
 import { getModelContextWindow } from "../../shared/model-metadata";
+import { PINNED_CONTEXT_OPEN_TAGS } from "./pinned-context-blocks";
 
 /**
  * Context Manager handles conversation history to prevent "input too long" errors
@@ -125,11 +126,7 @@ const ACTIVE_PATH_CONTEXT_WINDOW = 4;
 
 // Messages that begin with one of these tags are treated as "pinned" and should
 // survive compaction. (They are system-generated context blocks, not normal chat turns.)
-const PINNED_MESSAGE_TAG_PREFIXES = [
-  "<cowork_memory_recall>",
-  "<cowork_compaction_summary>",
-  "<cowork_shared_context>",
-] as const;
+const PINNED_MESSAGE_TAG_PREFIXES = PINNED_CONTEXT_OPEN_TAGS;
 
 function messageTextForPinnedCheck(message: LLMMessage): string {
   if (typeof message.content === "string") return message.content;

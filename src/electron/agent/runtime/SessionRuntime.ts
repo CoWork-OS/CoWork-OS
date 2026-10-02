@@ -77,6 +77,7 @@ import type { ToolRegistry } from "../tools/registry";
 import type { JevContextCompactionResult } from "../jev/context-compaction-decision";
 import { DurableContextService } from "../../memory/DurableContextService";
 import { InputSanitizer } from "../security/input-sanitizer";
+import { findPinnedContextBlockContent, PINNED_CONTEXT_TAGS } from "../pinned-context-blocks";
 
 interface WebEvidenceEntry {
   tool: "web_search" | "web_fetch";
@@ -1069,9 +1070,11 @@ export class SessionRuntime {
     }
     this.taskListVerificationReminderPending = false;
     return [
+      PINNED_CONTEXT_TAGS.taskListReminder.open,
       "CHECKLIST REMINDER:",
       "- All implementation checklist items are complete.",
       "- Before finishing, add a verification checklist item and run it when appropriate.",
+      PINNED_CONTEXT_TAGS.taskListReminder.close,
     ].join("\n");
   }
 
@@ -2079,15 +2082,18 @@ export class SessionRuntime {
     );
     this.deps.checkBudgets();
 
+    // Pinned blocks are found again by these tags on every iteration, so each
+    // one is updated in place instead of being stacked into message[0].
+    const tags = PINNED_CONTEXT_TAGS;
     const userProfileBlock = this.deps.buildUserProfileBlock(10);
     if (userProfileBlock) {
       this.deps.upsertPinnedUserBlock(messages, {
-        tag: "PINNED_USER_PROFILE",
+        tag: tags.userProfile.open,
         content: userProfileBlock,
-        insertAfterTag: "PINNED_COMPACTION_SUMMARY",
+        insertAfterTag: tags.compactionSummary.open,
       });
     } else {
-      this.deps.removePinnedUserBlock(messages, "PINNED_USER_PROFILE");
+      this.deps.removePinnedUserBlock(messages, tags.userProfile.open);
     }
 
     if (opts.allowSharedContextInjection) {
@@ -2099,15 +2105,15 @@ export class SessionRuntime {
 
       if (lastSharedContextBlock) {
         this.deps.upsertPinnedUserBlock(messages, {
-          tag: "PINNED_SHARED_CONTEXT",
+          tag: tags.sharedContext.open,
           content: lastSharedContextBlock,
-          insertAfterTag: "PINNED_USER_PROFILE",
+          insertAfterTag: tags.userProfile.open,
         });
       } else {
-        this.deps.removePinnedUserBlock(messages, "PINNED_SHARED_CONTEXT");
+        this.deps.removePinnedUserBlock(messages, tags.sharedContext.open);
       }
     } else {
-      this.deps.removePinnedUserBlock(messages, "PINNED_SHARED_CONTEXT");
+      this.deps.removePinnedUserBlock(messages, tags.sharedContext.open);
     }
 
     if (opts.allowMemoryInjection) {
@@ -2122,30 +2128,30 @@ export class SessionRuntime {
 
       if (lastTurnMemoryRecallBlock) {
         this.deps.upsertPinnedUserBlock(messages, {
-          tag: "PINNED_MEMORY_RECALL",
+          tag: tags.memoryRecall.open,
           content: lastTurnMemoryRecallBlock,
           insertAfterTag: lastSharedContextBlock
-            ? "PINNED_SHARED_CONTEXT"
-            : "PINNED_COMPACTION_SUMMARY",
+            ? tags.sharedContext.open
+            : tags.compactionSummary.open,
         });
       } else {
-        this.deps.removePinnedUserBlock(messages, "PINNED_MEMORY_RECALL");
+        this.deps.removePinnedUserBlock(messages, tags.memoryRecall.open);
       }
     }
 
     const taskListReminder = this.consumeTaskListVerificationReminder(opts.checklistUpdatedAfter);
     if (taskListReminder) {
       this.deps.upsertPinnedUserBlock(messages, {
-        tag: "PINNED_TASK_LIST_REMINDER",
+        tag: tags.taskListReminder.open,
         content: taskListReminder,
         insertAfterTag: lastTurnMemoryRecallBlock
-          ? "PINNED_MEMORY_RECALL"
+          ? tags.memoryRecall.open
           : lastSharedContextBlock
-            ? "PINNED_SHARED_CONTEXT"
-            : "PINNED_COMPACTION_SUMMARY",
+            ? tags.sharedContext.open
+            : tags.compactionSummary.open,
       });
     } else {
-      this.deps.removePinnedUserBlock(messages, "PINNED_TASK_LIST_REMINDER");
+      this.deps.removePinnedUserBlock(messages, tags.taskListReminder.open);
     }
 
     await this.deps.maybePreCompactionMemoryFlush({
@@ -2280,11 +2286,7 @@ export class SessionRuntime {
           }
 
           if (summaryResult.summaryBlock) {
-            const summaryText = this.deps.extractPinnedBlockContent(
-              summaryResult.summaryBlock,
-              "PINNED_COMPACTION_SUMMARY",
-              "PINNED_COMPACTION_SUMMARY_CLOSE",
-            );
+            const summaryText = this.extractCompactionSummaryText(summaryResult.summaryBlock);
             this.emitBestEffortEvent("context_summarized", {
               compactionId: compactionSession.compactionId,
               summaryPreview: compactPreview(InputSanitizer.sanitizeMemoryContent(summaryText)),
@@ -2334,11 +2336,7 @@ export class SessionRuntime {
             }
 
             if (summaryResult.summaryBlock) {
-              const summaryText = this.deps.extractPinnedBlockContent(
-                summaryResult.summaryBlock,
-                "PINNED_COMPACTION_SUMMARY",
-                "PINNED_COMPACTION_SUMMARY_CLOSE",
-              );
+              const summaryText = this.extractCompactionSummaryText(summaryResult.summaryBlock);
               this.emitBestEffortEvent("context_summarized", {
                 compactionId: compactionSession.compactionId,
                 summaryPreview: compactPreview(InputSanitizer.sanitizeMemoryContent(summaryText)),
@@ -2396,11 +2394,7 @@ export class SessionRuntime {
           });
         }
         const summaryText = compactionSummaryBlock
-          ? this.deps.extractPinnedBlockContent(
-              compactionSummaryBlock,
-              "PINNED_COMPACTION_SUMMARY",
-              "PINNED_COMPACTION_SUMMARY_CLOSE",
-            )
+          ? this.extractCompactionSummaryText(compactionSummaryBlock)
           : undefined;
         this.completeCompaction({
           compactionId: compactionSession.compactionId,
@@ -2465,6 +2459,14 @@ export class SessionRuntime {
     };
   }
 
+  private extractCompactionSummaryText(summaryBlock: string): string {
+    return this.deps.extractPinnedBlockContent(
+      summaryBlock,
+      PINNED_CONTEXT_TAGS.compactionSummary.open,
+      PINNED_CONTEXT_TAGS.compactionSummary.close,
+    );
+  }
+
   /**
    * Install one durable compaction summary for every compaction path.
    *
@@ -2513,10 +2515,15 @@ export class SessionRuntime {
         ? Math.max(200, Math.floor(opts.maxOutputTokens))
         : Math.min(4000, Math.max(800, Math.floor(slack * 0.6)));
 
+    // The new summary replaces the current one, so the summarizer gets it as input.
+    const previousSummary =
+      findPinnedContextBlockContent(opts.messages, PINNED_CONTEXT_TAGS.compactionSummary.open) ||
+      undefined;
     let summaryBlock = await buildSummary({
       removedMessages,
       maxOutputTokens: requestedMaxOutputTokens,
       contextLabel: opts.contextLabel,
+      ...(previousSummary ? { previousSummary } : {}),
     });
     if (typeof summaryBlock !== "string" || summaryBlock.trim().length === 0) {
       throw new Error("compaction_summary_empty");
@@ -2541,7 +2548,7 @@ export class SessionRuntime {
       | undefined;
     if (typeof upsertPinnedUserBlock === "function") {
       upsertPinnedUserBlock(replacementMessages, {
-        tag: "PINNED_COMPACTION_SUMMARY",
+        tag: PINNED_CONTEXT_TAGS.compactionSummary.open,
         content: summaryBlock,
       });
     }
@@ -2758,11 +2765,7 @@ export class SessionRuntime {
           removedApproxTokens: Math.max(0, tokensBefore - tokensAfter),
           targetRatio: CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
           summaryPreview: summaryResult.summaryBlock
-            ? this.deps.extractPinnedBlockContent(
-                summaryResult.summaryBlock,
-                "PINNED_COMPACTION_SUMMARY",
-                "PINNED_COMPACTION_SUMMARY_CLOSE",
-              )
+            ? this.extractCompactionSummaryText(summaryResult.summaryBlock)
             : undefined,
           fallbackUsed: !summaryResult.summaryBlock,
           extra: {
@@ -2910,11 +2913,7 @@ export class SessionRuntime {
         ...this.projectTaskState(),
       });
       const summaryText = summaryBlock
-        ? this.deps.extractPinnedBlockContent(
-            summaryBlock,
-            "PINNED_COMPACTION_SUMMARY",
-            "PINNED_COMPACTION_SUMMARY_CLOSE",
-          )
+        ? this.extractCompactionSummaryText(summaryBlock)
         : undefined;
       this.completeCompaction({
         compactionId: compactionSession.compactionId,
@@ -2939,13 +2938,7 @@ export class SessionRuntime {
         this.emitBestEffortEvent("context_summarized", {
           compactionId: compactionSession.compactionId,
           summaryPreview: compactPreview(
-            InputSanitizer.sanitizeMemoryContent(
-              this.deps.extractPinnedBlockContent(
-                summaryBlock,
-                "PINNED_COMPACTION_SUMMARY",
-                "PINNED_COMPACTION_SUMMARY_CLOSE",
-              ),
-            ),
+            InputSanitizer.sanitizeMemoryContent(this.extractCompactionSummaryText(summaryBlock)),
           ),
           summaryRef: `compaction:${compactionSession.compactionId}`,
           removedCount: compacted.meta.removedMessages.count,

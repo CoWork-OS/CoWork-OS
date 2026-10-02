@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 import { APPROVAL_GATED_TOOL_TIMEOUT_MS } from "../approval-timeouts";
+import {
+  BROWSER_ACTION_TIMEOUT_MS,
+  BROWSER_FAILURE_CAPTURE_TIMEOUT_MS,
+  BROWSER_NAVIGATION_TIMEOUT_MS,
+  BROWSER_WAIT_TIMEOUT_MS,
+} from "../browser/browser-timeouts";
 import { BuiltinToolsSettingsManager } from "../tools/builtin-settings";
 
 vi.mock("electron", () => ({
@@ -126,6 +132,29 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     });
 
     expect(timeoutMs).toBe(600_000);
+    timeoutSpy.mockRestore();
+  });
+
+  it("outlasts browser action and navigation budgets so their own errors reach the model", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: false } };
+
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(null);
+
+    expect(executor.getToolTimeoutMs("browser_click", { selector: "#submit" })).toBeGreaterThan(
+      BROWSER_ACTION_TIMEOUT_MS + BROWSER_FAILURE_CAPTURE_TIMEOUT_MS,
+    );
+    expect(executor.getToolTimeoutMs("browser_wait", { selector: "#results" })).toBeGreaterThan(
+      BROWSER_WAIT_TIMEOUT_MS + BROWSER_FAILURE_CAPTURE_TIMEOUT_MS,
+    );
+    expect(
+      executor.getToolTimeoutMs("browser_navigate", { url: "https://a.test" }),
+    ).toBeGreaterThan(BROWSER_NAVIGATION_TIMEOUT_MS);
+    expect(
+      executor.getToolTimeoutMs("browser_click", { selector: "#slow", timeout_ms: 90_000 }),
+    ).toBeGreaterThan(90_000 + BROWSER_FAILURE_CAPTURE_TIMEOUT_MS);
     timeoutSpy.mockRestore();
   });
 

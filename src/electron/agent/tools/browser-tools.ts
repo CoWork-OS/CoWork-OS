@@ -1066,7 +1066,10 @@ export class BrowserTools {
             },
             timeout_ms: {
               type: "number",
-              description: "Action timeout in ms. Use 60000+ for slow pages (default: 90_000)",
+              description:
+                "Max ms to wait for the element and complete the action (default: 15000). " +
+                "Raise it only for elements that render slowly; a selector that matches " +
+                "nothing fails fast with candidate selectors.",
             },
             session_id: {
               type: "string",
@@ -1127,7 +1130,10 @@ export class BrowserTools {
             },
             timeout_ms: {
               type: "number",
-              description: "Action timeout in ms. Use 60000+ for slow pages (default: 90_000)",
+              description:
+                "Max ms to wait for the element and complete the action (default: 15000). " +
+                "Raise it only for elements that render slowly; a selector that matches " +
+                "nothing fails fast with candidate selectors.",
             },
             session_id: {
               type: "string",
@@ -1161,7 +1167,10 @@ export class BrowserTools {
             },
             timeout_ms: {
               type: "number",
-              description: "Action timeout in ms. Use 60000+ for slow pages (default: 90_000)",
+              description:
+                "Max ms to wait for the element and complete the action (default: 15000). " +
+                "Raise it only for elements that render slowly; a selector that matches " +
+                "nothing fails fast with candidate selectors.",
             },
             session_id: {
               type: "string",

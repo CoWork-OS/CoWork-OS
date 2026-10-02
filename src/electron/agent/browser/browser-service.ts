@@ -9,6 +9,12 @@ import {
   type WorkspaceFilesystemAccessOptions,
 } from "../../security/access-profile-paths";
 import { createLogger } from "../../utils/logger";
+import {
+  BROWSER_ACTION_TIMEOUT_MS,
+  BROWSER_FAILURE_CAPTURE_TIMEOUT_MS,
+  BROWSER_NAVIGATION_TIMEOUT_MS,
+  BROWSER_WAIT_TIMEOUT_MS,
+} from "./browser-timeouts";
 
 const log = createLogger("BrowserService");
 
@@ -114,7 +120,10 @@ function rankConsentButtonName(name: string): number {
 
 export interface BrowserOptions {
   headless?: boolean;
+  /** Launch and navigation timeout in ms (default: BROWSER_NAVIGATION_TIMEOUT_MS) */
   timeout?: number;
+  /** Default element-action timeout in ms (default: BROWSER_ACTION_TIMEOUT_MS) */
+  actionTimeout?: number;
   viewport?: { width: number; height: number };
   /**
    * If set, Playwright will use a persistent browser context rooted at this directory
@@ -181,6 +190,18 @@ export interface PageContent {
   forms: Array<{ action: string; method: string; inputs: string[] }>;
 }
 
+/** A visible interactive element and a selector the click/fill/type tools accept for it. */
+export interface InteractiveElement {
+  role: string;
+  name: string;
+  selector: string;
+  type?: string;
+  placeholder?: string;
+  href?: string;
+  checked?: boolean;
+  disabled?: boolean;
+}
+
 export interface ClickResult {
   success: boolean;
   element?: string;
@@ -188,6 +209,8 @@ export interface ClickResult {
   screenshot?: string;
   url?: string;
   content?: string;
+  /** When the selector matched nothing: visible elements the caller can target instead */
+  candidates?: InteractiveElement[];
 }
 
 export interface FillResult {
@@ -198,6 +221,202 @@ export interface FillResult {
   screenshot?: string;
   url?: string;
   content?: string;
+  /** When the selector matched nothing: visible elements the caller can target instead */
+  candidates?: InteractiveElement[];
+}
+
+/** Thrown when an action's selector never matched any element within its budget. */
+class SelectorNotFoundError extends Error {
+  constructor(
+    message: string,
+    readonly candidates: InteractiveElement[],
+  ) {
+    super(message);
+    this.name = "SelectorNotFoundError";
+  }
+}
+
+function isPlaywrightTimeoutError(error: unknown): boolean {
+  const err = error as Error | undefined;
+  return err?.name === "TimeoutError" || /\bTimeout \d+ms exceeded\b/.test(String(err?.message));
+}
+
+function formatInteractiveElement(element: InteractiveElement): string {
+  const name = element.name ? ` "${element.name}"` : "";
+  return `${element.role}${name} -> ${element.selector}`;
+}
+
+const SELECTOR_NOISE_TOKENS = new Set(["text", "has", "nth", "type", "child", "not", "role"]);
+
+/**
+ * Orders candidates for a selector that matched nothing: elements sharing a word with the
+ * requested selector first (e.g. "#submit" -> "#submit-btn"), then non-links, then DOM order.
+ */
+function rankCandidatesForSelector(
+  elements: InteractiveElement[],
+  selector: string,
+): InteractiveElement[] {
+  const tokens = (selector.toLowerCase().match(/[a-z0-9]{3,}/g) || []).filter(
+    (token) => !SELECTOR_NOISE_TOKENS.has(token),
+  );
+  const score = (element: InteractiveElement) => {
+    const haystack =
+      `${element.selector} ${element.name} ${element.placeholder || ""}`.toLowerCase();
+    return tokens.filter((token) => haystack.includes(token)).length;
+  };
+  return elements
+    .map((element, index) => ({
+      element,
+      index,
+      score: score(element),
+      link: element.role === "link",
+    }))
+    .sort((a, b) => b.score - a.score || Number(a.link) - Number(b.link) || a.index - b.index)
+    .map((entry) => entry.element);
+}
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    promise.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+/**
+ * Page script listing visible interactive elements in DOM order, each with a selector that is
+ * unique on the page (id, name/test-id/label attributes, unique href, or a structural path).
+ * Links are capped separately so a large navigation menu cannot crowd out buttons and inputs.
+ */
+function interactiveElementsScript(limit: number, linkLimit: number): string {
+  return `
+    (() => {
+      const limit = ${Math.max(0, Math.floor(limit))};
+      const linkLimit = ${Math.max(0, Math.floor(linkLimit))};
+      const clip = (value, max) => {
+        const text = String(value || "").replace(/\\s+/g, " ").trim();
+        return text.length > max ? text.slice(0, max - 1) + "…" : text;
+      };
+      const esc = (value) =>
+        window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/[^\\w-]/g, "\\\\$&");
+      const quote = (value) => '"' + String(value).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"') + '"';
+      const unique = (selector) => {
+        try {
+          return document.querySelectorAll(selector).length === 1;
+        } catch {
+          return false;
+        }
+      };
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const style = getComputedStyle(el);
+        return style.visibility !== "hidden" && style.display !== "none";
+      };
+      const selectorFor = (el) => {
+        const tag = el.tagName.toLowerCase();
+        if (el.id && unique("#" + esc(el.id))) return "#" + esc(el.id);
+        for (const attr of ["data-testid", "data-test", "name", "aria-label", "placeholder"]) {
+          const value = el.getAttribute(attr);
+          if (value && value.length <= 80 && unique(tag + "[" + attr + "=" + quote(value) + "]")) {
+            return tag + "[" + attr + "=" + quote(value) + "]";
+          }
+        }
+        const href = tag === "a" ? el.getAttribute("href") : null;
+        if (href && href.length <= 160 && unique("a[href=" + quote(href) + "]")) {
+          return "a[href=" + quote(href) + "]";
+        }
+        const parts = [];
+        let node = el;
+        while (node && node.nodeType === 1 && node !== document.body && node !== document.documentElement) {
+          if (node !== el && node.id && unique("#" + esc(node.id))) {
+            parts.unshift("#" + esc(node.id));
+            return parts.join(" > ");
+          }
+          let part = node.tagName.toLowerCase();
+          const parent = node.parentElement;
+          if (parent) {
+            const same = Array.from(parent.children).filter((child) => child.tagName === node.tagName);
+            if (same.length > 1) part += ":nth-of-type(" + (same.indexOf(node) + 1) + ")";
+          }
+          parts.unshift(part);
+          node = parent;
+        }
+        parts.unshift("body");
+        return parts.join(" > ");
+      };
+      const roleFor = (el) => {
+        const explicit = el.getAttribute("role");
+        if (explicit) return explicit;
+        const tag = el.tagName.toLowerCase();
+        if (tag === "a") return "link";
+        if (tag === "button") return "button";
+        if (tag === "select") return el.multiple ? "listbox" : "combobox";
+        if (tag === "textarea" || el.isContentEditable) return "textbox";
+        if (tag === "input") {
+          const type = (el.getAttribute("type") || "text").toLowerCase();
+          if (["button", "submit", "reset", "image"].includes(type)) return "button";
+          if (type === "checkbox" || type === "radio") return type;
+          if (type === "range") return "slider";
+          return "textbox";
+        }
+        return tag;
+      };
+      const nameFor = (el, role) => {
+        const aria = el.getAttribute("aria-label");
+        if (aria) return clip(aria, 80);
+        const labelledBy = el.getAttribute("aria-labelledby");
+        if (labelledBy) {
+          const text = labelledBy.split(/\\s+/).map((id) => document.getElementById(id)?.innerText || "").join(" ");
+          if (text.trim()) return clip(text, 80);
+        }
+        if (role === "textbox" || role === "combobox" || role === "listbox" || role === "checkbox" || role === "radio" || role === "slider") {
+          const label = el.labels && el.labels[0] ? el.labels[0].innerText : "";
+          if (label && label.trim()) return clip(label, 80);
+          return clip(el.getAttribute("placeholder") || el.getAttribute("name") || el.getAttribute("title") || "", 80);
+        }
+        const text = el.innerText || el.value || el.getAttribute("title") || el.querySelector("img[alt]")?.getAttribute("alt") || "";
+        return clip(text, 80);
+      };
+      const candidates = document.querySelectorAll(
+        'button, [role="button"], input:not([type="hidden"]), textarea, select, [contenteditable="true"], ' +
+          '[role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], ' +
+          '[role="combobox"], [role="textbox"], [role="link"], a[href]'
+      );
+      const items = [];
+      let links = 0;
+      for (let index = 0; index < candidates.length && index < 4000 && items.length < limit; index += 1) {
+        const el = candidates[index];
+        try {
+          if (!isVisible(el)) continue;
+          const role = roleFor(el);
+          if (role === "link") {
+            if (links >= linkLimit) continue;
+            links += 1;
+          }
+          const item = { role, name: nameFor(el, role), selector: selectorFor(el) };
+          const tag = el.tagName.toLowerCase();
+          if (tag === "input") item.type = (el.getAttribute("type") || "text").toLowerCase();
+          if (el.getAttribute("placeholder")) item.placeholder = clip(el.getAttribute("placeholder"), 80);
+          if (tag === "a" && el.href) item.href = clip(el.href, 200);
+          if (role === "checkbox" || role === "radio" || role === "switch") {
+            item.checked = el.checked === true || el.getAttribute("aria-checked") === "true";
+          }
+          if (el.disabled === true || el.getAttribute("aria-disabled") === "true") item.disabled = true;
+          items.push(item);
+        } catch {
+          // Skip elements that cannot be described.
+        }
+      }
+      return items;
+    })()
+  `;
 }
 
 export interface EvaluateResult {
@@ -224,7 +443,6 @@ function normalizeEvaluateScript(script: string): string {
  * BrowserService provides browser automation capabilities using Playwright
  */
 export class BrowserService {
-  private static readonly DEFAULT_ACTION_TIMEOUT_MS = 90_000;
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
@@ -237,7 +455,8 @@ export class BrowserService {
     this.workspace = workspace;
     this.options = {
       headless: options.headless ?? true,
-      timeout: options.timeout ?? BrowserService.DEFAULT_ACTION_TIMEOUT_MS,
+      timeout: options.timeout ?? BROWSER_NAVIGATION_TIMEOUT_MS,
+      actionTimeout: options.actionTimeout ?? BROWSER_ACTION_TIMEOUT_MS,
       viewport: options.viewport ?? { width: 1280, height: 720 },
       userDataDir: options.userDataDir,
       channel: options.channel,
@@ -245,11 +464,19 @@ export class BrowserService {
     };
   }
 
-  private getActionTimeout(timeoutMs?: number): number {
-    const fallback = this.options.timeout ?? BrowserService.DEFAULT_ACTION_TIMEOUT_MS;
+  private getActionTimeout(
+    timeoutMs?: number,
+    fallback = this.options.actionTimeout ?? BROWSER_ACTION_TIMEOUT_MS,
+  ): number {
     const normalized = Number(timeoutMs);
     if (!Number.isFinite(normalized) || normalized <= 0) return fallback;
     return Math.round(normalized);
+  }
+
+  /** Applies the action default to all page operations, keeping the longer navigation budget. */
+  private applyPageTimeouts(page: Page): void {
+    page.setDefaultTimeout(this.options.actionTimeout ?? BROWSER_ACTION_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(this.options.timeout ?? BROWSER_NAVIGATION_TIMEOUT_MS);
   }
 
   private assertNetworkUrlAllowed(rawUrl: string, toolName = "browser_navigate"): void {
@@ -344,7 +571,6 @@ export class BrowserService {
   private isRetryableBrowserError(error: unknown): boolean {
     const message = String((error as Error)?.message || error || "").toLowerCase();
     const retryable = [
-      "timeout",
       "not visible",
       "not found",
       "detached",
@@ -360,34 +586,82 @@ export class BrowserService {
     return retryable.some((token) => message.includes(token));
   }
 
+  /**
+   * Waits for the selector and runs the action within one time budget. Timeouts are never
+   * retried (the budget is already spent); a selector that matched nothing fails with a list of
+   * visible interactive elements instead. Transient errors (detached, not stable, intercepted)
+   * get one more attempt inside the remaining budget.
+   */
   private async runLocatorActionWithRetry<T>(
     selector: string,
     timeoutMs: number | undefined,
     operation: (locator: Locator, timeout: number) => Promise<T>,
   ): Promise<T> {
-    const baseTimeout = this.getActionTimeout(timeoutMs);
+    const budget = this.getActionTimeout(timeoutMs);
+    const deadline = Date.now() + budget;
+    const remaining = () => Math.max(1_000, deadline - Date.now());
     const attempts = 2;
-    const perAttemptTimeout = Math.max(5_000, Math.floor(baseTimeout / attempts));
     let lastError: unknown;
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const locator = this.page!.locator(selector);
       try {
-        const locator = this.page!.locator(selector);
-        await locator.waitFor({ state: "visible", timeout: perAttemptTimeout });
-        await locator.scrollIntoViewIfNeeded();
+        await locator.waitFor({ state: "visible", timeout: remaining() });
+        await locator.scrollIntoViewIfNeeded({ timeout: remaining() });
         if (attempt > 0) {
           await this.page!.waitForTimeout(200).catch(() => {});
         }
-        return await operation(locator, perAttemptTimeout);
+        return await operation(locator, remaining());
       } catch (error) {
         lastError = error;
-        if (attempt === attempts - 1 || !this.isRetryableBrowserError(error)) {
+        if (isPlaywrightTimeoutError(error)) {
+          const matches = await locator.count().catch(() => undefined);
+          if (matches === 0) {
+            throw await this.selectorNotFoundError(selector, budget);
+          }
+          break;
+        }
+        if (
+          attempt === attempts - 1 ||
+          Date.now() >= deadline ||
+          !this.isRetryableBrowserError(error)
+        ) {
           break;
         }
       }
     }
 
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private async selectorNotFoundError(
+    selector: string,
+    waitedMs: number,
+  ): Promise<SelectorNotFoundError> {
+    const elements = await this.getInteractiveElements(40, 10).catch(() => []);
+    const candidates = rankCandidatesForSelector(elements, selector).slice(0, 8);
+    const hint =
+      candidates.length > 0
+        ? ` Visible interactive elements: ${candidates.map(formatInteractiveElement).join("; ")}.` +
+          " Retry with one of these selectors, or inspect the page with browser_get_content."
+        : " The page has no visible interactive elements; check that it finished loading.";
+    return new SelectorNotFoundError(
+      `No element matches selector "${selector}" (waited ${waitedMs}ms).${hint}`,
+      candidates,
+    );
+  }
+
+  /**
+   * Visible interactive elements (buttons, inputs, selects, links) in DOM order, each with a
+   * selector accepted by click/fill/type. Links are capped at `linkLimit`.
+   */
+  private async getInteractiveElements(
+    limit: number,
+    linkLimit: number,
+  ): Promise<InteractiveElement[]> {
+    if (!this.page) return [];
+    const items = await this.page.evaluate(interactiveElementsScript(limit, linkLimit));
+    return Array.isArray(items) ? (items as InteractiveElement[]) : [];
   }
 
   private async captureFailureContext(
@@ -406,29 +680,30 @@ export class BrowserService {
       selector?: string;
     } = { selector };
 
-    if (!this.page) {
+    const page = this.page;
+    if (!page) {
       return context;
     }
 
-    try {
+    // Best effort and bounded: diagnostics must not outlive the tool's own timeout.
+    context.url = page.url();
+    const capture = (async () => {
       const screenshot = await this.screenshot(
         `browser-${action}-failure-${Date.now()}.png`,
         false,
       );
       context.screenshot = screenshot.path;
-      context.url = this.page.url();
-      context.content = await this.page.evaluate(`
-        () => {
-          const body = (globalThis as Any).document?.body;
+      context.content = await page.evaluate(`
+        (() => {
+          const body = document.body;
           if (!body || !body.innerText) return '';
           return String(body.innerText).replace(/\\s+/g, ' ').trim().slice(0, 2000);
-        }
+        })()
       `);
-    } catch {
-      // Best effort for diagnostics
-    }
+    })();
+    await settleWithin(capture, BROWSER_FAILURE_CAPTURE_TIMEOUT_MS);
 
-    return context;
+    return { ...context };
   }
 
   private async resolveBraveExecutablePath(): Promise<string | undefined> {
@@ -495,7 +770,7 @@ export class BrowserService {
         context = contexts[0] ?? (await browser.newContext({ viewport: this.options.viewport }));
         this.configureContext(context);
         const page = context.pages()[0] ?? (await context.newPage());
-        page.setDefaultTimeout(this.options.timeout!);
+        this.applyPageTimeouts(page);
         await this.configurePage(page);
         this.assertPageUrlAllowed(page.url());
         this.browser = browser;
@@ -540,7 +815,7 @@ export class BrowserService {
 
       this.configureContext(context);
       const page = context.pages()[0] ?? (await context.newPage());
-      page.setDefaultTimeout(this.options.timeout!);
+      this.applyPageTimeouts(page);
       await this.configurePage(page);
 
       // Only assign to instance variables after all operations succeed
@@ -816,6 +1091,7 @@ export class BrowserService {
         success: false,
         element: selector,
         error: (error as Error).message,
+        ...(error instanceof SelectorNotFoundError ? { candidates: error.candidates } : {}),
         ...context,
       };
     }
@@ -850,6 +1126,7 @@ export class BrowserService {
         selector,
         value,
         error: (error as Error).message,
+        ...(error instanceof SelectorNotFoundError ? { candidates: error.candidates } : {}),
         ...context,
       };
     }
@@ -865,7 +1142,9 @@ export class BrowserService {
     timeoutMs?: number,
   ): Promise<FillResult> {
     await this.ensurePage();
-    const actionTimeout = this.getActionTimeout(timeoutMs);
+    // Typing with a per-key delay takes time of its own; budget it on top of the action default.
+    const actionTimeout =
+      this.getActionTimeout(timeoutMs) + String(text ?? "").length * Math.max(0, delay);
 
     try {
       const _locator = await this.runLocatorActionWithRetry(
@@ -890,6 +1169,7 @@ export class BrowserService {
         selector,
         value: text,
         error: (error as Error).message,
+        ...(error instanceof SelectorNotFoundError ? { candidates: error.candidates } : {}),
         ...context,
       };
     }
@@ -919,7 +1199,7 @@ export class BrowserService {
     await this.ensurePage();
 
     try {
-      const actionTimeout = this.getActionTimeout(timeout);
+      const actionTimeout = this.getActionTimeout(timeout, BROWSER_WAIT_TIMEOUT_MS);
       await this.page!.waitForSelector(selector, { timeout: actionTimeout });
       return { success: true, selector };
     } catch (error) {
@@ -934,7 +1214,7 @@ export class BrowserService {
     await this.ensurePage();
 
     try {
-      const actionTimeout = this.getActionTimeout(timeout);
+      const actionTimeout = this.getActionTimeout(timeout, this.options.timeout);
       await this.page!.waitForLoadState("load", { timeout: actionTimeout });
       return { success: true, url: this.page!.url() };
     } catch (error) {

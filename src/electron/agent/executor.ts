@@ -86,6 +86,10 @@ import { promisify } from "util";
 import { AgentDaemon } from "./daemon";
 import { APPROVAL_GATED_TOOL_TIMEOUT_MS as APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS } from "./approval-timeouts";
 import {
+  BROWSER_ACTION_DIAGNOSTICS_HEADROOM_MS,
+  BROWSER_TOOL_TIMEOUT_MS as BROWSER_TOOL_TIMEOUT_BUDGET_MS,
+} from "./browser/browser-timeouts";
+import {
   discoverDocumentForAnalysis,
   extractDocumentForAnalysis,
   splitDocumentForAnalysis,
@@ -1344,7 +1348,7 @@ export class TaskExecutor {
   private static readonly PINNED_USER_PROFILE_TAG = "<cowork_user_profile>";
   private static readonly PINNED_USER_PROFILE_CLOSE_TAG = "</cowork_user_profile>";
 
-  private static readonly BROWSER_TOOL_TIMEOUT_MS = 90 * 1000;
+  private static readonly BROWSER_TOOL_TIMEOUT_MS = BROWSER_TOOL_TIMEOUT_BUDGET_MS;
   private static readonly APPROVAL_GATED_TOOL_TIMEOUT_MS = APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS;
   /** Video generation submission can take 10–30 s for job creation + initial processing. */
   private static readonly VIDEO_TOOL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -10603,8 +10607,12 @@ ${transcript}
         ? Math.round(toolInput.timeout_ms)
         : undefined;
     if (browserActionTimeout) {
+      // Leave room past the action budget for the tool to capture and return its own failure.
       return clampToStepTimeout(
-        Math.max(browserActionTimeout, TaskExecutor.BROWSER_TOOL_TIMEOUT_MS),
+        Math.max(
+          browserActionTimeout + BROWSER_ACTION_DIAGNOSTICS_HEADROOM_MS,
+          TaskExecutor.BROWSER_TOOL_TIMEOUT_MS,
+        ),
       );
     }
 

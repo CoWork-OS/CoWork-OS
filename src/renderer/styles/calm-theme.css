@@ -351,21 +351,6 @@ html.visual-calm .calm-popover-item.danger > svg:first-child {
   color: #dc2626;
 }
 
-html.visual-calm .calm-popover-item-icon {
-  display: inline-flex;
-  width: 20px;
-  height: 20px;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-html.visual-calm .calm-popover-item-icon svg,
-html.visual-calm .calm-popover-item-icon img {
-  width: 18px;
-  height: 18px;
-}
-
 html.visual-calm .calm-popover-item-copy {
   display: flex;
   flex-direction: column;
@@ -394,32 +379,6 @@ html.visual-calm .calm-popover-divider {
   background: var(--calm-border);
 }
 
-html.visual-calm .calm-popover-back {
-  appearance: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  background: transparent;
-  color: var(--calm-text-secondary);
-  font: 600 13px var(--font-ui);
-  cursor: pointer;
-  border-radius: var(--calm-radius-item);
-}
-
-html.visual-calm .calm-popover-back:hover {
-  background: var(--calm-surface-hover);
-  color: var(--calm-text);
-}
-
-html.visual-calm .calm-popover-empty {
-  padding: 16px 12px;
-  font-size: 13px;
-  color: var(--calm-text-muted);
-}
-
 html.visual-calm .calm-popover-footer-item .calm-popover-item-title {
   font-size: 13.5px;
   color: var(--calm-text-secondary);
@@ -437,14 +396,6 @@ html.visual-calm .calm-topbar {
   flex-shrink: 0;
   position: relative;
   z-index: 20;
-}
-
-html.visual-calm .calm-topbar-left,
-html.visual-calm .calm-topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
 }
 
 html.visual-calm .calm-topbar-button {
@@ -479,16 +430,6 @@ html.visual-calm .calm-topbar-button-label {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
-}
-
-html.visual-calm .calm-topbar-button-detail {
-  font-weight: 400;
-  font-size: 13px;
-  color: var(--calm-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
 }
 
 html.visual-calm .calm-access-button {
@@ -1302,7 +1243,6 @@ html.visual-calm .calm-build-starter {
 /* The composer input and its rotating placeholder use the UI font in calm;
    the base styles force monospace with !important. */
 html.visual-calm .calm-main .cli-input,
-html.visual-calm .calm-main .cli-placeholder-measure,
 html.visual-calm .calm-main .cli-rotating-placeholder,
 html.visual-calm .calm-main .welcome-input {
   font-family: var(--font-ui) !important;
@@ -1497,16 +1437,6 @@ html.visual-calm .calm-task .main-header-title-group {
 html.visual-calm .calm-task .main-header > .calm-topbar {
   flex: 0 1 auto;
   min-width: 0;
-}
-
-html.visual-calm .calm-topbar-left {
-  min-width: 0;
-}
-
-@container (max-width: 900px) {
-  html.visual-calm .calm-topbar-button-detail {
-    display: none;
-  }
 }
 
 @container (max-width: 720px) {
@@ -1952,7 +1882,6 @@ html.visual-calm .browser-workbench-device-btn.is-active {
 
 /* ---------- Notifications popover ---------- */
 
-html.visual-calm .notification-panel,
 html.visual-calm [class*="notification-panel"] {
   border-radius: 18px;
   border-color: var(--calm-border);
@@ -1967,7 +1896,6 @@ html.visual-calm .cp-detail-header,
 html.visual-calm .cp-command-card,
 html.visual-calm .ea-operator-card,
 html.visual-calm .ea-live-rail,
-html.visual-calm .ea-temporary-modes,
 html.visual-calm .ea-console .ea-section,
 html.visual-calm .dp-input-box,
 html.visual-calm .dp-support-card,

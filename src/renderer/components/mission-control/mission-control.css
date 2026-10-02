@@ -215,16 +215,6 @@
   display: none;
 }
 
-/* ── Overview Tab ── */
-.mc-v2-overview {
-  padding: 24px 40px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  align-content: start;
-  max-width: 1100px;
-}
-
 .mc-v2-card {
   display: flex;
   flex-direction: column;
@@ -251,46 +241,6 @@
   border-color: var(--color-text-muted);
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
-}
-
-.mc-v2-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.mc-v2-card-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-}
-
-.mc-v2-card-badge {
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-}
-
-.mc-v2-card-badge.attention {
-  background: color-mix(in srgb, #f59e0b 15%, var(--color-bg-tertiary));
-  color: #f59e0b;
-}
-
-.mc-v2-card-badge.healthy {
-  background: var(--color-success-subtle);
-  color: var(--color-success);
-}
-
-.mc-v2-card-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  line-height: 1;
 }
 
 .mc-v2-card-items {
@@ -330,30 +280,6 @@
   font-weight: 600;
   color: var(--color-text-muted);
   vertical-align: middle;
-}
-
-.mc-v2-pipeline-bar {
-  display: flex;
-  gap: 2px;
-  height: 24px;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.mc-v2-pipeline-segment {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: white;
-  min-width: 24px;
-  transition: flex 0.3s;
-}
-
-.mc-v2-card-footer {
-  font-size: 11px;
-  color: var(--color-text-muted);
 }
 
 /* ── Agents Tab ── */
@@ -987,12 +913,6 @@
   color: var(--color-text-secondary);
 }
 
-.mc-v2-task-unassigned {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-
 .mc-v2-task-meta {
   display: flex;
   align-items: center;
@@ -1017,10 +937,6 @@
 
 .mc-v2-inline-chip.stale {
   color: var(--color-accent);
-}
-
-.mc-v2-task-footer-actions {
-  margin-top: 10px;
 }
 
 .mc-v2-task-secondary-btn {
@@ -1222,66 +1138,6 @@
 .mc-v2-feed-time {
   font-size: 10px;
   color: var(--color-text-muted);
-}
-
-.mc-v2-feed-content {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  line-height: 1.4;
-  max-width: 1180px;
-  overflow-wrap: anywhere;
-}
-
-.mc-v2-feed-content.markdown-content p,
-.mc-v2-feed-content.markdown-content ul,
-.mc-v2-feed-content.markdown-content ol,
-.mc-v2-feed-content.markdown-content blockquote,
-.mc-v2-feed-content.markdown-content pre {
-  margin-top: 6px;
-  margin-bottom: 0;
-}
-
-.mc-v2-feed-content.markdown-content > :first-child {
-  margin-top: 0;
-}
-
-.mc-v2-feed-content.markdown-content ul,
-.mc-v2-feed-content.markdown-content ol {
-  padding-left: 18px;
-}
-
-.mc-v2-feed-content.markdown-content li {
-  margin: 2px 0;
-}
-
-.mc-v2-feed-content.markdown-content h1,
-.mc-v2-feed-content.markdown-content h2,
-.mc-v2-feed-content.markdown-content h3,
-.mc-v2-feed-content.markdown-content h4,
-.mc-v2-feed-content.markdown-content h5,
-.mc-v2-feed-content.markdown-content h6 {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.mc-v2-feed-content.markdown-content code {
-  padding: 1px 4px;
-  border-radius: 4px;
-}
-
-.mc-v2-feed-content.markdown-content pre {
-  max-width: 100%;
-  padding: 8px;
-}
-
-.mc-v2-feed-content.markdown-content a {
-  color: var(--color-accent);
-  text-decoration: none;
-}
-
-.mc-v2-feed-content.markdown-content a:hover {
-  text-decoration: underline;
 }
 
 /* ── Command Brief / Intelligence ── */
@@ -2501,43 +2357,6 @@ button.mc-v2-ops-row-main:hover .mc-v2-ops-row-title {
   gap: 8px;
 }
 
-/* Ops split layout for issue detail */
-.mc-v2-ops-split {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
-
-.mc-v2-ops-subsection {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 240px;
-  flex: 1;
-}
-
-.mc-v2-ops-subsection h4 {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-/* Issue Detail in ops */
-.mc-v2-issue-detail-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border-light);
-  background: var(--color-bg-elevated);
-  box-shadow: var(--shadow-sm);
-}
-
 /* ── Editor Modal ── */
 .mc-v2-editor-overlay {
   position: fixed;
@@ -2565,9 +2384,6 @@ button.mc-v2-ops-row-main:hover .mc-v2-ops-row-title {
 
 /* ── Responsive ── */
 @media (max-width: 1200px) {
-  .mc-v2-overview {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .mc-v2-detail-panel {
     width: 400px;
     min-width: 400px;
@@ -2575,10 +2391,6 @@ button.mc-v2-ops-row-main:hover .mc-v2-ops-row-title {
 }
 
 @media (max-width: 900px) {
-  .mc-v2-overview {
-    grid-template-columns: 1fr;
-    padding: 24px 28px;
-  }
   .mc-v2-agents {
     grid-template-columns: 1fr;
     padding: 24px 28px;

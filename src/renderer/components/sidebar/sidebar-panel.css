@@ -509,30 +509,6 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   color: var(--color-text-primary);
 }
 
-/* Each project gets a coloured monogram tile; an open project's tile is ringed. */
-.sidebar-workspace-tile {
-  display: inline-flex;
-  flex: 0 0 16px;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 4.5px;
-  background: hsl(var(--workspace-hue) 72% 91%);
-  color: hsl(var(--workspace-hue) 48% 32%);
-  font: 700 9px/1 var(--font-ui);
-  letter-spacing: -0.02em;
-}
-
-html:not(.theme-light) .sidebar-workspace-tile {
-  background: hsl(var(--workspace-hue) 32% 27%);
-  color: hsl(var(--workspace-hue) 85% 82%);
-}
-
-.sidebar-workspace-tile[data-expanded="true"] {
-  box-shadow: 0 0 0 1.5px hsl(var(--workspace-hue) 60% 58% / 0.5);
-}
-
 .sidebar-panel .sidebar-workspace-label {
   font-size: 13.5px;
   font-weight: 400;

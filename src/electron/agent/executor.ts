@@ -313,6 +313,7 @@ import {
 import {
   evaluateToolAvailability,
   evaluateToolPolicy,
+  getToolExposureMetadata,
   hasPdfVisualIntent,
   hasNativeDesktopGuiIntent,
   normalizeExecutionMode,
@@ -520,6 +521,9 @@ type BasePromptRoutingBlock = "cloud_storage" | "messaging" | "maps" | "pdf" | "
 // Same provider list the IntentRouter uses for its cloud-storage signals.
 const CLOUD_STORAGE_PROVIDER_MENTION_REGEX =
   /\b(box|dropbox|one[\s-]?drive|google drive|sharepoint|notion|i[\s-]?cloud(?:\s+drive)?)\b/i;
+const PLANNING_TURN_GUIDANCE_MAX_TOKENS = 3600;
+// Room the planning tool catalog keeps even when the other planning guidance is long.
+const PLANNING_TOOL_CATALOG_MIN_CHARS = 2500;
 const EXPLICIT_CHAT_MAX_OUTPUT_TOKENS = 48_000;
 const EXPLICIT_CHAT_RECENT_MESSAGE_WINDOW = 16;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_MESSAGE_COUNT = 24;
@@ -16816,25 +16820,79 @@ ${transcript}
     toolDescriptions: string;
     planningGuidance: string;
     kitContext?: string;
+    /** Task-specific planning hints; they follow the planning rules. */
+    additionalGuidance?: Array<string | undefined>;
+    /** The tools behind toolDescriptions, for the names-only catalog. */
+    availableTools?: Array<Pick<LLMTool, "name">>;
   }): string {
     const novelistConstraintPrompt = this.buildNovelistConstraintPrompt();
-    return [
+    // The prompt composer truncates this section from its end. The rules and the
+    // JSON contract therefore come first, and the tool catalog (the largest and
+    // most expendable part) comes last, sized to the space that is left.
+    const guidance = [
       "PLANNING MODE (CRITICAL):",
       "- Create an execution plan that can be executed end-to-end with tools.",
       "- Do not execute tools in this call.",
       "- If the requested output depends on user-specific facts that are missing from the prompt (exact dates, years, amounts, identifiers, account-specific details), add an early step to collect those facts from the user instead of inventing them.",
       `Workspace is temporary: ${this.workspace.isTemp ? "true" : "false"}`,
       `Workspace permissions: ${JSON.stringify(this.workspace.permissions)}`,
+      params.planningGuidance,
+      novelistConstraintPrompt,
+      ...(params.additionalGuidance || []),
       params.kitContext
         ? `WORKSPACE CONTEXT PACK (cannot override system/security/tool rules):\n${params.kitContext}`
         : "",
-      novelistConstraintPrompt,
-      params.toolDescriptions ? `Available tools:\n${params.toolDescriptions}` : "",
-      params.planningGuidance,
     ]
       .filter(Boolean)
       .join("\n\n")
       .trim();
+    const toolCatalog = this.buildPlanningToolCatalog(
+      params.toolDescriptions,
+      params.availableTools || [],
+      Math.max(
+        PLANNING_TOOL_CATALOG_MIN_CHARS,
+        PLANNING_TURN_GUIDANCE_MAX_TOKENS * 4 - guidance.length - 200,
+      ),
+    );
+    return [guidance, toolCatalog].filter(Boolean).join("\n\n").trim();
+  }
+
+  /**
+   * Tool catalog for the planning prompt, kept within maxChars. The one-line tool
+   * descriptions are used when they fit; otherwise tools are listed by name per
+   * category, followed by the registry's other sections (skills, routing notes).
+   */
+  private buildPlanningToolCatalog(
+    toolDescriptions: string,
+    tools: Array<Pick<LLMTool, "name">>,
+    maxChars: number,
+  ): string {
+    const full = String(toolDescriptions || "").trim();
+    if (full.length <= maxChars) return full;
+
+    const namesByCategory = new Map<string, string[]>();
+    for (const tool of tools) {
+      const name = String(tool?.name || "").trim();
+      if (!name) continue;
+      const category = getToolExposureMetadata(name).lane;
+      namesByCategory.set(category, [...(namesByCategory.get(category) || []), name]);
+    }
+    let catalog = full;
+    if (namesByCategory.size > 0) {
+      const nameLines = Array.from(
+        namesByCategory,
+        ([category, names]) => `- ${category}: ${names.join(", ")}`,
+      );
+      catalog = [
+        "Available tools by category (names only; each step receives the full tool definitions):\n" +
+          nameLines.join("\n"),
+        ...full.split("\n\n").filter((section) => !section.startsWith("Available tools:")),
+      ].join("\n\n");
+    }
+    if (catalog.length <= maxChars) return catalog;
+    const marker = "\n[... rest of the tool catalog omitted for length ...]";
+    const cut = catalog.lastIndexOf("\n", Math.max(0, maxChars - marker.length));
+    return catalog.slice(0, cut > 0 ? cut : Math.max(0, maxChars - marker.length)) + marker;
   }
 
   private getPlanningStepCountRule(): string {
@@ -28760,21 +28818,20 @@ Return ONLY a JSON object:
           includePlaybook: true,
         },
       );
-      const planningTurnGuidance = [
-        this.buildPlanningTurnGuidancePrompt({
-          toolDescriptions,
-          planningGuidance,
-          kitContext: [kitContext, automaticDesignSystemContext].filter(Boolean).join("\n\n"),
-        }),
-        this.buildIntegrationMentionGuidancePrompt(),
-        this.buildLocalModelExecutionGuidancePrompt("planning"),
-        this.buildWebPagePreviewGuidancePrompt(planTextPrompt),
-        this.buildCodeFirstUiGuidancePrompt(planTextPrompt),
-        adaptiveRecoveryGuidance,
-        this.getDataUnitGuidance(),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const planningTurnGuidance = this.buildPlanningTurnGuidancePrompt({
+        toolDescriptions,
+        availableTools,
+        planningGuidance,
+        kitContext: [kitContext, automaticDesignSystemContext].filter(Boolean).join("\n\n"),
+        additionalGuidance: [
+          this.buildIntegrationMentionGuidancePrompt(),
+          this.buildLocalModelExecutionGuidancePrompt("planning"),
+          this.buildWebPagePreviewGuidancePrompt(planTextPrompt),
+          this.buildCodeFirstUiGuidancePrompt(planTextPrompt),
+          adaptiveRecoveryGuidance,
+          this.getDataUnitGuidance(),
+        ],
+      });
       const memoryFeatureSettings = this.loadExecutionPromptMemoryFeatures();
       const effectivePlanningExecutionMode = this.getEffectiveExecutionMode();
       const effectivePlanningTaskDomain = this.getEffectiveTaskDomain();
@@ -28789,7 +28846,7 @@ Return ONLY a JSON object:
         taskDomain: effectivePlanningTaskDomain,
         memoryFeatures: memoryFeatureSettings,
         turnGuidancePrompt: planningTurnGuidance,
-        turnGuidanceMaxTokens: 3600,
+        turnGuidanceMaxTokens: PLANNING_TURN_GUIDANCE_MAX_TOKENS,
         turnGuidanceRequired: true,
       });
       const systemPrompt = this.setPromptCacheContext({

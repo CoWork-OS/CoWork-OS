@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { isUtf8 } from "buffer";
 import { createHash, randomUUID } from "crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
@@ -254,6 +255,72 @@ function writeRecoveryRecord(
       // Preserve the write error.
     }
     throw error;
+  }
+}
+
+const ASCII_EDIT_TEXT_PATTERN = /^[\x01-\x7f]*$/;
+
+function firstInvalidUtf8Line(content: Buffer): number {
+  // A newline byte never occurs inside a UTF-8 sequence, so lines can be validated one by one.
+  let line = 1;
+  for (let start = 0; ; line += 1) {
+    const newline = content.indexOf(0x0a, start);
+    const end = newline === -1 ? content.length : newline;
+    if (!isUtf8(content.subarray(start, end)) || newline === -1) return line;
+    start = newline + 1;
+  }
+}
+
+/**
+ * Decode file bytes for matching. UTF-8 round-trips exactly. Any other encoding is edited only
+ * when old_string and new_string are ASCII: its bytes are then read one-to-one as Latin-1, so
+ * everything outside the replaced ASCII text is written back byte-for-byte instead of being
+ * re-encoded (which turned every Windows-1252/Latin-1 "é" into U+FFFD).
+ */
+function decodeEditableText(
+  content: Buffer,
+  oldString: string,
+  newString: string,
+): { text: string; encoding: "utf8" | "latin1" } {
+  if (isUtf8(content)) return { text: content.toString("utf8"), encoding: "utf8" };
+  const utf16Bom =
+    content.length >= 2 &&
+    ((content[0] === 0xff && content[1] === 0xfe) || (content[0] === 0xfe && content[1] === 0xff));
+  if (utf16Bom || content.includes(0)) {
+    throw new Error(
+      "File is not UTF-8 text: it contains NUL bytes or a UTF-16 byte order mark (binary, UTF-16 or UTF-32). " +
+        "edit_file only edits UTF-8 text and left the file unchanged.",
+    );
+  }
+  if (!ASCII_EDIT_TEXT_PATTERN.test(oldString) || !ASCII_EDIT_TEXT_PATTERN.test(newString)) {
+    throw new Error(
+      `File is not valid UTF-8 (first invalid byte on line ${firstInvalidUtf8Line(content)}); it is probably in a legacy encoding such as Windows-1252, Latin-1 or Shift_JIS. ` +
+        "edit_file left it unchanged: rewriting it as UTF-8 would corrupt its other non-ASCII characters, which read_file shows as U+FFFD. " +
+        "Edits whose old_string and new_string are plain ASCII are applied byte-for-byte; to change non-ASCII text, convert the file to UTF-8 first with the user's agreement. " +
+        "Do not recreate it with write_file.",
+    );
+  }
+  return { text: content.toString("latin1"), encoding: "latin1" };
+}
+
+/**
+ * In a non-UTF-8 file, a byte in 0x40-0x7E right after a non-ASCII byte can be the second half of
+ * a Shift_JIS/GBK/Big5 character, so an ASCII match starting there could split that character.
+ */
+function assertLegacyMatchBoundaries(text: string, needle: string): void {
+  const first = needle.charCodeAt(0);
+  if (first < 0x40 || first > 0x7e) return;
+  for (
+    let index = text.indexOf(needle);
+    index !== -1;
+    index = text.indexOf(needle, index + needle.length)
+  ) {
+    if (index > 0 && text.charCodeAt(index - 1) >= 0x80) {
+      throw new Error(
+        `old_string would start right after a non-ASCII byte on line ${lineNumberAt(text, index)} of this non-UTF-8 file, where it could be the second half of a multi-byte character, so edit_file left the file unchanged. ` +
+          "Choose an old_string that starts after ASCII text (for example at a space or punctuation), or convert the file to UTF-8 first with the user's agreement.",
+      );
+    }
   }
 }
 
@@ -710,9 +777,8 @@ export class EditTools {
         });
 
         const initialBuffer = readDescriptorBuffer(targetFd);
-        const initialContent = initialBuffer.toString("utf8");
         const initialReplacement = this.buildReplacement(
-          initialContent,
+          initialBuffer,
           old_string,
           new_string,
           replace_all,
@@ -732,10 +798,9 @@ export class EditTools {
               externalApprovalGranted,
             });
             const currentBuffer = readDescriptorBuffer(targetFd);
-            const currentContent = currentBuffer.toString("utf8");
-            let next: { content: string; replacements: number };
+            let next: { content: string; encoding: "utf8" | "latin1"; replacements: number };
             try {
-              next = this.buildReplacement(currentContent, old_string, new_string, replace_all);
+              next = this.buildReplacement(currentBuffer, old_string, new_string, replace_all);
             } catch (error: Any) {
               if (!currentBuffer.equals(initialBuffer)) {
                 throw new Error(
@@ -754,7 +819,7 @@ export class EditTools {
               );
             }
 
-            const nextBuffer = Buffer.from(next.content, "utf8");
+            const nextBuffer = Buffer.from(next.content, next.encoding);
             assertEditContentSize(nextBuffer.length);
             await this.revalidateEditTarget({
               requestedFullPath,
@@ -845,11 +910,12 @@ export class EditTools {
   }
 
   private buildReplacement(
-    content: string,
+    fileBytes: Buffer,
     oldString: string,
     newString: string,
     replaceAll: boolean,
-  ): { content: string; replacements: number } {
+  ): { content: string; encoding: "utf8" | "latin1"; replacements: number } {
+    const { text: content, encoding } = decodeEditableText(fileBytes, oldString, newString);
     for (const candidate of buildEditMatchCandidates(content, oldString, newString, replaceAll)) {
       const occurrences = this.countOccurrences(content, candidate.oldString);
       if (occurrences === 0) continue;
@@ -870,9 +936,11 @@ export class EditTools {
             "Use replace_all: true to replace all occurrences, or provide more context to make it unique.",
         );
       }
+      if (encoding === "latin1") assertLegacyMatchBoundaries(content, candidate.oldString);
       if (replaceAll) {
         return {
           content: content.split(candidate.oldString).join(candidate.newString),
+          encoding,
           replacements: occurrences,
         };
       }
@@ -882,6 +950,7 @@ export class EditTools {
           content.substring(0, index) +
           candidate.newString +
           content.substring(index + candidate.oldString.length),
+        encoding,
         replacements: 1,
       };
     }

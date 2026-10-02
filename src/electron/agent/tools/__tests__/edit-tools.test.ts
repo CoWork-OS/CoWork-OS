@@ -1701,3 +1701,66 @@ describe("edit miss diagnostics", () => {
     expect(result.error).toContain("line 4");
   });
 });
+
+describe("edit encoding safety", () => {
+  // "café = 1\nname = René\n" in Windows-1252: é is the single byte 0xE9.
+  const cp1252 = Buffer.concat([
+    Buffer.from("caf"),
+    Buffer.from([0xe9]),
+    Buffer.from(" = 1\nname = Ren"),
+    Buffer.from([0xe9]),
+    Buffer.from("\n"),
+  ]);
+
+  it("refuses a non-ASCII edit of a Windows-1252 file instead of re-encoding it", async () => {
+    const { result, bytes } = await editFixture(cp1252, {
+      old_string: "name = René",
+      new_string: "name = Renée",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/not valid UTF-8/);
+    expect(result.error).toContain("line 1");
+    expect(bytes.equals(cp1252)).toBe(true);
+  });
+
+  it("applies an ASCII edit to a Windows-1252 file without touching other bytes", async () => {
+    const { result, bytes } = await editFixture(cp1252, {
+      old_string: " = 1\nname",
+      new_string: " = 2\nname",
+    });
+    expect(result.success, result.error).toBe(true);
+    const expected = Buffer.from(cp1252);
+    expected[cp1252.indexOf(" = 1") + 3] = "2".charCodeAt(0);
+    expect(bytes.equals(expected)).toBe(true);
+  });
+
+  it("refuses UTF-16 files", async () => {
+    const utf16 = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from("hello\nworld\n", "utf16le"),
+    ]);
+    const { result, bytes } = await editFixture(utf16, { old_string: "h", new_string: "j" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/UTF-16/);
+    expect(bytes.equals(utf16)).toBe(true);
+  });
+
+  it("refuses an ASCII match that could be the second byte of a multi-byte character", async () => {
+    // Shift_JIS "ソ" is 0x83 0x5C; 0x5C is also ASCII "\".
+    const shiftJis = Buffer.from([0x83, 0x5c, 0x0a, 0x61, 0x0a]);
+    const { result, bytes } = await editFixture(shiftJis, { old_string: "\\", new_string: "/" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/multi-byte/);
+    expect(bytes.equals(shiftJis)).toBe(true);
+  });
+
+  it("keeps a UTF-8 byte order mark and multi-byte text intact", async () => {
+    const utf8 = Buffer.from("\ufeffnaïve = 1\n日本 = 2\n", "utf8");
+    const { result, bytes } = await editFixture(utf8, {
+      old_string: "日本 = 2",
+      new_string: "日本 = 3",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.equals(Buffer.from("\ufeffnaïve = 1\n日本 = 3\n", "utf8"))).toBe(true);
+  });
+});

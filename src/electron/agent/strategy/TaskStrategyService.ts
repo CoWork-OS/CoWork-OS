@@ -314,11 +314,14 @@ export class TaskStrategyService {
 
     // Strict execute gate:
     // - Always execute for explicit execution/workflow/deep-work intents
+    // - Redirects ("instead of a modal, build a dropdown") ask for work too;
+    //   falling through to plan mode blocked every edit they requested
     // - For mixed intent, require hard execution cues; otherwise keep plan mode
     const inferredExecutionMode: ExecutionMode =
       route.intent === "execution" ||
       route.intent === "workflow" ||
       route.intent === "deep_work" ||
+      route.intent === "redirect" ||
       (route.intent === "mixed" && (hasHardExecutionSignal || artifactCreationSignal)) ||
       buildVerifyRenderArtifactRequested ||
       buildRenderArtifactRequested

@@ -13,6 +13,19 @@ describe("TaskStrategyService execution-mode routing", () => {
 
     expect(strategy.executionMode).toBe("execute");
   });
+
+  it.each([
+    "Instead of a modal, build a dropdown",
+    "Rather than a new file, do it inside utils.ts",
+    "Focus only on the files you changed",
+    "Forget the X fixes, pivot to building the new onboarding flow",
+  ])("executes redirect and steering requests instead of planning them: %s", (prompt) => {
+    const route = IntentRouter.route("", prompt);
+    const strategy = TaskStrategyService.derive(route, undefined, { title: "", prompt });
+
+    expect(route.intent).toBe("redirect");
+    expect(strategy.executionMode).toBe("execute");
+  });
 });
 
 describe("TaskStrategyService deriveLlmProfile", () => {

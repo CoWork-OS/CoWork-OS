@@ -319,5 +319,35 @@ bounded_research=true
       const routed = IntentRouter.route("", "build a REST API for user authentication");
       expect(routed.intent).not.toBe("redirect");
     });
+
+    it.each([
+      "Instead of a modal, build a dropdown",
+      "Don't change the API; focus on the caching layer you just added",
+      "Leave the backend as is and focus on the frontend validation",
+      "Rather than a new file, do it inside utils.ts",
+      "Focus only on the files you changed",
+      "Ignore the flaky e2e test for now and look at the unit test failure",
+      "ignore the openclaw related fixes for its codebase and focus on new features or enhancements",
+      "Start over and build it in Rust",
+      "Let's do something different with the caching layer you just added",
+      "Scrap that and apply the same fix to the API layer",
+      "Don't forget the changelog",
+      "Add a new task type to the scheduler",
+      "Start over",
+      "Scrap the previous approach and use Redis instead",
+    ])("keeps steering and refinement follow-ups attached to prior work: %s", (message) => {
+      expect(IntentRouter.isHistoryResetRedirect(message)).toBe(false);
+    });
+
+    it.each([
+      "Forget that. New task: write a poem about the sea",
+      "Scrap that and write a haiku about autumn",
+      "Forget the X fixes, pivot to building the new onboarding flow",
+      "Never mind that. Let's start over with a landing page for the bakery",
+      "Something completely different: plan a team offsite agenda",
+      "Forget the previous plan and draft a hiring email",
+    ])("treats explicit pivots that do not refer back as a history reset: %s", (message) => {
+      expect(IntentRouter.isHistoryResetRedirect(message)).toBe(true);
+    });
   });
 });

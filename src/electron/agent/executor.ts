@@ -998,6 +998,8 @@ export class TaskExecutor {
   private recoveryRequestActive: boolean = false;
   private capabilityUpgradeRequested: boolean = false;
   private redirectRequested: boolean = false;
+  /** An explicit pivot away from the earlier work; only this replaces the history. */
+  private redirectResetsHistory: boolean = false;
   private toolResultMemory: Array<{ tool: string; summary: string; timestamp: number }> = [];
   private webEvidenceMemory: WebEvidenceEntry[] = [];
   private toolUsageCounts: Map<string, number> = new Map();
@@ -16904,7 +16906,7 @@ ${transcript}
     message: string,
     quotedAssistantMessage?: QuotedAssistantMessage,
   ): string {
-    if (this.redirectRequested) {
+    if (this.redirectResetsHistory) {
       return [
         "TASK RE-SCOPE (CRITICAL):",
         "- The user redirected this task to a new scope.",
@@ -16921,6 +16923,11 @@ ${transcript}
         ? "- The user explicitly quoted an earlier assistant message. Treat that quote as the exact reply they are referring to."
         : "",
       `- Build on the latest follow-up message: ${String(message || "").trim()}`,
+      ...(this.redirectRequested
+        ? [
+            "- The user is steering the current work (a different approach or a narrower scope). Apply that change to the existing work, drop only what they set aside, and do not restart from scratch.",
+          ]
+        : []),
       "- Gather new evidence only when the follow-up needs information that is not already available.",
     ].join("\n");
   }
@@ -18955,26 +18962,48 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   /**
-   * Replaces the full conversation history with a one-line context stub.
-   *
-   * When a user redirects a completed task ("ignore X, focus on Y"), the
-   * prior 20–30 step conversation is the primary cause of misinterpretation:
-   * the LLM anchors on the old work and tries to extend it instead of
-   * treating the follow-up as a fresh start. Compacting to a stub removes
-   * that anchor while still providing minimal context about what came before.
+   * True only for an explicit pivot that abandons the earlier work ("Forget
+   * that. New task: ..."). Refinements such as "instead of a modal, build a
+   * dropdown" are redirects too, but they depend on the existing history.
    */
-  private compactHistoryForRedirect(): void {
+  private isHistoryResetRedirect(text: string): boolean {
+    return IntentRouter.isHistoryResetRedirect(text);
+  }
+
+  /**
+   * Replaces the full conversation history with a short context stub.
+   *
+   * When a user explicitly abandons a completed task ("Forget that. New task:
+   * ..."), the prior 20–30 step conversation is the primary cause of
+   * misinterpretation: the LLM anchors on the old work and tries to extend it
+   * instead of treating the follow-up as a fresh start. The stub removes that
+   * anchor but keeps the last result summary and the files the earlier work
+   * changed, so later questions about that work are not answered by guessing.
+   */
+  private compactHistoryForRedirect(options?: { keepLatestUserTurn?: boolean }): void {
+    const priorHistory = Array.isArray(this.conversationHistory) ? this.conversationHistory : [];
+    const latestTurn = priorHistory[priorHistory.length - 1];
     const priorLabel = this.task.title ? `"${this.task.title}"` : "the previous session";
+    const priorSummary = this.getRedirectCarryOverSummary();
+    const changedFiles = this.getRedirectCarryOverChangedFiles();
+    const stubLines = [`[Prior session ${priorLabel} completed. Starting new direction.]`];
+    if (priorSummary) {
+      stubLines.push("", "Prior result summary:", priorSummary);
+    }
+    if (changedFiles.length > 0) {
+      stubLines.push("", "Files changed by the prior work:", ...changedFiles.map((f) => `- ${f}`));
+    }
     // Use a user→assistant stub pair so the conversation starts on a user turn,
     // which is required by providers that enforce alternating-role message ordering
-    // (e.g. Bedrock, Gemini). The actual redirect message is appended after this.
+    // (e.g. Bedrock, Gemini). The actual redirect message is appended after this,
+    // or kept when a recovered transcript already contains it.
     this.conversationHistory = [
       {
         role: "user",
         content: [
           {
             type: "text",
-            text: `[Prior session ${priorLabel} completed. Starting new direction.]`,
+            text: stubLines.join("\n"),
           },
         ],
       },
@@ -18987,7 +19016,64 @@ You are continuing a previous conversation. The context from the previous conver
           },
         ],
       },
+      ...(options?.keepLatestUserTurn && latestTurn?.role === "user" ? [latestTurn] : []),
     ];
+  }
+
+  private getRedirectCarryOverSummary(maxChars = 1500): string {
+    const candidates = [
+      this.lastNonVerificationOutput,
+      this.getLatestAssistantConversationText(),
+      this.lastAssistantOutput,
+      this.task?.resultSummary,
+    ];
+    for (const candidate of candidates) {
+      const text = String(candidate || "").trim();
+      if (!text) continue;
+      return text.length > maxChars ? `${text.slice(0, maxChars).trimEnd()}…` : text;
+    }
+    return "";
+  }
+
+  private getRedirectCarryOverChangedFiles(maxFiles = 25): string[] {
+    const workspaceRoot =
+      typeof this.workspace?.path === "string" && this.workspace.path.trim()
+        ? path.resolve(this.workspace.path)
+        : "";
+    const files: string[] = [];
+    const addFile = (rawPath: unknown) => {
+      if (typeof rawPath !== "string" || !rawPath.trim()) return;
+      let display = rawPath.trim();
+      if (workspaceRoot && path.isAbsolute(display)) {
+        const relative = path.relative(workspaceRoot, path.resolve(display));
+        if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+          display = relative;
+        }
+      }
+      display = display.replace(/\\/g, "/").replace(/^\.\//, "");
+      if (!files.includes(display)) files.push(display);
+    };
+    try {
+      const events =
+        this.daemon?.getTaskEvents(this.task.id, {
+          types: ["file_created", "file_modified", "artifact_created"],
+        }) || [];
+      for (const event of events) {
+        if (
+          this.getReplayEventType(event) === "file_created" &&
+          event.payload?.type === "directory"
+        ) {
+          continue;
+        }
+        addFile(event.payload?.path || event.payload?.to || event.payload?.from);
+      }
+    } catch {
+      // Best-effort context for the stub; the redirect proceeds without it.
+    }
+    for (const createdFile of this.fileOperationTracker?.getCreatedFiles?.() || []) {
+      addFile(createdFile);
+    }
+    return files.slice(0, maxFiles);
   }
 
   private isInternalAppOrToolChangeIntent(text: string): boolean {
@@ -39004,7 +39090,8 @@ Return ONLY a JSON object:
     );
     this.getSessionRuntime().setRecoveryRequestActive(this.isRecoveryIntent(message));
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(message);
-    this.redirectRequested = this.isRedirectIntent(message);
+    this.redirectResetsHistory = this.isHistoryResetRedirect(message);
+    this.redirectRequested = this.redirectResetsHistory || this.isRedirectIntent(message);
 
     if (!recoveredFromTurnLimit && this.isDebugMode() && !this.debugRuntimeSessionStarted) {
       await this.bootstrapDebugRuntimeIfNeeded();
@@ -39199,12 +39286,16 @@ Return ONLY a JSON object:
       return;
     }
 
-    // When the user is redirecting a completed/failed/cancelled task to a new scope,
-    // compact the prior conversation history to a one-line stub and force a fresh
+    // When the user explicitly abandons a completed/failed/cancelled task for new
+    // work, compact the prior conversation history to a short stub and force a fresh
     // system prompt rebuild. Without this the full prior session floods the context
     // and causes the LLM to anchor on the old work instead of executing the new direction.
-    if (this.redirectRequested && shouldStartNewCanvasSession) {
-      this.compactHistoryForRedirect();
+    // Refinements ("instead of a modal, build a dropdown") keep the history they
+    // depend on and get steering guidance instead.
+    if (this.redirectResetsHistory && shouldStartNewCanvasSession) {
+      this.compactHistoryForRedirect({
+        keepLatestUserTurn: opts?.transcriptAlreadyContainsMessage === true,
+      });
       this.systemPrompt = ""; // force rebuild with redirect-aware instructions below
     }
 

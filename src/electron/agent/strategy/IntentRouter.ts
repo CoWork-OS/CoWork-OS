@@ -29,6 +29,28 @@ interface IntentScores {
 const REDIRECT_CONTRAST_PATTERN =
   /\b(?:instead\s+of|rather\s+than)\b[^.!?\n]{0,150}\b(?:focus|work|do(?!\s+not\b)|build|create|look|tackle|explore|concentrate)\b/i;
 
+// Phrases that abandon the previous work outright ("Forget that. New task: ...").
+// Contrast ("instead of X, build Y") and scope narrowing ("focus only on ...")
+// are not here: they steer the current work and need its context.
+const EXPLICIT_PIVOT_PATTERN = new RegExp(
+  [
+    "(?<!\\b(?:don['’]?t|do\\s+not|never|not)\\s+)\\bforget\\s+(?:about\\s+)?(?:that|this|it|everything|all\\s+(?:of\\s+)?(?:that|this)|what\\s+(?:i|we|you)\\s+(?:said|asked|did)\\b|(?:the|my|your|our)\\s+(?:previous|prior|last|earlier|old|original|current|whole|entire)\\b[^.!?;:,\\n]{0,80}?(?=\\s*(?:[.!?;:,\\n]|$|\\band\\b)))",
+    "\\bstart\\s+(?:over|afresh|fresh|from\\s+scratch)\\b",
+    "(?:^|[.!?;\\n]\\s*)(?:(?:ok(?:ay)?|alright|now|so|next)[,\\s]+)?(?:here['’]?s\\s+|i\\s+have\\s+|(?:moving|switching)\\s+(?:on\\s+)?to\\s+)?(?:a\\s+|an\\s+|one\\s+|another\\s+)?(?:new|different|separate|unrelated)\\s+(?:task|topic|question|request|project)\\b",
+    "(?<!\\btry\\s+)\\bsomething\\s+(?:completely\\s+|totally\\s+|entirely\\s+)?(?:different|unrelated)\\b(?!\\s+(?:with|for|to|in|on|about|from|than)\\b)",
+    "\\bscrap\\s+(?:that|this|it|everything|all\\s+(?:of\\s+)?(?:that|this)|(?:the|my|your|our)\\s+(?:previous|prior|last|earlier|old|original|current|whole|entire)\\b[^.!?;:,\\n]{0,80}?(?=\\s*(?:[.!?;:,\\n]|$|\\band\\b)))",
+    "\\bnever\\s*mind\\s+(?:that|this|it|(?:the|my)\\s+(?:previous|last|earlier|above)\\b[^.!?;:,\\n]{0,40})",
+    "\\bpivot\\s+(?:to|away)\\b",
+  ].join("|"),
+  "gi",
+);
+
+// After the pivot phrase itself is removed, any of these means the new request
+// builds on or varies the earlier work ("start over and build it in Rust", "scrap
+// the previous approach and use Redis instead"), so its history must stay.
+const REFERS_TO_PRIOR_WORK_PATTERN =
+  /\b(?:it|its|that|those|them|instead|rather|differently|this\s+time|another\s+(?:way|approach)|the\s+same|same\s+(?:as|way|thing|approach|pattern|fix|change|code)|existing|above|earlier|previous(?:ly)?|prior|so\s+far|already|you\s+(?:just\s+|already\s+)?(?:added|changed|wrote|created|made|did|built|fixed|implemented|updated|modified|touched|edited|generated|refactored|removed|renamed|set\s+up)|your\s+(?:change|changes|fix|fixes|code|implementation|work|edits?|version|approach|branch|pr|commit|draft|output|result|solution))\b/i;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -132,6 +154,24 @@ export class IntentRouter {
   static isRedirectIntent(text: string): boolean {
     const lower = (text || "").toLowerCase();
     return this.getRedirectSignals(lower).length > 0;
+  }
+
+  /**
+   * Whether a follow-up abandons the earlier work so completely that its
+   * conversation history should be replaced. Only an explicit pivot ("forget
+   * that", "start over", "new task:", "scrap that", "never mind that") that does
+   * not refer back to the earlier work qualifies. Contrast and scope-narrowing
+   * messages ("Instead of a modal, build a dropdown", "Focus only on the files
+   * you changed") are redirect intents too, but they refine the current work.
+   */
+  static isHistoryResetRedirect(text: string): boolean {
+    const lower = String(text || "").toLowerCase();
+    const withoutPivots = lower.replace(EXPLICIT_PIVOT_PATTERN, " ");
+    if (withoutPivots === lower) return false;
+    // "Start over" or "Forget that." alone names no new work yet; keep the
+    // context the next message will need.
+    if ((withoutPivots.match(/[\p{L}\p{N}]+/gu) || []).length < 2) return false;
+    return !REFERS_TO_PRIOR_WORK_PATTERN.test(withoutPivots);
   }
 
   private static stripStrategyContext(text: string): string {

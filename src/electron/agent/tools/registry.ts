@@ -6802,7 +6802,7 @@ ${skillDescriptions}`;
       {
         name: "read_file",
         description:
-          "Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), PDF, and PPTX. For DOCX/PDF/PPTX, extracts and returns text. Supports chunked reads with startChar/maxChars for long documents.",
+          "Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), PDF, and PPTX. For DOCX/PDF/PPTX, extracts and returns text. Long files are returned one window at a time: when the result has truncated: true and a nextStartChar, call read_file again with startChar=nextStartChar to read the next part.",
         input_schema: {
           type: "object",
           properties: {
@@ -6813,12 +6813,12 @@ ${skillDescriptions}`;
             startChar: {
               type: "number",
               description:
-                "Optional character offset for chunked reads. Use with maxChars to continue long files.",
+                "Optional offset to start reading from (bytes for text files, characters for DOCX/PDF/PPTX). To continue a long file, pass the previous result's nextStartChar.",
             },
             maxChars: {
               type: "number",
               description:
-                "Optional max characters to return for this read (default: 300000, max: 1000000).",
+                "Optional window size for this read (default: 30000 for text files, 100000 for DOCX/PDF/PPTX; max: 1000000). Results larger than one tool result can hold are trimmed and report nextStartChar, so page through long files instead of raising this.",
             },
           },
           required: ["path"],

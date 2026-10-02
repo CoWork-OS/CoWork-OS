@@ -155,7 +155,7 @@ export async function readFilesByPatterns(
       files.push({
         path: filePath,
         size: read.size,
-        truncated: read.truncated,
+        truncated: Boolean(read.truncated) || content !== read.content,
         format: read.format,
         content,
       });

@@ -3,6 +3,8 @@
  *
  * Uses Codex's bundled @oai/artifact-tool presentation runtime when available.
  * Falls back to pptxgenjs only when the bundled runtime cannot be loaded.
+ * Both renderers draw the same slide plan (see pptx-slide-plan.ts), and the
+ * written file is read back to confirm every planned text made it in.
  */
 
 import { execFile } from "child_process";
@@ -12,27 +14,24 @@ import * as fsp from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { pathToFileURL } from "url";
+import JSZip from "jszip";
 import { resolveCodexArtifactToolRuntime } from "../codex-artifact-tool-runtime";
+import { createLogger } from "../logger";
+import {
+  SLIDE_CAPACITY,
+  expectedSlideText,
+  formatChartValue,
+  planPresentationSlides,
+  type PlannedSlide,
+  type PresentationSlideType,
+} from "./pptx-slide-plan";
 
 const execFileAsync = promisify(execFile);
 const ARTIFACT_TOOL_GENERATION_TIMEOUT_MS = 90_000;
+const logger = createLogger("pptx-generator");
 
 type PresentationVisualMode = "work" | "editorial" | "playful" | "premium" | "technical";
-type SlideType =
-  | "cover"
-  | "content"
-  | "image"
-  | "quote"
-  | "timeline"
-  | "comparison"
-  | "process"
-  | "chart"
-  | "table"
-  | "section"
-  | "product"
-  | "metric"
-  | "closing"
-  | "blank";
+type SlideType = PresentationSlideType;
 
 interface PresentationAsset {
   id?: string;
@@ -103,33 +102,143 @@ interface PptxOptions {
   };
 }
 
+export interface PptxGenerationResult {
+  success: boolean;
+  path: string;
+  size: number;
+  /** Slides written to the file, including continuation slides. */
+  slideCount: number;
+  /** Slides in the request. */
+  requestedSlideCount: number;
+  renderer: "artifact-tool" | "pptxgenjs";
+  /** Adaptations and problems to report to the user; empty when the deck matches the request. */
+  warnings: string[];
+}
+
 export async function generatePPTX(
   outputPath: string,
   options: PptxOptions,
-): Promise<{ success: boolean; path: string; size: number; slideCount: number }> {
+): Promise<PptxGenerationResult> {
+  const plan = planPresentationSlides(options.slides, {
+    title: options.title,
+    subject: options.subject,
+    assets: options.assets,
+  });
+  const warnings = [...plan.warnings];
+  let renderer: PptxGenerationResult["renderer"] = "artifact-tool";
   try {
-    await generatePPTXWithArtifactTool(outputPath, options);
+    warnings.push(...(await generatePPTXWithArtifactTool(outputPath, options, plan.slides)));
   } catch (error) {
-    console.warn(
-      "[pptx-generator] Codex artifact-tool generation failed; using pptxgenjs fallback:",
+    logger.warn(
+      "Codex artifact-tool generation failed; using pptxgenjs fallback:",
       error instanceof Error ? error.message : error,
     );
-    await generatePPTXWithPptxGenJs(outputPath, options);
+    renderer = "pptxgenjs";
+    warnings.push(...(await generatePPTXWithPptxGenJs(outputPath, options, plan.slides)));
   }
 
+  const verification = await verifyWrittenSlides(outputPath, plan.slides);
+  warnings.push(...verification.warnings);
   const stat = fs.statSync(outputPath);
   return {
     success: true,
     path: outputPath,
     size: stat.size,
-    slideCount: options.slides.length,
+    slideCount: verification.slideCount ?? plan.slides.length,
+    requestedSlideCount: plan.requestedSlideCount,
+    renderer,
+    warnings,
   };
+}
+
+function decodeSlideXmlText(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&amp;/g, "&");
+}
+
+function normalizeVerifiedText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Reads the written deck back and reports planned text that is not in it, so
+ * a renderer that loses content can never do so silently.
+ */
+async function verifyWrittenSlides(
+  outputPath: string,
+  slides: PlannedSlide[],
+): Promise<{ slideCount?: number; warnings: string[] }> {
+  try {
+    const zip = await JSZip.loadAsync(await fsp.readFile(outputPath));
+    const entries = Object.keys(zip.files)
+      .map((name) => ({ name, number: Number(name.match(/^ppt\/slides\/slide(\d+)\.xml$/)?.[1]) }))
+      .filter((entry) => Number.isInteger(entry.number))
+      .sort((a, b) => a.number - b.number);
+    const texts = await Promise.all(
+      entries.map(async (entry) => {
+        const xml = (await zip.file(entry.name)?.async("string")) ?? "";
+        const runs = Array.from(xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g), (match) =>
+          decodeSlideXmlText(match[1]),
+        );
+        return normalizeVerifiedText(runs.join(""));
+      }),
+    );
+
+    const warnings: string[] = [];
+    if (texts.length !== slides.length) {
+      warnings.push(
+        `The written deck has ${texts.length} slide(s), but ${slides.length} were planned.`,
+      );
+    }
+    slides.forEach((slide, index) => {
+      const text = texts[index];
+      if (text === undefined) return;
+      const missing = expectedSlideText(slide).filter(
+        (expected) => !text.includes(normalizeVerifiedText(expected)),
+      );
+      if (missing.length > 0) {
+        const shown = missing.slice(0, 5).map((value) => JSON.stringify(value));
+        const more =
+          missing.length > shown.length ? ` and ${missing.length - shown.length} more` : "";
+        warnings.push(
+          `Slide ${index + 1} of the written deck is missing planned text: ${shown.join(", ")}${more}.`,
+        );
+      }
+    });
+    return { slideCount: texts.length, warnings };
+  } catch (error) {
+    return {
+      warnings: [
+        `The written deck could not be read back to verify its content: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ],
+    };
+  }
+}
+
+async function readRuntimeWarnings(warningsPath: string): Promise<string[]> {
+  try {
+    const parsed: unknown = JSON.parse(await fsp.readFile(warningsPath, "utf-8"));
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 async function generatePPTXWithArtifactTool(
   outputPath: string,
   options: PptxOptions,
-): Promise<void> {
+  slides: PlannedSlide[],
+): Promise<string[]> {
   const runtime = await resolveCodexArtifactToolRuntime();
   if (!runtime) {
     throw new Error("bundled @oai/artifact-tool runtime is not available");
@@ -141,6 +250,7 @@ async function generatePPTXWithArtifactTool(
     tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cowork-pptx-generate-"));
     const inputPath = path.join(tempDir, "input.json");
     const scriptPath = path.join(tempDir, "build-presentation.mjs");
+    const warningsPath = path.join(tempDir, "warnings.json");
 
     const artifactToolUrl = pathToFileURL(
       path.join(
@@ -155,7 +265,12 @@ async function generatePPTXWithArtifactTool(
 
     await fsp.writeFile(
       inputPath,
-      JSON.stringify({ outputPath, options, artifactToolUrl }),
+      JSON.stringify({
+        outputPath,
+        options: { ...options, slides },
+        artifactToolUrl,
+        warningsPath,
+      }),
       "utf-8",
     );
     await fsp.writeFile(scriptPath, ARTIFACT_TOOL_PPTX_BUILDER, "utf-8");
@@ -165,6 +280,7 @@ async function generatePPTXWithArtifactTool(
       timeout: ARTIFACT_TOOL_GENERATION_TIMEOUT_MS,
       maxBuffer: 16 * 1024 * 1024,
     });
+    return await readRuntimeWarnings(warningsPath);
   } finally {
     if (tempDir) {
       await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {
@@ -179,13 +295,15 @@ const fs = await import("node:fs/promises");
 const path = await import("node:path");
 
 const inputPath = process.argv[2];
-const { outputPath, options, artifactToolUrl } = JSON.parse(await fs.readFile(inputPath, "utf-8"));
+const { outputPath, options, artifactToolUrl, warningsPath } = JSON.parse(await fs.readFile(inputPath, "utf-8"));
 const { Presentation, PresentationFile } = await import(artifactToolUrl);
 
 const WIDTH = 1280;
 const HEIGHT = 720;
 const SAFE = 64;
-const LAYOUT_ROTATION = ["content", "image", "metric", "process", "comparison", "quote", "chart", "timeline"];
+// Slides arrive planned (layout, motif, and content already sized to fit),
+// so renderers draw everything they receive and never pick their own layout.
+const runtimeWarnings = [];
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -288,67 +406,12 @@ const FONT = {
   body: options.theme?.fontFace || brand.fontFace || "Aptos",
 };
 
-function normalizeSlides(slides) {
-  if (Array.isArray(slides) && slides.length > 0) return slides;
-  return [{ title: options.title || "Presentation", subtitle: options.subject || "", layout: "title" }];
+function joinParts(parts) {
+  return parts.filter(Boolean).join(" — ");
 }
 
-function bulletItems(slide) {
-  const bullets = Array.isArray(slide.bullets) ? slide.bullets : [];
-  const content = typeof slide.content === "string" && slide.content.trim() ? [slide.content.trim()] : [];
-  return [...content, ...bullets].map(cleanText).filter(Boolean);
-}
-
-function hasDataRows(slide) {
-  return Array.isArray(slide.data?.rows) && slide.data.rows.length > 0;
-}
-
-function hasChartData(slide) {
-  return Array.isArray(slide.data?.series) && slide.data.series.some((series) => Array.isArray(series.values) && series.values.length > 0);
-}
-
-function hasImage(slide) {
-  return Boolean(slide.image?.path || slide.image?.url || slide.image?.id);
-}
-
-function inferSlideType(slide, index, count) {
-  const explicit = cleanText(slide.slideType || slide.layout).toLowerCase();
-  if (explicit === "title") return "cover";
-  if (explicit === "blank") return "blank";
-  if (explicit === "section") return "section";
-  if (["cover", "content", "image", "quote", "timeline", "comparison", "process", "chart", "table", "product", "metric", "closing"].includes(explicit)) {
-    return explicit;
-  }
-  const title = cleanText(slide.title).toLowerCase();
-  const hint = cleanText(slide.layoutHint || slide.intent || slide.visualBrief).toLowerCase();
-  if (index === 0) return "cover";
-  if (count > 2 && index === count - 1 && /next|close|thank|question|appendix|wrap|landing/.test(title + " " + hint)) return "closing";
-  if (hasDataRows(slide)) return "table";
-  if (hasChartData(slide)) return "chart";
-  if (hasImage(slide) && /product|screen|demo|app|mock|shot/.test(title + " " + hint)) return "product";
-  if (hasImage(slide)) return "image";
-  if (slide.quote || /quote|voice|testimonial/.test(title + " " + hint)) return "quote";
-  if (/timeline|roadmap|milestone|schedule|phase/.test(title + " " + hint)) return "timeline";
-  if (/compare|versus| vs |tradeoff|option/.test(title + " " + hint)) return "comparison";
-  if (/process|workflow|steps|how it works|flow/.test(title + " " + hint)) return "process";
-  if (/metric|kpi|number|growth|revenue|users|cost|rate|score/.test(title + " " + hint)) return "metric";
-  return LAYOUT_ROTATION[(index - 1) % LAYOUT_ROTATION.length];
-}
-
-function enrichSlides(rawSlides) {
-  const count = rawSlides.length;
-  const enriched = rawSlides.map((slide, index) => ({
-    ...slide,
-    _type: inferSlideType(slide || {}, index, count),
-    _motif: index % 5,
-  }));
-  for (let index = 2; index < enriched.length; index += 1) {
-    if (enriched[index]._type === enriched[index - 1]._type && enriched[index]._type === enriched[index - 2]._type) {
-      const replacement = LAYOUT_ROTATION.find((candidate) => candidate !== enriched[index - 1]._type && candidate !== enriched[index - 2]._type);
-      enriched[index]._type = replacement || "content";
-    }
-  }
-  return enriched;
+function formatChartValue(value) {
+  return value === null || value === undefined ? "–" : String(value);
 }
 
 function transparentTextBox(slide, position) {
@@ -438,7 +501,11 @@ async function addOptionalImage(slide, slideDef, frame, geometry = "roundRect") 
       placed.geometry = geometry;
       return true;
     }
-  } catch {
+  } catch (error) {
+    runtimeWarnings.push(
+      "Slide " + slideDef.source + ": the image could not be placed (" +
+        (error instanceof Error ? error.message : String(error)) + "), so a placeholder was drawn.",
+    );
     return false;
   }
   return false;
@@ -490,7 +557,7 @@ function addTitleBlock(slide, slideDef, inverse = false, y = 62, w = 840) {
 
 function renderCover(presentation, slideDef, index) {
   const slide = presentation.slides.add();
-  const motif = slideDef._motif || 0;
+  const motif = slideDef.motif || 0;
   const title = slideDef.title || options.title || "Presentation";
   slide.background.fill = motif % 2 === 0 ? palette.secondary : palette.bg;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, motif % 2 === 0 ? palette.secondary : palette.bg);
@@ -523,7 +590,7 @@ function renderSection(presentation, slideDef, index) {
   addText(slide, String(index + 1).padStart(2, "0"), { left: 82, top: 90, width: 220, height: 118 }, { typeface: FONT.title, fontSize: 86, bold: true, color: palette.primary });
   addRule(slide, 88, 244, 180, palette.accent, 7);
   addText(slide, slideDef.title || "Section", { left: 330, top: 136, width: 760, height: 150 }, { typeface: FONT.title, fontSize: 54, bold: true, color: palette.ink });
-  const context = slideDef.subtitle || slideDef.content || slideDef.intent;
+  const context = slideDef.subtitle || slideDef.intent;
   if (context) addText(slide, context, { left: 332, top: 320, width: 710, height: 78 }, { fontSize: 23, color: palette.body });
   setSpeakerNotes(slide, slideDef.notes);
 }
@@ -532,15 +599,15 @@ async function renderImageStatement(presentation, slideDef, index) {
   const slide = presentation.slides.add();
   slide.background.fill = palette.paper;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.paper);
-  const imageFrame = slideDef._motif % 2 === 0
+  const imageFrame = slideDef.motif % 2 === 0
     ? { left: 690, top: 0, width: 590, height: HEIGHT }
     : { left: 0, top: 0, width: 560, height: HEIGHT };
   const added = await addOptionalImage(slide, slideDef, imageFrame, "rect");
-  if (!added) drawFallbackVisual(slide, slideDef._motif, imageFrame, slideDef.visualBrief || slideDef.title);
+  if (!added) drawFallbackVisual(slide, slideDef.motif, imageFrame, slideDef.visualBrief || slideDef.title);
   const textLeft = imageFrame.left === 0 ? 630 : 76;
   addText(slide, slideDef.title || "Visual story", { left: textLeft, top: 132, width: 520, height: 150 }, { typeface: FONT.title, fontSize: 50, bold: true, color: palette.ink });
-  if (slideDef.subtitle || slideDef.content) addText(slide, slideDef.subtitle || slideDef.content, { left: textLeft + 2, top: 304, width: 500, height: 116 }, { fontSize: 24, color: palette.body });
-  bulletItems(slideDef).slice(0, 2).forEach((item, itemIndex) => {
+  if (slideDef.subtitle) addText(slide, slideDef.subtitle, { left: textLeft + 2, top: 304, width: 500, height: 116 }, { fontSize: 24, color: palette.body });
+  slideDef.bullets.forEach((item, itemIndex) => {
     const y = 482 + itemIndex * 54;
     addRule(slide, textLeft + 2, y + 12, 34, itemIndex === 0 ? palette.primary : palette.accent, 5);
     addText(slide, item, { left: textLeft + 56, top: y, width: 460, height: 42 }, { fontSize: 19, color: palette.body, bold: itemIndex === 0 });
@@ -554,11 +621,10 @@ function renderQuote(presentation, slideDef, index) {
   slide.background.fill = palette.secondary;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.secondary);
   addRect(slide, { left: 0, top: 0, width: 26, height: HEIGHT }, palette.accent);
+  if (slideDef.title) addText(slide, slideDef.title, { left: 96, top: 38, width: 900, height: 40 }, { fontSize: 20, bold: true, color: "#FFFFFFB8" });
   addText(slide, "“", { left: 94, top: 84, width: 130, height: 130 }, { typeface: FONT.title, fontSize: 120, color: palette.accent, bold: true });
-  const quote = slideDef.quote || slideDef.content || bulletItems(slideDef)[0] || slideDef.title || "A clear point of view belongs on its own slide.";
-  addText(slide, quote, { left: 170, top: 168, width: 850, height: 250 }, { typeface: FONT.title, fontSize: 45, color: palette.inverse, bold: true });
-  const attribution = slideDef.attribution || slideDef.subtitle || options.audience || "";
-  if (attribution) addText(slide, attribution, { left: 178, top: 470, width: 620, height: 42 }, { fontSize: 20, color: "#FFFFFFB8" });
+  if (slideDef.quote) addText(slide, slideDef.quote, { left: 170, top: 168, width: 850, height: 250 }, { typeface: FONT.title, fontSize: 45, color: palette.inverse, bold: true });
+  if (slideDef.attribution) addText(slide, slideDef.attribution, { left: 178, top: 470, width: 620, height: 42 }, { fontSize: 20, color: "#FFFFFFB8" });
   addSlideNumber(slide, index, true);
   setSpeakerNotes(slide, slideDef.notes);
 }
@@ -567,20 +633,22 @@ function renderMetric(presentation, slideDef, index) {
   const slide = presentation.slides.add();
   slide.background.fill = palette.bg;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.bg);
-  const items = slideDef.data?.items || bulletItems(slideDef).map((item) => {
-    const match = item.match(/([+-]?\d+(?:\.\d+)?%?|[$€£]?\d+(?:\.\d+)?[KMB]?)\s*(.*)/i);
-    return match ? { value: match[1], label: match[2] || item } : { value: item, label: "" };
-  });
-  const hero = items[0] || { value: slideDef.title || "1", label: slideDef.subtitle || "Core signal" };
+  // Metrics come from data.items or from bullets that start with a number;
+  // a metric without a value is shown as text, never given a made-up number.
+  const metrics = slideDef.metrics || [];
+  const hero = metrics[0] || { value: "", label: "", detail: "" };
   addText(slide, slideDef.title || "Key signal", { left: SAFE, top: 64, width: 760, height: 70 }, { typeface: FONT.title, fontSize: 36, bold: true, color: palette.ink });
-  addText(slide, String(hero.value || ""), { left: SAFE, top: 172, width: 610, height: 150 }, { typeface: FONT.title, fontSize: 104, bold: true, color: palette.primary });
-  addText(slide, hero.label || slideDef.subtitle || slideDef.content || "", { left: SAFE + 6, top: 330, width: 650, height: 88 }, { fontSize: 25, color: palette.body });
-  items.slice(1, 4).forEach((item, itemIndex) => {
+  if (slideDef.subtitle) addText(slide, slideDef.subtitle, { left: SAFE, top: 132, width: 760, height: 32 }, { fontSize: 18, color: palette.body });
+  if (hero.value) addText(slide, hero.value, { left: SAFE, top: 172, width: 610, height: 150 }, { typeface: FONT.title, fontSize: 104, bold: true, color: palette.primary });
+  const heroLabel = joinParts([hero.label, hero.detail]);
+  if (heroLabel) addText(slide, heroLabel, { left: SAFE + 6, top: hero.value ? 330 : 172, width: 650, height: 88 }, { fontSize: 25, color: palette.body });
+  metrics.slice(1).forEach((item, itemIndex) => {
     const x = 726;
     const y = 168 + itemIndex * 128;
     addRule(slide, x, y, 320, itemIndex === 0 ? palette.accent : palette.rule, 5);
-    addText(slide, String(item.value || ""), { left: x, top: y + 20, width: 300, height: 48 }, { fontSize: 34, bold: true, color: palette.ink });
-    addText(slide, item.label || item.detail || "", { left: x, top: y + 72, width: 360, height: 40 }, { fontSize: 17, color: palette.body });
+    if (item.value) addText(slide, item.value, { left: x, top: y + 20, width: 300, height: 48 }, { fontSize: 34, bold: true, color: palette.ink });
+    const label = joinParts([item.label, item.detail]);
+    if (label) addText(slide, label, { left: x, top: item.value ? y + 72 : y + 20, width: 360, height: item.value ? 40 : 92 }, { fontSize: item.value ? 17 : 20, color: palette.body });
   });
   addSlideNumber(slide, index);
   setSpeakerNotes(slide, slideDef.notes);
@@ -591,17 +659,17 @@ function renderProcess(presentation, slideDef, index) {
   slide.background.fill = palette.paper;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.paper);
   addTitleBlock(slide, slideDef, false, 66, 920);
-  const items = bulletItems(slideDef).slice(0, 5);
-  const count = Math.max(items.length, 3);
+  const items = slideDef.bullets;
+  const count = items.length;
   const startX = 96;
   const gap = 28;
-  const cardW = (1088 - gap * (count - 1)) / count;
+  const cardW = (1088 - gap * (Math.max(count, 1) - 1)) / Math.max(count, 1);
   for (let i = 0; i < count; i += 1) {
     const x = startX + i * (cardW + gap);
     const y = 318 + (i % 2) * 38;
     addRoundRect(slide, { left: x, top: y, width: cardW, height: 170 }, i === 0 ? palette.secondary : palette.bg, 9000, { width: 1, fill: i === 0 ? palette.secondary : palette.rule });
-    addText(slide, String(i + 1).padStart(2, "0"), { left: x + 22, top: y + 22, width: 58, height: 30 }, { fontSize: 18, bold: true, color: i === 0 ? palette.accent : palette.primary });
-    addText(slide, items[i] || "Step " + (i + 1), { left: x + 22, top: y + 62, width: cardW - 44, height: 78 }, { fontSize: 20, bold: i === 0, color: i === 0 ? palette.inverse : palette.ink });
+    addText(slide, String(i + 1 + (slideDef.offset || 0)).padStart(2, "0"), { left: x + 22, top: y + 22, width: 58, height: 30 }, { fontSize: 18, bold: true, color: i === 0 ? palette.accent : palette.primary });
+    addText(slide, items[i], { left: x + 22, top: y + 62, width: cardW - 44, height: 78 }, { fontSize: 20, bold: i === 0, color: i === 0 ? palette.inverse : palette.ink });
     if (i < count - 1) addRule(slide, x + cardW + 6, y + 84, gap - 12, palette.accent, 4);
   }
   addSlideNumber(slide, index);
@@ -613,18 +681,15 @@ function renderComparison(presentation, slideDef, index) {
   slide.background.fill = palette.bg;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.bg);
   addTitleBlock(slide, slideDef, false, 62, 980);
-  const items = bulletItems(slideDef);
-  const midpoint = Math.ceil(items.length / 2);
-  const leftItems = items.slice(0, midpoint);
-  const rightItems = items.slice(midpoint);
+  const planned = slideDef.columns || [];
   const columns = [
-    { x: 82, title: slideDef.data?.headers?.[0] || "Option A", color: palette.primary, items: leftItems },
-    { x: 676, title: slideDef.data?.headers?.[1] || "Option B", color: palette.accent, items: rightItems.length ? rightItems : leftItems.slice(0, 3), },
+    { x: 82, title: planned[0]?.title || "", color: palette.primary, items: planned[0]?.items || [] },
+    { x: 676, title: planned[1]?.title || "", color: palette.accent, items: planned[1]?.items || [] },
   ];
   columns.forEach((column) => {
-    addText(slide, column.title, { left: column.x, top: 226, width: 450, height: 44 }, { fontSize: 28, bold: true, color: column.color });
+    if (column.title) addText(slide, column.title, { left: column.x, top: 226, width: 450, height: 44 }, { fontSize: 28, bold: true, color: column.color });
     addRule(slide, column.x, 282, 460, column.color, 5);
-    column.items.slice(0, 5).forEach((item, itemIndex) => {
+    column.items.forEach((item, itemIndex) => {
       const y = 322 + itemIndex * 54;
       addText(slide, item, { left: column.x, top: y, width: 470, height: 38 }, { fontSize: 19, color: palette.body, bold: itemIndex === 0 });
       addRect(slide, { left: column.x, top: y + 42, width: 420, height: 1 }, palette.rule);
@@ -639,14 +704,13 @@ function renderTimeline(presentation, slideDef, index) {
   slide.background.fill = palette.paper;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.paper);
   addTitleBlock(slide, slideDef, false, 68, 920);
-  const items = slideDef.data?.items || bulletItems(slideDef).map((item) => ({ label: item }));
-  const visible = items.slice(0, 5);
+  const visible = slideDef.milestones || [];
   const y = 392;
   addRule(slide, 106, y, 1040, palette.rule, 4);
   visible.forEach((item, itemIndex) => {
     const x = 112 + itemIndex * (1040 / Math.max(visible.length - 1, 1));
     addRoundRect(slide, { left: x - 18, top: y - 18, width: 36, height: 36 }, itemIndex === 0 ? palette.primary : palette.paper, 12000, { width: 3, fill: itemIndex === 0 ? palette.primary : palette.primary });
-    addText(slide, item.value || item.label || "Milestone", { left: x - 82, top: y + 42, width: 164, height: 36 }, { fontSize: 18, bold: true, color: palette.ink, align: "center" });
+    if (item.label) addText(slide, item.label, { left: x - 82, top: y + 42, width: 164, height: 36 }, { fontSize: 18, bold: true, color: palette.ink, align: "center" });
     if (item.detail) addText(slide, item.detail, { left: x - 100, top: y + 82, width: 200, height: 44 }, { fontSize: 14, color: palette.body, align: "center" });
   });
   addSlideNumber(slide, index);
@@ -658,24 +722,39 @@ function renderChart(presentation, slideDef, index) {
   slide.background.fill = palette.bg;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.bg);
   addTitleBlock(slide, slideDef, false, 58, 940);
-  const categories = slideDef.data?.categories || bulletItems(slideDef).slice(0, 5);
-  const firstSeries = slideDef.data?.series?.[0] || { values: categories.map((_, itemIndex) => itemIndex + 1), name: "Value" };
-  const values = Array.isArray(firstSeries.values) && firstSeries.values.length ? firstSeries.values : categories.map((_, itemIndex) => itemIndex + 1);
-  const max = Math.max(...values.map((value) => Math.abs(Number(value) || 0)), 1);
+  // Only planned values are drawn: a missing value shows as a dash, never as a made-up bar.
+  const data = slideDef.chart || { categories: [], series: [], max: 1 };
+  const categories = data.categories;
+  const series = data.series;
+  const max = data.max || 1;
+  const seriesColors = [palette.primary, palette.accent, palette.secondary, palette.muted];
   const chart = { left: 132, top: 248, width: 940, height: 330 };
   addRule(slide, chart.left, chart.top + chart.height, chart.width, palette.rule, 3);
-  values.slice(0, 7).forEach((value, itemIndex) => {
-    const numeric = Number(value) || 0;
-    const slot = chart.width / Math.min(values.length, 7);
-    const barW = Math.max(34, slot * 0.48);
-    const barH = Math.max(12, Math.abs(numeric) / max * (chart.height - 52));
-    const x = chart.left + itemIndex * slot + slot * 0.22;
-    const y = chart.top + chart.height - barH;
-    addRect(slide, { left: x, top: y, width: barW, height: barH }, itemIndex === 0 ? palette.primary : palette.accent);
-    addText(slide, String(value), { left: x - 10, top: y - 32, width: barW + 20, height: 24 }, { fontSize: 15, bold: true, color: palette.ink, align: "center" });
-    addText(slide, categories[itemIndex] || "", { left: x - 28, top: chart.top + chart.height + 18, width: barW + 56, height: 42 }, { fontSize: 13, color: palette.body, align: "center" });
+  const slot = chart.width / Math.max(categories.length, 1);
+  const barW = Math.max(14, Math.min(slot * 0.48, (slot * 0.84) / Math.max(series.length, 1)));
+  categories.forEach((category, categoryIndex) => {
+    const groupLeft = chart.left + categoryIndex * slot + (slot - barW * series.length) / 2;
+    series.forEach((entry, seriesIndex) => {
+      const value = entry.values[categoryIndex];
+      const x = groupLeft + seriesIndex * barW;
+      const color = series.length > 1 ? seriesColors[seriesIndex % seriesColors.length] : categoryIndex === 0 ? palette.primary : palette.accent;
+      if (typeof value === "number") {
+        const barH = Math.max(12, Math.abs(value) / max * (chart.height - 52));
+        const y = chart.top + chart.height - barH;
+        addRect(slide, { left: x, top: y, width: series.length > 1 ? barW - 4 : barW, height: barH }, color);
+        addText(slide, formatChartValue(value), { left: x - 10, top: y - 32, width: barW + 20, height: 24 }, { fontSize: series.length > 1 ? 12 : 15, bold: true, color: palette.ink, align: "center" });
+      } else {
+        addText(slide, formatChartValue(value), { left: x - 10, top: chart.top + chart.height - 34, width: barW + 20, height: 24 }, { fontSize: 14, color: palette.muted, align: "center" });
+      }
+    });
+    if (category) addText(slide, category, { left: chart.left + categoryIndex * slot + 4, top: chart.top + chart.height + 18, width: slot - 8, height: 42 }, { fontSize: 13, color: palette.body, align: "center" });
   });
-  if (firstSeries.name) addText(slide, firstSeries.name, { left: 132, top: 602, width: 420, height: 28 }, { fontSize: 15, color: palette.muted });
+  series.forEach((entry, seriesIndex) => {
+    if (!entry.name) return;
+    const x = 132 + seriesIndex * 230;
+    if (series.length > 1) addRect(slide, { left: x, top: 655, width: 14, height: 14 }, seriesColors[seriesIndex % seriesColors.length]);
+    addText(slide, entry.name, { left: series.length > 1 ? x + 22 : x, top: 648, width: 200, height: 28 }, { fontSize: 15, color: palette.muted });
+  });
   addSlideNumber(slide, index);
   setSpeakerNotes(slide, slideDef.notes);
 }
@@ -685,22 +764,28 @@ function renderTable(presentation, slideDef, index) {
   slide.background.fill = palette.paper;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.paper);
   addTitleBlock(slide, slideDef, false, 58, 940);
-  const headers = slideDef.data?.headers || ["Item", "Value", "Notes"];
-  const rows = slideDef.data?.rows || bulletItems(slideDef).map((item) => [item, "", ""]);
+  const table = slideDef.table || { headers: [], rows: [] };
+  const headers = table.headers;
+  const rows = table.rows;
   const left = 82;
   const top = 228;
   const tableW = 1116;
   const rowH = 52;
-  const colW = tableW / Math.max(headers.length, 1);
-  addRect(slide, { left, top, width: tableW, height: rowH }, palette.secondary);
-  headers.forEach((header, columnIndex) => {
-    addText(slide, header, { left: left + columnIndex * colW + 16, top: top + 15, width: colW - 32, height: 24 }, { fontSize: 16, bold: true, color: palette.inverse });
-  });
-  rows.slice(0, 6).forEach((row, rowIndex) => {
-    const y = top + rowH * (rowIndex + 1);
+  // Every column of every row is drawn, even when the header row is shorter.
+  const columnCount = Math.max(headers.length, ...rows.map((row) => row.length), 1);
+  const colW = tableW / columnCount;
+  const headerH = headers.length > 0 ? rowH : 0;
+  if (headers.length > 0) {
+    addRect(slide, { left, top, width: tableW, height: rowH }, palette.secondary);
+    headers.forEach((header, columnIndex) => {
+      if (header) addText(slide, header, { left: left + columnIndex * colW + 16, top: top + 15, width: colW - 32, height: 24 }, { fontSize: 16, bold: true, color: palette.inverse });
+    });
+  }
+  rows.forEach((row, rowIndex) => {
+    const y = top + headerH + rowH * rowIndex;
     addRect(slide, { left, top: y, width: tableW, height: rowH }, rowIndex % 2 === 0 ? palette.bg : palette.paper, { width: 1, fill: palette.rule });
-    headers.forEach((_, columnIndex) => {
-      addText(slide, cleanText(row[columnIndex]), { left: left + columnIndex * colW + 16, top: y + 14, width: colW - 32, height: 28 }, { fontSize: 15, bold: columnIndex === 0, color: palette.body });
+    row.forEach((cell, columnIndex) => {
+      if (cell) addText(slide, cell, { left: left + columnIndex * colW + 16, top: y + 14, width: colW - 32, height: 28 }, { fontSize: 15, bold: columnIndex === 0, color: palette.body });
     });
   });
   addSlideNumber(slide, index);
@@ -725,11 +810,10 @@ function renderContent(presentation, slideDef, index) {
   slide.background.fill = palette.bg;
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.bg);
   addTitleBlock(slide, slideDef, false, 62, 920);
-  const items = bulletItems(slideDef);
-  const motif = slideDef._motif || 0;
-  if (items.length === 0 && slideDef.content) items.push(cleanText(slideDef.content));
+  const items = slideDef.bullets;
+  const motif = slideDef.motif || 0;
   if (motif % 2 === 0) {
-    items.slice(0, 5).forEach((item, itemIndex) => {
+    items.forEach((item, itemIndex) => {
       const y = 228 + itemIndex * 78;
       addRule(slide, 86, y + 15, 42, itemIndex === 0 ? palette.primary : palette.accent, 5);
       addText(slide, item, { left: 152, top: y, width: 880, height: 54 }, { fontSize: itemIndex === 0 ? 25 : 21, bold: itemIndex === 0, color: palette.body });
@@ -739,9 +823,9 @@ function renderContent(presentation, slideDef, index) {
     const rightItems = items.slice(Math.ceil(items.length / 2));
     [
       { x: 86, items: leftItems },
-      { x: 646, items: rightItems.length ? rightItems : leftItems.slice(0, 2) },
+      { x: 646, items: rightItems },
     ].forEach((column, columnIndex) => {
-      column.items.slice(0, 4).forEach((item, itemIndex) => {
+      column.items.forEach((item, itemIndex) => {
         const y = 238 + itemIndex * 86;
         addText(slide, item, { left: column.x, top: y, width: 470, height: 58 }, { fontSize: columnIndex === 0 && itemIndex === 0 ? 24 : 20, bold: columnIndex === 0 && itemIndex === 0, color: palette.body });
         addRect(slide, { left: column.x, top: y + 66, width: 390, height: 1 }, palette.rule);
@@ -758,8 +842,8 @@ function renderClosing(presentation, slideDef, index) {
   addRect(slide, { left: 0, top: 0, width: WIDTH, height: HEIGHT }, palette.secondary);
   addRect(slide, { left: 0, top: HEIGHT - 24, width: WIDTH, height: 24 }, palette.accent);
   addText(slide, slideDef.title || "Next steps", { left: 96, top: 160, width: 760, height: 130 }, { typeface: FONT.title, fontSize: 58, bold: true, color: palette.inverse });
-  if (slideDef.subtitle || slideDef.content) addText(slide, slideDef.subtitle || slideDef.content, { left: 100, top: 310, width: 660, height: 82 }, { fontSize: 24, color: "#FFFFFFC9" });
-  bulletItems(slideDef).slice(0, 3).forEach((item, itemIndex) => {
+  if (slideDef.subtitle) addText(slide, slideDef.subtitle, { left: 100, top: 310, width: 660, height: 82 }, { fontSize: 24, color: "#FFFFFFC9" });
+  slideDef.bullets.forEach((item, itemIndex) => {
     const y = 470 + itemIndex * 48;
     addText(slide, item, { left: 104, top: y, width: 680, height: 34 }, { fontSize: 20, color: palette.inverse, bold: itemIndex === 0 });
   });
@@ -795,22 +879,28 @@ const renderers = {
 };
 
 const presentation = Presentation.create({ slideSize: { width: WIDTH, height: HEIGHT } });
-const slides = enrichSlides(normalizeSlides(options.slides));
+const slides = Array.isArray(options.slides) ? options.slides : [];
 
 for (let index = 0; index < slides.length; index += 1) {
-  const slideDef = slides[index] || {};
-  const renderer = renderers[slideDef._type] || renderContent;
+  const slideDef = slides[index];
+  const renderer = renderers[slideDef.type] || renderContent;
   await renderer(presentation, slideDef, index);
 }
 
 const pptx = await PresentationFile.exportPptx(presentation);
 await fs.mkdir(path.dirname(outputPath), { recursive: true });
 await pptx.save(outputPath);
+if (warningsPath) await fs.writeFile(warningsPath, JSON.stringify(runtimeWarnings), "utf-8");
 `;
 
-async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOptions): Promise<void> {
+async function generatePPTXWithPptxGenJs(
+  outputPath: string,
+  options: PptxOptions,
+  slides: PlannedSlide[],
+): Promise<string[]> {
   const PptxGenJS = (await import("pptxgenjs")).default;
   const pptx = new PptxGenJS();
+  const warnings: string[] = [];
 
   const primaryColor = (options.theme?.primaryColor || "#2563eb").replace("#", "");
   const secondaryColor = (
@@ -824,57 +914,26 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
     "#f97316"
   ).replace("#", "");
   const fontFace = options.theme?.fontFace || "Helvetica Neue";
+  const seriesColors = [primaryColor, accentColor, secondaryColor, "64748B"];
 
   if (options.title) pptx.title = options.title;
   if (options.author) pptx.author = options.author;
   if (options.subject) pptx.subject = options.subject;
   pptx.layout = "LAYOUT_WIDE";
 
-  const slides = options.slides.length
-    ? options.slides
-    : [
-        {
-          title: options.title || "Presentation",
-          subtitle: options.subject,
-          layout: "title" as const,
-        },
-      ];
-
-  const getItems = (slideDef: SlideDefinition): string[] => {
-    const content = slideDef.content ? [slideDef.content] : [];
-    return [...content, ...(slideDef.bullets || [])]
-      .map((item) =>
-        String(item || "")
-          .replace(/\s+/g, " ")
-          .trim(),
-      )
-      .filter(Boolean);
-  };
-
-  const getSlideType = (slideDef: SlideDefinition, index: number): SlideType => {
-    if (slideDef.slideType) return slideDef.slideType;
-    if (slideDef.layout === "title") return "cover";
-    if (slideDef.layout === "section") return "section";
-    if (slideDef.layout === "blank") return "blank";
-    if (slideDef.layout && slideDef.layout !== "content") return slideDef.layout as SlideType;
-    if (index === 0) return "cover";
-    if (slideDef.data?.rows?.length) return "table";
-    if (slideDef.data?.series?.length) return "chart";
-    if (slideDef.image) return "image";
-    return (["content", "metric", "process", "comparison", "quote"] as SlideType[])[
-      (index - 1) % 5
-    ];
-  };
-
-  const addHeader = (slide: Any, slideDef: SlideDefinition, index: number): void => {
+  const addRect = (slide: Any, x: number, y: number, w: number, h: number, color: string): void => {
     slide.addShape(pptx.ShapeType.rect, {
-      x: 0.55,
-      y: 0.45,
-      w: 0.9,
-      h: 0.06,
-      fill: { color: primaryColor },
-      line: { color: primaryColor, transparency: 100 },
+      x,
+      y,
+      w,
+      h,
+      fill: { color },
+      line: { color, transparency: 100 },
     });
+  };
+
+  const addHeader = (slide: Any, slideDef: PlannedSlide, index: number): void => {
+    addRect(slide, 0.55, 0.45, 0.9, 0.06, primaryColor);
     slide.addText(slideDef.title || "Untitled slide", {
       x: 0.55,
       y: 0.68,
@@ -886,6 +945,18 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
       bold: true,
       fit: "shrink",
     });
+    if (slideDef.subtitle) {
+      slide.addText(slideDef.subtitle, {
+        x: 0.55,
+        y: 1.38,
+        w: 9.2,
+        h: 0.4,
+        fontSize: 14,
+        fontFace,
+        color: "475569",
+        fit: "shrink",
+      });
+    }
     slide.addText(String(index + 1).padStart(2, "0"), {
       x: 12,
       y: 0.38,
@@ -898,33 +969,87 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
     });
   };
 
+  /** Draws every item it is given; the plan already sized the list to fit. */
+  const addItems = (
+    slide: Any,
+    items: string[],
+    x: number,
+    w: number,
+    stepOffset?: number,
+  ): void => {
+    items.forEach((item, itemIndex) => {
+      const y = 2.08 + itemIndex * 0.68;
+      if (stepOffset === undefined) {
+        addRect(slide, x, y + 0.15, 0.34, 0.04, itemIndex === 0 ? primaryColor : accentColor);
+      } else {
+        slide.addText(String(stepOffset + itemIndex + 1).padStart(2, "0"), {
+          x,
+          y,
+          w: 0.5,
+          h: 0.45,
+          fontSize: 12,
+          fontFace,
+          color: primaryColor,
+          bold: true,
+        });
+      }
+      slide.addText(item, {
+        x: x + 0.55,
+        y,
+        w,
+        h: 0.45,
+        fontSize: itemIndex === 0 ? 17 : 14,
+        fontFace,
+        color: "334155",
+        bold: itemIndex === 0,
+        fit: "shrink",
+      });
+    });
+  };
+
+  const addSlideImage = (slide: Any, slideDef: PlannedSlide): void => {
+    const asset = slideDef.image?.id
+      ? options.assets?.find((candidate) => candidate?.id === slideDef.image?.id)
+      : undefined;
+    const imagePath = slideDef.image?.path || asset?.path;
+    const imageUrl = slideDef.image?.url || asset?.url;
+    if (imagePath) {
+      const resolved = path.isAbsolute(imagePath)
+        ? imagePath
+        : path.resolve(path.dirname(outputPath), imagePath);
+      if (fs.existsSync(resolved)) {
+        slide.addImage({
+          path: resolved,
+          x: 7.1,
+          y: 1.65,
+          w: slideDef.image?.width || 4.9,
+          h: slideDef.image?.height || 3.65,
+        });
+      } else {
+        warnings.push(
+          `Slide ${slideDef.source}: image file ${imagePath} was not found, so no picture was placed.`,
+        );
+      }
+    } else if (imageUrl) {
+      warnings.push(
+        `Slide ${slideDef.source}: the remote image ${imageUrl} cannot be embedded without the ` +
+          "artifact-tool runtime, so no picture was placed.",
+      );
+    }
+  };
+
   for (let index = 0; index < slides.length; index += 1) {
     const slideDef = slides[index];
     const slide = pptx.addSlide();
-    const slideType = getSlideType(slideDef, index);
-    const items = getItems(slideDef);
 
-    if (slideType === "cover") {
+    if (slideDef.type === "cover") {
       slide.background = { color: secondaryColor };
-      slide.addShape(pptx.ShapeType.rect, {
-        x: 0,
-        y: 0,
-        w: 4.7,
-        h: 7.5,
-        fill: { color: primaryColor },
-        line: { color: primaryColor, transparency: 100 },
-      });
-      slide.addShape(pptx.ShapeType.rect, {
-        x: 4.7,
-        y: 0,
-        w: 0.12,
-        h: 7.5,
-        fill: { color: accentColor },
-        line: { color: accentColor, transparency: 100 },
-      });
+      addRect(slide, 0, 0, 4.7, 7.5, primaryColor);
+      addRect(slide, 4.7, 0, 0.12, 7.5, accentColor);
 
-      if (slideDef.title) {
-        slide.addText(slideDef.title, {
+      const title = slideDef.title || options.title;
+      if (title) {
+        slide.addText(title, {
           x: 5.35,
           y: 1.55,
           w: 6.2,
@@ -949,7 +1074,7 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
           fit: "shrink",
         });
       }
-    } else if (slideType === "section") {
+    } else if (slideDef.type === "section") {
       slide.background = { color: "F8FAFC" };
       slide.addText(String(index + 1).padStart(2, "0"), {
         x: 0.75,
@@ -961,14 +1086,7 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
         color: primaryColor,
         bold: true,
       });
-      slide.addShape(pptx.ShapeType.rect, {
-        x: 0.82,
-        y: 2.45,
-        w: 1.85,
-        h: 0.08,
-        fill: { color: accentColor },
-        line: { color: accentColor, transparency: 100 },
-      });
+      addRect(slide, 0.82, 2.45, 1.85, 0.08, accentColor);
       slide.addText(slideDef.title || "Section", {
         x: 3.25,
         y: 1.35,
@@ -980,8 +1098,8 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
         bold: true,
         fit: "shrink",
       });
-      if (slideDef.subtitle || slideDef.content) {
-        slide.addText(slideDef.subtitle || slideDef.content || "", {
+      if (slideDef.subtitle) {
+        slide.addText(slideDef.subtitle, {
           x: 3.28,
           y: 3.15,
           w: 6.7,
@@ -992,98 +1110,139 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
           fit: "shrink",
         });
       }
-    } else if (slideType === "table") {
+    } else if (slideDef.type === "table") {
       addHeader(slide, slideDef, index);
-      const headers = slideDef.data?.headers || ["Item", "Value", "Notes"];
-      const rows = slideDef.data?.rows || items.map((item) => [item, "", ""]);
-      const tableRows = [headers, ...rows.slice(0, 6)].map((row) =>
-        row.map((cell) => ({
-          text: String(cell ?? ""),
-        })),
+      const table = slideDef.table ?? { headers: [], rows: [] };
+      // Every column of every row is kept, even when the header row is shorter.
+      const columnCount = Math.max(table.headers.length, ...table.rows.map((row) => row.length), 1);
+      const tableRows = [...(table.headers.length > 0 ? [table.headers] : []), ...table.rows].map(
+        (row) => Array.from({ length: columnCount }, (_, column) => ({ text: row[column] ?? "" })),
       );
-      slide.addTable(tableRows, {
-        x: 0.65,
-        y: 2.0,
-        w: 11.8,
-        h: 3.8,
-        border: { type: "solid", color: "D7DEE8", pt: 1 },
-        fontFace,
-        fontSize: 10,
-        color: "334155",
-        fill: { color: "FFFFFF" },
-      });
-    } else if (slideType === "chart") {
-      addHeader(slide, slideDef, index);
-      const values = slideDef.data?.series?.[0]?.values || [3, 5, 4, 7];
-      const categories =
-        slideDef.data?.categories || values.map((_, itemIndex) => `Item ${itemIndex + 1}`);
-      const max = Math.max(...values.map((value) => Math.abs(value)), 1);
-      values.slice(0, 7).forEach((value, itemIndex) => {
-        const h = Math.max(0.18, (Math.abs(value) / max) * 3.2);
-        const x = 1.05 + itemIndex * 1.45;
-        slide.addShape(pptx.ShapeType.rect, {
-          x,
-          y: 5.8 - h,
-          w: 0.72,
-          h,
-          fill: { color: itemIndex === 0 ? primaryColor : accentColor },
-          line: { color: itemIndex === 0 ? primaryColor : accentColor, transparency: 100 },
-        });
-        slide.addText(String(value), {
-          x: x - 0.1,
-          y: 5.48 - h,
-          w: 0.92,
-          h: 0.22,
+      if (tableRows.length > 0) {
+        slide.addTable(tableRows, {
+          x: 0.65,
+          y: 2.0,
+          w: 11.8,
+          h: 3.8,
+          border: { type: "solid", color: "D7DEE8", pt: 1 },
+          fontFace,
           fontSize: 10,
-          bold: true,
-          align: "center",
-          color: "111827",
-        });
-        slide.addText(categories[itemIndex] || "", {
-          x: x - 0.35,
-          y: 5.95,
-          w: 1.25,
-          h: 0.38,
-          fontSize: 8,
-          align: "center",
           color: "334155",
+          fill: { color: "FFFFFF" },
+        });
+      }
+    } else if (slideDef.type === "chart") {
+      addHeader(slide, slideDef, index);
+      // Only planned values are drawn: a missing value shows as a dash, never as a made-up bar.
+      const chart = slideDef.chart ?? { categories: [], series: [], max: 1 };
+      const seriesCount = Math.max(chart.series.length, 1);
+      const slot = 10.2 / Math.max(chart.categories.length, 1);
+      const barW = Math.max(0.16, Math.min(slot * 0.5, (slot * 0.84) / seriesCount));
+      chart.categories.forEach((category, categoryIndex) => {
+        const groupLeft = 1.05 + categoryIndex * slot + (slot - barW * seriesCount) / 2;
+        chart.series.forEach((series, seriesIndex) => {
+          const value = series.values[categoryIndex];
+          const x = groupLeft + seriesIndex * barW;
+          const color =
+            chart.series.length > 1
+              ? seriesColors[seriesIndex % seriesColors.length]
+              : categoryIndex === 0
+                ? primaryColor
+                : accentColor;
+          if (value === null) {
+            slide.addText(formatChartValue(value), {
+              x: x - 0.1,
+              y: 5.5,
+              w: barW + 0.2,
+              h: 0.22,
+              fontSize: 9,
+              align: "center",
+              color: "64748B",
+            });
+            return;
+          }
+          const h = Math.max(0.18, (Math.abs(value) / chart.max) * 3.2);
+          addRect(slide, x, 5.8 - h, chart.series.length > 1 ? barW - 0.04 : barW, h, color);
+          slide.addText(formatChartValue(value), {
+            x: x - 0.1,
+            y: 5.48 - h,
+            w: barW + 0.2,
+            h: 0.22,
+            fontSize: chart.series.length > 1 ? 8 : 10,
+            bold: true,
+            align: "center",
+            color: "111827",
+          });
+        });
+        if (category) {
+          slide.addText(category, {
+            x: 1.05 + categoryIndex * slot,
+            y: 5.95,
+            w: slot,
+            h: 0.38,
+            fontSize: 8,
+            align: "center",
+            color: "334155",
+            fit: "shrink",
+          });
+        }
+      });
+      chart.series.forEach((series, seriesIndex) => {
+        if (!series.name) return;
+        const x = 1.05 + seriesIndex * 2.6;
+        if (chart.series.length > 1) {
+          addRect(slide, x, 6.55, 0.16, 0.16, seriesColors[seriesIndex % seriesColors.length]);
+        }
+        slide.addText(series.name, {
+          x: chart.series.length > 1 ? x + 0.24 : x,
+          y: 6.47,
+          w: 2.3,
+          h: 0.3,
+          fontSize: 10,
+          color: "64748B",
           fit: "shrink",
         });
       });
-    } else if (slideType === "metric") {
+    } else if (slideDef.type === "metric") {
       addHeader(slide, slideDef, index);
-      const hero = items[0] || slideDef.subtitle || slideDef.content || "1 key signal";
-      const match = hero.match(/([+-]?\d+(?:\.\d+)?%?|[$€£]?\d+(?:\.\d+)?[KMB]?)/i);
-      slide.addText(match?.[1] || hero, {
-        x: 0.72,
-        y: 1.95,
-        w: 5.4,
-        h: 1.35,
-        fontSize: 62,
-        fontFace,
-        color: primaryColor,
-        bold: true,
-        fit: "shrink",
-      });
-      slide.addText(match ? hero.replace(match[1], "").trim() : slideDef.subtitle || "", {
-        x: 0.78,
-        y: 3.25,
-        w: 6.1,
-        h: 0.85,
-        fontSize: 18,
-        color: "334155",
-        fit: "shrink",
-      });
-      items.slice(1, 4).forEach((item, itemIndex) => {
-        slide.addShape(pptx.ShapeType.rect, {
-          x: 7.1,
-          y: 1.85 + itemIndex * 1.1,
-          w: 3.2,
-          h: 0.05,
-          fill: { color: itemIndex === 0 ? accentColor : "D7DEE8" },
-          line: { color: itemIndex === 0 ? accentColor : "D7DEE8", transparency: 100 },
+      // A metric without a value is shown as text, never given a made-up number.
+      const [hero, ...others] = slideDef.metrics;
+      if (hero?.value) {
+        slide.addText(hero.value, {
+          x: 0.72,
+          y: 1.95,
+          w: 5.4,
+          h: 1.35,
+          fontSize: 62,
+          fontFace,
+          color: primaryColor,
+          bold: true,
+          fit: "shrink",
         });
-        slide.addText(item, {
+      }
+      const heroLabel = [hero?.label, hero?.detail].filter(Boolean).join(" — ");
+      if (heroLabel) {
+        slide.addText(heroLabel, {
+          x: 0.78,
+          y: hero?.value ? 3.25 : 1.95,
+          w: 6.1,
+          h: 0.85,
+          fontSize: 18,
+          color: "334155",
+          fit: "shrink",
+        });
+      }
+      others.forEach((item, itemIndex) => {
+        addRect(
+          slide,
+          7.1,
+          1.85 + itemIndex * 1.1,
+          3.2,
+          0.05,
+          itemIndex === 0 ? accentColor : "D7DEE8",
+        );
+        const label = [item.label, item.detail].filter(Boolean).join(" — ");
+        slide.addText([item.value, label].filter(Boolean).join("  "), {
           x: 7.1,
           y: 2.06 + itemIndex * 1.1,
           w: 4.2,
@@ -1094,59 +1253,114 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
         });
       });
     } else {
-      slide.addShape(pptx.ShapeType.rect, {
-        x: index % 2 === 0 ? 0 : 12.95,
-        y: 0,
-        w: 0.38,
-        h: 7.5,
-        fill: { color: primaryColor },
-        line: { color: primaryColor, transparency: 100 },
-      });
-
+      addRect(slide, index % 2 === 0 ? 0 : 12.95, 0, 0.38, 7.5, primaryColor);
       addHeader(slide, slideDef, index);
-      if ((slideType === "image" || slideType === "product") && slideDef.image) {
-        const imgOpts: {
-          x: number;
-          y: number;
-          w: number;
-          h: number;
-          path?: string;
-        } = {
-          x: 7.1,
-          y: 1.65,
-          w: slideDef.image.width || 4.9,
-          h: slideDef.image.height || 3.65,
-        };
-        if (slideDef.image.path && fs.existsSync(slideDef.image.path)) {
-          imgOpts.path = slideDef.image.path;
-          slide.addImage(imgOpts);
-        }
-      }
+      const withImage = slideDef.type === "image" || slideDef.type === "product";
+      if (withImage) addSlideImage(slide, slideDef);
 
-      const textX = slideType === "image" || slideType === "product" ? 0.72 : 0.9;
-      const textW = slideType === "image" || slideType === "product" ? 5.7 : 10.8;
-      items.slice(0, 5).forEach((item, itemIndex) => {
-        const y = 2.08 + itemIndex * 0.68;
-        slide.addShape(pptx.ShapeType.rect, {
-          x: textX,
-          y: y + 0.15,
-          w: 0.34,
-          h: 0.04,
-          fill: { color: itemIndex === 0 ? primaryColor : accentColor },
-          line: { color: itemIndex === 0 ? primaryColor : accentColor, transparency: 100 },
+      const textX = withImage ? 0.72 : 0.9;
+      const textW = withImage ? 5.7 : 10.8;
+      if (slideDef.type === "quote") {
+        if (slideDef.quote) {
+          slide.addText(`“${slideDef.quote}”`, {
+            x: 0.9,
+            y: 2.0,
+            w: 11.2,
+            h: 2.6,
+            fontSize: 28,
+            fontFace,
+            color: "111827",
+            bold: true,
+            fit: "shrink",
+          });
+        }
+        if (slideDef.attribution) {
+          slide.addText(slideDef.attribution, {
+            x: 0.95,
+            y: 4.8,
+            w: 8,
+            h: 0.5,
+            fontSize: 16,
+            fontFace,
+            color: "475569",
+            fit: "shrink",
+          });
+        }
+      } else if (slideDef.type === "timeline") {
+        slideDef.milestones.forEach((milestone, itemIndex) => {
+          const y = 2.08 + itemIndex * 0.68;
+          addRect(slide, textX, y + 0.15, 0.34, 0.04, itemIndex === 0 ? primaryColor : accentColor);
+          if (milestone.label) {
+            slide.addText(milestone.label, {
+              x: textX + 0.55,
+              y,
+              w: 2.6,
+              h: 0.45,
+              fontSize: 15,
+              fontFace,
+              color: "111827",
+              bold: true,
+              fit: "shrink",
+            });
+          }
+          if (milestone.detail) {
+            slide.addText(milestone.detail, {
+              x: textX + 3.3,
+              y,
+              w: 8,
+              h: 0.45,
+              fontSize: 14,
+              fontFace,
+              color: "334155",
+              fit: "shrink",
+            });
+          }
         });
-        slide.addText(item, {
-          x: textX + 0.55,
-          y,
-          w: textW,
-          h: 0.45,
-          fontSize: itemIndex === 0 ? 17 : 14,
-          fontFace,
-          color: "334155",
-          bold: itemIndex === 0,
-          fit: "shrink",
+      } else if (slideDef.type === "comparison") {
+        slideDef.columns.forEach((column, columnIndex) => {
+          const x = columnIndex === 0 ? 0.9 : 6.9;
+          if (column.title) {
+            slide.addText(column.title, {
+              x,
+              y: 1.95,
+              w: 5.4,
+              h: 0.45,
+              fontSize: 18,
+              fontFace,
+              color: columnIndex === 0 ? primaryColor : accentColor,
+              bold: true,
+              fit: "shrink",
+            });
+          }
+          column.items.forEach((item, itemIndex) => {
+            slide.addText(item, {
+              x,
+              y: 2.55 + itemIndex * 0.62,
+              w: 5.4,
+              h: 0.5,
+              fontSize: 14,
+              fontFace,
+              color: "334155",
+              fit: "shrink",
+            });
+          });
         });
-      });
+      } else if (
+        slideDef.type === "content" &&
+        slideDef.bullets.length > SLIDE_CAPACITY.contentList
+      ) {
+        const half = Math.ceil(slideDef.bullets.length / 2);
+        addItems(slide, slideDef.bullets.slice(0, half), 0.9, 5.0);
+        addItems(slide, slideDef.bullets.slice(half), 6.9, 5.0);
+      } else {
+        addItems(
+          slide,
+          slideDef.bullets,
+          textX,
+          textW,
+          slideDef.type === "process" ? slideDef.offset : undefined,
+        );
+      }
     }
 
     if (slideDef.notes) {
@@ -1155,4 +1369,5 @@ async function generatePPTXWithPptxGenJs(outputPath: string, options: PptxOption
   }
 
   await pptx.writeFile({ fileName: outputPath });
+  return warnings;
 }

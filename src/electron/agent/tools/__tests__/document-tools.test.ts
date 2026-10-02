@@ -206,6 +206,34 @@ describe("DocumentTools", () => {
     expect(registerArtifact).toHaveBeenCalled();
   });
 
+  it("generatePresentation reports the slides written and the generator's warnings", async () => {
+    const warning =
+      'Slide 2 "Agenda" needed 2 slides to show all of its content; the extra slides are titled "Agenda (cont.)".';
+    vi.mocked(generatePPTX).mockResolvedValueOnce({
+      success: true,
+      path: "/workspace/deck.pptx",
+      size: 54321,
+      slideCount: 3,
+      requestedSlideCount: 2,
+      renderer: "pptxgenjs",
+      warnings: [warning],
+    });
+    const tools = new DocumentTools("/workspace", "task-1");
+
+    const result = await tools.generatePresentation({
+      filename: "deck.pptx",
+      slides: [
+        { title: "Intro", layout: "title" },
+        { title: "Agenda", bullets: Array.from({ length: 12 }, (_, index) => `Item ${index}`) },
+      ],
+    });
+
+    expect(result.slideCount).toBe(3);
+    expect(result.requestedSlideCount).toBe(2);
+    expect(result.warnings).toEqual([warning]);
+    expect(result.message).toContain("1 warning(s)");
+  });
+
   it("generatePresentation exposes richer design fields and passes them through", async () => {
     const defs = DocumentTools.getToolDefinitions();
     const presentationDef = defs.find((def) => def.name === "generate_presentation");

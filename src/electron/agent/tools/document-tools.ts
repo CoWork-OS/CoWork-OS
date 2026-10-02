@@ -686,13 +686,22 @@ export class DocumentTools {
       );
     }
 
+    // Layout adaptations (continuation slides, data that could not be drawn)
+    // reach the model so it can report them instead of claiming a clean deck.
+    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
     return {
       success: result.success,
       path: result.path,
       size: result.size,
       slideCount: result.slideCount,
+      ...(typeof result.requestedSlideCount === "number"
+        ? { requestedSlideCount: result.requestedSlideCount }
+        : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
       impactMetrics: [{ kind: "slides_created", value: result.slideCount }],
-      message: `Presentation generated: ${path.basename(result.path)} (${result.slideCount} slides, ${formatBytes(result.size)})`,
+      message:
+        `Presentation generated: ${path.basename(result.path)} (${result.slideCount} slides, ${formatBytes(result.size)})` +
+        (warnings.length > 0 ? ` with ${warnings.length} warning(s); see warnings.` : ""),
     };
   }
 

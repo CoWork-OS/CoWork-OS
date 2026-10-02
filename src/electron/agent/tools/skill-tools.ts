@@ -529,7 +529,7 @@ export class SkillTools {
       visualBrief?: string;
       notes?: string;
     }>;
-  }): Promise<{ success: boolean; path: string }> {
+  }): Promise<{ success: boolean; path: string; slideCount?: number; warnings?: string[] }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
     }
@@ -557,7 +557,7 @@ export class SkillTools {
       })),
     );
 
-    await this.presentationBuilder.create(outputPath, slides, {
+    const result = await this.presentationBuilder.create(outputPath, slides, {
       title: input.title,
       author: input.author,
       audience: input.audience,
@@ -567,16 +567,19 @@ export class SkillTools {
       themeColor: input.themeColor,
       accentColor: input.accentColor,
     });
+    const warnings = result?.warnings ?? [];
 
     this.daemon.logEvent(this.taskId, "file_created", {
       path: filename,
       type: "presentation",
-      slides: slides.length,
+      slides: result?.slideCount ?? slides.length,
     });
 
     return {
       success: true,
       path: filename,
+      ...(result ? { slideCount: result.slideCount } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 

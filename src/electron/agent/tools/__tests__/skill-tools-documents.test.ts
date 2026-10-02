@@ -31,6 +31,39 @@ afterEach(() => {
 });
 
 describe("SkillTools document results", () => {
+  it("create_document counts the blocks it wrote and reports the ones it could not", async () => {
+    const workspace = makeWorkspace();
+    const daemon = { logEvent: vi.fn() } as Any;
+    const tools = new SkillTools(workspace, daemon, "task-1");
+
+    const result = await tools.createDocument({
+      filename: "report",
+      format: "docx",
+      content: [
+        { type: "heading", text: "Q3 Report", level: 1 },
+        {
+          type: "table",
+          rows: [
+            ["Region", "Revenue"],
+            ["EMEA", "1200"],
+          ],
+        },
+        { type: "list", items: ["Hire 2 engineers"] },
+        { type: "paragraph", text: "" },
+      ],
+    });
+
+    expect(result.contentBlocks).toBe(3);
+    expect(result.requestedBlocks).toBe(4);
+    expect(result.droppedBlocks).toEqual([{ index: 3, type: "paragraph", reason: "no text" }]);
+    expect(result.warnings).toEqual(["Content block 4 (paragraph) was not written: no text."]);
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "file_created",
+      expect.objectContaining({ path: "report.docx", contentBlocks: 3 }),
+    );
+  });
+
   it("create_presentation reports the slides written and why the deck differs from the request", async () => {
     const workspace = makeWorkspace();
     const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");

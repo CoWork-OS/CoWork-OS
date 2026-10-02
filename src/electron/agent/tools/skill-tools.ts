@@ -3,7 +3,7 @@ import * as fs from "fs/promises";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { SpreadsheetBuilder } from "../skills/spreadsheet";
-import { DocumentBuilder } from "../skills/document";
+import { DocumentBuilder, type ContentBlockInput } from "../skills/document";
 import { PresentationBuilder } from "../skills/presentation";
 import { FolderOrganizer } from "../skills/organizer";
 import { editPdfRegion } from "../../documents/pdf-region-editor";
@@ -146,8 +146,15 @@ export class SkillTools {
   async createDocument(input: {
     filename: string;
     format: "docx" | "pdf";
-    content: Array<{ type: string; text: string; level?: number }>;
-  }): Promise<{ success: boolean; path: string; contentBlocks?: number }> {
+    content: ContentBlockInput[];
+  }): Promise<{
+    success: boolean;
+    path: string;
+    contentBlocks?: number;
+    requestedBlocks?: number;
+    droppedBlocks?: Array<{ index: number; type: string; reason: string }>;
+    warnings?: string[];
+  }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
     }
@@ -179,9 +186,11 @@ export class SkillTools {
       "document output",
     );
 
-    await this.documentBuilder.create(outputPath, input.format, input.content);
+    const report = await this.documentBuilder.create(outputPath, input.format, input.content);
 
-    const blockCount = Array.isArray(input.content) ? input.content.length : 1;
+    // Count what was written, not what was sent: a block with nothing to
+    // write is reported back instead.
+    const blockCount = report.renderedBlocks;
     console.log(
       `[SkillTools] Document created successfully: ${filename} with ${blockCount} content blocks`,
     );
@@ -193,10 +202,20 @@ export class SkillTools {
       contentBlocks: blockCount,
     });
 
+    const warnings = [
+      ...report.droppedBlocks.map(
+        (block) =>
+          `Content block ${block.index + 1} (${block.type}) was not written: ${block.reason}.`,
+      ),
+      ...report.warnings,
+    ];
     return {
       success: true,
       path: filename,
       contentBlocks: blockCount,
+      requestedBlocks: report.requestedBlocks,
+      ...(report.droppedBlocks.length > 0 ? { droppedBlocks: report.droppedBlocks } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 

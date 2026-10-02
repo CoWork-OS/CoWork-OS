@@ -19,6 +19,7 @@ import * as mammoth from "mammoth";
 import JSZip from "jszip";
 import { Workspace } from "../../../shared/types";
 import { parseMarkdownTable } from "../../utils/document-generators/markdown-tables";
+import { needsUnicodeFont, resolvePdfFonts } from "../../utils/pdf-unicode-fonts";
 
 export interface ContentBlock {
   type: string; // 'heading' | 'paragraph' | 'list' | 'table' | 'code'
@@ -178,7 +179,7 @@ export class DocumentBuilder {
     }
 
     if (ext === ".pdf" || format === "pdf") {
-      await this.createPDF(outputPath, blocks, options);
+      report.warnings.push(...(await this.createPDF(outputPath, blocks, options)));
       return report;
     }
 
@@ -388,13 +389,18 @@ export class DocumentBuilder {
   }
 
   /**
-   * Creates a PDF document
+   * Creates a PDF document. Returns warnings about text it cannot draw.
    */
   private async createPDF(
     outputPath: string,
     content: RenderBlock[],
     options: DocumentOptions,
-  ): Promise<void> {
+  ): Promise<string[]> {
+    // The built-in PDF fonts only encode Latin-1; text beyond that needs an
+    // embedded Unicode font or it is written as the wrong glyphs.
+    const fontChoice = resolvePdfFonts(
+      content.flatMap((block) => [block.text, ...block.items, ...block.rows.flat()]).join("\n"),
+    );
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({
         size: "LETTER",
@@ -414,6 +420,15 @@ export class DocumentBuilder {
       const stream = fs.createWriteStream(outputPath);
       doc.pipe(stream);
 
+      const fonts = { regular: "Helvetica", bold: "Helvetica-Bold" };
+      if (fontChoice.font) {
+        const { regular, bold } = fontChoice.font;
+        doc.registerFont("UnicodeRegular", regular.path, regular.postscriptName);
+        doc.registerFont("UnicodeBold", bold.path, bold.postscriptName);
+        fonts.regular = "UnicodeRegular";
+        fonts.bold = "UnicodeBold";
+      }
+
       const baseFontSize = options.fontSize || 12;
 
       for (const block of content) {
@@ -421,21 +436,21 @@ export class DocumentBuilder {
           case "heading": {
             const level = Math.min(Math.max(block.level || 1, 1), 6);
             const fontSize = baseFontSize + (7 - level) * 2; // h1 = base+12, h6 = base+2
-            doc.font("Helvetica-Bold").fontSize(fontSize).text(block.text, { paragraphGap: 10 });
+            doc.font(fonts.bold).fontSize(fontSize).text(block.text, { paragraphGap: 10 });
             doc.moveDown(0.5);
             break;
           }
 
           case "paragraph":
             doc
-              .font("Helvetica")
+              .font(fonts.regular)
               .fontSize(baseFontSize)
               .text(block.text, { paragraphGap: 8, lineGap: 4 });
             doc.moveDown(0.5);
             break;
 
           case "list": {
-            doc.font("Helvetica").fontSize(baseFontSize);
+            doc.font(fonts.regular).fontSize(baseFontSize);
             for (const item of block.items) {
               doc.text(`• ${item}`, { indent: 20, paragraphGap: 4 });
             }
@@ -445,14 +460,14 @@ export class DocumentBuilder {
 
           case "table": {
             if (block.rows.length > 0) {
-              doc.font("Helvetica").fontSize(baseFontSize - 1);
+              doc.font(fonts.regular).fontSize(baseFontSize - 1);
               const columnCount = block.rows[0].length;
               const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
               const colWidth = pageWidth / columnCount;
 
               for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex++) {
                 const row = block.rows[rowIndex];
-                doc.font(rowIndex === 0 ? "Helvetica-Bold" : "Helvetica");
+                doc.font(rowIndex === 0 ? fonts.bold : fonts.regular);
                 // A row is as tall as its tallest cell and starts on a new
                 // page when it would cross the bottom margin.
                 const rowHeight = Math.max(
@@ -490,7 +505,8 @@ export class DocumentBuilder {
 
           case "code":
             doc
-              .font("Courier")
+              // Courier is Latin-1 only; code with other characters uses the Unicode font.
+              .font(fontChoice.font && needsUnicodeFont(block.text) ? fonts.regular : "Courier")
               .fontSize(baseFontSize - 2)
               .fillColor("#333333")
               .text(block.text, { paragraphGap: 8 });
@@ -499,14 +515,14 @@ export class DocumentBuilder {
             break;
 
           default:
-            doc.font("Helvetica").fontSize(baseFontSize).text(block.text);
+            doc.font(fonts.regular).fontSize(baseFontSize).text(block.text);
             doc.moveDown(0.5);
         }
       }
 
       doc.end();
 
-      stream.on("finish", resolve);
+      stream.on("finish", () => resolve(fontChoice.warnings));
       stream.on("error", reject);
     });
   }

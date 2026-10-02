@@ -68,6 +68,40 @@ describe("DocumentBuilder.create", () => {
     expect(text).toContain("Ship v2");
   });
 
+  it("keeps Turkish, Polish, and Cyrillic text intact in PDFs", async () => {
+    const { builder, dir } = makeBuilder();
+    const outputPath = path.join(dir, "tr.pdf");
+
+    const report = await builder.create(outputPath, "pdf", [
+      { type: "heading", text: "Şubat Raporu", level: 1 },
+      { type: "paragraph", text: "Customer count grew in the İstanbul office." },
+      { type: "list", items: ["Zażółć gęślą jaźń", "Привет, мир"] },
+      {
+        type: "table",
+        rows: [
+          ["Şehir", "Müşteri"],
+          ["İzmir", "42"],
+        ],
+      },
+      { type: "code", text: "const şehir = 'İzmir';" },
+    ]);
+
+    const text = (await parsePdfBuffer(fs.readFileSync(outputPath))).text;
+    for (const value of [
+      "Şubat Raporu",
+      "Customer count grew in the İstanbul office.",
+      "Zażółć gęślą jaźń",
+      "Привет, мир",
+      "Şehir",
+      "Müşteri",
+      "İzmir",
+      "const şehir = 'İzmir';",
+    ]) {
+      expect(text).toContain(value);
+    }
+    expect(report.warnings).toEqual([]);
+  });
+
   it("turns a pipe-table text block into a real table", async () => {
     const { builder, dir } = makeBuilder();
     const outputPath = path.join(dir, "pipes.docx");

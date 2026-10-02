@@ -9497,6 +9497,7 @@ ${transcript}
   private async maybeApplyQualityPasses(opts: {
     response: Any;
     enabled: boolean;
+    phase?: "step" | "follow_up";
     contextLabel: string;
     userIntent: string;
   }): Promise<Any> {
@@ -9504,8 +9505,8 @@ ${transcript}
       ...opts,
       getQualityPassCount: () => this.getQualityPassCount(),
       extractTextFromLLMContent: (content) => this.extractTextFromLLMContent(content),
-      applyQualityPassesToDraft: ({ passes, contextLabel, userIntent, draft }) =>
-        this.applyQualityPassesToDraft({ passes, contextLabel, userIntent, draft }),
+      applyQualityPassesToDraft: ({ passes, contextLabel, userIntent, draft, maxTokens }) =>
+        this.applyQualityPassesToDraft({ passes, contextLabel, userIntent, draft, maxTokens }),
     });
   }
 
@@ -38015,6 +38016,7 @@ Return ONLY a JSON object:
     contextLabel: string;
     userIntent: string;
     draft: string;
+    maxTokens?: number;
   }): Promise<{ text: string; accepted: boolean }> {
     const draft = String(opts.draft || "").trim();
     if (!draft) return { text: opts.draft, accepted: false };
@@ -38022,6 +38024,9 @@ Return ONLY a JSON object:
     const intent = String(opts.userIntent || "")
       .trim()
       .slice(0, 5000);
+    // Rewrites are optional polish: room for the whole draft, one retry at most.
+    const refineMaxTokens = Math.max(1600, opts.maxTokens ?? 0);
+    const qualityPassMaxRetries = 1;
 
     const refineOnce = async (): Promise<{ text: string; accepted: boolean }> => {
       try {
@@ -38036,7 +38041,7 @@ Return ONLY a JSON object:
             this.createMessageWithTimeout(
               {
                 model: this.modelId,
-                maxTokens: 1600,
+                maxTokens: refineMaxTokens,
                 system: QUALITY_PASS_SYSTEM_PROMPT,
                 messages: [
                   {
@@ -38060,6 +38065,7 @@ Return ONLY a JSON object:
               refinerRouting,
             ),
           `Quality refine (${opts.contextLabel})`,
+          qualityPassMaxRetries,
         );
 
         if (response.usage) {
@@ -38134,6 +38140,7 @@ Return ONLY a JSON object:
             criticRouting,
           ),
         `Quality critique (${opts.contextLabel})`,
+        qualityPassMaxRetries,
       );
 
       if (critiqueResp.usage) {
@@ -38172,7 +38179,7 @@ Return ONLY a JSON object:
           this.createMessageWithTimeout(
             {
               model: this.modelId,
-              maxTokens: 1800,
+              maxTokens: Math.max(1800, refineMaxTokens),
               system: QUALITY_PASS_SYSTEM_PROMPT,
               messages: [
                 {
@@ -38203,6 +38210,7 @@ Return ONLY a JSON object:
             secondRefinerRouting,
           ),
         `Quality refine (${opts.contextLabel})`,
+        qualityPassMaxRetries,
       );
 
       if (refineResp.usage) {
@@ -40234,6 +40242,7 @@ Return ONLY a JSON object:
           response = await this.maybeApplyQualityPasses({
             response,
             enabled: response.stopReason === "end_turn" && !responseHasToolUse,
+            phase: "follow_up",
             contextLabel: `follow-up ${iterationCount}`,
             userIntent: `User message:\n${messageWithContext}`,
           });

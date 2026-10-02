@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isQualityRewriteSafe, QUALITY_PASS_SYSTEM_PROMPT } from "../quality-pass-output";
+import {
+  isQualityRewriteFaithful,
+  isQualityRewriteSafe,
+  QUALITY_PASS_SYSTEM_PROMPT,
+} from "../quality-pass-output";
 
 describe("text-only quality passes", () => {
   it("cannot reuse the autonomous executor's tool and routing instructions", () => {
@@ -23,5 +27,19 @@ describe("text-only quality passes", () => {
   it("does not forbid legitimate tool JSON already present in a requested explanation", () => {
     const draft = 'Example: {"tool":"read_file","arguments":{"path":"example.txt"}}';
     expect(isQualityRewriteSafe(draft, draft)).toBe(true);
+  });
+
+  it("lets a rewrite reformat lists and prose without dropping load-bearing details", () => {
+    const draft =
+      "1. Run the migration and/or the seed script.\n2. Check logs/app/server.log for 3 warnings.";
+    const rewrite =
+      "- Run the migration and/or the seed script.\n- Check logs/app/server.log; expect 3 warnings.";
+    expect(isQualityRewriteFaithful(rewrite, draft)).toBe(true);
+    expect(
+      isQualityRewriteFaithful(rewrite.replace("logs/app/server.log", "the server log"), draft),
+    ).toBe(false);
+    expect(
+      isQualityRewriteFaithful(rewrite.replace("3 warnings", "a few warnings"), draft),
+    ).toBe(false);
   });
 });

@@ -4855,7 +4855,6 @@ function MainContentComponent({
   const skillsMenuRef = useRef<HTMLDivElement>(null);
   const workspaceDropdownRef = useRef<HTMLDivElement>(null);
   const permissionDropdownRef = useRef<HTMLDivElement>(null);
-  const calmAccessMenuRef = useRef<HTMLDivElement>(null);
   // Overflow menu state (welcome view only - no task)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [showPermissionDropdown, setShowPermissionDropdown] = useState(false);
@@ -9350,6 +9349,7 @@ function MainContentComponent({
   // Welcome/Empty state
   const calmAccess: CalmAccessMenuProps = {
     label: selectedAccessProfileLabel,
+    notice: profileConstraintNotice,
     selectedId: selectedProfileId,
     isFullAccess: selectedProfileId === BUILTIN_ACCESS_PROFILE_IDS.fullAccess,
     options: [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].map((profile) => ({
@@ -9777,33 +9777,6 @@ function MainContentComponent({
                 )}
               </div>
 
-              {profileConstraintNotice && (
-                <div className="permission-profile-notice" role="note">
-                  <span>{profileConstraintNotice}</span>
-                  <button
-                    type="button"
-                    className="permission-profile-notice-action"
-                    onClick={() => {
-                      if (isCalm) {
-                        const trigger =
-                          calmAccessMenuRef.current?.querySelector<HTMLButtonElement>(
-                            ".calm-access-button",
-                          );
-                        trigger?.click();
-                        trigger?.focus();
-                        return;
-                      }
-                      setShowPermissionDropdown(true);
-                      permissionDropdownRef.current
-                        ?.querySelector<HTMLButtonElement>(".permission-access-btn")
-                        ?.focus();
-                    }}
-                  >
-                    Review profiles
-                  </button>
-                </div>
-              )}
-
               <div className="welcome-input-footer">
                 <div className="input-left-actions">
                   <button
@@ -9825,9 +9798,7 @@ function MainContentComponent({
                         selection={displayedInteractionMode}
                         onChange={setInteractionMode}
                       />
-                      <div ref={calmAccessMenuRef}>
-                        <CalmAccessMenu access={calmAccess} placement="up" />
-                      </div>
+                      <CalmAccessMenu access={calmAccess} placement="up" />
                     </>
                   )}
                   <div className="permission-dropdown-container" ref={permissionDropdownRef}>

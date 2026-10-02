@@ -6061,6 +6061,180 @@ describe("TaskExecutor step loop control", () => {
     });
   });
 
+  describe("recovery from tool failures", () => {
+    it("completes a step that recovers from an unavailable tool through an available alternative", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          toolCall("browser_navigate", { url: "https://example.com" }, "b1"),
+          toolCall("web_fetch", { url: "https://example.com" }, "f1"),
+          textResponse(
+            "Example Domain is a reserved illustrative domain; the page says it may be used in documentation without permission.",
+          ),
+        ],
+        {
+          web_fetch: {
+            success: true,
+            content: "Example Domain. This domain is for use in illustrative examples.",
+          },
+        },
+      );
+      const step: Any = {
+        id: "unavailable-then-alternative",
+        description: "Summarize what https://example.com says",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executor.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0])).toEqual([
+        "web_fetch",
+      ]);
+    });
+
+    it("still stops a step that calls the same unavailable tool again instead of the alternative", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          toolCall("browser_navigate", { url: "https://example.com" }, "b1"),
+          toolCall("browser_navigate", { url: "https://example.com" }, "b2"),
+          textResponse("Example Domain is a reserved illustrative domain."),
+        ],
+        {},
+      );
+      const step: Any = {
+        id: "unavailable-repeated",
+        description: "Summarize what https://example.com says",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(2);
+      expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
+    });
+
+    it("keeps researching after a site-specific fetch block and completes on the next source", async () => {
+      let fetches = 0;
+      const executor = createExecutorWithStubs(
+        [
+          toolCall("web_fetch", { url: "https://a.example.com/release" }, "f1"),
+          toolCall("web_fetch", { url: "https://b.example.com/release-notes" }, "f2"),
+          textResponse(
+            "According to the release notes on b.example.com, the widget ships in Q3 and supports offline mode.",
+          ),
+        ],
+        {},
+      );
+      executor.toolRegistry.executeTool = vi.fn(async () =>
+        ++fetches === 1
+          ? {
+              success: false,
+              error: "Request blocked by the site's bot protection (HTTP 403)",
+            }
+          : { success: true, content: "Release notes: ships in Q3 with offline mode." },
+      );
+      const step: Any = {
+        id: "blocked-fetch-then-success",
+        description: "Find when the widget ships",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fetches).toBe(2);
+    });
+
+    it("still fails a step whose hard tool failure is never followed by a successful tool", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          {
+            stopReason: "tool_use",
+            content: [
+              { type: "tool_use", id: "r1", name: "read_file", input: { path: "notes.md" } },
+              { type: "tool_use", id: "s1", name: "web_search", input: { query: "widget ship date" } },
+            ],
+          },
+          textResponse("The widget ships in Q3."),
+        ],
+        {
+          read_file: { success: true, content: "Widget planning notes" },
+          web_search: { success: false, error: "web_search is not configured for this workspace" },
+        },
+      );
+      const step: Any = {
+        id: "unrecovered-hard-failure",
+        description: "Find when the widget ships",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("not configured");
+    });
+
+    it("does not count edit mismatches or site-specific HTTP errors toward the cross-step tool block", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          {
+            stopReason: "tool_use",
+            content: [
+              ...Array.from({ length: 4 }, (_, index) => ({
+                type: "tool_use" as const,
+                id: `e${index}`,
+                name: "edit_file",
+                input: { file_path: "notes.md", old_string: `missing ${index}`, new_string: "x" },
+              })),
+              ...Array.from({ length: 4 }, (_, index) => ({
+                type: "tool_use" as const,
+                id: `f${index}`,
+                name: "web_fetch",
+                input: { url: `https://site${index}.example.com` },
+              })),
+            ],
+          },
+          textResponse("Could not apply the edits; none of the sources were reachable."),
+        ],
+        {},
+      );
+      executor.toolRegistry.executeTool = vi.fn(async (name: string) =>
+        name === "edit_file"
+          ? {
+              success: false,
+              error: "old_string found 2 times in file. Use replace_all: true to replace all occurrences.",
+            }
+          : { success: false, error: "HTTP 403: Forbidden" },
+      );
+      const step: Any = {
+        id: "cross-step-input-errors",
+        description: "Review the notes and the vendor pages",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step).catch(() => undefined);
+
+      expect((executor as Any).crossStepToolFailures.get("edit_file") || 0).toBe(0);
+      expect((executor as Any).crossStepToolFailures.get("web_fetch") || 0).toBe(0);
+    });
+
+    it("clears cross-step tool failure counts when a new follow-up message starts", async () => {
+      const executor = createExecutorWithStubs([], {});
+      (executor as Any).crossStepToolFailures = new Map([["web_fetch", 9]]);
+      const sentinel = new Error("stop after follow-up setup");
+      (executor as Any).daemon.getTask = vi.fn(() => {
+        throw sentinel;
+      });
+
+      await expect((executor as Any).sendMessageUnified("Try the vendor site again")).rejects.toBe(
+        sentinel,
+      );
+
+      expect((executor as Any).crossStepToolFailures.size).toBe(0);
+    });
+  });
+
   describe("run_command failures", () => {
     it("does not treat a later read as recovery from a failing test run", async () => {
       const executor = createCodeStepExecutor(

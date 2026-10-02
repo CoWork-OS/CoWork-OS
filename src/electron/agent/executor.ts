@@ -19998,6 +19998,28 @@ You are continuing a previous conversation. The context from the previous conver
     return canonicalToolName === "run_command" || canonicalToolName === "run_applescript";
   }
 
+  /**
+   * Count a failure toward the cross-step tool block. Failures that depend on
+   * the call's input (a missing path, an edit whose old_string did not match,
+   * invalid arguments, one site's HTTP error) say nothing about whether the tool
+   * itself works, so they do not count.
+   */
+  private recordCrossStepToolFailure(toolName: string, failureReason: string): void {
+    const reason = String(failureReason || "");
+    if (
+      _isInputDependentError(reason) ||
+      /\bold_string\b/i.test(reason) ||
+      /\bHTTP[\s/]?\d{3}\b/i.test(reason)
+    ) {
+      return;
+    }
+    const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    this.crossStepToolFailures.set(
+      canonicalToolName,
+      (this.crossStepToolFailures.get(canonicalToolName) || 0) + 1,
+    );
+  }
+
   private classifyShellPermissionDecision(
     text: string,
   ): "enable_shell" | "continue_without_shell" | "unknown" {
@@ -31894,6 +31916,10 @@ Return ONLY a JSON object:
       let hadRecoverableFutureArtifactProbe = false;
       let hadRecoverableVisionFallback = false;
       let hadRecoverableUnavailableAlternative = false;
+      // Reason of a hard tool failure no later successful tool has recovered
+      // from; it fails the step only if still set when the loop ends.
+      let unrecoveredHardToolFailureReason = "";
+      const unavailableToolsAttempted = new Set<string>();
       let hadDeferredPlanToolAttempt = false;
       let hadAnyToolSuccess = false;
       let allToolErrorsInputDependent = true;
@@ -32866,7 +32892,6 @@ Return ONLY a JSON object:
           let hasDuplicateToolAttempt = false;
           let hasUnavailableToolAttempt = false;
           let hasHardToolFailureAttempt = false;
-          let hadRecoverableUnavailableAlternative = false;
           const toolUseCount = (response.content || []).filter(
             (content: Any) => content?.type === "tool_use",
           ).length;
@@ -33297,7 +33322,16 @@ Return ONLY a JSON object:
                         ? "Switch to an access profile that permits command tools (Ask for approval, Approve for me, or Full access), or continue without commands."
                         : undefined;
                     hasUnavailableToolAttempt = true;
-                    if (!expectedRestriction) {
+                    const unavailableToolRepeated = unavailableToolsAttempted.has(
+                      canonicalContentName,
+                    );
+                    unavailableToolsAttempted.add(canonicalContentName);
+                    if (alternatives.length > 0 && !unavailableToolRepeated) {
+                      // An available alternative can do the work; the step only
+                      // fails if no tool succeeds afterwards. Calling the same
+                      // unavailable tool again is a hard failure as before.
+                      hadRecoverableUnavailableAlternative = true;
+                    } else if (!expectedRestriction) {
                       hasHardToolFailureAttempt = true;
                     }
                     if (isExecutionToolCall) {
@@ -34065,11 +34099,7 @@ Return ONLY a JSON object:
                             isHardToolFailure: (toolName, toolResult, error) =>
                               this.isHardToolFailure(toolName, toolResult, error),
                           });
-                          const canonicalFailureToolName = canonicalizeToolNameUtil(content.name);
-                          this.crossStepToolFailures.set(
-                            canonicalFailureToolName,
-                            (this.crossStepToolFailures.get(canonicalFailureToolName) || 0) + 1,
-                          );
+                          this.recordCrossStepToolFailure(content.name, failureMessage);
                           if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
                             hasHardToolFailureAttempt = true;
                           }
@@ -34154,6 +34184,9 @@ Return ONLY a JSON object:
 
                         if (toolSucceeded) {
                           hadAnyToolSuccess = true;
+                          // Hard failures of this iteration are recorded after the
+                          // batch, so this only clears failures from earlier turns.
+                          unrecoveredHardToolFailureReason = "";
                           this.taskHadAnyToolSuccess = true;
                           successfulToolNames.add(canonicalContentName);
                           this.recordToolResult(content.name, result, content.input);
@@ -34562,11 +34595,7 @@ Return ONLY a JSON object:
                               isHardToolFailure: (toolName, toolResult, error) =>
                                 this.isHardToolFailure(toolName, toolResult, error),
                             });
-                            const canonicalFailureToolName = canonicalizeToolNameUtil(content.name);
-                            this.crossStepToolFailures.set(
-                              canonicalFailureToolName,
-                              (this.crossStepToolFailures.get(canonicalFailureToolName) || 0) + 1,
-                            );
+                            this.recordCrossStepToolFailure(content.name, result.error || reason);
                             if (failureTracking.shouldDisable) {
                               const disabledScope =
                                 content.name === "web_search" &&
@@ -36255,9 +36284,8 @@ Return ONLY a JSON object:
               hasUnavailableToolAttempt,
             });
             const _allToolsFailed = failureDecision.allToolsFailed;
-            if (hasHardToolFailureAttempt && !lastFailureReason) {
-              stepFailed = true;
-              lastFailureReason =
+            if (hasHardToolFailureAttempt) {
+              unrecoveredHardToolFailureReason =
                 lastToolErrorReason ||
                 "A required tool became unavailable or returned a hard failure.";
             }
@@ -36286,6 +36314,7 @@ Return ONLY a JSON object:
                 continueLoop = true;
                 stepFailed = false;
                 lastFailureReason = "";
+                unrecoveredHardToolFailureReason = "";
                 state.messages = messages;
                 return { continueLoop, emptyResponseCount };
               }
@@ -36343,6 +36372,7 @@ Return ONLY a JSON object:
               stepFailed = true;
               lastFailureReason =
                 lastFailureReason ||
+                unrecoveredHardToolFailureReason ||
                 "All required tools are unavailable or failed. Unable to complete this step.";
               continueLoop = false;
             } else if (failureDecision.shouldStopFromHardFailure) {
@@ -36350,6 +36380,7 @@ Return ONLY a JSON object:
                 continueLoop = true;
                 stepFailed = false;
                 lastFailureReason = "";
+                unrecoveredHardToolFailureReason = "";
                 state.messages = messages;
                 return { continueLoop, emptyResponseCount };
               }
@@ -36758,15 +36789,21 @@ Return ONLY a JSON object:
         return;
       }
 
+      if (unrecoveredHardToolFailureReason) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason = unrecoveredHardToolFailureReason;
+        }
+      }
+
       if (
         !stepLoopBudgetStopReason &&
         hadRecoverableUnavailableAlternative &&
-        (hadToolSuccessAfterError || hadAnyToolSuccess)
+        (hadToolSuccessAfterError || hadAnyToolSuccess) &&
+        /Tool .* failed: Tool not available/i.test(String(lastFailureReason || ""))
       ) {
         stepFailed = false;
-        if (/Tool .* failed: Tool not available/i.test(String(lastFailureReason || ""))) {
-          lastFailureReason = "";
-        }
+        lastFailureReason = "";
       }
 
       // If the model repeatedly returned empty content, treat this as a hard failure.
@@ -39785,6 +39822,9 @@ Return ONLY a JSON object:
     if (!recoveredFromTurnLimit) {
       this.followUpRecoveryAttemptsInCurrentMessage = 0;
       this.lastFollowUpRecoveryBlockReason = "";
+      // A new user message is a new request (the user may have fixed the
+      // environment), so failures from earlier turns no longer block tools.
+      this.crossStepToolFailures = new Map();
     }
     const persistedTask = this.daemon.getTask(this.task.id);
     if (persistedTask) {
@@ -40759,7 +40799,6 @@ Return ONLY a JSON object:
           let hasDuplicateToolAttempt = false;
           let hasUnavailableToolAttempt = false;
           let hasHardToolFailureAttempt = false;
-          let hadRecoverableUnavailableAlternative = false;
           const batchCreatedPaths = new Set<string>();
           const followUpToolUseCount = (response.content || []).filter(
             (content: Any) => content?.type === "tool_use",
@@ -41079,9 +41118,6 @@ Return ONLY a JSON object:
                       content.input,
                       availableToolNames,
                     );
-                    if (alternatives.length > 0) {
-                      hadRecoverableUnavailableAlternative = true;
-                    }
                     if (!expectedRestriction && alternatives.length === 0) {
                       hasHardToolFailureAttempt = true;
                     }
@@ -41522,10 +41558,7 @@ Return ONLY a JSON object:
                             isHardToolFailure: (toolName, toolResult, error) =>
                               this.isHardToolFailure(toolName, toolResult, error),
                           });
-                          this.crossStepToolFailures.set(
-                            canonicalContentName,
-                            (this.crossStepToolFailures.get(canonicalContentName) || 0) + 1,
-                          );
+                          this.recordCrossStepToolFailure(canonicalContentName, failureMessage);
                           if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
                             hasHardToolFailureAttempt = true;
                           }
@@ -41691,10 +41724,7 @@ Return ONLY a JSON object:
                               isHardToolFailure: (toolName, toolResult, error) =>
                                 this.isHardToolFailure(toolName, toolResult, error),
                             });
-                            this.crossStepToolFailures.set(
-                              canonicalContentName,
-                              (this.crossStepToolFailures.get(canonicalContentName) || 0) + 1,
-                            );
+                            this.recordCrossStepToolFailure(canonicalContentName, reason);
                             if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
                               hasHardToolFailureAttempt = true;
                             }

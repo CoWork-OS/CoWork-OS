@@ -221,6 +221,33 @@ describe("tool failure normalization", () => {
     ).toBe(true);
   });
 
+  it.each([
+    "Request blocked by the site's bot protection (HTTP 403)",
+    "Fetch blocked by robots.txt for this site",
+    "Page requires JavaScript, which is disabled in the fetcher",
+  ])("does not treat a resource-specific failure as a hard tool failure: %s", (error) => {
+    expect(isHardToolFailure("web_fetch", { success: false, error }, error)).toBe(false);
+  });
+
+  it.each([
+    'Tool "web_fetch" blocked by workspace policy',
+    "Skill 'pdf' is blocked by skill allowlist/denylist policy",
+    "Integration is disabled. Enable it in Settings > Integrations.",
+    "Tool disabled due to repeated failures: timeout",
+    "web_search is not configured for this workspace",
+    "This tool is not available in this context",
+  ])("still treats a tool-level failure message as hard: %s", (error) => {
+    expect(isHardToolFailure("web_fetch", { success: false, error }, error)).toBe(true);
+  });
+
+  it("treats structured unavailable, disabled and blocked flags as hard regardless of message", () => {
+    for (const flag of ["unavailable", "disabled", "blocked"]) {
+      expect(
+        isHardToolFailure("web_fetch", { success: false, error: "nope", [flag]: true }, "nope"),
+      ).toBe(true);
+    }
+  });
+
   it("treats non-blocking fallback failures as advisory tool results", () => {
     const normalized = buildNormalizedToolResult({
       toolName: "read_pdf_visual",

@@ -1302,8 +1302,20 @@ export function isHardToolFailure(toolName: string, result: Any, failureReason =
     );
   }
 
-  return /not currently executable|blocked by|disabled|not available in this context|not configured/.test(
-    message,
+  // Free-text fallback for results without structured flags. Only tool-level
+  // conditions count: a site that blocked one fetch ("blocked by the site's bot
+  // protection") or a page that needs JavaScript says nothing about the tool.
+  return (
+    /not currently executable|not available in this context|not configured/.test(message) ||
+    /\bblocked by\b(?:\s+[\w/'"-]+){0,4}?\s+(?:polic(?:y|ies)|allowlist|denylist)\b/.test(
+      message,
+    ) ||
+    /(?:integration|tool|skill|connector|plugin|provider|search|fetch|browser|shell|command|feature|capabilit(?:y|ies))s?\b[^.\n]{0,30}?\b(?:is|are|been|was)\s+(?:currently\s+)?disabled\b/.test(
+      message,
+    ) ||
+    /\bdisabled\s+(?:due to|by (?:policy|an? admin|the administrator|your organi[sz]ation)|in settings)\b/.test(
+      message,
+    )
   );
 }
 

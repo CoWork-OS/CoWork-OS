@@ -995,6 +995,104 @@ describe("registered workspace operations without approval interruptions", () =>
   );
 });
 
+describe("default Ask for approval profile with approval prompts off", () => {
+  const runMcpCall = async (task: Any, cardAnswer = true) => {
+    const source = createWorkspace();
+    const profile = resolveEffectiveAccessProfile({ workspace: source, task });
+    const workspace = applyAccessProfileToWorkspace(source, profile);
+    const daemon = {
+      ...createDaemon(),
+      getTaskById: vi.fn().mockResolvedValue(task),
+      getEffectiveAccessProfile: vi.fn(() => profile),
+      evaluateToolPermission: vi.fn((_taskId: string, request: Any) =>
+        PermissionEngine.evaluate({
+          workspace,
+          toolName: request.toolName,
+          toolInput: request.details?.params,
+          approvalType: request.approvalType,
+          mode: profile.permissionMode,
+          rules: [],
+        }),
+      ),
+      authorizeToolAction: vi.fn().mockResolvedValue(cardAnswer),
+      requestApproval: vi.fn().mockResolvedValue(cardAnswer),
+    };
+    mockMcpState.tools = [
+      {
+        name: "research_lookup",
+        description: "Connector fixture",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        serverId: "research-server",
+      },
+    ];
+    const registry = new ToolRegistry(workspace, daemon as Any, task.id);
+    const outcome = await registry
+      .executeToolWithRuntime("mcp_research_lookup", { query: "status" })
+      .then(
+        () => null,
+        (error: unknown) => error as Error,
+      );
+    return { daemon, outcome, profile };
+  };
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("COWORK_APPROVAL_PROMPTS", "off");
+    mockMcpCallTool.mockReset().mockResolvedValue({ content: [] });
+  });
+
+  it("asks through the inline approval card instead of denying", async () => {
+    const { daemon, outcome, profile } = await runMcpCall({
+      id: "task-desktop",
+      source: "manual",
+      agentConfig: { accessProfileId: "ask_for_approval" },
+    });
+
+    expect(profile.id).toBe("ask_for_approval");
+    expect(outcome).toBeNull();
+    expect(daemon.authorizeToolAction).toHaveBeenCalledTimes(1);
+    expect(daemon.authorizeToolAction).toHaveBeenCalledWith(
+      "task-desktop",
+      expect.objectContaining({ toolName: "mcp_research_lookup" }),
+    );
+    expect(mockMcpCallTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run the call when the inline card is declined", async () => {
+    const { daemon, outcome } = await runMcpCall(
+      {
+        id: "task-declined",
+        source: "manual",
+        agentConfig: { accessProfileId: "ask_for_approval" },
+      },
+      false,
+    );
+
+    expect(outcome?.message).toContain("approval denied");
+    expect(daemon.authorizeToolAction).toHaveBeenCalledTimes(1);
+    expect(mockMcpCallTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a cowork run CLI task", { cli: { owner: "cowork-run", runId: "run-1" } }, {}],
+    ["a sub-agent", {}, { parentTaskId: "task-parent" }],
+    ["a scheduled task", {}, { source: "cron" }],
+    ["a task with no human input", { humanInputPolicy: "none" }, {}],
+  ])("keeps denying when %s cannot answer the card", async (_label, agentConfig, extra) => {
+    const { daemon, outcome } = await runMcpCall({
+      id: "task-unattended",
+      source: "manual",
+      ...extra,
+      agentConfig: { accessProfileId: "ask_for_approval", ...agentConfig },
+    });
+
+    expect(outcome?.message).toContain("approval requests are disabled");
+    expect(daemon.authorizeToolAction).not.toHaveBeenCalled();
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(mockMcpCallTool).not.toHaveBeenCalled();
+  });
+});
+
 describe("run_command kill timeout", () => {
   const runHandler = async (input: Record<string, unknown>, runtime?: Record<string, unknown>) => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-shell-timeout");

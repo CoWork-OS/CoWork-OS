@@ -202,7 +202,7 @@ import {
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
 import { getNumbatService } from "../../security/numbat";
-import { approvalPromptsDisabled } from "../approval-policy";
+import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -2212,6 +2212,9 @@ export class ToolRegistry {
           isHeadlessTask && hasExplicitNonInteractiveAuthority && semanticReview?.mode === "active"
             ? "allow_if_authorized"
             : undefined,
+        inlineApprovalAvailable: canAnswerInlineApproval(taskForApproval, {
+          headless: isHeadlessMode(),
+        }),
       });
 
       if (pipeline.decision === "deny") {

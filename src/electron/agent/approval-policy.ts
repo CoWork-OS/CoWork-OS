@@ -1,3 +1,10 @@
+import type { Task } from "../../shared/types";
+import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
+import {
+  allowsHardBlockerHumanInput,
+  resolveHumanInputPolicy,
+} from "../../shared/human-input-policy";
+
 /**
  * Approval prompts are an opt-in compatibility path. CoWork's normal local
  * runtime follows the same no-prompt posture as the full-auto harnesses; set
@@ -16,4 +23,26 @@ export function approvalPromptsDisabled(): boolean {
   }
   if (process.env.NODE_ENV === "test" || process.env.VITEST) return false;
   return true;
+}
+
+/**
+ * With the legacy queue off, a policy `ask` is delivered as an inline
+ * "Deny / Allow once" card in the task timeline
+ * (`AgentDaemon.requestAssistantApproval`). The card is only a consent surface
+ * when a person can see and answer it, so every context without one keeps the
+ * fail-closed denial: headless runs, `cowork run` CLI tasks (the CLI never
+ * answers input requests), sub-agents, bot and channel conversations,
+ * scheduled/automated work, and tasks configured for no human input.
+ */
+export function canAnswerInlineApproval(
+  task: Task | null | undefined,
+  runtime: { headless: boolean },
+): boolean {
+  if (!task || runtime.headless) return false;
+  const agentConfig = task.agentConfig;
+  if (agentConfig?.cli?.owner === "cowork-run") return false;
+  if (task.parentTaskId) return false;
+  if (agentConfig?.botConversation === true || agentConfig?.gatewayContext) return false;
+  if (isAutomatedTaskLike(task)) return false;
+  return allowsHardBlockerHumanInput(resolveHumanInputPolicy({ agentConfig }));
 }

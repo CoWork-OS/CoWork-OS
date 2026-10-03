@@ -1602,7 +1602,10 @@ export class BrowserTools {
         name: "browser_act_batch",
         description:
           "Execute a batch of browser actions in sequence. Use for multi-step interactions (e.g. fill form, click submit, wait for result). " +
-          "Each action can have an optional delay_ms before it runs. Actions: click, fill, type, press, wait, scroll.",
+          "Each action can have an optional delay_ms before it runs. Actions: click, fill, type, press, wait, scroll. " +
+          "The result reports total (requested) and completed (executed) steps; when fewer ran, incomplete is true " +
+          "and the remaining steps must be sent again. The batch stops at a failed step or at a confirm/prompt " +
+          "dialog the headless browser dismissed.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -2801,10 +2804,27 @@ export class BrowserTools {
         if (actions.length === 0) {
           return { success: false, error: "actions array is required and must not be empty" };
         }
+        const requestedCount = actions.length;
         const selectedActions = await this.selectBrowserActionsWithJev(input, actions);
         if (selectedActions && selectedActions.length < actions.length) {
           actions = selectedActions;
         }
+        // Action selection may run only a prefix; report against what the caller asked for.
+        const deferredCount = requestedCount - actions.length;
+        const batchCounts = {
+          total: requestedCount,
+          requested: requestedCount,
+          ...(deferredCount > 0
+            ? {
+                deferred: deferredCount,
+                incomplete: true,
+                message:
+                  `Only the first ${actions.length} of ${requestedCount} actions were selected to run; ` +
+                  "check the page (browser_snapshot or browser_get_content) and send the remaining " +
+                  "actions again.",
+              }
+            : {}),
+        };
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
           const results: Array<{ type: string; success: boolean; error?: string }> = [];
           for (let i = 0; i < actions.length; i++) {
@@ -2887,7 +2907,7 @@ export class BrowserTools {
           const allSuccess = results.every((r) => r.success);
           this.daemon.logEvent(this.taskId, "browser_action", {
             action: "act_batch",
-            count: actions.length,
+            count: requestedCount,
             completed: results.length,
             success: allSuccess,
             visible: true,
@@ -2896,7 +2916,7 @@ export class BrowserTools {
             success: allSuccess,
             results,
             completed: results.length,
-            total: actions.length,
+            ...batchCounts,
           };
         }
         const results: Array<{ type: string; success: boolean; error?: string } & Any> = [];
@@ -2979,7 +2999,7 @@ export class BrowserTools {
         const allSuccess = !stoppedForDialog && results.every((r) => r.success);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "act_batch",
-          count: actions.length,
+          count: requestedCount,
           completed: results.length,
           success: allSuccess,
           ...(stoppedForDialog ? { stoppedForDialog: stoppedForDialog.type } : {}),
@@ -2988,7 +3008,7 @@ export class BrowserTools {
           success: allSuccess,
           results,
           completed: results.length,
-          total: actions.length,
+          ...batchCounts,
           ...(stoppedForDialog
             ? {
                 stoppedForDialog,

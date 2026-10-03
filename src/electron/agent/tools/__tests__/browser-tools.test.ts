@@ -1277,6 +1277,31 @@ describe("BrowserTools headless browser capabilities", () => {
     expect(result.networkSummary).toEqual({ count: 1, recent: ["500 https://example.com/api"] });
   });
 
+  it("reports requested and executed counts when action selection runs only a prefix", async () => {
+    const click = vi.fn().mockResolvedValue({ success: true });
+    const fill = vi.fn().mockResolvedValue({ success: true });
+    const { tools } = makeHeadlessTools({ click, fill });
+    const actions = [
+      { type: "click", selector: "#open" },
+      { type: "fill", selector: "#name", value: "x" },
+      { type: "click", selector: "#save" },
+    ];
+    vi.spyOn(tools as Any, "selectBrowserActionsWithJev").mockResolvedValue(actions.slice(0, 1));
+
+    const result = await tools.executeTool("browser_act_batch", { actions });
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(fill).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      total: 3,
+      requested: 3,
+      completed: 1,
+      deferred: 2,
+      incomplete: true,
+    });
+    expect(result.message).toContain("1 of 3");
+  });
+
   it("describes headless popup handling on the tab tools", () => {
     const definitions = BrowserTools.getToolDefinitions();
     const descriptionOf = (name: string) =>

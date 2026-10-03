@@ -29,8 +29,8 @@ export class KnowledgeGraphRepository {
     return this.sql.unit("kg_getEntityTypes", [workspaceId]);
   }
 
-  getEntity(entityId: string): Promise<KGEntity | undefined> {
-    return this.sql.unit("kg_getEntity", [entityId]);
+  getEntity(workspaceId: string, entityId: string): Promise<KGEntity | undefined> {
+    return this.sql.unit("kg_getEntity", [workspaceId, entityId]);
   }
 
   upsertEntity(
@@ -43,14 +43,15 @@ export class KnowledgeGraphRepository {
   }
 
   updateEntity(
+    workspaceId: string,
     entityId: string,
     patch: { description?: string; properties?: Record<string, unknown>; confidence?: number },
   ): Promise<KGEntity | undefined> {
-    return this.sql.unit("kg_updateEntity", [entityId, patch]);
+    return this.sql.unit("kg_updateEntity", [workspaceId, entityId, patch]);
   }
 
-  deleteEntity(entityId: string): Promise<boolean> {
-    return this.sql.unit("kg_deleteEntity", [entityId]);
+  deleteEntity(workspaceId: string, entityId: string): Promise<boolean> {
+    return this.sql.unit("kg_deleteEntity", [workspaceId, entityId]);
   }
 
   createEdgeChecked(
@@ -63,32 +64,38 @@ export class KnowledgeGraphRepository {
     return this.sql.unit("kg_createEdgeChecked", [workspaceId, input, source, sourceTaskId, now]);
   }
 
-  getEdge(edgeId: string): Promise<KGEdge | undefined> {
-    return this.sql.unit("kg_getEdge", [edgeId]);
+  getEdge(workspaceId: string, edgeId: string): Promise<KGEdge | undefined> {
+    return this.sql.unit("kg_getEdge", [workspaceId, edgeId]);
   }
 
-  getEdgesBetween(entityId1: string, entityId2: string, asOf?: number): Promise<KGEdge[]> {
-    return this.sql.unit("kg_getEdgesBetween", [entityId1, entityId2, asOf]);
+  getEdgesBetween(
+    workspaceId: string,
+    entityId1: string,
+    entityId2: string,
+    asOf?: number,
+  ): Promise<KGEdge[]> {
+    return this.sql.unit("kg_getEdgesBetween", [workspaceId, entityId1, entityId2, asOf]);
   }
 
-  deleteEdge(edgeId: string): Promise<boolean> {
-    return this.sql.unit("kg_deleteEdge", [edgeId]);
+  deleteEdge(workspaceId: string, edgeId: string): Promise<boolean> {
+    return this.sql.unit("kg_deleteEdge", [workspaceId, edgeId]);
   }
 
-  invalidateEdge(edgeId: string, validTo: number): Promise<KGEdge | undefined> {
-    return this.sql.unit("kg_invalidateEdge", [edgeId, validTo]);
+  invalidateEdge(workspaceId: string, edgeId: string, validTo: number): Promise<KGEdge | undefined> {
+    return this.sql.unit("kg_invalidateEdge", [workspaceId, edgeId, validTo]);
   }
 
   addObservationChecked(
+    workspaceId: string,
     input: AddObservationInput,
     source: Source,
     sourceTaskId?: string,
   ): Promise<KGObservation> {
-    return this.sql.unit("kg_addObservationChecked", [input, source, sourceTaskId]);
+    return this.sql.unit("kg_addObservationChecked", [workspaceId, input, source, sourceTaskId]);
   }
 
-  getObservations(entityId: string, limit?: number): Promise<KGObservation[]> {
-    return this.sql.unit("kg_getObservations", [entityId, limit]);
+  getObservations(workspaceId: string, entityId: string, limit?: number): Promise<KGObservation[]> {
+    return this.sql.unit("kg_getObservations", [workspaceId, entityId, limit]);
   }
 
   searchEntities(workspaceId: string, query: string, limit?: number): Promise<KGSearchResult[]> {
@@ -96,16 +103,17 @@ export class KnowledgeGraphRepository {
   }
 
   getNeighbors(
+    workspaceId: string,
     entityId: string,
     depth?: number,
     edgeTypes?: string[],
     asOf?: number,
   ): Promise<KGNeighborResult[]> {
-    return this.sql.unit("kg_getNeighbors", [entityId, depth, edgeTypes, asOf]);
+    return this.sql.unit("kg_getNeighbors", [workspaceId, entityId, depth, edgeTypes, asOf]);
   }
 
-  getSubgraph(entityIds: string[], asOf?: number): Promise<KGSubgraph> {
-    return this.sql.unit("kg_getSubgraph", [entityIds, asOf]);
+  getSubgraph(workspaceId: string, entityIds: string[], asOf?: number): Promise<KGSubgraph> {
+    return this.sql.unit("kg_getSubgraph", [workspaceId, entityIds, asOf]);
   }
 
   contextEntities(

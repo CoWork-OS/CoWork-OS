@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
+import { buildAgentVisibleMemorySql } from "../memory/memory-visibility";
 import { PRUNE_TASK_EVENTS_BATCH_SQL } from "./maintenance-sql";
 import {
   flushPendingTimelineEvent,
@@ -6820,6 +6821,7 @@ export class MemoryStore {
         FROM memories_fts f
         JOIN memories m ON f.rowid = m.rowid
         WHERE memories_fts MATCH ? AND m.workspace_id = ? ${privacyFilter}
+          AND ${buildAgentVisibleMemorySql("m.id")}
         ORDER BY score
         LIMIT ?
       `);
@@ -6895,6 +6897,7 @@ export class MemoryStore {
         SELECT id, summary, content, type, created_at, task_id
         FROM memories
         WHERE workspace_id = ? ${fallbackPrivacyFilter}
+          AND ${buildAgentVisibleMemorySql("memories.id")}
           ${where}
         ORDER BY created_at DESC
         LIMIT ?
@@ -6920,8 +6923,10 @@ export class MemoryStore {
    * Search imported memories across ALL workspaces.
    * This is intentionally global so sessions from any workspace can retrieve imported history.
    */
-  searchImportedGlobal(query: string, limit = 20, includePrivate = false): MemorySearchResult[] {
-    const privacyFilter = includePrivate ? "" : "AND m.is_private = 0";
+  searchImportedGlobal(query: string, limit = 20, _includePrivate = false): MemorySearchResult[] {
+    // This lane crosses workspaces, so it never returns private rows (the owning
+    // workspace finds them through its local search) nor suppressed/redacted ones.
+    const privacyFilter = `AND m.is_private = 0 AND ${buildAgentVisibleMemorySql("m.id")}`;
     try {
       const stmt = this.db.prepare(`
         SELECT m.id, m.summary, m.content, m.type, m.created_at, m.task_id,
@@ -7002,7 +7007,7 @@ export class MemoryStore {
       SELECT m.id, m.summary, m.content, m.type, m.created_at, m.task_id
       FROM memories m
       WHERE ${buildImportedMemoryFilterSql("m.content")}
-        ${includePrivate ? "" : "AND m.is_private = 0"}
+        ${privacyFilter}
         ${where}
       ORDER BY m.created_at DESC
       LIMIT ?
@@ -7041,6 +7046,7 @@ export class MemoryStore {
         FROM memories_fts f
         JOIN memories m ON f.rowid = m.rowid
         WHERE memories_fts MATCH ? AND m.workspace_id = ? AND m.is_private = 0
+          AND ${buildAgentVisibleMemorySql("m.id")}
         ORDER BY score
         LIMIT ?
       `);
@@ -7111,6 +7117,7 @@ export class MemoryStore {
       SELECT id, summary, content, type, created_at, task_id
       FROM memories
       WHERE workspace_id = ? AND is_private = 0
+        AND ${buildAgentVisibleMemorySql("memories.id")}
         ${where}
       ORDER BY created_at DESC
       LIMIT ?

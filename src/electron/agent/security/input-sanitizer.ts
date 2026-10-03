@@ -314,6 +314,22 @@ export class InputSanitizer {
   }
 
   /**
+   * Sanitize one stored memory/profile line for rendering inside a tagged prompt
+   * block (e.g. `<cowork_user_profile>`). On top of sanitizeMemoryContent it
+   * collapses newlines and control characters to single spaces, so a value
+   * cannot start new "lines" of the block, and escapes angle brackets, so a value
+   * such as `</cowork_user_profile>` cannot close the block or open a new tag.
+   */
+  static sanitizeInlineMemoryLine(text: string): string {
+    if (!text) return "";
+    const collapsed = String(text)
+      .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return this.sanitizeMemoryContent(collapsed).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  /**
    * Validate and sanitize skill guidelines before injection
    */
   static validateSkillGuidelines(guidelines: string): {

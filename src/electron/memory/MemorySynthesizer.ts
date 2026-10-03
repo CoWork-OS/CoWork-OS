@@ -194,7 +194,12 @@ function extractUserProfileFragments(): MemoryFragment[] {
 
 function extractRelationshipFragments(): MemoryFragment[] {
   try {
-    return RelationshipMemoryService.listItems({ includeDone: false, limit: 16 }).map((item) => ({
+    return RelationshipMemoryService.listItems({
+      includeDone: false,
+      limit: 16,
+      // Mailbox-sourced items are sender-controlled text, not facts about the user.
+      excludeThirdParty: true,
+    }).map((item) => ({
       key: fingerprint(`relationship:${item.layer}:${item.text}`),
       source: "relationship" as const,
       text: `[${item.layer}] ${item.text}`,

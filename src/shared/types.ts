@@ -1883,6 +1883,25 @@ export const TOOL_GROUPS = {
     "search_sessions",
     "memory_topics_load",
     "email_imap_unread",
+    // Recall over the archive, verbatim task messages, durable context and the
+    // knowledge graph. These were missing here, which let group/public gateway
+    // chats search private (and imported cross-workspace) memory. (SEC-4)
+    "search_memories",
+    "search_quotes",
+    "context_grep",
+    "context_describe",
+    "kg_search",
+    "kg_get_neighbors",
+    "kg_get_subgraph",
+    // Knowledge-graph writes: a shared chat must not be able to plant or erase
+    // facts in the owner's graph either.
+    "kg_create_entity",
+    "kg_update_entity",
+    "kg_delete_entity",
+    "kg_create_edge",
+    "kg_delete_edge",
+    "kg_invalidate_edge",
+    "kg_add_observation",
   ],
   // Image generation - requires API access
   "group:image": ["generate_image"],
@@ -1891,6 +1910,27 @@ export const TOOL_GROUPS = {
 } as const;
 
 export type ToolGroupName = keyof typeof TOOL_GROUPS;
+
+/**
+ * Tools that persist or erase long-term memory (local archive, curated memory,
+ * Supermemory, knowledge graph). They do not touch workspace files, so they are
+ * not in group:write, but they are still writes: read-only lanes (plan/analyze
+ * modes, verifier/researcher workers) must deny them like any other mutation.
+ * (SEC-12)
+ */
+export const MEMORY_WRITE_TOOL_NAMES: readonly string[] = [
+  "memory_save",
+  "memory_curate",
+  "supermemory_remember",
+  "supermemory_forget",
+  "kg_create_entity",
+  "kg_update_entity",
+  "kg_delete_entity",
+  "kg_create_edge",
+  "kg_delete_edge",
+  "kg_invalidate_edge",
+  "kg_add_observation",
+];
 
 /**
  * Maps each tool to its risk level

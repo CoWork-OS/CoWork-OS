@@ -159,11 +159,13 @@ import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { QATools } from "./qa-tools";
 import {
+  CHRONICLE_PROMOTION_MIN_CONFIDENCE,
   ChronicleCaptureService,
   ChronicleMemoryService,
   ChronicleObservationRepository,
   ChronicleSettingsManager,
 } from "../../chronicle";
+import { taskDisablesMemoryCapture } from "../../memory/no-memory-directive";
 import { CitationTracker } from "../citation/CitationTracker";
 import { OrchestrationRepository } from "../orchestration-repository-facades";
 import {
@@ -2794,9 +2796,31 @@ export class ToolRegistry {
           useFallback: request.input?.useFallback !== false,
         });
 
+        // Durable promotion is limited to the single top match, only when it is
+        // confident, only when the task did not opt out with <no-memory>, and
+        // only when the task's access profile allows writing the workspace's
+        // Chronicle directory. Every match is still returned to the model.
+        const chronicleTask =
+          typeof (this.daemon as Any)?.getTask === "function"
+            ? (this.daemon as Any).getTask(this.taskId)
+            : undefined;
+        const promotionAllowed = !taskDisablesMemoryCapture(chronicleTask);
+        const promotionTarget =
+          promotionAllowed &&
+          matches[0] &&
+          matches[0].confidence >= CHRONICLE_PROMOTION_MIN_CONFIDENCE
+            ? matches[0]
+            : null;
+        const canWriteChronicle = (targetPath: string) =>
+          evaluateWorkspaceFilesystemAccess(this.workspace, targetPath, "write").decision ===
+          "allow";
+
         const evidenceRefs: EvidenceRef[] = [];
         const persistedResults = await Promise.all(
           matches.map(async (match) => {
+            if (match !== promotionTarget) {
+              return match;
+            }
             try {
               const record = await ChronicleObservationRepository.promote(this.workspace.path, {
                 workspaceId: this.workspace.id,
@@ -2804,6 +2828,7 @@ export class ToolRegistry {
                 query,
                 observation: match,
                 destinationHints: this.deriveChronicleDestinationHints(match),
+                canWrite: canWriteChronicle,
               });
               if (!record) {
                 return match;

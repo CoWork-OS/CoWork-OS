@@ -204,6 +204,25 @@ function toMemoryToolRestrictions(
       "supermemory_search",
       "supermemory_remember",
       "supermemory_forget",
+      // "Memory disabled" must cover every recall and memory-write lane, not
+      // just the ones above: archive search, observation index, durable
+      // context and the knowledge graph. (SEC-4)
+      "search_memories",
+      "memory_search_index",
+      "memory_timeline",
+      "memory_details",
+      "context_grep",
+      "context_describe",
+      "kg_search",
+      "kg_get_neighbors",
+      "kg_get_subgraph",
+      "kg_create_entity",
+      "kg_update_entity",
+      "kg_delete_entity",
+      "kg_create_edge",
+      "kg_delete_edge",
+      "kg_invalidate_edge",
+      "kg_add_observation",
     ],
   };
 }

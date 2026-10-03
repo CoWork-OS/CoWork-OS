@@ -41,6 +41,15 @@ describe("worker-role-registry", () => {
     expect(researcher.readOnlyExecution).toBe(true);
   });
 
+  it("denies memory writes to the verifier and researcher roles (SEC-12)", () => {
+    const verifier = resolveWorkerRoleAgentConfig("verifier", {});
+    const researcherSpec = getWorkerRoleSpec("researcher");
+    for (const tool of ["memory_save", "memory_curate", "supermemory_remember", "kg_create_entity"]) {
+      expect(verifier.toolRestrictions).toContain(tool);
+      expect(researcherSpec.toolRestrictions).toContain(tool);
+    }
+  });
+
   it("builds a worker prompt with the role contract", () => {
     const prompt = buildWorkerRolePrompt("researcher", {
       taskTitle: "Review release notes",

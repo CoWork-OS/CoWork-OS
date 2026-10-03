@@ -8,6 +8,8 @@ import { ChronicleSettingsManager } from "./ChronicleSettingsManager";
 import type { ChroniclePersistedObservation, ChronicleSettings } from "./types";
 
 const logger = createLogger("ChronicleMemoryService");
+/** Chronicle memories are always local-only (see docs/chronicle.md). */
+export const CHRONICLE_MEMORIES_PRIVATE = true;
 
 export class ChronicleMemoryService {
   private static instance: ChronicleMemoryService | null = null;
@@ -50,12 +52,14 @@ export class ChronicleMemoryService {
     }
 
     const memoryContent = chronicleObservationToMemoryContent(observation);
+    // Screen-derived text stays local: capture as private so it is never
+    // mirrored to external memory providers (Supermemory).
     const memory = await MemoryService.capture(
       observation.workspaceId,
       observation.taskId,
       "screen_context",
       memoryContent,
-      false,
+      CHRONICLE_MEMORIES_PRIVATE,
       {
         origin: "chronicle",
         signalFamily: "chronicle",

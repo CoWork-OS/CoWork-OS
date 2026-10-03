@@ -554,6 +554,25 @@ const TASK_OVERRIDE_ALLOWLIST = new Set<keyof Task>([
   "resumeStrategy",
 ]);
 
+/**
+ * Mirrors the executor's allowMemoryInjection: memory is retained unless the
+ * task opts out (sub-agents default to opting out), and group/public gateway
+ * contexts only get it when shared-context memory is explicitly trusted.
+ */
+function isRelationshipMemoryAllowedForTask(
+  agentConfig: AgentConfig | undefined,
+  isSubAgentTask: boolean,
+): boolean {
+  const retainMemory = agentConfig?.retainMemory ?? !isSubAgentTask;
+  if (!retainMemory) return false;
+  const gatewayContext = agentConfig?.gatewayContext ?? "private";
+  if (gatewayContext === "private") return true;
+  return (
+    agentConfig?.allowSharedContextMemory === true &&
+    (gatewayContext === "group" || gatewayContext === "public")
+  );
+}
+
 function sanitizeTaskOverrides(taskOverrides?: Partial<Task>): Partial<Task> | undefined {
   if (!taskOverrides) return undefined;
   const sanitized: Partial<Task> = {};
@@ -1548,6 +1567,8 @@ export class AgentDaemon extends EventEmitter {
     agentConfig?: AgentConfig;
     lastProgressScore?: number;
     workspaceId?: string;
+    /** Child/sub-agent task; defaults retainMemory to false like the executor. */
+    isSubAgentTask?: boolean;
   }): {
     route: IntentRoute;
     strategy: DerivedTaskStrategy;
@@ -1590,10 +1611,18 @@ export class AgentDaemon extends EventEmitter {
     if (!agentConfig.executionMode) {
       agentConfig.executionMode = strategy.executionMode;
     }
-    const relationshipContext = RelationshipMemoryService.buildPromptContext({
-      maxPerLayer: 2,
-      maxChars: 1200,
-    });
+    // task.prompt is persisted and can reach any model that sees the task, so
+    // relationship memory is only added under the executor's memory-injection gate
+    // (retainMemory, and a private gateway context unless shared memory is trusted).
+    const relationshipContext = isRelationshipMemoryAllowedForTask(
+      input.agentConfig,
+      input.isSubAgentTask === true,
+    )
+      ? RelationshipMemoryService.buildPromptContext({
+          maxPerLayer: 2,
+          maxChars: 1200,
+        })
+      : "";
     const prompt = TaskStrategyService.decoratePrompt(
       input.prompt,
       route,
@@ -1669,6 +1698,7 @@ export class AgentDaemon extends EventEmitter {
       agentConfig: task.agentConfig,
       lastProgressScore: task.lastProgressScore,
       workspaceId: task.workspaceId,
+      isSubAgentTask: (task.agentType ?? "main") === "sub" || !!task.parentTaskId,
     });
     const nextAgentConfig = derived.agentConfig;
     const agentConfigChanged = derived.agentConfigChanged;
@@ -4376,6 +4406,8 @@ export class AgentDaemon extends EventEmitter {
       routingPrompt: params.prompt,
       agentConfig: taskAgentConfig,
       workspaceId: params.workspaceId,
+      isSubAgentTask:
+        params.taskOverrides?.agentType === "sub" || !!params.taskOverrides?.parentTaskId,
     });
     const isCronTask = params.source === "cron";
     const cronBudgetProfile = isCronTask
@@ -9214,9 +9246,14 @@ export class AgentDaemon extends EventEmitter {
     const canRead = (candidatePath: string): boolean =>
       evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "read").decision ===
       "allow";
+    // Only guards the daemon's own transcript span and checkpoint writes.
+    // `.cowork/memory/transcripts` is protected from tool writes, so this
+    // internal writer opts in explicitly while still honoring the workspace
+    // write capability and profile filesystem rules.
     const canWrite = (candidatePath: string): boolean =>
-      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "write").decision ===
-      "allow";
+      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "write", {
+        internalRuntimeStorageWrite: true,
+      }).decision === "allow";
     const transcriptFilePath = path.join(
       workspace.path,
       ".cowork",

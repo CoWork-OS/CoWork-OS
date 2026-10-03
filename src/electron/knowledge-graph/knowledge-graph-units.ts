@@ -58,24 +58,27 @@ export const KNOWLEDGE_GRAPH_UNITS = {
   kg_getEntityTypes: defineReadUnit(tuple(id), (db, [workspaceId]) =>
     store(db).getEntityTypes(workspaceId),
   ),
-  kg_getEntity: defineReadUnit(tuple(id), (db, [entityId]) => store(db).getEntity(entityId)),
-  kg_getEdge: defineReadUnit(tuple(id), (db, [edgeId]) => store(db).getEdge(edgeId)),
-  kg_getEdgesBetween: defineReadUnit(tuple(id, id, opt(num)), (db, [a, b, asOf]) =>
-    store(db).getEdgesBetween(a, b, asOf),
+  // By-id units take the caller's workspace first; ids from other workspaces are not found.
+  kg_getEntity: defineReadUnit(tuple(id, id), (db, [ws, entityId]) =>
+    store(db).getEntity(ws, entityId),
   ),
-  kg_getObservations: defineReadUnit(tuple(id, opt(int)), (db, [entityId, limit]) =>
-    store(db).getObservations(entityId, limit),
+  kg_getEdge: defineReadUnit(tuple(id, id), (db, [ws, edgeId]) => store(db).getEdge(ws, edgeId)),
+  kg_getEdgesBetween: defineReadUnit(tuple(id, id, id, opt(num)), (db, [ws, a, b, asOf]) =>
+    store(db).getEdgesBetween(ws, a, b, asOf),
+  ),
+  kg_getObservations: defineReadUnit(tuple(id, id, opt(int)), (db, [ws, entityId, limit]) =>
+    store(db).getObservations(ws, entityId, limit),
   ),
   kg_searchEntities: defineReadUnit(tuple(id, text, opt(int)), (db, [ws, query, limit]) =>
     store(db).searchEntities(ws, query, limit),
   ),
   kg_getNeighbors: defineReadUnit(
-    tuple(id, opt(int), opt(strList), opt(num)),
-    (db, [entityId, depth, edgeTypes, asOf]) =>
-      store(db).getNeighbors(entityId, depth, edgeTypes, asOf),
+    tuple(id, id, opt(int), opt(strList), opt(num)),
+    (db, [ws, entityId, depth, edgeTypes, asOf]) =>
+      store(db).getNeighbors(ws, entityId, depth, edgeTypes, asOf),
   ),
-  kg_getSubgraph: defineReadUnit(tuple(strList, opt(num)), (db, [entityIds, asOf]) =>
-    store(db).getSubgraph(entityIds, asOf),
+  kg_getSubgraph: defineReadUnit(tuple(id, strList, opt(num)), (db, [ws, entityIds, asOf]) =>
+    store(db).getSubgraph(ws, entityIds, asOf),
   ),
   kg_getStats: defineReadUnit(tuple(id), (db, [workspaceId]) => store(db).getStats(workspaceId)),
   kg_contextEntities: defineReadUnit(
@@ -89,25 +92,27 @@ export const KNOWLEDGE_GRAPH_UNITS = {
       store(db).upsertEntity(ws, input, entitySource, taskId),
   ),
   kg_updateEntity: defineUnit(
-    tuple(id, (value: unknown) =>
+    tuple(id, id, (value: unknown) =>
       fields({ description: opt(text), properties: opt(properties), confidence: opt(num) })(value),
     ),
-    (db, [entityId, patch]) => store(db).updateEntity(entityId, patch),
+    (db, [ws, entityId, patch]) => store(db).updateEntity(ws, entityId, patch),
   ),
-  kg_deleteEntity: defineUnit(tuple(id), (db, [entityId]) => store(db).deleteEntity(entityId)),
+  kg_deleteEntity: defineUnit(tuple(id, id), (db, [ws, entityId]) =>
+    store(db).deleteEntity(ws, entityId),
+  ),
   kg_createEdgeChecked: defineUnit(
     tuple(id, edgeInput, source, opt(id), num),
     (db, [ws, input, edgeSource, taskId, now]) =>
       store(db).createEdgeChecked(ws, input, edgeSource, taskId, now),
   ),
-  kg_deleteEdge: defineUnit(tuple(id), (db, [edgeId]) => store(db).deleteEdge(edgeId)),
-  kg_invalidateEdge: defineUnit(tuple(id, num), (db, [edgeId, validTo]) =>
-    store(db).invalidateEdge(edgeId, validTo),
+  kg_deleteEdge: defineUnit(tuple(id, id), (db, [ws, edgeId]) => store(db).deleteEdge(ws, edgeId)),
+  kg_invalidateEdge: defineUnit(tuple(id, id, num), (db, [ws, edgeId, validTo]) =>
+    store(db).invalidateEdge(ws, edgeId, validTo),
   ),
   kg_addObservationChecked: defineUnit(
-    tuple(observationInput, source, opt(id)),
-    (db, [input, observationSource, taskId]) =>
-      store(db).addObservationChecked(input, observationSource, taskId),
+    tuple(id, observationInput, source, opt(id)),
+    (db, [ws, input, observationSource, taskId]) =>
+      store(db).addObservationChecked(ws, input, observationSource, taskId),
   ),
   kg_applyConfidenceDecay: defineUnit(tuple(id, opt(num), opt(num)), (db, [ws, decayRate, floor]) =>
     store(db).applyConfidenceDecay(ws, decayRate, floor),

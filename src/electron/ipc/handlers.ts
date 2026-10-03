@@ -56,6 +56,26 @@ import { RELEASE_BRIEF_ACCESS_PROFILE_ID } from "../security/access-profile-reso
 import * as path from "path";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
+import {
+  AddUserFactRequestSchema,
+  CommitmentsGetRequestSchema,
+  isMemoryVisibleInWorkspace,
+  KitOpenFileRequestSchema,
+  MemoryDetailsRequestSchema,
+  MemoryObservationSearchRequestSchema,
+  MemoryObservationTimelineRequestSchema,
+  MemoryRecentRequestSchema,
+  MemorySaveSettingsRequestSchema,
+  MemorySearchRequestSchema,
+  MemoryTimelineRequestSchema,
+  MemoryWriteApproveRequestSchema,
+  MemoryWriteRejectRequestSchema,
+  MessageFeedbackRequestSchema,
+  RelationshipListRequestSchema,
+  RelationshipUpdateRequestSchema,
+  resolveKitOpenPath,
+  UpdateUserFactRequestSchema,
+} from "./memory-ipc-validation";
 import { execFile, spawn as spawnProcess } from "child_process";
 import { promisify } from "util";
 import { promises as dns } from "dns";
@@ -11798,19 +11818,64 @@ function setupMCPHandlers(): void {
     return BuiltinToolsSettingsManager.getToolsByCategory();
   });
 
+  // Chronicle IPC input validation: renderer data is untrusted, so every
+  // CHRONICLE_* payload is shape-checked and capped before use.
+  const CHRONICLE_MAX_ID_LENGTH = 200;
+  const CHRONICLE_MAX_QUERY_LENGTH = 2_000;
+  const CHRONICLE_MAX_LIST_LIMIT = 500;
+  const chronicleIsPlainObject = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const chronicleWorkspaceId = (input: unknown): string | null => {
+    if (!chronicleIsPlainObject(input)) return null;
+    const value = input.workspaceId;
+    if (typeof value !== "string") return null;
+    return value.length > 0 && value.length <= CHRONICLE_MAX_ID_LENGTH ? value : null;
+  };
+  const chronicleClampInt = (value: unknown, fallback: number, min: number, max: number) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.min(max, Math.max(min, Math.round(value)))
+      : fallback;
+  const sanitizeChronicleSettingsInput = (input: unknown): Partial<ChronicleSettings> => {
+    if (!chronicleIsPlainObject(input)) return {};
+    const out: Partial<ChronicleSettings> = {};
+    const booleanKeys = [
+      "enabled",
+      "paused",
+      "backgroundGenerationEnabled",
+      "respectWorkspaceMemory",
+    ] as const;
+    for (const key of booleanKeys) {
+      if (typeof input[key] === "boolean") out[key] = input[key] as boolean;
+    }
+    const numberKeys = ["captureIntervalSeconds", "retentionMinutes", "maxFrames"] as const;
+    for (const key of numberKeys) {
+      if (typeof input[key] === "number" && Number.isFinite(input[key])) {
+        out[key] = input[key] as number;
+      }
+    }
+    if (input.mode === "hybrid") out.mode = "hybrid";
+    if (input.captureScope === "frontmost_display" || input.captureScope === "all_displays") {
+      out.captureScope = input.captureScope;
+    }
+    if (
+      input.consentAcceptedAt === null ||
+      (typeof input.consentAcceptedAt === "number" && Number.isFinite(input.consentAcceptedAt))
+    ) {
+      out.consentAcceptedAt = input.consentAcceptedAt as number | null;
+    }
+    return out;
+  };
+
   ipcMain.handle(IPC_CHANNELS.CHRONICLE_GET_SETTINGS, async (): Promise<ChronicleSettings> => {
     return ChronicleSettingsManager.loadSettings();
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.CHRONICLE_SAVE_SETTINGS,
-    async (_, settings: Partial<ChronicleSettings>) => {
-      const next = ChronicleSettingsManager.saveSettings(settings || {});
-      await ChronicleCaptureService.getInstance().applySettings(next);
-      ChronicleMemoryService.getInstance().applySettings(next);
-      return { success: true, settings: next };
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_SAVE_SETTINGS, async (_, settings: unknown) => {
+    const next = ChronicleSettingsManager.saveSettings(sanitizeChronicleSettingsInput(settings));
+    await ChronicleCaptureService.getInstance().applySettings(next);
+    ChronicleMemoryService.getInstance().applySettings(next);
+    return { success: true, settings: next };
+  });
 
   ipcMain.handle(IPC_CHANNELS.CHRONICLE_GET_STATUS, async (): Promise<ChronicleCaptureStatus> => {
     return ChronicleCaptureService.getInstance().getStatus();
@@ -11818,82 +11883,72 @@ function setupMCPHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.CHRONICLE_QUERY_RECENT_CONTEXT,
-    async (
-      _,
-      input: {
-        query: string;
-        limit?: number;
-        useFallback?: boolean;
-      },
-    ): Promise<ChronicleResolvedContext[]> => {
+    async (_, input: unknown): Promise<ChronicleResolvedContext[]> => {
+      if (!chronicleIsPlainObject(input)) return [];
+      const query = typeof input.query === "string" ? input.query : "";
+      if (query.length > CHRONICLE_MAX_QUERY_LENGTH) return [];
       return ChronicleCaptureService.getInstance().queryRecentContext({
-        query: input?.query || "",
-        limit: input?.limit,
-        useFallback: input?.useFallback,
+        query,
+        limit: chronicleClampInt(input.limit, 5, 1, 10),
+        useFallback: input.useFallback === true,
       });
     },
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.CHRONICLE_LIST_OBSERVATIONS,
-    async (
-      _,
-      input: {
-        workspaceId: string;
-        limit?: number;
-      },
-    ) => {
-      const workspace = await new WorkspaceRepository(
-        DatabaseManager.getInstance().getDatabase(),
-      ).findById(String(input?.workspaceId || ""));
-      if (!workspace) return [];
-      return ChronicleObservationRepository.list(workspace.path, input?.limit || 50);
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_LIST_OBSERVATIONS, async (_, input: unknown) => {
+    const workspaceId = chronicleWorkspaceId(input);
+    if (!workspaceId) return [];
+    const workspace = await new WorkspaceRepository(
+      DatabaseManager.getInstance().getDatabase(),
+    ).findById(workspaceId);
+    if (!workspace) return [];
+    const limit = chronicleClampInt(
+      (input as Record<string, unknown>).limit,
+      50,
+      1,
+      CHRONICLE_MAX_LIST_LIMIT,
+    );
+    return ChronicleObservationRepository.list(workspace.path, limit);
+  });
 
-  ipcMain.handle(
-    IPC_CHANNELS.CHRONICLE_DELETE_OBSERVATION,
-    async (
-      _,
-      input: {
-        workspaceId: string;
-        observationId: string;
-      },
-    ) => {
-      const workspace = await new WorkspaceRepository(
-        DatabaseManager.getInstance().getDatabase(),
-      ).findById(String(input?.workspaceId || ""));
-      if (!workspace) return { success: false };
-      const record = ChronicleObservationRepository.listSync(workspace.path, 10_000).find(
-        (entry) => entry.id === input?.observationId,
-      );
-      if (record?.memoryId) {
-        await MemoryService.deleteEntries(workspace.id, [record.memoryId]);
-      }
-      const success = await ChronicleObservationRepository.deleteObservation(
-        workspace.path,
-        String(input?.observationId || ""),
-      );
-      return { success };
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_DELETE_OBSERVATION, async (_, input: unknown) => {
+    const workspaceId = chronicleWorkspaceId(input);
+    const observationId = (input as Record<string, unknown> | null)?.observationId;
+    if (!workspaceId || !ChronicleObservationRepository.isValidObservationId(observationId)) {
+      return { success: false, error: "Invalid Chronicle observation request" };
+    }
+    const workspace = await new WorkspaceRepository(
+      DatabaseManager.getInstance().getDatabase(),
+    ).findById(workspaceId);
+    if (!workspace) return { success: false };
+    const record = ChronicleObservationRepository.listSync(workspace.path, 10_000).find(
+      (entry) => entry.id === observationId,
+    );
+    if (record?.memoryId) {
+      await MemoryService.deleteEntries(workspace.id, [record.memoryId]);
+    }
+    const success = await ChronicleObservationRepository.deleteObservation(
+      workspace.path,
+      observationId,
+    );
+    return { success };
+  });
 
-  ipcMain.handle(
-    IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS,
-    async (_, input: { workspaceId: string }) => {
-      const workspace = await new WorkspaceRepository(
-        DatabaseManager.getInstance().getDatabase(),
-      ).findById(String(input?.workspaceId || ""));
-      if (!workspace) return { success: false };
-      const observations = ChronicleObservationRepository.listSync(workspace.path, 10_000);
-      const memoryIds = observations.map((entry) => entry.memoryId).filter(Boolean) as string[];
-      if (memoryIds.length > 0) {
-        await MemoryService.deleteEntries(workspace.id, memoryIds);
-      }
-      await ChronicleObservationRepository.clearWorkspace(workspace.path);
-      return { success: true, deleted: observations.length };
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS, async (_, input: unknown) => {
+    const workspaceId = chronicleWorkspaceId(input);
+    if (!workspaceId) return { success: false, error: "Invalid workspace id" };
+    const workspace = await new WorkspaceRepository(
+      DatabaseManager.getInstance().getDatabase(),
+    ).findById(workspaceId);
+    if (!workspace) return { success: false };
+    const observations = ChronicleObservationRepository.listSync(workspace.path, 10_000);
+    const memoryIds = observations.map((entry) => entry.memoryId).filter(Boolean) as string[];
+    if (memoryIds.length > 0) {
+      await MemoryService.deleteEntries(workspace.id, memoryIds);
+    }
+    await ChronicleObservationRepository.clearWorkspace(workspace.path);
+    return { success: true, deleted: observations.length };
+  });
 
   // =====================
   // Computer use (desktop automation)
@@ -13259,21 +13314,19 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
 
   ipcMain.handle(
     IPC_CHANNELS.KIT_OPEN_FILE,
-    async (_event, args: { workspaceId: string; relPath: string }) => {
+    async (_event, rawArgs: unknown) => {
       checkRateLimit(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
+      const args = validateInput(KitOpenFileRequestSchema, rawArgs, "kit open file");
       const workspacePath = await getWorkspacePath(args.workspaceId);
 
-      // Sanitize relPath: must start with .cowork/ and not escape it
-      const relPath = (args.relPath || "").replace(/\\/g, "/").trim();
-      if (!relPath.startsWith(".cowork/") || relPath.includes("..")) {
-        throw new Error("Invalid relPath");
-      }
-
-      const absPath = path.join(workspacePath, relPath);
-      await fs.mkdir(path.dirname(absPath), { recursive: true });
+      // Markdown under .cowork/ only, never a protected segment (.cowork/policy, .git),
+      // and symlinks may not escape .cowork. Only known kit files are seeded.
+      const { absPath, fileName, seedable } = resolveKitOpenPath(workspacePath, args.relPath);
+      const relPath = path.relative(workspacePath, absPath).split(path.sep).join("/");
 
       if (!fsSync.existsSync(absPath)) {
-        const fileName = path.basename(relPath);
+        if (!seedable) throw new Error("Kit file not found");
+        await fs.mkdir(path.dirname(absPath), { recursive: true });
         const stamp = getLocalDateStamp(new Date());
         let defaultContent = withKitFrontmatter(
           relPath,
@@ -13308,18 +13361,16 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
 
   ipcMain.handle(
     IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK,
-    async (
-      _event,
-      payload: {
-        taskId: string;
-        messageId?: string;
-        decision: "accepted" | "rejected";
-        reason?: string;
-        note?: string;
-      },
-    ) => {
+    async (_event, rawPayload: unknown) => {
       checkRateLimit(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
-      const { taskId, decision, reason, note, messageId } = payload;
+      const { taskId, decision, reason, note, messageId } = validateInput(
+        MessageFeedbackRequestSchema,
+        rawPayload,
+        "message feedback",
+      );
+      if (!(await agentDaemon.getTaskById(taskId))) {
+        throw new Error("Task not found");
+      }
       const feedback = [reason, note].filter(Boolean).join(": ") || undefined;
       agentDaemon.logEvent(taskId, "user_feedback", {
         decision,
@@ -13364,10 +13415,12 @@ function setupMemoryHandlers(): void {
   // Save memory settings for a workspace
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_SAVE_SETTINGS,
-    async (_, data: { workspaceId: string; settings: Partial<MemorySettings> }) => {
+    async (_, rawData: unknown) => {
       checkRateLimit(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
       try {
-        await MemoryService.updateSettings(data.workspaceId, data.settings);
+        const data = validateInput(MemorySaveSettingsRequestSchema, rawData, "memory settings");
+        const settings: Partial<MemorySettings> = data.settings;
+        await MemoryService.updateSettings(data.workspaceId, settings);
         return { success: true };
       } catch (error) {
         logger.error("[Memory] Failed to save settings:", error);
@@ -13464,12 +13517,18 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_WRITE_APPROVALS_APPROVE,
-    async (_event, data: { id: string; workspaceId?: string }) => {
+    async (_event, rawData: unknown) => {
       checkRateLimit(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_APPROVE, RATE_LIMIT_CONFIGS.limited);
-      const id = typeof data?.id === "string" ? data.id.trim() : "";
+      // workspaceId is required so the gate verifies the pending write belongs to it.
+      const data = validateInput(
+        MemoryWriteApproveRequestSchema,
+        rawData,
+        "memory write approval",
+      );
+      const id = data.id.trim();
       if (!id) throw new Error("Pending memory write id is required.");
       return MemoryWriteGate.applyPending(id, {
-        workspaceId: typeof data?.workspaceId === "string" ? data.workspaceId : undefined,
+        workspaceId: data.workspaceId,
         reviewedBy: "user",
       });
     },
@@ -13477,14 +13536,19 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_WRITE_APPROVALS_REJECT,
-    async (_event, data: { id: string; workspaceId?: string; reason?: string }) => {
+    async (_event, rawData: unknown) => {
       checkRateLimit(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_REJECT, RATE_LIMIT_CONFIGS.limited);
-      const id = typeof data?.id === "string" ? data.id.trim() : "";
+      const data = validateInput(
+        MemoryWriteRejectRequestSchema,
+        rawData,
+        "memory write rejection",
+      );
+      const id = data.id.trim();
       if (!id) throw new Error("Pending memory write id is required.");
       return MemoryWriteGate.rejectForDisplay(id, {
-        workspaceId: typeof data?.workspaceId === "string" ? data.workspaceId : undefined,
+        workspaceId: data.workspaceId,
         reviewedBy: "user",
-        resolution: typeof data?.reason === "string" ? data.reason.trim() : undefined,
+        resolution: data.reason?.trim() || undefined,
       });
     },
   );
@@ -13553,8 +13617,9 @@ function setupMemoryHandlers(): void {
   // Search memories
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_SEARCH,
-    async (_, data: { workspaceId: string; query: string; limit?: number }) => {
+    async (_, rawData: unknown) => {
       try {
+        const data = validateInput(MemorySearchRequestSchema, rawData, "memory search");
         return await MemoryService.searchAsync(data.workspaceId, data.query, data.limit);
       } catch (error) {
         logger.error("[Memory] Failed to search:", error);
@@ -13566,8 +13631,13 @@ function setupMemoryHandlers(): void {
   // Get timeline context (Layer 2)
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_GET_TIMELINE,
-    async (_, data: { memoryId: string; windowSize?: number }) => {
+    async (_, rawData: unknown) => {
       try {
+        const data = validateInput(MemoryTimelineRequestSchema, rawData, "memory timeline");
+        // The timeline is drawn from the anchor's workspace, so the anchor must belong
+        // to the workspace the caller named.
+        const [anchor] = await MemoryService.getFullDetails([data.memoryId]);
+        if (!anchor || anchor.workspaceId !== data.workspaceId) return [];
         return await MemoryService.getTimelineContext(data.memoryId, data.windowSize);
       } catch (error) {
         logger.error("[Memory] Failed to get timeline:", error);
@@ -13577,9 +13647,12 @@ function setupMemoryHandlers(): void {
   );
 
   // Get full details (Layer 3)
-  ipcMain.handle(IPC_CHANNELS.MEMORY_GET_DETAILS, async (_, ids: string[]) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_GET_DETAILS, async (_, rawData: unknown) => {
     try {
-      return await MemoryService.getFullDetails(ids);
+      const data = validateInput(MemoryDetailsRequestSchema, rawData, "memory details");
+      if (data.ids.length === 0) return [];
+      const details = await MemoryService.getFullDetails(data.ids);
+      return details.filter((memory) => isMemoryVisibleInWorkspace(memory, data.workspaceId));
     } catch (error) {
       logger.error("[Memory] Failed to get details:", error);
       return [];
@@ -13588,8 +13661,13 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_OBSERVATIONS_SEARCH,
-    async (_, data: MemoryObservationSearchQuery) => {
+    async (_, rawData: unknown) => {
       try {
+        const data: MemoryObservationSearchQuery = validateInput(
+          MemoryObservationSearchRequestSchema,
+          rawData,
+          "memory observation search",
+        );
         return await MemoryObservationService.search(data);
       } catch (error) {
         logger.error("[MemoryObservations] Failed to search:", error);
@@ -13600,11 +13678,13 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_OBSERVATIONS_TIMELINE,
-    async (
-      _,
-      data: { workspaceId: string; memoryId?: string; query?: string; windowSize?: number },
-    ) => {
+    async (_, rawData: unknown) => {
       try {
+        const data = validateInput(
+          MemoryObservationTimelineRequestSchema,
+          rawData,
+          "memory observation timeline",
+        );
         return await MemoryObservationService.timeline(data);
       } catch (error) {
         logger.error("[MemoryObservations] Failed to load timeline:", error);
@@ -13712,8 +13792,9 @@ function setupMemoryHandlers(): void {
   // Get recent memories
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_GET_RECENT,
-    async (_, data: { workspaceId: string; limit?: number }) => {
+    async (_, rawData: unknown) => {
       try {
+        const data = validateInput(MemoryRecentRequestSchema, rawData, "recent memories");
         return await MemoryService.getRecent(data.workspaceId, data.limit);
       } catch (error) {
         logger.error("[Memory] Failed to get recent:", error);
@@ -13835,9 +13916,15 @@ function setupMemoryHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_ADD_USER_FACT, async (_, request: AddUserFactRequest) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_ADD_USER_FACT, async (_, rawRequest: unknown) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_ADD_USER_FACT, RATE_LIMIT_CONFIGS.limited);
     try {
+      // `source` is forced to "manual": the renderer cannot claim conversation/feedback provenance.
+      const request: AddUserFactRequest = validateInput(
+        AddUserFactRequestSchema,
+        rawRequest,
+        "user fact",
+      );
       return UserProfileService.addFact(request);
     } catch (error) {
       logger.error("[Memory] Failed to add user fact:", error);
@@ -13847,9 +13934,14 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_UPDATE_USER_FACT,
-    async (_, request: UpdateUserFactRequest) => {
+    async (_, rawRequest: unknown) => {
       checkRateLimit(IPC_CHANNELS.MEMORY_UPDATE_USER_FACT, RATE_LIMIT_CONFIGS.limited);
       try {
+        const request: UpdateUserFactRequest = validateInput(
+          UpdateUserFactRequestSchema,
+          rawRequest,
+          "user fact update",
+        );
         return UserProfileService.updateFact(request);
       } catch (error) {
         logger.error("[Memory] Failed to update user fact:", error);
@@ -13870,15 +13962,13 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_RELATIONSHIP_LIST,
-    async (
-      _,
-      data?: {
-        layer?: "identity" | "preferences" | "context" | "history" | "commitments";
-        includeDone?: boolean;
-        limit?: number;
-      },
-    ) => {
+    async (_, rawData?: unknown) => {
       try {
+        const data = validateInput(
+          RelationshipListRequestSchema,
+          rawData,
+          "relationship memory list",
+        );
         return RelationshipMemoryService.listItems({
           layer: data?.layer,
           includeDone: data?.includeDone,
@@ -13893,21 +13983,14 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE,
-    async (
-      _,
-      data: {
-        id: string;
-        text?: string;
-        confidence?: number;
-        status?: "open" | "done";
-        dueAt?: number | null;
-      },
-    ) => {
+    async (_, rawData: unknown) => {
       checkRateLimit(IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE, RATE_LIMIT_CONFIGS.limited);
       try {
-        if (!data?.id || typeof data.id !== "string") {
-          throw new Error("id is required");
-        }
+        const data = validateInput(
+          RelationshipUpdateRequestSchema,
+          rawData,
+          "relationship memory update",
+        );
         return RelationshipMemoryService.updateItem(data.id, {
           text: data.text,
           confidence: data.confidence,
@@ -13945,10 +14028,10 @@ function setupMemoryHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_COMMITMENTS_GET, async (_, data?: { limit?: number }) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_COMMITMENTS_GET, async (_, rawData?: unknown) => {
     try {
-      const limit =
-        typeof data?.limit === "number" && Number.isFinite(data.limit) ? data.limit : 25;
+      const data = validateInput(CommitmentsGetRequestSchema, rawData, "open commitments");
+      const limit = data?.limit ?? 25;
       return RelationshipMemoryService.listOpenCommitments(limit);
     } catch (error) {
       logger.error("[Memory] Failed to list open commitments:", error);

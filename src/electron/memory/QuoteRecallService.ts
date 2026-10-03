@@ -289,6 +289,16 @@ export class QuoteRecallService {
     const allowSource = (sourceType: VerbatimQuoteSourceType): boolean =>
       allowAllSources || requestedSourceTypes.has(sourceType);
 
+    const taskRepo = new TaskRepository(params.db);
+    if (params.taskId) {
+      // The taskId comes from the model (search_quotes input). Without this
+      // check a task id from another workspace would read that workspace's
+      // verbatim messages through the task_message lane. Fail closed: an
+      // unknown or foreign task yields no results at all.
+      const owner = await taskRepo.findById(params.taskId);
+      if (!owner || owner.workspaceId !== params.workspaceId) return [];
+    }
+
     const results: VerbatimQuoteSearchResult[] = [];
 
     if (allowSource("transcript_span")) {
@@ -309,7 +319,6 @@ export class QuoteRecallService {
 
     if (allowSource("task_message")) {
       const eventRepo = new TaskEventRepository(params.db);
-      const taskRepo = new TaskRepository(params.db);
       const taskIds = params.taskId
         ? [params.taskId]
         : (await taskRepo.findByWorkspace(params.workspaceId, MAX_EVENT_TASKS)).map(

@@ -4161,9 +4161,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, data),
   searchMemories: (data: { workspaceId: string; query: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_SEARCH, data),
-  getMemoryTimeline: (data: { memoryId: string; windowSize?: number }) =>
+  getMemoryTimeline: (data: { workspaceId: string; memoryId: string; windowSize?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_TIMELINE, data),
-  getMemoryDetails: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_DETAILS, ids),
+  getMemoryDetails: (data: { workspaceId: string; ids: string[] }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_DETAILS, data),
   searchMemoryObservations: (data: MemoryObservationSearchQuery) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_OBSERVATIONS_SEARCH, data),
   getMemoryObservationTimeline: (data: {
@@ -7751,10 +7752,11 @@ export interface ElectronAPI {
     limit?: number;
   }) => Promise<MemorySearchResult[]>;
   getMemoryTimeline: (data: {
+    workspaceId: string;
     memoryId: string;
     windowSize?: number;
   }) => Promise<MemoryTimelineEntry[]>;
-  getMemoryDetails: (ids: string[]) => Promise<Memory[]>;
+  getMemoryDetails: (data: { workspaceId: string; ids: string[] }) => Promise<Memory[]>;
   searchMemoryObservations: (
     data: MemoryObservationSearchQuery,
   ) => Promise<MemoryObservationSearchResult[]>;

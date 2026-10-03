@@ -728,7 +728,11 @@ export class ProactiveSuggestionsService {
         if (seenEntityIds.has(result.entity.id)) continue;
         seenEntityIds.add(result.entity.id);
 
-        const observations = await KnowledgeGraphService.getObservations(result.entity.id, 10);
+        const observations = await KnowledgeGraphService.getObservations(
+          workspaceId,
+          result.entity.id,
+          10,
+        );
         const actionableObs = observations.filter((o) => ACTION_KEYWORDS.test(o.content || ""));
 
         if (actionableObs.length < 1) continue;

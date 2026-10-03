@@ -41,6 +41,18 @@ function buildValidityFilter(
   };
 }
 
+/**
+ * Result caps for graph reads (SEC-9). Every by-id operation is also scoped to the
+ * caller's workspace, so an id from another workspace behaves as "not found".
+ */
+export const KG_MAX_NEIGHBOR_DEPTH = 3;
+export const KG_MAX_NEIGHBOR_RESULTS = 200;
+export const KG_MAX_EDGES_PER_LEVEL = 1000;
+export const KG_MAX_EDGE_TYPE_FILTERS = 20;
+export const KG_MAX_SUBGRAPH_ENTITIES = 100;
+export const KG_MAX_SUBGRAPH_EDGES = 1000;
+export const KG_MAX_OBSERVATIONS = 100;
+
 function intervalStart(edge: Pick<KGEdge, "createdAt" | "validFrom">): number {
   return Number.isFinite(edge.validFrom) ? (edge.validFrom as number) : edge.createdAt;
 }
@@ -163,14 +175,14 @@ export class KnowledgeGraphStore {
     };
   }
 
-  getEntity(entityId: string): KGEntity | undefined {
+  getEntity(workspaceId: string, entityId: string): KGEntity | undefined {
     const stmt = this.db.prepare(`
       SELECT e.*, t.name as entity_type_name
       FROM kg_entities e
       LEFT JOIN kg_entity_types t ON e.entity_type_id = t.id
-      WHERE e.id = ?
+      WHERE e.id = ? AND e.workspace_id = ?
     `);
-    const row = stmt.get(entityId) as Any;
+    const row = stmt.get(entityId, workspaceId) as Any;
     return row ? this.mapEntity(row) : undefined;
   }
 
@@ -186,6 +198,7 @@ export class KnowledgeGraphStore {
   }
 
   updateEntity(
+    workspaceId: string,
     entityId: string,
     patch: {
       description?: string;
@@ -193,7 +206,7 @@ export class KnowledgeGraphStore {
       confidence?: number;
     },
   ): KGEntity | undefined {
-    const entity = this.getEntity(entityId);
+    const entity = this.getEntity(workspaceId, entityId);
     if (!entity) return undefined;
 
     const now = Date.now();
@@ -213,25 +226,30 @@ export class KnowledgeGraphStore {
       params.push(clamp(patch.confidence, 0, 1));
     }
 
-    params.push(entityId);
-    this.db.prepare(`UPDATE kg_entities SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+    params.push(entityId, workspaceId);
+    this.db
+      .prepare(`UPDATE kg_entities SET ${updates.join(", ")} WHERE id = ? AND workspace_id = ?`)
+      .run(...params);
 
-    return this.getEntity(entityId);
+    return this.getEntity(workspaceId, entityId);
   }
 
-  deleteEntity(entityId: string): boolean {
+  deleteEntity(workspaceId: string, entityId: string): boolean {
+    if (!this.getEntity(workspaceId, entityId)) return false;
     // Cascade delete is handled by FK constraints, but we also do explicit cleanup
     // in case FK enforcement is off
     const deleteEdges = this.db.prepare(
       "DELETE FROM kg_edges WHERE source_entity_id = ? OR target_entity_id = ?",
     );
     const deleteObs = this.db.prepare("DELETE FROM kg_observations WHERE entity_id = ?");
-    const deleteEntity = this.db.prepare("DELETE FROM kg_entities WHERE id = ?");
+    const deleteEntity = this.db.prepare(
+      "DELETE FROM kg_entities WHERE id = ? AND workspace_id = ?",
+    );
 
     const transaction = this.db.transaction(() => {
       deleteEdges.run(entityId, entityId);
       deleteObs.run(entityId);
-      const result = deleteEntity.run(entityId);
+      const result = deleteEntity.run(entityId, workspaceId);
       return result.changes > 0;
     });
 
@@ -319,19 +337,21 @@ export class KnowledgeGraphStore {
     };
   }
 
-  getEdge(edgeId: string): KGEdge | undefined {
-    const stmt = this.db.prepare("SELECT * FROM kg_edges WHERE id = ?");
-    const row = stmt.get(edgeId) as Any;
+  getEdge(workspaceId: string, edgeId: string): KGEdge | undefined {
+    const stmt = this.db.prepare("SELECT * FROM kg_edges WHERE id = ? AND workspace_id = ?");
+    const row = stmt.get(edgeId, workspaceId) as Any;
     return row ? this.mapEdge(row) : undefined;
   }
 
-  deleteEdge(edgeId: string): boolean {
-    const result = this.db.prepare("DELETE FROM kg_edges WHERE id = ?").run(edgeId);
+  deleteEdge(workspaceId: string, edgeId: string): boolean {
+    const result = this.db
+      .prepare("DELETE FROM kg_edges WHERE id = ? AND workspace_id = ?")
+      .run(edgeId, workspaceId);
     return result.changes > 0;
   }
 
-  invalidateEdge(edgeId: string, validTo = Date.now()): KGEdge | undefined {
-    const edge = this.getEdge(edgeId);
+  invalidateEdge(workspaceId: string, edgeId: string, validTo = Date.now()): KGEdge | undefined {
+    const edge = this.getEdge(workspaceId, edgeId);
     if (!edge) return undefined;
     const effectiveValidFrom = intervalStart(edge);
     if (Number.isFinite(edge.validTo)) {
@@ -343,8 +363,10 @@ export class KnowledgeGraphStore {
     if (!Number.isFinite(validTo) || validTo <= effectiveValidFrom) {
       throw new Error("valid_to must be greater than the edge valid_from");
     }
-    this.db.prepare("UPDATE kg_edges SET valid_to = ? WHERE id = ?").run(validTo, edgeId);
-    return this.getEdge(edgeId);
+    this.db
+      .prepare("UPDATE kg_edges SET valid_to = ? WHERE id = ? AND workspace_id = ?")
+      .run(validTo, edgeId, workspaceId);
+    return this.getEdge(workspaceId, edgeId);
   }
 
   getRelationEdges(
@@ -367,15 +389,29 @@ export class KnowledgeGraphStore {
     return rows.map((row) => this.mapEdge(row));
   }
 
-  getEdgesBetween(entityId1: string, entityId2: string, asOf?: number): KGEdge[] {
+  getEdgesBetween(
+    workspaceId: string,
+    entityId1: string,
+    entityId2: string,
+    asOf?: number,
+  ): KGEdge[] {
     const validity = buildValidityFilter(asOf);
     const stmt = this.db.prepare(`
       SELECT * FROM kg_edges
-      WHERE ((source_entity_id = ? AND target_entity_id = ?)
+      WHERE workspace_id = ?
+        AND ((source_entity_id = ? AND target_entity_id = ?)
          OR (source_entity_id = ? AND target_entity_id = ?))
       ${validity.clause}
+      LIMIT ${KG_MAX_SUBGRAPH_EDGES}
     `);
-    const rows = stmt.all(entityId1, entityId2, entityId2, entityId1, ...validity.params) as Any[];
+    const rows = stmt.all(
+      workspaceId,
+      entityId1,
+      entityId2,
+      entityId2,
+      entityId1,
+      ...validity.params,
+    ) as Any[];
     return rows.map((r) => this.mapEdge(r));
   }
 
@@ -407,11 +443,15 @@ export class KnowledgeGraphStore {
     };
   }
 
-  getObservations(entityId: string, limit = 20): KGObservation[] {
+  getObservations(workspaceId: string, entityId: string, limit = 20): KGObservation[] {
+    const boundedLimit = clamp(Math.floor(limit) || 0, 1, KG_MAX_OBSERVATIONS);
     const stmt = this.db.prepare(
-      "SELECT * FROM kg_observations WHERE entity_id = ? ORDER BY created_at DESC LIMIT ?",
+      `SELECT o.* FROM kg_observations o
+       JOIN kg_entities e ON o.entity_id = e.id
+       WHERE o.entity_id = ? AND e.workspace_id = ?
+       ORDER BY o.created_at DESC LIMIT ?`,
     );
-    const rows = stmt.all(entityId, limit) as Any[];
+    const rows = stmt.all(entityId, workspaceId, boundedLimit) as Any[];
     return rows.map((r) => this.mapObservation(r));
   }
 
@@ -473,12 +513,16 @@ export class KnowledgeGraphStore {
   // ─── Graph Traversal ──────────────────────────────────────────────
 
   getNeighbors(
+    workspaceId: string,
     entityId: string,
     depth = 1,
     edgeTypes?: string[],
     asOf?: number,
   ): KGNeighborResult[] {
-    const maxDepth = Math.min(Math.max(1, depth), 3);
+    // The root must belong to the caller's workspace; traversal never leaves it.
+    if (!this.getEntity(workspaceId, entityId)) return [];
+    const maxDepth = Math.min(Math.max(1, depth), KG_MAX_NEIGHBOR_DEPTH);
+    const boundedEdgeTypes = edgeTypes?.slice(0, KG_MAX_EDGE_TYPE_FILTERS);
     const results: KGNeighborResult[] = [];
     const visited = new Set<string>([entityId]);
 
@@ -491,26 +535,29 @@ export class KnowledgeGraphStore {
       const placeholders = currentLevel.map(() => "?").join(",");
 
       let edgeFilter = "";
-      const params: Any[] = [...currentLevel, ...currentLevel];
+      const params: Any[] = [workspaceId, ...currentLevel, ...currentLevel];
       const validity = buildValidityFilter(asOf);
 
-      if (edgeTypes && edgeTypes.length > 0) {
-        const edgePlaceholders = edgeTypes.map(() => "?").join(",");
+      if (boundedEdgeTypes && boundedEdgeTypes.length > 0) {
+        const edgePlaceholders = boundedEdgeTypes.map(() => "?").join(",");
         edgeFilter = `AND edge_type IN (${edgePlaceholders})`;
-        params.push(...edgeTypes);
+        params.push(...boundedEdgeTypes);
       }
 
       const stmt = this.db.prepare(`
         SELECT * FROM kg_edges
-        WHERE (source_entity_id IN (${placeholders}) OR target_entity_id IN (${placeholders}))
+        WHERE workspace_id = ?
+          AND (source_entity_id IN (${placeholders}) OR target_entity_id IN (${placeholders}))
         ${edgeFilter}
         ${validity.clause}
+        LIMIT ${KG_MAX_EDGES_PER_LEVEL}
       `);
       const edges = stmt.all(...params, ...validity.params) as Any[];
 
       const nextLevel: string[] = [];
 
       for (const edgeRow of edges) {
+        if (results.length >= KG_MAX_NEIGHBOR_RESULTS) break;
         const edge = this.mapEdge(edgeRow);
         const isOutgoing = currentLevel.includes(edge.sourceEntityId);
         const neighborId = isOutgoing ? edge.targetEntityId : edge.sourceEntityId;
@@ -518,7 +565,7 @@ export class KnowledgeGraphStore {
         if (visited.has(neighborId)) continue;
         visited.add(neighborId);
 
-        const neighbor = this.getEntity(neighborId);
+        const neighbor = this.getEntity(workspaceId, neighborId);
         if (!neighbor) continue;
 
         results.push({
@@ -532,6 +579,7 @@ export class KnowledgeGraphStore {
       }
 
       currentLevel = nextLevel;
+      if (results.length >= KG_MAX_NEIGHBOR_RESULTS) break;
     }
 
     return results;
@@ -539,14 +587,14 @@ export class KnowledgeGraphStore {
 
   // ─── Subgraph ─────────────────────────────────────────────────────
 
-  getSubgraph(entityIds: string[], asOf?: number): KGSubgraph {
+  getSubgraph(workspaceId: string, entityIds: string[], asOf?: number): KGSubgraph {
     if (entityIds.length === 0) return { entities: [], edges: [] };
 
-    const uniqueIds = [...new Set(entityIds)];
+    const uniqueIds = [...new Set(entityIds)].slice(0, KG_MAX_SUBGRAPH_ENTITIES);
     const entities: KGEntity[] = [];
 
     for (const id of uniqueIds) {
-      const entity = this.getEntity(id);
+      const entity = this.getEntity(workspaceId, id);
       if (entity) entities.push(entity);
     }
 
@@ -559,11 +607,14 @@ export class KnowledgeGraphStore {
     const validity = buildValidityFilter(asOf);
     const stmt = this.db.prepare(`
       SELECT * FROM kg_edges
-      WHERE source_entity_id IN (${placeholders})
+      WHERE workspace_id = ?
+        AND source_entity_id IN (${placeholders})
         AND target_entity_id IN (${placeholders})
       ${validity.clause}
+      LIMIT ${KG_MAX_SUBGRAPH_EDGES}
     `);
     const edgeRows = stmt.all(
+      workspaceId,
       ...entities.map((e) => e.id),
       ...entities.map((e) => e.id),
       ...validity.params,
@@ -674,7 +725,7 @@ export class KnowledgeGraphStore {
       }
       // Boost confidence on repeated creation (max 1.0)
       patch.confidence = Math.min(1.0, (existing.confidence || 0.5) + 0.1);
-      return this.updateEntity(existing.id, patch) || existing;
+      return this.updateEntity(workspaceId, existing.id, patch) || existing;
     }
     return this.createEntity(
       workspaceId,
@@ -696,10 +747,12 @@ export class KnowledgeGraphStore {
     sourceTaskId: string | undefined,
     now: number,
   ): KGEdge {
-    if (!this.getEntity(input.sourceEntityId)) {
+    // Both endpoints must belong to this workspace (SEC-9): an id from another
+    // workspace is reported as not found rather than linked across the boundary.
+    if (!this.getEntity(workspaceId, input.sourceEntityId)) {
       throw new Error(`Source entity not found: ${input.sourceEntityId}`);
     }
-    if (!this.getEntity(input.targetEntityId)) {
+    if (!this.getEntity(workspaceId, input.targetEntityId)) {
       throw new Error(`Target entity not found: ${input.targetEntityId}`);
     }
     // Prevent self-loops
@@ -752,11 +805,12 @@ export class KnowledgeGraphStore {
 
   /** Add an observation to an existing entity. */
   addObservationChecked(
+    workspaceId: string,
     input: AddObservationInput,
     source: "manual" | "auto" | "agent",
     sourceTaskId?: string,
   ): KGObservation {
-    if (!this.getEntity(input.entityId)) {
+    if (!this.getEntity(workspaceId, input.entityId)) {
       throw new Error(`Entity not found: ${input.entityId}`);
     }
     return this.addObservation(input.entityId, input.content, source, sourceTaskId);
@@ -771,7 +825,7 @@ export class KnowledgeGraphStore {
   ): Array<{ result: KGSearchResult; neighbors: KGNeighborResult[] }> {
     return this.searchEntities(workspaceId, query, limit).map((result) => ({
       result,
-      neighbors: this.getNeighbors(result.entity.id, 1, undefined, asOf).slice(0, 3),
+      neighbors: this.getNeighbors(workspaceId, result.entity.id, 1, undefined, asOf).slice(0, 3),
     }));
   }
 

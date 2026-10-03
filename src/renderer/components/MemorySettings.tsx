@@ -66,7 +66,7 @@ interface RelationshipMemoryItem {
   layer: RelationshipLayer;
   text: string;
   confidence: number;
-  source: "conversation" | "feedback" | "task";
+  source: "conversation" | "feedback" | "task" | "mailbox";
   createdAt: number;
   updatedAt: number;
   status?: "open" | "done";
@@ -335,7 +335,10 @@ export function MemorySettings({
           limit: 30,
         });
         if (cancelled) return;
-        const details = await window.electronAPI.getMemoryDetails(results.map((r) => r.id));
+        const details = await window.electronAPI.getMemoryDetails({
+          workspaceId,
+          ids: results.map((r) => r.id),
+        });
         if (cancelled) return;
         setMemorySearchResults(Array.isArray(details) ? details : []);
       } catch (error) {

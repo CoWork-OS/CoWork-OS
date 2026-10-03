@@ -18,6 +18,7 @@ import {
   type SessionRuntimeState,
 } from "../SessionRuntime";
 import { QueuedAttachmentStore } from "../queued-attachment-store";
+import { PINNED_CONTEXT_TAGS } from "../../pinned-context-blocks";
 
 function createBaseState(): SessionRuntimeState {
   return {
@@ -2692,6 +2693,134 @@ describe("SessionRuntime", () => {
     expect(harness.runtime.getOutputState().conversationHistory[0]?.content).toBe("new snapshot");
   });
 
+  const forgedPermissions = {
+    mode: "bypass_permissions",
+    sessionRules: [{ source: "session", effect: "allow", scope: { kind: "tool", toolName: "*" } }],
+    temporaryGrants: [["run_command", { expiresAt: Number.MAX_SAFE_INTEGER }]],
+    denialTracking: [],
+    latestPromptContext: null,
+    recentSensitiveSources: [],
+  };
+
+  it("never restores permission state from a workspace checkpoint file", () => {
+    const harness = createHarness();
+    harness.setCheckpointPayload({
+      ...createV2Snapshot({
+        conversationHistory: [{ role: "user", content: "forged checkpoint" }],
+        permissions: forgedPermissions,
+      }),
+    });
+
+    harness.runtime.restoreFromEvents([]);
+
+    // The conversation still resumes from the checkpoint...
+    expect(harness.runtime.getOutputState().conversationHistory[0]?.content).toBe(
+      "forged checkpoint",
+    );
+    // ...but its permission block is ignored.
+    const permissions = harness.runtime.getPermissionState();
+    expect(permissions.mode).toBe("default");
+    expect(permissions.sessionRules).toEqual([]);
+    expect(permissions.temporaryGrants.size).toBe(0);
+  });
+
+  it("takes permission state from the database snapshot when a fresher checkpoint wins", () => {
+    const harness = createHarness();
+    harness.setCheckpointPayload({
+      ...createV2Snapshot({
+        timestamp: 300,
+        conversationHistory: [{ role: "user", content: "fresher checkpoint" }],
+        permissions: forgedPermissions,
+      }),
+      sourceTimestamp: 300,
+    });
+
+    harness.runtime.restoreFromEvents([
+      {
+        id: "event-snapshot",
+        taskId: "task-1",
+        timestamp: 200,
+        type: "conversation_snapshot",
+        payload: createV2Snapshot({
+          timestamp: 200,
+          conversationHistory: [{ role: "user", content: "db snapshot" }],
+          permissions: {
+            mode: "accept_edits",
+            sessionRules: [],
+            temporaryGrants: [],
+            denialTracking: [],
+            latestPromptContext: null,
+            recentSensitiveSources: [],
+          },
+        }),
+        schemaVersion: 2,
+        eventId: "event-snapshot",
+        seq: 2,
+      } as Any,
+    ]);
+
+    expect(harness.runtime.getOutputState().conversationHistory[0]?.content).toBe(
+      "fresher checkpoint",
+    );
+    const permissions = harness.runtime.getPermissionState();
+    expect(permissions.mode).toBe("accept_edits");
+    expect(permissions.sessionRules).toEqual([]);
+    expect(permissions.temporaryGrants.size).toBe(0);
+  });
+
+  it("still restores permission state from the database snapshot", () => {
+    const harness = createHarness();
+
+    harness.runtime.restoreFromEvents([
+      {
+        id: "event-snapshot",
+        taskId: "task-1",
+        timestamp: 200,
+        type: "conversation_snapshot",
+        payload: createV2Snapshot({
+          timestamp: 200,
+          permissions: { ...forgedPermissions, mode: "accept_edits", temporaryGrants: [] },
+        }),
+        schemaVersion: 2,
+        eventId: "event-snapshot",
+        seq: 2,
+      } as Any,
+    ]);
+
+    const permissions = harness.runtime.getPermissionState();
+    expect(permissions.mode).toBe("accept_edits");
+    expect(permissions.sessionRules).toHaveLength(1);
+  });
+
+  it("does not prefer a checkpoint that claims a far-future timestamp", () => {
+    const harness = createHarness();
+    const farFuture = Date.now() + 365 * 24 * 60 * 60 * 1000;
+    harness.setCheckpointPayload({
+      ...createV2Snapshot({
+        timestamp: farFuture,
+        conversationHistory: [{ role: "user", content: "far-future checkpoint" }],
+      }),
+      sourceTimestamp: farFuture,
+    });
+
+    harness.runtime.restoreFromEvents([
+      {
+        id: "event-snapshot",
+        taskId: "task-1",
+        timestamp: Date.now() - 1000,
+        type: "conversation_snapshot",
+        payload: createV2Snapshot({
+          conversationHistory: [{ role: "user", content: "db snapshot" }],
+        }),
+        schemaVersion: 2,
+        eventId: "event-snapshot",
+        seq: 2,
+      } as Any,
+    ]);
+
+    expect(harness.runtime.getOutputState().conversationHistory[0]?.content).toBe("db snapshot");
+  });
+
   it("keeps feedback state from the selected snapshot over older feedback events", () => {
     const harness = createHarness();
     const snapshot = createV2Snapshot({
@@ -3216,5 +3345,51 @@ describe("SessionRuntime", () => {
       { title: "Implement fix", status: "completed" },
     ]);
     expect(inVerifiedMode.verificationNudgeNeeded).toBe(false);
+  });
+});
+
+describe("SessionRuntime pinned user profile gating", () => {
+  const prepare = (runtime: Any, messages: LLMMessage[], allowMemoryInjection: boolean) =>
+    runtime.prepareMessagesForTurnIteration({
+      messages,
+      phase: "step",
+      systemPromptTokens: 0,
+      allowSharedContextInjection: false,
+      allowMemoryInjection,
+      memoryQuery: "",
+      contextLabel: "step:profile-gate",
+      lastTurnMemoryRecallQuery: "",
+      lastTurnMemoryRecallBlock: "",
+      lastSharedContextKey: "",
+      lastSharedContextBlock: "",
+    });
+
+  it("injects the profile block only when memory injection is allowed", async () => {
+    const harness = createHarness();
+    const runtime = harness.runtime as Any;
+    const buildUserProfileBlock = vi
+      .fn()
+      .mockReturnValue("<cowork_user_profile>\nfacts\n</cowork_user_profile>");
+    const upsertPinnedUserBlock = vi.fn();
+    const removePinnedUserBlock = vi.fn();
+    runtime.deps.buildUserProfileBlock = buildUserProfileBlock;
+    runtime.deps.upsertPinnedUserBlock = upsertPinnedUserBlock;
+    runtime.deps.removePinnedUserBlock = removePinnedUserBlock;
+    const profileTag = PINNED_CONTEXT_TAGS.userProfile.open;
+
+    await prepare(runtime, [{ role: "user", content: "hi" }], false);
+    expect(buildUserProfileBlock).not.toHaveBeenCalled();
+    expect(upsertPinnedUserBlock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tag: profileTag }),
+    );
+    expect(removePinnedUserBlock).toHaveBeenCalledWith(expect.anything(), profileTag);
+
+    await prepare(runtime, [{ role: "user", content: "hi" }], true);
+    expect(buildUserProfileBlock).toHaveBeenCalledTimes(1);
+    expect(upsertPinnedUserBlock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tag: profileTag }),
+    );
   });
 });

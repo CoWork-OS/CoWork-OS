@@ -267,6 +267,30 @@ function checkpointTimestamp(checkpoint: TranscriptCheckpointPayload): number | 
     : null;
 }
 
+/**
+ * How far ahead of the local clock a checkpoint timestamp may be before it is
+ * treated as untrustworthy. Checkpoints live in the workspace, so a forged
+ * file could claim a far-future `sourceTimestamp` to win every freshness
+ * comparison and block legitimate writes. Small skew is tolerated.
+ */
+const CHECKPOINT_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
+function isFarFutureCheckpointTimestamp(value: unknown, now = Date.now()): boolean {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > now + CHECKPOINT_MAX_FUTURE_SKEW_MS
+  );
+}
+
+function isFarFutureCheckpoint(checkpoint: TranscriptCheckpointPayload): boolean {
+  const now = Date.now();
+  return (
+    isFarFutureCheckpointTimestamp(checkpoint.sourceTimestamp, now) ||
+    isFarFutureCheckpointTimestamp(checkpoint.timestamp, now)
+  );
+}
+
 function checkpointMeaningfulExchangeCount(checkpoint: TranscriptCheckpointPayload): number | null {
   const raw = checkpoint.sourceMetadata?.meaningfulExchangeCount;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
@@ -281,6 +305,12 @@ function compareCheckpointFreshness(
   left: TranscriptCheckpointPayload,
   right: TranscriptCheckpointPayload,
 ): number {
+  // A checkpoint dated far in the future is never fresher than one with a
+  // plausible clock, whatever its other counters claim.
+  const leftFarFuture = isFarFutureCheckpoint(left);
+  const rightFarFuture = isFarFutureCheckpoint(right);
+  if (leftFarFuture !== rightFarFuture) return leftFarFuture ? -1 : 1;
+
   const leftTimestamp = checkpointTimestamp(left);
   const rightTimestamp = checkpointTimestamp(right);
   if (leftTimestamp !== null && rightTimestamp !== null && leftTimestamp !== rightTimestamp) {

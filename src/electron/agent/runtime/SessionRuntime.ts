@@ -83,6 +83,10 @@ import { findPinnedContextBlockContent, PINNED_CONTEXT_TAGS } from "../pinned-co
 // Lowest compaction target a provider-overflow retry tightens to.
 const OVERFLOW_RECOVERY_MIN_TARGET_RATIO = 0.05;
 
+// Clock skew tolerated on a workspace checkpoint's timestamp before it stops
+// counting as a freshness signal. Mirrors TranscriptStore's write-side guard.
+const CHECKPOINT_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
 interface WebEvidenceEntry {
   tool: "web_search" | "web_fetch";
   url: string;
@@ -2131,7 +2135,11 @@ export class SessionRuntime {
     // Pinned blocks are found again by these tags on every iteration, so each
     // one is updated in place instead of being stacked into message[0].
     const tags = PINNED_CONTEXT_TAGS;
-    const userProfileBlock = this.deps.buildUserProfileBlock(10);
+    // The profile block carries personal facts and relationship memory, so it is
+    // gated exactly like memory recall: allowMemoryInjection is false for
+    // retainMemory:false tasks (sub-agents, verifiers, council) and for group or
+    // public gateway contexts without trusted shared memory.
+    const userProfileBlock = opts.allowMemoryInjection ? this.deps.buildUserProfileBlock(10) : "";
     if (userProfileBlock) {
       this.deps.upsertPinnedUserBlock(messages, {
         tag: tags.userProfile.open,
@@ -2183,6 +2191,12 @@ export class SessionRuntime {
       } else {
         this.deps.removePinnedUserBlock(messages, tags.memoryRecall.open);
       }
+    } else {
+      // Memory injection can be revoked mid-session (e.g. a task moved to a
+      // shared context); drop any recall block pinned by an earlier turn.
+      lastTurnMemoryRecallQuery = "";
+      lastTurnMemoryRecallBlock = "";
+      this.deps.removePinnedUserBlock(messages, tags.memoryRecall.open);
     }
 
     const taskListReminder = this.consumeTaskListVerificationReminder(opts.checklistUpdatedAfter);
@@ -3760,8 +3774,16 @@ export class SessionRuntime {
       typeof checkpointPayload?.sourceTimestamp === "number"
         ? checkpointPayload.sourceTimestamp
         : checkpointPayload?.timestamp;
+    // The checkpoint file lives in the workspace, so its clock is untrusted. A
+    // timestamp well past the local clock carries no ordering signal; drop it
+    // so a forged far-future checkpoint cannot outrank the event snapshot.
+    const farFuture = Date.now() + CHECKPOINT_MAX_FUTURE_SKEW_MS;
     const timestamp =
-      typeof rawTimestamp === "number" && Number.isFinite(rawTimestamp) ? rawTimestamp : null;
+      typeof rawTimestamp === "number" &&
+      Number.isFinite(rawTimestamp) &&
+      rawTimestamp <= farFuture
+        ? rawTimestamp
+        : null;
     return { sequence: null, timestamp, position: -1 };
   }
 
@@ -3928,6 +3950,17 @@ export class SessionRuntime {
         candidate.sourceLabel,
       );
       if (restored.restored) {
+        if (
+          candidate.sourceLabel === "checkpoint" &&
+          latestSnapshotPayload?.schema === "session_runtime_v2" &&
+          latestSnapshotPayload?.version === 2
+        ) {
+          // The conversation came from the (fresher) workspace checkpoint, but
+          // permission state is trusted only from the database snapshot.
+          this.restorePermissionStateFromPayload(
+            latestSnapshotPayload as SessionRuntimeSnapshotV2,
+          );
+        }
         this.restorePendingSkillStateFromEvents(events);
         this.restoreTaskListStateFromEvents(events);
         this.restoreStepFeedbackStateFromEvents(
@@ -4507,7 +4540,7 @@ export class SessionRuntime {
 
   private restoreConversationFromPayload(
     payload: Any,
-    _sourceLabel: string,
+    sourceLabel: string,
   ): {
     restored: boolean;
     interruptedCompaction?: {
@@ -4588,7 +4621,13 @@ export class SessionRuntime {
       }
 
       if (payload.schema === "session_runtime_v2" && payload.version === 2) {
-        interruptedCompaction = this.restoreFromV2Payload(payload as SessionRuntimeSnapshotV2);
+        // Permission state (mode, session rules, grants) is restored only from
+        // the conversation_snapshot event in the task database. A checkpoint
+        // file lives in the agent-writable workspace and must never be able to
+        // grant itself a permission mode or allow rules on resume.
+        interruptedCompaction = this.restoreFromV2Payload(payload as SessionRuntimeSnapshotV2, {
+          restorePermissions: sourceLabel !== "checkpoint",
+        });
       } else {
         this.state.transcript.explicitChatSummaryBlock =
           typeof payload.explicitChatSummaryBlock === "string" &&
@@ -4634,7 +4673,30 @@ export class SessionRuntime {
     }
   }
 
-  private restoreFromV2Payload(payload: SessionRuntimeSnapshotV2): {
+  /**
+   * Restore permission mode, session rules and grants. Callers must pass a
+   * payload from the task database (the conversation_snapshot event), never
+   * one read from a workspace checkpoint file.
+   */
+  private restorePermissionStateFromPayload(payload: SessionRuntimeSnapshotV2): void {
+    this.state.permissions.mode = payload.permissions?.mode || this.state.permissions.mode;
+    this.state.permissions.sessionRules = Array.isArray(payload.permissions?.sessionRules)
+      ? payload.permissions.sessionRules
+      : [];
+    this.state.permissions.temporaryGrants = new Map(payload.permissions?.temporaryGrants || []);
+    this.state.permissions.denialTracking = new Map(payload.permissions?.denialTracking || []);
+    this.state.permissions.latestPromptContext = payload.permissions?.latestPromptContext || null;
+    this.state.permissions.recentSensitiveSources = Array.isArray(
+      payload.permissions?.recentSensitiveSources,
+    )
+      ? payload.permissions.recentSensitiveSources
+      : [];
+  }
+
+  private restoreFromV2Payload(
+    payload: SessionRuntimeSnapshotV2,
+    options: { restorePermissions: boolean },
+  ): {
     compactionId: string;
     attemptId?: string;
     historyGenerationBefore: number;
@@ -4757,18 +4819,9 @@ export class SessionRuntime {
       payload.skills?.primarySlashCommandHandled === true;
     this.state.worker.dispatchedMentionedAgents = payload.worker.dispatchedMentionedAgents;
     this.state.worker.verificationAgentState = payload.worker.verificationAgentState || {};
-    this.state.permissions.mode = payload.permissions?.mode || this.state.permissions.mode;
-    this.state.permissions.sessionRules = Array.isArray(payload.permissions?.sessionRules)
-      ? payload.permissions.sessionRules
-      : [];
-    this.state.permissions.temporaryGrants = new Map(payload.permissions?.temporaryGrants || []);
-    this.state.permissions.denialTracking = new Map(payload.permissions?.denialTracking || []);
-    this.state.permissions.latestPromptContext = payload.permissions?.latestPromptContext || null;
-    this.state.permissions.recentSensitiveSources = Array.isArray(
-      payload.permissions?.recentSensitiveSources,
-    )
-      ? payload.permissions.recentSensitiveSources
-      : [];
+    if (options.restorePermissions) {
+      this.restorePermissionStateFromPayload(payload);
+    }
     this.state.verification.verificationEvidenceEntries =
       payload.verification.verificationEvidenceEntries || [];
     this.state.verification.nonBlockingVerificationFailedStepIds = new Set(

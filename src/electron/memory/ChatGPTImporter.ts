@@ -29,6 +29,7 @@ import { estimateTokens } from "../agent/context-manager";
 
 import { DatabaseManager } from "../database/schema";
 import { createLocalEmbedding } from "./local-embedding";
+import { redactSecrets } from "./sensitive-content";
 
 // ── ChatGPT export format types ────────────────────────────────
 
@@ -105,25 +106,6 @@ const MAX_DISTILL_INPUT_CHARS = 6000;
 
 /** Max conversations processed in one import. */
 const HARD_MAX_CONVERSATIONS = 10000;
-
-/**
- * Patterns that indicate sensitive data in memory content.
- * Mirrors the detection used by MemoryService so imports get the same
- * privacy protection as auto-captured memories.
- */
-const SENSITIVE_PATTERNS = [
-  /(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*\S+/i,
-  /(?:password|passwd|pwd)\s*[:=]\s*\S+/i,
-  /(?:bearer|token)\s+[A-Za-z0-9\-._~+/]+=*/i,
-  /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/,
-  /sk-[A-Za-z0-9]{20,}/,
-  /ghp_[A-Za-z0-9]{36}/,
-  /xox[bpoas]-[A-Za-z0-9-]+/,
-];
-
-function containsSensitiveData(text: string): boolean {
-  return SENSITIVE_PATTERNS.some((pattern) => pattern.test(text));
-}
 
 // ── Importer ───────────────────────────────────────────────────
 
@@ -340,8 +322,11 @@ export class ChatGPTImporter {
           });
 
           for (const entry of distilled) {
-            // Sanitize content before storage
-            const sanitized = InputSanitizer.sanitizeMemoryContent(entry.content);
+            // Sanitize content before storage; secret values are redacted (shared
+            // detector with MemoryService), so the stored text holds no plaintext secret.
+            const sanitized = redactSecrets(
+              InputSanitizer.sanitizeMemoryContent(entry.content),
+            ).text;
             if (!sanitized || sanitized.length < 10) continue;
 
             const convTag = convId ? ` (conv:${convId})` : "";
@@ -350,10 +335,7 @@ export class ChatGPTImporter {
 
             // Write directly to DB, bypassing MemoryService.capture()
             // which checks autoCapture setting and would block imports
-            const isPrivate =
-              forcePrivate ||
-              settings.privacyMode === "strict" ||
-              containsSensitiveData(memoryContent);
+            const isPrivate = forcePrivate || settings.privacyMode === "strict";
 
             const created = await memoryRepo.create({
               workspaceId,

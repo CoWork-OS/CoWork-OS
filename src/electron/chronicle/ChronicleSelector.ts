@@ -1,5 +1,16 @@
 import type { ChronicleBufferedFrame, ChronicleResolvedContext } from "./types";
 
+/** Below this top-match confidence, a fresh fallback screenshot is taken. */
+export const CHRONICLE_FALLBACK_CONFIDENCE = 0.32;
+
+/**
+ * Minimum confidence for a match to be promoted into durable workspace
+ * storage (and memory). Scores combine app/title overlap (0.35), OCR overlap
+ * (0.45) and recency (0.2), so 0.5 requires real textual overlap with the
+ * query rather than "the most recent frame". Only the top match is promoted.
+ */
+export const CHRONICLE_PROMOTION_MIN_CONFIDENCE = 0.5;
+
 function normalizeText(value: unknown): string {
   return String(value || "")
     .toLowerCase()
@@ -86,6 +97,6 @@ export class ChronicleSelector {
   static shouldFallback(results: ChronicleResolvedContext[], query: string): boolean {
     if (results.length === 0) return true;
     if (!normalizeText(query)) return false;
-    return (results[0]?.confidence || 0) < 0.32;
+    return (results[0]?.confidence || 0) < CHRONICLE_FALLBACK_CONFIDENCE;
   }
 }

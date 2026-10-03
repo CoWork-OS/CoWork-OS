@@ -19,6 +19,42 @@ describe("tool-policy-engine background process tools", () => {
   });
 });
 
+describe("tool-policy-engine memory writes (SEC-12)", () => {
+  const MEMORY_WRITES = [
+    "memory_save",
+    "memory_curate",
+    "supermemory_remember",
+    "supermemory_forget",
+    "kg_create_entity",
+    "kg_update_entity",
+    "kg_delete_entity",
+    "kg_create_edge",
+    "kg_delete_edge",
+    "kg_invalidate_edge",
+    "kg_add_observation",
+  ];
+
+  it.each(MEMORY_WRITES)("denies %s in plan and analyze modes", (tool) => {
+    expect(evaluateToolPolicy(tool, { executionMode: "plan" }).decision).toBe("deny");
+    expect(evaluateToolPolicy(tool, { executionMode: "analyze" }).decision).toBe("deny");
+    expect(evaluateToolPolicy(tool, { executionMode: "execute" }).decision).toBe("allow");
+  });
+
+  it.each([
+    "search_memories",
+    "search_quotes",
+    "memory_search_index",
+    "memory_details",
+    "memory_curated_read",
+    "supermemory_search",
+    "kg_search",
+    "kg_get_neighbors",
+  ])("keeps memory read %s allowed in plan and analyze modes", (tool) => {
+    expect(evaluateToolPolicy(tool, { executionMode: "plan" }).decision).toBe("allow");
+    expect(evaluateToolPolicy(tool, { executionMode: "analyze" }).decision).toBe("allow");
+  });
+});
+
 describe("tool-policy-engine request_user_input gating", () => {
   it.each(["auto", "code", "operations"] as const)(
     "requires shell for execute_code in %s",

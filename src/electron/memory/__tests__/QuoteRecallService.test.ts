@@ -79,6 +79,18 @@ function createDb(): import("better-sqlite3").Database {
       actor TEXT,
       legacy_type TEXT
     );
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      status TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at)
+      VALUES ('task-1', 'Task 1', 'p', 'completed', 'ws-1', 1, 1),
+             ('task-foreign', 'Foreign', 'p', 'completed', 'ws-other', 1, 1);
   `);
   return db;
 }
@@ -172,6 +184,48 @@ describeWithNativeDb("QuoteRecallService", () => {
     expect(results[1]?.sourceType).toBe("task_message");
     expect(results[2]?.sourceType).toBe("memory");
     expect(results[0]?.excerpt).toContain("never mutate the production DB directly");
+  });
+
+  it("returns nothing when taskId belongs to another workspace", async () => {
+    const db = createDb();
+    const eventRepo = new TaskEventRepository(db);
+    eventRepo.create({
+      id: "event-foreign",
+      taskId: "task-foreign",
+      timestamp: 2_000,
+      type: "user_message",
+      payload: { message: "The other workspace secret launch codename is Bluebird." },
+      schemaVersion: 2,
+      eventId: "event-foreign",
+      seq: 1,
+      ts: 2_000,
+    });
+
+    for (const taskId of ["task-foreign", "task-missing"]) {
+      const results = await QuoteRecallService.search({
+        db,
+        workspaceId: "ws-1",
+        workspacePath: "/tmp/does-not-matter",
+        query: "secret launch codename Bluebird",
+        taskId,
+        limit: 5,
+      });
+      expect(results).toEqual([]);
+    }
+    expect(transcriptMocks.searchSpans).not.toHaveBeenCalled();
+    expect(memoryServiceMocks.search).not.toHaveBeenCalled();
+
+    // Same task from its own workspace still resolves.
+    const own = await QuoteRecallService.search({
+      db,
+      workspaceId: "ws-other",
+      workspacePath: "/tmp/does-not-matter",
+      query: "secret launch codename Bluebird",
+      taskId: "task-foreign",
+      limit: 5,
+      sourceTypes: ["task_message"],
+    });
+    expect(own[0]?.sourceType).toBe("task_message");
   });
 
   it("returns workspace markdown provenance with exact excerpt text", async () => {

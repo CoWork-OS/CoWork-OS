@@ -114,6 +114,14 @@ export interface WorkspaceFilesystemAccessResult {
 export interface WorkspaceFilesystemAccessOptions {
   /** A one-shot approval granted for this exact operation by the daemon. */
   externalApprovalGranted?: boolean;
+  /**
+   * Set only by CoWork's own runtime storage writers (the daemon's transcript
+   * span and checkpoint capture). It lifts the protected-path denial for
+   * `RUNTIME_OWNED_WORKSPACE_SEGMENTS` so those writers still honor the
+   * workspace's write capability and profile rules. Never set this from a
+   * tool, IPC handler or any other path the model can influence.
+   */
+  internalRuntimeStorageWrite?: boolean;
 }
 
 export interface ExternalFileApprovalRequest {
@@ -384,8 +392,24 @@ export function isProtectedFilesystemPath(absolutePath: string): boolean {
  *
  * Matched per path segment rather than as a prefix of the workspace root, so a
  * nested repository's `.git` (submodules, vendored checkouts) is covered too.
+ *
+ * `.cowork/memory/transcripts` holds the task resume checkpoints. A resumed
+ * task rebuilds its runtime state from them, so a tool able to forge one could
+ * plant conversation state for the next resume. Only the daemon's own capture
+ * writes there (see `RUNTIME_OWNED_WORKSPACE_SEGMENTS`).
  */
-const PROTECTED_WORKSPACE_SEGMENTS: string[][] = [[".cowork", "policy"], [".git"]];
+const PROTECTED_WORKSPACE_SEGMENTS: string[][] = [
+  [".cowork", "policy"],
+  [".git"],
+  [".cowork", "memory", "transcripts"],
+];
+
+/**
+ * Protected locations that CoWork's own runtime storage writers may still
+ * mutate when they pass `internalRuntimeStorageWrite`. `.cowork/policy` and
+ * `.git` are deliberately absent: nothing writes those through the evaluator.
+ */
+const RUNTIME_OWNED_WORKSPACE_SEGMENTS: string[][] = [[".cowork", "memory", "transcripts"]];
 
 /**
  * Exact paths carved out of the segments above.
@@ -402,7 +426,21 @@ const PROTECTED_WORKSPACE_EXCEPTIONS: string[][] = [[".git", "info", "exclude"]]
  * `workspacePath`. Paths outside the workspace return false — those are
  * governed by the access profile and the external-approval flow instead.
  */
-export function isProtectedWorkspacePath(workspacePath: string, absolutePath: string): boolean {
+export function isProtectedWorkspacePath(
+  workspacePath: string,
+  absolutePath: string,
+  options: { allowRuntimeOwned?: boolean } = {},
+): boolean {
+  const protectedList = options.allowRuntimeOwned
+    ? PROTECTED_WORKSPACE_SEGMENTS.filter(
+        (segments) =>
+          !RUNTIME_OWNED_WORKSPACE_SEGMENTS.some(
+            (owned) =>
+              owned.length === segments.length &&
+              owned.every((expected, index) => segments[index] === expected),
+          ),
+      )
+    : PROTECTED_WORKSPACE_SEGMENTS;
   // Compare against both the lexical and the canonical workspace root. A
   // canonicalized target resolves the macOS /var -> /private/var alias (and any
   // symlinked workspace root), which would otherwise appear to escape a
@@ -427,7 +465,7 @@ export function isProtectedWorkspacePath(workspacePath: string, absolutePath: st
     );
     if (isException) continue;
 
-    const matched = PROTECTED_WORKSPACE_SEGMENTS.some((protectedSegments) =>
+    const matched = protectedList.some((protectedSegments) =>
       segments.some((_, index) =>
         protectedSegments.every((expected, offset) => segments[index + offset] === expected),
       ),
@@ -545,8 +583,12 @@ export function evaluateWorkspaceFilesystemAccess(
   // `.git/` cannot launder the write.
   if (
     operation !== "read" &&
-    (isProtectedWorkspacePath(workspace.path, resolvedPath) ||
-      isProtectedWorkspacePath(workspace.path, operationPath))
+    (isProtectedWorkspacePath(workspace.path, resolvedPath, {
+      allowRuntimeOwned: options.internalRuntimeStorageWrite === true,
+    }) ||
+      isProtectedWorkspacePath(workspace.path, operationPath, {
+        allowRuntimeOwned: options.internalRuntimeStorageWrite === true,
+      }))
   ) {
     return { decision: "deny", path: operationPath, reason: "protected_path" };
   }

@@ -78,21 +78,26 @@ export class KnowledgeGraphService {
     return this.getRepo().upsertEntity(workspaceId, input, source, sourceTaskId);
   }
 
-  static updateEntity(input: UpdateEntityInput): Promise<KGEntity | undefined> {
+  // By-id operations are scoped to the caller's workspace (SEC-9): an id that belongs
+  // to another workspace is treated as not found.
+  static updateEntity(
+    workspaceId: string,
+    input: UpdateEntityInput,
+  ): Promise<KGEntity | undefined> {
     const repo = this.getRepo();
-    return repo.updateEntity(input.entityId, {
+    return repo.updateEntity(workspaceId, input.entityId, {
       description: input.description,
       properties: input.properties,
       confidence: input.confidence,
     });
   }
 
-  static deleteEntity(entityId: string): Promise<boolean> {
-    return this.getRepo().deleteEntity(entityId);
+  static deleteEntity(workspaceId: string, entityId: string): Promise<boolean> {
+    return this.getRepo().deleteEntity(workspaceId, entityId);
   }
 
-  static getEntity(entityId: string): Promise<KGEntity | undefined> {
-    return this.getRepo().getEntity(entityId);
+  static getEntity(workspaceId: string, entityId: string): Promise<KGEntity | undefined> {
+    return this.getRepo().getEntity(workspaceId, entityId);
   }
 
   // ─── Edge Operations ──────────────────────────────────────────────
@@ -107,22 +112,27 @@ export class KnowledgeGraphService {
     return this.getRepo().createEdgeChecked(workspaceId, input, source, sourceTaskId, Date.now());
   }
 
-  static deleteEdge(edgeId: string): Promise<boolean> {
-    return this.getRepo().deleteEdge(edgeId);
+  static deleteEdge(workspaceId: string, edgeId: string): Promise<boolean> {
+    return this.getRepo().deleteEdge(workspaceId, edgeId);
   }
 
-  static invalidateEdge(edgeId: string, validTo = Date.now()): Promise<KGEdge | undefined> {
-    return this.getRepo().invalidateEdge(edgeId, validTo);
+  static invalidateEdge(
+    workspaceId: string,
+    edgeId: string,
+    validTo = Date.now(),
+  ): Promise<KGEdge | undefined> {
+    return this.getRepo().invalidateEdge(workspaceId, edgeId, validTo);
   }
 
   // ─── Observation Operations ───────────────────────────────────────
 
   static addObservation(
+    workspaceId: string,
     input: AddObservationInput,
     source: "manual" | "auto" | "agent" = "agent",
     sourceTaskId?: string,
   ): Promise<KGObservation> {
-    return this.getRepo().addObservationChecked(input, source, sourceTaskId);
+    return this.getRepo().addObservationChecked(workspaceId, input, source, sourceTaskId);
   }
 
   // ─── Search & Traversal ───────────────────────────────────────────
@@ -132,16 +142,17 @@ export class KnowledgeGraphService {
   }
 
   static getNeighbors(
+    workspaceId: string,
     entityId: string,
     depth = 1,
     edgeTypes?: string[],
     asOf?: number,
   ): Promise<KGNeighborResult[]> {
-    return this.getRepo().getNeighbors(entityId, depth, edgeTypes, asOf);
+    return this.getRepo().getNeighbors(workspaceId, entityId, depth, edgeTypes, asOf);
   }
 
-  static getSubgraph(entityIds: string[], asOf?: number): Promise<KGSubgraph> {
-    return this.getRepo().getSubgraph(entityIds, asOf);
+  static getSubgraph(workspaceId: string, entityIds: string[], asOf?: number): Promise<KGSubgraph> {
+    return this.getRepo().getSubgraph(workspaceId, entityIds, asOf);
   }
 
   static getStats(workspaceId: string): Promise<KGStats> {
@@ -152,8 +163,12 @@ export class KnowledgeGraphService {
     return this.getRepo().getEntityTypes(workspaceId);
   }
 
-  static getObservations(entityId: string, limit = 20): Promise<KGObservation[]> {
-    return this.getRepo().getObservations(entityId, limit);
+  static getObservations(
+    workspaceId: string,
+    entityId: string,
+    limit = 20,
+  ): Promise<KGObservation[]> {
+    return this.getRepo().getObservations(workspaceId, entityId, limit);
   }
 
   static async ingestMailboxEvent(workspaceId: string, event: MailboxEvent): Promise<void> {
@@ -298,6 +313,7 @@ export class KnowledgeGraphService {
 
       if (person && observationContent) {
         await this.addObservation(
+          workspaceId,
           {
             entityId: person.id,
             content: observationContent,
@@ -308,6 +324,7 @@ export class KnowledgeGraphService {
       }
       if (org && observationContent) {
         await this.addObservation(
+          workspaceId,
           {
             entityId: org.id,
             content: observationContent,
@@ -318,6 +335,7 @@ export class KnowledgeGraphService {
       }
       if (project && observationContent) {
         await this.addObservation(
+          workspaceId,
           {
             entityId: project.id,
             content: observationContent,

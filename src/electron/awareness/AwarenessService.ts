@@ -20,6 +20,7 @@ import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { loadNotificationStoreSync } from "../notifications/store";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { UserProfileService } from "../memory/UserProfileService";
+import { InputSanitizer } from "../agent/security/input-sanitizer";
 
 const execFileAsync = promisify(execFile);
 const STORAGE_KEY = "awareness-state";
@@ -341,7 +342,9 @@ export class AwarenessService {
       .slice(0, 5)
       .map((item) => ({
         id: item.id,
-        title: item.text,
+        // Commitment text can originate from third-party email (mailbox source);
+        // the snapshot is injected into prompts, so neutralize tags/newlines.
+        title: InputSanitizer.sanitizeInlineMemoryLine(item.text),
         detail: item.dueAt ? `Due ${new Date(item.dueAt).toLocaleString()}` : "Due soon",
         source: "tasks" as AwarenessSource,
         workspaceId,

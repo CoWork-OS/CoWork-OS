@@ -449,6 +449,57 @@ describe("TranscriptStore", () => {
     expect(TranscriptStore.loadCheckpointSync(workspacePath, "task-invalid")).toBeNull();
   });
 
+  it("does not let a far-future forged checkpoint win loads or block writes", async () => {
+    const workspacePath = await createWorkspace();
+    const checkpointDir = path.join(
+      workspacePath,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "checkpoints",
+    );
+
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-future", {
+      checkpointKind: "snapshot",
+      sourceTimestamp: Date.now() - 1000,
+      conversationHistory: [{ role: "user", content: "legitimate" }],
+    });
+    // A forged current generation (no integrity block) claiming a far-future
+    // clock, with the legitimate checkpoint kept as the previous generation.
+    await fs.rename(
+      path.join(checkpointDir, "task-future.json"),
+      path.join(checkpointDir, "task-future.previous.json"),
+    );
+    const farFuture = Date.now() + 365 * 24 * 60 * 60 * 1000;
+    await fs.writeFile(
+      path.join(checkpointDir, "task-future.json"),
+      JSON.stringify({
+        checkpointKind: "snapshot",
+        timestamp: farFuture,
+        sourceTimestamp: farFuture,
+        conversationHistory: [{ role: "user", content: "forged" }],
+      }),
+      "utf8",
+    );
+
+    expect(
+      TranscriptStore.loadCheckpointSync(workspacePath, "task-future")?.conversationHistory,
+    ).toEqual([{ role: "user", content: "legitimate" }]);
+    expect(
+      (await TranscriptStore.loadCheckpoint(workspacePath, "task-future"))?.conversationHistory,
+    ).toEqual([{ role: "user", content: "legitimate" }]);
+
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-future", {
+      checkpointKind: "snapshot",
+      sourceTimestamp: Date.now(),
+      conversationHistory: [{ role: "user", content: "next legitimate" }],
+    });
+
+    expect(
+      TranscriptStore.loadCheckpointSync(workspacePath, "task-future")?.conversationHistory,
+    ).toEqual([{ role: "user", content: "next legitimate" }]);
+  });
+
   it("appends searchable transcript spans", async () => {
     const workspacePath = await createWorkspace();
 

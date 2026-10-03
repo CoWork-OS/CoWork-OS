@@ -2731,6 +2731,7 @@ export class DatabaseManager {
     ensureEverydayAgentSchema(this.db);
     this.migrateMemoryPayloadTables();
     this.initializeMemoryItems();
+    this.ensureForeignKeyChildIndexes();
 
     // Seed default models if table is empty
     this.seedDefaultModels();
@@ -8288,6 +8289,49 @@ export class DatabaseManager {
       schemaLogger.debug("[DatabaseManager] Passive checkpoint at close failed:", error);
     }
     this.db.close();
+  }
+
+  /**
+   * SQLite enforces a foreign key on parent delete by looking up child rows by the child
+   * column. Without an index on that column every deleted parent row scans the whole child
+   * table: deleting one temp workspace's 54 work-session items took ~4.8 s against a
+   * 63k-row `work_session_items` (self-referencing `causal_parent_item_id`), and deleting
+   * tasks scanned `activity_feed`, `llm_call_events` and others once per task.
+   * Full (not partial) indexes, so foreign-key enforcement can always use them. Tables
+   * created lazily by their owning service may not exist yet; those are skipped here and
+   * picked up on a later start.
+   */
+  private ensureForeignKeyChildIndexes(): void {
+    const childKeys: Array<[table: string, column: string]> = [
+      ["work_session_items", "causal_parent_item_id"],
+      ["work_session_constraints", "source_item_id"],
+      ["work_session_constraints", "turn_id"],
+      ["work_session_evidence", "item_id"],
+      ["work_session_activity_leases", "turn_id"],
+      ["work_session_wait_states", "turn_id"],
+      ["work_session_wait_states", "task_id"],
+      ["work_session_turns", "task_id"],
+      ["work_session_outcome_contracts", "task_id"],
+      ["activity_feed", "task_id"],
+      ["llm_call_events", "task_id"],
+      ["pending_memory_writes", "task_id"],
+      ["managed_session_events", "source_task_id"],
+      ["tasks", "branch_from_task_id"],
+      ["heartbeat_runs", "task_id"],
+      ["heartbeat_runs", "resumed_from_run_id"],
+      ["memory_observation_metadata", "task_id"],
+      ["core_failure_cluster_members", "failure_record_id"],
+      ["agent_team_thoughts", "team_item_id"],
+    ];
+    for (const [table, column] of childKeys) {
+      try {
+        this.db.exec(
+          `CREATE INDEX IF NOT EXISTS idx_fk_${table}_${column} ON ${table}(${column})`,
+        );
+      } catch {
+        // Table or column not created yet (lazy schema); the next start adds the index.
+      }
+    }
   }
 
   /**

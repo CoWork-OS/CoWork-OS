@@ -44,7 +44,7 @@ import {
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
-import { installGracefulShutdown } from "./utils/graceful-shutdown";
+import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
 import { DatabaseManager } from "./database/schema";
 import {
   SecureSettingsRepository,
@@ -59,6 +59,7 @@ import {
   setHookAgentDispatchObserver,
   setHookWorkflowDispatchObserver,
   setHookTriggerEmitter,
+  waitForComposerDraftWrites,
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
 import { setupPluginPackHandlers } from "./ipc/plugin-pack-handlers";
@@ -4458,6 +4459,16 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "tray", run: () => trayManager.destroy() },
+        {
+          // Closing the windows now lets the renderer save the open composer draft (it
+          // saves on hide and unload) while storage is open. Left to the end of quit,
+          // that save hit a closed database and the latest draft text was lost.
+          name: "windows",
+          run: async () => {
+            await closeWindowsForShutdown(BrowserWindow.getAllWindows());
+            await waitForComposerDraftWrites();
+          },
+        },
         { name: "workflow runtime", run: () => routineService?.stopWorkflowRuntime() },
         {
           name: "workflow watcher",

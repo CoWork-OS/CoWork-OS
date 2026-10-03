@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Composer draft on quit**: quitting saves the open composer draft before storage closes instead of failing with "The database connection is not open" and losing the latest draft text.
 - **Dev app Ctrl-C**: stopping `npm run dev` with Ctrl-C quits the app cleanly instead of killing it mid-shutdown, so the next start no longer reports an unclean shutdown and the shutdown output is kept; press Ctrl-C again to force quit.
 - **Heartbeat history pruning**: pruning no longer fails with `FOREIGN KEY constraint failed` on databases whose `tasks.heartbeat_run_id` link predates `ON DELETE SET NULL`; links to pruned runs are cleared first, so old run history is trimmed again.
 - **Browser reliability**: visible-browser selector and ref actions verify they landed and fail clearly on stale or covered targets; the headless browser tracks popups and tabs, saves downloads into the workspace, reports dialogs, supports uploads and captures console and network logs.

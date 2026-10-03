@@ -982,3 +982,69 @@ describe("BrowserTools browser_navigate", () => {
     expect(getContentTool?.input_schema.properties).toHaveProperty("scope");
   });
 });
+
+describe("BrowserTools headless browser capabilities", () => {
+  const workspace = {
+    id: "workspace-1",
+    path: "/tmp",
+    permissions: { read: true, write: true, delete: false, network: true, shell: false },
+  } as Any;
+
+  const makeHeadlessTools = (browserService: Any, workspaceOverride: Any = workspace) => {
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn(),
+    } as Any;
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue(null),
+      getTabs: vi.fn().mockReturnValue([]),
+      getConsole: vi.fn().mockReturnValue(null),
+      getNetwork: vi.fn().mockReturnValue(null),
+      getDownloads: vi.fn().mockReturnValue(null),
+      uploadFile: vi.fn(),
+      handleDialog: vi.fn(),
+    };
+    const tools = new BrowserTools(
+      workspaceOverride,
+      daemon,
+      "task-1",
+      browserWorkbenchService as Any,
+    );
+    (tools as Any).browserService = { hasSession: () => true, close: vi.fn(), ...browserService };
+    return { tools, daemon, browserWorkbenchService };
+  };
+
+  it("lists, switches and closes headless tabs", async () => {
+    const tabs = [
+      { tabId: "tab-1", url: "https://example.com/", title: "Home", active: false },
+      { tabId: "tab-2", url: "https://example.com/popup", title: "Popup", active: true },
+    ];
+    const browserService = {
+      listTabs: vi.fn().mockResolvedValue(tabs),
+      switchTab: vi.fn().mockResolvedValue({ success: true, tab: { ...tabs[0], active: true } }),
+      closeTab: vi.fn().mockResolvedValue({ success: true, closedTabId: "tab-2" }),
+    };
+    const { tools } = makeHeadlessTools(browserService);
+
+    const listed = await tools.executeTool("browser_tabs", {});
+    expect(listed).toMatchObject({ success: true, tabs });
+
+    const switched = await tools.executeTool("browser_switch_tab", { tab_id: "tab-1" });
+    expect(browserService.switchTab).toHaveBeenCalledWith("tab-1");
+    expect(switched).toMatchObject({ success: true, tab: { tabId: "tab-1", active: true } });
+
+    const closed = await tools.executeTool("browser_close_tab", { tab_id: "tab-2" });
+    expect(browserService.closeTab).toHaveBeenCalledWith("tab-2");
+    expect(closed).toMatchObject({ success: true, closedTabId: "tab-2" });
+  });
+
+  it("describes headless popup handling on the tab tools", () => {
+    const definitions = BrowserTools.getToolDefinitions();
+    const descriptionOf = (name: string) =>
+      definitions.find((tool) => tool.name === name)?.description;
+    expect(descriptionOf("browser_tabs")).toContain("popup");
+    expect(descriptionOf("browser_switch_tab")).toContain("browser_tabs");
+    expect(descriptionOf("browser_close_tab")).toContain("headless");
+  });
+});

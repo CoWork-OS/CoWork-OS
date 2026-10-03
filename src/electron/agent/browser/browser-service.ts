@@ -1,4 +1,4 @@
-import { chromium, Browser, Page, BrowserContext, Locator, ElementHandle } from "playwright";
+import { chromium, Browser, Page, BrowserContext, Locator, ElementHandle, Route } from "playwright";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { Workspace } from "../../../shared/types";
@@ -199,7 +199,68 @@ export interface BrowserOptions {
    * - Endpoint is typically http://localhost:9222 or the WebSocket URL from the version endpoint
    */
   debuggerUrl?: string;
+  /**
+   * Switch to a page that an action opened (popup, target=_blank, OAuth window) and report it
+   * as switchedToTab. Default: true.
+   */
+  followPopups?: boolean;
+  /**
+   * How long a click or key press waits for a page it may have opened, since Playwright can
+   * report a popup only after the action itself resolves. Default: POPUP_GRACE_MS.
+   */
+  popupGraceMs?: number;
 }
+
+/** A page of the headless browser context, as reported to the agent. */
+export interface BrowserTabInfo {
+  tabId: string;
+  url: string;
+  title: string;
+  active: boolean;
+  /** Tab whose page opened this one (window.open, target=_blank) */
+  openerTabId?: string;
+  backend: "playwright-local";
+  /** Why the service did not switch to this tab, e.g. its URL is outside the network policy */
+  error?: string;
+}
+
+/**
+ * Side effects of an action that the agent cannot otherwise see, attached to the action's
+ * result. Events that happened between actions are reported with the next action.
+ */
+export interface BrowserActionEvents {
+  /** A tab opened by this action that is now the active tab */
+  switchedToTab?: BrowserTabInfo;
+  /** Tabs opened since the previous action that did not become the active tab */
+  newTabs?: BrowserTabInfo[];
+  /** The active tab closed (e.g. an OAuth popup finished); actions now target activeTabId */
+  activeTabClosed?: { closedTabId: string; activeTabId?: string; url?: string };
+}
+
+/** Grace period for a popup opened by a click or key press to be reported. */
+const POPUP_GRACE_MS = 250;
+/** Bound on waiting for a followed popup to load before its URL and title are reported. */
+const POPUP_LOAD_WAIT_MS = 5_000;
+const TAB_TITLE_TIMEOUT_MS = 2_000;
+const MAX_ACTION_EVENTS = 50;
+
+interface BrowserTabRecord {
+  tabId: string;
+  page: Page;
+  /** Tabs that existed in an attached real browser before CoWork connected are not closable */
+  owned: boolean;
+  openerTabId?: string;
+  /** Settles once the opener lookup finished */
+  openerReady: Promise<void>;
+}
+
+type BrowserActionEventRecord =
+  | { seq: number; kind: "tab_opened"; tabId: string }
+  | { seq: number; kind: "active_tab_closed"; closedTabId: string; activeTabId?: string };
+
+type BrowserActionEventInput =
+  | { kind: "tab_opened"; tabId: string }
+  | { kind: "active_tab_closed"; closedTabId: string; activeTabId?: string };
 
 export interface ConsentDismissal {
   /** "clicked" a consent button, or "removed" a CMP banner that offered no recognised choice */
@@ -210,7 +271,7 @@ export interface ConsentDismissal {
   container: string;
 }
 
-export interface NavigateResult {
+export interface NavigateResult extends BrowserActionEvents {
   url: string;
   title: string;
   status: number | null;
@@ -342,7 +403,7 @@ export interface InteractiveElement {
   disabled?: boolean;
 }
 
-export interface ClickResult {
+export interface ClickResult extends BrowserActionEvents {
   success: boolean;
   element?: string;
   error?: string;
@@ -353,7 +414,7 @@ export interface ClickResult {
   candidates?: InteractiveElement[];
 }
 
-export interface FillResult {
+export interface FillResult extends BrowserActionEvents {
   success: boolean;
   selector: string;
   value: string;
@@ -590,6 +651,18 @@ export class BrowserService {
   private options: BrowserOptions;
   private isAttached = false;
   private configuredPages = new WeakSet<object>();
+  private tabIds = new WeakMap<object, string>();
+  /** Open pages of the context in the order they were opened */
+  private tabs = new Map<string, BrowserTabRecord>();
+  private nextTabNumber = 1;
+  private actionEvents: BrowserActionEventRecord[] = [];
+  private eventSeq = 0;
+  private lastReportedSeq = 0;
+  private contextEventsAttached = false;
+  private creatingPage = false;
+  private closing = false;
+  private explicitlyClosedTabs = new Set<string>();
+  private tabOpenedWaiters = new Set<() => void>();
 
   constructor(workspace: Workspace, options: BrowserOptions = {}) {
     this.workspace = workspace;
@@ -601,6 +674,8 @@ export class BrowserService {
       userDataDir: options.userDataDir,
       channel: options.channel,
       debuggerUrl: options.debuggerUrl,
+      followPopups: options.followPopups ?? true,
+      popupGraceMs: options.popupGraceMs ?? POPUP_GRACE_MS,
     };
   }
 
@@ -670,42 +745,306 @@ export class BrowserService {
     // turning that compatibility gap into a runtime crash.
     if (typeof (page as Any).route !== "function") return;
 
-    await page.route("**/*", async (route) => {
-      const requestUrl = route.request().url();
-      let parsed: URL;
+    await page.route("**/*", (route) => this.routeByNetworkPolicy(route));
+  }
+
+  /** Lets a request through only when the workspace network policy allows its URL. */
+  private async routeByNetworkPolicy(route: Route): Promise<void> {
+    const requestUrl = route.request().url();
+    let parsed: URL;
+    try {
+      parsed = new URL(requestUrl);
+    } catch {
+      await route.abort("blockedbyclient").catch(() => {});
+      return;
+    }
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
       try {
-        parsed = new URL(requestUrl);
+        this.assertNetworkUrlAllowed(requestUrl, "browser_request");
       } catch {
         await route.abort("blockedbyclient").catch(() => {});
         return;
       }
-      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-        try {
-          this.assertNetworkUrlAllowed(requestUrl, "browser_request");
-        } catch {
-          await route.abort("blockedbyclient").catch(() => {});
-          return;
-        }
-      } else if (
-        parsed.protocol !== "data:" &&
-        parsed.protocol !== "blob:" &&
-        parsed.protocol !== "about:"
-      ) {
-        await route.abort("blockedbyclient").catch(() => {});
-        return;
-      }
-      await route.continue().catch(() => {});
+    } else if (
+      parsed.protocol !== "data:" &&
+      parsed.protocol !== "blob:" &&
+      parsed.protocol !== "about:"
+    ) {
+      await route.abort("blockedbyclient").catch(() => {});
+      return;
+    }
+    await route.continue().catch(() => {});
+  }
+
+  /**
+   * Tracks every page the context opens as a tab. For a browser CoWork launched, the network
+   * policy is also installed on the context: a page-level route is only added after the "page"
+   * event, so a popup's first requests would otherwise run unchecked. An attached real browser
+   * keeps page-level routes only, so the user's own tabs are not filtered.
+   */
+  private async configureContext(
+    context: BrowserContext,
+    applyContextRoute: boolean,
+  ): Promise<void> {
+    if (typeof (context as Any).on === "function") {
+      context.on("page", (page: Page) => this.adoptPage(page));
+      this.contextEventsAttached = true;
+    }
+    if (applyContextRoute && typeof (context as Any).route === "function") {
+      await context.route("**/*", (route) => this.routeByNetworkPolicy(route));
+    }
+  }
+
+  /** A page opened in the context: by the site (popup, target=_blank) or by createPage. */
+  private adoptPage(page: Page): void {
+    if (typeof (page as Any).setDefaultTimeout === "function") this.applyPageTimeouts(page);
+    this.registerPage(page, true, !this.creatingPage);
+    void this.configurePage(page).catch(() => {
+      // Navigation and current-page checks remain authoritative if request
+      // interception cannot be installed on a newly opened page.
     });
   }
 
-  private configureContext(context: BrowserContext): void {
-    if (typeof (context as Any).on !== "function") return;
-    context.on("page", (page: Page) => {
-      void this.configurePage(page).catch(() => {
-        // Navigation and current-page checks remain authoritative if request
-        // interception cannot be installed on a newly opened page.
+  /** Opens a page for the service itself; it is not reported as a page the site opened. */
+  private async createPage(context: BrowserContext): Promise<Page> {
+    this.creatingPage = true;
+    try {
+      return await context.newPage();
+    } finally {
+      this.creatingPage = false;
+    }
+  }
+
+  private registerPage(page: Page, owned: boolean, openedBySite: boolean): string {
+    const existing = this.tabIds.get(page as object);
+    if (existing) return existing;
+    const tabId = `tab-${this.nextTabNumber++}`;
+    this.tabIds.set(page as object, tabId);
+    const record: BrowserTabRecord = { tabId, page, owned, openerReady: Promise.resolve() };
+    this.tabs.set(tabId, record);
+    if (typeof (page as Any).opener === "function") {
+      record.openerReady = page
+        .opener()
+        .then((opener) => {
+          const openerTabId = opener ? this.tabIds.get(opener as object) : undefined;
+          if (openerTabId) record.openerTabId = openerTabId;
+        })
+        .catch(() => undefined);
+    }
+    if (typeof (page as Any).on === "function") {
+      page.on("close", () => this.handlePageClosed(tabId));
+    }
+    if (openedBySite) {
+      this.pushActionEvent({ kind: "tab_opened", tabId });
+      for (const notify of this.tabOpenedWaiters) notify();
+    }
+    return tabId;
+  }
+
+  private pushActionEvent(event: BrowserActionEventInput): void {
+    this.eventSeq += 1;
+    this.actionEvents.push({ ...event, seq: this.eventSeq } as BrowserActionEventRecord);
+    if (this.actionEvents.length > MAX_ACTION_EVENTS) {
+      this.actionEvents = this.actionEvents.slice(-MAX_ACTION_EVENTS);
+    }
+  }
+
+  private isPageClosed(page: Page): boolean {
+    return typeof (page as Any).isClosed === "function" && page.isClosed();
+  }
+
+  /** Removes a closed tab; when it was active, control returns to its opener or the last tab. */
+  private handlePageClosed(tabId: string): void {
+    const record = this.tabs.get(tabId);
+    if (!record) return;
+    this.tabs.delete(tabId);
+    const explicit = this.explicitlyClosedTabs.delete(tabId);
+    if (this.closing || this.page !== record.page) return;
+    const openTabs = [...this.tabs.values()].filter((tab) => !this.isPageClosed(tab.page));
+    const opener = record.openerTabId ? this.tabs.get(record.openerTabId) : undefined;
+    const fallback =
+      opener && !this.isPageClosed(opener.page) ? opener : openTabs[openTabs.length - 1];
+    this.page = fallback?.page ?? null;
+    if (!explicit) {
+      this.pushActionEvent({
+        kind: "active_tab_closed",
+        closedTabId: tabId,
+        ...(fallback ? { activeTabId: fallback.tabId } : {}),
       });
+    }
+  }
+
+  private waitForTabOpened(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.tabOpenedWaiters.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      this.tabOpenedWaiters.add(done);
     });
+  }
+
+  private async describeTab(record: BrowserTabRecord): Promise<BrowserTabInfo> {
+    let title = "";
+    await settleWithin(
+      record.page.title().then((value) => {
+        title = value;
+      }),
+      TAB_TITLE_TIMEOUT_MS,
+    );
+    return {
+      tabId: record.tabId,
+      url: record.page.url(),
+      title,
+      active: record.page === this.page,
+      ...(record.openerTabId ? { openerTabId: record.openerTabId } : {}),
+      backend: "playwright-local",
+    };
+  }
+
+  /**
+   * Reports what happened since the previous action: tabs the site opened (switching to one
+   * this action opened), and the active tab closing.
+   */
+  private async collectActionEvents(
+    actionStartSeq: number,
+    mayOpenPopup: boolean,
+  ): Promise<BrowserActionEvents> {
+    const popupGraceMs = this.options.popupGraceMs ?? POPUP_GRACE_MS;
+    if (
+      mayOpenPopup &&
+      this.contextEventsAttached &&
+      popupGraceMs > 0 &&
+      !this.actionEvents.some((event) => event.seq > actionStartSeq && event.kind === "tab_opened")
+    ) {
+      await this.waitForTabOpened(popupGraceMs);
+    }
+
+    const events = this.actionEvents.filter((event) => event.seq > this.lastReportedSeq);
+    this.lastReportedSeq = this.eventSeq;
+    const report: BrowserActionEvents = {};
+
+    const opened: Array<{ record: BrowserTabRecord; seq: number }> = [];
+    for (const event of events) {
+      if (event.kind !== "tab_opened") continue;
+      const record = this.tabs.get(event.tabId);
+      if (record && !this.isPageClosed(record.page)) opened.push({ record, seq: event.seq });
+    }
+    let switched: BrowserTabRecord | undefined;
+    let switchError: { tabId: string; error: string } | undefined;
+    const candidate = this.options.followPopups
+      ? [...opened].reverse().find((entry) => entry.seq > actionStartSeq)?.record
+      : undefined;
+    if (candidate) {
+      await settleWithin(
+        candidate.page.waitForLoadState("domcontentloaded", { timeout: POPUP_LOAD_WAIT_MS }),
+        POPUP_LOAD_WAIT_MS,
+      );
+      await candidate.openerReady;
+      try {
+        this.assertPageUrlAllowed(candidate.page.url());
+        this.page = candidate.page;
+        switched = candidate;
+        report.switchedToTab = await this.describeTab(candidate);
+      } catch (error) {
+        switchError = { tabId: candidate.tabId, error: (error as Error).message };
+      }
+    }
+    const others = opened.filter((entry) => entry.record !== switched);
+    if (others.length > 0) {
+      report.newTabs = await Promise.all(
+        others.map(async ({ record }) => ({
+          ...(await this.describeTab(record)),
+          ...(switchError?.tabId === record.tabId ? { error: switchError.error } : {}),
+        })),
+      );
+    }
+
+    const closed = [...events].reverse().find((event) => event.kind === "active_tab_closed");
+    if (closed && closed.kind === "active_tab_closed" && !switched) {
+      report.activeTabClosed = {
+        closedTabId: closed.closedTabId,
+        ...(closed.activeTabId ? { activeTabId: closed.activeTabId } : {}),
+        ...(this.page ? { url: this.page.url() } : {}),
+      };
+    }
+    return report;
+  }
+
+  /** Runs a page action and attaches what it caused (popups, closed tabs) to its result. */
+  private async withActionEvents<T extends object>(
+    mayOpenPopup: boolean,
+    action: () => Promise<T>,
+  ): Promise<T & BrowserActionEvents> {
+    const actionStartSeq = this.eventSeq;
+    const result = await action();
+    const events = await this.collectActionEvents(actionStartSeq, mayOpenPopup);
+    return { ...result, ...events };
+  }
+
+  /** Tabs of the headless browser context, in the order they were opened. */
+  async listTabs(): Promise<BrowserTabInfo[]> {
+    if (this.page && !this.tabIds.has(this.page as object)) {
+      this.registerPage(this.page, true, false);
+    }
+    const open = [...this.tabs.values()].filter((record) => !this.isPageClosed(record.page));
+    return await Promise.all(open.map((record) => this.describeTab(record)));
+  }
+
+  /** Makes a tab the target of later actions. */
+  async switchTab(
+    tabId: string,
+  ): Promise<{ success: boolean; tab?: BrowserTabInfo; error?: string }> {
+    const record = this.tabs.get(tabId);
+    if (!record || this.isPageClosed(record.page)) {
+      return {
+        success: false,
+        error: `No open tab with id "${tabId}". Call browser_tabs to list open tabs.`,
+      };
+    }
+    try {
+      this.assertPageUrlAllowed(record.page.url());
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+    this.page = record.page;
+    if (typeof (record.page as Any).bringToFront === "function") {
+      await record.page.bringToFront().catch(() => {});
+    }
+    return { success: true, tab: await this.describeTab(record) };
+  }
+
+  /** Closes a tab; when it was active, later actions target its opener or the last tab. */
+  async closeTab(
+    tabId: string,
+  ): Promise<{ success: boolean; closedTabId?: string; activeTabId?: string; error?: string }> {
+    const record = this.tabs.get(tabId);
+    if (!record) {
+      return {
+        success: false,
+        error: `No open tab with id "${tabId}". Call browser_tabs to list open tabs.`,
+      };
+    }
+    if (!record.owned) {
+      return {
+        success: false,
+        error:
+          "This tab was already open in the attached browser before CoWork connected; close it in the browser itself.",
+      };
+    }
+    this.explicitlyClosedTabs.add(tabId);
+    await record.page.close().catch(() => {});
+    this.handlePageClosed(tabId);
+    this.explicitlyClosedTabs.delete(tabId);
+    const activeTabId = this.page ? this.tabIds.get(this.page as object) : undefined;
+    return { success: true, closedTabId: tabId, ...(activeTabId ? { activeTabId } : {}) };
+  }
+
+  /** Whether a browser context exists, even if all of its tabs were closed. */
+  hasSession(): boolean {
+    return this.context !== null;
   }
 
   private isRetryableBrowserError(error: unknown): boolean {
@@ -908,10 +1247,12 @@ export class BrowserService {
         browser = await chromium.connectOverCDP(endpoint);
         const contexts = browser.contexts();
         context = contexts[0] ?? (await browser.newContext({ viewport: this.options.viewport }));
-        this.configureContext(context);
-        const page = context.pages()[0] ?? (await context.newPage());
+        await this.configureContext(context, false);
+        const existingPage = context.pages()[0];
+        const page = existingPage ?? (await this.createPage(context));
         this.applyPageTimeouts(page);
         await this.configurePage(page);
+        this.registerPage(page, !existingPage, false);
         this.assertPageUrlAllowed(page.url());
         this.browser = browser;
         this.context = context;
@@ -953,10 +1294,11 @@ export class BrowserService {
         });
       }
 
-      this.configureContext(context);
-      const page = context.pages()[0] ?? (await context.newPage());
+      await this.configureContext(context, true);
+      const page = context.pages()[0] ?? (await this.createPage(context));
       this.applyPageTimeouts(page);
       await this.configurePage(page);
+      this.registerPage(page, true, false);
 
       // Only assign to instance variables after all operations succeed
       this.browser = browser;
@@ -964,6 +1306,7 @@ export class BrowserService {
       this.page = page;
     } catch (error) {
       // Cleanup partial initialization on error
+      this.resetTabState();
       if (context) {
         await context.close().catch(() => {});
       }
@@ -993,6 +1336,13 @@ export class BrowserService {
   async navigate(
     url: string,
     waitUntil: "load" | "domcontentloaded" | "networkidle" = "load",
+  ): Promise<NavigateResult> {
+    return await this.withActionEvents(false, () => this.navigateOnPage(url, waitUntil));
+  }
+
+  private async navigateOnPage(
+    url: string,
+    waitUntil: "load" | "domcontentloaded" | "networkidle",
   ): Promise<NavigateResult> {
     const normalizedUrl = normalizeBrowserUrl(url);
     if (!normalizedUrl) throw new Error("url is required");
@@ -1209,6 +1559,10 @@ export class BrowserService {
    * Click on an element
    */
   async click(selector: string, timeoutMs?: number): Promise<ClickResult> {
+    return await this.withActionEvents(true, () => this.clickOnPage(selector, timeoutMs));
+  }
+
+  private async clickOnPage(selector: string, timeoutMs?: number): Promise<ClickResult> {
     await this.ensurePage();
 
     const actionTimeout = this.getActionTimeout(timeoutMs);
@@ -1244,6 +1598,14 @@ export class BrowserService {
    * Fill a form field
    */
   async fill(selector: string, value: string, timeoutMs?: number): Promise<FillResult> {
+    return await this.withActionEvents(false, () => this.fillOnPage(selector, value, timeoutMs));
+  }
+
+  private async fillOnPage(
+    selector: string,
+    value: string,
+    timeoutMs?: number,
+  ): Promise<FillResult> {
     await this.ensurePage();
     const actionTimeout = this.getActionTimeout(timeoutMs);
 
@@ -1284,6 +1646,17 @@ export class BrowserService {
     delay: number = 50,
     timeoutMs?: number,
   ): Promise<FillResult> {
+    return await this.withActionEvents(false, () =>
+      this.typeOnPage(selector, text, delay, timeoutMs),
+    );
+  }
+
+  private async typeOnPage(
+    selector: string,
+    text: string,
+    delay: number,
+    timeoutMs?: number,
+  ): Promise<FillResult> {
     await this.ensurePage();
     // Typing with a per-key delay takes time of its own; budget it on top of the action default.
     const actionTimeout =
@@ -1321,7 +1694,11 @@ export class BrowserService {
   /**
    * Press a key
    */
-  async press(key: string): Promise<{ success: boolean; key: string }> {
+  async press(key: string): Promise<{ success: boolean; key: string } & BrowserActionEvents> {
+    return await this.withActionEvents(true, () => this.pressOnPage(key));
+  }
+
+  private async pressOnPage(key: string): Promise<{ success: boolean; key: string }> {
     await this.ensurePage();
 
     try {
@@ -1403,7 +1780,11 @@ export class BrowserService {
   /**
    * Evaluate JavaScript in the page
    */
-  async evaluate(script: string): Promise<EvaluateResult> {
+  async evaluate(script: string): Promise<EvaluateResult & BrowserActionEvents> {
+    return await this.withActionEvents(false, () => this.evaluateOnPage(script));
+  }
+
+  private async evaluateOnPage(script: string): Promise<EvaluateResult> {
     await this.ensurePage();
 
     const normalizedScript = normalizeEvaluateScript(script);
@@ -1423,6 +1804,10 @@ export class BrowserService {
    * Select option from dropdown
    */
   async select(selector: string, value: string): Promise<FillResult> {
+    return await this.withActionEvents(false, () => this.selectOnPage(selector, value));
+  }
+
+  private async selectOnPage(selector: string, value: string): Promise<FillResult> {
     await this.ensurePage();
 
     try {
@@ -1493,6 +1878,10 @@ export class BrowserService {
    * Go back in browser history
    */
   async goBack(): Promise<NavigateResult> {
+    return await this.withActionEvents(false, () => this.goBackOnPage());
+  }
+
+  private async goBackOnPage(): Promise<NavigateResult> {
     await this.ensurePage();
     this.assertPageUrlAllowed(this.page!.url());
     await this.page!.goBack();
@@ -1509,6 +1898,10 @@ export class BrowserService {
    * Go forward in browser history
    */
   async goForward(): Promise<NavigateResult> {
+    return await this.withActionEvents(false, () => this.goForwardOnPage());
+  }
+
+  private async goForwardOnPage(): Promise<NavigateResult> {
     await this.ensurePage();
     this.assertPageUrlAllowed(this.page!.url());
     await this.page!.goForward();
@@ -1525,6 +1918,10 @@ export class BrowserService {
    * Reload the page
    */
   async reload(): Promise<NavigateResult> {
+    return await this.withActionEvents(false, () => this.reloadOnPage());
+  }
+
+  private async reloadOnPage(): Promise<NavigateResult> {
     await this.ensurePage();
     this.assertPageUrlAllowed(this.page!.url());
     const response = await this.page!.reload();
@@ -1586,6 +1983,16 @@ export class BrowserService {
    * Close the browser (or disconnect when attached to existing Chrome)
    */
   async close(): Promise<void> {
+    this.closing = true;
+    try {
+      await this.closeBrowser();
+    } finally {
+      this.resetTabState();
+      this.closing = false;
+    }
+  }
+
+  private async closeBrowser(): Promise<void> {
     if (this.isAttached) {
       // Attached mode: only disconnect, do not close user's browser tabs
       if (this.browser) {
@@ -1611,11 +2018,33 @@ export class BrowserService {
     }
   }
 
+  private resetTabState(): void {
+    this.tabs.clear();
+    this.tabIds = new WeakMap<object, string>();
+    this.nextTabNumber = 1;
+    this.actionEvents = [];
+    this.lastReportedSeq = this.eventSeq;
+    this.contextEventsAttached = false;
+    this.explicitlyClosedTabs.clear();
+  }
+
   /**
-   * Ensure page is initialized
+   * Ensure page is initialized. When every tab was closed (by the agent or by the site) a
+   * fresh page is opened in the existing context rather than launching another browser.
    */
   private async ensurePage(): Promise<void> {
-    if (!this.page) {
+    if (this.page && this.isPageClosed(this.page)) {
+      const tabId = this.tabIds.get(this.page as object);
+      if (tabId) this.handlePageClosed(tabId);
+      if (this.page && this.isPageClosed(this.page)) this.page = null;
+    }
+    if (!this.page && this.context) {
+      const page = await this.createPage(this.context);
+      this.applyPageTimeouts(page);
+      await this.configurePage(page);
+      this.registerPage(page, true, false);
+      this.page = page;
+    } else if (!this.page) {
       await this.init();
     }
     this.assertPageUrlAllowed(this.page?.url() || "");

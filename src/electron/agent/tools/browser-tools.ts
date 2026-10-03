@@ -1005,7 +1005,11 @@ export class BrowserTools {
       },
       {
         name: "browser_tabs",
-        description: "List tabs for the active browser session",
+        description:
+          "List tabs for the active browser session. In the headless browser, pages the site opens " +
+          "(popups, target=_blank links, OAuth sign-in windows) become separate tabs: an action that " +
+          "opens one switches to it and reports switchedToTab, and a popup that closes itself returns " +
+          "control to the page that opened it (reported as activeTabClosed).",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1018,7 +1022,9 @@ export class BrowserTools {
       },
       {
         name: "browser_switch_tab",
-        description: "Switch to a browser tab by tab id",
+        description:
+          "Switch to a browser tab by tab id from browser_tabs, e.g. to return to the original page " +
+          "after a popup or to continue in a page opened with target=_blank.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1033,7 +1039,9 @@ export class BrowserTools {
       },
       {
         name: "browser_close_tab",
-        description: "Close a browser tab by tab id",
+        description:
+          "Close a headless browser tab by tab id from browser_tabs (e.g. a finished popup); later " +
+          "actions target the tab that opened it. The visible workbench tab cannot be closed here.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1995,21 +2003,24 @@ export class BrowserTools {
       case "browser_tabs": {
         const tabs = this.browserWorkbenchService.getTabs(this.taskId, this.getSessionId(input));
         if (tabs.length > 0) return { success: true, tabs };
-        return {
-          success: true,
-          tabs: [
-            {
-              tabId: "active",
-              title: "",
-              url: this.browserService.getUrl() || "",
-              active: true,
-              backend: "playwright-local",
-            },
-          ],
-        };
+        if (!this.browserService.hasSession()) {
+          return { success: true, tabs: [], message: "No browser session is open." };
+        }
+        return { success: true, tabs: await this.browserService.listTabs() };
       }
 
       case "browser_switch_tab": {
+        if (!this.hasVisibleWorkbenchSession(input) && this.browserService.hasSession()) {
+          const tabId = typeof input?.tab_id === "string" ? input.tab_id.trim() : "";
+          if (!tabId) return { success: false, error: "tab_id is required" };
+          const result = await this.browserService.switchTab(tabId);
+          this.daemon.logEvent(this.taskId, "browser_action", {
+            action: "switch_tab",
+            tabId,
+            success: result.success,
+          });
+          return result;
+        }
         const tabs = this.browserWorkbenchService.getTabs(this.taskId, this.getSessionId(input));
         const target = tabs.find((tab: Any) => tab.tabId === input?.tab_id);
         if (target?.active) return { success: true, tab: target };
@@ -2020,6 +2031,17 @@ export class BrowserTools {
       }
 
       case "browser_close_tab": {
+        if (!this.hasVisibleWorkbenchSession(input) && this.browserService.hasSession()) {
+          const tabId = typeof input?.tab_id === "string" ? input.tab_id.trim() : "";
+          if (!tabId) return { success: false, error: "tab_id is required" };
+          const result = await this.browserService.closeTab(tabId);
+          this.daemon.logEvent(this.taskId, "browser_action", {
+            action: "close_tab",
+            tabId,
+            success: result.success,
+          });
+          return result;
+        }
         return {
           success: false,
           error:

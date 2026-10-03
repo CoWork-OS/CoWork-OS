@@ -1135,7 +1135,7 @@ export class AgentDaemon extends EventEmitter {
       await this.runTranscriptMaintenance(90);
       if (worker) {
         const stats = await readStorageStats(worker);
-        log.info(
+        log.debug(
           `DB maintenance: ${Math.round(stats.freelistBytes / 1048576)} MB free of ${Math.round((stats.pageCount * stats.pageSize) / 1048576)} MB`,
         );
       }

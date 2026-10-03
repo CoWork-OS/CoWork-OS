@@ -133,7 +133,7 @@ import type { Task, TaskStatus } from "../shared/types";
 import { isAutomatedTaskLike } from "../shared/automated-task-detection";
 import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import { GuardrailManager } from "./guardrails/guardrail-manager";
-import { AppearanceManager, getDevLogCaptureEnabled } from "./settings/appearance-manager";
+import { AppearanceManager } from "./settings/appearance-manager";
 import { MemoryFeaturesManager } from "./settings/memory-features-manager";
 import { PersonalityManager } from "./settings/personality-manager";
 import { MCPClientManager } from "./mcp/client/MCPClientManager";
@@ -1834,11 +1834,7 @@ if (isMacSafeStorageMigrationWorker) {
         runtime: "desktop",
       });
       logStartupLane("blocking_startup", { event: "reporting_reader_start_requested" });
-      hostPerfMonitor = startHostPerfMonitor({
-        runtime: "desktop",
-        isSummaryEnabled: () =>
-          process.env.COWORK_DEV_LOG_CAPTURE === "1" || getDevLogCaptureEnabled(),
-      });
+      hostPerfMonitor = startHostPerfMonitor({ runtime: "desktop" });
       automationOutcomeService = new AutomationOutcomeService({
         repo: new AutomationRunOutcomeRepository(dbManager.getDatabase()),
         notify: async (params) => {

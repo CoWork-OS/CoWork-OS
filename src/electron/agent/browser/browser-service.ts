@@ -1,8 +1,17 @@
-import { chromium, Browser, Page, BrowserContext, Locator, ElementHandle, Route } from "playwright";
+import {
+  chromium,
+  Browser,
+  Page,
+  BrowserContext,
+  Dialog,
+  Locator,
+  ElementHandle,
+  Route,
+} from "playwright";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { Workspace } from "../../../shared/types";
-import { normalizeBrowserUrl } from "../../browser/browser-session-manager";
+import { normalizeBrowserUrl, redactBrowserText } from "../../browser/browser-session-manager";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 import {
   assertWorkspaceFilesystemAccess,
@@ -235,6 +244,31 @@ export interface BrowserActionEvents {
   newTabs?: BrowserTabInfo[];
   /** The active tab closed (e.g. an OAuth popup finished); actions now target activeTabId */
   activeTabClosed?: { closedTabId: string; activeTabId?: string; url?: string };
+  /**
+   * A JavaScript dialog (alert/confirm/prompt/beforeunload) the page opened. Dialogs are
+   * dismissed unless the agent asked to accept the next one, so a dismissed confirm() means
+   * the page's action did not go ahead.
+   */
+  dialog?: BrowserDialogReport;
+  /** Every dialog, when the page opened more than one */
+  dialogs?: BrowserDialogReport[];
+  /** An accept/dismiss decision for the next dialog lapsed because no dialog opened */
+  dialogDecisionExpired?: true;
+}
+
+export interface BrowserDialogReport {
+  type: string;
+  message: string;
+  /** Default value of a prompt() */
+  defaultValue?: string;
+  action: "accepted" | "dismissed";
+  tabId?: string;
+  timestamp: number;
+}
+
+export interface BrowserDialogDecision {
+  accept: boolean;
+  promptText?: string;
 }
 
 /** Grace period for a popup opened by a click or key press to be reported. */
@@ -254,13 +288,12 @@ interface BrowserTabRecord {
   openerReady: Promise<void>;
 }
 
-type BrowserActionEventRecord =
-  | { seq: number; kind: "tab_opened"; tabId: string }
-  | { seq: number; kind: "active_tab_closed"; closedTabId: string; activeTabId?: string };
-
 type BrowserActionEventInput =
   | { kind: "tab_opened"; tabId: string }
-  | { kind: "active_tab_closed"; closedTabId: string; activeTabId?: string };
+  | { kind: "active_tab_closed"; closedTabId: string; activeTabId?: string }
+  | { kind: "dialog"; dialog: BrowserDialogReport };
+
+type BrowserActionEventRecord = BrowserActionEventInput & { seq: number };
 
 export interface ConsentDismissal {
   /** "clicked" a consent button, or "removed" a CMP banner that offered no recognised choice */
@@ -663,6 +696,9 @@ export class BrowserService {
   private closing = false;
   private explicitlyClosedTabs = new Set<string>();
   private tabOpenedWaiters = new Set<() => void>();
+  /** The agent's decision for the next dialog; lapses after one action */
+  private nextDialogDecision: (BrowserDialogDecision & { actionsLeft: number }) | null = null;
+  private lastDialog: BrowserDialogReport | null = null;
 
   constructor(workspace: Workspace, options: BrowserOptions = {}) {
     this.workspace = workspace;
@@ -833,6 +869,7 @@ export class BrowserService {
     }
     if (typeof (page as Any).on === "function") {
       page.on("close", () => this.handlePageClosed(tabId));
+      page.on("dialog", (dialog: Dialog) => this.handleDialog(dialog, tabId));
     }
     if (openedBySite) {
       this.pushActionEvent({ kind: "tab_opened", tabId });
@@ -843,7 +880,7 @@ export class BrowserService {
 
   private pushActionEvent(event: BrowserActionEventInput): void {
     this.eventSeq += 1;
-    this.actionEvents.push({ ...event, seq: this.eventSeq } as BrowserActionEventRecord);
+    this.actionEvents.push({ ...event, seq: this.eventSeq });
     if (this.actionEvents.length > MAX_ACTION_EVENTS) {
       this.actionEvents = this.actionEvents.slice(-MAX_ACTION_EVENTS);
     }
@@ -872,6 +909,62 @@ export class BrowserService {
         ...(fallback ? { activeTabId: fallback.tabId } : {}),
       });
     }
+  }
+
+  /**
+   * A page dialog blocks the page until it is answered, so it is answered at once: dismissed,
+   * unless the agent armed an accept for this one dialog with armNextDialog. Never accepting by
+   * default keeps a destructive confirm() ("Delete all?") from going ahead unseen; the dialog
+   * is reported on the action that caused it so the agent can decide and repeat the action.
+   */
+  private handleDialog(dialog: Dialog, tabId: string): void {
+    const decision = this.nextDialogDecision;
+    this.nextDialogDecision = null;
+    const accept = decision?.accept === true;
+    const type = dialog.type();
+    const defaultValue = type === "prompt" ? dialog.defaultValue() : "";
+    const report: BrowserDialogReport = {
+      type,
+      message: redactBrowserText(dialog.message(), 1200),
+      ...(defaultValue ? { defaultValue: redactBrowserText(defaultValue, 300) } : {}),
+      action: accept ? "accepted" : "dismissed",
+      tabId,
+      timestamp: Date.now(),
+    };
+    this.lastDialog = report;
+    this.pushActionEvent({ kind: "dialog", dialog: report });
+    log.info(`${accept ? "Accepted" : "Dismissed"} ${type} dialog in ${tabId}`);
+    const answered = accept ? dialog.accept(decision?.promptText) : dialog.dismiss();
+    void answered.catch(() => {
+      // The page may have closed or answered the dialog itself.
+    });
+  }
+
+  /**
+   * Accept (or explicitly dismiss) the next dialog the page opens, optionally answering a
+   * prompt(). Applies to one dialog during the next action, then lapses.
+   */
+  armNextDialog(decision: BrowserDialogDecision): {
+    nextDialog: { action: "accept" | "dismiss"; promptText?: string };
+    lastDialog?: BrowserDialogReport;
+  } {
+    const promptText = typeof decision.promptText === "string" ? decision.promptText : undefined;
+    this.nextDialogDecision = {
+      accept: decision.accept,
+      ...(promptText !== undefined ? { promptText } : {}),
+      actionsLeft: 1,
+    };
+    return {
+      nextDialog: {
+        action: decision.accept ? "accept" : "dismiss",
+        ...(promptText !== undefined ? { promptText } : {}),
+      },
+      ...(this.lastDialog ? { lastDialog: this.lastDialog } : {}),
+    };
+  }
+
+  getLastDialog(): BrowserDialogReport | null {
+    return this.lastDialog;
   }
 
   private waitForTabOpened(timeoutMs: number): Promise<void> {
@@ -969,6 +1062,20 @@ export class BrowserService {
         ...(closed.activeTabId ? { activeTabId: closed.activeTabId } : {}),
         ...(this.page ? { url: this.page.url() } : {}),
       };
+    }
+
+    const dialogs: BrowserDialogReport[] = [];
+    for (const event of events) {
+      if (event.kind === "dialog") dialogs.push(event.dialog);
+    }
+    if (dialogs.length > 0) report.dialog = dialogs[0];
+    if (dialogs.length > 1) report.dialogs = dialogs;
+    if (this.nextDialogDecision) {
+      this.nextDialogDecision.actionsLeft -= 1;
+      if (this.nextDialogDecision.actionsLeft <= 0) {
+        this.nextDialogDecision = null;
+        report.dialogDecisionExpired = true;
+      }
     }
     return report;
   }
@@ -2026,6 +2133,7 @@ export class BrowserService {
     this.lastReportedSeq = this.eventSeq;
     this.contextEventsAttached = false;
     this.explicitlyClosedTabs.clear();
+    this.nextDialogDecision = null;
   }
 
   /**

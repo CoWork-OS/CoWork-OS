@@ -68,6 +68,50 @@ function getWhatsAppCompatibilityIssue(content: { url?: string; title?: string; 
   };
 }
 
+const BROWSER_ACTION_EVENT_FIELDS = [
+  "dialog",
+  "dialogs",
+  "switchedToTab",
+  "newTabs",
+  "activeTabClosed",
+  "dialogDecisionExpired",
+] as const;
+
+/** Side effects a headless action reported (dialogs, popups, closed tabs), for batch steps. */
+function pickBrowserActionEvents(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== "object") return {};
+  const source = result as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const field of BROWSER_ACTION_EVENT_FIELDS) {
+    if (source[field] !== undefined) picked[field] = source[field];
+  }
+  return picked;
+}
+
+/** A confirm/prompt/beforeunload that was dismissed, i.e. the page's action was cancelled. */
+function findDismissedBlockingDialog(
+  result: unknown,
+): { type: string; message: string; action: string } | null {
+  if (!result || typeof result !== "object") return null;
+  const source = result as { dialog?: unknown; dialogs?: unknown };
+  const dialogs = Array.isArray(source.dialogs) ? source.dialogs : [source.dialog];
+  for (const dialog of dialogs) {
+    if (!dialog || typeof dialog !== "object") continue;
+    const entry = dialog as { type?: unknown; message?: unknown; action?: unknown };
+    if (
+      entry.action === "dismissed" &&
+      (entry.type === "confirm" || entry.type === "prompt" || entry.type === "beforeunload")
+    ) {
+      return {
+        type: String(entry.type),
+        message: String(entry.message ?? ""),
+        action: "dismissed",
+      };
+    }
+  }
+  return null;
+}
+
 interface BrowserUseCloudSessionState {
   id: string;
   cdpUrl: string;
@@ -1346,7 +1390,12 @@ export class BrowserTools {
       },
       {
         name: "browser_handle_dialog",
-        description: "Accept or dismiss the latest JavaScript dialog in the browser",
+        description:
+          "Accept or dismiss a JavaScript dialog (alert/confirm/prompt). In the visible workbench this " +
+          "answers the open dialog. In the headless browser dialogs are dismissed as soon as they open " +
+          "and reported on the action that caused them as dialog: {type, message, action}; to accept " +
+          "one (e.g. a confirm() you intend to approve) or answer a prompt, call this first and then " +
+          "repeat that action. The decision applies to the next action only.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -2460,9 +2509,25 @@ export class BrowserTools {
           });
           if (result) return result;
         }
+        if (!this.browserService.hasSession()) {
+          return { success: false, error: "No browser session is open. Navigate first." };
+        }
+        // Headless dialogs are answered as soon as they open (dismissed by default), so the
+        // decision applies to the next dialog, which the agent triggers by repeating the action.
+        const accept = input?.accept !== false;
+        const promptText = typeof input?.prompt_text === "string" ? input.prompt_text : undefined;
+        const armed = this.browserService.armNextDialog({
+          accept,
+          ...(promptText !== undefined ? { promptText } : {}),
+        });
+        this.daemon.logEvent(this.taskId, "browser_action", { action: "handle_dialog", accept });
         return {
-          success: false,
-          error: "browser_handle_dialog requires an active visible Browser V2 session.",
+          success: true,
+          ...armed,
+          message:
+            `The next JavaScript dialog will be ${accept ? "accepted" : "dismissed"}. ` +
+            "Headless dialogs are answered as soon as they open, so repeat the action that " +
+            "opens it now; the decision lapses after that one action.",
         };
       }
 
@@ -2771,8 +2836,9 @@ export class BrowserTools {
             total: actions.length,
           };
         }
-        const results: Array<{ type: string; success: boolean; error?: string }> = [];
+        const results: Array<{ type: string; success: boolean; error?: string } & Any> = [];
         const timeoutMs = this.getTimeoutMs(input);
+        let stoppedForDialog: Any = null;
         for (let i = 0; i < actions.length; i++) {
           const act = actions[i] as Record<string, unknown>;
           const delayMs = typeof act.delay_ms === "number" && act.delay_ms > 0 ? act.delay_ms : 0;
@@ -2781,41 +2847,32 @@ export class BrowserTools {
           }
           const actType = String(act.type || "").toLowerCase();
           try {
+            let r: Any;
             if (actType === "click") {
-              const r = await this.browserService.click(
+              r = await this.browserService.click(
                 String(act.selector || ""),
                 (act.timeout_ms as number) || timeoutMs,
               );
-              results.push({ type: "click", success: r.success, error: r.error });
-              if (!r.success) break;
             } else if (actType === "fill") {
-              const r = await this.browserService.fill(
+              r = await this.browserService.fill(
                 String(act.selector || ""),
                 String(act.value ?? ""),
                 (act.timeout_ms as number) || timeoutMs,
               );
-              results.push({ type: "fill", success: r.success, error: r.error });
-              if (!r.success) break;
             } else if (actType === "type") {
-              const r = await this.browserService.type(
+              r = await this.browserService.type(
                 String(act.selector || ""),
                 String(act.text ?? ""),
                 typeof act.delay_ms === "number" ? act.delay_ms : 50,
                 (act.timeout_ms as number) || timeoutMs,
               );
-              results.push({ type: "type", success: r.success, error: r.error });
-              if (!r.success) break;
             } else if (actType === "press") {
-              const r = await this.browserService.press(String(act.key || ""));
-              results.push({ type: "press", success: r.success, error: (r as Any).error });
-              if (!r.success) break;
+              r = await this.browserService.press(String(act.key || ""));
             } else if (actType === "wait") {
-              const r = await this.browserService.waitForSelector(
+              r = await this.browserService.waitForSelector(
                 String(act.selector || ""),
                 (act.timeout_ms as number) || timeoutMs || 10000,
               );
-              results.push({ type: "wait", success: r.success, error: (r as Any).error });
-              if (!r.success) break;
             } else if (actType === "scroll") {
               const direction =
                 act.direction === "up" ||
@@ -2824,11 +2881,10 @@ export class BrowserTools {
                 act.direction === "bottom"
                   ? act.direction
                   : "down";
-              const r = await this.browserService.scroll(
+              r = await this.browserService.scroll(
                 direction,
                 typeof act.amount === "number" ? act.amount : undefined,
               );
-              results.push({ type: "scroll", success: (r as Any).success });
             } else {
               results.push({
                 type: actType,
@@ -2837,6 +2893,17 @@ export class BrowserTools {
               });
               break;
             }
+            results.push({
+              type: actType,
+              success: r?.success === true,
+              ...(r?.error ? { error: r.error } : {}),
+              ...pickBrowserActionEvents(r),
+            });
+            if (r?.success !== true) break;
+            // A dismissed confirm/prompt means the page did not do what this step asked for;
+            // running the remaining steps would act on the wrong state.
+            stoppedForDialog = findDismissedBlockingDialog(r);
+            if (stoppedForDialog) break;
           } catch (err) {
             results.push({
               type: actType,
@@ -2846,18 +2913,28 @@ export class BrowserTools {
             break;
           }
         }
-        const allSuccess = results.every((r) => r.success);
+        const allSuccess = !stoppedForDialog && results.every((r) => r.success);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "act_batch",
           count: actions.length,
           completed: results.length,
           success: allSuccess,
+          ...(stoppedForDialog ? { stoppedForDialog: stoppedForDialog.type } : {}),
         });
         return {
           success: allSuccess,
           results,
           completed: results.length,
           total: actions.length,
+          ...(stoppedForDialog
+            ? {
+                stoppedForDialog,
+                error:
+                  `Stopped after step ${results.length}: the page opened a ${stoppedForDialog.type} ` +
+                  `dialog ("${stoppedForDialog.message}") that was dismissed, so that step did not ` +
+                  "take effect. To approve it, call browser_handle_dialog with accept=true and repeat the step.",
+              }
+            : {}),
         };
       }
 

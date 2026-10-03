@@ -1039,6 +1039,54 @@ describe("BrowserTools headless browser capabilities", () => {
     expect(closed).toMatchObject({ success: true, closedTabId: "tab-2" });
   });
 
+  it("arms the next headless dialog decision instead of requiring the visible workbench", async () => {
+    const armNextDialog = vi.fn().mockReturnValue({
+      nextDialog: { action: "accept", promptText: "my-project" },
+      lastDialog: { type: "prompt", message: "Name?", action: "dismissed", timestamp: 1 },
+    });
+    const { tools, browserWorkbenchService } = makeHeadlessTools({ armNextDialog });
+
+    const result = await tools.executeTool("browser_handle_dialog", {
+      accept: true,
+      prompt_text: "my-project",
+    });
+
+    expect(browserWorkbenchService.handleDialog).not.toHaveBeenCalled();
+    expect(armNextDialog).toHaveBeenCalledWith({ accept: true, promptText: "my-project" });
+    expect(result).toMatchObject({
+      success: true,
+      nextDialog: { action: "accept", promptText: "my-project" },
+    });
+    expect(result.message).toContain("repeat");
+
+    await tools.executeTool("browser_handle_dialog", { accept: false });
+    expect(armNextDialog).toHaveBeenLastCalledWith({ accept: false });
+  });
+
+  it("stops a headless batch when a confirm dialog was dismissed", async () => {
+    const click = vi.fn().mockResolvedValue({
+      success: true,
+      dialog: { type: "confirm", message: "Delete?", action: "dismissed", timestamp: 1 },
+    });
+    const fill = vi.fn();
+    const { tools } = makeHeadlessTools({ click, fill });
+
+    const result = await tools.executeTool("browser_act_batch", {
+      actions: [
+        { type: "click", selector: "#delete" },
+        { type: "fill", selector: "#name", value: "x" },
+      ],
+    });
+
+    expect(fill).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.results[0]).toMatchObject({
+      type: "click",
+      dialog: { type: "confirm", action: "dismissed" },
+    });
+    expect(result.error).toContain("browser_handle_dialog");
+  });
+
   it("describes headless popup handling on the tab tools", () => {
     const definitions = BrowserTools.getToolDefinitions();
     const descriptionOf = (name: string) =>

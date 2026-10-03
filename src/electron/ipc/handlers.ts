@@ -52,6 +52,8 @@ import { FirstTaskRepository } from "../first-task/first-task-repository-facades
 import { reconcilePendingSampleAttempts } from "../first-task/reconcile-attempts";
 import { verifyReleaseBrief } from "../first-task/verify-release-brief";
 import { randomUUID } from "node:crypto";
+import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import { withSettingsResponseStyleMirror } from "../memory/memory-read-side";
 import { RELEASE_BRIEF_ACCESS_PROFILE_ID } from "../security/access-profile-resolver";
 import * as path from "path";
 import * as fs from "fs/promises";
@@ -534,6 +536,10 @@ import {
 import { initializeHookAgentIngress } from "../hooks/agent-ingress";
 import { MemoryService } from "../memory/MemoryService";
 import { MemoryWorkspacePurgeService } from "../memory/MemoryWorkspacePurgeService";
+import { MemoryItemsHubService } from "../memory/MemoryItemsHubService";
+import { MemoryWriter } from "../memory/MemoryWriter";
+import { createLegacyMemoryMirror } from "../memory/memory-items-legacy-mirror";
+import { setupMemoryItemsHandlers } from "./memory-items-handlers";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
@@ -9674,7 +9680,8 @@ export async function setupIpcHandlers(
   });
 
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, async (_, settings) => {
-    PersonalityManager.saveSettings(settings);
+    // A response style chosen here is user-stated memory (locks style adaptation).
+    withSettingsResponseStyleMirror(() => PersonalityManager.saveSettings(settings));
     // Event emission is handled by PersonalityManager.saveSettings()
     return { success: true };
   });
@@ -9720,7 +9727,7 @@ export async function setupIpcHandlers(
       ...validated,
       version: 2,
     } as import("../../shared/types").PersonalityConfigV2;
-    PersonalityManager.saveConfigV2(toSave);
+    withSettingsResponseStyleMirror(() => PersonalityManager.saveConfigV2(toSave));
     return { success: true };
   });
 
@@ -9730,7 +9737,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_IMPORT, async (_, data: unknown) => {
     const validated = validateInput(PersonalityImportSchema, data, "personality import");
-    return PersonalityManager.importProfile(validated);
+    return withSettingsResponseStyleMirror(() => PersonalityManager.importProfile(validated));
   });
 
   ipcMain.handle(
@@ -11537,6 +11544,20 @@ export async function setupIpcHandlers(
 
   // Memory system handlers
   setupMemoryHandlers();
+
+  // Memory Hub "What CoWork knows": memory_items list/get/add/edit/pin/delete/why.
+  setupMemoryItemsHandlers({
+    service: new MemoryItemsHubService({
+      getWriter: () => MemoryWriter.get(),
+      legacy: createLegacyMemoryMirror(),
+      getTask: async (taskId) => {
+        const task = await taskRepo.findById(taskId);
+        return task ? { id: task.id, title: task.title, workspaceId: task.workspaceId } : undefined;
+      },
+      syncKitFiles: (workspaceId) => CuratedMemoryService.syncWorkspaceFiles(workspaceId),
+    }),
+    workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+  });
 }
 
 /**
@@ -13556,11 +13577,9 @@ function setupMemoryHandlers(): void {
         contextPackInjectionEnabled: true,
         heartbeatMaintenanceEnabled: true,
         checkpointCaptureEnabled: true,
-        verbatimRecallEnabled: true,
         wakeUpLayersEnabled: true,
         temporalKnowledgeEnabled: true,
         structuredObservationsEnabled: true,
-        progressiveRecallToolsEnabled: true,
         memoryInspectorEnabled: true,
       };
     }
@@ -13595,8 +13614,11 @@ function setupMemoryHandlers(): void {
             ? recentTask.prompt
             : "Current workspace memory preview";
         return await MemorySynthesizer.buildLayerPreview(workspaceId, workspace.path, taskPrompt, {
-          tokenBudget: 1800,
           includeWorkspaceKit: true,
+          workspaceCanRead: workspace.permissions?.read !== false,
+          filesystemReadGuard: (candidatePath) =>
+            evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "read").decision ===
+            "allow",
           agentRoleId: recentTask?.assignedAgentRoleId || null,
           boxBrainHits: await MemorySynthesizer.prefetchBoxBrainHits(workspaceId, taskPrompt),
         });

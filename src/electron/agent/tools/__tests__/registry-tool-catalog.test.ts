@@ -630,7 +630,7 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(registry.getTools().map((tool) => tool.name)).toContain("x_search");
   });
 
-  it("exposes Supermemory tools only when the integration is configured", () => {
+  it("offers the four memory tools and keeps the deprecated names hidden but executable", () => {
     supermemoryIsConfiguredMock.mockReturnValue(true);
     const registry = new ToolRegistry(
       createWorkspace(),
@@ -639,10 +639,43 @@ describe("ToolRegistry tool catalog versioning", () => {
     );
 
     const toolNames = registry.getTools().map((tool) => tool.name);
-    expect(toolNames).toContain("supermemory_profile");
-    expect(toolNames).toContain("supermemory_search");
-    expect(toolNames).toContain("supermemory_remember");
-    expect(toolNames).toContain("supermemory_forget");
+    for (const name of ["memory_recall", "memory_remember", "memory_forget", "context_recall"]) {
+      expect(toolNames).toContain(name);
+    }
+    // Supermemory is reached through memory_recall (scope external), not its own tools.
+    for (const legacy of [
+      "supermemory_profile",
+      "supermemory_search",
+      "supermemory_remember",
+      "supermemory_forget",
+      "search_memories",
+      "memory_save",
+      "memory_curate",
+      "context_grep",
+    ]) {
+      expect(toolNames).not.toContain(legacy);
+      expect((registry as Any).handlerRegistry.has(legacy)).toBe(true);
+    }
+    // The aliases are not tool_search results either.
+    expect(registry.searchDeferredTools("supermemory search memories").matches).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ name: "supermemory_search" })]),
+    );
+  });
+
+  it("asks for external-service approval when memory tools reach Supermemory", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-memory-approval");
+    const approval = (name: string, input?: Any) =>
+      (registry as Any).getApprovalTypeForTool(name, input);
+    expect(approval("memory_recall", { query: "x" })).toBeNull();
+    expect(approval("memory_recall", { query: "x", scopes: ["external"] })).toBe(
+      "external_service",
+    );
+    expect(approval("memory_forget", { id: "memory:1" })).toBeNull();
+    expect(approval("memory_forget", { id: "external:abc" })).toBe("external_service");
+    // Deprecated aliases keep their own boundary although they canonicalize to memory tools.
+    expect(approval("supermemory_search", { query: "x" })).toBe("external_service");
+    expect(approval("supermemory_remember", { content: "x" })).toBe("external_service");
+    expect(approval("memory_remember", { content: "x", kind: "rule" })).toBeNull();
   });
 
   it("does not classify Skill as an external-service approval type", () => {

@@ -44,8 +44,12 @@ const AUTO_MISTAKES_END = "<!-- cowork:auto:mistakes:end -->";
 
 const FLUSH_DEBOUNCE_MS = 12_000;
 const STARTUP_REBUILD_LIMIT = 2500;
-const REBUILD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const PATTERN_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+/**
+ * The startup rebuild must cover the whole pattern window: with a shorter rebuild window a
+ * restart dropped every pattern last seen more than that long ago from MISTAKES.md.
+ */
+const REBUILD_WINDOW_MS = PATTERN_WINDOW_MS;
 
 function sanitizeInline(text: string): string {
   const cleaned = String(text || "")
@@ -115,6 +119,7 @@ export class FeedbackService {
   private agentRoleRepo: AgentRoleRepository;
   private stateByWorkspace = new Map<string, WorkspaceState>();
   private agentDaemon: AgentDaemon | null = null;
+  private stopped = false;
 
   constructor(private db: Database.Database) {
     this.taskRepo = new TaskRepository(db);
@@ -122,20 +127,24 @@ export class FeedbackService {
     this.agentRoleRepo = new AgentRoleRepository(db);
   }
 
+  private readonly onUserFeedback = (evt: Any): void => {
+    if (this.stopped) return;
+    try {
+      const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
+      if (!taskId) return;
+      void this.ingestFeedbackEvent(taskId, evt, Date.now(), { queueWeekly: true }).catch(() => {
+        // ignore
+      });
+    } catch {
+      // ignore
+    }
+  };
+
   async start(agentDaemon: AgentDaemon): Promise<void> {
     this.agentDaemon = agentDaemon;
+    this.stopped = false;
 
-    agentDaemon.on("user_feedback", (evt: Any) => {
-      try {
-        const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
-        if (!taskId) return;
-        void this.ingestFeedbackEvent(taskId, evt, Date.now(), { queueWeekly: true }).catch(() => {
-          // ignore
-        });
-      } catch {
-        // ignore
-      }
-    });
+    agentDaemon.on("user_feedback", this.onUserFeedback);
 
     // Best-effort rebuild for mistakes/preferences after restarts.
     try {
@@ -144,6 +153,25 @@ export class FeedbackService {
     } catch (error) {
       console.warn("[Feedback] Startup rebuild failed:", error);
     }
+  }
+
+  /**
+   * Stop listening and write pending feedback now, so debounced entries are not lost (or
+   * written after the database closes) on shutdown.
+   */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.agentDaemon) {
+      this.agentDaemon.off("user_feedback", this.onUserFeedback);
+      this.agentDaemon = null;
+    }
+    for (const state of this.stateByWorkspace.values()) {
+      if (state.flushTimer) {
+        clearTimeout(state.flushTimer);
+        state.flushTimer = null;
+      }
+    }
+    await this.flushAll();
   }
 
   private getWorkspaceState(workspaceId: string): WorkspaceState {
@@ -243,6 +271,7 @@ export class FeedbackService {
   }
 
   private scheduleFlush(workspaceId: string): void {
+    if (this.stopped) return;
     const state = this.getWorkspaceState(workspaceId);
     if (state.flushTimer) return;
 

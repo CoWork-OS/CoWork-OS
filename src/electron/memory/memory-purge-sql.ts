@@ -9,6 +9,7 @@
  * the `*OnHost` helpers load MemoryService, lazily, and only on the host.
  */
 import type Database from "better-sqlite3";
+import { purgeTaskMemoryItems, purgeWorkspaceMemoryItems } from "./memory-items-sql";
 
 /**
  * Observation origins whose task-attributed memories survive a task delete. These are
@@ -23,6 +24,10 @@ export interface TaskDerivedPurgeCounts {
   transcriptSpans: number;
   knowledgeGraph: number;
   playbookEvidence: number;
+  playbookEntries: number;
+  suggestions: number;
+  /** memory_items rows (task-scoped, or inferred/third-party items learned in the task). */
+  memoryItems: number;
   dreamingRunsUnlinked: number;
   pendingMemoryWritesUnlinked: number;
 }
@@ -33,6 +38,10 @@ export interface WorkspaceMemoryRowPurgeCounts {
   dreaming: number;
   coreMemoryCandidates: number;
   playbookEvidence: number;
+  playbookEntries: number;
+  /** Suggestions plus suggestion feedback rows. */
+  suggestions: number;
+  memoryItems: number;
   pendingMemoryWrites: number;
   transcriptSpans: number;
 }
@@ -52,7 +61,8 @@ function run(db: Database.Database, sql: string, ...params: unknown[]): number {
  * Delete or unlink rows derived from `taskId` in memory-side stores. Must be called inside
  * the task-delete transaction, before the `tasks` row is removed, so foreign keys to the
  * task never block the delete. Durable context and transcript span rows are always
- * removed; archive memories, KG facts and Playbook evidence only with `purgeDerivedMemory`.
+ * removed; archive memories, KG facts, Playbook entries and evidence, and suggestions raised
+ * from the task (with their feedback) only with `purgeDerivedMemory`.
  */
 export function purgeTaskDerivedRows(
   db: Database.Database,
@@ -66,6 +76,9 @@ export function purgeTaskDerivedRows(
     transcriptSpans: 0,
     knowledgeGraph: 0,
     playbookEvidence: 0,
+    playbookEntries: 0,
+    suggestions: 0,
+    memoryItems: 0,
     dreamingRunsUnlinked: 0,
     pendingMemoryWritesUnlinked: 0,
   };
@@ -121,6 +134,15 @@ export function purgeTaskDerivedRows(
     }
   }
 
+  // The conversation index; its FTS rows go with it through the table's triggers.
+  if (tableExists(db, "durable_context_events")) {
+    counts.durableContext += run(
+      db,
+      "DELETE FROM durable_context_events WHERE task_id = ?",
+      taskId,
+    );
+  }
+
   if (tableExists(db, "transcript_spans")) {
     counts.transcriptSpans = run(db, "DELETE FROM transcript_spans WHERE task_id = ?", taskId);
   }
@@ -172,6 +194,26 @@ export function purgeTaskDerivedRows(
     );
   }
 
+  if (purgeDerivedMemory && tableExists(db, "playbook_entries")) {
+    counts.playbookEntries = run(db, "DELETE FROM playbook_entries WHERE task_id = ?", taskId);
+  }
+
+  if (purgeDerivedMemory && tableExists(db, "suggestions")) {
+    if (tableExists(db, "suggestion_feedback")) {
+      counts.suggestions += run(
+        db,
+        `DELETE FROM suggestion_feedback
+         WHERE suggestion_id IN (SELECT id FROM suggestions WHERE source_task_id = ?)`,
+        taskId,
+      );
+    }
+    counts.suggestions += run(db, "DELETE FROM suggestions WHERE source_task_id = ?", taskId);
+  }
+
+  // memory_items: task-scoped items always; with purgeDerivedMemory also items inferred from
+  // the task. User-stated and curated items keep living with their task link cleared.
+  counts.memoryItems = purgeTaskMemoryItems(db, taskId, purgeDerivedMemory);
+
   // LIFE-4: these columns reference tasks(id) without ON DELETE on older databases.
   if (tableExists(db, "dreaming_runs")) {
     counts.dreamingRunsUnlinked = run(
@@ -205,6 +247,9 @@ export function purgeWorkspaceMemoryRows(
     dreaming: 0,
     coreMemoryCandidates: 0,
     playbookEvidence: 0,
+    playbookEntries: 0,
+    suggestions: 0,
+    memoryItems: 0,
     pendingMemoryWrites: 0,
     transcriptSpans: 0,
   };
@@ -278,6 +323,22 @@ export function purgeWorkspaceMemoryRows(
         workspaceId,
       );
     }
+
+    if (tableExists(db, "playbook_entries")) {
+      counts.playbookEntries = run(
+        db,
+        "DELETE FROM playbook_entries WHERE workspace_id = ?",
+        workspaceId,
+      );
+    }
+
+    for (const table of ["suggestion_feedback", "suggestions"]) {
+      if (tableExists(db, table)) {
+        counts.suggestions += run(db, `DELETE FROM ${table} WHERE workspace_id = ?`, workspaceId);
+      }
+    }
+
+    counts.memoryItems = purgeWorkspaceMemoryItems(db, workspaceId);
 
     if (tableExists(db, "pending_memory_writes")) {
       counts.pendingMemoryWrites = run(

@@ -24,6 +24,7 @@ import {
   Task,
   TaskEvent,
   TOOL_GROUPS,
+  LEGACY_MEMORY_TOOL_ALIASES,
   ToolGroupName,
   RuntimeToolApprovalKind,
   RuntimeToolSideEffectLevel,
@@ -169,6 +170,12 @@ import {
   ChronicleSettingsManager,
 } from "../../chronicle";
 import { taskDisablesMemoryCapture } from "../../memory/no-memory-directive";
+import { MemoryWriter } from "../../memory/MemoryWriter";
+import {
+  MEMORY_LANE_STORES,
+  preferredNameCandidate,
+  responseStyleCandidate,
+} from "../../memory/memory-items-lanes";
 import { CitationTracker } from "../citation/CitationTracker";
 import { OrchestrationRepository } from "../orchestration-repository-facades";
 import {
@@ -1494,11 +1501,10 @@ export class ToolRegistry {
       allTools.push(...KnowledgeGraphTools.getToolDefinitions());
     }
 
-    // Memory tools (explicit save during task execution)
+    // Memory tools: memory_recall, memory_remember, memory_forget, context_recall (audit
+    // §8.3). The tools they replaced stay executable as hidden aliases (registered below,
+    // LEGACY_MEMORY_TOOL_ALIASES) but are not offered to the model.
     allTools.push(...MemoryTools.getToolDefinitions());
-    if (SupermemoryTools.isEnabled()) {
-      allTools.push(...SupermemoryTools.getToolDefinitions());
-    }
 
     // Scraping tools (Scrapling integration - JS rendering, structured extraction)
     // Only add when scraping is enabled in settings
@@ -1942,7 +1948,24 @@ export class ToolRegistry {
       return "network_access";
     }
     if (canonicalToolName.startsWith("mcp_")) return "external_service";
-    if (EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(canonicalToolName)) return "external_service";
+    // Raw name too: the deprecated supermemory_* aliases canonicalize to memory tools.
+    if (
+      EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(canonicalToolName) ||
+      EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(toolName)
+    ) {
+      return "external_service";
+    }
+    // memory_recall / memory_forget reach Supermemory only when asked to (scope or id).
+    if (
+      (canonicalToolName === "memory_recall" &&
+        Array.isArray(input?.scopes) &&
+        input.scopes.includes("external")) ||
+      (canonicalToolName === "memory_forget" &&
+        typeof input?.id === "string" &&
+        input.id.trim().startsWith("external:"))
+    ) {
+      return "external_service";
+    }
     if (canonicalToolName.endsWith("_action") || canonicalToolName === "voice_call")
       return "external_service";
     if (canonicalToolName === "open_application" || isComputerUseToolName(canonicalToolName)) {
@@ -2049,6 +2072,25 @@ export class ToolRegistry {
       query,
       matches: searchService.search(query, limit),
     };
+  }
+
+  /**
+   * A deprecated memory tool name (LEGACY_MEMORY_TOOL_ALIASES), routed to the tool that
+   * replaced it. Supermemory writes keep their legacy implementation, which needs the
+   * external integration to be configured.
+   */
+  private executeLegacyMemoryAlias(name: string, input: Any): Promise<unknown> {
+    const supermemory = SupermemoryTools.isEnabled() ? this.supermemoryTools : null;
+    return this.memoryTools.executeLegacyAlias(
+      name,
+      input ?? {},
+      supermemory
+        ? {
+            supermemoryRemember: (value: Any) => supermemory.remember(value),
+            supermemoryForget: (value: Any) => supermemory.forget(value),
+          }
+        : {},
+    );
   }
 
   private buildBrowserUseApprovalDetails(toolName: string, input: Any) {
@@ -2786,80 +2828,34 @@ export class ToolRegistry {
     register("get_current_location", async ({ request }) =>
       this.systemTools.getCurrentLocation(request.input),
     );
-    register("search_memories", async ({ request }) =>
-      this.systemTools.searchMemories(request.input),
-    );
     register(
-      "memory_search_index",
-      async ({ request }) => this.systemTools.searchMemoryIndex(request.input),
+      "memory_recall",
+      async ({ request }) => this.memoryTools.recall(request.input),
       readParallelSchedulerSpec,
     );
     register(
-      "memory_timeline",
-      async ({ request }) => this.systemTools.memoryTimeline(request.input),
-      readParallelSchedulerSpec,
-    );
-    register(
-      "memory_details",
-      async ({ request }) => this.systemTools.memoryDetails(request.input),
-      readParallelSchedulerSpec,
-    );
-    register(
-      "search_quotes",
-      async ({ request }) => this.systemTools.searchQuotes(request.input),
-      readParallelSchedulerSpec,
-    );
-    register(
-      "search_sessions",
-      async ({ request }) => this.systemTools.searchSessions(request.input),
-      readParallelSchedulerSpec,
-    );
-    register(
-      "memory_topics_load",
-      async ({ request }) => this.systemTools.loadMemoryTopics(request.input),
-      readParallelSchedulerSpec,
-    );
-    register(
-      "context_grep",
-      async ({ request }) => this.systemTools.contextGrep(request.input),
-      readParallelSchedulerSpec,
-    );
-    register(
-      "context_describe",
-      async ({ request }) => this.systemTools.contextDescribe(request.input),
-      readParallelSchedulerSpec,
-    );
-    register("memory_save", async ({ request }) => this.memoryTools.save(request.input));
-    register(
-      "memory_curate",
-      async ({ request }) => this.memoryTools.curate(request.input),
+      "memory_remember",
+      async ({ request }) => this.memoryTools.remember(request.input),
       exclusiveSchedulerSpec,
     );
     register(
-      "memory_curated_read",
-      async ({ request }) => this.memoryTools.readCurated(request.input),
+      "memory_forget",
+      async ({ request }) => this.memoryTools.forget(request.input),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "context_recall",
+      async ({ request }) => this.memoryTools.contextRecall(request.input),
       readParallelSchedulerSpec,
     );
-    if (SupermemoryTools.isEnabled()) {
+    // Deprecated memory tool names: hidden, routed to the tool that replaced them.
+    for (const [aliasName, replacement] of Object.entries(LEGACY_MEMORY_TOOL_ALIASES)) {
       register(
-        "supermemory_profile",
-        async ({ request }) => this.supermemoryTools.profile(request.input),
-        readParallelSchedulerSpec,
-      );
-      register(
-        "supermemory_search",
-        async ({ request }) => this.supermemoryTools.search(request.input),
-        readParallelSchedulerSpec,
-      );
-      register(
-        "supermemory_remember",
-        async ({ request }) => this.supermemoryTools.remember(request.input),
-        exclusiveSchedulerSpec,
-      );
-      register(
-        "supermemory_forget",
-        async ({ request }) => this.supermemoryTools.forget(request.input),
-        exclusiveSchedulerSpec,
+        aliasName,
+        async ({ request }) => this.executeLegacyMemoryAlias(request.name, request.input),
+        replacement === "memory_recall" || replacement === "context_recall"
+          ? readParallelSchedulerSpec
+          : exclusiveSchedulerSpec,
       );
     }
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
@@ -4231,24 +4227,14 @@ System Tools:
 - list_macos_launch_agents: Inspect LaunchAgents/LaunchDaemons that may relaunch an app
 - disable_macos_launch_agents: Unload and move matching user LaunchAgent plists aside after approval
 - run_applescript: Execute exact AppleScript on macOS (explicit AppleScript requests or low-level fallback only)
-- search_memories: Search workspace memories, .cowork/ knowledge files, and imported conversations for past context
-- search_quotes: Search exact quoted wording across transcripts, task messages, imported memories, and workspace notes
-- search_sessions: Search recent task/session transcripts and checkpoints for prior run context
-- memory_topics_load: Load topical memory packs from \`.cowork/memory/topics\`
-- memory_save: Save an observation, decision, insight, or error to workspace memory for future recall
-- memory_curate: Add, replace, or remove curated hot-memory facts that should stay prompt-visible
-- memory_curated_read: Inspect the current curated hot-memory entries
 ${
-  hasAnyVisibleTools(
-    "supermemory_profile",
-    "supermemory_search",
-    "supermemory_remember",
-    "supermemory_forget",
-  )
-    ? `- supermemory_profile: Load the workspace-scoped external Supermemory profile and relevant facts
-- supermemory_search: Search external Supermemory memories for this workspace or approved container
-- supermemory_remember: Persist a high-signal fact into external Supermemory
-- supermemory_forget: Remove an outdated external Supermemory entry by ID or exact content`
+  hasAnyVisibleTools("memory_recall", "memory_remember", "memory_forget", "context_recall")
+    ? `
+Memory Tools:
+- memory_recall: Search saved facts, earlier tasks, workspace notes and the knowledge graph; index first, then ids with detail "full"
+- memory_remember: Save a durable fact (preference, rule, project fact, decision, commitment) for later tasks
+- memory_forget: Delete a wrong or unwanted memory by id or exact match
+- context_recall: Recover this task's earlier details after context compaction`
     : ""
 }
 ${
@@ -4788,26 +4774,13 @@ ${skillDescriptions}`;
 
     // System tools
     if (name === "system_info") return await this.systemTools.getSystemInfo();
-    if (name === "search_memories") return await this.systemTools.searchMemories(input);
-    if (name === "memory_search_index") return await this.systemTools.searchMemoryIndex(input);
-    if (name === "memory_timeline") return await this.systemTools.memoryTimeline(input);
-    if (name === "memory_details") return await this.systemTools.memoryDetails(input);
-    if (name === "search_quotes") return await this.systemTools.searchQuotes(input);
-    if (name === "search_sessions") return await this.systemTools.searchSessions(input);
-    if (name === "memory_topics_load") return await this.systemTools.loadMemoryTopics(input);
-    if (name === "context_grep") return await this.systemTools.contextGrep(input);
-    if (name === "context_describe") return await this.systemTools.contextDescribe(input);
-    if (name === "memory_save") return await this.memoryTools.save(input);
-    if (name === "memory_curate") return await this.memoryTools.curate(input);
-    if (name === "memory_curated_read") return await this.memoryTools.readCurated(input);
-    if (name === "supermemory_profile" && SupermemoryTools.isEnabled())
-      return await this.supermemoryTools.profile(input);
-    if (name === "supermemory_search" && SupermemoryTools.isEnabled())
-      return await this.supermemoryTools.search(input);
-    if (name === "supermemory_remember" && SupermemoryTools.isEnabled())
-      return await this.supermemoryTools.remember(input);
-    if (name === "supermemory_forget" && SupermemoryTools.isEnabled())
-      return await this.supermemoryTools.forget(input);
+    if (name === "memory_recall") return await this.memoryTools.recall(input);
+    if (name === "memory_remember") return await this.memoryTools.remember(input);
+    if (name === "memory_forget") return await this.memoryTools.forget(input);
+    if (name === "context_recall") return await this.memoryTools.contextRecall(input);
+    if (Object.prototype.hasOwnProperty.call(LEGACY_MEMORY_TOOL_ALIASES, name)) {
+      return await this.executeLegacyMemoryAlias(name, input);
+    }
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
@@ -10279,6 +10252,16 @@ ${skillDescriptions}`;
 
     // Save the user's name
     PersonalityManager.setUserName(userName);
+    // Also the user-stated `preferred_name` memory item (memory engine dual write).
+    const nameCandidate = preferredNameCandidate(userName, { source: "user_stated" });
+    MemoryWriter.dualWrite(
+      nameCandidate && {
+        ...nameCandidate,
+        taskId: this.taskId,
+        originWorkspaceId: this.workspace.id,
+      },
+      "set_user_name",
+    );
 
     console.log(`[ToolRegistry] User name set to: ${userName}`);
 
@@ -10363,6 +10346,21 @@ ${skillDescriptions}`;
 
     PersonalityManager.setResponseStyle(style);
     console.log(`[ToolRegistry] Response style updated:`, changes);
+    // The user asked for this style: a user-stated `response_style` memory item, which
+    // inferred style adaptations do not override (memory engine dual write).
+    let fullStyle = style;
+    try {
+      fullStyle = { ...PersonalityManager.loadSettings().responseStyle, ...style };
+    } catch {
+      // Settings unavailable; record the dimensions that were set.
+    }
+    MemoryWriter.dualWrite(
+      responseStyleCandidate(fullStyle, {
+        source: "user_stated",
+        store: MEMORY_LANE_STORES.personality,
+      }),
+      "set_response_style",
+    );
 
     return {
       success: true,

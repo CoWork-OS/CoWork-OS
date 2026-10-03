@@ -50,6 +50,7 @@ import {
 } from "../electron/gateway/chat-transcript";
 import { CuratedMemoryService } from "../electron/memory/CuratedMemoryService";
 import { MemoryService } from "../electron/memory/MemoryService";
+import { DurableContextService } from "../electron/memory/DurableContextService";
 import { CrossSignalService } from "../electron/agents/CrossSignalService";
 import { FeedbackService } from "../electron/agents/FeedbackService";
 import { attachAgentDaemonTaskBridge, registerControlPlaneMethods } from "./control-plane-methods";
@@ -794,6 +795,12 @@ async function main(): Promise<void> {
           name: "MCP servers",
           requiresQuiescence: true,
           run: () => mcpClientManager?.shutdown(),
+        },
+        // Conversation-index writes are batched (250 ms); write the queue before closing.
+        {
+          name: "conversation index",
+          requiresQuiescence: true,
+          run: () => DurableContextService.flushIndexQueue(),
         },
         {
           name: "memory",

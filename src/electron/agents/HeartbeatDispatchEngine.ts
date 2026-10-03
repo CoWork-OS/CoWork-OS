@@ -10,6 +10,7 @@ import {
   resolveOperationalAutonomyPolicy,
 } from "./autonomy-policy";
 import type { HeartbeatChecklistItem } from "./heartbeat-maintenance";
+import type { SuggestionSource } from "../agent/SuggestionSink";
 
 export interface HeartbeatDispatchDeps {
   createTask: (
@@ -41,6 +42,9 @@ export interface HeartbeatDispatchDeps {
       companionStyle?: ProactiveSuggestion["companionStyle"];
       sourceEntity?: string;
       sourceTaskId?: string;
+      /** Entity the suggestion is about; the suggestion sink merges proposals per entity. */
+      entityKey?: string;
+      source?: SuggestionSource;
     },
   ) => Promise<ProactiveSuggestion | null>;
   addNotification?: (params: {
@@ -96,6 +100,17 @@ function buildTaskPrompt(input: DispatchExecutionInput): string {
   }
   sections.push(`Always include the heartbeat run id in your notes: ${input.heartbeatRunId}.`);
   return sections.join("\n\n");
+}
+
+/**
+ * The entity a heartbeat suggestion is about: the first task or mention it cites. Without one
+ * the suggestion sink falls back to the normalized title.
+ */
+export function heartbeatSuggestionEntityKey(evidenceRefs: string[]): string | undefined {
+  return (
+    evidenceRefs.find((ref) => ref.startsWith("task:")) ||
+    evidenceRefs.find((ref) => ref.startsWith("mention:"))
+  );
 }
 
 export class HeartbeatDispatchEngine {
@@ -212,6 +227,8 @@ export class HeartbeatDispatchEngine {
           recommendedDelivery: "inbox",
           companionStyle: "note",
           sourceEntity: "heartbeat_v3",
+          entityKey: heartbeatSuggestionEntityKey(input.evidenceRefs),
+          source: "heartbeat",
         });
         if (suggestion) {
           await this.deps.addNotification?.({

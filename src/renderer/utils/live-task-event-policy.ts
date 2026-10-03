@@ -35,6 +35,7 @@ const HIDDEN_LIVE_NOISE_EVENT_TYPES = new Set([
   "llm_output_budget_escalation",
   "task_impact_updated",
   "jev_decision",
+  "memory_used",
 ]);
 
 const NETWORK_FAILURE_RE =

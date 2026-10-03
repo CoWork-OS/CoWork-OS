@@ -136,7 +136,6 @@ vi.mock("../../settings/memory-features-manager", () => ({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
       topicMemoryEnabled: true,
-      verbatimRecallEnabled: true,
       wakeUpLayersEnabled: true,
       defaultArchiveInjectionEnabled: false,
     }),
@@ -301,7 +300,6 @@ describe("MemorySynthesizer", () => {
       curatedMemoryEnabled: false,
       sessionRecallEnabled: true,
       topicMemoryEnabled: true,
-      verbatimRecallEnabled: true,
       wakeUpLayersEnabled: true,
       defaultArchiveInjectionEnabled: false,
     } as Any);
@@ -327,7 +325,6 @@ describe("MemorySynthesizer", () => {
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
       topicMemoryEnabled: true,
-      verbatimRecallEnabled: true,
       wakeUpLayersEnabled: true,
       defaultArchiveInjectionEnabled: true,
     } as Any);
@@ -370,7 +367,6 @@ describe("MemorySynthesizer", () => {
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
       topicMemoryEnabled: true,
-      verbatimRecallEnabled: true,
       wakeUpLayersEnabled: false,
       defaultArchiveInjectionEnabled: true,
     } as Any);
@@ -417,7 +413,6 @@ describe("MemorySynthesizer", () => {
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
       topicMemoryEnabled: true,
-      verbatimRecallEnabled: true,
       wakeUpLayersEnabled: false,
       defaultArchiveInjectionEnabled: true,
     } as Any);
@@ -428,21 +423,70 @@ describe("MemorySynthesizer", () => {
     expect(result.text).toContain("alert(1) sanitize me");
   });
 
-  it("builds a wake-up layer preview with only L0/L1 injected by default", async () => {
+  it("previews what a private task gets: builder L0/L1 from memory_items, not hot memory", async () => {
+    const buildLayers = vi.fn().mockResolvedValue({
+      l0: {
+        layer: "l0",
+        text: "MEMORY\n- [rule] Ship on Tuesdays",
+        refs: ["memory:i1"],
+        tokens: 8,
+        truncated: false,
+      },
+      l1: {
+        layer: "l1",
+        text: "Relevant memory\n- [decision] Deploy with blue-green",
+        refs: ["memory:i2"],
+        tokens: 8,
+        truncated: false,
+      },
+      source: "memory_items",
+    });
     const preview = await MemorySynthesizer.buildLayerPreview(
       "ws1",
       "/workspace",
       "Deploy the API",
+      { contextBuilder: { buildLayers } as Any },
     );
 
     expect(preview.injectedLayerIds).toEqual(["L0", "L1"]);
     expect(preview.excludedLayerIds).toEqual(["L2", "L3"]);
-    expect(preview.layers.find((layer) => layer.layer === "L0")?.includedText).toContain(
-      "<cowork_hot_memory>",
+    expect(buildLayers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "ws1",
+        focus: "Deploy the API",
+        include: { l0: true, l1: true },
+        decision: expect.objectContaining({ gatewayContext: "private", memory: true }),
+      }),
     );
+    const l0 = preview.layers.find((layer) => layer.layer === "L0")?.includedText ?? "";
+    const l1 = preview.layers.find((layer) => layer.layer === "L1")?.includedText ?? "";
+    expect(l0).toContain("<cowork_user_profile>");
+    expect(l0).toContain("Ship on Tuesdays");
+    expect(l0).not.toContain("<cowork_hot_memory>");
+    expect(l1).toContain("Deploy with blue-green");
+    expect(l1).not.toContain("Curated Hot Memory");
+    expect(l1).not.toContain("Preferred name: Alice");
     expect(preview.layers.find((layer) => layer.layer === "L3")?.includedText).toContain(
-      "search_quotes",
+      "memory_recall",
     );
+  });
+
+  it("previews no memory layers when the workspace has memory off", async () => {
+    (MemoryService as Any).getSettings = vi
+      .fn()
+      .mockResolvedValue({ enabled: false, privacyMode: "normal" });
+    const buildLayers = vi.fn();
+    try {
+      const preview = await MemorySynthesizer.buildLayerPreview("ws1", "/workspace", "Deploy", {
+        contextBuilder: { buildLayers } as Any,
+      });
+      expect(buildLayers).not.toHaveBeenCalled();
+      const l0 = preview.layers.find((layer) => layer.layer === "L0");
+      expect(l0?.includedText).toBe("");
+      expect(l0?.excludedText).toContain("turned off");
+    } finally {
+      delete (MemoryService as Any).getSettings;
+    }
   });
 });
 
@@ -484,31 +528,33 @@ describe("MemorySynthesizer prompt budget and routing", () => {
 
   it("adds a short routing hint in the default path naming only visible tools", async () => {
     const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API", {
-      visibleToolNames: ["search_memories", "search_quotes", "read_file"],
+      visibleToolNames: ["memory_recall", "context_recall", "read_file"],
     });
 
     expect(result.text).toContain("<cowork_recall_hints>");
-    expect(result.text).toContain("`search_memories`");
-    expect(result.text).toContain("`search_quotes`");
-    expect(result.text).not.toContain("memory_search_index");
+    expect(result.text).toContain("`memory_recall`");
+    expect(result.text).toContain("`context_recall`");
+    expect(result.text).not.toContain("memory_remember");
+    // Deprecated names are never suggested.
+    expect(result.text).not.toContain("search_memories");
     expect(result.text).not.toContain("search_sessions");
   });
 
-  it("caps the routing hint at 120 tokens and omits it when no memory tool is visible", () => {
+  it("caps the routing hint at 100 tokens and omits it when no memory tool is visible", () => {
     const all = MemorySynthesizer.buildMemoryRoutingHint([
-      "search_memories",
-      "memory_search_index",
-      "memory_timeline",
-      "memory_details",
-      "search_quotes",
-      "search_sessions",
-      "memory_curated_read",
-      "memory_topics_load",
-      "context_grep",
+      "memory_recall",
+      "memory_remember",
+      "memory_forget",
+      "context_recall",
     ]);
-    expect(Math.ceil(all.length / 4)).toBeLessThanOrEqual(120);
+    expect(Math.ceil(all.length / 4)).toBeLessThanOrEqual(100);
+    for (const tool of ["memory_recall", "memory_remember", "memory_forget", "context_recall"]) {
+      expect(all).toContain(`\`${tool}\``);
+    }
     expect(all.trim().endsWith("</cowork_recall_hints>")).toBe(true);
-    expect(MemorySynthesizer.buildMemoryRoutingHint(["read_file"])).toBe("");
+    expect(MemorySynthesizer.buildMemoryRoutingHint(["read_file", "search_memories"])).toBe("");
+    // The legacy path (no visible-tool list) gets the same hint.
+    expect(MemorySynthesizer.buildRecallHintsContext()).toBe(all);
   });
 
   it("can leave profile facts out of hot memory", async () => {
@@ -519,5 +565,33 @@ describe("MemorySynthesizer prompt budget and routing", () => {
     expect(result.text).toContain("Curated Hot Memory");
     expect(result.text).not.toContain("Preferred name: Alice");
     expect(result.sourceAttribution.user_profile).toBe(0);
+  });
+
+  it("replaces hot memory with the builder's L1 block when the prompt pins L0 elsewhere", async () => {
+    const { buildWorkspaceKitContext } = await import("../WorkspaceKitContext");
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API", {
+      includeHotMemory: false,
+      memoryItemsContext:
+        "<cowork_relevant_memory>\nRelevant memory\n- [rule] Deploy on Tuesdays\n</cowork_relevant_memory>",
+      includeWorkspaceKit: true,
+      includeDesignSystem: false,
+      excludeGeneratedMemoryBlocks: true,
+      excludeKitFiles: ["PRIORITIES.md"],
+    });
+
+    expect(result.text).not.toContain("Curated Hot Memory");
+    expect(result.text).not.toContain("Preferred name: Alice");
+    expect(result.text).toContain("Deploy on Tuesdays");
+    expect(result.sourceAttribution.curated_memory).toBe(0);
+    expect(vi.mocked(buildWorkspaceKitContext)).toHaveBeenCalledWith(
+      "/workspace",
+      "Deploy the API",
+      expect.any(Date),
+      expect.objectContaining({
+        includeDesignSystem: false,
+        excludeGeneratedMemoryBlocks: true,
+        excludeFiles: ["PRIORITIES.md"],
+      }),
+    );
   });
 });

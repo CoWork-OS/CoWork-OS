@@ -1,6 +1,6 @@
 # Durable Runtime Context
 
-Durable Runtime Context is the opt-in runtime-memory lane for long task conversations. It stores sanitized task messages and compaction summaries in local SQLite, then exposes read-only `context_grep` and `context_describe` tools so an agent can recover compacted task facts without relying on the visible recent-message tail.
+Durable Runtime Context is the opt-in runtime-memory lane for long task conversations. It stores sanitized task messages and compaction summaries in local SQLite, so the read-only `context_recall` tool can recover compacted task facts (and expand summaries back to their source messages) without relying on the visible recent-message tail.
 
 This is inspired by Lossless-style conversation lookup, but the CoWork OS implementation is deliberately task-scoped and additive. It does not replace the main execution architecture, curated memory, archive memory, or workspace kit. It gives the existing runtime a compact, source-linked recall path when the active task outgrows the live context window.
 
@@ -18,48 +18,42 @@ Do not use it as:
 - cross-task memory lookup
 - user preference memory
 - workspace-wide documentation
-- a replacement for `search_sessions`, `search_quotes`, structured observations, or curated memory
+- a replacement for `memory_recall` (cross-task conversations, archive, saved facts), structured observations, or curated memory
 
 ## Enable And Disable
 
 Open **Settings > Memory Hub** and toggle **Enable Durable Runtime Context**.
 
-The setting is read at runtime by the durable service and tool registration path. An app restart should not be required. Existing tasks may need a new agent turn or a newly started task before the visible tool list reflects the changed setting, but the desktop process does not need to restart.
+The setting is read at runtime by the durable service. An app restart should not be required.
 
 When disabled:
 
 - `DurableContextService.recordHistory(...)` and `recordCompactionSummary(...)` do not write rows
-- `context_grep` and `context_describe` are not exposed
-- direct calls to those tools fail with a disabled-setting error
+- `context_recall` is still available, but searches and expands only the conversation index
+  (task events), which has no compaction summaries or summary source links
 
 ## Tool Contract
 
-`context_grep` searches durable runtime context.
+`context_recall` searches the active task's earlier conversation, or expands one result.
 
-Required input:
+Input (give `query` or `id`):
 
 - `query`: keyword or phrase fragment
-
-Optional input:
-
+- `id`: a result ID returned by an earlier `context_recall` search, to expand
 - `limit`: maximum result count, default `10`, capped at `50`
-- `taskId`: only honored when the user explicitly asked to inspect that task
-- `explicitUserRequest`: must be `true` for a supplied `taskId` to override active-task scope
 
-`context_describe` expands a `context_grep` result and can include linked source messages for summaries.
+Search returns durable-context hits first (summaries and messages, when this feature is on),
+then fills up from the conversation index. Expanding a durable summary includes its linked
+source messages (at most `25`).
 
-Required input:
-
-- `id`: a durable result ID returned by `context_grep`
-
-Optional input:
-
-- `sourceLimit`: linked source-message count for summaries, default `8`, capped at `25`
-- `taskId` and `explicitUserRequest`: same active-task scope rule as `context_grep`
+The earlier `context_grep` (search) and `context_describe` (expand) tools are deprecated,
+hidden aliases of `context_recall` for one release. They keep their own inputs: `taskId` with
+`explicitUserRequest: true` to look at another task, and `sourceLimit` (default `8`, capped
+at `25`) on `context_describe`.
 
 ## Scope And Privacy Rules
 
-Durable runtime recall is active-task scoped by default. A model cannot broaden scope just by passing another `taskId`; the tool ignores that `taskId` unless `explicitUserRequest` is `true`.
+Durable runtime recall is active-task scoped. `context_recall` has no task parameter; through the deprecated aliases a model cannot broaden scope just by passing another `taskId`, which is ignored unless `explicitUserRequest` is `true`.
 
 This means a prompt such as:
 
@@ -67,9 +61,9 @@ This means a prompt such as:
 Use durable context to find the Lantern Harbor rollback phrase from another task.
 ```
 
-should not leak the answer from a different task. If the active task does not contain it, `context_grep` should return no active-task result.
+should not leak the answer from a different task. If the active task does not contain it, `context_recall` should return no active-task result.
 
-The service also skips injected memory blocks and durable-context tool-result payloads. This prevents recursive recall, where a previous `context_grep` answer becomes a new durable fact and later outranks the original source.
+The service also skips injected memory blocks and durable-context tool-result payloads. This prevents recursive recall, where a previous `context_recall` answer becomes a new durable fact and later outranks the original source.
 
 Durable context tools are read-only and still pass through the active task's
 [access profile](access-profiles.md), execution mode, and tool restrictions.
@@ -86,7 +80,7 @@ Skipped injected blocks include:
 - `<cowork_user_profile>`
 - `<cowork_structured_memory>`
 - `<cowork_recall_hints>`
-- serialized `context_grep` / `context_describe` tool results
+- serialized `context_recall` (and `context_grep` / `context_describe`) tool results
 
 ## Storage Model
 
@@ -100,7 +94,7 @@ The local database tables are created lazily:
 - `durable_context_large_payloads`: full text for oversized messages stored by reference
 - `durable_context_fts`: FTS5 acceleration table for messages and summaries
 
-Large payloads are summarized in the message row and stored in `durable_context_large_payloads`. `context_describe` can expand the referenced payload with a bounded preview.
+Large payloads are summarized in the message row and stored in `durable_context_large_payloads`. `context_recall` with the result `id` can expand the referenced payload with a bounded preview.
 
 ## Summary DAG
 
@@ -142,7 +136,7 @@ Search also filters serialized durable-context tool-result echoes, including row
 
 ## Diagnostics
 
-`context_grep` and `context_describe` tool events log:
+`context_recall` tool events (and those of its deprecated aliases) log:
 
 - requested query or result ID
 - requested task ID, if supplied
@@ -182,15 +176,15 @@ Without relying on the visible recent messages, recover the earlier durable-cont
 
 Expected behavior:
 
-- the agent should use `context_grep` and usually `context_describe`
+- the agent should use `context_recall` to search, and usually again with a result `id` to expand it
 - it should recover Lantern Harbor, `blue anchor`, opt-in task-scoped architecture, large payload retention, and true summary DAG with parent summaries
 
 Start a separate new task:
 
 ```text
-For this test, do not use task_history, search_sessions, search_quotes, search_memories, or visible recent messages.
+For this test, do not use task_history, memory_recall, or visible recent messages.
 
-Use only context_grep and context_describe.
+Use only context_recall.
 
 Try to find the Lantern Harbor rollback phrase from another task.
 
@@ -208,7 +202,7 @@ Expected behavior:
 | Area                                                           | File                                               |
 | -------------------------------------------------------------- | -------------------------------------------------- |
 | Durable storage, search, large payloads, summary DAG, clearing | `src/electron/memory/DurableContextService.ts`     |
-| Tool definitions and active-task scope enforcement             | `src/electron/agent/tools/system-tools.ts`         |
+| Tool definition and active-task scope enforcement              | `src/electron/agent/tools/memory-tools.ts`         |
 | Tool registry dispatch                                         | `src/electron/agent/tools/registry.ts`             |
 | Runtime/executor history capture fallback                      | `src/electron/agent/executor.ts`                   |
 | Settings normalization                                         | `src/electron/settings/memory-features-manager.ts` |
@@ -219,18 +213,17 @@ Expected behavior:
 Run focused checks after touching Durable Runtime Context:
 
 ```bash
-npx vitest run src/electron/agent/tools/__tests__/system-tools-new.test.ts src/electron/settings/__tests__/memory-features-manager.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts
+npx vitest run src/electron/agent/tools/__tests__/memory-tools.test.ts src/electron/settings/__tests__/memory-features-manager.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts
 npx vitest run src/electron/memory/__tests__/DurableContextService.test.ts
 npm run type-check
 ```
 
-The native SQLite durable-service test file can skip locally when `better-sqlite3` is unavailable. Keep the tool-level tests passing because they cover enablement, disabled behavior, and active-task scope enforcement without relying on native SQLite.
+The native SQLite durable-service test file can skip locally when `better-sqlite3` is unavailable. Keep the tool-level tests passing because they cover the `context_recall` contract, its deprecated aliases and active-task scope enforcement.
 
 ## Known Edge Cases
 
-- Settings toggles are read dynamically, but a currently running task may have already constructed a tool list for the current turn.
 - Durable context only becomes useful after the task has recorded history; an empty active task should return no hits.
 - If compaction has not happened yet, `durable_context_summaries` may be empty while message search still works.
 - Large payload retention must stay bounded and inspectable; oversized content is referenced and previewed rather than inlined into every hit.
 - Recursive durable-result echoes must remain filtered at both write time and search time.
-- Cross-task lookup requires an explicit user request and should be visible in tool logs through `effectiveTaskId`.
+- Cross-task lookup (deprecated aliases only) requires an explicit user request and should be visible in tool logs through `effectiveTaskId`.

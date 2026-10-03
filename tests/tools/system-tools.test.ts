@@ -514,7 +514,8 @@ describe("SystemTools - getToolDefinitions", () => {
     expect(toolNames).toContain("get_env");
     expect(toolNames).toContain("get_app_paths");
     expect(toolNames).toContain("run_applescript");
-    expect(toolNames).toContain("search_memories");
+    // Memory tools moved to MemoryTools (memory_recall …); SystemTools offers none.
+    expect(toolNames).not.toContain("search_memories");
   });
 
   it("should include at least the stable core system tools", () => {

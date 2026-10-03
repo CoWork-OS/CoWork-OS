@@ -1,10 +1,12 @@
 import fs from "fs/promises";
 import path from "path";
+import { InputSanitizer } from "../agent/security/input-sanitizer";
+import { extractFtsTerms, foldForMatch } from "../database/fts-query";
+import { DurableContextService, type ConversationHit } from "./DurableContextService";
 import {
   TranscriptStore,
   type TranscriptCheckpointPayload,
   type TranscriptReadGuard,
-  type TranscriptSearchResult,
 } from "./TranscriptStore";
 
 export interface SessionRecallResult {
@@ -79,19 +81,37 @@ function summarizePayload(payload: unknown): string {
   }
 }
 
-function mapSpanResult(entry: TranscriptSearchResult): SessionRecallResult {
+/** Snippets are recalled history: instruction-override patterns are neutralized. */
+function cleanSnippet(text: string): string {
+  return InputSanitizer.sanitizeMemoryContent(text.replace(/\s+/g, " ").trim()).slice(0, 600);
+}
+
+function mapConversationHit(hit: ConversationHit): SessionRecallResult {
   return {
-    taskId: entry.taskId,
-    timestamp: entry.timestamp,
-    type: entry.type,
-    snippet: summarizePayload(entry.payload) || entry.rawLine.slice(0, 280),
-    ...(entry.eventId ? { eventId: entry.eventId } : {}),
-    ...(typeof entry.seq === "number" ? { seq: entry.seq } : {}),
+    taskId: hit.taskId,
+    timestamp: hit.timestamp,
+    type: hit.type,
+    snippet: cleanSnippet(hit.snippet),
+    ...(hit.eventId ? { eventId: hit.eventId } : {}),
+    ...(typeof hit.seq === "number" ? { seq: hit.seq } : {}),
   };
 }
 
+/** Every query term occurs in the text (case- and accent-insensitive). */
+function matchesAllTerms(text: string, terms: string[]): boolean {
+  if (terms.length === 0) return false;
+  const haystack = foldForMatch(text);
+  return terms.every((term) => haystack.includes(foldForMatch(term)));
+}
+
+/**
+ * `search_sessions` and the recovery prompt's "earlier session evidence": hits from the
+ * conversation index (every task of the workspace, ranked by relevance), optionally
+ * filled with matching resume checkpoints.
+ */
 export class SessionRecallService {
   static async search(params: {
+    workspaceId: string;
     workspacePath: string;
     query: string;
     taskId?: string;
@@ -103,29 +123,29 @@ export class SessionRecallService {
     if (!query) return [];
 
     const limit = Math.max(1, params.limit ?? 10);
-    const transcriptResults = (
-      await TranscriptStore.searchSpans({
-        workspacePath: params.workspacePath,
-        query,
+    const indexResults = (
+      await DurableContextService.searchConversation({
+        workspaceId: params.workspaceId,
         taskId: params.taskId,
+        query,
         limit,
-        readGuard: params.readGuard,
+        mode: "auto",
       })
-    ).map(mapSpanResult);
+    ).map(mapConversationHit);
 
-    if (!params.includeCheckpoints || transcriptResults.length >= limit) {
-      return transcriptResults.slice(0, limit);
+    if (!params.includeCheckpoints || indexResults.length >= limit) {
+      return indexResults.slice(0, limit);
     }
 
     const checkpointResults = await this.searchCheckpoints({
       workspacePath: params.workspacePath,
       query,
       taskId: params.taskId,
-      limit: limit - transcriptResults.length,
+      limit: limit - indexResults.length,
       readGuard: params.readGuard,
     });
 
-    return [...transcriptResults, ...checkpointResults].sort(compareRecallResults).slice(0, limit);
+    return [...indexResults, ...checkpointResults].slice(0, limit);
   }
 
   private static async searchCheckpoints(params: {
@@ -135,7 +155,8 @@ export class SessionRecallService {
     limit: number;
     readGuard?: TranscriptReadGuard;
   }): Promise<SessionRecallResult[]> {
-    const query = params.query.toLowerCase();
+    const terms = extractFtsTerms(params.query);
+    if (terms.length === 0) return [];
     const dir = checkpointsDir(params.workspacePath);
     if (params.readGuard && !params.taskId) {
       try {
@@ -162,7 +183,7 @@ export class SessionRecallService {
       );
       if (!checkpoint) continue;
       const searchable = checkpointSearchText(checkpoint);
-      if (!searchable.toLowerCase().includes(query)) continue;
+      if (!matchesAllTerms(searchable, terms)) continue;
       const snippet = summarizePayload(
         checkpoint.explicitChatSummaryBlock ||
           checkpoint.planSummary ||
@@ -173,7 +194,7 @@ export class SessionRecallService {
         taskId,
         timestamp: Number(checkpoint.timestamp || 0),
         type: "checkpoint",
-        snippet: snippet || searchable.slice(0, 280),
+        snippet: cleanSnippet(snippet || searchable.slice(0, 280)),
       });
     }
     return results.sort(compareRecallResults).slice(0, params.limit);

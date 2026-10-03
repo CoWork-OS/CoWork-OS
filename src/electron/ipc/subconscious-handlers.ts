@@ -18,6 +18,7 @@ import {
 import type { SubconsciousLoopService } from "../subconscious/SubconsciousLoopService";
 import {
   ImprovementLoopSettingsSchema,
+  SubconsciousReviewStatusSchema,
   SubconsciousSettingsSchema,
   TargetKeySchema,
   UUIDSchema,
@@ -110,8 +111,11 @@ export function setupSubconsciousHandlers(service: SubconsciousLoopService): voi
   );
   ipcMain.handle(
     IPC_CHANNELS.SUBCONSCIOUS_REVIEW_RUN,
-    async (_event, runId: string, reviewStatus: "accepted" | "dismissed") =>
-      service.reviewRun(validateInput(UUIDSchema, runId, "run ID"), reviewStatus),
+    async (_event, runId: string, reviewStatus: unknown) =>
+      service.reviewRun(
+        validateInput(UUIDSchema, runId, "run ID"),
+        validateInput(SubconsciousReviewStatusSchema, reviewStatus, "review status"),
+      ),
   );
   ipcMain.handle(IPC_CHANNELS.SUBCONSCIOUS_DISMISS_TARGET, async (_event, targetKey: string) =>
     service.dismissTarget(validateInput(TargetKeySchema, targetKey, "target key")),

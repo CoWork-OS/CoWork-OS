@@ -12,6 +12,7 @@ import type {
   Task,
 } from "../../../shared/types";
 import { HeartbeatService, type HeartbeatServiceDeps } from "../HeartbeatService";
+import { BackgroundDispatchBudget } from "../BackgroundDispatchBudget";
 import { MemoryPressureService } from "../../memory/MemoryPressureService";
 
 vi.mock("electron", () => ({
@@ -173,6 +174,8 @@ function createService(overrides?: Partial<HeartbeatServiceDeps>): HeartbeatServ
     recordAutomationOutcome: async (outcome) => {
       automationOutcomes.push(outcome);
     },
+    // Each service gets its own shared-budget ledger so tests do not drain one another's.
+    dispatchBudget: new BackgroundDispatchBudget(),
     ...overrides,
   };
 
@@ -1078,6 +1081,85 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     expect(await runRepo.listRunningDispatches("agent-1")).toEqual([
       expect.objectContaining({ taskId: "task-2" }),
     ]);
+  });
+
+  it("evaluates the autonomy phase once per pulse for the pulse workspace", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    const evaluateAutonomy = vi.fn(async () => true);
+    const service = createService({ evaluateAutonomy });
+
+    await service.triggerHeartbeat("agent-1");
+    expect(evaluateAutonomy).toHaveBeenCalledTimes(1);
+    expect(evaluateAutonomy).toHaveBeenCalledWith("workspace-1");
+
+    await service.triggerHeartbeat("agent-1");
+    expect(evaluateAutonomy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not evaluate autonomy for deferred or out-of-hours pulses", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    const evaluateAutonomy = vi.fn(async () => true);
+    const service = createService({
+      evaluateAutonomy,
+      hasActiveForegroundTask: () => true,
+    });
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "awareness_signal",
+      source: "hook",
+      fingerprint: "deferred-autonomy",
+      urgency: "medium",
+      confidence: 0.7,
+      reason: "Focus changed",
+    });
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(evaluateAutonomy).not.toHaveBeenCalled();
+  });
+
+  it("suggests instead of creating a task when the shared workspace budget is spent", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    const dispatchBudget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 1 });
+    // Another producer (e.g. Workflow Intelligence) already used today's slot.
+    expect(
+      dispatchBudget.tryConsume({ workspaceId: "workspace-1", source: "workflow_intelligence" })
+        .allowed,
+    ).toBe(true);
+    const service = createService({ dispatchBudget });
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "urgent_interrupt",
+      source: "hook",
+      fingerprint: "budget-1",
+      urgency: "critical",
+      confidence: 1,
+      reason: "Urgent issue",
+      evidenceRefs: ["incident:1"],
+    });
+
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(createdTasks).toHaveLength(0);
+    expect(createdSuggestions).toHaveLength(1);
+    expect(dispatchBudget.snapshot("workspace-1").dispatchesToday).toBe(1);
+  });
+
+  it("records heartbeat task dispatches in the shared budget, manual pulses included", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    const dispatchBudget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 1 });
+    dispatchBudget.tryConsume({ workspaceId: "workspace-1", source: "autonomy" });
+    const service = createService({ dispatchBudget });
+
+    // A manual pulse is user-initiated: it is never refused, but it is counted.
+    const result = await service.triggerHeartbeat("agent-1");
+    expect(result.taskCreated).toBe("task-1");
+    expect(dispatchBudget.snapshot("workspace-1")).toMatchObject({
+      dispatchesToday: 2,
+      bySource: { autonomy: 1, heartbeat: 1 },
+    });
   });
 
   it("suggests instead of creating a task when a dispatch has no evidence refs", async () => {

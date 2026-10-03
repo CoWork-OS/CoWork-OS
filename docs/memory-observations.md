@@ -15,7 +15,7 @@ CoWork memory now has four complementary shapes:
 - **Curated hot memory**: short, prompt-visible facts and rules managed through curated memory.
 - **Archive memory**: durable local memory rows stored in `memories`.
 - **Structured observations**: metadata rows keyed by `memory_id` that describe archive memories with title, narrative, facts, concepts, provenance, files, tools, source events, privacy state, and migration status.
-- **Durable runtime context**: optional task-scoped message and compaction-summary rows used only for active-task recall through `context_grep` and `context_describe`.
+- **Durable runtime context**: optional task-scoped message and compaction-summary rows used only for active-task recall through `context_recall`.
 
 Structured observations are not a replacement for archive memory. They are an index and control
 plane over it.
@@ -63,9 +63,9 @@ Automatic capture from task events is salience-gated (`src/electron/memory/memor
 - tool errors, failed steps, task errors and verification failures (compact)
 - user corrections, captured once where they are detected
 
-Other writers add accepted insights and curated promotions, Chronicle-derived context (always private), Playbook outcomes and explicit `memory_save` calls.
+Other writers add accepted insights and curated promotions, Chronicle-derived context (always private), Playbook outcomes and explicit `memory_remember` calls of kind `outcome`, `error` or `note` (facts go to `memory_items`, see [memory-engine.md](memory-engine.md)).
 
-Raw telemetry is not archived: tool calls and results, step progress, plan JSON, assistant and user messages, file create/modify events and passed verifications stay in the task timeline. Events from memory-recall tools (for example `search_memories`, `memory_search_index`, `search_quotes`, `supermemory_search`, `kg_search`) are never archived, so recalled memories are not re-captured. Secrets are redacted before storage.
+Raw telemetry is not archived: tool calls and results, step progress, plan JSON, assistant and user messages, file create/modify events and passed verifications stay in the task timeline. Events from memory tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`, their deprecated aliases and `kg_*`) are never archived, so recalled memories are not re-captured. Secrets are redacted before storage.
 
 Dreaming does not change capture rules. It reviews already-captured observations and transcript
 evidence after the fact, then proposes maintenance when evidence suggests that memory is missing,
@@ -87,9 +87,10 @@ Observation privacy states are:
 
 Prompt recall checks both old prompt-recall ignore markers and observation privacy state. That means
 suppressed and redacted observations are excluded from both search-based recall and recent-memory
-prompt recall, and agent read paths (`search_memories`, `memory_search_index`, `memory_timeline`,
-`memory_details`) filter them as well. Private rows are never injected into prompts. A model-supplied
-privacy filter cannot widen this, and Rebuild never loosens an existing privacy state.
+prompt recall, and the agent read path (`memory_recall`, both its listing and its `detail: "full"`
+expansion) filters them as well. Private rows are never injected into prompts. The tool has no
+privacy-filter parameter, so the model cannot widen this, and Rebuild never loosens an existing
+privacy state.
 
 Supermemory mirroring remains additive and opt-in. Private, redacted, and suppressed local entries
 are not mirrored. Mirrored copies have no stored remote id, so later suppression, redaction or deletion
@@ -130,27 +131,31 @@ Backfill status tracks:
 
 If metadata creation fails for a row, that row increments `failed`, not `processed`.
 
-## Progressive Recall Tools
+## Progressive Recall
 
-Agents should use the progressive workflow for deep recall:
+Agents recall progressively with one tool, `memory_recall` (audit §8.3):
 
-1. `memory_search_index`: compact search results with IDs, title, type, date, source label, files, concepts, snippets, and estimated token cost.
-2. `memory_timeline`: compact neighboring observations around an anchor memory ID or query.
-3. `memory_details`: full structured details for selected IDs only.
+1. **Index** (default): ranked results across memory items, this archive, earlier conversations and
+   workspace knowledge, each with an `id` (`memory:…`, `archive:…`, `event:…`, `kg:…`, `doc:…`),
+   lane, kind, snippet, date, provenance, relevance and an estimated token cost of the full text.
+2. **Full detail**: `memory_recall` with `ids` (and `detail: "full"`) returns the complete text of
+   the selected results only. Reading an archive row in full counts as a use (reference count and
+   last reference), which retention and tier promotion see; a listing does not.
 
-`search_memories` remains backward-compatible for broad archive lookup, but deep recall should prefer
-the compact index -> timeline -> details sequence to reduce prompt tokens and avoid overloading the
-model with unnecessary full memory content.
+Archive results come from the same hybrid search as before (`MemoryService.searchForRecallAsync`),
+with suppressed and redacted rows removed. Expansion of an `archive:` id is scoped to the active
+workspace, plus non-private imported rows; it is refused for any other workspace's row.
 
-All agent-visible detail lookups are scoped to the active workspace.
+`context_recall` is the narrower task-scoped workflow for compacted active-task recall: it searches
+sanitized task messages and source-linked compaction summaries (durable runtime context, when
+enabled) and then the active task's conversation index, and expands one result by `id`. It always
+works on the active task.
 
-Durable Runtime Context adds a narrower task-scoped workflow for compacted active-task recall:
-
-1. `context_grep`: search sanitized task messages and source-linked compaction summaries for the active task.
-2. `context_describe`: expand a selected durable context result, including linked source messages for summaries.
-
-These tools default to the active task. A supplied `taskId` is ignored unless the user explicitly
-asked to inspect that task and the tool call sets `explicitUserRequest: true`.
+The earlier tools (`search_memories`, `memory_search_index`, `memory_timeline`, `memory_details`,
+`context_grep`, `context_describe`) are hidden deprecated aliases for one release: still executable,
+routed to `memory_recall` / `context_recall`, and answered with a `deprecated` notice. A
+`context_grep` / `context_describe` call keeps the old contract: a supplied `taskId` is ignored unless
+the call also sets `explicitUserRequest: true`.
 
 ## Memory Hub Inspector
 

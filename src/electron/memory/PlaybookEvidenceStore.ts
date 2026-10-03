@@ -1,17 +1,28 @@
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 import type Database from "better-sqlite3";
+import {
+  PlaybookEntrySqlStore,
+  ensurePlaybookEntriesSchema,
+  hashPlaybookContent,
+  type PlaybookEntry,
+  type PlaybookEntryInput,
+} from "./playbook-entries-sql";
 
 /**
- * One successful execution (a task) that a Playbook memory records. The ledger keeps
+ * One successful execution (a task) that a Playbook entry records. The ledger keeps
  * identities and the approach key only; readable text always comes from the source
- * memory, so memory privacy, redaction and deletion apply to it.
+ * entry (`playbook_entries`), so its privacy flag and deletion apply to it.
  */
 export interface PlaybookEvidenceRecord {
   id: string;
   workspaceId: string;
   taskId: string;
-  sourceMemoryId: string;
-  /** Hash of the source memory content when recorded; a mismatch means it was edited. */
+  /**
+   * The `playbook_entries` row this execution is recorded in. Stored in the
+   * `source_memory_id` column: entries migrated out of the archive keep their memory id.
+   */
+  sourceEntryId: string;
+  /** Hash of the source entry content when recorded; a mismatch means it was edited. */
   sourceContentHash: string;
   /** Approach identity (normalized tools and destinations). Empty means unknown. */
   patternKey: string;
@@ -21,8 +32,19 @@ export interface PlaybookEvidenceRecord {
 
 export type PlaybookEvidenceInput = Pick<
   PlaybookEvidenceRecord,
-  "workspaceId" | "taskId" | "sourceMemoryId" | "sourceContentHash" | "patternKey"
+  "workspaceId" | "taskId" | "sourceEntryId" | "sourceContentHash" | "patternKey"
 >;
+
+/** Result of recording one outcome: the entry and, for a success, its evidence row. */
+export type PlaybookOutcomeRecordResult =
+  | { status: "recorded"; entryId: string; evidenceId?: string }
+  | { status: "duplicate_execution" };
+
+/** A task the user corrected, and when (for the correction-rate metric). */
+export interface PlaybookCorrection {
+  taskId: string;
+  at: number;
+}
 
 interface EvidenceRow {
   id: string;
@@ -40,7 +62,7 @@ function toRecord(row: EvidenceRow): PlaybookEvidenceRecord {
     id: row.id,
     workspaceId: row.workspace_id,
     taskId: row.task_id,
-    sourceMemoryId: row.source_memory_id,
+    sourceEntryId: row.source_memory_id,
     sourceContentHash: row.source_content_hash,
     patternKey: row.pattern_key,
     createdAt: row.created_at,
@@ -48,14 +70,13 @@ function toRecord(row: EvidenceRow): PlaybookEvidenceRecord {
   };
 }
 
-export function hashMemoryContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
-}
+/** Hash of a Playbook entry's content, as evidence records it. */
+export const hashMemoryContent = hashPlaybookContent;
 
 /**
- * Narrow learning index for Playbook successes. General memory storage stays in
- * MemoryService; this ledger only records which tasks succeeded, and which later
- * successes reinforced which earlier ones.
+ * Narrow learning index for Playbook successes. Outcome text lives in `playbook_entries`
+ * (playbook-entries-sql.ts); this ledger only records which tasks succeeded, and which
+ * later successes reinforced which earlier ones.
  *
  * This is the synchronous store the memory domain's transaction units run (async SQLite
  * migration plan, DB6), on the host connection or in the database worker; services use
@@ -72,6 +93,7 @@ export class PlaybookEvidenceStore {
   }
 
   static ensureSchema(db: Database.Database): void {
+    ensurePlaybookEntriesSchema(db);
     db.exec(`
       -- The first ledger shape copied memory text and never shipped in a release; drop
       -- it so no copy outlives its memory's privacy state.
@@ -127,7 +149,7 @@ export class PlaybookEvidenceStore {
         randomUUID(),
         input.workspaceId,
         input.taskId,
-        input.sourceMemoryId,
+        input.sourceEntryId,
         input.sourceContentHash,
         input.patternKey,
         this.now(),
@@ -152,13 +174,17 @@ export class PlaybookEvidenceStore {
   /** Link a later execution to an earlier one it reinforces. Returns false if already linked. */
   link(evidenceId: string, reinforcesEvidenceId: string): boolean {
     if (evidenceId === reinforcesEvidenceId) return false;
-    return (
+    const linked =
       this.db
         .prepare(
           "INSERT OR IGNORE INTO playbook_success_links (evidence_id, reinforces_evidence_id, created_at) VALUES (?, ?, ?)",
         )
-        .run(evidenceId, reinforcesEvidenceId, this.now()).changes > 0
-    );
+        .run(evidenceId, reinforcesEvidenceId, this.now()).changes > 0;
+    if (linked) {
+      const reinforced = this.get(reinforcesEvidenceId);
+      if (reinforced) this.entries().incrementReinforcement(reinforced.sourceEntryId);
+    }
+    return linked;
   }
 
   /** Links whose both ends are still active, for one workspace. */
@@ -176,34 +202,89 @@ export class PlaybookEvidenceStore {
   }
 
   invalidate(id: string, reason: string): boolean {
-    return (
+    const changed =
       this.db
         .prepare(
           "UPDATE playbook_success_evidence SET invalidated_at = ?, invalidation_reason = ? WHERE id = ? AND invalidated_at IS NULL",
         )
-        .run(this.now(), reason, id).changes > 0
-    );
+        .run(this.now(), reason, id).changes > 0;
+    if (changed) {
+      const record = this.get(id);
+      if (record) this.entries().setStatus(record.sourceEntryId, "invalidated");
+    }
+    return changed;
   }
 
   /** Invalidate a task's active evidence (e.g. after the user corrected it). */
   invalidateTask(workspaceId: string, taskId: string, reason: string): number {
-    return this.db
+    const active = this.db
       .prepare(
-        `UPDATE playbook_success_evidence SET invalidated_at = ?, invalidation_reason = ?
+        `SELECT id FROM playbook_success_evidence
          WHERE workspace_id = ? AND task_id = ? AND invalidated_at IS NULL`,
       )
-      .run(this.now(), reason, workspaceId, taskId).changes;
+      .all(workspaceId, taskId) as Array<{ id: string }>;
+    return active.filter(({ id }) => this.invalidate(id, reason)).length;
+  }
+
+  private entries(): PlaybookEntrySqlStore {
+    return new PlaybookEntrySqlStore(this.db, this.now);
   }
 
   /**
-   * Active evidence with its source memory's content, newest first, skipping evidence
-   * `readSource` rejects (and invalidating what it invalidates). One transaction.
+   * Record one outcome in one transaction: its `playbook_entries` row and, for a success,
+   * its evidence row. A success for a task that already has evidence is a duplicate
+   * execution and writes nothing.
    */
-  listReadable(workspaceId: string): Array<{ record: PlaybookEvidenceRecord; content: string }> {
-    const readable: Array<{ record: PlaybookEvidenceRecord; content: string }> = [];
+  recordOutcome(input: PlaybookEntryInput): PlaybookOutcomeRecordResult {
+    if (input.kind === "success") {
+      if (!input.taskId) return { status: "duplicate_execution" };
+      if (this.find(input.workspaceId, input.taskId)) return { status: "duplicate_execution" };
+    }
+    const { entry } = this.entries().insert(input);
+    if (input.kind !== "success") return { status: "recorded", entryId: entry.id };
+    const { created, record } = this.record({
+      workspaceId: input.workspaceId,
+      taskId: input.taskId!,
+      sourceEntryId: entry.id,
+      sourceContentHash: hashPlaybookContent(entry.content),
+      patternKey: input.patternKey,
+    });
+    if (!created) return { status: "duplicate_execution" };
+    return { status: "recorded", entryId: entry.id, evidenceId: record.id };
+  }
+
+  /**
+   * Tasks the user corrected since `since`: Playbook failures classified as a user
+   * correction and success evidence invalidated as `corrected_by_user`. One row per task,
+   * at its earliest correction.
+   */
+  listCorrections(workspaceId: string, since: number): PlaybookCorrection[] {
+    return this.db
+      .prepare(
+        `SELECT task_id AS taskId, MIN(at) AS at FROM (
+           SELECT task_id, created_at AS at FROM playbook_entries
+           WHERE workspace_id = ? AND kind = 'failure' AND error_category = 'user_correction'
+             AND task_id IS NOT NULL AND created_at >= ?
+           UNION ALL
+           SELECT task_id, invalidated_at AS at FROM playbook_success_evidence
+           WHERE workspace_id = ? AND invalidation_reason = 'corrected_by_user'
+             AND invalidated_at >= ?
+         ) GROUP BY task_id`,
+      )
+      .all(workspaceId, since, workspaceId, since) as PlaybookCorrection[];
+  }
+
+  /**
+   * Active evidence with its source entry, newest first, skipping evidence `readSource`
+   * rejects (and invalidating what it invalidates). One transaction.
+   */
+  listReadable(
+    workspaceId: string,
+  ): Array<{ record: PlaybookEvidenceRecord; entry: PlaybookEntry }> {
+    const readable: Array<{ record: PlaybookEvidenceRecord; entry: PlaybookEntry }> = [];
     for (const record of this.listActive(workspaceId)) {
-      const content = this.readSource(record);
-      if (content !== null) readable.push({ record, content });
+      const entry = this.readSource(record);
+      if (entry !== null) readable.push({ record, entry });
     }
     return readable;
   }
@@ -214,29 +295,21 @@ export class PlaybookEvidenceStore {
   }
 
   /**
-   * The source memory's content while it still exists unchanged and is not private.
-   * Evidence whose memory was deleted or edited is invalidated so old content cannot stay
-   * authoritative through the ledger; a private memory is only skipped.
+   * The source entry while it still exists unchanged and is not private. Evidence whose
+   * entry was deleted (purge, retention) or edited is invalidated so old content cannot
+   * stay authoritative through the ledger; a private entry is only skipped.
    */
-  readSource(record: PlaybookEvidenceRecord): string | null {
+  readSource(record: PlaybookEvidenceRecord): PlaybookEntry | null {
     if (record.invalidatedAt) return null;
-    let row: { content: string; is_private: number } | undefined;
-    try {
-      row = this.db
-        .prepare("SELECT content, is_private FROM memories WHERE id = ?")
-        .get(record.sourceMemoryId) as { content: string; is_private: number } | undefined;
-    } catch {
-      // No memories table (a stripped-down profile): cannot verify.
+    const entry = this.entries().get(record.sourceEntryId);
+    if (!entry) {
+      this.invalidate(record.id, "source_entry_deleted");
       return null;
     }
-    if (!row) {
-      this.invalidate(record.id, "source_memory_deleted");
+    if (hashPlaybookContent(entry.content) !== record.sourceContentHash) {
+      this.invalidate(record.id, "source_entry_edited");
       return null;
     }
-    if (hashMemoryContent(row.content) !== record.sourceContentHash) {
-      this.invalidate(record.id, "source_memory_edited");
-      return null;
-    }
-    return row.is_private ? null : row.content;
+    return entry.isPrivate ? null : entry;
   }
 }

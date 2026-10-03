@@ -5,6 +5,8 @@ import { getUserDataDir } from "../utils/user-data-dir";
 import { removeLegacyHealthBridgeTempDirs } from "../utils/retired-feature-cleanup";
 import { createLogger } from "../utils/logger";
 import { ensureEverydayAgentSchema } from "../everyday-agent/schema";
+import { runMemoryPayloadMigration } from "../memory/memory-payload-migration-sql";
+import { ensureMemoryItemsSchema } from "../memory/memory-items-sql";
 import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
 import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
@@ -2725,6 +2727,8 @@ export class DatabaseManager {
     this.upgradeTaskReferenceForeignKeysToSetNull();
     this.initializeKnowledgeGraphFTS();
     ensureEverydayAgentSchema(this.db);
+    this.migrateMemoryPayloadTables();
+    this.initializeMemoryItems();
 
     // Seed default models if table is empty
     this.seedDefaultModels();
@@ -8457,6 +8461,38 @@ export class DatabaseManager {
       `);
     })();
     schemaLogger.info("[DatabaseManager] Narrowed memories_fts_update to content/summary changes");
+  }
+
+  /**
+   * Memory overhaul Phase 2 (audit item 6): create `suggestions`, `suggestion_feedback`
+   * and `playbook_entries`, and move `[SUGGESTION]`, `[suggestion-feedback:…]` and
+   * generated `[PLAYBOOK]` rows out of the `memories` archive once. A failure leaves the
+   * marker unset, so the idempotent move is retried on the next start.
+   */
+  private migrateMemoryPayloadTables(): void {
+    try {
+      const result = runMemoryPayloadMigration(this.db, Date.now());
+      if (result.ran) {
+        schemaLogger.info("[DatabaseManager] Moved suggestion and Playbook rows out of memories", {
+          ...result.counts,
+        });
+      }
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] Memory payload table migration failed:", error);
+    }
+  }
+
+  /**
+   * Memory overhaul Phase 2 (docs/memory-engine.md): the `memory_items` fact store and its
+   * FTS index. New tables only; the legacy lanes are copied in later by the deferred,
+   * marker-recorded lane migration (MemoryItemsLaneMigration), not here.
+   */
+  private initializeMemoryItems(): void {
+    try {
+      ensureMemoryItemsSchema(this.db);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] memory_items schema initialization failed:", error);
+    }
   }
 
   /**

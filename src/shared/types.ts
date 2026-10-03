@@ -67,8 +67,6 @@ export interface MemoryFeaturesSettings {
   heartbeatMaintenanceEnabled: boolean;
   /** Capture structured + verbatim checkpoints during runtime lifecycle events. */
   checkpointCaptureEnabled?: boolean;
-  /** Enable quote-first exact-span recall across transcripts, memories, and notes. */
-  verbatimRecallEnabled?: boolean;
   /** Use explicit wake-up memory layers and inject only L0/L1 by default. */
   wakeUpLayersEnabled?: boolean;
   /** Track KG edge validity windows and time-aware historical recall. */
@@ -101,8 +99,6 @@ export interface MemoryFeaturesSettings {
   autoPromoteToCuratedMemoryEnabled?: boolean;
   /** Store structured sidecar metadata for archive memories. */
   structuredObservationsEnabled?: boolean;
-  /** Expose index -> timeline -> details memory recall tools. */
-  progressiveRecallToolsEnabled?: boolean;
   /** Show the Memory Hub observation inspector. */
   memoryInspectorEnabled?: boolean;
 }
@@ -544,6 +540,8 @@ export interface AutonomyDecision {
   suggestedPrompt?: string;
   /** Set when decision is from a routine; used for cooldown tracking */
   routineId?: string;
+  /** Normalized entity (e.g. `commitment:<id>`) shared with the suggestion sink and briefing. */
+  entityKey?: string;
 }
 
 export interface AutonomyAction {
@@ -850,6 +848,9 @@ export type EventType =
   | "llm_error"
   // Persisted Jev decision telemetry (hidden from the primary renderer timeline)
   | "jev_decision"
+  // Memory attribution: memory_items / archive refs injected into a prompt (hidden from the
+  // primary timeline; never captured into memory)
+  | "memory_used"
   // Real-time streaming progress (ephemeral, not persisted to DB)
   | "llm_streaming"
   // Sub-Agent / Parallel Agent events
@@ -1605,6 +1606,11 @@ export type ToolType =
   | "scrape_session"
   | "scraping_status"
   // Memory tools
+  | "memory_recall"
+  | "memory_remember"
+  | "memory_forget"
+  | "context_recall"
+  // Deprecated memory tool aliases (LEGACY_MEMORY_TOOL_ALIASES)
   | "memory_save"
   | "memory_curate"
   | "memory_curated_read"
@@ -1722,7 +1728,9 @@ export const TOOL_GROUPS = {
     "skill_duplicate",
     "skill_update",
     "skill_delete",
-    "memory_curate",
+    // Memory writes (memory_remember and its deprecated memory_curate alias) are not
+    // listed here: they are classified through MEMORY_WRITE_TOOL_NAMES, and memory_curate
+    // canonicalizes to memory_remember (LEGACY_MEMORY_TOOL_ALIASES).
     // Monty transform library can write transformed outputs
     "monty_transform_file",
     // Session scratchpad (write)
@@ -1862,6 +1870,13 @@ export const TOOL_GROUPS = {
     // Privacy-sensitive: can exfiltrate local files/images to a provider
     "analyze_image",
     "read_pdf_visual",
+    // Consolidated memory tools (audit §8.3): recall, write, forget and active-task
+    // context recovery. Shared chats must neither read nor change the owner's memory.
+    "memory_recall",
+    "memory_remember",
+    "memory_forget",
+    "context_recall",
+    // Deprecated aliases of the tools above (hidden, still executable for one release).
     // Agent-initiated memory save
     "memory_save",
     "memory_curate",
@@ -1912,6 +1927,10 @@ export type ToolGroupName = keyof typeof TOOL_GROUPS;
  * (SEC-12)
  */
 export const MEMORY_WRITE_TOOL_NAMES: readonly string[] = [
+  "memory_remember",
+  "memory_forget",
+  // Deprecated aliases (hidden; route to memory_remember / memory_forget or their
+  // legacy implementation for one release).
   "memory_save",
   "memory_curate",
   "supermemory_remember",
@@ -1924,6 +1943,33 @@ export const MEMORY_WRITE_TOOL_NAMES: readonly string[] = [
   "kg_invalidate_edge",
   "kg_add_observation",
 ];
+
+/**
+ * Memory tools consolidated into four (audit §8.3). The old names are no longer offered
+ * to the model but stay executable for one release, so saved prompts and skills keep
+ * working: each maps to the tool that replaces it (tool-semantics aliases), and the
+ * registry routes the call to the new implementation.
+ */
+export const LEGACY_MEMORY_TOOL_ALIASES: Readonly<
+  Record<string, "memory_recall" | "memory_remember" | "memory_forget" | "context_recall">
+> = {
+  search_memories: "memory_recall",
+  memory_search_index: "memory_recall",
+  memory_timeline: "memory_recall",
+  memory_details: "memory_recall",
+  search_quotes: "memory_recall",
+  search_sessions: "memory_recall",
+  memory_topics_load: "memory_recall",
+  memory_curated_read: "memory_recall",
+  supermemory_profile: "memory_recall",
+  supermemory_search: "memory_recall",
+  memory_save: "memory_remember",
+  memory_curate: "memory_remember",
+  supermemory_remember: "memory_remember",
+  supermemory_forget: "memory_forget",
+  context_grep: "context_recall",
+  context_describe: "context_recall",
+};
 
 /**
  * Maps each tool to its risk level
@@ -2051,6 +2097,10 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   qa_report: "read",
   qa_cleanup: "network",
   // Memory
+  memory_recall: "read",
+  memory_remember: "write",
+  memory_forget: "write",
+  context_recall: "read",
   memory_save: "write",
   memory_curate: "write",
   memory_curated_read: "read",
@@ -4310,7 +4360,9 @@ export type UnifiedRecallSourceType =
   | "workspace_note"
   | "memory"
   | "screen_context"
-  | "knowledge_graph";
+  | "knowledge_graph"
+  /** Conversation index hits other than user/assistant messages (tool output, summaries). */
+  | "conversation";
 
 export type ChronicleCaptureScope = "frontmost_display" | "all_displays";
 export type ChronicleTaskMode = "inherit" | "enabled" | "disabled";
@@ -8158,6 +8210,10 @@ export interface ProactiveSuggestion {
   sourceSignals?: string[];
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
+  /** Normalized entity the suggestion is about; proposals for the same entity merge (SuggestionSink). */
+  entityKey?: string;
+  /** Producers that proposed this suggestion (heartbeat, autonomy, awareness, ...). */
+  sources?: string[];
   snoozedUntil?: number;
   createdAt: number;
   expiresAt: number;
@@ -9688,6 +9744,17 @@ export const IPC_CHANNELS = {
   MEMORY_RELATIONSHIP_CLEANUP_RECURRING: "memory:relationshipCleanupRecurring",
   MEMORY_COMMITMENTS_GET: "memory:commitmentsGet",
   MEMORY_COMMITMENTS_DUE_SOON: "memory:commitmentsDueSoon",
+
+  // Memory Hub "What CoWork knows": the memory_items fact store (docs/memory-engine.md)
+  MEMORY_ITEMS_LIST: "memoryItems:list",
+  MEMORY_ITEMS_GET: "memoryItems:get",
+  MEMORY_ITEMS_ADD: "memoryItems:add",
+  MEMORY_ITEMS_UPDATE: "memoryItems:update",
+  MEMORY_ITEMS_SET_PINNED: "memoryItems:setPinned",
+  MEMORY_ITEMS_DELETE: "memoryItems:delete",
+  MEMORY_ITEMS_WHY: "memoryItems:why",
+  MEMORY_ITEMS_CLEAR_GLOBAL: "memoryItems:clearGlobal",
+
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",
   AWARENESS_LIST_BELIEFS: "awareness:listBeliefs",

@@ -32,6 +32,14 @@ import type {
 } from "../shared/agent-security";
 import type { SpreadsheetPreview } from "../shared/spreadsheet-preview";
 import type {
+  MemoryHubAddableKind,
+  MemoryHubItemDetail,
+  MemoryHubListRequest,
+  MemoryHubListResult,
+  MemoryHubMutationResult,
+  MemoryHubWhy,
+} from "../shared/memory-hub-types";
+import type {
   SpreadsheetApplyPatchesResult,
   SpreadsheetOpenWorkbookResult,
   SpreadsheetPatch,
@@ -4255,6 +4263,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_COMMITMENTS_GET, { limit }),
   getDueSoonCommitments: (windowHours?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_COMMITMENTS_DUE_SOON, { windowHours }),
+  // Memory Hub "What CoWork knows" (memory_items)
+  listMemoryItems: (data: MemoryHubListRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_LIST, data),
+  getMemoryItem: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_GET, data),
+  addMemoryItem: (data: {
+    workspaceId: string;
+    content: string;
+    kind: MemoryHubAddableKind;
+    scope: "global" | "workspace";
+    pinned?: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_ADD, data),
+  updateMemoryItem: (data: { workspaceId: string; id: string; content: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_UPDATE, data),
+  setMemoryItemPinned: (data: { workspaceId: string; id: string; pinned: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_SET_PINNED, data),
+  deleteMemoryItem: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_DELETE, data),
+  getMemoryItemWhy: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_WHY, data),
+  clearGlobalMemoryItems: (data: { workspaceId: string; confirm: true }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_CLEAR_GLOBAL, data),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -7861,6 +7891,31 @@ export interface ElectronAPI {
   }>;
   getOpenCommitments: (limit?: number) => Promise<Any[]>;
   getDueSoonCommitments: (windowHours?: number) => Promise<{ items: Any[]; reminderText: string }>;
+  listMemoryItems: (data: MemoryHubListRequest) => Promise<MemoryHubListResult>;
+  getMemoryItem: (data: { workspaceId: string; id: string }) => Promise<MemoryHubItemDetail>;
+  addMemoryItem: (data: {
+    workspaceId: string;
+    content: string;
+    kind: MemoryHubAddableKind;
+    scope: "global" | "workspace";
+    pinned?: boolean;
+  }) => Promise<MemoryHubMutationResult>;
+  updateMemoryItem: (data: {
+    workspaceId: string;
+    id: string;
+    content: string;
+  }) => Promise<MemoryHubMutationResult>;
+  setMemoryItemPinned: (data: {
+    workspaceId: string;
+    id: string;
+    pinned: boolean;
+  }) => Promise<MemoryHubMutationResult>;
+  deleteMemoryItem: (data: { workspaceId: string; id: string }) => Promise<MemoryHubMutationResult>;
+  getMemoryItemWhy: (data: { workspaceId: string; id: string }) => Promise<MemoryHubWhy>;
+  clearGlobalMemoryItems: (data: {
+    workspaceId: string;
+    confirm: true;
+  }) => Promise<{ success: boolean; deleted: number; legacyRecords: number }>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

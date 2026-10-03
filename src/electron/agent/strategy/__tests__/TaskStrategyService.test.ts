@@ -203,7 +203,6 @@ describe("TaskStrategyService decoratePrompt", () => {
       "Implement the feature",
       executionRoute,
       executionStrategy,
-      "",
     );
 
     const planningRoute = makeRoute({ intent: "planning" });
@@ -212,7 +211,6 @@ describe("TaskStrategyService decoratePrompt", () => {
       "Plan the feature",
       planningRoute,
       planningStrategy,
-      "",
     );
 
     expect(executionPrompt).toContain("checklist_contract:");
@@ -235,7 +233,6 @@ describe("TaskStrategyService decoratePrompt", () => {
       "create an image of a snow leopard",
       route,
       strategy,
-      "",
     );
 
     expect(prompt).toContain("image_generation_contract:");
@@ -257,7 +254,6 @@ describe("TaskStrategyService decoratePrompt", () => {
       "create an infographic image explaining snow leopards",
       route,
       strategy,
-      "",
     );
 
     expect(prompt).toContain("image_generation_contract:");
@@ -300,7 +296,6 @@ image_generation_contract:
       "create an infographic about cowork os",
       route,
       strategy,
-      "",
     );
 
     expect(prompt).toContain("gather only the information needed");
@@ -613,7 +608,7 @@ describe("TaskStrategyService applyToAgentConfig", () => {
     const route = makeRoute({ intent: "execution" });
     const strategy = TaskStrategyService.derive(route, { executionMode: "debug" });
     expect(strategy.executionMode).toBe("debug");
-    const decorated = TaskStrategyService.decoratePrompt("Find the race", route, strategy, "");
+    const decorated = TaskStrategyService.decoratePrompt("Find the race", route, strategy);
     expect(decorated).toContain("debug_contract:");
     expect(decorated).toContain("cowork-debug");
   });

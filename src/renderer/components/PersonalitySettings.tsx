@@ -11,9 +11,14 @@ type TabId = "identity" | "memory" | "personality" | "instructions" | "style" | 
 
 interface PersonalitySettingsProps {
   onSettingsChanged?: () => void;
+  /** Opens Settings > Memory ("What CoWork knows"). */
+  onOpenMemoryHub?: () => void;
 }
 
-export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsProps) {
+export function PersonalitySettings({
+  onSettingsChanged,
+  onOpenMemoryHub,
+}: PersonalitySettingsProps) {
   const [config, setConfig] = useState<PersonalityConfigV2 | null>(null);
   const configRef = useRef<PersonalityConfigV2 | null>(null);
   const saveInFlightRef = useRef(false);
@@ -165,7 +170,7 @@ export function PersonalitySettings({ onSettingsChanged }: PersonalitySettingsPr
           saving={saving}
         />
       )}
-      {activeTab === "memory" && <PersonalityMemoryTab onChanged={onSettingsChanged} />}
+      {activeTab === "memory" && <PersonalityMemoryTab onOpenMemoryHub={onOpenMemoryHub} />}
       {activeTab === "personality" && (
         <PersonalityTraitsTab
           config={config}

@@ -8,6 +8,13 @@ import {
   isProtectedWorkspacePath,
 } from "../security/access-profile-paths";
 import { StringIdSchema, WorkspaceIdSchema } from "../utils/validation";
+import {
+  MEMORY_HUB_ADDABLE_KINDS,
+  MEMORY_HUB_KINDS,
+  MEMORY_HUB_SCOPES,
+  MEMORY_HUB_SOURCES,
+  MEMORY_HUB_STATUSES,
+} from "../../shared/memory-hub-types";
 
 /**
  * Schemas for the memory and kit IPC handlers (SEC-11). Every payload comes from the
@@ -287,3 +294,63 @@ export function resolveKitOpenPath(
     Object.prototype.hasOwnProperty.call(WORKSPACE_KIT_CONTRACTS, fileName);
   return { absPath, fileName, seedable };
 }
+
+// ---- Memory Hub: memory_items ("What CoWork knows") ----
+
+const MemoryItemIdSchema = z.string().trim().min(1).max(100);
+const MemoryHubKindSchema = z.enum(MEMORY_HUB_KINDS);
+const MemoryHubScopeSchema = z.enum(MEMORY_HUB_SCOPES);
+const MemoryHubSourceSchema = z.enum(MEMORY_HUB_SOURCES);
+const MemoryHubStatusSchema = z.enum(MEMORY_HUB_STATUSES);
+/** Longest item text accepted from the renderer; MemoryWriter stores at most 1000 chars. */
+const MAX_MEMORY_ITEM_CONTENT = 1_000;
+
+export const MemoryItemsListRequestSchema = z
+  .object({
+    workspaceId: WorkspaceIdSchema,
+    kinds: z.array(MemoryHubKindSchema).max(MEMORY_HUB_KINDS.length).optional(),
+    scopes: z.array(MemoryHubScopeSchema).max(MEMORY_HUB_SCOPES.length).optional(),
+    statuses: z.array(MemoryHubStatusSchema).max(MEMORY_HUB_STATUSES.length).optional(),
+    sources: z.array(MemoryHubSourceSchema).max(MEMORY_HUB_SOURCES.length).optional(),
+    query: z.string().max(500).optional(),
+    pinnedOnly: z.boolean().optional(),
+    limit: cappedLimit(200).optional(),
+    offset: z.number().int().min(0).max(100_000).optional(),
+  })
+  .strict();
+
+/** get, why and delete: the item and the workspace the Hub is showing. */
+export const MemoryItemRefRequestSchema = z
+  .object({ workspaceId: WorkspaceIdSchema, id: MemoryItemIdSchema })
+  .strict();
+
+/**
+ * A fact the user adds by hand: always `user_stated` (set in main, never by the
+ * renderer), global or bound to the workspace the Hub is showing.
+ */
+export const MemoryItemAddRequestSchema = z
+  .object({
+    workspaceId: WorkspaceIdSchema,
+    content: z.string().trim().min(1).max(MAX_MEMORY_ITEM_CONTENT),
+    kind: z.enum(MEMORY_HUB_ADDABLE_KINDS),
+    scope: z.enum(["global", "workspace"]),
+    pinned: z.boolean().optional(),
+  })
+  .strict();
+
+export const MemoryItemUpdateRequestSchema = z
+  .object({
+    workspaceId: WorkspaceIdSchema,
+    id: MemoryItemIdSchema,
+    content: z.string().trim().min(1).max(MAX_MEMORY_ITEM_CONTENT),
+  })
+  .strict();
+
+export const MemoryItemPinRequestSchema = z
+  .object({ workspaceId: WorkspaceIdSchema, id: MemoryItemIdSchema, pinned: z.boolean() })
+  .strict();
+
+/** Clearing global items is explicit: the renderer must send `confirm: true`. */
+export const MemoryItemsClearGlobalRequestSchema = z
+  .object({ workspaceId: WorkspaceIdSchema, confirm: z.literal(true) })
+  .strict();

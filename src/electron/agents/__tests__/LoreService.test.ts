@@ -249,6 +249,37 @@ describe("LoreService", () => {
       expect(state).toBeUndefined();
     });
 
+    it("skips background heartbeat, hook and workflow-intelligence tasks", async () => {
+      for (const overrides of [
+        { heartbeatRunId: "run-1" },
+        { source: "hook" },
+        { source: "subconscious" },
+        { source: "improvement" },
+      ]) {
+        const service = new LoreService(createMockDb());
+        (service as Any).taskRepo = {
+          findById: () =>
+            makeTaskRow({ workspaceId: "ws-1", title: "Background task title", ...overrides }),
+        };
+        (service as Any).workspaceRepo = {
+          findById: () => makeWorkspaceRow("ws-1", tmpDir),
+        };
+        await (service as Any).ingestTaskCompleted("task-bg", {}, Date.now());
+        expect((service as Any).stateByWorkspace.get("ws-1")).toBeUndefined();
+      }
+
+      const service = new LoreService(createMockDb());
+      (service as Any).taskRepo = {
+        findById: () =>
+          makeTaskRow({ workspaceId: "ws-1", title: "User asked for this", source: "manual" }),
+      };
+      (service as Any).workspaceRepo = {
+        findById: () => makeWorkspaceRow("ws-1", tmpDir),
+      };
+      await (service as Any).ingestTaskCompleted("task-user", {}, Date.now());
+      expect((service as Any).stateByWorkspace.get("ws-1")?.entries).toHaveLength(1);
+    });
+
     it("deduplicates entries by taskId", async () => {
       const db = createMockDb();
       const service = new LoreService(db);

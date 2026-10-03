@@ -485,7 +485,8 @@ export interface SessionRuntimeDeps {
   consolidateConsecutiveUserMessages: (messages: LLMMessage[]) => void;
   maybeInjectTurnBudgetSoftLanding: (messages: LLMMessage[], phase: string) => void;
   checkBudgets: () => void;
-  buildUserProfileBlock: (maxLines: number) => string;
+  /** MemoryContextBuilder L0 for the pinned profile block (gated again by the policy). */
+  buildUserProfileBlock: () => string | Promise<string>;
   upsertPinnedUserBlock: (messages: LLMMessage[], opts: Any) => void;
   removePinnedUserBlock: (messages: LLMMessage[], tag: string) => void;
   computeSharedContextKey: () => string;
@@ -2135,11 +2136,13 @@ export class SessionRuntime {
     // Pinned blocks are found again by these tags on every iteration, so each
     // one is updated in place instead of being stacked into message[0].
     const tags = PINNED_CONTEXT_TAGS;
-    // The profile block carries personal facts and relationship memory, so it is
-    // gated exactly like memory recall: allowMemoryInjection is false for
-    // retainMemory:false tasks (sub-agents, verifiers, council) and for group or
-    // public gateway contexts without trusted shared memory.
-    const userProfileBlock = opts.allowMemoryInjection ? this.deps.buildUserProfileBlock(10) : "";
+    // The profile block is MemoryContextBuilder's L0 (identity, rules, preferences,
+    // commitments). allowMemoryInjection comes from MemoryInjectionPolicy: false for
+    // retainMemory:false tasks (sub-agents, verifiers, council), `<no-memory>`, memory-off
+    // workspaces and group or public gateway contexts without trusted shared memory.
+    const userProfileBlock = opts.allowMemoryInjection
+      ? await this.deps.buildUserProfileBlock()
+      : "";
     if (userProfileBlock) {
       this.deps.upsertPinnedUserBlock(messages, {
         tag: tags.userProfile.open,

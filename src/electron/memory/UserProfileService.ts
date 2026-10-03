@@ -12,9 +12,10 @@ import {
   extractPreferredNameFromMessage,
   sanitizePreferredNameMemoryLine,
 } from "../utils/preferred-name";
-import { InputSanitizer } from "../agent/security/input-sanitizer";
-import { RelationshipMemoryService } from "./RelationshipMemoryService";
 import { bumpHotMemoryVersion } from "./hot-memory-version";
+import { MemoryWriter } from "./MemoryWriter";
+import { isMemoryReadSideActive } from "./memory-read-side";
+import { MEMORY_LANE_STORES, userFactCandidate } from "./memory-items-lanes";
 
 const MAX_FACTS = 250;
 const MAX_FACT_VALUE_LENGTH = 240;
@@ -32,7 +33,16 @@ export class UserProfileService {
     return this.load();
   }
 
-  static addFact(request: AddUserFactRequest): UserFact {
+  /**
+   * `options.memorySubjectKey` names the single-valued memory subject the fact sets (for
+   * example `response_length` from an awareness belief), so a newer value supersedes the
+   * older one in `memory_items`; `options.memoryOriginWorkspaceId` is the workspace the
+   * fact was learned in, whose memory settings govern that write.
+   */
+  static addFact(
+    request: AddUserFactRequest,
+    options: { memorySubjectKey?: string | null; memoryOriginWorkspaceId?: string | null } = {},
+  ): UserFact {
     const profile = this.load();
     const now = Date.now();
     const normalizedCategory = this.normalizeCategory(request.category);
@@ -63,6 +73,7 @@ export class UserProfileService {
         existing.pinned = request.pinned;
       }
       this.save(profile);
+      this.mirrorFact(existing, options);
       if (preferredName) {
         this.syncPreferredNameFromProfile(profile);
       }
@@ -87,6 +98,7 @@ export class UserProfileService {
     }
 
     this.save(profile);
+    this.mirrorFact(next, options);
     if (preferredName) {
       this.syncPreferredNameFromProfile(profile);
     }
@@ -127,6 +139,7 @@ export class UserProfileService {
     fact.lastUpdatedAt = Date.now();
 
     this.save(profile);
+    this.mirrorFact(fact);
     if (
       previousPreferredName ||
       nextPreferredName ||
@@ -149,45 +162,26 @@ export class UserProfileService {
     profile.facts = profile.facts.filter((fact) => fact.id !== id);
     if (profile.facts.length === originalLength) return false;
     this.save(profile);
+    MemoryWriter.dualWriteStatus(MEMORY_LANE_STORES.userProfile, id, "deleted", "profile delete");
     if (removedPreferredName) {
       this.syncPreferredNameFromProfile(profile);
     }
     return true;
   }
 
-  static buildPromptContext(maxFacts = 8): string {
-    const profile = this.load();
-    // Third-party (mailbox) relationship items are excluded by default; this
-    // context becomes the pinned user-profile block.
-    const relationshipContext = RelationshipMemoryService.buildPromptContext({
-      maxPerLayer: 2,
-      maxChars: 900,
-    });
-    if (!profile.facts.length && !relationshipContext) return "";
-
-    const selected = this.sortFacts(profile.facts).slice(0, Math.max(1, maxFacts));
-    if (!selected.length) {
-      return relationshipContext;
-    }
-
-    const lines = [
-      "USER PROFILE MEMORY (soft context from prior conversations):",
-      "- Use these as preferences/history hints.",
-      "- If the user gives newer or conflicting info, prefer the latest user message.",
-    ];
-
-    for (const fact of selected) {
-      const label = this.categoryLabel(fact.category);
-      // Rendered inside the pinned <cowork_user_profile> block: one line, no tags.
-      lines.push(`- ${label}: ${InputSanitizer.sanitizeInlineMemoryLine(fact.value)}`);
-    }
-
-    if (relationshipContext) {
-      lines.push("");
-      lines.push(relationshipContext);
-    }
-
-    return lines.join("\n");
+  /**
+   * Dual write (memory engine Phase 2): the profile stays the system of record for reads
+   * this wave; each saved fact is mirrored into `memory_items` in the background.
+   */
+  private static mirrorFact(
+    fact: UserFact,
+    options: { memorySubjectKey?: string | null; memoryOriginWorkspaceId?: string | null } = {},
+  ): void {
+    const candidate = userFactCandidate({ ...fact }, { subjectKey: options.memorySubjectKey });
+    MemoryWriter.dualWrite(
+      candidate && { ...candidate, originWorkspaceId: options.memoryOriginWorkspaceId ?? null },
+      "profile fact",
+    );
   }
 
   private static normalizeCategory(category: UserFactCategory): UserFactCategory {
@@ -220,7 +214,15 @@ export class UserProfileService {
   }
 
   private static syncPreferredNameFromProfile(profile: UserProfile): void {
-    const preferredName = this.sortFacts(profile.facts)
+    // With the memory engine's read side running, PersonalityManager follows the active
+    // `preferred_name` memory item (memory-read-side.ts): user-stated names win by trust.
+    if (isMemoryReadSideActive()) return;
+    // Legacy path (no writer yet, node daemon): the most trusted, then newest name. Not
+    // pinned-first, which reverted every newer name to the pinned onboarding one (PROMPT-7).
+    const sourceRank = (fact: UserFact) =>
+      fact.source === "manual" ? 2 : fact.source === "feedback" ? 1 : 0;
+    const preferredName = [...profile.facts]
+      .sort((a, b) => sourceRank(b) - sourceRank(a) || b.lastUpdatedAt - a.lastUpdatedAt)
       .map((fact) => this.extractPreferredNameFromFactValue(fact.category, fact.value))
       .find((name): name is string => Boolean(name));
 
@@ -234,31 +236,6 @@ export class UserProfileService {
   private static clampConfidence(confidence: number): number {
     if (!Number.isFinite(confidence)) return 0.7;
     return Math.max(0, Math.min(1, confidence));
-  }
-
-  private static categoryLabel(category: UserFactCategory): string {
-    switch (category) {
-      case "identity":
-        return "Identity";
-      case "preference":
-        return "Preference";
-      case "bio":
-        return "Profile";
-      case "work":
-        return "Work context";
-      case "goal":
-        return "Goal";
-      case "operating":
-        return "Operating style";
-      case "voice":
-        return "Voice";
-      case "accountability":
-        return "Accountability";
-      case "constraint":
-        return "Constraint";
-      default:
-        return "Note";
-    }
   }
 
   private static sortFacts(facts: UserFact[]): UserFact[] {

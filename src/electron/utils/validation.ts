@@ -2195,6 +2195,8 @@ export const GeneratePairingSchema = z.object({
 export const UUIDSchema = z.string().uuid();
 export const StringIdSchema = z.string().min(1).max(100);
 export const TargetKeySchema = z.string().trim().min(1).max(1024);
+/** Workflow Intelligence run review decision from the renderer. */
+export const SubconsciousReviewStatusSchema = z.enum(["accepted", "dismissed"]);
 export const ProviderApiKeySchema = z.string().max(4000).optional();
 export const ProviderBaseUrlSchema = z.string().url().max(500).optional();
 const HEARTBEAT_PROFILE_VALUES = ["observer", "operator", "dispatcher"] as const;

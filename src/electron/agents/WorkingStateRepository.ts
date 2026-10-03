@@ -276,3 +276,8 @@ export class WorkingStateStore {
     };
   }
 }
+
+/** Daily retention hook: keep the newest non-current working states per agent and workspace. */
+export function cleanupOldWorkingStates(db: Database.Database, keepCount = 50): number {
+  return new WorkingStateStore(db).cleanupOldStates(keepCount);
+}

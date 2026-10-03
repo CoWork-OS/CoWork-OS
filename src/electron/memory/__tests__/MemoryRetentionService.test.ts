@@ -232,6 +232,90 @@ describeWithSqlite("MemoryRetentionService (LIFE-3)", () => {
     );
   });
 
+  it("prunes old suggestions, suggestion feedback and Playbook entries", async () => {
+    const workspace = addWorkspace("payloads", { read: true, write: true, delete: true });
+    const suggestion = (id: string, status: string, expiresAt: number, updatedAt: number) =>
+      db
+        .prepare(
+          `INSERT INTO suggestions (id, workspace_id, title, payload, status, created_at, expires_at, updated_at)
+           VALUES (?, ?, ?, '{}', ?, ?, ?, ?)`,
+        )
+        .run(id, workspace.id, id, status, updatedAt, expiresAt, updatedAt);
+    suggestion("expired-long-ago", "active", now - 40 * DAY, now - 47 * DAY);
+    suggestion("open", "active", now + DAY, now - DAY);
+    suggestion("dismissed-long-ago", "dismissed", now + DAY, now - 40 * DAY);
+    suggestion("dismissed-recently", "dismissed", now + DAY, now - DAY);
+    const feedback = db.prepare(
+      `INSERT INTO suggestion_feedback (id, workspace_id, action, created_at) VALUES (?, ?, 'dismissed', ?)`,
+    );
+    feedback.run("fb-old", workspace.id, now - 100 * DAY);
+    feedback.run("fb-new", workspace.id, now - DAY);
+
+    const entry = db.prepare(
+      `INSERT INTO playbook_entries (id, workspace_id, task_id, kind, content, content_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'h', ?, ?)`,
+    );
+    entry.run("old-failure", workspace.id, "t1", "failure", "f", now - 200 * DAY, now - 200 * DAY);
+    entry.run("new-failure", workspace.id, "t2", "failure", "f", now - DAY, now - DAY);
+    entry.run(
+      "old-backed-success",
+      workspace.id,
+      "t3",
+      "success",
+      "s",
+      now - 200 * DAY,
+      now - 200 * DAY,
+    );
+    entry.run(
+      "old-unbacked-success",
+      workspace.id,
+      "t4",
+      "success",
+      "s",
+      now - 200 * DAY,
+      now - 200 * DAY,
+    );
+    db.prepare(
+      `INSERT INTO playbook_success_evidence (id, workspace_id, task_id, source_memory_id, source_content_hash, created_at, invalidated_at)
+       VALUES ('e-active', ?, 't3', 'old-backed-success', 'h', ?, NULL),
+              ('e-invalid', ?, 't4', 'old-unbacked-success', 'h', ?, ?)`,
+    ).run(workspace.id, now - 200 * DAY, workspace.id, now - 200 * DAY, now - 150 * DAY);
+
+    const result = await (await makeService()).runOnce();
+
+    expect(result.counts.suggestions).toBe(3);
+    expect(
+      (db.prepare("SELECT id FROM suggestions ORDER BY id").all() as Array<{ id: string }>).map(
+        (row) => row.id,
+      ),
+    ).toEqual(["dismissed-recently", "open"]);
+    expect(count("SELECT COUNT(*) AS n FROM suggestion_feedback WHERE id = 'fb-new'")).toBe(1);
+    expect(result.counts.playbookEntries).toBe(2);
+    expect(
+      (
+        db.prepare("SELECT id FROM playbook_entries ORDER BY id").all() as Array<{ id: string }>
+      ).map((row) => row.id),
+    ).toEqual(["new-failure", "old-backed-success"]);
+  });
+
+  it("keeps only the newest 50 non-current working states per agent and workspace", async () => {
+    const workspace = addWorkspace("working-state", { read: true, write: true, delete: true });
+    db.pragma("foreign_keys = OFF");
+    const insert = db.prepare(
+      `INSERT INTO agent_working_state (id, agent_role_id, workspace_id, state_type, content, is_current, created_at, updated_at)
+       VALUES (?, 'agent-1', ?, 'context', 'c', ?, ?, ?)`,
+    );
+    for (let i = 0; i < 53; i += 1) insert.run(`old-${i}`, workspace.id, 0, now - i, now - i);
+    insert.run("current", workspace.id, 1, now - 1000, now - 1000);
+
+    const result = await (await makeService()).runOnce();
+
+    expect(result.counts.workingStates).toBe(3);
+    expect(count("SELECT COUNT(*) AS n FROM agent_working_state WHERE is_current = 0")).toBe(50);
+    expect(count("SELECT COUNT(*) AS n FROM agent_working_state WHERE id = 'current'")).toBe(1);
+    expect(count("SELECT COUNT(*) AS n FROM agent_working_state WHERE id = 'old-52'")).toBe(0);
+  });
+
   it("isolates step failures so later steps still run", async () => {
     const workspace = addWorkspace("isolated", { read: true, write: true, delete: true });
     writeFile(

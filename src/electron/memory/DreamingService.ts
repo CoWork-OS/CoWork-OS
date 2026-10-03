@@ -11,18 +11,16 @@ import type {
 } from "../../shared/types";
 import { CuratedMemoryService } from "./CuratedMemoryService";
 import { MemoryObservationService } from "./MemoryObservationService";
-import {
-  TranscriptSearchResult,
-  TranscriptSpanRecord,
-  TranscriptStore,
-  type TranscriptReadGuard,
-} from "./TranscriptStore";
+import { DurableContextService, type ConversationHit } from "./DurableContextService";
+import type { TranscriptReadGuard } from "./TranscriptStore";
 import type { DreamingRepository } from "./DreamingRepository";
 
 interface DreamingEvidenceBundle {
   observations: MemoryObservationSearchResult[];
-  transcriptHits: TranscriptSearchResult[];
-  recentSpans: TranscriptSpanRecord[];
+  /** Conversation index hits for the run's query. */
+  transcriptHits: ConversationHit[];
+  /** The source task's most recent indexed events. */
+  recentSpans: ConversationHit[];
   curatedEntries: CuratedMemoryEntry[];
 }
 
@@ -32,19 +30,19 @@ export interface DreamingServiceDeps {
     query?: string;
     limit?: number;
   }) => MemoryObservationSearchResult[];
-  searchTranscriptSpans?: (params: {
-    workspacePath: string;
+  /** Conversation index search (defaults to `DurableContextService.searchConversation`). */
+  searchConversation?: (params: {
+    workspaceId: string;
     query: string;
     taskId?: string;
     limit?: number;
-    readGuard?: TranscriptReadGuard;
-  }) => Promise<TranscriptSearchResult[]>;
-  loadRecentTranscriptSpans?: (
-    workspacePath: string,
-    taskId: string,
-    limit?: number,
-    readGuard?: TranscriptReadGuard,
-  ) => Promise<TranscriptSpanRecord[]>;
+  }) => Promise<ConversationHit[]>;
+  /** A task's recent indexed events (defaults to `DurableContextService.recentConversation`). */
+  loadRecentConversation?: (params: {
+    workspaceId: string;
+    taskId: string;
+    limit?: number;
+  }) => Promise<ConversationHit[]>;
   listCuratedEntries?: (
     workspaceId: string,
   ) => CuratedMemoryEntry[] | Promise<CuratedMemoryEntry[]>;
@@ -133,14 +131,12 @@ function evidenceFromObservation(observation: MemoryObservationSearchResult): Ev
   };
 }
 
-function evidenceFromTranscript(hit: TranscriptSearchResult | TranscriptSpanRecord): EvidenceRef {
-  const id = hit.eventId || `${hit.taskId}:${hit.timestamp}:${hit.type}`;
-  const payload = typeof hit.payload === "string" ? hit.payload : JSON.stringify(hit.payload || {});
+function evidenceFromConversation(hit: ConversationHit): EvidenceRef {
   return {
-    evidenceId: id,
+    evidenceId: hit.eventId || hit.id,
     sourceType: "tool_output",
     sourceUrlOrPath: `transcript:${hit.taskId}`,
-    snippet: truncate(`[${hit.type}] ${payload}`, 260),
+    snippet: truncate(`[${hit.type}] ${hit.snippet}`, 260),
     capturedAt: hit.timestamp,
   };
 }
@@ -152,10 +148,8 @@ function combinedEvidenceText(bundle: DreamingEvidenceBundle): string {
         .filter(Boolean)
         .join(" "),
     ),
-    ...bundle.transcriptHits.map((entry) => entry.rawLine),
-    ...bundle.recentSpans.map((entry) =>
-      typeof entry.payload === "string" ? entry.payload : JSON.stringify(entry.payload || {}),
-    ),
+    ...bundle.transcriptHits.map((entry) => `[${entry.type}] ${entry.snippet}`),
+    ...bundle.recentSpans.map((entry) => `[${entry.type}] ${entry.snippet}`),
   ].join("\n");
 }
 
@@ -379,10 +373,13 @@ export class DreamingService {
           query: input.query || "",
           limit: input.limit || 40,
         }));
-    const searchTranscriptSpans =
-      this.deps.searchTranscriptSpans || TranscriptStore.searchSpans.bind(TranscriptStore);
-    const loadRecentTranscriptSpans =
-      this.deps.loadRecentTranscriptSpans || TranscriptStore.loadRecentSpans.bind(TranscriptStore);
+    const searchConversation =
+      this.deps.searchConversation ||
+      ((params: { workspaceId: string; query: string; taskId?: string; limit?: number }) =>
+        DurableContextService.searchConversation({ ...params, mode: "any" }));
+    const loadRecentConversation =
+      this.deps.loadRecentConversation ||
+      DurableContextService.recentConversation.bind(DurableContextService);
     const listCuratedEntries =
       this.deps.listCuratedEntries ||
       (async (workspaceId: string) => {
@@ -397,21 +394,19 @@ export class DreamingService {
       Promise.resolve(
         searchMemoryObservations({ workspaceId: request.workspaceId, query, limit: 40 }),
       ),
-      searchTranscriptSpans({
-        workspacePath: request.workspacePath,
+      searchConversation({
+        workspaceId: request.workspaceId,
         taskId: request.sourceTaskId,
         query,
         limit: 20,
-        readGuard: request.readGuard,
-      }),
+      }).catch(() => [] as ConversationHit[]),
       request.sourceTaskId
-        ? loadRecentTranscriptSpans(
-            request.workspacePath,
-            request.sourceTaskId,
-            30,
-            request.readGuard,
-          )
-        : Promise.resolve([]),
+        ? loadRecentConversation({
+            workspaceId: request.workspaceId,
+            taskId: request.sourceTaskId,
+            limit: 30,
+          }).catch(() => [] as ConversationHit[])
+        : Promise.resolve([] as ConversationHit[]),
     ]);
 
     return {
@@ -430,8 +425,8 @@ export class DreamingService {
     const normalized = text.toLowerCase();
     const evidenceRefs = [
       ...evidence.observations.slice(0, 10).map(evidenceFromObservation),
-      ...evidence.transcriptHits.slice(0, 8).map(evidenceFromTranscript),
-      ...evidence.recentSpans.slice(-6).map(evidenceFromTranscript),
+      ...evidence.transcriptHits.slice(0, 8).map(evidenceFromConversation),
+      ...evidence.recentSpans.slice(-6).map(evidenceFromConversation),
     ];
     const candidates: Array<Omit<DreamingCandidate, "id" | "createdAt">> = [];
     const push = (

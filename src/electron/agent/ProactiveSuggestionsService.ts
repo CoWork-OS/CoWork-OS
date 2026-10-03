@@ -1,5 +1,16 @@
 import { v4 as uuidv4 } from "uuid";
 import { MemoryService } from "../memory/MemoryService";
+import { PlaybookService } from "../memory/PlaybookService";
+import {
+  getProactiveSuggestionStore,
+  type ProactiveSuggestionStore,
+} from "../memory/ProactiveSuggestionStore";
+import {
+  parseSuggestionFeedbackContent,
+  renderSuggestionFeedbackContent,
+  type StoredSuggestion,
+  type StoredSuggestionStatus,
+} from "../memory/suggestions-sql";
 import { UserProfileService } from "../memory/UserProfileService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
@@ -10,6 +21,17 @@ import type {
   ProactiveSuggestion,
   SuggestionType,
 } from "../../shared/types";
+import {
+  commitmentEntityKey,
+  getSuggestionSink,
+  normalizeSuggestionEntityKey,
+  setSuggestionSinkStore,
+  type SuggestionCreateInput,
+  type SuggestionProposal,
+  type SuggestionProposalResult,
+  type SuggestionSinkStore,
+  type SuggestionSource,
+} from "./SuggestionSink";
 
 const SUGGESTION_MARKER = "[SUGGESTION]";
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -17,6 +39,9 @@ const MAX_ACTIVE_SUGGESTIONS = 10;
 const MIN_RECURRING_COUNT = 3;
 const SURFACE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const MAX_TELEMETRY_EVENTS = 1000;
+/** A dismissed or acted-on entity is not re-proposed by any producer for this long. */
+const ENTITY_SUPPRESSION_MS = SEVEN_DAYS_MS;
+const MAX_MERGED_SOURCE_ENTRIES = 200;
 
 type SuggestionTelemetryEventType =
   | "created"
@@ -52,6 +77,10 @@ interface PersistedSuggestionState {
   surfacedAt: Record<string, number>;
   telemetryEvents: SuggestionTelemetryEvent[];
   feedbackByKey?: Record<string, SuggestionFeedbackStats>;
+  /** Sources/evidence merged into an existing suggestion by the SuggestionSink. */
+  mergedSources?: Record<string, { sources: string[]; evidence: string[] }>;
+  /** `${workspaceId}::${entityKey}` -> suppressed until (ms). */
+  suppressedEntities?: Record<string, number>;
 }
 
 // ─── Follow-Up Templates ──────────────────────────────────────────
@@ -207,37 +236,9 @@ export class ProactiveSuggestionsService {
   private static surfacedAt: Map<string, number> = new Map();
   private static telemetryEvents: SuggestionTelemetryEvent[] = [];
   private static feedbackByKey: Map<string, SuggestionFeedbackStats> = new Map();
+  private static mergedSources: Map<string, { sources: string[]; evidence: string[] }> = new Map();
+  private static suppressedEntities: Map<string, number> = new Map();
   private static loaded = false;
-  /**
-   * Tracks titles generated within the current generateAll() cycle for cross-generator dedup.
-   * Scopes are keyed by workspace so parallel runs do not clear each other's state.
-   */
-  private static pendingTitlesByWorkspace: Map<string, { titles: Set<string>; depth: number }> =
-    new Map();
-
-  private static beginSuggestionCycle(workspaceId: string): Set<string> {
-    const existing = this.pendingTitlesByWorkspace.get(workspaceId);
-    if (existing) {
-      existing.depth += 1;
-      return existing.titles;
-    }
-    const titles = new Set<string>();
-    this.pendingTitlesByWorkspace.set(workspaceId, { titles, depth: 1 });
-    return titles;
-  }
-
-  private static endSuggestionCycle(workspaceId: string): void {
-    const existing = this.pendingTitlesByWorkspace.get(workspaceId);
-    if (!existing) return;
-    existing.depth -= 1;
-    if (existing.depth <= 0) {
-      this.pendingTitlesByWorkspace.delete(workspaceId);
-    }
-  }
-
-  private static getPendingTitles(workspaceId: string): Set<string> | undefined {
-    return this.pendingTitlesByWorkspace.get(workspaceId)?.titles;
-  }
 
   // ─── Persistence Helpers ────────────────────────────────────────
 
@@ -256,6 +257,8 @@ export class ProactiveSuggestionsService {
         this.surfacedAt = new Map(Object.entries(data.surfacedAt || {}));
         this.telemetryEvents = Array.isArray(data.telemetryEvents) ? data.telemetryEvents : [];
         this.feedbackByKey = new Map(Object.entries(data.feedbackByKey || {}));
+        this.mergedSources = new Map(Object.entries(data.mergedSources || {}));
+        this.suppressedEntities = new Map(Object.entries(data.suppressedEntities || {}));
       }
     } catch {
       // best-effort
@@ -273,6 +276,12 @@ export class ProactiveSuggestionsService {
         surfacedAt: Object.fromEntries(this.surfacedAt),
         telemetryEvents: this.telemetryEvents.slice(-MAX_TELEMETRY_EVENTS),
         feedbackByKey: Object.fromEntries(this.feedbackByKey),
+        mergedSources: Object.fromEntries(
+          [...this.mergedSources].slice(-MAX_MERGED_SOURCE_ENTRIES),
+        ),
+        suppressedEntities: Object.fromEntries(
+          [...this.suppressedEntities].filter(([, until]) => until > Date.now()),
+        ),
       });
     } catch {
       // best-effort
@@ -295,22 +304,13 @@ export class ProactiveSuggestionsService {
       const searchWorkspaceIds =
         Array.isArray(workspaceIds) && workspaceIds.length > 0 ? workspaceIds : [workspaceId];
       const results = (
-        await Promise.all(
-          searchWorkspaceIds.map(async (id) =>
-            (await MemoryService.searchByContentMarker(id, SUGGESTION_MARKER, 50)).map((entry) => ({
-              entry,
-              workspaceId: id,
-            })),
-          ),
-        )
+        await Promise.all(searchWorkspaceIds.map((id) => this.readStoredSuggestions(id)))
       ).flat();
       const now = Date.now();
       const suggestions: ProactiveSuggestion[] = [];
 
-      for (const { entry: r, workspaceId: originWorkspaceId } of results) {
-        if (r.type !== "insight" || !r.snippet.includes(SUGGESTION_MARKER)) continue;
-        const parsed = this.parseSuggestion(r.snippet, r.id, r.createdAt, originWorkspaceId);
-        if (!parsed) continue;
+      for (const parsed of results) {
+        const originWorkspaceId = parsed.workspaceId || workspaceId;
         if (parsed.expiresAt < now) continue;
         if ((parsed.snoozedUntil || 0) > now) continue;
         if (this.dismissedIds.has(parsed.id)) continue;
@@ -356,11 +356,13 @@ export class ProactiveSuggestionsService {
   static async dismiss(workspaceId: string, suggestionId: string): Promise<boolean> {
     this.loadDismissed();
     this.dismissedIds.add(suggestionId);
+    await this.persistStatus(workspaceId, suggestionId, "dismissed");
     this.recordTelemetry(workspaceId, suggestionId, "dismissed");
     const suggestion = await this.findSuggestionById(workspaceId, suggestionId);
     if (suggestion) {
       this.recordSuggestionFeedback(workspaceId, suggestion, "dismissed");
       this.captureSuggestionFeedbackMemory(workspaceId, suggestion, "dismissed");
+      this.suppressEntity(workspaceId, suggestion);
     }
     this.saveDismissed();
     return true;
@@ -374,6 +376,9 @@ export class ProactiveSuggestionsService {
     this.loadDismissed();
     const until = Number.isFinite(snoozedUntil) ? snoozedUntil : Date.now() + 24 * 60 * 60 * 1000;
     this.snoozedUntil.set(suggestionId, until);
+    await this.withSuggestionStore((store) =>
+      store.setSnoozedUntil(workspaceId, suggestionId, until),
+    );
     this.recordTelemetry(workspaceId, suggestionId, "snoozed");
     const suggestion = await this.findSuggestionById(workspaceId, suggestionId);
     if (suggestion) {
@@ -406,16 +411,14 @@ export class ProactiveSuggestionsService {
     this.loadDismissed();
 
     try {
-      const results = await MemoryService.searchByContentMarker(workspaceId, SUGGESTION_MARKER, 50);
-      for (const r of results) {
-        if (r.type !== "insight" || !r.snippet.includes(SUGGESTION_MARKER)) continue;
-        const parsed = this.parseSuggestion(r.snippet, r.id, r.createdAt);
-        if (!parsed || parsed.id !== suggestionId) continue;
-
+      const parsed = await this.findSuggestionById(workspaceId, suggestionId);
+      if (parsed) {
         this.actedOnIds.add(suggestionId);
+        await this.persistStatus(workspaceId, suggestionId, "acted_on");
         this.recordTelemetry(workspaceId, suggestionId, "acted_on");
         this.recordSuggestionFeedback(workspaceId, parsed, "acted_on");
         this.captureSuggestionFeedbackMemory(workspaceId, parsed, "acted_on");
+        this.suppressEntity(workspaceId, parsed);
         this.saveDismissed();
         return parsed.actionPrompt || null;
       }
@@ -457,7 +460,7 @@ export class ProactiveSuggestionsService {
    * Run all suggestion generators. Called from DailyBriefingService.
    */
   static async generateAll(workspaceId: string): Promise<void> {
-    this.beginSuggestionCycle(workspaceId);
+    // Cross-generator dedupe happens in the SuggestionSink (entity key + normalized title).
     try {
       await this.detectRecurringPatterns(workspaceId);
     } catch {
@@ -492,8 +495,6 @@ export class ProactiveSuggestionsService {
       this.pruneExpired(workspaceId);
     } catch {
       /* best-effort */
-    } finally {
-      this.endSuggestionCycle(workspaceId);
     }
   }
 
@@ -514,22 +515,35 @@ export class ProactiveSuggestionsService {
     const templates = FOLLOW_UP_TEMPLATES[category];
     if (!templates || templates.length === 0) return;
 
-    // Pick the first template that isn't already a duplicate
+    // Pick the first template that does not merge into an existing suggestion
     for (const tmpl of templates) {
-      if (await this.isDuplicate(workspaceId, tmpl.title)) continue;
-
-      await this.storeSuggestion(workspaceId, {
+      const result = await this.propose({
+        workspaceId,
+        source: "follow_up",
         type: "follow_up",
         title: tmpl.title,
-        description: tmpl.description,
+        why: tmpl.description,
         actionPrompt: `${tmpl.promptSuffix} in task "${taskTitle}".`,
         sourceTaskId: taskId,
         confidence: 0.8,
       });
-      break; // One follow-up per task completion
+      if (result.created) break; // One follow-up per task completion
     }
   }
 
+  /**
+   * Propose a suggestion through the shared SuggestionSink: proposals for the same entity merge
+   * into one suggestion (with every proposing source recorded) instead of creating another one.
+   */
+  static propose(proposal: SuggestionProposal): Promise<SuggestionProposalResult> {
+    return getSuggestionSink().propose(proposal);
+  }
+
+  /**
+   * Companion suggestion entry point (Heartbeat dispatch, Workflow Intelligence). Routes through
+   * the SuggestionSink and returns null when the proposal merged into an existing suggestion or
+   * was suppressed, so callers do not notify twice.
+   */
   static async createCompanionSuggestion(
     workspaceId: string,
     suggestion: {
@@ -547,12 +561,18 @@ export class ProactiveSuggestionsService {
       sourceSignals?: string[];
       recommendedDelivery?: ProactiveSuggestion["recommendedDelivery"];
       companionStyle?: ProactiveSuggestion["companionStyle"];
+      entityKey?: string;
+      source?: SuggestionSource;
     },
   ): Promise<ProactiveSuggestion | null> {
-    const created = await this.storeSuggestion(workspaceId, {
+    const result = await this.propose({
+      workspaceId,
+      entityKey: suggestion.entityKey,
+      source: suggestion.source || "companion",
       type: suggestion.type || "insight",
       title: suggestion.title,
-      description: suggestion.description,
+      why: suggestion.description,
+      evidence: suggestion.sourceSignals,
       actionPrompt: suggestion.actionPrompt,
       sourceTaskId: suggestion.sourceTaskId,
       sourceEntity: suggestion.sourceEntity,
@@ -561,17 +581,16 @@ export class ProactiveSuggestionsService {
       urgency: suggestion.urgency,
       learningSignalIds: suggestion.learningSignalIds,
       workspaceScope: suggestion.workspaceScope,
-      sourceSignals: suggestion.sourceSignals,
       recommendedDelivery: suggestion.recommendedDelivery,
       companionStyle: suggestion.companionStyle,
     });
-    if (!created) {
+    if (!result.created || !result.suggestion) {
       return null;
     }
     return {
-      ...created,
-      dismissed: this.dismissedIds.has(created.id),
-      actedOn: this.actedOnIds.has(created.id),
+      ...result.suggestion,
+      dismissed: this.dismissedIds.has(result.suggestion.id),
+      actedOn: this.actedOnIds.has(result.suggestion.id),
     };
   }
 
@@ -579,36 +598,37 @@ export class ProactiveSuggestionsService {
     const summary = getAwarenessService().getSummary(workspaceId);
     const dueSoon = summary.dueSoon[0];
     if (dueSoon) {
-      const title = `Review due soon: ${dueSoon.title}`.slice(0, 80);
-      if (!(await this.isDuplicate(workspaceId, title))) {
-        await this.storeSuggestion(workspaceId, {
-          type: "follow_up",
-          title,
-          description: dueSoon.detail || "An awareness signal suggests this needs attention soon.",
-          actionPrompt: `Review this due-soon item and decide the next action: ${dueSoon.title}`,
-          sourceEntity: dueSoon.id,
-          confidence: Math.max(0.72, dueSoon.score || 0.72),
-        });
-      }
+      await this.propose({
+        workspaceId,
+        // Due-soon items are relationship commitments: the same entity AutonomyEngine follows up.
+        entityKey: dueSoon.tags.includes("commitment") ? commitmentEntityKey(dueSoon.id) : undefined,
+        source: "awareness",
+        type: "follow_up",
+        title: `Review due soon: ${dueSoon.title}`.slice(0, 80),
+        why: dueSoon.detail || "An awareness signal suggests this needs attention soon.",
+        actionPrompt: `Review this due-soon item and decide the next action: ${dueSoon.title}`,
+        sourceEntity: dueSoon.id,
+        evidence: [dueSoon.id],
+        confidence: Math.max(0.72, dueSoon.score || 0.72),
+      });
     }
 
     const contextShift = summary.whatMattersNow.find(
       (item) => item.tags.includes("focus") || item.tags.includes("context"),
     );
     if (contextShift) {
-      const title = `Capture current focus: ${contextShift.title}`.slice(0, 80);
-      if (!(await this.isDuplicate(workspaceId, title))) {
-        await this.storeSuggestion(workspaceId, {
-          type: "reverse_prompt",
-          title,
-          description:
-            contextShift.detail ||
-            "CoWork detected a context shift and can turn it into a concrete next step.",
-          actionPrompt: `Use my current computer context and recent work to propose the best next action for: ${contextShift.title}`,
-          sourceEntity: contextShift.id,
-          confidence: Math.max(0.64, contextShift.score || 0.64),
-        });
-      }
+      await this.propose({
+        workspaceId,
+        source: "awareness",
+        type: "reverse_prompt",
+        title: `Capture current focus: ${contextShift.title}`.slice(0, 80),
+        why:
+          contextShift.detail ||
+          "CoWork detected a context shift and can turn it into a concrete next step.",
+        actionPrompt: `Use my current computer context and recent work to propose the best next action for: ${contextShift.title}`,
+        sourceEntity: contextShift.id,
+        confidence: Math.max(0.64, contextShift.score || 0.64),
+      });
     }
   }
 
@@ -624,18 +644,7 @@ export class ProactiveSuggestionsService {
       .slice(0, 4);
 
     for (const decision of decisions) {
-      const title = decision.title.slice(0, 80);
-      if (await this.isDuplicate(workspaceId, title)) continue;
-      await this.storeSuggestion(workspaceId, {
-        type: "follow_up",
-        title,
-        description: decision.description,
-        actionPrompt:
-          decision.suggestedPrompt ||
-          `Review this chief-of-staff recommendation and take the next appropriate action: ${decision.title}`,
-        sourceEntity: decision.id,
-        confidence: decision.priority === "high" ? 0.9 : 0.76,
-      });
+      await this.propose(ProactiveSuggestionsService.autonomyDecisionProposal(workspaceId, decision));
     }
   }
 
@@ -643,42 +652,36 @@ export class ProactiveSuggestionsService {
    * Detect recurring task patterns from playbook entries.
    */
   static async detectRecurringPatterns(workspaceId: string): Promise<void> {
-    const results = await MemoryService.searchByContentMarker(
-      workspaceId,
-      "[PLAYBOOK] Task succeeded",
-      50,
-    );
-    const playbookEntries = results
-      .filter((r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"))
-      .slice(0, 30);
+    // Recorded successful executions (playbook_entries), newest first; private ones skipped.
+    const playbookEntries = await PlaybookService.listEntries(workspaceId, {
+      kinds: ["success"],
+      limit: 30,
+    });
 
     const groups = new Map<string, { count: number; titles: string[]; tools: string }>();
 
     for (const entry of playbookEntries) {
-      const titleMatch = entry.snippet.match(/Task succeeded: "([^"]+)"/);
-      if (!titleMatch) continue;
-      const raw = titleMatch[1];
+      const raw = entry.title;
+      if (!raw) continue;
       const key = this.normalizeTitle(raw);
       if (!key) continue;
 
       const existing = groups.get(key) || { count: 0, titles: [], tools: "" };
       existing.count++;
       existing.titles.push(raw);
-      const toolsMatch = entry.snippet.match(/Key tools: ([^\n]+)/);
-      if (toolsMatch) existing.tools = toolsMatch[1];
+      if (entry.toolsUsed.length > 0) existing.tools = entry.toolsUsed.join(", ");
       groups.set(key, existing);
     }
 
     for (const [, group] of groups) {
       if (group.count < MIN_RECURRING_COUNT) continue;
       const representativeTitle = group.titles[0];
-      const title = `Automate "${representativeTitle}"`.slice(0, 80);
-      if (await this.isDuplicate(workspaceId, title)) continue;
-
-      await this.storeSuggestion(workspaceId, {
+      await this.propose({
+        workspaceId,
+        source: "proactive",
         type: "recurring_pattern",
-        title,
-        description: `You've done this ${group.count} times. I can create an automated workflow.`,
+        title: `Automate "${representativeTitle}"`.slice(0, 80),
+        why: `You've done this ${group.count} times. I can create an automated workflow.`,
         actionPrompt: `Create an automated workflow or script for the recurring task: "${representativeTitle}". Tools typically used: ${group.tools || "various"}.`,
         confidence: Math.min(0.95, 0.6 + group.count * 0.05),
       });
@@ -698,13 +701,12 @@ export class ProactiveSuggestionsService {
 
       const matched =
         GOAL_TEMPLATES.find((t) => t.pattern.test(goalValue)) || DEFAULT_GOAL_TEMPLATE;
-      const title = matched.title(goalValue).slice(0, 80);
-      if (await this.isDuplicate(workspaceId, title)) continue;
-
-      await this.storeSuggestion(workspaceId, {
+      await this.propose({
+        workspaceId,
+        source: "proactive",
         type: "goal_aligned",
-        title,
-        description: `Your goal: "${goalValue}"`.slice(0, 250),
+        title: matched.title(goalValue).slice(0, 80),
+        why: `Your goal: "${goalValue}"`.slice(0, 250),
         actionPrompt: matched.prompt(goalValue),
         confidence: 0.75,
       });
@@ -738,17 +740,14 @@ export class ProactiveSuggestionsService {
         if (actionableObs.length < 1) continue;
 
         const entityName = result.entity.name;
-        const title = `Investigate ${entityName}`.slice(0, 80);
-        if (await this.isDuplicate(workspaceId, title)) continue;
-
         const obsPreview = actionableObs[0].content?.slice(0, 100) || "";
-        await this.storeSuggestion(workspaceId, {
+        await this.propose({
+          workspaceId,
+          entityKey: `kg:${result.entity.id}`,
+          source: "proactive",
           type: "insight",
-          title,
-          description: `${actionableObs.length} observation(s) flagged: "${obsPreview}"`.slice(
-            0,
-            250,
-          ),
+          title: `Investigate ${entityName}`.slice(0, 80),
+          why: `${actionableObs.length} observation(s) flagged: "${obsPreview}"`.slice(0, 250),
           actionPrompt: `Investigate the entity "${entityName}" which has ${actionableObs.length} observations about potential issues. Review the observations and recommend fixes.`,
           sourceEntity: entityName,
           confidence: Math.min(0.9, 0.6 + actionableObs.length * 0.1),
@@ -769,11 +768,14 @@ export class ProactiveSuggestionsService {
       recentPlaybookCount: 0,
     };
 
-    // Count recent playbook entries
+    // Count recent playbook entries (outcomes recorded in the last 30 days, at most 30)
     try {
-      const recentMemories = await MemoryService.getRecent(workspaceId, 30);
-      ctx.recentPlaybookCount = recentMemories.filter(
-        (m) => m.type === "insight" && m.content.includes("[PLAYBOOK]"),
+      ctx.recentPlaybookCount = (
+        await PlaybookService.listEntries(workspaceId, {
+          kinds: ["success", "failure"],
+          since: Date.now() - 30 * 24 * 60 * 60 * 1000,
+          limit: 30,
+        })
       ).length;
     } catch {
       // best-effort
@@ -781,12 +783,12 @@ export class ProactiveSuggestionsService {
 
     for (const rp of REVERSE_PROMPTS) {
       if (!rp.condition(ctx)) continue;
-      if (await this.isDuplicate(workspaceId, rp.title)) continue;
-
-      await this.storeSuggestion(workspaceId, {
+      await this.propose({
+        workspaceId,
+        source: "proactive",
         type: "reverse_prompt",
         title: rp.title,
-        description: rp.description,
+        why: rp.description,
         actionPrompt: rp.prompt,
         confidence: rp.confidence,
       });
@@ -795,24 +797,10 @@ export class ProactiveSuggestionsService {
 
   // ─── Storage Helpers ────────────────────────────────────────────
 
+  /** Storage behind the SuggestionSink. Producers go through `propose()`, never this. */
   private static async storeSuggestion(
     workspaceId: string,
-    suggestion: {
-      type: SuggestionType;
-      title: string;
-      description: string;
-      actionPrompt?: string;
-      sourceTaskId?: string;
-      sourceEntity?: string;
-      confidence: number;
-      suggestionClass?: ProactiveSuggestion["suggestionClass"];
-      urgency?: ProactiveSuggestion["urgency"];
-      learningSignalIds?: string[];
-      workspaceScope?: HeartbeatWorkspaceScope;
-      sourceSignals?: string[];
-      recommendedDelivery?: ProactiveSuggestion["recommendedDelivery"];
-      companionStyle?: ProactiveSuggestion["companionStyle"];
-    },
+    suggestion: SuggestionCreateInput,
   ): Promise<ProactiveSuggestion | null> {
     // Enforce max active count
     const active = await this.listActive(workspaceId, {
@@ -825,6 +813,7 @@ export class ProactiveSuggestionsService {
       if (lowest && suggestion.confidence <= lowest.confidence) return null; // new one wouldn't rank
       if (lowest) {
         this.dismissedIds.add(lowest.id);
+        await this.persistStatus(lowest.workspaceId || workspaceId, lowest.id, "dismissed");
         this.saveDismissed();
       }
     }
@@ -849,17 +838,16 @@ export class ProactiveSuggestionsService {
     if (suggestion.recommendedDelivery)
       payload.recommendedDelivery = suggestion.recommendedDelivery;
     if (suggestion.companionStyle) payload.companionStyle = suggestion.companionStyle;
+    if (suggestion.entityKey) payload.entityKey = suggestion.entityKey;
+    if (suggestion.sources?.length) payload.sources = suggestion.sources;
 
-    const content = `${SUGGESTION_MARKER} ${JSON.stringify(payload)}`;
-
-    // Track title as pending so same-cycle generators can dedup
-    this.getPendingTitles(workspaceId)?.add(suggestion.title.toLowerCase().trim().slice(0, 60));
+    const createdAt = Date.now();
+    const expiresAt = createdAt + SEVEN_DAYS_MS;
 
     try {
-      await MemoryService.capture(workspaceId, undefined, "insight", content, false, {
-        origin: "proactive",
-        batchable: false,
-      });
+      if (!(await this.persistSuggestion(workspaceId, id, payload, createdAt, expiresAt))) {
+        return null;
+      }
       this.recordTelemetry(workspaceId, id, "created");
       return {
         id,
@@ -878,8 +866,10 @@ export class ProactiveSuggestionsService {
         sourceSignals: suggestion.sourceSignals,
         recommendedDelivery: suggestion.recommendedDelivery,
         companionStyle: suggestion.companionStyle,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + SEVEN_DAYS_MS,
+        entityKey: suggestion.entityKey,
+        sources: suggestion.sources,
+        createdAt,
+        expiresAt,
         dismissed: false,
         actedOn: false,
         snoozedUntil: this.snoozedUntil.get(id),
@@ -887,6 +877,94 @@ export class ProactiveSuggestionsService {
     } catch {
       return null;
     }
+  }
+
+  // ─── Suggestion table persistence (suggestions / suggestion_feedback) ─────
+
+  /** Run `action` on the suggestion store; a missing store or a failure is a no-op. */
+  private static async withSuggestionStore<T>(
+    action: (store: ProactiveSuggestionStore) => Promise<T>,
+  ): Promise<T | null> {
+    try {
+      const store = await getProactiveSuggestionStore();
+      return store ? await action(store) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Store a new suggestion in the `suggestions` table. Memory settings stay authoritative,
+   * as when suggestions were archive rows: nothing is stored when they do not allow it, and
+   * the payload text is privacy-redacted first. Returns false when nothing was stored.
+   */
+  private static async persistSuggestion(
+    workspaceId: string,
+    id: string,
+    payload: Record<string, unknown>,
+    createdAt: number,
+    expiresAt: number,
+  ): Promise<boolean> {
+    const prepared = await MemoryService.prepareDerivedRecord(
+      workspaceId,
+      `${SUGGESTION_MARKER} ${JSON.stringify(payload)}`,
+    );
+    if (!prepared) return false;
+    let stored: Record<string, unknown>;
+    try {
+      stored = JSON.parse(prepared.content.slice(SUGGESTION_MARKER.length).trim());
+    } catch {
+      // Redaction broke the JSON (a secret inside a string value spanning quotes); keep it out.
+      return false;
+    }
+    return (
+      (await this.withSuggestionStore((store) =>
+        store.insert({
+          id,
+          workspaceId,
+          payload: { ...stored, id },
+          isPrivate: prepared.isPrivate,
+          createdAt,
+          expiresAt,
+        }),
+      )) === true
+    );
+  }
+
+  private static async persistStatus(
+    workspaceId: string,
+    suggestionId: string,
+    status: StoredSuggestionStatus,
+  ): Promise<void> {
+    await this.withSuggestionStore((store) => store.setStatus(workspaceId, suggestionId, status));
+  }
+
+  /** Decode a stored row through the same payload decoder legacy archive rows used. */
+  private static fromStored(row: StoredSuggestion): ProactiveSuggestion | null {
+    const parsed = this.parseSuggestion(
+      `${SUGGESTION_MARKER} ${JSON.stringify(row.payload)}`,
+      row.id,
+      row.createdAt,
+      row.workspaceId,
+    );
+    if (!parsed) return null;
+    const snoozedUntil = Math.max(parsed.snoozedUntil || 0, row.snoozedUntil || 0);
+    return {
+      ...parsed,
+      expiresAt: row.expiresAt,
+      snoozedUntil: snoozedUntil > 0 ? snoozedUntil : undefined,
+      dismissed: parsed.dismissed || row.status === "dismissed",
+      actedOn: parsed.actedOn || row.status === "acted_on",
+    };
+  }
+
+  /** Active, unexpired suggestions of one workspace, newest first. */
+  private static async readStoredSuggestions(workspaceId: string): Promise<ProactiveSuggestion[]> {
+    const rows =
+      (await this.withSuggestionStore((store) => store.listActive(workspaceId, 50))) ?? [];
+    return rows
+      .map((row) => this.fromStored(row))
+      .filter((suggestion): suggestion is ProactiveSuggestion => suggestion !== null);
   }
 
   private static parseSuggestion(
@@ -901,6 +979,15 @@ export class ProactiveSuggestionsService {
     const jsonStr = snippet.slice(idx + SUGGESTION_MARKER.length).trim();
     try {
       const data = JSON.parse(jsonStr);
+      const merged = this.mergedSources.get(data.id || memoryId);
+      const storedSources = Array.isArray(data.sources)
+        ? data.sources.filter((value: unknown): value is string => typeof value === "string")
+        : [];
+      const storedSignals = Array.isArray(data.sourceSignals)
+        ? data.sourceSignals.filter((value: unknown): value is string => typeof value === "string")
+        : [];
+      const sources = Array.from(new Set([...storedSources, ...(merged?.sources || [])]));
+      const sourceSignals = Array.from(new Set([...storedSignals, ...(merged?.evidence || [])]));
       return {
         id: data.id || memoryId,
         type: data.type || "follow_up",
@@ -919,11 +1006,9 @@ export class ProactiveSuggestionsService {
           : undefined,
         workspaceScope: data.workspaceScope === "all" ? "all" : "single",
         workspaceId,
-        sourceSignals: Array.isArray(data.sourceSignals)
-          ? data.sourceSignals.filter(
-              (value: unknown): value is string => typeof value === "string",
-            )
-          : undefined,
+        sourceSignals: sourceSignals.length > 0 ? sourceSignals : undefined,
+        entityKey: typeof data.entityKey === "string" ? data.entityKey : undefined,
+        sources: sources.length > 0 ? sources : undefined,
         recommendedDelivery:
           data.recommendedDelivery === "briefing" ||
           data.recommendedDelivery === "inbox" ||
@@ -947,21 +1032,70 @@ export class ProactiveSuggestionsService {
     }
   }
 
-  private static async isDuplicate(workspaceId: string, title: string): Promise<boolean> {
-    const normalizedNew = title.toLowerCase().trim().slice(0, 60);
-    // Check in-memory pending titles from current generation cycle
-    if (this.getPendingTitles(workspaceId)?.has(normalizedNew)) return true;
-    // Check already-persisted suggestions
-    const active = await this.listActive(workspaceId, {
-      includeDeferred: true,
-      recordSurface: false,
-    });
-    return active.some((s) => s.title.toLowerCase().trim().slice(0, 60) === normalizedNew);
+  /** Storage adapter used by the shared SuggestionSink. */
+  static sinkStore(): SuggestionSinkStore {
+    return {
+      listActive: (workspaceId) =>
+        this.listActive(workspaceId, { includeDeferred: true, recordSurface: false }),
+      create: (workspaceId, input) => this.storeSuggestion(workspaceId, input),
+      mergeSources: (_workspaceId, suggestionId, sources, evidence) => {
+        this.loadDismissed();
+        const current = this.mergedSources.get(suggestionId) || { sources: [], evidence: [] };
+        this.mergedSources.delete(suggestionId);
+        this.mergedSources.set(suggestionId, {
+          sources: Array.from(new Set([...current.sources, ...sources])).slice(0, 12),
+          evidence: Array.from(new Set([...current.evidence, ...evidence])).slice(-24),
+        });
+        this.saveDismissed();
+      },
+      isEntitySuppressed: (workspaceId, entityKey) => {
+        this.loadDismissed();
+        const until = this.suppressedEntities.get(`${workspaceId}::${entityKey}`) || 0;
+        return until > Date.now();
+      },
+    };
+  }
+
+  /** Map a chief-of-staff decision onto a sink proposal (entity shared with awareness/briefing). */
+  static autonomyDecisionProposal(
+    workspaceId: string,
+    decision: {
+      id: string;
+      title: string;
+      description: string;
+      priority?: string;
+      suggestedPrompt?: string;
+      entityKey?: string;
+      evidenceRefs?: string[];
+    },
+  ): SuggestionProposal {
+    return {
+      workspaceId,
+      entityKey: decision.entityKey,
+      source: "autonomy",
+      type: "follow_up",
+      title: decision.title.slice(0, 80),
+      why: decision.description,
+      actionPrompt:
+        decision.suggestedPrompt ||
+        `Review this chief-of-staff recommendation and take the next appropriate action: ${decision.title}`,
+      sourceEntity: decision.id,
+      evidence: decision.evidenceRefs,
+      confidence: decision.priority === "high" ? 0.9 : 0.76,
+      urgency: decision.priority === "high" ? "high" : undefined,
+    };
+  }
+
+  /** A dismissed or acted-on suggestion keeps every producer from re-proposing its entity. */
+  private static suppressEntity(workspaceId: string, suggestion: ProactiveSuggestion): void {
+    const entityKey = normalizeSuggestionEntityKey(suggestion.entityKey, suggestion.title);
+    this.suppressedEntities.set(`${workspaceId}::${entityKey}`, Date.now() + ENTITY_SUPPRESSION_MS);
+    getSuggestionSink().forget(workspaceId);
   }
 
   private static pruneExpired(_workspaceId: string): void {
     // Expired suggestions are filtered out on retrieval (expiresAt check),
-    // so no explicit cleanup needed. MemoryService retention handles old entries.
+    // so no explicit cleanup needed. MemoryRetentionService prunes old `suggestions` rows.
   }
 
   private static normalizeTitle(title: string): string {
@@ -1023,17 +1157,8 @@ export class ProactiveSuggestionsService {
     workspaceId: string,
     suggestionId: string,
   ): Promise<ProactiveSuggestion | null> {
-    try {
-      const results = await MemoryService.searchByContentMarker(workspaceId, SUGGESTION_MARKER, 50);
-      for (const r of results) {
-        if (r.type !== "insight" || !r.snippet.includes(SUGGESTION_MARKER)) continue;
-        const parsed = this.parseSuggestion(r.snippet, r.id, r.createdAt, workspaceId);
-        if (parsed?.id === suggestionId) return parsed;
-      }
-    } catch {
-      // best-effort
-    }
-    return null;
+    const row = await this.withSuggestionStore((store) => store.get(workspaceId, suggestionId));
+    return row && !row.isPrivate ? this.fromStored(row) : null;
   }
 
   private static getSuggestionFeedbackKey(
@@ -1087,44 +1212,34 @@ export class ProactiveSuggestionsService {
     action: "acted_on" | "dismissed" | "snoozed" | "edited" | "ignored",
     editedPrompt?: string,
   ): void {
-    const actionLabel =
-      action === "acted_on"
-        ? "accepted"
-        : action === "edited"
-          ? "edited"
-          : action === "ignored"
-            ? "ignored"
-            : action === "snoozed"
-              ? "snoozed"
-              : "dismissed";
-    const type =
-      action === "acted_on"
-        ? "workflow_pattern"
-        : action === "edited"
-          ? "correction_rule"
-          : "observation";
-    const content = [
-      `[suggestion-feedback:${action}] ${actionLabel} suggestion "${suggestion.title}".`,
-      `Class: ${suggestion.suggestionClass || suggestion.type || "general"}.`,
-      suggestion.sourceEntity ? `Source: ${suggestion.sourceEntity}.` : "",
-      suggestion.actionPrompt ? `Suggested action: ${suggestion.actionPrompt}` : "",
-      editedPrompt ? `Edited action: ${editedPrompt}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    const captureResult = MemoryService.capture(workspaceId, undefined, type, content, false, {
-      origin: "proactive",
-      batchKey: `suggestion-feedback:${this.normalizeTitle(suggestion.title) || suggestion.id}`,
-      priority: action === "acted_on" || action === "edited" ? "high" : "normal",
-      batchable: false,
-      signalFamily:
-        action === "acted_on"
-          ? "accepted_suggestion"
-          : action === "edited"
-            ? "edited_suggestion"
-            : "ignored_noise",
-    });
-    void Promise.resolve(captureResult).catch(() => {
+    // A learning signal in `suggestion_feedback` (no longer an archive memory row), under
+    // the same memory settings and privacy redaction an archive capture had. Best-effort.
+    const record = {
+      action,
+      title: suggestion.title,
+      suggestionClass: suggestion.suggestionClass || suggestion.type || "general",
+      sourceEntity: suggestion.sourceEntity || null,
+      actionPrompt: suggestion.actionPrompt || null,
+      editedPrompt: editedPrompt || null,
+    };
+    void (async () => {
+      const prepared = await MemoryService.prepareDerivedRecord(
+        workspaceId,
+        renderSuggestionFeedbackContent(record),
+      );
+      const fields = prepared ? parseSuggestionFeedbackContent(prepared.content) : null;
+      if (!prepared || !fields) return;
+      await this.withSuggestionStore((store) =>
+        store.insertFeedback({
+          id: uuidv4(),
+          workspaceId,
+          suggestionId: suggestion.id,
+          ...fields,
+          isPrivate: prepared.isPrivate,
+          createdAt: Date.now(),
+        }),
+      );
+    })().catch(() => {
       // best-effort learning signal
     });
   }
@@ -1195,3 +1310,6 @@ export class ProactiveSuggestionsService {
     return adjustment < -0.1 && ageMs < 24 * 60 * 60 * 1000;
   }
 }
+
+// The shared SuggestionSink stores suggestions through this service.
+setSuggestionSinkStore(() => ProactiveSuggestionsService.sinkStore());

@@ -586,6 +586,50 @@ describeWithSqlite("SubconsciousLoopService", () => {
     await service.stop();
   });
 
+  it("routes WI task dispatch through the shared background budget", async () => {
+    const workspace = insertWorkspace("budgeted");
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const { BackgroundDispatchBudget, setBackgroundDispatchBudget } = await import(
+      "../../agents/BackgroundDispatchBudget"
+    );
+    const budget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 2 });
+    setBackgroundDispatchBudget(budget);
+    try {
+      const createTask = vi.fn().mockResolvedValue({ id: "wi-task-1" });
+      const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+      service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true, autoRun: false });
+      await service.start({ createTask } as unknown as import("../../agent/daemon").AgentDaemon);
+      const internals = service as unknown as {
+        resolveDispatchKind: () => string;
+        dispatchDecision: (
+          target: Any,
+          decision: Any,
+          evidence: Any[],
+        ) => Promise<{ kind: string; status: string; taskId?: string } | null>;
+      };
+      internals.resolveDispatchKind = () => "task";
+      const target = {
+        key: `workspace:${workspace.id}`,
+        kind: "workspace",
+        label: "Budgeted workspace",
+        workspaceId: workspace.id,
+      };
+      const decision = { runId: randomUUID(), winnerSummary: "Do it", recommendation: "Do it" };
+
+      const first = await internals.dispatchDecision(target, decision, []);
+      expect(first).toMatchObject({ kind: "task", taskId: "wi-task-1" });
+
+      // Same target again: the shared per-entity cooldown turns it into a review suggestion.
+      const second = await internals.dispatchDecision(target, decision, []);
+      expect(second?.kind).toBe("suggestion");
+      expect(createTask).toHaveBeenCalledTimes(1);
+      expect(budget.snapshot(workspace.id).bySource).toEqual({ workflow_intelligence: 1 });
+      service.stop();
+    } finally {
+      setBackgroundDispatchBudget(null);
+    }
+  });
+
   it("records a sleep outcome when a target has no fresh evidence worth acting on", async () => {
     const workspace = insertWorkspace("gamma");
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");

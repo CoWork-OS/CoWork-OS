@@ -268,6 +268,69 @@ describeWithSqlite("StrategicPlannerService", () => {
     expect(tasks[0]?.agentConfig?.autonomousMode).toBe(true);
   });
 
+  it("consults the shared background budget for scheduled dispatches only", async () => {
+    const workspace = insertWorkspace();
+    const company = await core.getDefaultCompany();
+    const project = await core.createProject({ companyId: company.id, name: "Budgeted Ops" });
+    await core.linkProjectWorkspace({
+      projectId: project.id,
+      workspaceId: workspace.id,
+      isPrimary: true,
+    });
+    const plannerAgent =
+      agentRoleRepo.findByName("project_manager") ||
+      agentRoleRepo.create({
+        name: "planner-agent",
+        displayName: "Planner Agent",
+        capabilities: ["plan", "manage"],
+        heartbeatEnabled: true,
+      });
+
+    const { BackgroundDispatchBudget } = await import("../../agents/BackgroundDispatchBudget");
+    const dispatchBudget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 1 });
+    // Heartbeat already spent today's background slot for this workspace.
+    dispatchBudget.tryConsume({ workspaceId: workspace.id, source: "heartbeat" });
+
+    const createdTaskIds: string[] = [];
+    planner = new (await import("../StrategicPlannerService")).StrategicPlannerService({
+      db,
+      dispatchBudget,
+      agentDaemon: {
+        createTask: async (params: { title: string; prompt: string; workspaceId: string }) => {
+          const task = taskRepo.create({
+            title: params.title,
+            prompt: params.prompt,
+            status: "pending",
+            workspaceId: params.workspaceId,
+            source: "api",
+          });
+          createdTaskIds.push(task.id);
+          return task;
+        },
+      } as Any,
+    });
+    await planner.updateConfig(company.id, {
+      enabled: true,
+      autoDispatch: true,
+      maxIssuesPerRun: 2,
+      plannerAgentRoleId: plannerAgent.id,
+      planningWorkspaceId: workspace.id,
+    });
+
+    const scheduled = await planner.runNow({ companyId: company.id, trigger: "schedule" });
+    expect(scheduled.status).toBe("completed");
+    expect(scheduled.dispatchedTaskCount ?? 0).toBe(0);
+    expect(createdTaskIds).toHaveLength(0);
+
+    const manual = await planner.runNow({ companyId: company.id, trigger: "manual" });
+    expect(manual.dispatchedTaskCount).toBeGreaterThan(0);
+    expect(createdTaskIds).toHaveLength(1);
+    expect(dispatchBudget.snapshot(workspace.id).bySource).toMatchObject({
+      heartbeat: 1,
+      strategic_planner: 1,
+    });
+  });
+
   it("uses the control-plane workspace link tool instructions for project workspace issues", async () => {
     const workspace = insertWorkspace();
     const company = await core.getDefaultCompany();

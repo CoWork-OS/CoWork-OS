@@ -18,6 +18,7 @@ import { MemoryTierService } from "../MemoryTierService";
 import { createMemoryStatementPort } from "../memory-statement-port";
 import { PlaybookEvidenceLedger } from "../PlaybookEvidenceLedger";
 import { hashMemoryContent } from "../PlaybookEvidenceStore";
+import { ProactiveSuggestionStore } from "../ProactiveSuggestionStore";
 
 // The memory domain on both backends (async SQLite migration plan, DB6): the same
 // workload through the host connection and through the database worker must return the
@@ -188,31 +189,92 @@ describe("memory domain on the host and in the database worker", () => {
     };
 
     const ledger = PlaybookEvidenceLedger.open(db, () => start);
-    const recorded = await ledger.record({
+    const successInput = {
       workspaceId: "ws",
       taskId: "task-1",
-      sourceMemoryId: "mem-plan",
-      sourceContentHash: hashMemoryContent("Reconcile invoices with the ledger export"),
+      kind: "success" as const,
+      content: [
+        '[PLAYBOOK] Task succeeded: "Reconcile invoices"',
+        "Approach: Reconcile invoices with the ledger export",
+        "Key tools: ledger",
+        "Original request: Reconcile invoices",
+      ].join("\n"),
+      isPrivate: false,
       patternKey: "tools:ledger",
+    };
+    const recorded = await ledger.recordOutcome(successInput);
+    const repeated = await ledger.recordOutcome(successInput);
+    const failure = await ledger.recordOutcome({
+      ...successInput,
+      taskId: "task-3",
+      kind: "failure",
+      content: '[PLAYBOOK] Task failed: "Reconcile invoices"\nCategory: user_correction',
     });
-    // Recorded against content the memory no longer has: reading it invalidates it.
+    if (recorded.status !== "recorded" || failure.status !== "recorded") throw new Error("setup");
+    // Recorded against content the entry no longer has: reading it invalidates it.
     const edited = await ledger.record({
       workspaceId: "ws",
       taskId: "task-2",
-      sourceMemoryId: "mem-old",
+      sourceEntryId: failure.entryId,
       sourceContentHash: hashMemoryContent("content before an edit"),
       patternKey: "tools:ledger",
     });
     result.playbook = {
-      created: recorded.created,
-      readable: (await ledger.listReadable("ws")).map(({ record, content }) => [
+      duplicate: repeated.status,
+      readable: (await ledger.listReadable("ws")).map(({ record, entry }) => [
         record.taskId,
-        content,
+        entry.title,
+        entry.approach,
+        entry.toolsUsed,
       ]),
       editedActive: (await ledger.get(edited.record.id))?.invalidatedAt === null,
-      linked: (await ledger.linkAll(recorded.record.id, [edited.record.id])).length,
+      linked: (await ledger.linkAll(recorded.evidenceId!, [edited.record.id])).length,
+      outcomes: await ledger.countOutcomes("ws"),
       invalidated: await ledger.invalidateTask("ws", "task-1", "corrected_by_user"),
+      corrections: (await ledger.listCorrections("ws", 0)).map(({ taskId }) => taskId).sort(),
+      entries: (await ledger.listEntries("ws")).map((entry) => [
+        entry.taskId,
+        entry.kind,
+        entry.status,
+        entry.reinforcementCount,
+      ]),
       readableAfter: (await ledger.listReadable("ws")).length,
+    };
+
+    const suggestions = ProactiveSuggestionStore.open(db, () => start);
+    const suggestion = (id: string, isPrivate = false) => ({
+      id,
+      workspaceId: "ws",
+      payload: { id, type: "follow_up", title: `Title ${id}`, description: "d", confidence: 0.7 },
+      isPrivate,
+      createdAt: start,
+      expiresAt: start + 7 * 86_400_000,
+    });
+    result.suggestions = {
+      inserted: await suggestions.insert(suggestion("sug-1")),
+      duplicate: await suggestions.insert(suggestion("sug-1")),
+      privateInserted: await suggestions.insert(suggestion("sug-private", true)),
+      second: await suggestions.insert(suggestion("sug-2")),
+      active: (await suggestions.listActive("ws")).map((row) => row.id).sort(),
+      dismissed: await suggestions.setStatus("ws", "sug-1", "dismissed"),
+      snoozed: await suggestions.setSnoozedUntil("ws", "sug-2", start + 1000),
+      activeAfter: (await suggestions.listActive("ws")).map((row) => row.id),
+      status: (await suggestions.get("ws", "sug-1"))?.status,
+      feedback: await suggestions.insertFeedback({
+        id: "fb-1",
+        workspaceId: "ws",
+        suggestionId: "sug-1",
+        action: "acted_on",
+        title: "Title sug-1",
+        suggestionClass: "follow_up",
+        sourceEntity: null,
+        actionPrompt: null,
+        editedPrompt: null,
+        isPrivate: false,
+        createdAt: start,
+      }),
+      accepted: await suggestions.countFeedback("ws", "acted_on", 2),
+      dismissedCount: await suggestions.countFeedback("ws", "dismissed", 2),
     };
 
     const dreaming = new DreamingRepository(db);
@@ -336,12 +398,35 @@ describe("memory domain on the host and in the database worker", () => {
     expect(result.kg.sameEdge).toBe(true);
     expect(result.kg.selfLoop).toBe("Cannot create an edge from an entity to itself");
     expect(result.playbook).toEqual({
-      created: true,
-      readable: [["task-1", "Reconcile invoices with the ledger export"]],
+      duplicate: "duplicate_execution",
+      readable: [
+        ["task-1", "Reconcile invoices", "Reconcile invoices with the ledger export", ["ledger"]],
+      ],
       editedActive: false,
       linked: 1,
+      outcomes: { successes: 1, failures: 1 },
       invalidated: 1,
+      corrections: ["task-1", "task-3"],
+      // Newest first; both share the clock, so the later insert leads.
+      entries: [
+        ["task-3", "failure", "invalidated", 1],
+        ["task-1", "success", "invalidated", 0],
+      ],
       readableAfter: 0,
+    });
+    expect(result.suggestions).toEqual({
+      inserted: true,
+      duplicate: false,
+      privateInserted: true,
+      second: true,
+      active: ["sug-1", "sug-2"],
+      dismissed: true,
+      snoozed: true,
+      activeAfter: ["sug-2"],
+      status: "dismissed",
+      feedback: true,
+      accepted: 1,
+      dismissedCount: 0,
     });
     expect(result.observations.suppressed).toEqual(["mem-plan"]);
     expect((result.durable.search as unknown[]).length).toBeGreaterThan(0);

@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "crypto";
 import type Database from "better-sqlite3";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
+import { buildFtsMatchQuery, likeContainsPattern } from "../database/fts-query";
+import { ConversationIndexStore, ensureConversationIndexSchema } from "./conversation-index-sql";
 
 /**
  * Durable context storage as synchronous SQL: the store the memory domain's transaction
@@ -86,20 +88,20 @@ export function normalizeText(text: string): string {
   return InputSanitizer.sanitizeMemoryContent(text).replace(/\s+/g, " ").trim();
 }
 
-function toSqlLikePattern(query: string): string {
-  const compact = query.trim().replace(/[%_]/g, "\\$&");
-  return `%${compact}%`;
+/**
+ * The shared, operator-safe builder (RECALL-9): user text such as `cats AND dogs` or
+ * `executor.ts` used to produce FTS syntax errors that silently fell back to LIKE.
+ */
+function toFtsQuery(query: string): string | null {
+  return buildFtsMatchQuery(query, { mode: "all", prefix: true });
 }
 
-function toFtsQuery(query: string): string {
-  return query
-    .trim()
-    .split(/[^\p{L}\p{N}_]+/u)
-    .map((token) => token.trim().replace(/"/g, ""))
-    .filter(Boolean)
-    .slice(0, 12)
-    .map((token) => `${token}*`)
-    .join(" AND ");
+/**
+ * Ids `context_recall` (and the deprecated context_grep / context_describe) return: durable
+ * messages and summaries, and conversation-index events (`dce_`, its fallback lane).
+ */
+function isContextRecallId(id: string): boolean {
+  return id.startsWith("dcm_") || id.startsWith("dcs_") || id.startsWith("dce_");
 }
 
 function looksLikeDurableContextResult(value: unknown): boolean {
@@ -110,10 +112,7 @@ function looksLikeDurableContextResult(value: unknown): boolean {
     const resultRecord = result as Record<string, unknown>;
     const id = typeof resultRecord.id === "string" ? resultRecord.id : "";
     const kind = resultRecord.kind;
-    if (
-      (id.startsWith("dcm_") || id.startsWith("dcs_")) &&
-      (kind === "message" || kind === "summary")
-    ) {
+    if (isContextRecallId(id) && (kind === "message" || kind === "summary")) {
       return true;
     }
   }
@@ -124,8 +123,7 @@ function looksLikeDurableContextResult(value: unknown): boolean {
     const entryRecord = entry as Record<string, unknown>;
     const id = typeof entryRecord.id === "string" ? entryRecord.id : "";
     return (
-      (id.startsWith("dcm_") || id.startsWith("dcs_")) &&
-      (entryRecord.kind === "message" || entryRecord.kind === "summary")
+      isContextRecallId(id) && (entryRecord.kind === "message" || entryRecord.kind === "summary")
     );
   });
 }
@@ -277,6 +275,8 @@ export function ensureDurableContextSchema(db: Database.Database): void {
     );
   `);
   ensureColumn(db, "durable_context_large_payloads", "content_text", "TEXT");
+  // The conversation index (task events of every task) lives in the same store.
+  ensureConversationIndexSchema(db);
 }
 
 export interface RecordHistoryArgs {
@@ -507,7 +507,8 @@ export class DurableContextStore {
     const conversations = db
       .prepare(`DELETE FROM durable_context_conversations WHERE workspace_id = ?`)
       .run(workspaceId).changes;
-    return payload + summaries + messages + conversations;
+    const events = new ConversationIndexStore(db).clearWorkspace(workspaceId);
+    return payload + summaries + messages + conversations + events;
   }
 
   search(params: DurableSearchArgs): DurableContextHit[] {
@@ -516,7 +517,7 @@ export class DurableContextStore {
     const limit = params.limit;
     const ftsResults = this.searchWithFts(params, query, limit);
     if (ftsResults.length > 0) return ftsResults;
-    const like = toSqlLikePattern(query);
+    const like = likeContainsPattern(query);
     const taskClause = params.taskId ? "AND task_id = ?" : "";
     const taskValues = params.taskId ? [params.taskId] : [];
     const internalLimit = limit * 4;
@@ -586,6 +587,23 @@ export class DurableContextStore {
     const id = params.id;
     const taskClause = params.taskId ? "AND task_id = ?" : "";
     const taskValues = params.taskId ? [params.taskId] : [];
+
+    if (id.startsWith("dce_")) {
+      const event = new ConversationIndexStore(db).describeEvent({
+        workspaceId: params.workspaceId,
+        taskId: params.taskId ?? null,
+        id,
+      });
+      if (!event) return null;
+      return {
+        id: event.id,
+        kind: "message",
+        workspaceId: event.workspaceId,
+        taskId: event.taskId,
+        timestamp: event.timestamp,
+        text: `${event.role} (${event.type}): ${event.text}`,
+      };
+    }
 
     if (id.startsWith("dcs_")) {
       const row = db

@@ -20,6 +20,7 @@ interface MCTaskDetailProps {
 const UNIFIED_RECALL_SOURCES: Array<{ value: UnifiedRecallSourceType; label: string }> = [
   { value: "task", label: "Tasks" },
   { value: "message", label: "Messages" },
+  { value: "conversation", label: "Conversation" },
   { value: "file", label: "Files" },
   { value: "workspace_note", label: "Workspace notes" },
   { value: "memory", label: "Memory" },

@@ -7,7 +7,6 @@ import {
   AutonomyOutcome,
   AutonomyPolicyLevel,
   AwarenessBelief,
-  AwarenessEvent,
   ChiefOfStaffActionType,
   ChiefOfStaffWorldModel,
   FocusSessionState,
@@ -20,20 +19,31 @@ import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getAwarenessService } from "./AwarenessService";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { UserProfileService } from "../memory/UserProfileService";
+import {
+  getBackgroundDispatchBudget,
+  type BackgroundDispatchBudget,
+} from "../agents/BackgroundDispatchBudget";
+import { commitmentEntityKey } from "../agent/SuggestionSink";
 
 const STORAGE_KEY = "autonomy-chief-of-staff";
-const EVALUATION_INTERVAL_MS = 90_000;
+/**
+ * Heartbeat pulses call `evaluate()`; several heartbeat agents can pulse the same workspace,
+ * so evaluations closer together than this are skipped (manual evaluations are not).
+ */
+const MIN_EVALUATION_INTERVAL_MS = 60_000;
 const MAX_ACTIONS = 80;
 const MAX_OUTCOMES = 80;
 /**
- * World-model fields stamped with the evaluation time. Every evaluation rewrites
- * them, and start() re-derives every world model, so a change in these alone is
- * not worth a settings write.
+ * v2: autonomous task creation is opt-in. Earlier states carried `execute_local` defaults for
+ * `create_task` / `execute_local_action`; loading such a state resets them to `suggest_only`.
  */
+const AUTONOMY_POLICY_VERSION = 2;
+const OPT_IN_ACTION_TYPES: ChiefOfStaffActionType[] = ["create_task", "execute_local_action"];
+/** World-model fields that change on every derivation and must not count as a change. */
 const VOLATILE_WORLD_MODEL_KEYS = new Set([
   "generatedAt",
-  "lastActiveAt",
   "startedAt",
+  "lastActiveAt",
   "lastObservedAt",
 ]);
 
@@ -43,6 +53,13 @@ interface PersistedAutonomyState {
   decisions: AutonomyDecision[];
   actions: AutonomyAction[];
   outcomes: AutonomyOutcome[];
+  policyVersion?: number;
+}
+
+/** A suggestion proposal for the shared SuggestionSink (kept structural to avoid a cycle). */
+export interface AutonomySuggestionProposal {
+  workspaceId: string;
+  decision: AutonomyDecision;
 }
 
 interface AutonomyEngineDeps {
@@ -56,20 +73,32 @@ interface AutonomyEngineDeps {
     description?: string;
     metadata?: Record<string, unknown>;
   }) => void;
-  wakeHeartbeats?: (params: { text: string; mode?: "now" | "next-heartbeat" }) => void;
+  /** Route suggested decisions into the shared SuggestionSink. */
+  proposeSuggestion?: (proposal: AutonomySuggestionProposal) => Promise<unknown>;
+  /** Shared background dispatch budget; defaults to the process-wide one. */
+  dispatchBudget?: BackgroundDispatchBudget;
   log?: (...args: unknown[]) => void;
+}
+
+function stableWorldModelKey(model: ChiefOfStaffWorldModel | undefined): string {
+  if (!model) return "";
+  return JSON.stringify(model, (key, value) =>
+    VOLATILE_WORLD_MODEL_KEYS.has(key) ? undefined : value,
+  );
+}
+
+function normalizeEntityPart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
 }
 
 function hashFingerprint(parts: Array<string | number | undefined>): string {
   return createHash("sha1").update(parts.filter(Boolean).join("|")).digest("hex").slice(0, 20);
-}
-
-/** The persisted state with evaluation timestamps removed from world models. */
-function persistedContentFingerprint(state: PersistedAutonomyState): string {
-  const worldModels = JSON.stringify(state.worldModels, (key, value) =>
-    VOLATILE_WORLD_MODEL_KEYS.has(key) ? undefined : value,
-  );
-  return JSON.stringify({ ...state, worldModels: undefined }) + worldModels;
 }
 
 function clampConfidence(value: number): number {
@@ -96,13 +125,14 @@ export const DEFAULT_AUTONOMY_CONFIG: AutonomyConfig = {
   maxPendingDecisions: 12,
   actionPolicies: {
     prepare_briefing: buildActionPolicy("prepare_briefing", "suggest_only", 180),
-    create_task: buildActionPolicy("create_task", "execute_local", 240),
+    // Autonomous task creation is opt-in (SEC-18): the user can switch these to execute_local.
+    create_task: buildActionPolicy("create_task", "suggest_only", 240),
     schedule_follow_up: buildActionPolicy("schedule_follow_up", "suggest_only", 180),
     draft_message: buildActionPolicy("draft_message", "execute_with_approval", 240, true),
     draft_agenda: buildActionPolicy("draft_agenda", "suggest_only", 180),
     organize_work_session: buildActionPolicy("organize_work_session", "suggest_only", 180),
     nudge_user: buildActionPolicy("nudge_user", "suggest_only", 90),
-    execute_local_action: buildActionPolicy("execute_local_action", "execute_local", 180),
+    execute_local_action: buildActionPolicy("execute_local_action", "suggest_only", 180),
   },
 };
 
@@ -113,6 +143,7 @@ function defaultState(): PersistedAutonomyState {
     decisions: [],
     actions: [],
     outcomes: [],
+    policyVersion: AUTONOMY_POLICY_VERSION,
   };
 }
 
@@ -122,10 +153,10 @@ export class AutonomyEngine {
   private state: PersistedAutonomyState = defaultState();
   private loaded = false;
   private started = false;
-  private timer: NodeJS.Timeout | null = null;
+  /** Unsaved changes; the encrypted state is written only when this is set. */
+  private dirty = false;
   private evaluationInFlight = new Set<string>();
-  /** Fingerprint of the last state written or loaded; `null` forces the next save. */
-  private lastSavedFingerprint: string | null = null;
+  private lastEvaluatedAt = new Map<string, number>();
 
   constructor(deps: AutonomyEngineDeps = {}) {
     this.deps = deps;
@@ -144,20 +175,36 @@ export class AutonomyEngine {
     return this.instance || this.initialize();
   }
 
+  /**
+   * AutonomyEngine no longer schedules itself: Heartbeat owns "when to think" and calls
+   * `evaluate(workspaceId)` from its pulse. `start` only loads the persisted state.
+   */
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
     this.ensureLoaded();
-    await this.evaluateAll();
-    this.timer = setInterval(() => {
-      void this.evaluateAll();
-    }, EVALUATION_INTERVAL_MS);
+    this.saveIfDirty();
   }
 
   async stop(): Promise<void> {
     this.started = false;
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.saveIfDirty();
+  }
+
+  /**
+   * Heartbeat pulse phase: cheap, deterministic evaluation of one workspace. Skipped when the
+   * engine is disabled, auto-evaluation is off, or this workspace was evaluated within the last
+   * minute (several heartbeat agents may pulse the same workspace).
+   */
+  async evaluate(workspaceId: string): Promise<boolean> {
+    this.ensureLoaded();
+    if (!workspaceId || !this.state.config.enabled || !this.state.config.autoEvaluate) {
+      return false;
+    }
+    const last = this.lastEvaluatedAt.get(workspaceId) || 0;
+    if (Date.now() - last < MIN_EVALUATION_INTERVAL_MS) return false;
+    await this.evaluateWorkspace(workspaceId);
+    return true;
   }
 
   getConfig(): AutonomyConfig {
@@ -175,7 +222,10 @@ export class AutonomyEngine {
         ...config.actionPolicies,
       },
     };
-    this.save();
+    // An explicit save is the user's choice (including opting in to execute_local).
+    this.state.policyVersion = AUTONOMY_POLICY_VERSION;
+    this.markDirty();
+    this.saveIfDirty();
     return this.getConfig();
   }
 
@@ -221,14 +271,6 @@ export class AutonomyEngine {
     return this.getWorldModel(resolvedWorkspaceId);
   }
 
-  notifyEvent(event: AwarenessEvent): void {
-    this.ensureLoaded();
-    if (!this.state.config.enabled || !this.state.config.autoEvaluate) return;
-    const workspaceId = event.workspaceId || this.deps.getDefaultWorkspaceId?.();
-    if (!workspaceId) return;
-    void this.evaluateWorkspace(workspaceId);
-  }
-
   updateDecision(
     id: string,
     patch: Partial<Pick<AutonomyDecision, "status">>,
@@ -260,7 +302,8 @@ export class AutonomyEngine {
         });
         this.state.outcomes = this.state.outcomes.slice(0, MAX_OUTCOMES);
       }
-      this.save();
+      this.markDirty();
+      this.saveIfDirty();
     }
     return { ...decision, evidenceRefs: [...decision.evidenceRefs] };
   }
@@ -275,7 +318,7 @@ export class AutonomyEngine {
     try {
       const repo = SecureSettingsRepository.getInstance();
       const stored = repo.load<PersistedAutonomyState>(STORAGE_KEY);
-      this.state = stored
+      const next: PersistedAutonomyState = stored
         ? {
             config: {
               ...DEFAULT_AUTONOMY_CONFIG,
@@ -289,68 +332,82 @@ export class AutonomyEngine {
             decisions: Array.isArray(stored.decisions) ? stored.decisions : [],
             actions: Array.isArray(stored.actions) ? stored.actions : [],
             outcomes: Array.isArray(stored.outcomes) ? stored.outcomes : [],
+            policyVersion: stored.policyVersion,
           }
         : defaultState();
-      if (stored) this.lastSavedFingerprint = persistedContentFingerprint(this.state);
+      if ((next.policyVersion ?? 1) < AUTONOMY_POLICY_VERSION) {
+        // Older states stored the former execute_local defaults; make task creation opt-in.
+        for (const actionType of OPT_IN_ACTION_TYPES) {
+          const policy = next.config.actionPolicies[actionType];
+          if (policy?.level === "execute_local") {
+            next.config.actionPolicies[actionType] = { ...policy, level: "suggest_only" };
+          }
+        }
+        next.policyVersion = AUTONOMY_POLICY_VERSION;
+        this.dirty = true;
+      }
+      this.state = next;
     } catch {
       this.state = defaultState();
     }
   }
 
-  private save(): void {
+  private markDirty(): void {
+    this.dirty = true;
+  }
+
+  /** Full encrypted SecureSettings write, only when something actually changed. */
+  private saveIfDirty(): void {
+    if (!this.dirty) return;
     if (!SecureSettingsRepository.isInitialized()) return;
-    const fingerprint = persistedContentFingerprint(this.state);
-    if (fingerprint === this.lastSavedFingerprint) return;
     try {
+      // save() returns false when the write was refused; keep the state dirty to retry.
       if (SecureSettingsRepository.getInstance().save(STORAGE_KEY, this.state)) {
-        this.lastSavedFingerprint = fingerprint;
+        this.dirty = false;
       }
     } catch {
-      // best-effort
+      // best-effort; retried on the next change
     }
   }
 
-  private async evaluateAll(): Promise<void> {
-    this.ensureLoaded();
-    if (!this.state.config.enabled) return;
-    const workspaceIds = Array.from(
-      new Set(
-        [
-          ...(this.deps.listWorkspaceIds?.() || []),
-          ...Object.keys(this.state.worldModels),
-          this.deps.getDefaultWorkspaceId?.() || "",
-        ].filter(Boolean),
-      ),
-    ).slice(0, 12);
-
-    // One save for the sweep rather than one full-state write per workspace.
-    for (const workspaceId of workspaceIds) {
-      await this.evaluateWorkspace(workspaceId, { persist: false });
-    }
-    this.save();
-  }
-
-  private async evaluateWorkspace(
-    workspaceId: string,
-    options: { persist?: boolean } = {},
-  ): Promise<void> {
+  private async evaluateWorkspace(workspaceId: string): Promise<void> {
     this.ensureLoaded();
     if (!workspaceId || this.evaluationInFlight.has(workspaceId)) return;
     this.evaluationInFlight.add(workspaceId);
+    this.lastEvaluatedAt.set(workspaceId, Date.now());
     try {
       const worldModel = this.deriveWorldModel(workspaceId);
+      const previous = this.state.worldModels[workspaceId];
       this.state.worldModels[workspaceId] = worldModel;
+      if (stableWorldModelKey(previous) !== stableWorldModelKey(worldModel)) this.markDirty();
       const generated = this.generateDecisions(workspaceId, worldModel);
       if (generated.length > 0) {
-        this.mergeDecisions(generated);
+        const fresh = this.mergeDecisions(generated);
         await this.executePendingDecisions(workspaceId);
+        await this.proposeSuggestedDecisions(workspaceId, fresh);
       }
       this.pruneDecisions();
-      if (options.persist !== false) this.save();
+      this.saveIfDirty();
     } catch (error) {
       this.deps.log?.("[AutonomyEngine] evaluation failed", workspaceId, error);
     } finally {
       this.evaluationInFlight.delete(workspaceId);
+    }
+  }
+
+  /** Suggested (not executed) decisions become suggestions through the shared sink. */
+  private async proposeSuggestedDecisions(
+    workspaceId: string,
+    decisions: AutonomyDecision[],
+  ): Promise<void> {
+    if (!this.deps.proposeSuggestion) return;
+    for (const decision of decisions) {
+      if (decision.status !== "suggested") continue;
+      try {
+        await this.deps.proposeSuggestion({ workspaceId, decision: { ...decision } });
+      } catch (error) {
+        this.deps.log?.("[AutonomyEngine] suggestion proposal failed", decision.id, error);
+      }
     }
   }
 
@@ -600,6 +657,7 @@ export class AutonomyEngine {
       suggestedTaskTitle?: string,
       suggestedPrompt?: string,
       routineId?: string,
+      entityKey?: string,
     ) => {
       const policy = this.state.config.actionPolicies[actionType];
       const fingerprint = hashFingerprint([workspaceId, actionType, title, reason]);
@@ -622,6 +680,7 @@ export class AutonomyEngine {
         suggestedTaskTitle,
         suggestedPrompt,
         routineId,
+        entityKey,
       });
     };
 
@@ -640,6 +699,8 @@ export class AutonomyEngine {
         openLoop.evidenceRefs,
         `Follow up: ${openLoop.title}`.slice(0, 100),
         `Review this open loop, clarify the next owner/step, and convert it into a concrete internal plan: ${openLoop.title}`,
+        undefined,
+        openLoop.source === "relationship" ? commitmentEntityKey(openLoop.id) : undefined,
       );
     }
 
@@ -655,6 +716,8 @@ export class AutonomyEngine {
         [...primaryGoal.evidenceRefs, focus.id],
         `Organize work session: ${primaryGoal.title}`.slice(0, 100),
         `Use the current project, active app, and recent files to prepare the next concrete work session for this goal: ${primaryGoal.title}`,
+        undefined,
+        `goal:${normalizeEntityPart(primaryGoal.title)}`,
       );
     }
 
@@ -672,6 +735,7 @@ export class AutonomyEngine {
         `Routine prep: ${routine.title}`.slice(0, 100),
         `Prepare the local context and checklist for this routine: ${routine.description}`,
         routine.id,
+        `routine:${routine.id}`,
       );
     }
 
@@ -685,28 +749,27 @@ export class AutonomyEngine {
         worldModel.openLoops.slice(0, 3).map((loop) => loop.id),
         "Chief of Staff briefing",
         `Summarize the active goals, due-soon items, routines, and current focus into a concise internal briefing for this workspace.`,
+        undefined,
+        `autonomy:briefing:${workspaceId}`,
       );
     }
 
     return decisions.slice(0, this.state.config.maxPendingDecisions);
   }
 
-  private mergeDecisions(decisions: AutonomyDecision[]): void {
-    if (decisions.length === 0) return;
+  private mergeDecisions(decisions: AutonomyDecision[]): AutonomyDecision[] {
+    if (decisions.length === 0) return [];
     const fresh = decisions.filter(
       (decision) => !this.hasActiveDecisionFingerprint(decision.fingerprint, decision.createdAt),
     );
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) return [];
     this.state.decisions = [...fresh, ...this.state.decisions]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 120);
-    const highPriority = fresh.find((decision) => decision.priority === "high");
-    if (highPriority) {
-      this.deps.wakeHeartbeats?.({
-        text: `Chief of staff decision: ${highPriority.title}`,
-        mode: "next-heartbeat",
-      });
-    }
+    this.markDirty();
+    // Evaluation runs inside a Heartbeat pulse now, so there is no heartbeat to wake: suggested
+    // decisions surface through the suggestion sink instead.
+    return fresh;
   }
 
   private async executePendingDecisions(workspaceId: string): Promise<void> {
@@ -721,6 +784,7 @@ export class AutonomyEngine {
         decision.status = "suggested";
         decision.updatedAt = now;
       }
+      this.markDirty();
       this.deps.log?.(
         "Skipped local autonomy execution because a manual task is already active in this workspace",
         { workspaceId, decisionIds: pending.map((decision) => decision.id) },
@@ -728,13 +792,34 @@ export class AutonomyEngine {
       return;
     }
 
+    const budget = this.deps.dispatchBudget || getBackgroundDispatchBudget();
     for (const decision of pending) {
+      this.markDirty();
       if (!this.canExecuteLocally(decision.actionType)) {
         decision.status = "suggested";
         decision.updatedAt = Date.now();
         continue;
       }
+      // Task creation shares the background dispatch budget with Heartbeat, Workflow
+      // Intelligence and the Strategic Planner; over budget, the decision stays a suggestion.
+      const grant = decision.workspaceId
+        ? budget.tryConsume({
+            workspaceId: decision.workspaceId,
+            source: "autonomy",
+            entityKey: decision.entityKey || decision.fingerprint,
+          })
+        : undefined;
+      if (grant && !grant.allowed) {
+        decision.status = "suggested";
+        decision.updatedAt = Date.now();
+        this.deps.log?.("Autonomy task creation deferred by the shared dispatch budget", {
+          decisionId: decision.id,
+          reason: grant.reason,
+        });
+        continue;
+      }
       const action = await this.executeDecision(decision);
+      if (action.status !== "success") budget.refund(grant?.ticket);
       this.state.actions.unshift(action);
       this.state.actions = this.state.actions.slice(0, MAX_ACTIONS);
     }
@@ -873,9 +958,11 @@ export class AutonomyEngine {
 
   private pruneDecisions(): void {
     const now = Date.now();
+    const before = this.state.decisions.length;
     this.state.decisions = this.state.decisions
       .filter((decision) => now - decision.createdAt <= 7 * 24 * 60 * 60 * 1000)
       .slice(0, 120);
+    if (this.state.decisions.length !== before) this.markDirty();
   }
 }
 

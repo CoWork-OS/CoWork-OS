@@ -26,6 +26,10 @@ import type { AgentDaemon } from "../agent/daemon";
 
 import { ControlPlaneCoreService } from "./ControlPlaneCoreService";
 import {
+  getBackgroundDispatchBudget,
+  type BackgroundDispatchBudget,
+} from "../agents/BackgroundDispatchBudget";
+import {
   buildAgentConfigFromAutonomyPolicy,
   resolveOperationalAutonomyPolicy,
 } from "../agents/autonomy-policy";
@@ -72,6 +76,8 @@ interface StrategicPlannerServiceDeps {
   agentDaemon?: AgentDaemon;
   log?: (...args: unknown[]) => void;
   recordAutomationOutcome?: (outcome: CreateAutomationRunOutcomeInput) => Promise<unknown>;
+  /** Shared background dispatch budget (Heartbeat, AutonomyEngine, WI, Strategic Planner). */
+  dispatchBudget?: BackgroundDispatchBudget;
 }
 
 export class StrategicPlannerService {
@@ -232,7 +238,7 @@ export class StrategicPlannerService {
     await this.sql.run("planner_runNow_1", [runId, request.companyId, trigger, now, now]);
 
     try {
-      const outcome = await this.executePlanningRun(company, config);
+      const outcome = await this.executePlanningRun(company, config, trigger);
       const outputType: CompanyOutputType =
         outcome.createdIssueIds.length > 0 || outcome.updatedIssueIds.length > 0
           ? "issue_batch"
@@ -421,6 +427,7 @@ export class StrategicPlannerService {
   private async executePlanningRun(
     company: Company,
     config: StrategicPlannerConfig,
+    trigger: StrategicPlannerRunRequest["trigger"] = "manual",
   ): Promise<{
     createdIssueIds: string[];
     updatedIssueIds: string[];
@@ -642,7 +649,7 @@ export class StrategicPlannerService {
 
     const dispatchedTaskIds: string[] = [];
     for (const issue of dispatchable) {
-      const taskId = await this.dispatchIssue(company, config, issue, plannerAgent);
+      const taskId = await this.dispatchIssue(company, config, issue, plannerAgent, trigger);
       if (taskId) dispatchedTaskIds.push(taskId);
     }
 
@@ -659,6 +666,7 @@ export class StrategicPlannerService {
     config: StrategicPlannerConfig,
     issue: Issue,
     plannerAgent: AgentRole | undefined,
+    trigger: StrategicPlannerRunRequest["trigger"] = "manual",
   ): Promise<string | null> {
     if (!this.deps.agentDaemon) return null;
     const workspaceId =
@@ -674,33 +682,59 @@ export class StrategicPlannerService {
       : plannerAgent;
     if (!dispatchAgent) return null;
 
-    const checkout = await this.core.checkoutIssue({
-      issueId: issue.id,
-      agentRoleId: dispatchAgent.id,
+    // Scheduled planner runs create tasks from the shared background budget (with Heartbeat,
+    // AutonomyEngine and Workflow Intelligence). Over budget, the issue stays in the backlog
+    // for a later run. Manual runs are recorded but never refused.
+    const budget = this.deps.dispatchBudget || getBackgroundDispatchBudget();
+    const grant = budget.tryConsume({
       workspaceId,
+      source: "strategic_planner",
+      entityKey: `issue:${issue.id}`,
+      manual: trigger === "manual",
     });
+    if (!grant.allowed) {
+      this.log("Planner dispatch deferred by the shared background budget", {
+        issueId: issue.id,
+        workspaceId,
+        reason: grant.reason,
+      });
+      return null;
+    }
 
-    const task = await this.deps.agentDaemon.createTask({
-      title: issue.title,
-      prompt: this.buildDispatchPrompt(company, issue),
-      workspaceId,
-      source: "api",
-      agentConfig: {
-        ...buildAgentConfigFromAutonomyPolicy({
-          preset: config.approvalPreset,
-        }),
-        ...buildAgentConfigFromAutonomyPolicy(resolveOperationalAutonomyPolicy(dispatchAgent)),
-        allowUserInput: false,
-        gatewayContext: "private",
-      },
-    });
+    let createdTaskId: string | undefined;
+    try {
+      const checkout = await this.core.checkoutIssue({
+        issueId: issue.id,
+        agentRoleId: dispatchAgent.id,
+        workspaceId,
+      });
 
-    await this.taskRepo.update(task.id, {
-      assignedAgentRoleId: dispatchAgent.id,
-      boardColumn: "todo",
-    });
-    await this.core.attachTaskToRun(checkout.run.id, task.id);
-    return task.id;
+      const task = await this.deps.agentDaemon.createTask({
+        title: issue.title,
+        prompt: this.buildDispatchPrompt(company, issue),
+        workspaceId,
+        source: "api",
+        agentConfig: {
+          ...buildAgentConfigFromAutonomyPolicy({
+            preset: config.approvalPreset,
+          }),
+          ...buildAgentConfigFromAutonomyPolicy(resolveOperationalAutonomyPolicy(dispatchAgent)),
+          allowUserInput: false,
+          gatewayContext: "private",
+        },
+      });
+      createdTaskId = task.id;
+
+      await this.taskRepo.update(task.id, {
+        assignedAgentRoleId: dispatchAgent.id,
+        boardColumn: "todo",
+      });
+      await this.core.attachTaskToRun(checkout.run.id, task.id);
+      return task.id;
+    } catch (error) {
+      if (!createdTaskId) budget.refund(grant.ticket);
+      throw error;
+    }
   }
 
   private buildDispatchPrompt(company: Company, issue: Issue): string {

@@ -16,7 +16,9 @@ It replaces the older queue-first heartbeat internals with a two-lane pipeline d
 
 The key design change is that not every wake is treated as potential task work anymore.
 
-Heartbeat owns the "when should we think?" decision for Reflection and heartbeat-triggered Dreaming. Reflection no longer runs its own independent interval loop for normal operation; Heartbeat triggers it when Pulse results or accumulated signals justify another evaluation. Other background loops (for example AutonomyEngine, core memory distillation, Box Brain polling and task-completion Dreaming) still schedule themselves.
+Heartbeat owns the "when should we think?" decision for Reflection, the chief-of-staff (AutonomyEngine) evaluation and heartbeat-triggered Dreaming. Reflection no longer runs its own independent interval loop for normal operation; Heartbeat triggers it when Pulse results or accumulated signals justify another evaluation. AutonomyEngine has no timer of its own: each in-hours, non-deferred pulse evaluates the pulse workspace once (repeat calls for the same workspace within a minute are skipped, since several agents can pulse it). Other background loops (for example core memory distillation, Box Brain polling and task-completion Dreaming) still schedule themselves.
+
+Awareness is a signal producer only. It keeps its 20-second device poll, but its Heartbeat wakes are debounced to one per category (focus, calendar, workflow) and workspace every 5 minutes, carry that category and workspace so they merge, and no longer trigger an AutonomyEngine evaluation per event.
 
 Heartbeat can also trigger Dreaming when the signal ledger contains memory-specific signals such as `memory_drift`, `correction_learning`, or `cross_workspace_patterns`, or when hot-memory pressure changed since the last run. Dreaming runs as background memory curation and produces candidates instead of creating tasks or silently rewriting memory.
 
@@ -123,6 +125,14 @@ Execution modes are:
 
 Runbook and `cron_handoff` decisions are advisory: they record a `dispatch.advisory` activity entry and do not execute a runbook or create a scheduled job yet. They do not create a dispatch run, spend dispatch budget or cooldown, or mark checklist items done, and they consume only `maintenance` signals. A reported item is not reported again for at least an hour (or its own cadence, if longer).
 
+## One Suggestion Sink
+
+Every suggestion producer — Heartbeat dispatch, Workflow Intelligence, the ProactiveSuggestions generators (due soon, focus, recurring patterns, ...) and AutonomyEngine decisions — proposes through one `SuggestionSink.propose({ entityKey, title, why, source, evidence, confidence })`. Proposals for the same entity merge into one suggestion that lists every proposing source, instead of each producer adding its own:
+
+- The entity key is the producer's id for the thing (`commitment:<id>`, `task:<id>`, a WI target key, ...) or, without one, the normalized title with producer prefixes such as "Review due soon:" or "Follow up on:" removed. Matching titles merge too.
+- Dismissing or acting on a suggestion suppresses its entity for every producer for 7 days.
+- The daily briefing does not repeat a chief-of-staff decision as "Decision needed" when its entity is already listed as due soon or already surfaced as a suggestion.
+
 ## Dispatch Guardrails
 
 Dispatch is intentionally narrow.
@@ -133,6 +143,8 @@ Dispatch is intentionally narrow.
 - daily dispatch budget via `maxDispatchesPerDay`
 - repeated identical low-value signals do not keep retriggering escalation
 - task creation requires evidence refs; a task decision without them is downgraded to a suggestion
+- one shared background budget per workspace and day (6, the `maxDispatchesPerDay` default) for every producer that creates tasks the user did not ask for: Heartbeat, AutonomyEngine, Workflow Intelligence auto-dispatch and scheduled Strategic Planner runs. It also holds a 2-hour per-entity cooldown across producers. Over budget, Heartbeat and Workflow Intelligence suggest instead, AutonomyEngine keeps the decision as a suggestion and the planner leaves the issue for a later run. Manual pulses and manual planner runs are counted but never refused. The shared ledger is in memory, so it restarts at zero with the app; Heartbeat's per-agent budget is stored and still applies.
+- AutonomyEngine does not create tasks by default: every action policy is `suggest_only` or approval-based, and creating tasks is an explicit opt-in (`execute_local` in Memory Hub). Older saved settings that still carried the former `execute_local` defaults are reset once.
 
 Every Pulse and every task-creating Dispatch gets a run record. If Dispatch creates a heartbeat task, that task carries a non-null `heartbeatRunId`. Each pulse settles in-flight dispatch runs from their task's status (or as failed when the task is gone or the run is older than 12 hours), and startup reconciles stale dispatch runs the same way.
 

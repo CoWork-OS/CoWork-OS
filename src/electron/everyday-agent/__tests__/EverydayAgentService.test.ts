@@ -97,6 +97,7 @@ class FakeDb {
   routineProvenance: Row[] = [];
   coreMemoryCandidates: Row[] = [];
   coreMemoryDistillRuns: Row[] = [];
+  automationProfiles: Row[] = [];
   routines: Row[] = [];
   routineRuns: Row[] = [];
 
@@ -121,6 +122,7 @@ class FakeDb {
         "everyday_agent_routine_provenance",
         "core_memory_candidates",
         "core_memory_distill_runs",
+        "automation_profiles",
         "automation_routines",
         "routine_runs",
       ]);
@@ -406,11 +408,21 @@ class FakeDb {
     if (normalized.includes("delete from everyday_agent_routine_provenance where profile_id = ?")) {
       return this.deleteRows(this.routineProvenance, (row) => row.profile_id === args[0]);
     }
-    if (normalized.includes("delete from core_memory_candidates where profile_id = ?")) {
-      return this.deleteRows(this.coreMemoryCandidates, (row) => row.profile_id === args[0]);
+    const inAutomationProfiles = (row: Row) =>
+      this.automationProfiles.some((profile) => profile.id === row.profile_id);
+    if (
+      normalized.includes(
+        "delete from core_memory_candidates where profile_id in (select id from automation_profiles)",
+      )
+    ) {
+      return this.deleteRows(this.coreMemoryCandidates, inAutomationProfiles);
     }
-    if (normalized.includes("delete from core_memory_distill_runs where profile_id = ?")) {
-      return this.deleteRows(this.coreMemoryDistillRuns, (row) => row.profile_id === args[0]);
+    if (
+      normalized.includes(
+        "delete from core_memory_distill_runs where profile_id in (select id from automation_profiles)",
+      )
+    ) {
+      return this.deleteRows(this.coreMemoryDistillRuns, inAutomationProfiles);
     }
     if (normalized.includes("delete from routine_runs where routine_id = ?")) {
       return this.deleteRows(this.routineRuns, (row) => row.routine_id === args[0]);
@@ -616,8 +628,10 @@ describe("EverydayAgentService", () => {
     db.taskLinks.push({ profile_id: profileId, task_id: "task-1" });
     db.connectorSummaries.push({ profile_id: profileId, connector_id: "gmail" });
     db.browserProfileMetadata.push({ profile_id: profileId, browser_profile_id: "visible" });
-    db.coreMemoryCandidates.push({ profile_id: profileId, id: "candidate-1" });
-    db.coreMemoryDistillRuns.push({ profile_id: profileId, id: "distill-1" });
+    // Core memory candidates belong to automation profiles, not to the Everyday Agent profile.
+    db.automationProfiles.push({ id: "automation-profile-1" });
+    db.coreMemoryCandidates.push({ profile_id: "automation-profile-1", id: "candidate-1" });
+    db.coreMemoryDistillRuns.push({ profile_id: "automation-profile-1", id: "distill-1" });
     db.routineProvenance.push({ profile_id: profileId, routine_id: "routine-1" });
     db.routines.push({
       id: "routine-1",

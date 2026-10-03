@@ -20,6 +20,7 @@ import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { loadNotificationStoreSync } from "../notifications/store";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { UserProfileService } from "../memory/UserProfileService";
+import { beliefSubjectKey } from "../memory/memory-items-lanes";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
 
 const execFileAsync = promisify(execFile);
@@ -27,6 +28,25 @@ const STORAGE_KEY = "awareness-state";
 const DEFAULT_TTL_MINUTES = 240;
 const DEVICE_POLL_MS = 20_000;
 const EVENT_BUFFER_LIMIT = 500;
+/**
+ * Awareness only produces Heartbeat signals. Foreground/browser changes arrive every poll, so
+ * wakes are debounced per category: the first event in a window signals, later ones in the same
+ * window are folded into it (the pulse reads the current awareness state anyway).
+ */
+const WAKE_DEBOUNCE_MS = 5 * 60 * 1000;
+/**
+ * Subjects that hold one value: a newer belief supersedes older ones instead of coexisting
+ * ("prefers concise" vs "prefers detailed"). `workspace` subjects supersede per workspace.
+ */
+const SINGLE_VALUED_SUBJECTS: Record<string, "global" | "workspace"> = {
+  preferred_name: "global",
+  response_length: "global",
+  current_goal: "workspace",
+};
+/** Name triggers; "I am / I'm" is not one ("i am going to..." is not a name). */
+const NAME_TRIGGER_RE = /\b(?:call me|my name is)\s+([^.,!?;:\n]{1,60})/i;
+/** One to three capitalized words (letters, apostrophes, hyphens). */
+const NAME_VALUE_RE = /^\p{Lu}[\p{L}'-]*(?:\s+\p{Lu}[\p{L}'-]*){0,2}/u;
 const HIGH_SENSITIVITY_SOURCES = new Set<AwarenessSource>([
   "clipboard",
   "notifications",
@@ -58,8 +78,13 @@ interface PersistedAwarenessState {
 
 interface AwarenessServiceDeps {
   getDefaultWorkspaceId?: () => string | undefined;
-  onWakeHeartbeats?: (params: { text: string; mode?: "now" | "next-heartbeat" }) => void;
-  onEventCaptured?: (event: AwarenessEvent) => void;
+  /** Debounced Heartbeat wake; `category` and `workspaceId` let Heartbeat merge the signals. */
+  onWakeHeartbeats?: (params: {
+    text: string;
+    mode?: "now" | "next-heartbeat";
+    category?: string;
+    workspaceId?: string;
+  }) => void;
   log?: (...args: unknown[]) => void;
 }
 
@@ -157,6 +182,7 @@ export class AwarenessService {
   private lastClipboardFingerprint = "";
   private lastForegroundFingerprint = "";
   private lastNotificationFingerprint = "";
+  private lastWakeAt = new Map<string, number>();
 
   constructor(deps: AwarenessServiceDeps = {}) {
     this.deps = deps;
@@ -268,7 +294,15 @@ export class AwarenessService {
       .map((event) => ({ ...event, payload: event.payload ? { ...event.payload } : undefined }));
   }
 
-  getSnapshot(workspaceId?: string): AwarenessSnapshot {
+  /**
+   * `options.excludeBeliefTypes`: belief types left out of the prompt text because another
+   * section carries them. Prompt builders pass the user_* types, which are mirrored into
+   * memory_items and rendered once by MemoryContextBuilder (PROMPT-5).
+   */
+  getSnapshot(
+    workspaceId?: string,
+    options: { excludeBeliefTypes?: readonly AwarenessBeliefType[] } = {},
+  ): AwarenessSnapshot {
     const summary = this.getSummary(workspaceId);
     const recentEvents = this.listEvents({ workspaceId, limit: 40 }).filter(
       (event) => this.state.config.sources[event.source]?.allowPromptInjection,
@@ -290,18 +324,22 @@ export class AwarenessService {
       .map((event) => event.summary)
       .slice(0, 4);
     const dueSoon = summary.dueSoon.map((item) => item.title).slice(0, 4);
+    const excludedBeliefTypes = new Set(options.excludeBeliefTypes ?? []);
+    // Every value is observed text (window titles, pages, files): one line, tag-escaped.
+    const line = (value: unknown) => InputSanitizer.sanitizeInlineMemoryLine(String(value ?? ""));
     const beliefLines = summary.beliefs
+      .filter((belief) => !excludedBeliefTypes.has(belief.beliefType))
       .slice(0, 6)
-      .map((belief) => `- ${belief.subject}: ${belief.value}`)
+      .map((belief) => `- ${line(belief.subject)}: ${line(belief.value)}`)
       .join("\n");
     const text = [
       "<cowork_awareness_snapshot>",
-      summary.currentFocus ? `Current focus: ${summary.currentFocus}` : "",
-      activeAppEvent ? `Active app: ${activeAppEvent.title}` : "",
-      browserEvent ? `Browser context: ${browserEvent.summary}` : "",
-      recentFiles.length > 0 ? `Recent files: ${recentFiles.join(" | ")}` : "",
-      recentProjects.length > 0 ? `Recent projects: ${recentProjects.join(" | ")}` : "",
-      dueSoon.length > 0 ? `Due soon: ${dueSoon.join(" | ")}` : "",
+      summary.currentFocus ? `Current focus: ${line(summary.currentFocus)}` : "",
+      activeAppEvent ? `Active app: ${line(activeAppEvent.title)}` : "",
+      browserEvent ? `Browser context: ${line(browserEvent.summary)}` : "",
+      recentFiles.length > 0 ? `Recent files: ${recentFiles.map(line).join(" | ")}` : "",
+      recentProjects.length > 0 ? `Recent projects: ${recentProjects.map(line).join(" | ")}` : "",
+      dueSoon.length > 0 ? `Due soon: ${dueSoon.map(line).join(" | ")}` : "",
       beliefLines ? `Beliefs:\n${beliefLines}` : "",
       "</cowork_awareness_snapshot>",
     ]
@@ -432,13 +470,8 @@ export class AwarenessService {
     }
 
     if (policy.allowHeartbeat && this.shouldWakeFromEvent(event)) {
-      this.deps.onWakeHeartbeats?.({
-        text: `Awareness detected ${event.source}: ${event.summary}`,
-        mode: "next-heartbeat",
-      });
+      this.maybeWakeHeartbeats(event);
     }
-
-    this.deps.onEventCaptured?.(event);
 
     return event;
   }
@@ -576,6 +609,27 @@ export class AwarenessService {
     };
   }
 
+  private wakeCategory(event: AwarenessEvent): string {
+    if (event.source === "apps" || event.source === "browser") return "awareness_focus";
+    if (event.source === "calendar") return "awareness_calendar";
+    return "awareness_workflow";
+  }
+
+  private maybeWakeHeartbeats(event: AwarenessEvent): void {
+    const category = this.wakeCategory(event);
+    const key = `${category}:${event.workspaceId || "*"}`;
+    const now = Date.now();
+    const last = this.lastWakeAt.get(key) || 0;
+    if (now - last < WAKE_DEBOUNCE_MS) return;
+    this.lastWakeAt.set(key, now);
+    this.deps.onWakeHeartbeats?.({
+      text: `Awareness detected ${event.source}: ${event.summary}`,
+      mode: "next-heartbeat",
+      category,
+      workspaceId: event.workspaceId,
+    });
+  }
+
   private shouldWakeFromEvent(event: AwarenessEvent): boolean {
     if (event.source === "calendar") return true;
     if (event.source === "apps" || event.source === "browser") return true;
@@ -675,12 +729,12 @@ export class AwarenessService {
       });
     };
 
-    // Match names: single word (capitalized), multi-word, hyphenated (O'Brien), non-ASCII
-    const preferredNameMatch = text.match(
-      /\b(?:call me|my name is|i'm|i am)\s+([A-Za-z\u00C0-\u024F\u1E00-\u1EFF][A-Za-z\u00C0-\u024F\u1E00-\u1EFF'\s-]{1,50})\b/u,
-    );
-    if (preferredNameMatch) {
-      const name = preferredNameMatch[1].trim().replace(/\s+/g, " ");
+    // Names: an explicit trigger followed by one to three capitalized words (hyphens,
+    // apostrophes and non-ASCII letters allowed). Lowercase continuations are not names.
+    const nameTrigger = text.match(NAME_TRIGGER_RE);
+    const nameValue = nameTrigger?.[1].trim().match(NAME_VALUE_RE)?.[0];
+    if (nameValue) {
+      const name = nameValue.trim().replace(/\s+/g, " ");
       if (name) {
         push({
           beliefType: "user_fact",
@@ -711,7 +765,9 @@ export class AwarenessService {
       });
     }
 
-    const goalMatch = text.match(/\b(?:my goal is|i want to|i need to)\s+([^.!?\n]{3,120})/i);
+    // Only an explicit goal statement becomes a goal belief: passing phrases such as
+    // "I need to ..." / "I want to ..." are intents, not durable goals.
+    const goalMatch = text.match(/\bmy goal is\s+(?:to\s+)?([^.!?\n]{3,120})/i);
     if (goalMatch) {
       push({
         beliefType: "user_goal",
@@ -725,7 +781,10 @@ export class AwarenessService {
       });
     }
 
-    if (/\b(concise|shorter|brief|too long)\b/i.test(text)) {
+    const wantsConcise = /\b(concise|shorter|brief|too long)\b/i.test(text);
+    const wantsDetail = /\b(more detail|detailed|deeper)\b/i.test(text);
+    // A message that mentions both is ambiguous ("less detailed, more concise"): no belief.
+    if (wantsConcise && !wantsDetail) {
       push({
         beliefType: "user_preference",
         subject: "response_length",
@@ -738,7 +797,7 @@ export class AwarenessService {
       });
     }
 
-    if (/\b(more detail|detailed|deeper)\b/i.test(text)) {
+    if (wantsDetail && !wantsConcise) {
       push({
         beliefType: "user_preference",
         subject: "response_length",
@@ -791,6 +850,20 @@ export class AwarenessService {
       updatedAt: now,
       lastConfirmedAt: input.promotionStatus === "confirmed" ? now : undefined,
     };
+    const scope = SINGLE_VALUED_SUBJECTS[input.subject];
+    if (scope) {
+      // Newest wins: drop contradicting beliefs for the same subject (unless the user confirmed
+      // them; a confirmed belief is only replaced by an explicit edit).
+      this.state.beliefs = this.state.beliefs.filter(
+        (entry) =>
+          !(
+            entry.beliefType === input.beliefType &&
+            entry.subject === input.subject &&
+            entry.promotionStatus !== "confirmed" &&
+            (scope === "global" || entry.workspaceId === input.workspaceId)
+          ),
+      );
+    }
     this.state.beliefs.push(belief);
     this.state.beliefs = this.state.beliefs.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 250);
     this.applyLegacyMemorySideEffects(belief);
@@ -815,7 +888,12 @@ export class AwarenessService {
           confidence: belief.confidence,
           source: belief.source === "feedback" ? "feedback" : "conversation",
         };
-        UserProfileService.addFact(request);
+        // The profile mirrors the fact into memory_items; a single-valued belief subject
+        // (preferred_name, response_length) lets a newer belief supersede the older one.
+        UserProfileService.addFact(request, {
+          memorySubjectKey: beliefSubjectKey(belief.subject),
+          memoryOriginWorkspaceId: belief.workspaceId ?? null,
+        });
       }
     } catch {
       // best-effort compatibility bridge

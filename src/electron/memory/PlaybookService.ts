@@ -1,8 +1,12 @@
 import { createLogger } from "../utils/logger";
-import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryService } from "./MemoryService";
 import { PlaybookEvidenceLedger } from "./PlaybookEvidenceLedger";
-import { hashMemoryContent, type PlaybookEvidenceRecord } from "./PlaybookEvidenceStore";
+import type { PlaybookCorrection, PlaybookEvidenceRecord } from "./PlaybookEvidenceStore";
+import type {
+  PlaybookEntry,
+  PlaybookEntryKind,
+  PlaybookEntryListOptions,
+} from "./playbook-entries-sql";
 import { scorePlaybookRelevance } from "./playbook-relevance";
 
 const logger = createLogger("PlaybookService");
@@ -18,15 +22,19 @@ export type ErrorCategory =
   | "unknown";
 
 export interface PlaybookCaptureOptions {
-  /** Prevent automatic external-memory mirroring when the task profile gates network access. */
+  /**
+   * Kept for callers' compatibility. Playbook entries are no longer archive memories, so
+   * they are never mirrored to an external memory provider.
+   */
   allowExternalMirror?: boolean;
 }
 
 export type PlaybookCaptureResult =
   | {
       status: "recorded";
-      memoryId: string;
-      /** Set for a success. A failure is recorded as memory only. */
+      /** The `playbook_entries` row. */
+      entryId: string;
+      /** Set for a success. A failure is recorded as an entry only. */
       evidenceId?: string;
     }
   | {
@@ -40,7 +48,7 @@ export interface PlaybookReinforcementResult {
   linkedEvidenceIds: string[];
 }
 
-/** A successful execution with the text of its source memory, as stored (redacted). */
+/** A successful execution with the fields of its source entry, as stored (redacted). */
 export interface PlaybookSuccess {
   record: PlaybookEvidenceRecord;
   title: string;
@@ -52,24 +60,6 @@ export interface PlaybookSuccess {
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_REINFORCEMENT_LINKS = 2;
-
-/** Read title, approach, tools and request back out of a generated success memory. */
-function parseSuccessMemory(content: string): Omit<PlaybookSuccess, "record"> {
-  const field = (pattern: RegExp) => content.match(pattern)?.[1]?.trim() ?? "";
-  const tools = field(/^Key tools: (.*)$/m);
-  return {
-    title: field(/^\s*\[PLAYBOOK\] Task succeeded: "(.*)"\s*$/m),
-    approach: field(/^Approach: (.*)$/m),
-    request: field(/^Original request: (.*)$/m),
-    toolsUsed:
-      tools && tools !== "none"
-        ? tools
-            .split(",")
-            .map((tool) => tool.trim())
-            .filter(Boolean)
-        : [],
-  };
-}
 
 /**
  * Approach identity: the normalized set of tools and destinations. Two executions with
@@ -99,10 +89,16 @@ function decayFactor(ageMs: number): number {
 /**
  * Records Playbook outcomes and serves evidence-backed context.
  *
- * Memory rows keep the human-readable history; the PlaybookEvidenceStore ledger is the
- * only thing that counts as proof. Success context, reinforcement and skill promotion all
- * read active successes, one per task, whose source memory still exists unchanged and may
- * be recalled. Failures and legacy reinforcement text are never treated as proof.
+ * Outcomes are `playbook_entries` rows (not archive memories, audit Phase 2 item 6); the
+ * PlaybookEvidenceStore ledger is the only thing that counts as proof. Success context,
+ * reinforcement and skill promotion all read active successes, one per task, whose source
+ * entry still exists unchanged and is not private. Failures, inbox patterns and legacy
+ * reinforcement text are never treated as proof.
+ *
+ * Memory settings stay authoritative: an entry is written only when the workspace's
+ * memory settings would have allowed an archive capture (MemoryService.prepareDerivedRecord:
+ * memory and auto-capture enabled, privacy mode, exclusions, `<no-memory>`), with inline
+ * `<private>` blocks and secret values redacted first.
  */
 export class PlaybookService {
   private static evidenceStoreOverride: PlaybookEvidenceLedger | undefined;
@@ -138,6 +134,8 @@ export class PlaybookService {
       payload?: Record<string, unknown>;
     },
   ): Promise<void> {
+    const store = this.getEvidenceStore();
+    if (!store) return;
     const body = [
       `[PLAYBOOK] Inbox pattern: "${input.title}"`,
       `Summary: ${input.summary}`,
@@ -152,20 +150,40 @@ export class PlaybookService {
       .join("\n");
 
     try {
-      await MemoryService.capture(workspaceId, undefined, "insight", body, false, {
-        origin: "playbook",
-        batchKey: "mailbox-playbook",
-        batchable: false,
-      });
+      await this.writeEntry(store, workspaceId, null, "inbox", body, "");
     } catch (error) {
       logger.warn("Failed to capture mailbox playbook pattern:", error);
     }
   }
 
   /**
+   * Gate `content` through memory settings and write it as one entry (and, for a success,
+   * its evidence row). Null when memory settings do not allow keeping it.
+   */
+  private static async writeEntry(
+    store: PlaybookEvidenceLedger,
+    workspaceId: string,
+    taskId: string | null,
+    kind: PlaybookEntryKind,
+    content: string,
+    patternKey: string,
+  ) {
+    const prepared = await MemoryService.prepareDerivedRecord(workspaceId, content);
+    if (!prepared) return null;
+    return store.recordOutcome({
+      workspaceId,
+      taskId,
+      kind,
+      content: prepared.content,
+      isPrivate: prepared.isPrivate,
+      patternKey,
+    });
+  }
+
+  /**
    * Record a mid-task user correction in the Playbook ledger only: the task's success
-   * evidence is invalidated as `corrected_by_user`. No memory row is written; the
-   * correction itself is archived once by the caller.
+   * evidence is invalidated as `corrected_by_user`. No entry is written; the correction
+   * itself is archived once by the caller.
    */
   static async recordUserCorrection(workspaceId: string, taskId: string): Promise<void> {
     const store = this.getEvidenceStore();
@@ -176,10 +194,10 @@ export class PlaybookService {
   /**
    * Capture a Playbook outcome after task completion or failure.
    *
-   * Returns `recorded` only when the memory (and, for a success, its evidence row) exists.
-   * Memory settings (disabled, privacy, exclusions, write gate) remain authoritative: when
-   * the memory is not written, no evidence row is created either. A user correction
-   * invalidates the task's success evidence whether or not its memory is written.
+   * Returns `recorded` only when the entry (and, for a success, its evidence row) exists.
+   * Memory settings (disabled, privacy, exclusions) remain authoritative: when they do not
+   * allow the entry, no evidence row is created either (`memory_not_recorded`). A user
+   * correction invalidates the task's success evidence whether or not its entry is written.
    */
   static async captureOutcome(
     workspaceId: string,
@@ -228,31 +246,25 @@ export class PlaybookService {
             `Original request: ${taskPrompt.slice(0, 200)}`,
           ];
 
+    void options; // entries are never mirrored externally (see PlaybookCaptureOptions)
     try {
-      const memory = await MemoryService.capture(
+      const result = await this.writeEntry(
+        store,
         workspaceId,
         taskId,
-        "insight",
+        outcome,
         content.filter((line): line is string => Boolean(line)).join("\n"),
-        false,
-        {
-          origin: "playbook",
-          batchable: false,
-          allowExternalMirror: options.allowExternalMirror,
-        },
+        derivePlaybookPatternKey(toolsUsed, destinationHints),
       );
-      if (!memory) return { status: "skipped", reason: "memory_not_recorded" };
-      if (outcome === "failure") return { status: "recorded", memoryId: memory.id };
-
-      const { created, record } = await store.record({
-        workspaceId,
-        taskId,
-        sourceMemoryId: memory.id,
-        sourceContentHash: hashMemoryContent(memory.content),
-        patternKey: derivePlaybookPatternKey(toolsUsed, destinationHints),
-      });
-      if (!created) return { status: "skipped", reason: "duplicate_execution" };
-      return { status: "recorded", memoryId: memory.id, evidenceId: record.id };
+      if (!result) return { status: "skipped", reason: "memory_not_recorded" };
+      if (result.status === "duplicate_execution") {
+        return { status: "skipped", reason: "duplicate_execution" };
+      }
+      return {
+        status: "recorded",
+        entryId: result.entryId,
+        ...(result.evidenceId ? { evidenceId: result.evidenceId } : {}),
+      };
     } catch (err) {
       logger.warn("Failed to capture playbook entry:", err);
       return { status: "error", error: err instanceof Error ? err.message : String(err) };
@@ -260,20 +272,48 @@ export class PlaybookService {
   }
 
   /**
-   * Active successes, newest first, whose source memory still exists unchanged and is not
-   * private or suppressed in Memory Hub. Their text is read from that memory.
+   * Active successes, newest first, whose source entry still exists unchanged and is not
+   * private. Their text is read from that entry.
    */
   static async eligibleSuccesses(
     store: PlaybookEvidenceLedger,
     workspaceId: string,
   ): Promise<PlaybookSuccess[]> {
     const readable = await store.listReadable(workspaceId);
-    const suppressed = await MemoryObservationService.suppressedIds(
-      readable.map(({ record }) => record.sourceMemoryId),
-    );
-    return readable
-      .filter(({ record }) => !suppressed.has(record.sourceMemoryId))
-      .map(({ record, content }) => ({ record, ...parseSuccessMemory(content) }));
+    return readable.map(({ record, entry }) => ({
+      record,
+      title: entry.title,
+      approach: entry.approach,
+      request: entry.request,
+      toolsUsed: entry.toolsUsed,
+    }));
+  }
+
+  /** Playbook entries of a workspace, newest first; private entries only on request. */
+  static async listEntries(
+    workspaceId: string,
+    options: PlaybookEntryListOptions = {},
+  ): Promise<PlaybookEntry[]> {
+    const store = this.getEvidenceStore();
+    if (!store) return [];
+    return store.listEntries(workspaceId, options);
+  }
+
+  /** Recorded successful and failed executions since `since` (all by default). */
+  static async countOutcomes(
+    workspaceId: string,
+    since = 0,
+  ): Promise<{ successes: number; failures: number }> {
+    const store = this.getEvidenceStore();
+    if (!store) return { successes: 0, failures: 0 };
+    return store.countOutcomes(workspaceId, since);
+  }
+
+  /** Tasks the user corrected since `since`, one per task (Playbook side only). */
+  static async listCorrections(workspaceId: string, since: number): Promise<PlaybookCorrection[]> {
+    const store = this.getEvidenceStore();
+    if (!store) return [];
+    return store.listCorrections(workspaceId, since);
   }
 
   /**

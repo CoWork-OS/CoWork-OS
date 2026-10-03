@@ -37,31 +37,44 @@ describe("runtime tool definition metadata", () => {
     expect(metadata.approvalKind).toBe("shell_sensitive");
   });
 
-  it.each([
-    "search_memories",
-    "memory_search_index",
-    "memory_timeline",
-    "memory_details",
-    "search_quotes",
-    "search_sessions",
-    "memory_topics_load",
-    "memory_curate",
-    "memory_curated_read",
-  ])("exposes memory tool %s directly instead of both deferring and exposing it", (tool) => {
-    const metadata = getDefaultRuntimeToolMetadata(tool);
-    expect(metadata.alwaysExpose).toBe(true);
-    expect(metadata.deferLoad).toBe(false);
-  });
-
-  it.each(["kg_search", "kg_get_neighbors", "kg_get_subgraph"])(
-    "defers knowledge-graph read %s so tool_search can surface it",
+  it.each(["memory_recall", "memory_remember", "memory_forget", "context_recall"])(
+    "exposes memory tool %s directly instead of both deferring and exposing it",
     (tool) => {
       const metadata = getDefaultRuntimeToolMetadata(tool);
-      expect(metadata.deferLoad).toBe(true);
-      expect(metadata.alwaysExpose).toBe(false);
+      expect(metadata.alwaysExpose).toBe(true);
+      expect(metadata.deferLoad).toBe(false);
       expect(metadata.capabilityTags).toContain("memory");
     },
   );
+
+  it.each(["memory_recall", "context_recall", "search_memories", "context_grep"])(
+    "runs memory read %s in parallel with other reads",
+    (tool) => {
+      const metadata = getDefaultRuntimeToolMetadata(tool);
+      expect(metadata.readOnly).toBe(true);
+      expect(metadata.concurrencyClass).toBe("read_parallel");
+    },
+  );
+
+  it.each(["memory_remember", "memory_forget", "memory_save"])(
+    "does not treat memory write %s as read-only",
+    (tool) => {
+      expect(getDefaultRuntimeToolMetadata(tool).readOnly).toBe(false);
+    },
+  );
+
+  it.each([
+    "kg_search",
+    "kg_get_neighbors",
+    "kg_get_subgraph",
+    "kg_create_entity",
+    "kg_add_observation",
+  ])("defers knowledge-graph tool %s so tool_search can surface it", (tool) => {
+    const metadata = getDefaultRuntimeToolMetadata(tool);
+    expect(metadata.deferLoad).toBe(true);
+    expect(metadata.alwaysExpose).toBe(false);
+    expect(metadata.capabilityTags).toContain("memory");
+  });
 
   it("keeps bot-team handoffs discoverable without prompt wording", () => {
     const metadata = getDefaultRuntimeToolMetadata("send_agent_message");

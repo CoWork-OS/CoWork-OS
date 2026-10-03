@@ -6,8 +6,8 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1584,
-    "getDatabase": 135,
+    "prepare": 1656,
+    "getDatabase": 134,
     "runtimeImport": 49
   },
   "files": {
@@ -56,9 +56,6 @@
       "getDatabase": 1
     },
     "src/electron/agent/tools/registry.ts": {
-      "getDatabase": 1
-    },
-    "src/electron/agent/tools/system-tools.ts": {
       "getDatabase": 1
     },
     "src/electron/agents/agent-signal-sql.ts": {
@@ -308,6 +305,9 @@
     "src/electron/memory/ChatGPTImporter.ts": {
       "getDatabase": 1
     },
+    "src/electron/memory/conversation-index-sql.ts": {
+      "prepare": 26
+    },
     "src/electron/memory/CuratedMemoryService.ts": {
       "getDatabase": 1
     },
@@ -329,12 +329,24 @@
     "src/electron/memory/memory-cleanup-sql.ts": {
       "prepare": 20
     },
+    "src/electron/memory/memory-context-sql.ts": {
+      "prepare": 2
+    },
+    "src/electron/memory/memory-items-sql.ts": {
+      "prepare": 28
+    },
     "src/electron/memory/memory-observation-sql.ts": {
       "prepare": 12
+    },
+    "src/electron/memory/memory-payload-migration-sql.ts": {
+      "prepare": 11
     },
     "src/electron/memory/memory-purge-sql.ts": {
       "prepare": 3,
       "getDatabase": 2
+    },
+    "src/electron/memory/memory-recall-sql.ts": {
+      "prepare": 4
     },
     "src/electron/memory/memory-retention-sql.ts": {
       "prepare": 7,
@@ -351,11 +363,17 @@
       "getDatabase": 1,
       "runtimeImport": 1
     },
+    "src/electron/memory/playbook-entries-sql.ts": {
+      "prepare": 7
+    },
     "src/electron/memory/PlaybookEvidenceStore.ts": {
       "prepare": 9
     },
+    "src/electron/memory/suggestions-sql.ts": {
+      "prepare": 8
+    },
     "src/electron/memory/transcript-sql.ts": {
-      "prepare": 15
+      "prepare": 1
     },
     "src/electron/memory/TranscriptStore.ts": {
       "getDatabase": 3,

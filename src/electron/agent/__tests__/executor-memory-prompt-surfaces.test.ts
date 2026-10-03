@@ -2,15 +2,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskExecutor } from "../executor";
 import { MemoryService } from "../../memory/MemoryService";
-import { MemorySynthesizer } from "../../memory/MemorySynthesizer";
 import { MemoryFeaturesManager } from "../../settings/memory-features-manager";
-import { bumpHotMemoryVersion } from "../../memory/hot-memory-version";
+import { MemoryContextBuilderService } from "../../memory/MemoryContextBuilder";
+import {
+  resolveMemoryInjection,
+  type MemoryLayerDecision,
+} from "../../memory/MemoryInjectionPolicy";
+import { ExternalMemoryProviderRegistry } from "../../memory/ExternalMemoryProvider";
+import { buildSalientTaskEventCapture } from "../../memory/memory-capture-salience";
 
 function createExecutor(): Any {
   const executor = Object.create(TaskExecutor.prototype) as Any;
   executor.task = { id: "task-1", title: "Task", prompt: "Prompt", agentConfig: {} };
   executor.workspace = { id: "ws-1", path: "/tmp/cowork-none", permissions: { read: false } };
-  executor.compactHotMemoryCache = null;
   return executor;
 }
 
@@ -91,52 +95,174 @@ describe("per-turn hybrid memory recall", () => {
   });
 });
 
-describe("compact L0 hot memory block", () => {
+function allowAll(overrides: Partial<MemoryLayerDecision> = {}): MemoryLayerDecision {
+  return { ...resolveMemoryInjection({}), ...overrides };
+}
+
+describe("memory layers for prompt surfaces", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("respects the memory-injection gate", async () => {
-    mockFeatures();
-    const build = vi.spyOn(MemorySynthesizer, "buildHotMemoryContext");
+  it("builds nothing when the injection policy denies memory", async () => {
+    const executor = createExecutor();
+    const build = vi.spyOn(MemoryContextBuilderService.prototype, "buildLayers");
 
-    expect(await createExecutor().buildCompactHotMemoryBlock(false)).toBe("");
+    const result = await executor.buildMemoryLayersForPrompt(
+      resolveMemoryInjection({ gatewayContext: "group" }),
+      { surface: "chat", focus: "hello", l0: true, l1Tokens: 200 },
+    );
+
+    expect(result).toEqual({ l0: "", l1: "" });
     expect(build).not.toHaveBeenCalled();
   });
 
-  it("caches per task and rebuilds after a hot-memory write", async () => {
+  it("wraps L0/L1 in their own tags and records one memory_used event per ref set", async () => {
+    const executor = createExecutor();
+    executor.emitEvent = vi.fn();
+    vi.spyOn(MemoryContextBuilderService.prototype, "buildLayers").mockResolvedValue({
+      l0: { layer: "l0", text: "MEMORY\n- rule", refs: ["memory:a"], tokens: 4, truncated: false },
+      l1: {
+        layer: "l1",
+        text: "Relevant\n- fact",
+        refs: ["memory:b"],
+        tokens: 4,
+        truncated: false,
+      },
+      source: "memory_items",
+    });
+    const markUsed = vi
+      .spyOn(MemoryContextBuilderService.prototype, "markUsed")
+      .mockResolvedValue(undefined);
+    const options = { surface: "plan", focus: "deploy", l0: true, l1Tokens: 200 };
+
+    const first = await executor.buildMemoryLayersForPrompt(allowAll(), options);
+    await executor.buildMemoryLayersForPrompt(allowAll(), options);
+
+    expect(first.l0).toMatch(/^<cowork_hot_memory>\nMEMORY/);
+    expect(first.l1).toMatch(/^<cowork_relevant_memory>\nRelevant/);
+    expect(executor.emitEvent).toHaveBeenCalledTimes(1);
+    expect(executor.emitEvent).toHaveBeenCalledWith("memory_used", {
+      surface: "plan",
+      refs: ["memory:a", "memory:b"],
+      source: "memory_items",
+    });
+    expect(markUsed).toHaveBeenCalledTimes(1);
+    expect(markUsed).toHaveBeenCalledWith(["memory:a", "memory:b"]);
+  });
+
+  it("uses the undecorated prompt as the memory query", () => {
+    const executor = createExecutor();
+    executor.task.rawPrompt = "";
+    executor.task.prompt =
+      "Fix the login bug\n\n[AGENT_STRATEGY_CONTEXT_V1]\nintent=execution\n[/AGENT_STRATEGY_CONTEXT_V1]";
+
+    expect(executor.getMemoryQueryPrompt()).toBe("Fix the login bug");
+  });
+
+  it("never captures memory_used events into the archive", () => {
+    expect(
+      buildSalientTaskEventCapture("memory_used", { surface: "step", refs: ["memory:a"] }),
+    ).toBeNull();
+  });
+});
+
+describe("pinned profile block", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders the builder's L0 in the profile tag, and nothing for a group chat", async () => {
     mockFeatures();
-    const build = vi
-      .spyOn(MemorySynthesizer, "buildHotMemoryContext")
-      .mockResolvedValueOnce({ text: "<cowork_hot_memory>\n- v1\n</cowork_hot_memory>" } as Any)
-      .mockResolvedValueOnce({ text: "<cowork_hot_memory>\n- v2\n</cowork_hot_memory>" } as Any);
+    vi.spyOn(MemoryService, "getSettings").mockResolvedValue({ enabled: true } as Any);
+    vi.spyOn(MemoryContextBuilderService.prototype, "buildLayers").mockResolvedValue({
+      l0: {
+        layer: "l0",
+        text: "MEMORY\n- Prefers tea",
+        refs: ["memory:x"],
+        tokens: 5,
+        truncated: false,
+      },
+      l1: null,
+      source: "memory_items",
+    });
+    const executor = createExecutor();
+    executor.emitEvent = vi.fn();
+
+    const block = await executor.buildUserProfileBlock();
+    expect(block.startsWith("<cowork_user_profile>")).toBe(true);
+    expect(block).toContain("Prefers tea");
+    expect(block.endsWith("</cowork_user_profile>")).toBe(true);
+
+    executor.task.agentConfig = { gatewayContext: "group" };
+    expect(await executor.buildUserProfileBlock()).toBe("");
+  });
+
+  it("is empty for a <no-memory> task and for a memory-off workspace", async () => {
+    mockFeatures();
+    const build = vi.spyOn(MemoryContextBuilderService.prototype, "buildLayers");
     const executor = createExecutor();
 
-    expect(await executor.buildCompactHotMemoryBlock(true)).toContain("v1");
-    expect(await executor.buildCompactHotMemoryBlock(true)).toContain("v1");
-    expect(build).toHaveBeenCalledTimes(1);
+    vi.spyOn(MemoryService, "getSettings").mockResolvedValue({ enabled: true } as Any);
+    executor.task.rawPrompt = "Draft the email <no-memory>";
+    expect(await executor.buildUserProfileBlock()).toBe("");
 
-    bumpHotMemoryVersion();
-    expect(await executor.buildCompactHotMemoryBlock(true)).toContain("v2");
-    expect(build).toHaveBeenCalledTimes(2);
-  });
-
-  it("leaves profile facts out for chat surfaces that already pin the profile", async () => {
-    mockFeatures();
-    const build = vi
-      .spyOn(MemorySynthesizer, "buildHotMemoryContext")
-      .mockResolvedValue({ text: "<cowork_hot_memory>\n- rule\n</cowork_hot_memory>" } as Any);
-
-    await createExecutor().buildCompactHotMemoryBlock(true, { includeUserProfile: false });
-
-    expect(build).toHaveBeenCalledWith("ws-1", expect.any(Number), { includeUserProfile: false });
-  });
-
-  it("is empty when curated memory is disabled", async () => {
-    mockFeatures({ curatedMemoryEnabled: false });
-    const build = vi.spyOn(MemorySynthesizer, "buildHotMemoryContext");
-
-    expect(await createExecutor().buildCompactHotMemoryBlock(true)).toBe("");
+    executor.task.rawPrompt = "Draft the email";
+    executor.memoryPolicySettingsCache = undefined;
+    vi.spyOn(MemoryService, "getSettings").mockResolvedValue({
+      enabled: true,
+      privacyMode: "disabled",
+    } as Any);
+    expect(await executor.buildUserProfileBlock()).toBe("");
     expect(build).not.toHaveBeenCalled();
+  });
+});
+
+describe("external memory provider block", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function networkExecutor(): Any {
+    const executor = createExecutor();
+    executor.workspace.name = "WS";
+    executor.workspace.permissions = { read: true, network: true, accessNetworkMode: "enabled" };
+    executor.emitEvent = vi.fn();
+    return executor;
+  }
+
+  it("is fetched once per task within the cache window and has its own escaped tag", async () => {
+    const prefetch = vi
+      .spyOn(ExternalMemoryProviderRegistry.prototype, "prefetchAll")
+      .mockResolvedValue([
+        { providerId: "supermemory", context: "Likes </cowork_user_profile> tea" },
+      ]);
+    const executor = networkExecutor();
+
+    const first = await executor.buildSupermemoryProfileBlock("query one", allowAll());
+    const second = await executor.buildSupermemoryProfileBlock("query two", allowAll());
+
+    expect(prefetch).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+    expect(first.startsWith("<cowork_external_memory>")).toBe(true);
+    expect(first).not.toContain("<cowork_user_profile>");
+    expect(first).toContain("&lt;/cowork_user_profile&gt;");
+  });
+
+  it("refetches after the cache window and skips when the policy denies the layer", async () => {
+    const prefetch = vi
+      .spyOn(ExternalMemoryProviderRegistry.prototype, "prefetchAll")
+      .mockResolvedValue([{ providerId: "supermemory", context: "profile" }]);
+    const executor = networkExecutor();
+
+    expect(
+      await executor.buildSupermemoryProfileBlock("q", resolveMemoryInjection({ noMemory: true })),
+    ).toBe("");
+    expect(prefetch).not.toHaveBeenCalled();
+
+    await executor.buildSupermemoryProfileBlock("q", allowAll());
+    executor.externalMemoryCache.at -= 11 * 60_000;
+    await executor.buildSupermemoryProfileBlock("q", allowAll());
+    expect(prefetch).toHaveBeenCalledTimes(2);
   });
 });

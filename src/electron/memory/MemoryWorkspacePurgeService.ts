@@ -3,9 +3,11 @@
  * deleted task or for "Clear All Memories" (audit SEC-15).
  *
  * Task delete: database rows derived from the task (archive memories, durable context,
- * transcript span index, KG facts, Playbook evidence) are removed inside
+ * transcript span index, KG facts, Playbook entries and evidence, suggestions raised from the
+ * task) are removed inside
  * `TaskStore.delete`'s transaction (memory-purge-sql.ts). This service removes the
- * file-side copies afterwards: transcripts (via `TranscriptStore.deleteTask`: JSONL spans,
+ * file-side copies afterwards: transcripts (via `TranscriptStore.deleteTask`: conversation
+ * index rows written after the delete, legacy JSONL spans,
  * checkpoints and lock file) and Chronicle observations with their screenshots.
  *
  * Workspace clear: every memory store for the workspace, each step failure-isolated, with
@@ -47,6 +49,11 @@ export interface MemoryWorkspacePurgeCounts {
   dreaming: number;
   coreMemoryCandidates: number;
   playbookEvidence: number;
+  playbookEntries: number;
+  /** Proactive suggestions and suggestion feedback. */
+  suggestions: number;
+  /** Memory engine fact store (memory_items) rows owned by the workspace. */
+  memoryItems: number;
   pendingMemoryWrites: number;
 }
 
@@ -81,6 +88,9 @@ function emptyCounts(): MemoryWorkspacePurgeCounts {
     dreaming: 0,
     coreMemoryCandidates: 0,
     playbookEvidence: 0,
+    playbookEntries: 0,
+    suggestions: 0,
+    memoryItems: 0,
     pendingMemoryWrites: 0,
   };
 }
@@ -125,7 +135,7 @@ async function removeConfinedFiles(
 
 /** Files and index rows removed by a TranscriptStore deletion. */
 function transcriptDeletionCount(result: TranscriptDeletionResult): number {
-  return result.spanRows + result.spanFiles + result.checkpointFiles;
+  return result.indexRows + result.spanRows + result.spanFiles + result.checkpointFiles;
 }
 
 function errorMessage(error: unknown): string {
@@ -226,6 +236,9 @@ export class MemoryWorkspacePurgeService {
         counts.dreaming += rows.dreaming;
         counts.coreMemoryCandidates += rows.coreMemoryCandidates;
         counts.playbookEvidence += rows.playbookEvidence;
+        counts.playbookEntries += rows.playbookEntries;
+        counts.suggestions += rows.suggestions;
+        counts.memoryItems += rows.memoryItems;
         counts.pendingMemoryWrites += rows.pendingMemoryWrites;
         counts.transcripts += rows.transcriptSpans;
       }
@@ -237,6 +250,9 @@ export class MemoryWorkspacePurgeService {
         "dreaming",
         "coreMemoryCandidates",
         "playbookEvidence",
+        "playbookEntries",
+        "suggestions",
+        "memoryItems",
         "pendingMemoryWrites",
       ] as const) {
         errors[key] = message;

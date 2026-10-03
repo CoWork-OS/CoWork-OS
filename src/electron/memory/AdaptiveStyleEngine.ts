@@ -26,6 +26,9 @@ import {
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PersonalityManager } from "../settings/personality-manager";
+import { MemoryWriter } from "./MemoryWriter";
+import { hasExplicitResponseStyle } from "./memory-read-side";
+import { MEMORY_LANE_STORES, responseStyleCandidate } from "./memory-items-lanes";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -303,6 +306,16 @@ export class AdaptiveStyleEngine {
     const state = this.loadState();
     this.resetWeekIfNeeded(state);
 
+    // An explicit choice (a user-stated or user-confirmed `response_style` memory item)
+    // is not adapted away: inference only adjusts the style while the user has not chosen.
+    if (hasExplicitResponseStyle()) {
+      if (state.pendingSignals.length > 0) {
+        state.pendingSignals = state.pendingSignals.filter((s) => s.source !== "feedback");
+        this.saveState(state);
+      }
+      return;
+    }
+
     const guardrails = GuardrailManager.loadSettings();
     const maxDrift = guardrails.adaptiveStyleMaxDriftPerWeek ?? 1;
 
@@ -367,6 +380,19 @@ export class AdaptiveStyleEngine {
     }
 
     PersonalityManager.setResponseStyle(styleUpdate);
+    // Mirror the adapted style into memory_items as the single `response_style` subject.
+    // It is inferred, so a style the user stated explicitly is not overridden there.
+    MemoryWriter.dualWrite(
+      responseStyleCandidate(
+        { ...currentStyle, ...styleUpdate },
+        {
+          source: "inferred",
+          store: MEMORY_LANE_STORES.adaptiveStyle,
+          reason: adaptations.map((adaptation) => adaptation.reason).join("; "),
+        },
+      ),
+      "adaptive style",
+    );
     state.weeklyAdaptationCount += adaptations.length;
     state.lastAdaptationAt = Date.now();
     state.pendingSignals = state.pendingSignals.filter((s) => s.source !== "feedback");

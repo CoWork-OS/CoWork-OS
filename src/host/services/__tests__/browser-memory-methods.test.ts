@@ -320,7 +320,7 @@ describe("browser memory services", () => {
       workspace.path,
       "Disposable recent task",
       expect.objectContaining({
-        tokenBudget: 1800,
+        workspaceCanRead: true,
         agentRoleId: "role-one",
         boxBrainHits: [],
         filesystemReadGuard: expect.any(Function),
@@ -330,5 +330,89 @@ describe("browser memory services", () => {
     await expect(
       definitions.getMemoryLayerPreview.handler([workspace.id], {} as never),
     ).rejects.toThrow("Layer storage unavailable");
+  });
+});
+
+describe("browser memory items (What CoWork knows)", () => {
+  const WS = "7b0f8e4c-3a52-4d8e-9b1a-2f6c1d9e0a11";
+  function setupItems(permissions: Partial<Workspace["permissions"]>) {
+    const memoryItems = {
+      list: vi.fn(async () => ({ items: [], total: 0, offset: 0, hasMore: false })),
+      delete: vi.fn(async () => ({ success: true, item: null })),
+      add: vi.fn(async () => ({ success: true, item: null })),
+      clearGlobal: vi.fn(async () => ({ success: true, deleted: 0, legacyRecords: 0 })),
+    };
+    const definitions = createBrowserMemoryDefinitions({
+      resolveWorkspace: async () =>
+        ({
+          ...workspace,
+          id: WS,
+          permissions: { ...workspace.permissions, ...permissions },
+        }) as Workspace,
+      memoryItems: memoryItems as never,
+    });
+    const call = async (name: string, args: unknown[]) => {
+      const method = definitions[name];
+      return method.handler(method.validate?.(args) ?? args, {} as never);
+    };
+    return { memoryItems, call, definitions };
+  }
+
+  it("exposes the desktop method names", () => {
+    const { definitions } = setupItems({});
+    for (const name of [
+      "listMemoryItems",
+      "getMemoryItem",
+      "getMemoryItemWhy",
+      "addMemoryItem",
+      "updateMemoryItem",
+      "setMemoryItemPinned",
+      "deleteMemoryItem",
+      "clearGlobalMemoryItems",
+    ]) {
+      expect(definitions[name]).toBeDefined();
+    }
+  });
+
+  it("checks workspace read, write and delete authority", async () => {
+    const readOnly = setupItems({ write: false, delete: false });
+    await expect(readOnly.call("listMemoryItems", [{ workspaceId: WS }])).resolves.toMatchObject({
+      total: 0,
+    });
+    await expect(
+      readOnly.call("addMemoryItem", [
+        { workspaceId: WS, content: "Prefers tea", kind: "preference", scope: "global" },
+      ]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      readOnly.call("deleteMemoryItem", [{ workspaceId: WS, id: "item-1" }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      readOnly.call("clearGlobalMemoryItems", [{ workspaceId: WS, confirm: true }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(readOnly.memoryItems.add).not.toHaveBeenCalled();
+    expect(readOnly.memoryItems.delete).not.toHaveBeenCalled();
+    expect(readOnly.memoryItems.clearGlobal).not.toHaveBeenCalled();
+
+    const full = setupItems({});
+    await full.call("deleteMemoryItem", [{ workspaceId: WS, id: "item-1" }]);
+    expect(full.memoryItems.delete).toHaveBeenCalledWith({ workspaceId: WS, id: "item-1" });
+  });
+
+  it("validates payloads with the desktop schemas", async () => {
+    const { call, memoryItems } = setupItems({});
+    await expect(
+      call("addMemoryItem", [
+        {
+          workspaceId: WS,
+          content: "Prefers tea",
+          kind: "preference",
+          scope: "global",
+          source: "x",
+        },
+      ]),
+    ).rejects.toThrow();
+    await expect(call("clearGlobalMemoryItems", [{ workspaceId: WS }])).rejects.toThrow();
+    expect(memoryItems.add).not.toHaveBeenCalled();
   });
 });

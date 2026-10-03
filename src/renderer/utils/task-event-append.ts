@@ -8,6 +8,7 @@ const RENDERER_NOISE_EVENT_TYPES = new Set([
   "progress_update",
   "task_analysis",
   "jev_decision",
+  "memory_used",
   "executing",
 ]);
 

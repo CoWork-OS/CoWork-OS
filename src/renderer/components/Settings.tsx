@@ -9246,7 +9246,10 @@ export function Settings({
                   onboardingCompletedAt={onboardingCompletedAt}
                 />
               ) : activeTab === "personality" ? (
-                <PersonalitySettings onSettingsChanged={onSettingsChanged} />
+                <PersonalitySettings
+                  onSettingsChanged={onSettingsChanged}
+                  onOpenMemoryHub={() => setActiveTab("memory")}
+                />
               ) : activeTab === "everydayAgent" ? (
                 <EverydayAgentSettingsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
               ) : activeTab === "system" ? (

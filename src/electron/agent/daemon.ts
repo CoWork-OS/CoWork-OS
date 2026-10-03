@@ -241,6 +241,7 @@ import { DreamingRepository } from "../memory/DreamingRepository";
 import { DreamingService } from "../memory/DreamingService";
 import { MemoryPressureService } from "../memory/MemoryPressureService";
 import { TranscriptStore } from "../memory/TranscriptStore";
+import { DurableContextService } from "../memory/DurableContextService";
 import { getAwarenessService } from "../awareness/AwarenessService";
 import { PersonalityManager } from "../settings/personality-manager";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
@@ -561,25 +562,6 @@ const TASK_OVERRIDE_ALLOWLIST = new Set<keyof Task>([
   "resumeStrategy",
 ]);
 
-/**
- * Mirrors the executor's allowMemoryInjection: memory is retained unless the
- * task opts out (sub-agents default to opting out), and group/public gateway
- * contexts only get it when shared-context memory is explicitly trusted.
- */
-function isRelationshipMemoryAllowedForTask(
-  agentConfig: AgentConfig | undefined,
-  isSubAgentTask: boolean,
-): boolean {
-  const retainMemory = agentConfig?.retainMemory ?? !isSubAgentTask;
-  if (!retainMemory) return false;
-  const gatewayContext = agentConfig?.gatewayContext ?? "private";
-  if (gatewayContext === "private") return true;
-  return (
-    agentConfig?.allowSharedContextMemory === true &&
-    (gatewayContext === "group" || gatewayContext === "public")
-  );
-}
-
 function sanitizeTaskOverrides(taskOverrides?: Partial<Task>): Partial<Task> | undefined {
   if (!taskOverrides) return undefined;
   const sanitized: Partial<Task> = {};
@@ -728,6 +710,7 @@ export class AgentDaemon extends EventEmitter {
     "llm_usage",
     "task_analysis",
     "jev_decision",
+    "memory_used",
   ]);
 
   private taskRepo: TaskStore;
@@ -1150,9 +1133,9 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
-   * Transcript retention follows task-event retention, then the one-time span
-   * storage cleanup runs in the background (resumable, batched, recorded once
-   * complete). Freed pages are returned by the idle VACUUM below.
+   * Conversation index and transcript retention follow task-event retention, then the
+   * one-time conversation index migration runs in the background (resumable, batched,
+   * recorded once complete). Freed pages are returned by the idle VACUUM below.
    */
   private async runTranscriptMaintenance(retentionDays: number): Promise<void> {
     try {
@@ -1160,7 +1143,8 @@ export class AgentDaemon extends EventEmitter {
       if (pruned.tasks > 0 || pruned.lockFiles > 0) {
         log.info(
           `DB maintenance: pruned transcripts of ${pruned.tasks} task(s) ` +
-            `(${pruned.spanRows} span rows, ${pruned.spanFiles} span files, ` +
+            `(${pruned.indexRows} conversation index rows, ${pruned.spanRows} span rows, ` +
+            `${pruned.spanFiles} span files, ` +
             `${pruned.checkpointFiles} checkpoint files, ${pruned.lockFiles} lock files, ` +
             `${Math.round(pruned.bytesFreed / 1048576)} MB of files)`,
         );
@@ -1168,9 +1152,11 @@ export class AgentDaemon extends EventEmitter {
     } catch (error) {
       log.warn("DB maintenance: transcript retention failed:", error);
     }
-    void TranscriptStore.runStorageCleanup({ log: (message) => log.info(message) }).catch(
-      (error) => log.warn("DB maintenance: transcript storage cleanup failed:", error),
-    );
+    // One-time move of legacy transcript spans (and task_events history) into the
+    // conversation index; resumable, batched, recorded once complete.
+    void DurableContextService.migrateLegacyTranscripts({
+      log: (message) => log.info(message),
+    }).catch((error) => log.warn("DB maintenance: conversation index migration failed:", error));
   }
 
   /**
@@ -1607,8 +1593,6 @@ export class AgentDaemon extends EventEmitter {
     agentConfig?: AgentConfig;
     lastProgressScore?: number;
     workspaceId?: string;
-    /** Child/sub-agent task; defaults retainMemory to false like the executor. */
-    isSubAgentTask?: boolean;
   }): {
     route: IntentRoute;
     strategy: DerivedTaskStrategy;
@@ -1651,24 +1635,10 @@ export class AgentDaemon extends EventEmitter {
     if (!agentConfig.executionMode) {
       agentConfig.executionMode = strategy.executionMode;
     }
-    // task.prompt is persisted and can reach any model that sees the task, so
-    // relationship memory is only added under the executor's memory-injection gate
-    // (retainMemory, and a private gateway context unless shared memory is trusted).
-    const relationshipContext = isRelationshipMemoryAllowedForTask(
-      input.agentConfig,
-      input.isSubAgentTask === true,
-    )
-      ? RelationshipMemoryService.buildPromptContext({
-          maxPerLayer: 2,
-          maxChars: 1200,
-        })
-      : "";
-    const prompt = TaskStrategyService.decoratePrompt(
-      input.prompt,
-      route,
-      strategy,
-      relationshipContext,
-    );
+    // task.prompt is persisted and reaches every consumer of the task, so it carries no
+    // memory: relationship and profile facts are injected per prompt by
+    // MemoryContextBuilder under MemoryInjectionPolicy.
+    const prompt = TaskStrategyService.decoratePrompt(input.prompt, route, strategy);
     return {
       route,
       strategy,
@@ -1738,7 +1708,6 @@ export class AgentDaemon extends EventEmitter {
       agentConfig: task.agentConfig,
       lastProgressScore: task.lastProgressScore,
       workspaceId: task.workspaceId,
-      isSubAgentTask: (task.agentType ?? "main") === "sub" || !!task.parentTaskId,
     });
     const nextAgentConfig = derived.agentConfig;
     const agentConfigChanged = derived.agentConfigChanged;
@@ -4454,8 +4423,6 @@ export class AgentDaemon extends EventEmitter {
       routingPrompt: params.prompt,
       agentConfig: taskAgentConfig,
       workspaceId: params.workspaceId,
-      isSubAgentTask:
-        params.taskOverrides?.agentType === "sub" || !!params.taskOverrides?.parentTaskId,
     });
     const isCronTask = params.source === "cron";
     const cronBudgetProfile = isCronTask
@@ -9087,6 +9054,10 @@ export class AgentDaemon extends EventEmitter {
     if (typeof recordTaskMutationImpact === "function") {
       recordTaskMutationImpact.call(this, taskId, timelineEvent, legacyType || type, legacyPayload);
     }
+    const indexConversationEvent = (this as Any).indexConversationEvent;
+    if (typeof indexConversationEvent === "function") {
+      indexConversationEvent.call(this, taskId, timelineEvent, legacyType, legacyPayload);
+    }
     const persistTranscriptArtifacts = (this as Any).persistTranscriptArtifacts;
     if (typeof persistTranscriptArtifacts === "function") {
       void persistTranscriptArtifacts.call(this, taskId, timelineEvent, legacyType, legacyPayload);
@@ -9307,6 +9278,38 @@ export class AgentDaemon extends EventEmitter {
     this.rememberTaskLlmProviderType(taskId, providerType);
   }
 
+  /**
+   * Feed the conversation index, the one search index over task conversations
+   * (search_sessions, search_quotes, query orchestrator, Dreaming, Mission Control
+   * recall). Runs for every task whatever the memory settings, except tasks whose prompt
+   * carries a `<no-memory>` directive. Writes are batched by the service.
+   */
+  private indexConversationEvent(
+    taskId: string,
+    timelineEvent: TaskEvent,
+    legacyType: string | undefined,
+    legacyPayload: Record<string, unknown>,
+  ): void {
+    const type = legacyType || timelineEvent.type;
+    if (!DurableContextService.isConversationEventType(type)) return;
+    try {
+      const task = this.taskRepo.findById(taskId);
+      if (!task?.workspaceId || taskDisablesMemoryCapture(task)) return;
+      DurableContextService.indexEvent({
+        workspaceId: task.workspaceId,
+        taskId,
+        type,
+        payload: legacyPayload,
+        timestamp: timelineEvent.timestamp,
+        eventId: timelineEvent.eventId,
+        seq: timelineEvent.seq,
+        id: timelineEvent.id,
+      });
+    } catch {
+      // Indexing is best effort; the event is already in task_events.
+    }
+  }
+
   private async persistTranscriptArtifacts(
     taskId: string,
     timelineEvent: TaskEvent,
@@ -9361,30 +9364,9 @@ export class AgentDaemon extends EventEmitter {
       evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "write", {
         internalRuntimeStorageWrite: true,
       }).decision === "allow";
-    const transcriptFilePath = path.join(
-      workspace.path,
-      ".cowork",
-      "memory",
-      "transcripts",
-      "spans",
-      `${task.id}.jsonl`,
-    );
-    const transcriptDirectory = path.dirname(transcriptFilePath);
-
-    if (
-      features.transcriptStoreEnabled &&
-      canWrite(transcriptDirectory) &&
-      canWrite(transcriptFilePath)
-    ) {
-      const legacyEvent: TaskEvent = {
-        ...timelineEvent,
-        type: (legacyType as EventType) || timelineEvent.type,
-        payload: legacyPayload,
-        legacyType: (legacyType as EventType) || timelineEvent.legacyType,
-      };
-      await TranscriptStore.appendEvent(workspace.path, legacyEvent).catch(() => undefined);
-    }
-
+    // Transcript spans (JSONL + `transcript_spans`) are no longer written: the
+    // conversation index (indexConversationEvent) is the search copy, and task_events
+    // the record. Checkpoints below are resume state, not search.
     const checkpointFilePath = path.join(
       workspace.path,
       ".cowork",

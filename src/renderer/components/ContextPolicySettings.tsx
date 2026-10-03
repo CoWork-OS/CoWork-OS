@@ -34,7 +34,7 @@ const TOOL_GROUPS = [
     id: "group:memory",
     name: "Memory Tools",
     description:
-      "Memory save/recall, knowledge graph, session history and Supermemory tools, plus clipboard and chat-history access",
+      "Memory recall, remember and forget, task context recovery and knowledge graph tools, plus clipboard and chat-history access",
     defaultDeniedInGroup: true,
   },
   {

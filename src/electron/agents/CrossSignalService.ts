@@ -154,6 +154,7 @@ export class CrossSignalService {
   private agentRoleRepo: AgentRoleRepository;
   private stateByWorkspace = new Map<string, WorkspaceState>();
   private agentDaemon: AgentDaemon | null = null;
+  private stopped = false;
 
   constructor(private db: Database.Database) {
     this.taskRepo = new TaskRepository(db);
@@ -161,28 +162,32 @@ export class CrossSignalService {
     this.agentRoleRepo = new AgentRoleRepository(db);
   }
 
+  private readonly onAssistantMessage = (evt: Any): void => {
+    if (this.stopped) return;
+    try {
+      const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
+      const content =
+        typeof evt?.message === "string"
+          ? evt.message
+          : typeof evt?.content === "string"
+            ? evt.content
+            : "";
+      if (taskId && content) {
+        void this.ingestTaskMessage(taskId, content, Date.now()).catch(() => {
+          // ignore
+        });
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   async start(agentDaemon: AgentDaemon): Promise<void> {
     this.agentDaemon = agentDaemon;
+    this.stopped = false;
 
     // Live updates
-    agentDaemon.on("assistant_message", (evt: Any) => {
-      try {
-        const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
-        const content =
-          typeof evt?.message === "string"
-            ? evt.message
-            : typeof evt?.content === "string"
-              ? evt.content
-              : "";
-        if (taskId && content) {
-          void this.ingestTaskMessage(taskId, content, Date.now()).catch(() => {
-            // ignore
-          });
-        }
-      } catch {
-        // ignore
-      }
-    });
+    agentDaemon.on("assistant_message", this.onAssistantMessage);
 
     // Best-effort rebuild on startup so CROSS_SIGNALS.md isn't blank after restarts.
     try {
@@ -191,6 +196,25 @@ export class CrossSignalService {
     } catch (error) {
       console.warn("[CrossSignals] Startup rebuild failed:", error);
     }
+  }
+
+  /**
+   * Stop listening and write pending signals now, so debounced updates are not lost (or
+   * written after the database closes) on shutdown.
+   */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.agentDaemon) {
+      this.agentDaemon.off("assistant_message", this.onAssistantMessage);
+      this.agentDaemon = null;
+    }
+    for (const state of this.stateByWorkspace.values()) {
+      if (state.flushTimer) {
+        clearTimeout(state.flushTimer);
+        state.flushTimer = null;
+      }
+    }
+    await this.flushAll();
   }
 
   private getWorkspaceState(workspaceId: string): WorkspaceState {
@@ -244,6 +268,7 @@ export class CrossSignalService {
   }
 
   private scheduleFlush(workspaceId: string): void {
+    if (this.stopped) return;
     const state = this.getWorkspaceState(workspaceId);
     if (state.flushTimer) return;
 

@@ -217,7 +217,7 @@ When command tools are exposed by the active access profile:
 | Working directory     | Restricted to the active workspace and profile-approved roots |
 | Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR)     |
 | API keys              | **Never passed** to subprocesses                              |
-| Timeout               | Maximum 5 minutes                                             |
+| Timeout               | 2 minutes by default (5 for installs, builds and tests); a command may ask for up to 30 minutes, capped by the current step's time budget |
 | Output limit          | 100KB (truncated if exceeded)                                 |
 
 **Security note**: Your API keys and secrets are never exposed to shell commands. The app creates a minimal, safe environment for each command.

@@ -87,6 +87,11 @@ import { promisify } from "util";
 import { AgentDaemon } from "./daemon";
 import { APPROVAL_GATED_TOOL_TIMEOUT_MS as APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS } from "./approval-timeouts";
 import {
+  RUN_COMMAND_DEFAULT_TIMEOUT_MS,
+  RUN_COMMAND_HEAVY_TIMEOUT_MS,
+  RUN_COMMAND_MAX_TIMEOUT_MS,
+} from "./run-command-timeouts";
+import {
   BROWSER_ACTION_DIAGNOSTICS_HEADROOM_MS,
   BROWSER_TOOL_TIMEOUT_MS as BROWSER_TOOL_TIMEOUT_BUDGET_MS,
 } from "./browser/browser-timeouts";
@@ -1437,8 +1442,8 @@ export class TaskExecutor {
   private static readonly APPROVAL_GATED_TOOL_TIMEOUT_MS = APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS;
   /** Video generation submission can take 10–30 s for job creation + initial processing. */
   private static readonly VIDEO_TOOL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-  private static readonly RUN_COMMAND_DEFAULT_TIMEOUT_MS = 120 * 1000;
-  private static readonly RUN_COMMAND_HEAVY_TIMEOUT_MS = 5 * 60 * 1000;
+  private static readonly RUN_COMMAND_DEFAULT_TIMEOUT_MS = RUN_COMMAND_DEFAULT_TIMEOUT_MS;
+  private static readonly RUN_COMMAND_HEAVY_TIMEOUT_MS = RUN_COMMAND_HEAVY_TIMEOUT_MS;
 
   /**
    * Insert or replace a pinned block. Blocks are located by their tags even after
@@ -10755,8 +10760,12 @@ ${transcript}
         inputTimeoutRaw > 0
           ? Math.round(inputTimeoutRaw)
           : undefined;
+      // An explicit or configured timeout may run past the inferred defaults (long
+      // builds, full test suites) but must end inside the current step.
+      const clampRunCommand = (ms: number): number =>
+        clampToStepTimeout(Math.min(ms, RUN_COMMAND_MAX_TIMEOUT_MS));
       if (typeof inputTimeout === "number" && Number.isFinite(inputTimeout) && inputTimeout > 0) {
-        return Math.min(inputTimeout, TaskExecutor.RUN_COMMAND_HEAVY_TIMEOUT_MS);
+        return clampRunCommand(inputTimeout);
       }
 
       const command = typeof toolInput.command === "string" ? toolInput.command.toLowerCase() : "";
@@ -10770,7 +10779,9 @@ ${transcript}
         /\b(pytest|jest|vitest|playwright|cypress|turbo|nx)\b/.test(command)
           ? TaskExecutor.RUN_COMMAND_HEAVY_TIMEOUT_MS
           : TaskExecutor.RUN_COMMAND_DEFAULT_TIMEOUT_MS;
-      return normalizedSettingsTimeout ?? inferredDefault;
+      return normalizedSettingsTimeout === null
+        ? inferredDefault
+        : clampRunCommand(normalizedSettingsTimeout);
     }
 
     if (toolName === "request_user_input") {

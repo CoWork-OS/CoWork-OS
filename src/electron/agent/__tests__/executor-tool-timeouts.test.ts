@@ -102,7 +102,7 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     timeoutSpy.mockRestore();
   });
 
-  it("accepts timeout_seconds aliases for run_command and clamps to shell max", () => {
+  it("accepts timeout_seconds aliases for run_command beyond the old five-minute cap", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { deepWorkMode: false } };
 
@@ -115,7 +115,44 @@ describe("TaskExecutor getToolTimeoutMs", () => {
       timeout_seconds: 480,
     });
 
-    expect(timeoutMs).toBe(300_000);
+    expect(timeoutMs).toBe(480_000);
+    timeoutSpy.mockRestore();
+  });
+
+  it("clamps explicit run_command timeouts to the step budget and the 30-minute shell max", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(null);
+
+    // Standard steps last 15 minutes; the command must finish inside the step.
+    executor.task = { agentConfig: { deepWorkMode: false } };
+    expect(executor.getToolTimeoutMs("run_command", { command: "make", timeout: 1_800_000 })).toBe(
+      895_000,
+    );
+
+    // Deep-work steps last 45 minutes, so the shell max applies.
+    executor.task = { agentConfig: { deepWorkMode: true } };
+    expect(
+      executor.getToolTimeoutMs("run_command", { command: "make", timeout_seconds: 1_800 }),
+    ).toBe(1_800_000);
+    expect(executor.getToolTimeoutMs("run_command", { command: "make", timeout: 7_200_000 })).toBe(
+      1_800_000,
+    );
+    // Inferred defaults are unchanged.
+    expect(executor.getToolTimeoutMs("run_command", { command: "git status" })).toBe(120_000);
+    expect(executor.getToolTimeoutMs("run_command", { command: "npm test" })).toBe(300_000);
+    timeoutSpy.mockRestore();
+  });
+
+  it("keeps a configured run_command timeout within the step budget and shell max", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: true } };
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(3_600_000);
+
+    expect(executor.getToolTimeoutMs("run_command", { command: "git status" })).toBe(1_800_000);
     timeoutSpy.mockRestore();
   });
 

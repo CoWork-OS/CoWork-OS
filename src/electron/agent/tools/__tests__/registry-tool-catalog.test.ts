@@ -1031,14 +1031,33 @@ describe("run_command kill timeout", () => {
     expect(fromMs).toHaveBeenCalledWith("make", expect.objectContaining({ timeout: 90_000 }));
   });
 
-  it("falls back to the documented 120s default and clamps to the 300s maximum", async () => {
+  it("falls back to the documented 120s default and clamps to the 30-minute maximum", async () => {
     const withoutBudget = await runHandler({ command: "git status" });
     expect(withoutBudget).toHaveBeenCalledWith(
       "git status",
       expect.objectContaining({ timeout: 120_000 }),
     );
 
-    const oversized = await runHandler({ command: "npm ci", timeout: 900_000 });
-    expect(oversized).toHaveBeenCalledWith("npm ci", expect.objectContaining({ timeout: 300_000 }));
+    const long = await runHandler({ command: "npm ci", timeout: 900_000 });
+    expect(long).toHaveBeenCalledWith("npm ci", expect.objectContaining({ timeout: 900_000 }));
+
+    const oversized = await runHandler({ command: "npm ci", timeout: 3_600_000 });
+    expect(oversized).toHaveBeenCalledWith(
+      "npm ci",
+      expect.objectContaining({ timeout: 1_800_000 }),
+    );
+  });
+
+  it("never sets a kill timer past the executor's budget for the call", async () => {
+    // The executor clamps a 30-minute request to its 15-minute step budget; the
+    // command must be killed within that budget so its partial output survives.
+    const clamped = await runHandler(
+      { command: "cargo build --release", timeout_seconds: 1_800 },
+      { timeoutMs: 895_000 },
+    );
+    expect(clamped).toHaveBeenCalledWith(
+      "cargo build --release",
+      expect.objectContaining({ timeout: 895_000 }),
+    );
   });
 });

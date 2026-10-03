@@ -16,6 +16,7 @@ import { getBackgroundProcessManager, type BackgroundProcessLaunch } from "./bac
 import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
 import { OUTPUT_TRUNCATED_MARKER, boundOutput } from "../sandbox/bounded-output";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
+import { RUN_COMMAND_DEFAULT_TIMEOUT_MS, RUN_COMMAND_MAX_TIMEOUT_MS } from "../run-command-timeouts";
 import { createLogger } from "../../utils/logger";
 
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
@@ -98,8 +99,8 @@ function stripScriptControlCodes(text: string): string {
 }
 
 // Limits to prevent runaway commands
-const MAX_TIMEOUT = 5 * 60 * 1000; // 5 minutes max
-const DEFAULT_TIMEOUT = 2 * 60 * 1000; // 2 minutes default, as the run_command schema documents
+const MAX_TIMEOUT = RUN_COMMAND_MAX_TIMEOUT_MS;
+const DEFAULT_TIMEOUT = RUN_COMMAND_DEFAULT_TIMEOUT_MS; // as the run_command schema documents
 // Kill commands this long before the executor's own tool deadline so a timed-out
 // command still returns its partial output instead of a bare tool timeout.
 const EXECUTOR_DEADLINE_GRACE_MS = 3_000;
@@ -439,8 +440,10 @@ function positiveFiniteNumber(value: unknown): number | undefined {
 
 /**
  * Kill timeout for a run_command call: an explicit input timeout (timeout,
- * timeout_ms, timeout_seconds) wins; otherwise the executor's budget for the
- * call (runtime.timeoutMs) minus a grace period; otherwise the default.
+ * timeout_ms, timeout_seconds) wins, up to the executor's budget for the call
+ * (runtime.timeoutMs); otherwise that budget minus a grace period; otherwise
+ * the default. The executor clamps explicit requests to the step budget, so the
+ * kill timer must not outlive it. Never above RUN_COMMAND_MAX_TIMEOUT_MS.
  */
 export function resolveRunCommandTimeoutMs(input: unknown, runtimeTimeoutMs?: unknown): number {
   const source = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
@@ -451,10 +454,11 @@ export function resolveRunCommandTimeoutMs(input: unknown, runtimeTimeoutMs?: un
     (timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000);
   const budgetMs = positiveFiniteNumber(runtimeTimeoutMs);
   const resolvedMs =
-    explicitMs ??
-    (budgetMs === undefined
-      ? DEFAULT_TIMEOUT
-      : Math.max(budgetMs - EXECUTOR_DEADLINE_GRACE_MS, Math.ceil(budgetMs / 2)));
+    explicitMs !== undefined
+      ? Math.min(explicitMs, budgetMs ?? explicitMs)
+      : budgetMs === undefined
+        ? DEFAULT_TIMEOUT
+        : Math.max(budgetMs - EXECUTOR_DEADLINE_GRACE_MS, Math.ceil(budgetMs / 2));
   return Math.min(Math.round(resolvedMs), MAX_TIMEOUT);
 }
 

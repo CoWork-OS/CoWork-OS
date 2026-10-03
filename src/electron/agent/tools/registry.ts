@@ -9019,7 +9019,7 @@ ${skillDescriptions}`;
             timeout: {
               type: "number",
               description:
-                "Timeout in milliseconds (optional, default: 120000; build/test/install commands may infer longer timeouts automatically; max: 300000). Ignored with background: true.",
+                "Timeout in milliseconds (optional, default: 120000; build/test/install commands may infer longer timeouts automatically). Set it for long builds, test suites or downloads: max 1800000 (30 minutes), limited to the current step's time budget (just under 15 minutes outside deep work). Ignored with background: true.",
             },
             background: {
               type: "boolean",

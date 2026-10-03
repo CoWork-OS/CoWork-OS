@@ -41,6 +41,13 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void>
 }
 
 describe("shell-session-manager", () => {
+  it("lets agent commands run past five minutes up to the run_command maximum", () => {
+    expect(_testUtils.resolveCommandTimeoutMs("task", 20 * 60 * 1000)).toBe(20 * 60 * 1000);
+    expect(_testUtils.resolveCommandTimeoutMs("task", 2 * 60 * 60 * 1000)).toBe(30 * 60 * 1000);
+    expect(_testUtils.resolveCommandTimeoutMs(undefined, 0)).toBe(60_000);
+    expect(_testUtils.resolveCommandTimeoutMs("tab", 2 * 60 * 60 * 1000)).toBe(2 * 60 * 60 * 1000);
+  });
+
   it("does not use interactive shell startup on Unix sessions", () => {
     if (process.platform === "win32") {
       expect(_testUtils.getShellArgs("powershell.exe")).toEqual(["-NoLogo", "-NoProfile"]);

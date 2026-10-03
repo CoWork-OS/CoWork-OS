@@ -5,6 +5,7 @@ import * as path from "path";
 import { execFileSync, spawn, type ChildProcess } from "child_process";
 import { getUserDataDir } from "../../utils/user-data-dir";
 import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
+import { RUN_COMMAND_MAX_TIMEOUT_MS } from "../run-command-timeouts";
 import type {
   CommandTerminationReason,
   ShellSessionInfo,
@@ -74,8 +75,13 @@ export interface ShellRunRequest {
 
 const STATE_FILE = path.join(getUserDataDir(), "shell-sessions.json");
 const COMMAND_TIMEOUT_FALLBACK_MS = 60_000;
-const COMMAND_TIMEOUT_MAX_MS = 5 * 60 * 1000;
+const COMMAND_TIMEOUT_MAX_MS = RUN_COMMAND_MAX_TIMEOUT_MS;
 const TAB_COMMAND_TIMEOUT_MAX_MS = 24 * 60 * 60 * 1000;
+
+function resolveCommandTimeoutMs(scope: ShellSessionScope | undefined, timeoutMs: number): number {
+  const maxMs = scope === "tab" ? TAB_COMMAND_TIMEOUT_MAX_MS : COMMAND_TIMEOUT_MAX_MS;
+  return Math.min(Math.max(timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000), maxMs);
+}
 const MAX_TERMINAL_TABS_PER_WORKSPACE = 12;
 
 function safeJsonParse<T>(value: string, fallback: T): T {
@@ -865,12 +871,7 @@ export class ShellSessionManager {
     this.activeSessionRuns.add(runKey);
 
     const commandId = `${session.info.id}:${++session.cmdSeq}`;
-    const commandTimeoutMaxMs =
-      request.scope === "tab" ? TAB_COMMAND_TIMEOUT_MAX_MS : COMMAND_TIMEOUT_MAX_MS;
-    const commandTimeoutMs = Math.min(
-      Math.max(request.timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000),
-      commandTimeoutMaxMs,
-    );
+    const commandTimeoutMs = resolveCommandTimeoutMs(request.scope, request.timeoutMs);
 
     const firstCommand = !session.process || session.process.killed;
     if (firstCommand) {
@@ -1274,4 +1275,5 @@ export class ShellSessionManager {
 export const _testUtils = {
   getShellArgs,
   getTerminalShellArgs,
+  resolveCommandTimeoutMs,
 };

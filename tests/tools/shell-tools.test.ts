@@ -398,6 +398,22 @@ describe("ShellTools auto-approval", () => {
     );
   });
 
+  it("honors explicit timeouts above five minutes up to the thirty-minute cap", async () => {
+    await shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd(), timeout: 20 * 60 * 1000 });
+    expect(sandboxMocks.sandbox.execute).toHaveBeenLastCalledWith(
+      SAFE_CMD_1,
+      [],
+      expect.objectContaining({ timeout: 20 * 60 * 1000 }),
+    );
+
+    await shellTools.runCommand(SAFE_CMD_2, { cwd: process.cwd(), timeout: 2 * 60 * 60 * 1000 });
+    expect(sandboxMocks.sandbox.execute).toHaveBeenLastCalledWith(
+      SAFE_CMD_2,
+      [],
+      expect.objectContaining({ timeout: 30 * 60 * 1000 }),
+    );
+  });
+
   it("disables shell sandbox networking by default even when workspace network is enabled", async () => {
     await shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd() });
 

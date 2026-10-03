@@ -1,3 +1,4 @@
+import { codexComputerUseAppConsent, isCodexComputerUseServer } from "../codex-computer-use";
 /**
  * MCPServerConnection - Manages connection to a single MCP server
  *
@@ -19,6 +20,8 @@ import {
   MCP_METHODS,
   JSONRPCNotification,
   JSONRPCResponse,
+  JSONRPCRequest,
+  MCPToolCallOptions,
 } from "../types";
 import { StdioTransport } from "./transports/StdioTransport";
 import { SSETransport } from "./transports/SSETransport";
@@ -73,6 +76,8 @@ export class MCPServerConnection extends EventEmitter {
   private connectedAt: number | null = null;
   private intentionalDisconnect = false;
   private subscribedResourceUris = new Set<string>();
+  private toolCallQueue: Promise<void> = Promise.resolve();
+  private activeToolCall: MCPToolCallOptions | null = null;
 
   constructor(
     config: MCPServerConfig,
@@ -194,7 +199,32 @@ export class MCPServerConnection extends EventEmitter {
   /**
    * Call a tool on this server
    */
-  async callTool(name: string, args: Record<string, Any> = {}): Promise<MCPCallResult> {
+  async callTool(
+    name: string,
+    args: Record<string, Any> = {},
+    options: MCPToolCallOptions = {},
+  ): Promise<MCPCallResult> {
+    // Stdio elicitation has no reliable parent request ID. Serialize calls so an
+    // approval can only reach the task that owns the currently executing call.
+    if (this.config.transport !== "stdio") return this.executeToolCall(name, args);
+    const previous = this.toolCallQueue;
+    let release!: () => void;
+    this.toolCallQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    const context = { ...options };
+    this.activeToolCall = context;
+    try {
+      if (context.signal?.aborted) throw new Error("MCP tool call cancelled");
+      return await this.executeToolCall(name, args);
+    } finally {
+      if (this.activeToolCall === context) this.activeToolCall = null;
+      release();
+    }
+  }
+
+  private async executeToolCall(name: string, args: Record<string, Any>): Promise<MCPCallResult> {
     if (this.status !== "connected" || !this.transport) {
       throw new Error(`Server ${this.config.name} is not connected`);
     }
@@ -337,11 +367,9 @@ export class MCPServerConnection extends EventEmitter {
 
     const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
       protocolVersion: PROTOCOL_VERSION,
-      capabilities: {
-        // Declare capabilities we actually support
-        // Note: roots capability removed - we don't respond to roots/list requests
-        // and some servers timeout waiting for the response
-      },
+      // Declare approval forms only when the transport can answer server requests.
+      // Do not advertise roots: this client does not answer roots/list.
+      capabilities: this.transport.sendResponse ? { elicitation: { form: {} } } : {},
       clientInfo: CLIENT_INFO,
     });
 
@@ -419,9 +447,77 @@ export class MCPServerConnection extends EventEmitter {
    * Handle incoming messages (notifications)
    */
   private handleMessage(message: JSONRPCResponse | JSONRPCNotification): void {
+    if ("method" in message && "id" in message) {
+      void this.handleServerRequest(message as JSONRPCRequest).catch((error) => {
+        logger.warn("Failed to respond to MCP server request:", error);
+      });
+      return;
+    }
     // Handle notifications
     if ("method" in message && !("id" in message)) {
       this.handleNotification(message as JSONRPCNotification);
+    }
+  }
+
+  private async handleServerRequest(request: JSONRPCRequest): Promise<void> {
+    const transport = this.transport;
+    if (!transport?.sendResponse) return;
+    if (request.method === "ping") {
+      await transport.sendResponse({ jsonrpc: "2.0", id: request.id, result: {} });
+      return;
+    }
+    if (request.method !== "elicitation/create") {
+      await transport.sendResponse({
+        jsonrpc: "2.0",
+        id: request.id,
+        error: { code: -32601, message: "Unsupported MCP server request" },
+      });
+      return;
+    }
+    const context = this.activeToolCall;
+    const params = request.params;
+    const schema = params?.requestedSchema;
+    const isApprovalForm =
+      (params?.mode === undefined || params.mode === "form") &&
+      typeof params?.message === "string" &&
+      params.message.length > 0 &&
+      params.message.length <= 4000 &&
+      schema?.type === "object" &&
+      schema.properties &&
+      typeof schema.properties === "object" &&
+      !Array.isArray(schema.properties) &&
+      Object.keys(schema.properties).length === 0 &&
+      (schema.required === undefined ||
+        (Array.isArray(schema.required) && schema.required.length === 0));
+    let result: { action: "accept" | "decline" | "cancel"; content?: Record<string, never> } = {
+      action: "cancel",
+    };
+    if (isApprovalForm && context?.onElicitation && !context.signal?.aborted) {
+      try {
+        result = await context.onElicitation({
+          message: params!.message,
+          ...(isCodexComputerUseServer(this.config)
+            ? { computerUseApp: codexComputerUseAppConsent(params?._meta, params!.message) }
+            : {}),
+          mode: "form",
+          requestedSchema: { type: "object", properties: {} },
+        });
+        // A late approval cannot authorize an expired call or another task.
+        if (
+          this.activeToolCall !== context ||
+          context.signal?.aborted ||
+          this.transport !== transport
+        ) {
+          result = { action: "cancel" };
+        } else if (result.action === "accept") {
+          result = { action: "accept", content: {} };
+        }
+      } catch {
+        result = { action: "cancel" };
+      }
+    }
+    if (this.transport === transport) {
+      await transport.sendResponse({ jsonrpc: "2.0", id: request.id, result });
     }
   }
 

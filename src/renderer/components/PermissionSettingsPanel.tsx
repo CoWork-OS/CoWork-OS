@@ -1,3 +1,4 @@
+import { useFullAccessConfirmation } from "./FullAccessConfirmationDialog";
 import { useEffect, useMemo, useState } from "react";
 import type {
   PermissionMode,
@@ -9,6 +10,7 @@ import type {
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
   BUILTIN_ACCESS_PROFILES,
+  resolveAccessProfileDefinition,
   type AccessProfileDefinition,
   type AccessFilesystemRule,
   type AccessProfileId,
@@ -223,6 +225,7 @@ export function detectApprovalExperiencePreset(
 }
 
 export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanelProps) {
+  const fullAccessConfirmation = useFullAccessConfirmation();
   const [settings, setSettings] = useState<PermissionSettingsData>(DEFAULT_SETTINGS);
   const [builtinSettings, setBuiltinSettings] = useState<BuiltinToolsSettingsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -463,6 +466,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
 
   return (
     <div className="settings-section">
+      {fullAccessConfirmation.dialog}
       <div className="settings-section-header">
         <h3>Permissions</h3>
       </div>
@@ -508,12 +512,12 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         <select
           className="settings-select"
           value={settings.defaultMode}
-          onChange={(e) =>
-            setSettings({
-              ...settings,
-              defaultMode: e.target.value as PermissionMode,
-            })
-          }
+          onChange={(e) => {
+            const mode = e.target.value as PermissionMode;
+            fullAccessConfirmation.request(mode === "bypass_permissions", () =>
+              setSettings({ ...settings, defaultMode: mode }),
+            );
+          }}
         >
           <option value="default">Default</option>
           <option value="plan">Plan</option>
@@ -541,14 +545,19 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
               ? BUILTIN_ACCESS_PROFILE_IDS.fullAccess
               : BUILTIN_ACCESS_PROFILE_IDS.askForApproval)
           }
-          onChange={(e) =>
-            setSettings({
-              ...settings,
-              defaultAccessProfileId: e.target.value,
-              defaultPermissionAccess:
-                e.target.value === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "full" : "default",
-            })
-          }
+          onChange={(e) => {
+            const profileId = e.target.value;
+            const profile = resolveAccessProfileDefinition(profileId, settings.accessProfiles || []);
+            fullAccessConfirmation.request(
+              profile?.sandbox === "danger-full-access" && profile?.approval === "never",
+              () => setSettings({
+                ...settings,
+                defaultAccessProfileId: profileId,
+                defaultPermissionAccess:
+                  profileId === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "full" : "default",
+              }),
+            );
+          }}
         >
           {BUILTIN_ACCESS_PROFILES.map((profile) => (
             <option key={profile.id} value={profile.id}>

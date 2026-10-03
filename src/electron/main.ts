@@ -44,7 +44,7 @@ import {
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
-import { installGracefulShutdown } from "./utils/graceful-shutdown";
+import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
 import { DatabaseManager } from "./database/schema";
 import {
   SecureSettingsRepository,
@@ -59,6 +59,7 @@ import {
   setHookAgentDispatchObserver,
   setHookWorkflowDispatchObserver,
   setHookTriggerEmitter,
+  waitForComposerDraftWrites,
 } from "./ipc/handlers";
 import { setupMissionControlHandlers } from "./ipc/mission-control-handlers";
 import { setupPluginPackHandlers } from "./ipc/plugin-pack-handlers";
@@ -133,7 +134,7 @@ import type { Task, TaskStatus } from "../shared/types";
 import { isAutomatedTaskLike } from "../shared/automated-task-detection";
 import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import { GuardrailManager } from "./guardrails/guardrail-manager";
-import { AppearanceManager, getDevLogCaptureEnabled } from "./settings/appearance-manager";
+import { AppearanceManager } from "./settings/appearance-manager";
 import { MemoryFeaturesManager } from "./settings/memory-features-manager";
 import { PersonalityManager } from "./settings/personality-manager";
 import { MCPClientManager } from "./mcp/client/MCPClientManager";
@@ -1836,11 +1837,7 @@ if (isMacSafeStorageMigrationWorker) {
         runtime: "desktop",
       });
       logStartupLane("blocking_startup", { event: "reporting_reader_start_requested" });
-      hostPerfMonitor = startHostPerfMonitor({
-        runtime: "desktop",
-        isSummaryEnabled: () =>
-          process.env.COWORK_DEV_LOG_CAPTURE === "1" || getDevLogCaptureEnabled(),
-      });
+      hostPerfMonitor = startHostPerfMonitor({ runtime: "desktop" });
       automationOutcomeService = new AutomationOutcomeService({
         repo: new AutomationRunOutcomeRepository(dbManager.getDatabase()),
         notify: async (params) => {
@@ -4478,6 +4475,16 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         { name: "tray", run: () => trayManager.destroy() },
+        {
+          // Closing the windows now lets the renderer save the open composer draft (it
+          // saves on hide and unload) while storage is open. Left to the end of quit,
+          // that save hit a closed database and the latest draft text was lost.
+          name: "windows",
+          run: async () => {
+            await closeWindowsForShutdown(BrowserWindow.getAllWindows());
+            await waitForComposerDraftWrites();
+          },
+        },
         { name: "workflow runtime", run: () => routineService?.stopWorkflowRuntime() },
         {
           name: "workflow watcher",

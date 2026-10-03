@@ -110,3 +110,38 @@ export function installGracefulShutdown(
     })();
   });
 }
+
+interface ClosableWindow {
+  isDestroyed(): boolean;
+  close(): void;
+  once(event: "closed", listener: () => void): unknown;
+}
+
+/**
+ * Close windows during shutdown and wait until they are gone (at most `timeoutMs`).
+ * Closing runs the renderer's hide/unload handlers, which save state such as the
+ * open composer draft, while main-process storage is still open.
+ */
+export async function closeWindowsForShutdown(
+  windows: readonly ClosableWindow[],
+  timeoutMs = 5_000,
+): Promise<void> {
+  const open = windows.filter((window) => !window.isDestroyed());
+  if (open.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.all(
+      open.map(
+        (window) =>
+          new Promise<void>((resolve) => {
+            window.once("closed", () => resolve());
+            window.close();
+          }),
+      ),
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+}

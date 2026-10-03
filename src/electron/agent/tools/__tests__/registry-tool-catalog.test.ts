@@ -534,6 +534,42 @@ describe("ToolRegistry tool catalog versioning", () => {
     ).resolves.toBe("matched decision");
   });
 
+  it("classifies only the configured Codex desktop driver as a desktop MCP tool", () => {
+    mockMcpSettings.servers = [
+      {
+        id: "codex",
+        name: "codex-cu",
+        transport: "stdio",
+        args: ["/Applications/ChatGPT.app/node_modules/@oai/cua-repl/bin/cua-repl.mjs"],
+        env: { CUA_REPL_ENABLED_SURFACES: "browser,computer" },
+      },
+      { id: "other", name: "codex-cu" },
+    ];
+    mockMcpState.tools = [
+      { name: "js", description: "Execute code", inputSchema: {}, serverId: "codex" },
+      {
+        name: "search_docs",
+        description: "Codex computer use",
+        inputSchema: {},
+        serverId: "other",
+      },
+    ];
+    const tools = new ToolRegistry(createWorkspace(), createDaemon(), "desktop-mcp").getTools();
+    expect(tools.find((tool) => tool.name === "mcp_js")?.runtime).toMatchObject({
+      capabilityTags: ["system", "mcp"],
+      concurrencyClass: "serial_only",
+      readOnly: false,
+      approvalKind: "external_service",
+      exposure: "conditional",
+    });
+    expect(tools.find((tool) => tool.name === "mcp_js")?.description).toContain(
+      "cua.rewriteDocumentation()",
+    );
+    expect(
+      tools.find((tool) => tool.name === "mcp_search_docs")?.runtime?.capabilityTags,
+    ).not.toContain("system");
+  });
+
   it("invalidates cached tool definitions when built-in tool settings change", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-2");
 
@@ -1295,3 +1331,69 @@ describe("run_command kill timeout", () => {
     );
   });
 });
+
+it.each(["ask_for_approval", "full_access"])(
+  "honors %s for the Codex engine through the full policy path",
+  async (accessProfileId) => {
+    const workspace = createWorkspace();
+    const task = {
+      id: "task-codex-consent",
+      source: "manual",
+      agentConfig: { accessProfileId },
+    };
+    const profile = resolveEffectiveAccessProfile({ workspace, task } as Any);
+    mockMcpSettings.servers = [
+      {
+        id: "codex-server",
+        name: "codex-cu",
+        transport: "stdio",
+        args: ["/local/@oai/cua-repl/bin/cua-repl.mjs"],
+        env: { CUA_REPL_ENABLED_SURFACES: "computer" },
+      },
+    ];
+    mockMcpState.tools = [
+      {
+        name: "js",
+        serverId: "codex-server",
+        description: "Codex driver",
+        inputSchema: { type: "object" },
+      },
+    ];
+    const daemon = {
+      ...createDaemon(),
+      getTaskById: vi.fn(async () => task),
+      getEffectiveAccessProfile: vi.fn(() => profile),
+      evaluateToolPermission: vi.fn((_taskId: string, request: Any) =>
+        PermissionEngine.evaluate({
+          workspace: applyAccessProfileToWorkspace(workspace, profile),
+          mode: profile.permissionMode,
+          toolName: request.toolName,
+          toolInput: request.details.params,
+          approvalType: request.approvalType,
+          rules: [],
+          trustedLocalComputerUse: true,
+        }),
+      ),
+      getTaskConsentAuthority: vi.fn().mockResolvedValue("authority"),
+      requestApproval: vi.fn().mockResolvedValue(true),
+    };
+    const registry = new ToolRegistry(
+      applyAccessProfileToWorkspace(workspace, profile),
+      daemon as Any,
+      task.id,
+    );
+    mockMcpCallTool.mockResolvedValue({ content: [] });
+    for (let i = 0; i < 5; i++)
+      await registry.executeToolWithRuntime("mcp_js", { code: `await app.pressKey("${i}")` });
+    expect(daemon.requestApproval).toHaveBeenCalledTimes(accessProfileId === "full_access" ? 0 : 1);
+    expect(daemon.evaluateToolPermission).toHaveBeenCalledTimes(5);
+    daemon.evaluateToolPermission.mockResolvedValue({
+      decision: "deny",
+      reason: { type: "rule", summary: "Denied" },
+    });
+    await expect(
+      registry.executeToolWithRuntime("mcp_js", { code: "await app.getAXState()" }),
+    ).rejects.toThrow("blocked by policy");
+    expect(mockMcpCallTool).toHaveBeenCalledTimes(5);
+  },
+);

@@ -1,3 +1,5 @@
+import { isFullAccessProfile } from "../../../shared/access-profiles";
+import { isCodexComputerUseServer } from "../../mcp/codex-computer-use";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -1973,6 +1975,59 @@ export class ToolRegistry {
     return null;
   }
 
+  // These grants live only in this task's registry. They are never saved as workspace rules.
+  private codexTaskConsents = new Map<string, string>();
+  private codexConsentClosed = false;
+
+  private getCodexConsentServer(toolName: string) {
+    const settings = MCPSettingsManager.loadSettings();
+    const prefix = settings.toolNamePrefix || "mcp_";
+    if (!toolName.startsWith(prefix)) return null;
+    const rawName = toolName.slice(prefix.length);
+    if (rawName !== "js" && rawName !== "js_reset") return null;
+    const manager = MCPClientManager.getInstance();
+    if (typeof manager.getServerIdForTool !== "function") return null;
+    const id = manager.getServerIdForTool(rawName);
+    const server = settings.servers?.find((entry) => entry.id === id);
+    return isCodexComputerUseServer(server) ? server! : null;
+  }
+
+  private async requestCodexTaskConsent(
+    description: string,
+    details: Any,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (signal?.aborted || this.codexConsentClosed) {
+      this.codexTaskConsents?.clear();
+      return false;
+    }
+    this.codexTaskConsents ??= new Map();
+    const snapshot =
+      typeof (this.daemon as Any).getTaskConsentAuthority === "function"
+        ? this.daemon.getTaskConsentAuthority.bind(this.daemon)
+        : undefined;
+    const key = JSON.stringify(details);
+    const authority = snapshot ? await snapshot(this.taskId, details) : null;
+    if (snapshot && !authority) {
+      this.codexTaskConsents.clear();
+      return false;
+    }
+    if (authority && this.codexTaskConsents.get(key) === authority) return true;
+    this.codexTaskConsents.delete(key);
+    const approved = await this.daemon.requestApproval(
+      this.taskId,
+      "external_service",
+      description,
+      details,
+      { allowAutoApprove: false, requireExplicitApproval: true, signal },
+    );
+    if (!approved || signal?.aborted || this.codexConsentClosed) return false;
+    const current = snapshot ? await snapshot(this.taskId, details) : null;
+    if (snapshot && current !== authority) return false;
+    if (current) this.codexTaskConsents.set(key, current);
+    return true;
+  }
+
   private toolHandlesApprovalInternally(toolName: string): boolean {
     return (
       toolName === "run_command" ||
@@ -2222,25 +2277,33 @@ export class ToolRegistry {
       const hasExplicitNonInteractiveAuthority =
         effectiveAccessProfile?.permissionMode === "bypass_permissions" &&
         effectiveAccessProfile?.definition?.approval === "never";
+      const codexFullAccess =
+        hasExplicitNonInteractiveAuthority &&
+        isFullAccessProfile(effectiveAccessProfile.definition) &&
+        this.getCodexConsentServer(context.request.name) !== null;
+      let hasMatchedPermissionRule = false;
       const pipeline = await evaluateToolPolicyPipeline({
         workspace: this.workspace,
         toolName: context.request.name,
         toolInput: context.request.input,
         gatewayContext: this.gatewayContext,
         policyContext: context.request.runtime?.toolPolicyContext as Any,
-        approvalRequired: runtimeApprovalRequired,
-        runtimeApprovalType: runtimeApprovalRequired ? runtimeApprovalType : null,
+        approvalRequired: runtimeApprovalRequired && !codexFullAccess,
+        runtimeApprovalType:
+          runtimeApprovalRequired && !codexFullAccess ? runtimeApprovalType : null,
         permissionApprovalType: effectiveApprovalType,
         permissionEvaluation:
           typeof permissionEvaluation === "function"
-            ? (policy) => {
+            ? async (policy) => {
                 const approvalTypeForPermission = policy?.approvalType ?? effectiveApprovalType;
-                return permissionEvaluation.call(this.daemon, this.taskId, {
+                const result = await permissionEvaluation.call(this.daemon, this.taskId, {
                   ...(approvalTypeForPermission ? { approvalType: approvalTypeForPermission } : {}),
                   toolName: context.request.name,
                   details: approvalDetails,
                   allowPersistence: approvalTypeForPermission !== "location_access",
                 });
+                hasMatchedPermissionRule ||= Boolean(result.matchedRule);
+                return result;
               }
             : undefined,
         agentSecurityEvaluation: getNumbatService()
@@ -2323,8 +2386,30 @@ export class ToolRegistry {
               pipeline.approvalSource === "runtime_metadata",
           };
           const authorizer = (this.daemon as Any)?.authorizeToolAction;
-          const approved =
-            typeof authorizer === "function"
+          const codexServer =
+            effectiveApprovalType === "external_service" &&
+            pipeline.approvalSource !== "semantic_review" &&
+            !hasMatchedPermissionRule
+              ? this.getCodexConsentServer(context.request.name)
+              : null;
+          const approved = codexServer
+            ? await this.requestCodexTaskConsent(
+                `Allow ${codexServer.name} computer-use engine for this task?`,
+                {
+                  tool: context.request.name,
+                  serverName: codexServer.name,
+                  params: {
+                    serverId: codexServer.id,
+                    configuration: createHash("sha256")
+                      .update(JSON.stringify(codexServer))
+                      .digest("hex"),
+                  },
+                  taskConsentScope:
+                    "calls to this computer-use engine; each app requires separate consent",
+                },
+                options.signal,
+              )
+            : typeof authorizer === "function"
               ? await authorizer.call(this.daemon, this.taskId, {
                   toolName: context.request.name,
                   approvalType: effectiveApprovalType || "external_service",
@@ -3395,7 +3480,7 @@ export class ToolRegistry {
         const prefix = settings.toolNamePrefix || "mcp_";
         return name.startsWith(prefix);
       },
-      async ({ request }) => this.tryExecuteMCPTool(request.name, request.input),
+      async ({ request }) => this.tryExecuteMCPTool(request.name, request.input, request.runtime),
     );
   }
 
@@ -3420,7 +3505,14 @@ export class ToolRegistry {
         const serverName = server?.name;
         const policy = server ? resolveMcpToolPolicy(tool, server) : undefined;
         const readOnly = policy?.readOnly === true;
-        const baseDescription = tool.description || `MCP tool: ${tool.name}`;
+        // Identify the installed driver from local configuration, not untrusted tool prose.
+        const codexComputerUse =
+          isCodexComputerUseServer(server) && (tool.name === "js" || tool.name === "js_reset");
+        const desktopGuide =
+          codexComputerUse && tool.name === "js"
+            ? 'Codex desktop computer use: at the start of each new task call await cua.rewriteDocumentation() alone and read its output. Bind a native app with let app = await cua.getApp("App name"). Use app.click(index), app.typeText(text), app.pressKey(key), app.getAXState(), and app.getScreenshot() as documented. Read fresh UI state after actions before choosing further indices. '
+            : "";
+        const baseDescription = desktopGuide + (tool.description || `MCP tool: ${tool.name}`);
 
         return {
           name: `${prefix}${tool.name}`,
@@ -3441,6 +3533,18 @@ export class ToolRegistry {
             capabilityTags: ["mcp" as const, "integration" as const],
             exposure: "always" as const,
             resultKind: "integration" as const,
+            ...(codexComputerUse
+              ? {
+                  capabilityTags: ["system" as const, "mcp" as const],
+                  exposure: "conditional" as const,
+                  alwaysExpose: false,
+                  concurrencyClass: "serial_only" as const,
+                  interruptBehavior: "cancel" as const,
+                  readOnly: false,
+                  sideEffectLevel: "high" as const,
+                  supportsContextMutation: true,
+                }
+              : {}),
           },
         };
       });
@@ -5151,7 +5255,11 @@ ${skillDescriptions}`;
   /**
    * Try to execute an MCP tool if the name matches
    */
-  private async tryExecuteMCPTool(name: string, input: Any): Promise<Any | null> {
+  private async tryExecuteMCPTool(
+    name: string,
+    input: Any,
+    runtime?: Record<string, unknown>,
+  ): Promise<Any | null> {
     const settings = MCPSettingsManager.loadSettings();
     const prefix = settings.toolNamePrefix || "mcp_";
 
@@ -5232,7 +5340,80 @@ ${skillDescriptions}`;
     console.log(`[ToolRegistry] Executing MCP tool: ${mcpToolName}`);
 
     try {
-      const result = await mcpManager.callTool(mcpToolName, input);
+      const signal = runtime?.signal instanceof AbortSignal ? runtime.signal : undefined;
+      const result = await mcpManager.callTool(mcpToolName, input, {
+        signal,
+        onElicitation: async (request) => {
+          const server = request.computerUseApp ? this.getCodexConsentServer(name) : null;
+          if (server && request.computerUseApp) {
+            const permission = await this.daemon.evaluateToolPermission(this.taskId, {
+              approvalType: "external_service",
+              toolName: name,
+              details: { tool: name, serverName: server.name, params: input },
+              allowPersistence: false,
+            });
+            if (permission.decision === "deny" || signal?.aborted) {
+              this.codexTaskConsents?.clear();
+              return { action: "decline" };
+            }
+            if (permission.decision === "ask" && permission.matchedRule) {
+              const approved = await this.daemon.requestApproval(
+                this.taskId,
+                "external_service",
+                request.message,
+                { tool: name, serverName: server.name, params: input },
+                { allowAutoApprove: false, requireExplicitApproval: true, signal },
+              );
+              return approved ? { action: "accept", content: {} } : { action: "decline" };
+            }
+            const app = request.computerUseApp;
+            // The SDK asks for every app action. Full access is the user's existing
+            // authority for routine app control, not a reason to manufacture a new ask.
+            if (
+              !this.codexConsentClosed &&
+              !signal?.aborted &&
+              typeof (this.daemon as Any).canAutoApproveComputerUseApp === "function" &&
+              (await this.daemon.canAutoApproveComputerUseApp(this.taskId, {
+                tool: name,
+                serverName: server.name,
+                params: { ...input, app: app.id },
+              }))
+            ) {
+              return signal?.aborted || this.codexConsentClosed
+                ? { action: "cancel" }
+                : { action: "accept", content: {} };
+            }
+
+            const approved = await this.requestCodexTaskConsent(
+              `Allow Computer Use to use "${app.name}" for this task?`,
+              {
+                tool: name,
+                serverName: server.name,
+                params: {
+                  app: app.id,
+                  serverId: server.id,
+                  configuration: createHash("sha256").update(JSON.stringify(server)).digest("hex"),
+                },
+                taskConsentScope: `reading, clicking, typing, and dragging in ${app.name}`,
+              },
+              signal,
+            );
+            return approved ? { action: "accept", content: {} } : { action: "decline" };
+          }
+          const approved = await this.daemon.requestApproval(
+            this.taskId,
+            "external_service",
+            request.message,
+            {
+              tool: name,
+              serverName: this.getMcpServerName(name) || undefined,
+              reason: "MCP server requests explicit operation consent",
+            },
+            { allowAutoApprove: false, requireExplicitApproval: true, signal },
+          );
+          return approved === true ? { action: "accept", content: {} } : { action: "decline" };
+        },
+      });
       // Format MCP result and process any generated files
       return await this.formatMCPResult(result, mcpToolName, input);
     } catch (error: Any) {
@@ -5440,6 +5621,8 @@ ${skillDescriptions}`;
    * Cleanup resources (call when task is done)
    */
   async cleanup(): Promise<void> {
+    this.codexConsentClosed = true;
+    this.codexTaskConsents?.clear();
     await this.browserTools.cleanup();
     await this.qaTools.execute("qa_cleanup", {}).catch(() => {});
 

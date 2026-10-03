@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getDefaultRuntimeToolMetadata } from "../tools/runtime-tool-definition";
 import {
   evaluateToolPolicy,
   evaluateToolAvailability,
@@ -566,4 +567,30 @@ describe("tool-policy-engine memory recall lane", () => {
       expect(result.decision).toBe("allow");
     },
   );
+});
+
+describe("Codex desktop MCP exposure", () => {
+  const runtime = {
+    ...getDefaultRuntimeToolMetadata("mcp_js"),
+    // Mirrors the registry's classification of the configured driver.
+    capabilityTags: ["system", "mcp"] as const,
+    exposure: "conditional" as const,
+    alwaysExpose: false,
+  };
+  it("exposes the configured driver for ordinary native GUI requests", () => {
+    expect(
+      evaluateToolAvailability(
+        "mcp_js",
+        { taskText: "Operate macOS Calculator to compute 12 times 12" },
+        { ...runtime, capabilityTags: [...runtime.capabilityTags] },
+      ).decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability(
+        "mcp_js",
+        { taskText: "Summarize this document" },
+        { ...runtime, capabilityTags: [...runtime.capabilityTags] },
+      ).decision,
+    ).toBe("defer");
+  });
 });

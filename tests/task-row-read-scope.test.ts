@@ -52,8 +52,9 @@ describe("task row read scope invalidation", () => {
       const relative = path.relative(process.cwd(), file);
       // Schema migrations and maintenance run outside any read scope (post-startup
       // chunks run between awaits or in the worker, never inside a synchronous scope).
-      // Deletes of issues, heartbeat runs, companies, goals, and projects would also
-      // change tasks rows through ON DELETE SET NULL; no runtime code issues them today.
+      // Deletes of issues, companies, goals, and projects would also change tasks rows
+      // through ON DELETE SET NULL; no runtime code issues them today. Heartbeat run
+      // pruning clears tasks.heartbeat_run_id itself and invalidates.
       if (relative === path.join("src", "electron", "database", "schema.ts")) continue;
       if (relative === path.join("src", "electron", "database", "post-startup-maintenance.ts")) {
         continue;

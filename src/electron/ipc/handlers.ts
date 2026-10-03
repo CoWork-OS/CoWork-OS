@@ -78,6 +78,7 @@ import {
   resolveKitOpenPath,
   UpdateUserFactRequestSchema,
 } from "./memory-ipc-validation";
+import { createPendingWriteTracker } from "./pending-writes";
 import { execFile, spawn as spawnProcess } from "child_process";
 import { promisify } from "util";
 import { promises as dns } from "dns";
@@ -972,6 +973,14 @@ export function setHeartbeatWakeSubmitter(submitter: HooksWakeSubmitter | null):
 /**
  * Get the notification service instance
  */
+/** Composer draft saves in flight; shutdown waits for them before storage closes. */
+const composerDraftWrites = createPendingWriteTracker();
+
+/** Wait for composer draft saves, including one sent by a window that was just closed. */
+export function waitForComposerDraftWrites(): Promise<void> {
+  return composerDraftWrites.waitForAll();
+}
+
 export function getNotificationService(): NotificationService | null {
   return notificationService;
 }
@@ -5360,7 +5369,11 @@ export async function setupIpcHandlers(
     return composerDraftRepo.get(owner.draftKey, owner);
   });
 
-  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_UPSERT, async (_, value: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_UPSERT, (_, value: unknown) =>
+    composerDraftWrites.track(upsertComposerDraft(value)),
+  );
+
+  async function upsertComposerDraft(value: unknown) {
     const draft = validateComposerDraft(value);
     const owner = validateComposerDraftOwner({
       draftKey: draft.draftKey,
@@ -5376,7 +5389,7 @@ export async function setupIpcHandlers(
     await assertComposerDraftOwner(owner);
     const accepted = await composerDraftRepo.upsertIfNewer(draft);
     return { accepted, draft: await composerDraftRepo.get(draft.draftKey, owner) };
-  });
+  }
 
   ipcMain.handle(IPC_CHANNELS.COMPOSER_DRAFT_CLEAR, async (_, request: unknown) => {
     const owner = validateComposerDraftOwner(request);

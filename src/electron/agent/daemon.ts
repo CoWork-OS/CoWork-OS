@@ -1,3 +1,5 @@
+import { isCodexComputerUseServer } from "../mcp/codex-computer-use";
+import { MCPSettingsManager } from "../mcp/settings";
 import { CanvasManager } from "../canvas/canvas-manager";
 import {
   AnnotationRepository,
@@ -168,6 +170,7 @@ import {
   BUILTIN_ACCESS_PROFILE_IDS,
   hasAccessProfileScope,
   isAccessProfileAtMostPrivileged,
+  isFullAccessProfile,
 } from "../../shared/access-profiles";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import {
@@ -1118,7 +1121,7 @@ export class AgentDaemon extends EventEmitter {
       await this.runTranscriptMaintenance(90);
       if (worker) {
         const stats = await readStorageStats(worker);
-        log.info(
+        log.debug(
           `DB maintenance: ${Math.round(stats.freelistBytes / 1048576)} MB free of ${Math.round((stats.pageCount * stats.pageSize) / 1048576)} MB`,
         );
       }
@@ -7140,7 +7143,20 @@ export class AgentDaemon extends EventEmitter {
     const permissionToolInput = authorizationToolInput(details || {});
     const mode = this.buildPermissionMode(taskId, task);
     const rules = await this.buildPermissionRules(taskId, task, workspace);
+    let trustedLocalComputerUse = false;
+    if (type === "external_service") {
+      try {
+        const prefix = MCPSettingsManager.loadSettings().toolNamePrefix || "mcp_";
+        const rawName = toolName.startsWith(prefix) ? toolName.slice(prefix.length) : "";
+        trustedLocalComputerUse =
+          (rawName === "js" || rawName === "js_reset") &&
+          isCodexComputerUseServer(MCPClientManager.getInstance().getServerConfigForTool(rawName));
+      } catch {
+        // Unavailable or unknown drivers retain ordinary MCP policy.
+      }
+    }
     const evaluation = PermissionEngine.evaluate({
+      trustedLocalComputerUse,
       workspace:
         workspace ||
         ({
@@ -7455,6 +7471,51 @@ export class AgentDaemon extends EventEmitter {
       opts.allowPersistence !== false,
     );
     return result.evaluation;
+  }
+
+  /** Honor effective Full access for routine app consent, while rechecking policy. */
+  async canAutoApproveComputerUseApp(taskId: string, details: Any): Promise<boolean> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return false;
+    const permission = await this.evaluatePermissionRequest(
+      taskId,
+      "external_service",
+      details,
+      false,
+    );
+    const profile = this.getEffectiveAccessProfile(
+      taskId,
+      this.getTaskWithTransientAgentConfig(task),
+      permission.workspace,
+    );
+    return (
+      permission.evaluation.decision === "allow" &&
+      profile.permissionMode === "bypass_permissions" &&
+      isFullAccessProfile(profile.definition)
+    );
+  }
+
+  /** Snapshot authority for an explicit, in-memory task consent scope. */
+  async getTaskConsentAuthority(taskId: string, details: Any): Promise<string | null> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return null;
+    const permission = await this.evaluatePermissionRequest(
+      taskId,
+      "external_service",
+      details,
+      false,
+    );
+    const profile = this.getEffectiveAccessProfile(
+      taskId,
+      this.getTaskWithTransientAgentConfig(task),
+      permission.workspace,
+    );
+    if (permission.evaluation.decision === "deny" || profile.definition.approval === "never")
+      return null;
+    return authorizationFingerprint({
+      authority: permission.authorizationKey,
+      profile,
+    });
   }
 
   /** Authorize a tool operation without manufacturing an approval lifecycle for allowed work. */

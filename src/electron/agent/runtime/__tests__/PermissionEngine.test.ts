@@ -1512,3 +1512,68 @@ describe("PermissionEngine", () => {
     });
   });
 });
+
+it("honors Full access for the host-classified local driver without widening generic MCP consent", () => {
+  const fullWorkspace = {
+    ...workspace,
+    permissions: {
+      ...workspace.permissions,
+      accessProfileId: "full_access",
+      accessSandboxMode: "danger-full-access" as const,
+      accessApprovalPolicy: "never" as const,
+      accessNetworkMode: "enabled" as const,
+    },
+  };
+  const request = {
+    workspace: fullWorkspace,
+    mode: "bypass_permissions" as const,
+    toolName: "mcp_js",
+    approvalType: "external_service" as const,
+    toolInput: { code: "await app.getAXState()", trustedLocalComputerUse: true },
+    rules: [],
+  };
+  expect(PermissionEngine.evaluate(request).decision).toBe("deny");
+  expect(PermissionEngine.evaluate({ ...request, trustedLocalComputerUse: true }).decision).toBe(
+    "allow",
+  );
+  for (const effect of ["deny", "ask"] as const) {
+    const result = PermissionEngine.evaluate({
+      ...request,
+      trustedLocalComputerUse: true,
+      rules: [{ source: "profile", effect, scope: { kind: "tool", toolName: "mcp_js" } }],
+    });
+    expect(result.decision).toBe("deny");
+  }
+  expect(
+    PermissionEngine.evaluate({
+      ...request,
+      trustedLocalComputerUse: true,
+      approvalType: "protected_credential",
+    }).decision,
+  ).toBe("deny");
+  expect(
+    PermissionEngine.evaluate({
+      ...request,
+      trustedLocalComputerUse: true,
+      workspace: {
+        ...fullWorkspace,
+        permissions: { ...fullWorkspace.permissions, accessSandboxMode: "read-only" },
+      },
+    }).decision,
+  ).toBe("deny");
+  expect(
+    PermissionEngine.evaluate({
+      ...request,
+      trustedLocalComputerUse: true,
+      workspace: {
+        ...fullWorkspace,
+        permissions: {
+          ...fullWorkspace.permissions,
+          accessApprovalPolicy: "on-request",
+          accessSandboxMode: "workspace-write",
+        },
+      },
+      mode: "default",
+    }).decision,
+  ).toBe("ask");
+});

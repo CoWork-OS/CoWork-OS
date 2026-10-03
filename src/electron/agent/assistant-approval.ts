@@ -117,6 +117,14 @@ export function buildAssistantApprovalRequest(
             : undefined,
         )
       : "";
+  const taskConsent =
+    approvalType === "external_service" &&
+    details &&
+    typeof details === "object" &&
+    typeof (details as Record<string, unknown>).taskConsentScope === "string"
+      ? normalizeText((details as Record<string, unknown>).taskConsentScope)
+      : "";
+  const allowLabel = taskConsent ? "Allow for this task" : "Allow once";
   const scopeText = scopePreview ? ` Scope: ${scopePreview}.` : "";
 
   return {
@@ -124,7 +132,7 @@ export function buildAssistantApprovalRequest(
       {
         header: "Permission",
         id: ASSISTANT_APPROVAL_QUESTION_ID,
-        question: `${safeDescription}${scopeText} Do you want CoWork to continue this operation?`,
+        question: `${safeDescription}${scopeText}${taskConsent ? ` Consent covers ${taskConsent} until this task ends.` : ""} Do you want CoWork to continue?`,
         // Deny is first so an accidental Enter/keyboard submission fails
         // closed. The user can explicitly choose Allow once.
         options: [
@@ -133,8 +141,10 @@ export function buildAssistantApprovalRequest(
             description: "Stop this operation and return control to the task.",
           },
           {
-            label: "Allow once",
-            description: `Continue this ${normalizeText(approvalType, 80) || "operation"} only once.`,
+            label: allowLabel,
+            description:
+              taskConsent ||
+              `Continue this ${normalizeText(approvalType, 80) || "operation"} only once.`,
           },
         ],
       },
@@ -149,7 +159,7 @@ export function buildAssistantApprovalMessage(
 ): string {
   const request = buildAssistantApprovalRequest(approvalType, description, details);
   const question = request.questions[0];
-  return `I need your decision before I can continue. ${question.question} Choose **Deny** or **Allow once** below.`;
+  return `I need your decision before I can continue. ${question.question} Choose **Deny** or **${question.options[1].label}** below.`;
 }
 
 export function isAssistantApprovalInputRequest(request: InputRequest | undefined): boolean {

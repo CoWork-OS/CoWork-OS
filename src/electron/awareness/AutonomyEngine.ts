@@ -361,8 +361,10 @@ export class AutonomyEngine {
     if (!this.dirty) return;
     if (!SecureSettingsRepository.isInitialized()) return;
     try {
-      SecureSettingsRepository.getInstance().save(STORAGE_KEY, this.state);
-      this.dirty = false;
+      // save() returns false when the write was refused; keep the state dirty to retry.
+      if (SecureSettingsRepository.getInstance().save(STORAGE_KEY, this.state)) {
+        this.dirty = false;
+      }
     } catch {
       // best-effort; retried on the next change
     }

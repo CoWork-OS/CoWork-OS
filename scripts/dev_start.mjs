@@ -354,40 +354,108 @@ function terminateChild(child, signal = "SIGTERM") {
   }
 }
 
-function shutdown(exitCode = 0) {
+// Electron runs in its own process group, so a terminal Ctrl-C reaches this script but
+// not the app. Every wrapper between here and Electron (npm, cross-env, the electron CLI)
+// forwards the signals it receives, and Chromium treats a second SIGINT/SIGTERM during a
+// graceful quit as "exit now": the app died before its shutdown steps ran and the next
+// start reported an unclean shutdown. Electron gets exactly one SIGTERM instead.
+const electronOwnGroup = process.platform !== "win32";
+const ELECTRON_QUIT_TIMEOUT_MS = 60_000;
+// One Ctrl-C arrives here more than once (from the terminal and from dev_with_logs).
+const FORCE_QUIT_AFTER_MS = 1_500;
+let firstSignalAt = 0;
+
+function electronExited() {
+  return !electron || electron.exitCode !== null || electron.signalCode !== null;
+}
+
+function signalElectronGroup(signal) {
+  if (!electron?.pid) return;
+  try {
+    if (electronOwnGroup) process.kill(-electron.pid, signal);
+    else electron.kill(signal);
+  } catch {
+    // The group may already be gone.
+  }
+}
+
+/** Ask the app to quit once, and wait for it so its shutdown output is still captured. */
+function stopElectron() {
+  if (electronExited()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      process.stderr.write("[dev-start] Electron did not quit in time; killing it.\n");
+      signalElectronGroup("SIGKILL");
+      resolve();
+    }, ELECTRON_QUIT_TIMEOUT_MS);
+    electron.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    const appPid = electronOwnGroup ? findRunningElectronDevPid(electronStatus.binaryPath) : null;
+    if (appPid) {
+      try {
+        process.kill(appPid, "SIGTERM");
+      } catch {
+        signalElectronGroup("SIGTERM");
+      }
+    } else {
+      // Still building, or not on a platform with process groups.
+      signalElectronGroup("SIGTERM");
+    }
+  });
+}
+
+async function shutdown(exitCode = 0) {
   if (resolvedExit) return;
   resolvedExit = true;
   shuttingDown = true;
-  terminateChild(electron);
   terminateChild(react);
+  await stopElectron();
   process.exit(exitCode);
 }
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => shutdown(0));
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    const now = Date.now();
+    if (!firstSignalAt) {
+      firstSignalAt = now;
+      if (!electronExited()) {
+        process.stdout.write(
+          "[dev-start] Quitting CoWork OS cleanly; press Ctrl-C again to force quit.\n",
+        );
+      }
+      void shutdown(0);
+      return;
+    }
+    if (now - firstSignalAt < FORCE_QUIT_AFTER_MS) return;
+    process.stderr.write("[dev-start] Force quitting.\n");
+    signalElectronGroup("SIGKILL");
+    process.exit(1);
+  });
 }
 
 react.once("error", (error) => {
   process.stderr.write(`[react] Failed to start: ${error.message}\n`);
-  shutdown(1);
+  void shutdown(1);
 });
 
 react.once("exit", (code) => {
   if (shuttingDown) return;
   if (code !== 0) {
     process.stderr.write(`[dev-start] React dev server exited with code ${code ?? 1}.\n`);
-    shutdown(code ?? 1);
+    void shutdown(code ?? 1);
     return;
   }
   process.stdout.write("[dev-start] React dev server exited cleanly.\n");
-  shutdown(0);
+  void shutdown(0);
 });
 
 try {
   await waitForPort(selectedPort, REACT_READY_TIMEOUT_MS);
 } catch (error) {
   process.stderr.write(`[dev-start] ${error instanceof Error ? error.message : String(error)}\n`);
-  shutdown(1);
+  await shutdown(1);
 }
 
 // Opt-in DevTools port for driving the dev app over CDP (e.g. automated UI checks):
@@ -401,13 +469,15 @@ const electronArgs =
 electron = spawn(npmCommand, electronArgs, {
   cwd: process.cwd(),
   env: childEnv,
-  stdio: ["inherit", "pipe", "pipe"],
+  // A background process group must not read the terminal.
+  stdio: [electronOwnGroup ? "ignore" : "inherit", "pipe", "pipe"],
+  detached: electronOwnGroup,
 });
 pipePrefixedOutput(electron, "electron");
 
 electron.once("error", (error) => {
   process.stderr.write(`[electron] Failed to start: ${error.message}\n`);
-  shutdown(1);
+  void shutdown(1);
 });
 
 electron.once("exit", (code) => {
@@ -417,9 +487,9 @@ electron.once("exit", (code) => {
       "[dev-start] Electron startup was blocked by an existing CoWork OS instance. " +
         "Quit the running app, then run `npm run dev` again.\n",
     );
-    shutdown(code);
+    void shutdown(code);
     return;
   }
   process.stdout.write(`[dev-start] Electron exited with code ${code ?? 0}.\n`);
-  shutdown(code ?? 0);
+  void shutdown(code ?? 0);
 });

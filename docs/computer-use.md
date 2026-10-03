@@ -33,6 +33,50 @@ The planner and tool policy treat the computer-use lane as a **controlled, last-
 - **macOS** uses a bundled Swift helper with Accessibility and Screen Recording permissions.
 - **Windows v1** uses a bundled PowerShell/Win32 helper for visible, non-minimized windows. Some protected or elevated apps may block capture or input unless CoWork is running with comparable privileges.
 
+## Optional Codex Computer Use MCP connection on macOS
+
+An installed Codex/ChatGPT desktop Computer Use plugin can also be connected as a
+local MCP server. This is an unofficial integration with an installed desktop
+runtime; it is not a bundled CoWork engine or the OpenAI computer-use API.
+
+1. Find the newest installed `unified-computer-use/<version>/.mcp.json` under
+   `~/.codex/plugins/cache/openai-bundled/` and read its `mcpServers.cua_repl` entry.
+2. In CoWork's **MCP Servers**, add a stdio server named `codex-cu`, copying the
+   entry's `command`, `args`, and `env` exactly. Enter environment values as
+   `KEY=value`, one per line. Use the installed paths rather than a version or
+   username copied from someone else's configuration.
+3. Connect the server and verify that its `js` and `js_reset` tools appear.
+4. Ask CoWork: **Use the codex-cu MCP tools to operate Calculator in the
+   background, calculate 12 × 12, and verify the displayed result.** CoWork exposes
+   the tools as `mcp_js` and `mcp_js_reset` with the default MCP prefix.
+
+Keep the desktop runtime installed and available, including its Computer Use
+helper and macOS permissions. Updates can change its paths or protocol; refresh
+the connection from the installed manifest if needed. Registering this server
+does not automatically replace CoWork's built-in desktop tools. To prefer it,
+add a behavioral rule in **Personality → Instructions** for native macOS GUI work.
+CoWork recognizes `js` and `js_reset` from the locally configured `@oai/cua-repl`
+stdio entry when its enabled surfaces include `computer`. Unlike other connected
+MCP tools, which are always available, those two are offered only for native GUI
+requests, and they stay available within step budgets for those tasks.
+
+CoWork supports the plugin's approval-only **form elicitation** over stdio. The
+**Ask for approval** profile offers **Allow for this task** on the first engine
+permission. Each app then asks once for consent covering reads, clicks, typing,
+and drags for that task. Subsequent
+calls reuse consent; different apps and tasks ask again. Grants are kept in
+memory and invalidated by changed configuration, permissions, or access profile.
+Hard denies, explicit rule asks, and semantic review remain enforced on each
+call. Audio consent and other forms remain per operation. No grant changes a
+workspace rule or survives a restart. General data forms and URL elicitation
+are cancelled. Calls are serialized so consent belongs to the calling task.
+
+Under effective **Full access**, routine engine calls and validated app-consent
+requests proceed without CoWork approval cards. Policy denies and OS permissions
+still apply. Audio and other special consent forms do not gain this exception.
+The access choice belongs to each task: selecting Full access in the Home composer
+does not change a task already created with Ask for approval.
+
 ## Access-profile and operating-system boundaries
 
 Computer-use tools must be exposed by the task's effective [access

@@ -422,6 +422,16 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
    * Send a JSON-RPC message (request or notification)
    */
   async send(message: JSONRPCRequest | JSONRPCNotification): Promise<void> {
+    return this.writeMessage(message);
+  }
+
+  async sendResponse(message: JSONRPCResponse): Promise<void> {
+    return this.writeMessage(message);
+  }
+
+  private async writeMessage(
+    message: JSONRPCRequest | JSONRPCNotification | JSONRPCResponse,
+  ): Promise<void> {
     if (!this.connected || !this.process?.stdin?.writable) {
       throw new Error(
         this.lastCloseError ? `Not connected: ${this.lastCloseError.message}` : "Not connected",
@@ -492,7 +502,7 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
    */
   private handleMessage(message: Any): void {
     // Check if this is a response to a pending request
-    if ("id" in message && message.id !== null) {
+    if (!("method" in message) && "id" in message && message.id !== null) {
       const pending = this.pendingRequests.get(message.id);
       if (pending) {
         this.pendingRequests.delete(message.id);

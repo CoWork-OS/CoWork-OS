@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { ThemeMode, AccentColor, ACCENT_COLORS, LLMSettingsData } from "../../shared/types";
+import {
+  GEMINI_DEFAULT_MODEL,
+  OPENROUTER_DEFAULT_MODEL_ID,
+} from "../../shared/llm-provider-catalog";
 
 interface OnboardingModalProps {
   onComplete: (dontShowAgain: boolean) => void;
@@ -551,9 +555,9 @@ export function OnboardingModal({
         } else if (selectedProvider === "openai") {
           settings.openai = { apiKey, authMethod: "api_key", model: "gpt-6-astra" };
         } else if (selectedProvider === "gemini") {
-          settings.gemini = { apiKey, model: "gemini-2.0-flash" };
+          settings.gemini = { apiKey, model: GEMINI_DEFAULT_MODEL };
         } else if (selectedProvider === "openrouter") {
-          settings.openrouter = { apiKey, model: "anthropic/claude-3.5-sonnet" };
+          settings.openrouter = { apiKey, model: OPENROUTER_DEFAULT_MODEL_ID };
         } else if (selectedProvider === "ollama") {
           settings.ollama = { baseUrl: ollamaUrl, model: "llama3.2" };
         } else if (selectedProvider === "bedrock") {
@@ -611,11 +615,11 @@ export function OnboardingModal({
       case "openai":
         return "gpt-6-astra";
       case "gemini":
-        return "gemini-2.0-flash";
+        return GEMINI_DEFAULT_MODEL;
       case "ollama":
         return "llama3.2";
       case "openrouter":
-        return "anthropic/claude-3.5-sonnet";
+        return OPENROUTER_DEFAULT_MODEL_ID;
       case "bedrock":
         return "sonnet-4-6";
       case "groq":

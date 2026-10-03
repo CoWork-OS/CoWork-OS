@@ -23,6 +23,7 @@ import {
 } from "./openai-compatible";
 import { createLogger } from "../../utils/logger";
 import { registerLiveModelMetadata, type ModelMetadataEntry } from "../../../shared/model-metadata";
+import { OPENROUTER_DEFAULT_MODEL_ID } from "../../../shared/llm-provider-catalog";
 
 const logger = createLogger("OpenRouter");
 const SHARED_MODEL_IMAGE_SUPPORT = new Map<string, boolean>();
@@ -35,7 +36,7 @@ const MODEL_CATALOG_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const OPENROUTER_AUTH_ERROR_MESSAGE =
   "OpenRouter did not accept this API key. Paste the complete key beginning with `sk-or-v1-` without `Bearer`, quotes, or `OPENROUTER_API_KEY=`.";
 
-export const OPENROUTER_DEFAULT_MODEL = "anthropic/claude-3.5-sonnet";
+export const OPENROUTER_DEFAULT_MODEL = OPENROUTER_DEFAULT_MODEL_ID;
 export const OPENROUTER_PARETO_CODE_MODEL = "openrouter/pareto-code";
 export const OPENROUTER_PARETO_CODE_NITRO_MODEL = `${OPENROUTER_PARETO_CODE_MODEL}:nitro`;
 

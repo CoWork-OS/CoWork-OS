@@ -52,6 +52,7 @@ import {
   CUSTOM_PROVIDER_CATALOG,
   CUSTOM_PROVIDER_MAP,
   CUSTOM_PROVIDER_IDS,
+  GEMINI_DEFAULT_MODEL,
   type ProviderCatalogEntry,
 } from "../../../shared/llm-provider-catalog";
 import { withLlmModelSelectionMetadata } from "../../../shared/llm-model-selection";
@@ -2520,7 +2521,7 @@ export class LLMProviderFactory {
 
     // For Gemini, use the specific Gemini model if provided or default
     if (providerType === "gemini") {
-      return geminiModel || "gemini-2.0-flash";
+      return geminiModel || GEMINI_DEFAULT_MODEL;
     }
 
     // For OpenRouter, use the specific model if provided or default
@@ -2943,7 +2944,7 @@ export class LLMProviderFactory {
       }
 
       case "gemini": {
-        const currentModel = settings.gemini?.model || "gemini-2.0-flash";
+        const currentModel = settings.gemini?.model || GEMINI_DEFAULT_MODEL;
         const modelList =
           settings.cachedGeminiModels && settings.cachedGeminiModels.length > 0
             ? settings.cachedGeminiModels
@@ -3895,12 +3896,12 @@ export class LLMProviderFactory {
 
     const defaultModels = [
       {
-        name: "gemini-2.5-pro-preview-05-06",
+        name: "gemini-2.5-pro",
         displayName: "Gemini 2.5 Pro",
         description: "Most capable model for complex tasks",
       },
       {
-        name: "gemini-2.5-flash-preview-05-20",
+        name: "gemini-2.5-flash",
         displayName: "Gemini 2.5 Flash",
         description: "Fast and efficient for most tasks",
       },
@@ -4076,14 +4077,14 @@ export class LLMProviderFactory {
         context_length: 200000,
       },
       {
-        id: "anthropic/claude-3.5-sonnet",
-        name: "Claude 3.5 Sonnet",
-        context_length: 200000,
+        id: "anthropic/claude-sonnet-4.6",
+        name: "Claude Sonnet 4.6",
+        context_length: 1000000,
       },
       {
-        id: "anthropic/claude-3-opus",
-        name: "Claude 3 Opus",
-        context_length: 200000,
+        id: "anthropic/claude-opus-4.6",
+        name: "Claude Opus 4.6",
+        context_length: 1000000,
       },
       { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000 },
       { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", context_length: 128000 },

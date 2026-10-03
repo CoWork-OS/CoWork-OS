@@ -541,12 +541,12 @@ export function isRetiredAnthropicModelReference(model: string): boolean {
  */
 export const GEMINI_MODELS = {
   "gemini-2.5-pro": {
-    id: "gemini-2.5-pro-preview-05-06",
+    id: "gemini-2.5-pro",
     displayName: "Gemini 2.5 Pro",
     description: "Most capable model for complex tasks",
   },
   "gemini-2.5-flash": {
-    id: "gemini-2.5-flash-preview-05-20",
+    id: "gemini-2.5-flash",
     displayName: "Gemini 2.5 Flash",
     description: "Fast and efficient for most tasks",
   },
@@ -589,14 +589,14 @@ export const OPENROUTER_MODELS = {
     displayName: "Pareto Code Router (Nitro)",
     description: "Pareto coding router optimized for OpenRouter throughput",
   },
-  "anthropic/claude-3.5-sonnet": {
-    id: "anthropic/claude-3.5-sonnet",
-    displayName: "Claude 3.5 Sonnet",
+  "anthropic/claude-sonnet-4.6": {
+    id: "anthropic/claude-sonnet-4.6",
+    displayName: "Claude Sonnet 4.6",
     description: "Anthropic's balanced model",
   },
-  "anthropic/claude-3-opus": {
-    id: "anthropic/claude-3-opus",
-    displayName: "Claude 3 Opus",
+  "anthropic/claude-opus-4.6": {
+    id: "anthropic/claude-opus-4.6",
+    displayName: "Claude Opus 4.6",
     description: "Anthropic's most capable model",
   },
   "openai/gpt-4o": {

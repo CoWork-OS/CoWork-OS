@@ -18,6 +18,7 @@ import {
   LLMTool,
 } from "./types";
 import { imageToTextFallback } from "./image-utils";
+import { GEMINI_DEFAULT_MODEL } from "../../../shared/llm-provider-catalog";
 
 /** Schema keywords Gemini function declarations accept (an OpenAPI subset). */
 const GEMINI_SCHEMA_KEYS = new Set([
@@ -78,7 +79,7 @@ export class GeminiProvider implements LLMProvider {
     }
 
     this.client = new GoogleGenerativeAI(apiKey);
-    this.defaultModel = config.model || "gemini-2.0-flash";
+    this.defaultModel = config.model || GEMINI_DEFAULT_MODEL;
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
@@ -508,12 +509,12 @@ export class GeminiProvider implements LLMProvider {
   private getDefaultModels(): Array<{ name: string; displayName: string; description: string }> {
     return [
       {
-        name: "gemini-2.5-pro-preview-05-06",
+        name: "gemini-2.5-pro",
         displayName: "Gemini 2.5 Pro",
         description: "Most capable model for complex tasks",
       },
       {
-        name: "gemini-2.5-flash-preview-05-20",
+        name: "gemini-2.5-flash",
         displayName: "Gemini 2.5 Flash",
         description: "Fast and efficient for most tasks",
       },

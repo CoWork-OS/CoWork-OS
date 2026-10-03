@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Heartbeat history pruning**: pruning no longer fails with `FOREIGN KEY constraint failed` on databases whose `tasks.heartbeat_run_id` link predates `ON DELETE SET NULL`; links to pruned runs are cleared first, so old run history is trimmed again.
 - **Browser reliability**: visible-browser selector and ref actions verify they landed and fail clearly on stale or covered targets; the headless browser tracks popups and tabs, saves downloads into the workspace, reports dialogs, supports uploads and captures console and network logs.
 - **Blocked-command patterns**: match dangerous commands and targets instead of substrings, so `curl … | grep` and `rm -rf ./dist` are no longer blocked.
 - **Agent tool feedback**: failed shell commands now give the model their exit code and the tail of stderr/stdout instead of only `exit code 1`; `run_command` honors the executor's 120 s / 5 min budgets (approval time no longer counts), runs non-interactively, keeps the end of long output, and no longer re-runs a command after a persistent-shell timeout. Local commands that merely mention `fetch`, `axios` or a loopback URL are no longer blocked as shell networking.

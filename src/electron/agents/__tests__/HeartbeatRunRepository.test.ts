@@ -159,6 +159,42 @@ describeWithSqlite("HeartbeatRunStore (SQLite)", () => {
     expect(result.eventsDeleted).toBe(4);
   });
 
+  it("prunes runs that tasks point to when the task link has no ON DELETE action", () => {
+    // Older databases declare tasks.heartbeat_run_id without ON DELETE SET NULL.
+    db.pragma("foreign_keys = ON");
+    db.exec("ALTER TABLE tasks ADD COLUMN heartbeat_run_id TEXT REFERENCES heartbeat_runs(id)");
+    const now = Date.now();
+    for (let index = 0; index < 4; index += 1) {
+      insertRun({
+        id: `old-${index}`,
+        runType: "dispatch",
+        status: "completed",
+        createdAt: now - 40 * DAY - index,
+      });
+    }
+    db.prepare("INSERT INTO tasks (id, status, heartbeat_run_id) VALUES (?, ?, ?)").run(
+      "task-kept-run",
+      "completed",
+      "old-0",
+    );
+    db.prepare("INSERT INTO tasks (id, status, heartbeat_run_id) VALUES (?, ?, ?)").run(
+      "task-pruned-run",
+      "completed",
+      "old-3",
+    );
+
+    const result = pruneHeartbeatRunHistory(db, { retentionMs: 30 * DAY, keepPerAgent: 1, now });
+
+    expect(result.runsDeleted).toBe(3);
+    expect(statusOf("old-0")).toBe("completed");
+    expect(statusOf("old-3")).toBeUndefined();
+    const linkOf = (taskId: string) =>
+      (db.prepare("SELECT heartbeat_run_id FROM tasks WHERE id = ?").get(taskId) as Any)
+        .heartbeat_run_id;
+    expect(linkOf("task-kept-run")).toBe("old-0");
+    expect(linkOf("task-pruned-run")).toBeNull();
+  });
+
   it("lists only agent dispatch runs that are still running", () => {
     const now = Date.now();
     insertRun({ id: "a", status: "running", taskId: "t", createdAt: now });

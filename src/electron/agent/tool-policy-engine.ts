@@ -428,6 +428,11 @@ export function getToolExposureMetadata(toolName: string): ToolExposureMetadata 
   return inferToolExposureMetadata(String(toolName || "").trim());
 }
 
+/** Host-classified desktop MCP tools; tags are never taken from server descriptions. */
+export function isMcpComputerUseRuntime(runtime?: RuntimeToolMetadata): boolean {
+  return runtime?.capabilityTags[0] === "system" && runtime.capabilityTags.includes("mcp");
+}
+
 export function evaluateToolAvailability(
   toolName: string,
   ctx: ToolAvailabilityContext,
@@ -441,7 +446,12 @@ export function evaluateToolAvailability(
 
   // A connected MCP catalog is already an explicit user configuration. Tool
   // discovery must work in any language without requiring protocol keywords.
-  if (normalizedToolName.startsWith("mcp_") || runtime?.capabilityTags.includes("mcp")) {
+  // The configured desktop driver is the exception: it drives native apps, so it
+  // stays in the system lane and is exposed only for native GUI requests.
+  if (
+    (normalizedToolName.startsWith("mcp_") || runtime?.capabilityTags.includes("mcp")) &&
+    !isMcpComputerUseRuntime(runtime)
+  ) {
     return { decision: "allow", metadata };
   }
 
@@ -541,7 +551,7 @@ export function evaluateToolAvailability(
           ? { decision: "allow", metadata: { ...metadata, overlapGroup: "chronicle" } }
           : { decision: "defer", reason: "screen_context_intent_missing", metadata };
       }
-      if (isComputerUseToolName(normalizedToolName)) {
+      if (isComputerUseToolName(normalizedToolName) || isMcpComputerUseRuntime(runtime)) {
         if (WEB_SURFACE_PATTERN.test(taskText) && !COMPUTER_USE_INTENT_PATTERN.test(taskText)) {
           return {
             decision: "defer",

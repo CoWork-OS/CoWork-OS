@@ -9,10 +9,10 @@ import { createLogger } from "./logger";
  * Periodic host event-loop and SQLite summary for the async SQLite migration
  * baseline (DB0 in docs/async-sqlite-migration-plan-2026-09-27.md).
  *
- * Each interval produces one `[HostPerf] {json}` line. It is logged at info
- * when summaries are enabled (dev log capture or `COWORK_HOST_PERF=1`), and at
+ * Each interval produces at most one `[HostPerf] {json}` line. It is logged at
  * warn whenever event-loop p99 crosses the warning threshold, so real stalls
- * surface in ordinary logs too. Lines carry durations, counts, and SQL
+ * surface in ordinary logs, and at info only when summaries are opted into
+ * (`COWORK_HOST_PERF=1` or `isSummaryEnabled`). Lines carry durations, counts, and SQL
  * fingerprints only.
  */
 

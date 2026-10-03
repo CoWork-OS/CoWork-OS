@@ -1491,7 +1491,10 @@ describe("inline approval card routing (legacy approval queue off)", () => {
     expect(daemon.logEvent).toHaveBeenCalledWith(
       "task-inline",
       "approval_granted",
-      expect.objectContaining({ reason: "auto_review", autoReviewReason: "safe_read_shell_command" }),
+      expect.objectContaining({
+        reason: "auto_review",
+        autoReviewReason: "safe_read_shell_command",
+      }),
     );
   });
 
@@ -1710,4 +1713,92 @@ describe("inline approval card routing (legacy approval queue off)", () => {
       expect.objectContaining({ status: "executing" }),
     );
   });
+});
+
+describe("task consent authority snapshots", () => {
+  it("binds grants to active task, current policy, and access profile", async () => {
+    const fixture = {
+      taskRepo: { findById: vi.fn(() => ({ id: "task", status: "executing" })) },
+      getTaskWithTransientAgentConfig: (task: Any) => task,
+      evaluatePermissionRequest: vi.fn(async () => ({
+        evaluation: { decision: "ask" },
+        authorizationKey: "policy-1",
+      })),
+      getEffectiveAccessProfile: vi.fn(() => ({
+        id: "ask",
+        definition: { approval: "on-request" },
+      })),
+    } as Any;
+    const snapshot = () =>
+      AgentDaemon.prototype.getTaskConsentAuthority.call(fixture, "task", { tool: "mcp_js" });
+    const first = await snapshot();
+    expect(first).toBeTruthy();
+    expect(await snapshot()).toBe(first);
+    fixture.evaluatePermissionRequest.mockResolvedValue({
+      evaluation: { decision: "ask" },
+      authorizationKey: "policy-2",
+    });
+    expect(await snapshot()).not.toBe(first);
+    fixture.getEffectiveAccessProfile.mockReturnValue({
+      id: "new-profile",
+      definition: { approval: "on-request" },
+    });
+    const changed = await snapshot();
+    fixture.getEffectiveAccessProfile.mockReturnValue({
+      id: "unattended",
+      definition: { approval: "never" },
+    });
+    expect(await snapshot()).toBeNull();
+    fixture.getEffectiveAccessProfile.mockReturnValue({
+      id: "new-profile",
+      definition: { approval: "on-request" },
+    });
+    expect(await snapshot()).toBe(changed);
+    fixture.evaluatePermissionRequest.mockResolvedValue({
+      evaluation: { decision: "deny" },
+      authorizationKey: "policy-2",
+    });
+    expect(await snapshot()).toBeNull();
+    fixture.taskRepo.findById.mockReturnValue({ id: "task", status: "completed" });
+    expect(await snapshot()).toBeNull();
+  });
+});
+
+it("auto-approves routine app consent only under effective Full access and current allow policy", async () => {
+  const fixture = {
+    taskRepo: { findById: vi.fn(() => ({ id: "task", status: "executing" })) },
+    getTaskWithTransientAgentConfig: (task: Any) => task,
+    evaluatePermissionRequest: vi.fn(async () => ({ evaluation: { decision: "allow" } })),
+    getEffectiveAccessProfile: vi.fn(() => ({
+      permissionMode: "bypass_permissions",
+      definition: { sandbox: "danger-full-access", approval: "never" },
+    })),
+  } as Any;
+  const authorized = () =>
+    AgentDaemon.prototype.canAutoApproveComputerUseApp.call(fixture, "task", {
+      tool: "mcp_js",
+      params: { app: "com.apple.calculator" },
+    });
+  expect(await authorized()).toBe(true);
+  fixture.getEffectiveAccessProfile.mockReturnValue({
+    permissionMode: "default",
+    definition: { sandbox: "workspace-write", approval: "on-request" },
+  });
+  expect(await authorized()).toBe(false);
+  fixture.getEffectiveAccessProfile.mockReturnValue({
+    permissionMode: "plan",
+    definition: { sandbox: "read-only", approval: "never" },
+  });
+  expect(await authorized()).toBe(false);
+  fixture.getEffectiveAccessProfile.mockReturnValue({
+    permissionMode: "bypass_permissions",
+    definition: { sandbox: "danger-full-access", approval: "never" },
+  });
+  fixture.evaluatePermissionRequest.mockResolvedValue({ evaluation: { decision: "ask" } });
+  expect(await authorized()).toBe(false);
+  fixture.evaluatePermissionRequest.mockResolvedValue({ evaluation: { decision: "deny" } });
+  expect(await authorized()).toBe(false);
+  fixture.evaluatePermissionRequest.mockResolvedValue({ evaluation: { decision: "allow" } });
+  fixture.taskRepo.findById.mockReturnValue({ id: "task", status: "completed" });
+  expect(await authorized()).toBe(false);
 });

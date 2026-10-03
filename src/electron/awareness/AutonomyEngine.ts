@@ -25,6 +25,17 @@ const STORAGE_KEY = "autonomy-chief-of-staff";
 const EVALUATION_INTERVAL_MS = 90_000;
 const MAX_ACTIONS = 80;
 const MAX_OUTCOMES = 80;
+/**
+ * World-model fields stamped with the evaluation time. Every evaluation rewrites
+ * them, and start() re-derives every world model, so a change in these alone is
+ * not worth a settings write.
+ */
+const VOLATILE_WORLD_MODEL_KEYS = new Set([
+  "generatedAt",
+  "lastActiveAt",
+  "startedAt",
+  "lastObservedAt",
+]);
 
 interface PersistedAutonomyState {
   config: AutonomyConfig;
@@ -51,6 +62,14 @@ interface AutonomyEngineDeps {
 
 function hashFingerprint(parts: Array<string | number | undefined>): string {
   return createHash("sha1").update(parts.filter(Boolean).join("|")).digest("hex").slice(0, 20);
+}
+
+/** The persisted state with evaluation timestamps removed from world models. */
+function persistedContentFingerprint(state: PersistedAutonomyState): string {
+  const worldModels = JSON.stringify(state.worldModels, (key, value) =>
+    VOLATILE_WORLD_MODEL_KEYS.has(key) ? undefined : value,
+  );
+  return JSON.stringify({ ...state, worldModels: undefined }) + worldModels;
 }
 
 function clampConfidence(value: number): number {
@@ -105,6 +124,8 @@ export class AutonomyEngine {
   private started = false;
   private timer: NodeJS.Timeout | null = null;
   private evaluationInFlight = new Set<string>();
+  /** Fingerprint of the last state written or loaded; `null` forces the next save. */
+  private lastSavedFingerprint: string | null = null;
 
   constructor(deps: AutonomyEngineDeps = {}) {
     this.deps = deps;
@@ -270,6 +291,7 @@ export class AutonomyEngine {
             outcomes: Array.isArray(stored.outcomes) ? stored.outcomes : [],
           }
         : defaultState();
+      if (stored) this.lastSavedFingerprint = persistedContentFingerprint(this.state);
     } catch {
       this.state = defaultState();
     }
@@ -277,8 +299,12 @@ export class AutonomyEngine {
 
   private save(): void {
     if (!SecureSettingsRepository.isInitialized()) return;
+    const fingerprint = persistedContentFingerprint(this.state);
+    if (fingerprint === this.lastSavedFingerprint) return;
     try {
-      SecureSettingsRepository.getInstance().save(STORAGE_KEY, this.state);
+      if (SecureSettingsRepository.getInstance().save(STORAGE_KEY, this.state)) {
+        this.lastSavedFingerprint = fingerprint;
+      }
     } catch {
       // best-effort
     }
@@ -297,12 +323,17 @@ export class AutonomyEngine {
       ),
     ).slice(0, 12);
 
+    // One save for the sweep rather than one full-state write per workspace.
     for (const workspaceId of workspaceIds) {
-      await this.evaluateWorkspace(workspaceId);
+      await this.evaluateWorkspace(workspaceId, { persist: false });
     }
+    this.save();
   }
 
-  private async evaluateWorkspace(workspaceId: string): Promise<void> {
+  private async evaluateWorkspace(
+    workspaceId: string,
+    options: { persist?: boolean } = {},
+  ): Promise<void> {
     this.ensureLoaded();
     if (!workspaceId || this.evaluationInFlight.has(workspaceId)) return;
     this.evaluationInFlight.add(workspaceId);
@@ -315,7 +346,7 @@ export class AutonomyEngine {
         await this.executePendingDecisions(workspaceId);
       }
       this.pruneDecisions();
-      this.save();
+      if (options.persist !== false) this.save();
     } catch (error) {
       this.deps.log?.("[AutonomyEngine] evaluation failed", workspaceId, error);
     } finally {

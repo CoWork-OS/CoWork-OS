@@ -58,3 +58,17 @@ describe("assistant mediated approvals", () => {
     ).toBe(true);
   });
 });
+
+it("makes the duration and app scope explicit while keeping Deny first", () => {
+  const request = buildAssistantApprovalRequest("external_service", 'Use "Calculator"?', {
+    taskConsentScope: "reading, clicking, typing, and dragging in Calculator",
+  });
+  expect(request.questions[0].question).toContain("until this task ends");
+  expect(request.questions[0].options.map((option) => option.label)).toEqual([
+    "Deny",
+    "Allow for this task",
+  ]);
+  expect(
+    parseAssistantApprovalAnswer({ approval_decision: { optionLabel: "Allow for this task" } }),
+  ).toBe(true);
+});

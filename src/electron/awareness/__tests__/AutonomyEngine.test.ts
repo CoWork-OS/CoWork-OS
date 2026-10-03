@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AwarenessService } from "../AwarenessService";
 import { AutonomyEngine } from "../AutonomyEngine";
 import { RelationshipMemoryService } from "../../memory/RelationshipMemoryService";
+import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
 
 describe("AutonomyEngine", () => {
   beforeEach(() => {
@@ -12,6 +13,36 @@ describe("AutonomyEngine", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("writes settings once per sweep and skips sweeps that only move timestamps", async () => {
+    const save = vi.fn(() => true);
+    vi.spyOn(SecureSettingsRepository, "isInitialized").mockReturnValue(true);
+    vi.spyOn(SecureSettingsRepository, "getInstance").mockReturnValue({
+      load: () => undefined,
+      save,
+    } as unknown as SecureSettingsRepository);
+    vi.useFakeTimers();
+
+    const workspaceIds = Array.from({ length: 5 }, (_, index) => `ws-sweep-${index}`);
+    const engine = new AutonomyEngine({
+      getDefaultWorkspaceId: () => workspaceIds[0],
+      listWorkspaceIds: () => workspaceIds,
+    });
+
+    await engine.start();
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    const config = engine.getConfig();
+    config.maxPendingDecisions = 7;
+    engine.saveConfig(config);
+    expect(save).toHaveBeenCalledTimes(2);
+
+    await engine.stop();
   });
 
   it("derives a durable world model from awareness and commitments", async () => {

@@ -593,6 +593,21 @@ describe("TaskExecutor plan parsing", () => {
     ]);
   });
 
+  it("keeps the configured desktop MCP driver in native GUI steps", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Operate Calculator";
+    executor.task.prompt = "Operate macOS Calculator in the background to compute 12 times 12.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.lastUserMessage = executor.task.prompt;
+    executor.currentStepId = "1";
+    executor.plan = { steps: [{ id: "1", description: "Verify Calculator displays the result.", status: "pending" }] };
+    executor.hasTaskToolAllowlistConfigured = vi.fn().mockReturnValue(false);
+    executor.resolveStepExecutionContract = vi.fn().mockReturnValue({ requiredTools: new Set(), requiresMutation: false });
+    executor.toolUsageCounts = new Map();
+    const tools = [{ name: "mcp_js", runtime: { capabilityTags: ["system", "mcp"] } }, { name: "mcp_other" }];
+    expect(executor.applyStepScopedToolPolicy(tools).map((tool: Any) => tool.name)).toContain("mcp_js");
+  });
+
   it("retains available MCP tools through step and adaptive filtering", () => {
     const executor = createPlanExecutor({ content: [] });
     const prompt = "Call mcp_qa_echo with the text 'fixture ping'.";

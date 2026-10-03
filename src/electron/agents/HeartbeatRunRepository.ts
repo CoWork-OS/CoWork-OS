@@ -6,6 +6,7 @@ import {
   HeartbeatRunEvent,
   HeartbeatRunType,
 } from "../../shared/types";
+import { invalidateTaskRowReads } from "../database/repositories";
 
 interface CreateHeartbeatRunInput {
   issueId?: string;
@@ -442,6 +443,20 @@ export class HeartbeatRunStore {
               OR run_id NOT IN (SELECT id FROM heartbeat_runs)`,
         )
         .run().changes;
+      // tasks.heartbeat_run_id is meant to be ON DELETE SET NULL, but older databases
+      // reference heartbeat_runs with no action, so deleting a run a task points to
+      // fails and rolls back the whole prune. Clear those links first.
+      const tasksLinkRuns =
+        db
+          .prepare("SELECT 1 FROM pragma_table_info('tasks') WHERE name = 'heartbeat_run_id'")
+          .get() !== undefined;
+      if (tasksLinkRuns) {
+        db.prepare(
+          `UPDATE tasks SET heartbeat_run_id = NULL
+           WHERE heartbeat_run_id IN (SELECT id FROM temp.heartbeat_runs_prune)`,
+        ).run();
+        invalidateTaskRowReads(db);
+      }
       const runsDeleted = db
         .prepare("DELETE FROM heartbeat_runs WHERE id IN (SELECT id FROM temp.heartbeat_runs_prune)")
         .run().changes;

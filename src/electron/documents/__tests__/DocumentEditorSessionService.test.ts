@@ -2,7 +2,17 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { reviewSpy } = vi.hoisted(() => ({ reviewSpy: vi.fn() }));
+
+vi.mock("../../utils/pdf-review", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../utils/pdf-review")>();
+  reviewSpy.mockImplementation(actual.extractPdfReviewData);
+  return { ...actual, extractPdfReviewData: reviewSpy };
+});
+
 import { DocumentBuilder } from "../../agent/skills/document";
+import { PdfParseLimitError } from "../../utils/bounded-pdf-parser";
 import { DocumentEditorSessionService } from "../DocumentEditorSessionService";
 import { editPdfRegion } from "../pdf-region-editor";
 import { parsePdfBuffer } from "../../utils/pdf-parser";
@@ -65,6 +75,28 @@ describe("DocumentEditorSessionService", () => {
     expect(session.versions.map((item) => item.fileName)).toEqual(["report.pdf", "report-v2.pdf"]);
     expect(session.pdfDataBase64).toBeTruthy();
     expect(session.sourceTaskId).toBe("task-1");
+  });
+
+  it("still opens a PDF whose review summary hits a parse limit", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-doc-editor-"));
+    tempDirs.push(dir);
+    const original = path.join(dir, "heavy.pdf");
+    fs.writeFileSync(original, Buffer.from("%PDF-1.7 heavy"));
+    reviewSpy.mockRejectedValueOnce(
+      new PdfParseLimitError("PDF parsing did not finish within 30 seconds"),
+    );
+    const service = new DocumentEditorSessionService(
+      { findAll: () => [makeWorkspace(dir)] } as Any,
+      { findById: vi.fn().mockReturnValue(undefined) } as Any,
+      { findLatestByPath: vi.fn().mockReturnValue(undefined) } as Any,
+      {} as Any,
+    );
+
+    const session = await service.openSession(original, dir);
+
+    expect(reviewSpy).toHaveBeenCalledOnce();
+    expect(session.pdfDataBase64).toBe(Buffer.from("%PDF-1.7 heavy").toString("base64"));
+    expect(session.pdfReviewSummary).toBeUndefined();
   });
 
   it("creates a child edit task for DOCX selections when the source artifact belongs to a task", async () => {

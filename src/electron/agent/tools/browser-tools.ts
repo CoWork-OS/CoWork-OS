@@ -1372,7 +1372,9 @@ export class BrowserTools {
       {
         name: "browser_upload_file",
         description:
-          "Upload a workspace-readable file into a file input, preferably using a Browser V2 ref from browser_snapshot",
+          "Upload a workspace-readable file into a file input (input[type=file]). Use a Browser V2 ref " +
+          "from browser_snapshot in the visible workbench, or a CSS selector (required in the headless " +
+          "browser; hidden file inputs work). Files outside the workspace need the user's approval.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -2498,11 +2500,28 @@ export class BrowserTools {
           });
           if (result) return result;
         }
-        return {
-          success: false,
-          error:
-            "browser_upload_file requires an active visible Browser V2 session and a file input ref or selector.",
-        };
+        // Headless: the path already passed the same workspace read checks and external-file
+        // approval as the visible workbench above.
+        const selector = typeof input?.selector === "string" ? input.selector.trim() : "";
+        if (!selector) {
+          return {
+            success: false,
+            error:
+              "The headless browser has no snapshot refs; pass selector for the input[type=file] " +
+              "(browser_get_content lists inputs with selectors).",
+          };
+        }
+        const result = await this.browserService.uploadFile(
+          selector,
+          filePath,
+          this.getTimeoutMs(input),
+        );
+        this.daemon.logEvent(this.taskId, "browser_action", {
+          action: "upload_file",
+          selector,
+          success: result.success,
+        });
+        return result;
       }
 
       case "browser_handle_dialog": {

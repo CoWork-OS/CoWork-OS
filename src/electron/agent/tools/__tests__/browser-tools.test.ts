@@ -1110,6 +1110,114 @@ describe("BrowserTools headless browser capabilities", () => {
     expect(definition?.description).toContain("downloads/");
   });
 
+  describe("headless browser_upload_file", () => {
+    let workspaceRoot: string;
+    let externalRoot: string;
+    let uploadWorkspace: Any;
+
+    const setup = () => {
+      workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "browser-upload-headless-ws-"));
+      externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "browser-upload-headless-ext-"));
+      uploadWorkspace = {
+        ...workspace,
+        path: workspaceRoot,
+        permissions: { ...workspace.permissions, allowedPaths: [], unrestrictedFileAccess: false },
+      };
+    };
+    const cleanup = () => {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+      fs.rmSync(externalRoot, { recursive: true, force: true });
+    };
+
+    it("uploads a workspace file into a headless file input", async () => {
+      setup();
+      try {
+        fs.writeFileSync(path.join(workspaceRoot, "resume.pdf"), "pdf");
+        const uploadFile = vi.fn().mockResolvedValue({ success: true, selector: "#cv" });
+        const { tools, browserWorkbenchService } = makeHeadlessTools(
+          { uploadFile },
+          uploadWorkspace,
+        );
+
+        const result = await tools.executeTool("browser_upload_file", {
+          file_path: "resume.pdf",
+          selector: "#cv",
+        });
+
+        expect(result.success).toBe(true);
+        expect(browserWorkbenchService.uploadFile).not.toHaveBeenCalled();
+        expect(uploadFile).toHaveBeenCalledWith(
+          "#cv",
+          fs.realpathSync(path.join(workspaceRoot, "resume.pdf")),
+          undefined,
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it("asks before uploading a file outside the workspace and honours a denial", async () => {
+      setup();
+      try {
+        const externalFile = path.join(externalRoot, "id-card.png");
+        fs.writeFileSync(externalFile, "png");
+        const uploadFile = vi.fn().mockResolvedValue({ success: true });
+        const { tools, daemon } = makeHeadlessTools({ uploadFile }, uploadWorkspace);
+        daemon.requestApproval.mockResolvedValue(false);
+
+        await expect(
+          tools.executeTool("browser_upload_file", { file_path: externalFile, selector: "#id" }),
+        ).rejects.toThrow("Read permission not granted");
+        expect(daemon.requestApproval).toHaveBeenCalled();
+        expect(uploadFile).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    });
+
+    it("rejects a symlink that escapes the workspace before touching the page", async () => {
+      setup();
+      try {
+        const externalFile = path.join(externalRoot, "secret.txt");
+        fs.writeFileSync(externalFile, "secret");
+        try {
+          fs.symlinkSync(externalFile, path.join(workspaceRoot, "upload.txt"));
+        } catch {
+          return;
+        }
+        const uploadFile = vi.fn();
+        const { tools } = makeHeadlessTools({ uploadFile }, uploadWorkspace);
+
+        await expect(
+          tools.executeTool("browser_upload_file", { file_path: "upload.txt", selector: "#f" }),
+        ).rejects.toThrow("Read permission not granted");
+        expect(uploadFile).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    });
+
+    it("requires a selector for headless uploads", async () => {
+      setup();
+      try {
+        fs.writeFileSync(path.join(workspaceRoot, "resume.pdf"), "pdf");
+        const uploadFile = vi.fn();
+        const { tools } = makeHeadlessTools({ uploadFile }, uploadWorkspace);
+
+        const result = await tools.executeTool("browser_upload_file", {
+          file_path: "resume.pdf",
+          ref: "b2:snap:4",
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("selector");
+        expect(uploadFile).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    });
+  });
+
   it("describes headless popup handling on the tab tools", () => {
     const definitions = BrowserTools.getToolDefinitions();
     const descriptionOf = (name: string) =>

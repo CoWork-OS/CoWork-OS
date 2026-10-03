@@ -111,3 +111,27 @@ describe("BrowserService headless tabs", () => {
     expect((await service.listTabs()).map((tab) => tab.tabId)).toEqual(["tab-2"]);
   });
 });
+
+describe("BrowserService headless uploads", () => {
+  it("sets the files of a file input, even a hidden one, without waiting for visibility", async () => {
+    const service = new BrowserService(workspace, { headless: true, popupGraceMs: 0 });
+    await service.navigate("https://example.com/apply");
+    const page = context.pagesList[0];
+
+    const result = await service.uploadFile('input[type="file"]', "/tmp/resume.pdf");
+
+    expect(result).toMatchObject({ success: true, filePath: "/tmp/resume.pdf" });
+    expect(page.uploads).toEqual([{ selector: 'input[type="file"]', files: ["/tmp/resume.pdf"] }]);
+  });
+
+  it("reports a missing file input with candidate selectors", async () => {
+    const service = new BrowserService(workspace, { headless: true, popupGraceMs: 0 });
+    await service.navigate("https://example.com/apply");
+    context.pagesList[0].missingSelectors.add("#cv");
+
+    const result = await service.uploadFile("#cv", "/tmp/resume.pdf", 1_000);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No element matches selector "#cv"');
+  });
+});

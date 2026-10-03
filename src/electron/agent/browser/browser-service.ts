@@ -511,6 +511,15 @@ export interface FillResult extends BrowserActionEvents {
   candidates?: InteractiveElement[];
 }
 
+export interface UploadResult extends BrowserActionEvents {
+  success: boolean;
+  selector: string;
+  filePath?: string;
+  error?: string;
+  /** When the selector matched nothing: visible elements the caller can target instead */
+  candidates?: InteractiveElement[];
+}
+
 /** Thrown when an action's selector never matched any element within its budget. */
 class SelectorNotFoundError extends Error {
   constructor(
@@ -2090,6 +2099,43 @@ export class BrowserService {
       return { success: true, result };
     } catch (error) {
       return { success: false, result: (error as Error).message };
+    }
+  }
+
+  /**
+   * Set the file of an input[type=file]. The caller must already have passed filePath through
+   * the workspace read checks (and any external-file approval); the page only receives it.
+   */
+  async uploadFile(selector: string, filePath: string, timeoutMs?: number): Promise<UploadResult> {
+    return await this.withActionEvents(false, () =>
+      this.uploadFileOnPage(selector, filePath, timeoutMs),
+    );
+  }
+
+  private async uploadFileOnPage(
+    selector: string,
+    filePath: string,
+    timeoutMs?: number,
+  ): Promise<UploadResult> {
+    await this.ensurePage();
+    const timeout = this.getActionTimeout(timeoutMs);
+    // File inputs are often hidden behind a styled button, so wait for the element to exist
+    // rather than for it to be visible.
+    const locator = this.page!.locator(selector).first();
+    try {
+      await locator.setInputFiles(filePath, { timeout });
+      return { success: true, selector, filePath };
+    } catch (error) {
+      if (isPlaywrightTimeoutError(error) && (await locator.count().catch(() => -1)) === 0) {
+        const notFound = await this.selectorNotFoundError(selector, timeout);
+        return {
+          success: false,
+          selector,
+          error: notFound.message,
+          candidates: notFound.candidates,
+        };
+      }
+      return { success: false, selector, error: (error as Error).message };
     }
   }
 

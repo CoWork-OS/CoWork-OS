@@ -209,9 +209,12 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   },
   gemini: {
-    supportsImages: false,
-    maxImageBytes: 0,
-    supportedMimeTypes: [],
+    // Inline image parts. A generateContent request is capped at 20MB and
+    // base64 adds a third, so keep a single raw image under 15MB. The API
+    // accepts PNG, JPEG, WebP, HEIC and HEIF; GIF is not a listed image type.
+    supportsImages: true,
+    maxImageBytes: 15 * 1024 * 1024,
+    supportedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
   },
   azure: {
     supportsImages: true,

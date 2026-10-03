@@ -41,6 +41,27 @@ const GEMINI_SCHEMA_KEYS = new Set([
 ]);
 
 /**
+ * Gemini 1.5 and later (and Gemma 3 above 1B) accept image parts. The original
+ * Gemini 1.0 Pro, Gemma 3 1B, and embedding/AQA models are text-only, so they
+ * keep the text placeholder instead of a request the API would reject.
+ */
+const GEMINI_TEXT_ONLY_MODEL_PATTERNS = [
+  /^gemini-1\.0-pro(?!-vision)/,
+  /^gemini-pro$/,
+  /^gemma-3-1b/,
+  /embedding/,
+  /^aqa/,
+];
+
+export function geminiModelAcceptsImages(model: string): boolean {
+  const name = String(model || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^models\//, "");
+  return !GEMINI_TEXT_ONLY_MODEL_PATTERNS.some((pattern) => pattern.test(name));
+}
+
+/**
  * Google AI Studio (Gemini) provider implementation
  */
 export class GeminiProvider implements LLMProvider {
@@ -61,12 +82,13 @@ export class GeminiProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
+    const modelName = request.model || this.defaultModel;
     const model = this.client.getGenerativeModel({
-      model: request.model || this.defaultModel,
+      model: modelName,
       systemInstruction: request.system,
     });
 
-    const contents = this.convertMessages(request.messages);
+    const contents = this.convertMessages(request.messages, modelName);
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
 
     try {
@@ -125,7 +147,8 @@ export class GeminiProvider implements LLMProvider {
     }
   }
 
-  private convertMessages(messages: LLMMessage[]): Content[] {
+  private convertMessages(messages: LLMMessage[], modelName = this.defaultModel): Content[] {
+    const acceptsImages = geminiModelAcceptsImages(modelName);
     return messages.map((msg) => {
       const parts: Part[] = [];
 
@@ -162,7 +185,11 @@ export class GeminiProvider implements LLMProvider {
           } else if (item.type === "text") {
             parts.push({ text: item.text });
           } else if (item.type === "image") {
-            parts.push({ text: imageToTextFallback(item) });
+            parts.push(
+              acceptsImages
+                ? { inlineData: { mimeType: item.mimeType, data: item.data } }
+                : { text: imageToTextFallback(item) },
+            );
           }
         }
       }

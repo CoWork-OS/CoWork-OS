@@ -1115,7 +1115,7 @@ When disabled, CoWork does not render those cards and skips their home-screen da
 | --------------------------------- | ------------------ | ----------------------------------------------- |
 | **Token Budget** (per user turn)  | 2,000,000          | 1K - 10M                                        |
 | **Cost Budget**                   | $10.00 (enabled)   | $0.01 - $100                                    |
-| **Iteration Limit**               | 50                 | 5 - 500                                         |
+| **Iteration Limit** (per window)  | 500                | 5 - 500                                         |
 | **Dangerous Command Blocking**    | Enabled            | On/Off + custom                                 |
 | **Auto-Approve Trusted Commands** | Disabled           | On/Off + patterns                               |
 | **File Size Limit**               | 50 MB              | 1 - 500 MB                                      |

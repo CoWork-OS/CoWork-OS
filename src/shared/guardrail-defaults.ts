@@ -53,10 +53,12 @@ export const DEFAULT_GUARDRAIL_SETTINGS: Readonly<GuardrailSettings> = Object.fr
   webSearchAllowedDomains: [],
   webSearchBlockedDomains: [],
 
-  // Iterations — raised from 50 → 100.
+  // Iterations (LLM calls per continuation window) — raised 50 → 100 → 500.
   // Complex multi-repo operations and deep-research tasks routinely exceeded 50
   // without being stuck: each file edit + verify + lint cycle costs ~3 iterations.
-  maxIterationsPerTask: 100,
+  // 500 matches defaultLifetimeTurnCap. Hitting it is a turn-window limit: the task
+  // auto-continues within the continuation caps instead of failing.
+  maxIterationsPerTask: 500,
   iterationLimitEnabled: true,
 
   // Execution continuation.

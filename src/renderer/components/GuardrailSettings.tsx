@@ -256,10 +256,12 @@ export function GuardrailSettings() {
           </label>
         </div>
         <p className="settings-description">
-          Limit the number of LLM calls per task to prevent infinite loops.
+          Limit the LLM calls in each continuation window to prevent infinite loops. When the limit
+          is reached, the task continues automatically if Execution Continuation allows it;
+          otherwise it stops.
         </p>
         <div className="settings-inline-input">
-          <label>Max iterations per task:</label>
+          <label>Max iterations per window:</label>
           <input
             type="number"
             className="settings-input settings-input-number"

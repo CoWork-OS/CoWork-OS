@@ -89,3 +89,20 @@ describe("token budget defaults", () => {
     ).toMatchObject({ exceeded: false, used: 1_000, source: "global" });
   });
 });
+
+describe("iteration limit defaults", () => {
+  it("allows 500 iterations per continuation window by default", () => {
+    // Matches the 500-turn lifetime cap; the old 100 stopped long tasks that
+    // the adaptive turn policy would have continued.
+    expect(GuardrailManager.getDefaults()).toMatchObject({
+      iterationLimitEnabled: true,
+      maxIterationsPerTask: 500,
+      defaultLifetimeTurnCap: 500,
+    });
+    expect(GuardrailManager.isIterationLimitExceeded(499).exceeded).toBe(false);
+    expect(GuardrailManager.isIterationLimitExceeded(500)).toMatchObject({
+      exceeded: true,
+      limit: 500,
+    });
+  });
+});

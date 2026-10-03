@@ -9636,10 +9636,12 @@ ${transcript}
       }
     }
 
-    // Check iteration limit
+    // Check iteration limit. iterationCount resets with each continuation window,
+    // so this is a window limit: raise it as one so the task auto-continues (within
+    // the continuation, progress, and lifetime caps) instead of failing outright.
     const iterationCheck = GuardrailManager.isIterationLimitExceeded(this.iterationCount);
     if (iterationCheck.exceeded) {
-      throw new Error(
+      throw new TurnLimitExceededError(
         `Iteration limit exceeded: ${iterationCheck.iterations}/${iterationCheck.limit} iterations. ` +
           `Task stopped to prevent runaway execution.`,
       );
@@ -9687,7 +9689,18 @@ ${transcript}
         ? Number.MAX_SAFE_INTEGER
         : Math.max(0, this.maxGlobalTurns - this.globalTurnCount);
     const remainingLifetimeTurns = Math.max(0, this.maxLifetimeTurns - this.lifetimeTurnCount);
-    return Math.min(remainingWindowTurns, remainingLifetimeTurns);
+    return Math.min(
+      remainingWindowTurns,
+      remainingLifetimeTurns,
+      this.getRemainingIterationBudget(),
+    );
+  }
+
+  /** LLM calls left before the Settings > Guardrails iteration limit ends this window. */
+  private getRemainingIterationBudget(): number {
+    const settings = GuardrailManager.loadSettings();
+    if (!settings.iterationLimitEnabled) return Number.MAX_SAFE_INTEGER;
+    return Math.max(0, settings.maxIterationsPerTask - (Number(this.iterationCount) || 0));
   }
 
   private getEffectiveTurnBudgetPolicy(): TurnBudgetPolicy {
@@ -10035,7 +10048,9 @@ ${transcript}
     if (error instanceof TurnLimitExceededError) return true;
     const message = String((error as Any)?.message || error || "");
     return (
-      /Global turn limit exceeded|Lifetime turn limit exceeded/i.test(message) ||
+      /Global turn limit exceeded|Lifetime turn limit exceeded|Iteration limit exceeded/i.test(
+        message,
+      ) ||
       /budget exhausted/i.test(message) ||
       /Token budget exceeded/i.test(message) ||
       /Cost budget exceeded/i.test(message)
@@ -10442,7 +10457,9 @@ ${transcript}
           ? (errorLike as Any).message
           : undefined;
 
-    return /Global turn limit exceeded|Lifetime turn limit exceeded/i.test(String(message || ""));
+    return /Global turn limit exceeded|Lifetime turn limit exceeded|Iteration limit exceeded/i.test(
+      String(message || ""),
+    );
   }
 
   private isWindowTurnLimitExceededError(errorLike: unknown): boolean {
@@ -10452,7 +10469,8 @@ ${transcript}
         : typeof errorLike === "object" && errorLike !== null
           ? (errorLike as Any).message
           : undefined;
-    return /Global turn limit exceeded/i.test(String(message || ""));
+    // The iteration limit resets with each window too, so it continues the same way.
+    return /Global turn limit exceeded|Iteration limit exceeded/i.test(String(message || ""));
   }
 
   private getAdaptiveSoftLandingReserve(): number {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { AgentDaemon } from "../daemon";
 import { PermissionSettingsManager } from "../../security/permission-settings-manager";
+import { APPROVAL_REQUEST_TIMEOUT_MS } from "../approval-timeouts";
 
 vi.mock("../../admin/policies", () => ({
   loadPolicies: vi.fn(() => ({
@@ -1519,5 +1520,159 @@ describe("inline approval card routing (legacy approval queue off)", () => {
     );
 
     expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "a cowork run CLI task",
+      {
+        agentConfig: {
+          accessProfileId: "ask_for_approval",
+          cli: { owner: "cowork-run", runId: "r1" },
+        },
+      },
+      false,
+    ],
+    [
+      "a sub-agent",
+      { parentTaskId: "parent-1", agentConfig: { accessProfileId: "ask_for_approval" } },
+      false,
+    ],
+    ["a headless runtime", { agentConfig: { accessProfileId: "ask_for_approval" } }, true],
+  ])(
+    "denies a tool-internal ask immediately for %s instead of raising an unanswerable card",
+    async (_label, task, headless) => {
+      useInlineCardRuntime();
+      if (headless) process.env.COWORK_HEADLESS = "1";
+      const daemon = buildDaemon(task);
+
+      const approved = await AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task-inline",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+      );
+
+      expect(approved).toBe(false);
+      expect(daemon.requestAssistantApproval).not.toHaveBeenCalled();
+      expect(daemon.logEvent).toHaveBeenCalledWith(
+        "task-inline",
+        "log",
+        expect.objectContaining({
+          type: "tool_authorization",
+          decision: "deny",
+          reason: "interactive_approval_unavailable",
+        }),
+      );
+    },
+  );
+
+  it("still raises the card for an interactive desktop task", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
+    daemon.requestAssistantApproval.mockResolvedValue(true);
+
+    await expect(
+      AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task-inline",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+      ),
+    ).resolves.toBe(true);
+    expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+  });
+
+  const buildCardDaemon = (task: Record<string, unknown>) => {
+    const rows = new Map<string, Record<string, Any>>();
+    return {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({ id: "task-card", status: "executing", ...task }),
+      },
+      inputRequestRepo: {
+        create: vi.fn(async (row: Record<string, Any>) => {
+          const created = { id: `req-${rows.size + 1}`, ...row };
+          rows.set(created.id, created);
+          return created;
+        }),
+        findPendingByTaskId: vi.fn(async (taskId: string) =>
+          [...rows.values()].filter((row) => row.taskId === taskId && row.status === "pending"),
+        ),
+        resolve: vi.fn(async (id: string, status: string) => {
+          const row = rows.get(id);
+          if (row) row.status = status;
+        }),
+      },
+      pendingInputRequests: new Map(),
+      logEvent: vi.fn(),
+      updateTask: vi.fn(),
+    } as Any;
+  };
+
+  it("refuses to raise an approval card for a CLI-owned task", async () => {
+    useInlineCardRuntime();
+    const daemon = buildCardDaemon({
+      agentConfig: { cli: { owner: "cowork-run", runId: "r1" } },
+    });
+    const runtime = { recordPermissionDenial: vi.fn() };
+
+    await expect(
+      AgentDaemon.prototype["requestAssistantApproval"].call(
+        daemon,
+        "task-card",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+        runtime,
+        "tool:run_command",
+      ),
+    ).resolves.toBe(false);
+    expect(daemon.inputRequestRepo.create).not.toHaveBeenCalled();
+    expect(runtime.recordPermissionDenial).toHaveBeenCalledWith("tool:run_command");
+  });
+
+  it("denies an unanswered approval card after the approval timeout", async () => {
+    useInlineCardRuntime();
+    vi.useFakeTimers();
+    const daemon = buildCardDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
+    const runtime = { recordPermissionDenial: vi.fn(), recordPermissionSuccess: vi.fn() };
+
+    let settled: boolean | "rejected" | undefined;
+    void AgentDaemon.prototype["requestAssistantApproval"]
+      .call(
+        daemon,
+        "task-card",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+        runtime,
+        "tool:run_command",
+      )
+      .then(
+        (value: boolean) => (settled = value),
+        () => (settled = "rejected"),
+      );
+
+    await vi.advanceTimersByTimeAsync(APPROVAL_REQUEST_TIMEOUT_MS - 1);
+    expect(settled).toBeUndefined();
+    expect(daemon.pendingInputRequests.size).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(false);
+    expect(daemon.pendingInputRequests.size).toBe(0);
+    expect(daemon.inputRequestRepo.resolve).toHaveBeenCalledWith("req-1", "dismissed");
+    expect(runtime.recordPermissionDenial).toHaveBeenCalledWith("tool:run_command");
+    expect(runtime.recordPermissionSuccess).not.toHaveBeenCalled();
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-card",
+      "approval_denied",
+      expect.objectContaining({ assistantInput: true, reason: "timeout" }),
+    );
+    expect(daemon.updateTask).toHaveBeenLastCalledWith(
+      "task-card",
+      expect.objectContaining({ status: "executing" }),
+    );
   });
 });

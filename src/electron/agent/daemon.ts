@@ -182,7 +182,8 @@ import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/ta
 import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
 import { APPROVAL_REQUEST_TIMEOUT_MS } from "./approval-timeouts";
-import { approvalPromptsDisabled } from "./approval-policy";
+import { approvalPromptsDisabled, canAnswerInlineApproval } from "./approval-policy";
+import { isHeadlessMode } from "../utils/runtime-mode";
 import {
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
@@ -674,6 +675,13 @@ function parseSessionRetentionDurationMs(raw: unknown): number | undefined {
   };
   return Math.floor(value * multipliers[unit]);
 }
+
+const INLINE_APPROVAL_UNAVAILABLE_MESSAGE =
+  "Approval denied: nobody can answer an approval card for this task " +
+  "(CLI, headless, sub-agent, automated, or no-human-input task).";
+const INLINE_APPROVAL_TIMEOUT_MESSAGE =
+  "Approval denied: no response to the approval request within " +
+  `${Math.round(APPROVAL_REQUEST_TIMEOUT_MS / 60_000)} minutes.`;
 
 /**
  * AgentDaemon is the core orchestrator that manages task execution
@@ -7525,34 +7533,68 @@ export class AgentDaemon extends EventEmitter {
       throw new Error("Approval request cancelled because tool execution ended");
     }
 
+    const storedTask = this.taskRepo.findById(taskId);
+    const task =
+      typeof (this as Any).getTaskWithTransientAgentConfig === "function"
+        ? this.getTaskWithTransientAgentConfig(storedTask)
+        : storedTask;
+    if (!canAnswerInlineApproval(task, { headless: isHeadlessMode() })) {
+      runtime?.recordPermissionDenial?.(trackingKey);
+      this.logEvent(taskId, "log", {
+        type: "tool_authorization",
+        decision: "deny",
+        reason: "interactive_approval_unavailable",
+        approvalType: type,
+        message: INLINE_APPROVAL_UNAVAILABLE_MESSAGE,
+      });
+      return false;
+    }
+
     this.logEvent(taskId, "assistant_message", {
       message: buildAssistantApprovalMessage(type, description, details),
       source: "assistant_approval_request",
       approvalType: type,
     });
 
+    const dismissPendingCard: AgentDaemon["dismissPendingAssistantApproval"] =
+      typeof (this as Any).dismissPendingAssistantApproval === "function"
+        ? (this as Any).dismissPendingAssistantApproval
+        : AgentDaemon.prototype["dismissPendingAssistantApproval"];
     let abortListener: (() => void) | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
       const inputRequester =
         typeof (this as Any).requestUserInput === "function"
           ? (this as Any).requestUserInput
           : AgentDaemon.prototype.requestUserInput;
-      const responsePromise = inputRequester.call(
+      const responsePromise: Promise<InputRequestResponse> = inputRequester.call(
         this,
         taskId,
         buildAssistantApprovalRequest(type, description, details),
       );
-      const response = signal
-        ? await Promise.race([
-            responsePromise,
-            new Promise<never>((_, reject) => {
-              abortListener = () =>
-                reject(new Error("Approval request cancelled because tool execution ended"));
-              signal.addEventListener("abort", abortListener, { once: true });
-              if (signal.aborted) abortListener();
-            }),
-          ])
-        : await responsePromise;
+      // An unanswered card must not block the tool forever. It times out like
+      // a queued approval and resolves as a denial.
+      const waiters: Promise<InputRequestResponse>[] = [
+        responsePromise,
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            reject(new Error(INLINE_APPROVAL_TIMEOUT_MESSAGE));
+          }, APPROVAL_REQUEST_TIMEOUT_MS);
+        }),
+      ];
+      if (signal) {
+        waiters.push(
+          new Promise<never>((_, reject) => {
+            abortListener = () =>
+              reject(new Error("Approval request cancelled because tool execution ended"));
+            signal.addEventListener("abort", abortListener, { once: true });
+            if (signal.aborted) abortListener();
+          }),
+        );
+      }
+      const response = await Promise.race(waiters);
       if (signal?.aborted) {
         throw new Error("Approval request cancelled because tool execution ended");
       }
@@ -7578,26 +7620,33 @@ export class AgentDaemon extends EventEmitter {
       }
       return approved;
     } catch (error) {
-      if (signal?.aborted) {
-        const pending =
-          typeof (this.inputRequestRepo as Any)?.findPendingByTaskId === "function"
-            ? (await this.inputRequestRepo.findPendingByTaskId(taskId))[0]
-            : undefined;
-        if (pending) {
-          if (typeof (this.inputRequestRepo as Any)?.resolve === "function") {
-            await this.inputRequestRepo.resolve(pending.id, "dismissed");
-          }
-          const pendingWait = this.pendingInputRequests?.get(pending.id);
-          if (pendingWait && !pendingWait.resolved) {
-            pendingWait.resolved = true;
-            this.pendingInputRequests.delete(pending.id);
-            pendingWait.reject(error);
-          }
-          this.logEvent(taskId, "input_request_dismissed", {
-            requestId: pending.id,
-            reason: "tool_execution_cancelled",
+      if (timedOut && !signal?.aborted) {
+        await dismissPendingCard.call(this, taskId, error, "approval_timeout");
+        runtime?.recordPermissionDenial?.(trackingKey);
+        const currentTask = this.taskRepo.findById(taskId);
+        if (currentTask && !isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask))) {
+          // The tool continues with the denial, so the task is running again.
+          this.updateTask(taskId, {
+            status: "executing",
+            terminalStatus: undefined,
+            failureClass: undefined,
           });
         }
+        this.logEvent(taskId, "assistant_message", {
+          message: INLINE_APPROVAL_TIMEOUT_MESSAGE,
+          source: "assistant_approval_timeout",
+          approvalType: type,
+        });
+        this.logEvent(taskId, "approval_denied", {
+          assistantInput: true,
+          approvalType: type,
+          reason: "timeout",
+          message: INLINE_APPROVAL_TIMEOUT_MESSAGE,
+        });
+        return false;
+      }
+      if (signal?.aborted) {
+        await dismissPendingCard.call(this, taskId, error, "tool_execution_cancelled");
         throw error;
       }
       const errorMessage = String((error as Any)?.message || error || "");
@@ -7612,8 +7661,32 @@ export class AgentDaemon extends EventEmitter {
       });
       return false;
     } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       if (abortListener && signal) signal.removeEventListener("abort", abortListener);
     }
+  }
+
+  /** Dismiss the task's open approval card and release its waiter. */
+  private async dismissPendingAssistantApproval(
+    taskId: string,
+    error: unknown,
+    reason: string,
+  ): Promise<void> {
+    const pending =
+      typeof (this.inputRequestRepo as Any)?.findPendingByTaskId === "function"
+        ? (await this.inputRequestRepo.findPendingByTaskId(taskId))[0]
+        : undefined;
+    if (!pending) return;
+    if (typeof (this.inputRequestRepo as Any)?.resolve === "function") {
+      await this.inputRequestRepo.resolve(pending.id, "dismissed");
+    }
+    const pendingWait = this.pendingInputRequests?.get(pending.id);
+    if (pendingWait && !pendingWait.resolved) {
+      pendingWait.resolved = true;
+      this.pendingInputRequests.delete(pending.id);
+      pendingWait.reject(error);
+    }
+    this.logEvent(taskId, "input_request_dismissed", { requestId: pending.id, reason });
   }
 
   async requestApproval(
@@ -7891,12 +7964,19 @@ export class AgentDaemon extends EventEmitter {
           requireExplicitApproval: opts?.requireExplicitApproval,
         }))
     ) {
-      if (isAutomatedTaskLike(task) || task?.agentConfig?.humanInputPolicy === "none") {
+      // Tool-internal asks (e.g. run_command's own approval) reach this point
+      // after the tool policy pipeline already allowed the call, so check the
+      // same answerability rule here. Nobody answers the card in `cowork run`,
+      // headless, sub-agent, bot, automated or no-human-input tasks; waiting
+      // on it would hang the task.
+      if (!canAnswerInlineApproval(task, { headless: isHeadlessMode() })) {
+        permission.runtime?.recordPermissionDenial(permission.trackingKey);
         this.logEvent(taskId, "log", {
           type: "tool_authorization",
           decision: "deny",
           reason: "interactive_approval_unavailable",
           approvalType: type,
+          message: INLINE_APPROVAL_UNAVAILABLE_MESSAGE,
         });
         return false;
       }
@@ -7915,9 +7995,9 @@ export class AgentDaemon extends EventEmitter {
         permission.trackingKey,
         opts?.signal,
       );
-      // The card can wait indefinitely. Like a queued approval, an "Allow
-      // once" answer only counts if the operation identity and the task's
-      // authority are unchanged since the card was raised.
+      // The card can stay open for up to the approval timeout. Like a queued
+      // approval, an "Allow once" answer only counts if the operation identity
+      // and the task's authority are unchanged since the card was raised.
       if (
         approved &&
         typeof (this as Any).isApprovalAuthorityCurrent === "function" &&

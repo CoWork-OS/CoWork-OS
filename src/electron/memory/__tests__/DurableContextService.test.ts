@@ -117,8 +117,15 @@ describeWithNativeDb("DurableContextService", () => {
                     taskId: "task-1",
                     snippet: "Project codename: Lantern Harbor",
                   },
+                  // context_recall mixes in conversation-index events (dce_).
+                  {
+                    id: "dce_17",
+                    kind: "message",
+                    role: "user",
+                    snippet: "Lantern Harbor is the codename",
+                  },
                 ],
-                totalFound: 1,
+                totalFound: 2,
               }),
             },
           ],
@@ -412,5 +419,43 @@ describeWithNativeDb("DurableContextService", () => {
       .get() as { byte_length: number; stored: number };
     expect(payload.byte_length).toBeGreaterThan(700_000);
     expect(payload.stored).toBeLessThan(300_000);
+  });
+
+  it("searches with uppercase operators, file names and accents through FTS", async () => {
+    enableDurableContext();
+    const db = createDb();
+
+    await DurableContextService.recordHistory({
+      workspaceId: "ws-1",
+      taskId: "task-1",
+      source: "test",
+      messages: [
+        { role: "user", content: "Compare cats AND dogs in executor.ts" },
+        { role: "assistant", content: "Die Größe passt; 100% done_now" },
+      ],
+    });
+    // Without FTS the LIKE fallback would run; drop it to prove FTS answers.
+    const like = vi.spyOn(db, "prepare");
+
+    const operators = await DurableContextService.search({
+      workspaceId: "ws-1",
+      query: "cats AND dogs",
+    });
+    expect(operators.map((hit) => hit.snippet)).toEqual([
+      "user: Compare cats AND dogs in executor.ts",
+    ]);
+    const files = await DurableContextService.search({ workspaceId: "ws-1", query: "executor.ts" });
+    expect(files).toHaveLength(1);
+    const accents = await DurableContextService.search({ workspaceId: "ws-1", query: "größe" });
+    expect(accents).toHaveLength(1);
+    expect(like.mock.calls.some(([sql]) => String(sql).includes("content_text LIKE"))).toBe(false);
+
+    // The LIKE fallback matches `%` and `_` literally.
+    const percent = await DurableContextService.search({ workspaceId: "ws-1", query: "0% d" });
+    expect(percent).toHaveLength(1);
+    const underscore = await DurableContextService.search({ workspaceId: "ws-1", query: "e_n" });
+    expect(underscore).toHaveLength(1);
+    const literal = await DurableContextService.search({ workspaceId: "ws-1", query: "s_d%" });
+    expect(literal).toEqual([]);
   });
 });

@@ -257,8 +257,10 @@ describe("memory archive retention and capture hygiene", () => {
         content: "[Imported from ChatGPT — x]\nhello",
         createdAt: old,
       });
+      // Playbook outcomes live in playbook_entries now (Phase 2); text in the archive that
+      // looks like one is an ordinary memory with no special protection.
       insert(db, {
-        id: "d-playbook",
+        id: "d-playbook-text",
         workspaceId: workspace.id,
         content: "[PLAYBOOK] Task succeeded: x",
         createdAt: old,
@@ -279,11 +281,10 @@ describe("memory archive retention and capture hygiene", () => {
       insert(db, { id: "g-fresh", workspaceId: workspace.id, content: "fresh" });
 
       const deleted = store.deleteOlderThan(workspace.id, Date.now() - 90 * DAY);
-      expect(deleted).toBe(1);
+      expect(deleted).toBe(2);
       expect(ids(db)).toEqual([
         "b-recently-used",
         "c-imported",
-        "d-playbook",
         "e-saved",
         "f-curated",
         "g-fresh",

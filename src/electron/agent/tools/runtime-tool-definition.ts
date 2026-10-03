@@ -39,16 +39,9 @@ const READ_PARALLEL_TOOLS = new Set([
   "git_refs",
   "task_history",
   "task_list_list",
-  "search_memories",
-  "memory_search_index",
-  "memory_timeline",
-  "memory_details",
-  "search_quotes",
-  "search_sessions",
-  "memory_topics_load",
-  "memory_curated_read",
-  "supermemory_profile",
-  "supermemory_search",
+  // Memory reads. Deprecated aliases (search_memories, …) canonicalize to these.
+  "memory_recall",
+  "context_recall",
   "scratchpad_read",
   "browser_snapshot",
   "browser_tabs",
@@ -139,12 +132,19 @@ const DEFERRED_BY_DEFAULT_TOOLS = new Set([
   "monty_list_transforms",
   "monty_run_transform",
   "monty_transform_file",
-  // Memory recall and curation tools are always exposed (ALWAYS_EXPOSE_TOOLS);
-  // listing them here as well made the two lists contradict each other. The
-  // knowledge-graph reads are deferred: tool_search surfaces them when needed.
+  // The four memory tools are always exposed (ALWAYS_EXPOSE_TOOLS). Knowledge-graph
+  // tools are explicit graph editing (audit §8.3): deferred, and discoverable through
+  // tool_search or task text that names them.
   "kg_search",
   "kg_get_neighbors",
   "kg_get_subgraph",
+  "kg_create_entity",
+  "kg_update_entity",
+  "kg_delete_entity",
+  "kg_create_edge",
+  "kg_delete_edge",
+  "kg_invalidate_edge",
+  "kg_add_observation",
   // Agent lifecycle management (spawn_agent / orchestrate_agents stay visible)
   "capture_agent_events",
   "send_agent_message",
@@ -187,20 +187,11 @@ const ALWAYS_EXPOSE_TOOLS = new Set([
   "task_history",
   "scratchpad_write",
   "scratchpad_read",
-  "search_memories",
-  "memory_search_index",
-  "memory_timeline",
-  "memory_details",
-  "search_quotes",
-  "search_sessions",
-  "memory_topics_load",
-  "memory_save",
-  "memory_curate",
-  "memory_curated_read",
-  "supermemory_profile",
-  "supermemory_search",
-  "supermemory_remember",
-  "supermemory_forget",
+  // Memory (audit §8.3): recall, remember, forget, and active-task context recovery.
+  "memory_recall",
+  "memory_remember",
+  "memory_forget",
+  "context_recall",
   // Keep bot-to-bot handoffs discoverable for persistent bot conversations.
   // Runtime policy still gates execution; deferring this tool makes delegation
   // silently unavailable when the prompt omits the exact tool name.

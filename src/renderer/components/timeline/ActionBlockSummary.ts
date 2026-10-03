@@ -323,7 +323,8 @@ export function buildActionBlockSummary(
   const searches =
     (summaryToolCounts.get("grep") || 0) +
     (summaryToolCounts.get("search_files") || 0) +
-    (summaryToolCounts.get("context_grep") || 0);
+    (summaryToolCounts.get("context_grep") || 0) +
+    (summaryToolCounts.get("context_recall") || 0);
   const countFileTargets = (toolName: string): number => {
     const pathsByCall = new Map<string, string>();
     const targets = new Set<string>();
@@ -393,6 +394,7 @@ export function buildActionBlockSummary(
     "grep",
     "search_files",
     "context_grep",
+    "context_recall",
     "write_file",
     "edit_file",
     "run_command",

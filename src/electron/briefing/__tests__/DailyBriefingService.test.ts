@@ -352,6 +352,75 @@ describe("DailyBriefingService", () => {
     ).toBe(true);
   });
 
+  it("does not repeat a decision whose entity is already due soon or suggested", async () => {
+    const deps = makeDeps({
+      getAwarenessSummary: async () => ({
+        generatedAt: Date.now(),
+        workspaceId: "ws-1",
+        whatChanged: [],
+        whatMattersNow: [],
+        dueSoon: [
+          {
+            id: "commitment-1",
+            title: "Send the signed contract to Dana",
+            detail: "Due tomorrow 10:00",
+            source: "tasks",
+            score: 0.9,
+            tags: ["due_soon", "commitment"],
+            requiresHeartbeat: true,
+          },
+        ],
+        beliefs: [],
+        wakeReasons: ["due_soon"],
+      }),
+      getActiveSuggestions: () => [
+        {
+          id: "suggestion-1",
+          type: "follow_up",
+          title: "Review launch blockers",
+          description: "From chief of staff",
+          sourceEntity: "decision-2",
+          confidence: 0.8,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 1000,
+          dismissed: false,
+          actedOn: false,
+        },
+      ],
+      getAutonomyDecisions: async () => [
+        {
+          id: "decision-1",
+          title: "Follow up on: Send the signed contract to Dana",
+          description: "This open loop is due soon and should be clarified.",
+          priority: "high",
+          entityKey: "commitment:commitment-1",
+        },
+        {
+          id: "decision-2",
+          title: "Review launch blockers",
+          description: "Check the remaining blocker list before shipping the redesign.",
+          priority: "normal",
+        },
+        {
+          id: "decision-3",
+          title: "Prepare the quarterly planning agenda",
+          description: "Collect the open themes for the planning review.",
+          priority: "normal",
+          entityKey: "goal:quarterly planning",
+        },
+      ],
+    });
+    const briefing = await new DailyBriefingService(deps).generateBriefing("ws-1");
+    const labels =
+      briefing.sections
+        .find((section) => section.type === "awareness_digest")
+        ?.items.map((item) => item.label) || [];
+
+    expect(labels.filter((label) => label.startsWith("Decision needed"))).toEqual([
+      "Decision needed: Prepare the quarterly planning agenda",
+    ]);
+  });
+
   it("filters generic app telemetry out of the awareness digest", async () => {
     const deps = makeDeps({
       getAwarenessSummary: async () => ({

@@ -11,7 +11,6 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   contextPackInjectionEnabled: true,
   heartbeatMaintenanceEnabled: true,
   checkpointCaptureEnabled: true,
-  verbatimRecallEnabled: true,
   wakeUpLayersEnabled: true,
   temporalKnowledgeEnabled: true,
   layeredMemoryEnabled: false,
@@ -28,7 +27,6 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   memoryWriteApprovalMode: "off",
   autoPromoteToCuratedMemoryEnabled: false,
   structuredObservationsEnabled: true,
-  progressiveRecallToolsEnabled: true,
   memoryInspectorEnabled: true,
 };
 
@@ -47,6 +45,8 @@ function normalizePositiveNumber(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+// Builds the settings from known keys only, so retired keys still present in a stored blob
+// (`verbatimRecallEnabled`, `progressiveRecallToolsEnabled`) are dropped on load and save.
 function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSettings {
   const durableContextMode = normalizeDurableContextMode(settings.durableContextMode);
   const durableContextEnabled =
@@ -58,13 +58,15 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     contextPackInjectionEnabled: !!settings.contextPackInjectionEnabled,
     heartbeatMaintenanceEnabled: !!settings.heartbeatMaintenanceEnabled,
     checkpointCaptureEnabled: durableContextEnabled || settings.checkpointCaptureEnabled !== false,
-    verbatimRecallEnabled: settings.verbatimRecallEnabled !== false,
     wakeUpLayersEnabled: settings.wakeUpLayersEnabled !== false,
     temporalKnowledgeEnabled: settings.temporalKnowledgeEnabled !== false,
     layeredMemoryEnabled: isEnabled(settings.layeredMemoryEnabled),
-    // Transcript span writing follows its own flag. Durable context does not read
-    // spans, and coupling the two left span writing on after durable context was off.
+    // No longer writes transcript spans (the conversation index is always fed from task
+    // events). It now only turns on the query orchestrator's `transcript_context` prompt
+    // section and the checkpoint resume label.
     transcriptStoreEnabled: isEnabled(settings.transcriptStoreEnabled),
+    // Durable context only controls the compaction-recovery layer: recording the full
+    // LLM history and compaction summaries that context_recall can expand.
     durableContextEnabled,
     durableContextMode: effectiveDurableMode,
     durableContextLargePayloadThreshold: Math.floor(
@@ -79,7 +81,6 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     memoryWriteApprovalMode: normalizeMemoryWriteApprovalMode(settings.memoryWriteApprovalMode),
     autoPromoteToCuratedMemoryEnabled: isEnabled(settings.autoPromoteToCuratedMemoryEnabled),
     structuredObservationsEnabled: settings.structuredObservationsEnabled !== false,
-    progressiveRecallToolsEnabled: settings.progressiveRecallToolsEnabled !== false,
     memoryInspectorEnabled: settings.memoryInspectorEnabled !== false,
   };
 }

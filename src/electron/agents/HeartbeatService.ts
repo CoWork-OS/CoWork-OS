@@ -45,6 +45,11 @@ import {
 } from "./HeartbeatPulseEngine";
 import { HeartbeatDispatchEngine } from "./HeartbeatDispatchEngine";
 import {
+  getBackgroundDispatchBudget,
+  type BackgroundDispatchBudget,
+} from "./BackgroundDispatchBudget";
+import type { SuggestionSource } from "../agent/SuggestionSink";
+import {
   TERMINAL_TASK_STATUSES,
   type PruneHeartbeatRunsInput,
   type PruneHeartbeatRunsResult,
@@ -145,6 +150,13 @@ export interface HeartbeatServiceDeps {
   getAwarenessSummary?: (workspaceId?: string) => AwarenessSummary | null;
   getAutonomyState?: (workspaceId?: string) => ChiefOfStaffWorldModel | null;
   getAutonomyDecisions?: (workspaceId?: string) => AutonomyDecision[];
+  /**
+   * Pulse phase: AutonomyEngine (chief of staff) evaluation for the pulse workspace. Heartbeat
+   * is its only scheduler; the engine throttles repeat calls for the same workspace.
+   */
+  evaluateAutonomy?: (workspaceId: string) => Promise<boolean | void>;
+  /** Shared background dispatch budget (Heartbeat, AutonomyEngine, WI, Strategic Planner). */
+  dispatchBudget?: BackgroundDispatchBudget;
   listActiveSuggestions?: (
     workspaceId: string,
   ) => ProactiveSuggestion[] | Promise<ProactiveSuggestion[]>;
@@ -165,6 +177,8 @@ export interface HeartbeatServiceDeps {
       companionStyle?: ProactiveSuggestion["companionStyle"];
       sourceEntity?: string;
       sourceTaskId?: string;
+      entityKey?: string;
+      source?: SuggestionSource;
     },
   ) => Promise<ProactiveSuggestion | null>;
   addNotification?: (params: {
@@ -780,7 +794,7 @@ export class HeartbeatService extends EventEmitter {
     const dispatchesToday = await this.getDispatchesToday(agent.id);
     const maxDispatchesPerDay =
       agent.heartbeatPolicy?.maxDispatchesPerDay || agent.maxDispatchesPerDay || 6;
-    const decision = this.withDispatchEvidence(
+    let decision = this.withDispatchEvidence(
       this.pulseEngine.evaluate({
         agent,
         signals: pulseSignals,
@@ -905,6 +919,19 @@ export class HeartbeatService extends EventEmitter {
         dispatchesToday,
         maxDispatchesPerDay,
       };
+
+      // Observe phase: the chief-of-staff world model is evaluated here, at most once per pulse
+      // (and throttled per workspace across agents), instead of on its own 90 s timer.
+      const autonomyEvaluated = await this.maybeEvaluateAutonomy(workspaceId);
+      if (autonomyEvaluated && coreTrace) {
+        await this.deps.coreTraceService?.appendPhaseEvent(
+          coreTrace.id,
+          "decision",
+          "heartbeat.autonomy_evaluated",
+          "Heartbeat evaluated the chief-of-staff world model.",
+          { workspaceId },
+        );
+      }
 
       const reflectionRun = await this.maybeRunWorkflowReflection({
         agent,
@@ -1119,6 +1146,29 @@ export class HeartbeatService extends EventEmitter {
         return result;
       }
 
+      // Task creation also spends the shared per-workspace background budget, which
+      // AutonomyEngine, Workflow Intelligence and the Strategic Planner draw from too. Over
+      // budget, the dispatch becomes a suggestion. Manual pulses are recorded, never refused.
+      let budgetTicket: string | undefined;
+      if (decision.dispatchKind === "task") {
+        const grant = this.getDispatchBudget().tryConsume({
+          workspaceId,
+          source: "heartbeat",
+          manual: manualOverride,
+        });
+        if (grant.allowed) {
+          budgetTicket = grant.ticket;
+        } else {
+          decision = {
+            ...decision,
+            kind: "suggestion",
+            dispatchKind: "suggestion",
+            reason: `${decision.reason} (workspace background task budget reached; suggested instead of creating a task)`,
+          };
+          result = { ...result, pulseOutcome: decision.kind, triggerReason: decision.reason };
+        }
+      }
+
       const dispatchRun = await this.runRepo.create({
         agentRoleId: agent.id,
         workspaceId,
@@ -1162,9 +1212,11 @@ export class HeartbeatService extends EventEmitter {
           evidenceRefs: decision.evidenceRefs,
           dueChecklistItems: scopedChecklistItems,
           dueProactiveTasks,
-          dispatchKind: decision.dispatchKind,
+          // Narrowing is lost by the budget downgrade above; the idle branch already returned.
+          dispatchKind: decision.dispatchKind ?? "suggestion",
         });
       } catch (error) {
+        this.getDispatchBudget().refund(budgetTicket);
         const message = error instanceof Error ? error.message : String(error);
         await this.runRepo.recordEvent(dispatchRun.id, "dispatch.failed", {
           dispatchKind: decision.dispatchKind,
@@ -1184,6 +1236,7 @@ export class HeartbeatService extends EventEmitter {
       // reaches a terminal state (settleInFlightDispatches), so the in-flight guard holds.
       const tracksTask =
         dispatchResult.status !== "error" && Boolean(dispatchResult.taskCreated);
+      if (!dispatchResult.taskCreated) this.getDispatchBudget().refund(budgetTicket);
       await this.runRepo.recordEvent(
         dispatchRun.id,
         tracksTask ? "dispatch.task_created" : "dispatch.completed",
@@ -1523,6 +1576,20 @@ export class HeartbeatService extends EventEmitter {
       );
     } catch (error) {
       console.warn("[HeartbeatService] Failed to record heartbeat error outcome:", error);
+    }
+  }
+
+  private getDispatchBudget(): BackgroundDispatchBudget {
+    return this.deps.dispatchBudget || getBackgroundDispatchBudget();
+  }
+
+  private async maybeEvaluateAutonomy(workspaceId?: string): Promise<boolean> {
+    if (!this.deps.evaluateAutonomy || !workspaceId) return false;
+    try {
+      return (await this.deps.evaluateAutonomy(workspaceId)) === true;
+    } catch (error) {
+      console.warn("[HeartbeatService] Autonomy evaluation failed:", error);
+      return false;
     }
   }
 

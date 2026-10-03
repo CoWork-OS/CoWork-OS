@@ -73,6 +73,10 @@ describe("salience-gated task event capture", () => {
 
   it("never archives events of memory recall tools", () => {
     for (const tool of [
+      "memory_recall",
+      "memory_remember",
+      "memory_forget",
+      "context_recall",
       "memory_search_index",
       "memory_timeline",
       "memory_details",

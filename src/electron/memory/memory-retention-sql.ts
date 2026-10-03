@@ -125,6 +125,67 @@ export const SUBCONSCIOUS_RETENTION_RULES: RetentionRule[] = [
   },
 ];
 
+/**
+ * Proactive suggestions (suggestions-sql.ts) past the cutoff: expired ones and ones the
+ * user dismissed or acted on, kept 30 days after that so the UI and dedupe still see them.
+ */
+export const SUGGESTION_RETENTION_RULES: RetentionRule[] = [
+  {
+    name: "suggestions",
+    table: "suggestions",
+    where: "(expires_at < ? OR (status != 'active' AND updated_at < ?))",
+    params: (cutoff) => [cutoff, cutoff],
+  },
+];
+
+/** Suggestion feedback rows older than the cutoff (90 days). */
+export const SUGGESTION_FEEDBACK_RETENTION_RULES: RetentionRule[] = [
+  {
+    name: "suggestion_feedback",
+    table: "suggestion_feedback",
+    where: "created_at < ?",
+    params: (cutoff) => [cutoff],
+  },
+];
+
+/**
+ * Playbook entries (playbook-entries-sql.ts) older than the cutoff (180 days): failures,
+ * inbox patterns and legacy reinforcement text, and successes that no longer back active
+ * evidence. A success that still backs active evidence is kept (deleting it would
+ * invalidate the evidence as `source_entry_deleted`); the evidence rows themselves stay so
+ * the same task can never be counted twice.
+ */
+export const PLAYBOOK_RETENTION_RULES: RetentionRule[] = [
+  {
+    name: "playbook_entries",
+    table: "playbook_entries",
+    where: `created_at < ? AND (kind != 'success' OR NOT EXISTS (
+      SELECT 1 FROM playbook_success_evidence e
+      WHERE e.source_memory_id = playbook_entries.id AND e.invalidated_at IS NULL))`,
+    params: (cutoff) => [cutoff],
+  },
+];
+
+/**
+ * Memory items (memory-items-sql.ts) at the cutoff, which is the run time: tombstones of
+ * forgotten items (their content is already scrubbed when they are forgotten) and items
+ * past their own `expires_at`.
+ */
+export const MEMORY_ITEM_RETENTION_RULES: RetentionRule[] = [
+  {
+    name: "memory_items_deleted",
+    table: "memory_items",
+    where: "status = 'deleted' AND updated_at <= ?",
+    params: (cutoff) => [cutoff],
+  },
+  {
+    name: "memory_items_expired",
+    table: "memory_items",
+    where: "expires_at IS NOT NULL AND expires_at <= ?",
+    params: (cutoff) => [cutoff],
+  },
+];
+
 function tableExists(db: Database.Database, name: string): boolean {
   const row = db
     .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?")
@@ -153,8 +214,8 @@ export function deleteRetentionBatch(
 
 /**
  * Workspace memory retention (MemoryStore.deleteOlderThan): delete the workspace's
- * archive rows not used (created or referenced) since `cutoff`, keeping imports, Playbook
- * rows, explicit saves and curated promotions (memory-retention.ts). Child embeddings go
+ * archive rows not used (created or referenced) since `cutoff`, keeping imports, explicit
+ * saves and curated promotions (memory-retention.ts). Child embeddings go
  * first. Run it inside the caller's transaction.
  */
 export function deleteWorkspaceMemoriesOlderThan(

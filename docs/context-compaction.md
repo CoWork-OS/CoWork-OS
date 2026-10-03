@@ -121,8 +121,8 @@ Compaction source messages and summaries are written to the MemoryService and (i
 When **Durable Runtime Context** is enabled, compaction summaries are also recorded in the durable
 runtime-context tables with links back to the source messages they summarize. Overlapping summaries
 can link to parent summaries, forming a summary DAG rather than a flat list. Agents can recover these
-summaries later in the same active task with `context_grep` and expand source links with
-`context_describe`. See [Durable Runtime Context](durable-runtime-context.md).
+summaries later in the same active task with `context_recall` (search, then expand a result by
+id to follow its source links). See [Durable Runtime Context](durable-runtime-context.md).
 
 ### Pinned Messages
 
@@ -211,7 +211,7 @@ Compaction behavior is controlled by constants in `src/electron/agent/executor-h
 | `src/shared/context-compaction.ts`                                 | Provider-neutral lifecycle payloads, policy defaults, and preview validation                                                 |
 | `src/electron/agent/executor-helpers.ts`                           | Tunable constants                                                                                                            |
 | `src/electron/memory/DurableContextService.ts`                     | Optional task-scoped durable message/summarization index with source links, large-payload refs, and summary DAG parent links |
-| `src/electron/agent/tools/system-tools.ts`                         | `context_grep` and `context_describe` tool definitions and active-task scope enforcement                                     |
+| `src/electron/agent/tools/memory-tools.ts`                         | `context_recall` tool definition (and the deprecated `context_grep` / `context_describe` aliases) and active-task scope       |
 | `src/renderer/components/MainContent/timeline-event-rendering.tsx` | Compaction event rendering with lifecycle details and typed/legacy payload support                                           |
 | `src/renderer/utils/task-event-visibility.ts`                      | Legacy summary-event deduplication                                                                                           |
 | `src/renderer/styles/index.css`                                    | Summary section styling                                                                                                      |

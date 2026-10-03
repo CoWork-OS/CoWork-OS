@@ -19,6 +19,7 @@
 
 import { MemoryService } from "./MemoryService";
 import { AdaptiveStyleEngine } from "./AdaptiveStyleEngine";
+import { PlaybookService } from "./PlaybookService";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -53,6 +54,9 @@ export interface EvolutionMetric {
 // ─── Constants ────────────────────────────────────────────────────────
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The archive row the daemon writes once per detected mid-task user correction. */
+const CORRECTION_MARKER = "[CORRECTION] User corrected agent";
 
 // ─── Main Service ─────────────────────────────────────────────────────
 
@@ -127,39 +131,50 @@ export class EvolutionMetricsService {
   // ─── Individual Metric Computers ───────────────────────────────────
 
   /**
-   * Correction rate: ratio of user corrections in recent vs. older playbook entries.
-   * Lower correction rate = agent is improving.
+   * Correction rate: tasks the user actually corrected, this week vs. the weekly average of
+   * the three weeks before. A correction is a `[CORRECTION]` archive row (the daemon's
+   * mid-task correction detection), a Playbook failure classified as a user correction, or
+   * success evidence invalidated as `corrected_by_user` (PlaybookService.recordUserCorrection).
+   * Each task counts once, at its earliest correction. Other task failures (tool errors,
+   * timeouts, rate limits) are not corrections and do not count.
    */
   private static async computeCorrectionRate(workspaceId: string): Promise<EvolutionMetric> {
     try {
-      const results = await MemoryService.searchByContentMarker(
-        workspaceId,
-        "[PLAYBOOK] Task failed",
-        100,
-      );
-      const failures = results.filter(
-        (r) =>
-          r.type === "insight" && r.snippet.includes("[PLAYBOOK]") && r.snippet.includes("failed"),
-      );
-
       const now = Date.now();
-      const recentFailures = failures.filter((f) => now - f.createdAt < ONE_WEEK_MS).length;
-      const olderFailures = failures.filter(
-        (f) => now - f.createdAt >= ONE_WEEK_MS && now - f.createdAt < ONE_WEEK_MS * 4,
-      ).length;
+      const since = now - ONE_WEEK_MS * 4;
+      const [archived, playbook] = await Promise.all([
+        MemoryService.searchByContentMarker(workspaceId, CORRECTION_MARKER, 500),
+        PlaybookService.listCorrections(workspaceId, since),
+      ]);
+      const correctedAt = new Map<string, number>();
+      const note = (key: string, at: number) => {
+        if (at < since) return;
+        const existing = correctedAt.get(key);
+        if (existing === undefined || at < existing) correctedAt.set(key, at);
+      };
+      for (const row of archived) {
+        // The marker lookup matched the stored content; the snippet may be its summary.
+        if (row.type !== "insight") continue;
+        note(row.taskId ? `task:${row.taskId}` : `memory:${row.id}`, row.createdAt);
+      }
+      for (const correction of playbook) note(`task:${correction.taskId}`, correction.at);
+
+      const times = [...correctedAt.values()];
+      const recentCorrections = times.filter((at) => now - at < ONE_WEEK_MS).length;
+      const olderCorrections = times.filter((at) => now - at >= ONE_WEEK_MS).length;
 
       // Compute weekly average for the older period (3 weeks)
-      const olderWeeklyAvg = olderFailures / 3;
+      const olderWeeklyAvg = olderCorrections / 3;
       let trend: "improving" | "stable" | "declining" = "stable";
       if (olderWeeklyAvg > 0) {
-        if (recentFailures < olderWeeklyAvg * 0.7) trend = "improving";
-        else if (recentFailures > olderWeeklyAvg * 1.3) trend = "declining";
+        if (recentCorrections < olderWeeklyAvg * 0.7) trend = "improving";
+        else if (recentCorrections > olderWeeklyAvg * 1.3) trend = "declining";
       }
 
       return {
         id: "correction_rate",
         label: "Correction Rate",
-        value: recentFailures,
+        value: recentCorrections,
         unit: "/week",
         trend,
         detail:
@@ -243,21 +258,11 @@ export class EvolutionMetricsService {
   }
 
   /**
-   * Task success rate: ratio of successful vs. failed playbook entries.
+   * Task success rate: ratio of successful vs. failed Playbook entries.
    */
   private static async computeTaskSuccessRate(workspaceId: string): Promise<EvolutionMetric> {
     try {
-      const results = await MemoryService.searchByContentMarker(
-        workspaceId,
-        "[PLAYBOOK] Task",
-        100,
-      );
-      const playbook = results.filter(
-        (r) => r.type === "insight" && r.snippet.includes("[PLAYBOOK]"),
-      );
-
-      const successes = playbook.filter((e) => e.snippet.includes("Task succeeded")).length;
-      const failures = playbook.filter((e) => e.snippet.includes("Task failed")).length;
+      const { successes, failures } = await PlaybookService.countOutcomes(workspaceId);
       const total = successes + failures;
 
       if (total === 0) {

@@ -680,10 +680,11 @@ export function EverydayAgentPanel({
         setSuggestions([]);
       }
       if (window.electronAPI.listCoreMemoryCandidates) {
-        if (isEverydayAgentUuid(profileResult.profile.id) && isEverydayAgentUuid(workspace?.id)) {
+        // Candidates belong to automation profiles, not the Everyday Agent profile ("default"),
+        // so they are counted per workspace.
+        if (isEverydayAgentUuid(workspace?.id)) {
           const candidates = await window.electronAPI
             .listCoreMemoryCandidates({
-              profileId: profileResult.profile.id,
               workspaceId: workspace.id,
               status: "proposed",
               limit: 50,

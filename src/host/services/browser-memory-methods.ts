@@ -31,6 +31,17 @@ import { ChronicleObservationRepository } from "../../electron/chronicle/Chronic
 import type { MemoryFeaturesSettings, Workspace } from "../../shared/types";
 import type { BrowserDesktopDefinition, BrowserDesktopDefinitions } from "./browser-desktop-rpc";
 import { WebApplicationError } from "../web/WebApplication";
+import { MemoryHubError, MemoryItemsHubService } from "../../electron/memory/MemoryItemsHubService";
+import { MemoryWriter } from "../../electron/memory/MemoryWriter";
+import { createLegacyMemoryMirror } from "../../electron/memory/memory-items-legacy-mirror";
+import {
+  MemoryItemAddRequestSchema,
+  MemoryItemPinRequestSchema,
+  MemoryItemRefRequestSchema,
+  MemoryItemsClearGlobalRequestSchema,
+  MemoryItemsListRequestSchema,
+  MemoryItemUpdateRequestSchema,
+} from "../../electron/ipc/memory-ipc-validation";
 
 const id = z.string().trim().min(1).max(200);
 const scope = z.object({ workspaceId: id });
@@ -72,7 +83,6 @@ const featureBooleanKeys = [
   "contextPackInjectionEnabled",
   "heartbeatMaintenanceEnabled",
   "checkpointCaptureEnabled",
-  "verbatimRecallEnabled",
   "wakeUpLayersEnabled",
   "temporalKnowledgeEnabled",
   "layeredMemoryEnabled",
@@ -86,7 +96,6 @@ const featureBooleanKeys = [
   "defaultArchiveInjectionEnabled",
   "autoPromoteToCuratedMemoryEnabled",
   "structuredObservationsEnabled",
-  "progressiveRecallToolsEnabled",
   "memoryInspectorEnabled",
 ] as const;
 const featureSettings = z
@@ -121,6 +130,11 @@ export function createBrowserMemoryDefinitions(options: {
   getRecentTask?: (
     workspaceId: string,
   ) => Promise<{ prompt?: string; assignedAgentRoleId?: string } | null>;
+  getTask?: (
+    taskId: string,
+  ) => Promise<{ id: string; title?: string | null; workspaceId?: string | null } | null>;
+  /** Memory Hub service override (tests). */
+  memoryItems?: MemoryItemsHubService;
 }): BrowserDesktopDefinitions {
   const requireWorkspace = async (
     workspaceId: string,
@@ -240,6 +254,48 @@ export function createBrowserMemoryDefinitions(options: {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     };
+
+  // Memory Hub "What CoWork knows": same service and schemas as the desktop IPC. Kit
+  // re-renders after a change run under the workspace's file access rules.
+  const guardAllows =
+    (workspace: Workspace, operation: "read" | "write") =>
+    (candidatePath: string): boolean => {
+      try {
+        kitGuard(workspace)(candidatePath, operation);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+  const memoryItems =
+    options.memoryItems ??
+    new MemoryItemsHubService({
+      getWriter: () => MemoryWriter.get(),
+      legacy: createLegacyMemoryMirror(),
+      getTask: async (taskId) => (await options.getTask?.(taskId)) ?? undefined,
+      syncKitFiles: async (workspaceId) => {
+        const workspace = await options.resolveWorkspace(workspaceId);
+        if (!workspace?.permissions.write) return;
+        await CuratedMemoryService.syncWorkspaceFiles(workspaceId, {
+          readGuard: guardAllows(workspace, "read"),
+          writeGuard: guardAllows(workspace, "write"),
+        });
+      },
+    });
+  const hubCall = async <T>(run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof MemoryHubError) {
+        throw new WebApplicationError(
+          error.code === "not_found" ? "NOT_FOUND" : "HOST_UNAVAILABLE",
+          error.message,
+          error.code === "not_found" ? 404 : 503,
+        );
+      }
+      throw error;
+    }
+  };
 
   const requirePending = async (pendingId: string, workspaceId?: string, mutate = false) => {
     const pending = await MemoryWriteGate.findPending(pendingId);
@@ -387,8 +443,8 @@ export function createBrowserMemoryDefinitions(options: {
       const task = await options.getRecentTask?.(workspaceId);
       const prompt = task?.prompt?.trim() || "Current workspace memory preview";
       return MemorySynthesizer.buildLayerPreview(workspaceId, workspace.path, prompt, {
-        tokenBudget: 1800,
         includeWorkspaceKit: true,
+        workspaceCanRead: workspace.permissions?.read !== false,
         agentRoleId: task?.assignedAgentRoleId || null,
         filesystemReadGuard: (candidatePath) =>
           evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "read").decision === "allow",
@@ -686,6 +742,30 @@ export function createBrowserMemoryDefinitions(options: {
     deleteMemoryObservation: workspaceAction(observationScope, "delete", async (value) => ({
       success: await MemoryObservationService.delete(value.workspaceId, value.memoryId),
     })),
+    listMemoryItems: workspaceAction(MemoryItemsListRequestSchema, "read", (value) =>
+      hubCall(() => memoryItems.list(value)),
+    ),
+    getMemoryItem: workspaceAction(MemoryItemRefRequestSchema, "read", (value) =>
+      hubCall(() => memoryItems.get(value.workspaceId, value.id)),
+    ),
+    getMemoryItemWhy: workspaceAction(MemoryItemRefRequestSchema, "read", (value) =>
+      hubCall(() => memoryItems.why(value.workspaceId, value.id)),
+    ),
+    addMemoryItem: workspaceAction(MemoryItemAddRequestSchema, "write", (value) =>
+      hubCall(() => memoryItems.add(value)),
+    ),
+    updateMemoryItem: workspaceAction(MemoryItemUpdateRequestSchema, "write", (value) =>
+      hubCall(() => memoryItems.update(value)),
+    ),
+    setMemoryItemPinned: workspaceAction(MemoryItemPinRequestSchema, "write", (value) =>
+      hubCall(() => memoryItems.setPinned(value)),
+    ),
+    deleteMemoryItem: workspaceAction(MemoryItemRefRequestSchema, "delete", (value) =>
+      hubCall(() => memoryItems.delete(value)),
+    ),
+    clearGlobalMemoryItems: workspaceAction(MemoryItemsClearGlobalRequestSchema, "delete", () =>
+      hubCall(() => memoryItems.clearGlobal()),
+    ),
     getMemoryObservationBackfillStatus: noArgs(() => MemoryObservationService.getBackfillStatus()),
     rebuildMemoryObservationMetadata: {
       ...action(

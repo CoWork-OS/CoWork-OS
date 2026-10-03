@@ -554,7 +554,7 @@ export class EverydayAgentStore {
       }
       if (shouldClearAll || request?.memoryCandidates) {
         deleted.memoryCandidates =
-          (deleted.memoryCandidates || 0) + this.clearMemoryCandidateData(profile.id);
+          (deleted.memoryCandidates || 0) + this.clearMemoryCandidateData();
       }
       if (shouldClearAll || request?.routineProvenance) {
         deleted.routineProvenance =
@@ -1511,14 +1511,18 @@ export class EverydayAgentStore {
     }
   }
 
-  private clearMemoryCandidateData(profileId: string): number {
+  /**
+   * Core memory candidates and distill runs belong to automation profiles
+   * (`automation_profiles.id`), not to the Everyday Agent profile ("default"), so filtering by
+   * the Everyday Agent profile id never matched a row. Clear the candidates of every automation
+   * profile: that is the set the panel counts as "memory candidates need review".
+   */
+  private clearMemoryCandidateData(): number {
+    if (!this.tableExists("automation_profiles")) return 0;
+    const automationProfiles = "profile_id IN (SELECT id FROM automation_profiles)";
     let deleted = 0;
-    deleted += this.deleteRowsIfTableExists("core_memory_candidates", "profile_id = ?", profileId);
-    deleted += this.deleteRowsIfTableExists(
-      "core_memory_distill_runs",
-      "profile_id = ?",
-      profileId,
-    );
+    deleted += this.deleteRowsIfTableExists("core_memory_candidates", automationProfiles);
+    deleted += this.deleteRowsIfTableExists("core_memory_distill_runs", automationProfiles);
     return deleted;
   }
 

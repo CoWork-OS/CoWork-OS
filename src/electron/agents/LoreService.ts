@@ -31,6 +31,13 @@ const STARTUP_REBUILD_LIMIT = 2500;
 const REBUILD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_LORE_ENTRIES = 40;
 
+/** Task sources that are background automation rather than work the user asked for. */
+const BACKGROUND_TASK_SOURCES = new Set(["hook", "subconscious", "improvement"]);
+
+export function isBackgroundTask(task: { source?: string; heartbeatRunId?: string }): boolean {
+  return Boolean(task.heartbeatRunId) || BACKGROUND_TASK_SOURCES.has(task.source || "");
+}
+
 function sanitizeInline(text: string): string {
   const cleaned = String(text || "")
     .replace(/[\r\n\t]+/g, " ")
@@ -182,6 +189,9 @@ export class LoreService {
     const gatewayContext = task.agentConfig?.gatewayContext;
     if (gatewayContext === "group" || gatewayContext === "public") return;
     if (task.parentTaskId) return;
+    // Background work (Heartbeat dispatch, chief-of-staff/hook tasks, Workflow Intelligence,
+    // improvement runs) is not a user milestone.
+    if (isBackgroundTask(task)) return;
 
     const workspaceId = task.workspaceId;
     if (!workspaceId) return;

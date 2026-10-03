@@ -44,7 +44,6 @@ describe("MemoryFeaturesManager", () => {
     expect(settings.contextPackInjectionEnabled).toBe(true);
     expect(settings.heartbeatMaintenanceEnabled).toBe(true);
     expect(settings.checkpointCaptureEnabled).toBe(true);
-    expect(settings.verbatimRecallEnabled).toBe(true);
     expect(settings.wakeUpLayersEnabled).toBe(true);
     expect(settings.temporalKnowledgeEnabled).toBe(true);
     expect(settings.layeredMemoryEnabled).toBe(false);
@@ -86,6 +85,7 @@ describe("MemoryFeaturesManager", () => {
       topicMemoryEnabled: false,
       defaultArchiveInjectionEnabled: true,
       autoPromoteToCuratedMemoryEnabled: true,
+      progressiveRecallToolsEnabled: false,
     };
 
     MemoryFeaturesManager.clearCache();
@@ -98,13 +98,14 @@ describe("MemoryFeaturesManager", () => {
       "durableContextFreshTailCount",
       "durableContextSummaryModel",
       "sessionLineageEnabled",
+      "verbatimRecallEnabled",
+      "progressiveRecallToolsEnabled",
     ]) {
       expect(settings).not.toHaveProperty(legacyKey);
     }
     expect(settings.contextPackInjectionEnabled).toBe(false);
     expect(settings.heartbeatMaintenanceEnabled).toBe(true);
     expect(settings.checkpointCaptureEnabled).toBe(true);
-    expect(settings.verbatimRecallEnabled).toBe(false);
     expect(settings.wakeUpLayersEnabled).toBe(false);
     expect(settings.temporalKnowledgeEnabled).toBe(false);
     expect(settings.layeredMemoryEnabled).toBe(true);
@@ -133,7 +134,6 @@ describe("MemoryFeaturesManager", () => {
       contextPackInjectionEnabled: true,
       heartbeatMaintenanceEnabled: true,
       checkpointCaptureEnabled: true,
-      verbatimRecallEnabled: true,
       wakeUpLayersEnabled: true,
       temporalKnowledgeEnabled: true,
       layeredMemoryEnabled: false,
@@ -150,7 +150,6 @@ describe("MemoryFeaturesManager", () => {
       memoryWriteApprovalMode: "off",
       autoPromoteToCuratedMemoryEnabled: false,
       structuredObservationsEnabled: true,
-      progressiveRecallToolsEnabled: true,
       memoryInspectorEnabled: true,
     });
   });

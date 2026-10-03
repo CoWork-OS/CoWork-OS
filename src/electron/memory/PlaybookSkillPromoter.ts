@@ -4,10 +4,10 @@
  * Bridges the Playbook evidence ledger with SkillProposalService (which has the approval
  * workflow). A pattern qualifies when durable reinforcement links connect at least N
  * distinct, independent successful executions (default 3) that used a compatible
- * approach. Memory rows, reinforcement chains and legacy free-text claims never count.
+ * approach. Entry rows, reinforcement chains and legacy free-text claims never count.
  *
  * Proposals still require review; they describe "observed successful executions" and
- * list each execution's task and source memory.
+ * list each execution's task and source Playbook entry.
  */
 
 import {
@@ -30,7 +30,7 @@ export interface PromotionCandidate {
   toolsUsed: string[];
   /** Original request excerpts. */
   requestExcerpts: string[];
-  /** One line per execution: its task and source memory. */
+  /** One line per execution: its task and source Playbook entry. */
   sourceEvidence: string[];
   evidenceIds: string[];
 }
@@ -150,7 +150,7 @@ export class PlaybookSkillPromoter {
 
   /**
    * Clusters of active success evidence joined by durable reinforcement links, counting
-   * distinct independent executions (not memory rows or chains) per cluster.
+   * distinct independent executions (not entry rows or chains) per cluster.
    */
   static async findCandidates(
     workspaceId: string,
@@ -201,7 +201,7 @@ export class PlaybookSkillPromoter {
             .slice(0, 5),
           sourceEvidence: executions.map(
             ({ record }) =>
-              `Observed successful execution of task ${record.taskId} (memory ${record.sourceMemoryId})`,
+              `Observed successful execution of task ${record.taskId} (playbook entry ${record.sourceEntryId})`,
           ),
           evidenceIds: executions.map(({ record }) => record.id),
         });

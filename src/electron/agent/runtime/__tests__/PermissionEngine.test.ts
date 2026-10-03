@@ -286,14 +286,23 @@ describe("PermissionEngine", () => {
     expect(result.matchedRule?.scope.kind).toBe("mcp_server");
   });
 
-  it.each(["memory_save", "supermemory_remember", "supermemory_forget", "kg_create_entity", "kg_add_observation"])(
+  it.each([
+    "memory_remember",
+    "memory_forget",
+    "memory_save",
+    "memory_curate",
+    "supermemory_remember",
+    "supermemory_forget",
+    "kg_create_entity",
+    "kg_add_observation",
+  ])(
     "treats memory write %s as a mutation in plan mode (SEC-12)",
     (toolName) => {
       expect(evaluate({ toolName, mode: "plan" }).decision).toBe("deny");
     },
   );
 
-  it.each(["search_memories", "kg_search", "memory_details"])(
+  it.each(["memory_recall", "context_recall", "search_memories", "kg_search", "memory_details"])(
     "keeps memory read %s allowed in plan mode",
     (toolName) => {
       expect(evaluate({ toolName, mode: "plan" }).decision).toBe("allow");

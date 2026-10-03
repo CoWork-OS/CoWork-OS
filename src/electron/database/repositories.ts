@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
+import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "./fts-query";
 import { buildAgentVisibleMemorySql } from "../memory/memory-visibility";
 import {
   buildMemoryLastActivitySql,
@@ -1519,9 +1520,10 @@ export class TaskStore {
 
     const query = typeof params.query === "string" ? params.query.trim() : "";
     if (query) {
-      // Simple LIKE match (SQLite default collation is case-insensitive for ASCII).
-      where.push("(title LIKE ? OR prompt LIKE ?)");
-      args.push(`%${query}%`, `%${query}%`);
+      // Simple LIKE match (SQLite default collation is case-insensitive for ASCII);
+      // `%` and `_` in the query match literally.
+      where.push(`(title LIKE ? ${LIKE_ESCAPE_CLAUSE} OR prompt LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+      args.push(likeContainsPattern(query), likeContainsPattern(query));
     }
 
     args.push(limit);
@@ -2371,6 +2373,7 @@ export class TaskEventRepository {
     "progress_update",
     "task_analysis",
     "jev_decision",
+    "memory_used",
     "executing",
   ] as const;
   private static readonly DEFAULT_TIMELINE_PAGE_LIMIT = TASK_TIMELINE_HISTORY_LIMIT;

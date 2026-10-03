@@ -69,13 +69,9 @@ const READ_PARALLEL_TOOLS = new Set([
   "git_refs",
   "task_history",
   "task_list_list",
-  "search_memories",
-  "search_quotes",
-  "search_sessions",
-  "memory_topics_load",
-  "memory_curated_read",
-  "supermemory_profile",
-  "supermemory_search",
+  // Memory reads; deprecated aliases canonicalize to these.
+  "memory_recall",
+  "context_recall",
   "scratchpad_read",
   // Reads buffered output of this task's own background processes.
   "process_output",
@@ -122,13 +118,9 @@ const IDEMPOTENT_TOOLS = new Set([
   "git_refs",
   "task_history",
   "task_list_list",
-  "search_memories",
-  "search_quotes",
-  "search_sessions",
-  "memory_topics_load",
-  "memory_curated_read",
-  "supermemory_profile",
-  "supermemory_search",
+  // Memory reads; deprecated aliases canonicalize to these.
+  "memory_recall",
+  "context_recall",
   "scratchpad_read",
   "process_output",
 ]);

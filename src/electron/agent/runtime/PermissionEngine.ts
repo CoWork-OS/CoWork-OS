@@ -1306,7 +1306,6 @@ export class PermissionEngine {
       "take_screenshot",
       "git_commit",
       "git_merge_to_base",
-      "memory_curate",
       "skill_create",
       "skill_duplicate",
       "skill_update",

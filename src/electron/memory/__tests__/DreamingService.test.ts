@@ -140,8 +140,8 @@ describe("DreamingService", () => {
     const service = new DreamingService(repo as never, {
       now: () => 1000,
       searchMemoryObservations: () => [observation()],
-      searchTranscriptSpans: async () => [],
-      loadRecentTranscriptSpans: async () => [],
+      searchConversation: async () => [],
+      loadRecentConversation: async () => [],
       listCuratedEntries: () => [],
     });
 
@@ -167,8 +167,8 @@ describe("DreamingService", () => {
       searchMemoryObservations: () => [
         observation({ snippet: "Use Vite 6 for renderer builds is outdated." }),
       ],
-      searchTranscriptSpans: async () => [],
-      loadRecentTranscriptSpans: async () => [],
+      searchConversation: async () => [],
+      loadRecentConversation: async () => [],
       listCuratedEntries: () => [curated()],
       applyCuratedMemory,
     });
@@ -198,8 +198,8 @@ describe("DreamingService", () => {
     return new DreamingService(repo as never, {
       now,
       searchMemoryObservations: () => [observation()],
-      searchTranscriptSpans: async () => [],
-      loadRecentTranscriptSpans: async () => [],
+      searchConversation: async () => [],
+      loadRecentConversation: async () => [],
       listCuratedEntries: () => [],
     });
   }
@@ -240,11 +240,11 @@ describe("DreamingService", () => {
     const service = new DreamingService(repo as never, {
       now: () => 10_000,
       searchMemoryObservations: () => [observation()],
-      searchTranscriptSpans: async () => {
+      searchConversation: async () => {
         await gate;
         return [];
       },
-      loadRecentTranscriptSpans: async () => [],
+      loadRecentConversation: async () => [],
       listCuratedEntries: () => [],
     });
 

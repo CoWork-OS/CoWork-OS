@@ -17,12 +17,13 @@ import type { AgentDaemon } from "../agent/daemon";
 import { ProactiveSuggestionsService } from "../agent/ProactiveSuggestionsService";
 
 import { buildCoreAutomationAgentConfig } from "../agents/autonomy-policy";
+import { getBackgroundDispatchBudget } from "../agents/BackgroundDispatchBudget";
 import { CoreMemoryCandidateService } from "../core/CoreMemoryCandidateService";
 import { CoreMemoryDistiller } from "../core/CoreMemoryDistiller";
 import { CoreLearningPipelineService } from "../core/CoreLearningPipelineService";
 import { CoreTraceService } from "../core/CoreTraceService";
 import { WorkspaceStore } from "../database/repositories";
-import { MemoryService } from "../memory/MemoryService";
+import { getProactiveSuggestionStore } from "../memory/ProactiveSuggestionStore";
 import { getCronStorePath, loadCronStoreSync } from "../cron/store";
 import type { EventTriggerService } from "../triggers/EventTriggerService";
 import { GitService } from "../git/GitService";
@@ -1287,15 +1288,11 @@ export class SubconsciousLoopService {
     return acceptedPatternCount >= 2 && hasClearScope && input.evidence.length <= 8;
   }
 
+  /** Accepted suggestions in the workspace (suggestion feedback), counted up to 2. */
   private async countAcceptedSuggestionPatterns(workspaceId: string): Promise<number> {
     try {
-      return (
-        await MemoryService.searchByContentMarkerAsync(
-          workspaceId,
-          "[suggestion-feedback:acted_on]",
-          2,
-        )
-      ).length;
+      const store = await getProactiveSuggestionStore();
+      return store ? await store.countFeedback(workspaceId, "acted_on", 2) : 0;
     } catch {
       return 0;
     }
@@ -2298,6 +2295,8 @@ export class SubconsciousLoopService {
       confidence: 0.72,
       suggestionClass: "open_loop",
       sourceEntity: target.key,
+      entityKey: target.key,
+      source: "workflow_intelligence",
       sourceSignals: Array.from(new Set(evidence.map((item) => item.type))).slice(0, 5),
       recommendedDelivery: "inbox",
       companionStyle: "note",
@@ -2348,6 +2347,22 @@ export class SubconsciousLoopService {
       .slice(0, 5)
       .map((item) => `- ${item.summary}`)
       .join("\n")}`;
+    // Background task creation shares one per-workspace budget and per-entity cooldown with
+    // Heartbeat, AutonomyEngine and the Strategic Planner. Over budget, the decision is
+    // surfaced as a review suggestion instead of creating a task.
+    let budgetTicket: string | undefined;
+    if ((dispatchKind === "task" || dispatchKind === "code_change_task") && workspaceId) {
+      const grant = getBackgroundDispatchBudget().tryConsume({
+        workspaceId,
+        source: "workflow_intelligence",
+        entityKey: target.key,
+      });
+      if (!grant.allowed) {
+        return this.dispatchSuggestionForReview(target, decision, evidence);
+      }
+      budgetTicket = grant.ticket;
+    }
+    let taskCreated = false;
     try {
       switch (dispatchKind) {
         case "task": {
@@ -2366,6 +2381,7 @@ export class SubconsciousLoopService {
             source: "subconscious",
             agentConfig: buildCoreAutomationAgentConfig(),
           });
+          taskCreated = true;
           return this.completedDispatch(decision, target, dispatchKind, {
             taskId: task.id,
             summary: `Created task ${task.id}.`,
@@ -2389,6 +2405,8 @@ export class SubconsciousLoopService {
               confidence: 0.78,
               suggestionClass: "general",
               sourceEntity: target.key,
+              entityKey: target.key,
+              source: "workflow_intelligence",
               sourceSignals: Array.from(new Set(evidence.map((item) => item.type))).slice(0, 5),
               recommendedDelivery: "inbox",
               companionStyle: "note",
@@ -2468,6 +2486,7 @@ export class SubconsciousLoopService {
                 : "balanced",
             }),
           });
+          taskCreated = true;
           return this.completedDispatch(decision, target, dispatchKind, {
             taskId: task.id,
             summary: `Created code change task ${task.id}.`,
@@ -2486,7 +2505,11 @@ export class SubconsciousLoopService {
         createdAt: now(),
         completedAt: now(),
       };
+    } finally {
+      if (!taskCreated) getBackgroundDispatchBudget().refund(budgetTicket);
     }
+    // Every switch case returns; TypeScript does not see that through try/finally.
+    return null;
   }
 
   private completedDispatch(

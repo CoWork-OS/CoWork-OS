@@ -5,21 +5,22 @@
  * never removed by retention or the storage cap, because deleting them loses something the
  * user cannot cheaply get back:
  *   - imported rows (a re-import pays the LLM again),
- *   - Playbook rows (their evidence is invalidated as `source_memory_deleted`),
  *   - explicit saves (`memory_save` / tool origin),
  *   - curated promotions (core-memory distiller rows, `system` origin).
+ *
+ * Playbook outcomes are no longer archive rows (they live in `playbook_entries`, audit
+ * Phase 2 item 6), so they need no protection here; MemoryRetentionService prunes them.
  *
  * Deliberately free of runtime imports so the database worker can load it.
  */
 
 /** Observation origins whose memories retention never removes. */
-export const RETENTION_PROTECTED_ORIGINS = ["import", "playbook", "tool", "system"] as const;
+export const RETENTION_PROTECTED_ORIGINS = ["import", "tool", "system"] as const;
 
 /** Content prefixes (after optional whitespace) of rows retention never removes. */
 const PROTECTED_CONTENT_PREFIX_PATTERNS = [
   "[Imported from %",
   "[cowork:prompt_recall=ignore]%[Imported from %",
-  "[PLAYBOOK]%",
   "[core-trace:%",
 ] as const;
 

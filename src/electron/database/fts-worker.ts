@@ -1,12 +1,11 @@
 import { parentPort, workerData } from "worker_threads";
 import Database from "better-sqlite3";
 import {
-  sanitizeFtsToken,
-  isSafeFtsToken,
   buildMarkerFtsQuery,
   buildRelaxedTokenFtsQuery,
   buildImportedMemoryFilterSql,
 } from "./fts-utils";
+import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "./fts-query";
 import {
   type EmbeddingInvalidation,
   findMissingEmbeddingRows,
@@ -203,11 +202,13 @@ function searchByContentMarker(workspaceId: string, marker: string, limit: numbe
   const stmt = db.prepare(`
     SELECT id, summary, content, type, created_at, task_id
     FROM memories
-    WHERE workspace_id = ? AND is_private = 0 AND (content LIKE ? OR summary LIKE ?)
+    WHERE workspace_id = ? AND is_private = 0
+      AND (content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})
     ORDER BY created_at DESC
     LIMIT ?
   `);
-  const like = `%${marker}%`;
+  // `_` in markers such as `[suggestion-feedback:acted_on]` must match literally.
+  const like = likeContainsPattern(marker);
   const rows = stmt.all(workspaceId, like, like, limit) as Record<string, unknown>[];
   return rows.map((row) => ({
     id: row.id,

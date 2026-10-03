@@ -194,6 +194,7 @@ export function createBrowserHostApplication(
       resolveWorkspace: resolveBrowserWorkspace,
       getRecentTask: async (workspaceId) =>
         (await taskRepository.findByWorkspace(workspaceId, 1))[0] ?? null,
+      getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
     }),
     ...createBrowserReportDefinitions({
       db: options.db,

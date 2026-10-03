@@ -38,12 +38,6 @@ vi.mock("../../settings/personality-manager", () => ({
   },
 }));
 
-vi.mock("../RelationshipMemoryService", () => ({
-  RelationshipMemoryService: {
-    buildPromptContext: vi.fn(() => ""),
-  },
-}));
-
 import { UserProfileService } from "../UserProfileService";
 
 describe("UserProfileService", () => {

@@ -27,15 +27,17 @@ The audit also ran read-only aggregate queries against the live desktop database
 
 File references are relative to `src/electron/` unless prefixed.
 
-### Phase 1 status (2026-10-03)
+### Status (2026-10-03, end of Phase 2)
 
 The findings below describe `main` @ `069740faf`, before any fixes.
 
 | Status | Findings |
 |---|---|
-| Fixed in Phase 0 (merged, `28e423ff1`) | SEC-1..12 |
-| Fixed in Phase 1 (branch `cowork-os/memory-phase1`, in progress) | DATA-1, 2, 3, 9, 11, 12; LOOP-1..11; PROMPT-1..4, 6, 8, 9; RECALL-1, 3; LIFE-1..4; SEC-14, 15; §6 dead-code and dead-settings cleanup; §7 doc drift in the memory docs |
-| Remaining | Phase 2/3 items; SEC-13, 16, 17, 18; LIFE-5 (partial); PROMPT-5, 7, 10..12; RECALL-2, 4..9; DATA-4..8, 10, 13; LOOP-12..15 |
+| Fixed in Phase 0 (merged, `28e423ff1`, PR #291) | SEC-1..12 |
+| Fixed in Phase 1 (merged, `ad1db1d94`, PR #292) | DATA-1, 2, 3, 9, 11, 12; LOOP-1..11; PROMPT-1..4, 6, 8, 9; RECALL-1, 3; LIFE-1..4; SEC-14, 15; §6 dead-code and dead-settings cleanup; §7 doc drift in the memory docs |
+| Phase 2 complete (branch `cowork-os/memory-phase2`) | **Roadmap item 1:** `memory_items` store + `MemoryWriter` (salience gate, redaction, dedupe, trust-ranked supersession), one-time lane migration, dual writes from the legacy stores, purge and retention. **Item 2:** `MemoryInjectionPolicy` + `MemoryContextBuilder` for every prompt surface (L0 pinned profile, L1 recall per step, one budget, dedupe by subject and content hash, `memory_used` attribution); `MemoryRecall` (one Unicode FTS builder, weighted RRF across memory, archive, conversations, knowledge and external lanes). **Item 3:** one conversation index. **Item 4:** four agent tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`) with the 16 earlier tools as hidden aliases for one release, and a generated routing hint naming only visible tools. **§8.4 Memory Hub:** "What CoWork knows" tab over `memory_items` (list, why, add, edit, pin, delete, clear global), layer preview built with the policy and builder, and kit auto-blocks rendered from `memory_items` with back-sync of hand edits at curated trust boundaries (PROMPT-12). **Item 5:** scheduler consolidation (one suggestion sink). **Item 6:** `[PLAYBOOK]`/`[SUGGESTION]` payload tables. Also PROMPT-5, 7, 10, 11; RECALL-2, 7; a response style set in Settings is recorded as `user_stated` and locks style adaptation. Design: [memory-engine.md](memory-engine.md) |
+| Phase 3 (remaining) | Dreaming as the LLM curator, with a review inbox and undo; a real local embedding model (DATA-6); remove the legacy stores and their dual writes after one release; `MemoryWriter` parity in the node daemon (its prompts still use the legacy L0 source); per-reply "memory used" UI on top of the `memory_used` events; memory evals in the harness battery; Supermemory remote ids, forget and purge on disable (SEC-17); SEC-13, 16 and 17 leftovers |
+| Other open findings | SEC-18; LIFE-5 (partial); RECALL-4..6, 8, 9; DATA-4..8, 10, 13; LOOP-12..15; the Memory Hub Review/Sources/Health tabs of §8.4 |
 
 Phase 0 deviations from the §9 plan:
 

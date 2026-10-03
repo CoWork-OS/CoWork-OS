@@ -4,6 +4,8 @@ import type { Task } from "../../shared/types";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
 import { bumpHotMemoryVersion } from "./hot-memory-version";
 import { sanitizePreferredNameMemoryLine } from "../utils/preferred-name";
+import { MemoryWriter } from "./MemoryWriter";
+import { MEMORY_LANE_STORES, relationshipItemCandidate } from "./memory-items-lanes";
 
 type RelationshipLayer = "identity" | "preferences" | "context" | "history" | "commitments";
 /**
@@ -129,6 +131,7 @@ export class RelationshipMemoryService {
     }
     item.updatedAt = Date.now();
     this.save(profile);
+    this.mirrorItem(item);
     return item;
   }
 
@@ -138,6 +141,12 @@ export class RelationshipMemoryService {
     profile.items = profile.items.filter((item) => item.id !== id);
     if (profile.items.length === before) return false;
     this.save(profile);
+    MemoryWriter.dualWriteStatus(
+      MEMORY_LANE_STORES.relationship,
+      id,
+      "deleted",
+      "relationship delete",
+    );
     return true;
   }
 
@@ -387,10 +396,11 @@ export class RelationshipMemoryService {
       existing.contactIdentityId = input.contactIdentityId ?? existing.contactIdentityId;
       existing.companyId = input.companyId ?? existing.companyId;
       this.save(profile);
+      this.mirrorItem(existing);
       return;
     }
 
-    profile.items.push({
+    const created: RelationshipMemoryItem = {
       id: uuidv4(),
       layer: input.layer,
       text: normalizedText,
@@ -403,12 +413,32 @@ export class RelationshipMemoryService {
       dueAt: typeof input.dueAt === "number" ? Math.floor(input.dueAt) : undefined,
       contactIdentityId: input.contactIdentityId,
       companyId: input.companyId,
-    });
+    };
+    profile.items.push(created);
 
     if (profile.items.length > MAX_ITEMS) {
       profile.items = this.sort(profile.items).slice(0, MAX_ITEMS);
     }
     this.save(profile);
+    this.mirrorItem(created);
+  }
+
+  /**
+   * Dual write (memory engine Phase 2): this store stays the system of record for reads
+   * this wave; each change is mirrored into `memory_items` in the background. History
+   * items are episodic and are not mirrored; a done commitment is archived.
+   */
+  private static mirrorItem(item: RelationshipMemoryItem): void {
+    if (item.status === "done") {
+      MemoryWriter.dualWriteStatus(
+        MEMORY_LANE_STORES.relationship,
+        item.id,
+        "archived",
+        "relationship commitment done",
+      );
+      return;
+    }
+    MemoryWriter.dualWrite(relationshipItemCandidate({ ...item }), "relationship item");
   }
 
   private static markMatchingCommitmentsDone(summary: string): void {
@@ -417,6 +447,7 @@ export class RelationshipMemoryService {
     if (!normalizedSummary) return;
 
     let changed = false;
+    const closed: RelationshipMemoryItem[] = [];
     for (const item of profile.items) {
       if (item.layer !== "commitments" || item.status === "done") continue;
       const signal = this.normalizeForMatch(item.text).replace(/^remind me to\s+/, "");
@@ -424,11 +455,13 @@ export class RelationshipMemoryService {
         item.status = "done";
         item.updatedAt = Date.now();
         changed = true;
+        closed.push(item);
       }
     }
 
     if (changed) {
       this.save(profile);
+      for (const item of closed) this.mirrorItem(item);
     }
   }
 

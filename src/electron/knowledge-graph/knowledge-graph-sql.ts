@@ -13,6 +13,7 @@ import type {
   KGSubgraph,
   KGStats,
 } from "../../shared/knowledge-graph-types";
+import { buildFtsMatchQuery, LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "../database/fts-query";
 
 function safeJsonParse<T>(jsonString: string | null | undefined, defaultValue: T): T {
   if (!jsonString) return defaultValue;
@@ -463,13 +464,9 @@ export class KnowledgeGraphStore {
 
     // Try FTS5 first
     try {
-      const ftsQuery = trimmed
-        .replace(/[^a-zA-Z0-9\s]/g, " ")
-        .trim()
-        .split(/\s+/)
-        .filter((w) => w.length > 1)
-        .map((w) => `"${w}"`)
-        .join(" OR ");
+      // Shared Unicode builder: accented and non-Latin names and file names are kept
+      // (the old ASCII-only filter dropped them), and terms match as prefixes.
+      const ftsQuery = buildFtsMatchQuery(trimmed, { mode: "any", prefix: true });
 
       if (ftsQuery) {
         const stmt = this.db.prepare(`
@@ -493,13 +490,14 @@ export class KnowledgeGraphStore {
       // FTS5 not available or query error, fall through to LIKE
     }
 
-    // Fallback: LIKE search
-    const likePattern = `%${trimmed}%`;
+    // Fallback: LIKE search, with `%` and `_` in the query matched literally.
+    const likePattern = likeContainsPattern(trimmed);
     const stmt = this.db.prepare(`
       SELECT e.*, t.name as entity_type_name
       FROM kg_entities e
       LEFT JOIN kg_entity_types t ON e.entity_type_id = t.id
-      WHERE e.workspace_id = ? AND (e.name LIKE ? OR e.description LIKE ?)
+      WHERE e.workspace_id = ?
+        AND (e.name LIKE ? ${LIKE_ESCAPE_CLAUSE} OR e.description LIKE ? ${LIKE_ESCAPE_CLAUSE})
       ORDER BY e.confidence DESC, e.updated_at DESC
       LIMIT ?
     `);

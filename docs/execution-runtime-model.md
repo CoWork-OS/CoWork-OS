@@ -155,7 +155,7 @@ Examples of turn-scoped sections:
 - turn guidance
 - other step-specific or follow-up-specific context
 
-Recent transcript/session recall, verbatim quote recall, and topical memory packs are not injected by default. They stay tool-driven through `search_sessions`, `search_quotes`, `search_memories`, and `memory_topics_load`, so follow-up turns only pay that prompt cost when the agent explicitly asks for it.
+Recall of earlier conversations, archive memory and topical memory packs is not injected by default. It stays tool-driven through `memory_recall` (and `context_recall` for the active task after compaction), so follow-up turns only pay that prompt cost when the agent explicitly asks for it.
 
 ### Retry-aware recovery guidance
 

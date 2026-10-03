@@ -6,34 +6,21 @@ import path from "path";
 import { createHash, randomUUID } from "crypto";
 import BetterSqlite3 from "better-sqlite3";
 import type Database from "better-sqlite3";
-import type { TaskEvent } from "../../shared/types";
 import { DatabaseManager } from "../database/schema";
 import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
 import { signCheckpointBody, verifyCheckpointSignature } from "./checkpoint-signing";
-import {
-  TRANSCRIPT_SPAN_PAYLOAD_MAX_CHARS,
-  TRANSCRIPT_SPAN_SEARCH_TEXT_MAX_CHARS,
-  ensureTranscriptSchema,
-} from "./transcript-sql";
+import { DurableContextService } from "./DurableContextService";
 
-export interface TranscriptSpanRecord {
-  taskId: string;
-  timestamp: number;
-  type: string;
-  payload: unknown;
-  eventId?: string;
-  seq?: number;
-}
-
-export interface TranscriptSearchResult {
-  taskId: string;
-  timestamp: number;
-  type: string;
-  payload: unknown;
-  eventId?: string;
-  seq?: number;
-  rawLine: string;
-}
+/**
+ * Transcript files of a task: signed resume checkpoints under
+ * `.cowork/memory/transcripts/checkpoints`, and the deletion and retention of
+ * everything stored about a task's conversation.
+ *
+ * Conversation search is the conversation index (`DurableContextService`). Transcript
+ * spans (the `transcript_spans` table and the JSONL files under `spans/`) are no longer
+ * written; existing rows are moved into the index by a one-time migration, and existing
+ * JSONL files are removed by task deletion, workspace purge and retention.
+ */
 
 type TranscriptDatabase = Pick<import("better-sqlite3").Database, "exec" | "prepare">;
 
@@ -100,15 +87,6 @@ export interface TranscriptCheckpointPayload {
     triggerEventType?: string;
     meaningfulExchangeCount?: number;
   };
-}
-
-function compareSearchResults(a: TranscriptSearchResult, b: TranscriptSearchResult): number {
-  return (
-    b.timestamp - a.timestamp ||
-    a.taskId.localeCompare(b.taskId) ||
-    (typeof b.seq === "number" ? b.seq : -1) - (typeof a.seq === "number" ? a.seq : -1) ||
-    a.type.localeCompare(b.type)
-  );
 }
 
 function rootDir(workspacePath: string): string {
@@ -442,150 +420,12 @@ function normalizeWorkspacePath(workspacePath: string): string {
   return path.resolve(workspacePath);
 }
 
-function hashText(text: string): string {
-  return createHash("sha256").update(text).digest("hex").slice(0, 24);
-}
-
-function buildSpanId(workspacePath: string, record: TranscriptSpanRecord, rawLine: string): string {
-  const stablePart =
-    record.eventId ||
-    (typeof record.seq === "number"
-      ? `seq:${record.seq}`
-      : `ts:${record.timestamp}:${record.type}:${hashText(rawLine)}`);
-  return `${hashText(normalizeWorkspacePath(workspacePath))}:${record.taskId}:${stablePart}`;
-}
-
-function payloadToSearchText(payload: unknown): string {
-  if (typeof payload === "string") return payload;
-  try {
-    return JSON.stringify(payload) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export { TRANSCRIPT_SPAN_PAYLOAD_MAX_CHARS, TRANSCRIPT_SPAN_SEARCH_TEXT_MAX_CHARS };
-
-const SPAN_PAYLOAD_FIELD_MAX_CHARS = 512;
-
-function buildSpanSearchText(type: string, payload: unknown): string {
-  return `${type} ${payloadToSearchText(payload)}`.slice(0, TRANSCRIPT_SPAN_SEARCH_TEXT_MAX_CHARS);
-}
-
-/** Replace an oversized payload with its small scalar fields plus a bounded preview. */
-export function boundTranscriptSpanPayload(payload: unknown): unknown {
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(payload ?? null) ?? "null";
-  } catch {
-    return { spanPayloadTruncated: true, preview: "" };
-  }
-  if (serialized.length <= TRANSCRIPT_SPAN_PAYLOAD_MAX_CHARS) return payload;
-
-  const bounded: Record<string, unknown> = {};
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
-      if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
-        const fieldText = typeof value === "string" ? value : String(value);
-        if (fieldText.length <= SPAN_PAYLOAD_FIELD_MAX_CHARS) bounded[key] = value;
-      }
-    }
-  }
-  const preview =
-    typeof payload === "string"
-      ? payload.slice(0, TRANSCRIPT_SPAN_PAYLOAD_MAX_CHARS)
-      : serialized.slice(0, TRANSCRIPT_SPAN_PAYLOAD_MAX_CHARS);
-  return {
-    ...bounded,
-    spanPayloadTruncated: true,
-    originalChars: serialized.length,
-    preview: `${preview}\n[... truncated; the full event is kept in the task event log ...]`,
-  };
-}
-
-function buildFtsQuery(query: string): string {
-  return (query.toLowerCase().match(/[a-z0-9_]{2,}/g) || []).slice(0, 12).join(" ");
-}
-
-function shouldPersistSpan(type: string): boolean {
-  return [
-    "task_created",
-    "user_message",
-    "assistant_message",
-    "timeline_group_started",
-    "timeline_group_finished",
-    "timeline_step_started",
-    "timeline_step_updated",
-    "timeline_step_finished",
-    "timeline_evidence_attached",
-    "timeline_artifact_emitted",
-    "timeline_command_output",
-    "timeline_error",
-    "tool_call",
-    "tool_result",
-    "tool_error",
-    "step_feedback",
-    "task_completed",
-    "task_status",
-    "task_paused",
-    "task_resumed",
-    "context_compaction_started",
-    "context_compaction_completed",
-    "context_compaction_failed",
-    "context_summarized",
-    // `conversation_snapshot` is deliberately absent: each one carries the whole
-    // history, task_events keeps the latest and checkpoints hold resume state.
-  ].includes(type);
-}
-
-const TAIL_READ_CHUNK_BYTES = 256 * 1024;
-const TAIL_READ_MAX_BYTES = 16 * 1024 * 1024;
-
-/** Read up to `limit` trailing lines without loading a large span file whole. */
-async function readTailLines(filePath: string, limit: number): Promise<string[]> {
-  const handle = await fs.open(filePath, "r");
-  try {
-    const { size } = await handle.stat();
-    let position = size;
-    const chunks: Buffer[] = [];
-    let bytesRead = 0;
-    let newlines = 0;
-    while (position > 0 && bytesRead < TAIL_READ_MAX_BYTES) {
-      const length = Math.min(TAIL_READ_CHUNK_BYTES, position);
-      position -= length;
-      const buffer = Buffer.alloc(length);
-      await handle.read(buffer, 0, length, position);
-      bytesRead += length;
-      chunks.unshift(buffer);
-      for (const byte of buffer) {
-        if (byte === 10) newlines += 1;
-      }
-      // One extra newline guarantees the first kept line is complete.
-      if (newlines > limit + 1) break;
-    }
-    let lines = Buffer.concat(chunks).toString("utf8").split("\n");
-    // Drop a partial leading line when the read did not reach the file start.
-    if (position > 0) lines = lines.slice(1);
-    return lines.filter(Boolean).slice(-limit);
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
-}
-
-function safeParseLine(line: string): TranscriptSpanRecord | null {
-  try {
-    const parsed = JSON.parse(line) as TranscriptSpanRecord;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (typeof parsed.taskId !== "string" || typeof parsed.type !== "string") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 export interface TranscriptDeletionResult {
   /** Tasks selected by retention (0 for direct deletes). */
   tasks: number;
+  /** Conversation index and durable history rows removed. */
+  indexRows: number;
+  /** Legacy `transcript_spans` rows removed (only before the one-time migration ran). */
   spanRows: number;
   spanFiles: number;
   checkpointFiles: number;
@@ -593,23 +433,20 @@ export interface TranscriptDeletionResult {
   bytesFreed: number;
 }
 
-export interface TranscriptStorageCleanupResult {
-  status: "completed" | "already_done" | "unavailable";
-  deletedSnapshotRows: number;
-  rewrittenRows: number;
-  /** Approximate characters of row text released (snapshots, duplicates, oversize). */
-  reclaimedChars: number;
-  reindexedRows: number;
-  incrementalVacuum: boolean;
-  freelistBytes?: number;
-}
-
 /** Mirrors `PRUNE_TASK_EVENTS_BATCH_SQL` so span retention follows task-event retention. */
 const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const DEFAULT_RETENTION_DAYS = 90;
 
 function emptyDeletionResult(): TranscriptDeletionResult {
-  return { tasks: 0, spanRows: 0, spanFiles: 0, checkpointFiles: 0, lockFiles: 0, bytesFreed: 0 };
+  return {
+    tasks: 0,
+    indexRows: 0,
+    spanRows: 0,
+    spanFiles: 0,
+    checkpointFiles: 0,
+    lockFiles: 0,
+    bytesFreed: 0,
+  };
 }
 
 function mergeDeletionResult(
@@ -617,6 +454,7 @@ function mergeDeletionResult(
   source: TranscriptDeletionResult,
 ): void {
   target.tasks += source.tasks;
+  target.indexRows += source.indexRows;
   target.spanRows += source.spanRows;
   target.spanFiles += source.spanFiles;
   target.checkpointFiles += source.checkpointFiles;
@@ -833,45 +671,18 @@ async function sweepStaleCheckpointLocks(cutoff: number): Promise<number> {
   return removed;
 }
 
-function yieldToEventLoop(pauseMs: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, pauseMs));
-}
-
 export class TranscriptStore {
   private static dbOverride: TranscriptDatabase | null | undefined;
-  private static dbSchemaReady = false;
   private static statements: { db: TranscriptDatabase; port: MemoryStatementPort } | null = null;
   private static readonly checkpointWriteTails = new Map<string, Promise<void>>();
 
   static setDatabaseForTests(db: TranscriptDatabase | null): void {
     this.dbOverride = db;
-    this.dbSchemaReady = false;
+    this.statements = null;
   }
 
   static async ensureLayout(workspacePath: string): Promise<void> {
-    await Promise.all([
-      ensureWorkspaceDirectory(workspacePath, spansDir(workspacePath)),
-      ensureWorkspaceDirectory(workspacePath, checkpointsDir(workspacePath)),
-    ]);
-  }
-
-  static async appendEvent(workspacePath: string, event: TaskEvent): Promise<void> {
-    if (!workspacePath || !shouldPersistSpan(event.type)) {
-      return;
-    }
-    await this.ensureLayout(workspacePath);
-    if (!isSafeTaskId(event.taskId)) return;
-    const record: TranscriptSpanRecord = {
-      taskId: event.taskId,
-      timestamp: typeof event.ts === "number" ? event.ts : event.timestamp,
-      type: event.type,
-      payload: boundTranscriptSpanPayload(event.payload),
-      ...(event.eventId ? { eventId: event.eventId } : {}),
-      ...(typeof event.seq === "number" ? { seq: event.seq } : {}),
-    };
-    const rawLine = JSON.stringify(record);
-    await fs.appendFile(taskSpanPath(workspacePath, event.taskId), `${rawLine}\n`, "utf8");
-    await this.indexSpan(workspacePath, record, rawLine);
+    await ensureWorkspaceDirectory(workspacePath, checkpointsDir(workspacePath));
   }
 
   static async writeCheckpoint(
@@ -1029,108 +840,18 @@ export class TranscriptStore {
     return validCandidates[0]?.checkpoint || null;
   }
 
-  static async loadRecentSpans(
-    workspacePath: string,
-    taskId: string,
-    limit = 40,
-    readGuard?: TranscriptReadGuard,
-  ): Promise<TranscriptSpanRecord[]> {
-    if (!isSafeTaskId(taskId)) return [];
-    const spanPath = taskSpanPath(workspacePath, taskId);
-    if (!allowsRead(readGuard, spanPath)) return [];
-    try {
-      const lines = await readTailLines(spanPath, Math.max(1, limit));
-      return lines
-        .map((line) => safeParseLine(line))
-        .filter((entry): entry is TranscriptSpanRecord => entry !== null)
-        .slice(-Math.max(1, limit));
-    } catch {
-      return [];
-    }
-  }
-
-  static async searchSpans(params: {
-    workspacePath: string;
-    query: string;
-    taskId?: string;
-    limit?: number;
-    readGuard?: TranscriptReadGuard;
-  }): Promise<TranscriptSearchResult[]> {
-    const query = params.query.trim().toLowerCase();
-    if (!query) return [];
-    if (params.taskId && !isSafeTaskId(params.taskId)) return [];
-
-    const limit = Math.max(1, params.limit ?? 10);
-    const indexedResults = await this.searchIndexedSpans({
-      workspacePath: params.workspacePath,
-      query,
-      taskId: params.taskId,
-      limit: params.readGuard ? Math.min(limit * 4, 120) : limit,
-      readGuard: params.readGuard,
-    });
-    if (indexedResults.length >= limit) {
-      return indexedResults.slice(0, limit);
-    }
-
-    const results: TranscriptSearchResult[] = [];
-    const spansDirectory = spansDir(params.workspacePath);
-    if (!params.taskId && !allowsRead(params.readGuard, spansDirectory)) {
-      return indexedResults.slice(0, limit);
-    }
-    const files = params.taskId
-      ? [taskSpanPath(params.workspacePath, params.taskId)]
-      : (await fs.readdir(spansDir(params.workspacePath)).catch(() => []))
-          .filter((name) => name.endsWith(".jsonl"))
-          .map((name) => path.join(spansDir(params.workspacePath), name));
-
-    for (const file of files) {
-      if (!allowsRead(params.readGuard, file)) continue;
-      const raw = await fs.readFile(file, "utf8").catch(() => "");
-      if (!raw) continue;
-      const lines = raw.split("\n").filter(Boolean);
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index];
-        if (!line.toLowerCase().includes(query)) continue;
-        const parsed = safeParseLine(line);
-        if (!parsed) continue;
-        results.push({ ...parsed, rawLine: line });
-        if (results.length > limit) {
-          results.sort(compareSearchResults);
-          results.length = limit;
-        }
-        if (params.taskId && results.length >= limit) {
-          break;
-        }
-      }
-    }
-
-    return [...indexedResults, ...results]
-      .filter((entry, index, all) => {
-        const key = `${entry.taskId}:${entry.eventId || ""}:${entry.seq ?? ""}:${entry.timestamp}:${entry.rawLine}`;
-        return (
-          all.findIndex(
-            (other) =>
-              `${other.taskId}:${other.eventId || ""}:${other.seq ?? ""}:${other.timestamp}:${other.rawLine}` ===
-              key,
-          ) === index
-        );
-      })
-      .sort(compareSearchResults)
-      .slice(0, limit);
-  }
-
   // ---------------------------------------------------------------------------
   // Deletion and retention
   // ---------------------------------------------------------------------------
 
   /**
-   * Delete everything stored for one task: span rows (and their FTS entries), the
-   * JSONL span file, both checkpoint generations, leftover temp files and the
-   * checkpoint lock file. Safe to call for tasks that never wrote transcripts.
+   * Delete everything stored for one task's conversation: its conversation index rows,
+   * legacy span rows, the legacy JSONL span file, both checkpoint generations, leftover
+   * temp files and the checkpoint lock file. Safe to call for tasks that never wrote
+   * transcripts.
    *
-   * `workspacePath` scopes the row delete and names the workspace whose files are
-   * removed. Without it, rows are deleted by task id and files are removed in every
-   * workspace that held spans for the task.
+   * `workspacePath` names the workspace whose files are removed. Without it, files are
+   * removed in every workspace that held legacy spans for the task.
    */
   static async deleteTask(
     taskId: string,
@@ -1138,6 +859,11 @@ export class TranscriptStore {
   ): Promise<TranscriptDeletionResult> {
     const result = emptyDeletionResult();
     if (!taskId || !isSafeTaskId(taskId)) return result;
+    try {
+      result.indexRows += await DurableContextService.deleteTaskConversation(taskId);
+    } catch {
+      // Files below are still removed when the index is unavailable.
+    }
     const sql = this.getStatements();
     const workspacePaths = new Set<string>();
     if (options.workspacePath) workspacePaths.add(normalizeWorkspacePath(options.workspacePath));
@@ -1173,12 +899,24 @@ export class TranscriptStore {
   }
 
   /**
-   * Delete all transcript data of a workspace: span rows, the transcripts directory
-   * (spans and checkpoints) and the checkpoint lock files of its tasks.
+   * Delete all transcript data of a workspace: legacy span rows, the transcripts
+   * directory (spans and checkpoints) and the checkpoint lock files of its tasks. With
+   * `workspaceId`, the workspace's conversation index and durable history go too (the
+   * memory purge clears those itself through `DurableContextService.clearWorkspace`).
    */
-  static async deleteWorkspace(workspacePath: string): Promise<TranscriptDeletionResult> {
+  static async deleteWorkspace(
+    workspacePath: string,
+    options: { workspaceId?: string } = {},
+  ): Promise<TranscriptDeletionResult> {
     const result = emptyDeletionResult();
     if (!workspacePath) return result;
+    if (options.workspaceId) {
+      try {
+        result.indexRows += await DurableContextService.clearWorkspace(options.workspaceId);
+      } catch {
+        // Continue with the legacy rows and files.
+      }
+    }
     const normalized = normalizeWorkspacePath(workspacePath);
     const taskIds = new Set<string>(await listTranscriptFileTaskIds(normalized));
     const sql = this.getStatements();
@@ -1247,8 +985,9 @@ export class TranscriptStore {
   }
 
   /**
-   * Retention across every workspace known to the database or present in the span
-   * index, followed by a sweep of stale checkpoint lock files. Call it after
+   * Retention with the task-event retention window: the conversation index and durable
+   * history of expired and deleted tasks, then every workspace's transcript files (and
+   * legacy span rows), followed by a sweep of stale checkpoint lock files. Call it after
    * task-event pruning with the same retention window.
    */
   static async pruneRetention(
@@ -1258,6 +997,13 @@ export class TranscriptStore {
     const sql = this.getStatements();
     // Without the database nothing is known about task state; keep everything.
     if (!sql) return result;
+    try {
+      const pruned = await DurableContextService.pruneConversationRetention(options);
+      result.tasks += pruned.tasks;
+      result.indexRows += pruned.rows;
+    } catch {
+      // File retention below still runs.
+    }
     const workspacePaths = new Set<string>();
     {
       try {
@@ -1309,119 +1055,6 @@ export class TranscriptStore {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // One-time storage cleanup (span storage diet)
-  // ---------------------------------------------------------------------------
-
-  private static storageCleanupRun: Promise<TranscriptStorageCleanupResult> | null = null;
-
-  /**
-   * Reclaim space held by spans written before the storage diet. Idempotent and
-   * resumable: progress and completion are recorded in the database, so it can be
-   * interrupted at any batch. Work is done in short transactions with the event loop
-   * yielding in between; call it from deferred maintenance, never on the startup path.
-   *
-   * 1. Empties the span FTS index (the triggers skip rows still waiting for backfill).
-   * 2. Deletes `conversation_snapshot` spans, clears the duplicate `raw_line`, bounds
-   *    `search_text` and truncates oversized payloads.
-   * 3. Rebuilds the FTS index from the bounded text in batches.
-   * 4. Runs `PRAGMA incremental_vacuum` when the database uses incremental
-   *    auto-vacuum. Otherwise the freed pages stay on the freelist until a VACUUM
-   *    (the idle VACUUM in daemon maintenance).
-   *
-   * JSONL span files are not rewritten; they age out through retention.
-   */
-  static runStorageCleanup(
-    options: { batchSize?: number; pauseMs?: number; log?: (message: string) => void } = {},
-  ): Promise<TranscriptStorageCleanupResult> {
-    if (!this.storageCleanupRun) {
-      this.storageCleanupRun = this.runStorageCleanupOnce(options).finally(() => {
-        this.storageCleanupRun = null;
-      });
-    }
-    return this.storageCleanupRun;
-  }
-
-  private static async runStorageCleanupOnce(options: {
-    batchSize?: number;
-    pauseMs?: number;
-    log?: (message: string) => void;
-  }): Promise<TranscriptStorageCleanupResult> {
-    const result: TranscriptStorageCleanupResult = {
-      status: "unavailable",
-      deletedSnapshotRows: 0,
-      rewrittenRows: 0,
-      reclaimedChars: 0,
-      reindexedRows: 0,
-      incrementalVacuum: false,
-    };
-    const sql = this.getStatements();
-    if (!sql) return result;
-    const start = await sql.unit("transcript_storageCleanupStart", { now: Date.now() });
-    if (start.status === "already_done") {
-      result.status = "already_done";
-      return result;
-    }
-    const batch = Math.max(1, Math.floor(options.batchSize ?? 200));
-    const pauseMs = Math.max(0, Math.floor(options.pauseMs ?? 10));
-    const log = options.log ?? (() => undefined);
-
-    // Phase 1 (in the start unit): open the gap and empty the index in one transaction.
-    const gap = start.gap;
-
-    // Phase 2: delete snapshot spans and shrink the remaining rows, window by window.
-    if (gap) {
-      let cursor = start.cursor;
-      while (cursor < gap.maxRowid) {
-        const upper = Math.min(cursor + batch, gap.maxRowid);
-        const rewritten = await sql.unit("transcript_storageCleanupRewrite", {
-          lower: cursor,
-          upper,
-          now: Date.now(),
-        });
-        result.deletedSnapshotRows += rewritten.deletedSnapshotRows;
-        result.rewrittenRows += rewritten.rewrittenRows;
-        result.reclaimedChars += rewritten.reclaimedChars;
-        cursor = upper;
-        await yieldToEventLoop(pauseMs);
-      }
-
-      // Phase 3: rebuild the index for the gap from the bounded text.
-      let done = gap.doneUpto;
-      while (done < gap.maxRowid) {
-        const upper = Math.min(done + batch * 4, gap.maxRowid);
-        result.reindexedRows += await sql.unit("transcript_storageCleanupBackfill", {
-          lower: done,
-          upper,
-        });
-        done = upper;
-        await yieldToEventLoop(pauseMs);
-      }
-    }
-
-    // Phase 4: close the gap, add the task-id index, incremental vacuum, completion marker.
-    const finished = await sql.unit("transcript_storageCleanupFinish", {
-      closeGap: gap !== null,
-      now: Date.now(),
-      deletedSnapshotRows: result.deletedSnapshotRows,
-      rewrittenRows: result.rewrittenRows,
-      reclaimedChars: result.reclaimedChars,
-    });
-    result.incrementalVacuum = finished.incrementalVacuum;
-    if (typeof finished.freelistBytes === "number") result.freelistBytes = finished.freelistBytes;
-    result.status = "completed";
-    log(
-      `[TranscriptStore] Span storage cleanup: deleted ${result.deletedSnapshotRows} ` +
-        `snapshot span(s), rewrote ${result.rewrittenRows} span(s), ` +
-        `reclaimed ~${Math.round(result.reclaimedChars / 1048576)} MB of text, ` +
-        `reindexed ${result.reindexedRows} span(s)` +
-        (typeof result.freelistBytes === "number"
-          ? `, ${Math.round(result.freelistBytes / 1048576)} MB free in the database file`
-          : ""),
-    );
-    return result;
-  }
-
   private static getDatabase(): TranscriptDatabase | null {
     if (this.dbOverride !== undefined) return this.dbOverride;
     try {
@@ -1431,110 +1064,16 @@ export class TranscriptStore {
     }
   }
 
-  private static ensureDbSchema(db: TranscriptDatabase): boolean {
-    if (this.dbSchemaReady) return true;
-    try {
-      ensureTranscriptSchema(db);
-      this.dbSchemaReady = true;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /** The memory statement port for the current database, schema created on first use. */
+  /**
+   * The memory statement port for the current database. The legacy span table is not
+   * created: its statements fail (and are skipped) on databases that never had spans.
+   */
   private static getStatements(): MemoryStatementPort | null {
     const db = this.getDatabase();
-    if (!db || !this.ensureDbSchema(db)) return null;
+    if (!db) return null;
     if (this.statements?.db !== db) {
       this.statements = { db, port: createMemoryStatementPort(db as Database.Database) };
     }
     return this.statements.port;
-  }
-
-  private static async indexSpan(
-    workspacePath: string,
-    record: TranscriptSpanRecord,
-    rawLine: string,
-  ): Promise<void> {
-    const sql = this.getStatements();
-    if (!sql) return;
-
-    try {
-      await sql.run("transcript_indexSpan", [
-        buildSpanId(workspacePath, record, rawLine),
-        normalizeWorkspacePath(workspacePath),
-        record.taskId,
-        record.timestamp,
-        record.type,
-        JSON.stringify(record.payload ?? null),
-        record.eventId ?? null,
-        typeof record.seq === "number" ? record.seq : null,
-        // The payload is stored once; `raw_line` stays empty for new rows.
-        "",
-        buildSpanSearchText(record.type, record.payload),
-        Date.now(),
-      ]);
-    } catch {
-      // Search falls back to JSONL scans when SQLite/FTS is unavailable.
-    }
-  }
-
-  private static async searchIndexedSpans(params: {
-    workspacePath: string;
-    query: string;
-    taskId?: string;
-    limit: number;
-    readGuard?: TranscriptReadGuard;
-  }): Promise<TranscriptSearchResult[]> {
-    const sql = this.getStatements();
-    if (!sql) return [];
-
-    const ftsQuery = buildFtsQuery(params.query);
-    if (!ftsQuery) return [];
-
-    try {
-      const rows = await sql.all<Record<string, unknown>>("transcript_searchSpans", [
-        ftsQuery,
-        normalizeWorkspacePath(params.workspacePath),
-        params.taskId ?? null,
-        params.taskId ?? null,
-        params.limit,
-      ]);
-
-      return rows
-        .map((row) => {
-          const item = row as Record<string, unknown>;
-          let payload: unknown = null;
-          try {
-            payload = JSON.parse(String(item.payload_json || "null"));
-          } catch {
-            payload = item.payload_json;
-          }
-          const entry = {
-            taskId: String(item.task_id || ""),
-            timestamp: Number(item.timestamp || 0),
-            type: String(item.type || ""),
-            payload,
-            ...(typeof item.event_id === "string" && item.event_id
-              ? { eventId: item.event_id }
-              : {}),
-            ...(typeof item.seq === "number" ? { seq: item.seq } : {}),
-          };
-          // Spans written before the storage diet kept a copy of the JSONL line;
-          // newer rows store the payload once and the line is rebuilt from it.
-          const rawLine = String(item.raw_line || "") || JSON.stringify(entry);
-          return { ...entry, rawLine };
-        })
-        .filter(
-          (entry) =>
-            entry.taskId &&
-            entry.type &&
-            entry.rawLine &&
-            allowsRead(params.readGuard, taskSpanPath(params.workspacePath, entry.taskId)),
-        );
-    } catch {
-      return [];
-    }
   }
 }

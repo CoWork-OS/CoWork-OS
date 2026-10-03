@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PlaybookSkillPromoter } from "../PlaybookSkillPromoter";
 import { PlaybookService } from "../PlaybookService";
 import { hashMemoryContent, PlaybookEvidenceStore } from "../PlaybookEvidenceStore";
+import { PlaybookEntrySqlStore, parsePlaybookContent } from "../playbook-entries-sql";
 
 // ── Mocks ─────────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ vi.mock("../../agent/skills/SkillProposalService", () => ({
   },
 }));
 
-// ── Fixture: a synthetic ledger with verifiable source memories ─────────
+// ── Fixture: a synthetic ledger with verifiable source entries ──────────
 
 let db: Database.Database;
 let store: PlaybookEvidenceStore;
@@ -35,12 +36,22 @@ function addSuccess(workspaceId: string, taskId: string, title: string, tools: s
     `Key tools: ${tools.join(", ")}`,
     `Original request: ${title} (${taskId})`,
   ].join("\n");
-  const memoryId = `mem-${taskId}`;
-  db.prepare("INSERT INTO memories (id, content) VALUES (?, ?)").run(memoryId, content);
+  const entryId = `entry-${taskId}`;
+  new PlaybookEntrySqlStore(db).insertRow({
+    id: entryId,
+    workspaceId,
+    taskId,
+    kind: "success",
+    parsed: parsePlaybookContent(content),
+    patternKey: `tools:${[...tools].sort().join(",")}`,
+    content,
+    isPrivate: false,
+    createdAt: 1,
+  });
   return store.record({
     workspaceId,
     taskId,
-    sourceMemoryId: memoryId,
+    sourceEntryId: entryId,
     sourceContentHash: hashMemoryContent(content),
     patternKey: `tools:${[...tools].sort().join(",")}`,
   }).record;
@@ -55,9 +66,6 @@ describe("PlaybookSkillPromoter", () => {
     vi.clearAllMocks();
     mockCreate.mockResolvedValue({ proposal: { id: "sp_test_123", status: "pending" } });
     db = new Database(":memory:");
-    db.exec(
-      "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT, is_private INTEGER NOT NULL DEFAULT 0)",
-    );
     store = new PlaybookEvidenceStore(db);
     PlaybookService.setEvidenceStoreForTesting(PlaybookEvidenceLedger.open(db));
   });
@@ -83,7 +91,7 @@ describe("PlaybookSkillPromoter", () => {
       expect(candidate.toolsUsed).toEqual(expect.arrayContaining(["web_search", "write_file"]));
       expect(candidate.sourceEvidence).toHaveLength(3);
       expect(candidate.sourceEvidence[0]).toMatch(
-        /^Observed successful execution of task [abc] \(memory mem-[abc]\)$/,
+        /^Observed successful execution of task [abc] \(playbook entry entry-[abc]\)$/,
       );
       expect(candidate.requestExcerpts).toHaveLength(3);
     });
@@ -102,12 +110,12 @@ describe("PlaybookSkillPromoter", () => {
       expect(await PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
     });
 
-    it("excludes invalidated evidence and evidence whose memory was deleted", async () => {
+    it("excludes invalidated evidence and evidence whose entry was deleted", async () => {
       const records = ["a", "b", "c"].map((id) => addSuccess("ws1", id, "Deploy", ["shell"]));
       chain(records.map((record) => record.id));
       store.invalidate(records[0].id, "corrected_by_user");
       expect(await PlaybookSkillPromoter.findCandidates("ws1")).toEqual([]);
-      db.prepare("DELETE FROM memories").run();
+      db.prepare("DELETE FROM playbook_entries").run();
       expect(await PlaybookSkillPromoter.findCandidates("ws1", 1)).toEqual([]);
     });
 

@@ -158,9 +158,11 @@ import {
   isManagedScheduledWorkspacePath,
 } from "./cron/workspace-context";
 import { MemoryService } from "./memory/MemoryService";
+import { DurableContextService } from "./memory/DurableContextService";
 import { BoxBrainService } from "./memory/BoxBrainService";
 import { MemoryRetentionService } from "./memory/MemoryRetentionService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
+import { startMemoryEngine } from "./memory/memory-engine-bootstrap";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
 import { DreamingRepository } from "./memory/DreamingRepository";
 import { DreamingService } from "./memory/DreamingService";
@@ -2114,6 +2116,15 @@ if (isMacSafeStorageMigrationWorker) {
         }
         MemoryService.initialize(dbManager);
         CuratedMemoryService.initialize(dbManager);
+        // Memory engine write side: legacy stores dual-write into memory_items, and the
+        // legacy lanes are copied in once, well after startup (docs/memory-engine.md).
+        const memoryStatements = MemoryService.getStatements();
+        if (memoryStatements) {
+          const stopMemoryEngine = startMemoryEngine(memoryStatements, {
+            getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
+          });
+          app.on("will-quit", stopMemoryEngine);
+        }
 
         // Initialize FTS worker thread for off-main-thread memory search
         const { FtsWorkerClient } = await import("./database/FtsWorkerClient");
@@ -3103,6 +3114,8 @@ if (isMacSafeStorageMigrationWorker) {
             autonomyEngine?.getWorldModel(workspaceId) || null,
           getAutonomyDecisions: (workspaceId?: string) =>
             autonomyEngine?.listDecisions(workspaceId) || [],
+          evaluateAutonomy: async (workspaceId: string) =>
+            (await autonomyEngine?.evaluate(workspaceId)) ?? false,
           listActiveSuggestions: (workspaceId: string) =>
             ProactiveSuggestionsService.listActive(workspaceId, {
               includeDeferred: true,
@@ -3210,11 +3223,10 @@ if (isMacSafeStorageMigrationWorker) {
               })
               .catch((error: unknown) => logger.warn("Failed to record activity:", error));
           },
-          wakeHeartbeats: ({ text, mode }) => {
-            void submitHeartbeatSignalForAll({ text, mode, source: "hook" }).catch((error) => {
-              logger.warn("Failed to wake heartbeats:", error);
-            });
-          },
+          proposeSuggestion: ({ workspaceId, decision }) =>
+            ProactiveSuggestionsService.propose(
+              ProactiveSuggestionsService.autonomyDecisionProposal(workspaceId, decision),
+            ),
           log: (...args: unknown[]) => logger.debug("[Autonomy]", ...args),
         });
         if (startupQuietMode) {
@@ -3224,7 +3236,8 @@ if (isMacSafeStorageMigrationWorker) {
           logger.info("AutonomyEngine initialized");
         }
 
-        // Initialize AwarenessService after Heartbeat and Autonomy so onWakeHeartbeats and onEventCaptured work
+        // Initialize AwarenessService after Heartbeat so its debounced wakes reach the pulse.
+        // Awareness is a signal producer only: AutonomyEngine is evaluated by the pulse.
         try {
           awarenessService = AwarenessService.initialize({
             getDefaultWorkspaceId: () => {
@@ -3240,13 +3253,16 @@ if (isMacSafeStorageMigrationWorker) {
                 return undefined;
               }
             },
-            onWakeHeartbeats: ({ text, mode }) => {
-              void submitHeartbeatSignalForAll({ text, mode, source: "hook" }).catch((error) => {
+            onWakeHeartbeats: ({ text, mode, category, workspaceId }) => {
+              void submitHeartbeatSignalForAll({
+                text,
+                mode,
+                source: "hook",
+                category,
+                workspaceId,
+              }).catch((error) => {
                 logger.warn("Failed to wake heartbeats:", error);
               });
-            },
-            onEventCaptured: (event) => {
-              autonomyEngine?.notifyEvent(event);
             },
             log: (...args: unknown[]) => logger.debug("[Awareness]", ...args),
           });
@@ -4582,9 +4598,29 @@ if (isMacSafeStorageMigrationWorker) {
           },
         },
         {
+          name: "cross signals",
+          run: async () => {
+            await crossSignalService?.stop();
+            crossSignalService = null;
+          },
+        },
+        {
+          name: "feedback",
+          run: async () => {
+            await feedbackService?.stop();
+            feedbackService = null;
+          },
+        },
+        {
           name: "MCP servers",
           requiresQuiescence: true,
           run: () => MCPClientManager.getInstance().shutdown(),
+        },
+        // Conversation-index writes are batched (250 ms); write the queue before closing.
+        {
+          name: "conversation index",
+          requiresQuiescence: true,
+          run: () => DurableContextService.flushIndexQueue(),
         },
         { name: "memory", requiresQuiescence: true, run: () => MemoryService.shutdown() },
         {

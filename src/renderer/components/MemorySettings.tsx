@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { hasHostMethod } from "../host/browser-capabilities";
 import { ChatGPTImportWizard } from "./ChatGPTImportWizard";
 import { PromptMemoryImportWizard } from "./PromptMemoryImportWizard";
+import { describePurgeCounts } from "./memory/memory-knowledge-model";
 
 // Types inlined since preload types aren't directly importable in renderer
 type PrivacyMode = "normal" | "strict" | "disabled";
@@ -27,36 +28,6 @@ interface MemoryStats {
 interface ImportedStats {
   count: number;
   totalTokens: number;
-}
-
-type UserFactCategory =
-  | "identity"
-  | "preference"
-  | "bio"
-  | "work"
-  | "goal"
-  | "operating"
-  | "voice"
-  | "accountability"
-  | "constraint"
-  | "other";
-
-interface UserFact {
-  id: string;
-  category: UserFactCategory;
-  value: string;
-  confidence: number;
-  source: "conversation" | "feedback" | "manual";
-  pinned?: boolean;
-  firstSeenAt: number;
-  lastUpdatedAt: number;
-  lastTaskId?: string;
-}
-
-interface UserProfile {
-  summary?: string;
-  facts: UserFact[];
-  updatedAt: number;
 }
 
 type RelationshipLayer = "identity" | "preferences" | "context" | "history" | "commitments";
@@ -95,6 +66,8 @@ interface MemorySettingsProps {
   workspaceId: string;
   canDelete?: boolean;
   onSettingsChanged?: () => void;
+  /** Opens the Memory Hub "What CoWork knows" tab, where facts about the user are edited. */
+  onOpenKnowledge?: () => void;
 }
 
 interface ToggleRowProps {
@@ -197,6 +170,7 @@ export function MemorySettings({
   workspaceId,
   onSettingsChanged,
   canDelete = true,
+  onOpenKnowledge,
 }: MemorySettingsProps) {
   const [settings, setSettings] = useState<MemorySettingsData | null>(null);
   const [stats, setStats] = useState<MemoryStats | null>(null);
@@ -227,10 +201,11 @@ export function MemorySettings({
   const [deletingImported, setDeletingImported] = useState(false);
   const [deletingImportedEntryId, setDeletingImportedEntryId] = useState<string | null>(null);
   const [updatingImportedEntryId, setUpdatingImportedEntryId] = useState<string | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [newFact, setNewFact] = useState("");
-  const [newFactCategory, setNewFactCategory] = useState<UserFactCategory>("preference");
-  const [savingFact, setSavingFact] = useState(false);
+  const [clearSummary, setClearSummary] = useState<{
+    lines: string[];
+    notes: string[];
+    errors: string[];
+  } | null>(null);
   const [relationshipItems, setRelationshipItems] = useState<RelationshipMemoryItem[]>([]);
   const [dueSoonItems, setDueSoonItems] = useState<RelationshipMemoryItem[]>([]);
   const [dueSoonReminder, setDueSoonReminder] = useState("");
@@ -249,6 +224,7 @@ export function MemorySettings({
   useEffect(() => {
     setSettings(null);
     setActionError(null);
+    setClearSummary(null);
     setSaving(false);
     setLoadingImported(false);
     setImportedMemories([]);
@@ -277,7 +253,6 @@ export function MemorySettings({
         loadedSettings,
         loadedStats,
         loadedImportedStats,
-        loadedUserProfile,
         loadedRelationshipItems,
         loadedDueSoon,
         loadedRecentMemories,
@@ -286,7 +261,6 @@ export function MemorySettings({
         window.electronAPI.getMemorySettings(workspaceId),
         window.electronAPI.getMemoryStats(workspaceId),
         window.electronAPI.getImportedMemoryStats(workspaceId),
-        window.electronAPI.getUserProfile(),
         window.electronAPI.listRelationshipMemory({ limit: 80, includeDone: false }),
         window.electronAPI.getDueSoonCommitments(72),
         window.electronAPI.getRecentMemories({ workspaceId, limit: 20 }),
@@ -296,7 +270,6 @@ export function MemorySettings({
       setSettings(loadedSettings);
       setStats(loadedStats);
       setImportedStats(loadedImportedStats);
-      setUserProfile(loadedUserProfile);
       setRelationshipItems(Array.isArray(loadedRelationshipItems) ? loadedRelationshipItems : []);
       setDueSoonItems(Array.isArray(loadedDueSoon?.items) ? loadedDueSoon.items : []);
       setDueSoonReminder(
@@ -501,8 +474,17 @@ export function MemorySettings({
     }
     try {
       setClearing(true);
-      await window.electronAPI.clearMemory(workspaceId);
+      setClearSummary(null);
+      const result = await window.electronAPI.clearMemory(workspaceId);
       if (activeWorkspace.current !== workspaceId) return;
+      const lines = describePurgeCounts(result?.counts);
+      setClearSummary({
+        lines: lines.length > 0 ? lines : ["Nothing was stored for this workspace."],
+        notes: Array.isArray(result?.notes) ? result.notes : [],
+        errors: Object.entries(result?.errors ?? {}).map(
+          ([store, message]) => `${store}: ${String(message)}`,
+        ),
+      });
       setImportedMemories([]);
       setImportedOffset(0);
       setImportedHasMore(false);
@@ -536,66 +518,6 @@ export function MemorySettings({
       reportError(error);
     } finally {
       setClearingChronicle(false);
-    }
-  };
-
-  const handleAddFact = async () => {
-    const trimmed = newFact.trim();
-    if (!trimmed) return;
-    try {
-      setSavingFact(true);
-      const created = await window.electronAPI.addUserFact({
-        category: newFactCategory,
-        value: trimmed,
-        source: "manual",
-        confidence: 1,
-      });
-      setUserProfile((prev) => ({
-        summary: prev?.summary,
-        updatedAt: Date.now(),
-        facts: [created, ...(prev?.facts || [])],
-      }));
-      setNewFact("");
-    } catch (error) {
-      reportError(error);
-    } finally {
-      setSavingFact(false);
-    }
-  };
-
-  const handleDeleteFact = async (factId: string) => {
-    try {
-      await window.electronAPI.deleteUserFact(factId);
-      setUserProfile((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          facts: prev.facts.filter((fact) => fact.id !== factId),
-          updatedAt: Date.now(),
-        };
-      });
-    } catch (error) {
-      reportError(error);
-    }
-  };
-
-  const handleToggleFactPin = async (fact: UserFact) => {
-    try {
-      const updated = await window.electronAPI.updateUserFact({
-        id: fact.id,
-        pinned: !fact.pinned,
-      });
-      if (!updated) return;
-      setUserProfile((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          updatedAt: Date.now(),
-          facts: prev.facts.map((existing) => (existing.id === updated.id ? updated : existing)),
-        };
-      });
-    } catch (error) {
-      reportError(error);
     }
   };
 
@@ -960,108 +882,18 @@ export function MemorySettings({
             </div>
           </div>
 
-          {/* User Profile Facts */}
+          {/* Facts about the user moved to the Memory Hub "What CoWork knows" tab. */}
           <div className="settings-form-group memory-section">
-            <div
-              style={{ fontWeight: 500, color: "var(--color-text-primary)", marginBottom: "4px" }}
-            >
-              User Memory Facts
-            </div>
-            <p className="settings-form-hint" style={{ marginTop: 0 }}>
-              Curate what the assistant remembers about preferences and context.
+            <div className="memory-hub-primary-label">User Memory Facts</div>
+            <p className="settings-form-hint">
+              Facts about you, your preferences and rules are edited in{" "}
+              <strong>What CoWork knows</strong>, with their source, scope and history.
             </p>
-
-            <div className="memory-fact-form">
-              <select
-                className="settings-select"
-                value={newFactCategory}
-                onChange={(e) => setNewFactCategory(e.target.value as UserFactCategory)}
-                disabled={savingFact}
-              >
-                <option value="identity">Identity</option>
-                <option value="preference">Preference</option>
-                <option value="bio">Profile</option>
-                <option value="work">Work</option>
-                <option value="goal">Goal</option>
-                <option value="operating">Operating Style</option>
-                <option value="voice">Voice</option>
-                <option value="accountability">Accountability</option>
-                <option value="constraint">Constraint</option>
-                <option value="other">Other</option>
-              </select>
-              <input
-                className="settings-input"
-                type="text"
-                value={newFact}
-                onChange={(e) => setNewFact(e.target.value)}
-                placeholder="Add a fact (for example: Prefers concise responses)"
-                disabled={savingFact}
-              />
-              <button
-                className="settings-button"
-                onClick={handleAddFact}
-                disabled={savingFact || !newFact.trim()}
-                style={{ minWidth: "74px" }}
-              >
-                {savingFact ? "Saving..." : "Add"}
+            {onOpenKnowledge && (
+              <button type="button" className="settings-button" onClick={onOpenKnowledge}>
+                Open What CoWork knows
               </button>
-            </div>
-
-            <div className="memory-list" style={{ maxHeight: "220px" }}>
-              {(!userProfile?.facts || userProfile.facts.length === 0) && (
-                <div className="settings-empty">No user facts stored yet.</div>
-              )}
-
-              {(userProfile?.facts || [])
-                .slice()
-                .sort((a, b) => {
-                  if ((a.pinned ? 1 : 0) !== (b.pinned ? 1 : 0))
-                    return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
-                  if (a.confidence !== b.confidence) return b.confidence - a.confidence;
-                  return b.lastUpdatedAt - a.lastUpdatedAt;
-                })
-                .map((fact) => (
-                  <div
-                    key={fact.id}
-                    className="memory-list-item"
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr auto",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div>
-                      <div style={{ color: "var(--color-text-primary)", fontSize: "13px" }}>
-                        {fact.value}
-                      </div>
-                      <div
-                        style={{
-                          color: "var(--color-text-tertiary)",
-                          fontSize: "11px",
-                          marginTop: "2px",
-                        }}
-                      >
-                        {fact.category} • {Math.round(fact.confidence * 100)}% confidence
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button
-                        className={`memory-inline-btn${fact.pinned ? " active" : ""}`}
-                        onClick={() => handleToggleFactPin(fact)}
-                      >
-                        {fact.pinned ? "Pinned" : "Pin"}
-                      </button>
-                      <button
-                        className="memory-inline-btn danger"
-                        onClick={() => handleDeleteFact(fact.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-            </div>
+            )}
           </div>
 
           {/* Relationship Memory */}
@@ -1610,8 +1442,29 @@ export function MemorySettings({
                   {clearing ? "Clearing..." : "Clear All Memories"}
                 </button>
                 <p className="settings-form-hint" style={{ marginTop: "8px" }}>
-                  Permanently deletes all memories for this workspace.
+                  Permanently deletes all memories for this workspace. Global facts about you are
+                  cleared separately in What CoWork knows.
                 </p>
+                {clearSummary && (
+                  <div role="status">
+                    <p className="settings-form-hint">Cleared:</p>
+                    <ul className="memory-clear-summary">
+                      {clearSummary.lines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                    {clearSummary.errors.length > 0 && (
+                      <p className="settings-form-hint" role="alert">
+                        Some stores could not be cleared: {clearSummary.errors.join("; ")}
+                      </p>
+                    )}
+                    {clearSummary.notes.map((note) => (
+                      <p key={note} className="settings-form-hint">
+                        {note}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}

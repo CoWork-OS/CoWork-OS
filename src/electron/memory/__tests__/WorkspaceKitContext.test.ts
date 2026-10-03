@@ -407,6 +407,46 @@ describe("WorkspaceKitContext", () => {
       expect(out).not.toContain("ARCH_DETAIL");
     });
 
+    it("drops generated memory blocks, DESIGN.md and shared-context files when asked", () => {
+      seedRepoAndKit();
+      writeFile(
+        path.join(tmpDir, ".cowork", "MEMORY.md"),
+        [
+          "# Long-Term Memory",
+          "",
+          "## Rules",
+          "- HAND_WRITTEN_RULE",
+          "",
+          "<!-- cowork:auto:curated-workspace:start -->",
+          "- GENERATED_ITEM",
+          "<!-- cowork:auto:curated-workspace:end -->",
+          "",
+        ].join("\n"),
+      );
+      writeFile(
+        path.join(tmpDir, ".cowork", "USER.md"),
+        "<!-- cowork:auto:curated-user:start -->\n- GENERATED_USER_ITEM\n",
+      );
+      writeFile(path.join(tmpDir, ".cowork", "DESIGN.md"), "# Design System\n- DESIGN_TOKEN\n");
+
+      const full = buildWorkspaceKitContext(tmpDir, "Improve the dashboard UI");
+      expect(full).toContain("GENERATED_ITEM");
+      expect(full).toContain("DESIGN_TOKEN");
+      expect(full).toContain("PRIORITY_ITEM");
+
+      const slice = buildWorkspaceKitContext(tmpDir, "Improve the dashboard UI", new Date(), {
+        includeDesignSystem: false,
+        excludeGeneratedMemoryBlocks: true,
+        excludeFiles: ["PRIORITIES.md"],
+      });
+      expect(slice).toContain("HAND_WRITTEN_RULE");
+      expect(slice).not.toContain("GENERATED_ITEM");
+      // A truncated block (no end marker) is dropped to the end of the file.
+      expect(slice).not.toContain("GENERATED_USER_ITEM");
+      expect(slice).not.toContain("DESIGN_TOKEN");
+      expect(slice).not.toContain("PRIORITY_ITEM");
+    });
+
     it("renders project instructions before docs maps in the project guidance block", () => {
       seedRepoAndKit();
       const guidance = buildProjectGuidanceContext(tmpDir);

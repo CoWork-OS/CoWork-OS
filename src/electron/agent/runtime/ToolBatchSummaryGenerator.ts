@@ -100,6 +100,7 @@ function inferBatchFamilyLabel(toolNames: string[]): string {
     "task_history",
     "task_events",
     "search_sessions",
+    "context_recall",
     "task_list_list",
   ]);
   const webResearchTools = new Set([

@@ -173,6 +173,24 @@ describe("subconscious improvement IPC handlers", () => {
     );
   });
 
+  it("validates the Workflow Intelligence review status", async () => {
+    const reviewRun = vi.fn(async () => true);
+    setupSubconsciousHandlers({ reviewRun } as Any);
+    const handler = registeredHandlers.get(IPC_CHANNELS.SUBCONSCIOUS_REVIEW_RUN) as (
+      _event: unknown,
+      runId: unknown,
+      status: unknown,
+    ) => Promise<unknown>;
+    const runId = "3f2c1a4e-5b6d-4e7f-8a9b-0c1d2e3f4a5b";
+
+    await handler(null, runId, "accepted");
+    expect(reviewRun).toHaveBeenCalledWith(runId, "accepted");
+
+    await expect(handler(null, runId, "approved")).rejects.toThrow();
+    await expect(handler(null, runId, { status: "accepted" })).rejects.toThrow();
+    expect(reviewRun).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects invalid improvement cadence settings", async () => {
     const saveSettings = vi.fn();
     const service = {

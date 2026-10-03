@@ -559,12 +559,10 @@ describe("task strategy contracts", () => {
       executionMode: "execute",
       agentConfig: { deepWorkMode: true },
     });
-    executor.task.prompt = TaskStrategyService.decoratePrompt(
-      rawPrompt,
-      route,
-      { ...strategy, taskDomain: "code" },
-      "RELATIONSHIP MEMORY (continuity context, not hard constraints):\nIdentity:\n- Preferred name: Almarion.",
-    );
+    executor.task.prompt = TaskStrategyService.decoratePrompt(rawPrompt, route, {
+      ...strategy,
+      taskDomain: "code",
+    });
 
     const built = await buildExecutionPrompt(executor);
     const strategySection = sectionText(built, "task_strategy");
@@ -575,7 +573,6 @@ describe("task strategy contracts", () => {
     expect(built.systemBlocks.find((b) => b.stableKey.startsWith("task_strategy:"))).toMatchObject({
       scope: "session",
     });
-    expect(built.prompt).not.toContain("Almarion");
     expect(built.prompt).not.toMatch(/answer_first=|timeout_finalize_bias=|AGENT_STRATEGY_CONTEXT/);
   });
 

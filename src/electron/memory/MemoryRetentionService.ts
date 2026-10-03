@@ -10,6 +10,11 @@
  *   - kit `.history/` snapshots: newest 20 per file, at most 90 days old
  *   - weekly feedback files older than 90 days
  *   - heartbeat run history (the Heartbeat store's own prune rules)
+ *   - agent working-state history (newest 50 non-current states per agent and workspace)
+ *   - proactive suggestions expired or closed more than 30 days ago, suggestion feedback
+ *     older than 90 days
+ *   - Playbook entries older than 180 days that no longer back active success evidence
+ *   - memory items that were forgotten (deleted tombstones) or are past their `expires_at`
  *
  * Transcript retention is not repeated here: daemon DB maintenance runs
  * `TranscriptStore.pruneRetention` with the user's task retention window.
@@ -30,10 +35,15 @@ import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-pa
 import { pruneKitSnapshots } from "../context/kit-revisions";
 import { SubconsciousSettingsManager } from "../subconscious/SubconsciousSettingsManager";
 import { pruneHeartbeatRunHistory } from "../agents/HeartbeatRunRepository";
+import { cleanupOldWorkingStates } from "../agents/WorkingStateRepository";
 import {
   CORE_RETENTION_RULES,
   DREAMING_RETENTION_RULES,
+  MEMORY_ITEM_RETENTION_RULES,
+  PLAYBOOK_RETENTION_RULES,
   SUBCONSCIOUS_RETENTION_RULES,
+  SUGGESTION_FEEDBACK_RETENTION_RULES,
+  SUGGESTION_RETENTION_RULES,
   deleteRetentionBatch,
   listRetentionWorkspaces,
   listSubconsciousArtifactRoots,
@@ -51,6 +61,9 @@ export const MEMORY_RETENTION_DEFAULTS = {
   dreamingRetentionDays: 90,
   subconsciousRetentionDays: 90,
   feedbackRetentionDays: 90,
+  suggestionRetentionDays: 30,
+  suggestionFeedbackRetentionDays: 90,
+  playbookRetentionDays: 180,
   /** Delay before the first run, so startup work is not slowed down. */
   initialDelayMs: 10 * 60 * 1000,
   intervalMs: DAY_MS,
@@ -68,7 +81,11 @@ export type MemoryRetentionStep =
   | "subconsciousArtifacts"
   | "kitSnapshots"
   | "feedbackFiles"
-  | "heartbeatRuns";
+  | "heartbeatRuns"
+  | "workingStates"
+  | "suggestions"
+  | "playbookEntries"
+  | "memoryItems";
 
 export interface MemoryRetentionResult {
   startedAt: number;
@@ -263,6 +280,29 @@ export class MemoryRetentionService {
       const pruned = pruneHeartbeatRunHistory(db, { now: startedAt });
       return pruned.runsDeleted;
     });
+    await step("workingStates", async () => cleanupOldWorkingStates(db));
+    await step(
+      "suggestions",
+      async () =>
+        (await this.pruneRows(
+          db,
+          SUGGESTION_RETENTION_RULES,
+          startedAt - MEMORY_RETENTION_DEFAULTS.suggestionRetentionDays * DAY_MS,
+        )) +
+        (await this.pruneRows(
+          db,
+          SUGGESTION_FEEDBACK_RETENTION_RULES,
+          startedAt - MEMORY_RETENTION_DEFAULTS.suggestionFeedbackRetentionDays * DAY_MS,
+        )),
+    );
+    await step("playbookEntries", () =>
+      this.pruneRows(
+        db,
+        PLAYBOOK_RETENTION_RULES,
+        startedAt - MEMORY_RETENTION_DEFAULTS.playbookRetentionDays * DAY_MS,
+      ),
+    );
+    await step("memoryItems", () => this.pruneRows(db, MEMORY_ITEM_RETENTION_RULES, startedAt));
 
     result.durationMs = this.now() - startedAt;
     logger.info("Memory retention finished", {

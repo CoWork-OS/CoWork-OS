@@ -11,7 +11,16 @@ import { CuratedMemoryService } from "./CuratedMemoryService";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { BoxSettingsManager } from "../settings/box-manager";
 import { BOX_BRAIN_IMPORT_HEADER } from "./BoxBrainService";
+import { MEMORY_TOOL_ROUTES, buildMemoryToolRoutingHint } from "./memory-tool-routing";
 import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
+import { MemoryContextBuilderService, type MemoryContextLayers } from "./MemoryContextBuilder";
+import { resolveMemoryInjection, type MemoryLayerDecision } from "./MemoryInjectionPolicy";
+import { PINNED_CONTEXT_TAGS } from "../agent/pinned-context-blocks";
+import {
+  MEMORY_CONTEXT_SECTION_TOKENS,
+  MEMORY_L0_TOKENS,
+  MEMORY_L1_ITEMS_TOKENS,
+} from "../agent/content/prompt-budgets";
 import type { MemorySearchResult } from "../database/repositories";
 import type {
   MemoryLayerPreview,
@@ -66,6 +75,26 @@ export interface SynthesizeOptions {
    * wake-up path adds a short memory-tool routing hint that names only these tools.
    */
   visibleToolNames?: Iterable<string>;
+  /**
+   * Include the legacy hot-memory block (curated + profile + relationship). Prompt
+   * surfaces pass false: MemoryContextBuilder renders L0 from memory_items once (the
+   * pinned profile block), so hot memory here would repeat it (PROMPT-5).
+   */
+  includeHotMemory?: boolean;
+  /** MemoryContextBuilder's L1 block (memory_items recall), rendered in the L0/L1 slot. */
+  memoryItemsContext?: string;
+  /**
+   * DESIGN.md in the kit slice (default: when the task looks like UI work). The executor
+   * passes false because it injects the design system in its own section (PROMPT-11).
+   */
+  includeDesignSystem?: boolean;
+  /**
+   * Drop the generated curated auto-blocks of `.cowork/USER.md` / `MEMORY.md` from the kit
+   * slice: they are views of memory_items that L0/L1 already carry.
+   */
+  excludeGeneratedMemoryBlocks?: boolean;
+  /** Kit files carried by another section (the pinned shared context), left out here. */
+  excludeKitFiles?: readonly string[];
 }
 
 export interface HotMemoryOptions {
@@ -73,6 +102,33 @@ export interface HotMemoryOptions {
   includeUserProfile?: boolean;
   /** Include relationship items (default true). */
   includeRelationships?: boolean;
+}
+
+/** Kit files rendered by the pinned shared-context block instead of the kit slice. */
+export const SHARED_CONTEXT_KIT_FILES = [
+  "PRIORITIES.md",
+  "CROSS_SIGNALS.md",
+  "MISTAKES.md",
+] as const;
+
+export interface LayerPreviewOptions extends SynthesizeOptions {
+  /** Workspace read permission (the kit and shared-context layers need it). Default true. */
+  workspaceCanRead?: boolean;
+  /** Test seam: the builder that renders L0/L1 (default: a fresh MemoryContextBuilderService). */
+  contextBuilder?: Pick<MemoryContextBuilderService, "buildLayers">;
+}
+
+const LAYER_REASON_TEXT: Record<string, string> = {
+  memory_off: "Memory is turned off for this workspace.",
+  no_memory_directive: "The request carries <no-memory>.",
+  scope_mismatch: "Memory is not retained for this kind of task.",
+  group_channel: "Not injected in group or public channels.",
+  read_only_denied: "The workspace cannot be read or the context pack is off.",
+};
+
+function layerReasonText(decision: MemoryLayerDecision, layer: "l0" | "l1"): string {
+  const reason = decision.reasons[layer];
+  return (reason && LAYER_REASON_TEXT[reason]) || "Not injected for this workspace.";
 }
 
 /** Upper bound for the routing hint added to the default wake-up path. */
@@ -420,6 +476,21 @@ function groupBySource(fragments: MemoryFragment[]): Record<MemorySourceKind, Me
   return grouped;
 }
 
+/**
+ * The builder's L1 block in the slot the hot-memory block used to fill. Already sanitized,
+ * deduplicated and budgeted by MemoryContextBuilder; only clamped to the slot here.
+ */
+function memoryItemsSlice(text: string | undefined, tokenBudget: number): SynthesizedContext {
+  const clamped = fitToBudget((text ?? "").trim(), tokenBudget, "[... memory truncated]");
+  return {
+    text: clamped,
+    totalTokens: estimateTokens(clamped),
+    fragmentCount: clamped ? clamped.split("\n").filter((line) => line.startsWith("- ")).length : 0,
+    sourceAttribution: emptySourceAttribution(),
+    droppedCount: 0,
+  };
+}
+
 export class MemorySynthesizer {
   static async buildHotMemoryContext(
     workspaceId: string,
@@ -576,64 +647,20 @@ export class MemorySynthesizer {
 
   /**
    * Compact memory-tool routing hint for the default wake-up path (at most
-   * ROUTING_HINT_MAX_TOKENS). Only tools in `visibleToolNames` are named, so the
-   * hint never points at a tool the model cannot call.
+   * ROUTING_HINT_MAX_TOKENS): the four memory tools (audit §8.3) and when to use each.
+   * Only tools in `visibleToolNames` are named, so the hint never points at a tool the
+   * model cannot call.
    */
   static buildMemoryRoutingHint(visibleToolNames: Iterable<string>): string {
-    const visible = new Set(visibleToolNames);
-    const routes: Array<[string, string]> = [
-      ["search_memories", "past decisions/context"],
-      ["memory_search_index", "observation index (then memory_timeline/memory_details)"],
-      ["search_quotes", "exact wording"],
-      ["search_sessions", "earlier task transcripts"],
-      ["memory_curated_read", "curated rules/preferences"],
-      ["memory_topics_load", "topic packs"],
-      ["context_grep", "compacted context of this task"],
-    ];
-    const lines: string[] = [];
-    for (const [tool, use] of routes) {
-      if (!visible.has(tool)) continue;
-      lines.push(`- ${use}: \`${tool}\``);
-    }
-    if (lines.length === 0) return "";
-    const hint = [
-      "<cowork_recall_hints>",
-      "Memory above is a summary. To recall more, use:",
-      ...lines,
-      "</cowork_recall_hints>",
-    ].join("\n");
-    return fitToBudget(hint, ROUTING_HINT_MAX_TOKENS, "");
+    return fitToBudget(buildMemoryToolRoutingHint(visibleToolNames), ROUTING_HINT_MAX_TOKENS, "");
   }
 
+  /**
+   * The same hint for callers without the visible tool list (the legacy synthesis path):
+   * the memory tools are always exposed unless a policy removes them.
+   */
   static buildRecallHintsContext(): string {
-    const features = MemoryFeaturesManager.loadSettings();
-    const hints: string[] = [];
-    if (features.verbatimRecallEnabled !== false) {
-      hints.push(
-        "- Use `search_quotes` for exact wording across transcripts, imported memories, and workspace notes.",
-      );
-    }
-    if (features.sessionRecallEnabled !== false) {
-      hints.push("- Use `search_sessions` for recent transcript/task history recall.");
-    }
-    if (
-      features.durableContextEnabled === true ||
-      features.durableContextMode === "experimental" ||
-      features.durableContextMode === "on"
-    ) {
-      hints.push(
-        "- Use `context_grep` and then `context_describe` for compacted runtime context from this task.",
-      );
-    }
-    hints.push("- Use `search_memories` for broader archive and imported-history recall.");
-    if (features.topicMemoryEnabled !== false) {
-      hints.push(
-        "- Use `memory_topics_load` when the task is topical and needs a focused L2 topic pack.",
-      );
-    }
-    return hints.length
-      ? `<cowork_recall_hints>\n## L2/L3 Recall Guidance\n${hints.join("\n")}\n</cowork_recall_hints>`
-      : "";
+    return this.buildMemoryRoutingHint(MEMORY_TOOL_ROUTES.map(([tool]) => tool));
   }
 
   private static async buildWakeUpLayers(
@@ -661,15 +688,17 @@ export class MemorySynthesizer {
     const l1Budget = remainingBudget - l0Budget;
 
     const identity =
-      settings.curatedMemoryEnabled === false
-        ? {
-            text: "",
-            totalTokens: 0,
-            fragmentCount: 0,
-            sourceAttribution: emptySourceAttribution(),
-            droppedCount: 0,
-          }
-        : await this.buildHotMemoryContext(workspaceId, l0Budget);
+      options.includeHotMemory === false
+        ? memoryItemsSlice(options.memoryItemsContext, l0Budget)
+        : settings.curatedMemoryEnabled === false
+          ? {
+              text: "",
+              totalTokens: 0,
+              fragmentCount: 0,
+              sourceAttribution: emptySourceAttribution(),
+              droppedCount: 0,
+            }
+          : await this.buildHotMemoryContext(workspaceId, l0Budget);
     let kitText = "";
     if (includeWorkspaceKit) {
       try {
@@ -679,6 +708,9 @@ export class MemorySynthesizer {
           agentRoleId: options.agentRoleId ?? null,
           readGuard: options.filesystemReadGuard,
           includeProjectGuidance: false,
+          includeDesignSystem: options.includeDesignSystem,
+          excludeGeneratedMemoryBlocks: options.excludeGeneratedMemoryBlocks,
+          excludeFiles: options.excludeKitFiles,
         });
         if (rawKit) {
           kitText = fitToBudget(rawKit, kitBudget, "[... workspace context truncated]");
@@ -727,89 +759,147 @@ export class MemorySynthesizer {
     };
   }
 
+  /**
+   * Memory Hub preview: what a private task in this workspace would receive, built the way
+   * the executor builds a plan step. MemoryInjectionPolicy decides the layers (private
+   * gateway, this workspace's memory settings); MemoryContextBuilder renders L0 (the pinned
+   * profile block) and L1 (memory_items recall for the prompt) from memory_items, or from
+   * the legacy stores until the lane migration has run; the synthesizer adds the kit slice,
+   * playbook and summaries around L1, as in the `memory_context` section.
+   */
   static async buildLayerPreview(
     workspaceId: string,
     workspacePath: string,
     taskPrompt: string,
-    options: SynthesizeOptions = {},
+    options: LayerPreviewOptions = {},
   ): Promise<MemoryLayerPreviewPayload> {
     const settings = MemoryFeaturesManager.loadSettings();
-    const wakeUpLayersEnabled = settings.wakeUpLayersEnabled !== false;
     const effectivePrompt = taskPrompt.trim() || "Current workspace memory preview";
+    const { workspaceCanRead, contextBuilder, ...synthesizeOptions } = options;
 
-    if (!wakeUpLayersEnabled) {
-      const synthesized = await this.synthesize(
-        workspaceId,
-        workspacePath,
-        effectivePrompt,
-        options,
-      );
-      return {
-        workspaceId,
-        taskPrompt: effectivePrompt,
-        generatedAt: Date.now(),
-        injectedLayerIds: ["L0", "L1", "L2", "L3"],
-        excludedLayerIds: [],
-        layers: [
-          {
-            layer: "L0",
-            title: "Legacy Combined Memory",
-            description:
-              "Wake-up layers are disabled; the prompt uses the combined synthesized memory block.",
-            includedText: synthesized.text,
-            budget: {
-              usedTokens: synthesized.totalTokens,
-              budgetTokens: options.tokenBudget ?? DEFAULT_TOKEN_BUDGET,
-              excludedCount: synthesized.droppedCount,
-            },
-            injectedByDefault: true,
-          },
-        ],
-      };
+    let workspaceSettings: {
+      enabled: boolean;
+      privacyMode?: "normal" | "strict" | "disabled";
+    } | null = null;
+    try {
+      const stored = await MemoryService.getSettings(workspaceId);
+      workspaceSettings = stored
+        ? { enabled: stored.enabled !== false, privacyMode: stored.privacyMode }
+        : null;
+    } catch {
+      workspaceSettings = null;
+    }
+    const decision = resolveMemoryInjection({
+      gatewayContext: "private",
+      workspaceSettings,
+      curatedMemoryEnabled: settings.curatedMemoryEnabled !== false,
+      contextPackInjectionEnabled: !!settings.contextPackInjectionEnabled,
+      workspaceCanRead: workspaceCanRead !== false,
+      // External providers are a network call; the preview shows local memory only.
+      externalNetworkAllowed: false,
+    });
+
+    let layers: MemoryContextLayers = { l0: null, l1: null, source: "none" };
+    if (decision.memory) {
+      try {
+        layers = await (contextBuilder ?? new MemoryContextBuilderService()).buildLayers({
+          workspaceId,
+          decision,
+          focus: effectivePrompt,
+          include: { l0: true, l1: true },
+          budgets: { l0Tokens: MEMORY_L0_TOKENS, l1Tokens: MEMORY_L1_ITEMS_TOKENS },
+        });
+      } catch {
+        layers = { l0: null, l1: null, source: "none" };
+      }
     }
 
-    const wakeUp = await this.buildWakeUpLayers(
-      workspaceId,
-      workspacePath,
-      effectivePrompt,
-      options,
-      settings,
-    );
+    const l0Text = layers.l0
+      ? [
+          PINNED_CONTEXT_TAGS.userProfile.open,
+          layers.l0.text,
+          PINNED_CONTEXT_TAGS.userProfile.close,
+        ].join("\n")
+      : "";
+    const l1ItemsText = layers.l1
+      ? `<cowork_relevant_memory>\n${layers.l1.text}\n</cowork_relevant_memory>`
+      : "";
+
+    const contextBudget = synthesizeOptions.tokenBudget ?? MEMORY_CONTEXT_SECTION_TOKENS;
+    let memoryContext: SynthesizedContext = {
+      text: "",
+      totalTokens: 0,
+      fragmentCount: 0,
+      sourceAttribution: emptySourceAttribution(),
+      droppedCount: 0,
+    };
+    if (decision.layers.l1 || decision.layers.workspaceKit) {
+      memoryContext = await this.synthesize(workspaceId, workspacePath, effectivePrompt, {
+        ...synthesizeOptions,
+        tokenBudget: contextBudget,
+        includeWorkspaceKit:
+          synthesizeOptions.includeWorkspaceKit !== false && decision.layers.workspaceKit,
+        includeHotMemory: false,
+        memoryItemsContext: l1ItemsText,
+        includeDesignSystem: false,
+        excludeGeneratedMemoryBlocks: true,
+        excludeKitFiles: decision.layers.sharedContext ? SHARED_CONTEXT_KIT_FILES : [],
+        includeKnowledgeGraph: synthesizeOptions.includeKnowledgeGraph !== false,
+      });
+    }
+
+    const sourceNote =
+      layers.source === "legacy"
+        ? " Read from the legacy stores until the memory_items migration has run."
+        : "";
+    const recallHints = this.buildRecallHintsContext();
     const l2Description =
       settings.topicMemoryEnabled !== false
-        ? "Excluded from default injection. Load with `memory_topics_load` when the task needs a focused topical pack."
+        ? "Excluded from default injection. `memory_recall` (scope knowledge) returns matching topic packs when the task needs them."
         : "Topic packs are currently disabled.";
     const l3Description =
-      "Excluded from default injection. Use `search_quotes`, `search_sessions`, or `search_memories` when exact recall is needed.";
+      'Excluded from default injection. Use `memory_recall` (index, then detail "full") when exact recall is needed.';
 
-    const layers: MemoryLayerPreview[] = [
+    const previewLayers: MemoryLayerPreview[] = [
       {
         layer: "L0",
-        title: wakeUp.l0.title,
-        description: wakeUp.l0.description,
-        includedText: wakeUp.l0.text,
+        title: "L0 Pinned profile",
+        description:
+          "Identity, rules, pinned and user-stated preferences, open commitments and curated facts from memory_items, pinned to every turn of a private task." +
+          sourceNote,
+        includedText: l0Text,
+        ...(l0Text
+          ? {}
+          : {
+              excludedText: decision.layers.l0
+                ? "Nothing to pin yet."
+                : layerReasonText(decision, "l0"),
+            }),
         budget: {
-          usedTokens: wakeUp.l0.totalTokens,
-          budgetTokens: Math.max(
-            wakeUp.l0.totalTokens,
-            options.tokenBudget ?? DEFAULT_TOKEN_BUDGET,
-          ),
-          excludedCount: wakeUp.l0.droppedCount,
+          usedTokens: estimateTokens(l0Text),
+          budgetTokens: MEMORY_L0_TOKENS,
+          excludedCount: layers.l0?.truncated ? 1 : 0,
         },
         injectedByDefault: true,
       },
       {
         layer: "L1",
-        title: wakeUp.l1.title,
-        description: wakeUp.l1.description,
-        includedText: wakeUp.l1.text,
+        title: "L1 Memory context",
+        description:
+          "memory_items recall for the request, with the .cowork kit slice, past task patterns and recent summaries (the plan step's memory section)." +
+          sourceNote,
+        includedText: memoryContext.text,
+        ...(memoryContext.text
+          ? {}
+          : {
+              excludedText: decision.layers.l1
+                ? "Nothing relevant to this request yet."
+                : layerReasonText(decision, "l1"),
+            }),
         budget: {
-          usedTokens: wakeUp.l1.totalTokens,
-          budgetTokens: Math.max(
-            wakeUp.l1.totalTokens,
-            options.tokenBudget ?? DEFAULT_TOKEN_BUDGET,
-          ),
-          excludedCount: wakeUp.l1.droppedCount,
+          usedTokens: memoryContext.totalTokens,
+          budgetTokens: Math.max(memoryContext.totalTokens, contextBudget),
+          excludedCount: memoryContext.droppedCount,
         },
         injectedByDefault: true,
       },
@@ -830,11 +920,11 @@ export class MemorySynthesizer {
         layer: "L3",
         title: "L3 Deep Recall",
         description:
-          "Unified recall and verbatim quote search across transcripts, tasks, files, and memory.",
-        includedText: wakeUp.recallHints,
+          "On-demand recall across memory, the archive, past conversations and workspace knowledge.",
+        includedText: recallHints,
         excludedText: l3Description,
         budget: {
-          usedTokens: estimateTokens(wakeUp.recallHints),
+          usedTokens: estimateTokens(recallHints),
           budgetTokens: 0,
           excludedCount: 0,
         },
@@ -848,7 +938,7 @@ export class MemorySynthesizer {
       generatedAt: Date.now(),
       injectedLayerIds: ["L0", "L1"],
       excludedLayerIds: ["L2", "L3"],
-      layers,
+      layers: previewLayers,
     };
   }
 
@@ -918,15 +1008,17 @@ export class MemorySynthesizer {
     const structuredBudget = remainingBudget - hotBudget;
 
     const hot =
-      settings.curatedMemoryEnabled === false
-        ? {
-            text: "",
-            totalTokens: 0,
-            fragmentCount: 0,
-            sourceAttribution: emptySourceAttribution(),
-            droppedCount: 0,
-          }
-        : await this.buildHotMemoryContext(workspaceId, hotBudget);
+      options.includeHotMemory === false
+        ? memoryItemsSlice(options.memoryItemsContext, hotBudget)
+        : settings.curatedMemoryEnabled === false
+          ? {
+              text: "",
+              totalTokens: 0,
+              fragmentCount: 0,
+              sourceAttribution: emptySourceAttribution(),
+              droppedCount: 0,
+            }
+          : await this.buildHotMemoryContext(workspaceId, hotBudget);
     const structured = await this.buildStructuredMemoryContext(
       workspaceId,
       workspacePath,
@@ -949,6 +1041,9 @@ export class MemorySynthesizer {
           agentRoleId: options.agentRoleId ?? null,
           readGuard: options.filesystemReadGuard,
           includeProjectGuidance: false,
+          includeDesignSystem: options.includeDesignSystem,
+          excludeGeneratedMemoryBlocks: options.excludeGeneratedMemoryBlocks,
+          excludeFiles: options.excludeKitFiles,
         });
         if (rawKit) {
           kitText = fitToBudget(rawKit, kitBudget, "[... workspace context truncated]");

@@ -21,6 +21,8 @@ describe("tool-policy-engine background process tools", () => {
 
 describe("tool-policy-engine memory writes (SEC-12)", () => {
   const MEMORY_WRITES = [
+    "memory_remember",
+    "memory_forget",
     "memory_save",
     "memory_curate",
     "supermemory_remember",
@@ -41,6 +43,8 @@ describe("tool-policy-engine memory writes (SEC-12)", () => {
   });
 
   it.each([
+    "memory_recall",
+    "context_recall",
     "search_memories",
     "search_quotes",
     "memory_search_index",
@@ -52,6 +56,30 @@ describe("tool-policy-engine memory writes (SEC-12)", () => {
   ])("keeps memory read %s allowed in plan and analyze modes", (tool) => {
     expect(evaluateToolPolicy(tool, { executionMode: "plan" }).decision).toBe("allow");
     expect(evaluateToolPolicy(tool, { executionMode: "analyze" }).decision).toBe("allow");
+  });
+});
+
+describe("tool-policy-engine memory lane (audit §8.3)", () => {
+  it.each(["memory_recall", "memory_remember", "memory_forget", "context_recall"])(
+    "always exposes %s in the memory lane, whatever the task text",
+    (tool) => {
+      const availability = evaluateToolAvailability(tool, { taskText: "fix the login bug" });
+      expect(availability.decision).toBe("allow");
+      expect(availability.metadata).toMatchObject({ lane: "memory", exposure: "always" });
+    },
+  );
+
+  it.each(["kg_search", "kg_create_entity", "search_memories", "memory_save"])(
+    "keeps %s in the memory lane instead of the conditional system lane",
+    (tool) => {
+      expect(evaluateToolAvailability(tool, { taskText: "" }).metadata.lane).toBe("memory");
+    },
+  );
+
+  it("blocks every memory tool in chat mode", () => {
+    for (const tool of ["memory_recall", "memory_remember", "memory_forget", "context_recall"]) {
+      expect(evaluateToolPolicy(tool, { executionMode: "chat" }).decision).toBe("deny");
+    }
   });
 });
 

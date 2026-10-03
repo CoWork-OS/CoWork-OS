@@ -459,15 +459,15 @@ The native SQLite test file can skip locally when `better-sqlite3` is unavailabl
 
 ## Durable Runtime Context QA
 
-Run focused durable-context checks when touching active-task recall, compaction-summary persistence, Memory Hub durable-context settings, `context_grep`, `context_describe`, or memory clearing:
+Run focused durable-context checks when touching active-task recall, compaction-summary persistence, Memory Hub durable-context settings, `context_recall` (and its deprecated `context_grep` / `context_describe` aliases), or memory clearing:
 
 ```bash
-npx vitest run src/electron/agent/tools/__tests__/system-tools-new.test.ts src/electron/settings/__tests__/memory-features-manager.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts
+npx vitest run src/electron/agent/tools/__tests__/memory-tools.test.ts src/electron/settings/__tests__/memory-features-manager.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts
 npx vitest run src/electron/memory/__tests__/DurableContextService.test.ts
 npm run type-check
 ```
 
-The durable-service suite uses native SQLite and may skip locally when `better-sqlite3` is unavailable. The tool-level suite should still run because it covers disabled behavior, tool exposure, active-task scope enforcement, and the explicit-user-request override without needing native SQLite.
+The durable-service suite uses native SQLite and may skip locally when `better-sqlite3` is unavailable. The tool-level suite covers the `context_recall` contract, its deprecated aliases, active-task scope enforcement, and the explicit-user-request override of the aliases.
 
 See [Durable Runtime Context](durable-runtime-context.md) for test prompts, expected behavior, and implementation landmarks.
 

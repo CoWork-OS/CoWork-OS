@@ -94,6 +94,26 @@ describe("HeartbeatDispatchEngine.execute", () => {
     expect(deps.createTask).not.toHaveBeenCalled();
   });
 
+  it("proposes heartbeat suggestions to the sink keyed by the cited task", async () => {
+    await engine.execute(
+      makeInput({
+        dispatchKind: "suggestion",
+        evidenceRefs: ["signal:1", "mention:m-1", "task:t-9"],
+      }),
+    );
+    expect(deps.createCompanionSuggestion).toHaveBeenCalledWith(
+      "ws-1",
+      expect.objectContaining({ entityKey: "task:t-9", source: "heartbeat" }),
+    );
+  });
+
+  it("does not notify when the sink merged the proposal into an existing suggestion", async () => {
+    deps = makeDeps({ createCompanionSuggestion: vi.fn().mockResolvedValue(null) });
+    engine = new HeartbeatDispatchEngine(deps);
+    await engine.execute(makeInput({ dispatchKind: "suggestion" }));
+    expect(deps.addNotification).not.toHaveBeenCalled();
+  });
+
   it("handles runbook dispatch without creating a task or suggestion", async () => {
     const result = await engine.execute(
       makeInput({

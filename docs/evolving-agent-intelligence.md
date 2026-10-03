@@ -39,7 +39,7 @@ This keeps retries closer to "continue from what already worked" than "start ove
 
 ## 1. Layered Memory Runtime
 
-**File:** `src/electron/memory/MemorySynthesizer.ts`
+**Files:** `src/electron/memory/MemoryInjectionPolicy.ts`, `src/electron/memory/MemoryContextBuilder.ts`, `src/electron/memory/MemorySynthesizer.ts` (design: [Memory Engine](memory-engine.md))
 
 ### Problem
 
@@ -47,44 +47,39 @@ The old monolithic synthesized-memory block mixed durable facts, broad archive r
 
 ### Solution
 
-`MemorySynthesizer.synthesize()` now uses an explicit wake-up model with distinct roles and budgets:
+Facts about the user and workspace live in `memory_items` (written through `MemoryWriter`). One policy, `MemoryInjectionPolicy`, decides per task and turn which memory layers a prompt may receive (private gateway, retained memory, workspace memory switch, `<no-memory>`, sub-agents and verifiers). One builder, `MemoryContextBuilder`, renders them within one budget:
 
-1. **L0 Identity** in `<cowork_hot_memory>` for the facts that should stay front-and-center:
-   - curated hot-memory entries from `CuratedMemoryService`
-   - user profile facts
-   - relationship memory
-   - workspace-kit essentials
-2. **L1 Essential Story** in `<cowork_structured_memory>` for ranked supporting context:
+1. **L0** (identity, rules, pinned and user-stated preferences, open commitments, curated facts) as the pinned `<cowork_user_profile>` block on step and follow-up turns, or `<cowork_hot_memory>` in the planning and chat system prompts. Cached per session and rebuilt when memory changes. Until the one-time lane migration has run, L0 is read from the legacy stores (curated entries, user profile, relationship memory).
+2. **L1** (memory items relevant to the request) as `<cowork_relevant_memory>`, or on plan steps inside the memory context section, where `MemorySynthesizer` adds:
+   - the `.cowork` kit slice
    - playbook patterns
    - daily activity summaries
    - Box Brain hits when available
-   - the knowledge graph and archive memory are not part of this layer; the KG is reached through `kg_*` tools, and archive matches arrive through the per-turn recall block
-3. **L2 Topic Packs** as explicit `.cowork/memory/topics/*.md` loads through `memory_topics_load`
-4. **L3 Deep Recall** as explicit tools:
-   - `search_quotes`
-   - `search_sessions`
-   - `search_memories`
+3. **L2 Topic Packs** from `.cowork/memory/topics/*.md`, returned by `memory_recall` (scope `knowledge`)
+4. **L3 Deep Recall** through the memory tools:
+   - `memory_recall` over saved facts, the archive, earlier conversations, notes and the knowledge graph
+   - `context_recall` for the active task after compaction
 
-Workspace kit context still renders separately before memory sections, and only `L0 + L1` are injected into the live prompt by default.
+Only `L0 + L1` are injected into the live prompt by default. Memory Hub's layer preview shows what a private task in the workspace would receive.
 
 ### Configuration
 
 Default runtime behavior:
 
-| Setting                        | Default                                                             |
-| ------------------------------ | ------------------------------------------------------------------- |
-| `L0 Identity` injection        | `on`                                                                |
-| `L1 Essential Story` injection | `on`                                                                |
-| Archive memory injection       | `off` (`defaultArchiveInjectionEnabled: false`)                     |
-| Quote/session/archive recall   | tool-driven (`search_quotes`, `search_sessions`, `search_memories`) |
-| Topic packs                    | tool-driven (`memory_topics_load`)                                  |
+| Setting                        | Default                                         |
+| ------------------------------ | ----------------------------------------------- |
+| `L0` injection                 | `on`                                            |
+| `L1` injection                 | `on`                                            |
+| Archive memory injection       | `off` (`defaultArchiveInjectionEnabled: false`) |
+| Conversation and archive recall | tool-driven (`memory_recall`)                  |
+| Topic packs                    | tool-driven (`memory_recall`, scope `knowledge`) |
 
 ### Curated-memory guardrails
 
 - Curated entry content is capped at **320 characters**
 - `match` strings for replace/remove are capped at **120 characters**
-- `memory_curate` supports stable `id` values so replace/remove operations can be deterministic
-- Curated file sync into `.cowork/USER.md` and `.cowork/MEMORY.md` is serialized per workspace and retried on file-change races
+- the deprecated `memory_curate` alias supports stable `id` values so replace/remove operations can be deterministic; new writes use `memory_remember`
+- Curated file sync into `.cowork/USER.md` and `.cowork/MEMORY.md` is serialized per workspace and retried on file-change races; once the lane migration has run, the generated blocks are rendered from `memory_items` and hand edits are synced back
 
 ### Dreaming curation
 
@@ -94,14 +89,12 @@ Dreaming does not change what is injected into prompts by itself. Candidates sta
 
 ### Sources
 
-The runtime now thinks about sources by wake-up layer instead of one flat synthesis list:
-
 | Layer                  | Sources                                                                                                           |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **L0 Identity**        | `CuratedMemoryService`, `UserProfileService`, `RelationshipMemoryService`, workspace-kit essentials               |
-| **L1 Essential Story** | `PlaybookService`, `DailyLogSummarizer`, Box Brain hits                                                            |
-| **L2 Topic Packs**     | `memory_topics_load` over `.cowork/memory/topics/*.md`                                                            |
-| **L3 Deep Recall**     | `search_quotes`, `search_sessions`, `search_memories`                                                             |
+| **L0**                 | `memory_items` (legacy `CuratedMemoryService`, `UserProfileService`, `RelationshipMemoryService` before the lane migration) |
+| **L1**                 | `memory_items` recall, the `.cowork` kit slice, `PlaybookService`, `DailyLogSummarizer`, Box Brain hits            |
+| **L2 Topic Packs**     | `memory_recall` (scope `knowledge`) over `.cowork/memory/topics/*.md`                                             |
+| **L3 Deep Recall**     | `memory_recall`, `context_recall`                                                                                 |
 | **Dreaming Evidence**  | transcript spans, structured observations, curated hot memory, and heartbeat memory-drift signals                 |
 
 `daily_summary` fragments come from `.cowork/memory/summaries/<YYYY-MM-DD>.md` files written by `MemoryConsolidator` through `DailyLogSummarizer` (see [Daily Summaries](#6-daily-summaries)).
@@ -109,23 +102,22 @@ The runtime now thinks about sources by wake-up layer instead of one flat synthe
 ### Output format
 
 ```xml
-<cowork_hot_memory>
-## Curated Hot Memory
-- [Curated entry]
+<cowork_user_profile>
+MEMORY (what CoWork knows about the user and this workspace; ...):
+## Preferences
+- ...
+## Rules
+- ... (inferred)
+</cowork_user_profile>
 
-## You & the User
-- [UserProfile fact]
-- [RelationshipMemory item]
-</cowork_hot_memory>
-
-<cowork_structured_memory>
-## Past Task Patterns
-- [Playbook entry]
-
-## Recent Summaries
-[Daily summary snippet]
-</cowork_structured_memory>
+<cowork_relevant_memory>
+Relevant memory for this request (read-only context):
+- [decision] ...
+</cowork_relevant_memory>
 ```
+
+On plan steps the L1 block sits in the memory context section together with the kit slice and
+`<cowork_structured_memory>` (past task patterns, recent summaries).
 
 ---
 
@@ -217,8 +209,10 @@ Task finalizes with terminal ok
     → if count ≥ threshold: proposeSkill() via SkillProposalService.create()
 ```
 
-**Legacy data.** Older `[PLAYBOOK] Reinforced pattern` memories are kept for history but are
-never treated as proof, and generated Playbook rows are excluded from generic prompt recall and
+**Legacy data.** Playbook outcomes are `playbook_entries` rows; the generated `[PLAYBOOK]` archive
+memories of older releases were moved there once (keeping their ids, so existing evidence still
+verifies). Older `[PLAYBOOK] Reinforced pattern` text is kept as `legacy_reinforcement` entries for
+history but is never treated as proof, and no Playbook outcome reaches generic prompt recall or
 archive synthesis. Pending auto-proposals created from that text are marked `unverified` and
 cannot be approved until revalidated; already-approved skills stay installed and are flagged for
 review. Summaries derived before this change carry no source lineage and cannot be proven clean

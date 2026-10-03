@@ -108,16 +108,18 @@ describe("TaskExecutor tool allow-list semantics", () => {
         "Update the config loader",
       ) as Set<string>;
       for (const tool of [
+        "memory_recall",
+        "context_recall",
+        // Deprecated names routed to memory_recall / context_recall.
         "search_memories",
-        "memory_search_index",
-        "memory_timeline",
-        "memory_details",
-        "search_quotes",
         "search_sessions",
-        "memory_curated_read",
-        "memory_topics_load",
+        "context_grep",
       ]) {
         expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(true);
+      }
+      // Memory writes stay step-scoped.
+      for (const tool of ["memory_remember", "memory_forget", "memory_save", "memory_curate"]) {
+        expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(false);
       }
     }
   });

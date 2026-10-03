@@ -1,8 +1,11 @@
 import type { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import { type TaskEventRepository } from "../database/repositories";
 import { type ActivityRepository } from "../activity/activity-repository-facades";
+import path from "path";
 import { MemoryService } from "../memory/MemoryService";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
+import { DurableContextService } from "../memory/DurableContextService";
+import { extractFtsTerms, termCoverage } from "../database/fts-query";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { ChronicleObservationRepository } from "../chronicle";
 import { LLMProviderFactory, type LLMSettings } from "./llm/provider-factory";
@@ -54,6 +57,8 @@ function sourceWeight(sourceType: UnifiedRecallSourceType): number {
       return 0.9;
     case "message":
       return 0.88;
+    case "conversation":
+      return 0.85;
     case "file":
       return 0.84;
     case "workspace_note":
@@ -69,14 +74,47 @@ function sourceWeight(sourceType: UnifiedRecallSourceType): number {
   }
 }
 
-function recencyBoost(timestamp: number): number {
-  const ageHours = Math.max(0, Date.now() - timestamp) / (60 * 60 * 1000);
-  if (!Number.isFinite(ageHours)) return 0;
-  return Math.max(0, 1 - Math.min(ageHours / 168, 1) * 0.35);
-}
+/** Reciprocal-rank fusion constant: lanes contribute weight / (K + position). */
+const RRF_K = 60;
+/** Lanes that are not full-text indexes must match at least this share of query terms. */
+const MIN_TERM_COVERAGE = 0.5;
+const KNOWN_SOURCES = new Set<UnifiedRecallSourceType>([
+  "task",
+  "message",
+  "conversation",
+  "file",
+  "workspace_note",
+  "memory",
+  "screen_context",
+  "knowledge_graph",
+]);
 
-function rankFrom(sourceType: UnifiedRecallSourceType, timestamp: number, base = 0): number {
-  return Number((base + sourceWeight(sourceType) * 0.7 + recencyBoost(timestamp) * 0.3).toFixed(4));
+type RecallCandidate = Omit<UnifiedRecallResult, "rank">;
+
+/**
+ * Fuse per-lane rankings: each lane is ordered by its own relevance (bm25, hybrid score,
+ * term coverage...), and only positions are compared across lanes, scaled by the lane's
+ * weight. Raw scores of different lanes are never compared. The result rank is in (0, 1]:
+ * the top item of the heaviest lane scores close to its weight.
+ */
+function fuseLanes(lanes: RecallCandidate[][], limit: number): UnifiedRecallResult[] {
+  const fused = new Map<string, { result: RecallCandidate; score: number }>();
+  for (const lane of lanes) {
+    lane.forEach((result, index) => {
+      const key = `${result.sourceType}:${result.objectId}`;
+      const score = sourceWeight(result.sourceType) / (RRF_K + index + 1);
+      const existing = fused.get(key);
+      if (existing) existing.score += score;
+      else fused.set(key, { result, score });
+    });
+  }
+  return [...fused.values()]
+    .sort((a, b) => b.score - a.score || b.result.timestamp - a.result.timestamp)
+    .slice(0, limit)
+    .map(({ result, score }) => ({
+      ...result,
+      rank: Number((score * (RRF_K + 1)).toFixed(4)),
+    }));
 }
 
 export class RuntimeVisibilityService {
@@ -213,284 +251,344 @@ export class RuntimeVisibilityService {
     };
   }
 
+  /**
+   * Mission Control recall (RECALL-4): one ranked list across the workspace's memory,
+   * notes, knowledge graph, screen context, conversation index, tasks, files and
+   * activity. Full-text lanes are trusted as returned (no whole-query substring filter
+   * on top of FTS); lanes without an index are filtered by query-term coverage. Lanes are
+   * fused by reciprocal rank. Browsing records no memory references, and everything is
+   * scoped to the workspace: without one, nothing is returned.
+   */
   static async collectUnifiedRecall(
     deps: RecallRepositories,
     query: UnifiedRecallQuery & { workspacePath?: string },
   ): Promise<UnifiedRecallResponse> {
     const workspaceId = normalizeText(query.workspaceId) || undefined;
-    const normalizedQuery = normalizeText(query.query);
-    const limit = Math.min(Math.max(query.limit || 20, 1), 100);
-    const wantedSources = new Set<UnifiedRecallSourceType>(query.sourceTypes || []);
+    const normalizedQuery = normalizeText(query.query).slice(0, 2000);
+    const limit = Math.min(Math.max(Math.floor(Number(query.limit) || 20), 1), 100);
+    const wantedSources = new Set<UnifiedRecallSourceType>(
+      (Array.isArray(query.sourceTypes) ? query.sourceTypes : []).filter((source) =>
+        KNOWN_SOURCES.has(source),
+      ),
+    );
     const includeAllSources = wantedSources.size === 0;
     const sourceAllowed = (source: UnifiedRecallSourceType): boolean =>
       includeAllSources || wantedSources.has(source);
+    const response = (results: UnifiedRecallResult[]): UnifiedRecallResponse => ({
+      query: normalizedQuery,
+      workspaceId,
+      generatedAt: Date.now(),
+      results,
+    });
 
-    const results: UnifiedRecallResult[] = [];
-    const seen = new Set<string>();
-    const queryLower = normalizedQuery.toLowerCase();
-    const matchesQuery = (text: string): boolean =>
-      !queryLower || text.toLowerCase().includes(queryLower);
-
-    const addResult = (result: UnifiedRecallResult): void => {
-      const key = `${result.sourceType}:${result.objectId}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      results.push(result);
+    const terms = extractFtsTerms(normalizedQuery, { maxTerms: 24 });
+    if (!workspaceId || terms.length === 0) return response([]);
+    const covers = (text: string): number => termCoverage(text, terms);
+    const candidateLimit = Math.min(limit * 2, 100);
+    const lanes: RecallCandidate[][] = [];
+    const lane = async (
+      enabled: boolean,
+      collect: () => Promise<RecallCandidate[]>,
+    ): Promise<RecallCandidate[]> => {
+      if (!enabled) return [];
+      try {
+        return await collect();
+      } catch {
+        // One failing source must not hide the others.
+        return [];
+      }
     };
 
-    if (workspaceId && sourceAllowed("memory")) {
-      for (const mem of await MemoryService.searchForPromptRecall(
-        workspaceId,
-        normalizedQuery,
-        limit * 2,
-      )) {
-        const snippet = truncate(mem.snippet || "", 260);
-        if (!matchesQuery(snippet)) continue;
-        let observation:
-          | Awaited<ReturnType<typeof MemoryObservationService.details>>[number]
-          | undefined;
-        try {
-          observation = (await MemoryObservationService.details([mem.id], workspaceId))[0];
-        } catch {
-          observation = undefined;
-        }
-        addResult({
-          sourceType: "memory",
-          objectId: mem.id,
+    // Memory: own, non-private, visible rows; browsing is not a use, so no references.
+    lanes.push(
+      await lane(sourceAllowed("memory"), async () => {
+        const memories = await MemoryService.searchForBriefingAsync(
           workspaceId,
-          taskId: mem.taskId,
-          timestamp: mem.createdAt,
-          rank: rankFrom("memory", mem.createdAt, mem.relevanceScore ?? 0),
-          snippet,
-          title: observation?.title || normalizeText(mem.type) || "Memory",
-          sourceLabel: "Memory",
-          metadata: {
-            type: mem.type,
-            relevanceScore: mem.relevanceScore,
-            observationTitle: observation?.title,
-            concepts: observation?.concepts || [],
-            filesRead: observation?.filesRead || [],
-            filesModified: observation?.filesModified || [],
-            privacyState: observation?.privacyState,
-            sourceEventIds: observation?.sourceEventIds || [],
-          },
+          normalizedQuery,
+          candidateLimit,
+        );
+        let observations = new Map<
+          string,
+          Awaited<ReturnType<typeof MemoryObservationService.details>>[number]
+        >();
+        try {
+          observations = new Map(
+            (
+              await MemoryObservationService.details(
+                memories.map((mem) => mem.id),
+                workspaceId,
+              )
+            ).map((observation) => [observation.memoryId, observation]),
+          );
+        } catch {
+          // Observation metadata is optional.
+        }
+        return memories.map((mem) => {
+          const observation = observations.get(mem.id);
+          return {
+            sourceType: "memory" as const,
+            objectId: mem.id,
+            workspaceId,
+            taskId: mem.taskId,
+            timestamp: mem.createdAt,
+            snippet: truncate(mem.snippet || "", 260),
+            title: observation?.title || normalizeText(mem.type) || "Memory",
+            sourceLabel: "Memory",
+            metadata: {
+              type: mem.type,
+              relevanceScore: mem.relevanceScore,
+              observationTitle: observation?.title,
+              concepts: observation?.concepts || [],
+              filesRead: observation?.filesRead || [],
+              filesModified: observation?.filesModified || [],
+              privacyState: observation?.privacyState,
+              sourceEventIds: observation?.sourceEventIds || [],
+            },
+          };
         });
-      }
-    }
+      }),
+    );
 
-    if (workspaceId && query.workspacePath && sourceAllowed("workspace_note")) {
-      for (const note of await MemoryService.searchWorkspaceMarkdown(
-        workspaceId,
-        query.workspacePath,
-        normalizedQuery,
-        limit * 2,
-      )) {
-        const snippet = truncate(note.snippet || "", 260);
-        if (!matchesQuery(snippet)) continue;
-        addResult({
-          sourceType: "workspace_note",
+    // Workspace notes: the `.cowork` kit, the same root the agent tools index.
+    lanes.push(
+      await lane(Boolean(query.workspacePath) && sourceAllowed("workspace_note"), async () =>
+        (
+          await MemoryService.searchWorkspaceMarkdown(
+            workspaceId,
+            path.join(query.workspacePath as string, ".cowork"),
+            normalizedQuery,
+            candidateLimit,
+          )
+        ).map((note) => ({
+          sourceType: "workspace_note" as const,
           objectId: note.id,
           workspaceId,
           timestamp: note.createdAt,
-          rank: rankFrom("workspace_note", note.createdAt, note.relevanceScore ?? 0),
-          snippet,
+          snippet: truncate(note.snippet || "", 260),
           title: normalizeText(note.type) || "Workspace note",
           sourceLabel: "Workspace note",
           metadata: {
             relevanceScore: note.relevanceScore,
             ...("path" in note ? { path: note.path } : {}),
           },
-        });
-      }
-    }
+        })),
+      ),
+    );
 
-    if (workspaceId && sourceAllowed("knowledge_graph")) {
-      for (const entity of await KnowledgeGraphService.search(
-        workspaceId,
-        normalizedQuery,
-        limit * 2,
-      )) {
-        const snippet = truncate(
-          `${entity.entity.name}${entity.entity.description ? ` - ${entity.entity.description}` : ""}`,
-          260,
-        );
-        if (!matchesQuery(snippet)) continue;
-        addResult({
-          sourceType: "knowledge_graph",
-          objectId: entity.entity.id,
+    lanes.push(
+      await lane(sourceAllowed("knowledge_graph"), async () =>
+        (await KnowledgeGraphService.search(workspaceId, normalizedQuery, candidateLimit)).map(
+          (entity) => ({
+            sourceType: "knowledge_graph" as const,
+            objectId: entity.entity.id,
+            workspaceId,
+            timestamp: entity.entity.updatedAt,
+            snippet: truncate(
+              `${entity.entity.name}${entity.entity.description ? ` - ${entity.entity.description}` : ""}`,
+              260,
+            ),
+            title: entity.entity.name,
+            sourceLabel: "Knowledge graph",
+            metadata: {
+              entityType: entity.entity.entityTypeName,
+              confidence: entity.entity.confidence,
+            },
+          }),
+        ),
+      ),
+    );
+
+    // Screen context is scored, not indexed: keep observations that match the query.
+    lanes.push(
+      await lane(Boolean(query.workspacePath) && sourceAllowed("screen_context"), async () =>
+        ChronicleObservationRepository.searchSync(
+          query.workspacePath as string,
+          normalizedQuery,
+          candidateLimit,
+        )
+          .map((observation) => ({
+            observation,
+            snippet: truncate(
+              [
+                observation.appName,
+                observation.windowTitle,
+                observation.localTextSnippet || observation.query,
+              ]
+                .filter(Boolean)
+                .join(" - "),
+              260,
+            ),
+          }))
+          .filter(({ snippet }) => covers(snippet) >= MIN_TERM_COVERAGE)
+          .map(({ observation, snippet }) => ({
+            sourceType: "screen_context" as const,
+            objectId: observation.id,
+            workspaceId: observation.workspaceId,
+            taskId: observation.taskId,
+            timestamp: observation.capturedAt,
+            snippet,
+            title: observation.windowTitle || observation.appName || "Screen context",
+            sourceLabel: "Screen context",
+            metadata: {
+              appName: observation.appName,
+              windowTitle: observation.windowTitle,
+              imagePath: observation.imagePath,
+              confidence: observation.confidence,
+              usedFallback: observation.usedFallback,
+              provenance: observation.provenance,
+              destinationHints: observation.destinationHints,
+              sourceRef: observation.sourceRef || null,
+              memoryId: observation.memoryId || null,
+              memoryGeneratedAt: observation.memoryGeneratedAt || null,
+            },
+          })),
+      ),
+    );
+
+    // The conversation index: user/assistant messages, tool output and summaries of
+    // every task in the workspace.
+    const wantConversation = sourceAllowed("message") || sourceAllowed("conversation");
+    lanes.push(
+      await lane(wantConversation, async () =>
+        (
+          await DurableContextService.searchConversation({
+            workspaceId,
+            query: normalizedQuery,
+            limit: candidateLimit,
+            mode: "auto",
+          })
+        )
+          .map((hit) => {
+            const isMessage = hit.role === "user" || hit.role === "assistant";
+            const sourceType: UnifiedRecallSourceType =
+              isMessage && hit.kind === "event" ? "message" : "conversation";
+            return {
+              sourceType,
+              objectId: hit.eventId ? `${hit.taskId}:${hit.eventId}` : `${hit.taskId}:${hit.id}`,
+              workspaceId,
+              taskId: hit.taskId,
+              timestamp: hit.timestamp,
+              snippet: truncate(hit.snippet, 260),
+              title:
+                hit.type === "user_message"
+                  ? "User message"
+                  : hit.type === "assistant_message"
+                    ? "Assistant message"
+                    : hit.kind === "summary"
+                      ? "Conversation summary"
+                      : hit.type,
+              sourceLabel: sourceType === "message" ? "Message" : "Conversation",
+              metadata: { eventType: hit.type, conversationId: hit.id },
+            };
+          })
+          .filter((result) => sourceAllowed(result.sourceType)),
+      ),
+    );
+
+    // Tasks of this workspace (title, prompt, result), ranked by query-term coverage.
+    let taskMatches: Task[] = [];
+    if (sourceAllowed("task") || sourceAllowed("file")) {
+      try {
+        const recent = await deps.taskRepo.findByCreatedAtRange({
+          startMs: Date.now() - 90 * 24 * 60 * 60 * 1000,
+          endMs: Date.now() + 1,
+          limit: 200,
           workspaceId,
-          timestamp: entity.entity.updatedAt,
-          rank: rankFrom("knowledge_graph", entity.entity.updatedAt, entity.score),
-          snippet,
-          title: entity.entity.name,
-          sourceLabel: "Knowledge graph",
-          metadata: {
-            entityType: entity.entity.entityTypeName,
-            confidence: entity.entity.confidence,
-          },
         });
+        taskMatches = recent
+          .filter((task) => task.workspaceId === workspaceId)
+          .map((task) => ({
+            task,
+            coverage: covers(`${task.title}\n${task.prompt}\n${task.resultSummary || ""}`),
+          }))
+          .filter((entry) => entry.coverage >= MIN_TERM_COVERAGE)
+          .sort(
+            (a, b) =>
+              b.coverage - a.coverage ||
+              (b.task.updatedAt || b.task.createdAt) - (a.task.updatedAt || a.task.createdAt),
+          )
+          .slice(0, candidateLimit)
+          .map((entry) => entry.task);
+      } catch {
+        taskMatches = [];
       }
     }
-
-    if (workspaceId && query.workspacePath && sourceAllowed("screen_context")) {
-      for (const observation of ChronicleObservationRepository.searchSync(
-        query.workspacePath,
-        normalizedQuery,
-        limit * 2,
-      )) {
-        const snippet = truncate(
-          [
-            observation.appName,
-            observation.windowTitle,
-            observation.localTextSnippet || observation.query,
-          ]
-            .filter(Boolean)
-            .join(" - "),
-          260,
-        );
-        if (!matchesQuery(snippet)) continue;
-        addResult({
-          sourceType: "screen_context",
-          objectId: observation.id,
-          workspaceId: observation.workspaceId,
-          taskId: observation.taskId,
-          timestamp: observation.capturedAt,
-          rank: rankFrom("screen_context", observation.capturedAt, observation.confidence),
-          snippet,
-          title: observation.windowTitle || observation.appName || "Screen context",
-          sourceLabel: "Screen context",
-          metadata: {
-            appName: observation.appName,
-            windowTitle: observation.windowTitle,
-            imagePath: observation.imagePath,
-            confidence: observation.confidence,
-            usedFallback: observation.usedFallback,
-            provenance: observation.provenance,
-            destinationHints: observation.destinationHints,
-            sourceRef: observation.sourceRef || null,
-            memoryId: observation.memoryId || null,
-            memoryGeneratedAt: observation.memoryGeneratedAt || null,
-          },
-        });
-      }
+    if (sourceAllowed("task")) {
+      lanes.push(
+        taskMatches.map((task) => ({
+          sourceType: "task" as const,
+          objectId: task.id,
+          workspaceId: task.workspaceId,
+          taskId: task.id,
+          timestamp: task.updatedAt || task.createdAt,
+          snippet: getTaskSnippet(task),
+          title: task.title,
+          sourceLabel: "Task",
+          metadata: { status: task.status, terminalStatus: task.terminalStatus },
+        })),
+      );
     }
 
-    const taskCandidates = await deps.taskRepo.findByCreatedAtRange({
-      startMs: Date.now() - 90 * 24 * 60 * 60 * 1000,
-      endMs: Date.now(),
-      limit: limit * 2,
-      workspaceId,
-      query: normalizedQuery,
-    });
-
-    if (sourceAllowed("task") || sourceAllowed("message") || sourceAllowed("file")) {
-      const taskIds = taskCandidates.map((task) => task.id);
-      const taskEvents = taskIds.length > 0 ? deps.eventRepo.findByTaskIds(taskIds) : [];
-      const eventsByTask = new Map<
-        string,
-        Array<{
-          id: string;
-          taskId: string;
-          type: string;
-          payload: unknown;
-          timestamp?: number;
-        }>
-      >();
-      for (const event of taskEvents) {
-        const list = eventsByTask.get(event.taskId) || [];
-        list.push(event);
-        eventsByTask.set(event.taskId, list);
-      }
-
-      for (const task of taskCandidates) {
-        const taskText = `${task.title}\n${task.prompt}\n${task.resultSummary || ""}`;
-        if (!matchesQuery(taskText)) continue;
-        if (sourceAllowed("task")) {
-          addResult({
-            sourceType: "task",
-            objectId: task.id,
+    // Files touched by the matching tasks.
+    lanes.push(
+      await lane(sourceAllowed("file") && taskMatches.length > 0, async () => {
+        const byTask = new Map(taskMatches.map((task) => [task.id, task]));
+        const events = await deps.eventRepo.findByTaskIds(taskMatches.map((task) => task.id));
+        const files: Array<RecallCandidate & { coverage: number }> = [];
+        for (const event of events) {
+          const task = byTask.get(event.taskId);
+          if (!task) continue;
+          const payload = asObject(event.payload);
+          const filePath = normalizeText(payload.path || payload.filePath || payload.outputPath);
+          if (!filePath) continue;
+          const message = getMessageText(payload);
+          const coverage = Math.max(covers(filePath), covers(message));
+          if (coverage < MIN_TERM_COVERAGE) continue;
+          files.push({
+            sourceType: "file",
+            objectId: filePath,
             workspaceId: task.workspaceId,
             taskId: task.id,
-            timestamp: task.updatedAt || task.createdAt,
-            rank: rankFrom("task", task.updatedAt || task.createdAt, 1),
-            snippet: getTaskSnippet(task),
-            title: task.title,
-            sourceLabel: "Task",
-            metadata: { status: task.status, terminalStatus: task.terminalStatus },
+            timestamp: event.timestamp || task.updatedAt || task.createdAt,
+            snippet: truncate(message || filePath, 260),
+            title: filePath,
+            sourceLabel: "File",
+            metadata: { eventType: event.type, path: filePath },
+            coverage,
           });
         }
+        return files
+          .sort((a, b) => b.coverage - a.coverage || b.timestamp - a.timestamp)
+          .map(({ coverage: _coverage, ...result }) => result);
+      }),
+    );
 
-        const taskEventsForTask = eventsByTask.get(task.id) || [];
-        for (const event of taskEventsForTask) {
-          const payload = asObject(event.payload);
-          const message = getMessageText(payload);
-          const filePath = normalizeText(payload.path || payload.filePath || payload.outputPath);
-          const createdAt = event.timestamp || task.updatedAt || task.createdAt;
-          if (
-            sourceAllowed("message") &&
-            (event.type === "assistant_message" || event.type === "user_message")
-          ) {
-            if (message && matchesQuery(message)) {
-              addResult({
-                sourceType: "message",
-                objectId: `${task.id}:${event.id}`,
-                workspaceId: task.workspaceId,
-                taskId: task.id,
-                timestamp: createdAt,
-                rank: rankFrom("message", createdAt, 0.95),
-                snippet: truncate(message, 260),
-                title: event.type === "assistant_message" ? "Assistant message" : "User message",
-                sourceLabel: "Message",
-                metadata: { eventType: event.type },
-              });
-            }
-          }
-          if (sourceAllowed("file") && filePath) {
-            if (matchesQuery(filePath) || matchesQuery(message)) {
-              addResult({
-                sourceType: "file",
-                objectId: filePath,
-                workspaceId: task.workspaceId,
-                taskId: task.id,
-                timestamp: createdAt,
-                rank: rankFrom("file", createdAt, 0.9),
-                snippet: truncate(message || filePath, 260),
-                title: filePath,
-                sourceLabel: "File",
-                metadata: { eventType: event.type, path: filePath },
-              });
-            }
-          }
-        }
-      }
-    }
+    // Activity feed entries; shown as messages, filtered by query-term coverage.
+    lanes.push(
+      await lane(sourceAllowed("message"), async () =>
+        (await deps.activityRepo.list({ workspaceId, limit: candidateLimit }))
+          .map((activity) => ({
+            activity,
+            text: `${activity.title}\n${activity.description || ""}`,
+          }))
+          .map((entry) => ({ ...entry, coverage: covers(entry.text) }))
+          .filter((entry) => entry.coverage >= MIN_TERM_COVERAGE)
+          .sort((a, b) => b.coverage - a.coverage || b.activity.createdAt - a.activity.createdAt)
+          .map(({ activity, text }) => ({
+            sourceType: "message" as const,
+            objectId: activity.id,
+            workspaceId,
+            taskId: activity.taskId,
+            timestamp: activity.createdAt,
+            snippet: truncate(text, 260),
+            title: activity.title,
+            sourceLabel: "Activity",
+            metadata: { activityType: activity.activityType, actorType: activity.actorType },
+          })),
+      ),
+    );
 
-    if (workspaceId) {
-      for (const activity of await deps.activityRepo.list({ workspaceId, limit: limit * 2 })) {
-        const text = `${activity.title}\n${activity.description || ""}`;
-        if (!matchesQuery(text)) continue;
-        addResult({
-          sourceType: "message",
-          objectId: activity.id,
-          workspaceId,
-          taskId: activity.taskId,
-          timestamp: activity.createdAt,
-          rank: rankFrom("message", activity.createdAt, 0.7),
-          snippet: truncate(text, 260),
-          title: activity.title,
-          sourceLabel: "Activity",
-          metadata: { activityType: activity.activityType, actorType: activity.actorType },
-        });
-      }
-    }
-
-    results.sort((a, b) => b.rank - a.rank || b.timestamp - a.timestamp);
-    return {
-      query: normalizedQuery,
-      workspaceId,
-      generatedAt: Date.now(),
-      results: results.slice(0, limit),
-    };
+    return response(fuseLanes(lanes, limit));
   }
 
   static buildRoutingState(

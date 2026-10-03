@@ -59,6 +59,7 @@ import type {
   OperationalAutonomyPolicy,
   Workspace,
 } from "../../shared/types";
+import { LEGACY_MEMORY_TOOL_ALIASES } from "../../shared/types";
 import type {
   ManagedAgent,
   ManagedAgentVersion,
@@ -194,25 +195,13 @@ function toMemoryToolRestrictions(
   if (memoryConfig?.mode !== "disabled") return undefined;
   return {
     deniedTools: [
-      "search_quotes",
-      "search_sessions",
-      "memory_topics_load",
-      "memory_save",
-      "memory_curate",
-      "memory_curated_read",
-      "supermemory_profile",
-      "supermemory_search",
-      "supermemory_remember",
-      "supermemory_forget",
-      // "Memory disabled" must cover every recall and memory-write lane, not
-      // just the ones above: archive search, observation index, durable
-      // context and the knowledge graph. (SEC-4)
-      "search_memories",
-      "memory_search_index",
-      "memory_timeline",
-      "memory_details",
-      "context_grep",
-      "context_describe",
+      // "Memory disabled" covers every recall and memory-write lane: the memory tools,
+      // their deprecated aliases (still executable) and the knowledge graph. (SEC-4)
+      "memory_recall",
+      "memory_remember",
+      "memory_forget",
+      "context_recall",
+      ...Object.keys(LEGACY_MEMORY_TOOL_ALIASES),
       "kg_search",
       "kg_get_neighbors",
       "kg_get_subgraph",
@@ -543,10 +532,9 @@ function deriveManagedToolFamily(tool: LLMTool): ManagedAgentToolFamily | undefi
   if (isComputerUseToolName(toolName)) return "computer-use";
   if (
     toolName.startsWith("memory_") ||
-    toolName.startsWith("supermemory_") ||
-    toolName === "search_memories" ||
-    toolName === "search_quotes" ||
-    toolName === "search_sessions" ||
+    toolName === "context_recall" ||
+    toolName.startsWith("kg_") ||
+    Object.prototype.hasOwnProperty.call(LEGACY_MEMORY_TOOL_ALIASES, toolName) ||
     capabilityTags.includes("memory")
   ) {
     return "memory";

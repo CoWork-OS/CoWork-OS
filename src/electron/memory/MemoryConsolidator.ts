@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import { DailyLogSummarizer } from "./DailyLogSummarizer";
 import { LayeredMemoryIndexService } from "./LayeredMemoryIndexService";
-import { TranscriptStore } from "./TranscriptStore";
+import { DurableContextService } from "./DurableContextService";
 import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
 
 export type MemoryConsolidationPhase = "orient" | "gather_signal" | "consolidate" | "prune_index";
@@ -97,20 +97,19 @@ export class MemoryConsolidator {
 
     try {
       phases.push("orient");
-      const recentSpans = params.taskId
-        ? await TranscriptStore.loadRecentSpans(
-            params.workspacePath,
-            params.taskId,
-            20,
-            params.readGuard,
-          )
+      const recentEvents = params.taskId
+        ? await DurableContextService.recentConversation({
+            workspaceId: params.workspaceId,
+            taskId: params.taskId,
+            limit: 20,
+          }).catch(() => [])
         : [];
 
       phases.push("gather_signal");
-      // Only counts and the task's own prompt are kept from the transcript. Raw span
-      // payloads are never copied into the summary, because summaries are injected
-      // into later prompts.
-      const eventCount = recentSpans.length;
+      // Only counts and the task's own prompt are kept from the conversation index. Event
+      // text is never copied into the summary, because summaries are injected into later
+      // prompts.
+      const eventCount = recentEvents.length;
 
       phases.push("consolidate");
       if (params.taskId && eventCount > 0) {

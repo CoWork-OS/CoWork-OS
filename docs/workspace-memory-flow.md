@@ -62,9 +62,9 @@ Approving a pending write first atomically claims the row as `applying`, replays
 
 The approval gate sits in front of all durable memory write surfaces:
 
-- `memory_save` and automatic `MemoryService.capture(...)` archive writes
-- `memory_curate`, Dreaming accepted candidates, and Core Memory Distiller promotions
-- `supermemory_remember` and optional Supermemory mirroring
+- `memory_remember` (facts go through `MemoryWriter`; `outcome`/`error`/`note` go to the archive) and automatic `MemoryService.capture(...)` archive writes
+- Dreaming accepted candidates and Core Memory Distiller promotions (and the deprecated `memory_curate` alias)
+- the deprecated `supermemory_remember` alias and optional Supermemory mirroring
 - external provider mirror hooks through `ExternalMemoryProvider`
 
 Read-only recall tools are not staged. Search, profile fetch, inspector views, and prompt synthesis read from the current committed memory layers.
@@ -108,25 +108,39 @@ MemorySynthesizer.synthesize()
         └─→ L1 Essential Story
               └─→ playbook / daily summaries / Box Brain hits
 
-Explicit recall tools
-        ├─→ memory_search_index
-        ├─→ memory_timeline
-        ├─→ memory_details
-        ├─→ search_memories
-        ├─→ search_sessions
-        ├─→ search_quotes
-        ├─→ memory_topics_load
-        ├─→ memory_curate
-        ├─→ memory_curated_read
-        ├─→ supermemory_profile
-        ├─→ supermemory_search
-        ├─→ supermemory_remember
-        └─→ supermemory_forget
+Agent memory tools (audit §8.3)
+        ├─→ memory_recall    MemoryRecall: memory_items + archive + conversations
+        │                    + knowledge (KG, .cowork markdown, topic packs) + Supermemory
+        ├─→ memory_remember  MemoryWriter (facts) or the archive (outcome/error/note)
+        ├─→ memory_forget    real delete of an item (and its legacy record) or own archive row
+        ├─→ context_recall   the active task's earlier conversation after compaction
+        └─→ kg_*             explicit graph editing (deferred; found through tool_search)
 
 Chronicle promoted observations
         ├─→ .cowork/chronicle/observations + assets
         └─→ ChronicleMemoryService → MemoryService (`screen_context`)
 ```
+
+---
+
+## Agent Memory Tools
+
+**Tools:** `src/electron/agent/tools/memory-tools.ts`  
+**Recall:** `src/electron/memory/MemoryRecall.ts`  
+**Routing hint:** `src/electron/memory/memory-tool-routing.ts`
+
+The agent sees four memory tools (audit §8.3), always exposed in the memory lane:
+
+| Tool | Does | Policy |
+|---|---|---|
+| `memory_recall` | One query over `memory_items`, the archive, the conversation index (other tasks), knowledge (KG entities, `.cowork` markdown, topic packs) and, when asked for and allowed, Supermemory. Lists are fused by weighted reciprocal rank; results are an index (`id`, lane, snippet, provenance, relevance, token estimate) until `detail: "full"` with `ids`. | Read. Allowed in plan/analyze modes and every plan step. `external` scope needs network access and the `external_service` approval. |
+| `memory_remember` | Facts (`preference`, `identity`, `rule`, `project_fact`, `decision`, `commitment`, `correction`, `insight`) through `MemoryWriter`; `outcome`, `error`, `note` to the archive. `user_stated` only when the model sets `user_asked` and the user's latest message really asks to remember (otherwise `inferred`). | Memory write: denied in plan/analyze modes and to verifier/researcher workers; staged when memory-write approval is on; blocked by `<no-memory>`. |
+| `memory_forget` | Real delete of a memory item visible to this workspace (and the legacy record it mirrors), of this workspace's archive row, or of a Supermemory entry. `match` must identify exactly one memory. | Memory write. |
+| `context_recall` | The active task's earlier conversation: durable compaction context when enabled, then the conversation index. | Read. |
+
+All of them are in `group:memory`, so group and public gateway contexts cannot use them, and a managed agent with memory disabled has them denied. Recall output is never re-captured into the archive or the conversation index.
+
+The 16 tools they replace (`search_memories`, `memory_search_index`, `memory_timeline`, `memory_details`, `search_quotes`, `search_sessions`, `memory_topics_load`, `memory_curated_read`, `supermemory_profile`, `supermemory_search`, `memory_save`, `memory_curate`, `supermemory_remember`, `supermemory_forget`, `context_grep`, `context_describe`) are hidden for one release: still executable through the same policies (`LEGACY_MEMORY_TOOL_ALIASES`, tool-semantics aliases), answered by the new implementation with a `deprecated` notice, but never offered to the model or returned by `tool_search`. `kg_*` stays for explicit graph editing, deferred and discoverable through `tool_search`.
 
 ---
 
@@ -147,7 +161,7 @@ This lane is for the small set of durable facts that should stay front-and-cente
 
 ### How entries arrive
 
-- explicit agent/user actions through `memory_curate`
+- explicit user actions (Memory Hub) and the deprecated `memory_curate` tool alias; the agent's `memory_remember` writes facts to `memory_items` through `MemoryWriter`, which render into the same kit blocks once the lane migration has run
 - accepted stable promotions from `CoreMemoryDistiller`
 - future human edits that are synced back through governed workflows
 
@@ -158,7 +172,7 @@ This lane is for the small set of durable facts that should stay front-and-cente
 - `match` strings used for replace/remove are capped at **120 characters**
 - writes mirror into auto-managed blocks inside `.cowork/USER.md` and `.cowork/MEMORY.md`
 - file sync is serialized per workspace to reduce last-writer-wins races
-- replace/remove prefers stable `id` values from `memory_curated_read` for deterministic updates
+- replace/remove prefers stable `id` values for deterministic updates; the agent forgets an item with `memory_forget` and an id from `memory_recall`
 
 ### Prompt behavior
 
@@ -182,7 +196,7 @@ This is the broad searchable archive:
 - decisions and user feedback
 - errors that affected a task (tool errors, failed steps, verification failures)
 - user corrections and insights
-- explicit `memory_save` entries
+- explicit `memory_remember` entries of kind `outcome`, `error` or `note` (and the deprecated `memory_save` alias)
 - imported ChatGPT history
 - compressed summaries
 
@@ -202,14 +216,12 @@ This gives CoWork a compact index for retrieval and a user-inspectable control p
 
 Backfill is deterministic and local. It derives metadata from existing content and summaries without per-row LLM calls. It does not run as a synchronous startup write path; Memory Hub shows status and can trigger rebuild explicitly.
 
-Destructive inspector actions are workspace-scoped. Delete is implemented as confirmed soft-delete: the observation becomes `suppressed`, the underlying memory is marked private, and the row is excluded from default search, prompt recall and every agent read path (`search_memories`, `memory_search_index`/`timeline`/`details`) instead of being hard-deleted directly. Rebuild never loosens an existing privacy state.
+Destructive inspector actions are workspace-scoped. Delete is implemented as confirmed soft-delete: the observation becomes `suppressed`, the underlying memory is marked private, and the row is excluded from default search, prompt recall and every agent read path (`memory_recall` listings and `detail: "full"` expansion) instead of being hard-deleted directly. Rebuild never loosens an existing privacy state.
 
 ### Retrieval path
 
-- `search_memories` searches archive memory plus indexed `.cowork/` markdown
-- `memory_search_index` returns compact structured observation matches first
-- `memory_timeline` returns compact neighboring observations around an anchor ID or query
-- `memory_details` expands only selected observation IDs and is scoped to the active workspace
+- `memory_recall` (scope `memory`) searches this lane through `MemoryService.searchForRecallAsync` (same hybrid search and visibility as `searchAsync`, without counting a listing as a reference) and fuses it with `memory_items`; `detail: "full"` with `archive:<id>` expands a row only when it belongs to this workspace or is a non-private import, and never when it is suppressed or redacted
+- a row read in full counts as a use (`MemoryService.recordPromptInjection`); a listing does not
 - archive recall can still be injected when explicitly enabled for a workspace/runtime
 - `MemoryTierService` tracks reference counts (search hits and prompt injections) and promotes entries between tiers; it never deletes rows
 
@@ -288,10 +300,9 @@ What it does not replace:
 
 ### Retrieval and write path
 
-- `supermemory_profile` fetches a scoped profile plus relevant external context
-- `supermemory_search` performs explicit search against the resolved or overridden `containerTag`
-- `supermemory_remember` creates a durable external memory directly in Supermemory
-- `supermemory_forget` removes an external memory by ID or exact content
+- `memory_recall` with scope `external` searches Supermemory for the workspace's resolved `containerTag`. The lane runs only when Supermemory is configured, the workspace allows network access and the model asked for the scope; the call then needs the `external_service` approval
+- `memory_forget` with an `external:<id>` from `memory_recall` removes that external memory
+- the deprecated `supermemory_profile` / `supermemory_search` names route to `memory_recall`; `supermemory_remember` and `supermemory_forget` (by content) keep their own implementation for one release
 
 ### Prompt behavior
 
@@ -317,16 +328,22 @@ Supermemory requests are guarded with timeouts, best-effort behavior, and a temp
 ## Lane 3 — Session Recall
 
 **Service:** `src/electron/memory/SessionRecallService.ts`  
-**Backing store:** `src/electron/memory/TranscriptStore.ts`
+**Backing store:** the conversation index (`src/electron/memory/conversation-index-sql.ts`, via `DurableContextService`), plus checkpoints in `src/electron/memory/TranscriptStore.ts`
 
-Recent task/session history is now a first-class recall lane rather than something folded into archive recall.
+Recent task/session history is a first-class recall lane rather than something folded into archive recall.
 
-Stored artifacts include:
+There is one conversation search index: `durable_context_events` with an FTS5 index (`unicode61 remove_diacritics 2`) keyed by row id. It is part of the durable context store and is:
 
-- transcript spans under `.cowork/memory/transcripts/spans/*.jsonl`, indexed once in SQLite (`transcript_spans`)
-- lightweight checkpoints under `.cowork/memory/transcripts/checkpoints/*.json`
+- fed from the task event pipeline for every task, whatever the memory settings, except tasks whose prompt carries `<no-memory>`
+- clean text extracted from each event (messages, tool calls and results, completion summaries); no raw JSON, no `conversation_snapshot` copies, no recall-tool echoes
+- scoped by workspace id; queries use the shared builder in `src/electron/database/fts-query.ts` (Unicode terms, file names kept whole, prefix matching, operator-safe)
+- pruned with task-event retention (terminal tasks older than 90 days, and deleted tasks), and removed by task delete and by "Clear All Memories"
 
-Full `conversation_snapshot` events are not stored as spans (the task database keeps the latest snapshot), and oversized payloads are stored as a preview. Transcript retention follows task-event retention (90 days). Deleting a task removes its spans, JSONL file, checkpoints and lock file.
+The old transcript spans (`transcript_spans` and `.cowork/memory/transcripts/spans/*.jsonl`) are no longer written. A one-time, resumable migration in daily database maintenance moves existing span rows into the index and deletes them (until it finishes, searches also read the remaining span rows), then backfills the index from `task_events`. Leftover JSONL files are removed by task delete, workspace purge and retention.
+
+`durableContextEnabled` now only controls the compaction-recovery layer: recording the full LLM message history and compaction summaries that `context_recall` searches first. `transcriptStoreEnabled` only turns on the query orchestrator's `transcript_context` prompt section.
+
+Checkpoints stay under `.cowork/memory/transcripts/checkpoints/*.json`; they are resume state, not a search source.
 
 Checkpoints are signed with an `hmac-sha256` key held in encrypted settings. A checkpoint without a valid signature (including legacy unkeyed `sha256` ones) is never used for restore; the runtime falls back to the snapshot in the task database. Permission state is never restored from a checkpoint file.
 
@@ -345,20 +362,13 @@ Dreaming reads session recall as one of its main evidence sources after task com
 
 ### Retrieval path
 
-- `search_sessions` searches transcript spans
-- optional checkpoint search can widen recall to summary/checkpoint payloads
+- `memory_recall` with scope `conversations` searches the conversation index (all of the workspace's tasks except the active one, ranked by relevance and fused with the other lanes); `event:<id>` results expand with `detail: "full"`
+- `context_recall` searches the active task only (compaction recovery)
 - this is intended for “what happened in that run?” rather than “what should the system remember forever?”
 
-### Verbatim recall lane
+### Verbatim recall
 
-`search_quotes` is the low-loss recall lane for exact wording. It searches:
-
-- transcript spans
-- task messages
-- imported/archive memories
-- indexed workspace markdown
-
-Results return exact excerpts plus provenance such as `sourceType`, `objectId`, `taskId`, `timestamp`, optional `path`, and ranking reason. Transcript/message hits outrank synthesized-memory hits when both match.
+Exact wording comes from `memory_recall` too: conversation hits are clean excerpts of the indexed events, and `detail: "full"` returns the stored text (events, archive rows, `.cowork` markdown line ranges). The deprecated `search_quotes` name routes to `memory_recall` over conversations, memory and knowledge.
 
 ---
 
@@ -376,8 +386,8 @@ Topic packs are query-scoped, focused memory slices generated from:
 
 ### Retrieval path
 
-- `memory_topics_load` can rebuild topic files for a query
-- `memory_topics_load(refresh: false)` now performs a true read-only lookup over existing topic files
+- `memory_recall` (scope `knowledge`) returns matching existing topic packs as `topic:<file>` hits; it only reads, and never creates the topic directories
+- topic files are rebuilt by the prompt path (`LayeredMemoryIndexService.refreshIndex`), not by a tool
 - topic snippets are intentionally capped so packs stay compact
 
 Topic packs are for topical work such as “bring me the onboarding context for billing migrations,” not for always-on prompt injection.
@@ -410,8 +420,8 @@ Prompt synthesis now builds separate sections instead of one monolithic synthesi
 
 Durable Runtime Context is another explicit, tool-driven lane. It is not part of the default
 `L0/L1` prompt payload and is not workspace-wide memory. When enabled, it stores task-scoped runtime
-messages and source-linked compaction summaries so `context_grep` and `context_describe` can recover
-facts from the active task after compaction.
+messages and source-linked compaction summaries so `context_recall` can recover facts from the active
+task after compaction. Without it, `context_recall` searches the active task's conversation index.
 
 Workspace kit context is still injected separately and placed before the memory sections.
 
@@ -421,7 +431,7 @@ Workspace kit context is still injected separately and placed before the memory 
 - in the default wake-up path the workspace kit keeps roughly `30%` of the budget; `.cowork/USER.md`, `MEMORY.md`, `RULES.md`, `.cowork/AGENTS.md` and `IDENTITY.md` come first in that slice
 - repo-root `AGENTS.md`/`CLAUDE.md` and docs map files are not part of the memory slice; they have their own `project_guidance` section (1000 tokens)
 - design-system context (`design_system`, 1200 tokens), the external memory profile (`external_memory`, 400) and transcript hits (`transcript_context`, 400) also have their own sections
-- remaining budget is split between hot memory and structured memory; a short memory-tool routing hint (at most 120 tokens, naming only tools the model can call) is included in that budget
+- remaining budget is split between hot memory and structured memory; a short memory-tool routing hint (about 90 tokens, at most 100, naming only the memory tools the model can call: `memory_recall`, `memory_remember`, `memory_forget`, `context_recall`) is included in that budget
 - truncation always happens on fragment boundaries and closes any wrapper tag it left open; when the whole prompt is over budget, memory, design-system and project-guidance sections shrink before they are dropped
 - follow-ups, chat and planning get a compact L0 block (curated memory plus identity, 450 tokens), cached per task and rebuilt after curated, profile or relationship writes
 
@@ -432,7 +442,7 @@ Workspace kit context is still injected separately and placed before the memory 
 - archive memory: **off by default** (the per-turn recall block still injects query matches)
 - Supermemory profile injection: **optional**
 - `L2 Topic Packs`: **tool-driven**
-- `L3 Deep Recall` (`memory_search_index`, `memory_timeline`, `memory_details`, `search_quotes`, `search_sessions`, `search_memories`): **tool-driven**
+- `L3 Deep Recall` (`memory_recall`, `context_recall`): **tool-driven**
 
 ---
 
@@ -453,7 +463,7 @@ Memory Hub also shows a preview of the current `L0/L1` payload plus the `L2/L3` 
 
 **Service:** `src/electron/memory/MemoryWorkspacePurgeService.ts`
 
-- **Task delete:** in the same transaction as the task row, durable context, transcript span rows, and the archive memories (except imported rows and explicit saves), KG facts and Playbook evidence derived from the task are removed, and task foreign keys in `dreaming_runs` and `pending_memory_writes` are cleared. The task's transcript files (JSONL spans, checkpoints, lock file) and its Chronicle observations are removed afterwards.
+- **Task delete:** in the same transaction as the task row, durable context (including the task's conversation index rows), legacy transcript span rows, and the archive memories (except imported rows and explicit saves), KG facts and Playbook evidence derived from the task are removed, and task foreign keys in `dreaming_runs` and `pending_memory_writes` are cleared. The task's transcript files (JSONL spans, checkpoints, lock file) and its Chronicle observations are removed afterwards.
 - **Clear All Memories** (per workspace, from Memory settings): archive memories and observations, durable context, curated entries (and the auto-managed blocks in `.cowork/USER.md` / `.cowork/MEMORY.md`), knowledge graph, Dreaming runs and candidates, core memory candidates, Playbook evidence, pending memory writes, transcripts, topic packs and `.cowork/memory/MEMORY.md`, daily summaries and Chronicle observations. Each store is cleared separately and the result reports per-store counts and failures.
 - **Not covered:** copies already mirrored to Supermemory. The local runtime does not keep remote ids, so it cannot delete them; remove them in Supermemory directly.
 

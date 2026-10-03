@@ -32,19 +32,7 @@ export const MEMORY_STATEMENTS = {
                  OR content LIKE '[cowork:prompt_recall=ignore]%[Imported from ChatGPT %'
                )
              LIMIT 100000`,
-  // TranscriptStore
-  transcript_indexSpan: `INSERT OR IGNORE INTO transcript_spans (
-          id, workspace_path, task_id, timestamp, type, payload_json,
-          event_id, seq, raw_line, search_text, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  transcript_searchSpans: `SELECT s.task_id, s.timestamp, s.type, s.payload_json, s.event_id, s.seq, s.raw_line
-           FROM transcript_spans_fts f
-           JOIN transcript_spans s ON s.rowid = f.rowid
-           WHERE transcript_spans_fts MATCH ?
-             AND s.workspace_path = ?
-             AND (? IS NULL OR s.task_id = ?)
-           ORDER BY bm25(transcript_spans_fts), s.timestamp DESC
-           LIMIT ?`,
+  // TranscriptStore: legacy span rows, removed with their task until the migration ran
   transcript_deleteTaskSpans: `DELETE FROM transcript_spans WHERE workspace_path = ? AND task_id = ?`,
   transcript_deleteTaskSpansAnyWorkspace: `DELETE FROM transcript_spans WHERE task_id = ?`,
   transcript_taskWorkspaces: `SELECT DISTINCT workspace_path FROM transcript_spans WHERE task_id = ?`,

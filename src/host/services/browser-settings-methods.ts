@@ -26,6 +26,7 @@ import { GuardrailManager } from "../../electron/guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager } from "../../electron/agent/tools/builtin-settings";
 import { loadPolicies } from "../../electron/admin/policies";
 import { PersonalityManager } from "../../electron/settings/personality-manager";
+import { withSettingsResponseStyleMirror } from "../../electron/memory/memory-read-side";
 import { GoogleWorkspaceSettingsManager } from "../../electron/settings/google-workspace-manager";
 import { RelationshipMemoryService } from "../../electron/memory/RelationshipMemoryService";
 import { UserProfileService } from "../../electron/memory/UserProfileService";
@@ -1681,7 +1682,10 @@ export function createBrowserSettingsDefinitions(
       (args) => {
         const settings = PersonalitySettingsSchema.safeParse(args[0]);
         if (!settings.success) return invalid();
-        PersonalityManager.saveSettings(settings.data as never);
+        // A response style chosen here is user-stated memory (locks style adaptation).
+        withSettingsResponseStyleMirror(() =>
+          PersonalityManager.saveSettings(settings.data as never),
+        );
         return { success: true };
       },
       {
@@ -1711,7 +1715,9 @@ export function createBrowserSettingsDefinitions(
     savePersonalityConfigV2: define(
       (args) => {
         const config = PersonalityConfigV2Schema.parse(args[0]);
-        PersonalityManager.saveConfigV2({ ...config, version: 2 } as never);
+        withSettingsResponseStyleMirror(() =>
+          PersonalityManager.saveConfigV2({ ...config, version: 2 } as never),
+        );
         return { success: true };
       },
       {

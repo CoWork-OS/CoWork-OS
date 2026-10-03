@@ -37,5 +37,14 @@ export const EXTERNAL_MEMORY_SECTION_TOKENS = 400;
 /** Transcript span hits selected by the query orchestrator. */
 export const TRANSCRIPT_CONTEXT_SECTION_TOKENS = 400;
 
-/** Compact L0 hot memory (curated + identity) for follow-ups, chat and planning. */
-export const COMPACT_HOT_MEMORY_TOKENS = 450;
+/**
+ * MemoryContextBuilder budgets (the one budget owner for memory_items text).
+ * L0: identity, rules, pinned/explicit preferences, open commitments and curated hot
+ * memory — the pinned `<cowork_user_profile>` block on step/follow-up turns, the memory
+ * section on planning and chat. L1: memory_items recall for the current query; on plan
+ * steps it takes the synthesizer's former hot-memory share of `memory_context`.
+ */
+export const MEMORY_L0_TOKENS = 600;
+export const MEMORY_L1_ITEMS_TOKENS = 400;
+/** L1 on compact surfaces (planning, chat, follow-up system prompt). */
+export const MEMORY_L1_COMPACT_TOKENS = 250;

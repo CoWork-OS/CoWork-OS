@@ -18,6 +18,13 @@ import type { MemoryType } from "../database/repositories";
  * archived: archiving a recall re-captures memories as new ones.
  */
 export const MEMORY_RECALL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  // Consolidated memory tools (audit §8.3): recall output is never captured again, and a
+  // remember/forget call already is the memory write.
+  "memory_recall",
+  "memory_remember",
+  "memory_forget",
+  "context_recall",
+  // Deprecated aliases (still executable for one release).
   "memory_search_index",
   "memory_timeline",
   "memory_details",
@@ -37,6 +44,13 @@ export const MEMORY_RECALL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kg_search",
   "kg_get_neighbors",
   "kg_get_subgraph",
+  "kg_create_entity",
+  "kg_update_entity",
+  "kg_delete_entity",
+  "kg_create_edge",
+  "kg_delete_edge",
+  "kg_invalidate_edge",
+  "kg_add_observation",
   "task_events",
   "task_history",
   "scratchpad_read",

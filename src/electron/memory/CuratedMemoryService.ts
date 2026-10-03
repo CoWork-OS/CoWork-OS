@@ -1,6 +1,7 @@
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { WorkspaceRepository } from "../database/repository-facades";
 import { CuratedMemoryRepository } from "../database/repository-facades";
+import { createHash, randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import type { DatabaseManager } from "../database/schema";
@@ -12,6 +13,10 @@ import type {
 } from "../../shared/types";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
 import { bumpHotMemoryVersion } from "./hot-memory-version";
+import { MemoryWriter } from "./MemoryWriter";
+import { KIT_FILE_STORE, MemoryItemsHubService } from "./MemoryItemsHubService";
+import { MEMORY_LANE_STORES, curatedEntryCandidate } from "./memory-items-lanes";
+import type { KitRenderState, MemoryItem, MemoryItemKind } from "./memory-items-types";
 
 const USER_BLOCK_START = "<!-- cowork:auto:curated-user:start -->";
 const USER_BLOCK_END = "<!-- cowork:auto:curated-user:end -->";
@@ -21,12 +26,17 @@ const MAX_CURATED_CONTENT_CHARS = 320;
 const MAX_MATCH_CHARS = 120;
 const MAX_SYNC_RETRIES = 3;
 
+type KitView = "user" | "workspace";
+
 type SyncFileParams = {
+  workspaceId: string;
+  view: KitView;
   filePath: string;
+  /** Workspace-relative name, for provenance (`.cowork/USER.md`). */
+  relPath: string;
   title: string;
   startMarker: string;
   endMarker: string;
-  body: string;
 };
 
 type FileSnapshot = {
@@ -98,7 +108,26 @@ function replaceOrAppendBlock(
   return `${input.trimEnd()}\n\n${block}\n`;
 }
 
-function renderUserBlock(entries: CuratedMemoryEntryRecord[]): string {
+/** What the generated kit blocks render: a curated entry or a memory item. */
+type KitBlockEntry = { id: string; kind: string; content: string };
+
+const MEMORY_ITEM_KIND_LABELS: Record<MemoryItemKind, string> = {
+  identity: "Identity",
+  preference: "Preference",
+  rule: "Rule",
+  project_fact: "Project Fact",
+  decision: "Decision",
+  commitment: "Active Commitment",
+  correction: "Correction",
+  insight: "Insight",
+  outcome: "Outcome",
+};
+
+function kitBlockLabel(kind: string): string {
+  return MEMORY_ITEM_KIND_LABELS[kind as MemoryItemKind] ?? kindLabel(kind as CuratedMemoryKind);
+}
+
+function renderUserBlock(entries: KitBlockEntry[]): string {
   const lines = ["## Auto Curated Memory"];
   if (entries.length === 0) {
     lines.push("- status: empty");
@@ -110,16 +139,173 @@ function renderUserBlock(entries: CuratedMemoryEntryRecord[]): string {
   return lines.join("\n");
 }
 
-function renderWorkspaceBlock(entries: CuratedMemoryEntryRecord[]): string {
+function renderWorkspaceBlock(entries: KitBlockEntry[]): string {
   const lines = ["## Auto Curated Memory"];
   if (entries.length === 0) {
     lines.push("- No curated workspace memory yet.");
     return lines.join("\n");
   }
   for (const entry of entries) {
-    lines.push(`- ${kindLabel(entry.kind)}: ${entry.content}`);
+    lines.push(`- ${kitBlockLabel(entry.kind)}: ${entry.content}`);
   }
   return lines.join("\n");
+}
+
+function renderKitLine(view: KitView, entry: KitBlockEntry): string {
+  return `- ${view === "user" ? entry.kind : kitBlockLabel(entry.kind)}: ${entry.content}`;
+}
+
+function renderKitBlock(view: KitView, entries: KitBlockEntry[]): string {
+  return view === "user" ? renderUserBlock(entries) : renderWorkspaceBlock(entries);
+}
+
+// ---- Kit back-sync (PROMPT-12) ----
+//
+// The auto-blocks in USER.md / MEMORY.md are views of `memory_items`. The last rendered
+// block of each file is kept (`maintenance_state`, KitRenderState). On the next sync, a
+// block that no longer matches it was edited by hand: its bullet lines are compared with
+// the rendered ones, and adds, edits and removals go through MemoryWriter as `curated` (the agent can write
+// kit files too, so these edits are never treated as the user's own statements)
+// before the block is rendered again. Only blocks rendered from `memory_items` are synced
+// back, so every rendered line maps to an item id.
+
+const KIT_PLACEHOLDER_LINES = new Set(["- status: empty", "- no curated workspace memory yet."]);
+
+/** Normalized form of one block line: whitespace collapsed, `*` bullets as `-`. */
+function normalizeKitLine(line: string): string {
+  return line
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\*\s+/, "- ");
+}
+
+function hashKitBody(body: string): string {
+  const normalized = body.split(/\r?\n/).map(normalizeKitLine).filter(Boolean).join("\n");
+  return createHash("sha256").update(normalized).digest("hex");
+}
+
+/** Body between the markers, or null when the block is missing or malformed. */
+export function extractKitBlock(
+  content: string,
+  startMarker: string,
+  endMarker: string,
+): string | null {
+  const start = content.indexOf(startMarker);
+  if (start < 0) return null;
+  const end = content.indexOf(endMarker, start + startMarker.length);
+  if (end < 0) return null;
+  return content.slice(start + startMarker.length, end).trim();
+}
+
+/** Bullet lines of a block, without the heading and the empty-state placeholder. */
+function kitBulletLines(body: string): string[] {
+  return body
+    .split(/\r?\n/)
+    .map(normalizeKitLine)
+    .filter((line) => line.startsWith("- ") && !KIT_PLACEHOLDER_LINES.has(line.toLowerCase()));
+}
+
+const KIT_LABEL_KINDS: Record<string, MemoryItemKind> = {
+  identity: "identity",
+  preference: "preference",
+  rule: "rule",
+  constraint: "rule",
+  "workflow rule": "rule",
+  workflow_rule: "rule",
+  "project fact": "project_fact",
+  project_fact: "project_fact",
+  decision: "decision",
+  commitment: "commitment",
+  "active commitment": "commitment",
+  active_commitment: "commitment",
+  correction: "correction",
+  insight: "insight",
+  outcome: "outcome",
+};
+
+/** `- Label: text` → kind and text; an unknown label is part of the text. */
+export function parseKitLine(
+  line: string,
+  defaultKind: MemoryItemKind,
+): { kind: MemoryItemKind; content: string; labelled: boolean } {
+  const text = normalizeKitLine(line).replace(/^-\s+/, "");
+  const colon = text.indexOf(":");
+  if (colon > 0) {
+    const kind = KIT_LABEL_KINDS[text.slice(0, colon).trim().toLowerCase()];
+    if (kind) return { kind, content: text.slice(colon + 1).trim(), labelled: true };
+  }
+  return { kind: defaultKind, content: text, labelled: false };
+}
+
+function wordSet(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => word.length > 1),
+  );
+}
+
+function similarity(a: string, b: string): number {
+  const left = wordSet(a);
+  const right = wordSet(b);
+  if (left.size === 0 || right.size === 0) return 0;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared += 1;
+  return shared / (left.size + right.size - shared);
+}
+
+export type KitBlockEdit =
+  | { type: "add"; kind: MemoryItemKind; content: string }
+  | { type: "edit"; id: string; kind: MemoryItemKind | null; content: string }
+  | { type: "remove"; id: string };
+
+/**
+ * Compare a hand-edited block with the rendered one. Lines that still match a rendered
+ * line are kept; a new line similar to a vanished one is an edit of that item; other new
+ * lines are adds, other vanished lines are removals.
+ */
+export function diffKitBlock(
+  rendered: KitRenderState["entries"],
+  currentBody: string,
+  view: KitView,
+): KitBlockEdit[] {
+  const defaultKind: MemoryItemKind = view === "user" ? "preference" : "project_fact";
+  const unmatched = rendered.map((entry) => ({ ...entry, line: normalizeKitLine(entry.line) }));
+  const added: string[] = [];
+  for (const line of kitBulletLines(currentBody)) {
+    const index = unmatched.findIndex((entry) => entry.line === line);
+    if (index >= 0) unmatched.splice(index, 1);
+    else added.push(line);
+  }
+  const edits: KitBlockEdit[] = [];
+  for (const line of added) {
+    const parsed = parseKitLine(line, defaultKind);
+    if (!parsed.content) continue;
+    let best = -1;
+    let bestScore = 0;
+    unmatched.forEach((entry, index) => {
+      const score = similarity(parseKitLine(entry.line, defaultKind).content, parsed.content);
+      if (score > bestScore) {
+        best = index;
+        bestScore = score;
+      }
+    });
+    if (best >= 0 && bestScore >= 0.4) {
+      const [entry] = unmatched.splice(best, 1);
+      const previousKind = parseKitLine(entry.line, defaultKind).kind;
+      edits.push({
+        type: "edit",
+        id: entry.id,
+        kind: parsed.labelled && parsed.kind !== previousKind ? parsed.kind : null,
+        content: parsed.content,
+      });
+    } else {
+      edits.push({ type: "add", kind: parsed.kind, content: parsed.content });
+    }
+  }
+  for (const entry of unmatched) edits.push({ type: "remove", id: entry.id });
+  return edits;
 }
 
 /**
@@ -358,6 +544,9 @@ export class CuratedMemoryService {
       }
     }
 
+    if (entry) {
+      await this.mirrorToMemoryItems(entry, params.action === "remove" ? "archived" : "active");
+    }
     bumpHotMemoryVersion();
     await this.syncWorkspaceFiles(params.workspaceId, {
       readGuard: params.filesystemReadGuard,
@@ -443,6 +632,7 @@ export class CuratedMemoryService {
           lastConfirmedAt: Date.now(),
         });
 
+    if (entry) await this.mirrorToMemoryItems(entry, "active");
     bumpHotMemoryVersion();
     await this.syncWorkspaceFiles(params.workspaceId, {
       readGuard: params.filesystemReadGuard,
@@ -476,36 +666,27 @@ export class CuratedMemoryService {
         if (!canWrite(root) || !canWrite(userPath) || !canWrite(memoryPath)) {
           throw new Error("Access denied while writing curated memory files.");
         }
-        const userEntries = await this.curatedRepo.list({
-          workspaceId,
-          target: "user",
-          status: "active",
-          limit: 200,
-        });
-        const workspaceEntries = await this.curatedRepo.list({
-          workspaceId,
-          target: "workspace",
-          status: "active",
-          limit: 200,
-        });
-
         await ensureWorkspaceDirectory(workspace.path, root);
-        await Promise.all([
-          this.syncFile({
-            filePath: userPath,
-            title: "# User Profile",
-            startMarker: USER_BLOCK_START,
-            endMarker: USER_BLOCK_END,
-            body: renderUserBlock(userEntries),
-          }),
-          this.syncFile({
-            filePath: memoryPath,
-            title: "# Long-Term Memory",
-            startMarker: WORKSPACE_BLOCK_START,
-            endMarker: WORKSPACE_BLOCK_END,
-            body: renderWorkspaceBlock(workspaceEntries),
-          }),
-        ]);
+        // One file after the other: a back-synced edit in USER.md can move an item into
+        // the MEMORY.md view (and the reverse).
+        await this.syncFile({
+          workspaceId,
+          view: "user",
+          filePath: userPath,
+          relPath: ".cowork/USER.md",
+          title: "# User Profile",
+          startMarker: USER_BLOCK_START,
+          endMarker: USER_BLOCK_END,
+        });
+        await this.syncFile({
+          workspaceId,
+          view: "workspace",
+          filePath: memoryPath,
+          relPath: ".cowork/MEMORY.md",
+          title: "# Long-Term Memory",
+          startMarker: WORKSPACE_BLOCK_START,
+          endMarker: WORKSPACE_BLOCK_END,
+        });
       })
       .finally(() => {
         if (this.syncQueueByWorkspace.get(workspaceId) === next) {
@@ -514,6 +695,181 @@ export class CuratedMemoryService {
       });
     this.syncQueueByWorkspace.set(workspaceId, next);
     await next;
+  }
+
+  /**
+   * Dual write (memory engine Phase 2): curated entries stay the system of record for
+   * reads this wave, and every change is mirrored into `memory_items` through MemoryWriter.
+   * Awaited so the kit files rendered next see it; a failure is logged and never fails
+   * the curated write.
+   */
+  private static async mirrorToMemoryItems(
+    entry: CuratedMemoryEntry,
+    status: "active" | "archived",
+  ): Promise<void> {
+    const writer = MemoryWriter.get();
+    if (!writer) return;
+    try {
+      if (status === "archived") {
+        await writer.setStatusBySourceRef(MEMORY_LANE_STORES.curated, entry.id, "archived");
+      } else {
+        await writer.ingest(curatedEntryCandidate(entry));
+      }
+    } catch (error) {
+      console.warn("[CuratedMemoryService] Memory item dual write failed:", error);
+    }
+  }
+
+  /**
+   * Entries for the generated USER.md / MEMORY.md blocks. Once the legacy lanes have been
+   * copied into `memory_items`, the blocks are a view of the workspace's memory items;
+   * before that (and without a writer) they render from the curated table as before.
+   */
+  private static async listKitBlockEntries(
+    workspaceId: string,
+    view: KitView,
+  ): Promise<{ entries: KitBlockEntry[]; source: KitRenderState["source"] }> {
+    const writer = MemoryWriter.get();
+    if (writer) {
+      try {
+        if (await writer.repository.isLaneMigrationComplete()) {
+          const items: MemoryItem[] = await writer.repository.listForView(workspaceId, view, 200);
+          return { entries: items, source: "memory_items" };
+        }
+      } catch (error) {
+        console.warn(
+          "[CuratedMemoryService] Falling back to curated entries for kit files:",
+          error,
+        );
+      }
+    }
+    const entries = await this.curatedRepo.list({
+      workspaceId,
+      target: view,
+      status: "active",
+      limit: 200,
+    });
+    return { entries, source: "curated" };
+  }
+
+  /**
+   * Apply a Memory Hub or kit edit to the curated entry a memory item mirrors, without a
+   * kit sync (the caller renders the files). No dual write: `memory_items` already has it.
+   */
+  static async applyMirroredEdit(entryId: string, content: string): Promise<void> {
+    this.ensureInitialized();
+    const entry = await this.curatedRepo.findById(entryId);
+    const trimmed = normalizeCuratedContent(content);
+    if (!entry || entry.status !== "active" || !trimmed) return;
+    await this.curatedRepo.update(entry.id, {
+      content: trimmed,
+      normalizedKey: normalizeMemoryKey(trimmed),
+      lastConfirmedAt: Date.now(),
+    });
+    bumpHotMemoryVersion();
+  }
+
+  /** Archive the curated entry a forgotten or removed memory item mirrors (no kit sync). */
+  static async archiveMirroredEntry(entryId: string): Promise<void> {
+    this.ensureInitialized();
+    const entry = await this.curatedRepo.findById(entryId);
+    if (!entry || entry.status !== "active") return;
+    await this.curatedRepo.archive(entry.id);
+    bumpHotMemoryVersion();
+  }
+
+  /** Kit back-sync writes through the Hub operations, with the curated lane mirrored. */
+  private static kitEditor(): MemoryItemsHubService {
+    return new MemoryItemsHubService({
+      getWriter: () => MemoryWriter.get(),
+      legacy: {
+        edit: async (ref, content) => {
+          if (ref.store === MEMORY_LANE_STORES.curated) {
+            await this.applyMirroredEdit(ref.id, content);
+          }
+        },
+        remove: async (ref) => {
+          if (ref.store === MEMORY_LANE_STORES.curated) await this.archiveMirroredEntry(ref.id);
+        },
+      },
+    });
+  }
+
+  private static kitStateKey(params: SyncFileParams): string {
+    return `${params.workspaceId}:${params.view}`;
+  }
+
+  /**
+   * Route hand edits of a generated block back into `memory_items`. Returns `applied`
+   * when items changed, `none` when there was nothing to sync back, and `concurrent` when
+   * the file changed while the edits were being read (nothing is applied then).
+   */
+  private static async backSyncFile(
+    params: SyncFileParams,
+    snapshot: FileSnapshot,
+  ): Promise<"applied" | "none" | "concurrent"> {
+    const writer = MemoryWriter.get();
+    if (!writer || snapshot.mtimeMs === 0) return "none";
+    let state: KitRenderState | null;
+    try {
+      state = await writer.repository.getKitRenderState(this.kitStateKey(params));
+    } catch {
+      return "none";
+    }
+    // No baseline yet (first render, or a file that came with a repository): nothing to
+    // compare against, so nothing is synced back.
+    if (!state || state.source !== "memory_items") return "none";
+    const body = extractKitBlock(snapshot.content, params.startMarker, params.endMarker);
+    // A deleted block is re-rendered rather than read as "forget everything".
+    if (body === null || hashKitBody(body) === state.hash) return "none";
+    const edits = diffKitBlock(state.entries, body, params.view);
+    if (edits.length === 0) return "none";
+
+    const current = await fs.stat(params.filePath).catch(() => null);
+    if ((current?.mtimeMs || 0) !== snapshot.mtimeMs) return "concurrent";
+
+    const editor = this.kitEditor();
+    const provenance = { file: params.relPath, target: params.view };
+    let applied = 0;
+    for (const edit of edits) {
+      try {
+        if (edit.type === "add") {
+          const result = await writer.ingest({
+            content: edit.content,
+            kind: edit.kind,
+            scope: "workspace",
+            workspaceId: params.workspaceId,
+            source: "curated",
+            sourceRef: { store: KIT_FILE_STORE, id: randomUUID(), ...provenance },
+            confidence: 0.85,
+            originText: edit.content,
+          });
+          if (result.status === "written") applied += 1;
+          continue;
+        }
+        const item = await writer.repository.findById(edit.id);
+        // The item changed since the block was rendered: the database wins.
+        if (!item || item.status !== "active" || item.workspaceId !== params.workspaceId) {
+          continue;
+        }
+        // A file edit can't archive or rewrite what the user stated or confirmed in
+        // the Hub; those changes have to be made there.
+        if (item.source === "user_stated" || item.source === "user_confirmed") continue;
+        if (edit.type === "remove") {
+          await editor.removeItem(item, "archived");
+          applied += 1;
+        } else {
+          const result = await editor.editItem(item, edit.content, KIT_FILE_STORE, {
+            kind: edit.kind ?? undefined,
+            extraRef: { file: params.relPath },
+          });
+          if (result.status === "written") applied += 1;
+        }
+      } catch (error) {
+        console.warn("[CuratedMemoryService] Kit back-sync edit failed:", error);
+      }
+    }
+    return applied > 0 ? "applied" : "none";
   }
 
   private static async validateSyncAccess(
@@ -596,26 +952,72 @@ export class CuratedMemoryService {
     }
   }
 
+  /**
+   * Back-sync hand edits, render the block, and write the file only when its content
+   * changes. A file that changes while it is being synced is re-read (up to
+   * MAX_SYNC_RETRIES); once edits were synced back from it, a concurrent change skips the
+   * rewrite instead, and the next sync picks the new edits up.
+   */
   private static async syncFile(params: SyncFileParams): Promise<void> {
+    let backSynced = false;
     for (let attempt = 0; attempt < MAX_SYNC_RETRIES; attempt += 1) {
       const snapshot = await this.readFileSnapshot(params.filePath, params.title);
+      if (!backSynced) {
+        const outcome = await this.backSyncFile(params, snapshot);
+        if (outcome === "concurrent") continue;
+        backSynced = outcome === "applied";
+      }
+      const { entries, source } = await this.listKitBlockEntries(params.workspaceId, params.view);
+      const body = renderKitBlock(params.view, entries);
       const next = replaceOrAppendBlock(
         snapshot.content,
         params.startMarker,
         params.endMarker,
-        params.body,
+        body,
       );
       const currentStat = await fs.stat(params.filePath).catch(() => null);
       const currentMtime = currentStat?.mtimeMs || 0;
       if (currentMtime !== snapshot.mtimeMs) {
+        if (backSynced) {
+          console.warn(
+            `[CuratedMemoryService] ${params.relPath} changed during sync; it is re-rendered on the next sync.`,
+          );
+          return;
+        }
         continue;
       }
-      await fs.writeFile(params.filePath, next, "utf8");
+      if (next !== snapshot.content) {
+        await fs.writeFile(params.filePath, next, "utf8");
+      }
+      await this.recordKitRender(params, source, body, entries);
       return;
     }
     throw new Error(
       `Concurrent update detected while syncing curated memory file: ${params.filePath}`,
     );
+  }
+
+  private static async recordKitRender(
+    params: SyncFileParams,
+    source: KitRenderState["source"],
+    body: string,
+    entries: KitBlockEntry[],
+  ): Promise<void> {
+    const writer = MemoryWriter.get();
+    if (!writer) return;
+    try {
+      await writer.repository.setKitRenderState(this.kitStateKey(params), {
+        hash: hashKitBody(body),
+        source,
+        entries: entries.map((entry) => ({
+          id: entry.id,
+          line: renderKitLine(params.view, entry),
+        })),
+        renderedAt: Date.now(),
+      });
+    } catch (error) {
+      console.warn("[CuratedMemoryService] Recording the rendered kit block failed:", error);
+    }
   }
 
   private static ensureInitialized(): void {

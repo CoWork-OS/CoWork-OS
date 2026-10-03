@@ -180,9 +180,40 @@ function stripMarkedBlock(markdown: string, startMarker: string, endMarker: stri
   return markdown.replace(pattern, "").trim();
 }
 
-function formatWorkspaceKitBody(body: string, contract: KitContract): string {
-  const normalizedBody =
+/**
+ * Generated curated auto-blocks of USER.md / MEMORY.md (CuratedMemoryService): views of
+ * memory_items. A block cut by the kit truncation (no end marker) is dropped to the end.
+ */
+const GENERATED_MEMORY_BLOCKS: Array<[string, string]> = [
+  ["<!-- cowork:auto:curated-user:start -->", "<!-- cowork:auto:curated-user:end -->"],
+  ["<!-- cowork:auto:curated-workspace:start -->", "<!-- cowork:auto:curated-workspace:end -->"],
+];
+
+function stripGeneratedMemoryBlocks(markdown: string): string {
+  let out = markdown;
+  for (const [start, end] of GENERATED_MEMORY_BLOCKS) {
+    const startAt = out.indexOf(start);
+    if (startAt === -1) continue;
+    const endAt = out.indexOf(end, startAt);
+    out =
+      endAt === -1
+        ? out.slice(0, startAt)
+        : `${out.slice(0, startAt)}${out.slice(endAt + end.length).replace(/^\n/, "")}`;
+  }
+  return out.trim();
+}
+
+function formatWorkspaceKitBody(
+  body: string,
+  contract: KitContract,
+  excludeGeneratedMemoryBlocks = false,
+): string {
+  const withoutLore =
     contract.file === "LORE.md" ? stripMarkedBlock(body, AUTO_LORE_START, AUTO_LORE_END) : body;
+  const normalizedBody =
+    excludeGeneratedMemoryBlocks && (contract.file === "USER.md" || contract.file === "MEMORY.md")
+      ? stripGeneratedMemoryBlocks(withoutLore)
+      : withoutLore;
   switch (contract.parser) {
     case "kv-lines":
       return extractFilledKvLines(normalizedBody) || normalizedBody.trim();
@@ -444,6 +475,8 @@ function buildScopedKitSections(
   onboardingIncomplete: boolean,
   includeDesignSystem: boolean,
   readGuard?: MarkdownMemoryReadGuard,
+  excludeGeneratedMemoryBlocks = false,
+  excludeFiles: ReadonlySet<string> = new Set(),
 ): ExtractedSection[] {
   return buildWorkspaceKitSections({
     workspacePath,
@@ -452,12 +485,18 @@ function buildScopedKitSections(
     readGuard,
   })
     .filter((section) => includeDesignSystem || section.file !== "DESIGN.md")
+    .filter((section) => !excludeFiles.has(section.file))
     .map((section) => ({
       title: section.title,
       relPath: section.relPath,
-      content: formatWorkspaceKitBody(section.parsed.body, section.contract),
+      content: formatWorkspaceKitBody(
+        section.parsed.body,
+        section.contract,
+        excludeGeneratedMemoryBlocks,
+      ),
       maxChars: Math.max(MAX_SECTION_CHARS, section.contract.maxChars),
-    }));
+    }))
+    .filter((section) => !excludeGeneratedMemoryBlocks || section.content.trim().length > 0);
 }
 
 export function buildProjectInstructionsSection(
@@ -534,9 +573,14 @@ function collectKitMemorySections(
   now: Date,
   agentRoleId: string | null,
   readGuard?: MarkdownMemoryReadGuard,
+  options: {
+    includeDesignSystem?: boolean;
+    excludeGeneratedMemoryBlocks?: boolean;
+    excludeFiles?: readonly string[];
+  } = {},
 ): ExtractedSection[] {
   const collected: ExtractedSection[] = [];
-  const includeDesignSystem = isDesignSystemRelevantTask(taskPrompt);
+  const includeDesignSystem = options.includeDesignSystem ?? isDesignSystemRelevantTask(taskPrompt);
   const kitDir = safeResolveWithinWorkspace(workspacePath, KIT_DIRNAME);
   if (!kitDir) return collected;
   try {
@@ -553,6 +597,8 @@ function collectKitMemorySections(
             false,
             includeDesignSystem,
             readGuard,
+            options.excludeGeneratedMemoryBlocks === true,
+            new Set(options.excludeFiles ?? []),
           ),
         ),
       );
@@ -596,6 +642,15 @@ export function buildWorkspaceKitContext(
      * The step memory slice passes false: those files get their own prompt section.
      */
     includeProjectGuidance?: boolean;
+    /**
+     * Include `.cowork/DESIGN.md` (default: when the task looks like UI work). Pass false
+     * when the caller injects the design system in its own section.
+     */
+    includeDesignSystem?: boolean;
+    /** Drop the generated curated auto-blocks of USER.md / MEMORY.md (memory_items views). */
+    excludeGeneratedMemoryBlocks?: boolean;
+    /** Kit files another prompt section already carries (for example the shared context). */
+    excludeFiles?: readonly string[];
   },
 ): string {
   const agentRoleId = typeof opts?.agentRoleId === "string" ? opts.agentRoleId : null;
@@ -606,6 +661,11 @@ export function buildWorkspaceKitContext(
     now,
     agentRoleId,
     opts?.readGuard,
+    {
+      includeDesignSystem: opts?.includeDesignSystem,
+      excludeGeneratedMemoryBlocks: opts?.excludeGeneratedMemoryBlocks,
+      excludeFiles: opts?.excludeFiles,
+    },
   );
   const mapSections = includeProjectGuidance
     ? buildMapSections(workspacePath, opts?.readGuard)

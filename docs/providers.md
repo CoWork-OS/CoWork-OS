@@ -173,7 +173,7 @@ Cacheable prefix material comes from stable session-scoped sections such as:
 - role, personality, and guidelines
 - tool policy and rendered tool schema
 
-Dynamic turn-scoped material such as current time, layered memory sections (`<cowork_hot_memory>`, `<cowork_structured_memory>`), and turn guidance is intentionally kept outside the stable prefix. Session transcript recall, verbatim quote recall, archive recall, and topic-pack recall are tool-driven, so they only enter the active turn after explicit `search_sessions`, `search_quotes`, `search_memories`, or `memory_topics_load` use.
+Dynamic turn-scoped material such as current time, layered memory sections (`<cowork_hot_memory>`, `<cowork_relevant_memory>`, the memory context section), and turn guidance is intentionally kept outside the stable prefix. Conversation, archive and topic-pack recall are tool-driven, so they only enter the active turn after an explicit `memory_recall` or `context_recall` call.
 
 ### Defaults and overrides
 

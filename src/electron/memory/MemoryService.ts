@@ -10,7 +10,6 @@ import { isSafeExcludedPattern } from "./excluded-patterns";
 import { MemoryEmbeddingRepository, MemoryRepository } from "../database/repository-facades";
 import { MemorySettingsRepository, MemorySummaryRepository } from "../database/repository-facades";
 import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
-import { isGeneratedPlaybookContent } from "./playbook-markers";
 import { randomUUID } from "crypto";
 import type { DatabaseManager } from "../database/schema";
 import {
@@ -574,6 +573,33 @@ export class MemoryService {
     return memory;
   }
 
+  /**
+   * The memory-settings and privacy gates of `capture`, for records kept in their own
+   * tables beside the archive (Playbook entries, proactive suggestions and their feedback;
+   * audit Phase 2 item 6). Returns the text to store, with inline `<private>` blocks and
+   * secret values redacted, and whether it is private; or null when memory settings do not
+   * allow keeping it (memory or auto-capture off, privacy mode `disabled`, an excluded
+   * pattern, a `<no-memory>` directive). Writes nothing: no archive row, embedding,
+   * compression or external mirror, and the archive write gate does not apply.
+   */
+  static async prepareDerivedRecord(
+    workspaceId: string,
+    content: string,
+  ): Promise<{ content: string; isPrivate: boolean } | null> {
+    this.ensureInitialized();
+    if (containsNoMemoryDirective(content)) return null;
+    const settings = await this.settingsRepo.getOrCreate(workspaceId);
+    if (!settings.enabled || !settings.autoCapture) return null;
+    if (settings.privacyMode === "disabled") return null;
+    const prepared = this.applyInlinePrivacy(content);
+    const text = neutralizeReservedImportPrefix(redactSecrets(prepared.content).text);
+    if (this.shouldExclude(text, settings)) return null;
+    return {
+      content: text,
+      isPrivate: prepared.hadPrivateBlock || settings.privacyMode === "strict",
+    };
+  }
+
   static async captureCoreMemory(
     workspaceId: string,
     taskId: string | undefined,
@@ -1044,10 +1070,7 @@ export class MemoryService {
     const recent = await this.memoryRepo.getRecentForWorkspace(workspaceId, limit, false);
     const suppressed = await MemoryObservationService.suppressedIds(recent.map((m) => m.id));
     return recent.filter(
-      (memory) =>
-        !this.isPromptRecallIgnoredContent(memory.content) &&
-        !isGeneratedPlaybookContent(memory.content) &&
-        !suppressed.has(memory.id),
+      (memory) => !this.isPromptRecallIgnoredContent(memory.content) && !suppressed.has(memory.id),
     );
   }
 
@@ -1068,7 +1091,6 @@ export class MemoryService {
           (memory) =>
             memory.isPrivate ||
             this.isPromptRecallIgnoredContent(memory.content) ||
-            isGeneratedPlaybookContent(memory.content) ||
             suppressed.has(memory.id),
         )
         .map((memory) => memory.id),
@@ -1175,9 +1197,7 @@ export class MemoryService {
     return rawResults
       .filter(
         (r) =>
-          !this.isPromptRecallIgnoredContent(r.content || r.snippet || "") &&
-          !isGeneratedPlaybookContent(r.content || r.snippet || "") &&
-          !suppressed.has(r.id),
+          !this.isPromptRecallIgnoredContent(r.content || r.snippet || "") && !suppressed.has(r.id),
       )
       .slice(0, limit)
       .map((r) => ({
@@ -1286,6 +1306,34 @@ export class MemoryService {
       );
     }
     return results;
+  }
+
+  /**
+   * Archive lane of MemoryRecall: the same search and visibility as `searchAsync` (this
+   * workspace's agent-visible rows plus non-private imported rows), but it records no
+   * references: a hit that is only listed is not a use. MemoryRecall counts a use through
+   * `recordPromptInjection` when an item is returned in full. Errors propagate.
+   */
+  static async searchForRecallAsync(
+    workspaceId: string,
+    query: string,
+    limit = 20,
+  ): Promise<MemorySearchResult[]> {
+    this.ensureInitialized();
+    if (!this.ftsWorker) {
+      return this.withoutHiddenMemories(await this.searchInternal(workspaceId, query, limit));
+    }
+    this.kickoffEmbeddingBackfill(workspaceId);
+    this.kickoffImportedEmbeddingBackfill();
+    let results: MemorySearchResult[];
+    try {
+      results = await this.ftsWorker.hybridSearch(workspaceId, query, limit, true);
+    } catch (error) {
+      throw new Error(
+        `Memory search is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return this.withoutHiddenMemories(results);
   }
 
   /**

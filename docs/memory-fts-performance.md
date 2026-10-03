@@ -97,22 +97,11 @@ The fast prompt-recall path skips tier tracking entirely since automatic recall 
 
 ## Fix 3: Background Marker-Based Lookups
 
-Background services (Subconscious loop, ProactiveSuggestionsService, EvolutionMetricsService, PlaybookSkillPromoter) search for known content markers like `[SUGGESTION]`, `[PLAYBOOK] Task succeeded`, `[suggestion-feedback:acted_on]`. These are structural lookups, not natural-language search — FTS tokenization is counterproductive (strips brackets, splits tokens) and slow.
+Background services search the archive for known content markers (for example the daemon's `[CORRECTION]` rows that `EvolutionMetricsService.computeCorrectionRate()` counts). These are structural lookups, not natural-language search — FTS tokenization is counterproductive (strips brackets, splits tokens) and slow.
 
 `MemoryRepository.searchByContentMarker()` and `MemoryService.searchByContentMarker()` use a direct `LIKE` query instead of FTS — no tokenization, no BM25 scoring, no imported-global scan, no tier tracking.
 
-### Callers Migrated
-
-| File                             | Method                              | Marker                           | Limit |
-| -------------------------------- | ----------------------------------- | -------------------------------- | ----- |
-| `ProactiveSuggestionsService.ts` | `loadAll()`                         | `[SUGGESTION]`                   | 50    |
-| `ProactiveSuggestionsService.ts` | `actOn()`                           | `[SUGGESTION]`                   | 50    |
-| `ProactiveSuggestionsService.ts` | `detectRecurringPatterns()`         | `[PLAYBOOK] Task succeeded`      | 50    |
-| `ProactiveSuggestionsService.ts` | `findSuggestionById()`              | `[SUGGESTION]`                   | 50    |
-| `SubconsciousLoopService.ts`     | `countAcceptedSuggestionPatterns()` | `[suggestion-feedback:acted_on]` | 20    |
-| `EvolutionMetricsService.ts`     | `computeCorrectionRate()`           | `[PLAYBOOK] Task failed`         | 100   |
-| `EvolutionMetricsService.ts`     | `computeTaskSuccessRate()`          | `[PLAYBOOK] Task`                | 100   |
-| `PlaybookSkillPromoter.ts`       | `findCandidates()`                  | `[PLAYBOOK] Reinforced pattern`  | 100   |
+Suggestions, suggestion feedback and Playbook outcomes used to be `[SUGGESTION]`, `[suggestion-feedback:…]` and `[PLAYBOOK] …` archive rows found this way. They now live in their own tables (`suggestions`, `suggestion_feedback`, `playbook_entries`) and are read through `ProactiveSuggestionStore` and `PlaybookService`; a one-time migration (`memory/memory-payload-migration-sql.ts`) moved existing rows out of `memories`.
 
 ---
 

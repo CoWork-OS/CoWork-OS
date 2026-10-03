@@ -11,6 +11,15 @@ vi.mock("../MemoryService", () => ({
   },
 }));
 
+const mockCountOutcomes = vi.fn();
+const mockListCorrections = vi.fn();
+vi.mock("../PlaybookService", () => ({
+  PlaybookService: {
+    countOutcomes: (...args: unknown[]) => mockCountOutcomes(...args),
+    listCorrections: (...args: unknown[]) => mockListCorrections(...args),
+  },
+}));
+
 vi.mock("../AdaptiveStyleEngine", () => ({
   AdaptiveStyleEngine: {
     getAdaptationHistory: vi.fn().mockReturnValue([]),
@@ -52,6 +61,8 @@ describe("EvolutionMetricsService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSearch.mockReturnValue([]);
+    mockCountOutcomes.mockResolvedValue({ successes: 0, failures: 0 });
+    mockListCorrections.mockResolvedValue([]);
   });
 
   describe("computeSnapshot", () => {
@@ -87,25 +98,8 @@ describe("EvolutionMetricsService", () => {
       expect(kgMetric.detail).toContain("40 relationships");
     });
 
-    it("computes task success rate from playbook data", async () => {
-      mockSearch.mockImplementation((_ws: string, query: string) => {
-        if (query.includes("[PLAYBOOK] Task")) {
-          return [
-            {
-              type: "insight",
-              snippet: '[PLAYBOOK] Task succeeded: "Deploy"',
-              createdAt: Date.now(),
-            },
-            {
-              type: "insight",
-              snippet: '[PLAYBOOK] Task succeeded: "Build"',
-              createdAt: Date.now(),
-            },
-            { type: "insight", snippet: '[PLAYBOOK] Task failed: "Test"', createdAt: Date.now() },
-          ];
-        }
-        return [];
-      });
+    it("computes task success rate from playbook entries", async () => {
+      mockCountOutcomes.mockResolvedValue({ successes: 2, failures: 1 });
 
       const snapshot = await EvolutionMetricsService.computeSnapshot("ws1");
       const successRate = snapshot.metrics.find((m) => m.id === "task_success_rate")!;
@@ -113,51 +107,80 @@ describe("EvolutionMetricsService", () => {
       expect(successRate.value).toBe(67); // 2/3 = 67%
       expect(successRate.detail).toContain("2 succeeded");
       expect(successRate.detail).toContain("1 failed");
+      expect(mockSearch).not.toHaveBeenCalledWith(
+        "ws1",
+        expect.stringContaining("[PLAYBOOK]"),
+        expect.anything(),
+      );
     });
 
-    it("detects improving correction rate", async () => {
+    it("bases the correction rate on user corrections, not on task failures", async () => {
       const now = Date.now();
       const oneWeekAgo = now - 8 * 24 * 60 * 60 * 1000;
       const twoWeeksAgo = now - 15 * 24 * 60 * 60 * 1000;
-
-      mockSearch.mockImplementation((_ws: string, query: string) => {
-        if (query.includes("failed")) {
-          return [
-            // Recent: only 1 failure
-            { type: "insight", snippet: '[PLAYBOOK] Task failed: "A"', createdAt: now - 100000 },
-            // Older period: 6 failures (high rate)
-            { type: "insight", snippet: '[PLAYBOOK] Task failed: "B"', createdAt: oneWeekAgo },
-            {
-              type: "insight",
-              snippet: '[PLAYBOOK] Task failed: "C"',
-              createdAt: oneWeekAgo - 1000,
-            },
-            { type: "insight", snippet: '[PLAYBOOK] Task failed: "D"', createdAt: twoWeeksAgo },
-            {
-              type: "insight",
-              snippet: '[PLAYBOOK] Task failed: "E"',
-              createdAt: twoWeeksAgo - 1000,
-            },
-            {
-              type: "insight",
-              snippet: '[PLAYBOOK] Task failed: "F"',
-              createdAt: twoWeeksAgo - 2000,
-            },
-            {
-              type: "insight",
-              snippet: '[PLAYBOOK] Task failed: "G"',
-              createdAt: twoWeeksAgo - 3000,
-            },
-          ];
-        }
-        return [];
-      });
+      // Many failures, none of them corrections: no correction is reported.
+      mockCountOutcomes.mockResolvedValue({ successes: 1, failures: 12 });
 
       const snapshot = await EvolutionMetricsService.computeSnapshot("ws1");
       const correctionRate = snapshot.metrics.find((m) => m.id === "correction_rate")!;
+      expect(correctionRate.value).toBe(0);
+      expect(correctionRate.trend).toBe("stable");
 
-      expect(correctionRate.trend).toBe("improving");
-      expect(correctionRate.value).toBe(1); // only 1 recent failure
+      // Archive [CORRECTION] rows and Playbook corrections, one per task.
+      mockSearch.mockImplementation((_ws: string, marker: string) => {
+        if (!marker.startsWith("[CORRECTION]")) return [];
+        return [
+          {
+            id: "m1",
+            type: "insight",
+            snippet: "[CORRECTION] A",
+            taskId: "t-recent",
+            createdAt: now - 100_000,
+          },
+          {
+            id: "m2",
+            type: "insight",
+            snippet: "[CORRECTION] B",
+            taskId: "t-b",
+            createdAt: oneWeekAgo,
+          },
+          {
+            id: "m3",
+            type: "insight",
+            snippet: "[CORRECTION] C",
+            taskId: "t-c",
+            createdAt: oneWeekAgo - 1000,
+          },
+          {
+            id: "m4",
+            type: "insight",
+            snippet: "[CORRECTION] D",
+            taskId: "t-d",
+            createdAt: twoWeeksAgo,
+          },
+          // A second correction of the same task counts once.
+          {
+            id: "m5",
+            type: "insight",
+            snippet: "[CORRECTION] D2",
+            taskId: "t-d",
+            createdAt: twoWeeksAgo + 1000,
+          },
+        ];
+      });
+      mockListCorrections.mockResolvedValue([
+        { taskId: "t-e", at: twoWeeksAgo - 1000 },
+        { taskId: "t-f", at: twoWeeksAgo - 2000 },
+        { taskId: "t-g", at: twoWeeksAgo - 3000 },
+        // Already counted from the archive row.
+        { taskId: "t-b", at: oneWeekAgo + 5000 },
+      ]);
+
+      const improving = (await EvolutionMetricsService.computeSnapshot("ws1")).metrics.find(
+        (m) => m.id === "correction_rate",
+      )!;
+      expect(improving.value).toBe(1); // only t-recent this week
+      expect(improving.trend).toBe("improving"); // 6 older corrections over 3 weeks
     });
   });
 

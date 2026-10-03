@@ -1,0 +1,212 @@
+import { describe, expect, it } from "vitest";
+import {
+  DefaultMemoryInjectionPolicy,
+  memoryItemAllowed,
+  memoryPolicyInputForTask,
+  resolveMemoryInjection,
+  type MemoryInjectionPolicyInput,
+} from "../MemoryInjectionPolicy";
+import type { MemoryItem } from "../memory-items-types";
+
+const GATEWAYS = ["private", "group", "public"] as const;
+const RETAIN = [undefined, true, false] as const;
+const SUB_AGENT = [false, true] as const;
+const PRIVACY = ["normal", "strict", "disabled"] as const;
+const NO_MEMORY = [false, true] as const;
+const TRUSTED_SHARED = [false, true] as const;
+
+describe("resolveMemoryInjection matrix", () => {
+  const cases: Array<MemoryInjectionPolicyInput & { label: string }> = [];
+  for (const gatewayContext of GATEWAYS)
+    for (const retainMemory of RETAIN)
+      for (const isSubAgent of SUB_AGENT)
+        for (const privacyMode of PRIVACY)
+          for (const noMemory of NO_MEMORY)
+            for (const allowSharedContextMemory of TRUSTED_SHARED)
+              cases.push({
+                label: `${gatewayContext}/retain=${retainMemory}/sub=${isSubAgent}/${privacyMode}/noMemory=${noMemory}/trusted=${allowSharedContextMemory}`,
+                gatewayContext,
+                retainMemory,
+                isSubAgent,
+                noMemory,
+                allowSharedContextMemory,
+                workspaceSettings: { enabled: true, privacyMode },
+                contextPackInjectionEnabled: true,
+                workspaceCanRead: true,
+                externalNetworkAllowed: true,
+              });
+
+  it.each(cases)("$label", (input) => {
+    const decision = resolveMemoryInjection(input);
+    const retained = input.retainMemory ?? !input.isSubAgent;
+    const channelOk = input.gatewayContext === "private" || input.allowSharedContextMemory === true;
+    const memoryOn =
+      !input.noMemory &&
+      retained &&
+      channelOk &&
+      input.workspaceSettings?.privacyMode !== "disabled";
+
+    expect(decision.layers.l0).toBe(memoryOn);
+    expect(decision.layers.l1).toBe(memoryOn);
+    expect(decision.layers.external).toBe(memoryOn);
+    expect(decision.memory).toBe(memoryOn);
+    // Private items: only the user's own private conversation, never a sub-agent.
+    expect(decision.allowPrivateItems).toBe(
+      memoryOn && input.gatewayContext === "private" && !input.isSubAgent,
+    );
+    // The kit slice (USER.md / MEMORY.md) is private-gateway only.
+    expect(decision.layers.workspaceKit).toBe(memoryOn && input.gatewayContext === "private");
+    // Shared kit context ignores the workspace memory switch but not the channel or opt-outs.
+    expect(decision.layers.sharedContext).toBe(!input.noMemory && retained && channelOk);
+    // Project guidance is not memory.
+    expect(decision.layers.projectGuidance).toBe(input.gatewayContext === "private");
+    if (!memoryOn) expect(decision.reasons.l0).toBeDefined();
+  });
+});
+
+describe("resolveMemoryInjection details", () => {
+  it("names the first reason a layer is off", () => {
+    expect(resolveMemoryInjection({ noMemory: true }).reasons.l0).toBe("no_memory_directive");
+    expect(resolveMemoryInjection({ gatewayContext: "group" }).reasons.l0).toBe("group_channel");
+    expect(resolveMemoryInjection({ isSubAgent: true }).reasons.l0).toBe("scope_mismatch");
+    expect(resolveMemoryInjection({ workspaceSettings: { enabled: false } }).reasons.l0).toBe(
+      "memory_off",
+    );
+  });
+
+  it("keeps verifiers out of personal memory even with retainMemory", () => {
+    const decision = resolveMemoryInjection({ retainMemory: true, workerRole: "verifier" });
+    expect(decision.memory).toBe(false);
+    expect(decision.layers.sharedContext).toBe(false);
+  });
+
+  it("turns the external provider off without network access only", () => {
+    const decision = resolveMemoryInjection({ externalNetworkAllowed: false });
+    expect(decision.layers.external).toBe(false);
+    expect(decision.layers.l0).toBe(true);
+  });
+
+  it("drops file layers without read access or the context pack", () => {
+    const noRead = resolveMemoryInjection({ workspaceCanRead: false });
+    expect(noRead.layers.workspaceKit || noRead.layers.projectGuidance).toBe(false);
+    expect(noRead.layers.l0).toBe(true);
+    const noPack = resolveMemoryInjection({ contextPackInjectionEnabled: false });
+    expect(noPack.layers.sharedContext || noPack.layers.workspaceKit).toBe(false);
+  });
+
+  it("reports curated items as disallowed when curated memory is off", () => {
+    expect(resolveMemoryInjection({ curatedMemoryEnabled: false }).allowCuratedItems).toBe(false);
+  });
+});
+
+describe("memoryPolicyInputForTask", () => {
+  it("derives sub-agent, gateway and <no-memory> from the task and the message", () => {
+    const input = memoryPolicyInputForTask(
+      {
+        parentTaskId: "parent",
+        prompt: "do it",
+        agentConfig: { gatewayContext: "group", allowSharedContextMemory: true },
+      },
+      { message: "and <no-memory> please" },
+    );
+    expect(input).toMatchObject({
+      isSubAgent: true,
+      gatewayContext: "group",
+      allowSharedContextMemory: true,
+      noMemory: true,
+    });
+    expect(memoryPolicyInputForTask({ rawPrompt: "<no-memory> x" }).noMemory).toBe(true);
+  });
+});
+
+function item(overrides: Partial<MemoryItem> = {}): MemoryItem {
+  return {
+    id: "i1",
+    workspaceId: null,
+    scope: "global",
+    scopeRef: null,
+    kind: "preference",
+    subjectKey: "preference:0123456789abcdef",
+    content: "Prefers tea",
+    source: "user_stated",
+    sourceRef: {},
+    trust: 1,
+    confidence: 1,
+    status: "active",
+    pinned: false,
+    reinforcedCount: 0,
+    lastUsedAt: null,
+    supersedesId: null,
+    contentHash: "h",
+    privacy: "normal",
+    taskId: null,
+    expiresAt: null,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+describe("memoryItemAllowed", () => {
+  const privateDecision = resolveMemoryInjection({});
+  const sharedDecision = resolveMemoryInjection({
+    gatewayContext: "group",
+    allowSharedContextMemory: true,
+  });
+
+  it("refuses third-party and contact items outside their contact's surface", () => {
+    expect(memoryItemAllowed(item({ source: "third_party" }), privateDecision).reason).toBe(
+      "third_party_item",
+    );
+    const contact = item({ scope: "contact", scopeRef: "c1", source: "third_party" });
+    expect(memoryItemAllowed(contact, privateDecision).allowed).toBe(false);
+    expect(memoryItemAllowed(contact, privateDecision, { contactRef: "c1" }).allowed).toBe(true);
+  });
+
+  it("allows private items only where the decision does", () => {
+    const privateItem = item({ privacy: "private" });
+    expect(memoryItemAllowed(privateItem, privateDecision).allowed).toBe(true);
+    expect(memoryItemAllowed(privateItem, sharedDecision).reason).toBe("private_item");
+  });
+
+  it("refuses other workspaces' items, other tasks' items and closed items", () => {
+    const ws = item({ scope: "workspace", workspaceId: "ws-2" });
+    expect(memoryItemAllowed(ws, privateDecision, { workspaceId: "ws-1" }).allowed).toBe(false);
+    const task = item({ scope: "task", scopeRef: "t2", workspaceId: "ws-1" });
+    expect(memoryItemAllowed(task, privateDecision, { taskId: "t1" }).allowed).toBe(false);
+    expect(memoryItemAllowed(item({ status: "superseded" }), privateDecision).allowed).toBe(false);
+  });
+
+  it("refuses curated items when curated memory is off", () => {
+    const decision = resolveMemoryInjection({ curatedMemoryEnabled: false });
+    expect(memoryItemAllowed(item({ source: "curated" }), decision).allowed).toBe(false);
+  });
+});
+
+describe("DefaultMemoryInjectionPolicy (contract)", () => {
+  it("refuses group channels, <no-memory> and memory-off workspaces", async () => {
+    const policy = new DefaultMemoryInjectionPolicy({
+      loadWorkspaceSettings: async (id) =>
+        id === "off" ? { enabled: false, privacyMode: "normal" } : { enabled: true },
+    });
+    expect(await policy.surfaceAllowed({ workspaceId: "ws", surface: "step" })).toEqual({
+      allowed: true,
+    });
+    expect(
+      (await policy.surfaceAllowed({ workspaceId: "ws", surface: "channel_group" })).reason,
+    ).toBe("group_channel");
+    expect(
+      (await policy.surfaceAllowed({ workspaceId: "ws", surface: "chat", noMemory: true })).reason,
+    ).toBe("no_memory_directive");
+    expect((await policy.surfaceAllowed({ workspaceId: "off", surface: "chat" })).reason).toBe(
+      "memory_off",
+    );
+    expect(
+      policy.itemAllowed(item({ privacy: "private" }), { workspaceId: "ws", surface: "chat" })
+        .allowed,
+    ).toBe(true);
+    expect(policy.itemAllowed(item(), { workspaceId: "ws", surface: "channel_group" }).reason).toBe(
+      "group_channel",
+    );
+  });
+});

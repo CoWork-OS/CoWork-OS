@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AdaptiveStyleEngine } from "../AdaptiveStyleEngine";
+import { setExplicitResponseStyleState } from "../memory-read-side";
 
 // ── Mocks ─────────────────────────────────────────────────────────────
 
@@ -64,6 +65,27 @@ describe("AdaptiveStyleEngine", () => {
       explanationDepth: "balanced",
     };
     AdaptiveStyleEngine.reset();
+    setExplicitResponseStyleState(false);
+  });
+
+  describe("explicit response style", () => {
+    it("does not adapt while the user has chosen a style explicitly", () => {
+      setExplicitResponseStyleState(true);
+      AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
+      for (let i = 0; i < 20; i++) {
+        AdaptiveStyleEngine.observe("fix bug");
+      }
+      AdaptiveStyleEngine.maybeAdapt();
+      expect(setResponseStyleMock).not.toHaveBeenCalled();
+    });
+
+    it("drops feedback seen while locked instead of replaying it later", () => {
+      setExplicitResponseStyleState(true);
+      AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
+      setExplicitResponseStyleState(false);
+      AdaptiveStyleEngine.maybeAdapt();
+      expect(setResponseStyleMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("observe", () => {

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CONSOLIDATION_LOCK_STALE_MS, MemoryConsolidator } from "../MemoryConsolidator";
 import { DailyLogSummarizer } from "../DailyLogSummarizer";
 import { LayeredMemoryIndexService } from "../LayeredMemoryIndexService";
-import { TranscriptStore } from "../TranscriptStore";
+import { DurableContextService } from "../DurableContextService";
 
 describe("MemoryConsolidator", () => {
   let workspacePath: string;
@@ -16,7 +16,6 @@ describe("MemoryConsolidator", () => {
       indexPath: path.join(workspacePath, ".cowork", "memory", "MEMORY.md"),
       topics: [],
     } as unknown as Awaited<ReturnType<typeof LayeredMemoryIndexService.refreshIndex>>);
-    vi.spyOn(TranscriptStore, "searchSpans").mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -27,21 +26,36 @@ describe("MemoryConsolidator", () => {
   const spans = (taskId: string) =>
     [
       {
+        id: "dce_1",
+        kind: "event",
+        workspaceId: "ws-1",
         taskId,
         timestamp: Date.now(),
         type: "tool_result",
-        payload: { secret: "RAW_SPAN_PAYLOAD_SHOULD_NOT_APPEAR", output: '{"json":true}' },
+        role: "tool",
+        snippet: 'RAW_SPAN_PAYLOAD_SHOULD_NOT_APPEAR {"json":true}',
+        score: 0,
       },
-      { taskId, timestamp: Date.now(), type: "assistant_message", payload: { text: "hello" } },
-    ] as unknown as Awaited<ReturnType<typeof TranscriptStore.loadRecentSpans>>;
+      {
+        id: "dce_2",
+        kind: "event",
+        workspaceId: "ws-1",
+        taskId,
+        timestamp: Date.now(),
+        type: "assistant_message",
+        role: "assistant",
+        snippet: "hello",
+        score: 0,
+      },
+    ] as Awaited<ReturnType<typeof DurableContextService.recentConversation>>;
 
   const today = () => new Date().toISOString().slice(0, 10);
   const readSummary = () =>
     fs.readFileSync(DailyLogSummarizer.resolveSummaryPath(workspacePath, today()), "utf8");
 
   it("appends one compact line per task and never copies raw span payloads", async () => {
-    vi.spyOn(TranscriptStore, "loadRecentSpans").mockImplementation(async (_ws, taskId) =>
-      spans(taskId),
+    vi.spyOn(DurableContextService, "recentConversation").mockImplementation(async (params) =>
+      spans(params.taskId),
     );
 
     const first = await MemoryConsolidator.run({
@@ -77,7 +91,7 @@ describe("MemoryConsolidator", () => {
   });
 
   it("does not write a boilerplate summary when the task has no transcript events", async () => {
-    vi.spyOn(TranscriptStore, "loadRecentSpans").mockResolvedValue([]);
+    vi.spyOn(DurableContextService, "recentConversation").mockResolvedValue([]);
     await MemoryConsolidator.run({
       workspaceId: "ws-1",
       workspacePath,
@@ -117,8 +131,8 @@ describe("MemoryConsolidator", () => {
   });
 
   it("skips while a fresh lock is held and removes a stale lock", async () => {
-    vi.spyOn(TranscriptStore, "loadRecentSpans").mockImplementation(async (_ws, taskId) =>
-      spans(taskId),
+    vi.spyOn(DurableContextService, "recentConversation").mockImplementation(async (params) =>
+      spans(params.taskId),
     );
     await LayeredMemoryIndexService.ensureLayout(workspacePath);
     const lockPath = LayeredMemoryIndexService.resolveLockPath(workspacePath);

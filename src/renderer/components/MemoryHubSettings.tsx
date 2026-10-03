@@ -24,6 +24,8 @@ import type {
   WorkspaceKitStatus,
 } from "../../shared/types";
 import { MemorySettings } from "./MemorySettings";
+import { MemoryKnowledgeTab } from "./memory/MemoryKnowledgeTab";
+import "./memory/memory-knowledge.css";
 import { ChronicleSettingsCard } from "./ChronicleSettings";
 import { createRendererLogger } from "../utils/logger";
 import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
@@ -32,11 +34,9 @@ const DEFAULT_FEATURES: MemoryFeaturesSettings = {
   contextPackInjectionEnabled: true,
   heartbeatMaintenanceEnabled: true,
   checkpointCaptureEnabled: true,
-  verbatimRecallEnabled: true,
   wakeUpLayersEnabled: true,
   temporalKnowledgeEnabled: true,
   structuredObservationsEnabled: true,
-  progressiveRecallToolsEnabled: true,
   memoryInspectorEnabled: true,
   transcriptStoreEnabled: false,
   durableContextEnabled: false,
@@ -85,6 +85,8 @@ export function MemoryHubSettings(props?: {
   const [actionError, setActionError] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  // "What CoWork knows" is the primary view; everything else is under Settings.
+  const [hubTab, setHubTab] = useState<"knowledge" | "settings">("knowledge");
   const activeWorkspace = useRef(selectedWorkspaceId);
   activeWorkspace.current = selectedWorkspaceId;
   const observationSearchGeneration = useRef(0);
@@ -897,6 +899,80 @@ export function MemoryHubSettings(props?: {
     );
   }
 
+  const canWriteWorkspace =
+    window.coworkBrowserHost !== true || selectedWorkspace?.permissions.write === true;
+  const canDeleteWorkspace =
+    window.coworkBrowserHost !== true || selectedWorkspace?.permissions.delete === true;
+
+  // Workspace picker first (it scopes every view below), then the view tabs.
+  const hubHeader = (
+    <>
+      <h2 className="settings-section-title">Memory</h2>
+      {workspaces.length === 0 ? (
+        <p className="settings-form-hint">No workspaces found.</p>
+      ) : (
+        <div className="memory-hub-workspace-bar">
+          <label className="settings-label" htmlFor="memory-workspace">
+            Workspace
+          </label>
+          <select
+            id="memory-workspace"
+            value={selectedWorkspaceId}
+            onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+            className="settings-select"
+          >
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+          {selectedWorkspace?.path && (
+            <p className="settings-form-hint">
+              <code>{selectedWorkspace.path}</code>
+            </p>
+          )}
+        </div>
+      )}
+      <div className="settings-tabs" role="tablist" aria-label="Memory views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={hubTab === "knowledge"}
+          className={`settings-tab ${hubTab === "knowledge" ? "active" : ""}`}
+          onClick={() => setHubTab("knowledge")}
+        >
+          What CoWork knows
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={hubTab === "settings"}
+          className={`settings-tab ${hubTab === "settings" ? "active" : ""}`}
+          onClick={() => setHubTab("settings")}
+        >
+          Settings and sources
+        </button>
+      </div>
+    </>
+  );
+
+  if (hubTab === "knowledge") {
+    return (
+      <div className="settings-section">
+        {hubHeader}
+        {selectedWorkspaceId ? (
+          <MemoryKnowledgeTab
+            key={selectedWorkspaceId}
+            workspaceId={selectedWorkspaceId}
+            canWrite={canWriteWorkspace}
+            canDelete={canDeleteWorkspace}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="settings-section">
       {kitPreviewPath && (
@@ -906,7 +982,7 @@ export function MemoryHubSettings(props?: {
           onClose={() => setKitPreviewPath(null)}
         />
       )}
-      <h2 className="settings-section-title">Memory</h2>
+      {hubHeader}
       {actionNotice && <div role="status">{actionNotice}</div>}
       {actionError && (
         <div role="alert">
@@ -1008,27 +1084,6 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">Enable Verbatim Recall</div>
-              <p className="settings-form-hint memory-hub-hint-tight">
-                Exposes the quote-first recall lane so the agent can retrieve exact wording instead
-                of summarized memory when precision matters.
-              </p>
-            </div>
-            <label className="settings-toggle memory-hub-toggle">
-              <input
-                type="checkbox"
-                checked={features.verbatimRecallEnabled !== false}
-                onChange={(e) => saveFeatures({ verbatimRecallEnabled: e.target.checked })}
-                disabled={saving}
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
-        </div>
-
-        <div className="settings-form-group">
-          <div className="memory-hub-toggle-row">
-            <div className="memory-hub-grow">
               <div className="memory-hub-primary-label">Enable Wake-Up Layers</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Makes prompt-visible memory explicit: inject only L0 Identity and L1 Essential Story
@@ -1092,31 +1147,10 @@ export function MemoryHubSettings(props?: {
         <div className="settings-form-group">
           <div className="memory-hub-toggle-row">
             <div className="memory-hub-grow">
-              <div className="memory-hub-primary-label">Enable Progressive Recall Tools</div>
-              <p className="settings-form-hint memory-hub-hint-tight">
-                Adds index, timeline, and detail tools so agents retrieve memory in token-efficient
-                stages.
-              </p>
-            </div>
-            <label className="settings-toggle memory-hub-toggle">
-              <input
-                type="checkbox"
-                checked={features.progressiveRecallToolsEnabled !== false}
-                onChange={(e) => saveFeatures({ progressiveRecallToolsEnabled: e.target.checked })}
-                disabled={saving}
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
-        </div>
-
-        <div className="settings-form-group">
-          <div className="memory-hub-toggle-row">
-            <div className="memory-hub-grow">
               <div className="memory-hub-primary-label">Enable Durable Runtime Context</div>
               <p className="settings-form-hint memory-hub-hint-tight">
-                Stores compacted task context with source links and exposes read-only context_grep
-                and context_describe tools.
+                Stores compacted task context with source links, so context_recall can expand
+                compaction summaries back to their sources.
               </p>
             </div>
             <label className="settings-toggle memory-hub-toggle">
@@ -2211,26 +2245,9 @@ export function MemoryHubSettings(props?: {
           <p className="settings-form-hint">No workspaces found.</p>
         ) : (
           <div className="settings-form-group">
-            <label className="settings-label" htmlFor="memory-workspace">
-              Workspace
-            </label>
-            <select
-              id="memory-workspace"
-              value={selectedWorkspaceId}
-              onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-              className="settings-select"
-            >
-              {workspaces.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-            {selectedWorkspace?.path && (
-              <p className="settings-form-hint">
-                Path: <code>{selectedWorkspace.path}</code>
-              </p>
-            )}
+            <p className="settings-form-hint">
+              Settings below apply to the workspace selected at the top.
+            </p>
             <div className="memory-hub-top-gap" hidden={!hasHostMethod("getWorkspaceKitStatus")}>
               <label className="settings-label">Kit Preset</label>
               <select
@@ -2667,6 +2684,7 @@ export function MemoryHubSettings(props?: {
                 window.coworkBrowserHost !== true || selectedWorkspace?.permissions.delete === true
               }
               onSettingsChanged={props?.onSettingsChanged}
+              onOpenKnowledge={() => setHubTab("knowledge")}
             />
           </>
         )}

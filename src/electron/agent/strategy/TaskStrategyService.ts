@@ -590,12 +590,7 @@ export class TaskStrategyService {
     }
   }
 
-  static decoratePrompt(
-    prompt: string,
-    route: IntentRoute,
-    strategy: DerivedTaskStrategy,
-    relationshipContext: string,
-  ): string {
+  static decoratePrompt(prompt: string, route: IntentRoute, strategy: DerivedTaskStrategy): string {
     const text = String(prompt || "").trim();
     if (!text) return text;
     if (text.includes(STRATEGY_CONTEXT_OPEN)) return text;
@@ -728,11 +723,6 @@ export class TaskStrategyService {
       );
     }
 
-    if (relationshipContext) {
-      lines.push("relationship_memory:");
-      lines.push(relationshipContext);
-    }
-
     lines.push(STRATEGY_CONTEXT_CLOSE);
 
     return `${text}\n\n${lines.join("\n")}`;
@@ -840,16 +830,10 @@ export class TaskStrategyService {
       "set_vibes",
       "update_lore",
       // Memory
-      "search_memories",
-      "search_sessions",
-      "memory_topics_load",
-      "memory_save",
-      "memory_curate",
-      "memory_curated_read",
-      "supermemory_profile",
-      "supermemory_search",
-      "supermemory_remember",
-      "supermemory_forget",
+      "memory_recall",
+      "memory_remember",
+      "memory_forget",
+      "context_recall",
       // System
       "system_info",
       // Diagrams (lightweight UI-only, no side effects)

@@ -8,6 +8,7 @@
 import { serviceStatements } from "../database/service-statements";
 import { randomUUID } from "crypto";
 import { hasReservedImportPrefix, isAgentVisiblePrivacyState } from "../memory/memory-visibility";
+import { commitmentEntityKey, normalizeSuggestionEntityKey } from "../agent/SuggestionSink";
 import {
   Briefing,
   BriefingConfig,
@@ -783,7 +784,36 @@ export class DailyBriefingService {
         status: item.status,
       }));
 
+      // One entity, one surface: a decision about a commitment already listed as due soon, or
+      // already surfaced as a suggestion (SuggestionSink), is not repeated as "Decision needed".
+      const coveredEntityKeys = new Set<string>();
+      const coveredDecisionIds = new Set<string>();
+      for (const entry of summary.dueSoon?.slice(0, 3) || []) {
+        if (entry?.id && Array.isArray(entry.tags) && entry.tags.includes("commitment")) {
+          coveredEntityKeys.add(commitmentEntityKey(entry.id));
+        }
+      }
+      try {
+        for (const suggestion of (await this.deps.getActiveSuggestions(workspaceId)) || []) {
+          if (suggestion?.entityKey) {
+            coveredEntityKeys.add(normalizeSuggestionEntityKey(suggestion.entityKey, ""));
+          }
+          if (typeof suggestion?.sourceEntity === "string") {
+            coveredDecisionIds.add(suggestion.sourceEntity);
+          }
+        }
+      } catch {
+        // suggestions are optional here
+      }
       const usefulDecisions = autonomyDecisions
+        .filter(
+          (decision: Any) =>
+            !coveredDecisionIds.has(decision.id) &&
+            !(
+              decision.entityKey &&
+              coveredEntityKeys.has(normalizeSuggestionEntityKey(decision.entityKey, ""))
+            ),
+        )
         .map((decision: Any) => ({ ...decision, _score: this.decisionScore(decision) }))
         .filter((decision: Any) => decision._score > 0)
         .sort((a: Any, b: Any) => b._score - a._score)

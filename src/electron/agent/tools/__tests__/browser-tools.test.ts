@@ -981,6 +981,101 @@ describe("BrowserTools browser_navigate", () => {
     expect(getContentTool?.input_schema.properties).toHaveProperty("max_chars");
     expect(getContentTool?.input_schema.properties).toHaveProperty("scope");
   });
+
+  const visibleSession = () =>
+    vi.fn().mockReturnValue({ taskId: "task-1", sessionId: "default", webContentsId: 123 });
+
+  it("passes snapshot paging and filter options to the visible workbench", async () => {
+    const browserWorkbenchService = {
+      getSession: visibleSession(),
+      snapshot: vi.fn().mockResolvedValue({
+        success: true,
+        url: "https://shop.example/",
+        nodes: [],
+        truncated: true,
+        nextOffset: 280,
+      }),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_snapshot", {
+      offset: 140,
+      limit: 140,
+      interactive_only: true,
+      query: "cart",
+    });
+
+    expect(result).toMatchObject({ truncated: true, nextOffset: 280 });
+    expect(browserWorkbenchService.snapshot).toHaveBeenCalledWith("task-1", undefined, {
+      offset: 140,
+      limit: 140,
+      interactiveOnly: true,
+      query: "cart",
+    });
+  });
+
+  it("runs visible act_batch actions by ref and stops when the workbench returns nothing", async () => {
+    const browserWorkbenchService = {
+      getSession: visibleSession(),
+      clickRef: vi.fn().mockResolvedValue({ success: true }),
+      fillRef: vi.fn().mockResolvedValue({ success: true, value: "a@b.co" }),
+      click: vi.fn().mockResolvedValue(null),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_act_batch", {
+      actions: [
+        { type: "fill", ref: "b2:snap-1:2", value: "a@b.co" },
+        { type: "click", ref: "b2:snap-1:3" },
+        { type: "click", selector: "text=Continue" },
+        { type: "click", selector: "text=Never reached" },
+      ],
+    });
+
+    expect(browserWorkbenchService.fillRef).toHaveBeenCalledWith(
+      "task-1",
+      "b2:snap-1:2",
+      "a@b.co",
+      undefined,
+    );
+    expect(browserWorkbenchService.clickRef).toHaveBeenCalledWith(
+      "task-1",
+      "b2:snap-1:3",
+      undefined,
+    );
+    expect(result.success).toBe(false);
+    expect(result.completed).toBe(3);
+    expect(result.results[2]).toMatchObject({
+      success: false,
+      error: expect.stringContaining("no longer available"),
+    });
+    expect(browserWorkbenchService.click).toHaveBeenCalledTimes(1);
+  });
+
+  it("hovers by selector in the visible workbench", async () => {
+    const browserWorkbenchService = {
+      getSession: visibleSession(),
+      hover: vi.fn().mockResolvedValue({ success: true, x: 10, y: 20 }),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_hover", { selector: "text=Menu" });
+
+    expect(result).toMatchObject({ success: true });
+    expect(browserWorkbenchService.hover).toHaveBeenCalledWith("task-1", "text=Menu", undefined);
+  });
+
+  it("teaches observe -> act -> verify with refs in the visible browser tool descriptions", () => {
+    const definitions = BrowserTools.getToolDefinitions();
+    const descriptionOf = (name: string) =>
+      definitions.find((tool) => tool.name === name)?.description || "";
+
+    expect(descriptionOf("browser_snapshot")).toContain("observe -> act -> verify");
+    expect(descriptionOf("browser_snapshot")).toContain("snapshot again");
+    expect(descriptionOf("browser_click")).toContain("preferably by ref from browser_snapshot");
+    expect(descriptionOf("browser_click")).toContain("call browser_snapshot to verify");
+    expect(descriptionOf("browser_fill")).toContain("success:false means the value did not take");
+  });
 });
 
 describe("BrowserTools headless browser capabilities", () => {

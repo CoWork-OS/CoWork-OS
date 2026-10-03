@@ -3963,6 +3963,7 @@ Browser Automation:
 - browser_navigate: Navigate to a URL (a headless background browser by default; the visible in-app workbench in visible mode or once a workbench session is open). Use it for JS-heavy pages, app/site testing, forms, screenshots, or “use/test/check this website as a normal user” tasks.
 - browser_screenshot: Take a screenshot of the page
 - browser_get_content: Get page text, links, and forms (use after navigate, for inspecting interactive elements)
+- browser_snapshot: Accessibility snapshot with refs. Observe -> act -> verify: act on refs from it rather than CSS selectors, and snapshot again after actions that change the page
 - browser_click: Click on an element
 - browser_fill: Fill a form field
 - browser_type: Type text character by character

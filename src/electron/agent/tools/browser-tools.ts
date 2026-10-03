@@ -1047,10 +1047,31 @@ export class BrowserTools {
       {
         name: "browser_snapshot",
         description:
-          "Get a compact accessibility snapshot of the current browser tab. Prefer refs from this snapshot for browser_click, browser_fill, browser_type, browser_get_text, browser_hover, browser_drag, and browser_upload_file.",
+          "Get a compact accessibility snapshot of the current browser tab. Prefer refs from this snapshot over CSS selectors for browser_click, browser_fill, browser_type, browser_get_text, browser_hover, browser_drag, and browser_upload_file. " +
+          "Work in an observe -> act -> verify loop: snapshot, act on a ref, then snapshot again after any action that can change the page (navigation, submit, opening a menu or dialog) to confirm the effect and get fresh refs; refs from before a navigation are rejected as stale. " +
+          "When truncated is true, page with offset=nextOffset or narrow with interactive_only/query.",
         input_schema: {
           type: "object" as const,
           properties: {
+            offset: {
+              type: "number",
+              description:
+                "Visible workbench: skip this many nodes (pass nextOffset from a truncated snapshot). Default 0",
+            },
+            limit: {
+              type: "number",
+              description: "Visible workbench: maximum nodes to return (default 140, max 400).",
+            },
+            interactive_only: {
+              type: "boolean",
+              description:
+                "Visible workbench: only return buttons, links, fields and other controls.",
+            },
+            query: {
+              type: "string",
+              description:
+                "Visible workbench: only return nodes whose name or value contains this text (case-insensitive).",
+            },
             session_id: {
               type: "string",
               description: "Optional visible in-app browser workbench session id.",
@@ -1143,7 +1164,9 @@ export class BrowserTools {
       },
       {
         name: "browser_click",
-        description: "Click on an element on the page",
+        description:
+          "Click an element, preferably by ref from browser_snapshot. Returns success:false with the reason when the element is covered by another element, outside the viewport, or did not receive the click. " +
+          "After a click that may change the page, call browser_snapshot to verify the result before the next action.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1154,7 +1177,8 @@ export class BrowserTools {
             selector: {
               type: "string",
               description:
-                'CSS selector or text selector (e.g., "button.submit", "text=Login", "#myButton")',
+                "Fallback when no ref is available: CSS selector (e.g. #myButton, button:has-text('Log in')), " +
+                "text selector (text=Login matches a substring, text='Log in' is exact), or role selector (role=button[name='Sign in'])",
             },
             timeout_ms: {
               type: "number",
@@ -1177,7 +1201,11 @@ export class BrowserTools {
           type: "object" as const,
           properties: {
             ref: { type: "string", description: "Preferred Browser V2 ref from browser_snapshot" },
-            selector: { type: "string", description: "CSS selector fallback" },
+            selector: {
+              type: "string",
+              description:
+                "Selector fallback (visible workbench only), same forms as browser_click",
+            },
             session_id: {
               type: "string",
               description: "Optional visible in-app browser workbench session id.",
@@ -1203,7 +1231,9 @@ export class BrowserTools {
       },
       {
         name: "browser_fill",
-        description: "Fill a form field with text",
+        description:
+          "Replace the contents of a text field (input, textarea or contenteditable), preferably by ref from browser_snapshot. " +
+          "The field is read back afterwards; success:false means the value did not take (read-only, maxlength, wrong element).",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1274,7 +1304,9 @@ export class BrowserTools {
       },
       {
         name: "browser_press",
-        description: "Press a keyboard key (e.g., Enter, Tab, Escape)",
+        description:
+          "Press a key or combo on the focused element (e.g. Enter to submit the focused form field, Tab, Escape, Shift+Tab). " +
+          "Take a browser_snapshot afterwards when the key can change the page.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1605,7 +1637,7 @@ export class BrowserTools {
           "Each action can have an optional delay_ms before it runs. Actions: click, fill, type, press, wait, scroll. " +
           "The result reports total (requested) and completed (executed) steps; when fewer ran, incomplete is true " +
           "and the remaining steps must be sent again. The batch stops at a failed step or at a confirm/prompt " +
-          "dialog the headless browser dismissed.",
+          "dialog the headless browser dismissed; take a browser_snapshot afterwards to verify the outcome.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1621,7 +1653,13 @@ export class BrowserTools {
                   },
                   selector: {
                     type: "string",
-                    description: "CSS selector (required for click, fill, type, wait)",
+                    description:
+                      "CSS/text/role selector (required for click, fill, type, wait unless ref is given)",
+                  },
+                  ref: {
+                    type: "string",
+                    description:
+                      "Visible workbench only: Browser V2 ref from browser_snapshot for click, fill or type. Refs go stale once an earlier action in the batch navigates.",
                   },
                   value: { type: "string", description: "Value for fill" },
                   text: { type: "string", description: "Text for type" },
@@ -2040,12 +2078,19 @@ export class BrowserTools {
           const result = await this.browserWorkbenchService.snapshot(
             this.taskId,
             this.getSessionId(input),
+            {
+              offset: typeof input?.offset === "number" ? input.offset : undefined,
+              limit: typeof input?.limit === "number" ? input.limit : undefined,
+              interactiveOnly: input?.interactive_only === true,
+              query: typeof input?.query === "string" ? input.query : undefined,
+            },
           );
           if (result) {
             this.daemon.logEvent(this.taskId, "browser_action", {
               action: "snapshot",
               url: result.url,
               nodeCount: Array.isArray(result.nodes) ? result.nodes.length : undefined,
+              truncated: result.truncated === true,
               visible: true,
             });
             return result;
@@ -2225,6 +2270,19 @@ export class BrowserTools {
             success: false,
             error: "browser_hover ref requires an active visible Browser V2 snapshot.",
           };
+        }
+        if (
+          typeof input?.selector === "string" &&
+          input.selector.trim() &&
+          this.shouldPreferVisibleWorkbench(input) &&
+          this.hasVisibleWorkbenchSession(input)
+        ) {
+          const result = await this.browserWorkbenchService.hover(
+            this.taskId,
+            input.selector,
+            this.getSessionId(input),
+          );
+          if (result) return result;
         }
         return {
           success: false,
@@ -2832,28 +2890,49 @@ export class BrowserTools {
             const delayMs = typeof act.delay_ms === "number" && act.delay_ms > 0 ? act.delay_ms : 0;
             if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
             const actType = String(act.type || "").toLowerCase();
+            const actRef = typeof act.ref === "string" ? act.ref.trim() : "";
             try {
               let result: Any = null;
               if (actType === "click") {
-                result = await this.browserWorkbenchService.click(
-                  this.taskId,
-                  String(act.selector || ""),
-                  this.getSessionId(input),
-                );
+                result = actRef
+                  ? await this.browserWorkbenchService.clickRef(
+                      this.taskId,
+                      actRef,
+                      this.getSessionId(input),
+                    )
+                  : await this.browserWorkbenchService.click(
+                      this.taskId,
+                      String(act.selector || ""),
+                      this.getSessionId(input),
+                    );
               } else if (actType === "fill") {
-                result = await this.browserWorkbenchService.fill(
-                  this.taskId,
-                  String(act.selector || ""),
-                  String(act.value ?? ""),
-                  this.getSessionId(input),
-                );
+                result = actRef
+                  ? await this.browserWorkbenchService.fillRef(
+                      this.taskId,
+                      actRef,
+                      String(act.value ?? ""),
+                      this.getSessionId(input),
+                    )
+                  : await this.browserWorkbenchService.fill(
+                      this.taskId,
+                      String(act.selector || ""),
+                      String(act.value ?? ""),
+                      this.getSessionId(input),
+                    );
               } else if (actType === "type") {
-                result = await this.browserWorkbenchService.type(
-                  this.taskId,
-                  String(act.selector || ""),
-                  String(act.text ?? ""),
-                  this.getSessionId(input),
-                );
+                result = actRef
+                  ? await this.browserWorkbenchService.typeRef(
+                      this.taskId,
+                      actRef,
+                      String(act.text ?? ""),
+                      this.getSessionId(input),
+                    )
+                  : await this.browserWorkbenchService.type(
+                      this.taskId,
+                      String(act.selector || ""),
+                      String(act.text ?? ""),
+                      this.getSessionId(input),
+                    );
               } else if (actType === "press") {
                 result = await this.browserWorkbenchService.press(
                   this.taskId,
@@ -2889,12 +2968,20 @@ export class BrowserTools {
                 });
                 break;
               }
+              if (!result) {
+                results.push({
+                  type: actType,
+                  success: false,
+                  error: "The visible browser workbench session is no longer available.",
+                });
+                break;
+              }
               results.push({
                 type: actType,
-                success: result?.success !== false,
-                error: result?.error,
+                success: result.success !== false,
+                error: result.error,
               });
-              if (result?.success === false) break;
+              if (result.success === false) break;
             } catch (err) {
               results.push({
                 type: actType,

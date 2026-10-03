@@ -13,7 +13,7 @@ import type { ControlPlaneServer } from "../electron/control-plane/server";
 import { ControlPlaneSettingsManager } from "../electron/control-plane/settings";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
 import type { AgentConfig, PermissionMode } from "../shared/types";
-import { isTempWorkspaceId } from "../shared/types";
+import { DEFAULT_WORKSPACE_PERMISSIONS, isTempWorkspaceId } from "../shared/types";
 import type { AgentDaemon } from "../electron/agent/daemon";
 import type { DatabaseManager } from "../electron/database/schema";
 import type { ChannelGateway } from "../electron/gateway";
@@ -912,13 +912,7 @@ export function registerControlPlaneMethods(
       };
     }
 
-    const defaultPermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      shell: false,
-    };
+    const defaultPermissions = { ...DEFAULT_WORKSPACE_PERMISSIONS };
 
     const workspace = await workspaceRepo.create(
       validated.name,

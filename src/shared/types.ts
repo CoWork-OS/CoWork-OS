@@ -4970,6 +4970,30 @@ export interface WorkspacePermissions {
 }
 
 /**
+ * Baseline permissions for a newly created workspace record.
+ *
+ * `delete` is on: inside the workspace, removing, moving and replacing files
+ * and directories is ordinary project work (rm -r, mv, build tools cleaning
+ * their output, atomic write-then-rename), and the sandbox cannot tell a
+ * rename from a delete. The protected .git and .cowork/policy paths stay
+ * immutable regardless, delete-like commands and delete_file still go
+ * through the active access profile's approval policy, and a read-only
+ * profile still turns delete off.
+ *
+ * `shell` stays off: named access profiles decide command-tool availability
+ * per task, so the persisted record is fail-closed for legacy callers.
+ * Existing records keep their stored value; only a record that never stored
+ * `delete` picks up this default.
+ */
+export const DEFAULT_WORKSPACE_PERMISSIONS: Readonly<WorkspacePermissions> = Object.freeze({
+  read: true,
+  write: true,
+  delete: true,
+  network: true,
+  shell: false,
+});
+
+/**
  * External verification configuration for a plan step (used in "verified" execution mode).
  * When present, the step must pass external verification before being marked complete.
  */

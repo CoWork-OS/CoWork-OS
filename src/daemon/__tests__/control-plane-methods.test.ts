@@ -163,6 +163,24 @@ describeWithSqlite("Node Control Plane browser parity", () => {
     });
   }
 
+  it("creates workspaces with delete on and shell off", async () => {
+    const methods = registerMethods({});
+    const handler = methods.get(Methods.WORKSPACE_CREATE);
+    expect(handler).toBeDefined();
+    const result = (await handler!(scopedClient(["admin"]), {
+      name: "Created",
+      path: path.join(tempDir, "created-workspace"),
+    })) as { workspace: { id: string; permissions: Record<string, unknown> } };
+    expect(result.workspace.permissions).toMatchObject({
+      read: true,
+      write: true,
+      delete: true,
+      shell: false,
+    });
+    const stored = new WorkspaceStore(manager.getDatabase()).findById(result.workspace.id);
+    expect(stored?.permissions.delete).toBe(true);
+  });
+
   it("uses durable daemon admission only for explicit operation keys", async () => {
     const workspace = createWorkspace();
     const task = new TaskStore(manager.getDatabase()).create({

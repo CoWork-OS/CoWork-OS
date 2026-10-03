@@ -87,6 +87,7 @@ import { routeModelWithJev } from "./jev/model-routing";
 import { createDecisionService } from "./decisions";
 import { decideTaskStrategyWithJev } from "./jev/task-strategy-decision";
 import {
+  DEFAULT_WORKSPACE_PERMISSIONS,
   Task,
   ApprovalRequest,
   ApprovalResponseAction,
@@ -12352,13 +12353,7 @@ export class AgentDaemon extends EventEmitter {
    * Create a new workspace with default permissions
    */
   createWorkspace(name: string, path: string): Workspace {
-    const defaultPermissions: WorkspacePermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      shell: false,
-    };
+    const defaultPermissions: WorkspacePermissions = { ...DEFAULT_WORKSPACE_PERMISSIONS };
     return this.workspaceRepo.create(name, path, defaultPermissions);
   }
 

@@ -20,6 +20,7 @@ import os from "os";
 import path from "path";
 import { z } from "zod";
 import {
+  DEFAULT_WORKSPACE_PERMISSIONS,
   IPC_CHANNELS,
   isTempWorkspaceId,
   LOCAL_MANAGED_DEVICE_ID,
@@ -3000,13 +3001,7 @@ export function registerTaskAndWorkspaceMethods(
       };
     }
 
-    const defaultPermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      shell: false,
-    };
+    const defaultPermissions = { ...DEFAULT_WORKSPACE_PERMISSIONS };
 
     const workspace = await workspaceRepo.create(
       validated.name,

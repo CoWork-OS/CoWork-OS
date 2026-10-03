@@ -44,6 +44,7 @@ import { Channel } from "../database/repositories";
 import type Database from "better-sqlite3";
 import { AgentDaemon } from "../agent/daemon";
 import {
+  DEFAULT_WORKSPACE_PERMISSIONS,
   Task,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
@@ -1046,13 +1047,7 @@ export class MessageRouter {
     const jobDir = path.join(root, dirName);
     fs.mkdirSync(jobDir, { recursive: true });
 
-    const permissions: WorkspacePermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      shell: false,
-    };
+    const permissions: WorkspacePermissions = { ...DEFAULT_WORKSPACE_PERMISSIONS };
     const name = `Scheduled: ${jobName}`.trim();
     return this.workspaceRepo.create(name, jobDir, permissions);
   }

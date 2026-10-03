@@ -7120,6 +7120,76 @@ describe("TaskExecutor step loop control", () => {
         );
       });
 
+      it("notes a configured test command that only passed as a different command", async () => {
+        const runs = [red, green];
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("npm test fails: the test script is broken."),
+            toolCall("run_command", { command: "node --test test/math.test.js" }, "c2"),
+            textResponse("Ran node --test test/math.test.js; both tests pass."),
+          ],
+          { run_command: () => runs.shift() },
+        );
+        const verify = verifyStep();
+        const recovery = recoveryStep("revised-1");
+        (executor as Any).plan = {
+          description: "Plan",
+          steps: [fixedStep(), verify, recovery],
+        };
+
+        await (executor as Any).executeStep(verify);
+        await (executor as Any).executeStep(recovery);
+
+        expect((executor as Any).getUnresolvedTestCommandFailures()).toEqual({
+          failingCommands: ["npm test"],
+          passingCommand: "node --test test/math.test.js",
+        });
+        const note = (executor as Any).buildUnresolvedTestCommandNote();
+        expect(note).toContain("`npm test` failed and did not pass in a later run");
+        expect(note).toContain("`node --test test/math.test.js`");
+        expect((executor as Any).appendCompletionFooters("Fixed average().", "")).toContain(
+          "Test notes:",
+        );
+
+        (executor as Any).requiresTestRun = true;
+        (executor as Any).daemon.completeTask = vi.fn(async () => undefined);
+        (executor as Any).finalizeTask("Fixed average(); both tests pass.");
+        expect((executor as Any).daemon.completeTask).toHaveBeenCalledWith(
+          "task-1",
+          expect.stringContaining("Test notes:"),
+          expect.objectContaining({ terminalStatus: "partial_success" }),
+        );
+        expect((executor as Any).task.terminalStatus).toBe("partial_success");
+        expect((executor as Any).task.failureClass).toBe("required_verification");
+        expect((executor as Any).task.resultSummary).toContain("Test notes:");
+      });
+
+      it("adds no test note when the configured command itself passes later", async () => {
+        const runs = [red, green];
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("npm test fails."),
+            toolCall("run_command", { command: "CI=1 npm test -- --reporter=dot" }, "c2"),
+            textResponse("npm test passes."),
+          ],
+          { run_command: () => runs.shift() },
+        );
+        const verify = verifyStep();
+        const recovery = recoveryStep("revised-1");
+        (executor as Any).plan = {
+          description: "Plan",
+          steps: [fixedStep(), verify, recovery],
+        };
+
+        await (executor as Any).executeStep(verify);
+        await (executor as Any).executeStep(recovery);
+
+        expect((executor as Any).getUnresolvedTestCommandFailures()).toBeNull();
+        expect((executor as Any).buildUnresolvedTestCommandNote()).toBe("");
+      });
+
       it("keeps the verification failure when the final re-run also fails", async () => {
         const runs = [red, red];
         const executor = createCodeStepExecutor(

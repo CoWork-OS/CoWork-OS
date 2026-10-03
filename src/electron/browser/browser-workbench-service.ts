@@ -3,7 +3,11 @@ import * as path from "path";
 import type { AccessDomainRule } from "../../shared/access-profiles";
 import type { WorkspacePermissions } from "../../shared/types";
 import { IPC_CHANNELS } from "../../shared/types";
-import { BrowserSessionManager, getBrowserSessionManager } from "./browser-session-manager";
+import {
+  BrowserSessionManager,
+  type BrowserSnapshotOptions,
+  getBrowserSessionManager,
+} from "./browser-session-manager";
 import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
 import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 
@@ -303,8 +307,16 @@ export class BrowserWorkbenchService {
     `);
   }
 
-  async snapshot(taskId: string, sessionId?: unknown): Promise<AnyRecord | null> {
-    return (await this.browserSessionManager.snapshot({ taskId, sessionId })) as AnyRecord | null;
+  async snapshot(
+    taskId: string,
+    sessionId?: unknown,
+    options: BrowserSnapshotOptions = {},
+  ): Promise<AnyRecord | null> {
+    return (await this.browserSessionManager.snapshot({
+      taskId,
+      sessionId,
+      ...options,
+    })) as AnyRecord | null;
   }
 
   async clickRef(taskId: string, ref: string, sessionId?: unknown): Promise<AnyRecord | null> {

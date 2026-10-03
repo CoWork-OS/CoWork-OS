@@ -40547,6 +40547,8 @@ Return ONLY a JSON object:
     // Progress (edits, commands that now pass, first reads) resets the
     // tool-use streak that drives the stop nudge and the tool lock.
     const toolLoopProgress = new ToolLoopProgressTracker();
+    let unexecutedActionNudgeCount = 0;
+    let intentOnlyNudgeInjected = false;
     let followUpToolCallsLocked = false;
     let followUpToolLockReason:
       | "persistent_tool_use_streak"
@@ -42444,6 +42446,53 @@ Return ONLY a JSON object:
             });
             continueLoop = false;
             wantsToEnd = true;
+          }
+
+          // As in the step loop: ending on tool-call markup the provider did not
+          // parse, or on a bare statement of the next action before any tool
+          // ran, has not done the work it describes.
+          if (
+            wantsToEnd &&
+            !responseHasToolUse &&
+            !followUpToolCallsLocked &&
+            !assistantAskedQuestion &&
+            availableToolNames.size > 0 &&
+            unexecutedActionNudgeCount < 2
+          ) {
+            const rawResponseText = ((response.content || []) as Any[])
+              .filter((block) => block?.type === "text" && typeof block.text === "string")
+              .map((block) => String(block.text))
+              .join("\n");
+            const textualToolCall = this.responseLooksLikeUnexecutedToolCall(rawResponseText);
+            const intentOnly =
+              !textualToolCall &&
+              !hadToolCalls &&
+              !intentOnlyNudgeInjected &&
+              isForwardLookingIntentOnlyTextUtil(assistantText || "");
+            if (textualToolCall || intentOnly) {
+              unexecutedActionNudgeCount += 1;
+              if (intentOnly) intentOnlyNudgeInjected = true;
+              this.emitEvent("log", {
+                metric: "unexecuted_action_nudge",
+                followUp: true,
+                kind: textualToolCall ? "textual_tool_call" : "intent_only",
+                attempt: unexecutedActionNudgeCount,
+              });
+              messages.push({
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: this.sanitizeFallbackInstruction(
+                      "You described a next action but didn't call a tool. " +
+                        "Call the tool now, or give the final answer if no tool is needed.",
+                    ),
+                  },
+                ],
+              });
+              continueLoop = true;
+              wantsToEnd = false;
+            }
           }
 
           // Check if agent wants to end but hasn't provided a text response yet

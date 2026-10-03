@@ -6224,6 +6224,81 @@ describe("TaskExecutor step loop control", () => {
     });
   });
 
+  describe("follow-up turns", () => {
+    /** Drives the real follow-up loop (sendMessageUnified) with the step harness stubs. */
+    function createFollowUpExecutor(
+      responses: LLMResponse[],
+      handlers: Record<string, (input: Any) => Any> = {},
+    ) {
+      const executor = createCodeStepExecutor(responses, handlers) as Any;
+      executor.task.status = "completed";
+      executor.task.agentConfig = { executionMode: "execute", retainMemory: false };
+      executor.daemon.getTask = vi.fn(() => executor.task);
+      executor.provider = { type: "openai" };
+      executor.toolRegistry.setCanvasSessionCutoff = vi.fn();
+      executor.toolCallDeduplicator.reset = vi.fn();
+      executor.turnSuccessfulToolUsageCounts = new Map();
+      executor.finalizeSuccessfulFollowUp = vi.fn();
+      return executor;
+    }
+    const sendFollowUp = (executor: Any, message: string) =>
+      executor.sendMessageUnified(message, undefined, undefined, {
+        suppressUserMessageEvent: true,
+      });
+
+    it("nudges a follow-up that only states its next action, then runs the tool", async () => {
+      const executor = createFollowUpExecutor([
+        textResponse("Let me check src/auth/login.ts first."),
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        textResponse("login() reads user.name without a null check."),
+      ]);
+
+      await sendFollowUp(executor, "Is there a null check problem in login?");
+
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledWith("read_file", {
+        path: "src/auth/login.ts",
+      });
+      expect(
+        userTexts(executor).filter((text) =>
+          text.includes("You described a next action but didn't call a tool"),
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("does not lock follow-up tool calls while the turns keep reading new files", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 14 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      responses.push(textResponse("The modules split request handling from domain logic."));
+      const executor = createFollowUpExecutor(responses);
+      executor.guardrailPhaseAEnabled = true;
+
+      await sendFollowUp(executor, "Walk through every module and explain how they connect");
+
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledTimes(14);
+      const locks = executor.daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "tool_use_lock_enabled",
+      );
+      expect(locks).toEqual([]);
+    });
+
+    it("still locks follow-up tool calls when the same file is read over and over", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 14 }, (_, index) =>
+        toolCall("read_file", { path: "src/module0.ts", offset: index }, `r${index}`),
+      );
+      responses.push(textResponse("The module exports the request handlers."));
+      const executor = createFollowUpExecutor(responses);
+      executor.guardrailPhaseAEnabled = true;
+
+      await sendFollowUp(executor, "Walk through every module and explain how they connect");
+
+      const locks = executor.daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "tool_use_lock_enabled",
+      );
+      expect(locks).toHaveLength(1);
+    });
+  });
+
   describe("verification rewind", () => {
     it("gives the rewound verification step the failed checks to fix", async () => {
       const executor = createExecutorWithStubs(

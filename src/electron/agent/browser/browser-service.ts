@@ -125,13 +125,31 @@ function rankConsentButtonName(name: string): number {
  * must be position fixed or sticky; it must be rendered, visible and intersect the viewport;
  * and it must cover a tenth of the viewport or sit within 48px of a viewport edge (top or
  * bottom bars, corner cards). Role and aria attributes alone are page-supplied claims.
+ *
+ * The page's element is typed structurally because the daemon and CLI builds have no DOM lib.
  */
-function isConsentOverlayLayout(element: Element): boolean {
+interface ConsentOverlayElement {
+  ownerDocument: { defaultView: ConsentOverlayView | null };
+  parentElement: ConsentOverlayElement | null;
+  getBoundingClientRect(): { top: number; left: number; right: number; bottom: number };
+}
+interface ConsentOverlayView {
+  innerWidth: number;
+  innerHeight: number;
+  getComputedStyle(element: ConsentOverlayElement): {
+    visibility: string;
+    display: string;
+    opacity: string;
+    position: string;
+  };
+}
+function isConsentOverlayLayout(pageElement: unknown): boolean {
+  const element = pageElement as ConsentOverlayElement;
   const view = element.ownerDocument.defaultView;
   if (!view) return false;
   if (["hidden", "collapse"].includes(view.getComputedStyle(element).visibility)) return false;
   let pinned = false;
-  for (let node: Element | null = element; node; node = node.parentElement) {
+  for (let node: ConsentOverlayElement | null = element; node; node = node.parentElement) {
     const style = view.getComputedStyle(node);
     if (style.display === "none" || Number(style.opacity) === 0) return false;
     if (style.position === "fixed" || style.position === "sticky") pinned = true;

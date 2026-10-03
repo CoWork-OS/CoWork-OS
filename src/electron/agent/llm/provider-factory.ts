@@ -2273,6 +2273,8 @@ export class LLMProviderFactory {
       anthropicApiKey:
         normalizeSecret(overrideConfig?.anthropicApiKey) ||
         resolveAnthropicCredential(settings.anthropic),
+      anthropicReasoningEffort:
+        overrideConfig?.anthropicReasoningEffort || settings.anthropic?.reasoningEffort,
       // Bedrock config - from settings only
       awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || "us-east-1",
       awsAccessKeyId: overrideConfig?.awsAccessKeyId || settings.bedrock?.accessKeyId,
@@ -2336,6 +2338,8 @@ export class LLMProviderFactory {
       azureAnthropicDeployment,
       azureAnthropicApiVersion:
         overrideConfig?.azureAnthropicApiVersion || settings.azureAnthropic?.apiVersion,
+      azureAnthropicReasoningEffort:
+        overrideConfig?.azureAnthropicReasoningEffort || settings.azureAnthropic?.reasoningEffort,
       // Groq config - from settings only
       groqApiKey: normalizeSecret(overrideConfig?.groqApiKey) || settings.groq?.apiKey,
       groqBaseUrl: overrideConfig?.groqBaseUrl || settings.groq?.baseUrl,

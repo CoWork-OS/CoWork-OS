@@ -327,8 +327,17 @@ export function applyAnthropicCacheMarker(
   }
 
   if (Array.isArray(content) && content.length > 0) {
-    const last = content[content.length - 1];
-    if (last && typeof last === "object") {
+    // Thinking blocks cannot carry cache_control; mark the last block before them.
+    const last = [...content]
+      .reverse()
+      .find(
+        (block) =>
+          block &&
+          typeof block === "object" &&
+          block.type !== "thinking" &&
+          block.type !== "redacted_thinking",
+      );
+    if (last) {
       (last as Record<string, Any>).cache_control = cacheMarker;
     }
   }

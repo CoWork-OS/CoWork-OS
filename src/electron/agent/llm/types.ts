@@ -7,6 +7,7 @@ import type {
   LLMProviderType,
   AzureReasoningEffort,
   OpenAIReasoningEffort,
+  LLMReasoningEffort,
   LLMTextVerbosity,
   RuntimeToolMetadata,
   ExecutionMode,
@@ -24,6 +25,8 @@ export interface LLMProviderConfig {
   model: string;
   // Anthropic-specific
   anthropicApiKey?: string;
+  /** Saved reasoning effort; mapped to thinking/effort per model (anthropic-thinking.ts). */
+  anthropicReasoningEffort?: LLMReasoningEffort;
   // Bedrock-specific
   awsRegion?: string;
   awsAccessKeyId?: string;
@@ -71,6 +74,7 @@ export interface LLMProviderConfig {
   azureAnthropicEndpoint?: string;
   azureAnthropicDeployment?: string;
   azureAnthropicApiVersion?: string;
+  azureAnthropicReasoningEffort?: LLMReasoningEffort;
   // Groq-specific
   groqApiKey?: string;
   groqBaseUrl?: string;
@@ -293,7 +297,8 @@ export interface LLMToolResult {
 
 /** Opaque provider reasoning state, replayed only to the model that produced it. */
 export interface LLMReasoningItem {
-  format: "openai-responses" | "pi-ai";
+  /** "anthropic": a thinking/redacted_thinking block (see anthropic-thinking.ts). */
+  format: "openai-responses" | "pi-ai" | "anthropic";
   model: string;
   data: unknown;
 }

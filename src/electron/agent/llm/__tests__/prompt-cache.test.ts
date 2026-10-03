@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContentBuilder } from "../../content/ContentBuilder";
 import {
+  applyAnthropicExplicitCacheControl,
   computePromptCacheKey,
   computeStablePrefixHash,
   computeToolSchemaHash,
@@ -457,5 +458,30 @@ describe("prompt-cache stable prefix hashing", () => {
       true,
     );
     expect(isPromptCacheRequestUnsupportedError(400, "Invalid API key")).toBe(false);
+  });
+});
+
+describe("applyAnthropicExplicitCacheControl with thinking blocks", () => {
+  it("marks the last non-thinking block, since thinking blocks cannot carry cache_control", () => {
+    const marked = applyAnthropicExplicitCacheControl(
+      [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Partial answer" },
+            { type: "thinking", thinking: "", signature: "sig" },
+          ],
+        },
+        { role: "assistant", content: [{ type: "redacted_thinking", data: "opaque" }] },
+      ],
+      { ttl: "5m", nativeAnthropic: true, includeSystem: false, maxBreakpoints: 2 },
+    );
+
+    expect(marked[0].content).toEqual([
+      { type: "text", text: "Partial answer", cache_control: { type: "ephemeral" } },
+      { type: "thinking", thinking: "", signature: "sig" },
+    ]);
+    expect(marked[1].content).toEqual([{ type: "redacted_thinking", data: "opaque" }]);
+    expect(marked[1]).not.toHaveProperty("cache_control");
   });
 });

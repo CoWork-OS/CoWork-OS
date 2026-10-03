@@ -304,6 +304,14 @@ const EXTRACTION_SUB_AGENT_ALLOWED_TOOLS = [
 ];
 
 const DEFAULT_ACTIVE_SUB_AGENT_LIMIT = 3;
+// Turn windows for spawned agents when max_turns is omitted. Read-only roles
+// (researcher, verifier, synthesizer) and extraction helpers finish well within
+// 20 turns; an implementer that edits several files and then builds and tests
+// routinely needs more, and hitting the window ends it with partial work.
+const DEFAULT_SUB_AGENT_MAX_TURNS = 20;
+const DEFAULT_IMPLEMENTER_SUB_AGENT_MAX_TURNS = 40;
+// Model used for extraction helpers and explicit "cheaper"/"haiku" requests.
+const EXTRACTION_SUB_AGENT_MODEL_KEY = "haiku-4-5";
 const ACTIVE_CHILD_AGENT_STATUSES = new Set(["pending", "queued", "planning", "executing"]);
 const EXTRACTION_CONTRACT_MARKER = "[EXTRACTION_OUTPUT_CONTRACT_V1]";
 const CODEX_RUNTIME_TITLE_PATTERNS = [
@@ -11012,11 +11020,8 @@ ${skillDescriptions}`;
       worker_role,
       runtime,
       runtime_agent,
-      max_turns = 20,
+      max_turns,
     } = input;
-
-    const normalizedMaxTurns =
-      typeof max_turns === "number" && Number.isFinite(max_turns) ? Math.round(max_turns) : 20;
 
     const phaseCEnabled = parseBooleanEnv("COWORK_GUARDRAIL_PHASE_C", true);
     const modelPref =
@@ -11026,10 +11031,6 @@ ${skillDescriptions}`;
       !model_preference && capability_hint
         ? ModelCapabilityRegistry.selectForTask(String(capability_hint))
         : undefined;
-    const modelKey =
-      modelPref === "same"
-        ? undefined
-        : (resolveModelPreferenceToModelKey(model_preference ?? capabilityRouted) ?? "haiku-4-5");
     const personalityId: PersonalityId | undefined =
       personalityPref === "same"
         ? undefined
@@ -11039,6 +11040,30 @@ ${skillDescriptions}`;
       prompt,
     });
     const extractionMode = phaseCEnabled && isExtractionLikePrompt(prompt, workerRole);
+    const parentTask = await this.getDelegationParentTask();
+
+    // A child inherits the parent's model route unless a cheaper or specific
+    // model is asked for. Leaving providerType/modelKey unset keeps the
+    // configured provider failover chain, which a pinned modelKey disables.
+    const requestedModelKey =
+      modelPref === "same"
+        ? undefined
+        : (resolveModelPreferenceToModelKey(model_preference ?? capabilityRouted) ??
+          (extractionMode ? EXTRACTION_SUB_AGENT_MODEL_KEY : undefined));
+    const inheritedRoute = requestedModelKey
+      ? {}
+      : {
+          providerType: parentTask?.agentConfig?.providerType,
+          modelKey: parentTask?.agentConfig?.modelKey,
+        };
+    const modelKey = requestedModelKey ?? inheritedRoute.modelKey;
+
+    const normalizedMaxTurns =
+      typeof max_turns === "number" && Number.isFinite(max_turns)
+        ? Math.round(max_turns)
+        : workerRole === "implementer" && !extractionMode
+          ? DEFAULT_IMPLEMENTER_SUB_AGENT_MAX_TURNS
+          : DEFAULT_SUB_AGENT_MAX_TURNS;
 
     const agentConfig: AgentConfig = {
       maxTurns: normalizedMaxTurns,
@@ -11065,12 +11090,12 @@ ${skillDescriptions}`;
       agentConfig.allowedTools = [...EXTRACTION_SUB_AGENT_ALLOWED_TOOLS];
     }
 
+    if (inheritedRoute.providerType) agentConfig.providerType = inheritedRoute.providerType;
     if (modelKey) agentConfig.modelKey = modelKey;
     if (personalityId) agentConfig.personalityId = personalityId;
 
     const taskTitle =
       title || `Sub-task: ${prompt.substring(0, 50)}${prompt.length > 50 ? "..." : ""}`;
-    const parentTask = await this.getDelegationParentTask();
     const currentStepContext = await this.getDelegationCurrentStepContext();
     const knownFindings = await this.getDelegationKnownFindings();
     const delegatedPromptBody = extractionMode ? applyExtractionOutputContract(prompt) : prompt;
@@ -11184,7 +11209,7 @@ ${skillDescriptions}`;
       runtime,
       runtime_agent,
       wait = false,
-      max_turns = 20,
+      max_turns,
     } = input;
 
     // Validate prompt
@@ -11192,11 +11217,12 @@ ${skillDescriptions}`;
       throw new Error("spawn_agent requires a non-empty prompt");
     }
 
-    const normalizedMaxTurns =
-      typeof max_turns === "number" && Number.isFinite(max_turns) ? Math.round(max_turns) : 20;
-    const maxTurnsCap = this._deepWorkMode ? 250 : 100;
-    if (normalizedMaxTurns < 1 || normalizedMaxTurns > maxTurnsCap) {
-      throw new Error(`max_turns must be between 1 and ${maxTurnsCap}`);
+    if (typeof max_turns === "number" && Number.isFinite(max_turns)) {
+      const requestedMaxTurns = Math.round(max_turns);
+      const maxTurnsCap = this._deepWorkMode ? 250 : 100;
+      if (requestedMaxTurns < 1 || requestedMaxTurns > maxTurnsCap) {
+        throw new Error(`max_turns must be between 1 and ${maxTurnsCap}`);
+      }
     }
 
     const phaseCEnabled = parseBooleanEnv("COWORK_GUARDRAIL_PHASE_C", true);
@@ -11286,7 +11312,7 @@ ${skillDescriptions}`;
       runtime: runtime || (prepared.externalRuntime ? "acpx" : "native"),
       runtimeAgent: prepared.externalRuntime?.agent,
       workerRole: prepared.workerRole,
-      maxTurns: normalizedMaxTurns,
+      maxTurns: prepared.agentConfig.maxTurns,
       parentDepth: currentDepth,
       extractionMode: prepared.extractionMode,
       fanout: {
@@ -11379,7 +11405,7 @@ ${skillDescriptions}`;
         runtime: runtime || (prepared.externalRuntime ? "acpx" : "native"),
         runtimeAgent: prepared.externalRuntime?.agent,
         workerRole: prepared.workerRole,
-        maxTurns: normalizedMaxTurns,
+        maxTurns: prepared.agentConfig.maxTurns,
         parentDepth: currentDepth,
       });
 
@@ -11706,7 +11732,6 @@ ${skillDescriptions}`;
           capability_hint: task.capability_hint,
           acp_agent_id: task.acp_agent_id,
           worker_role: task.worker_role,
-          max_turns: 20,
         });
         return {
           key: `batch-${index + 1}`,
@@ -13651,7 +13676,7 @@ ${skillDescriptions}`;
               type: "string",
               enum: ["same", "cheaper", "smarter"],
               description:
-                'Model selection: "same" uses parent model, "cheaper" selects Haiku (fast/cheap), "smarter" selects Opus (most capable). Default: "cheaper" for cost optimization.',
+                'Model selection: "same" uses the parent\'s model, "cheaper" selects Haiku (fast/cheap) for bulk or mechanical work, "smarter" selects Opus (most capable). Default: the parent\'s model (extraction-only helpers default to Haiku).',
             },
             capability_hint: {
               type: "string",
@@ -13697,7 +13722,7 @@ ${skillDescriptions}`;
             max_turns: {
               type: "number",
               description:
-                "Maximum number of LLM turns for the sub-agent. Range: 1-100 (up to 250 in deep work mode). Default: 20",
+                "Maximum number of LLM turns for the sub-agent. Range: 1-100 (up to 250 in deep work mode). Default: 40 for implementer roles, 20 for researcher/verifier/synthesizer roles and extraction helpers.",
             },
           },
           required: ["prompt"],
@@ -13731,7 +13756,8 @@ ${skillDescriptions}`;
                   model_preference: {
                     type: "string",
                     enum: ["same", "cheaper", "smarter"],
-                    description: 'Model selection. Default: "cheaper"',
+                    description:
+                      'Model selection. Default: the parent\'s model; use "cheaper" for bulk or mechanical sub-tasks.',
                   },
                   capability_hint: {
                     type: "string",

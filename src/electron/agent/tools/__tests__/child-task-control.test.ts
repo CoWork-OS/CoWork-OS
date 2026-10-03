@@ -1589,6 +1589,116 @@ describe("ToolRegistry child task control tools", () => {
     expect(inferredCall.prompt).toContain("Resolved worker role: Researcher");
   });
 
+  describe("spawn_agent model and turn defaults", () => {
+    // Sub-agents used to default to Haiku with 20 turns. A pinned modelKey also
+    // drops the provider failover chain (resolveProviderFailoverChain returns
+    // only the primary route when the task has a modelKey), so the default now
+    // inherits the parent's route and only extraction helpers or explicit
+    // requests ask for Haiku.
+    let prevLimit: string | undefined;
+    let prevPhaseC: string | undefined;
+    beforeEach(() => {
+      prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+      prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+      process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+    });
+    afterEach(() => {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    });
+
+    async function spawnChild(
+      input: Record<string, unknown>,
+      parentAgentConfig?: Task["agentConfig"],
+    ): Promise<Any> {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+          ...(parentAgentConfig ? { agentConfig: parentAgentConfig } : {}),
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createChildTask: vi.fn().mockResolvedValue({
+          id: "child-1",
+          title: "Child",
+          prompt: "x",
+          status: "pending",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: "parent-task",
+          agentType: "sub",
+          depth: 1,
+        }),
+        logEvent: vi.fn(),
+      } as Any;
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", input);
+      expect(result.success).toBe(true);
+      return daemon.createChildTask.mock.calls[0][0].agentConfig;
+    }
+
+    it("inherits the parent's model route when no preference is given", async () => {
+      const agentConfig = await spawnChild({ prompt: "Fix the failing date parser in src/utils" });
+      expect(agentConfig.modelKey).toBeUndefined();
+      expect(agentConfig.providerType).toBeUndefined();
+    });
+
+    it("copies an explicit parent provider and model", async () => {
+      const agentConfig = await spawnChild(
+        { prompt: "Fix the failing date parser in src/utils" },
+        { providerType: "openai", modelKey: "gpt-5.2" },
+      );
+      expect(agentConfig.providerType).toBe("openai");
+      expect(agentConfig.modelKey).toBe("gpt-5.2");
+    });
+
+    it('treats "same" and unknown preferences as inheritance', async () => {
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "same" })).modelKey,
+      ).toBeUndefined();
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "gpt-9" })).modelKey,
+      ).toBeUndefined();
+    });
+
+    it("keeps Haiku for explicit cheaper/haiku requests and extraction helpers", async () => {
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "cheaper" })).modelKey,
+      ).toBe("haiku-4-5");
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "haiku" })).modelKey,
+      ).toBe("haiku-4-5");
+      const extraction = await spawnChild(
+        {
+          prompt:
+            'Read "temp-writing-rules.html" in the workspace and extract meaningful content to markdown.',
+        },
+        { providerType: "openai", modelKey: "gpt-5.2" },
+      );
+      expect(extraction.modelKey).toBe("haiku-4-5");
+      expect(extraction.providerType).toBeUndefined();
+    });
+
+    it("gives implementer children 40 turns and other roles 20", async () => {
+      expect((await spawnChild({ prompt: "Fix the failing date parser" })).maxTurns).toBe(40);
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", worker_role: "researcher" })).maxTurns,
+      ).toBe(20);
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", worker_role: "verifier" })).maxTurns,
+      ).toBe(20);
+      expect((await spawnChild({ prompt: "Fix the parser", max_turns: 12 })).maxTurns).toBe(12);
+    });
+  });
+
   describe("orchestrate_agents", () => {
     const parentTask = {
       id: "parent-task",

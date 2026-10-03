@@ -234,7 +234,7 @@ denied when the active sandbox cannot enforce those domains.
 
 `execute_code` requires the same command-tool capability and approval handling as
 shell execution for every supported language. Its separate network request still
-requires network permission.
+requires network permission. Code runs for up to 300 seconds (30 by default).
 
 ### Browser Automation
 

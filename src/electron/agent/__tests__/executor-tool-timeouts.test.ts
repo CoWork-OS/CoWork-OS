@@ -156,6 +156,28 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     timeoutSpy.mockRestore();
   });
 
+  it("budgets execute_code for its approval wait plus its requested run time", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: false } };
+    executor.toolRegistry = { getApprovalType: () => "run_command" };
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(null);
+
+    const long = executor.getToolTimeoutMs("execute_code", {
+      language: "python",
+      code: "train()",
+      timeout_seconds: 300,
+    });
+    expect(long).toBeGreaterThanOrEqual(300_000 + APPROVAL_GATED_TOOL_TIMEOUT_MS);
+    expect(long).toBeLessThan(15 * 60 * 1000);
+
+    const short = executor.getToolTimeoutMs("execute_code", { language: "shell", code: "ls" });
+    expect(short).toBeGreaterThanOrEqual(30_000 + APPROVAL_GATED_TOOL_TIMEOUT_MS);
+    expect(short).toBeLessThan(long);
+    timeoutSpy.mockRestore();
+  });
+
   it("gives image generation enough time to avoid retrying slow provider calls", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { deepWorkMode: false } };

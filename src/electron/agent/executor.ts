@@ -91,6 +91,7 @@ import {
   RUN_COMMAND_HEAVY_TIMEOUT_MS,
   RUN_COMMAND_MAX_TIMEOUT_MS,
 } from "./run-command-timeouts";
+import { resolveCodeExecTimeoutSeconds } from "./tools/code-exec-tools";
 import {
   BROWSER_ACTION_DIAGNOSTICS_HEADROOM_MS,
   BROWSER_TOOL_TIMEOUT_MS as BROWSER_TOOL_TIMEOUT_BUDGET_MS,
@@ -1444,6 +1445,8 @@ export class TaskExecutor {
   private static readonly VIDEO_TOOL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly RUN_COMMAND_DEFAULT_TIMEOUT_MS = RUN_COMMAND_DEFAULT_TIMEOUT_MS;
   private static readonly RUN_COMMAND_HEAVY_TIMEOUT_MS = RUN_COMMAND_HEAVY_TIMEOUT_MS;
+  /** Sandbox or container startup allowance for execute_code. */
+  private static readonly CODE_EXEC_STARTUP_MS = 30_000;
 
   /**
    * Insert or replace a pinned block. Blocks are located by their tags even after
@@ -10782,6 +10785,18 @@ ${transcript}
       return normalizedSettingsTimeout === null
         ? inferredDefault
         : clampRunCommand(normalizedSettingsTimeout);
+    }
+
+    if (toolName === "execute_code") {
+      // The approval prompt is answered inside this budget, then the code runs for
+      // up to its own timeout; the headroom covers sandbox or container startup.
+      const runMs = resolveCodeExecTimeoutSeconds(toolInput.timeout_seconds) * 1000;
+      return (
+        normalizedSettingsTimeout ??
+        clampToStepTimeout(
+          runMs + TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS + TaskExecutor.CODE_EXEC_STARTUP_MS,
+        )
+      );
     }
 
     if (toolName === "request_user_input") {

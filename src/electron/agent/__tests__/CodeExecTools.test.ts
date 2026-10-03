@@ -150,14 +150,40 @@ describe("CodeExecTools", () => {
     ).rejects.toThrow(/domain-scoped network rules/i);
   });
 
-  it("clamps timeout to max 60 seconds", async () => {
+  it("allows up to 300 seconds and clamps longer requests", async () => {
     const { createSandbox } = await import("../sandbox/sandbox-factory");
     const tools = new CodeExecTools(
       fakeWorkspace as unknown as import("../../../shared/types").Workspace,
     );
+
+    await tools.executeCode({ language: "shell", code: "make data", timeout_seconds: 240 });
+    const sandbox = await vi.mocked(createSandbox).mock.results.at(-1)!.value;
+    expect(sandbox.execute).toHaveBeenLastCalledWith(
+      "make data",
+      [],
+      expect.objectContaining({ timeout: 240_000, allowNetwork: false }),
+    );
+
     await tools.executeCode({ language: "shell", code: "sleep 1", timeout_seconds: 999 });
-    // The sandbox.execute is called with options; we just verify no error thrown
-    expect(createSandbox).toHaveBeenCalled();
+    expect(sandbox.execute).toHaveBeenLastCalledWith(
+      "sleep 1",
+      [],
+      expect.objectContaining({ timeout: 300_000 }),
+    );
+
+    await tools.executeCode({ language: "shell", code: "true" });
+    expect(sandbox.execute).toHaveBeenLastCalledWith(
+      "true",
+      [],
+      expect.objectContaining({ timeout: 30_000 }),
+    );
+  });
+
+  it("documents the 300-second maximum in the tool schema", () => {
+    const [def] = CodeExecTools.getToolDefinitions();
+    const timeout = (def.input_schema.properties as Record<string, { description: string }>)
+      .timeout_seconds;
+    expect(timeout.description).toContain("1–300");
   });
 
   it("getToolDefinitions returns a tool named execute_code", () => {

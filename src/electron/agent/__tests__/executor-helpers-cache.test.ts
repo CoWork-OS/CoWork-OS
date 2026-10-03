@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   FileOperationTracker,
   ToolCallDeduplicator,
   ToolFailureTracker,
 } from "../executor-helpers";
 import { TaskExecutor } from "../executor";
+import {
+  buildDuplicateCallSuggestion,
+  buildDuplicateToolResult,
+} from "../executor-tool-execution-utils";
 
 describe("ToolCallDeduplicator read-history invalidation", () => {
   it("does not dedupe repeated screenshot calls", () => {
@@ -242,6 +246,387 @@ describe("FileOperationTracker cache invalidation", () => {
 
     expect(first.blocked).toBe(false);
     expect(retry.blocked).toBe(false);
+  });
+});
+
+describe("ToolCallDeduplicator only blocks genuine repeats", () => {
+  const failedTestRun = JSON.stringify({
+    success: false,
+    exitCode: 1,
+    stdout: "1 failed",
+    stderr: "AssertionError: expected 200, got 302",
+  });
+
+  it("lets the model keep polling a background process with the same call", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const input = { process_id: "bg-1a2b3c4d", wait_ms: 5_000 };
+
+    for (let i = 0; i < 8; i++) {
+      expect(dedupe.checkDuplicate("process_output", input)).toEqual({ isDuplicate: false });
+      dedupe.recordCall("process_output", input, `{"success":true,"output":"tick ${i}"}`);
+    }
+  });
+
+  it("allows six distinct edits to different files in a row", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+
+    for (let i = 0; i < 6; i++) {
+      const input = {
+        file_path: `src/feature${i}.ts`,
+        old_string: "getUser(",
+        new_string: "fetchUser(",
+      };
+      expect(dedupe.checkDuplicate("edit_file", input)).toEqual({ isDuplicate: false });
+      dedupe.recordCall("edit_file", input, '{"success":true}');
+    }
+  });
+
+  it("allows different edits to the same file", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+
+    for (let i = 0; i < 6; i++) {
+      const input = {
+        file_path: "src/app.ts",
+        old_string: `const v${i} = 0;`,
+        new_string: `const v${i} = 1;`,
+      };
+      expect(dedupe.checkDuplicate("edit_file", input).isDuplicate).toBe(false);
+      dedupe.recordCall("edit_file", input, '{"success":true}');
+    }
+  });
+
+  it("does not cap distinct edits per run, including across follow-up resets", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const now = vi.spyOn(Date, "now");
+    try {
+      for (let i = 1; i <= 30; i++) {
+        now.mockReturnValue(1_000_000 + i * 180_000);
+        if (i === 7) dedupe.reset();
+        const input = { file_path: `src/f${i}.ts`, old_string: "a", new_string: "b" };
+        expect(dedupe.checkDuplicate("edit_file", input).isDuplicate).toBe(false);
+        dedupe.recordCall("edit_file", input, "{}");
+      }
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("still blocks an identical edit repeated over and over", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const input = { file_path: "src/app.ts", old_string: "a", new_string: "b" };
+
+    for (let i = 0; i < 3; i++) dedupe.recordCall("edit_file", input, '{"success":true}');
+
+    const check = dedupe.checkDuplicate("edit_file", input);
+    expect(check.isDuplicate).toBe(true);
+    expect(check.reason).toMatch(/exact parameters/);
+  });
+
+  it("does not collapse distinct numbered source files written with write_file", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+
+    for (let i = 1; i <= 6; i++) {
+      const input = { path: `src/steps/step-${i}.ts`, content: `export const step = ${i};\n` };
+      expect(dedupe.checkDuplicate("write_file", input).isDuplicate).toBe(false);
+      dedupe.recordCall("write_file", input, '{"success":true}');
+    }
+  });
+
+  it("still flags renamed variants of the same document", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const names = ["report_v2.md", "report_v3.md", "report_final.md", "report_updated.md"];
+    for (const name of names) {
+      const input = { path: `out/${name}`, content: `# Report (${name})` };
+      expect(dedupe.checkDuplicate("write_file", input).isDuplicate).toBe(false);
+      dedupe.recordCall("write_file", input, '{"success":true}');
+    }
+
+    const check = dedupe.checkDuplicate("write_file", {
+      path: "out/report_complete.md",
+      content: "# Report (complete)",
+    });
+    expect(check.isDuplicate).toBe(true);
+    expect(check.reason).toMatch(/versions of the same document/);
+  });
+
+  it("treats rewriting the same document as editing it, not as a new variant", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+
+    for (let i = 1; i <= 6; i++) {
+      const input = { path: "out/report.md", content: `# Report\n\nDraft ${i}` };
+      expect(dedupe.checkDuplicate("write_file", input).isDuplicate).toBe(false);
+      dedupe.recordCall("write_file", input, '{"success":true}');
+    }
+  });
+
+  it("does not treat calls with different nested inputs as identical", () => {
+    const dedupe = new ToolCallDeduplicator(2, 120_000, 4);
+    const doc = (text: string) => ({
+      filename: "notes.docx",
+      content: [{ type: "paragraph", text }],
+    });
+
+    dedupe.recordCall("create_document", doc("first"), '{"success":true}');
+    dedupe.recordCall("create_document", doc("second"), '{"success":true}');
+
+    expect(dedupe.checkDuplicate("create_document", doc("third")).isDuplicate).toBe(false);
+  });
+
+  it("allows the same test command again after a workspace mutation", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const testRun = { command: "pytest tests/test_login.py -x" };
+    for (let i = 0; i < 3; i++) dedupe.recordCall("run_command", testRun, failedTestRun);
+    expect(dedupe.checkDuplicate("run_command", testRun).isDuplicate).toBe(true);
+
+    dedupe.clearHistoryAfterWorkspaceMutation();
+
+    expect(dedupe.checkDuplicate("run_command", testRun).isDuplicate).toBe(false);
+  });
+
+  it("keeps blocking a command repeated back-to-back when only that command ran", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const testRun = { command: "npm test" };
+    for (let i = 0; i < 3; i++) {
+      dedupe.recordCall("run_command", testRun, failedTestRun);
+      dedupe.clearHistoryAfterWorkspaceMutation({ toolName: "run_command", input: testRun });
+    }
+
+    expect(dedupe.checkDuplicate("run_command", testRun).isDuplicate).toBe(true);
+  });
+
+  it("allows 25 distinct reads and searches within a minute", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+
+    for (let i = 0; i < 25; i++) {
+      for (const [tool, input] of [
+        ["read_file", { path: `src/module${i}.ts` }],
+        ["grep", { pattern: `symbol${i}` }],
+      ] as const) {
+        expect(dedupe.checkDuplicate(tool, input).isDuplicate).toBe(false);
+        dedupe.recordCall(tool, input, '{"content":"export {}"}');
+      }
+    }
+  });
+
+  it("states that the previous identical call failed instead of claiming success", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const testRun = { command: "npm test" };
+    for (let i = 0; i < 3; i++) dedupe.recordCall("run_command", testRun, failedTestRun);
+
+    const check = dedupe.checkDuplicate("run_command", testRun);
+    const suggestion = buildDuplicateCallSuggestion(check);
+
+    expect(check.isDuplicate).toBe(true);
+    expect(check.previousOutcome).toBe("failed");
+    expect(check.reason).toMatch(/failed \(exit code 1/);
+    expect(`${check.reason} ${suggestion}`).not.toMatch(/succeeded/);
+    expect(suggestion).toMatch(/fail the same way/);
+  });
+
+  it("states that the previous identical call succeeded only when it did", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const listing = { command: "ls" };
+    for (let i = 0; i < 3; i++) {
+      dedupe.recordCall("run_command", listing, '{"success":true,"exitCode":0,"stdout":"a"}');
+    }
+
+    const check = dedupe.checkDuplicate("run_command", listing);
+
+    expect(check.previousOutcome).toBe("succeeded");
+    expect(check.reason).toMatch(/last one succeeded/);
+  });
+});
+
+describe("FileOperationTracker read windows", () => {
+  it("never answers a read of one window with another window's content", () => {
+    const tracker = new FileOperationTracker();
+    tracker.recordFileRead("src/big.ts", "chunk-0", { path: "src/big.ts", startChar: 0 });
+    tracker.recordFileRead("src/big.ts", "chunk-1", { path: "src/big.ts", startChar: 20000 });
+
+    const next = tracker.checkFileRead("src/big.ts", { path: "src/big.ts", startChar: 40000 });
+
+    expect(next.blocked).toBe(false);
+    expect(next.cachedResult).toBeUndefined();
+  });
+
+  it("serves a repeated identical read with that read's own content", () => {
+    const tracker = new FileOperationTracker();
+    tracker.recordFileRead("src/big.ts", "chunk-0", { path: "src/big.ts" });
+    tracker.recordFileRead("src/big.ts", "chunk-1", { path: "src/big.ts", startChar: 20000 });
+    tracker.recordFileRead("src/big.ts", "chunk-1", { path: "src/big.ts", startChar: "20000" });
+
+    const repeat = tracker.checkFileRead("src/big.ts", { path: "src/big.ts", startChar: 20000 });
+    expect(repeat.blocked).toBe(true);
+    expect(repeat.cachedResult).toBe("chunk-1");
+    // The first window was read once, so reading it again is not throttled.
+    expect(tracker.checkFileRead("src/big.ts", { path: "src/big.ts", startChar: 0 }).blocked).toBe(
+      false,
+    );
+  });
+});
+
+describe("TaskExecutor read cache invalidation", () => {
+  const readResult = {
+    content: "export const a = 1;\n",
+    size: 20,
+    truncated: false,
+    path: "src/a.ts",
+    window: { start: 0, end: 20, total: 20 },
+  };
+
+  function createFileOpExecutor(): Any {
+    const fakeThis: Any = Object.create(TaskExecutor.prototype);
+    fakeThis.fileOperationTracker = new FileOperationTracker();
+    fakeThis.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    fakeThis.workspace = { path: "/workspace" };
+    fakeThis.logTag = "[Executor:test]";
+    return fakeThis;
+  }
+
+  function checkFileOperation(executor: Any, toolName: string, input: Any, batch = new Set()) {
+    return (TaskExecutor as Any).prototype.checkFileOperation.call(
+      executor,
+      toolName,
+      input,
+      batch,
+    );
+  }
+
+  function recordFileOperation(executor: Any, toolName: string, input: Any, result: Any) {
+    (TaskExecutor as Any).prototype.recordFileOperation.call(executor, toolName, input, result);
+  }
+
+  function readTwice(executor: Any, filePath = "src/a.ts") {
+    recordFileOperation(executor, "read_file", { path: filePath }, readResult);
+    recordFileOperation(executor, "read_file", { path: filePath }, readResult);
+  }
+
+  it("labels a cached read_file result explicitly and keeps it valid JSON", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+
+    const check = checkFileOperation(executor, "read_file", { path: "src/a.ts" });
+
+    expect(check.blocked).toBe(true);
+    const served = JSON.parse(check.cachedResult);
+    expect(served._cached).toMatch(/identical read_file call \(same path and window\)/);
+    expect(served.content).toBe(readResult.content);
+    expect(served.window).toEqual(readResult.window);
+  });
+
+  it("does not serve cached content after a failed edit of the file", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+
+    recordFileOperation(
+      executor,
+      "edit_file",
+      { file_path: "/workspace/src/a.ts", old_string: "a = 2", new_string: "a = 3" },
+      { success: false, error: "old_string not found" },
+    );
+
+    expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(false);
+  });
+
+  it("does not answer a read from cache when an earlier call in the same batch edits the file", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+    const batch = new Set<string>();
+
+    const edit = checkFileOperation(
+      executor,
+      "edit_file",
+      { file_path: "src/a.ts", old_string: "a = 1", new_string: "a = 2" },
+      batch,
+    );
+    const read = checkFileOperation(executor, "read_file", { path: "src/a.ts" }, batch);
+
+    expect(edit.blocked).toBe(false);
+    expect(read.blocked).toBe(false);
+  });
+
+  it("drops every cached read after a shell command", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor);
+
+    recordFileOperation(executor, "run_command", { command: "npm run fmt" }, { exitCode: 0 });
+
+    expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(false);
+  });
+
+  it("lets an identical test command run again after a successful edit", () => {
+    const executor = createFileOpExecutor();
+    const testRun = { command: "npm test" };
+    for (let i = 0; i < 3; i++) {
+      executor.toolCallDeduplicator.recordCall("run_command", testRun, '{"exitCode":1}');
+    }
+    expect(executor.toolCallDeduplicator.checkDuplicate("run_command", testRun).isDuplicate).toBe(
+      true,
+    );
+
+    recordFileOperation(
+      executor,
+      "edit_file",
+      { file_path: "src/a.ts", old_string: "a = 1", new_string: "a = 2" },
+      { success: true, file_path: "src/a.ts", replacements: 1 },
+    );
+
+    expect(executor.toolCallDeduplicator.checkDuplicate("run_command", testRun).isDuplicate).toBe(
+      false,
+    );
+  });
+
+  it("labels a duplicate read served from the duplicate-call cache", () => {
+    const cached = JSON.stringify({ content: "export const a = 1;\n", path: "src/a.ts" });
+    const { toolResult, hasDuplicateAttempt } = buildDuplicateToolResult({
+      toolName: "read_file",
+      toolUseId: "tool-1",
+      duplicateCheck: {
+        reason: "Tool read_file was already called 3 times.",
+        cachedResult: cached,
+      },
+      isIdempotentTool: () => true,
+      suggestion: "",
+    });
+
+    const served = JSON.parse(String(toolResult.content));
+    expect(hasDuplicateAttempt).toBe(false);
+    expect(served._cached).toMatch(/Served from cache/);
+    expect(served.content).toBe("export const a = 1;\n");
+  });
+
+  it("drops cached reads of a renamed or deleted file whatever the tool-semantics flag", () => {
+    for (const toolSemanticsV2Enabled of [true, false]) {
+      const executor = createFileOpExecutor();
+      executor.toolSemanticsV2Enabled = toolSemanticsV2Enabled;
+      readTwice(executor, "src/a.ts");
+      readTwice(executor, "src/b.ts");
+
+      recordFileOperation(executor, "delete_file", { path: "src/a.ts" }, { success: false });
+      recordFileOperation(
+        executor,
+        "rename_file",
+        { oldPath: "src/b.ts", newPath: "src/c.ts" },
+        { success: false },
+      );
+
+      expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(false);
+      expect(checkFileOperation(executor, "read_file", { path: "src/b.ts" }).blocked).toBe(false);
+    }
+  });
+
+  it("keeps cached reads of other files when one file is edited", () => {
+    const executor = createFileOpExecutor();
+    readTwice(executor, "src/a.ts");
+
+    recordFileOperation(
+      executor,
+      "edit_file",
+      { file_path: "src/b.ts", old_string: "b = 1", new_string: "b = 2" },
+      { success: true, file_path: "src/b.ts", replacements: 1 },
+    );
+
+    expect(checkFileOperation(executor, "read_file", { path: "src/a.ts" }).blocked).toBe(true);
   });
 });
 

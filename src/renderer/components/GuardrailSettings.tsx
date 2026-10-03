@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import {
   GuardrailSettings as GuardrailSettingsType,
-  DEFAULT_BLOCKED_COMMAND_PATTERNS,
+  DEFAULT_BLOCKED_COMMAND_RULES,
   DEFAULT_TRUSTED_COMMAND_PATTERNS,
 } from "../../shared/types";
+import { DEFAULT_GUARDRAIL_SETTINGS as DEFAULTS } from "../../shared/guardrail-defaults";
 
 export function GuardrailSettings() {
   const [settings, setSettings] = useState<GuardrailSettingsType | null>(null);
@@ -168,16 +169,21 @@ export function GuardrailSettings() {
           </label>
         </div>
         <p className="settings-description">
-          Limit the total tokens (input + output) used per task to prevent runaway costs.
+          Limit the tokens (input + output) a task can use for each message you send. Automatic
+          continuations within that turn share the same budget; the cost budget below caps spend
+          across the whole task.
         </p>
         <div className="settings-inline-input">
-          <label>Max tokens per task:</label>
+          <label>Max tokens per turn:</label>
           <input
             type="number"
             className="settings-input settings-input-number"
             value={settings.maxTokensPerTask}
             onChange={(e) =>
-              setSettings({ ...settings, maxTokensPerTask: parseInt(e.target.value) || 100000 })
+              setSettings({
+                ...settings,
+                maxTokensPerTask: parseInt(e.target.value) || DEFAULTS.maxTokensPerTask,
+              })
             }
             min={1000}
             max={10000000}
@@ -186,8 +192,9 @@ export function GuardrailSettings() {
           />
         </div>
         <p className="settings-hint">
-          Typical tasks use 5,000-50,000 tokens. Default: 100,000 (about $0.30-$7.50 depending on
-          model)
+          Models without prompt caching (most local models) count the whole prompt on every call, so
+          long coding turns can use over a million tokens. Default:{" "}
+          {DEFAULTS.maxTokensPerTask.toLocaleString()}
         </p>
       </div>
 
@@ -216,7 +223,10 @@ export function GuardrailSettings() {
             className="settings-input settings-input-number"
             value={settings.maxCostPerTask}
             onChange={(e) =>
-              setSettings({ ...settings, maxCostPerTask: parseFloat(e.target.value) || 10.0 })
+              setSettings({
+                ...settings,
+                maxCostPerTask: parseFloat(e.target.value) || DEFAULTS.maxCostPerTask,
+              })
             }
             min={0.01}
             max={100}
@@ -246,16 +256,21 @@ export function GuardrailSettings() {
           </label>
         </div>
         <p className="settings-description">
-          Limit the number of LLM calls per task to prevent infinite loops.
+          Limit the LLM calls in each continuation window to prevent infinite loops. When the limit
+          is reached, the task continues automatically if Execution Continuation allows it;
+          otherwise it stops.
         </p>
         <div className="settings-inline-input">
-          <label>Max iterations per task:</label>
+          <label>Max iterations per window:</label>
           <input
             type="number"
             className="settings-input settings-input-number"
             value={settings.maxIterationsPerTask}
             onChange={(e) =>
-              setSettings({ ...settings, maxIterationsPerTask: parseInt(e.target.value) || 50 })
+              setSettings({
+                ...settings,
+                maxIterationsPerTask: parseInt(e.target.value) || DEFAULTS.maxIterationsPerTask,
+              })
             }
             min={5}
             max={500}
@@ -264,7 +279,8 @@ export function GuardrailSettings() {
           />
         </div>
         <p className="settings-hint">
-          Each tool call and follow-up message counts as an iteration. Default: 50
+          Each tool call and follow-up message counts as an iteration. Default:{" "}
+          {DEFAULTS.maxIterationsPerTask}
         </p>
       </div>
 
@@ -364,7 +380,7 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                loopWarningThreshold: parseInt(e.target.value, 10) || 8,
+                loopWarningThreshold: parseInt(e.target.value, 10) || DEFAULTS.loopWarningThreshold,
               })
             }
             min={1}
@@ -382,7 +398,8 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                loopCriticalThreshold: parseInt(e.target.value, 10) || 14,
+                loopCriticalThreshold:
+                  parseInt(e.target.value, 10) || DEFAULTS.loopCriticalThreshold,
               })
             }
             min={1}
@@ -400,7 +417,8 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                globalNoProgressCircuitBreaker: parseInt(e.target.value, 10) || 20,
+                globalNoProgressCircuitBreaker:
+                  parseInt(e.target.value, 10) || DEFAULTS.globalNoProgressCircuitBreaker,
               })
             }
             min={1}
@@ -466,7 +484,7 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                defaultLifetimeTurnCap: parseInt(e.target.value) || 320,
+                defaultLifetimeTurnCap: parseInt(e.target.value) || DEFAULTS.defaultLifetimeTurnCap,
               })
             }
             min={20}
@@ -476,7 +494,9 @@ export function GuardrailSettings() {
           />
         </div>
         <p className="settings-hint">
-          Defaults: auto continuation on, max 3 windows, min score 0.25, lifetime cap 320 turns.
+          Defaults: auto continuation on, max {DEFAULTS.defaultMaxAutoContinuations} windows, min
+          score {DEFAULTS.defaultMinProgressScore}, lifetime cap {DEFAULTS.defaultLifetimeTurnCap}{" "}
+          turns.
         </p>
       </div>
 
@@ -502,9 +522,9 @@ export function GuardrailSettings() {
         <div className="settings-subsection">
           <h4>Built-in Blocked Patterns</h4>
           <div className="pattern-list">
-            {DEFAULT_BLOCKED_COMMAND_PATTERNS.map((pattern, index) => (
-              <span key={index} className="pattern-tag builtin" title={pattern}>
-                {pattern.length > 30 ? pattern.slice(0, 27) + "..." : pattern}
+            {DEFAULT_BLOCKED_COMMAND_RULES.map((rule, index) => (
+              <span key={index} className="pattern-tag builtin" title={rule.pattern}>
+                {rule.label}
               </span>
             ))}
           </div>
@@ -668,7 +688,10 @@ export function GuardrailSettings() {
             className="settings-input settings-input-number"
             value={settings.maxFileSizeMB}
             onChange={(e) =>
-              setSettings({ ...settings, maxFileSizeMB: parseInt(e.target.value) || 50 })
+              setSettings({
+                ...settings,
+                maxFileSizeMB: parseInt(e.target.value) || DEFAULTS.maxFileSizeMB,
+              })
             }
             min={1}
             max={500}
@@ -740,6 +763,11 @@ export function GuardrailSettings() {
             step={1}
           />
         </div>
+        <p className="settings-hint">
+          Defaults: {DEFAULTS.webSearchMaxUsesPerTask} per task, {DEFAULTS.webSearchMaxUsesPerStep}{" "}
+          per step. Left at its default, the per-task cap scales with the task's budget profile
+          (lower for strict tasks, higher for long-running ones).
+        </p>
         <div className="settings-subsection">
           <h4>Allowed Domains (optional)</h4>
           <p className="settings-description">

@@ -85,10 +85,28 @@ describe("AzureOpenAIProvider", () => {
       expect(JSON.parse(options.body)).toMatchObject({
         model,
         reasoning: { effort: "max" },
-        max_output_tokens: 128,
+        // A 128-token cap at max effort would be spent entirely on hidden reasoning.
+        max_output_tokens: 128 + 8_192,
       });
     },
   );
+
+  it("keeps a large Responses output budget unchanged", async () => {
+    mockFetch.mockResolvedValue(createOkResponse({ output: [] }));
+    const provider = new AzureOpenAIProvider({
+      ...baseConfig,
+      azureDeployment: "gpt-6-sol",
+      azureReasoningEffort: "max",
+    });
+
+    await provider.createMessage({
+      model: "gpt-6-sol",
+      maxTokens: 16_000,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).max_output_tokens).toBe(16_000);
+  });
 
   it("builds the request URL and payload for connection tests", async () => {
     mockFetch.mockResolvedValue(createOkResponse({ choices: [] }));

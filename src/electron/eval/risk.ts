@@ -244,17 +244,48 @@ export function scoreTaskRisk(
   };
 }
 
-export function resolveReviewPolicy(requestedPolicy: unknown): ReviewPolicy {
-  if (requestedPolicy === "off" || requestedPolicy === "balanced" || requestedPolicy === "strict") {
-    return requestedPolicy;
-  }
+export type ReviewPolicySource = "explicit" | "env_default" | "auto" | "default";
 
+function readBooleanEnv(name: string, fallback: boolean): boolean {
+  const raw = (process.env[name] || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
+}
+
+/**
+ * Review policy applied when a task completes.
+ *
+ * An explicit task policy or COWORK_REVIEW_POLICY_DEFAULT wins. Otherwise a
+ * code or operations task that scored high risk gets the "balanced" review
+ * (completion contract, evidence check, and the independent verifier for
+ * top-level tasks); everything else stays unreviewed. Risk is only known at
+ * completion, so this is decided there rather than when the task starts.
+ * COWORK_REVIEW_POLICY_ENABLE_AUTO=false turns the automatic review off and
+ * COWORK_REVIEW_POLICY_AUTO_DEFAULT=strict makes it strict.
+ */
+export function resolveEffectiveReviewPolicy(params: {
+  requestedPolicy: unknown;
+  taskDomain: unknown;
+  riskLevel: TaskRiskLevel;
+}): { policy: ReviewPolicy; source: ReviewPolicySource } {
+  const { requestedPolicy, taskDomain, riskLevel } = params;
+  if (requestedPolicy === "off" || requestedPolicy === "balanced" || requestedPolicy === "strict") {
+    return { policy: requestedPolicy, source: "explicit" };
+  }
   const envDefault = (process.env.COWORK_REVIEW_POLICY_DEFAULT || "").trim().toLowerCase();
   if (envDefault === "off" || envDefault === "balanced" || envDefault === "strict") {
-    return envDefault;
+    return { policy: envDefault, source: "env_default" };
   }
-
-  return "off";
+  if (
+    readBooleanEnv("COWORK_REVIEW_POLICY_ENABLE_AUTO", true) &&
+    (taskDomain === "code" || taskDomain === "operations") &&
+    riskLevel === "high"
+  ) {
+    const autoPolicy = (process.env.COWORK_REVIEW_POLICY_AUTO_DEFAULT || "").trim().toLowerCase();
+    return { policy: autoPolicy === "strict" ? "strict" : "balanced", source: "auto" };
+  }
+  return { policy: "off", source: "default" };
 }
 
 export function deriveReviewGateDecision(params: {

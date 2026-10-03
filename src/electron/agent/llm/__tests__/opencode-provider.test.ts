@@ -74,7 +74,8 @@ describe("OpenCode provider routing", () => {
     expect(responseHeaders.get("authorization")).toBe("Bearer zen-key");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       model: "gpt-5.5",
-      max_output_tokens: 128,
+      // Reasoning headroom: a 128-token cap at medium effort returns no text.
+      max_output_tokens: 128 + 2_048,
     });
   });
 

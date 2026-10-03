@@ -1,5 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+
+vi.mock("electron", () => ({
+  app: {
+    getPath: vi.fn().mockReturnValue("/tmp"),
+  },
+}));
+
+vi.mock("../custom-skill-loader", () => ({
+  getCustomSkillLoader: () => ({
+    getEnabledGuidelinesPrompt: () => "",
+    rankModelInvocableSkillsForQuery: () => [],
+  }),
+}));
+
+vi.mock("../../settings/personality-manager", () => ({
+  PersonalityManager: {
+    getPersonalityPrompt: vi.fn().mockReturnValue(""),
+    getPersonalityPromptById: vi.fn().mockReturnValue(""),
+    getIdentityPrompt: vi.fn().mockReturnValue(""),
+  },
+}));
 
 /**
  * Tests for isRedirectIntent() and compactHistoryForRedirect().
@@ -273,5 +294,245 @@ describe("TaskExecutor — sendMessageLegacy redirect wiring", () => {
     expect(executor.conversationHistory).toHaveLength(2);
     // Last entry is assistant, ready for the user redirect message to follow
     expect(executor.conversationHistory[1].role).toBe("assistant");
+  });
+});
+
+describe("TaskExecutor — redirect history reset vs steering", () => {
+  const isHistoryReset = (text: string): boolean =>
+    (Object.create(TaskExecutor.prototype) as Any).isHistoryResetRedirect(text);
+
+  it.each([
+    "Instead of a modal, build a dropdown",
+    "Don't change the API; focus on the caching layer you just added",
+    "Leave the backend as is and focus on the frontend validation",
+    "Rather than a new file, do it inside utils.ts",
+    "Focus only on the files you changed",
+  ])("keeps the conversation for a refinement of the current work: %s", (message) => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    expect(executor.isRedirectIntent(message)).toBe(true);
+    expect(isHistoryReset(message)).toBe(false);
+  });
+
+  it("resets the conversation only for an explicit pivot that does not refer back", () => {
+    expect(isHistoryReset("Forget that. New task: write a poem about the sea")).toBe(true);
+    expect(isHistoryReset("Start over and build it in Rust")).toBe(false);
+  });
+
+  it("keeps the prior result summary and changed files in the redirect stub", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-1", title: "Add settings modal" };
+    executor.workspace = { path: "/workspace/project" };
+    executor.conversationHistory = [
+      { role: "user", content: [{ type: "text", text: "Add a settings modal" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Added SettingsModal with a save button and wired it into the Header.",
+          },
+        ],
+      },
+    ];
+    executor.fileOperationTracker = {
+      getCreatedFiles: () => ["/workspace/project/src/SettingsModal.tsx"],
+    };
+    executor.daemon = {
+      getTaskEvents: vi.fn(() => [
+        { type: "file_modified", payload: { path: "/workspace/project/src/Header.tsx" } },
+        { type: "file_created", payload: { path: "src/SettingsModal.tsx" } },
+      ]),
+    };
+
+    executor.compactHistoryForRedirect();
+
+    expect(executor.conversationHistory).toHaveLength(2);
+    const stub = executor.conversationHistory[0].content[0].text as string;
+    expect(stub).toContain("Add settings modal");
+    expect(stub).toContain("Added SettingsModal with a save button");
+    expect(stub).toContain("src/Header.tsx");
+    expect(stub).toContain("src/SettingsModal.tsx");
+    expect(stub.match(/src\/SettingsModal\.tsx/g)).toHaveLength(1);
+  });
+
+  it("keeps a redirect message that is already in the recovered transcript", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { title: "Old Task" };
+    const redirectTurn = {
+      role: "user",
+      content: [{ type: "text", text: "Forget that. New task: write a poem about the sea" }],
+    };
+    executor.conversationHistory = [
+      { role: "user", content: [{ type: "text", text: "fix the bugs" }] },
+      { role: "assistant", content: [{ type: "text", text: "Fixed 3 bugs." }] },
+      redirectTurn,
+    ];
+
+    executor.compactHistoryForRedirect({ keepLatestUserTurn: true });
+
+    expect(executor.conversationHistory.map((message: Any) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect(executor.conversationHistory[2]).toBe(redirectTurn);
+  });
+
+  it("uses steering guidance instead of fresh-work guidance for refinements", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.redirectRequested = true;
+    executor.redirectResetsHistory = false;
+
+    const guidance = executor.buildFollowUpTurnGuidancePrompt(
+      "Instead of a modal, build a dropdown",
+    ) as string;
+
+    expect(guidance).toContain("FOLLOW-UP TURN (CRITICAL):");
+    expect(guidance).toContain("steering");
+    expect(guidance).not.toContain("fresh work");
+  });
+
+  it("keeps fresh-work guidance for an explicit pivot", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.redirectRequested = true;
+    executor.redirectResetsHistory = true;
+
+    const guidance = executor.buildFollowUpTurnGuidancePrompt(
+      "Forget that. New task: write a poem about the sea",
+    ) as string;
+
+    expect(guidance).toContain("TASK RE-SCOPE (CRITICAL):");
+    expect(guidance).toContain("fresh work");
+  });
+});
+
+describe("TaskExecutor — redirect follow-up wiring after a completed task", () => {
+  const runCompletedTaskFollowUp = async (message: string) => {
+    const redirectTurn = { role: "user", content: [{ type: "text", text: message }] };
+    const task = {
+      id: "redirect-wiring",
+      status: "completed",
+      title: "Add settings modal",
+      prompt: "Add a settings modal",
+      agentConfig: { executionMode: "execute", retainMemory: false },
+    };
+    let loopMessages: Any[] = [];
+    let turnGuidance = "";
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = task;
+    executor.workspace = {
+      id: "workspace-1",
+      path: "/tmp/workspace",
+      permissions: { read: false, write: false, delete: false, network: false, shell: false },
+    };
+    executor.provider = { type: "openai" };
+    executor.conversationHistory = [
+      { role: "user", content: [{ type: "text", text: "Add a settings modal" }] },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Added SettingsModal.tsx and wired it into Header.tsx." }],
+      },
+      redirectTurn,
+    ];
+    executor.lastNonVerificationOutput = "Added SettingsModal.tsx and wired it into Header.tsx.";
+    executor.daemon = {
+      getTask: vi.fn(() => task),
+      getTaskEvents: vi.fn(() => []),
+      updateTaskStatus: vi.fn(),
+    };
+    executor.getSessionRuntime = () => ({
+      setRecoveryRequestActive: vi.fn(),
+      runFollowUpLoop: vi.fn(async ({ messages }: Any) => {
+        loopMessages = messages.slice();
+        messages.push({ role: "assistant", content: [{ type: "text", text: "Done." }] });
+        return { messages, iterations: 1, emptyResponseCount: 0 };
+      }),
+    });
+    executor.refreshProviderIfSettingsChanged = vi.fn();
+    executor.ensureProviderFailoverSelectionsContext = vi.fn();
+    executor.getPendingSkillParameterCollection = () => null;
+    executor.handleGoalSlashFollowUp = () => ({ handled: false });
+    executor.isRecoveryIntent = () => false;
+    executor.isCapabilityUpgradeIntent = () => false;
+    executor.isDebugMode = () => false;
+    executor.preflightShellExecutionCheck = () => false;
+    executor.isExplicitChatExecutionMode = () => false;
+    executor.isKnownContextInformationalFollowUp = () => false;
+    executor.getEffectiveExecutionMode = () => "execute";
+    executor.getEffectiveTaskDomain = () => "code";
+    executor.getEffectiveTaskPathRootPolicy = () => "none";
+    executor.getLoopGuardrailForMode = () => ({});
+    executor.followUpRequiresCommandExecution = () => false;
+    executor.followUpRequiresCanvasAction = () => false;
+    executor.loadExecutionPromptMemoryFeatures = () => ({ contextPackInjectionEnabled: false });
+    executor.getRoleContextPrompt = () => "";
+    executor.getInfraContextPrompt = () => "";
+    executor.buildAdaptiveRecoveryTurnGuidance = async () => "";
+    executor.buildIntegrationMentionGuidancePrompt = () => "";
+    executor.buildExecutionSystemPrompt = async (params: Any) => {
+      turnGuidance = params.turnGuidancePrompt;
+      return {
+        systemBlocks: [],
+        memoryIndexInjected: false,
+        topicCount: 0,
+        droppedSections: [],
+        truncatedSections: [],
+        totalTokens: 0,
+      };
+    };
+    executor.setPromptCacheContext = () => "system";
+    executor.fileOperationTracker = { getKnowledgeSummary: () => "", getCreatedFiles: () => [] };
+    executor.toolRegistry = { setCanvasSessionCutoff: vi.fn() };
+    executor.toolCallDeduplicator = { reset: vi.fn() };
+    executor.turnSuccessfulToolUsageCounts = new Map();
+    executor.emitEvent = vi.fn();
+    executor.updateConversationHistory = (messages: Any[]) => {
+      executor.conversationHistory = messages;
+    };
+    executor.saveConversationSnapshot = vi.fn(() => true);
+    executor.finalizeSuccessfulFollowUp = vi.fn();
+
+    await (TaskExecutor as Any).prototype.sendMessageUnified.call(
+      executor,
+      message,
+      undefined,
+      undefined,
+      {
+        messageContext: { messageSource: "web", messageId: "redirect-wiring" },
+        suppressUserMessageEvent: true,
+        transcriptAlreadyContainsMessage: true,
+      },
+    );
+    return { loopMessages, turnGuidance, redirectTurn };
+  };
+
+  const textOf = (message: Any): string =>
+    (message?.content || []).map((block: Any) => block?.text || "").join("\n");
+
+  it("keeps the full conversation and adds steering guidance for a refinement", async () => {
+    const { loopMessages, turnGuidance, redirectTurn } = await runCompletedTaskFollowUp(
+      "Instead of a modal, build a dropdown",
+    );
+
+    expect(loopMessages.map(textOf)).toEqual([
+      "Add a settings modal",
+      "Added SettingsModal.tsx and wired it into Header.tsx.",
+      "Instead of a modal, build a dropdown",
+    ]);
+    expect(loopMessages[2]).toBe(redirectTurn);
+    expect(turnGuidance).toContain("FOLLOW-UP TURN (CRITICAL):");
+    expect(turnGuidance).toContain("steering the current work");
+  });
+
+  it("compacts to a summary stub and keeps the pivot message for an explicit pivot", async () => {
+    const { loopMessages, turnGuidance, redirectTurn } = await runCompletedTaskFollowUp(
+      "Forget that. New task: write a poem about the sea",
+    );
+
+    expect(loopMessages).toHaveLength(3);
+    expect(textOf(loopMessages[0])).toContain("Prior session");
+    expect(textOf(loopMessages[0])).toContain("Added SettingsModal.tsx");
+    expect(loopMessages[2]).toBe(redirectTurn);
+    expect(turnGuidance).toContain("TASK RE-SCOPE (CRITICAL):");
   });
 });

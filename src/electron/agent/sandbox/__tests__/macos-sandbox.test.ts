@@ -129,6 +129,61 @@ describe("MacOSSandbox", () => {
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("grants /dev/null and the standard streams for data, but not the terminal", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const sandbox = new MacOSSandbox(makeWorkspace());
+    const resultPromise = sandbox.execute("git status", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+    });
+
+    const [, args] = spawnMock.mock.calls[0];
+    const profile = fs.readFileSync(args[1], "utf8");
+    proc.emit("close", 0, null);
+    await resultPromise;
+    const deviceRule = profile.slice(profile.indexOf("(allow file-read* file-write-data"));
+    expect(deviceRule).toMatch(/^\(allow file-read\* file-write-data\n {2}\(literal "\/dev\/null"\)/);
+    expect(deviceRule.slice(0, deviceRule.indexOf("\n)\n"))).toContain('(subpath "/dev/fd")');
+    expect(profile).not.toContain('"/dev/tty"');
+    expect(profile).not.toMatch(/file-write\*[^\n]*\/dev\//);
+  });
+
+  it("adds toolchain grants and TLS trust without opening $HOME", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const sandbox = new MacOSSandbox(makeWorkspace());
+    const resultPromise = sandbox.execute("npm ci", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+    });
+
+    const [, args, options] = spawnMock.mock.calls[0];
+    const profile = fs.readFileSync(args[1], "utf8");
+    proc.emit("close", 0, null);
+    await resultPromise;
+    const home = process.env.HOME || os.homedir();
+    expect(profile).toContain('(global-name "com.apple.trustd.agent")');
+    expect(profile).toContain(`(subpath "${path.join(home, ".npm")}")`);
+    expect(profile).not.toContain(`(subpath "${home}")`);
+    const secretDeny = `(deny file-read* file-write* (subpath "${path.join(home, ".ssh")}"))`;
+    expect(profile).toContain(secretDeny);
+    // User-configured workspace grants come later and keep the final say.
+    expect(profile.indexOf(secretDeny)).toBeLessThan(profile.indexOf("; Allow reading workspace"));
+    expect(options.env.PATH.split(":").slice(-4)).toEqual([
+      "/usr/bin",
+      "/bin",
+      "/usr/sbin",
+      "/sbin",
+    ]);
+  });
+
   it("allows Homebrew launchers to resolve the /opt mount point", async () => {
     const proc = new EventEmitter() as ChildProcess;
     proc.stdout = new EventEmitter() as ChildProcess["stdout"];
@@ -173,6 +228,115 @@ describe("MacOSSandbox", () => {
 
     proc.emit("close", 0, null);
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  describe("loopback servers with network denied", () => {
+    const LISTEN_RULES = [
+      '(allow network-bind (local tcp "localhost:*"))',
+      '(allow network-inbound (local tcp "localhost:*"))',
+    ];
+
+    function profileFor(options: { allowNetwork?: boolean; allowLoopbackListen?: boolean }) {
+      const workspace = makeWorkspace();
+      workspace.permissions.network = options.allowNetwork === true;
+      const sandbox = new MacOSSandbox(workspace);
+      const { process: proc } = sandbox.spawnProcess("/bin/sh", ["-c", "true"], {
+        cwd: "/tmp/cowork workspace",
+        ...options,
+      });
+      const [, args] = spawnMock.mock.calls[spawnMock.mock.calls.length - 1];
+      const profile = fs.readFileSync(args[1], "utf8");
+      proc.emit("close", 0, null);
+      return profile;
+    }
+
+    it("keeps listening denied unless the caller opts in", () => {
+      const profile = profileFor({});
+      for (const rule of LISTEN_RULES) expect(profile).not.toContain(rule);
+      expect(profile).toContain("(deny network*)");
+    });
+
+    it("allows TCP listening, keeps egress loopback-only and leaves UDP binds denied", () => {
+      const profile = profileFor({ allowLoopbackListen: true });
+      for (const rule of LISTEN_RULES) expect(profile).toContain(rule);
+      expect(profile).toContain("(deny network*)");
+      expect(profile).toContain('(allow network-outbound\n  (remote tcp "localhost:*")');
+      expect(profile).not.toContain("(allow network*)");
+      expect(profile).not.toMatch(/\(local (?:ip|udp) "/);
+      expect(profile).not.toContain('(local tcp "*:*")');
+    });
+
+    it("needs no listen rule when network is already allowed", () => {
+      const profile = profileFor({ allowNetwork: true, allowLoopbackListen: true });
+      expect(profile).toContain("(allow network*)");
+      for (const rule of LISTEN_RULES) expect(profile).not.toContain(rule);
+    });
+  });
+
+  it("starts long-running processes in their own process group only when asked", () => {
+    const sandbox = new MacOSSandbox(makeWorkspace());
+    sandbox.spawnProcess("/bin/sh", ["-c", "true"], { cwd: "/tmp/cowork workspace" });
+    sandbox.spawnProcess("/bin/sh", ["-c", "true"], {
+      cwd: "/tmp/cowork workspace",
+      detached: true,
+    });
+
+    expect(spawnMock.mock.calls[0][2]).toMatchObject({ detached: false });
+    expect(spawnMock.mock.calls[1][2]).toMatchObject({ detached: true });
+  });
+
+  it("runs commands with non-interactive defaults without overriding passed-through values", async () => {
+    const previousPager = process.env.PAGER;
+    process.env.PAGER = "less";
+    try {
+      const sandbox = new MacOSSandbox(makeWorkspace());
+      await sandbox.execute("git commit", [], {
+        cwd: "/tmp/cowork workspace",
+        timeout: 1000,
+        envPassthrough: ["PATH", "HOME", "PAGER"],
+      });
+
+      const [, , options] = spawnMock.mock.calls[0];
+      expect(options.env).toMatchObject({
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_EDITOR: "true",
+        GIT_PAGER: "cat",
+        PAGER: "less",
+        PIP_NO_INPUT: "1",
+        DEBIAN_FRONTEND: "noninteractive",
+      });
+      expect(options.env.CI).toBeUndefined();
+    } finally {
+      if (previousPager === undefined) delete process.env.PAGER;
+      else process.env.PAGER = previousPager;
+    }
+  });
+
+  it("keeps the start and the end of long command output", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const sandbox = new MacOSSandbox(makeWorkspace());
+
+    const resultPromise = sandbox.execute("npm test", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+      maxOutputSize: 1_000,
+    });
+    proc.stdout?.emit("data", Buffer.from(`RUN v1\n${"ok\n".repeat(2_000)}`));
+    proc.stdout?.emit("data", Buffer.from("FAIL src/x.test.ts > adds\n"));
+    proc.stderr?.emit("data", Buffer.from("short stderr"));
+    proc.emit("close", 1, null);
+    const result = await resultPromise;
+
+    expect(result.stdout.startsWith("RUN v1")).toBe(true);
+    expect(result.stdout).toContain("FAIL src/x.test.ts > adds");
+    expect(result.stdout).toMatch(/\[Output truncated\] \[\.\.\. \d+ chars omitted \.\.\.\]/);
+    expect(result.stdout.length).toBeLessThan(1_100);
+    expect(result.stderr).toBe("short stderr");
+    expect(result.truncated).toBe(true);
   });
 
   it("reports nonzero sandbox process exits", async () => {

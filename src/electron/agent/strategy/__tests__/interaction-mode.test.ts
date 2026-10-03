@@ -62,6 +62,31 @@ describe("interactive mode contract", () => {
     );
     expect(["plan", "analyze"]).toContain(result.executionMode);
   });
+  it.each([
+    "Just propose a plan, don't implement anything.",
+    "Only propose a plan for the refactor.",
+    "Review the PR. Do not implement anything.",
+    "Explain how to fix the login bug. Don't implement it.",
+    "Describe the caching architecture without implementing anything.",
+    "Summarize the open issues. Do not modify any files.",
+  ])("treats an unscoped no-action request as proposal-only: %s", (prompt) => {
+    const result = resolveInteractionMode(undefined, { mode: "smart" }, prompt);
+    expect(result.executionMode).toBe("plan");
+    expect(result.executionModeSource).toBe("user");
+  });
+  it.each([
+    "Fix the failing test in parser.test.ts. Don't modify files in vendor/.",
+    "Implement the /orders endpoint and just explain the tricky parts at the end.",
+    "Write the migration, but don't execute it.",
+    "Add input validation to the signup form. Do not change any files outside src/forms.",
+    "Refactor the logger. Don't change files that are generated.",
+    "Update the copy on the pricing page; only review the rest of the page for typos.",
+    "Rename the env var everywhere; do not modify files under node_modules.",
+  ])("does not lock a scoped prohibition or side request into plan mode: %s", (prompt) => {
+    const result = resolveInteractionMode(undefined, { mode: "smart" }, prompt);
+    expect(result.executionMode).not.toBe("plan");
+    expect(result.executionModeSource).not.toBe("user");
+  });
   it("does not promote Chat for an execution request", () => {
     const result = resolveInteractionMode(
       { accessProfileId: "read_only" },

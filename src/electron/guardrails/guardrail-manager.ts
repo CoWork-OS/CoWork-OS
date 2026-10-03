@@ -12,83 +12,11 @@ import {
   DEFAULT_BLOCKED_COMMAND_PATTERNS,
   DEFAULT_TRUSTED_COMMAND_PATTERNS,
 } from "../../shared/types";
+import { getDefaultGuardrailSettings } from "../../shared/guardrail-defaults";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
 
 const LEGACY_SETTINGS_FILE = "guardrail-settings.json";
-
-const DEFAULT_SETTINGS: GuardrailSettings = {
-  // Token Budget
-  maxTokensPerTask: 100000,
-  tokenBudgetEnabled: true,
-
-  // Cost Budget — on by default so a runaway task cannot silently spend without bound.
-  // $10 leaves room for long tasks on frontier models (Opus-class tasks regularly
-  // exceed $1). Subscription routes are exempt from this default cap because their
-  // cost is an API-equivalent estimate, not a bill; an explicit per-task budgetCost
-  // is always enforced. Users who saved guardrail settings before keep their choice.
-  maxCostPerTask: 10.0,
-  costBudgetEnabled: true,
-
-  // Dangerous Commands
-  blockDangerousCommands: true,
-  customBlockedPatterns: [],
-
-  // Auto-Approve Trusted Commands
-  autoApproveTrustedCommands: false,
-  trustedCommandPatterns: [],
-
-  // File Size
-  maxFileSizeMB: 50,
-  fileSizeLimitEnabled: true,
-
-  // Network Domains
-  enforceAllowedDomains: false,
-  allowedDomains: [],
-
-  // Web search policy
-  webSearchMode: "cached",
-  webSearchMaxUsesPerTask: 8,
-  webSearchMaxUsesPerStep: 3,
-  webSearchAllowedDomains: [],
-  webSearchBlockedDomains: [],
-
-  // Iterations — raised from 50 → 100.
-  // Complex multi-repo operations and deep-research tasks routinely exceeded 50
-  // without being stuck: each file edit + verify + lint cycle costs ~3 iterations.
-  maxIterationsPerTask: 100,
-  iterationLimitEnabled: true,
-
-  // Execution continuation.
-  // autoContinuations: raised 3 → 5; large tasks often need more than 3 segments.
-  // minProgressScore: lowered 0.25 → 0.15; read/search ops now contribute to score
-  //   (see progress-score-engine.ts), so the bar naturally shifted down.
-  // lifetimeTurnCap: raised 320 → 500; aligns with the new maxIterations ceiling
-  //   and extended loop guardrail windows (see completion-checks.ts).
-  // loopWarning/Critical/CircuitBreaker: raised proportionally so warning/critical
-  //   thresholds remain meaningful relative to the larger cap.
-  autoContinuationEnabled: true,
-  defaultMaxAutoContinuations: 5,
-  defaultMinProgressScore: 0.15,
-  lifetimeTurnCapEnabled: true,
-  defaultLifetimeTurnCap: 500,
-  compactOnContinuation: true,
-  // Match the Codex-style automatic compaction trigger.  Individual tasks can
-  // still opt into a lower threshold through agentConfig.
-  compactionThresholdRatio: 0.9,
-  loopWarningThreshold: 12,
-  loopCriticalThreshold: 20,
-  globalNoProgressCircuitBreaker: 30,
-  sideChannelDuringExecution: "paused",
-  sideChannelMaxCallsPerWindow: 2,
-
-  // Adaptive Style Engine — opt-in, conservative by default
-  adaptiveStyleEnabled: false,
-  adaptiveStyleMaxDriftPerWeek: 1,
-
-  // Cross-Channel Persona Coherence — opt-in
-  channelPersonaEnabled: false,
-};
 
 /**
  * True when a command line chains, pipes, substitutes, or redirects — i.e.
@@ -155,7 +83,7 @@ export class GuardrailManager {
 
       try {
         const data = fs.readFileSync(this.legacySettingsPath, "utf-8");
-        const legacySettings = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+        const legacySettings = { ...getDefaultGuardrailSettings(), ...JSON.parse(data) };
 
         repository.save("guardrails", legacySettings);
         console.log("[GuardrailManager] Settings migrated to encrypted database");
@@ -198,7 +126,7 @@ export class GuardrailManager {
       if (repository) {
         const record = repository.readRecord<GuardrailSettings>("guardrails");
         if (record.data) {
-          this.cachedSettings = { ...DEFAULT_SETTINGS, ...record.data };
+          this.cachedSettings = { ...getDefaultGuardrailSettings(), ...record.data };
           this.cachedRevision = record.revision;
           return this.cachedSettings;
         }
@@ -207,7 +135,7 @@ export class GuardrailManager {
       console.error("[GuardrailManager] Failed to load settings:", error);
     }
 
-    this.cachedSettings = { ...DEFAULT_SETTINGS };
+    this.cachedSettings = getDefaultGuardrailSettings();
     this.cachedRevision = revision;
     return this.cachedSettings;
   }
@@ -226,7 +154,7 @@ export class GuardrailManager {
         "guardrails",
         () => settings,
       );
-      this.cachedSettings = { ...DEFAULT_SETTINGS, ...settings };
+      this.cachedSettings = { ...getDefaultGuardrailSettings(), ...settings };
       this.cachedRevision = result.revision;
       console.log("[GuardrailManager] Settings saved to encrypted database");
     } catch (error) {
@@ -247,7 +175,7 @@ export class GuardrailManager {
    * Get default settings (for reference)
    */
   static getDefaults(): GuardrailSettings {
-    return { ...DEFAULT_SETTINGS };
+    return getDefaultGuardrailSettings();
   }
 
   /**
@@ -402,7 +330,14 @@ export class GuardrailManager {
    */
   static isTokenBudgetExceeded(
     tokensUsed: number,
-    options?: { taskBudget?: number },
+    options?: {
+      taskBudget?: number;
+      /**
+       * Whole-task usage for Task.budgetTokens. `tokensUsed` is what the global
+       * cap counts (the current user turn); defaults to `tokensUsed`.
+       */
+      taskTokensUsed?: number;
+    },
   ): {
     exceeded: boolean;
     used: number;
@@ -419,9 +354,10 @@ export class GuardrailManager {
     ) {
       // A budget set on the task itself (API, CLI, automations) is always enforced,
       // but it can only tighten the global guardrail, never raise it.
+      const taskTokensUsed = options?.taskTokensUsed ?? tokensUsed;
       return {
-        exceeded: tokensUsed >= taskBudget,
-        used: tokensUsed,
+        exceeded: taskTokensUsed >= taskBudget,
+        used: taskTokensUsed,
         limit: taskBudget,
         source: "task",
       };

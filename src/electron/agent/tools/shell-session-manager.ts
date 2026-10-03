@@ -4,6 +4,8 @@ import * as fsPromises from "fs/promises";
 import * as path from "path";
 import { execFileSync, spawn, type ChildProcess } from "child_process";
 import { getUserDataDir } from "../../utils/user-data-dir";
+import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
+import { RUN_COMMAND_MAX_TIMEOUT_MS } from "../run-command-timeouts";
 import type {
   CommandTerminationReason,
   ShellSessionInfo,
@@ -73,8 +75,13 @@ export interface ShellRunRequest {
 
 const STATE_FILE = path.join(getUserDataDir(), "shell-sessions.json");
 const COMMAND_TIMEOUT_FALLBACK_MS = 60_000;
-const COMMAND_TIMEOUT_MAX_MS = 5 * 60 * 1000;
+const COMMAND_TIMEOUT_MAX_MS = RUN_COMMAND_MAX_TIMEOUT_MS;
 const TAB_COMMAND_TIMEOUT_MAX_MS = 24 * 60 * 60 * 1000;
+
+function resolveCommandTimeoutMs(scope: ShellSessionScope | undefined, timeoutMs: number): number {
+  const maxMs = scope === "tab" ? TAB_COMMAND_TIMEOUT_MAX_MS : COMMAND_TIMEOUT_MAX_MS;
+  return Math.min(Math.max(timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000), maxMs);
+}
 const MAX_TERMINAL_TABS_PER_WORKSPACE = 12;
 
 function safeJsonParse<T>(value: string, fallback: T): T {
@@ -587,7 +594,7 @@ export class ShellSessionManager {
     const child = spawn(shell, args, {
       cwd: runtime.info.cwd || workspacePath,
       detached: process.platform !== "win32",
-      env: {
+      env: applyNonInteractiveEnvDefaults({
         ...process.env,
         HOME: process.env.HOME || "",
         SHELL: shell,
@@ -598,7 +605,7 @@ export class ShellSessionManager {
         PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         LANG: process.env.LANG || "en_US.UTF-8",
         TERM: process.env.TERM || "xterm-256color",
-      },
+      }),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -712,7 +719,10 @@ export class ShellSessionManager {
       stdout: parsed.visible,
       stderr: "",
       exitCode: parsed.exitCode,
-      terminationReason: parsed.exitCode === 0 ? "normal" : ("error" as CommandTerminationReason),
+      // The command ran to completion; a non-zero exit is still a normal
+      // termination ("error" is reserved for commands that could not run).
+      terminationReason:
+        parsed.exitCode === null ? ("error" as CommandTerminationReason) : "normal",
       usedPersistentSession: true,
       sessionId: runtime.info.id,
       sessionEvent,
@@ -861,12 +871,7 @@ export class ShellSessionManager {
     this.activeSessionRuns.add(runKey);
 
     const commandId = `${session.info.id}:${++session.cmdSeq}`;
-    const commandTimeoutMaxMs =
-      request.scope === "tab" ? TAB_COMMAND_TIMEOUT_MAX_MS : COMMAND_TIMEOUT_MAX_MS;
-    const commandTimeoutMs = Math.min(
-      Math.max(request.timeoutMs || COMMAND_TIMEOUT_FALLBACK_MS, 1_000),
-      commandTimeoutMaxMs,
-    );
+    const commandTimeoutMs = resolveCommandTimeoutMs(request.scope, request.timeoutMs);
 
     const firstCommand = !session.process || session.process.killed;
     if (firstCommand) {
@@ -917,7 +922,9 @@ export class ShellSessionManager {
       request.command,
       heredocMarker,
       ")",
-      'eval "$__COWORK_COMMAND"',
+      // The shell's stdin carries this wrapper; an agent command reading stdin
+      // would consume it and hang, so it gets an empty stdin instead.
+      request.scope === "tab" ? 'eval "$__COWORK_COMMAND"' : 'eval "$__COWORK_COMMAND" </dev/null',
       "__cowork_exit_code=$?",
       "printf '\\n__COWORK_STATE_START__\\n'",
       "printf '__COWORK_CWD__:%s\\n' \"$(pwd -P)\"",
@@ -934,10 +941,22 @@ export class ShellSessionManager {
     const commandPromise = new Promise<ShellCommandResult>((resolve, reject) => {
       session.busy = true;
       const timeout = setTimeout(() => {
+        // The command already reached the shell and may have run, so report a
+        // timeout with its partial output rather than an error a caller could
+        // answer by running the command a second time.
+        const partialOutput = this.parseShellOutput(session.buffer, session).visible;
         session.busy = false;
         session.pending = session.pending.filter((item) => item.commandId !== commandId);
         void this.invalidateRuntime(session, "Persistent shell command timed out.");
-        reject(new Error("Persistent shell command timed out."));
+        resolve({
+          success: false,
+          stdout: partialOutput,
+          stderr: `Command timed out after ${Math.round(commandTimeoutMs / 1000)}s.`,
+          exitCode: null,
+          terminationReason: "timeout",
+          usedPersistentSession: true,
+          sessionId: session.info.id,
+        });
       }, commandTimeoutMs);
 
       session.pending.push({
@@ -967,7 +986,16 @@ export class ShellSessionManager {
         clearTimeout(timeout);
         session.busy = false;
         session.pending = session.pending.filter((item) => item.commandId !== commandId);
-        reject(error);
+        // Part of the command may already have run; do not invite a re-run.
+        resolve({
+          success: false,
+          stdout: this.parseShellOutput(session.buffer, session).visible,
+          stderr: `Persistent shell failed while running the command: ${error.message}`,
+          exitCode: null,
+          terminationReason: "error",
+          usedPersistentSession: true,
+          sessionId: session.info.id,
+        });
       });
     });
     return commandPromise.finally(() => {
@@ -1247,4 +1275,5 @@ export class ShellSessionManager {
 export const _testUtils = {
   getShellArgs,
   getTerminalShellArgs,
+  resolveCommandTimeoutMs,
 };

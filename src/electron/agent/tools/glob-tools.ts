@@ -265,7 +265,8 @@ export class GlobTools {
         if (scanState.scanTruncated) break;
 
         const fullPath = path.join(currentPath, entry.name);
-        const relativePath = path.relative(basePath, fullPath);
+        // Glob patterns use "/"; path.relative() returns "\"-separated paths on Windows.
+        const relativePath = path.relative(basePath, fullPath).split(path.sep).join("/");
 
         if (
           evaluateWorkspaceFilesystemAccess(this.workspace, fullPath, "read").decision !== "allow"

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { isUtf8 } from "buffer";
 import { createHash, randomUUID } from "crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
@@ -257,6 +258,311 @@ function writeRecoveryRecord(
   }
 }
 
+const ASCII_EDIT_TEXT_PATTERN = /^[\x01-\x7f]*$/;
+
+function firstInvalidUtf8Line(content: Buffer): number {
+  // A newline byte never occurs inside a UTF-8 sequence, so lines can be validated one by one.
+  let line = 1;
+  for (let start = 0; ; line += 1) {
+    const newline = content.indexOf(0x0a, start);
+    const end = newline === -1 ? content.length : newline;
+    if (!isUtf8(content.subarray(start, end)) || newline === -1) return line;
+    start = newline + 1;
+  }
+}
+
+/**
+ * Decode file bytes for matching. UTF-8 round-trips exactly. Any other encoding is edited only
+ * when old_string and new_string are ASCII: its bytes are then read one-to-one as Latin-1, so
+ * everything outside the replaced ASCII text is written back byte-for-byte instead of being
+ * re-encoded (which turned every Windows-1252/Latin-1 "é" into U+FFFD).
+ */
+function decodeEditableText(
+  content: Buffer,
+  oldString: string,
+  newString: string,
+): { text: string; encoding: "utf8" | "latin1" } {
+  if (isUtf8(content)) return { text: content.toString("utf8"), encoding: "utf8" };
+  const utf16Bom =
+    content.length >= 2 &&
+    ((content[0] === 0xff && content[1] === 0xfe) || (content[0] === 0xfe && content[1] === 0xff));
+  if (utf16Bom || content.includes(0)) {
+    throw new Error(
+      "File is not UTF-8 text: it contains NUL bytes or a UTF-16 byte order mark (binary, UTF-16 or UTF-32). " +
+        "edit_file only edits UTF-8 text and left the file unchanged.",
+    );
+  }
+  if (!ASCII_EDIT_TEXT_PATTERN.test(oldString) || !ASCII_EDIT_TEXT_PATTERN.test(newString)) {
+    throw new Error(
+      `File is not valid UTF-8 (first invalid byte on line ${firstInvalidUtf8Line(content)}); it is probably in a legacy encoding such as Windows-1252, Latin-1 or Shift_JIS. ` +
+        "edit_file left it unchanged: rewriting it as UTF-8 would corrupt its other non-ASCII characters, which read_file shows as U+FFFD. " +
+        "Edits whose old_string and new_string are plain ASCII are applied byte-for-byte; to change non-ASCII text, convert the file to UTF-8 first with the user's agreement. " +
+        "Do not recreate it with write_file.",
+    );
+  }
+  return { text: content.toString("latin1"), encoding: "latin1" };
+}
+
+/**
+ * In a non-UTF-8 file, a byte in 0x40-0x7E right after a non-ASCII byte can be the second half of
+ * a Shift_JIS/GBK/Big5 character, so an ASCII match starting there could split that character.
+ */
+function assertLegacyMatchBoundaries(text: string, needle: string): void {
+  const first = needle.charCodeAt(0);
+  if (first < 0x40 || first > 0x7e) return;
+  for (
+    let index = text.indexOf(needle);
+    index !== -1;
+    index = text.indexOf(needle, index + needle.length)
+  ) {
+    if (index > 0 && text.charCodeAt(index - 1) >= 0x80) {
+      throw new Error(
+        `old_string would start right after a non-ASCII byte on line ${lineNumberAt(text, index)} of this non-UTF-8 file, where it could be the second half of a multi-byte character, so edit_file left the file unchanged. ` +
+          "Choose an old_string that starts after ASCII text (for example at a space or punctuation), or convert the file to UTF-8 first with the user's agreement.",
+      );
+    }
+  }
+}
+
+/** One way of reading old_string/new_string against the file; tried in order until one matches. */
+interface EditMatchCandidate {
+  oldString: string;
+  newString: string;
+  /** Set when line-number prefixes were stripped: the 1-based line the match must start on. */
+  expectedLine?: number;
+}
+
+// Prefixes copied from numbered views: `cat -n`/`nl` (tab), `grep -n` (colon), arrow and pipe gutters.
+const LINE_NUMBER_PREFIX_PATTERN = /^[ \t]*(\d+)(?:\t|:|→|[ \t]?\|[ \t]?)/;
+
+function withLineEndings(value: string, lineEnding: "\n" | "\r\n"): string {
+  return value.replace(/\r?\n/g, lineEnding);
+}
+
+/** The file's line ending when every line uses the same one; null for mixed or single-line files. */
+function detectConsistentLineEnding(text: string): "\n" | "\r\n" | null {
+  let newlines = 0;
+  let crlf = 0;
+  for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) {
+    newlines += 1;
+    if (index > 0 && text.charCodeAt(index - 1) === 13) crlf += 1;
+  }
+  if (newlines === 0) return null;
+  if (crlf === newlines) return "\r\n";
+  return crlf === 0 ? "\n" : null;
+}
+
+/**
+ * Remove consecutive line-number prefixes (e.g. "    12\t") that a model copied from a numbered
+ * view. Returns null unless every line carries one and the numbers increase by one.
+ */
+function stripLineNumberPrefixes(value: string): { text: string; firstLine: number } | null {
+  const lines = value.split("\n");
+  const hasTrailingNewline = lines.length > 1 && lines[lines.length - 1] === "";
+  const contentLines = hasTrailingNewline ? lines.slice(0, -1) : lines;
+  let firstLine = 0;
+  const stripped: string[] = [];
+  for (const [index, line] of contentLines.entries()) {
+    const match = LINE_NUMBER_PREFIX_PATTERN.exec(line);
+    if (!match) return null;
+    const lineNumber = Number(match[1]);
+    if (index === 0) firstLine = lineNumber;
+    else if (lineNumber !== firstLine + index) return null;
+    stripped.push(line.slice(match[0].length));
+  }
+  if (firstLine < 1) return null;
+  return { text: stripped.join("\n") + (hasTrailingNewline ? "\n" : ""), firstLine };
+}
+
+function lineNumberAt(text: string, offset: number): number {
+  let line = 1;
+  let index = text.indexOf("\n");
+  while (index !== -1 && index < offset) {
+    line += 1;
+    index = text.indexOf("\n", index + 1);
+  }
+  return line;
+}
+
+/**
+ * Exact text first, then the same text with the other line-ending convention (models emit LF
+ * even for CRLF files), then without numbered-view prefixes. new_string follows the file's line
+ * ending whenever the file uses only one, so an edit never mixes LF and CRLF lines.
+ */
+function buildEditMatchCandidates(
+  text: string,
+  oldString: string,
+  newString: string,
+  replaceAll: boolean,
+): EditMatchCandidate[] {
+  const fileLineEnding = detectConsistentLineEnding(text);
+  const candidates: EditMatchCandidate[] = [];
+  const addWithLineEndings = (oldValue: string, newValue: string, expectedLine?: number) => {
+    const variants: Array<[string, string]> = [
+      [oldValue, fileLineEnding ? withLineEndings(newValue, fileLineEnding) : newValue],
+    ];
+    if (oldValue.includes("\n") && text.includes("\r\n")) {
+      variants.push([withLineEndings(oldValue, "\r\n"), withLineEndings(newValue, "\r\n")]);
+    }
+    if (oldValue.includes("\r\n")) {
+      variants.push([withLineEndings(oldValue, "\n"), withLineEndings(newValue, "\n")]);
+    }
+    for (const [variantOld, variantNew] of variants) {
+      if (candidates.some((candidate) => candidate.oldString === variantOld)) continue;
+      candidates.push({ oldString: variantOld, newString: variantNew, expectedLine });
+    }
+  };
+
+  addWithLineEndings(oldString, newString);
+  // Line numbers address a single location, so prefixes are never stripped for replace_all.
+  const strippedOld = replaceAll ? null : stripLineNumberPrefixes(oldString);
+  if (strippedOld) {
+    const strippedNew = stripLineNumberPrefixes(newString);
+    addWithLineEndings(
+      strippedOld.text,
+      strippedNew && strippedNew.firstLine === strippedOld.firstLine ? strippedNew.text : newString,
+      strippedOld.firstLine,
+    );
+  }
+  return candidates;
+}
+
+// Miss diagnostics scan the whole file; beyond this size they would cost more than they help.
+const EDIT_MISS_ANALYSIS_MAX_CHARS = 4 * 1024 * 1024;
+const EDIT_MISS_EXCERPT_MAX_LINES = 12;
+const EDIT_MISS_EXCERPT_MAX_LINE_CHARS = 240;
+const EDIT_MISS_MIN_SIMILARITY = 0.5;
+const WORD_TOKEN_PATTERN = /[\p{L}\p{N}_]+/gu;
+
+function formatLineRange(startLine: number, endLine: number): string {
+  return startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`;
+}
+
+function clipForMessage(value: string): string {
+  return value.length > EDIT_MISS_EXCERPT_MAX_LINE_CHARS
+    ? `${value.slice(0, EDIT_MISS_EXCERPT_MAX_LINE_CHARS)}…`
+    : value;
+}
+
+/** Offset in text of the character at compactIndex in text with all whitespace removed. */
+function offsetOfCompactIndex(text: string, compactIndex: number): number {
+  const whitespace = /\s+/g;
+  let removed = 0;
+  for (
+    let match = whitespace.exec(text);
+    match && match.index - removed <= compactIndex;
+    match = whitespace.exec(text)
+  ) {
+    removed += match[0].length;
+  }
+  return compactIndex + removed;
+}
+
+function findWhitespaceInsensitiveMatch(
+  text: string,
+  target: string,
+): { startLine: number; endLine: number } | null {
+  const compactTarget = target.replace(/\s+/g, "");
+  if (!compactTarget) return null;
+  const compactIndex = text.replace(/\s+/g, "").indexOf(compactTarget);
+  if (compactIndex === -1) return null;
+  const start = offsetOfCompactIndex(text, compactIndex);
+  const end = offsetOfCompactIndex(text, compactIndex + compactTarget.length - 1);
+  return { startLine: lineNumberAt(text, start), endLine: lineNumberAt(text, end) };
+}
+
+/** Window of file lines sharing the most words with target (multiset overlap), if any is close. */
+function findMostSimilarLines(
+  lines: string[],
+  targetLines: string[],
+): { startLine: number; endLine: number; score: number } | null {
+  const targetTokens = targetLines.join("\n").match(WORD_TOKEN_PATTERN) ?? [];
+  if (targetTokens.length === 0 || lines.length === 0) return null;
+  const targetCounts = new Map<string, number>();
+  for (const token of targetTokens) targetCounts.set(token, (targetCounts.get(token) ?? 0) + 1);
+  const lineStats = lines.map((line) => {
+    const tokens = line.match(WORD_TOKEN_PATTERN) ?? [];
+    return { total: tokens.length, shared: tokens.filter((token) => targetCounts.has(token)) };
+  });
+
+  const windowSize = Math.min(targetLines.length, lines.length);
+  const windowCounts = new Map<string, number>();
+  let overlap = 0;
+  let windowTotal = 0;
+  const apply = (stats: { total: number; shared: string[] }, delta: 1 | -1) => {
+    windowTotal += delta * stats.total;
+    for (const token of stats.shared) {
+      const cap = targetCounts.get(token) ?? 0;
+      const before = windowCounts.get(token) ?? 0;
+      windowCounts.set(token, before + delta);
+      overlap += Math.min(before + delta, cap) - Math.min(before, cap);
+    }
+  };
+
+  let best: { startLine: number; endLine: number; score: number } | null = null;
+  for (let end = 0; end < lineStats.length; end += 1) {
+    apply(lineStats[end], 1);
+    if (end >= windowSize) apply(lineStats[end - windowSize], -1);
+    if (end < windowSize - 1) continue;
+    const score = overlap / Math.max(targetTokens.length, windowTotal);
+    if (!best || score > best.score) {
+      best = { startLine: end - windowSize + 2, endLine: end + 1, score };
+    }
+  }
+  return best && best.score >= EDIT_MISS_MIN_SIMILARITY ? best : null;
+}
+
+/**
+ * Explain an old_string miss with the closest region of the file, so the model can copy the
+ * current text instead of re-reading the whole file and guessing again.
+ */
+function describeEditMiss(text: string, oldString: string): string {
+  const base =
+    "old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).";
+  if (text.length > EDIT_MISS_ANALYSIS_MAX_CHARS) {
+    return `${base} The file is too large to search for a closest match; use grep to locate the text, then read those lines and copy them exactly.`;
+  }
+
+  const stripped = stripLineNumberPrefixes(oldString);
+  const prefix = stripped ? LINE_NUMBER_PREFIX_PATTERN.exec(oldString)?.[0] : undefined;
+  const prefixNote = prefix
+    ? ` old_string seems to start each line with a line-number prefix such as ${JSON.stringify(prefix)}; those numbers are not part of the file.`
+    : "";
+  const target = (stripped?.text ?? oldString).replace(/\r\n/g, "\n");
+  const lines = text.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+  const excerpt = (startLine: number, endLine: number) => {
+    const last = Math.min(endLine, startLine + EDIT_MISS_EXCERPT_MAX_LINES - 1);
+    const shown = lines.slice(startLine - 1, last).map(clipForMessage);
+    if (endLine > last) shown.push(`[... ${endLine - last} more lines ...]`);
+    return `The exact current text of ${formatLineRange(startLine, endLine)} is:\n${shown.join("\n")}`;
+  };
+
+  const whitespaceMatch = findWhitespaceInsensitiveMatch(text, target);
+  if (whitespaceMatch) {
+    const range = formatLineRange(whitespaceMatch.startLine, whitespaceMatch.endLine);
+    if (prefix && text.replace(/\r\n/g, "\n").includes(target)) {
+      return `${base}${prefixNote} Without them the text is at ${range}; remove the prefixes from old_string.`;
+    }
+    return `${base}${prefixNote} The same text is at ${range}, but its whitespace or indentation differs. ${excerpt(whitespaceMatch.startLine, whitespaceMatch.endLine)}`;
+  }
+
+  const targetLines = target.split("\n");
+  if (targetLines.length > 1 && targetLines[targetLines.length - 1] === "") targetLines.pop();
+  const similar = findMostSimilarLines(lines, targetLines);
+  if (similar) {
+    let difference = "";
+    for (let index = 0; index < targetLines.length; index += 1) {
+      const fileLine = lines[similar.startLine - 1 + index];
+      if (fileLine === undefined || fileLine === targetLines[index]) continue;
+      difference = ` First difference at line ${similar.startLine + index}: the file has ${JSON.stringify(clipForMessage(fileLine))} where old_string has ${JSON.stringify(clipForMessage(targetLines[index]))}.`;
+      break;
+    }
+    return `${base}${prefixNote} The most similar text is at ${formatLineRange(similar.startLine, similar.endLine)} (${Math.round(similar.score * 100)}% of words in common).${difference} ${excerpt(similar.startLine, similar.endLine)}`;
+  }
+
+  return `${base}${prefixNote} No similar text was found in the file; re-read it (it may have changed) before retrying.`;
+}
+
 /**
  * EditTools provides surgical file editing capabilities
  * Similar to Claude Code's Edit tool for precise string replacements
@@ -471,9 +777,8 @@ export class EditTools {
         });
 
         const initialBuffer = readDescriptorBuffer(targetFd);
-        const initialContent = initialBuffer.toString("utf8");
         const initialReplacement = this.buildReplacement(
-          initialContent,
+          initialBuffer,
           old_string,
           new_string,
           replace_all,
@@ -493,10 +798,9 @@ export class EditTools {
               externalApprovalGranted,
             });
             const currentBuffer = readDescriptorBuffer(targetFd);
-            const currentContent = currentBuffer.toString("utf8");
-            let next: { content: string; replacements: number };
+            let next: { content: string; encoding: "utf8" | "latin1"; replacements: number };
             try {
-              next = this.buildReplacement(currentContent, old_string, new_string, replace_all);
+              next = this.buildReplacement(currentBuffer, old_string, new_string, replace_all);
             } catch (error: Any) {
               if (!currentBuffer.equals(initialBuffer)) {
                 throw new Error(
@@ -515,7 +819,7 @@ export class EditTools {
               );
             }
 
-            const nextBuffer = Buffer.from(next.content, "utf8");
+            const nextBuffer = Buffer.from(next.content, next.encoding);
             assertEditContentSize(nextBuffer.length);
             await this.revalidateEditTarget({
               requestedFullPath,
@@ -606,32 +910,51 @@ export class EditTools {
   }
 
   private buildReplacement(
-    content: string,
+    fileBytes: Buffer,
     oldString: string,
     newString: string,
     replaceAll: boolean,
-  ): { content: string; replacements: number } {
-    const occurrences = this.countOccurrences(content, oldString);
-    if (occurrences === 0) {
-      throw new Error(
-        "old_string not found in file. Make sure the string matches exactly (including whitespace and indentation).",
-      );
+  ): { content: string; encoding: "utf8" | "latin1"; replacements: number } {
+    const { text: content, encoding } = decodeEditableText(fileBytes, oldString, newString);
+    for (const candidate of buildEditMatchCandidates(content, oldString, newString, replaceAll)) {
+      const occurrences = this.countOccurrences(content, candidate.oldString);
+      if (occurrences === 0) continue;
+      if (candidate.expectedLine !== undefined) {
+        if (occurrences > 1) {
+          throw new Error(
+            `old_string appears to include line-number prefixes; without them it was found ${occurrences} times in file. ` +
+              "Remove the prefixes and include more surrounding lines to make it unique.",
+          );
+        }
+        const index = content.indexOf(candidate.oldString);
+        const startsLine = index === 0 || content[index - 1] === "\n";
+        if (!startsLine || lineNumberAt(content, index) !== candidate.expectedLine) continue;
+      }
+      if (occurrences > 1 && !replaceAll) {
+        throw new Error(
+          `old_string found ${occurrences} times in file. ` +
+            "Use replace_all: true to replace all occurrences, or provide more context to make it unique.",
+        );
+      }
+      if (encoding === "latin1") assertLegacyMatchBoundaries(content, candidate.oldString);
+      if (replaceAll) {
+        return {
+          content: content.split(candidate.oldString).join(candidate.newString),
+          encoding,
+          replacements: occurrences,
+        };
+      }
+      const index = content.indexOf(candidate.oldString);
+      return {
+        content:
+          content.substring(0, index) +
+          candidate.newString +
+          content.substring(index + candidate.oldString.length),
+        encoding,
+        replacements: 1,
+      };
     }
-    if (occurrences > 1 && !replaceAll) {
-      throw new Error(
-        `old_string found ${occurrences} times in file. ` +
-          "Use replace_all: true to replace all occurrences, or provide more context to make it unique.",
-      );
-    }
-    if (replaceAll) {
-      return { content: content.split(oldString).join(newString), replacements: occurrences };
-    }
-    const index = content.indexOf(oldString);
-    return {
-      content:
-        content.substring(0, index) + newString + content.substring(index + oldString.length),
-      replacements: 1,
-    };
+    throw new Error(describeEditMiss(content, oldString));
   }
 
   protected async revalidateEditTarget(options: {

@@ -33,13 +33,16 @@ import { OpenAISiwcError, OpenAISiwcOAuth, SIWC_RESOURCE, siwcFetch } from "./op
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
 import {
+  mapResponsesApiStopReason,
   parseOpenAICompatibleToolArguments,
   toOpenAICompatibleMessages,
 } from "./openai-compatible";
-import { resolveOutputTokenParamName } from "./output-token-policy";
+import { resolveOutputTokenParamName, withReasoningOutputHeadroom } from "./output-token-policy";
+import { classifyProviderError } from "./provider-error-classifier";
 import {
   buildOpenAIPromptCacheFields,
   extractOpenAICompatibleCacheUsage,
+  extractPiAiUsage,
   isPromptCacheRequestUnsupportedError,
   mapPromptCacheTtlToPiAiRetention,
   prependVolatileSystemContextToMessages,
@@ -213,48 +216,17 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  private isTransientInterruptionMessage(message: string): boolean {
-    const normalized = String(message || "").toLowerCase();
-    if (!normalized) return false;
-    return (
-      normalized.includes("terminated") ||
-      normalized.includes("stream disconnected") ||
-      normalized.includes("connection reset") ||
-      normalized.includes("unexpected eof") ||
-      normalized.includes("socket hang up") ||
-      normalized.includes("fetch failed") ||
-      normalized.includes("failed to fetch")
-    );
-  }
-
-  private isRetryableProviderMessage(message: string, code?: string): boolean {
-    const normalized = String(message || "").toLowerCase();
-    const normalizedCode = String(code || "").toLowerCase();
-    return (
-      normalizedCode === "service_unavailable_error" ||
-      normalizedCode === "server_is_overloaded" ||
-      normalized.includes("service_unavailable_error") ||
-      normalized.includes("server_is_overloaded") ||
-      normalized.includes("server is overloaded") ||
-      normalized.includes("servers are currently overloaded") ||
-      normalized.includes("temporarily unavailable")
-    );
-  }
-
   private toStructuredProviderError(error: Any, phase: OpenAIProviderErrorPhase): Error {
     const message = String(error?.message || "OpenAI request failed");
     const wrapped = new OpenAIProviderError(message);
+    const classification = classifyProviderError(error);
     wrapped.name = error?.name || "OpenAIProviderError";
     wrapped.phase = phase;
-    wrapped.code = String(error?.code || error?.cause?.code || "").trim() || undefined;
-    wrapped.retryable =
-      this.isTransientInterruptionMessage(message) ||
-      this.isRetryableProviderMessage(message, wrapped.code) ||
-      wrapped.code === "ECONNRESET" ||
-      wrapped.code === "ETIMEDOUT" ||
-      wrapped.code === "ENOTFOUND" ||
-      wrapped.code === "EAI_AGAIN" ||
-      wrapped.code === "ECONNREFUSED";
+    wrapped.code =
+      String(error?.code || error?.cause?.code || classification.code || "").trim() || undefined;
+    // SDK connection errors ("Connection error.") carry their errno several causes
+    // deep, and an exhausted quota arrives as a 429; the shared classifier handles both.
+    wrapped.retryable = classification.retryable;
     if (error?.status !== undefined) {
       (wrapped as Any).status = error.status;
     }
@@ -560,7 +532,9 @@ export class OpenAIProvider implements LLMProvider {
         this.normalizeCodexModelId(request.model || this.model || DEFAULT_CODEX_MODEL),
       ),
       ...(instructions ? { instructions } : {}),
-      max_output_tokens: request.maxTokens,
+      max_output_tokens: reasoningEffort
+        ? withReasoningOutputHeadroom(request.maxTokens, reasoningEffort)
+        : request.maxTokens,
       ...(reasoningEffort
         ? {
             reasoning: { effort: reasoningEffort },
@@ -649,12 +623,7 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     const hasToolUse = content.some((item) => item.type === "tool_use");
-    const incompleteReason = String(response?.incomplete_details?.reason || "");
-    const stopReason: LLMResponse["stopReason"] = hasToolUse
-      ? "tool_use"
-      : incompleteReason === "max_output_tokens" || response?.status === "incomplete"
-        ? "max_tokens"
-        : "end_turn";
+    const stopReason = mapResponsesApiStopReason(response, hasToolUse);
 
     const usage = response?.usage;
     // Tag with the id we requested (and replay against), not response.model, which the
@@ -1021,9 +990,11 @@ export class OpenAIProvider implements LLMProvider {
         codexModelId,
       );
       const configuredReasoningEffort = this.getOpenAIReasoningEffort(request);
+      const piAiReasoningEffort =
+        configuredReasoningEffort === "none" ? "medium" : configuredReasoningEffort;
       const response = await piAiComplete(model, context, {
         apiKey,
-        maxTokens: request.maxTokens,
+        maxTokens: withReasoningOutputHeadroom(request.maxTokens, piAiReasoningEffort),
         signal: request.signal,
         cacheRetention,
         ...(sessionId ? { sessionId } : {}),
@@ -1035,8 +1006,7 @@ export class OpenAIProvider implements LLMProvider {
               }),
             }
           : {}),
-        reasoningEffort:
-          configuredReasoningEffort === "none" ? "medium" : configuredReasoningEffort,
+        reasoningEffort: piAiReasoningEffort,
         textVerbosity: this.getOpenAITextVerbosity(request),
       });
 
@@ -1628,14 +1598,7 @@ export class OpenAIProvider implements LLMProvider {
       content,
       ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason,
-      usage: response.usage
-        ? {
-            inputTokens: response.usage.input || 0,
-            outputTokens: response.usage.output || 0,
-            cachedTokens: response.usage.cacheRead || undefined,
-            cacheWriteTokens: response.usage.cacheWrite || undefined,
-          }
-        : undefined,
+      usage: extractPiAiUsage(response.usage),
     };
   }
 
@@ -1717,7 +1680,7 @@ export class OpenAIProvider implements LLMProvider {
       case "length":
         return "max_tokens";
       case "content_filter":
-        return "stop_sequence";
+        return "refusal";
       default:
         return "end_turn";
     }

@@ -445,7 +445,7 @@ budgets and local admission control without changing the permission model.
 1. Get API key from [Google AI Studio](https://aistudio.google.com/apikey)
 2. Configure in **Settings** > **Google Gemini**
 
-Models: `gemini-2.0-flash` (default), `gemini-2.5-pro` (most capable), `gemini-2.5-flash` (fast)
+Models: `gemini-2.5-flash` (default, fast), `gemini-2.5-pro` (most capable)
 
 ---
 

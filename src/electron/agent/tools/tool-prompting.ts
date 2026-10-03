@@ -6,6 +6,9 @@ import type {
 } from "../llm/types";
 
 const TOOL_DESCRIPTION_CHAR_LIMIT = 420;
+// Appended prompt guidance has its own budget and follows the canonical description, so long
+// guidance can never push out what a tool does, its defaults, or how its results behave.
+const TOOL_PROMPT_GUIDANCE_CHAR_LIMIT = 420;
 const TOOL_COMPACT_DESCRIPTION_CHAR_LIMIT = 220;
 
 export const TOOL_PROMPT_METADATA_VERSION = "tool-prompting:v2";
@@ -48,12 +51,13 @@ function resolvePromptMetadata(
 export function renderToolDescription(tool: LLMTool, context: LLMToolPromptRenderContext): string {
   const resolved = resolvePromptMetadata(tool, context);
   const base = normalizeText(tool.description);
-  const merged = resolved.description
-    ? normalizeText(resolved.description)
-    : resolved.appendDescription
-      ? joinText(resolved.appendDescription, base)
-      : base;
-  return truncateText(merged || base, TOOL_DESCRIPTION_CHAR_LIMIT);
+  const replacement = normalizeText(resolved.description);
+  if (replacement) return truncateText(replacement, TOOL_DESCRIPTION_CHAR_LIMIT);
+  if (!resolved.appendDescription) return truncateText(base, TOOL_DESCRIPTION_CHAR_LIMIT);
+  return joinText(
+    truncateText(base, TOOL_DESCRIPTION_CHAR_LIMIT),
+    truncateText(resolved.appendDescription, TOOL_PROMPT_GUIDANCE_CHAR_LIMIT),
+  );
 }
 
 export function renderCompactToolDescription(
@@ -95,7 +99,7 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
   })),
   orchestrate_agents: createPromptMetadata(() => ({
     appendDescription:
-      "Launch 2-8 independent delegated tasks in parallel. Use only when tasks do not block each other and can be summarized separately before synthesis.",
+      "Launch 2-8 independent delegated tasks; up to the active child-agent limit (3 by default) run in parallel and the rest queue. Use only when tasks do not block each other and can be summarized separately before synthesis.",
     compactDescription:
       "Run 2-8 independent delegated tasks in parallel. Do not split one blocking serial task across nodes.",
   })),
@@ -107,9 +111,9 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
   })),
   run_command: createPromptMetadata(() => ({
     appendDescription:
-      "Use for shell, test, build, packaging, git, and local CLI work. Prefer this over browser or web tools for local execution. Do not use this for simple workspace file creation or overwrite when write_file can do it. Do not use this for native desktop GUI control when screenshot/click/type_text/keypress and related computer-use tools are available. If a test or build fails, inspect the output, fix the cause, then rerun.",
+      "Use for shell, test, build, packaging, git, and local CLI work instead of browser or web tools. Not for simple file writes (use write_file) or native GUI control (use computer-use tools). Runs non-interactively: pass -y/--yes, --no-input, or git commit -m; avoid editors and pagers. Start dev servers and watchers with background: true (they would otherwise block until the timeout), then use process_output and stop_process. If a test or build fails, read the output, fix the cause, and rerun.",
     compactDescription:
-      "Use for shell, test, build, git, and local CLI execution. For simple file writes, prefer write_file.",
+      "Use for shell, test, build, git, and local CLI execution; runs non-interactively (pass -y/--yes, --no-input, git commit -m). Servers and watchers: background: true. For simple file writes, prefer write_file.",
   })),
   write_file: createPromptMetadata(() => ({
     appendDescription:
@@ -168,7 +172,7 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
   })),
   browser_navigate: createPromptMetadata(() => ({
     appendDescription:
-      "Use for interactive or JS-heavy pages, app/site testing, login flows, or screenshots. By default this opens and controls the visible in-app browser workbench for the active task; after the user logs in there, continue the same visible session. Do not set headless=true for normal user-facing site testing. Use force_headless/profile/debugger options only when no visible workbench session is available and background browsing is required. Real signed-in Chrome/Edge attach requires explicit user consent. After navigating, inspect with browser_snapshot first when you need to act, or browser_get_content/browser_screenshot when you only need reading or visual evidence.",
+      "Use for interactive or JS-heavy pages, site testing, logins, or screenshots. Reuse an open visible workbench session (e.g. after the user signs in there). In ask mode, visible=true requests the workbench; force_headless, profile and debugger options are for background use. Real signed-in Chrome attach requires explicit user consent. Then use browser_snapshot to act, or browser_get_content/browser_screenshot to read.",
     compactDescription:
       "Use for interactive or JS-heavy pages and visible site testing. Navigate, then inspect immediately.",
   })),

@@ -2,6 +2,11 @@ import type { LLMProviderType } from "./types";
 
 export type ProviderCompatibility = "openai" | "anthropic";
 
+/** Default Gemini model. Listed in GEMINI_MODELS and src/shared/model-metadata.json. */
+export const GEMINI_DEFAULT_MODEL = "gemini-2.5-flash";
+/** Default OpenRouter model. Listed in OPENROUTER_MODELS and src/shared/model-metadata.json. */
+export const OPENROUTER_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
+
 export interface ProviderCatalogEntry {
   id: LLMProviderType;
   name: string;
@@ -87,7 +92,7 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     id: "google-vertex",
     name: "Google Vertex",
     compatibility: "openai",
-    defaultModel: "gemini-2.0-flash",
+    defaultModel: GEMINI_DEFAULT_MODEL,
     apiKeyLabel: "Access Token",
     apiKeyPlaceholder: "ya29...",
     requiresBaseUrl: true,

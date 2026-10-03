@@ -33,6 +33,7 @@ import type {
   RunFilters,
   Task,
 } from "../../shared/types";
+import { DEFAULT_WORKSPACE_PERMISSIONS } from "../../shared/types";
 
 function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
@@ -1816,11 +1817,7 @@ export class ControlPlaneStore {
     const workspace =
       byPath ||
       this.workspaceRepo.create(`Company: ${company.name}`, workspacePath, {
-        read: true,
-        write: true,
-        delete: false,
-        network: true,
-        shell: false,
+        ...DEFAULT_WORKSPACE_PERMISSIONS,
       });
 
     const now = Date.now();

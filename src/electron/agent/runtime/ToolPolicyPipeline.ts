@@ -68,6 +68,15 @@ export interface ToolPolicyPipelineOptions {
    * denials, domain rules, and mutating requests still win before this lane.
    */
   allowReadOnlyNetworkWhenApprovalDisabled?: boolean;
+  /**
+   * With the legacy approval queue off (the default), an approval decision is
+   * answered through the daemon's inline "Deny / Allow once" task card. Set
+   * this only when a person can answer that card (see
+   * `canAnswerInlineApproval`); otherwise the ask is denied as before. It never
+   * turns an ask into an allow, and it cannot reopen hard denials or
+   * `approval: "never"` profiles.
+   */
+  inlineApprovalAvailable?: boolean;
 }
 
 export interface ToolPolicyPipelineResult {
@@ -154,11 +163,14 @@ export async function evaluateToolPolicyPipeline(
     requestedPermissionApprovalType ?? opts.runtimeApprovalType ?? null;
   let workspaceApprovalReason: string | undefined;
   let runtimeRequirementAuthorized = false;
-  // The default local runtime is full-auto: permission checks and hard policy
-  // denials still run, but an approval decision never opens a durable prompt.
+  // The default local runtime has no approval modal: permission checks and
+  // hard policy denials still run, and an approval decision becomes the
+  // daemon's inline "Deny / Allow once" card when a person can answer it.
+  // Without one (headless, CLI, automation, sub-agents) the ask is denied.
   // Operators can restore the legacy queue with COWORK_APPROVAL_PROMPTS=on.
   const canRequestApproval =
-    !approvalPromptsDisabled() && opts.workspace.permissions.accessApprovalPolicy !== "never";
+    (!approvalPromptsDisabled() || opts.inlineApprovalAvailable === true) &&
+    opts.workspace.permissions.accessApprovalPolicy !== "never";
 
   if (opts.deniedTools?.has(opts.toolName)) {
     trace.add("task_restrictions", "deny", "tool denied by task restrictions");

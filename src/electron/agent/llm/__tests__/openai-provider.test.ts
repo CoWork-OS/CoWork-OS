@@ -199,7 +199,8 @@ describe("OpenAIProvider structured errors", () => {
       expect.objectContaining({
         model: "gpt-5.5",
         instructions: "Stable instructions",
-        max_output_tokens: 128,
+        // 128 tokens at high effort would be spent entirely on hidden reasoning.
+        max_output_tokens: 128 + 4_096,
         reasoning: { effort: "high" },
         text: { verbosity: "low" },
         prompt_cache_key: "stable-prefix-hash",
@@ -263,6 +264,79 @@ describe("OpenAIProvider structured errors", () => {
         cacheWriteTokens: 40,
       },
     });
+  });
+
+  it("reserves reasoning headroom when a Responses request has a small output budget", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output: [{ type: "message", content: [{ type: "output_text", text: "Hi there" }] }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    await provider.createMessage({ ...makeRequest(), model: "gpt-5.5", maxTokens: 260 });
+    await provider.createMessage({ ...makeRequest(), model: "gpt-5.5", maxTokens: 16_000 });
+
+    // Hidden reasoning counts against max_output_tokens; at the default medium
+    // effort a 260-token cap is spent on reasoning and returns no text.
+    const smallBody = responsesCreateMock.mock.calls[0][0];
+    expect(smallBody.reasoning).toEqual({ effort: "medium" });
+    expect(smallBody.max_output_tokens).toBe(260 + 2_048);
+    expect(responsesCreateMock.mock.calls[1][0].max_output_tokens).toBe(16_000);
+  });
+
+  it("reserves reasoning headroom for small ChatGPT subscription budgets", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    const provider = new OpenAIProvider(makeConfig());
+
+    await provider.createMessage({ ...makeRequest(), maxTokens: 260 });
+
+    expect(completeMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({ maxTokens: 260 + 2_048, reasoningEffort: "medium" }),
+    );
+  });
+
+  it("reports content-filtered Responses output as a refusal", async () => {
+    responsesCreateMock.mockResolvedValue({
+      status: "incomplete",
+      incomplete_details: { reason: "content_filter" },
+      output: [],
+      usage: { input_tokens: 10, output_tokens: 0 },
+    });
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    const response = await provider.createMessage({ ...makeRequest(), model: "gpt-5.5" });
+
+    expect(response.stopReason).toBe("refusal");
+  });
+
+  it("reports a content-filtered chat completion as a refusal", async () => {
+    chatCompletionsCreateMock.mockResolvedValue({
+      choices: [{ message: { content: "" }, finish_reason: "content_filter" }],
+      usage: { prompt_tokens: 10, completion_tokens: 0 },
+    });
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-4o",
+      openaiApiKey: "sk-test",
+    });
+
+    const response = await provider.createMessage({ ...makeRequest(), model: "gpt-4o" });
+
+    expect(response.stopReason).toBe("refusal");
   });
 
   it("uses Responses API controls for other GPT-5-family OpenAI API-key models", async () => {
@@ -736,6 +810,19 @@ describe("OpenAIProvider structured errors", () => {
     );
   });
 
+  it("reports ChatGPT subscription usage with cache reads included in inputTokens", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1_000, output: 50, cacheRead: 9_000, cacheWrite: 0 },
+    });
+    const provider = new OpenAIProvider(makeConfig());
+
+    const response = await provider.createMessage(makeRequest());
+
+    expect(response.usage).toEqual({ inputTokens: 10_000, outputTokens: 50, cachedTokens: 9_000 });
+  });
+
   it("marks terminated OAuth stopReason errors as retryable", async () => {
     completeMock.mockResolvedValue({
       stopReason: "error",
@@ -796,6 +883,61 @@ describe("OpenAIProvider structured errors", () => {
       retryable: true,
       phase: "oauth",
     });
+  });
+
+  it("marks SDK connection errors from API-key requests as retryable", async () => {
+    const { APIConnectionError } = await vi.importActual<typeof import("openai")>("openai");
+    responsesCreateMock.mockRejectedValue(
+      new APIConnectionError({
+        cause: new TypeError("fetch failed", {
+          cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.openai.com"), {
+            code: "ENOTFOUND",
+          }),
+        }),
+      }),
+    );
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    await expect(
+      provider.createMessage({ ...makeRequest(), model: "gpt-5.5" }),
+    ).rejects.toMatchObject({
+      message: "Connection error.",
+      retryable: true,
+      phase: "api_key",
+      code: "ENOTFOUND",
+    });
+  });
+
+  it("does not mark an exhausted quota as retryable even though it is a 429", async () => {
+    const { APIError } = await vi.importActual<typeof import("openai")>("openai");
+    responsesCreateMock.mockRejectedValue(
+      APIError.generate(
+        429,
+        {
+          error: {
+            message: "You exceeded your current quota, please check your plan and billing details.",
+            type: "insufficient_quota",
+            code: "insufficient_quota",
+            param: null,
+          },
+        },
+        undefined,
+        new Headers(),
+      ),
+    );
+    const provider = new OpenAIProvider({
+      type: "openai",
+      model: "gpt-5.5",
+      openaiApiKey: "sk-test",
+    });
+
+    await expect(
+      provider.createMessage({ ...makeRequest(), model: "gpt-5.5" }),
+    ).rejects.toMatchObject({ retryable: false, status: 429, code: "insufficient_quota" });
   });
 
   it("marks temporarily unavailable provider errors as retryable", async () => {

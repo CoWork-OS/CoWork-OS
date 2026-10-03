@@ -20,6 +20,15 @@ import {
   isPromptCacheRequestUnsupportedError,
   normalizeSystemBlocks,
 } from "./prompt-cache";
+import { ensureNoTrailingAssistantPrefill } from "./assistant-prefill";
+import {
+  anthropicReasoningFromResponse,
+  anthropicThinkingPrefixSeed,
+  applyAnthropicThinkingReplay,
+  classifyAnthropicThinkingRejection,
+  planAnthropicThinking,
+  trailingToolTurnStartsWithThinking,
+} from "./anthropic-thinking";
 import { createLogger } from "../../utils/logger";
 
 /**
@@ -27,11 +36,30 @@ import { createLogger } from "../../utils/logger";
  */
 const logger = createLogger("Anthropic");
 
+interface ThinkingRequestOptions {
+  /** Replay thinking blocks produced by this model (see anthropic-thinking.ts). */
+  replay: boolean;
+  /** Send thinking/effort parameters. */
+  sendConfig: boolean;
+}
+
+interface BuiltRequest {
+  payload: Any;
+  model: string;
+  /** Prefix hash recorded on the response's thinking blocks. */
+  prefixHash: string;
+  /** The request carries thinking parameters or replayed thinking blocks. */
+  usesThinking: boolean;
+}
+
 export class AnthropicProvider implements LLMProvider {
   readonly type = "anthropic" as const;
   private client: Anthropic;
   private readonly configuredModel: string;
+  private readonly reasoningEffort?: string;
   private promptCacheAutoSupported = true;
+  /** Models whose endpoint rejected thinking/effort parameters (sticky per instance). */
+  private readonly thinkingConfigRejectedModels = new Set<string>();
   private static readonly STREAMING_REQUIRED_ERROR_FRAGMENT =
     "Streaming is required for operations that may take longer than 10 minutes";
 
@@ -44,6 +72,7 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     this.configuredModel = config.model;
+    this.reasoningEffort = config.anthropicReasoningEffort;
     const isSubscriptionToken = apiKey.includes("sk-ant-oat");
     this.client = isSubscriptionToken
       ? new Anthropic({
@@ -58,6 +87,16 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
+    return this.createMessageWithThinking(request, {
+      replay: true,
+      sendConfig: !this.thinkingConfigRejectedModels.has(normalizeAnthropicModelId(request.model)),
+    });
+  }
+
+  private async createMessageWithThinking(
+    request: LLMRequest,
+    thinkingOptions: ThinkingRequestOptions,
+  ): Promise<LLMResponse> {
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
     const model = normalizeAnthropicModelId(request.model);
     const requestedPromptCache =
@@ -66,13 +105,28 @@ export class AnthropicProvider implements LLMProvider {
       requestedPromptCache?.mode === "anthropic_auto" && !this.promptCacheAutoSupported
         ? { ...requestedPromptCache, mode: "anthropic_explicit" as const }
         : requestedPromptCache;
+    const built = this.buildRequest(request, effectivePromptCache, tools, thinkingOptions);
+
+    // A thinking block or parameter the endpoint rejects: retry once without
+    // replayed blocks and thinking parameters instead of failing the turn.
+    const retryWithoutThinking = (error: Any): Promise<LLMResponse> | null => {
+      const rejection = classifyAnthropicThinkingRejection(error?.status, error?.message || "");
+      if (!rejection || !built.usesThinking) return null;
+      logger.warn("Thinking rejected by the API; retrying without thinking blocks or parameters", {
+        model,
+        status: error?.status,
+        reason: rejection,
+      });
+      if (rejection === "config") this.thinkingConfigRejectedModels.add(model);
+      return this.createMessageWithThinking(request, { replay: false, sendConfig: false });
+    };
 
     try {
       logger.debug(`Calling API with model: ${model}`);
 
-      const response = await this.createWithPromptCache(request, effectivePromptCache, tools);
+      const response = await this.send(built.payload, request.signal);
 
-      return this.convertResponse(response);
+      return this.convertResponse(response, built);
     } catch (error: Any) {
       if (
         effectivePromptCache?.mode === "anthropic_auto" &&
@@ -87,12 +141,14 @@ export class AnthropicProvider implements LLMProvider {
           },
         );
 
-        const fallbackResponse = await this.createWithPromptCache(
+        const fallback = this.buildRequest(
           request,
           { ...effectivePromptCache, mode: "anthropic_explicit" },
           tools,
+          thinkingOptions,
         );
-        return this.convertResponse(fallbackResponse);
+        const fallbackResponse = await this.send(fallback.payload, request.signal);
+        return this.convertResponse(fallbackResponse, fallback);
       }
 
       if (
@@ -103,16 +159,21 @@ export class AnthropicProvider implements LLMProvider {
           "Retrying request with streaming because the SDK rejected the non-streaming timeout budget.",
           {
             model,
-            maxTokens: request.maxTokens,
+            maxTokens: built.payload.max_tokens,
           },
         );
-        const streamedResponse = await this.createWithStreaming(
-          request,
-          effectivePromptCache,
-          tools,
-        );
-        return this.convertResponse(streamedResponse);
+        try {
+          const streamedResponse = await this.sendStreaming(built.payload, request.signal);
+          return this.convertResponse(streamedResponse, built);
+        } catch (streamError: Any) {
+          const retried = retryWithoutThinking(streamError);
+          if (retried) return retried;
+          throw streamError;
+        }
       }
+
+      const retried = retryWithoutThinking(error);
+      if (retried) return retried;
 
       if (
         effectivePromptCache &&
@@ -122,7 +183,10 @@ export class AnthropicProvider implements LLMProvider {
           model,
           status: error?.status,
         });
-        return this.createMessage({ ...request, promptCache: undefined });
+        return this.createMessageWithThinking(
+          { ...request, promptCache: undefined },
+          thinkingOptions,
+        );
       }
 
       // Handle abort errors gracefully
@@ -221,52 +285,88 @@ export class AnthropicProvider implements LLMProvider {
     }) as Anthropic.MessageParam[];
   }
 
-  private async createWithPromptCache(
+  /**
+   * Request body: thinking/effort per model (anthropic-thinking.ts), thinking
+   * blocks replayed when they still belong to this conversation, and cache
+   * markers. Sampling parameters and tool_choice are never sent, so thinking is
+   * always combined with the default `auto` tool choice.
+   */
+  private buildRequest(
     request: LLMRequest,
     promptCache: LLMRequest["promptCache"] | undefined,
     tools: Anthropic.Tool[] | undefined,
-  ): Promise<Anthropic.Message> {
+    thinkingOptions: ThinkingRequestOptions,
+  ): BuiltRequest {
     const model = normalizeAnthropicModelId(request.model);
+    const messages = ensureNoTrailingAssistantPrefill(request.messages, model);
+    const systemTexts = normalizeSystemBlocks(request.system, request.systemBlocks).map(
+      (block) => block.text,
+    );
+    const replay = applyAnthropicThinkingReplay({
+      messages,
+      converted: this.convertMessages(messages) as Any[],
+      model,
+      provider: this.type,
+      seed: anthropicThinkingPrefixSeed(
+        systemTexts.length > 0 ? systemTexts : [request.system],
+        tools,
+      ),
+      replay: thinkingOptions.replay,
+    });
+    if (replay.droppedBlocks > 0) {
+      logger.debug("Dropped thinking blocks that no longer match the conversation or model", {
+        model,
+        dropped: replay.droppedBlocks,
+        replayed: replay.replayedBlocks,
+      });
+    }
+
+    let plan = thinkingOptions.sendConfig
+      ? planAnthropicThinking({
+          model,
+          maxTokens: request.maxTokens,
+          effort: request.reasoningEffort || this.reasoningEffort,
+        })
+      : { maxTokens: request.maxTokens };
+    if (plan.thinking?.type === "enabled" && !trailingToolTurnStartsWithThinking(replay.messages)) {
+      // Budget-mode thinking needs the tool-calling turn to start with its thinking.
+      plan = {
+        ...(plan.outputConfig ? { outputConfig: plan.outputConfig } : {}),
+        maxTokens: request.maxTokens,
+      };
+    }
+
     const payload: Any = {
       model,
-      max_tokens: request.maxTokens,
+      max_tokens: plan.maxTokens,
       system: this.buildSystemPayload(request, promptCache),
-      messages: this.buildMessagesPayload(request.messages, promptCache),
+      messages: this.buildMessagesPayload(replay.messages, promptCache),
       ...(tools && { tools }),
+      ...(plan.thinking && { thinking: plan.thinking }),
+      ...(plan.outputConfig && { output_config: plan.outputConfig }),
     };
 
     if (promptCache?.mode === "anthropic_auto") {
       payload.cache_control = buildAnthropicCacheMarker(promptCache.ttl);
     }
 
+    return {
+      payload,
+      model,
+      prefixHash: replay.prefixHash,
+      usesThinking: replay.replayedBlocks > 0 || Boolean(plan.thinking || plan.outputConfig),
+    };
+  }
+
+  private send(payload: Any, signal: AbortSignal | undefined): Promise<Anthropic.Message> {
     return this.client.messages.create(
       payload,
-      request.signal ? { signal: request.signal } : undefined,
+      signal ? { signal } : undefined,
     ) as Promise<Anthropic.Message>;
   }
 
-  private async createWithStreaming(
-    request: LLMRequest,
-    promptCache: LLMRequest["promptCache"] | undefined,
-    tools: Anthropic.Tool[] | undefined,
-  ): Promise<Anthropic.Message> {
-    const model = normalizeAnthropicModelId(request.model);
-    const payload: Any = {
-      model,
-      max_tokens: request.maxTokens,
-      system: this.buildSystemPayload(request, promptCache),
-      messages: this.buildMessagesPayload(request.messages, promptCache),
-      ...(tools && { tools }),
-    };
-
-    if (promptCache?.mode === "anthropic_auto") {
-      payload.cache_control = buildAnthropicCacheMarker(promptCache.ttl);
-    }
-
-    const stream = this.client.messages.stream(
-      payload,
-      request.signal ? { signal: request.signal } : undefined,
-    );
+  private sendStreaming(payload: Any, signal: AbortSignal | undefined): Promise<Anthropic.Message> {
+    const stream = this.client.messages.stream(payload, signal ? { signal } : undefined);
     return stream.finalMessage() as Promise<Anthropic.Message>;
   }
 
@@ -286,7 +386,13 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     const parts = convertSystemBlocksToTextParts(request.system, request.systemBlocks);
-    if (promptCache?.mode === "anthropic_explicit") {
+    // Explicit mode marks the system prefix and recent turns. Automatic mode's
+    // single top-level breakpoint follows the conversation tail, so the static
+    // system prefix also gets its own marker: a read point that survives
+    // whatever changes later in the transcript. Two breakpoints stay within the
+    // limit of four, and both use the request TTL so the longer-TTL-first
+    // ordering rule holds.
+    if (promptCache?.mode === "anthropic_explicit" || promptCache?.mode === "anthropic_auto") {
       applyExplicitSystemBlockMarker(parts, blocks, promptCache.ttl);
     }
 
@@ -298,10 +404,9 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   private buildMessagesPayload(
-    messages: LLMMessage[],
+    converted: Anthropic.MessageParam[],
     promptCache: LLMRequest["promptCache"] | undefined,
   ): Anthropic.MessageParam[] {
-    const converted = this.convertMessages(messages) as Any[];
     if (promptCache?.mode !== "anthropic_explicit") {
       return converted as Anthropic.MessageParam[];
     }
@@ -322,7 +427,7 @@ export class AnthropicProvider implements LLMProvider {
     }));
   }
 
-  private convertResponse(response: Anthropic.Message): LLMResponse {
+  private convertResponse(response: Anthropic.Message, built: BuiltRequest): LLMResponse {
     const content: LLMContent[] = response.content
       .filter((block) => block.type === "text" || block.type === "tool_use")
       .map((block) => {
@@ -341,8 +446,17 @@ export class AnthropicProvider implements LLMProvider {
         };
       });
 
+    const reasoning = anthropicReasoningFromResponse({
+      content: response.content,
+      visibleContent: this.convertMessages([{ role: "assistant", content }])[0]?.content,
+      model: built.model,
+      provider: this.type,
+      prefixHash: built.prefixHash,
+    });
+
     return {
       content,
+      ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason: this.mapStopReason(response.stop_reason),
       usage: extractAnthropicUsage(response.usage),
     };
@@ -358,6 +472,13 @@ export class AnthropicProvider implements LLMProvider {
         return "max_tokens";
       case "stop_sequence":
         return "stop_sequence";
+      case "refusal":
+        return "refusal";
+      // The context window, not max_tokens, cut the answer off: recover like a truncation.
+      case "model_context_window_exceeded":
+      // A resumable server-side pause: continue the turn like a truncated one.
+      case "pause_turn":
+        return "max_tokens";
       default:
         return "end_turn";
     }

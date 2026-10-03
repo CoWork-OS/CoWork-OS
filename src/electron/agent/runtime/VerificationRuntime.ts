@@ -45,6 +45,11 @@ export interface VerificationRuntimeResult {
   verdict: VerificationVerdict;
   report: string;
   shouldBlock: boolean;
+  /**
+   * The verifier stopped before judging the work (timeout, cancellation, a
+   * missing or failed run, or no report). Reported as a non-blocking PARTIAL.
+   */
+  incomplete?: boolean;
 }
 
 const OPTIONAL_VERIFICATION_EVIDENCE_PREVIEW_LIMIT = 20;
@@ -57,6 +62,28 @@ const VERIFICATION_PARENT_SUMMARY_CHAR_LIMIT = 8_000;
 const VERIFICATION_OUTPUT_SUMMARY_CHAR_LIMIT = 6_000;
 const VERIFICATION_REQUIREMENT_DESCRIPTION_CHAR_LIMIT = 400;
 const VERIFICATION_EVIDENCE_CLAIM_CHAR_LIMIT = 200;
+
+// A standalone FAIL verdict line written before the verifier stopped.
+const UNFINISHED_RUN_FAIL_VERDICT_REGEX = /^VERDICT:[ \t]*FAIL[ \t]*\r?$/im;
+
+function describeIncompleteVerification(
+  result: VerificationRuntimeChildResult,
+  timeoutMs: number,
+): string {
+  const cause =
+    result.status === "timeout"
+      ? `the verifier timed out after ${Math.round(timeoutMs / 1000)}s`
+      : result.status === "cancelled"
+        ? "the verifier run was cancelled"
+        : result.status === "missing"
+          ? "the verifier task could not be found"
+          : result.status === "failed"
+            ? "the verifier run failed"
+            : result.terminalStatus && result.terminalStatus !== "ok"
+              ? `the verifier finished with status ${result.terminalStatus}`
+              : "the verifier returned no report";
+  return `Independent verification did not complete: ${cause}. The result is unverified; this is not a failed verification.`;
+}
 
 function truncateForVerification(value: string, limit: number): string {
   if (value.length <= limit) return value;
@@ -130,11 +157,12 @@ export class VerificationRuntime {
       };
     }
 
+    const timeoutMs = request.timeoutMs ?? 120_000;
     const result = await this.deps.runReadOnlyChildTaskAndWait({
       parentTask: request.parentTask,
       title: `Verify: ${request.parentTask.title}`.slice(0, 200),
       prompt,
-      timeoutMs: request.timeoutMs ?? 120_000,
+      timeoutMs,
       workerRole: "verifier",
       agentConfig: {
         maxTurns: 12,
@@ -150,10 +178,36 @@ export class VerificationRuntime {
     });
 
     const report = String(result.summary || "").trim();
-    // A stale/partial summary cannot certify an unfinished verification run.
     const completedSuccessfully =
       result.status === "completed" && (!result.terminalStatus || result.terminalStatus === "ok");
-    const verdict = completedSuccessfully ? parseVerificationVerdict(report) : "FAIL";
+    if (!completedSuccessfully || !report) {
+      // A stale/partial summary cannot certify an unfinished verification run,
+      // but a verifier that stopped early has not judged the work either. Only a
+      // FAIL verdict it reached before stopping blocks; otherwise the outcome is
+      // incomplete and must not fail an otherwise successful task.
+      if (UNFINISHED_RUN_FAIL_VERDICT_REGEX.test(report)) {
+        return {
+          gated: true,
+          ran: true,
+          childTaskId: result.childTaskId,
+          status: result.status,
+          verdict: "FAIL",
+          report,
+          shouldBlock: true,
+        };
+      }
+      return {
+        gated: true,
+        ran: true,
+        childTaskId: result.childTaskId,
+        status: result.status,
+        verdict: "PARTIAL",
+        report: describeIncompleteVerification(result, timeoutMs),
+        shouldBlock: false,
+        incomplete: true,
+      };
+    }
+    const verdict = parseVerificationVerdict(report);
     const highRisk = this.isHighRiskTask(request.parentTask, request);
     const shouldBlock = verdict === "FAIL" || (highRisk && verdict !== "PASS");
 

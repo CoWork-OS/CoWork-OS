@@ -116,13 +116,18 @@ describe("ShellSessionManager", () => {
       }),
     };
 
+    // A timeout resolves (rather than throws) so callers never re-run the command.
     await expect(
       manager.runCommand({
         ...requestBase,
         command: "sleep 2",
         timeoutMs: 1_000,
       }),
-    ).rejects.toThrow("Persistent shell command timed out.");
+    ).resolves.toMatchObject({
+      success: false,
+      terminationReason: "timeout",
+      usedPersistentSession: true,
+    });
 
     await new Promise((resolve) => setTimeout(resolve, 100));
 

@@ -1549,3 +1549,218 @@ describe("edit recovery and conflict handling", () => {
     30_000,
   );
 });
+
+async function editFixture(
+  content: string | Buffer,
+  input: { old_string: string; new_string: string; replace_all?: boolean },
+): Promise<{ result: Awaited<ReturnType<EditTools["editFile"]>>; bytes: Buffer }> {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-edit-matching-"));
+  const target = path.join(directory, "target.txt");
+  fs.writeFileSync(target, content);
+  try {
+    const editor = new EditTools({ ...mockWorkspace, path: directory }, mockDaemon as Any, "task");
+    const result = await editor.editFile({ file_path: "target.txt", ...input });
+    return { result, bytes: fs.readFileSync(target) };
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+describe("edit line-ending tolerance", () => {
+  it("matches an LF old_string in a CRLF file and keeps CRLF endings", async () => {
+    const { result, bytes } = await editFixture("alpha=1\r\nbeta=1\r\ngamma=1\r\n", {
+      old_string: "alpha=1\nbeta=1",
+      new_string: "alpha=2\nbeta=2\nbeta2=2",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(result.replacements).toBe(1);
+    expect(bytes.toString("utf8")).toBe("alpha=2\r\nbeta=2\r\nbeta2=2\r\ngamma=1\r\n");
+  });
+
+  it("writes new lines with the file's CRLF endings for a single-line match", async () => {
+    const { result, bytes } = await editFixture("a\r\nb\r\n", {
+      old_string: "b",
+      new_string: "b\nc",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("a\r\nb\r\nc\r\n");
+  });
+
+  it("matches a CRLF old_string in an LF file and keeps LF endings", async () => {
+    const { result, bytes } = await editFixture("a\nb\nc\n", {
+      old_string: "a\r\nb",
+      new_string: "x\r\ny",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("x\ny\nc\n");
+  });
+
+  it("keeps replace_all counts and uniqueness under line-ending tolerance", async () => {
+    const all = await editFixture("k=1\r\nv\r\nk=1\r\nv\r\n", {
+      old_string: "k=1\nv",
+      new_string: "k=2\nv",
+      replace_all: true,
+    });
+    expect(all.result.success, all.result.error).toBe(true);
+    expect(all.result.replacements).toBe(2);
+    expect(all.bytes.toString("utf8")).toBe("k=2\r\nv\r\nk=2\r\nv\r\n");
+
+    const ambiguous = await editFixture("k=1\r\nv\r\nk=1\r\nv\r\n", {
+      old_string: "k=1\nv",
+      new_string: "k=2\nv",
+    });
+    expect(ambiguous.result.success).toBe(false);
+    expect(ambiguous.result.error).toContain("found 2 times");
+    expect(ambiguous.bytes.toString("utf8")).toBe("k=1\r\nv\r\nk=1\r\nv\r\n");
+  });
+});
+
+describe("edit numbered-view prefixes", () => {
+  it("strips cat -n style line-number prefixes that match the file's line numbers", async () => {
+    const { result, bytes } = await editFixture("one\ntwo\nthree\nfour\n", {
+      old_string: "     2\ttwo\n     3\tthree",
+      new_string: "TWO\nTHREE",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("one\nTWO\nTHREE\nfour\n");
+  });
+
+  it("strips matching grep -n style prefixes from new_string too", async () => {
+    const { result, bytes } = await editFixture("one\ntwo\nthree\nfour\n", {
+      old_string: "2:two\n3:three",
+      new_string: "2:TWO\n3:THREE",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.toString("utf8")).toBe("one\nTWO\nTHREE\nfour\n");
+  });
+
+  it("does not strip prefixes whose numbers disagree with the file", async () => {
+    const { result, bytes } = await editFixture("one\ntwo\nthree\nfour\n", {
+      old_string: "     7\ttwo\n     8\tthree",
+      new_string: "TWO\nTHREE",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("old_string not found");
+    expect(bytes.toString("utf8")).toBe("one\ntwo\nthree\nfour\n");
+  });
+});
+
+describe("edit miss diagnostics", () => {
+  const source = [
+    "function main() {",
+    "    if (ready) {",
+    "        const total = computeTotal(items);",
+    "        report(total);",
+    "    }",
+    "}",
+    "",
+  ].join("\n");
+
+  it("reports where the text is when only whitespace or indentation differs", async () => {
+    const { result, bytes } = await editFixture(source, {
+      old_string: "if (ready) {\n  const total = computeTotal(items);\n  report(total);\n}",
+      new_string: "if (ready) {}",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("old_string not found");
+    expect(result.error).toContain("lines 2-5");
+    expect(result.error).toMatch(/whitespace or indentation/i);
+    expect(result.error).toContain(
+      "    if (ready) {\n        const total = computeTotal(items);\n        report(total);\n    }",
+    );
+    expect(bytes.toString("utf8")).toBe(source);
+  });
+
+  it("points at the most similar line and its first difference for a near miss", async () => {
+    const { result } = await editFixture(source, {
+      old_string: "        const total = computeTotl(items);",
+      new_string: "        const total = sum(items);",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("line 3");
+    expect(result.error).toContain("const total = computeTotal(items);");
+    expect(result.error).toContain("computeTotl");
+  });
+
+  it("says so when nothing in the file resembles old_string", async () => {
+    const { result } = await editFixture(source, {
+      old_string: "zebra quantum xylophone",
+      new_string: "anything",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no similar text/i);
+  });
+
+  it("calls out stale line-number prefixes", async () => {
+    const { result } = await editFixture(source, {
+      old_string: "    12\t        report(total);",
+      new_string: "        report(total, true);",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/line-number prefix/i);
+    expect(result.error).toContain("line 4");
+  });
+});
+
+describe("edit encoding safety", () => {
+  // "café = 1\nname = René\n" in Windows-1252: é is the single byte 0xE9.
+  const cp1252 = Buffer.concat([
+    Buffer.from("caf"),
+    Buffer.from([0xe9]),
+    Buffer.from(" = 1\nname = Ren"),
+    Buffer.from([0xe9]),
+    Buffer.from("\n"),
+  ]);
+
+  it("refuses a non-ASCII edit of a Windows-1252 file instead of re-encoding it", async () => {
+    const { result, bytes } = await editFixture(cp1252, {
+      old_string: "name = René",
+      new_string: "name = Renée",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/not valid UTF-8/);
+    expect(result.error).toContain("line 1");
+    expect(bytes.equals(cp1252)).toBe(true);
+  });
+
+  it("applies an ASCII edit to a Windows-1252 file without touching other bytes", async () => {
+    const { result, bytes } = await editFixture(cp1252, {
+      old_string: " = 1\nname",
+      new_string: " = 2\nname",
+    });
+    expect(result.success, result.error).toBe(true);
+    const expected = Buffer.from(cp1252);
+    expected[cp1252.indexOf(" = 1") + 3] = "2".charCodeAt(0);
+    expect(bytes.equals(expected)).toBe(true);
+  });
+
+  it("refuses UTF-16 files", async () => {
+    const utf16 = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from("hello\nworld\n", "utf16le"),
+    ]);
+    const { result, bytes } = await editFixture(utf16, { old_string: "h", new_string: "j" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/UTF-16/);
+    expect(bytes.equals(utf16)).toBe(true);
+  });
+
+  it("refuses an ASCII match that could be the second byte of a multi-byte character", async () => {
+    // Shift_JIS "ソ" is 0x83 0x5C; 0x5C is also ASCII "\".
+    const shiftJis = Buffer.from([0x83, 0x5c, 0x0a, 0x61, 0x0a]);
+    const { result, bytes } = await editFixture(shiftJis, { old_string: "\\", new_string: "/" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/multi-byte/);
+    expect(bytes.equals(shiftJis)).toBe(true);
+  });
+
+  it("keeps a UTF-8 byte order mark and multi-byte text intact", async () => {
+    const utf8 = Buffer.from("\ufeffnaïve = 1\n日本 = 2\n", "utf8");
+    const { result, bytes } = await editFixture(utf8, {
+      old_string: "日本 = 2",
+      new_string: "日本 = 3",
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(bytes.equals(Buffer.from("\ufeffnaïve = 1\n日本 = 3\n", "utf8"))).toBe(true);
+  });
+});

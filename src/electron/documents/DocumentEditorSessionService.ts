@@ -19,6 +19,8 @@ import type {
 import { parseDocxBlocksFromBuffer } from "./docx-blocks";
 import { editPdfRegion } from "./pdf-region-editor";
 import { extractPdfReviewData } from "../utils/pdf-review";
+import { PdfParseLimitError } from "../utils/bounded-pdf-parser";
+import { createLogger } from "../utils/logger";
 import {
   applyAccessProfileToWorkspace,
   applyDefaultAccessProfile,
@@ -30,6 +32,8 @@ import {
 } from "../security/access-profile-paths";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { loadPolicies } from "../admin/policies";
+
+const logger = createLogger("DocumentEditorSessionService");
 
 type SessionRecord = {
   id: string;
@@ -453,12 +457,20 @@ export class DocumentEditorSessionService {
     if (fileType === "pdf") {
       const pdfBytes = await fs.readFile(currentPath);
       session.pdfDataBase64 = pdfBytes.toString("base64");
-      session.pdfReviewSummary = await extractPdfReviewData(currentPath, {
-        maxPages: 12,
-        maxCharsPerPage: 1600,
-        maxOcrPages: 4,
-        includeOcr: true,
-      });
+      try {
+        session.pdfReviewSummary = await extractPdfReviewData(currentPath, {
+          maxPages: 12,
+          maxCharsPerPage: 1600,
+          maxOcrPages: 4,
+          includeOcr: true,
+        });
+      } catch (error) {
+        // The PDF itself still opens in the editor; only the text summary is unavailable.
+        if (!(error instanceof PdfParseLimitError)) throw error;
+        logger.warn(
+          `PDF review summary skipped for ${path.basename(currentPath)}: ${error.message}`,
+        );
+      }
     } else {
       const docxBytes = await fs.readFile(currentPath);
       const blocks = await parseDocxBlocksFromBuffer(docxBytes);

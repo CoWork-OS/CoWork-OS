@@ -213,7 +213,7 @@ describe("TaskExecutor image attachment routing", () => {
 
   it("emits a user-facing switch-model message when the active provider cannot accept images", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
-    executor.provider = { type: "gemini" };
+    executor.provider = { type: "groq" };
     executor.emitEvent = vi.fn();
 
     const result = await executor.buildUserContent("What is in this image?", [

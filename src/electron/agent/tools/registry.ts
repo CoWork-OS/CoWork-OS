@@ -28,11 +28,13 @@ import {
   WorkspacePathAliasPolicy,
   WorkerRoleKind,
   AgentMessageDeliveryStatus,
+  OrchestrationGraphNode,
 } from "../../../shared/types";
 import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
 } from "../../../shared/human-input-policy";
+import { isTerminalTaskStatus } from "../../../shared/task-status";
 import {
   compareBotHandoffEventOrder,
   isBotHandoffMessageDelivered,
@@ -49,7 +51,7 @@ import { EditTools } from "./edit-tools";
 import { MontyTools } from "./monty-tools";
 import { TextTools } from "./text-tools";
 import { BrowserTools } from "./browser-tools";
-import { ShellTools } from "./shell-tools";
+import { ShellTools, resolveRunCommandTimeoutMs } from "./shell-tools";
 import { ImageTools } from "./image-tools";
 import { VideoTools } from "./video-tools";
 import { YouTubeTools } from "./youtube-tools";
@@ -201,7 +203,7 @@ import {
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
 import { getNumbatService } from "../../security/numbat";
-import { approvalPromptsDisabled } from "../approval-policy";
+import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -267,6 +269,13 @@ function getApprovalTypeForRuntimeKind(
 
 const MCP_PAYMENT_AMOUNT_TYPES = new Set(["number", "integer", "string"]);
 
+// Untyped on purpose: a cell may be a number, boolean, null or string. (Providers that need a
+// type, such as Gemini, fall back to string; numeric text is converted when the file is written.)
+const SPREADSHEET_CELL_SCHEMA = {
+  description:
+    "Cell value: a number, boolean, null, or text. Text starting with = is a formula (e.g. =SUM(B2:B5)).",
+};
+
 const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
   "spawn_agent",
   "wait_for_agent",
@@ -296,6 +305,14 @@ const EXTRACTION_SUB_AGENT_ALLOWED_TOOLS = [
 ];
 
 const DEFAULT_ACTIVE_SUB_AGENT_LIMIT = 3;
+// Turn windows for spawned agents when max_turns is omitted. Read-only roles
+// (researcher, verifier, synthesizer) and extraction helpers finish well within
+// 20 turns; an implementer that edits several files and then builds and tests
+// routinely needs more, and hitting the window ends it with partial work.
+const DEFAULT_SUB_AGENT_MAX_TURNS = 20;
+const DEFAULT_IMPLEMENTER_SUB_AGENT_MAX_TURNS = 40;
+// Model used for extraction helpers and explicit "cheaper"/"haiku" requests.
+const EXTRACTION_SUB_AGENT_MODEL_KEY = "haiku-4-5";
 const ACTIVE_CHILD_AGENT_STATUSES = new Set(["pending", "queued", "planning", "executing"]);
 const EXTRACTION_CONTRACT_MARKER = "[EXTRACTION_OUTPUT_CONTRACT_V1]";
 const CODEX_RUNTIME_TITLE_PATTERNS = [
@@ -406,30 +423,30 @@ function parseBooleanEnv(envName: string, fallback = true): boolean {
   return fallback;
 }
 
-function isExtractionLikePrompt(prompt: string): boolean {
+// An explicit document to extract from: an HTML/document file, a page source/markup, or the DOM.
+const EXTRACTION_SOURCE_PATTERN =
+  /\.(?:x?html?|mhtml|pdf|docx?|epub|rtf)\b|\b(?:raw html|html (?:page|file|source|document|markup)|(?:web ?page|website|page) source|saved (?:web ?)?page|saved as html|(?:html|page) markup|dom)\b/;
+const EXTRACTION_VERB_PATTERN =
+  /\bextract(?:s|ed|ing|ion)?\b|\bmeaningful content\b|\bknowledge[-\s]?base\b|\bconvert\b[^.]{0,80}?\b(?:to|into) (?:clean )?(?:markdown|md|plain text)\b/;
+// Work that needs the tools extraction mode removes (shell, edits, web search).
+const NON_EXTRACTION_WORK_PATTERN =
+  /\b(?:run|rerun|execute|tests?|testing|build|compile|lint|edit|modify|refactor|implement|fix|patch|debug|install|deploy|commit|migrate|research|search (?:the )?(?:web|internet|online)|web[_ ]search|web[_ ]fetch|google|look up|browse)\b/;
+
+/**
+ * Whether a delegated prompt is a read-only extraction from an explicit source document. Such
+ * children get a minimal tool set and a JSON-only answer contract, so this must not match
+ * implementation, verification, web research, or prompts that ask to run, test, edit or build.
+ */
+export function isExtractionLikePrompt(prompt: string, workerRole?: WorkerRoleKind): boolean {
   const normalized = String(prompt || "").toLowerCase();
   if (!normalized) return false;
+  if (workerRole && workerRole !== "researcher") return false;
 
-  const hasHtmlSignal =
-    /(?:\.html?\b|\.xhtml\b)/i.test(normalized) ||
-    normalized.includes("html page") ||
-    normalized.includes("saved as html") ||
-    normalized.includes("raw html") ||
-    normalized.includes("page source") ||
-    normalized.includes("webpage source") ||
-    normalized.includes("web page source") ||
-    normalized.includes("markup") ||
-    normalized.includes("dom");
-  const hasFileReadSignal =
-    /\bread\b.{0,40}\b(file|document|page|source)\b/i.test(normalized) ||
-    normalized.includes("from the workspace") ||
-    normalized.includes("in the workspace");
-  const hasExtractionSignal =
-    /\bextract|extraction|summari(?:ze|sation)|convert|transform|clean|normalize|meaningful content|knowledge[-\s]?base|markdown\b/i.test(
-      normalized,
-    );
-
-  return hasExtractionSignal && (hasHtmlSignal || hasFileReadSignal);
+  return (
+    EXTRACTION_VERB_PATTERN.test(normalized) &&
+    EXTRACTION_SOURCE_PATTERN.test(normalized) &&
+    !NON_EXTRACTION_WORK_PATTERN.test(normalized)
+  );
 }
 
 function applyExtractionOutputContract(prompt: string): string {
@@ -1220,6 +1237,30 @@ export class ToolRegistry {
 
   async cancelShellSession(): Promise<void> {
     await this.shellTools.cancelPersistentShellSession();
+  }
+
+  /** Stop every background process this task started with run_command background: true. */
+  async stopBackgroundProcesses(reason: string): Promise<number> {
+    return this.shellTools.stopAllBackgroundProcesses(reason);
+  }
+
+  private async runShellCommand(input: Any, runtime?: Record<string, unknown>): Promise<Any> {
+    const signal = runtime?.signal instanceof AbortSignal ? runtime.signal : undefined;
+    if (input?.background === true || input?.background === "true") {
+      return this.shellTools.startBackgroundCommand(input.command, {
+        cwd: input.cwd,
+        env: input.env,
+        signal,
+        startupWaitMs: input.startup_wait_ms,
+      });
+    }
+    return this.shellTools.runCommand(input.command, {
+      ...input,
+      // Kill the command within the executor's budget for this call (which
+      // infers longer budgets for builds and tests) rather than a fixed default.
+      timeout: resolveRunCommandTimeoutMs(input, runtime?.timeoutMs),
+      signal,
+    });
   }
 
   private deriveChronicleDestinationHints(input: {
@@ -2183,6 +2224,9 @@ export class ToolRegistry {
           isHeadlessTask && hasExplicitNonInteractiveAuthority && semanticReview?.mode === "active"
             ? "allow_if_authorized"
             : undefined,
+        inlineApprovalAvailable: canAnswerInlineApproval(taskForApproval, {
+          headless: isHeadlessMode(),
+        }),
       });
 
       if (pipeline.decision === "deny") {
@@ -2630,12 +2674,21 @@ export class ToolRegistry {
     register("voice_call", async ({ request }) => this.voiceCallTools.executeAction(request.input));
     register(
       "run_command",
+      async ({ request }) => this.runShellCommand(request.input, request.runtime),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "process_output",
       async ({ request }) =>
-        this.shellTools.runCommand(request.input.command, {
-          ...request.input,
-          signal:
-            request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
-        }),
+        this.shellTools.getBackgroundProcessOutput(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "stop_process",
+      async ({ request }) => this.shellTools.stopBackgroundProcess(request.input),
       exclusiveSchedulerSpec,
     );
     register("git_status", async () => this.gitTools.gitStatus());
@@ -3966,9 +4019,10 @@ Web Fetch (PREFERRED for reading web content):
 
 Browser Automation:
 - For HTML/React/Vite/Next.js page design, editing, and troubleshooting, start the local app when needed and inspect it in the visible in-app browser workbench. Use screenshots, snapshots, mobile/desktop emulation, console/network checks, and interaction tests to catch rendered layout and behavior issues before finalizing.
-- browser_navigate: Navigate to a URL in the visible in-app browser workbench by default. Use it for JS-heavy pages, app/site testing, forms, screenshots, or “use/test/check this website as a normal user” tasks.
+- browser_navigate: Navigate to a URL (a headless background browser by default; the visible in-app workbench in visible mode or once a workbench session is open). Use it for JS-heavy pages, app/site testing, forms, screenshots, or “use/test/check this website as a normal user” tasks.
 - browser_screenshot: Take a screenshot of the page
 - browser_get_content: Get page text, links, and forms (use after navigate, for inspecting interactive elements)
+- browser_snapshot: Accessibility snapshot with refs. Observe -> act -> verify: act on refs from it rather than CSS selectors, and snapshot again after actions that change the page
 - browser_click: Click on an element
 - browser_fill: Fill a form field
 - browser_type: Type text character by character
@@ -3995,7 +4049,9 @@ Web Search (for finding URLs, not reading them):
       descriptions += `
 
 Shell Commands:
-- run_command: Execute commands within the active access profile`;
+- run_command: Execute commands within the active access profile. Use background: true for dev servers and watchers.
+- process_output: Read output and status of a background process
+- stop_process: Stop a background process and everything it started`;
     }
 
     descriptions += `
@@ -4136,7 +4192,7 @@ If omitted, the runtime fills in a safe fallback so execution can continue.
 WEB APP BUILD + SHOW WORKFLOW:
 When you build any web app, do NOT stop at code generation. Always finish by running the app and showing it in canvas. Pick the approach that fits what you built:
 - Single HTML/CSS/JS file → canvas_create then canvas_push the HTML directly
-- Multi-file app with a dev script (React, Next.js, Vite, Vue, etc.) → install deps if needed, start the dev server on any free port, wait for it to be ready, then canvas_create + canvas_open_url("http://localhost:<port>")
+- Multi-file app with a dev script (React, Next.js, Vite, Vue, etc.) → install deps if needed, start the dev server with run_command background: true (bound to localhost on a free port), check its startup_output or poll process_output until it prints its URL, then canvas_create + canvas_open_url with that URL. Stop it with stop_process if you restart it
 - App that builds to a static dist/ → run the build, then canvas_push the built HTML or serve it and use canvas_open_url
 Use whichever workspace makes sense (the project folder or a temp dir). What matters is that the running app is visible in canvas before the task ends. Code generation alone is not a complete result.
 `
@@ -4562,11 +4618,13 @@ ${skillDescriptions}`;
     if (name === "voice_call") return await this.voiceCallTools.executeAction(input);
 
     // Shell tools
-    if (name === "run_command")
-      return await this.shellTools.runCommand(input.command, {
-        ...input,
-        signal: _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
-      });
+    if (name === "run_command") return await this.runShellCommand(input, _runtime);
+    if (name === "process_output")
+      return await this.shellTools.getBackgroundProcessOutput(
+        input,
+        _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
+      );
+    if (name === "stop_process") return await this.shellTools.stopBackgroundProcess(input);
 
     // Git tools
     if (name === "git_status") return await this.gitTools.gitStatus();
@@ -6822,7 +6880,7 @@ ${skillDescriptions}`;
       {
         name: "read_file",
         description:
-          "Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), PDF, and PPTX. For DOCX/PDF/PPTX, extracts and returns text. Supports chunked reads with startChar/maxChars for long documents.",
+          "Read the contents of a file in the workspace. Supports plain text files, DOCX (Word documents), PDF, and PPTX. For DOCX/PDF/PPTX, extracts and returns text. Long files are returned one window at a time: when the result has truncated: true and a nextStartChar, call read_file again with startChar=nextStartChar to read the next part.",
         input_schema: {
           type: "object",
           properties: {
@@ -6833,12 +6891,12 @@ ${skillDescriptions}`;
             startChar: {
               type: "number",
               description:
-                "Optional character offset for chunked reads. Use with maxChars to continue long files.",
+                "Optional offset to start reading from (bytes for text files, characters for DOCX/PDF/PPTX). To continue a long file, pass the previous result's nextStartChar.",
             },
             maxChars: {
               type: "number",
               description:
-                "Optional max characters to return for this read (default: 300000, max: 1000000).",
+                "Optional window size for this read (default: 30000 for text files, 100000 for DOCX/PDF/PPTX; max: 1000000). Results larger than one tool result can hold are trimmed and report nextStartChar, so page through long files instead of raising this.",
             },
           },
           required: ["path"],
@@ -7053,7 +7111,7 @@ ${skillDescriptions}`;
                     items: {
                       type: "array",
                       description: "Row of cell values",
-                      items: { type: "string", description: "Cell value" },
+                      items: { ...SPREADSHEET_CELL_SCHEMA },
                     },
                   },
                   headers: {
@@ -7067,7 +7125,7 @@ ${skillDescriptions}`;
                     items: {
                       type: "array",
                       description: "Row of cell values",
-                      items: { type: "string", description: "Cell value" },
+                      items: { ...SPREADSHEET_CELL_SCHEMA },
                     },
                   },
                 },
@@ -7088,13 +7146,31 @@ ${skillDescriptions}`;
             format: { type: "string", enum: ["docx", "pdf"], description: "Output format" },
             content: {
               type: "array",
-              description: "Document content blocks",
+              description:
+                "Document content blocks. heading/paragraph/code use text; list uses items; table uses rows.",
               items: {
                 type: "object",
                 properties: {
-                  type: { type: "string", enum: ["heading", "paragraph", "list"] },
-                  text: { type: "string" },
+                  type: {
+                    type: "string",
+                    enum: ["heading", "paragraph", "list", "table", "code"],
+                  },
+                  text: {
+                    type: "string",
+                    description: "Block text (not needed for list or table blocks)",
+                  },
                   level: { type: "number", description: "For headings: 1-6" },
+                  items: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "For lists: one string per list item",
+                  },
+                  rows: {
+                    type: "array",
+                    items: { type: "array", items: { type: "string" } },
+                    description: "For tables: rows of cell text; the first row is the header",
+                  },
+                  language: { type: "string", description: "For code blocks: language name" },
                 },
               },
             },
@@ -8965,7 +9041,7 @@ ${skillDescriptions}`;
       {
         name: "run_command",
         description:
-          "Execute a shell command in the workspace directory. IMPORTANT: Commands run within the active access profile. Additional authority is requested only when the operation requires it. If additional authority is needed, the request identifies that boundary. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing.",
+          "Execute a shell command in the workspace directory. IMPORTANT: Commands run within the active access profile. Additional authority is requested only when the operation requires it. If additional authority is needed, the request identifies that boundary. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Commands run non-interactively, with no terminal to answer prompts: pass flags such as -y/--yes, --no-input, or git commit -m, and avoid editors and pagers. For anything that runs until stopped (dev servers such as npm run dev or vite, python -m http.server, file watchers, --watch modes), set background: true: the call returns after a short startup window with the process_id and startup output, and the process keeps running; then use process_output to read its output and stop_process to stop it. Without background, such commands block until the timeout and are killed. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing.",
         input_schema: {
           type: "object",
           properties: {
@@ -8982,10 +9058,68 @@ ${skillDescriptions}`;
             timeout: {
               type: "number",
               description:
-                "Timeout in milliseconds (optional, default: 120000; build/test/install commands may infer longer timeouts automatically; max: 300000)",
+                "Timeout in milliseconds (optional, default: 120000; build/test/install commands may infer longer timeouts automatically). Set it for long builds, test suites or downloads: max 1800000 (30 minutes), limited to the current step's time budget (just under 15 minutes outside deep work). Ignored with background: true.",
+            },
+            background: {
+              type: "boolean",
+              description:
+                "Start a long-running command (dev server, file server, watcher) and return once it is ready or after a short startup window, leaving it running. The result has process_id, pid, status, startup_output and any localhost urls it printed. At most 5 per task; they stop when the task is cancelled, after 30 minutes without process_output, or when the app quits.",
+            },
+            startup_wait_ms: {
+              type: "number",
+              description:
+                "With background: true, how long to wait for a ready line (for example 'Local: http://localhost:5173') or an early exit before returning (default 5000, max 30000).",
             },
           },
           required: ["command"],
+        },
+      },
+      {
+        name: "process_output",
+        description:
+          "Read new output and the status (running, exit code) of a background process started with run_command background: true. Use it to wait for a dev server to become ready, to find the URL or port it printed, or to check its logs after an action. Each call returns output since the previous call; pass since_offset (from next_offset) to page, since_offset: 0 to reread what is still buffered, or tail_lines for just the end. Call it without process_id to list this task's background processes.",
+        input_schema: {
+          type: "object",
+          properties: {
+            process_id: {
+              type: "string",
+              description:
+                "process_id returned by run_command background: true. Omit to list processes.",
+            },
+            since_offset: {
+              type: "number",
+              description: "Return output after this offset (next_offset of an earlier result).",
+            },
+            tail_lines: {
+              type: "number",
+              description: "Return only the last N lines of the selected output.",
+            },
+            wait_ms: {
+              type: "number",
+              description:
+                "If there is no new output yet, wait up to this long for some (max 15000) before returning.",
+            },
+            max_chars: {
+              type: "number",
+              description:
+                "Maximum characters of output to return (default 16000, max 64000). Longer output keeps its start and end.",
+            },
+          },
+        },
+      },
+      {
+        name: "stop_process",
+        description:
+          "Stop a background process started with run_command background: true, together with every process it started. Use it when you no longer need a dev server or watcher, before starting it again with different options, or to free a port. Returns the final status and the last lines of output.",
+        input_schema: {
+          type: "object",
+          properties: {
+            process_id: {
+              type: "string",
+              description: "process_id returned by run_command background: true.",
+            },
+          },
+          required: ["process_id"],
         },
       },
     ];
@@ -10914,11 +11048,8 @@ ${skillDescriptions}`;
       worker_role,
       runtime,
       runtime_agent,
-      max_turns = 20,
+      max_turns,
     } = input;
-
-    const normalizedMaxTurns =
-      typeof max_turns === "number" && Number.isFinite(max_turns) ? Math.round(max_turns) : 20;
 
     const phaseCEnabled = parseBooleanEnv("COWORK_GUARDRAIL_PHASE_C", true);
     const modelPref =
@@ -10928,19 +11059,39 @@ ${skillDescriptions}`;
       !model_preference && capability_hint
         ? ModelCapabilityRegistry.selectForTask(String(capability_hint))
         : undefined;
-    const modelKey =
-      modelPref === "same"
-        ? undefined
-        : (resolveModelPreferenceToModelKey(model_preference ?? capabilityRouted) ?? "haiku-4-5");
     const personalityId: PersonalityId | undefined =
       personalityPref === "same"
         ? undefined
         : (resolvePersonalityPreference(personality) ?? "concise");
-    const extractionMode = phaseCEnabled && isExtractionLikePrompt(prompt);
     const workerRole = resolveDelegationWorkerRole({
       requestedRole: worker_role,
       prompt,
     });
+    const extractionMode = phaseCEnabled && isExtractionLikePrompt(prompt, workerRole);
+    const parentTask = await this.getDelegationParentTask();
+
+    // A child inherits the parent's model route unless a cheaper or specific
+    // model is asked for. Leaving providerType/modelKey unset keeps the
+    // configured provider failover chain, which a pinned modelKey disables.
+    const requestedModelKey =
+      modelPref === "same"
+        ? undefined
+        : (resolveModelPreferenceToModelKey(model_preference ?? capabilityRouted) ??
+          (extractionMode ? EXTRACTION_SUB_AGENT_MODEL_KEY : undefined));
+    const inheritedRoute = requestedModelKey
+      ? {}
+      : {
+          providerType: parentTask?.agentConfig?.providerType,
+          modelKey: parentTask?.agentConfig?.modelKey,
+        };
+    const modelKey = requestedModelKey ?? inheritedRoute.modelKey;
+
+    const normalizedMaxTurns =
+      typeof max_turns === "number" && Number.isFinite(max_turns)
+        ? Math.round(max_turns)
+        : workerRole === "implementer" && !extractionMode
+          ? DEFAULT_IMPLEMENTER_SUB_AGENT_MAX_TURNS
+          : DEFAULT_SUB_AGENT_MAX_TURNS;
 
     const agentConfig: AgentConfig = {
       maxTurns: normalizedMaxTurns,
@@ -10967,12 +11118,12 @@ ${skillDescriptions}`;
       agentConfig.allowedTools = [...EXTRACTION_SUB_AGENT_ALLOWED_TOOLS];
     }
 
+    if (inheritedRoute.providerType) agentConfig.providerType = inheritedRoute.providerType;
     if (modelKey) agentConfig.modelKey = modelKey;
     if (personalityId) agentConfig.personalityId = personalityId;
 
     const taskTitle =
       title || `Sub-task: ${prompt.substring(0, 50)}${prompt.length > 50 ? "..." : ""}`;
-    const parentTask = await this.getDelegationParentTask();
     const currentStepContext = await this.getDelegationCurrentStepContext();
     const knownFindings = await this.getDelegationKnownFindings();
     const delegatedPromptBody = extractionMode ? applyExtractionOutputContract(prompt) : prompt;
@@ -11023,6 +11174,42 @@ ${skillDescriptions}`;
     };
   }
 
+  /**
+   * Child-agent slots this task's running orchestration runs hold beyond its active child tasks.
+   * A run starts its queued nodes, up to its maxParallel, as its children finish, so those slots
+   * are taken even though no active child task shows it yet. Only nodes that become child tasks
+   * of this task count, and a paused (or blocked, interrupted) child keeps its run slot without
+   * counting, like in the active-child count itself.
+   */
+  private async countReservedChildAgentSlots(childTasks: Task[]): Promise<number> {
+    if (typeof this.daemon.listOrchestrationGraphsByRootTask !== "function") return 0;
+    const childStatusById = new Map(childTasks.map((task) => [task.id, task.status]));
+    let reserved = 0;
+    for (const { run, nodes } of await this.daemon.listOrchestrationGraphsByRootTask(this.taskId)) {
+      if (run.status !== "running") continue;
+      let active = 0;
+      let held = 0;
+      let upcoming = 0;
+      for (const node of nodes) {
+        const becomesChildTask =
+          node.dispatchTarget !== "remote_acp" &&
+          (node.parentTaskId === undefined
+            ? node.dispatchTarget !== "local_role"
+            : node.parentTaskId === this.taskId);
+        if (!becomesChildTask) continue;
+        if (node.status === "pending" || node.status === "ready") upcoming += 1;
+        if (node.status !== "running") continue;
+        const status = node.taskId ? childStatusById.get(node.taskId) : undefined;
+        // No visible child yet means dispatch is in flight; a finished child frees its slot.
+        if (status === undefined) upcoming += 1;
+        else if (ACTIVE_CHILD_AGENT_STATUSES.has(status)) active += 1;
+        else if (!isTerminalTaskStatus(status)) held += 1;
+      }
+      reserved += Math.max(0, Math.min(run.maxParallel - held, active + upcoming) - active);
+    }
+    return reserved;
+  }
+
   private async spawnAgent(input: {
     prompt: string;
     title?: string;
@@ -11050,7 +11237,7 @@ ${skillDescriptions}`;
       runtime,
       runtime_agent,
       wait = false,
-      max_turns = 20,
+      max_turns,
     } = input;
 
     // Validate prompt
@@ -11058,11 +11245,12 @@ ${skillDescriptions}`;
       throw new Error("spawn_agent requires a non-empty prompt");
     }
 
-    const normalizedMaxTurns =
-      typeof max_turns === "number" && Number.isFinite(max_turns) ? Math.round(max_turns) : 20;
-    const maxTurnsCap = this._deepWorkMode ? 250 : 100;
-    if (normalizedMaxTurns < 1 || normalizedMaxTurns > maxTurnsCap) {
-      throw new Error(`max_turns must be between 1 and ${maxTurnsCap}`);
+    if (typeof max_turns === "number" && Number.isFinite(max_turns)) {
+      const requestedMaxTurns = Math.round(max_turns);
+      const maxTurnsCap = this._deepWorkMode ? 250 : 100;
+      if (requestedMaxTurns < 1 || requestedMaxTurns > maxTurnsCap) {
+        throw new Error(`max_turns must be between 1 and ${maxTurnsCap}`);
+      }
     }
 
     const phaseCEnabled = parseBooleanEnv("COWORK_GUARDRAIL_PHASE_C", true);
@@ -11077,18 +11265,22 @@ ${skillDescriptions}`;
     const activeChildTasks = childTasks.filter((task) =>
       ACTIVE_CHILD_AGENT_STATUSES.has(task.status),
     );
-    if (phaseCEnabled && activeChildTasks.length >= activeSubAgentLimit) {
+    const reservedSlots = phaseCEnabled ? await this.countReservedChildAgentSlots(childTasks) : 0;
+    const usedSlots = activeChildTasks.length + reservedSlots;
+    if (phaseCEnabled && usedSlots >= activeSubAgentLimit) {
       const activeIds = activeChildTasks.slice(0, 5).map((task) => task.id);
       this.daemon.logEvent(this.taskId, "agent_spawn_blocked", {
         reason: "fanout_limit_reached",
         activeChildCount: activeChildTasks.length,
+        reservedSlots,
         activeSubAgentLimit,
         activeChildIds: activeIds,
       });
       return {
         success: false,
         message:
-          `Cannot spawn agent: active child-agent limit reached (${activeChildTasks.length}/${activeSubAgentLimit}). ` +
+          `Cannot spawn agent: active child-agent limit reached (${usedSlots}/${activeSubAgentLimit}` +
+          `${reservedSlots > 0 ? `, including ${reservedSlots} held for queued orchestration tasks` : ""}). ` +
           `Wait for existing child agents to finish before spawning more.`,
         error: "FANOUT_LIMIT_REACHED",
       };
@@ -11148,7 +11340,7 @@ ${skillDescriptions}`;
       runtime: runtime || (prepared.externalRuntime ? "acpx" : "native"),
       runtimeAgent: prepared.externalRuntime?.agent,
       workerRole: prepared.workerRole,
-      maxTurns: normalizedMaxTurns,
+      maxTurns: prepared.agentConfig.maxTurns,
       parentDepth: currentDepth,
       extractionMode: prepared.extractionMode,
       fanout: {
@@ -11241,7 +11433,7 @@ ${skillDescriptions}`;
         runtime: runtime || (prepared.externalRuntime ? "acpx" : "native"),
         runtimeAgent: prepared.externalRuntime?.agent,
         workerRole: prepared.workerRole,
-        maxTurns: normalizedMaxTurns,
+        maxTurns: prepared.agentConfig.maxTurns,
         parentDepth: currentDepth,
       });
 
@@ -11420,7 +11612,61 @@ ${skillDescriptions}`;
   }
 
   /**
+   * Waits for one orchestration node. Nodes beyond the run's maxParallel stay queued, without a
+   * public handle, until the graph engine dispatches them as earlier nodes finish.
+   */
+  private async waitForOrchestrationNode(
+    runId: string,
+    created: OrchestrationGraphNode,
+    deadline: number,
+  ): Promise<{
+    task_id: string;
+    title: string;
+    status: string;
+    result_summary?: string;
+    error?: string;
+  }> {
+    const handleOf = (candidate: OrchestrationGraphNode) =>
+      candidate.publicHandle || candidate.taskId || candidate.remoteTaskId;
+    const isTerminal = (status: OrchestrationGraphNode["status"]) =>
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled" ||
+      status === "blocked";
+
+    let node = created;
+    while (!handleOf(node) && !isTerminal(node.status) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, deadline - Date.now())));
+      const latest = await this.daemon.getOrchestrationGraphSnapshot(runId);
+      node = latest?.nodes.find((candidate) => candidate.id === created.id) ?? node;
+    }
+
+    const handle = handleOf(node);
+    if (!handle) {
+      const terminal = isTerminal(node.status);
+      return {
+        task_id: node.id,
+        title: node.title,
+        status: terminal ? node.status : "queued",
+        result_summary: node.summary || node.output,
+        error: node.error || (terminal ? undefined : "NOT_STARTED_BEFORE_TIMEOUT"),
+      };
+    }
+
+    const remainingSeconds = Math.max(1, Math.round((deadline - Date.now()) / 1000));
+    const result = await this.daemon.waitForDelegatedNode(this.taskId, handle, remainingSeconds);
+    return {
+      task_id: handle,
+      title: node.title,
+      status: result.status,
+      result_summary: result.resultSummary,
+      error: result.error,
+    };
+  }
+
+  /**
    * Orchestrate multiple agents in parallel: spawn all, wait for all, return combined results.
+   * Tasks beyond the free child-agent slots are queued by the graph and start as slots free up.
    */
   private async orchestrateAgents(input: {
     tasks: Array<{
@@ -11444,6 +11690,10 @@ ${skillDescriptions}`;
     completed: number;
     failed: number;
     message: string;
+    error?: string;
+    run_id?: string;
+    max_parallel?: number;
+    queued?: number;
   }> {
     const { tasks, timeout_seconds = 300 } = input;
 
@@ -11461,20 +11711,33 @@ ${skillDescriptions}`;
       1,
       20,
     );
-    const activeChildTasks = (await this.daemon.getChildTasks(this.taskId)).filter((task) =>
+    const childTasks = await this.daemon.getChildTasks(this.taskId);
+    const activeChildTasks = childTasks.filter((task) =>
       ACTIVE_CHILD_AGENT_STATUSES.has(task.status),
     );
-    if (phaseCEnabled && activeChildTasks.length + tasks.length > activeSubAgentLimit) {
+    // The fan-out limit caps how many children run at once, not how many tasks one call may
+    // queue: the graph runs at most the free slots in parallel and starts the rest as they finish.
+    // Slots that earlier runs hold for their own queued tasks are not free.
+    const reservedSlots = phaseCEnabled ? await this.countReservedChildAgentSlots(childTasks) : 0;
+    const usedSlots = activeChildTasks.length + reservedSlots;
+    const freeSlots = activeSubAgentLimit - usedSlots;
+    if (phaseCEnabled && freeSlots <= 0) {
       return {
         success: false,
         results: [],
         completed: 0,
         failed: 0,
+        error: "FANOUT_LIMIT_REACHED",
         message:
-          `Cannot orchestrate agents: active child-agent limit would be exceeded ` +
-          `(${activeChildTasks.length + tasks.length}/${activeSubAgentLimit}).`,
+          `Cannot orchestrate agents: active child-agent limit reached ` +
+          `(${usedSlots}/${activeSubAgentLimit}` +
+          `${reservedSlots > 0 ? `, including ${reservedSlots} held for queued orchestration tasks` : ""}). ` +
+          `Wait for existing child agents to finish before orchestrating more.`,
       };
     }
+    const maxParallel = phaseCEnabled
+      ? Math.max(1, Math.min(tasks.length, freeSlots))
+      : tasks.length;
 
     const currentDepth = await this.getCurrentTaskDepth();
     if (currentDepth >= 3) {
@@ -11483,6 +11746,7 @@ ${skillDescriptions}`;
         results: [],
         completed: 0,
         failed: 0,
+        error: "MAX_DEPTH_REACHED",
         message: "Cannot orchestrate agents: maximum nesting depth (3) reached.",
       };
     }
@@ -11496,7 +11760,6 @@ ${skillDescriptions}`;
           capability_hint: task.capability_hint,
           acp_agent_id: task.acp_agent_id,
           worker_role: task.worker_role,
-          max_turns: 20,
         });
         return {
           key: `batch-${index + 1}`,
@@ -11522,7 +11785,7 @@ ${skillDescriptions}`;
       rootTaskId: this.taskId,
       workspaceId: this.workspace.id,
       kind: "delegation",
-      maxParallel: tasks.length,
+      maxParallel,
       metadata: { createdBy: "orchestrate_agents" },
       nodes: preparedNodes.map((entry) => entry.node),
     });
@@ -11537,27 +11800,27 @@ ${skillDescriptions}`;
     }> = [];
 
     for (const node of snapshot.nodes) {
-      const handle = node.publicHandle || node.taskId || node.remoteTaskId || node.id;
-      const remainingSeconds = Math.max(1, Math.round((deadline - Date.now()) / 1000));
-      const result = await this.daemon.waitForDelegatedNode(this.taskId, handle, remainingSeconds);
-      results.push({
-        task_id: handle,
-        title: node.title,
-        status: result.status,
-        result_summary: result.resultSummary,
-        error: result.error,
-      });
+      results.push(await this.waitForOrchestrationNode(snapshot.run.id, node, deadline));
     }
 
     const completed = results.filter((r) => r.status === "completed").length;
     const failed = results.filter((r) => r.status !== "completed").length;
+    const queued = results.filter((r) => r.status === "queued").length;
+    const queuedNote =
+      queued > 0
+        ? ` ${queued} queued task(s) had not started before the timeout; they start as child-agent ` +
+          `slots free up. Track them with get_orchestration_status run_id=${snapshot.run.id}.`
+        : "";
 
     return {
       success: completed > 0,
       results,
       completed,
       failed,
-      message: `Orchestration complete: ${completed}/${results.length} succeeded`,
+      run_id: snapshot.run.id,
+      max_parallel: maxParallel,
+      ...(queued > 0 ? { queued } : {}),
+      message: `Orchestration complete: ${completed}/${results.length} succeeded` + queuedNote,
     };
   }
 
@@ -13441,7 +13704,7 @@ ${skillDescriptions}`;
               type: "string",
               enum: ["same", "cheaper", "smarter"],
               description:
-                'Model selection: "same" uses parent model, "cheaper" selects Haiku (fast/cheap), "smarter" selects Opus (most capable). Default: "cheaper" for cost optimization.',
+                'Model selection: "same" uses the parent\'s model, "cheaper" selects Haiku (fast/cheap) for bulk or mechanical work, "smarter" selects Opus (most capable). Default: the parent\'s model (extraction-only helpers default to Haiku).',
             },
             capability_hint: {
               type: "string",
@@ -13487,7 +13750,7 @@ ${skillDescriptions}`;
             max_turns: {
               type: "number",
               description:
-                "Maximum number of LLM turns for the sub-agent. Range: 1-100 (up to 250 in deep work mode). Default: 20",
+                "Maximum number of LLM turns for the sub-agent. Range: 1-100 (up to 250 in deep work mode). Default: 40 for implementer roles, 20 for researcher/verifier/synthesizer roles and extraction helpers.",
             },
           },
           required: ["prompt"],
@@ -13504,7 +13767,9 @@ ${skillDescriptions}`;
           properties: {
             tasks: {
               type: "array",
-              description: "Array of sub-tasks to execute in parallel (2-8 tasks)",
+              description:
+                "Array of 2-8 independent sub-tasks. At most the active child-agent limit (3 by default) run at once; " +
+                "the rest are queued and start as earlier ones finish, so allow a longer timeout_seconds for large batches.",
               items: {
                 type: "object",
                 properties: {
@@ -13519,7 +13784,8 @@ ${skillDescriptions}`;
                   model_preference: {
                     type: "string",
                     enum: ["same", "cheaper", "smarter"],
-                    description: 'Model selection. Default: "cheaper"',
+                    description:
+                      'Model selection. Default: the parent\'s model; use "cheaper" for bulk or mechanical sub-tasks.',
                   },
                   capability_hint: {
                     type: "string",

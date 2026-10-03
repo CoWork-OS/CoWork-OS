@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { getDefaultRuntimeToolMetadata, withRuntimeToolMetadata } from "../runtime-tool-definition";
 
 describe("runtime tool definition metadata", () => {
+  it("treats background process tools as shell tools without their own approval", () => {
+    const output = getDefaultRuntimeToolMetadata("process_output");
+    expect(output).toMatchObject({ readOnly: true, approvalKind: "none" });
+    expect(output.capabilityTags).toContain("shell");
+
+    const stop = getDefaultRuntimeToolMetadata("stop_process");
+    expect(stop.readOnly).toBe(false);
+    expect(stop.concurrencyClass).toBe("exclusive");
+    expect(stop.capabilityTags).toContain("shell");
+    expect(getDefaultRuntimeToolMetadata("run_command").approvalKind).toBe("shell_sensitive");
+  });
+
   it("routes arbitrary code through shell approval", () => {
     const metadata = getDefaultRuntimeToolMetadata("execute_code");
     expect(metadata.readOnly).toBe(false);

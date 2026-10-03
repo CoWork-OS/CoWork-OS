@@ -71,8 +71,11 @@ const COMMAND_PREFIX_REGEX =
   /(^|\s)(python3?|node|npm|npx|pnpm|yarn|bash|sh|zsh|git|curl|wget|make|cmake|xcodebuild|uv|pip3?|go|cargo|java|ruby|php|ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap)\b/i;
 const SHELL_OPERATOR_REGEX = /(?:\|\||&&|[|;<>])/;
 const URL_LIKE_REGEX = /^[a-z][a-z0-9+.-]*:\/\//i;
+// "change", "correct", "convert" and "resolve" are also nouns/adjectives or
+// read-only verbs ("the change log", "is correct", "resolve the hostname"),
+// so they count only with an object that makes them a remediation.
 const STRONG_WRITE_VERB_REGEX =
-  /\b(write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite|delete|remove|rename|move|modify|replace|fix|refactor)\b/;
+  /\b(write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite|delete|remove|rename|move|modify|replace|fix|refactor|patch|adjust|optimi[sz]e|tweak|stabili[sz]e|bump|upgrade|repair|migrate)\b|\b(?:change|correct|convert)\s+(?:it|them|this|that|these|those|the|a|an|all|any|each|every|its|their|our)\b|\bresolve\s+(?:(?:the|all|any|each|every|its|their|our|these|those|remaining|outstanding)\s+)*(?:(?:merge|type|lint|build|test)\s+)?(?:conflicts?|issues?|bugs?|errors?|warnings?|failures?|problems?|it|them)\b/;
 const PASSIVE_ARTIFACT_WRITE_CUE_REGEX =
   /\b(saved|written|created|generated|produced|updated|edited|rewritten|appended|stored|placed)\s+(?:as|to|at|in|under)\b/;
 
@@ -322,6 +325,59 @@ export function descriptionHasChecklistReportCue(text: string): boolean {
   const desc = String(text || "").toLowerCase();
   if (!desc.trim()) return false;
   return /\b(checklist|scorecard|qa|audit|report)\b/.test(desc);
+}
+
+// A named source file makes a step about code even when it mentions a document
+// format ("the PDF export feature in src/export/pdf.ts"). Framework names such
+// as "Next.js" are not file targets.
+const CODE_SOURCE_TARGET_REGEX =
+  /(?:^|[\s`'"(])(?!(?:next|node|nuxt|vue|react|express|three|d3|chart|angular|ember|alpine|solid|socket)\.js\b)[\w./-]*[\w-]\.(?:tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|kts|swift|rb|php|cs|cpp|cc|c|h|hpp|scala|vue|svelte|dart|sh)(?=$|[\s`'"),.;:!?\]])/i;
+
+export function descriptionNamesCodeSourceFile(text: string): boolean {
+  return CODE_SOURCE_TARGET_REGEX.test(String(text || ""));
+}
+
+export type GeneratedArtifactFormat = "document" | "spreadsheet";
+
+const GENERATED_FORMAT_NOUNS: Record<GeneratedArtifactFormat, string> = {
+  document: String.raw`word\s+documents?|docx|pdfs?|[\w./-]*[\w-]\.(?:pdf|docx)`,
+  spreadsheet: String.raw`spreadsheets?|excel|xlsx|workbooks?|[\w./-]*[\w-]\.xlsx`,
+};
+const ARTIFACT_CREATION_VERB =
+  String.raw`(?:create|generate|write|save|produce|export|build|make|draft|prepare|compile|render)`;
+const OBJECT_STOP_WORD =
+  String.raw`(?:that|which|to|for|in|into|from|with|of|and|or|as|on|by|at|using|via|about|then)`;
+// The format noun is the created object ("a PDF report", "PDF invoices", "an
+// Excel workbook") unless it only describes a software component ("the xlsx
+// parser", "a PDF export feature", "a PDF viewer").
+const NOT_SOFTWARE_COMPONENT_MODIFIER =
+  String.raw`(?![\w-])(?!\s+(?:parser|parsing|export(?:er|ing)?(?!\s+of\b)|import(?:er|ing)?|` +
+  String.raw`feature|button|viewer|preview|reader|writer|library|lib|module|component|endpoint|` +
+  String.raw`api|support|generat(?:or|ion)|handler|service|function|method|class|plugin|` +
+  String.raw`integration|convert(?:er|ion)|render(?:er|ing)|engine|util(?:ity|ities)?|helper|` +
+  String.raw`pipeline|logic|tests?)\b)`;
+
+/**
+ * True when a document/spreadsheet format is the object being created ("create
+ * a PDF report", "export the results to Excel"), not a modifier of a code object
+ * ("make the xlsx parser handle merged cells") or an input ("read the PDF spec").
+ */
+export function descriptionCreatesFormatArtifact(
+  text: string,
+  format: GeneratedArtifactFormat,
+): boolean {
+  const desc = String(text || "").toLowerCase();
+  const noun = GENERATED_FORMAT_NOUNS[format];
+  const createdObject = new RegExp(
+    String.raw`\b${ARTIFACT_CREATION_VERB}\s+(?:(?:a|an|the|new|final|single|separate|one|\d+)\s+)*` +
+      String.raw`(?:(?!${OBJECT_STOP_WORD}\b)[\w'-]+\s+){0,3}?(?:${noun})${NOT_SOFTWARE_COMPONENT_MODIFIER}`,
+  );
+  const convertedInto = new RegExp(
+    String.raw`\b(?:export|save|convert|output|render|write|turn|transform|compile)\b` +
+      String.raw`(?:(?!\b(?:that|which)\b)[^.;!?\n]){0,60}?\b(?:to|as|into)\s+` +
+      String.raw`(?:(?:a|an|the|new|final|single)\s+)*(?:${noun})(?![\w-])`,
+  );
+  return createdObject.test(desc) || convertedInto.test(desc);
 }
 
 export function deriveStepContractMode(opts: {

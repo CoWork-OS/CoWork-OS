@@ -1,0 +1,243 @@
+{
+  "id": "harness-weak-areas-2026-10-02",
+  "title": "Harness weak-area repairs: tool feedback, routing, step contracts, completion truth, providers, context",
+  "source": {
+    "incident": "internal-harness-audit-2026-10-02",
+    "taskId": "harness-weak-area-repairs"
+  },
+  "categories": [
+    {
+      "id": "failed-command-output-reaches-model",
+      "prompt": "Run the test suite; one test fails with an assertion near the end of a long log.",
+      "assertions": {
+        "toolResultContains": ["FAIL line", "stderr tail", "exitCode"],
+        "toolResultBounded": true,
+        "executableTest": "src/electron/agent/__tests__/executor-tool-execution-utils.test.ts"
+      }
+    },
+    {
+      "id": "run-command-honors-executor-budget",
+      "prompt": "npm run build takes 90 seconds and needs approval first.",
+      "assertions": {
+        "killedAt60s": false,
+        "approvalWaitCountsAgainstCommand": false,
+        "persistentShellTimeoutReRunsCommand": false,
+        "executableTest": "src/electron/agent/__tests__/executor-tool-timeouts.test.ts"
+      }
+    },
+    {
+      "id": "local-commands-not-classified-as-network",
+      "prompt": "grep -rn \"fetch(\" src; cat src/api/fetch.ts; git commit -m \"retry fetch\"",
+      "assertions": {
+        "blockedAsShellNetworking": false,
+        "curlAndInlineRequestsStillNetwork": true,
+        "executableTest": "src/shared/__tests__/shell-network.test.ts"
+      }
+    },
+    {
+      "id": "read-file-truncation-is-honest",
+      "prompt": "Read a 100 KB source file and continue where the first read stopped.",
+      "assertions": {
+        "truncatedFlagWhenCut": true,
+        "nextStartCharMatchesDelivered": true,
+        "cachedHitServesOnlySameWindow": true,
+        "executableTest": "src/electron/agent/__tests__/context-manager-compaction.test.ts"
+      }
+    },
+    {
+      "id": "distinct-edits-not-blocked-as-loop",
+      "prompt": "Rename a function across eight files, then rerun failing tests after each fix.",
+      "assertions": {
+        "distinctEditsBlocked": false,
+        "testRerunAfterEditBlocked": false,
+        "blockedMessageClaimsSuccess": false,
+        "executableTest": "src/electron/agent/__tests__/executor-step-failures.test.ts"
+      }
+    },
+    {
+      "id": "injection-filter-never-rewrites-content",
+      "prompt": "Read an Express route file containing app.post and res.send(req.file).",
+      "assertions": {
+        "contentByteIdentical": true,
+        "realInjectionWarned": true,
+        "executableTest": "src/electron/agent/security/__tests__/output-filter.test.ts"
+      }
+    },
+    {
+      "id": "work-follow-ups-keep-tools",
+      "prompt": "After a completed coding task: \"Do it\" / \"Why is the test still failing?\"",
+      "assertions": {
+        "routedToNoToolsChat": false,
+        "executableTest": "src/electron/agent/__tests__/executor-command-requirement.test.ts"
+      }
+    },
+    {
+      "id": "workspace-questions-read-the-workspace",
+      "prompt": "Where is the rate limiter configured?",
+      "assertions": {
+        "answeredWithoutTools": false,
+        "executableTest": "src/electron/agent/__tests__/executor-chat-mode.test.ts"
+      }
+    },
+    {
+      "id": "refinements-keep-history",
+      "prompt": "Instead of a modal, build a dropdown.",
+      "assertions": {
+        "historyWiped": false,
+        "executableTest": "src/electron/agent/__tests__/executor-redirect-intent.test.ts"
+      }
+    },
+    {
+      "id": "coding-and-non-english-requests-route-to-execution",
+      "prompt": "Add dark mode to the settings screen / Testleri çalıştır ve hatayı düzelt",
+      "assertions": {
+        "intentNotChat": true,
+        "executableTest": "src/electron/agent/strategy/__tests__/IntentRouter.test.ts"
+      }
+    },
+    {
+      "id": "scoped-prohibitions-do-not-lock-read-only",
+      "prompt": "Fix the failing test. Don't edit files under vendor/.",
+      "assertions": {
+        "readOnlyConstraint": false,
+        "planModeLocked": false,
+        "executableTest": "src/electron/agent/__tests__/executor-completion-contract.test.ts"
+      }
+    },
+    {
+      "id": "equivalent-tools-satisfy-step-contracts",
+      "prompt": "Fix the null check in parser.ts (model uses edit_file or write_file).",
+      "assertions": {
+        "stepFailedForToolChoice": false,
+        "executableTest": "src/electron/agent/__tests__/required-tool-equivalence.test.ts"
+      }
+    },
+    {
+      "id": "inspect-then-fix-steps-may-edit",
+      "prompt": "Investigate the crash in parser.ts and patch it.",
+      "assertions": {
+        "analysisOnlyGuardFails": false,
+        "executableTest": "src/electron/agent/__tests__/executor-step-failures.test.ts"
+      }
+    },
+    {
+      "id": "test-requirement-needs-run-intent-and-fresh-pass",
+      "prompt": "Write a blog post comparing jest and vitest / fix then make test",
+      "assertions": {
+        "mentionRequiresTestRun": false,
+        "makeTestRecognized": true,
+        "passBeforeLaterEditSatisfies": false,
+        "executableTest": "src/electron/agent/__tests__/executor-prompt-heuristics-utils.test.ts"
+      }
+    },
+    {
+      "id": "verification-evidence-from-observed-tools",
+      "prompt": "Check the pricing page and tell me whether Pro includes SSO.",
+      "assertions": {
+        "toolBackedAnswerFails": false,
+        "fabricatedTestReportWithoutToolsPasses": false,
+        "executableTest": "src/electron/agent/__tests__/executor-completion-contract.test.ts"
+      }
+    },
+    {
+      "id": "requested-artifact-must-exist",
+      "prompt": "Create a PDF report saved as reports/q3.pdf (no file written, long claim).",
+      "assertions": {
+        "expectedTerminalStatus": "failed",
+        "executableTest": "src/electron/agent/__tests__/executor-completion-contract.test.ts"
+      }
+    },
+    {
+      "id": "pinned-context-not-duplicated",
+      "prompt": "Multi-turn step with memory recall and user profile enabled.",
+      "assertions": {
+        "pinnedBlockCopiesPerTurn": 1,
+        "executableTest": "src/electron/agent/__tests__/executor-pinned-context-blocks.test.ts"
+      }
+    },
+    {
+      "id": "planner-contract-survives-budget",
+      "prompt": "Plan a coding task with 140 tools and 20 skills available.",
+      "assertions": {
+        "promptContainsPlanningRules": true,
+        "promptContainsJsonContract": true,
+        "executableTest": "src/electron/agent/__tests__/executor-planning-prompt-budget.test.ts"
+      }
+    },
+    {
+      "id": "transient-provider-errors-retried",
+      "prompt": "Anthropic 529 overloaded / connection reset mid-task.",
+      "assertions": {
+        "taskFailsOnFirstTransientError": false,
+        "quotaErrorRetried": false,
+        "executableTest": "src/electron/agent/__tests__/executor-retry-semantics.test.ts"
+      }
+    },
+    {
+      "id": "no-assistant-prefill-requests",
+      "prompt": "A long chat answer hits max_tokens on a model that rejects prefill.",
+      "assertions": {
+        "lastMessageRole": "user",
+        "executableTest": "src/electron/agent/runtime/__tests__/SessionRuntime.test.ts"
+      }
+    },
+    {
+      "id": "max-tokens-tool-call-recovers",
+      "prompt": "The first write_file call carries more content than the output budget.",
+      "assertions": {
+        "stepFailsOnFirstTruncation": false,
+        "executableTest": "src/electron/agent/__tests__/executor-step-failures.test.ts"
+      }
+    },
+    {
+      "id": "gemini-tool-calls-not-end-turn",
+      "prompt": "Gemini returns text plus a functionCall with finishReason STOP.",
+      "assertions": {
+        "normalizedStopReason": "tool_use",
+        "executableTest": "src/electron/agent/llm/__tests__/response-tool-metadata.test.ts"
+      }
+    },
+    {
+      "id": "ollama-context-window-explicit",
+      "prompt": "Run a task on a local Ollama model.",
+      "assertions": {
+        "numCtxSent": true,
+        "executableTest": "src/electron/agent/llm/__tests__/ollama-provider.test.ts"
+      }
+    },
+    {
+      "id": "consent-dismissal-scoped",
+      "prompt": "Navigate to a page with a footer link containing \"ok\" and no consent banner.",
+      "assertions": {
+        "elementsClicked": 0,
+        "executableTest": "src/electron/agent/browser/__tests__/browser-service-consent.test.ts"
+      }
+    },
+    {
+      "id": "spreadsheet-values-numeric",
+      "prompt": "Create a spreadsheet with 1200 and 800 and a SUM total.",
+      "assertions": {
+        "numericCellsStoredAsNumbers": true,
+        "executableTest": "src/electron/agent/skills/__tests__/spreadsheet.test.ts"
+      }
+    },
+    {
+      "id": "pdf-keeps-non-latin-text",
+      "prompt": "Create a PDF report mentioning the İstanbul office.",
+      "assertions": {
+        "extractedTextContains": "İstanbul",
+        "executableTest": "src/electron/agent/skills/__tests__/document-create.test.ts"
+      }
+    },
+    {
+      "id": "pptx-keeps-all-content",
+      "prompt": "Create a 7-slide deck with a 7-bullet agenda and a chart without series data.",
+      "assertions": {
+        "bulletsDropped": 0,
+        "inventedChartValues": false,
+        "executableTest": "src/electron/utils/document-generators/__tests__/pptx-generator.test.ts"
+      }
+    }
+  ],
+  "notes": "Each category names the executable regression test added with its fix; every test failed before its fix and passes after. Live end-to-end grading of these scenarios is not part of this record."
+}

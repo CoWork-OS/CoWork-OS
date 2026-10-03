@@ -18,7 +18,7 @@ export function resolveModelPreferenceToModelKey(
       return "haiku-4-5";
     case "smarter":
     case "opus":
-      return "opus-4-5";
+      return "opus-4-6";
     case "sonnet":
       return "sonnet-4-6";
     default:

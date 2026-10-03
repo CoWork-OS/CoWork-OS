@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { LLMRefusalError } from "../llm/provider-error-classifier";
 import { DurableContextService } from "../../memory/DurableContextService";
 
 vi.mock("electron", () => ({
@@ -162,6 +163,212 @@ describe("TaskExecutor chat mode", () => {
     expect(executor.conversationHistory.filter((message: Any) => message.role === "user")).toEqual(
       history,
     );
+  });
+
+  it("shows the provider refusal instead of the canned companion fallback", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "chat-refusal",
+      agentConfig: { conversationMode: "chat", retainMemory: false },
+    };
+    executor.workspace = { id: "workspace-1", path: "/tmp/workspace" };
+    executor.provider = { type: "anthropic" };
+    executor.conversationHistory = [];
+    executor.getRoleContextPrompt = () => "";
+    executor.buildUserProfileBlock = () => "";
+    executor.buildChatOrThinkSystemBlocks = () => [];
+    executor.setPromptCacheContext = () => "system";
+    executor.getEffectiveExecutionMode = () => "execute";
+    executor.getEffectiveTaskDomain = () => "general";
+    executor.isExplicitChatExecutionMode = () => false;
+    executor.emitEvent = vi.fn();
+    executor.saveConversationSnapshot = vi.fn(() => false);
+    executor.restoreFollowUpStatusAfterFailure = vi.fn();
+    executor.generateCompanionFallbackResponse = () => "Hey! How can I help?";
+    executor.updateConversationHistory = vi.fn();
+    executor.buildUserContent = vi.fn(async (message: string) => message);
+    executor.runTextTurnKernel = vi.fn().mockRejectedValue(new LLMRefusalError());
+
+    await (TaskExecutor as Any).prototype.respondInChatMode.call(executor, "Explain this");
+
+    const assistantMessages = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "assistant_message")
+      .map(([, payload]: [string, Any]) => String(payload.message));
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]).toMatch(/declined/i);
+    expect(assistantMessages[0]).not.toContain("How can I help");
+  });
+
+  it.each(["chat", "think"])(
+    "gives %s-mode follow-ups an output budget that hidden reasoning cannot exhaust",
+    async (conversationMode) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.task = {
+        id: `chat-budget-${conversationMode}`,
+        agentConfig: { conversationMode, retainMemory: false },
+      };
+      executor.workspace = { id: "workspace-1", path: "/tmp/workspace" };
+      executor.provider = { type: "openai" };
+      executor.conversationHistory = [];
+      executor.getRoleContextPrompt = () => "";
+      executor.buildUserProfileBlock = () => "";
+      executor.buildChatOrThinkSystemBlocks = () => [];
+      executor.setPromptCacheContext = () => "system";
+      executor.getEffectiveExecutionMode = () => "execute";
+      executor.getEffectiveTaskDomain = () => "general";
+      executor.isExplicitChatExecutionMode = () => false;
+      executor.emitEvent = vi.fn();
+      executor.saveConversationSnapshot = vi.fn(() => false);
+      executor.finalizeSuccessfulFollowUp = vi.fn();
+      executor.generateCompanionFallbackResponse = () => "fallback";
+      executor.responseLooksLikeUnexecutedToolCall = () => false;
+      executor.updateConversationHistory = vi.fn();
+      executor.buildUserContent = vi.fn(async (message: string) => message);
+      const runTextTurnKernel = vi.fn(async ({ messages }: Any) => ({
+        assistantText: "reply",
+        messages: [...messages, { role: "assistant", content: "reply" }],
+      }));
+      executor.runTextTurnKernel = runTextTurnKernel;
+
+      await (TaskExecutor as Any).prototype.respondInChatMode.call(executor, "How are you?");
+
+      const turn = runTextTurnKernel.mock.calls[0][0];
+      expect(turn.initialMaxTokens).toBeGreaterThanOrEqual(4_096);
+      expect(turn.continuationMaxTokens).toBeGreaterThanOrEqual(4_096);
+    },
+  );
+
+  async function runFollowUpMaxTokensTurn(remainingTurns: number) {
+    const outcome: { decision?: Any; messages: Any[]; executor?: Any } = { messages: [] };
+    const task = {
+      id: "follow-up-max-tokens",
+      status: "executing",
+      title: "Write the report",
+      prompt: "Write the report",
+      agentConfig: {
+        executionMode: "plan",
+        interactionMode: { mode: "smart" },
+        retainMemory: false,
+      },
+    };
+    const runtime = {
+      setRecoveryRequestActive: vi.fn(),
+      runFollowUpLoop: vi.fn(async ({ messages, policy }: Any) => {
+        const state = {
+          mode: "follow_up",
+          iterationCount: 1,
+          messages,
+          emptyResponseCount: 0,
+          continueLoop: true,
+        };
+        const prepared = await policy.requestResponse(state);
+        outcome.decision = await policy.handleResponse(prepared, state);
+        outcome.messages = state.messages;
+        return { messages: state.messages, iterations: 1, emptyResponseCount: 0 };
+      }),
+    };
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    outcome.executor = executor;
+    executor.task = task;
+    executor.workspace = {
+      id: "workspace-1",
+      path: "/tmp/workspace",
+      permissions: { read: false, write: false, delete: false, network: false, shell: false },
+    };
+    executor.provider = { type: "anthropic" };
+    executor.conversationHistory = [{ role: "user", content: "Write the report" }];
+    executor.daemon = { getTask: vi.fn(() => task), updateTaskStatus: vi.fn() };
+    executor.getSessionRuntime = () => runtime;
+    executor.refreshProviderIfSettingsChanged = vi.fn();
+    executor.ensureProviderFailoverSelectionsContext = vi.fn();
+    executor.getPendingSkillParameterCollection = () => null;
+    executor.handleGoalSlashFollowUp = () => ({ handled: false });
+    executor.isRecoveryIntent = () => false;
+    executor.isCapabilityUpgradeIntent = () => false;
+    executor.isRedirectIntent = () => false;
+    executor.isDebugMode = () => false;
+    executor.preflightShellExecutionCheck = () => false;
+    executor.isExplicitChatExecutionMode = () => false;
+    executor.isKnownContextInformationalFollowUp = () => false;
+    executor.getEffectiveExecutionMode = () => "plan";
+    executor.getEffectiveTaskDomain = () => "general";
+    executor.getEffectiveTaskPathRootPolicy = () => "none";
+    executor.getLoopGuardrailForMode = () => ({});
+    executor.followUpRequiresCommandExecution = () => false;
+    executor.followUpRequiresCanvasAction = () => false;
+    executor.loadExecutionPromptMemoryFeatures = () => ({ contextPackInjectionEnabled: false });
+    executor.getRoleContextPrompt = () => "";
+    executor.getInfraContextPrompt = () => "";
+    executor.buildAdaptiveRecoveryTurnGuidance = async () => "";
+    executor.buildFollowUpTurnGuidancePrompt = () => "";
+    executor.buildIntegrationMentionGuidancePrompt = () => "";
+    executor.buildExecutionSystemPrompt = async () => ({
+      systemBlocks: [],
+      memoryIndexInjected: false,
+      topicCount: 0,
+      droppedSections: [],
+      truncatedSections: [],
+      totalTokens: 0,
+    });
+    executor.setPromptCacheContext = () => "system";
+    executor.fileOperationTracker = { getKnowledgeSummary: () => "" };
+    executor.toolRegistry = { setCanvasSessionCutoff: vi.fn() };
+    executor.toolCallDeduplicator = { reset: vi.fn() };
+    executor.turnSuccessfulToolUsageCounts = new Map();
+    executor.emitEvent = vi.fn();
+    executor.updateConversationHistory = vi.fn();
+    executor.saveConversationSnapshot = vi.fn(() => true);
+    executor.finalizeSuccessfulFollowUp = vi.fn();
+    executor.getRemainingTurnBudget = () => remainingTurns;
+    executor.requestLLMResponseWithAdaptiveBudget = vi.fn(async () => ({
+      response: {
+        stopReason: "max_tokens",
+        content: [
+          { type: "text", text: "Writing the report." },
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "write_file",
+            input: { path: "report.md", content: "partial" },
+          },
+        ],
+      },
+      availableTools: [],
+      outputBudget: { continuationAllowed: true, truncationClassification: null },
+    }));
+
+    await (TaskExecutor as Any).prototype.sendMessageUnified.call(
+      executor,
+      "Write the report",
+      undefined,
+      undefined,
+      {
+        messageContext: { messageSource: "web", messageId: "max-tokens-follow-up" },
+        suppressUserMessageEvent: true,
+        transcriptAlreadyContainsMessage: true,
+      },
+    );
+    return outcome;
+  }
+
+  it("retries a follow-up whose tool call was cut off by max_tokens instead of ending the turn", async () => {
+    const { decision, messages } = await runFollowUpMaxTokensTurn(20);
+
+    expect(decision).toMatchObject({ continueLoop: true, repeatIteration: true });
+    expect(messages.at(-1).role).toBe("user");
+    expect(JSON.stringify(messages.at(-1).content)).toMatch(/discarded/);
+  });
+
+  it("shows the cut-off follow-up response when it cannot be retried", async () => {
+    const { decision, executor } = await runFollowUpMaxTokensTurn(0);
+
+    expect(decision).toMatchObject({ continueLoop: false });
+    const assistantMessages = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "assistant_message")
+      .map(([, payload]: [string, Any]) => String(payload.message));
+    expect(assistantMessages).toEqual([
+      expect.stringMatching(/^Writing the report\.\n\n.*output token limit/s),
+    ]);
   });
 
   it.each([true, false])(
@@ -926,6 +1133,69 @@ describe("TaskExecutor chat mode", () => {
     expect(createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(48_000);
   });
 
+  it("continues a truncated companion response without an assistant prefill turn", async () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const createMessageWithTimeout = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "First half" }],
+        stopReason: "max_tokens",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: " second half." }],
+        stopReason: "end_turn",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      });
+
+    executor.task = {
+      id: "task-companion-continuation",
+      title: "Chat session",
+      prompt: "Tell me a story",
+      userPrompt: "Tell me a story",
+      rawPrompt: "Tell me a story",
+      createdAt: Date.now(),
+      agentConfig: { conversationMode: "chat" },
+    };
+    executor.workspace = {
+      id: "ws-companion-continuation",
+      path: "/tmp",
+      isTemp: true,
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    };
+    executor.daemon = { updateTaskStatus: vi.fn(), updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.getRoleContextPrompt = vi.fn().mockReturnValue("");
+    executor.buildUserProfileBlock = vi.fn().mockReturnValue("");
+    executor.buildUserContent = vi.fn().mockResolvedValue("Tell me a story");
+    executor.callLLMWithRetry = vi.fn(async (fn: Any) => fn());
+    executor.createMessageWithTimeout = createMessageWithTimeout;
+    executor.updateTracking = vi.fn();
+    executor.updateConversationHistory = vi.fn();
+    executor.saveConversationSnapshot = vi.fn();
+    executor.finalizeTaskBestEffort = vi.fn();
+    executor.capturePlaybookOutcome = vi.fn();
+    executor.generateCompanionFallbackResponse = vi.fn().mockReturnValue("fallback");
+    executor.getCumulativeInputTokens = vi.fn().mockReturnValue(0);
+    executor.getCumulativeOutputTokens = vi.fn().mockReturnValue(0);
+    executor.taskCompleted = false;
+    executor.cancelled = false;
+
+    await (TaskExecutor as Any).prototype.handleCompanionPrompt.call(executor);
+
+    expect(createMessageWithTimeout).toHaveBeenCalledTimes(2);
+    const continuationMessages = createMessageWithTimeout.mock.calls[1][0].messages;
+    expect(continuationMessages.at(-1).role).toBe("user");
+    expect(continuationMessages.at(-2)).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "First half" }],
+    });
+    const assistantMessages = executor.emitEvent.mock.calls
+      .filter(([type]: [string]) => type === "assistant_message")
+      .map(([, payload]: [string, Any]) => String(payload.message));
+    expect(assistantMessages).toEqual(["First half second half."]);
+  });
+
   it("replaces unexecuted tool-call syntax in chat streaming events", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.cancelled = false;
@@ -1318,5 +1588,114 @@ describe("TaskExecutor chat mode", () => {
       { role: "assistant", content: [{ type: "text", text: "Part one. Part two." }] },
     ]);
     expect(executor.finalizeTaskBestEffort).toHaveBeenCalledWith("summary");
+  });
+});
+
+describe("TaskExecutor answer-first workspace grounding", () => {
+  const quickAnswer =
+    "Most likely Safari drops the session cookie because it is set as a third-party cookie; set SameSite=None; Secure and serve the auth endpoint from the same site.";
+
+  const createAnswerFirstExecutor = (
+    prompt: string,
+    options: { isTemp?: boolean; looksLikeProject?: boolean; taskDomain?: string } = {},
+  ) => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const taskDomain = options.taskDomain ?? "general";
+    executor.task = {
+      id: "answer-first",
+      title: prompt,
+      prompt,
+      rawPrompt: prompt,
+      createdAt: Date.now(),
+      agentConfig: {
+        executionMode: "plan",
+        executionModeSource: "strategy",
+        conversationMode: "hybrid",
+        taskIntent: "advice",
+        taskDomain,
+        taskStrategySnapshot: {
+          taskIntent: "advice",
+          conversationMode: "hybrid",
+          executionMode: "plan",
+          taskDomain,
+          directResponseMode: "terminal_quick_answer",
+          preflightGates: [],
+          workflowMode: "none",
+          confidence: 0.7,
+          overrides: [],
+        },
+      },
+    };
+    executor.workspace = {
+      id: options.isTemp ? "temp-workspace" : "ws-project",
+      path: "/workspace/project",
+      isTemp: options.isTemp === true,
+      permissions: { read: true, write: true, delete: false, network: true, shell: false },
+    };
+    const looksLikeProject = options.looksLikeProject ?? true;
+    executor.getWorkspaceSignals = vi.fn(() => ({
+      hasEntries: true,
+      hasProjectMarkers: looksLikeProject,
+      hasCodeFiles: looksLikeProject,
+      hasAppDirs: looksLikeProject,
+    }));
+    executor.hasDirectAnswerReady = vi.fn().mockReturnValue(true);
+    executor.getBestFinalResponseCandidate = vi.fn().mockReturnValue(quickAnswer);
+    executor.buildCompletionContract = vi.fn().mockReturnValue({
+      requiresExecutionEvidence: false,
+      requiresArtifactEvidence: false,
+      requiresVerificationEvidence: false,
+    });
+    executor.lastAssistantOutput = quickAnswer;
+    executor.lastNonVerificationOutput = quickAnswer;
+    return executor;
+  };
+
+  const answerFirstDecisions = (executor: Any) => ({
+    emit: (TaskExecutor as Any).prototype.shouldEmitAnswerFirst.call(executor),
+    afterAnswerFirst: (TaskExecutor as Any).prototype.shouldShortCircuitAfterAnswerFirst.call(
+      executor,
+    ),
+    simpleNonExecute: (TaskExecutor as Any).prototype.shouldShortCircuitSimpleNonExecuteAnswer.call(
+      executor,
+    ),
+  });
+
+  it.each([
+    ["Where is the rate limiter configured?", "general"],
+    ["Which of our API endpoints lack auth checks?", "code"],
+    ["Does this project support Node 22?", "code"],
+    ["Is our password hashing secure enough?", "general"],
+    ["Why does login fail on Safari?", "general"],
+    ["Why is the dashboard so slow to load?", "general"],
+    ["What does `parseConfig` return when the file is missing?", "code"],
+    ["Bu projede rate limiter nerede yapılandırılıyor?", "general"],
+  ])(
+    "does not quick-answer a question about the real project workspace: %s",
+    (prompt, taskDomain) => {
+      const executor = createAnswerFirstExecutor(prompt, { taskDomain });
+
+      expect(answerFirstDecisions(executor)).toEqual({
+        emit: false,
+        afterAnswerFirst: false,
+        simpleNonExecute: false,
+      });
+    },
+  );
+
+  it.each([
+    ["What is the capital of France?", { isTemp: false }],
+    ["How should I structure my week?", { isTemp: false }],
+    ["What is the capital of France?", { isTemp: true }],
+    ["Where is the rate limiter configured?", { isTemp: true }],
+    ["Why does login fail on Safari?", { isTemp: false, looksLikeProject: false }],
+  ])("keeps the quick-answer fast path for %s (%o)", (prompt, options) => {
+    const executor = createAnswerFirstExecutor(prompt, options);
+
+    expect(answerFirstDecisions(executor)).toEqual({
+      emit: true,
+      afterAnswerFirst: true,
+      simpleNonExecute: true,
+    });
   });
 });

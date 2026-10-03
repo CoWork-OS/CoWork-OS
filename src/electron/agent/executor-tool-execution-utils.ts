@@ -470,28 +470,251 @@ export function formatToolInputForLog(input: Any, maxLength = 200): string {
   }
 }
 
-function prependRunCommandTerminationContext(sanitizedResult: string, result: Any): string {
-  if (!result || !result.terminationReason) return sanitizedResult;
+function getRunCommandTerminationContext(result: Any): string {
+  if (!result || !result.terminationReason) return "";
 
-  let contextPrefix = "";
   switch (result.terminationReason) {
     case "user_stopped":
-      contextPrefix =
+      return (
         "[USER STOPPED] The user intentionally interrupted this command. " +
-        "Do not retry automatically. Ask the user if they want you to continue or try a different approach.\n\n";
-      break;
+        "Do not retry automatically. Ask the user if they want you to continue or try a different approach."
+      );
     case "timeout":
-      contextPrefix =
+      // ShellTools adds a hint when the command looks like a server or watcher.
+      if (typeof result.hint === "string" && result.hint.trim()) {
+        return `[TIMEOUT] Command exceeded time limit. ${result.hint.trim()}`;
+      }
+      return (
         "[TIMEOUT] Command exceeded time limit. " +
-        "Consider: 1) Breaking into smaller steps, 2) Using a longer timeout if available, 3) Asking the user to run this manually.\n\n";
-      break;
+        "Consider: 1) Breaking into smaller steps, 2) Using a longer timeout if available, 3) Asking the user to run this manually."
+      );
     case "error":
-      contextPrefix =
-        "[EXECUTION ERROR] The command could not be spawned or executed properly.\n\n";
-      break;
+      return "[EXECUTION ERROR] The command could not be spawned or executed properly.";
+    default:
+      return "";
+  }
+}
+
+function prependRunCommandTerminationContext(sanitizedResult: string, result: Any): string {
+  const context = getRunCommandTerminationContext(result);
+  return context ? `${context}\n\n${sanitizedResult}` : sanitizedResult;
+}
+
+// Failed tool results are the model's only view of why a call failed, so they
+// carry bounded diagnostics instead of a bare error string. Command output is
+// tail-biased: test failures, compiler errors and tracebacks print last.
+const TOOL_FAILURE_PAYLOAD_MAX_CHARS = 16_000;
+const TOOL_FAILURE_ERROR_MAX_CHARS = 4_000;
+const TOOL_FAILURE_DISPLAY_MAX_CHARS = 4_000;
+const TOOL_FAILURE_URL_MAX_CHARS = 2_000;
+const TOOL_FAILURE_STDERR_TAIL_CHARS = 8_000;
+const TOOL_FAILURE_STDOUT_HEAD_CHARS = 1_500;
+const TOOL_FAILURE_STDOUT_TAIL_CHARS = 6_000;
+const TOOL_FAILURE_DETAIL_MAX_CHARS = 2_000;
+const TOOL_FAILURE_RESULT_ITEMS_MAX = 8;
+const TOOL_FAILURE_DETAIL_FIELDS = [
+  "message",
+  "hint",
+  "suggestion",
+  "details",
+  "status",
+  "reason",
+  "missing",
+  "missing_requirements",
+  "missing_tools",
+  "missing_items",
+  "task_id",
+  "taskId",
+  "completed",
+  "failed",
+] as const;
+// Per-child fields kept for orchestrate_agents-style results; caps keep each item near 1.5K.
+const TOOL_FAILURE_RESULT_ITEM_FIELDS: ReadonlyArray<readonly [string, number]> = [
+  ["task_id", 120],
+  ["taskId", 120],
+  ["title", 200],
+  ["status", 60],
+  ["error", 500],
+  ["summary", 700],
+  ["result_summary", 700],
+];
+
+const ANSI_CSI_SEQUENCE_REGEX = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+
+/** Keep the start and end of `text`, cut at line boundaries when one is close. */
+function clipFailureText(text: string, headChars: number, tailChars: number): string {
+  const headBudget = Math.max(0, Math.floor(headChars));
+  const tailBudget = Math.max(0, Math.floor(tailChars));
+  if (text.length <= headBudget + tailBudget) return text;
+  let head = text.slice(0, headBudget);
+  const lastHeadBreak = head.lastIndexOf("\n");
+  if (lastHeadBreak >= headBudget * 0.75) head = head.slice(0, lastHeadBreak);
+  let tail = tailBudget > 0 ? text.slice(-tailBudget) : "";
+  const firstTailBreak = tail.indexOf("\n");
+  if (firstTailBreak >= 0 && firstTailBreak <= tailBudget * 0.25) {
+    tail = tail.slice(firstTailBreak + 1);
+  }
+  const marker = `[... ${text.length - head.length - tail.length} chars omitted ...]`;
+  return [head, marker, tail].filter(Boolean).join("\n");
+}
+
+function clipCommandOutput(text: string, headChars: number, tailChars: number): string {
+  return clipFailureText(text.replace(ANSI_CSI_SEQUENCE_REGEX, ""), headChars, tailChars);
+}
+
+function boundFailureDetailValue(value: unknown, maxChars: number): unknown {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? clipFailureText(trimmed, maxChars * 0.6, maxChars * 0.4) : undefined;
+  }
+  if (typeof value !== "object") return undefined;
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+  if (typeof serialized !== "string") return undefined;
+  return serialized.length <= maxChars
+    ? value
+    : clipFailureText(serialized, maxChars * 0.6, maxChars * 0.4);
+}
+
+function reduceFailureResultItem(item: unknown, scale: number): unknown {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return boundFailureDetailValue(item, 1_500 * scale);
+  }
+  const source = item as Record<string, unknown>;
+  const reduced: Record<string, unknown> = {};
+  for (const [key, maxChars] of TOOL_FAILURE_RESULT_ITEM_FIELDS) {
+    const bounded = boundFailureDetailValue(source[key], maxChars * scale);
+    if (bounded !== undefined) reduced[key] = bounded;
+  }
+  return reduced;
+}
+
+function buildToolFailurePayload(
+  result: Any,
+  failure: NormalizedToolFailureReason,
+  guidance: string,
+  scale: number,
+): Record<string, unknown> {
+  const source: Record<string, Any> = result && typeof result === "object" ? result : {};
+  const errorText = failure.message;
+  const payload: Record<string, unknown> = {
+    error: clipFailureText(
+      errorText,
+      Math.max(TOOL_FAILURE_ERROR_MAX_CHARS * scale * 0.5, 250),
+      Math.max(TOOL_FAILURE_ERROR_MAX_CHARS * scale * 0.5, 250),
+    ),
+  };
+  if (failure.kind) payload.kind = failure.kind;
+  if (failure.display) {
+    payload.display = clipFailureText(
+      failure.display,
+      TOOL_FAILURE_DISPLAY_MAX_CHARS * scale * 0.25,
+      TOOL_FAILURE_DISPLAY_MAX_CHARS * scale * 0.75,
+    );
+  }
+  if (failure.code) payload.code = failure.code;
+  if (source.url) payload.url = boundFailureDetailValue(source.url, TOOL_FAILURE_URL_MAX_CHARS);
+  if (guidance) payload.guidance = guidance;
+
+  if (typeof source.exitCode === "number" || source.exitCode === null) {
+    payload.exitCode = source.exitCode;
+  }
+  if (typeof source.terminationReason === "string" && source.terminationReason) {
+    payload.terminationReason = source.terminationReason;
+  }
+  if (typeof source.stderr === "string" && source.stderr.trim()) {
+    payload.stderr = clipCommandOutput(source.stderr, 0, TOOL_FAILURE_STDERR_TAIL_CHARS * scale);
+  }
+  if (typeof source.stdout === "string" && source.stdout.trim()) {
+    payload.stdout = clipCommandOutput(
+      source.stdout,
+      TOOL_FAILURE_STDOUT_HEAD_CHARS * scale,
+      TOOL_FAILURE_STDOUT_TAIL_CHARS * scale,
+    );
+  }
+  if (typeof source.truncated === "boolean") payload.truncated = source.truncated;
+
+  for (const key of TOOL_FAILURE_DETAIL_FIELDS) {
+    if (key in payload || !(key in source)) continue;
+    const value = source[key];
+    if (typeof value === "string" && value.trim() === errorText) continue;
+    const bounded = boundFailureDetailValue(value, TOOL_FAILURE_DETAIL_MAX_CHARS * scale);
+    if (bounded !== undefined) payload[key] = bounded;
   }
 
-  return contextPrefix ? contextPrefix + sanitizedResult : sanitizedResult;
+  if (Array.isArray(source.results) && source.results.length > 0) {
+    payload.results = source.results
+      .slice(0, TOOL_FAILURE_RESULT_ITEMS_MAX)
+      .map((item: unknown) => reduceFailureResultItem(item, scale));
+    if (source.results.length > TOOL_FAILURE_RESULT_ITEMS_MAX) {
+      payload.results_omitted = source.results.length - TOOL_FAILURE_RESULT_ITEMS_MAX;
+    }
+  }
+
+  return payload;
+}
+
+// A long successful run_command result would reach the generic tool-result
+// budget, which cuts head-only and drops the summary at the end of a build or
+// test log. Its stdout/stderr are bounded head+tail before that.
+const RUN_COMMAND_RESULT_MAX_CHARS = 32_000;
+const RUN_COMMAND_STDOUT_HEAD_CHARS = 4_000;
+const RUN_COMMAND_STDOUT_TAIL_CHARS = 20_000;
+const RUN_COMMAND_STDERR_TAIL_CHARS = 6_000;
+
+function boundRunCommandOutputForModel(toolName: string, rawResult: string): string {
+  if (toolName !== "run_command" || rawResult.length <= RUN_COMMAND_RESULT_MAX_CHARS) {
+    return rawResult;
+  }
+  const parsed = safeJsonParseValue(rawResult);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return rawResult;
+  let scale = 1;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const bounded = { ...parsed };
+    if (typeof parsed.stdout === "string") {
+      bounded.stdout = clipCommandOutput(
+        parsed.stdout,
+        RUN_COMMAND_STDOUT_HEAD_CHARS * scale,
+        RUN_COMMAND_STDOUT_TAIL_CHARS * scale,
+      );
+    }
+    if (typeof parsed.stderr === "string") {
+      bounded.stderr = clipCommandOutput(parsed.stderr, 0, RUN_COMMAND_STDERR_TAIL_CHARS * scale);
+    }
+    const serialized = JSON.stringify(bounded);
+    if (serialized.length <= RUN_COMMAND_RESULT_MAX_CHARS) return serialized;
+    scale *= (RUN_COMMAND_RESULT_MAX_CHARS / serialized.length) * 0.9;
+  }
+  return rawResult;
+}
+
+/**
+ * Serialize a failed tool result for the model: the error first, then bounded
+ * diagnostics. Field caps shrink proportionally until the JSON fits, so escaped
+ * control characters cannot push the payload past its budget.
+ */
+function serializeToolFailureForModel(
+  result: Any,
+  failure: NormalizedToolFailureReason,
+  guidance: string,
+): string {
+  let scale = 1;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const serialized = JSON.stringify(buildToolFailurePayload(result, failure, guidance, scale));
+    if (serialized.length <= TOOL_FAILURE_PAYLOAD_MAX_CHARS) return serialized;
+    scale *= (TOOL_FAILURE_PAYLOAD_MAX_CHARS / serialized.length) * 0.9;
+  }
+  return JSON.stringify({
+    error: clipFailureText(failure.message, 500, 500),
+    ...(guidance ? { guidance } : {}),
+    diagnostics_omitted: true,
+  });
 }
 
 function normalizeImageMimeType(value: unknown): LLMImageMimeType | null {
@@ -596,10 +819,14 @@ export function buildNormalizedToolResult(opts: {
         rawResult: opts.rawResult,
       })
     : opts.rawResult;
-  const truncatedResult = truncateToolResult(rawResultForModel);
+  const truncatedResult = truncateToolResult(
+    boundRunCommandOutputForModel(opts.toolName, rawResultForModel),
+  );
   let sanitizedResult = opts.sanitizeToolResult(opts.toolName, truncatedResult);
+  const includeTerminationContext =
+    opts.includeRunCommandTerminationContext === true && opts.toolName === "run_command";
 
-  if (opts.includeRunCommandTerminationContext && opts.toolName === "run_command") {
+  if (includeTerminationContext) {
     sanitizedResult = prependRunCommandTerminationContext(sanitizedResult, opts.result);
   }
 
@@ -612,21 +839,24 @@ export function buildNormalizedToolResult(opts: {
   const companion = !resultIsError
     ? buildComputerUseCompanionContent(opts.toolName, opts.result)
     : null;
+  // Failure diagnostics go through the same sanitizer as success payloads.
+  const failureContent =
+    normalizedFailure && !advisoryFallbackFailure
+      ? opts.sanitizeToolResult(
+          opts.toolName,
+          serializeToolFailureForModel(
+            opts.result,
+            normalizedFailure,
+            includeTerminationContext ? getRunCommandTerminationContext(opts.result) : "",
+          ),
+        )
+      : null;
 
   return {
     toolResult: {
       type: "tool_result",
       tool_use_id: opts.toolUseId,
-      content:
-        resultIsError && !advisoryFallbackFailure
-          ? JSON.stringify({
-              error: toolFailureReason,
-              ...(normalizedFailure?.kind ? { kind: normalizedFailure.kind } : {}),
-              ...(normalizedFailure?.display ? { display: normalizedFailure.display } : {}),
-              ...(normalizedFailure?.code ? { code: normalizedFailure.code } : {}),
-              ...(opts.result?.url ? { url: opts.result.url } : {}),
-            })
-          : companion?.compactResult || sanitizedResult,
+      content: failureContent ?? (companion?.compactResult || sanitizedResult),
       is_error: resultIsError && !advisoryFallbackFailure,
       ...(companion ? { companion_user_content: companion.companionUserContent } : {}),
     },
@@ -738,12 +968,45 @@ export function buildInvalidInputToolResult(opts: {
   };
 }
 
+/**
+ * What to tell the model after a blocked duplicate call. Never claims the earlier call
+ * succeeded unless its recorded result did.
+ */
+export function buildDuplicateCallSuggestion(duplicateCheck: {
+  kind?: "exact" | "semantic" | "rate_limit";
+  previousOutcome?: "succeeded" | "failed" | "unknown";
+}): string {
+  if (duplicateCheck.kind === "rate_limit") {
+    return "Wait before calling this tool again, or continue with a different approach.";
+  }
+  if (duplicateCheck.kind === "semantic") {
+    return (
+      "Check what the earlier attempts did before trying again: if one already did what " +
+      "you need, move on; if they failed, fix the cause or change the approach."
+    );
+  }
+  if (duplicateCheck.previousOutcome === "failed") {
+    return (
+      "Repeating this exact call unchanged will fail the same way. Fix the underlying " +
+      "cause or change the inputs before running it again."
+    );
+  }
+  if (duplicateCheck.previousOutcome === "succeeded") {
+    return (
+      "The earlier identical call succeeded: use its result and move on, or change the " +
+      "inputs if you need something different."
+    );
+  }
+  return "Use the result of the earlier identical call, or change the inputs if you need something different.";
+}
+
 export function buildDuplicateToolResult(opts: {
   toolName: string;
   toolUseId: string;
   duplicateCheck: { reason?: string; cachedResult?: string };
   isIdempotentTool: (toolName: string) => boolean;
   suggestion: string;
+  sanitizeToolResult?: (toolName: string, resultText: string) => string;
 }): { toolResult: LLMToolResult; hasDuplicateAttempt: boolean } {
   const reason =
     typeof opts.duplicateCheck.reason === "string" && opts.duplicateCheck.reason.trim()
@@ -751,11 +1014,20 @@ export function buildDuplicateToolResult(opts: {
       : "Duplicate tool call blocked.";
 
   if (opts.duplicateCheck.cachedResult && opts.isIdempotentTool(opts.toolName)) {
+    // The cached result is the raw tool output: bound and sanitize it like a live result,
+    // and say it is a repeat rather than a new run.
+    const bounded = truncateToolResult(opts.duplicateCheck.cachedResult);
+    const sanitized = opts.sanitizeToolResult
+      ? opts.sanitizeToolResult(opts.toolName, bounded)
+      : bounded;
     return {
       toolResult: {
         type: "tool_result",
         tool_use_id: opts.toolUseId,
-        content: opts.duplicateCheck.cachedResult,
+        content: markCachedToolResult(
+          sanitized,
+          `Served from cache instead of running the call again: ${reason}`,
+        ),
       },
       hasDuplicateAttempt: false,
     };
@@ -836,6 +1108,30 @@ export function buildCancellationToolResult(opts: {
   };
 }
 
+/**
+ * Label a result served from a cache instead of a new tool run. A JSON object result
+ * gets a leading `_cached` field (the rest stays byte-identical and parseable); any
+ * other result gets a one-line prefix.
+ */
+export function markCachedToolResult(content: string, note: string): string {
+  const leadingWhitespace = /^\s*/.exec(content)?.[0] || "";
+  const body = content.slice(leadingWhitespace.length);
+  if (body.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if ("_cached" in parsed) return content;
+        if (Object.keys(parsed).length > 0) {
+          return `${leadingWhitespace}{"_cached":${JSON.stringify(note)},${body.slice(1)}`;
+        }
+      }
+    } catch {
+      // Not JSON: fall through to the text prefix.
+    }
+  }
+  return `[cached] ${note}\n${content}`;
+}
+
 export function buildRedundantFileOperationToolResult(opts: {
   toolUseId: string;
   fileOpCheck: { cachedResult?: string; reason?: string; suggestion?: string };
@@ -890,6 +1186,8 @@ export function recordToolFailureOutcome(opts: {
   persistentToolFailures: Map<string, number>;
   recordFailure: (toolName: string, error: string) => boolean;
   isHardToolFailure: (toolName: string, result: Any, reason: string) => boolean;
+  /** False for a failure that is not a retry of the same thing (e.g. a red test run after an edit). */
+  countTowardRepeatedFailures?: boolean;
 }): {
   shouldDisable: boolean;
   isHardFailure: boolean;
@@ -904,7 +1202,9 @@ export function recordToolFailureOutcome(opts: {
   }
   const shouldDisable = opts.recordFailure(opts.toolName, opts.failureReason);
   const isHardFailure = opts.isHardToolFailure(opts.toolName, opts.result, opts.failureReason);
-  const failureCount = (opts.persistentToolFailures.get(opts.toolName) || 0) + 1;
+  const previousCount = opts.persistentToolFailures.get(opts.toolName) || 0;
+  const failureCount =
+    opts.countTowardRepeatedFailures === false ? previousCount : previousCount + 1;
   opts.persistentToolFailures.set(opts.toolName, failureCount);
   return {
     shouldDisable,
@@ -1018,8 +1318,49 @@ export function isHardToolFailure(toolName: string, result: Any, failureReason =
     );
   }
 
-  return /not currently executable|blocked by|disabled|not available in this context|not configured/.test(
-    message,
+  // Free-text fallback for results without structured flags. Only tool-level
+  // conditions count: a site that blocked one fetch ("blocked by the site's bot
+  // protection") or a page that needs JavaScript says nothing about the tool.
+  return (
+    /not currently executable|not available in this context|not configured/.test(message) ||
+    /\bblocked by\b(?:\s+[\w/'"-]+){0,4}?\s+(?:polic(?:y|ies)|allowlist|denylist)\b/.test(
+      message,
+    ) ||
+    /(?:integration|tool|skill|connector|plugin|provider|search|fetch|browser|shell|command|feature|capabilit(?:y|ies))s?\b[^.\n]{0,30}?\b(?:is|are|been|was)\s+(?:currently\s+)?disabled\b/.test(
+      message,
+    ) ||
+    /\bdisabled\s+(?:due to|by (?:policy|an? admin|the administrator|your organi[sz]ation)|in settings)\b/.test(
+      message,
+    )
+  );
+}
+
+/**
+ * A run_command result for a command that ran to completion and exited
+ * non-zero with output, such as a red test or build run. A command that could
+ * not run or report (spawn error, timeout, user stop, sandbox abort, policy
+ * block, no output at all) does not qualify.
+ */
+export function isCompletedNonZeroExitCommandResult(result: Any): boolean {
+  if (!result || typeof result !== "object" || result.success !== false) return false;
+  if (result.blocked === true || result.disabled === true || result.unavailable === true) {
+    return false;
+  }
+  if (typeof result.exitCode !== "number" || result.exitCode === 0) return false;
+  if (result.timedOut === true) return false;
+  if (result.terminationReason !== undefined && result.terminationReason !== "normal") {
+    return false;
+  }
+  const error = typeof result.error === "string" ? result.error.trim() : "";
+  if (error && !/^(?:command\s+)?exit(?:ed)?\s+(?:with\s+)?code\s+-?\d+\b/i.test(error)) {
+    return false;
+  }
+  const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+  // The shell tool fills an empty stderr with a placeholder explaining that
+  // the command printed nothing; that is not output from the command.
+  return (
+    Boolean(stdout) || (Boolean(stderr) && !/^Command exited with no output\b/.test(stderr))
   );
 }
 

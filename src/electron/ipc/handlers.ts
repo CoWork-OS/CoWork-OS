@@ -234,6 +234,7 @@ import { ContextPolicyManager } from "../gateway/context-policy-repository-facad
 import { OnboardingProfileService } from "../onboarding/OnboardingProfileService";
 import type { ApplyOnboardingProfileRequest } from "../../shared/onboarding";
 import {
+  DEFAULT_WORKSPACE_PERMISSIONS,
   IPC_CHANNELS,
   AgentMailSettingsData,
   AgentMailListEntry,
@@ -4332,19 +4333,13 @@ export async function setupIpcHandlers(
       );
     }
 
-    // Provide default permissions if not specified
-    // Note: network is enabled by default for browser tools (web access)
-    const defaultPermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      // Named access profiles decide command-tool availability per task.
-      // Keep new workspace records fail-closed for legacy callers.
-      shell: false,
-    };
-
-    return workspaceRepo.create(name, resolvedPath, permissions ?? defaultPermissions);
+    // Provide default permissions if not specified (network on for browser
+    // tools; shell off because named access profiles decide command tools).
+    return workspaceRepo.create(
+      name,
+      resolvedPath,
+      permissions ?? { ...DEFAULT_WORKSPACE_PERMISSIONS },
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_LIST, async () => {

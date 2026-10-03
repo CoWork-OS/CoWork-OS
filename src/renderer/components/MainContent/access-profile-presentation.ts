@@ -8,11 +8,11 @@ export function getAccessProfilePresentation(
     return { label: profile.label, description: profile.description, notice: null };
   }
 
-  const notice =
-    "Approval prompts are off in this runtime. Actions allowed by this profile can run; requests for additional authority are blocked.";
+  // Without the legacy approval queue, an ask is answered in the task itself:
+  // the daemon raises an inline "Deny / Allow once" card instead of a modal.
   return {
-    label: `${profile.label} · prompts off`,
-    description: "Allowed actions can run; requests that need approval are blocked.",
-    notice,
+    label: profile.label,
+    description: `${profile.description} Requests that need approval appear in the task as a Deny / Allow once card.`,
+    notice: null,
   };
 }

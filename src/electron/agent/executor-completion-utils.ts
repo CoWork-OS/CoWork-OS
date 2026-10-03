@@ -1,7 +1,15 @@
 import * as path from "path";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
+import { TOOL_GROUPS, type RuntimeToolResultKind } from "../../shared/types";
 import type { CompletionContract } from "./executor-helpers";
 import { CANONICAL_ARTIFACT_PATH_REGEX, extractArtifactExtensionsFromText } from "./step-contract";
+import {
+  canonicalizeToolName,
+  isArtifactGenerationToolName,
+  isCanonicalWriteToolName,
+  isFileMutationToolName,
+} from "./tool-semantics";
+import { getDefaultRuntimeToolMetadata } from "./tools/runtime-tool-definition";
 
 const ARTIFACT_CREATION_VERB_REGEX =
   /\b(create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)\b/;
@@ -29,6 +37,29 @@ const VERIFICATION_TOOL_EVIDENCE = new Set([
   // source extraction internally rather than through a model tool call. Treat
   // that extraction as verification evidence for its completed review step.
   "bounded_document_extract",
+]);
+// Content-gathering tools whose names do not follow the read_/list_/get_/
+// search_ conventions the runtime metadata infers read-only results from.
+const CONTENT_GATHERING_TOOL_REGEX =
+  /^(?:scrape_|qa_|youtube_)|^(?:parse_document|read_pdf_visual|analyze_image|execute_code)$/;
+// Lanes whose tools act on the agent's own state rather than observe the task.
+const NON_EVIDENCE_TOOL_LANES = new Set(["memory", "orchestration", "admin", "artifact"]);
+const SELF_STATE_TOOL_REGEX = /^task_list_/;
+const EVIDENCE_RESULT_KINDS = new Set<RuntimeToolResultKind>([
+  "read",
+  "search",
+  "command",
+  "browser",
+  "integration",
+]);
+const READ_GROUP_TOOLS = new Set<string>(TOOL_GROUPS["group:read"]);
+// Tools that can actually produce the command output or API responses an
+// execution report claims (exit codes, HTTP statuses, pass/fail results).
+const COMMAND_OR_API_EVIDENCE_TOOLS = new Set([
+  "run_command",
+  "execute_code",
+  "http_request",
+  "web_fetch",
 ]);
 
 export function normalizePromptForContracts(taskPrompt: string): string {
@@ -344,9 +375,15 @@ export function extractExplicitOutputExtensions(taskTitle: string, taskPrompt: s
     while (pathMatch) {
       const prefix = clause.slice(0, pathMatch.index);
       // A path after an input/source cue belongs to the source material, not
-      // the requested deliverable ("create report from notes.txt").
+      // the requested deliverable ("create report from notes.txt", "write a
+      // summary of README.md"). A path right after "as"/"to"/"into"/"at" is
+      // the destination even when the clause names a source first.
+      const namesDestination = /\b(?:as|to|into|at)\s+(?:(?:the|a|an|new)\s+)?(?:file\s+)?$/i.test(
+        prefix,
+      );
       if (
-        !/\b(?:read|from|based\s+on|using|input|source|original|prior|previous|include|including)\b[^.!?\n]{0,60}$/i.test(
+        namesDestination ||
+        !/\b(?:read|from|based\s+on|using|input|source|original|prior|previous|include|including|of|about|for)\b[^.!?\n]{0,60}$/i.test(
           prefix,
         )
       ) {
@@ -409,7 +446,7 @@ export function buildCompletionGuidancePrompt(opts: {
     "TASK COMPLETION GUIDANCE:",
     "- When you create or modify files, use the appropriate write tool — do not describe what you would write without actually writing it.",
     "- If a tool call fails, report the failure honestly and try an alternative approach. Never fabricate tool output.",
-    "- End with a substantive summary of what was accomplished, not just a status message.",
+    "- End with a substantive summary of what was accomplished, not just a status message (internal verification steps use their own OK/FAIL reply format instead).",
   ];
 
   if (opts.hasReadOnlyConstraint) {
@@ -441,8 +478,9 @@ export function buildCompletionGuidancePrompt(opts: {
  * the task should produce text output only, not file artifacts.
  *
  * "read-only" alone is NOT matched — it must appear as a constraint declaration
- * (e.g. "this is read-only", "read-only mode"), not as a subject to fix
- * (e.g. "fix the read-only permission", "database is in read-only mode, fix it").
+ * (e.g. "this is read-only", "read-only review", "work in read-only mode"), not
+ * as an attribute of a deliverable ("add a read-only mode toggle") or a subject
+ * to fix (e.g. "fix the read-only permission", "database is in read-only mode, fix it").
  */
 export function detectReadOnlyConstraint(prompt: string): boolean {
   const lower = String(prompt || "").toLowerCase();
@@ -465,11 +503,27 @@ export function detectReadOnlyConstraint(prompt: string): boolean {
     );
   if (hasScopedOtherFileRestriction && explicitlyRequestsFileOutput) return false;
 
-  // Explicit "do not" / "don't" constraints — unambiguous
+  // Explicit "do not" / "don't" constraints are global only when they are not
+  // narrowed to a scope: "don't edit files under vendor/", "do not make
+  // changes to the database schema", "no file changes beyond package.json" and
+  // "without modifying its public signature" all permit the requested change.
+  const wholeWorkspace =
+    String.raw`(?:(?:this|the|your|my|our|any)\s+)?(?:repo(?:sitory)?|workspace|project|` +
+    String.raw`code(?:base)?|working\s+(?:tree|copy|directory)|file\s*system|disk)\b`;
+  const unscoped =
+    String.raw`(?!\s+(?:(?:outside|other\s+than|except|besides|beyond|apart\s+from|that|which|` +
+    String.raw`from|of|matching|named|like|for)\b|(?:in|under|inside|within|to|on)\b` +
+    String.raw`(?!\s+${wholeWorkspace})))`;
   const hasExplicitConstraint =
-    /\b(?:do\s+not\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|do\s+not\s+make\s+(?:any\s+)?changes|no\s+file\s+changes|without\s+(?:editing|modifying|creating)|don'?t\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?|situational\s+awareness\s+(?:only|mode))\b/.test(
-      lower,
-    );
+    new RegExp(
+      String.raw`\b(?:do\s+not|don'?t)\s+(?:edit|create|modify|write)\s+(?:any\s+)?files?\b${unscoped}`,
+    ).test(lower) ||
+    new RegExp(String.raw`\bdo\s+not\s+make\s+(?:any\s+)?changes\b${unscoped}`).test(lower) ||
+    new RegExp(String.raw`\bno\s+file\s+changes\b${unscoped}`).test(lower) ||
+    new RegExp(
+      String.raw`\bwithout\s+(?:editing|modifying|creating)(?:\s*(?:[.!?;,\n]|$)|\s+anything\b(?!\s+else\b)|\s+(?:any\s+|the\s+)?files?\b${unscoped}|\s+${wholeWorkspace})`,
+    ).test(lower) ||
+    /\bsituational\s+awareness\s+(?:only|mode)\b/.test(lower);
   if (hasExplicitConstraint) return true;
 
   // A coordinated prohibition such as "do not create, write, edit, move, or
@@ -487,9 +541,29 @@ export function detectReadOnlyConstraint(prompt: string): boolean {
     );
   if (hasNegatedFileOperationList && !requestsChangeOutsideProhibition) return true;
 
-  // "read-only" requires constraint context — must NOT be preceded by fix/debug verbs
-  // "fix the read-only issue" → false, "this task is read-only" → true
-  if (/\bread[- ]only\b/.test(lower)) {
+  // "read-only" counts only when it frames the task itself ("this task is
+  // read-only", "read-only review: ...", "stay read-only", "Read-only."). As an
+  // attribute of something to build ("a read-only mode toggle", "make the field
+  // read-only", "a read-only Postgres user") it describes the deliverable.
+  // It must also not be the subject of a fix ("fix the read-only issue").
+  const readOnly = String.raw`read[- ]only\b`;
+  const readOnlyTaskFraming =
+    new RegExp(
+      String.raw`\b(?:this|everything|task|request|job|session|review|analysis|audit|investigation|inspection|exploration|pass|assessment)\s+(?:is|should\s+be|must\s+be|will\s+be|stays?|remains?)\s+(?:strictly\s+|purely\s+|completely\s+|entirely\s+)?${readOnly}`,
+    ).test(lower) ||
+    new RegExp(
+      String.raw`(?:^|[.!?;:\n]\s*|\b(?:please|and|but|you|we)\s+(?:(?:must|should|will|need\s+to)\s+)?)(?:stay|remain|work|operate|proceed|act)\s+(?:strictly\s+|purely\s+)?(?:in\s+)?${readOnly}`,
+    ).test(lower) ||
+    new RegExp(
+      String.raw`\b${readOnly}\s+(?:task|request|review|analysis|audit|investigation|inspection|exploration|pass|assessment|session)\b`,
+    ).test(lower) ||
+    new RegExp(String.raw`\b(?:you(?:'re|\s+are)|we(?:'re|\s+are))\s+(?:in\s+)?${readOnly}`).test(
+      lower,
+    ) ||
+    new RegExp(String.raw`(?:^|[.!?\n]\s*)${readOnly}(?:\s+only\b)?\s*(?:[:.,!;\-–—]|$)`).test(
+      lower,
+    );
+  if (readOnlyTaskFraming) {
     const isSubjectToFix =
       /\b(?:fix|repair|resolve|debug|troubleshoot|diagnose|investigate|restore|change|update|remove|disable|toggle|switch)\b[^.!?\n]{0,40}\bread[- ]only\b/.test(
         lower,
@@ -726,17 +800,45 @@ export function responseHasReviewReportEvidenceSignal(text: string): boolean {
   return matchedFieldCount >= 4 && hasMismatchOrFinding && hasSuggestedDocChange && hasPriority;
 }
 
+/**
+ * Returns true when a successful call of this tool observed something about the
+ * task (read, searched, fetched, browsed, queried, or executed), based on the
+ * tool's runtime semantics rather than a fixed list of names. Writes, artifact
+ * generators, orchestration, and reads of the agent's own memory or checklist
+ * are not evidence.
+ */
+export function isVerificationEvidenceTool(toolName: string): boolean {
+  const canonical = canonicalizeToolName(
+    String(toolName || "")
+      .trim()
+      .toLowerCase(),
+  );
+  if (!canonical) return false;
+  if (VERIFICATION_TOOL_EVIDENCE.has(canonical)) return true;
+  if (
+    isFileMutationToolName(canonical) ||
+    isArtifactGenerationToolName(canonical) ||
+    isCanonicalWriteToolName(canonical)
+  ) {
+    return false;
+  }
+  if (CONTENT_GATHERING_TOOL_REGEX.test(canonical)) return true;
+  if (SELF_STATE_TOOL_REGEX.test(canonical)) return false;
+  const runtime = getDefaultRuntimeToolMetadata(canonical);
+  if (runtime.capabilityTags.some((tag) => NON_EVIDENCE_TOOL_LANES.has(tag))) return false;
+  return (
+    READ_GROUP_TOOLS.has(canonical) ||
+    runtime.readOnly ||
+    EVIDENCE_RESULT_KINDS.has(runtime.resultKind) ||
+    runtime.capabilityTags.includes("integration")
+  );
+}
+
 export function hasVerificationToolEvidence(
   toolResultMemory: Array<{ tool: string }> | undefined,
 ): boolean {
   if (!Array.isArray(toolResultMemory) || toolResultMemory.length === 0) return false;
-  return toolResultMemory.some((entry) =>
-    VERIFICATION_TOOL_EVIDENCE.has(
-      String(entry.tool || "")
-        .trim()
-        .toLowerCase(),
-    ),
-  );
+  return toolResultMemory.some((entry) => isVerificationEvidenceTool(entry.tool));
 }
 
 export function responseLooksOperationalOnly(text: string): boolean {
@@ -929,33 +1031,57 @@ export function hasArtifactEvidence(opts: {
   );
 }
 
+/**
+ * A direct conclusion ("Yes. The Pro plan includes SSO…", "3 unique attendees")
+ * rather than a status line. Only meaningful together with tool evidence.
+ */
+function responseStatesConclusion(text: string): boolean {
+  const normalized = String(text || "").trim();
+  if (!normalized || responseLooksOperationalOnly(normalized)) return false;
+  return responseHasDecisionSignal(normalized) || responseHasConcreteResultSignal(normalized);
+}
+
 export function hasVerificationEvidence(opts: {
   bestCandidate: string;
   planSteps?: Array<{ status?: string; description?: string }>;
   toolResultMemory?: Array<{ tool: string }>;
   successfulTools?: string[];
 }): boolean {
+  const toolNames = [
+    ...(opts.toolResultMemory || []).map((entry) => entry.tool),
+    ...(opts.successfulTools || []),
+  ].map((tool) =>
+    canonicalizeToolName(
+      String(tool || "")
+        .trim()
+        .toLowerCase(),
+    ),
+  );
+  // Verification needs something the run actually observed. Wording alone
+  // (including a well-formed command report) is easy to produce without work.
+  if (!toolNames.some((tool) => isVerificationEvidenceTool(tool))) return false;
+
+  // Reported command results or API responses count only when a tool that can
+  // produce them ran; reading package.json does not show that `npm test` passed.
+  if (
+    responseHasExecutionReportEvidenceSignal(opts.bestCandidate) &&
+    !toolNames.some((tool) => COMMAND_OR_API_EVIDENCE_TOOLS.has(tool))
+  ) {
+    return false;
+  }
+
   const hasCompletedReviewStep = !!opts.planSteps?.some(
     (step) =>
       step.status === "completed" &&
       (isVerificationStepDescription(step.description || "") ||
         COMPLETED_REVIEW_STEP_REGEX.test(step.description || "")),
   );
-  const hasToolEvidence = hasVerificationToolEvidence([
-    ...(opts.toolResultMemory || []),
-    ...(opts.successfulTools || []).map((tool) => ({ tool })),
-  ]);
-
-  if (responseHasExecutionReportEvidenceSignal(opts.bestCandidate)) {
-    return true;
-  }
-
   return (
-    hasToolEvidence &&
-    (hasCompletedReviewStep ||
-      responseHasVerificationSignal(opts.bestCandidate) ||
-      responseHasReasonedConclusionSignal(opts.bestCandidate) ||
-      responseHasReviewReportEvidenceSignal(opts.bestCandidate))
+    hasCompletedReviewStep ||
+    responseHasVerificationSignal(opts.bestCandidate) ||
+    responseHasReasonedConclusionSignal(opts.bestCandidate) ||
+    responseHasReviewReportEvidenceSignal(opts.bestCandidate) ||
+    responseStatesConclusion(opts.bestCandidate)
   );
 }
 
@@ -984,8 +1110,12 @@ export function getFinalOutcomeGuardError(opts: {
   }
 
   if (!opts.hasArtifactEvidence) {
+    // A substantive inline answer may stand in for an inferred deliverable
+    // ("write a summary report"), but never for an explicitly requested output
+    // path or format: a claim to have written it is not the file.
+    const explicitOutputRequested = opts.contract.requiredArtifactExtensions.length > 0;
     const hasSubstantiveText = opts.bestCandidate.trim().length >= 50;
-    if (!(hasSubstantiveText && opts.createdFiles.length === 0)) {
+    if (explicitOutputRequested || !(hasSubstantiveText && opts.createdFiles.length === 0)) {
       const requested = opts.contract.requiredArtifactExtensions.join(", ");
       return requested
         ? `Task missing artifact evidence: expected an output artifact (${requested}) but no matching created file was detected.`

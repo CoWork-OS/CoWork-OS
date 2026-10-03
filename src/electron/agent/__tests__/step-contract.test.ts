@@ -88,6 +88,30 @@ describe("step-contract write intent", () => {
     ).toBe(false);
   });
 
+  it.each([
+    "Investigate the crash in parser.ts and patch it",
+    "Check the config and correct the port number",
+    "Look into the flaky test and stabilize it",
+    "Analyze the slow query and optimize it",
+    "Inspect the migration and change the column type",
+    "Review the CSS and adjust the spacing",
+    "Convert it to TypeScript",
+    "Resolve the merge conflicts in app.ts",
+    "Bump the version and upgrade the lockfile",
+    "Repair the broken symlink and migrate the config",
+  ])("treats remediation verbs as write intent: %s", (description) => {
+    expect(descriptionHasStrongWriteIntent(description)).toBe(true);
+  });
+
+  it.each([
+    "Review the change log for the release",
+    "Check whether the totals are correct",
+    "Resolve the hostname for the staging server",
+    "Summarize what changed in the last release",
+  ])("does not treat noun/adjective uses as write intent: %s", (description) => {
+    expect(descriptionHasStrongWriteIntent(description)).toBe(false);
+  });
+
   it("recognizes checklist/report phrasing cues for verification-mode policy decisions", () => {
     expect(
       descriptionHasChecklistReportCue(

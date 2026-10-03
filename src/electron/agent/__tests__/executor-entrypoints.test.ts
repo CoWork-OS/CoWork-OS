@@ -63,7 +63,7 @@ describe("TaskExecutor entrypoint guards", () => {
       invalidateFileRead: vi.fn(),
       invalidateDirectoryListing: vi.fn(),
     };
-    executor.toolCallDeduplicator = { clearReadOnlyHistory: vi.fn() };
+    executor.toolCallDeduplicator = { clearHistoryAfterWorkspaceMutation: vi.fn() };
     executor.recordWebEvidence = vi.fn();
     executor.trackFileRead = vi.fn();
     executor.summarizeToolResult = vi.fn();
@@ -464,7 +464,10 @@ describe("TaskExecutor entrypoint guards", () => {
     executor.endDebugRuntimeSessionIfNeeded = vi.fn();
     executor.stopProgressJournal = vi.fn();
     executor.killShellProcess = vi.fn();
-    executor.toolRegistry = { cancelShellSession: vi.fn(async () => undefined) };
+    executor.toolRegistry = {
+      cancelShellSession: vi.fn(async () => undefined),
+      stopBackgroundProcesses: vi.fn(async () => 0),
+    };
     executor.closeAcpxRuntimeSession = vi.fn(async () => undefined);
     executor.discardProvisionalBootstrapArtifacts = vi.fn();
     executor.sandboxRunner = { cleanup: vi.fn() };
@@ -472,6 +475,10 @@ describe("TaskExecutor entrypoint guards", () => {
     await (TaskExecutor.prototype as Any).cancel.call(executor, "user");
 
     expect(executor.toolRegistry.cancelShellSession).toHaveBeenCalledTimes(1);
+    // Background dev servers outlive a finished turn, not a cancelled task.
+    expect(executor.toolRegistry.stopBackgroundProcesses).toHaveBeenCalledWith(
+      "task_cancelled:user",
+    );
     expect(cancelRunner).toHaveBeenCalledTimes(1);
     expect(executor.getAcpxRuntimeRunner).not.toHaveBeenCalled();
     expect(executor.killShellProcess).toHaveBeenCalledWith(true);

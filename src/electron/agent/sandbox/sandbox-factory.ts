@@ -15,6 +15,7 @@ import { MacOSSandbox } from "./macos-sandbox";
 import { DockerSandbox } from "./docker-sandbox";
 import { spawn, type ChildProcess } from "child_process";
 import { createSecureTempFile } from "./security-utils";
+import { BoundedOutputBuffer } from "./bounded-output";
 
 /**
  * Sandbox type enumeration
@@ -33,6 +34,14 @@ export interface SandboxOptions {
   maxOutputSize?: number;
   /** Allow network access */
   allowNetwork?: boolean;
+  /**
+   * With network denied, still let the command accept TCP connections so local
+   * servers work. macOS seatbelt cannot limit this to loopback, so a caller
+   * that sets it must also watch the process group with LoopbackListenerGuard.
+   */
+  allowLoopbackListen?: boolean;
+  /** spawnProcess only: lead a new process group so the whole tree can be stopped. */
+  detached?: boolean;
   /** Additional allowed paths for read access */
   allowedReadPaths?: string[];
   /** Additional allowed paths for write access */
@@ -53,6 +62,8 @@ export interface SandboxResult {
   killed: boolean;
   timedOut: boolean;
   error?: string;
+  /** True when stdout or stderr exceeded maxOutputSize and had its middle omitted. */
+  truncated?: boolean;
 }
 
 /**
@@ -124,8 +135,9 @@ export class NoSandbox implements ISandbox {
     const cwd = options.cwd || this.workspace.path;
 
     return new Promise((resolve) => {
-      let stdout = "";
-      let stderr = "";
+      // Keep the start and the end of long output; errors and summaries print last.
+      const stdout = new BoundedOutputBuffer(maxOutputSize);
+      const stderr = new BoundedOutputBuffer(maxOutputSize);
       let killed = false;
       let timedOut = false;
 
@@ -154,34 +166,18 @@ export class NoSandbox implements ISandbox {
         proc.kill("SIGKILL");
       }, timeout);
 
-      proc.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stdout.length + chunk.length <= maxOutputSize) {
-          stdout += chunk;
-        } else if (stdout.length < maxOutputSize) {
-          stdout += chunk.slice(0, maxOutputSize - stdout.length);
-          stdout += "\n[Output truncated]";
-        }
-      });
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stderr.length + chunk.length <= maxOutputSize) {
-          stderr += chunk;
-        } else if (stderr.length < maxOutputSize) {
-          stderr += chunk.slice(0, maxOutputSize - stderr.length);
-          stderr += "\n[Output truncated]";
-        }
-      });
+      proc.stdout?.on("data", (data: Buffer) => stdout.append(data.toString()));
+      proc.stderr?.on("data", (data: Buffer) => stderr.append(data.toString()));
 
       proc.on("close", (code) => {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: code ?? 1,
-          stdout,
-          stderr,
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
           killed,
           timedOut,
+          truncated: stdout.truncated || stderr.truncated,
         });
       });
 
@@ -189,11 +185,12 @@ export class NoSandbox implements ISandbox {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: 1,
-          stdout,
+          stdout: stdout.toString(),
           stderr: err.message,
           killed,
           timedOut,
           error: err.message,
+          truncated: stdout.truncated,
         });
       });
     });

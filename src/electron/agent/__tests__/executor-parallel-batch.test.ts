@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { LLMToolResult } from "../llm";
 import { TaskExecutor } from "../executor";
+import { createToolBatchSummaryGenerator } from "../runtime/ToolBatchSummaryGenerator";
 
 type ParallelExecutorFixture = {
   executor: Any;
@@ -308,5 +309,23 @@ describe("TaskExecutor parallel tool batches", () => {
       toolBatchPhase: "follow_up",
       groupId: "tools:step:test:1",
     });
+  });
+});
+
+describe("TaskExecutor tool batch labels", () => {
+  it("labels a finished batch synchronously from the batch itself", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.toolBatchSummaryGenerator = createToolBatchSummaryGenerator();
+    const reports = ["read_file", "list_directory"].map((name, index) => ({
+      call: { index, toolUse: makeToolUse(`use-${index}`, name, { path: "src" }) },
+      effectiveToolName: name,
+      status: "executed" as const,
+      toolResult: { type: "tool_result" as const, tool_use_id: `use-${index}`, content: "ok" },
+    }));
+
+    const label = executor.summarizeToolBatch("step", reports, "Inspect the workspace layout");
+
+    expect(label).not.toBeInstanceOf(Promise);
+    expect(label).toEqual({ semanticSummary: "Inspect The Workspace Layout", source: "fallback" });
   });
 });

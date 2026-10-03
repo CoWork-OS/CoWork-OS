@@ -44,6 +44,9 @@ export class AzureAnthropicProvider implements LLMProvider {
       apiKey,
       baseUrl,
       defaultModel: deployment,
+      // Azure serves Anthropic's own models: send thinking/effort per model.
+      sendThinkingConfig: true,
+      reasoningEffort: config.azureAnthropicReasoningEffort,
     });
   }
 

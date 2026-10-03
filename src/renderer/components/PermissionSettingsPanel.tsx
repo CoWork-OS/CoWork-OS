@@ -563,9 +563,10 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         </select>
         <p className="settings-hint">
           Command tools are governed by this access profile. Ask and Approve for me use the
-          workspace-write boundary; Full access also removes the local sandbox. The local runtime
-          authorizes ordinary boundary decisions without opening approval prompts. Set
-          COWORK_APPROVAL_PROMPTS=on before launch to restore the legacy approval queue for a
+          workspace-write boundary; Full access also removes the local sandbox. Allowed work runs
+          without approval prompts; anything that still needs approval appears in the task as a Deny
+          / Allow once card, and runs with nobody to answer (scheduled, CLI, sub-agents) deny it.
+          Set COWORK_APPROVAL_PROMPTS=on before launch to restore the legacy approval queue for a
           diagnostic run. Custom profiles can narrow the command-tool surface further.
         </p>
       </div>

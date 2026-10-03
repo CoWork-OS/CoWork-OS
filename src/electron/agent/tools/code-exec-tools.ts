@@ -5,7 +5,7 @@
  * Delegates to the existing ISandbox infrastructure (MacOSSandbox / DockerSandbox / NoSandbox).
  *
  * Supported languages: python, javascript, shell
- * Timeout: 1–60 seconds (default 30)
+ * Timeout: 1–300 seconds (default 30)
  * Output cap: 100 KB per stream
  */
 
@@ -18,7 +18,7 @@ import { canEnableSubprocessNetwork } from "../../security/subprocess-network-po
 export interface CodeExecInput {
   language: "python" | "javascript" | "shell";
   code: string;
-  /** Timeout in seconds. Clamped to [1, 60]. Default: 30. */
+  /** Timeout in seconds. Clamped to [1, 300]. Default: 30. */
   timeout_seconds?: number;
   /** Allow outbound network access inside the sandbox. Default: false. */
   allow_network?: boolean;
@@ -36,7 +36,19 @@ export interface CodeExecResult {
 const MAX_OUTPUT_BYTES = 100 * 1024; // 100 KB
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MIN_TIMEOUT_SECONDS = 1;
-const MAX_TIMEOUT_SECONDS = 60;
+// Data processing, model inference and test scripts commonly need a few minutes;
+// a 60 s ceiling forced them into run_command. The process still runs in the OS
+// sandbox with the same output cap, network and approval rules.
+const MAX_TIMEOUT_SECONDS = 300;
+
+/** Run time in seconds that execute_code allows for a requested timeout_seconds. */
+export function resolveCodeExecTimeoutSeconds(requested: unknown): number {
+  const seconds =
+    typeof requested === "number" && Number.isFinite(requested)
+      ? requested
+      : DEFAULT_TIMEOUT_SECONDS;
+  return Math.min(MAX_TIMEOUT_SECONDS, Math.max(MIN_TIMEOUT_SECONDS, Math.round(seconds)));
+}
 
 export class CodeExecTools {
   private sandbox: ISandbox | null = null;
@@ -104,10 +116,7 @@ export class CodeExecTools {
       );
     }
 
-    const timeoutSec = Math.min(
-      MAX_TIMEOUT_SECONDS,
-      Math.max(MIN_TIMEOUT_SECONDS, Math.round(input.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS)),
-    );
+    const timeoutSec = resolveCodeExecTimeoutSeconds(input.timeout_seconds);
     const options: SandboxOptions = {
       timeout: timeoutSec * 1000,
       maxOutputSize: MAX_OUTPUT_BYTES,

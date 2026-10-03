@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { ContentBuilder } from "../../content/ContentBuilder";
 import {
+  applyAnthropicExplicitCacheControl,
   computePromptCacheKey,
   computeStablePrefixHash,
   computeToolSchemaHash,
   buildSystemBlock,
   extractAnthropicUsage,
+  extractPiAiUsage,
   isPromptCacheRequestUnsupportedError,
   buildOpenAIPromptCacheFields,
   mapPromptCacheTtlToOpenAIRetention,
@@ -421,11 +423,34 @@ describe("prompt-cache stable prefix hashing", () => {
         cache_creation: { ephemeral_1h_input_tokens: 80 },
       }),
     ).toMatchObject({
-      inputTokens: 100,
+      // Inclusive usage contract: cache reads and writes are part of inputTokens.
+      inputTokens: 200,
       cachedTokens: 20,
       cacheWriteTokens: 80,
       cacheWriteTtl: "1h",
     });
+  });
+
+  it("folds Anthropic's disjoint cache counters into inclusive input usage", () => {
+    expect(
+      extractAnthropicUsage({
+        input_tokens: 10_000,
+        output_tokens: 1_000,
+        cache_read_input_tokens: 90_000,
+      }),
+    ).toEqual({ inputTokens: 100_000, outputTokens: 1_000, cachedTokens: 90_000 });
+  });
+
+  it("folds pi-ai's disjoint cache counters into inclusive input usage", () => {
+    expect(
+      extractPiAiUsage({ input: 1_000, output: 50, cacheRead: 9_000, cacheWrite: 500 }),
+    ).toEqual({
+      inputTokens: 10_500,
+      outputTokens: 50,
+      cachedTokens: 9_000,
+      cacheWriteTokens: 500,
+    });
+    expect(extractPiAiUsage(undefined)).toBeUndefined();
   });
 
   it("only disables caching for errors that identify cache request incompatibility", () => {
@@ -433,5 +458,30 @@ describe("prompt-cache stable prefix hashing", () => {
       true,
     );
     expect(isPromptCacheRequestUnsupportedError(400, "Invalid API key")).toBe(false);
+  });
+});
+
+describe("applyAnthropicExplicitCacheControl with thinking blocks", () => {
+  it("marks the last non-thinking block, since thinking blocks cannot carry cache_control", () => {
+    const marked = applyAnthropicExplicitCacheControl(
+      [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Partial answer" },
+            { type: "thinking", thinking: "", signature: "sig" },
+          ],
+        },
+        { role: "assistant", content: [{ type: "redacted_thinking", data: "opaque" }] },
+      ],
+      { ttl: "5m", nativeAnthropic: true, includeSystem: false, maxBreakpoints: 2 },
+    );
+
+    expect(marked[0].content).toEqual([
+      { type: "text", text: "Partial answer", cache_control: { type: "ephemeral" } },
+      { type: "thinking", thinking: "", signature: "sig" },
+    ]);
+    expect(marked[1].content).toEqual([{ type: "redacted_thinking", data: "opaque" }]);
+    expect(marked[1]).not.toHaveProperty("cache_control");
   });
 });

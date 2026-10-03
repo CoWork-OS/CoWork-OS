@@ -6,6 +6,14 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { execFile } from "child_process";
+
+// Pass-through spy so the .gitignore tests can see which repository git is pointed at.
+vi.mock("child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("child_process")>();
+  return { ...actual, execFile: vi.fn(actual.execFile) };
+});
 
 // Mock electron
 vi.mock("electron", () => ({
@@ -16,6 +24,7 @@ vi.mock("electron", () => ({
 
 // Import after mocking
 import { GrepTools } from "../grep-tools";
+import { BoundedRegex, RegexDeadlineError } from "../bounded-regex";
 import { Workspace } from "../../../../shared/types";
 
 // Mock daemon
@@ -368,5 +377,403 @@ describe("GrepTools", () => {
         }),
       );
     });
+  });
+});
+
+/** Lets the first `allowed` regex evaluations run, then reports an exhausted time budget. */
+class BudgetLimitedGrepTools extends GrepTools {
+  constructor(
+    workspace: Workspace,
+    private readonly allowed: number,
+  ) {
+    super(workspace, mockDaemon as Any, "test-task-id");
+  }
+
+  protected override createRegexEvaluator(): BoundedRegex {
+    const evaluator = new BoundedRegex();
+    const evaluate = evaluator.evaluate.bind(evaluator);
+    let remaining = this.allowed;
+    evaluator.evaluate = async (...args: Parameters<BoundedRegex["evaluate"]>) => {
+      if (remaining <= 0) {
+        throw new RegexDeadlineError("Regex search exceeded its total execution budget");
+      }
+      remaining -= 1;
+      return evaluate(...args);
+    };
+    return evaluator;
+  }
+}
+
+describe("GrepTools regex budget exhaustion", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const workspaceWithMatches = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-budget-"));
+    dirs.push(dir);
+    for (const name of ["a.txt", "b.txt", "c.txt"]) {
+      fs.writeFileSync(path.join(dir, name), `intro\nneedle in ${name}\noutro\n`);
+    }
+    return { ...mockWorkspace, path: dir };
+  };
+
+  it.each(["content", "files_only", "count"] as const)(
+    "returns matches found before the budget ran out in %s mode",
+    async (outputMode) => {
+      const tool = new BudgetLimitedGrepTools(workspaceWithMatches(), 1);
+
+      const result = await tool.grep({ pattern: "needle", outputMode });
+
+      expect(result.success).toBe(true);
+      expect(result.matches).toHaveLength(1);
+      expect(result.totalMatches).toBe(1);
+      expect(result.truncated).toBe(true);
+      expect(result.truncationReason).toMatch(/budget/);
+      expect(result.truncationReason).toMatch(/1 of 3 files/);
+    },
+  );
+
+  it("still fails, with progress, when the budget runs out before any match", async () => {
+    const tool = new BudgetLimitedGrepTools(workspaceWithMatches(), 0);
+
+    const result = await tool.grep({ pattern: "needle" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/budget/);
+    expect(result.error).toMatch(/0 of 3 files/);
+  });
+});
+
+describe("GrepTools document-heavy directories", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const documentHeavyWorkspace = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-documents-"));
+    dirs.push(dir);
+    for (let index = 0; index < 6; index += 1) {
+      fs.writeFileSync(path.join(dir, `report-${index}.pdf`), "%PDF-1.4 placeholder");
+    }
+    fs.writeFileSync(path.join(dir, "notes.txt"), "first\nneedle in notes\n");
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.writeFileSync(path.join(dir, "src", "app.ts"), "export const needle = 1;\n");
+    return new GrepTools({ ...mockWorkspace, path: dir }, mockDaemon as Any, "test-task-id");
+  };
+
+  it("judges the requested path, not the workspace root", async () => {
+    const result = await documentHeavyWorkspace().grep({ pattern: "needle", path: "src" });
+
+    expect(result.success).toBe(true);
+    expect(result.matches).toEqual([
+      { file: "src/app.ts", line: 1, content: "export const needle = 1;" },
+    ]);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("still searches the text files of a document-heavy directory and warns about the rest", async () => {
+    const result = await documentHeavyWorkspace().grep({
+      pattern: "needle",
+      outputMode: "files_only",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.matches.map((match) => match.file).sort()).toEqual(["notes.txt", "src/app.ts"]);
+    expect(result.warning).toMatch(/document-heavy/);
+  });
+
+  it("skips the search when the glob only targets PDF or DOCX files", async () => {
+    const result = await documentHeavyWorkspace().grep({ pattern: "needle", glob: "*.pdf" });
+
+    expect(result.success).toBe(true);
+    expect(result.matches).toEqual([]);
+    expect(result.warning).toMatch(/read_file/);
+  });
+});
+
+describe("GrepTools single-file paths", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const workspaceWithFiles = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-file-path-"));
+    dirs.push(dir);
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.writeFileSync(path.join(dir, "src", "app.ts"), "const a = 1;\nconst needle = 2;\n");
+    fs.writeFileSync(path.join(dir, "src", "other.ts"), "const needle = 3;\n");
+    fs.writeFileSync(path.join(dir, "brief.pdf"), "%PDF-1.4 needle");
+    fs.writeFileSync(path.join(dir, "big.log"), `${"x".repeat(1024 * 1024)}\nneedle\n`);
+    return new GrepTools({ ...mockWorkspace, path: dir }, mockDaemon as Any, "test-task-id");
+  };
+
+  it("searches only the file named by path", async () => {
+    const result = await workspaceWithFiles().grep({ pattern: "needle", path: "src/app.ts" });
+
+    expect(result.success).toBe(true);
+    expect(result.filesSearched).toBe(1);
+    expect(result.matches).toEqual([{ file: "src/app.ts", line: 2, content: "const needle = 2;" }]);
+  });
+
+  it.each(["brief.pdf", "big.log"])(
+    "explains why a named file %s cannot be searched",
+    async (name) => {
+      const result = await workspaceWithFiles().grep({ pattern: "needle", path: name });
+
+      expect(result.success).toBe(true);
+      expect(result.matches).toEqual([]);
+      expect(result.warning).toMatch(/read_file/);
+    },
+  );
+});
+
+const gitAvailable = spawnSync("git", ["--version"]).status === 0;
+
+describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const gitRepository = (root: string, ignore: string) => {
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", root]);
+    fs.writeFileSync(path.join(root, ".gitignore"), ignore);
+  };
+
+  const tempDir = (prefix: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    dirs.push(dir);
+    return dir;
+  };
+
+  const toolFor = (workspacePath: string) =>
+    new GrepTools({ ...mockWorkspace, path: workspacePath }, mockDaemon as Any, "test-task-id");
+
+  const ignoredFilesWorkspace = () => {
+    const dir = tempDir("cowork-grep-gitignore-");
+    gitRepository(dir, "vendor/\n*.min.js\n");
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.mkdirSync(path.join(dir, "vendor"));
+    fs.writeFileSync(path.join(dir, "src", "app.ts"), "const needle = 1;\n");
+    fs.writeFileSync(path.join(dir, "src", "app.min.js"), "var needle=1;\n");
+    fs.writeFileSync(path.join(dir, "vendor", "lib.js"), "var needle = 2; var vendorOnly = 3;\n");
+    return dir;
+  };
+
+  const workspaceWithIgnoredFiles = () => toolFor(ignoredFilesWorkspace());
+
+  const gitCalls = () => vi.mocked(execFile).mock.calls.filter(([file]) => file === "git");
+
+  // A repository outside the workspace whose excludes would hide every .ts file.
+  const outsideRepositoryIgnoringTs = (options: { bare?: boolean } = {}) => {
+    const repo = path.join(tempDir("cowork-grep-outside-repo-"), "repo.git");
+    const init = ["-c", "init.defaultBranch=main", "init", "-q"];
+    execFileSync("git", [...init, ...(options.bare ? ["--bare"] : []), repo]);
+    const gitDir = options.bare ? repo : path.join(repo, ".git");
+    fs.mkdirSync(path.join(gitDir, "info"), { recursive: true });
+    fs.appendFileSync(path.join(gitDir, "info", "exclude"), "*.ts\n");
+    return gitDir;
+  };
+
+  // A repository outside the workspace with a commit and a linked worktree checked out at
+  // `worktreePath`, as the isolated-worktree task mode creates them.
+  const outsideRepositoryWithWorktree = (worktreePath: string) => {
+    const repo = tempDir("cowork-grep-main-repo-");
+    gitRepository(repo, "ignored.txt\n");
+    const identity = ["-c", "user.email=t@example.com", "-c", "user.name=t"];
+    const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...identity, ...args]);
+    git("add", ".gitignore");
+    git("commit", "-q", "-m", "init");
+    git("worktree", "add", "-q", "-b", `wt-${path.basename(worktreePath)}`, worktreePath);
+    return path.join(repo, ".git", "worktrees", path.basename(worktreePath));
+  };
+
+  beforeEach(() => {
+    vi.mocked(execFile).mockClear();
+  });
+
+  const matchedFiles = (result: { matches: Array<{ file: string }> }) =>
+    result.matches.map((match) => match.file.split(path.sep).join("/")).sort();
+
+  it("skips gitignored files and directories", async () => {
+    const result = await workspaceWithIgnoredFiles().grep({
+      pattern: "needle",
+      outputMode: "files_only",
+    });
+
+    expect(result.success).toBe(true);
+    expect(matchedFiles(result)).toEqual(["src/app.ts"]);
+  });
+
+  it("searches an ignored directory that is requested explicitly", async () => {
+    const result = await workspaceWithIgnoredFiles().grep({
+      pattern: "needle",
+      path: "vendor",
+      outputMode: "files_only",
+    });
+
+    expect(matchedFiles(result)).toEqual(["vendor/lib.js"]);
+  });
+
+  it("says ignored entries were skipped when nothing matches", async () => {
+    const result = await workspaceWithIgnoredFiles().grep({ pattern: "vendorOnly" });
+
+    expect(result.success).toBe(true);
+    expect(result.matches).toEqual([]);
+    expect(result.warning).toMatch(/\.gitignore/);
+  });
+
+  it("ignores the rules of a repository that contains the workspace", async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-grep-parent-repo-"));
+    dirs.push(parent);
+    gitRepository(parent, "*.ts\n");
+    const workspacePath = path.join(parent, "workspace");
+    fs.mkdirSync(workspacePath);
+    fs.writeFileSync(path.join(workspacePath, "app.ts"), "const needle = 1;\n");
+    const tool = new GrepTools({ ...mockWorkspace, path: workspacePath }, mockDaemon as Any, "t");
+
+    const result = await tool.grep({ pattern: "needle", outputMode: "files_only" });
+
+    expect(matchedFiles(result)).toEqual(["app.ts"]);
+  });
+
+  it("points git at the workspace repository explicitly", async () => {
+    const dir = ignoredFilesWorkspace();
+    const root = fs.realpathSync(dir);
+
+    const result = await toolFor(dir).grep({
+      pattern: "needle",
+      path: "src",
+      outputMode: "files_only",
+    });
+
+    expect(matchedFiles(result)).toEqual(["src/app.ts"]);
+    expect(gitCalls()).toHaveLength(1);
+    const [, args, options] = gitCalls()[0] as unknown as [string, string[], { cwd: string }];
+    expect(args.slice(0, 2)).toEqual([
+      `--git-dir=${path.join(root, ".git")}`,
+      `--work-tree=${root}`,
+    ]);
+    expect(options.cwd).toBe(path.join(root, "src"));
+  });
+
+  it("keeps core.worktree from moving git outside the workspace", async () => {
+    const outside = tempDir("cowork-grep-outside-worktree-");
+    const dir = ignoredFilesWorkspace();
+    execFileSync("git", ["-C", dir, "config", "core.worktree", outside]);
+
+    const result = await toolFor(dir).grep({ pattern: "needle", outputMode: "files_only" });
+
+    // The workspace's own .gitignore still applies; nothing is resolved against `outside`.
+    expect(matchedFiles(result)).toEqual(["src/app.ts"]);
+  });
+
+  it.each([
+    [
+      "a .git file names a git directory outside the workspace",
+      (dir: string) => {
+        fs.writeFileSync(path.join(dir, ".git"), `gitdir: ${outsideRepositoryIgnoringTs()}\n`);
+      },
+    ],
+    [
+      "a .git file names an outside git directory relatively",
+      (dir: string) => {
+        const target = path.relative(dir, outsideRepositoryIgnoringTs());
+        fs.writeFileSync(path.join(dir, ".git"), `gitdir: ${target}\n`);
+      },
+    ],
+    [
+      ".git is a symlink to a git directory outside the workspace",
+      (dir: string) => fs.symlinkSync(outsideRepositoryIgnoringTs(), path.join(dir, ".git")),
+    ],
+    [
+      "a .git file names another worktree's git directory",
+      (dir: string) => {
+        const otherWorktree = path.join(tempDir("cowork-grep-other-worktree-"), "other");
+        const gitDir = outsideRepositoryWithWorktree(otherWorktree);
+        fs.appendFileSync(path.join(gitDir, "..", "..", "info", "exclude"), "*.ts\n");
+        fs.writeFileSync(path.join(dir, ".git"), `gitdir: ${gitDir}\n`);
+      },
+    ],
+    [
+      "the .git directory's commondir points outside the workspace",
+      (dir: string) => {
+        gitRepository(dir, "");
+        const common = outsideRepositoryIgnoringTs({ bare: true });
+        fs.writeFileSync(path.join(dir, ".git", "commondir"), `${common}\n`);
+      },
+    ],
+  ])("does not run git when %s", async (_name, plant) => {
+    const dir = tempDir("cowork-grep-planted-git-");
+    fs.writeFileSync(path.join(dir, "app.ts"), "const needle = 1;\n");
+    plant(dir);
+
+    const result = await toolFor(dir).grep({ pattern: "needle", outputMode: "files_only" });
+
+    expect(result.success).toBe(true);
+    expect(matchedFiles(result)).toEqual(["app.ts"]);
+    expect(gitCalls()).toEqual([]);
+  });
+
+  it("uses a linked worktree whose repository is outside the workspace", async () => {
+    const worktree = path.join(tempDir("cowork-grep-worktree-parent-"), "task-worktree");
+    const gitDir = outsideRepositoryWithWorktree(worktree);
+    fs.writeFileSync(path.join(worktree, "kept.txt"), "needle\n");
+    fs.writeFileSync(path.join(worktree, "ignored.txt"), "needle\n");
+
+    const result = await toolFor(worktree).grep({ pattern: "needle", outputMode: "files_only" });
+
+    expect(matchedFiles(result)).toEqual(["kept.txt"]);
+    expect(gitCalls()).toHaveLength(1);
+    expect(gitCalls()[0][1]).toEqual(
+      expect.arrayContaining([
+        `--git-dir=${fs.realpathSync(gitDir)}`,
+        `--work-tree=${fs.realpathSync(worktree)}`,
+      ]),
+    );
+  });
+
+  it("uses a .git file whose git directory is inside the workspace", async () => {
+    const dir = tempDir("cowork-grep-gitfile-inside-");
+    const sub = path.join(dir, "sub");
+    const gitDir = path.join(dir, "modules", "sub.git");
+    fs.mkdirSync(path.dirname(gitDir));
+    execFileSync("git", [
+      "-c",
+      "init.defaultBranch=main",
+      "init",
+      "-q",
+      `--separate-git-dir=${gitDir}`,
+      sub,
+    ]);
+    // Submodules record their git directory relative to the .git file.
+    fs.writeFileSync(path.join(sub, ".git"), "gitdir: ../modules/sub.git\n");
+    fs.writeFileSync(path.join(sub, ".gitignore"), "ignored.txt\n");
+    fs.writeFileSync(path.join(sub, "kept.txt"), "needle\n");
+    fs.writeFileSync(path.join(sub, "ignored.txt"), "needle\n");
+    const root = fs.realpathSync(dir);
+
+    const result = await toolFor(dir).grep({
+      pattern: "needle",
+      path: "sub",
+      outputMode: "files_only",
+    });
+
+    expect(matchedFiles(result)).toEqual(["sub/kept.txt"]);
+    expect(gitCalls()).toHaveLength(1);
+    expect(gitCalls()[0][1]).toEqual(
+      expect.arrayContaining([
+        `--git-dir=${path.join(root, "modules", "sub.git")}`,
+        `--work-tree=${path.join(root, "sub")}`,
+      ]),
+    );
   });
 });

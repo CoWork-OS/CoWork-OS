@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalType } from "../../../shared/types";
 
 vi.mock("../../security/policy-manager", () => ({
@@ -826,6 +826,140 @@ describe("ToolPolicyPipeline", () => {
       if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
       else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
     }
+  });
+
+  describe("when legacy approval prompts are off", () => {
+    const networkAsk = async () => ({
+      decision: "ask" as const,
+      reason: {
+        type: "workspace_capability" as const,
+        capability: "network" as const,
+        summary: "The active access profile requires approval before internet access.",
+      },
+      suggestions: [],
+      scopePreview: "domain docs.example.com",
+    });
+    const onRequestWorkspace = {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        accessProfileId: "ask_for_approval",
+        accessApprovalPolicy: "on-request",
+        accessNetworkMode: "on-request",
+      },
+    };
+    let previousPromptMode: string | undefined;
+
+    beforeEach(() => {
+      previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+      process.env.COWORK_APPROVAL_PROMPTS = "off";
+    });
+
+    afterEach(() => {
+      if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+      else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+    });
+
+    it("routes a permission ask to the inline approval card when a human can answer", async () => {
+      const result = await evaluateToolPolicyPipeline({
+        workspace: onRequestWorkspace,
+        toolName: "web_fetch",
+        toolInput: { url: "https://docs.example.com/guide" },
+        permissionEvaluation: networkAsk,
+        inlineApprovalAvailable: true,
+      });
+
+      expect(result.decision).toBe("require_approval");
+      expect(result.approvalSource).toBe("permission");
+      expect(result.reason).toContain("requires approval before internet access");
+      expect(result.trace.finalDecision).toBe("require_approval");
+    });
+
+    it("still denies the ask when no human can answer the inline card", async () => {
+      for (const inlineApprovalAvailable of [false, undefined]) {
+        const result = await evaluateToolPolicyPipeline({
+          workspace: onRequestWorkspace,
+          toolName: "web_fetch",
+          toolInput: { url: "https://docs.example.com/guide" },
+          permissionEvaluation: networkAsk,
+          inlineApprovalAvailable,
+        });
+
+        expect(result.decision, String(inlineApprovalAvailable)).toBe("deny");
+        expect(result.reason).toContain("approval requests are disabled");
+      }
+    });
+
+    it("routes workspace-policy and runtime approval requirements to the inline card", async () => {
+      vi.mocked(evaluateMontyToolPolicy).mockResolvedValueOnce({
+        decision: "require_approval",
+        reason: "Workspace policy asks first",
+      } as Any);
+      const workspacePolicy = await evaluateToolPolicyPipeline({
+        workspace: onRequestWorkspace,
+        toolName: "custom_action",
+        toolInput: {},
+        inlineApprovalAvailable: true,
+      });
+      expect(workspacePolicy.decision).toBe("require_approval");
+      expect(workspacePolicy.approvalSource).toBe("workspace_policy");
+
+      const runtimeMetadata = await evaluateToolPolicyPipeline({
+        workspace: onRequestWorkspace,
+        toolName: "custom_action",
+        toolInput: {},
+        approvalRequired: true,
+        inlineApprovalAvailable: true,
+      });
+      expect(runtimeMetadata.decision).toBe("require_approval");
+      expect(runtimeMetadata.approvalSource).toBe("runtime_metadata");
+    });
+
+    it("keeps hard denials and never-ask profiles as denials", async () => {
+      const hardDeny = await evaluateToolPolicyPipeline({
+        workspace: onRequestWorkspace,
+        toolName: "write_file",
+        toolInput: { path: "/etc/hosts" },
+        permissionEvaluation: async () => ({
+          decision: "deny",
+          reason: {
+            type: "guardrail",
+            summary: "Protected operating-system path.",
+          } as Any,
+          suggestions: [],
+          scopePreview: "write_file /etc/hosts",
+        }),
+        inlineApprovalAvailable: true,
+      });
+      expect(hardDeny.decision).toBe("deny");
+      expect(hardDeny.reason).toBe("Protected operating-system path.");
+
+      const neverAsk = await evaluateToolPolicyPipeline({
+        workspace: {
+          ...onRequestWorkspace,
+          permissions: { ...onRequestWorkspace.permissions, accessApprovalPolicy: "never" },
+        },
+        toolName: "web_fetch",
+        toolInput: { url: "https://docs.example.com/guide" },
+        permissionEvaluation: networkAsk,
+        inlineApprovalAvailable: true,
+      });
+      expect(neverAsk.decision).toBe("deny");
+
+      vi.mocked(evaluateMontyToolPolicy).mockResolvedValueOnce({
+        decision: "deny",
+        reason: "Workspace policy forbids this",
+      } as Any);
+      const scriptDeny = await evaluateToolPolicyPipeline({
+        workspace: onRequestWorkspace,
+        toolName: "web_fetch",
+        toolInput: { url: "https://docs.example.com/guide" },
+        permissionEvaluation: networkAsk,
+        inlineApprovalAvailable: true,
+      });
+      expect(scriptDeny.decision).toBe("deny");
+      expect(scriptDeny.reason).toBe("Workspace policy forbids this");
+    });
   });
 
   it("fails closed for malformed credential, body, and header inputs", async () => {

@@ -19,6 +19,7 @@ import {
   PersonalityConfigV2Schema,
 } from "../validation";
 import { z } from "zod";
+import { DEFAULT_GUARDRAIL_SETTINGS } from "../../../shared/guardrail-defaults";
 
 describe("validateInput", () => {
   const simpleSchema = z.object({
@@ -412,20 +413,8 @@ describe("GuardrailSettingsSchema", () => {
     const result = GuardrailSettingsSchema.safeParse({});
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.maxTokensPerTask).toBe(100000);
-      expect(result.data.tokenBudgetEnabled).toBe(true);
-      expect(result.data.blockDangerousCommands).toBe(true);
-      expect(result.data.maxIterationsPerTask).toBe(50);
-      expect(result.data.webSearchMode).toBe("cached");
-      expect(result.data.webSearchMaxUsesPerTask).toBe(8);
-      expect(result.data.webSearchMaxUsesPerStep).toBe(3);
-      expect(result.data.webSearchAllowedDomains).toEqual([]);
-      expect(result.data.webSearchBlockedDomains).toEqual([]);
-      expect(result.data.autoContinuationEnabled).toBe(true);
-      expect(result.data.defaultMaxAutoContinuations).toBe(3);
-      expect(result.data.defaultMinProgressScore).toBe(0.25);
-      expect(result.data.lifetimeTurnCapEnabled).toBe(true);
-      expect(result.data.defaultLifetimeTurnCap).toBe(320);
+      // Defaults are derived from the manager's defaults, never a separate copy.
+      expect(result.data).toEqual(DEFAULT_GUARDRAIL_SETTINGS);
     }
   });
 

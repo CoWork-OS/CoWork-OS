@@ -86,14 +86,15 @@ describe("SkillTools access profile boundaries", () => {
       rawRowsSheet?.getRow(2).values.slice(1),
     ]).toEqual([
       ["Email", "City", "Tickets"],
-      ["Ava@example.test", "Lisbon", "2"],
+      // Numeric text is written as a number so formulas over the column compute.
+      ["Ava@example.test", "Lisbon", 2],
     ]);
     expect([
       summarySheet?.getRow(1).values.slice(1),
       summarySheet?.getRow(2).values.slice(1),
     ]).toEqual([
       ["Metric", "Value"],
-      ["Source Rows", "1"],
+      ["Source Rows", 1],
     ]);
     expect(daemon.logEvent).toHaveBeenCalledWith(
       "task-1",

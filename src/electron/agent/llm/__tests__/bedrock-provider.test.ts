@@ -141,7 +141,8 @@ describe("BedrockProvider", () => {
       { cachePoint: { type: "default", ttl: "1h" } },
     ]);
     expect(response.usage).toEqual({
-      inputTokens: 100,
+      // Inclusive usage contract: 100 uncached + 60 cache reads + 40 cache writes.
+      inputTokens: 200,
       outputTokens: 20,
       cachedTokens: 60,
       cacheWriteTokens: 40,
@@ -399,5 +400,54 @@ describe("BedrockProvider", () => {
     const retryInput = send.mock.calls[1][0].input;
     expect(retryInput.modelId).toBe("us.anthropic.claude-3-sonnet-20240229-v1:0");
     expect(retryInput.inferenceConfig.maxTokens).toBe(4096);
+  });
+});
+
+describe("BedrockProvider stop reasons", () => {
+  const convert = (stopReason: string) =>
+    (new BedrockProvider(config) as Any).convertResponse({
+      output: { message: { content: [{ text: "partial" }] } },
+      stopReason,
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+
+  it.each([
+    ["content_filtered", "refusal"],
+    ["guardrail_intervened", "refusal"],
+    ["model_context_window_exceeded", "max_tokens"],
+    ["end_turn", "end_turn"],
+  ])("maps %s to %s", (stopReason, expected) => {
+    expect(convert(stopReason).stopReason).toBe(expected);
+  });
+
+  it.each(["malformed_model_output", "malformed_tool_use"])(
+    "raises a retryable error for %s instead of accepting the output as final",
+    (stopReason) => {
+      expect(() => convert(stopReason)).toThrow(
+        expect.objectContaining({ retryable: true, code: stopReason }),
+      );
+    },
+  );
+});
+
+describe("BedrockProvider usage", () => {
+  it("reports cache reads and writes inside inputTokens", () => {
+    const response = (new BedrockProvider(config) as Any).convertResponse({
+      output: { message: { content: [{ text: "ok" }] } },
+      stopReason: "end_turn",
+      usage: {
+        inputTokens: 1_000,
+        outputTokens: 50,
+        cacheReadInputTokens: 9_000,
+        cacheWriteInputTokens: 500,
+      },
+    });
+
+    expect(response.usage).toMatchObject({
+      inputTokens: 10_500,
+      outputTokens: 50,
+      cachedTokens: 9_000,
+      cacheWriteTokens: 500,
+    });
   });
 });

@@ -18,6 +18,49 @@ import {
   LLMTool,
 } from "./types";
 import { imageToTextFallback } from "./image-utils";
+import { GEMINI_DEFAULT_MODEL } from "../../../shared/llm-provider-catalog";
+
+/** Schema keywords Gemini function declarations accept (an OpenAPI subset). */
+const GEMINI_SCHEMA_KEYS = new Set([
+  "type",
+  "format",
+  "title",
+  "description",
+  "nullable",
+  "enum",
+  "items",
+  "minItems",
+  "maxItems",
+  "properties",
+  "required",
+  "minimum",
+  "maximum",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "propertyOrdering",
+]);
+
+/**
+ * Gemini 1.5 and later (and Gemma 3 above 1B) accept image parts. The original
+ * Gemini 1.0 Pro, Gemma 3 1B, and embedding/AQA models are text-only, so they
+ * keep the text placeholder instead of a request the API would reject.
+ */
+const GEMINI_TEXT_ONLY_MODEL_PATTERNS = [
+  /^gemini-1\.0-pro(?!-vision)/,
+  /^gemini-pro$/,
+  /^gemma-3-1b/,
+  /embedding/,
+  /^aqa/,
+];
+
+export function geminiModelAcceptsImages(model: string): boolean {
+  const name = String(model || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^models\//, "");
+  return !GEMINI_TEXT_ONLY_MODEL_PATTERNS.some((pattern) => pattern.test(name));
+}
 
 /**
  * Google AI Studio (Gemini) provider implementation
@@ -36,16 +79,17 @@ export class GeminiProvider implements LLMProvider {
     }
 
     this.client = new GoogleGenerativeAI(apiKey);
-    this.defaultModel = config.model || "gemini-2.0-flash";
+    this.defaultModel = config.model || GEMINI_DEFAULT_MODEL;
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
+    const modelName = request.model || this.defaultModel;
     const model = this.client.getGenerativeModel({
-      model: request.model || this.defaultModel,
+      model: modelName,
       systemInstruction: request.system,
     });
 
-    const contents = this.convertMessages(request.messages);
+    const contents = this.convertMessages(request.messages, modelName);
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
 
     try {
@@ -104,7 +148,8 @@ export class GeminiProvider implements LLMProvider {
     }
   }
 
-  private convertMessages(messages: LLMMessage[]): Content[] {
+  private convertMessages(messages: LLMMessage[], modelName = this.defaultModel): Content[] {
+    const acceptsImages = geminiModelAcceptsImages(modelName);
     return messages.map((msg) => {
       const parts: Part[] = [];
 
@@ -141,7 +186,11 @@ export class GeminiProvider implements LLMProvider {
           } else if (item.type === "text") {
             parts.push({ text: item.text });
           } else if (item.type === "image") {
-            parts.push({ text: imageToTextFallback(item) });
+            parts.push(
+              acceptsImages
+                ? { inlineData: { mimeType: item.mimeType, data: item.data } }
+                : { text: imageToTextFallback(item) },
+            );
           }
         }
       }
@@ -167,14 +216,40 @@ export class GeminiProvider implements LLMProvider {
 
   /**
    * Recursively sanitize schema for Gemini API compatibility.
-   * Gemini requires all nested objects/arrays to have explicit 'type' fields.
+   * Gemini requires all nested objects/arrays to have explicit 'type' fields,
+   * and its function declarations accept only an OpenAPI subset: keywords such
+   * as additionalProperties, oneOf, const or $ref make the whole request fail.
    */
   private sanitizeSchemaForGemini(schema: Any): Any {
     if (!schema || typeof schema !== "object") {
       return schema;
     }
 
-    const result: Any = { ...schema };
+    const result: Any = {};
+    for (const [key, value] of Object.entries(schema)) {
+      if (GEMINI_SCHEMA_KEYS.has(key)) result[key] = value;
+    }
+    // oneOf has the same meaning for a single tool argument; Gemini only knows anyOf.
+    const alternatives = Array.isArray(schema.anyOf) ? schema.anyOf : schema.oneOf;
+    if (Array.isArray(alternatives)) {
+      result.anyOf = alternatives.map((entry: Any) => this.sanitizeSchemaForGemini(entry));
+    }
+    if (
+      result.enum === undefined &&
+      ["string", "number", "boolean"].includes(typeof schema.const)
+    ) {
+      result.enum = [schema.const];
+    }
+    if (typeof result.format === "string") {
+      const type = String(result.type || "").toLowerCase();
+      const allowed =
+        type === "string"
+          ? ["enum", "date-time"]
+          : type === "number" || type === "integer"
+            ? ["int32", "int64", "float", "double"]
+            : [];
+      if (!allowed.includes(result.format)) delete result.format;
+    }
 
     // Ensure type field exists
     if (!result.type) {
@@ -288,9 +363,12 @@ export class GeminiProvider implements LLMProvider {
       content.push({ type: "text", text: "" });
     }
 
+    // Gemini reports finishReason STOP for a turn that ends in function calls.
+    const hasFunctionCall = content.some((block) => block.type === "tool_use");
+    const stopReason = this.mapStopReason(candidate.finishReason);
     return {
       content,
-      stopReason: this.mapStopReason(candidate.finishReason),
+      stopReason: hasFunctionCall && stopReason === "end_turn" ? "tool_use" : stopReason,
       usage: response.usageMetadata
         ? {
             inputTokens: response.usageMetadata.promptTokenCount || 0,
@@ -306,10 +384,16 @@ export class GeminiProvider implements LLMProvider {
         return "end_turn";
       case "MAX_TOKENS":
         return "max_tokens";
+      // Blocked or filtered generations. These were reported as stop_sequence, which
+      // the loops treat as an unfinished turn and re-ask until their budget runs out.
       case "SAFETY":
       case "RECITATION":
+      case "LANGUAGE":
+      case "BLOCKLIST":
+      case "PROHIBITED_CONTENT":
+      case "SPII":
       case "OTHER":
-        return "stop_sequence";
+        return "refusal";
       default:
         // Check if we have function calls (tool use)
         return "end_turn";
@@ -425,12 +509,12 @@ export class GeminiProvider implements LLMProvider {
   private getDefaultModels(): Array<{ name: string; displayName: string; description: string }> {
     return [
       {
-        name: "gemini-2.5-pro-preview-05-06",
+        name: "gemini-2.5-pro",
         displayName: "Gemini 2.5 Pro",
         description: "Most capable model for complex tasks",
       },
       {
-        name: "gemini-2.5-flash-preview-05-20",
+        name: "gemini-2.5-flash",
         displayName: "Gemini 2.5 Flash",
         description: "Fast and efficient for most tasks",
       },

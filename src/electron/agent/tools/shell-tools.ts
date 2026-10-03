@@ -7,9 +7,20 @@ import type { AgentDaemon } from "../daemon";
 import { GuardrailManager, containsShellControlOperator } from "../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager, type RunCommandApprovalMode } from "./builtin-settings";
 import { ShellSessionManager, isLikelyInteractiveCommand } from "./shell-session-manager";
-import { createSandbox } from "../sandbox/sandbox-factory";
+import { createSandbox, type ISandbox } from "../sandbox/sandbox-factory";
+import {
+  getLoopbackListenerGuard,
+  type LoopbackListenerViolation,
+} from "../sandbox/loopback-listener-guard";
+import { getBackgroundProcessManager, type BackgroundProcessLaunch } from "./background-processes";
+import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
+import { OUTPUT_TRUNCATED_MARKER, boundOutput } from "../sandbox/bounded-output";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
+import {
+  RUN_COMMAND_DEFAULT_TIMEOUT_MS,
+  RUN_COMMAND_MAX_TIMEOUT_MS,
+} from "../run-command-timeouts";
 import { createLogger } from "../../utils/logger";
 
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
@@ -64,6 +75,7 @@ type RunCommandResult = {
   exitCode: number | null;
   truncated?: boolean;
   terminationReason?: CommandTerminationReason;
+  hint?: string;
 };
 
 /**
@@ -91,8 +103,11 @@ function stripScriptControlCodes(text: string): string {
 }
 
 // Limits to prevent runaway commands
-const MAX_TIMEOUT = 5 * 60 * 1000; // 5 minutes max
-const DEFAULT_TIMEOUT = 60 * 1000; // 1 minute default
+const MAX_TIMEOUT = RUN_COMMAND_MAX_TIMEOUT_MS;
+const DEFAULT_TIMEOUT = RUN_COMMAND_DEFAULT_TIMEOUT_MS; // as the run_command schema documents
+// Kill commands this long before the executor's own tool deadline so a timed-out
+// command still returns its partial output instead of a bare tool timeout.
+const EXECUTOR_DEADLINE_GRACE_MS = 3_000;
 const MAX_OUTPUT_SIZE = 100 * 1024; // 100KB max output
 const UNSANDBOXED_SHELL_OVERRIDE_ENV = "COWORK_ALLOW_UNSANDBOXED_SHELL";
 
@@ -113,11 +128,6 @@ const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: str
     pattern:
       /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)? PRIVATE KEY-----/g,
     replacement: "[REDACTED_PRIVATE_KEY]",
-  },
-  {
-    // Common JSON-secret-key shape (e.g., Solana id.json).
-    pattern: /\[(?:\s*\d{1,3}\s*,){31,}\s*\d{1,3}\s*\]/g,
-    replacement: "[REDACTED_SECRET_KEY_ARRAY]",
   },
   // OpenAI-style API keys
   { pattern: /\bsk-[A-Za-z0-9_-]{16,}\b/g, replacement: "[REDACTED_API_KEY]" },
@@ -141,6 +151,29 @@ const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: str
     replacement: "$1[REDACTED]$3",
   },
 ];
+
+// JSON byte-array secret keys (e.g., a Solana id.json keypair). Only arrays of
+// 32+ byte values (0-255) qualify, and only when key-sized (32 or 64 bytes) or
+// printed under a secret/private/seed label, so ordinary number lists such as
+// `print(df.age.tolist())` stay readable.
+const SECRET_KEY_ARRAY_CANDIDATE = /\[(?:\s*\d{1,3}\s*,){31,}\s*\d{1,3}\s*\]/g;
+const SECRET_KEY_BYTE_LENGTHS = new Set([32, 64]);
+const SECRET_KEY_LABEL = /secret|private|seed|key ?pair|mnemonic|signing/i;
+const SECRET_KEY_LABEL_WINDOW = 80;
+
+function redactSecretKeyArrays(output: string): string {
+  return output.replace(SECRET_KEY_ARRAY_CANDIDATE, (match: string, offset: number) => {
+    const values = match
+      .slice(1, -1)
+      .split(",")
+      .map((value) => Number(value.trim()));
+    if (values.some((value) => !Number.isInteger(value) || value > 255)) return match;
+    const label = output.slice(Math.max(0, offset - SECRET_KEY_LABEL_WINDOW), offset);
+    return SECRET_KEY_BYTE_LENGTHS.has(values.length) || SECRET_KEY_LABEL.test(label)
+      ? "[REDACTED_SECRET_KEY_ARRAY]"
+      : match;
+  });
+}
 
 /**
  * Validate that a PID is a safe positive integer
@@ -405,6 +438,93 @@ function buildSafeShellPath(platform: NodeJS.Platform, envPath: string | undefin
   return Array.from(new Set([...basePaths, ...inheritedPaths])).join(path.delimiter);
 }
 
+function positiveFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Kill timeout for a run_command call: an explicit input timeout (timeout,
+ * timeout_ms, timeout_seconds) wins, up to the executor's budget for the call
+ * (runtime.timeoutMs); otherwise that budget minus a grace period; otherwise
+ * the default. The executor clamps explicit requests to the step budget, so the
+ * kill timer must not outlive it. Never above RUN_COMMAND_MAX_TIMEOUT_MS.
+ */
+export function resolveRunCommandTimeoutMs(input: unknown, runtimeTimeoutMs?: unknown): number {
+  const source = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const timeoutSeconds = positiveFiniteNumber(source.timeout_seconds);
+  const explicitMs =
+    positiveFiniteNumber(source.timeout) ??
+    positiveFiniteNumber(source.timeout_ms) ??
+    (timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000);
+  const budgetMs = positiveFiniteNumber(runtimeTimeoutMs);
+  const resolvedMs =
+    explicitMs !== undefined
+      ? Math.min(explicitMs, budgetMs ?? explicitMs)
+      : budgetMs === undefined
+        ? DEFAULT_TIMEOUT
+        : Math.max(budgetMs - EXECUTOR_DEADLINE_GRACE_MS, Math.ceil(budgetMs / 2));
+  return Math.min(Math.round(resolvedMs), MAX_TIMEOUT);
+}
+
+// Commands that normally run until stopped: dev servers, file servers, watchers.
+const LONG_RUNNING_COMMAND_PATTERN = new RegExp(
+  [
+    String.raw`\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|serve|watch|preview)\b`,
+    String.raw`\bvite\b(?!\s+build)`,
+    String.raw`\b(?:next|nuxt|astro|remix)\s+(?:dev|start)\b`,
+    String.raw`\b(?:ng|webpack)\s+serve\b|\bwebpack-dev-server\b`,
+    String.raw`\breact-scripts\s+start\b|\bgatsby\s+develop\b`,
+    String.raw`\b(?:nodemon|http-server|live-server|serve|uvicorn|gunicorn)\b`,
+    String.raw`\bhttp\.server\b|\bSimpleHTTPServer\b|\bflask\s+run\b|\brunserver\b`,
+    String.raw`\b(?:rails\s+s(?:erver)?|jekyll\s+serve|hugo\s+server)\b`,
+    String.raw`(?:^|\s)--watch\b|\btail\s+-f\b`,
+  ].join("|"),
+  "i",
+);
+
+export const LONG_RUNNING_COMMAND_HINT =
+  "This looks like a server or watcher that runs until it is stopped. Run it with " +
+  "run_command background: true, read its output with process_output, and stop it with " +
+  "stop_process when you are done.";
+
+export function looksLikeLongRunningCommand(command: string): boolean {
+  return LONG_RUNNING_COMMAND_PATTERN.test(String(command || ""));
+}
+
+function withLongRunningCommandHint(command: string, result: RunCommandResult): RunCommandResult {
+  if (result.terminationReason !== "timeout" || !looksLikeLongRunningCommand(command)) {
+    return result;
+  }
+  return { ...result, hint: LONG_RUNNING_COMMAND_HINT };
+}
+
+function describeLoopbackViolation(violation: LoopbackListenerViolation): string {
+  return (
+    `Stopped: the command listened on ${violation.address} (pid ${violation.pid}), which is ` +
+    "reachable from the network, while shell network access is off. Bind servers to " +
+    "127.0.0.1 or localhost instead (for example --host 127.0.0.1)."
+  );
+}
+
+/**
+ * Signal a background command's whole tree: its descendants and, when it leads
+ * its own process group, every remaining member of that group.
+ */
+function signalBackgroundTree(
+  pid: number | undefined,
+  signal: NodeJS.Signals,
+  group: boolean,
+): void {
+  if (!isValidPid(pid)) return;
+  killProcessTree(pid, signal);
+  if (!group || process.platform === "win32") return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // The group is already empty.
+  }
+}
+
 /**
  * Get the shell arguments for running a command string.
  * Unix shells use -c, PowerShell uses -Command, cmd.exe uses /c.
@@ -556,7 +676,7 @@ function getDescendantPidsWindows(parentPid: number): number[] {
 
 /**
  * Kill a process and all its descendants
- * Sends the signal to children first, then to the parent (bottom-up killing)
+ * Enumerates the tree first, then signals the parent before its descendants
  * Only kills processes owned by the current user for security
  */
 function killProcessTree(pid: number, signal: NodeJS.Signals): void {
@@ -575,9 +695,20 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
     return;
   }
 
+  // Enumerate while the parent is alive; its children are reparented once it dies.
   const descendants = getDescendantPids(pid);
 
-  // Kill descendants first (in reverse order, deepest children first)
+  // Signal the parent first: a shell whose running child dies before the shell
+  // itself is signalled goes on to the next command of its script.
+  if (isProcessOwnedByCurrentUser(pid)) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Process may have already exited
+    }
+  }
+
+  // Then the descendants, deepest children first
   for (const descendantPid of descendants.reverse()) {
     // Double-check ownership before killing each process
     if (isProcessOwnedByCurrentUser(descendantPid)) {
@@ -586,15 +717,6 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
       } catch {
         // Process may have already exited
       }
-    }
-  }
-
-  // Kill the parent process (also verify ownership)
-  if (isProcessOwnedByCurrentUser(pid)) {
-    try {
-      process.kill(pid, signal);
-    } catch {
-      // Process may have already exited
     }
   }
 }
@@ -759,28 +881,26 @@ export class ShellTools {
     return canEnableSubprocessNetwork(this.workspace.permissions, policies);
   }
 
-  private async runCommandInSandbox(
+  /**
+   * The OS sandbox a shell command must run in. Returns null when policy lets
+   * the command run without one (the caller then spawns it directly) and throws
+   * when it may not run at all. The caller owns and must clean up the sandbox.
+   */
+  private async acquireCommandSandbox(
     command: string,
     options: {
       cwd: string;
-      timeout: number;
-      promptPrefix: string;
-      env?: Record<string, string>;
+      timeout?: number;
       policies: AdminPolicies;
       signal?: AbortSignal;
+      background?: boolean;
     },
-  ): Promise<{
-    success: boolean;
-    stdout: string;
-    stderr: string;
-    exitCode: number | null;
-    truncated?: boolean;
-    terminationReason?: CommandTerminationReason;
-  } | null> {
+  ): Promise<ISandbox | null> {
     const sandbox = await createSandbox(
       this.workspace,
       this.workspace.permissions.sandboxType || "auto",
     );
+    let acquired = false;
     try {
       const policies = options.policies;
       const sandboxAllowed = policies.runtime.allowedSandboxTypes.includes(sandbox.type);
@@ -824,7 +944,7 @@ export class ShellTools {
             {
               command,
               cwd: options.cwd,
-              timeout: options.timeout,
+              ...(options.background ? { background: true } : { timeout: options.timeout }),
               unsandboxed: true,
               reason: "no_os_sandbox_available",
             },
@@ -859,15 +979,66 @@ export class ShellTools {
             : `run_command sandbox type "${sandbox.type}" is blocked by admin policy.`,
         );
       }
+      acquired = true;
+      return sandbox;
+    } finally {
+      if (!acquired) sandbox.cleanup();
+    }
+  }
 
-      if (options.env && Object.keys(options.env).length > 0) {
-        this.daemon.logEvent(this.taskId, "tool_warning", {
-          tool: "run_command",
-          message:
-            "Custom command environment variables are not forwarded to sandboxed shell execution.",
-          envKeys: Object.keys(options.env),
-        });
-      }
+  private warnUnforwardedSandboxEnv(env: Record<string, string> | undefined): void {
+    if (env && Object.keys(env).length > 0) {
+      this.daemon.logEvent(this.taskId, "tool_warning", {
+        tool: "run_command",
+        message:
+          "Custom command environment variables are not forwarded to sandboxed shell execution.",
+        envKeys: Object.keys(env),
+      });
+    }
+  }
+
+  /** Whether a sandboxed shell command may use the network; logs the decision. */
+  private resolveSandboxShellNetwork(policies: AdminPolicies, sandboxType: string): boolean {
+    const allowShellNetwork = this.shouldAllowShellNetwork(policies);
+    if (this.workspace.permissions?.network === true) {
+      this.daemon.logEvent(this.taskId, "network_policy_decision", {
+        action: allowShellNetwork ? "allow" : "deny",
+        url: "shell://run_command",
+        domain: "",
+        toolName: "run_command",
+        reason: allowShellNetwork
+          ? "admin_shell_network_enabled"
+          : "shell_network_requires_admin_coarse_allow",
+        ruleSource: "admin_policy",
+        sandboxType,
+      });
+    }
+    return allowShellNetwork;
+  }
+
+  private async runCommandInSandbox(
+    command: string,
+    options: {
+      cwd: string;
+      timeout: number;
+      promptPrefix: string;
+      env?: Record<string, string>;
+      policies: AdminPolicies;
+      signal?: AbortSignal;
+    },
+  ): Promise<{
+    success: boolean;
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+    truncated?: boolean;
+    terminationReason?: CommandTerminationReason;
+  } | null> {
+    const policies = options.policies;
+    const sandbox = await this.acquireCommandSandbox(command, options);
+    if (!sandbox) return null;
+    try {
+      this.warnUnforwardedSandboxEnv(options.env);
 
       this.daemon.logEvent(this.taskId, "command_output", {
         command,
@@ -877,20 +1048,7 @@ export class ShellTools {
         sandboxType: sandbox.type,
       });
 
-      const allowShellNetwork = this.shouldAllowShellNetwork(policies);
-      if (this.workspace.permissions?.network === true) {
-        this.daemon.logEvent(this.taskId, "network_policy_decision", {
-          action: allowShellNetwork ? "allow" : "deny",
-          url: "shell://run_command",
-          domain: "",
-          toolName: "run_command",
-          reason: allowShellNetwork
-            ? "admin_shell_network_enabled"
-            : "shell_network_requires_admin_coarse_allow",
-          ruleSource: "admin_policy",
-          sandboxType: sandbox.type,
-        });
-      }
+      const allowShellNetwork = this.resolveSandboxShellNetwork(policies, sandbox.type);
 
       this.processSessionId++;
       this.clearEscalationTimeouts();
@@ -899,18 +1057,37 @@ export class ShellTools {
         sandbox.type === "docker"
           ? resolveDockerSandboxCwd(this.workspace.path, options.cwd)
           : options.cwd;
+      // With network denied the macOS profile still lets the command serve on
+      // loopback (test servers, Playwright webServer); the guard stops it if it
+      // listens anywhere else.
+      const guardLoopback = sandbox.type === "macos" && !allowShellNetwork;
+      const loopbackGuard: { violation?: LoopbackListenerViolation; unwatch?: () => void } = {};
       const result = await sandbox.execute(command, [], {
         cwd: sandboxCwd,
         timeout: options.timeout,
         maxOutputSize: MAX_OUTPUT_SIZE,
         allowNetwork: allowShellNetwork,
+        allowLoopbackListen: guardLoopback,
         onProcess: (process) => {
           this.activeProcess = process;
+          if (guardLoopback && isValidPid(process.pid)) {
+            loopbackGuard.unwatch = getLoopbackListenerGuard().watch(process.pid, (violation) => {
+              loopbackGuard.violation = violation;
+              this.killProcess(true, "system");
+            });
+          }
         },
       });
+      loopbackGuard.unwatch?.();
+      const listenerViolationMessage = loopbackGuard.violation
+        ? describeLoopbackViolation(loopbackGuard.violation)
+        : undefined;
 
       const stdout = this.sanitizeCommandOutput(result.stdout);
       let stderr = this.sanitizeCommandOutput(result.stderr);
+      if (listenerViolationMessage) {
+        stderr = stderr ? `${stderr}\n${listenerViolationMessage}` : listenerViolationMessage;
+      }
       if (result.exitCode !== 0 && !stdout.trim() && !stderr.trim() && !result.error) {
         stderr = buildEmptyCommandFailureMessage({
           exitCode: result.exitCode,
@@ -941,13 +1118,16 @@ export class ShellTools {
       const sandboxRuntimeFailure = isSandboxRuntimeFailure(stderr, result.exitCode);
       const terminationReason: CommandTerminationReason = this.userKillRequested
         ? "user_stopped"
-        : result.timedOut
-          ? "timeout"
-          : result.error || sandboxRuntimeFailure
-            ? "error"
-            : "normal";
+        : listenerViolationMessage
+          ? "error"
+          : result.timedOut
+            ? "timeout"
+            : result.error || sandboxRuntimeFailure
+              ? "error"
+              : "normal";
       const success = terminationReason === "normal" && result.exitCode === 0;
       const errorMessage =
+        listenerViolationMessage ||
         result.error ||
         (sandboxRuntimeFailure
           ? `Shell sandbox failed before command completion: sandbox-exec aborted${result.exitCode !== null ? ` (exit ${result.exitCode})` : ""}. If this command was creating or editing files, use write_file or edit_file instead of shell heredocs/redirection.`
@@ -985,8 +1165,9 @@ export class ShellTools {
         stderr,
         exitCode: result.exitCode,
         truncated:
-          result.stdout.includes("[Output truncated]") ||
-          result.stderr.includes("[Output truncated]"),
+          result.truncated ??
+          (result.stdout.includes(OUTPUT_TRUNCATED_MARKER) ||
+            result.stderr.includes(OUTPUT_TRUNCATED_MARKER)),
         terminationReason,
       };
     } finally {
@@ -1040,8 +1221,10 @@ export class ShellTools {
   /**
    * Kill the currently running command and all its child processes
    * @param force - If true, send SIGKILL immediately. Otherwise, try SIGINT first, then SIGTERM, then SIGKILL.
+   * @param initiator - "system" stops a command that timed out or whose tool call was aborted;
+   *   the caller reports why, and the command is not reported as stopped by the user.
    */
-  killProcess(force: boolean = false): boolean {
+  killProcess(force: boolean = false, initiator: "user" | "system" = "user"): boolean {
     if (!this.activeProcess || this.activeProcess.killed) {
       return false;
     }
@@ -1062,7 +1245,8 @@ export class ShellTools {
     const currentSessionId = this.processSessionId;
 
     // Mark this as a user-initiated kill so the close handler can signal the agent
-    this.userKillRequested = true;
+    const byUser = initiator === "user";
+    if (byUser) this.userKillRequested = true;
 
     if (force) {
       // Force kill - immediate SIGKILL to entire process tree
@@ -1071,10 +1255,12 @@ export class ShellTools {
 
       try {
         killProcessTree(pid, "SIGKILL");
-        this.daemon.logEvent(this.taskId, "command_output", {
-          type: "error",
-          output: "\n[Process tree force killed by user]\n",
-        });
+        if (byUser) {
+          this.daemon.logEvent(this.taskId, "command_output", {
+            type: "error",
+            output: "\n[Process tree force killed by user]\n",
+          });
+        }
         return true;
       } catch (error) {
         log.error("Failed to force kill process tree:", error);
@@ -1088,10 +1274,12 @@ export class ShellTools {
     try {
       // Send SIGINT (Ctrl+C) to gracefully interrupt the process tree
       killProcessTree(pid, "SIGINT");
-      this.daemon.logEvent(this.taskId, "command_output", {
-        type: "error",
-        output: "\n^C [Process tree interrupted by user]\n",
-      });
+      if (byUser) {
+        this.daemon.logEvent(this.taskId, "command_output", {
+          type: "error",
+          output: "\n^C [Process tree interrupted by user]\n",
+        });
+      }
 
       // Set up escalation: if still running after 2s, send SIGTERM to tree
       // If still running after 4s, send SIGKILL to tree
@@ -1176,6 +1364,267 @@ export class ShellTools {
   }
 
   /**
+   * Start a command that keeps running (dev server, watcher) and return after a
+   * short startup window with whatever it printed. It goes through the same
+   * approval, policy, sandbox and environment path as runCommand.
+   */
+  async startBackgroundCommand(
+    command: string,
+    options?: {
+      cwd?: string;
+      env?: Record<string, string>;
+      signal?: AbortSignal;
+      startupWaitMs?: unknown;
+    },
+  ): Promise<Record<string, unknown>> {
+    const manager = getBackgroundProcessManager();
+    // Refuse before asking anyone to approve a command that could not start.
+    manager.assertCanStart(this.taskId);
+    const { cwd, policies } = await this.authorizeCommand(command, options, true);
+    manager.assertCanStart(this.taskId);
+    if (options?.signal?.aborted) {
+      throw new Error("Command execution cancelled after approval expired");
+    }
+
+    const shouldSandboxCommand = shouldSandboxShellCommand({
+      persistentShellAllowed: shouldUsePersistentShell(command),
+      requireSandboxForShell: policies.runtime.requireSandboxForShell,
+      accessSandboxMode: this.workspace.permissions.accessSandboxMode,
+      accessApprovalPolicy: this.workspace.permissions.accessApprovalPolicy,
+      hasScopedAccessRules:
+        hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions) ||
+        (this.workspace.permissions.accessDomainRules?.length || 0) > 0,
+    });
+    const started: { processId?: string } = {};
+    const onListenerViolation = (violation: LoopbackListenerViolation) => {
+      if (!started.processId) return;
+      const message = describeLoopbackViolation(violation);
+      manager.appendNotice(this.taskId, started.processId, `\n[${message}]\n`);
+      this.daemon.logEvent(this.taskId, "log", { message, processId: started.processId });
+      void manager
+        .stop(this.taskId, started.processId, "listened_on_non_loopback_address")
+        .catch(() => undefined);
+    };
+    let launch: BackgroundProcessLaunch | null = null;
+    if (shouldSandboxCommand) {
+      const sandbox = await this.acquireCommandSandbox(command, {
+        cwd,
+        policies,
+        signal: options?.signal,
+        background: true,
+      });
+      if (sandbox) {
+        launch = this.launchSandboxedBackground(sandbox, command, cwd, {
+          env: options?.env,
+          policies,
+          onListenerViolation,
+        });
+      }
+    }
+    launch ||= this.launchDirectBackground(command, cwd, options?.env);
+
+    const summary = manager.start({
+      taskId: this.taskId,
+      command,
+      cwd,
+      launch,
+      normalizeChunk: (chunk) => this.sanitizeCommandOutput(stripScriptControlCodes(chunk)),
+      redact: (text) => this.sanitizeCommandOutput(text),
+      onExit: (exited) =>
+        this.daemon.logEvent(this.taskId, "log", {
+          message:
+            exited.status === "stopped"
+              ? `Background process ${exited.process_id} stopped`
+              : `Background process ${exited.process_id} exited with code ${exited.exit_code ?? "unknown"}`,
+          processId: exited.process_id,
+          exitCode: exited.exit_code,
+        }),
+    });
+    const processId = summary.process_id;
+    started.processId = processId;
+    this.daemon.logEvent(this.taskId, "log", {
+      message: `Started background process ${processId}: ${command}`,
+      processId,
+      pid: summary.pid,
+      cwd,
+      sandboxType: summary.sandbox,
+    });
+
+    await manager.waitForStartup(this.taskId, processId, options?.startupWaitMs, options?.signal);
+    const startup = manager.read(this.taskId, processId);
+    const status = manager.summary(this.taskId, processId);
+    const failed = !status.running && status.exit_code !== 0;
+    return {
+      success: !failed,
+      background: true,
+      ...status,
+      startup_output: startup.output,
+      next_offset: startup.next_offset,
+      ...(startup.truncated ? { truncated: true } : {}),
+      ...(failed
+        ? {
+            error:
+              status.status === "stopped"
+                ? `Background command was stopped during startup (${status.stop_reason}).`
+                : `Background command exited during startup with code ${status.exit_code ?? "unknown"}.`,
+            exitCode: status.exit_code,
+            stdout: startup.output,
+          }
+        : {}),
+      next_steps: status.running
+        ? "It keeps running. Read new output with process_output, and stop it with stop_process when you no longer need it."
+        : "The command already finished, so it did not need background: true.",
+    };
+  }
+
+  private launchSandboxedBackground(
+    sandbox: ISandbox,
+    command: string,
+    cwd: string,
+    options: {
+      env?: Record<string, string>;
+      policies: AdminPolicies;
+      onListenerViolation: (violation: LoopbackListenerViolation) => void;
+    },
+  ): BackgroundProcessLaunch {
+    if (typeof sandbox.spawnProcess !== "function") {
+      sandbox.cleanup();
+      throw new Error(
+        `The ${sandbox.type} sandbox cannot keep a command running in the background.`,
+      );
+    }
+    this.warnUnforwardedSandboxEnv(options.env);
+    const allowShellNetwork = this.resolveSandboxShellNetwork(options.policies, sandbox.type);
+    const docker = sandbox.type === "docker";
+    const guardLoopback = sandbox.type === "macos" && !allowShellNetwork;
+    let spawned: ReturnType<NonNullable<ISandbox["spawnProcess"]>>;
+    try {
+      spawned = sandbox.spawnProcess("/bin/sh", ["-c", command], {
+        cwd: docker ? resolveDockerSandboxCwd(this.workspace.path, cwd) : cwd,
+        allowNetwork: allowShellNetwork,
+        allowLoopbackListen: guardLoopback,
+        detached: !docker,
+      });
+    } catch (error) {
+      sandbox.cleanup();
+      throw error;
+    }
+    const child = spawned.process;
+    const unwatch =
+      guardLoopback && isValidPid(child.pid)
+        ? getLoopbackListenerGuard().watch(child.pid, options.onListenerViolation)
+        : () => undefined;
+    const notes: string[] = [];
+    if (docker) {
+      notes.push(
+        "Runs inside a Docker container with no published ports: only commands in that container can connect to it. The host, browser tools and canvas cannot reach it.",
+      );
+    }
+    if (guardLoopback) {
+      notes.push(
+        "Shell network access is off: the process can serve on 127.0.0.1/localhost but cannot connect out. Listening on 0.0.0.0 or a LAN address stops it.",
+      );
+    }
+    return {
+      child,
+      sandboxType: sandbox.type,
+      reachableFromHost: !docker,
+      notes,
+      signalTree: (signal) => {
+        signalBackgroundTree(child.pid, signal, !docker);
+        // Killing the docker client does not stop its container.
+        if (docker) spawned.cleanup();
+      },
+      release: () => {
+        unwatch();
+        spawned.cleanup();
+        sandbox.cleanup();
+      },
+    };
+  }
+
+  private launchDirectBackground(
+    command: string,
+    cwd: string,
+    env: Record<string, string> | undefined,
+  ): BackgroundProcessLaunch {
+    const { resolvedShell, safeEnv, effectiveCommand } = this.prepareDirectSpawn(command, env);
+    const group = process.platform !== "win32";
+    const child = spawn(resolvedShell, getShellArgs(resolvedShell, effectiveCommand), {
+      cwd,
+      env: safeEnv,
+      // Lead a process group so stopping it reaches everything it started.
+      detached: group,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    return {
+      child,
+      sandboxType: "none",
+      reachableFromHost: true,
+      signalTree: (signal) => signalBackgroundTree(child.pid, signal, group),
+    };
+  }
+
+  /** process_output: new output and status of a background process, or the task's list. */
+  async getBackgroundProcessOutput(
+    input: {
+      process_id?: unknown;
+      since_offset?: unknown;
+      tail_lines?: unknown;
+      max_chars?: unknown;
+      wait_ms?: unknown;
+    } = {},
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    const manager = getBackgroundProcessManager();
+    const processId = typeof input.process_id === "string" ? input.process_id.trim() : "";
+    if (!processId) {
+      return { success: true, processes: manager.list(this.taskId) };
+    }
+    await manager.waitForOutput(this.taskId, processId, input.since_offset, input.wait_ms, signal);
+    const output = manager.read(this.taskId, processId, {
+      sinceOffset: input.since_offset,
+      tailLines: input.tail_lines,
+      maxChars: input.max_chars,
+    });
+    return { success: true, ...manager.summary(this.taskId, processId), ...output };
+  }
+
+  /** stop_process: stop a background process of this task and its whole tree. */
+  async stopBackgroundProcess(
+    input: { process_id?: unknown } = {},
+  ): Promise<Record<string, unknown>> {
+    const manager = getBackgroundProcessManager();
+    const processId = typeof input.process_id === "string" ? input.process_id.trim() : "";
+    if (!processId) {
+      throw new Error(
+        "stop_process needs process_id. Call process_output without arguments to list this task's background processes.",
+      );
+    }
+    const before = manager.summary(this.taskId, processId);
+    const after = await manager.stop(this.taskId, processId);
+    const finalOutput = manager.read(this.taskId, processId, { tailLines: 40 });
+    if (before.running) {
+      this.daemon.logEvent(this.taskId, "log", {
+        message: `Stopped background process ${processId}`,
+        processId,
+      });
+    }
+    return {
+      success: true,
+      ...after,
+      ...(before.running ? {} : { already_exited: true }),
+      final_output: finalOutput.output,
+    };
+  }
+
+  /** Stop every background process of this task (task cancelled). */
+  async stopAllBackgroundProcesses(reason: string): Promise<number> {
+    return getBackgroundProcessManager().stopAllForTask(this.taskId, reason);
+  }
+
+  /**
    * Execute a shell command (requires command tools from the active access profile and user
    * approval unless auto-approve is enabled).
    */
@@ -1188,6 +1637,20 @@ export class ShellTools {
       signal?: AbortSignal;
     },
   ): Promise<RunCommandResult> {
+    const { cwd, policies } = await this.authorizeCommand(command, options);
+    const result = await this.runAuthorizedCommand(command, cwd, policies, options);
+    return withLongRunningCommandHint(command, result);
+  }
+
+  /**
+   * Every check and approval run_command applies before it starts anything.
+   * Background starts go through exactly the same path.
+   */
+  private async authorizeCommand(
+    command: string,
+    options?: { cwd?: string; timeout?: number; signal?: AbortSignal },
+    background = false,
+  ): Promise<{ cwd: string; policies: AdminPolicies }> {
     if (options?.signal?.aborted) {
       throw new Error("Command execution cancelled before approval");
     }
@@ -1264,6 +1727,9 @@ export class ShellTools {
 
     const typedAuthorizationAvailable =
       typeof (this.daemon as Any)?.authorizeToolAction === "function";
+    const backgroundNotice = background
+      ? " It keeps running in the background until it is stopped or the task is cancelled."
+      : "";
 
     if (typedAuthorizationAvailable) {
       // The daemon is the single execution authority.  In-scope commands are
@@ -1273,11 +1739,11 @@ export class ShellTools {
       approved = await authorizeToolActionWithFallback(this.daemon, this.taskId, {
         toolName: "run_command",
         approvalType: "run_command",
-        description: "Review the shell command below before approving.",
+        description: `Review the shell command below before approving.${backgroundNotice}`,
         details: {
           command,
           cwd,
-          timeout: options?.timeout || DEFAULT_TIMEOUT,
+          ...(background ? { background: true } : { timeout: options?.timeout || DEFAULT_TIMEOUT }),
           approvalMode,
           bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
           network: networkCommand,
@@ -1335,13 +1801,15 @@ export class ShellTools {
         approved = await this.daemon.requestApproval(
           this.taskId,
           "run_command",
-          bundleEligible
+          (bundleEligible
             ? "Single approval bundle for this task: subsequent safe commands may run without another prompt until you deny or the task ends."
-            : "Review the shell command below before approving.",
+            : "Review the shell command below before approving.") + backgroundNotice,
           {
             command,
             cwd,
-            timeout: options?.timeout || DEFAULT_TIMEOUT,
+            ...(background
+              ? { background: true }
+              : { timeout: options?.timeout || DEFAULT_TIMEOUT }),
             approvalMode,
             bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
           },
@@ -1373,8 +1841,21 @@ export class ShellTools {
       tool: "run_command",
       command,
       cwd: options?.cwd || this.workspace.path,
+      ...(background ? { background: true } : {}),
     });
+    return { cwd, policies };
+  }
 
+  private async runAuthorizedCommand(
+    command: string,
+    cwd: string,
+    policies: AdminPolicies,
+    options?: {
+      timeout?: number;
+      env?: Record<string, string>;
+      signal?: AbortSignal;
+    },
+  ): Promise<RunCommandResult> {
     const verificationCommandKey = this.getVerificationCommandKey(command, cwd);
     if (verificationCommandKey) {
       const reused = await this.waitForVerificationCommandResult(verificationCommandKey);
@@ -1436,6 +1917,12 @@ export class ShellTools {
             truncated: false,
           }),
         });
+        // The session manager reports every stop as user_stopped. When this call
+        // was aborted (at its own or the step's deadline) the user did not stop it.
+        const terminationReason: CommandTerminationReason | undefined =
+          persistentResult.terminationReason === "user_stopped" && options?.signal?.aborted
+            ? "timeout"
+            : persistentResult.terminationReason;
         if (persistentResult.sessionEvent) {
           this.daemon.logEvent(
             this.taskId,
@@ -1465,16 +1952,25 @@ export class ShellTools {
           type: "end",
           exitCode: persistentResult.exitCode,
           success: persistentResult.success,
-          terminationReason: persistentResult.terminationReason,
+          terminationReason,
         });
         if (persistentResult.usedPersistentSession) {
+          // Redact before cutting so a secret is never split across the omission.
+          const stdout = boundOutput(
+            this.sanitizeCommandOutput(persistentResult.stdout),
+            MAX_OUTPUT_SIZE,
+          );
+          const stderr = boundOutput(
+            this.sanitizeCommandOutput(persistentResult.stderr),
+            MAX_OUTPUT_SIZE,
+          );
           return this.recordVerificationCommandResult(verificationCommandKey, {
             success: persistentResult.success,
-            stdout: this.sanitizeCommandOutput(persistentResult.stdout),
-            stderr: this.sanitizeCommandOutput(persistentResult.stderr),
+            stdout: stdout.text,
+            stderr: stderr.text,
             exitCode: persistentResult.exitCode,
-            truncated: persistentResult.truncated,
-            terminationReason: persistentResult.terminationReason,
+            truncated: persistentResult.truncated || stdout.truncated || stderr.truncated,
+            terminationReason,
           });
         }
       } catch (error) {
@@ -1517,80 +2013,10 @@ export class ShellTools {
       }
     }
 
-    // Create a minimal, safe environment (don't leak sensitive process.env vars like API keys)
-    const resolvedShell = resolveShellForCommandExecution();
-
-    // Detect if this command invokes a CLI agent (codex / claude) that needs
-    // special environment (API keys) and PTY allocation.
-    // Match only when the agent command appears as the first command token or after a
-    // shell separator (;, |, &) to avoid false-positives on paths like
-    // /usr/local/codex-backup or variables that contain the word.
-    const isCliAgentCommand = /(?:^|[;&|])\s*(?:codex|claude)\b/.test(command);
-
-    const safeEnv: Record<string, string> =
-      process.platform === "win32"
-        ? {
-            PATH: buildSafeShellPath(process.platform, process.env.PATH),
-            USERPROFILE: process.env.USERPROFILE || "",
-            USERNAME: process.env.USERNAME || "",
-            HOMEDRIVE: process.env.HOMEDRIVE || "C:",
-            HOMEPATH: process.env.HOMEPATH || "\\Users\\" + (process.env.USERNAME || ""),
-            TEMP: process.env.TEMP || process.env.TMP || "C:\\Windows\\Temp",
-            TMP: process.env.TMP || process.env.TEMP || "C:\\Windows\\Temp",
-            SystemRoot: process.env.SystemRoot || "C:\\Windows",
-            COMSPEC: process.env.COMSPEC || "C:\\Windows\\System32\\cmd.exe",
-            ...options?.env,
-          }
-        : {
-            // Essential system variables only (Unix/macOS)
-            PATH: buildSafeShellPath(process.platform, process.env.PATH),
-            HOME: process.env.HOME || "",
-            USER: process.env.USER || "",
-            SHELL: resolvedShell,
-            LANG: process.env.LANG || "en_US.UTF-8",
-            TERM: process.env.TERM || "xterm-256color",
-            TMPDIR: process.env.TMPDIR || "/tmp",
-            ...options?.env,
-          };
-
-    // Forward auth keys and runtime config for CLI agent commands.
-    if (isCliAgentCommand && process.platform !== "win32") {
-      const CLI_AGENT_ENV_PASSTHROUGH = [
-        // Auth credentials
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "CODEX_API_KEY",
-        "AWS_REGION",
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-        "CLOUD_ML_REGION",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        // Runtime config (not secret keys, but required for correct operation)
-        "ANTHROPIC_MODEL", // selects which Anthropic model the CLI agent uses
-        "XDG_CONFIG_HOME",
-        "NPM_CONFIG_PREFIX",
-        "NVM_DIR",
-        "NODE_PATH",
-      ];
-      for (const key of CLI_AGENT_ENV_PASSTHROUGH) {
-        if (process.env[key] && !safeEnv[key]) {
-          safeEnv[key] = process.env[key]!;
-        }
-      }
-    }
-
-    // Wrap CLI agent commands with `script` to allocate a PTY (prevents hang bug)
-    let effectiveCommand = command;
-    if (isCliAgentCommand && process.platform !== "win32") {
-      if (process.platform === "darwin") {
-        // macOS: script -q /dev/null <command>
-        effectiveCommand = `script -q /dev/null ${command}`;
-      } else {
-        // Linux: script -qc "<command>" /dev/null
-        effectiveCommand = `script -qc ${JSON.stringify(command)} /dev/null`;
-      }
-    }
+    const { resolvedShell, safeEnv, effectiveCommand, isCliAgentCommand } = this.prepareDirectSpawn(
+      command,
+      options?.env,
+    );
 
     // Emit the command being executed (show original command, not wrapped)
     this.daemon.logEvent(this.taskId, "command_output", {
@@ -1604,6 +2030,7 @@ export class ShellTools {
       let stdout = "";
       let stderr = "";
       let killed = false;
+      let aborted = false;
 
       // Increment session ID to invalidate any pending escalation timeouts from previous commands
       this.processSessionId++;
@@ -1620,16 +2047,33 @@ export class ShellTools {
       // Store reference to active process for stdin support
       this.activeProcess = child;
 
-      // Set timeout
+      // Set timeout. Kill the whole process tree at once: signalling only the shell
+      // leaves its children running and holding the output pipes (and this call)
+      // open, and background jobs ignore SIGINT.
       const timeoutId = setTimeout(() => {
         killed = true;
-        child.kill("SIGTERM");
         this.daemon.logEvent(this.taskId, "command_output", {
           command,
           type: "error",
           output: `\n[Command timed out after ${timeout / 1000}s]\n`,
         });
+        this.killProcess(true, "system");
       }, timeout);
+
+      // The executor aborts the call at its own deadline or on cancellation; stop
+      // the command then too instead of leaving it running unobserved.
+      const onAbort = () => {
+        if (killed || aborted) return;
+        aborted = true;
+        this.daemon.logEvent(this.taskId, "command_output", {
+          command,
+          type: "error",
+          output: "\n[Command stopped because the tool call was aborted]\n",
+        });
+        this.killProcess(true, "system");
+      };
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options?.signal?.aborted) onAbort();
 
       // Stream stdout
       child.stdout.on("data", (data: Buffer) => {
@@ -1663,6 +2107,7 @@ export class ShellTools {
 
       child.on("close", (code: number | null) => {
         clearTimeout(timeoutId);
+        options?.signal?.removeEventListener("abort", onAbort);
         this.activeProcess = null; // Clear active process reference
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();
@@ -1671,7 +2116,7 @@ export class ShellTools {
         let terminationReason: CommandTerminationReason = "normal";
         if (this.userKillRequested) {
           terminationReason = "user_stopped";
-        } else if (killed) {
+        } else if (killed || aborted) {
           terminationReason = "timeout";
         }
 
@@ -1722,6 +2167,7 @@ export class ShellTools {
 
       child.on("error", (error: Error) => {
         clearTimeout(timeoutId);
+        options?.signal?.removeEventListener("abort", onAbort);
         this.activeProcess = null; // Clear active process reference
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();
@@ -1755,6 +2201,98 @@ export class ShellTools {
         );
       });
     });
+  }
+
+  /**
+   * Shell, minimal environment and effective command line for a command that
+   * runs without an OS sandbox.
+   */
+  private prepareDirectSpawn(
+    command: string,
+    env: Record<string, string> | undefined,
+  ): {
+    resolvedShell: string;
+    safeEnv: Record<string, string>;
+    effectiveCommand: string;
+    isCliAgentCommand: boolean;
+  } {
+    // Create a minimal, safe environment (don't leak sensitive process.env vars like API keys)
+    const resolvedShell = resolveShellForCommandExecution();
+
+    // Detect if this command invokes a CLI agent (codex / claude) that needs
+    // special environment (API keys) and PTY allocation.
+    // Match only when the agent command appears as the first command token or after a
+    // shell separator (;, |, &) to avoid false-positives on paths like
+    // /usr/local/codex-backup or variables that contain the word.
+    const isCliAgentCommand = /(?:^|[;&|])\s*(?:codex|claude)\b/.test(command);
+
+    const safeEnv: Record<string, string> =
+      process.platform === "win32"
+        ? {
+            PATH: buildSafeShellPath(process.platform, process.env.PATH),
+            USERPROFILE: process.env.USERPROFILE || "",
+            USERNAME: process.env.USERNAME || "",
+            HOMEDRIVE: process.env.HOMEDRIVE || "C:",
+            HOMEPATH: process.env.HOMEPATH || "\\Users\\" + (process.env.USERNAME || ""),
+            TEMP: process.env.TEMP || process.env.TMP || "C:\\Windows\\Temp",
+            TMP: process.env.TMP || process.env.TEMP || "C:\\Windows\\Temp",
+            SystemRoot: process.env.SystemRoot || "C:\\Windows",
+            COMSPEC: process.env.COMSPEC || "C:\\Windows\\System32\\cmd.exe",
+            ...env,
+          }
+        : {
+            // Essential system variables only (Unix/macOS)
+            PATH: buildSafeShellPath(process.platform, process.env.PATH),
+            HOME: process.env.HOME || "",
+            USER: process.env.USER || "",
+            SHELL: resolvedShell,
+            LANG: process.env.LANG || "en_US.UTF-8",
+            TERM: process.env.TERM || "xterm-256color",
+            TMPDIR: process.env.TMPDIR || "/tmp",
+            ...env,
+          };
+    // Nobody is at a terminal to answer prompts; explicit options.env values win.
+    applyNonInteractiveEnvDefaults(safeEnv);
+
+    // Forward auth keys and runtime config for CLI agent commands.
+    if (isCliAgentCommand && process.platform !== "win32") {
+      const CLI_AGENT_ENV_PASSTHROUGH = [
+        // Auth credentials
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "CODEX_API_KEY",
+        "AWS_REGION",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "CLOUD_ML_REGION",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        // Runtime config (not secret keys, but required for correct operation)
+        "ANTHROPIC_MODEL", // selects which Anthropic model the CLI agent uses
+        "XDG_CONFIG_HOME",
+        "NPM_CONFIG_PREFIX",
+        "NVM_DIR",
+        "NODE_PATH",
+      ];
+      for (const key of CLI_AGENT_ENV_PASSTHROUGH) {
+        if (process.env[key] && !safeEnv[key]) {
+          safeEnv[key] = process.env[key]!;
+        }
+      }
+    }
+
+    // Wrap CLI agent commands with `script` to allocate a PTY (prevents hang bug)
+    let effectiveCommand = command;
+    if (isCliAgentCommand && process.platform !== "win32") {
+      if (process.platform === "darwin") {
+        // macOS: script -q /dev/null <command>
+        effectiveCommand = `script -q /dev/null ${command}`;
+      } else {
+        // Linux: script -qc "<command>" /dev/null
+        effectiveCommand = `script -qc ${JSON.stringify(command)} /dev/null`;
+      }
+    }
+    return { resolvedShell, safeEnv, effectiveCommand, isCliAgentCommand };
   }
 
   /**
@@ -1831,16 +2369,11 @@ export class ShellTools {
   }
 
   /**
-   * Truncate output to prevent context overflow
+   * Truncate output to prevent context overflow. Keeps the start and the end:
+   * errors, failing tests and summaries are printed last.
    */
   private truncateOutput(output: string): string {
-    if (output.length <= MAX_OUTPUT_SIZE) {
-      return output;
-    }
-    return (
-      output.slice(0, MAX_OUTPUT_SIZE) +
-      `\n\n[... Output truncated. Showing first ${Math.round(MAX_OUTPUT_SIZE / 1024)}KB ...]`
-    );
+    return boundOutput(output, MAX_OUTPUT_SIZE).text;
   }
 
   /**
@@ -1852,7 +2385,7 @@ export class ShellTools {
     for (const { pattern, replacement } of SHELL_OUTPUT_REDACTION_PATTERNS) {
       sanitized = sanitized.replace(pattern, replacement);
     }
-    return sanitized;
+    return redactSecretKeyArrays(sanitized);
   }
 }
 

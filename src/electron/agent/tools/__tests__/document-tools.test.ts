@@ -5,6 +5,8 @@ import { randomUUID } from "crypto";
 import { describe, expect, it, vi } from "vitest";
 import { DocumentTools } from "../document-tools";
 import { compileLatex } from "../../../utils/document-generators/latex-compiler";
+import { generatePDF } from "../../../utils/document-generators/pdf-generator";
+import { generateXLSX } from "../../../utils/document-generators/xlsx-generator";
 import { generatePPTX } from "../../../utils/document-generators/pptx-generator";
 
 // Mock the generator modules since they depend on external packages
@@ -125,15 +127,93 @@ describe("DocumentTools", () => {
     );
   });
 
-  it("generateDocument sanitizes filenames", async () => {
-    const tools = new DocumentTools("/workspace", "task-1");
-
-    const result = await tools.generateDocument({
-      filename: "../../../etc/evil.pdf",
+  it("generateDocument reports an HTML fallback as a recoverable failure, not a PDF", async () => {
+    vi.mocked(generatePDF).mockResolvedValueOnce({
+      success: false,
+      path: "/workspace/report.html",
+      size: 2048,
+      format: "html",
+      error: "No Chrome, Chromium, Edge, or Brave browser was found to render the PDF",
     });
+    const registerArtifact = vi.fn();
+    const tools = new DocumentTools("/workspace", "task-1", registerArtifact);
 
-    // sanitizeFilename should strip path traversal via path.basename
-    expect(result.success).toBe(true);
+    const result = await tools.generateDocument({ filename: "report.pdf", markdown: "# Report" });
+
+    expect(result).toMatchObject({
+      success: false,
+      recoverableFallback: true,
+      nonBlocking: true,
+      format: "html",
+      path: "/workspace/report.html",
+    });
+    expect(result.error).toMatch(/PDF was not generated: No Chrome/);
+    expect(result.fallbackHint).toMatch(/create_document/);
+    expect(result.message).not.toMatch(/Document generated/);
+    expect(registerArtifact).toHaveBeenCalledWith(
+      "task-1",
+      "/workspace/report.html",
+      "text/html",
+      expect.objectContaining({ requestedFormat: "pdf" }),
+    );
+  });
+
+  it("generateDocument keeps traversal inside the workspace", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-doc-names-"));
+    try {
+      const tools = new DocumentTools(workspace, "task-1");
+
+      const result = await tools.generateDocument({
+        filename: "../../../etc/evil.pdf",
+      });
+
+      // ".." cannot climb above the workspace root.
+      expect(result.success).toBe(true);
+      expect(generatePDF).toHaveBeenLastCalledWith(
+        path.join(workspace, "etc", "evil.pdf"),
+        expect.anything(),
+      );
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("generated files keep requested subfolders and non-ASCII letters", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-doc-names-"));
+    try {
+      const tools = new DocumentTools(workspace, "task-1");
+
+      await tools.generateDocument({ filename: "raporlar/Şubat İstanbul 報告.pdf", markdown: "x" });
+      expect(generatePDF).toHaveBeenLastCalledWith(
+        path.join(workspace, "raporlar", "Şubat İstanbul 報告.pdf"),
+        expect.anything(),
+      );
+      expect(fs.statSync(path.join(workspace, "raporlar")).isDirectory()).toBe(true);
+
+      await tools.generatePresentation({ filename: "decks/../q3: plan?.pptx", slides: [] });
+      expect(generatePPTX).toHaveBeenLastCalledWith(
+        path.join(workspace, "q3_ plan_.pptx"),
+        expect.anything(),
+      );
+
+      await tools.generateSpreadsheet({
+        filename: path.join(workspace, "exports", "Müşteriler.xlsx"),
+        sheets: [],
+      });
+      expect(generateXLSX).toHaveBeenLastCalledWith(
+        path.join(workspace, "exports", "Müşteriler.xlsx"),
+        expect.anything(),
+      );
+
+      // An absolute path outside the workspace keeps only its file name.
+      await tools.generateDocument({ filename: "/somewhere/else/report.pdf", markdown: "x" });
+      expect(generatePDF).toHaveBeenLastCalledWith(
+        path.join(workspace, "report.pdf"),
+        expect.anything(),
+      );
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it("compileLatex calls the compiler and registers the PDF artifact with source metadata", async () => {
@@ -204,6 +284,34 @@ describe("DocumentTools", () => {
     expect(result.success).toBe(true);
     expect(result.slideCount).toBe(5);
     expect(registerArtifact).toHaveBeenCalled();
+  });
+
+  it("generatePresentation reports the slides written and the generator's warnings", async () => {
+    const warning =
+      'Slide 2 "Agenda" needed 2 slides to show all of its content; the extra slides are titled "Agenda (cont.)".';
+    vi.mocked(generatePPTX).mockResolvedValueOnce({
+      success: true,
+      path: "/workspace/deck.pptx",
+      size: 54321,
+      slideCount: 3,
+      requestedSlideCount: 2,
+      renderer: "pptxgenjs",
+      warnings: [warning],
+    });
+    const tools = new DocumentTools("/workspace", "task-1");
+
+    const result = await tools.generatePresentation({
+      filename: "deck.pptx",
+      slides: [
+        { title: "Intro", layout: "title" },
+        { title: "Agenda", bullets: Array.from({ length: 12 }, (_, index) => `Item ${index}`) },
+      ],
+    });
+
+    expect(result.slideCount).toBe(3);
+    expect(result.requestedSlideCount).toBe(2);
+    expect(result.warnings).toEqual([warning]);
+    expect(result.message).toContain("1 warning(s)");
   });
 
   it("generatePresentation exposes richer design fields and passes them through", async () => {

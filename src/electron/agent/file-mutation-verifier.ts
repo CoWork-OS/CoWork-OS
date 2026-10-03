@@ -79,6 +79,9 @@ export class FileMutationVerifier {
     if (typeof obj.file_path === "string") return obj.file_path;
     if (typeof obj.target === "string") return obj.target;
     if (typeof obj.outputPath === "string") return obj.outputPath;
+    // copy_file and rename_file name their written path destPath / newPath.
+    if (typeof obj.destPath === "string") return obj.destPath;
+    if (typeof obj.newPath === "string") return obj.newPath;
     return null;
   }
 }

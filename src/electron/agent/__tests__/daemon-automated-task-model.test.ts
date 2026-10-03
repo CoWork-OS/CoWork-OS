@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { AgentDaemon } from "../daemon";
@@ -265,5 +268,48 @@ describe("AgentDaemon automated task model selection", () => {
     const result = applyRuntimeTaskStrategy(daemonLike, task);
 
     expect(result.task.agentConfig?.llmProfileHint).toBe("strong");
+  });
+});
+
+describe("AgentDaemon code-project domain routing", () => {
+  const deriveInWorkspace = (prompt: string, markerFile?: string) => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-domain-"));
+    try {
+      if (markerFile) fs.writeFileSync(path.join(workspaceDir, markerFile), "{}");
+      const daemonLike = Object.create(AgentDaemon.prototype) as Any;
+      daemonLike.workspaceRepo = {
+        findById: vi.fn(() => ({
+          id: "ws-project",
+          path: workspaceDir,
+          isTemp: false,
+          permissions: { read: true, write: true, delete: false, network: false, shell: false },
+        })),
+      };
+      return daemonLike.deriveTaskStrategy({
+        title: prompt,
+        prompt,
+        agentConfig: {},
+        workspaceId: "ws-project",
+      });
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  };
+
+  it("gives a cue-less action request the code domain in a code project", () => {
+    const derived = deriveInWorkspace("Integrate Stripe checkout", "package.json");
+
+    expect(derived.route.domain).toBe("general");
+    expect(derived.agentConfig.taskDomain).toBe("code");
+  });
+
+  it.each([
+    ["Integrate Stripe checkout", undefined],
+    ["How should I structure my week?", "package.json"],
+    ["Draft an email to the team about the offsite", "package.json"],
+  ])("keeps the routed domain for %s (marker=%s)", (prompt, markerFile) => {
+    const derived = deriveInWorkspace(prompt, markerFile);
+
+    expect(derived.agentConfig.taskDomain).toBe(derived.route.domain);
   });
 });

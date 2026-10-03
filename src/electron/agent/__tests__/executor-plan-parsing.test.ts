@@ -2028,6 +2028,33 @@ relationship_memory:
     ).toBe(false);
   });
 
+  it.each([
+    "Run the test suite to verify the fix and address any failures",
+    "Run npm test to verify nothing broke; fix any regressions",
+    "Re-run the linter to verify the cleanup and resolve remaining warnings",
+    "Test the endpoint with curl to verify it returns 200 and adjust the handler if needed",
+    "Verify the build and fix any type errors",
+    "Confirm that the totals match and then update the summary",
+  ])("does not classify a step that also remediates as verification: %s", (description) => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    expect(executor.descriptionIndicatesVerification(description)).toBe(false);
+  });
+
+  it.each([
+    "Verify the fix works",
+    "Verifying the generated files exist",
+    "Verify that the totals are correct",
+    "Verify: generated image file exists",
+    "Validate the output JSON against the schema",
+    "Double-check the totals in report.csv",
+    "Final verification: the report includes every section",
+    "Open index.html in the browser to verify the layout renders",
+    "Run the tests to verify the update did not break anything",
+  ])("keeps classifying a pure check as verification: %s", (description) => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    expect(executor.descriptionIndicatesVerification(description)).toBe(true);
+  });
+
   it("parses JSON plans split across multiple text blocks", async () => {
     const response = {
       usage: { inputTokens: 10, outputTokens: 20 },

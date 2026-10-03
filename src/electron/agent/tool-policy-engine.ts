@@ -179,6 +179,8 @@ const ALWAYS_VISIBLE_TOOLS = new Set([
   "count_text",
   "text_metrics",
   "run_command",
+  "process_output",
+  "stop_process",
   "web_fetch",
   "web_search",
   "http_request",
@@ -554,6 +556,7 @@ const READONLY_GIT_TOOLS = new Set([
 
 const ALWAYS_MUTATING = new Set([
   "run_command",
+  "stop_process",
   "run_applescript",
   "schedule_task",
   "spawn_agent",

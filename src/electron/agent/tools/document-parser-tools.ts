@@ -99,6 +99,29 @@ export function calculateDocumentWindow(input: {
   return { end: low, note: noteFor(low) };
 }
 
+/**
+ * Text for one ExcelJS cell value. Formula cells are objects: print the cached result when the
+ * file has one, otherwise the formula itself; rich text and hyperlinks print their text.
+ */
+function formatSpreadsheetCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object" || value instanceof Date) return String(value);
+  const cell = value as Record<string, unknown>;
+  if ("formula" in cell || "sharedFormula" in cell) {
+    const result = cell.result;
+    if (result !== undefined && result !== null) return formatSpreadsheetCell(result);
+    return typeof cell.formula === "string" ? `=${cell.formula}` : "";
+  }
+  if (Array.isArray(cell.richText)) {
+    return cell.richText
+      .map((part) => (part && typeof part === "object" ? String(part.text ?? "") : ""))
+      .join("");
+  }
+  if ("text" in cell) return String(cell.text ?? "");
+  if ("error" in cell) return String(cell.error ?? "");
+  return JSON.stringify(value);
+}
+
 export class DocumentParserTools {
   constructor(
     private workspace: Workspace,
@@ -306,19 +329,13 @@ export class DocumentParserTools {
       if (format === "structured") {
         lines.push(`\n## Sheet: ${sheet.name}\n`);
         sheet.eachRow((row) => {
-          const cells = (row.values as unknown[])
-            .slice(1)
-            .map((v) => String(v ?? ""))
-            .join(" | ");
+          const cells = (row.values as unknown[]).slice(1).map(formatSpreadsheetCell).join(" | ");
           lines.push(`| ${cells} |`);
         });
       } else {
         lines.push(`Sheet: ${sheet.name}`);
         sheet.eachRow((row) => {
-          const cells = (row.values as unknown[])
-            .slice(1)
-            .map((v) => String(v ?? ""))
-            .join("\t");
+          const cells = (row.values as unknown[]).slice(1).map(formatSpreadsheetCell).join("\t");
           lines.push(cells);
         });
       }

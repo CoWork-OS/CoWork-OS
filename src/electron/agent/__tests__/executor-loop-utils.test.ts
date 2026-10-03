@@ -1,15 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LLMMessage } from "../llm";
 import {
+  appendAssistantResponseToConversation,
+  buildCommandFailureSignature,
+  buildLoopTurnLimitWarning,
+  buildMaxTokensExhaustedNotice,
   computeToolFailureDecision,
   handleMaxTokensRecovery,
+  isForwardLookingIntentOnlyText,
   maybeInjectLowProgressNudge,
   maybeInjectStopReasonNudge,
+  nextToolUseStreak,
   recordPackagingFailureFingerprint,
   shouldRetryEmptyFollowUpEndTurn,
   shouldAllowBotMessagingDuringFollowUpToolLock,
   shouldForceStopAfterSkippedToolOnlyTurns,
   shouldLockFollowUpToolCalls,
+  ToolLoopProgressTracker,
   type ToolLoopCall,
   updateSkippedToolOnlyTurnStreak,
 } from "../executor-loop-utils";
@@ -403,5 +410,233 @@ describe("executor-loop-utils guardrails", () => {
         hadToolCalls: false,
       }),
     ).toBe(false);
+  });
+
+  it("answers an empty response with a user nudge instead of an assistant placeholder", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Do the task" }];
+
+    const emptyCount = appendAssistantResponseToConversation(
+      messages,
+      { content: [], stopReason: "end_turn" },
+      0,
+    );
+
+    expect(emptyCount).toBe(1);
+    expect(messages).toHaveLength(2);
+    // A trailing assistant turn is an assistant prefill, which Claude 4.6+ rejects.
+    expect(messages[1].role).toBe("user");
+    expect(JSON.stringify(messages[1].content)).toContain("empty");
+  });
+
+  it("appends non-empty assistant content and resets the empty-response count", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Do the task" }];
+
+    const emptyCount = appendAssistantResponseToConversation(
+      messages,
+      { content: [{ type: "text", text: "done" }], stopReason: "end_turn" },
+      2,
+    );
+
+    expect(emptyCount).toBe(0);
+    expect(messages[1]).toEqual({ role: "assistant", content: [{ type: "text", text: "done" }] });
+  });
+
+  it("retries a truncated tool call with split-the-write instructions", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Write the report" }];
+    const result = handleMaxTokensRecovery({
+      response: {
+        stopReason: "max_tokens",
+        content: [
+          { type: "text", text: "Writing the report now." },
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "write_file",
+            input: { path: "report.md", content: "# Report\npartial" },
+          },
+        ],
+      },
+      messages,
+      recoveryCount: 0,
+      maxRecoveries: 3,
+      remainingTurns: 10,
+      minTurnsRequiredForRetry: 0,
+      log: vi.fn(),
+      emitMaxTokensRecovery: vi.fn(),
+    });
+
+    expect(result).toEqual({ action: "retry", recoveryCount: 1 });
+    // The truncated call is dropped (it never ran); the text is kept.
+    expect(messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "Writing the report now." }],
+    });
+    const instruction = JSON.stringify(messages[2]);
+    expect(messages[2].role).toBe("user");
+    expect(instruction).toMatch(/discarded/);
+    expect(instruction).toMatch(/multiple/i);
+  });
+
+  it("asks for the complete answer again after a text-only truncation", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "Explain the findings" }];
+    handleMaxTokensRecovery({
+      response: { stopReason: "max_tokens", content: [{ type: "text", text: "PART-ONE" }] },
+      messages,
+      recoveryCount: 0,
+      maxRecoveries: 3,
+      remainingTurns: 10,
+      log: vi.fn(),
+      emitMaxTokensRecovery: vi.fn(),
+    });
+
+    // A "continue where you left off" reply would replace the first part in the
+    // recorded output, so the model is asked for the whole answer instead.
+    const instruction = JSON.stringify(messages.at(-1));
+    expect(instruction).toMatch(/complete response/i);
+    expect(instruction).not.toMatch(/continue from where you left off/i);
+  });
+
+  it("keeps the partial text visible when a truncated turn cannot be retried", () => {
+    expect(
+      buildMaxTokensExhaustedNotice({ content: [{ type: "text", text: "Section one" }] }),
+    ).toMatch(/^Section one\n\n.*output token limit/s);
+    expect(buildMaxTokensExhaustedNotice({ content: [] })).toMatch(/output token limit/);
+  });
+});
+
+describe("isForwardLookingIntentOnlyText", () => {
+  it.each([
+    "I'll start by listing the project files.",
+    "Let me check the project structure first.",
+    "First, I will read the README.",
+    "Sure! Let me take a look at the config.",
+    "I'm going to search for the failing test. Then I'll fix it.",
+    "Now I'll run the tests.",
+    "Let me fetch https://example.com/docs and summarize it.",
+  ])("treats a stated next action with no result as intent-only: %s", (text) => {
+    expect(isForwardLookingIntentOnlyText(text)).toBe(true);
+  });
+
+  it.each([
+    "",
+    "The project has three main modules: api, core and ui.",
+    "I'll summarize: the main modules are api, core and ui.",
+    "Here are the main modules:\n- api\n- core",
+    "Let me know if you need more detail.",
+    "I'll note that the build passes on main.",
+    "Let me explain the structure. The api module handles HTTP. The core module holds the logic. The ui module renders it.",
+    "I checked the files. Let me know if you want me to change anything.",
+  ])("does not treat an answer as intent-only: %s", (text) => {
+    expect(isForwardLookingIntentOnlyText(text)).toBe(false);
+  });
+});
+
+describe("progress-aware tool-use streak", () => {
+  // Drives the stop nudge and the follow-up lock the way the follow-up loop
+  // does, returning the turn at which tool calls get locked (or -1).
+  const lockTurn = (turnMadeProgress: (turn: number) => boolean, turns = 30): number => {
+    let streak = 0;
+    let nudged = false;
+    let toolCalls = 0;
+    let previousTurnMadeProgress = false;
+    for (let turn = 1; turn <= turns; turn += 1) {
+      streak = nextToolUseStreak({ stopReason: "tool_use", previousStreak: streak, previousTurnMadeProgress });
+      toolCalls += 1;
+      nudged = maybeInjectStopReasonNudge({
+        stopReason: "tool_use",
+        consecutiveToolUseStops: streak,
+        consecutiveMaxTokenStops: 0,
+        remainingTurns: 1_000,
+        messages: [],
+        phaseLabel: "follow-up",
+        stopReasonNudgeInjected: nudged,
+        minToolUseStreak: 5,
+        log: () => undefined,
+      });
+      if (
+        shouldLockFollowUpToolCalls({
+          stopReason: "tool_use",
+          consecutiveToolUseStops: streak,
+          followUpToolCallCount: toolCalls,
+          stopReasonNudgeInjected: nudged,
+          remainingTurns: 1_000,
+          allowImmediateTurnBudgetLock: false,
+          minStreak: 10,
+          minToolCalls: 8,
+        })
+      ) {
+        return turn;
+      }
+      previousTurnMadeProgress = turnMadeProgress(turn);
+    }
+    return -1;
+  };
+
+  it("restarts the streak after a turn that made progress and resets it on a non-tool stop", () => {
+    expect(nextToolUseStreak({ stopReason: "tool_use", previousStreak: 7, previousTurnMadeProgress: false })).toBe(8);
+    expect(nextToolUseStreak({ stopReason: "tool_use", previousStreak: 7, previousTurnMadeProgress: true })).toBe(1);
+    expect(nextToolUseStreak({ stopReason: "end_turn", previousStreak: 7, previousTurnMadeProgress: false })).toBe(0);
+  });
+
+  it("does not lock follow-up tool calls while turns keep editing files or fixing tests", () => {
+    expect(lockTurn((turn) => turn % 3 === 0)).toBe(-1);
+  });
+
+  it("still locks tool calls when tool use stops converging", () => {
+    expect(lockTurn(() => false)).toBe(10);
+    // Progress early on does not exempt a later run of non-converging turns.
+    expect(lockTurn((turn) => turn === 4)).toBe(14);
+  });
+});
+
+describe("ToolLoopProgressTracker", () => {
+  it("treats edits, a failing command that now passes and first reads of a file as progress", () => {
+    const tracker = new ToolLoopProgressTracker();
+    tracker.recordOutcome("edit_file", { file_path: "a.ts", old_string: "a", new_string: "b" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(true);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+
+    tracker.recordOutcome("run_command", { command: "npm test" }, false);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+    tracker.recordOutcome("run_command", { command: "npm  test" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(true);
+    tracker.recordOutcome("run_command", { command: "npm test" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+
+    expect(tracker.recordOutcome("read_file", { path: "src/a.ts" }, true)).toBe(true);
+    expect(tracker.consumeTurnProgress()).toBe(true);
+    expect(tracker.recordOutcome("read_file", { path: "src/a.ts" }, true)).toBe(false);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+    tracker.recordOutcome("read_file", { path: "src/b.ts" }, false);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+  });
+
+  it("counts a failing run toward repeated failures only when it repeats unchanged", () => {
+    const tracker = new ToolLoopProgressTracker();
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|1 failed")).toBe(false);
+    expect(tracker.isIdenticalRepeatFailure("pytest  tests/test_login.py", "1|1 failed")).toBe(true);
+    // A different failure is progress, not a repeat.
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(false);
+    // An edit between runs makes the next red run part of a fix cycle.
+    tracker.recordOutcome("edit_file", { file_path: "app/login.py" }, true);
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(false);
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(true);
+  });
+
+  it("builds a failure signature that ignores timings but keeps the outcome", () => {
+    const first = buildCommandFailureSignature({ exitCode: 1, stdout: "1 failed in 0.42s" });
+    const second = buildCommandFailureSignature({ exitCode: 1, stdout: "1 failed in 0.57s" });
+    const different = buildCommandFailureSignature({ exitCode: 1, stdout: "2 failed in 0.57s" });
+    expect(first).toBe(second);
+    expect(first).not.toBe(different);
+  });
+});
+
+describe("buildLoopTurnLimitWarning", () => {
+  it("tells the model how many turns are left and to land the current change", () => {
+    expect(buildLoopTurnLimitWarning(2, "step")).toBe(
+      "[TURN_LIMIT] You have 2 turns left in this step. Finish the current change, then summarize what is done and what remains.",
+    );
+    expect(buildLoopTurnLimitWarning(1, "follow-up")).toContain("You have 1 turn left in this follow-up.");
   });
 });

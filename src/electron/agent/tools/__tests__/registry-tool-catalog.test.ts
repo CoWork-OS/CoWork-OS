@@ -732,6 +732,167 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(compact).toContain("web_fetch");
   });
 
+  it("lets create_spreadsheet cells carry numbers, booleans and nulls, not only strings", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-spreadsheet");
+    const createSpreadsheet = registry
+      .getTools()
+      .find((tool) => tool.name === "create_spreadsheet");
+    const sheet = createSpreadsheet!.input_schema.properties.sheets.items.properties;
+
+    for (const cell of [sheet.data.items.items, sheet.rows.items.items]) {
+      expect(cell.type).toBeUndefined();
+      expect(cell.description).toMatch(/number/i);
+      expect(cell.description).toContain("=");
+    }
+  });
+
+  it("advertises the table, list and code blocks create_document renders", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-document-schema");
+    const createDocument = registry.getTools().find((tool) => tool.name === "create_document");
+    const block = createDocument!.input_schema.properties.content.items.properties;
+
+    expect(block.type.enum).toEqual(["heading", "paragraph", "list", "table", "code"]);
+    expect(block.items.items.type).toBe("string");
+    expect(block.rows.items.items.type).toBe("string");
+  });
+
+  it("keeps canonical tool facts when prompt guidance is appended", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-prompting-facts");
+    const tools = registry.getTools();
+    const pick = (name: string) => tools.find((tool) => tool.name === name)!;
+    const [spawnAgent, navigate] = registry.renderToolsForContext(
+      [pick("spawn_agent"), pick("browser_navigate")],
+      {
+        executionMode: "execute",
+        taskDomain: "code",
+        webSearchMode: "live",
+        shellEnabled: true,
+        agentType: "main",
+        workerRole: null,
+        allowUserInput: true,
+      },
+    );
+
+    expect(spawnAgent.description).toContain("Returns immediately");
+    expect(spawnAgent.description).toContain("wait_for_agent");
+    expect(spawnAgent.description).toContain("worker_role");
+    expect(navigate.description).toMatch(/headless/i);
+    expect(navigate.description).not.toContain("By default this opens and controls the visible");
+  });
+
+  it("tells the model that run_command runs non-interactively", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-noninteractive");
+    const runCommand = registry.getTools().find((tool) => tool.name === "run_command")!;
+    const renderContext = {
+      executionMode: "execute" as const,
+      taskDomain: "code" as const,
+      webSearchMode: "live" as const,
+      shellEnabled: true,
+      agentType: "main" as const,
+      workerRole: null,
+      allowUserInput: true,
+    };
+    // The rendered description (base text, then appended guidance) is what the model sees.
+    const rendered = registry.renderToolsForContext([runCommand], renderContext)[0];
+    const compact = registry.getToolDescriptions(["run_command"], { renderContext });
+
+    for (const description of [runCommand.description, rendered.description, compact]) {
+      expect(description).toMatch(/non-interactive/i);
+      expect(description).toContain("--yes");
+    }
+    expect(rendered.description).toContain("dev servers and watchers with background: true");
+    expect(compact).toContain("background: true");
+  });
+
+  it("offers background process control exactly when run_command is offered", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-background");
+    const tools = registry.getTools();
+    const runCommand = tools.find((tool) => tool.name === "run_command")!;
+    const processOutput = tools.find((tool) => tool.name === "process_output")!;
+    const stopProcess = tools.find((tool) => tool.name === "stop_process")!;
+
+    expect(runCommand.input_schema.properties.background.type).toBe("boolean");
+    expect(runCommand.description).toMatch(/dev servers.*background: true/s);
+    expect(processOutput.description).toMatch(/^Read new output/);
+    expect(processOutput.description).toMatch(/Use it to wait for a dev server/);
+    expect(processOutput.input_schema.required).toBeUndefined();
+    expect(stopProcess.description).toMatch(/Use it when you no longer need/);
+    expect(stopProcess.input_schema.required).toEqual(["process_id"]);
+
+    const noShell = createWorkspace();
+    noShell.permissions.shell = false;
+    const names = new ToolRegistry(noShell, createDaemon(), "task-background-no-shell")
+      .getTools()
+      .map((tool) => tool.name);
+    expect(names).not.toContain("run_command");
+    expect(names).not.toContain("process_output");
+    expect(names).not.toContain("stop_process");
+  });
+
+  it("schedules process_output as a parallel read and stop_process exclusively, without approval", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-background-spec");
+
+    expect(registry.getSchedulerSpec("process_output", { process_id: "bg-1" })).toMatchObject({
+      concurrencyClass: "read_parallel",
+      readOnly: true,
+      idempotent: true,
+    });
+    expect(registry.getSchedulerSpec("stop_process", { process_id: "bg-1" })).toMatchObject({
+      concurrencyClass: "exclusive",
+      readOnly: false,
+      idempotent: false,
+    });
+    expect((registry as Any).getApprovalTypeForTool("process_output")).toBeNull();
+    expect((registry as Any).getApprovalTypeForTool("stop_process")).toBeNull();
+    expect(
+      (registry as Any).getApprovalTypeForTool("run_command", {
+        command: "npm run dev",
+        background: true,
+      }),
+    ).toBe("run_command");
+  });
+
+  it("routes background run_command calls and process tools to the shell tools", async () => {
+    const daemon = { ...createDaemon(), requestApproval: vi.fn().mockResolvedValue(true) };
+    const registry = new ToolRegistry(createWorkspace(), daemon as Any, "task-background-route");
+    const internals = registry as Any;
+    const startBackground = vi
+      .spyOn(internals.shellTools, "startBackgroundCommand")
+      .mockResolvedValue({ success: true, background: true, process_id: "bg-1" } as Any);
+    const runCommand = vi
+      .spyOn(internals.shellTools, "runCommand")
+      .mockResolvedValue({ success: true } as Any);
+    const output = vi
+      .spyOn(internals.shellTools, "getBackgroundProcessOutput")
+      .mockResolvedValue({ success: true } as Any);
+    const stop = vi
+      .spyOn(internals.shellTools, "stopBackgroundProcess")
+      .mockResolvedValue({ success: true } as Any);
+
+    await registry.executeTool("run_command", {
+      command: "npm run dev",
+      cwd: "web",
+      background: true,
+      startup_wait_ms: 8000,
+    });
+    await registry.executeTool("process_output", { process_id: "bg-1", tail_lines: 5 });
+    await registry.executeTool("stop_process", { process_id: "bg-1" });
+
+    expect(startBackground).toHaveBeenCalledWith("npm run dev", {
+      cwd: "web",
+      env: undefined,
+      signal: undefined,
+      startupWaitMs: 8000,
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(output).toHaveBeenCalledWith({ process_id: "bg-1", tail_lines: 5 }, undefined);
+    expect(stop).toHaveBeenCalledWith({ process_id: "bg-1" });
+    // The background start passes the same pre-dispatch shell approval as any
+    // run_command; reading or stopping the task's own process does not ask.
+    expect(daemon.requestApproval).toHaveBeenCalledTimes(1);
+    expect(daemon.requestApproval.mock.calls[0][1]).toBe("run_command");
+  });
+
   it("prioritizes local channel history for message summarization", () => {
     const definitions = ChannelTools.getToolDefinitions();
     const listChats = definitions.find((tool) => tool.name === "channel_list_chats");
@@ -935,4 +1096,169 @@ describe("registered workspace operations without approval interruptions", () =>
       }
     },
   );
+});
+
+describe("default Ask for approval profile with approval prompts off", () => {
+  const runMcpCall = async (task: Any, cardAnswer = true) => {
+    const source = createWorkspace();
+    const profile = resolveEffectiveAccessProfile({ workspace: source, task });
+    const workspace = applyAccessProfileToWorkspace(source, profile);
+    const daemon = {
+      ...createDaemon(),
+      getTaskById: vi.fn().mockResolvedValue(task),
+      getEffectiveAccessProfile: vi.fn(() => profile),
+      evaluateToolPermission: vi.fn((_taskId: string, request: Any) =>
+        PermissionEngine.evaluate({
+          workspace,
+          toolName: request.toolName,
+          toolInput: request.details?.params,
+          approvalType: request.approvalType,
+          mode: profile.permissionMode,
+          rules: [],
+        }),
+      ),
+      authorizeToolAction: vi.fn().mockResolvedValue(cardAnswer),
+      requestApproval: vi.fn().mockResolvedValue(cardAnswer),
+    };
+    mockMcpState.tools = [
+      {
+        name: "research_lookup",
+        description: "Connector fixture",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        serverId: "research-server",
+      },
+    ];
+    const registry = new ToolRegistry(workspace, daemon as Any, task.id);
+    const outcome = await registry
+      .executeToolWithRuntime("mcp_research_lookup", { query: "status" })
+      .then(
+        () => null,
+        (error: unknown) => error as Error,
+      );
+    return { daemon, outcome, profile };
+  };
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("COWORK_APPROVAL_PROMPTS", "off");
+    mockMcpCallTool.mockReset().mockResolvedValue({ content: [] });
+  });
+
+  it("asks through the inline approval card instead of denying", async () => {
+    const { daemon, outcome, profile } = await runMcpCall({
+      id: "task-desktop",
+      source: "manual",
+      agentConfig: { accessProfileId: "ask_for_approval" },
+    });
+
+    expect(profile.id).toBe("ask_for_approval");
+    expect(outcome).toBeNull();
+    expect(daemon.authorizeToolAction).toHaveBeenCalledTimes(1);
+    expect(daemon.authorizeToolAction).toHaveBeenCalledWith(
+      "task-desktop",
+      expect.objectContaining({ toolName: "mcp_research_lookup" }),
+    );
+    expect(mockMcpCallTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run the call when the inline card is declined", async () => {
+    const { daemon, outcome } = await runMcpCall(
+      {
+        id: "task-declined",
+        source: "manual",
+        agentConfig: { accessProfileId: "ask_for_approval" },
+      },
+      false,
+    );
+
+    expect(outcome?.message).toContain("approval denied");
+    expect(daemon.authorizeToolAction).toHaveBeenCalledTimes(1);
+    expect(mockMcpCallTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a cowork run CLI task", { cli: { owner: "cowork-run", runId: "run-1" } }, {}],
+    ["a sub-agent", {}, { parentTaskId: "task-parent" }],
+    ["a scheduled task", {}, { source: "cron" }],
+    ["a task with no human input", { humanInputPolicy: "none" }, {}],
+  ])("keeps denying when %s cannot answer the card", async (_label, agentConfig, extra) => {
+    const { daemon, outcome } = await runMcpCall({
+      id: "task-unattended",
+      source: "manual",
+      ...extra,
+      agentConfig: { accessProfileId: "ask_for_approval", ...agentConfig },
+    });
+
+    expect(outcome?.message).toContain("approval requests are disabled");
+    expect(daemon.authorizeToolAction).not.toHaveBeenCalled();
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(mockMcpCallTool).not.toHaveBeenCalled();
+  });
+});
+
+describe("run_command kill timeout", () => {
+  const runHandler = async (input: Record<string, unknown>, runtime?: Record<string, unknown>) => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-shell-timeout");
+    const internals = registry as Any;
+    const runCommand = vi
+      .spyOn(internals.shellTools, "runCommand")
+      .mockResolvedValue({ success: true } as Any);
+    await internals.handlerRegistry.execute("run_command", {
+      request: { name: "run_command", input, runtime },
+    });
+    return runCommand;
+  };
+
+  it("uses the executor budget minus a grace period when the call sets no timeout", async () => {
+    const runCommand = await runHandler({ command: "npm run build" }, { timeoutMs: 300_000 });
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "npm run build",
+      expect.objectContaining({ timeout: 297_000 }),
+    );
+  });
+
+  it("honors explicit timeout aliases from the tool input", async () => {
+    const fromSeconds = await runHandler(
+      { command: "npm test", timeout_seconds: 120 },
+      { timeoutMs: 120_000 },
+    );
+    expect(fromSeconds).toHaveBeenCalledWith(
+      "npm test",
+      expect.objectContaining({ timeout: 120_000 }),
+    );
+
+    const fromMs = await runHandler({ command: "make", timeout_ms: 90_000 });
+    expect(fromMs).toHaveBeenCalledWith("make", expect.objectContaining({ timeout: 90_000 }));
+  });
+
+  it("falls back to the documented 120s default and clamps to the 30-minute maximum", async () => {
+    const withoutBudget = await runHandler({ command: "git status" });
+    expect(withoutBudget).toHaveBeenCalledWith(
+      "git status",
+      expect.objectContaining({ timeout: 120_000 }),
+    );
+
+    const long = await runHandler({ command: "npm ci", timeout: 900_000 });
+    expect(long).toHaveBeenCalledWith("npm ci", expect.objectContaining({ timeout: 900_000 }));
+
+    const oversized = await runHandler({ command: "npm ci", timeout: 3_600_000 });
+    expect(oversized).toHaveBeenCalledWith(
+      "npm ci",
+      expect.objectContaining({ timeout: 1_800_000 }),
+    );
+  });
+
+  it("never sets a kill timer past the executor's budget for the call", async () => {
+    // The executor clamps a 30-minute request to its 15-minute step budget; the
+    // command must be killed within that budget so its partial output survives.
+    const clamped = await runHandler(
+      { command: "cargo build --release", timeout_seconds: 1_800 },
+      { timeoutMs: 895_000 },
+    );
+    expect(clamped).toHaveBeenCalledWith(
+      "cargo build --release",
+      expect.objectContaining({ timeout: 895_000 }),
+    );
+  });
 });

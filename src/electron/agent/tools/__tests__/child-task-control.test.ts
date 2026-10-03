@@ -1,6 +1,43 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import Database from "better-sqlite3";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Task, TaskEvent, Workspace } from "../../../../shared/types";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
+import { OrchestrationGraphEngine } from "../../orchestration/OrchestrationGraphEngine";
+
+const nativeSqliteAvailable = await import("better-sqlite3")
+  .then((module) => {
+    const probe = new module.default(":memory:");
+    probe.close();
+    return true;
+  })
+  .catch(() => false);
+
+function createGraphSchema(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE orchestration_graph_runs (
+      id TEXT PRIMARY KEY, root_task_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+      kind TEXT NOT NULL, status TEXT NOT NULL, max_parallel INTEGER NOT NULL,
+      metadata TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
+    );
+    CREATE TABLE orchestration_graph_nodes (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, node_key TEXT NOT NULL, title TEXT NOT NULL,
+      prompt TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, dispatch_target TEXT NOT NULL,
+      worker_role TEXT, parent_task_id TEXT, assigned_agent_role_id TEXT, capability_hint TEXT,
+      acp_agent_id TEXT, agent_config TEXT, task_id TEXT, remote_task_id TEXT, public_handle TEXT,
+      summary TEXT, output TEXT, error TEXT, team_run_id TEXT, team_item_id TEXT,
+      workflow_phase_id TEXT, acp_task_id TEXT, metadata TEXT, verification_verdict TEXT,
+      verification_report TEXT, semantic_summary TEXT, created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL, started_at INTEGER, completed_at INTEGER
+    );
+    CREATE TABLE orchestration_graph_edges (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, from_node_id TEXT NOT NULL, to_node_id TEXT NOT NULL
+    );
+    CREATE TABLE orchestration_graph_node_events (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, node_id TEXT NOT NULL, event_type TEXT NOT NULL,
+      payload TEXT, created_at INTEGER NOT NULL
+    );
+  `);
+}
 
 vi.mock("electron", () => ({
   app: {
@@ -1288,6 +1325,57 @@ describe("ToolRegistry child task control tools", () => {
     }
   });
 
+  it("spawn_agent keeps full tools and a free-form answer for ordinary research prompts", async () => {
+    const prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+    const prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+    process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+    process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+
+    try {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createChildTask: vi.fn().mockResolvedValue({
+          id: "child-3",
+          title: "Competitor pricing",
+          prompt: "x",
+          status: "pending",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: "parent-task",
+          agentType: "sub",
+          depth: 1,
+        }),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", {
+        prompt: "Research the top 5 competitors in the ed-tech domain and summarize their pricing",
+      });
+
+      expect(result.success).toBe(true);
+      const call = daemon.createChildTask.mock.calls[0][0];
+      expect(call.prompt).not.toContain("[EXTRACTION_OUTPUT_CONTRACT_V1]");
+      expect(call.prompt).not.toContain("strict JSON");
+      expect(call.agentConfig?.allowedTools).toBeUndefined();
+      expect(call.agentConfig.toolRestrictions).toContain("spawn_agent");
+    } finally {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    }
+  });
+
   it("spawn_agent persists explicit acpx runtime requests into agentConfig", async () => {
     const daemon = {
       getTaskById: vi.fn().mockResolvedValue({
@@ -1499,5 +1587,419 @@ describe("ToolRegistry child task control tools", () => {
 
     expect(inferredCall.workerRole).toBe("researcher");
     expect(inferredCall.prompt).toContain("Resolved worker role: Researcher");
+  });
+
+  describe("spawn_agent model and turn defaults", () => {
+    // Sub-agents used to default to Haiku with 20 turns. A pinned modelKey also
+    // drops the provider failover chain (resolveProviderFailoverChain returns
+    // only the primary route when the task has a modelKey), so the default now
+    // inherits the parent's route and only extraction helpers or explicit
+    // requests ask for Haiku.
+    let prevLimit: string | undefined;
+    let prevPhaseC: string | undefined;
+    beforeEach(() => {
+      prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+      prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+      process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+    });
+    afterEach(() => {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    });
+
+    async function spawnChild(
+      input: Record<string, unknown>,
+      parentAgentConfig?: Task["agentConfig"],
+    ): Promise<Any> {
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue({
+          id: "parent-task",
+          title: "Parent",
+          prompt: "x",
+          status: "executing",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          depth: 0,
+          ...(parentAgentConfig ? { agentConfig: parentAgentConfig } : {}),
+        }),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createChildTask: vi.fn().mockResolvedValue({
+          id: "child-1",
+          title: "Child",
+          prompt: "x",
+          status: "pending",
+          workspaceId: workspace.id,
+          createdAt: 1,
+          updatedAt: 1,
+          parentTaskId: "parent-task",
+          agentType: "sub",
+          depth: 1,
+        }),
+        logEvent: vi.fn(),
+      } as Any;
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("spawn_agent", input);
+      expect(result.success).toBe(true);
+      return daemon.createChildTask.mock.calls[0][0].agentConfig;
+    }
+
+    it("inherits the parent's model route when no preference is given", async () => {
+      const agentConfig = await spawnChild({ prompt: "Fix the failing date parser in src/utils" });
+      expect(agentConfig.modelKey).toBeUndefined();
+      expect(agentConfig.providerType).toBeUndefined();
+    });
+
+    it("copies an explicit parent provider and model", async () => {
+      const agentConfig = await spawnChild(
+        { prompt: "Fix the failing date parser in src/utils" },
+        { providerType: "openai", modelKey: "gpt-5.2" },
+      );
+      expect(agentConfig.providerType).toBe("openai");
+      expect(agentConfig.modelKey).toBe("gpt-5.2");
+    });
+
+    it('treats "same" and unknown preferences as inheritance', async () => {
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "same" })).modelKey,
+      ).toBeUndefined();
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "gpt-9" })).modelKey,
+      ).toBeUndefined();
+    });
+
+    it("keeps Haiku for explicit cheaper/haiku requests and extraction helpers", async () => {
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "cheaper" })).modelKey,
+      ).toBe("haiku-4-5");
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", model_preference: "haiku" })).modelKey,
+      ).toBe("haiku-4-5");
+      const extraction = await spawnChild(
+        {
+          prompt:
+            'Read "temp-writing-rules.html" in the workspace and extract meaningful content to markdown.',
+        },
+        { providerType: "openai", modelKey: "gpt-5.2" },
+      );
+      expect(extraction.modelKey).toBe("haiku-4-5");
+      expect(extraction.providerType).toBeUndefined();
+    });
+
+    it("gives implementer children 40 turns and other roles 20", async () => {
+      expect((await spawnChild({ prompt: "Fix the failing date parser" })).maxTurns).toBe(40);
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", worker_role: "researcher" })).maxTurns,
+      ).toBe(20);
+      expect(
+        (await spawnChild({ prompt: "Fix the parser", worker_role: "verifier" })).maxTurns,
+      ).toBe(20);
+      expect((await spawnChild({ prompt: "Fix the parser", max_turns: 12 })).maxTurns).toBe(12);
+    });
+  });
+
+  describe("orchestrate_agents", () => {
+    const parentTask = {
+      id: "parent-task",
+      title: "Parent",
+      prompt: "x",
+      status: "executing",
+      workspaceId: "ws-1",
+      createdAt: 1,
+      updatedAt: 1,
+      depth: 0,
+    };
+    const tasks = [1, 2, 3, 4].map((index) => ({
+      prompt: `Review vendor ${index} pricing notes`,
+      title: `Vendor ${index}`,
+    }));
+    const node = (index: number, overrides: Record<string, unknown> = {}) => ({
+      id: `node-${index}`,
+      runId: "run-1",
+      key: `batch-${index}`,
+      title: `Vendor ${index}`,
+      status: "running",
+      publicHandle: `child-${index}`,
+      ...overrides,
+    });
+
+    let prevLimit: string | undefined;
+    let prevPhaseC: string | undefined;
+    beforeEach(() => {
+      prevLimit = process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT;
+      prevPhaseC = process.env.COWORK_GUARDRAIL_PHASE_C;
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = "3";
+      process.env.COWORK_GUARDRAIL_PHASE_C = "true";
+    });
+    afterEach(() => {
+      process.env.COWORK_SUBAGENT_MAX_ACTIVE_PER_PARENT = prevLimit;
+      process.env.COWORK_GUARDRAIL_PHASE_C = prevPhaseC;
+    });
+
+    it("queues tasks beyond the active child limit instead of rejecting them", async () => {
+      const queued = node(4, { status: "ready", publicHandle: undefined });
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), queued],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), node(4)],
+        }),
+        waitForDelegatedNode: vi.fn(async (_root: string, handle: string) => ({
+          success: true,
+          status: "completed",
+          message: "Delegated work completed successfully",
+          resultSummary: `summary for ${handle}`,
+        })),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks });
+
+      expect(result.success).toBe(true);
+      expect(daemon.createOrchestrationGraphRun).toHaveBeenCalledWith(
+        expect.objectContaining({ maxParallel: 3 }),
+      );
+      expect(daemon.createOrchestrationGraphRun.mock.calls[0][0].nodes).toHaveLength(4);
+      expect(result.completed).toBe(4);
+      expect(result.results.map((entry: Any) => entry.task_id)).toEqual([
+        "child-1",
+        "child-2",
+        "child-3",
+        "child-4",
+      ]);
+      expect(daemon.waitForDelegatedNode).toHaveBeenCalledWith(
+        "parent-task",
+        "child-4",
+        expect.any(Number),
+      );
+    });
+
+    it("reports tasks that never started before the timeout as queued", async () => {
+      const queued = node(4, { status: "ready", publicHandle: undefined });
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), queued],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), queued],
+        }),
+        waitForDelegatedNode: vi.fn().mockResolvedValue({
+          success: true,
+          status: "completed",
+          message: "Delegated work completed successfully",
+        }),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", {
+        tasks,
+        timeout_seconds: 1,
+      });
+
+      expect(result.results[3]).toMatchObject({ title: "Vendor 4", status: "queued" });
+      expect(daemon.waitForDelegatedNode).toHaveBeenCalledTimes(3);
+      expect(result.run_id).toBe("run-1");
+      expect(result.message).toContain("get_orchestration_status");
+    });
+
+    it("leaves the slots a running run holds for its queued tasks", async () => {
+      const activeChild = {
+        ...parentTask,
+        id: "child-active",
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      };
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([activeChild]),
+        // An earlier run: one child running, two tasks queued behind it (2 parallel).
+        listOrchestrationGraphsByRootTask: vi.fn().mockResolvedValue([
+          {
+            run: { id: "run-0", status: "running", maxParallel: 2 },
+            nodes: [
+              node(1, { runId: "run-0", taskId: "child-active" }),
+              node(2, { runId: "run-0", status: "pending", publicHandle: undefined }),
+              node(3, { runId: "run-0", status: "ready", publicHandle: undefined }),
+            ],
+          },
+        ]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 1 },
+          nodes: [node(1), node(2), node(3), node(4)],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn(),
+        waitForDelegatedNode: vi.fn().mockResolvedValue({ status: "completed" }),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks });
+
+      // 3 slots: one running child, one more the earlier run will start for its queue.
+      expect(daemon.createOrchestrationGraphRun).toHaveBeenCalledWith(
+        expect.objectContaining({ maxParallel: 1 }),
+      );
+      expect(result.max_parallel).toBe(1);
+    });
+
+    it.runIf(nativeSqliteAvailable)(
+      "keeps a run's queued tasks and later spawn_agent calls within the limit together",
+      async () => {
+        const db = new Database(":memory:");
+        createGraphSchema(db);
+        const childTasks = new Map<string, Task>();
+        const isActive = (task: Task) =>
+          ["pending", "queued", "planning", "executing"].includes(task.status);
+        const activeChildren = () => [...childTasks.values()].filter(isActive).length;
+        let mostActiveChildren = 0;
+        const engine = new OrchestrationGraphEngine(db, {
+          createChildTask: async (params) => {
+            const child = {
+              ...parentTask,
+              id: `child-${childTasks.size + 1}`,
+              title: params.title,
+              status: "executing",
+              parentTaskId: params.parentTaskId,
+              agentType: "sub",
+              depth: 1,
+            } as Task;
+            childTasks.set(child.id, child);
+            mostActiveChildren = Math.max(mostActiveChildren, activeChildren());
+            return child;
+          },
+          createRootTask: async () => {
+            throw new Error("unexpected root task");
+          },
+          getTaskById: async (taskId) => childTasks.get(taskId),
+          cancelTask: async () => undefined,
+          getActiveAgentRoles: () => [],
+        });
+        const repo = engine.getRepository();
+        const daemon = {
+          getTaskById: vi.fn(async (taskId: string) =>
+            taskId === parentTask.id ? parentTask : childTasks.get(taskId),
+          ),
+          getChildTasks: vi.fn(async () => [...childTasks.values()]),
+          createOrchestrationGraphRun: (params: Any) => engine.createRun(params),
+          getOrchestrationGraphSnapshot: (runId: string) => repo.findSnapshotByRunId(runId),
+          listOrchestrationGraphsByRootTask: (rootTaskId: string) =>
+            repo.listSnapshotsByRootTaskId(rootTaskId),
+          logEvent: vi.fn(),
+        } as Any;
+        const finish = (taskId: string) =>
+          childTasks.set(taskId, { ...childTasks.get(taskId)!, status: "completed" });
+        const registry = new ToolRegistry(workspace, daemon, "parent-task");
+        const spawn = () => registry.executeTool("spawn_agent", { prompt: "Review vendor 5" });
+
+        // What orchestrate_agents creates for four tasks with all three slots free.
+        const run = await engine.createRun({
+          rootTaskId: "parent-task",
+          workspaceId: "ws-1",
+          kind: "delegation",
+          maxParallel: 3,
+          metadata: { createdBy: "orchestrate_agents" },
+          nodes: tasks.map((task, index) => ({
+            key: `batch-${index + 1}`,
+            title: task.title,
+            prompt: task.prompt,
+            kind: "child_task" as const,
+            dispatchTarget: "native_child_task" as const,
+            parentTaskId: "parent-task",
+          })),
+        });
+        expect(activeChildren()).toBe(3);
+
+        // A child finishes; its slot belongs to the queued fourth task, before and after the
+        // run notices.
+        finish("child-1");
+        expect((await spawn()).error).toBe("FANOUT_LIMIT_REACHED");
+        await engine.tickRun(run.run.id);
+        expect(activeChildren()).toBe(3);
+        expect((await spawn()).error).toBe("FANOUT_LIMIT_REACHED");
+
+        // Once the queue is drained, finished children free their slots for spawn_agent.
+        finish("child-2");
+        await engine.tickRun(run.run.id);
+        const spawned = await spawn();
+        expect(spawned.success).toBe(true);
+        expect((await spawn()).error).toBe("FANOUT_LIMIT_REACHED");
+        expect(mostActiveChildren).toBe(3);
+        db.close();
+      },
+    );
+
+    it("does not count a paused child that holds a slot in its run", async () => {
+      const pausedChild = {
+        ...parentTask,
+        id: "child-paused",
+        status: "paused",
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      };
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([pausedChild]),
+        // The paused child keeps its run's only slot, so the queued task cannot start either.
+        listOrchestrationGraphsByRootTask: vi.fn().mockResolvedValue([
+          {
+            run: { id: "run-0", status: "running", maxParallel: 1 },
+            nodes: [
+              node(1, { runId: "run-0", taskId: "child-paused" }),
+              node(2, { runId: "run-0", status: "pending", publicHandle: undefined }),
+            ],
+          },
+        ]),
+        createOrchestrationGraphRun: vi.fn().mockResolvedValue({
+          run: { id: "run-1", maxParallel: 3 },
+          nodes: [node(1), node(2), node(3), node(4)],
+        }),
+        getOrchestrationGraphSnapshot: vi.fn(),
+        waitForDelegatedNode: vi.fn().mockResolvedValue({ status: "completed" }),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks });
+
+      expect(result.max_parallel).toBe(3);
+    });
+
+    it("returns a coded error when no child-agent slot is free", async () => {
+      const activeChild = {
+        ...parentTask,
+        id: "child-active",
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        depth: 1,
+      };
+      const daemon = {
+        getTaskById: vi.fn().mockResolvedValue(parentTask),
+        getChildTasks: vi.fn().mockResolvedValue([activeChild, activeChild, activeChild]),
+        createOrchestrationGraphRun: vi.fn(),
+        logEvent: vi.fn(),
+      } as Any;
+
+      const registry = new ToolRegistry(workspace, daemon, "parent-task");
+      const result = await registry.executeTool("orchestrate_agents", { tasks });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("FANOUT_LIMIT_REACHED");
+      expect(result.message).toContain("3/3");
+      expect(daemon.createOrchestrationGraphRun).not.toHaveBeenCalled();
+    });
   });
 });

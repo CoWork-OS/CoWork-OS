@@ -1,6 +1,12 @@
-import { LLMMessage, LLMContent as _LLMContent, LLMToolResult as _LLMToolResult } from "./llm";
+import {
+  LLMMessage,
+  LLMTool,
+  LLMContent as _LLMContent,
+  LLMToolResult as _LLMToolResult,
+} from "./llm";
 import { estimateImageTokens } from "./llm/image-utils";
 import { getModelContextWindow } from "../../shared/model-metadata";
+import { PINNED_CONTEXT_OPEN_TAGS } from "./pinned-context-blocks";
 
 /**
  * Context Manager handles conversation history to prevent "input too long" errors
@@ -125,11 +131,7 @@ const ACTIVE_PATH_CONTEXT_WINDOW = 4;
 
 // Messages that begin with one of these tags are treated as "pinned" and should
 // survive compaction. (They are system-generated context blocks, not normal chat turns.)
-const PINNED_MESSAGE_TAG_PREFIXES = [
-  "<cowork_memory_recall>",
-  "<cowork_compaction_summary>",
-  "<cowork_shared_context>",
-] as const;
+const PINNED_MESSAGE_TAG_PREFIXES = PINNED_CONTEXT_OPEN_TAGS;
 
 function messageTextForPinnedCheck(message: LLMMessage): string {
   if (typeof message.content === "string") return message.content;
@@ -161,6 +163,39 @@ function messageHasToolResult(message: LLMMessage): boolean {
 }
 
 /**
+ * Indexes compaction keeps regardless of budget: the latest user request and the
+ * latest complete tool call with its results. Without them the model loses what
+ * it was asked and where it stopped.
+ */
+function findLatestWorkIndexes(messages: LLMMessage[]): number[] {
+  const indexes: number[] = [];
+  for (let i = messages.length - 1; i > 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "user" || messageHasToolResult(message) || isPinnedMessage(message)) {
+      continue;
+    }
+    const text =
+      typeof message.content === "string" ? message.content : messageTextForPinnedCheck(message);
+    if (text.trim()) {
+      indexes.push(i);
+      break;
+    }
+  }
+  for (let i = messages.length - 1; i > 1; i--) {
+    if (
+      messages[i]?.role === "user" &&
+      messageHasToolResult(messages[i]) &&
+      messages[i - 1]?.role === "assistant" &&
+      messageHasToolUse(messages[i - 1])
+    ) {
+      indexes.push(i - 1, i);
+      break;
+    }
+  }
+  return indexes;
+}
+
+/**
  * Estimate token count from text (rough approximation)
  * LLMs use ~4 characters per token on average for English text
  */
@@ -189,7 +224,46 @@ export function estimateMessageTokens(message: LLMMessage): number {
       tokens += estimateImageTokens(content);
     }
   }
+  return tokens + estimateAnthropicThinkingTokens(message);
+}
+
+/**
+ * Anthropic thinking blocks ride on `reasoning` and are sent back with the turn
+ * (see llm/anthropic-thinking.ts). The signature carries the encrypted thinking,
+ * so its length stands in for the thinking even when the text is omitted.
+ */
+function estimateAnthropicThinkingTokens(message: LLMMessage): number {
+  if (message.role !== "assistant" || !Array.isArray(message.reasoning)) return 0;
+  let tokens = 0;
+  for (const item of message.reasoning) {
+    if (item?.format !== "anthropic") continue;
+    const block = (item.data as { block?: Any } | undefined)?.block;
+    if (block?.type === "thinking") {
+      tokens +=
+        estimateTokens(String(block.thinking || "")) +
+        estimateTokens(String(block.signature || ""));
+    } else if (block?.type === "redacted_thinking") {
+      tokens += estimateTokens(String(block.data || ""));
+    }
+  }
   return tokens;
+}
+
+/**
+ * Estimate the tokens tool definitions (name, description, input schema) add to
+ * every request that offers them.
+ */
+export function estimateToolSchemaTokens(
+  tools: Array<Pick<LLMTool, "name" | "description" | "input_schema">>,
+): number {
+  let total = 0;
+  for (const tool of tools || []) {
+    total +=
+      estimateTokens(String(tool?.name || "")) +
+      estimateTokens(String(tool?.description || "")) +
+      estimateTokens(JSON.stringify(tool?.input_schema || {}));
+  }
+  return total;
 }
 
 /**
@@ -243,47 +317,541 @@ function getToolResultTokenBudget(parsed: Any | null): number {
   return MAX_TOOL_RESULT_TOKENS_DEFAULT;
 }
 
+// Strings at or below this many JSON-escaped chars are never shortened.
+const MIN_TRIMMED_STRING_CHARS = 400;
+// Room kept free for the `_truncated` note added to trimmed JSON objects.
+const TRUNCATION_NOTE_RESERVE = 400;
+// Log-like fields report failures at the end, so they keep more tail than head.
+const LOG_LIKE_KEYS = new Set([
+  "stdout",
+  "stderr",
+  "output",
+  "log",
+  "logs",
+  "trace",
+  "traceback",
+  "stack",
+  "stacktrace",
+]);
+const LOG_HEAD_RATIO = 0.3;
+const DEFAULT_HEAD_RATIO = 0.6;
+const PLAIN_TEXT_HEAD_RATIO = 0.5;
+// Trailing window notes written by read_file ("[... File window 0-30000 of 90000 bytes ...]",
+// "[... Content window ...]") and parse_document ("[Content window 0-50000 of 90000 characters]").
+const READ_WINDOW_NOTE_RE =
+  /\n{1,2}\[(?:\.\.\. )?(?:File|Content) window (\d+)-(\d+) of (?:at least )?(\d+) (bytes|chars|characters)(?: \.\.\.)?\]\s*$/;
+const READ_FILES_TRUNCATION_NOTE_RE = /\[\.\.\. truncated by read_files \.\.\.\]\s*$/;
+// Notes this module appends when it trims a read window or a read_files entry. Compaction
+// can trim a result again, and these must not be mistaken for file content then.
+const TRIMMED_READ_NOTE_RE =
+  /\n\n\[\.\.\. trimmed to fit the tool-result budget: delivered (?:bytes|chars) \d+-\d+ of \d+\. Call [a-z_]+ with [A-Za-z_]+=\d+ to continue \.\.\.\]\s*$/;
+const TRIMMED_READ_FILES_NOTE_RE =
+  /\n\n\[\.\.\. \d+ chars of this file omitted to fit the tool-result budget\. Call read_file with path .*? to read the rest \.\.\.\]\s*$/;
+const OMITTED_ITEMS_NOTICE_RE = /^\[\.\.\. (\d+) more items omitted/;
+const OMITTED_CHARS_NOTICE_RE = /\n?\[\.\.\. (\d+) chars omitted \.\.\.\]\n?/g;
+
+function isPlainObject(value: unknown): value is Record<string, Any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/** Move a cut point so it never separates a surrogate pair. */
+function alignCut(text: string, index: number, direction: "back" | "forward"): number {
+  if (index <= 0 || index >= text.length) return index;
+  if (isHighSurrogate(text.charCodeAt(index - 1)) && isLowSurrogate(text.charCodeAt(index))) {
+    return direction === "back" ? index - 1 : index + 1;
+  }
+  return index;
+}
+
+/** End a head excerpt right after a nearby newline so it holds whole lines. */
+function snapHeadEnd(text: string, end: number): number {
+  if (end <= 0) return 0;
+  const newline = text.lastIndexOf("\n", end - 1);
+  if (newline >= 0 && end - (newline + 1) <= Math.min(2000, Math.floor(end / 4))) {
+    return newline + 1;
+  }
+  return alignCut(text, end, "back");
+}
+
+/** Start a tail excerpt at the beginning of a nearby line. */
+function snapTailStart(text: string, start: number): number {
+  if (start <= 0) return 0;
+  if (text[start - 1] === "\n") return start;
+  const newline = text.indexOf("\n", start);
+  if (
+    newline >= 0 &&
+    newline + 1 - start <= Math.min(2000, Math.floor((text.length - start) / 4))
+  ) {
+    return newline + 1;
+  }
+  return alignCut(text, start, "forward");
+}
+
+function omittedCharsNotice(omitted: number): string {
+  return `[... ${omitted} chars omitted ...]`;
+}
+
 /**
- * Truncate tool result content if too large
+ * Keep the start and the end of text within maxChars and mark the omitted middle,
+ * so errors and summaries at the end of an output survive truncation.
+ */
+function trimHeadTail(text: string, maxChars: number, headRatio: number): string {
+  if (text.length <= maxChars) return text;
+  const keep = Math.max(0, maxChars - omittedCharsNotice(text.length).length - 2);
+  const headBudget = Math.floor(keep * headRatio);
+  const headEnd = snapHeadEnd(text, headBudget);
+  const tailStart = Math.max(headEnd, snapTailStart(text, text.length - (keep - headBudget)));
+  const head = text.slice(0, headEnd);
+  const tail = text.slice(tailStart);
+  // Text trimmed before (e.g. re-trimmed during compaction) carries earlier notices:
+  // count what they stood for instead of the notice text itself.
+  let omitted = tailStart - headEnd;
+  for (const match of text.slice(headEnd, tailStart).matchAll(OMITTED_CHARS_NOTICE_RE)) {
+    omitted += Number(match[1]) - match[0].length;
+  }
+  // Always exactly one newline on each side, so a notice can be told apart from the text.
+  const beforeNotice = head ? "\n" : "";
+  const afterNotice = tail ? "\n" : "";
+  return `${head}${beforeNotice}${omittedCharsNotice(omitted)}${afterNotice}${tail}`;
+}
+
+function jsonEscapedLength(text: string): number {
+  return JSON.stringify(text).length - 2;
+}
+
+/** Length of the longest prefix of text[0, end) whose JSON-escaped form fits budget. */
+function prefixWithinEscapedBudget(text: string, end: number, budget: number): number {
+  let used = 0;
+  let index = 0;
+  while (index < end) {
+    const code = text.charCodeAt(index);
+    let width = 1;
+    let cost = 1;
+    if (code === 0x22 || code === 0x5c) {
+      cost = 2;
+    } else if (code < 0x20) {
+      cost =
+        code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d ? 2 : 6;
+    } else if (
+      isHighSurrogate(code) &&
+      index + 1 < end &&
+      isLowSurrogate(text.charCodeAt(index + 1))
+    ) {
+      width = 2;
+      cost = 2;
+    } else if (isHighSurrogate(code) || isLowSurrogate(code)) {
+      cost = 6;
+    }
+    if (used + cost > budget) break;
+    used += cost;
+    index += width;
+  }
+  return index;
+}
+
+/**
+ * Size of text in the unit its read window is measured in: read_file windows plain-text
+ * files in UTF-8 bytes and extracted document text (and parse_document) in characters.
+ */
+function readWindowUnits(text: string, unit: "bytes" | "chars"): number {
+  return unit === "bytes" ? Buffer.byteLength(text, "utf8") : text.length;
+}
+
+/**
+ * read_file / parse_document payload: keep a head of the window and report exactly where
+ * the delivered text ends, so continuing from the reported offset never skips content.
+ */
+function fitWindowedReadPayload(parsed: Record<string, Any>, maxChars: number): string | null {
+  const content = parsed.content as string;
+  const window = parsed.window as { start: number; end: number; total: number };
+  const isParseDocument = typeof parsed.detected_type === "string";
+  const toolName = isParseDocument ? "parse_document" : "read_file";
+  const startParam = isParseDocument ? "start_char" : "startChar";
+  const unit = isParseDocument || typeof parsed.format === "string" ? "chars" : "bytes";
+  const windowNote = READ_WINDOW_NOTE_RE.exec(content) || TRIMMED_READ_NOTE_RE.exec(content);
+  const bodyEnd = windowNote ? windowNote.index : content.length;
+
+  const describe = (deliveredEnd: number) => ({
+    note:
+      `\n\n[... trimmed to fit the tool-result budget: delivered ${unit} ${window.start}-${deliveredEnd}` +
+      ` of ${window.total}. Call ${toolName} with ${startParam}=${deliveredEnd} to continue ...]`,
+    hint:
+      "This result was trimmed to fit the tool-result budget. " +
+      `Call ${toolName} with ${startParam}=${deliveredEnd} to continue reading.`,
+  });
+  const build = (keptContent: string, deliveredEnd: number): Record<string, Any> => {
+    const text = describe(deliveredEnd);
+    const next: Record<string, Any> = {
+      ...parsed,
+      content: keptContent + text.note,
+      truncated: true,
+      window: { ...window, end: deliveredEnd },
+      hint: text.hint,
+    };
+    if (isParseDocument) {
+      next.next_start_char = deliveredEnd;
+      next.char_count = next.content.length;
+    } else {
+      next.nextStartChar = deliveredEnd;
+    }
+    return next;
+  };
+
+  // Measure the fixed part with the widest possible offsets.
+  const available = maxChars - JSON.stringify(build("", window.total)).length;
+  if (available < MIN_TRIMMED_STRING_CHARS) return null;
+  const fitted = prefixWithinEscapedBudget(content, bodyEnd, available);
+  // The window body already fits: the overflow is elsewhere, so trim generically.
+  if (fitted >= bodyEnd) return null;
+  const cut = snapHeadEnd(content, fitted);
+  const removedUnits = readWindowUnits(content.slice(cut, bodyEnd), unit);
+  const deliveredEnd = Math.max(window.start, window.end - removedUnits);
+  const serialized = JSON.stringify(build(content.slice(0, cut), deliveredEnd));
+  return serialized.length <= maxChars ? serialized : null;
+}
+
+interface TrimSlot {
+  label: string;
+  original: string;
+  escapedLength: number;
+  render: (maxRawChars: number) => string;
+  assign: (value: string) => void;
+}
+
+/**
+ * Shorten the longest strings to one shared cap (short strings stay intact) so the
+ * serialized root fits maxChars. Returns false when even the minimum cap is too large.
+ */
+function fitTrimSlots(root: unknown, slots: TrimSlot[], maxChars: number): boolean {
+  const candidates = slots.filter((slot) => slot.escapedLength > MIN_TRIMMED_STRING_CHARS);
+  if (candidates.length === 0) return false;
+  for (const slot of candidates) slot.assign("");
+  const fixedChars = JSON.stringify(root).length;
+  const valueFor = (slot: TrimSlot, cap: number): string =>
+    slot.escapedLength <= cap
+      ? slot.original
+      : slot.render(Math.floor((cap * slot.original.length) / slot.escapedLength));
+  const totalFor = (cap: number): number =>
+    candidates.reduce((sum, slot) => sum + jsonEscapedLength(valueFor(slot, cap)), fixedChars);
+
+  let low = MIN_TRIMMED_STRING_CHARS;
+  let high = candidates.reduce((max, slot) => Math.max(max, slot.escapedLength), low);
+  const fits = totalFor(low) <= maxChars;
+  if (fits) {
+    while (high - low > 32) {
+      const mid = Math.floor((low + high) / 2);
+      if (totalFor(mid) <= maxChars) low = mid;
+      else high = mid;
+    }
+  }
+  for (const slot of candidates) slot.assign(valueFor(slot, low));
+  return fits;
+}
+
+function collectTrimSlots(
+  parent: Record<string, Any> | Any[],
+  key: string | number,
+  label: string,
+  headRatio: number,
+  out: TrimSlot[],
+  depth = 0,
+): void {
+  const value = (parent as Any)[key];
+  if (typeof value === "string") {
+    out.push({
+      label: label || "(result)",
+      original: value,
+      escapedLength: jsonEscapedLength(value),
+      render: (maxRawChars) => trimHeadTail(value, maxRawChars, headRatio),
+      assign: (next) => {
+        (parent as Any)[key] = next;
+      },
+    });
+    return;
+  }
+  if (depth > 32 || !value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach((_item, index) =>
+      collectTrimSlots(value, index, `${label}[${index}]`, headRatio, out, depth + 1),
+    );
+    return;
+  }
+  for (const childKey of Object.keys(value)) {
+    const childRatio = LOG_LIKE_KEYS.has(childKey.toLowerCase()) ? LOG_HEAD_RATIO : headRatio;
+    const childLabel = label ? `${label}.${childKey}` : childKey;
+    collectTrimSlots(value, childKey, childLabel, childRatio, out, depth + 1);
+  }
+}
+
+function collectArrays(value: unknown, label: string, out: Array<{ label: string; items: Any[] }>) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    if (value.length > 1) out.push({ label: label || "(result)", items: value });
+    value.forEach((item, index) => collectArrays(item, `${label}[${index}]`, out));
+    return;
+  }
+  for (const [childKey, child] of Object.entries(value)) {
+    collectArrays(child, label ? `${label}.${childKey}` : childKey, out);
+  }
+}
+
+/** Drop trailing items of the largest array, leaving a notice. Returns its label. */
+function dropTrailingArrayItems(root: unknown, maxChars: number): string | null {
+  const arrays: Array<{ label: string; items: Any[] }> = [];
+  collectArrays(root, "", arrays);
+  let target: { label: string; items: Any[]; size: number } | null = null;
+  for (const entry of arrays) {
+    const size = JSON.stringify(entry.items).length;
+    if (!target || size > target.size) target = { ...entry, size };
+  }
+  if (!target) return null;
+
+  const items = target.items;
+  let omitted = 0;
+  const previousNotice =
+    typeof items[items.length - 1] === "string"
+      ? OMITTED_ITEMS_NOTICE_RE.exec(items[items.length - 1])
+      : null;
+  if (previousNotice) {
+    items.pop();
+    omitted += Number(previousNotice[1]);
+  }
+  const excess = JSON.stringify(root).length - maxChars + 96;
+  let removedChars = 0;
+  while (items.length > 1 && removedChars < excess) {
+    removedChars += JSON.stringify(items.pop()).length + 1;
+    omitted += 1;
+  }
+  items.push(`[... ${omitted} more items omitted to fit the tool-result budget ...]`);
+  return target.label;
+}
+
+/**
+ * Fit any other JSON value: shorten long strings head+tail (logs keep more tail), then
+ * drop trailing items of long arrays. Small fields such as exit codes stay intact and the
+ * output remains valid JSON.
+ */
+function fitGenericJson(root: unknown, maxChars: number): string | null {
+  // Strings are reassigned through their container, so wrap the root once.
+  const holder: Record<string, Any> = { value: root };
+  const wrapperChars = JSON.stringify({ value: null }).length - "null".length;
+  const objectRoot = isPlainObject(root);
+  const valueBudget = maxChars - (objectRoot ? TRUNCATION_NOTE_RESERVE : 0);
+
+  const slots: TrimSlot[] = [];
+  collectTrimSlots(holder, "value", "", DEFAULT_HEAD_RATIO, slots);
+  const trimmedLabels = new Set<string>();
+  for (const slot of slots) {
+    const assign = slot.assign;
+    slot.assign = (next) => {
+      assign(next);
+      if (next !== slot.original) trimmedLabels.add(slot.label);
+      else trimmedLabels.delete(slot.label);
+    };
+  }
+
+  const fitsBudget = () => JSON.stringify(holder.value).length <= valueBudget;
+  let fits = fitTrimSlots(holder, slots, valueBudget + wrapperChars) || fitsBudget();
+  const droppedFrom = new Set<string>();
+  for (let attempt = 0; !fits && attempt < 8; attempt += 1) {
+    const label = dropTrailingArrayItems(holder.value, valueBudget);
+    if (!label) break;
+    droppedFrom.add(label);
+    fits = fitsBudget();
+  }
+  if (!fits) return null;
+
+  if (objectRoot) {
+    const fields = Array.from(trimmedLabels).slice(0, 6);
+    const parts = [
+      "This result was trimmed to fit the tool-result budget.",
+      fields.length > 0
+        ? `Shortened fields (omitted text marked "[... N chars omitted ...]"): ${fields.join(", ")}.`
+        : "",
+      droppedFrom.size > 0
+        ? `Trailing items dropped from: ${Array.from(droppedFrom).join(", ")}.`
+        : "",
+    ];
+    (root as Record<string, Any>)._truncated = parts.filter(Boolean).join(" ").slice(0, 380);
+  }
+  const serialized = JSON.stringify(holder.value);
+  return serialized.length <= maxChars ? serialized : null;
+}
+
+/** Where a read_files entry's text ends in its file, if that can be determined. */
+function describeReadFilesEntryWindow(
+  file: Record<string, Any>,
+): { end: number; unit: "bytes" | "chars" } | null {
+  const content = file.content as string;
+  const windowNote = READ_WINDOW_NOTE_RE.exec(content);
+  if (windowNote) {
+    return { end: Number(windowNote[2]), unit: windowNote[4] === "bytes" ? "bytes" : "chars" };
+  }
+  const trimmedNote = TRIMMED_READ_FILES_NOTE_RE.exec(content);
+  if (trimmedNote) {
+    // Trimmed before: the text shown so far ends where the earlier note said to continue.
+    const continueAt = / and startChar=(\d+) to read the rest \.\.\.\]\s*$/.exec(trimmedNote[0]);
+    if (!continueAt) return null;
+    return {
+      end: Number(continueAt[1]),
+      unit: typeof file.format === "string" ? "chars" : "bytes",
+    };
+  }
+  if (READ_FILES_TRUNCATION_NOTE_RE.test(content)) return null;
+  // A plain-text file read whole: its window ends at the file size in bytes.
+  if (typeof file.format !== "string" && Number.isFinite(file.size)) {
+    return { end: Number(file.size), unit: "bytes" };
+  }
+  return null;
+}
+
+/**
+ * read_files payload: shorten file contents (head only, small files stay intact), say
+ * where each trimmed file continues, and keep skippedFiles/warnings and valid JSON.
+ */
+function fitReadFilesPayload(parsed: Record<string, Any>, maxChars: number): string | null {
+  const files = parsed.files as Array<Record<string, Any>>;
+  const budget = maxChars - TRUNCATION_NOTE_RESERVE;
+  const originals = files.map((file) => ({ ...file }));
+
+  const buildSlots = (): TrimSlot[] =>
+    files.map((file, index) => {
+      const original = originals[index]!;
+      const content = original.content as string;
+      const windowInfo = describeReadFilesEntryWindow(original);
+      const windowNote =
+        READ_WINDOW_NOTE_RE.exec(content) || TRIMMED_READ_FILES_NOTE_RE.exec(content);
+      const bodyEnd = windowNote
+        ? windowNote.index
+        : content.replace(READ_FILES_TRUNCATION_NOTE_RE, "").length;
+      let lastRender: { value: string; nextStartChar?: number } | null = null;
+      return {
+        label: String(original.path || `files[${index}]`),
+        original: content,
+        escapedLength: jsonEscapedLength(content),
+        render: (maxRawChars) => {
+          const notice = (omitted: number, nextStartChar?: number) =>
+            `\n\n[... ${omitted} chars of this file omitted to fit the tool-result budget. ` +
+            `Call read_file with path ${JSON.stringify(String(original.path || ""))}` +
+            (nextStartChar !== undefined ? ` and startChar=${nextStartChar}` : "") +
+            " to read the rest ...]";
+          const reserve = notice(content.length, Number.MAX_SAFE_INTEGER).length;
+          const cut = Math.min(bodyEnd, snapHeadEnd(content, Math.max(0, maxRawChars - reserve)));
+          const nextStartChar = windowInfo
+            ? Math.max(
+                0,
+                windowInfo.end - readWindowUnits(content.slice(cut, bodyEnd), windowInfo.unit),
+              )
+            : undefined;
+          const value = content.slice(0, cut) + notice(content.length - cut, nextStartChar);
+          lastRender = { value, nextStartChar };
+          return value;
+        },
+        assign: (value) => {
+          if (value === content || value === "") {
+            Object.assign(file, original, { content: value });
+            delete file.nextStartChar;
+            return;
+          }
+          file.content = value;
+          file.truncated = true;
+          if (lastRender?.value === value && lastRender.nextStartChar !== undefined) {
+            file.nextStartChar = lastRender.nextStartChar;
+          }
+        },
+      };
+    });
+
+  const skippedFiles = Array.isArray(parsed.skippedFiles) ? parsed.skippedFiles : null;
+  let fits = fitTrimSlots(parsed, buildSlots(), budget);
+  while (!fits && files.length > 1 && skippedFiles) {
+    // Too many files to show even a short head of each: skip the last ones explicitly.
+    const dropped = files.pop()!;
+    originals.pop();
+    skippedFiles.push({
+      path: dropped.path,
+      reason: "Omitted to fit the tool-result budget; read it with read_file.",
+    });
+    fits = fitTrimSlots(parsed, buildSlots(), budget);
+  }
+  if (!fits) return null;
+
+  parsed.truncated = true;
+  if (typeof parsed.included === "number") parsed.included = files.length;
+  if (skippedFiles && typeof parsed.skipped === "number") parsed.skipped = skippedFiles.length;
+  const notice =
+    "Some file contents were trimmed to fit the tool-result budget; each trimmed file says " +
+    "where to continue with read_file.";
+  if (Array.isArray(parsed.warnings)) parsed.warnings.push(notice);
+  else parsed._truncated = notice;
+  const serialized = JSON.stringify(parsed);
+  return serialized.length <= maxChars ? serialized : null;
+}
+
+function isWindowedReadPayload(parsed: unknown): parsed is Record<string, Any> {
+  if (!isPlainObject(parsed) || typeof parsed.content !== "string") return false;
+  const window = parsed.window;
+  return (
+    isPlainObject(window) &&
+    Number.isFinite(window.start) &&
+    Number.isFinite(window.end) &&
+    Number.isFinite(window.total)
+  );
+}
+
+function isReadFilesPayload(parsed: unknown): parsed is Record<string, Any> {
+  return (
+    isPlainObject(parsed) &&
+    Array.isArray(parsed.files) &&
+    parsed.files.length > 0 &&
+    parsed.files.every((file: unknown) => isPlainObject(file) && typeof file.content === "string")
+  );
+}
+
+/**
+ * Bound a tool result to the per-result budget without misleading the model:
+ * - read_file / parse_document windows keep a head and report the real delivered end
+ *   (`window.end`, `nextStartChar` / `next_start_char`, `truncated: true`);
+ * - read_files trims per file and keeps skippedFiles/warnings;
+ * - other JSON keeps small fields intact and shortens long strings head+tail;
+ * - plain text keeps head and tail around an explicit omission marker.
  */
 export function truncateToolResult(result: string): string {
   if (typeof result !== "string") {
     return "";
   }
-  // For JSON results, try to preserve structure
-  const parsed = safeJsonParse(result);
-  const tokenBudget = getToolResultTokenBudget(parsed);
-  const maxChars = tokenBudget * 4;
+  // Every budget is at least the default, so short results need no parsing.
+  if (result.length <= MAX_TOOL_RESULT_TOKENS_DEFAULT * 4) return result;
 
+  const parsed = safeJsonParse(result);
+  const maxChars = getToolResultTokenBudget(parsed) * 4;
   if (result.length <= maxChars) return result;
 
-  if (parsed !== null) {
-    // If it's an array, limit items
-    if (Array.isArray(parsed)) {
-      const limited = parsed.slice(0, 50);
-      const truncatedJson = JSON.stringify(limited, null, 2);
-      const withNotice =
-        truncatedJson + `\n\n[... showing ${limited.length} of ${parsed.length} items ...]`;
-      if (withNotice.length <= maxChars) {
-        return withNotice;
-      }
+  if (parsed !== null && typeof parsed === "object") {
+    if (isWindowedReadPayload(parsed)) {
+      const fitted = fitWindowedReadPayload(parsed, maxChars);
+      if (fitted !== null) return fitted;
     }
-
-    // If it's an object with content field (like file content), truncate the content
-    if (parsed.content && typeof parsed.content === "string") {
-      const contentBudget = isExpandedDocumentPayload(parsed)
-        ? Math.max(4000, tokenBudget - 1500)
-        : Math.floor(tokenBudget / 2);
-      parsed.content = truncateToTokens(parsed.content, contentBudget);
-      const truncatedJson = JSON.stringify(parsed, null, 2);
-      // Metadata and JSON escaping also consume context. Fall back to a bounded
-      // excerpt when preserving the full structure still exceeds the budget.
-      if (truncatedJson.length <= maxChars) return truncatedJson;
+    if (isReadFilesPayload(parsed)) {
+      const fitted = fitReadFilesPayload(safeJsonParse(result), maxChars);
+      if (fitted !== null) return fitted;
     }
+    const fitted = fitGenericJson(safeJsonParse(result), maxChars);
+    if (fitted !== null) return fitted;
+  } else if (typeof parsed === "string") {
+    const fitted = fitGenericJson(parsed, maxChars);
+    if (fitted !== null) return fitted;
   }
 
-  // Plain text truncation
-  return truncateToTokens(result, tokenBudget);
+  return trimHeadTail(result, maxChars, PLAIN_TEXT_HEAD_RATIO);
 }
 
 export type CompactionKind = "none" | "tool_truncation_only" | "message_removal";
@@ -337,11 +905,27 @@ export class ContextManager {
   private modelKey: string;
   private maxTokens: number;
   private tokenizerInflation: number;
+  private contextWindowLimit?: () => number | undefined;
 
-  constructor(modelKey: string = "default") {
+  /**
+   * @param opts.contextWindowLimit Runtime window the serving backend actually
+   *   uses (for example Ollama's num_ctx); the budget never exceeds it.
+   */
+  constructor(
+    modelKey: string = "default",
+    opts?: { contextWindowLimit?: () => number | undefined },
+  ) {
     this.modelKey = modelKey;
     this.maxTokens = MODEL_LIMITS[modelKey] || inferModelLimit(modelKey) || MODEL_LIMITS.default;
     this.tokenizerInflation = getTokenizerInflation(modelKey);
+    this.contextWindowLimit = opts?.contextWindowLimit;
+  }
+
+  private getContextWindowTokens(): number {
+    const runtimeLimit = this.contextWindowLimit?.();
+    return typeof runtimeLimit === "number" && Number.isFinite(runtimeLimit) && runtimeLimit > 0
+      ? Math.min(this.maxTokens, Math.floor(runtimeLimit))
+      : this.maxTokens;
   }
 
   /**
@@ -350,7 +934,9 @@ export class ContextManager {
    */
   getAvailableTokens(systemPromptTokens: number = 0): number {
     return (
-      Math.floor(this.maxTokens / this.tokenizerInflation) - RESERVED_TOKENS - systemPromptTokens
+      Math.floor(this.getContextWindowTokens() / this.tokenizerInflation) -
+      RESERVED_TOKENS -
+      systemPromptTokens
     );
   }
 
@@ -358,7 +944,7 @@ export class ContextManager {
    * Get the model's estimated total context window.
    */
   getModelTokenLimit(): number {
-    return this.maxTokens;
+    return this.getContextWindowTokens();
   }
 
   /**
@@ -368,7 +954,7 @@ export class ContextManager {
     const inputTokens = Math.ceil(
       estimateTotalTokens(messages, systemPrompt) * this.tokenizerInflation,
     );
-    return Math.max(1, this.maxTokens - inputTokens);
+    return Math.max(1, this.getContextWindowTokens() - inputTokens);
   }
 
   /**
@@ -572,6 +1158,14 @@ export class ContextManager {
     // Always keep pinned messages (system-generated context blocks).
     for (let i = 1; i < messages.length; i++) {
       if (!isPinnedMessage(messages[i])) continue;
+      keep.add(i);
+      currentTokens += estimateMessageTokens(messages[i]);
+    }
+
+    // Always keep the latest request and tool exchange, even past the target: a
+    // large first message would otherwise leave no room for any recent message.
+    for (const i of findLatestWorkIndexes(messages)) {
+      if (keep.has(i)) continue;
       keep.add(i);
       currentTokens += estimateMessageTokens(messages[i]);
     }

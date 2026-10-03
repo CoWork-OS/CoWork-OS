@@ -30,12 +30,14 @@ import {
 } from "../../security/access-profile-paths";
 import { createSecureTempFile } from "./security-utils";
 import { collectPolicyPathEntries } from "./policy-paths";
+import { NON_INTERACTIVE_COMMAND_ENV } from "./non-interactive-env";
+import { BoundedOutputBuffer } from "./bounded-output";
 
 /**
  * Docker sandbox configuration
  */
 export interface DockerSandboxConfig {
-  /** Docker image to use (default: node:20-alpine) */
+  /** Docker image to use (default: node:24-bookworm) */
   image?: string;
   /** CPU limit in cores (e.g., 0.5 = half a core) */
   cpuLimit?: number;
@@ -49,14 +51,34 @@ export interface DockerSandboxConfig {
 
 /**
  * Default Docker configuration
+ *
+ * The image is the official Node.js LTS image on Debian bookworm (built on
+ * buildpack-deps), so the usual coding-task toolchain is present: git, python3,
+ * gcc/g++/make and curl, alongside node and npm. The previous node:20-alpine
+ * default had none of git, python or a compiler, so `git status`, `pip`, and
+ * any native npm module failed inside the sandbox. A workspace can still pick
+ * another image (for example a devcontainer image) through dockerConfig.
+ *
+ * Resource limits are sized for installs and builds (TypeScript, webpack and
+ * native compiles routinely exceed 512 MB). The CPU limit never exceeds what
+ * the host reports, because Docker rejects --cpus above the available count.
  */
 const DEFAULT_DOCKER_CONFIG: Required<DockerSandboxConfig> = {
-  image: "node:20-alpine",
-  cpuLimit: 1,
-  memoryLimit: "512m",
+  image: "node:24-bookworm",
+  cpuLimit: Math.min(2, Math.max(1, os.availableParallelism())),
+  memoryLimit: "4g",
   networkMode: "none",
   env: {},
 };
+
+/**
+ * Writable HOME inside the container. Commands run as the host uid with a
+ * read-only root filesystem, so the image's HOME is either missing or not
+ * writable and npm/pip/git caches and config writes fail without this.
+ */
+const CONTAINER_HOME = "/home/cowork";
+/** `docker pull` budget; the default image is around 400 MB compressed. */
+const IMAGE_PULL_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
  * Default sandbox options
@@ -66,6 +88,8 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
   timeout: 5 * 60 * 1000, // 5 minutes
   maxOutputSize: 100 * 1024, // 100KB
   allowNetwork: false,
+  allowLoopbackListen: false,
+  detached: false,
   allowedReadPaths: [],
   allowedWritePaths: [],
   envPassthrough: ["LANG", "TERM"],
@@ -196,8 +220,9 @@ export class DockerSandbox implements ISandbox {
     dockerArgs.push(imageOverride || this.config.image, "/bin/sh", "-c", fullCommand);
 
     return new Promise((resolve) => {
-      let stdout = "";
-      let stderr = "";
+      // Keep the start and the end of long output; errors and summaries print last.
+      const stdout = new BoundedOutputBuffer(opts.maxOutputSize);
+      const stderr = new BoundedOutputBuffer(opts.maxOutputSize);
       let killed = false;
       let timedOut = false;
 
@@ -214,34 +239,18 @@ export class DockerSandbox implements ISandbox {
         this.killContainer(proc.pid);
       }, opts.timeout);
 
-      proc.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stdout.length + chunk.length <= opts.maxOutputSize) {
-          stdout += chunk;
-        } else if (stdout.length < opts.maxOutputSize) {
-          stdout += chunk.slice(0, opts.maxOutputSize - stdout.length);
-          stdout += "\n[Output truncated]";
-        }
-      });
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stderr.length + chunk.length <= opts.maxOutputSize) {
-          stderr += chunk;
-        } else if (stderr.length < opts.maxOutputSize) {
-          stderr += chunk.slice(0, opts.maxOutputSize - stderr.length);
-          stderr += "\n[Output truncated]";
-        }
-      });
+      proc.stdout?.on("data", (data: Buffer) => stdout.append(data.toString()));
+      proc.stderr?.on("data", (data: Buffer) => stderr.append(data.toString()));
 
       proc.on("close", (code) => {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: code ?? 1,
-          stdout,
-          stderr,
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
           killed,
           timedOut,
+          truncated: stdout.truncated || stderr.truncated,
         });
       });
 
@@ -249,11 +258,12 @@ export class DockerSandbox implements ISandbox {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: 1,
-          stdout,
+          stdout: stdout.toString(),
           stderr: err.message,
           killed,
           timedOut,
           error: err.message,
+          truncated: stdout.truncated,
         });
       });
     });
@@ -382,7 +392,7 @@ export class DockerSandbox implements ISandbox {
       const timeout = setTimeout(() => {
         proc.kill();
         reject(new Error("Docker pull timed out"));
-      }, 120000); // 2 minute timeout for pull
+      }, IMAGE_PULL_TIMEOUT_MS);
 
       proc.on("close", (code) => {
         clearTimeout(timeout);
@@ -440,8 +450,11 @@ export class DockerSandbox implements ISandbox {
     // Read-only root filesystem (except for specific mounts)
     args.push("--read-only");
 
-    // Add tmpfs for /tmp
-    args.push("--tmpfs", "/tmp:rw,noexec,nosuid,size=100m");
+    // Private scratch space. /tmp allows exec because build tools (node-gyp,
+    // cargo, go test, pip wheels) compile and run helpers there; nosuid and the
+    // dropped capabilities still apply. HOME holds npm/pip/git caches and config.
+    args.push("--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=1g");
+    args.push("--tmpfs", `${CONTAINER_HOME}:rw,exec,nosuid,nodev,mode=1777,size=1g`);
 
     // Network isolation
     const networkMode = options.allowNetwork ? "bridge" : "none";
@@ -558,6 +571,16 @@ export class DockerSandbox implements ISandbox {
     for (const [key, value] of Object.entries(this.config.env)) {
       args.push("-e", `${key}=${value}`);
     }
+
+    // Non-interactive defaults for anything not passed through or configured above
+    const setEnvKeys = new Set([
+      ...(options.envPassthrough || []).filter((envKey) => process.env[envKey]),
+      ...Object.keys(this.config.env),
+    ]);
+    for (const [key, value] of Object.entries(NON_INTERACTIVE_COMMAND_ENV)) {
+      if (!setEnvKeys.has(key)) args.push("-e", `${key}=${value}`);
+    }
+    if (!setEnvKeys.has("HOME")) args.push("-e", `HOME=${CONTAINER_HOME}`);
 
     // User mapping (run as current user to avoid permission issues)
     // Skip on Windows as Docker Desktop handles this differently

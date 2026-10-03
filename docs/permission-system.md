@@ -60,8 +60,15 @@ side effects, eligible outside-workspace paths, or an explicit
 `allowAutoApprove: false` request—the daemon emits an assistant message and a
 durable inline input card with **Deny** and **Allow once**. It does not create an
 `approval_requested` row or open a modal. Hard denials, administrator policy,
-protected operating-system paths, and `approval: "never"` remain fail-closed;
-automated tasks without a human-input channel are denied. Set
+protected operating-system paths, and `approval: "never"` remain fail-closed.
+The card is raised only when a person can answer it. Headless runs
+(`--headless`, `--no-ui`, `COWORK_HEADLESS`), `cowork run` CLI tasks,
+sub-agents, bot and channel conversations, scheduled or otherwise automated
+tasks, and tasks with no human input (`humanInputPolicy: "none"` or
+`allowUserInput: false`) cannot, so their asks are denied with "approval
+requests are disabled". An **Allow once** answer is revalidated like a queued
+approval: if the operation's arguments or the task's authority changed while the
+card was open, the answer is treated as a denial. Set
 `COWORK_APPROVAL_PROMPTS=on` before launch only to restore the legacy queue for
 diagnostics. Pending approval rows and assistant approval cards fail closed on
 restart rather than resuming an unconfirmed action.

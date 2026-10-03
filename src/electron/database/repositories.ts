@@ -24,6 +24,7 @@ import {
   insertMemoryRow,
 } from "../memory/memory-capture-sql";
 import {
+  DEFAULT_WORKSPACE_PERMISSIONS,
   Task,
   TaskEvent,
   TaskEventDetailResult,
@@ -340,14 +341,10 @@ export class WorkspaceStore {
   }
 
   private mapRowToWorkspace(row: Any): Workspace {
-    // Note: network is true by default for browser tools (web access)
-    const defaultPermissions: WorkspacePermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      shell: false,
-    };
+    // Note: network is true by default for browser tools (web access). A
+    // stored `delete` (true or false) is kept; only a record that never
+    // stored one gets the current default.
+    const defaultPermissions: WorkspacePermissions = { ...DEFAULT_WORKSPACE_PERMISSIONS };
     const storedPermissions = safeJsonParse(
       row.permissions,
       defaultPermissions,

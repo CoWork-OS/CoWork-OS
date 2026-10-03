@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { LLMMessage } from "../../llm";
 import { estimateTotalTokens } from "../../context-manager";
+import { fromOpenAICompatibleResponse } from "../../llm/openai-compatible";
+import { extractAnthropicUsage } from "../../llm/prompt-cache";
 import { FileOperationTracker, ToolFailureTracker } from "../../executor-helpers";
 import { DurableContextService } from "../../../memory/DurableContextService";
 import {
@@ -2186,6 +2188,108 @@ describe("SessionRuntime", () => {
     expect(harness.runtime.state.loop.lifetimeTurnCount).toBe(2);
   });
 
+  it("continues a max_tokens text turn with a user turn instead of an assistant prefill", async () => {
+    const harness = createHarness();
+    harness.createMessageWithTimeout
+      .mockResolvedValueOnce({
+        stopReason: "max_tokens",
+        content: [{ type: "text", text: "Hello" }],
+        usage: { inputTokens: 10, outputTokens: 5, cachedTokens: 0 },
+      })
+      .mockResolvedValueOnce({
+        stopReason: "end_turn",
+        content: [{ type: "text", text: " world" }],
+        usage: { inputTokens: 6, outputTokens: 4, cachedTokens: 0 },
+      });
+
+    const result = await harness.runtime.runTextLoop({
+      messages: [{ role: "user", content: "Start" }],
+      systemPrompt: "system",
+      initialMaxTokens: 64,
+      continuationMaxTokens: 32,
+      mode: "follow_up",
+      operationLabel: "test text loop",
+      allowContinuation: true,
+      emptyFallback: "empty",
+    });
+
+    const continuationMessages = harness.createMessageWithTimeout.mock.calls[1][0].messages;
+    // Claude 4.6+ rejects a trailing assistant turn (prefill) with HTTP 400.
+    expect(continuationMessages.at(-1).role).toBe("user");
+    expect(continuationMessages.at(-2)).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    expect(result.assistantText).toBe("Hello world");
+    // The stored transcript keeps one joined assistant answer, not the nudge.
+    expect(result.messages).toEqual([
+      { role: "user", content: "Start" },
+      { role: "assistant", content: [{ type: "text", text: "Hello world" }] },
+    ]);
+  });
+
+  it("retries a text turn once with a larger budget when reasoning used up the output budget", async () => {
+    const harness = createHarness();
+    harness.createMessageWithTimeout
+      .mockResolvedValueOnce({
+        stopReason: "max_tokens",
+        content: [],
+        usage: { inputTokens: 10, outputTokens: 260, cachedTokens: 0 },
+      })
+      .mockResolvedValueOnce({
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "Here is the answer." }],
+        usage: { inputTokens: 10, outputTokens: 900, cachedTokens: 0 },
+      });
+
+    const result = await harness.runtime.runTextLoop({
+      messages: [{ role: "user", content: "Question" }],
+      systemPrompt: "system",
+      initialMaxTokens: 260,
+      continuationMaxTokens: 400,
+      mode: "follow_up",
+      operationLabel: "test text loop",
+      allowContinuation: true,
+      emptyFallback: "canned fallback",
+    });
+
+    expect(harness.createMessageWithTimeout).toHaveBeenCalledTimes(2);
+    const firstBudget = harness.createMessageWithTimeout.mock.calls[0][0].maxTokens;
+    const retryBudget = harness.createMessageWithTimeout.mock.calls[1][0].maxTokens;
+    expect(firstBudget).toBe(260);
+    expect(retryBudget).toBeGreaterThanOrEqual(8_192);
+    // The retry repeats the same request rather than continuing an empty answer.
+    expect(harness.createMessageWithTimeout.mock.calls[1][0].messages).toEqual([
+      { role: "user", content: "Question" },
+    ]);
+    expect(result.assistantText).toBe("Here is the answer.");
+  });
+
+  it("sizes text-turn deadlines from the output budget instead of a fixed 120 s", async () => {
+    const harness = createHarness();
+    const getRetryTimeoutMs = vi.fn(() => 600_000);
+    harness.deps.getRetryTimeoutMs = getRetryTimeoutMs;
+    harness.createMessageWithTimeout.mockResolvedValueOnce({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "A long answer." }],
+      usage: { inputTokens: 10, outputTokens: 900, cachedTokens: 0 },
+    });
+
+    await harness.runtime.runTextLoop({
+      messages: [{ role: "user", content: "Write 4,000 words" }],
+      systemPrompt: "system",
+      initialMaxTokens: 48_000,
+      continuationMaxTokens: 4_096,
+      mode: "follow_up",
+      operationLabel: "test text loop",
+      allowContinuation: true,
+      emptyFallback: "empty",
+    });
+
+    expect(getRetryTimeoutMs).toHaveBeenCalledWith(120_000, 0, false, 48_000);
+    expect(harness.createMessageWithTimeout.mock.calls[0][1]).toBe(600_000);
+  });
+
   it("replays one same-request escalation before continuation recovery in adaptive mode", async () => {
     const previousPolicy = process.env.COWORK_LLM_OUTPUT_POLICY;
     try {
@@ -2210,7 +2314,8 @@ describe("SessionRuntime", () => {
       });
 
       expect(harness.createMessageWithTimeout).toHaveBeenCalledTimes(2);
-      expect(harness.createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(8_000);
+      // Initial agentic budget (raised from 8K so a first-call file write is not cut off).
+      expect(harness.createMessageWithTimeout.mock.calls[0][0].maxTokens).toBe(16_000);
       expect(harness.createMessageWithTimeout.mock.calls[1][0].maxTokens).toBe(64_000);
       expect(result.response.stopReason).toBe("end_turn");
       expect(result.outputBudget.escalationAttempted).toBe(true);
@@ -2222,6 +2327,39 @@ describe("SessionRuntime", () => {
         process.env.COWORK_LLM_OUTPUT_POLICY = previousPolicy;
       }
     }
+  });
+
+  it("counts the same new tokens toward the budget for equivalent Anthropic and OpenAI work", () => {
+    // One turn re-reading a 100K-token prompt with 90K served from cache.
+    const anthropicUsage = extractAnthropicUsage({
+      input_tokens: 10_000,
+      output_tokens: 1_000,
+      cache_read_input_tokens: 90_000,
+    })!;
+    const openAIUsage = fromOpenAICompatibleResponse({
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 100_000,
+        completion_tokens: 1_000,
+        prompt_tokens_details: { cached_tokens: 90_000 },
+      },
+    }).usage!;
+
+    const budgetInput = (usage: typeof anthropicUsage) => {
+      const harness = createHarness();
+      harness.runtime.updateTracking(
+        usage.inputTokens,
+        usage.outputTokens,
+        usage.cachedTokens,
+        usage.cacheWriteTokens,
+      );
+      return (
+        harness.runtime.getCumulativeInputTokens() + harness.runtime.getCumulativeOutputTokens()
+      );
+    };
+
+    expect(budgetInput(anthropicUsage)).toBe(11_000);
+    expect(budgetInput(openAIUsage)).toBe(11_000);
   });
 
   it("preserves cache-write TTL in usage telemetry", async () => {

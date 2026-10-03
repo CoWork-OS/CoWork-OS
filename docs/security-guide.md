@@ -113,9 +113,9 @@ CoWork OS includes configurable guardrails in **Settings > Guardrails** to limit
 
 | Guardrail              | Description                                                        | Default            |
 | ---------------------- | ------------------------------------------------------------------ | ------------------ |
-| **Token Budget**       | Max tokens (input + output) per task; a task's own budget always applies but can only lower this limit | 100,000 (enabled)  |
+| **Token Budget**       | Max tokens (input + output) per user turn (each follow-up message starts a new count); a task's own budget counts the whole task, always applies, and can only lower this limit | 2,000,000 (enabled) |
 | **Cost Budget**        | Max estimated cost (USD) per task; a task's own budget always applies but can only lower this limit | $10.00 (enabled)   |
-| **Iteration Limit**    | Max LLM calls per task                                             | 50 (enabled)       |
+| **Iteration Limit**    | Max LLM calls per continuation window; reaching it auto-continues within the continuation caps | 500 (enabled)      |
 | **Dangerous Commands** | Block dangerous command-tool commands matching patterns            | Enabled            |
 | **File Size Limit**    | Max file size the agent can write                                  | 50 MB (enabled)    |
 | **Domain Rules**       | Profile- and administrator-controlled destination allow/deny rules | Profile-controlled |
@@ -215,9 +215,9 @@ When command tools are exposed by the active access profile:
 | Aspect                | Implementation                                                |
 | --------------------- | ------------------------------------------------------------- |
 | Working directory     | Restricted to the active workspace and profile-approved roots |
-| Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR)     |
+| Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR) plus toolchain configuration (proxies without credentials, CA bundles, relocated toolchain homes) |
 | API keys              | **Never passed** to subprocesses                              |
-| Timeout               | Maximum 5 minutes                                             |
+| Timeout               | 2 minutes by default (5 for installs, builds and tests); a command may ask for up to 30 minutes, capped by the current step's time budget |
 | Output limit          | 100KB (truncated if exceeded)                                 |
 
 **Security note**: Your API keys and secrets are never exposed to shell commands. The app creates a minimal, safe environment for each command.
@@ -225,8 +225,8 @@ When command tools are exposed by the active access profile:
 `run_command` first requires the active access profile to expose command tools, then applies
 guardrails, approval, and the selected access profile. Restricted profiles use the native macOS or Docker sandbox when
 available; if no OS sandbox is available (Windows, or Linux without Docker), execution fails closed. The one
-exception is an administrator opt-in: when admin policy sets `allowUnsandboxedShell: true` and does not set
-`requireSandboxForShell`, CoWork asks you to approve each such command explicitly before it runs with your full
+exception is per-command approval: unless admin policy sets `requireSandboxForShell` or turns off
+`allowUnsandboxedShell` (on by default), CoWork asks you to approve each such command explicitly before it runs with your full
 user permissions. That prompt cannot be auto-approved or answered by a "never ask" profile. Scoped filesystem rules are
 canonicalized before execution so symlinks and path traversal cannot escape the approved roots.
 Domain-scoped network rules are enforced for built-in network tools; arbitrary shell networking is
@@ -234,7 +234,7 @@ denied when the active sandbox cannot enforce those domains.
 
 `execute_code` requires the same command-tool capability and approval handling as
 shell execution for every supported language. Its separate network request still
-requires network permission.
+requires network permission. Code runs for up to 300 seconds (30 by default).
 
 ### Browser Automation
 
@@ -942,10 +942,34 @@ fed by the same canonical filesystem evaluator:
 - Uses a minimal, filtered subprocess environment
 
 The macOS backend also enforces positive read-only filesystem rules, recursive
-Git and policy-path protection, and the separate delete capability. It prevents
-host directory removal and moves because renaming a parent can bypass a protected
-descendant. Private scratch directories remain available for temporary work.
-Use guarded file tools for directory mutations.
+Git and policy-path protection, and the separate delete capability. With delete
+on, files and directories inside the workspace can be removed, moved and
+replaced (`rm -r`, `mv`, build tools that clean their output directory or
+rename a temporary directory into place). The workspace root and every
+directory on the way to a profile filesystem rule stay fixed, so a move cannot
+shed a rule; `.git` and `.cowork/policy` stay immutable wherever their parent is
+moved, and no writable location can create them, so a repository cannot be
+assembled elsewhere and moved in. A nested repository moved into private
+scratch is kept rather than deleted when scratch is cleaned up. Directory
+removal and moves stay denied in host roots outside the workspace. Private
+scratch directories remain available for temporary work.
+
+Developer toolchains work inside the macOS sandbox without opening the home
+directory: installs and configuration (`~/.cargo/bin`, `~/.rustup`, `~/.nvm`,
+`~/.pyenv`, `~/.local/bin`, `~/.gitconfig`, ...) are read-only, package
+download and build caches (`~/.npm`, `~/Library/Caches/{go-build,pip,uv,...}`,
+`~/.cargo/registry`, `~/go/pkg`, ...) are read-write for writable workspaces,
+and PATH comes from the user's PATH plus known toolchain locations. Credential
+stores (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gcloud`, `~/.docker`,
+`~/.netrc`, `~/.kube`, `~/.npmrc`, Keychains, browser profiles, Mail and
+Messages) are denied after those grants. npm sees a copy of `~/.npmrc` with
+auth lines removed, so registry and script settings apply but tokens never
+enter the sandbox; installs from registries that require authentication must
+run outside it. Writable caches deny Git and policy names (except uv's empty
+per-bucket `.git` marker files) so they cannot stage a repository for the
+workspace. Residual risk: these caches are shared with your own builds, so a
+sandboxed command can leave cache content that a later unsandboxed build
+consumes, as it can with the workspace's own scripts and dependencies.
 
 Docker checks every host mount against the active filesystem policy. It refuses
 mounts that expose denied descendants, writable mounts that violate read-only or

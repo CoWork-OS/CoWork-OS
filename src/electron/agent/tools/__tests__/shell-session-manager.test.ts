@@ -41,6 +41,13 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void>
 }
 
 describe("shell-session-manager", () => {
+  it("lets agent commands run past five minutes up to the run_command maximum", () => {
+    expect(_testUtils.resolveCommandTimeoutMs("task", 20 * 60 * 1000)).toBe(20 * 60 * 1000);
+    expect(_testUtils.resolveCommandTimeoutMs("task", 2 * 60 * 60 * 1000)).toBe(30 * 60 * 1000);
+    expect(_testUtils.resolveCommandTimeoutMs(undefined, 0)).toBe(60_000);
+    expect(_testUtils.resolveCommandTimeoutMs("tab", 2 * 60 * 60 * 1000)).toBe(2 * 60 * 60 * 1000);
+  });
+
   it("does not use interactive shell startup on Unix sessions", () => {
     if (process.platform === "win32") {
       expect(_testUtils.getShellArgs("powershell.exe")).toEqual(["-NoLogo", "-NoProfile"]);
@@ -51,6 +58,134 @@ describe("shell-session-manager", () => {
     expect(_testUtils.getShellArgs("/bin/zsh")).toEqual([]);
     expect(_testUtils.getTerminalShellArgs("/bin/zsh")).toEqual([]);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "reports a completed command with a non-zero exit as a normal termination",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID();
+      const workspaceId = randomUUID();
+      try {
+        const result = await manager.runCommand({
+          taskId,
+          workspaceId,
+          workspacePath: testUserDataDir,
+          command: "echo compiled; sh -c 'exit 3'",
+          timeoutMs: 10_000,
+          fallbackRunner: async () => ({
+            success: false,
+            stdout: "",
+            stderr: "Persistent shell fallback requested.",
+            exitCode: null,
+            terminationReason: "error",
+          }),
+        });
+
+        // "error" means the command could not be spawned; this one ran and exited 3.
+        expect(result).toMatchObject({
+          success: false,
+          exitCode: 3,
+          terminationReason: "normal",
+          usedPersistentSession: true,
+        });
+        expect(result.stdout).toContain("compiled");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        // Session state persistence may still be flushing into the directory.
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+    15_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "gives commands an empty stdin instead of the shell's own command stream",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID();
+      const workspaceId = randomUUID();
+      const run = (command: string) =>
+        waitFor(
+          manager.runCommand({
+            taskId,
+            workspaceId,
+            workspacePath: testUserDataDir,
+            command,
+            timeoutMs: 5_000,
+            fallbackRunner: async () => ({
+              success: false,
+              stdout: "",
+              stderr: "Persistent shell fallback requested.",
+              exitCode: null,
+              terminationReason: "error",
+            }),
+          }),
+          8_000,
+          `the ${command} command`,
+        );
+      try {
+        // `cat` used to read the rest of the wrapper script and hang until the timeout.
+        const result = await run("cat");
+        expect(result).toMatchObject({ success: true, exitCode: 0, terminationReason: "normal" });
+        expect(result.stdout).toBe("");
+
+        const next = await run("echo still-usable");
+        expect(next.stdout).toBe("still-usable");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "reports a timed-out command with its partial output instead of throwing",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID();
+      const workspaceId = randomUUID();
+      try {
+        const result = await waitFor(
+          manager.runCommand({
+            taskId,
+            workspaceId,
+            workspacePath: testUserDataDir,
+            command: "echo started; sleep 20",
+            timeoutMs: 1_000,
+            fallbackRunner: async () => ({
+              success: false,
+              stdout: "",
+              stderr: "Persistent shell fallback requested.",
+              exitCode: null,
+              terminationReason: "error",
+            }),
+          }),
+          8_000,
+          "the timed-out shell command",
+        );
+
+        // The command already reached the shell; callers must not re-run it.
+        expect(result).toMatchObject({
+          success: false,
+          exitCode: null,
+          terminationReason: "timeout",
+          usedPersistentSession: true,
+        });
+        expect(result.stdout).toContain("started");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+    15_000,
+  );
 
   it.skipIf(process.platform === "win32")(
     "stops the persistent shell process tree when the command signal is aborted",

@@ -602,7 +602,7 @@ describe("ToolScheduler", () => {
         { index: 0, toolUse: { type: "tool_use", id: "1", name: "read_file", input: {} } },
         { index: 1, toolUse: { type: "tool_use", id: "2", name: "read_file", input: {} } },
       ],
-      summarizeBatch: async () => {
+      summarizeBatch: () => {
         throw summaryError;
       },
       prepareCall: async (call) => ({
@@ -632,6 +632,100 @@ describe("ToolScheduler", () => {
     expect(outcome.fatalError).toBe(summaryError);
     expect(outcome.batches[0]?.semanticSummary).toBeUndefined();
   });
+
+  describe("batch labels", () => {
+    const scheduleCall = (call: { index: number; toolUse: Any }, ran: string[]) => ({
+      status: "scheduled" as const,
+      call: {
+        ...call,
+        toolName: call.toolUse.name,
+        input: call.toolUse.input,
+        spec:
+          call.toolUse.name === "write_file"
+            ? { concurrencyClass: "exclusive" as const, readOnly: false, idempotent: false }
+            : { concurrencyClass: "read_parallel" as const, readOnly: true, idempotent: true },
+        run: async () => {
+          ran.push(call.toolUse.id);
+          return { resultJson: call.toolUse.id };
+        },
+        finalize: async () => ({
+          toolResult: {
+            type: "tool_result" as const,
+            tool_use_id: call.toolUse.id,
+            content: "ok",
+          },
+        }),
+      },
+    });
+    const calls = [
+      { index: 0, toolUse: { type: "tool_use" as const, id: "1", name: "read_file", input: {} } },
+      { index: 1, toolUse: { type: "tool_use" as const, id: "2", name: "glob", input: {} } },
+      { index: 2, toolUse: { type: "tool_use" as const, id: "3", name: "write_file", input: {} } },
+    ];
+
+    it("does not hold results or later batches on a summarizer that never resolves", async () => {
+      const scheduler = new ToolScheduler();
+      const ran: string[] = [];
+      const summarizeBatch = vi.fn(() => new Promise<undefined>(() => undefined));
+
+      const outcome = await Promise.race([
+        scheduler.executeBatch({
+          calls,
+          maxParallel: 2,
+          summarizeBatch,
+          prepareCall: async (call) => scheduleCall(call, ran),
+        }),
+        new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 1_000)),
+      ]);
+
+      expect(outcome).not.toBe("hung");
+      if (outcome === "hung") return;
+      expect(ran).toEqual(["1", "2", "3"]);
+      expect(outcome.toolResults.map((result) => result.tool_use_id)).toEqual(["1", "2", "3"]);
+      expect(outcome.batches).toHaveLength(2);
+      expect(summarizeBatch).toHaveBeenCalledTimes(2);
+      expect(outcome.fatalError).toBeUndefined();
+    });
+
+    it("ignores an asynchronous summarizer rejection", async () => {
+      const scheduler = new ToolScheduler();
+      const ran: string[] = [];
+
+      const outcome = await scheduler.executeBatch({
+        calls,
+        summarizeBatch: () => Promise.reject(new Error("label model unavailable")),
+        prepareCall: async (call) => scheduleCall(call, ran),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(ran).toEqual(["1", "2", "3"]);
+      expect(outcome.fatalError).toBeUndefined();
+      expect(outcome.batches.map((batch) => batch.semanticSummary)).toEqual([
+        undefined,
+        undefined,
+      ]);
+    });
+
+    it("applies a synchronous label before returning", async () => {
+      const scheduler = new ToolScheduler();
+      const ran: string[] = [];
+
+      const outcome = await scheduler.executeBatch({
+        calls,
+        summarizeBatch: (batch) => ({
+          semanticSummary: batch.mode === "parallel" ? "Inspect Workspace" : "Update Files",
+          source: "fallback",
+        }),
+        prepareCall: async (call) => scheduleCall(call, ran),
+      });
+
+      expect(outcome.batches.map((batch) => batch.semanticSummary)).toEqual([
+        "Inspect Workspace",
+        "Update Files",
+      ]);
+    });
+  });
+
   it.each(["prepare", "finalize"])(
     "stops unstarted calls and retains all results after a %s failure",
     async (failureStage) => {

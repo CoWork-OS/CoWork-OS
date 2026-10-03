@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   autoPromoteToCuratedMemoryEnabled: false,
   structuredObservationsEnabled: true,
   memoryInspectorEnabled: true,
+  dreamingLlmEnabled: false,
+  dreamingLlmDailyTokenBudget: 20000,
 };
 
 function isEnabled(value: boolean | undefined): boolean {
@@ -82,6 +84,11 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     autoPromoteToCuratedMemoryEnabled: isEnabled(settings.autoPromoteToCuratedMemoryEnabled),
     structuredObservationsEnabled: settings.structuredObservationsEnabled !== false,
     memoryInspectorEnabled: settings.memoryInspectorEnabled !== false,
+    dreamingLlmEnabled: isEnabled(settings.dreamingLlmEnabled),
+    dreamingLlmDailyTokenBudget: Math.min(
+      1_000_000,
+      Math.floor(normalizePositiveNumber(settings.dreamingLlmDailyTokenBudget, 20000)),
+    ),
   };
 }
 

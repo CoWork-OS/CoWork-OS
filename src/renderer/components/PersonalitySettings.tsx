@@ -21,6 +21,9 @@ export function PersonalitySettings({
 }: PersonalitySettingsProps) {
   const [config, setConfig] = useState<PersonalityConfigV2 | null>(null);
   const configRef = useRef<PersonalityConfigV2 | null>(null);
+  // The response style as loaded: saves send it so main can tell a style the user changed
+  // here from a stale copy of one the adaptive style engine changed meanwhile.
+  const loadedStyleRef = useRef<PersonalityConfigV2["style"] | null>(null);
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
   const reloadAfterSaveRef = useRef(false);
@@ -70,6 +73,7 @@ export function PersonalitySettings({
       ]);
       const nextConfig = loadedConfig as PersonalityConfigV2;
       configRef.current = nextConfig;
+      loadedStyleRef.current = nextConfig?.style ? { ...nextConfig.style } : null;
       setConfig(nextConfig);
       setPersonas((loadedPersonas as PersonaDefinition[]) ?? []);
       setPresets(
@@ -110,7 +114,11 @@ export function PersonalitySettings({
         saveQueuedRef.current = false;
         const configToSave = configRef.current;
         if (!configToSave) break;
-        await window.electronAPI.savePersonalityConfigV2(configToSave);
+        await window.electronAPI.savePersonalityConfigV2(configToSave, {
+          responseStyleBaseline: loadedStyleRef.current,
+        });
+        // What was saved is the new baseline for the next save from this form.
+        loadedStyleRef.current = configToSave.style ? { ...configToSave.style } : null;
         saved = true;
       } while (saveQueuedRef.current);
       if (saved) {

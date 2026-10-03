@@ -9,6 +9,7 @@
  */
 import type Database from "better-sqlite3";
 import { buildMemoryLastActivitySql, buildRetentionProtectedMemorySql } from "./memory-retention";
+import { EXCLUDED_INDEX_PREFIXES } from "./markdown-index-exclusions";
 
 export interface RetentionRule {
   /** Name used in logs and result counts. */
@@ -86,6 +87,13 @@ export const DREAMING_RETENTION_RULES: RetentionRule[] = [
     where: `created_at < ? AND status != 'running' AND NOT EXISTS (
       SELECT 1 FROM dreaming_candidates dc
       WHERE dc.run_id = dreaming_runs.id AND dc.status = 'proposed')`,
+    params: (cutoff) => [cutoff],
+  },
+  {
+    // The curator's audit log (and with it, Undo) for changes older than the cutoff.
+    name: "memory_curation_log",
+    table: "memory_curation_log",
+    where: "applied_at < ?",
     params: (cutoff) => [cutoff],
   },
 ];
@@ -186,6 +194,20 @@ export const MEMORY_ITEM_RETENTION_RULES: RetentionRule[] = [
   },
 ];
 
+/**
+ * Memory-write approvals (`pending_memory_writes`) that are settled: applied, rejected or
+ * failed, older than the cutoff (30 days) by review time (creation time when never
+ * reviewed). Pending and in-flight (`applying`) rows are kept.
+ */
+export const PENDING_MEMORY_WRITE_RETENTION_RULES: RetentionRule[] = [
+  {
+    name: "pending_memory_writes",
+    table: "pending_memory_writes",
+    where: "status IN ('applied', 'rejected', 'failed') AND COALESCE(reviewed_at, created_at) < ?",
+    params: (cutoff) => [cutoff],
+  },
+];
+
 function tableExists(db: Database.Database, name: string): boolean {
   const row = db
     .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?")
@@ -278,4 +300,124 @@ export function listSubconsciousArtifactRoots(db: Database.Database, limit = 500
 export async function loadHostMemoryDatabase(): Promise<Database.Database | null> {
   const { MemoryService } = await import("./MemoryService");
   return MemoryService.getDatabase() ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// One-time markdown index purge (all workspaces)
+// ---------------------------------------------------------------------------
+
+/**
+ * `maintenance_state` marker of the one-time purge of excluded paths from the markdown
+ * index of every workspace. The per-workspace purge (MarkdownMemoryIndexService) only runs
+ * when a workspace's index syncs, so workspaces that are never opened kept their rows.
+ */
+export const MARKDOWN_INDEX_EXCLUSION_PURGE_KEY = "memory:markdown_index_exclusion_purge:v1";
+
+/** Coarse SQL prefilter; `isExcludedMarkdownIndexPath` decides exactly. */
+const MARKDOWN_PURGE_PREFILTER = [
+  ...EXCLUDED_INDEX_PREFIXES.map((prefix) => `${prefix}%`),
+  "%.history%",
+  "%scratchpad%",
+  "../%",
+  ".cowork/%",
+  "./%",
+  "",
+];
+
+function ensureMaintenanceState(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS maintenance_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+}
+
+export function markdownIndexPurgeDone(db: Database.Database): boolean {
+  ensureMaintenanceState(db);
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM maintenance_state WHERE key = ?")
+      .get(MARKDOWN_INDEX_EXCLUSION_PURGE_KEY),
+  );
+}
+
+export function recordMarkdownIndexPurge(
+  db: Database.Database,
+  now: number,
+  removedPaths: number,
+): void {
+  ensureMaintenanceState(db);
+  db.prepare(
+    `INSERT INTO maintenance_state (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).run(
+    MARKDOWN_INDEX_EXCLUSION_PURGE_KEY,
+    JSON.stringify({ completedAt: now, removedPaths }),
+    now,
+  );
+}
+
+export interface MarkdownIndexPathRow {
+  workspaceId: string;
+  path: string;
+}
+
+/**
+ * The next page of indexed `(workspace, path)` pairs after `after`, from the file, chunk
+ * and chunk-FTS tables, that the coarse prefilter keeps. Keyset-paged, so rows the exact
+ * check keeps do not come back.
+ */
+export function listMarkdownIndexPurgeCandidates(
+  db: Database.Database,
+  after: MarkdownIndexPathRow | null,
+  limit: number,
+): MarkdownIndexPathRow[] {
+  const sources = ["memory_markdown_files", "memory_markdown_chunks", "memory_markdown_chunks_fts"]
+    .filter((table) => tableExists(db, table))
+    .map((table) => `SELECT workspace_id, path FROM ${table}`);
+  if (sources.length === 0) return [];
+  const prefilter = MARKDOWN_PURGE_PREFILTER.map((pattern) =>
+    pattern === "" ? "path = ''" : "path LIKE ?",
+  ).join(" OR ");
+  const prefilterParams = MARKDOWN_PURGE_PREFILTER.filter((pattern) => pattern !== "");
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT workspace_id, path FROM (${sources.join(" UNION ALL ")})
+       WHERE (${prefilter})
+         AND (workspace_id > ? OR (workspace_id = ? AND path > ?))
+       ORDER BY workspace_id, path
+       LIMIT ?`,
+    )
+    .all(
+      ...prefilterParams,
+      after?.workspaceId ?? "",
+      after?.workspaceId ?? "",
+      after?.path ?? "",
+      Math.max(1, Math.floor(limit)),
+    ) as Array<{ workspace_id: unknown; path: unknown }>;
+  return rows.map((row) => ({ workspaceId: String(row.workspace_id), path: String(row.path) }));
+}
+
+/** Delete the file, chunk and chunk-FTS rows of each path, in one transaction. */
+export function deleteMarkdownIndexPaths(
+  db: Database.Database,
+  rows: MarkdownIndexPathRow[],
+): number {
+  if (rows.length === 0) return 0;
+  const tables = [
+    "memory_markdown_chunks_fts",
+    "memory_markdown_chunks",
+    "memory_markdown_files",
+  ].filter((table) => tableExists(db, table));
+  const statements = tables.map((table) =>
+    db.prepare(`DELETE FROM ${table} WHERE workspace_id = ? AND path = ?`),
+  );
+  db.transaction(() => {
+    for (const row of rows) {
+      for (const statement of statements) statement.run(row.workspaceId, row.path);
+    }
+  })();
+  return rows.length;
 }

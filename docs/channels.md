@@ -88,6 +88,33 @@ new task after updating the workspace/profile configuration.
 
 Workspace-local router rules still run per message and can override specialization for that message. Tool restrictions are additive with context policies and channel restrictions, with deny rules taking priority. Shared memory remains off for group/public contexts unless the specialization explicitly enables it.
 
+## Your Account on a Channel (Memory)
+
+CoWork learns facts and preferences about you only from your own messages. A channel message
+counts as yours only on positive evidence:
+
+- WhatsApp self-chat mode (only your own chat is routed), or
+- a direct message from an account listed in **Settings > Channels > [channel] > Your Account on
+  This Channel** (stored as `ownerUserIds` in the channel config).
+
+Group messages never count as yours, because several people write there. Every other sender is
+a third party: their tasks run normally, but what they say does not update your profile,
+awareness beliefs, response style or `user_stated` memories. `memory_remember` stores it as a
+private contact-scope item about that sender instead.
+
+Pairing and allowlists are not used as evidence. They admit anyone you let in (a colleague, a
+family member), so a paired or allowlisted user is not necessarily you. Instead, the settings
+section lists the channel's allowed users with a **This is me** button that adds that account
+to `ownerUserIds`; **Not me** removes it. You can also type the IDs (one per line, at most 20).
+The main process validates every ID: no spaces, separators or control characters, at most 200
+characters.
+
+Where to find your ID: Telegram uses your numeric user ID, Slack your member ID (`U…`/`W…`,
+from your profile's **Copy member ID**), Discord your user ID (Developer Mode, then **Copy User
+ID**), Matrix `@you:server`, and phone-based channels your number in international format. The
+simplest route on any channel is to message CoWork once, then press **This is me** next to your
+account under the channel's users.
+
 ---
 
 ## WhatsApp

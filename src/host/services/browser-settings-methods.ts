@@ -18,6 +18,7 @@ import {
   PermissionSettingsSchema,
   LLMSettingsSchema,
   PersonalityConfigV2Schema,
+  parsePersonalitySaveOptions,
 } from "../../electron/utils/validation";
 import { MCPSettingsManager } from "../../electron/mcp/settings";
 import { PermissionSettingsManager } from "../../electron/security/permission-settings-manager";
@@ -1715,8 +1716,10 @@ export function createBrowserSettingsDefinitions(
     savePersonalityConfigV2: define(
       (args) => {
         const config = PersonalityConfigV2Schema.parse(args[0]);
-        withSettingsResponseStyleMirror(() =>
-          PersonalityManager.saveConfigV2({ ...config, version: 2 } as never),
+        const options = parsePersonalitySaveOptions(args[1]);
+        withSettingsResponseStyleMirror(
+          () => PersonalityManager.saveConfigV2({ ...config, version: 2 } as never),
+          { baseline: options.responseStyleBaseline ?? null },
         );
         return { success: true };
       },
@@ -1724,8 +1727,16 @@ export function createBrowserSettingsDefinitions(
         capability: "agents.manage",
         mutation: true,
         minArgs: 1,
-        maxArgs: 1,
-        validate: (args) => parseArgs(PersonalityConfigV2Schema, args),
+        maxArgs: 2,
+        validate: (args) => {
+          const [config] = parseArgs(PersonalityConfigV2Schema, args.slice(0, 1));
+          if (args.length < 2) return [config];
+          try {
+            return [config, parsePersonalitySaveOptions(args[1])];
+          } catch {
+            return invalid();
+          }
+        },
       },
     ),
     getPersonalityDefinitions: define(() => PersonalityManager.getDefinitions(), {

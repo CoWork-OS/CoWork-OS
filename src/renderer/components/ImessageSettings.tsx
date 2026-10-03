@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import { ChannelData, ChannelUserData, SecurityMode } from "../../shared/types";
 
 interface ImessageSettingsProps {
@@ -611,6 +612,12 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
           <p className="settings-hint">Do not send "pairing required" / "unauthorized" replies.</p>
         </div>
       </div>
+
+      <ChannelOwnerSettings
+        channel={channel}
+        users={users}
+        onSaved={(config) => setChannel((prev) => (prev ? { ...prev, config } : prev))}
+      />
 
       {users.length > 0 && (
         <div className="settings-section">

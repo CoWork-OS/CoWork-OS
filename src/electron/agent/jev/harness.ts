@@ -27,6 +27,7 @@ const SECRET_KEY_PATTERN =
 const REVIEW_APPROVAL_TYPES = new Set<ApprovalType>([
   "delete_file",
   "delete_multiple",
+  "memory_delete",
   "workspace_write",
   "external_file_access",
   "data_export",

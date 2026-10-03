@@ -15,6 +15,9 @@
  *     older than 90 days
  *   - Playbook entries older than 180 days that no longer back active success evidence
  *   - memory items that were forgotten (deleted tombstones) or are past their `expires_at`
+ *   - settled memory-write approvals (applied, rejected, failed) older than 30 days
+ *   - once per profile (marker in `maintenance_state`): markdown index rows of excluded
+ *     paths in every workspace, including workspaces whose index never syncs again
  *
  * Transcript retention is not repeated here: daemon DB maintenance runs
  * `TranscriptStore.pruneRetention` with the user's task retention window.
@@ -40,17 +43,24 @@ import {
   CORE_RETENTION_RULES,
   DREAMING_RETENTION_RULES,
   MEMORY_ITEM_RETENTION_RULES,
+  PENDING_MEMORY_WRITE_RETENTION_RULES,
   PLAYBOOK_RETENTION_RULES,
   SUBCONSCIOUS_RETENTION_RULES,
   SUGGESTION_FEEDBACK_RETENTION_RULES,
   SUGGESTION_RETENTION_RULES,
+  deleteMarkdownIndexPaths,
   deleteRetentionBatch,
+  listMarkdownIndexPurgeCandidates,
   listRetentionWorkspaces,
   listSubconsciousArtifactRoots,
   loadHostMemoryDatabase,
+  markdownIndexPurgeDone,
+  recordMarkdownIndexPurge,
+  type MarkdownIndexPathRow,
   type RetentionRule,
   type RetentionWorkspaceRow,
 } from "./memory-retention-sql";
+import { isExcludedMarkdownIndexPath } from "./markdown-index-exclusions";
 
 const logger = createLogger("MemoryRetentionService");
 
@@ -64,6 +74,9 @@ export const MEMORY_RETENTION_DEFAULTS = {
   suggestionRetentionDays: 30,
   suggestionFeedbackRetentionDays: 90,
   playbookRetentionDays: 180,
+  pendingWriteRetentionDays: 30,
+  /** Indexed paths checked per page of the one-time markdown index purge. */
+  markdownPurgePageSize: 500,
   /** Delay before the first run, so startup work is not slowed down. */
   initialDelayMs: 10 * 60 * 1000,
   intervalMs: DAY_MS,
@@ -85,7 +98,9 @@ export type MemoryRetentionStep =
   | "workingStates"
   | "suggestions"
   | "playbookEntries"
-  | "memoryItems";
+  | "memoryItems"
+  | "pendingWrites"
+  | "markdownIndexPurge";
 
 export interface MemoryRetentionResult {
   startedAt: number;
@@ -303,6 +318,14 @@ export class MemoryRetentionService {
       ),
     );
     await step("memoryItems", () => this.pruneRows(db, MEMORY_ITEM_RETENTION_RULES, startedAt));
+    await step("pendingWrites", () =>
+      this.pruneRows(
+        db,
+        PENDING_MEMORY_WRITE_RETENTION_RULES,
+        startedAt - MEMORY_RETENTION_DEFAULTS.pendingWriteRetentionDays * DAY_MS,
+      ),
+    );
+    await step("markdownIndexPurge", () => this.purgeExcludedMarkdownIndexOnce(db, startedAt));
 
     result.durationMs = this.now() - startedAt;
     logger.info("Memory retention finished", {
@@ -332,6 +355,39 @@ export class MemoryRetentionService {
       total += ruleTotal;
     }
     return total;
+  }
+
+  /**
+   * One-time purge of markdown index rows (files, chunks, chunk FTS) whose path the index
+   * no longer covers, in every workspace. Recorded in `maintenance_state` when complete;
+   * an interrupted run (stop, error) is repeated on the next run. Deletes are idempotent,
+   * so a desktop app and a daemon running it at once only repeat work.
+   */
+  private async purgeExcludedMarkdownIndexOnce(
+    db: Database.Database,
+    now: number,
+  ): Promise<number> {
+    if (markdownIndexPurgeDone(db)) return 0;
+    let removed = 0;
+    let after: MarkdownIndexPathRow | null = null;
+    for (;;) {
+      if (this.stopped) return removed;
+      const page = listMarkdownIndexPurgeCandidates(
+        db,
+        after,
+        MEMORY_RETENTION_DEFAULTS.markdownPurgePageSize,
+      );
+      if (page.length === 0) break;
+      after = page[page.length - 1];
+      removed += deleteMarkdownIndexPaths(
+        db,
+        page.filter((row) => isExcludedMarkdownIndexPath(row.path)),
+      );
+      await this.pause();
+    }
+    recordMarkdownIndexPurge(db, now, removed);
+    if (removed > 0) logger.info(`Removed ${removed} excluded markdown index path(s)`);
+    return removed;
   }
 
   private collectRoots(db: Database.Database): RetentionRoot[] {

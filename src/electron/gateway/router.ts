@@ -130,6 +130,8 @@ import {
   normalizeRemoteCommandName,
 } from "./remote-command-registry";
 import { normalizeRemoteIncomingCommand } from "./remote-command-normalizer";
+import { gatewaySenderAgentConfig } from "./gateway-sender-identity";
+import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 export type { RouterConfig } from "./router-helpers";
 
@@ -1182,6 +1184,26 @@ export class MessageRouter {
     return this.adapterChannelIds.get(adapter);
   }
 
+  /**
+   * Who sent a message that creates a task (SEC-16): only the workspace owner's own
+   * messages may become facts about the user. See gateway-sender-identity.ts.
+   */
+  private gatewaySenderConfig(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    isGroup: boolean,
+    channel: Channel | undefined,
+  ) {
+    return gatewaySenderAgentConfig(
+      adapter.type,
+      { userId: message.userId, chatId: message.chatId, isGroup, ingestOnly: message.ingestOnly },
+      {
+        selfChatMode: (adapter as unknown as { isSelfChatMode?: boolean }).isSelfChatMode === true,
+        ownerUserIds: (channel?.config as Record<string, unknown> | undefined)?.ownerUserIds,
+      },
+    );
+  }
+
   private async getChannelForAdapter(adapter: ChannelAdapter): Promise<Channel | undefined> {
     const channelId = this.getChannelIdForAdapter(adapter);
     return channelId
@@ -1780,8 +1802,10 @@ export class MessageRouter {
     message: IncomingMessage;
     workspace: Workspace;
     contextType: "dm" | "group";
+    /** SEC-16: only the workspace owner's own voice notes set the owner's priorities. */
+    senderIsOwner: boolean;
   }): Promise<void> {
-    if (params.contextType !== "dm") return;
+    if (params.contextType !== "dm" || !params.senderIsOwner) return;
 
     const hasAudio =
       Array.isArray(params.message.attachments) &&
@@ -1793,6 +1817,15 @@ export class MessageRouter {
 
     const prioritiesPath = path.join(params.workspace.path, ".cowork", "PRIORITIES.md");
     if (!fs.existsSync(prioritiesPath)) return;
+    // Background write without a user turn: stay inside the workspace and honor its
+    // access profile (SEC-13); a denied path is skipped.
+    const pathGuard = createBackgroundKitPathGuard(params.workspace, "PRIORITIES.md");
+    try {
+      pathGuard(prioritiesPath, "write");
+    } catch (error) {
+      console.warn("[Router] Skipping PRIORITIES.md update:", error);
+      return;
+    }
 
     // Extract structured priorities from the transcript via the configured LLM (best-effort).
     let extractedPriorities: string[] = [];
@@ -1919,6 +1952,7 @@ export class MessageRouter {
     if (!hasAny) return;
 
     try {
+      pathGuard(prioritiesPath, "read");
       const current = fs.readFileSync(prioritiesPath, "utf8");
       const next = updatePrioritiesMarkdown(
         current,
@@ -1931,7 +1965,13 @@ export class MessageRouter {
         formatLocalTimestamp(new Date()),
       );
       if (next !== current) {
-        writeKitFileWithSnapshot(prioritiesPath, next, "agent", "router:voice_priorities_update");
+        writeKitFileWithSnapshot(
+          prioritiesPath,
+          next,
+          "agent",
+          "router:voice_priorities_update",
+          pathGuard,
+        );
       }
     } catch (error) {
       console.warn("[Router] Failed to update PRIORITIES.md:", error);
@@ -5464,6 +5504,12 @@ export class MessageRouter {
     const taskAgentConfig = {
       gatewayContext,
       originChannel: adapter.type,
+      ...this.gatewaySenderConfig(
+        adapter,
+        message,
+        contextType === "group",
+        await this.getChannelForAdapter(adapter),
+      ),
       ...(toolRestrictions.length > 0 ? { toolRestrictions } : {}),
     };
 
@@ -6702,6 +6748,13 @@ export class MessageRouter {
         message,
         workspace,
         contextType,
+        senderIsOwner:
+          this.gatewaySenderConfig(
+            adapter,
+            message,
+            contextType === "group",
+            await this.getChannelForAdapter(adapter),
+          ).gatewaySenderIsOwner === true,
       });
     } catch {
       // ignore
@@ -6824,6 +6877,7 @@ export class MessageRouter {
             ? { channelSpecializationId: securityContext.channelSpecialization.id }
             : {}),
           originChannel: adapter.type,
+          ...this.gatewaySenderConfig(adapter, message, contextType === "group", routedChannel),
           ...(securityContext?.researchWorkflowPreset
             ? {
                 researchWorkflow: {
@@ -7793,6 +7847,11 @@ export class MessageRouter {
     }
     if (approvalType === "delete") {
       return "A delete action needs approval to continue.";
+    }
+    if (approvalType === "memory_delete") {
+      // The memory text stays out of the channel message: a channel can be shared with
+      // other people, and the desktop dialog shows the full memory and its source.
+      return "Forgetting a saved memory needs approval to continue.";
     }
     if (approvalType === "write_file" || approvalType === "file_write") {
       return "A file change needs approval to continue.";

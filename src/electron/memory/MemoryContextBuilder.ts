@@ -15,7 +15,7 @@
  *   "memory used" attribution.
  *
  * Until the one-time lane migration has run (first two minutes of the first start) or when
- * no MemoryWriter exists (node daemon, CLI), L0 falls back to the legacy stores through the
+ * no MemoryWriter exists (CLI), L0 falls back to the legacy stores through the
  * same lane mappers, so rendering, dedupe and budgets are identical.
  */
 import { InputSanitizer } from "../agent/security/input-sanitizer";

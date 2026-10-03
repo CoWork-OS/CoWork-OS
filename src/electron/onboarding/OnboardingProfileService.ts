@@ -12,7 +12,7 @@ import { UserProfileService } from "../memory/UserProfileService";
 import { MemoryService } from "../memory/MemoryService";
 import { KIT_DIR_NAME, ensureBootstrapLifecycleState } from "../context/kit-status";
 import { WORKSPACE_KIT_CONTRACTS } from "../context/kit-contracts";
-import { writeKitFileWithSnapshot } from "../context/kit-revisions";
+import { writeKitFileWithSnapshot, type KitRevisionPathGuard } from "../context/kit-revisions";
 
 const ONBOARDING_PROFILE_MARKER = "onboarding-profile";
 const ONBOARDING_IDENTITY_MARKER = "onboarding-identity";
@@ -193,12 +193,16 @@ async function writeManagedKitDoc(
   heading: string,
   body: string,
   now: Date,
+  pathGuard?: KitRevisionPathGuard,
 ): Promise<void> {
   const absPath = path.join(workspacePath, relPath);
   const updated = formatUpdatedStamp(now);
+  pathGuard?.(absPath, "write");
   await ensureWorkspaceDirectory(workspacePath, path.dirname(absPath));
 
-  const existing = fs.existsSync(absPath)
+  const exists = fs.existsSync(absPath);
+  if (exists) pathGuard?.(absPath, "read");
+  const existing = exists
     ? await fsp.readFile(absPath, "utf8")
     : withKitFrontmatter(relPath, ensureDefaultMarkdown(path.basename(relPath)), updated);
 
@@ -212,7 +216,7 @@ async function writeManagedKitDoc(
 
   const nextBody = upsertAutoSection(bodyWithoutFrontmatter, marker, heading, body);
   const nextContent = withKitFrontmatter(relPath, nextBody, updated);
-  writeKitFileWithSnapshot(absPath, nextContent, "system", "apply onboarding profile");
+  writeKitFileWithSnapshot(absPath, nextContent, "system", "apply onboarding profile", pathGuard);
 }
 
 export class OnboardingProfileService {
@@ -236,11 +240,18 @@ export class OnboardingProfileService {
     }
   }
 
+  /**
+   * Write the onboarding sections of the workspace kit. `pathGuard` checks every kit path
+   * against the workspace's access profile before it is read, written or removed; a
+   * denied path throws and nothing after it is written.
+   */
   static async applyWorkspaceProfile(
     workspaceId: string,
     workspacePath: string,
     data: OnboardingProfileData,
+    options: { pathGuard?: KitRevisionPathGuard } = {},
   ): Promise<void> {
+    const { pathGuard } = options;
     const now = new Date();
     const summary = buildOnboardingWorkspaceSummary(data);
     const kitRoot = path.join(workspacePath, KIT_DIR_NAME);
@@ -265,6 +276,7 @@ export class OnboardingProfileService {
         .filter(Boolean)
         .join("\n"),
       now,
+      pathGuard,
     );
 
     await writeManagedKitDoc(
@@ -287,6 +299,7 @@ export class OnboardingProfileService {
         .filter(Boolean)
         .join("\n"),
       now,
+      pathGuard,
     );
 
     await writeManagedKitDoc(
@@ -310,6 +323,7 @@ export class OnboardingProfileService {
         .filter(Boolean)
         .join("\n"),
       now,
+      pathGuard,
     );
 
     await writeManagedKitDoc(
@@ -321,6 +335,7 @@ export class OnboardingProfileService {
         ? summary.priorities.map((item, index) => `${index + 1}. ${item}`).join("\n")
         : EMPTY_ONBOARDING_PRIORITIES_LINE,
       now,
+      pathGuard,
     );
 
     await writeManagedKitDoc(
@@ -332,10 +347,12 @@ export class OnboardingProfileService {
         ? `- Core tools: ${data.workflowTools.trim()}`
         : EMPTY_ONBOARDING_TOOLS_LINE,
       now,
+      pathGuard,
     );
 
     const bootstrapPath = path.join(kitRoot, "BOOTSTRAP.md");
     if (fs.existsSync(bootstrapPath)) {
+      pathGuard?.(bootstrapPath, "write");
       await fsp.unlink(bootstrapPath).catch(() => undefined);
     }
     await ensureBootstrapLifecycleState(workspacePath);

@@ -807,3 +807,15 @@ describe("AddDiscordChannelSchema", () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe("ChannelConfigSchema ownerUserIds", () => {
+  it("normalizes owner account ids and rejects malformed ones", () => {
+    expect(
+      validateInput(ChannelConfigSchema, { ownerUserIds: [" U01ABC ", "U01ABC", "42"] }, "test"),
+    ).toMatchObject({ ownerUserIds: ["U01ABC", "42"] });
+    expect(() =>
+      validateInput(ChannelConfigSchema, { ownerUserIds: ["two words"] }, "test"),
+    ).toThrow();
+    expect(() => validateInput(ChannelConfigSchema, { ownerUserIds: "42" }, "test")).toThrow();
+  });
+});

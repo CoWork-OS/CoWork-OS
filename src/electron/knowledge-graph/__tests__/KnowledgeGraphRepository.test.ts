@@ -290,3 +290,27 @@ describeWithNativeDb("KnowledgeGraphStore workspace scoping (SEC-9)", () => {
     expect(repo.getNeighbors("ws-a", a1.id, 3)).toHaveLength(KG_MAX_NEIGHBOR_RESULTS);
   });
 });
+
+describeWithNativeDb("KnowledgeGraphStore search", () => {
+  it("finds entities through their observations, ranked by term coverage", () => {
+    const repo = createRepository();
+    const workspaceId = "ws-search";
+    const person = repo.getOrCreateEntityType(workspaceId, "person");
+    const juergen = repo.createEntity(workspaceId, person.id, "Jürgen Weiß", "Backend lead");
+    const mira = repo.createEntity(workspaceId, person.id, "Mira", "Designer");
+    repo.addObservation(juergen.id, "Owns the payments service since March.");
+    repo.addObservation(mira.id, "Reviews the service landing page.");
+    const foreign = repo.createEntity(
+      "ws-other",
+      repo.getOrCreateEntityType("ws-other", "person").id,
+      "Other",
+    );
+    repo.addObservation(foreign.id, "Owns the payments service elsewhere.");
+
+    const results = repo.searchEntities(workspaceId, "who owns the payments service");
+    expect(results.map((result) => result.entity.name)).toEqual(["Jürgen Weiß", "Mira"]);
+    expect(results[0]?.score).toBeGreaterThan(results[1]?.score ?? 1);
+    // Stopwords alone ("who", "the") do not match every observation.
+    expect(repo.searchEntities(workspaceId, "who the")).toEqual([]);
+  });
+});

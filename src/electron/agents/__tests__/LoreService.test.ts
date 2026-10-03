@@ -52,7 +52,12 @@ function makeTaskRow(overrides: Record<string, Any> = {}) {
 }
 
 function makeWorkspaceRow(id: string, workspacePath: string) {
-  return { id, path: workspacePath, name: "test-workspace" };
+  return {
+    id,
+    path: workspacePath,
+    name: "test-workspace",
+    permissions: { read: true, write: true, delete: true, network: false, shell: false },
+  };
 }
 
 describe("LoreService", () => {
@@ -186,6 +191,37 @@ describe("LoreService", () => {
       const content = readFile(lorePath);
       expect(content).not.toContain("- (none)");
       expect(content).toContain("Implemented the auth flow");
+    });
+  });
+
+  describe("access boundary", () => {
+    const flushWith = async (workspaceRow: Record<string, Any>) => {
+      const service = new LoreService(createMockDb());
+      (service as Any).taskRepo = {
+        findById: () => makeTaskRow({ workspaceId: "ws-1" }),
+      };
+      (service as Any).workspaceRepo = { findById: () => workspaceRow };
+      await (service as Any).ingestTaskCompleted("task-1", {}, Date.now());
+      await (service as Any).flushWorkspace("ws-1");
+    };
+
+    it("does not write LORE.md through a .cowork symlink that escapes the workspace", async () => {
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-lore-outside-"));
+      try {
+        fs.rmSync(path.join(tmpDir, ".cowork"), { recursive: true, force: true });
+        fs.symlinkSync(outside, path.join(tmpDir, ".cowork"));
+        const row = makeWorkspaceRow("ws-1", tmpDir);
+        await flushWith({ ...row, permissions: { ...row.permissions, unrestrictedFileAccess: true } });
+        expect(fs.readdirSync(outside)).toEqual([]);
+      } finally {
+        fs.rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    it("does not write LORE.md when the workspace access profile denies writes", async () => {
+      const row = makeWorkspaceRow("ws-1", tmpDir);
+      await flushWith({ ...row, permissions: { ...row.permissions, write: false } });
+      expect(fs.existsSync(path.join(tmpDir, ".cowork", "LORE.md"))).toBe(false);
     });
   });
 

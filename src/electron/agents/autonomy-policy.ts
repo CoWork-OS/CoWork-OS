@@ -22,6 +22,7 @@ function normalizeApprovalTypes(value: unknown): ApprovalType[] | undefined {
         entry === "computer_use" ||
         entry === "delete_file" ||
         entry === "delete_multiple" ||
+        entry === "memory_delete" ||
         entry === "bulk_rename",
     );
   return normalized;

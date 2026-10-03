@@ -94,6 +94,31 @@ describe("buildFtsMatchQuery", () => {
     expect(buildFtsMatchQuery("executor.ts")).toBe('"executor.ts"');
   });
 
+  it("drops stopwords from any-term queries only, unless nothing else is left", () => {
+    expect(buildFtsMatchQuery("when do we ship the postgres 16 migration", { mode: "any" })).toBe(
+      '"ship" OR "postgres" OR "16" OR "migration"',
+    );
+    expect(buildFtsMatchQuery("who owns the payments service", { mode: "any" })).toBe(
+      '"owns" OR "payments" OR "service"',
+    );
+    // Turkish, German, French and Spanish function words.
+    expect(buildFtsMatchQuery("haftalık toplantı ne zaman ve", { mode: "any" })).toBe(
+      '"haftalık" OR "toplantı" OR "zaman"',
+    );
+    expect(buildFtsMatchQuery("Wer muss die Reviews freigeben", { mode: "any" })).toBe(
+      '"muss" OR "Reviews" OR "freigeben"',
+    );
+    expect(buildFtsMatchQuery("quand est la réunion", { mode: "any" })).toBe('"réunion"');
+    expect(buildFtsMatchQuery("cuándo es la reunión", { mode: "any" })).toBe('"reunión"');
+    // All-terms mode keeps every term.
+    expect(buildFtsMatchQuery("the postgres migration")).toBe(
+      '"the" AND "postgres" AND "migration"',
+    );
+    // A query of only stopwords is still searched.
+    expect(buildFtsMatchQuery("what is this", { mode: "any" })).toBe('"what" OR "is" OR "this"');
+    expect(buildFtsMatchQuery("the", { mode: "any", dropStopwords: false })).toBe('"the"');
+  });
+
   it("returns null when nothing searchable remains", () => {
     expect(buildFtsMatchQuery("")).toBeNull();
     expect(buildFtsMatchQuery("  ***  ()  ")).toBeNull();

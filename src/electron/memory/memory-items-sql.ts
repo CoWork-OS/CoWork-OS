@@ -17,6 +17,11 @@ import {
   type PreparedMemoryItemWrite,
   isDerivedSubjectKey,
 } from "./memory-items-types";
+import {
+  purgeGlobalCurationLog,
+  purgeWorkspaceCurationLog,
+  scrubCurationLogForItems,
+} from "./memory-curation-log-sql";
 
 /**
  * Memory items as synchronous SQL: the store the memory domain's transaction units run
@@ -576,6 +581,8 @@ export class MemoryItemsStore {
       }
       changed.push(item.id);
     }
+    // The curation log quotes item content in its snapshots; a real forget removes it there.
+    if (status === "deleted") scrubCurationLogForItems(this.db, changed);
     return changed;
   }
 
@@ -591,6 +598,7 @@ export class MemoryItemsStore {
 
   /** "Clear All Memories": every item that belongs to the workspace. */
   purgeWorkspace(workspaceId: string): number {
+    purgeWorkspaceCurationLog(this.db, workspaceId);
     return this.db.prepare("DELETE FROM memory_items WHERE workspace_id = ?").run(workspaceId)
       .changes;
   }
@@ -738,6 +746,7 @@ export class MemoryItemsStore {
 
   /** "Clear global memory": every global item and revision (workspace items untouched). */
   purgeGlobal(): number {
+    purgeGlobalCurationLog(this.db);
     return this.db
       .prepare("DELETE FROM memory_items WHERE workspace_id IS NULL AND scope = 'global'")
       .run().changes;
@@ -787,6 +796,15 @@ export function purgeTaskMemoryItems(
   purgeDerivedMemory: boolean,
 ): number {
   if (!tableExists(db, "memory_items")) return 0;
+  const doomed = (
+    db
+      .prepare(
+        `SELECT id FROM memory_items WHERE (scope = 'task' AND scope_ref = ?)
+           OR (? = 1 AND task_id = ? AND source IN ('inferred', 'third_party', 'system'))`,
+      )
+      .all(taskId, purgeDerivedMemory ? 1 : 0, taskId) as Array<{ id: string }>
+  ).map((row) => row.id);
+  scrubCurationLogForItems(db, doomed);
   let deleted = db
     .prepare("DELETE FROM memory_items WHERE scope = 'task' AND scope_ref = ?")
     .run(taskId).changes;

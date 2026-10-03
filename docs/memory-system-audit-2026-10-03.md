@@ -27,7 +27,7 @@ The audit also ran read-only aggregate queries against the live desktop database
 
 File references are relative to `src/electron/` unless prefixed.
 
-### Status (2026-10-03, end of Phase 2)
+### Status (2026-10-03, Phase 3)
 
 The findings below describe `main` @ `069740faf`, before any fixes.
 
@@ -36,7 +36,9 @@ The findings below describe `main` @ `069740faf`, before any fixes.
 | Fixed in Phase 0 (merged, `28e423ff1`, PR #291) | SEC-1..12 |
 | Fixed in Phase 1 (merged, `ad1db1d94`, PR #292) | DATA-1, 2, 3, 9, 11, 12; LOOP-1..11; PROMPT-1..4, 6, 8, 9; RECALL-1, 3; LIFE-1..4; SEC-14, 15; §6 dead-code and dead-settings cleanup; §7 doc drift in the memory docs |
 | Phase 2 complete (branch `cowork-os/memory-phase2`) | **Roadmap item 1:** `memory_items` store + `MemoryWriter` (salience gate, redaction, dedupe, trust-ranked supersession), one-time lane migration, dual writes from the legacy stores, purge and retention. **Item 2:** `MemoryInjectionPolicy` + `MemoryContextBuilder` for every prompt surface (L0 pinned profile, L1 recall per step, one budget, dedupe by subject and content hash, `memory_used` attribution); `MemoryRecall` (one Unicode FTS builder, weighted RRF across memory, archive, conversations, knowledge and external lanes). **Item 3:** one conversation index. **Item 4:** four agent tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`) with the 16 earlier tools as hidden aliases for one release, and a generated routing hint naming only visible tools. **§8.4 Memory Hub:** "What CoWork knows" tab over `memory_items` (list, why, add, edit, pin, delete, clear global), layer preview built with the policy and builder, and kit auto-blocks rendered from `memory_items` with back-sync of hand edits at curated trust boundaries (PROMPT-12). **Item 5:** scheduler consolidation (one suggestion sink). **Item 6:** `[PLAYBOOK]`/`[SUGGESTION]` payload tables. Also PROMPT-5, 7, 10, 11; RECALL-2, 7; a response style set in Settings is recorded as `user_stated` and locks style adaptation. Design: [memory-engine.md](memory-engine.md) |
-| Phase 3 (remaining) | Dreaming as the LLM curator, with a review inbox and undo; a real local embedding model (DATA-6); remove the legacy stores and their dual writes after one release; `MemoryWriter` parity in the node daemon (its prompts still use the legacy L0 source); per-reply "memory used" UI on top of the `memory_used` events; memory evals in the harness battery; Supermemory remote ids, forget and purge on disable (SEC-17); SEC-13, 16 and 17 leftovers |
+| Phase 3 (branch `cowork-os/memory-phase3`) | Dreaming as the curator of `memory_items`, with the Memory Hub Review tab and undo; `MemoryWriter` parity in the node daemon; per-reply "Memory used" (desktop and browser host); memory evals in the harness battery and a read-only health check; Supermemory remote ids, forget and purge on disable (SEC-17); SEC-13 (1, 2) and SEC-16, with a settings UI for the owner's channel accounts; a dedicated `memory_delete` approval for `memory_forget`; lexical recall quality (stopwords, KG observations, coverage-aware fusion); retention of settled memory-write approvals and a one-time markdown index purge; memory flush at desktop shutdown. Details below |
+| Decided | **Real local embeddings (DATA-6): skipped by decision (2026-10-03).** Recall stays lexical FTS plus reciprocal-rank fusion; the memory evals gate recall quality |
+| Phase 3 (remaining) | Retire the legacy stores and their dual writes (and the 16 hidden tool aliases) after one release on `memory_items`; route the mailbox prompt through the policy and builder; the remaining producers not yet routed through `MemoryWriter` ([memory-engine.md](memory-engine.md) §8); SEC-17 copies made before remote ids were kept cannot be addressed |
 | Other open findings | SEC-18; LIFE-5 (partial); RECALL-4..6, 8, 9; DATA-4..8, 10, 13; LOOP-12..15; the Memory Hub Review/Sources/Health tabs of §8.4 |
 
 Phase 0 deviations from the §9 plan:
@@ -45,6 +47,48 @@ Phase 0 deviations from the §9 plan:
 - **SEC-2:** mailbox-sourced relationship items are kept out of profile prompts (and injected text is escaped) rather than routed to a contact-scoped `third_party` lane.
 - **SEC-10:** spoofed `[Imported from` prefixes are neutralized and private imports stay in their workspace; there is no `is_imported` column.
 - **SEC-13** (background writers bypassing access profiles) was not addressed in Phase 0 or Phase 1.
+
+Phase 3 progress (branch `cowork-os/memory-phase3`):
+
+- **SEC-13 (1) and (2) fixed.**
+  - Workflow Intelligence writes no `.cowork/subconscious/**` while it is disabled. Enabling it starts a refresh.
+  - Artifacts go only to the owning workspace's own `.cowork/subconscious`, never to an enclosing git root.
+  - Every artifact write passes the confined internal-write check and the workspace access profile (`security/background-write-guard.ts`).
+  - CrossSignal, Feedback and Lore pass a `pathGuard` to `writeKitFileWithSnapshot`.
+  - (3) was already resolved in Phase 1: `CoreMemoryDistiller.refreshIndex` no longer runs.
+- **Daemon parity.** The node daemon starts the memory engine (`MemoryWriter`, read side, lane migration), retention, the knowledge graph and Lore. It flushes memory writes at shutdown. A desktop app and a daemon on one profile claim one-time migrations atomically (`maintenance-claim-sql.ts`).
+- **SEC-16 fixed.** Channel tasks record whether the sender is the workspace owner (self-chat, or `ownerUserIds` in the channel config). Other senders no longer feed awareness beliefs, the adaptive style, `user_stated` facts or the curated profile; `memory_remember` stores what they say as a private contact-scope `third_party` item.
+- **SEC-17 fixed** for copies written from now on: remote ids are kept (`supermemory_remote_refs`); deletes, suppression, privacy changes, task delete, Clear All Memories and `memory_forget` forget the remote copy; "Disconnect & purge" deletes every recorded copy before disabling; mirror writes use the workspace name for `{workspaceName}` containers; 4xx answers no longer trip the circuit breaker. (4) was addressed in Phase 2 (own sanitized `external_memory` tag); (2) is limited only by the Phase 1 capture salience gate (`mirrorMemoryWrites` still defaults to on). Copies made before remote ids were kept cannot be addressed.
+- **Per-reply "Memory used"** on chat replies, from the hidden `memory_used` events (now emitted per turn). **`memory_forget` asks before deleting** (except facts the task's own agent inferred). A stale Personality settings copy no longer records its response style as the user's choice.
+- **§8.5 quality gates.**
+  - Memory evals: `npm run qa:memory-evals`, also in `qa:harness`.
+  - Read-only health check: `npm run qa:memory-health`.
+  - Both are described in [harness-eval-battery.md](harness-eval-battery.md).
+- **`memory_forget` approval.** A dedicated `memory_delete` approval type, classified as a
+  delete by the permission engine (prompted in default and dangerous-only modes, denied when
+  the workspace delete capability is off). The dialog reads "Forget a memory" and shows the
+  memory, its source and the reason; channel approval messages leave the memory text out.
+- **SEC-16 owner accounts.** Each channel's settings has "Your Account on This Channel": the
+  `ownerUserIds` list, typed or set with "This is me" next to an allowed user, validated in
+  main ([channels.md](channels.md#your-account-on-a-channel-memory)). Pairing and allowlists are
+  not taken as owner evidence: they admit anyone the owner lets in. Voice-note updates of
+  `PRIORITIES.md` now also require the owner as sender.
+- **SEC-13 leftovers.** Every `writeKitFileWithSnapshot` caller passes a path guard: kit seeding
+  and onboarding from Settings use the workspace's effective access profile
+  (`security/effective-workspace.ts`), and the gateway's voice-note `PRIORITIES.md` update uses
+  the background guard.
+- **Recall quality (RECALL-9 follow-up).** Any-term FTS queries drop a small multilingual
+  stopword list (en/tr/de/fr/es); knowledge-graph search also matches observations; fusion
+  scales each hit by its coverage of the query's distinctive terms. Golden set (27 queries,
+  one added for KG observations): recall@5 0.923 → 1.0, recall@1 0.769 → 0.889, MRR 0.848 →
+  0.944 (gates 0.90 and 0.75).
+- **Lifecycle.** Retention drops `pending_memory_writes` rows that are applied, rejected or
+  failed and older than 30 days (the live profile held 10,006 rejected rows). A one-time,
+  marker-recorded purge removes excluded markdown index rows (with their FTS rows) in every
+  workspace, not only in workspaces whose index syncs. The desktop app stops retention and the
+  engine and flushes `MemoryWriter` before the database closes, as the daemon does.
+- **"Memory used" in the browser host** (`getMemoryUsedForTask`), and "Open in Memory Hub"
+  switches the Hub to the task's workspace.
 
 ---
 
@@ -579,7 +623,7 @@ Memory Hub becomes four tabs plus a single settings area:
 ### Phase 3 — Make it great (ongoing)
 
 1. Dreaming becomes the real curator: LLM synthesis under a budget, auto-apply with undo for safe changes, and a review inbox.
-2. A real local embedding model: multilingual/Unicode, chunked full content, Float32 BLOBs with `sqlite-vec` ANN.
+2. A real local embedding model: multilingual/Unicode, chunked full content, Float32 BLOBs with `sqlite-vec` ANN. *Skipped by decision (2026-10-03); recall stays lexical FTS plus reciprocal-rank fusion (see Status).*
 3. The Memory Hub redesign (§8.4) and per-reply "memory used" attribution.
 4. Memory evals and per-loop cost telemetry in the harness battery.
 5. Supermemory as a proper provider: remote IDs, forget, and purge on disable.

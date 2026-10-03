@@ -3,6 +3,7 @@ import {
   ASSISTANT_APPROVAL_QUESTION_ID,
   buildAssistantApprovalRequest,
   isAssistantApprovalInputRequest,
+  isHighImpactApprovalDecision,
   parseAssistantApprovalAnswer,
   shouldUseAssistantApprovalInput,
 } from "../assistant-approval";
@@ -33,6 +34,17 @@ describe("assistant mediated approvals", () => {
     expect(
       shouldUseAssistantApprovalInput("network_access", {}, { requireExplicitApproval: true }),
     ).toBe(true);
+  });
+
+  it("treats forgetting a memory as a high-impact decision with a readable option", () => {
+    expect(isHighImpactApprovalDecision("memory_delete", { tool: "memory_forget" })).toBe(true);
+    const request = buildAssistantApprovalRequest(
+      "memory_delete",
+      'Forget a saved memory: "The user prefers dark mode"',
+      { tool: "memory_forget" },
+    );
+    expect(request.questions[0].question).toContain("dark mode");
+    expect(request.questions[0].options?.[1].description).toBe("Forget this memory.");
   });
 
   it("fails closed on the default answer and parses only an explicit allow", () => {

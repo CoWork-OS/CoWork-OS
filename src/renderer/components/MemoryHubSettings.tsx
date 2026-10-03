@@ -25,6 +25,9 @@ import type {
 } from "../../shared/types";
 import { MemorySettings } from "./MemorySettings";
 import { MemoryKnowledgeTab } from "./memory/MemoryKnowledgeTab";
+import { peekMemoryHubFocusWorkspace } from "./memory/memory-hub-focus";
+import { MemoryReviewTab } from "./memory/MemoryReviewTab";
+import { SupermemoryDisconnectPurge } from "./memory/SupermemoryDisconnectPurge";
 import "./memory/memory-knowledge.css";
 import { ChronicleSettingsCard } from "./ChronicleSettings";
 import { createRendererLogger } from "../utils/logger";
@@ -86,7 +89,23 @@ export function MemoryHubSettings(props?: {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
   // "What CoWork knows" is the primary view; everything else is under Settings.
-  const [hubTab, setHubTab] = useState<"knowledge" | "settings">("knowledge");
+  const [hubTab, setHubTab] = useState<"knowledge" | "review" | "settings">("knowledge");
+  // Pending Dreaming proposals of the selected workspace (Review tab badge).
+  const [reviewCount, setReviewCount] = useState(0);
+  useEffect(() => {
+    setReviewCount(0);
+    if (!selectedWorkspaceId || !hasHostMethod("getMemoryReviewCount")) return;
+    let cancelled = false;
+    window.electronAPI
+      .getMemoryReviewCount({ workspaceId: selectedWorkspaceId })
+      .then((count) => {
+        if (!cancelled) setReviewCount(count);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWorkspaceId]);
   const activeWorkspace = useRef(selectedWorkspaceId);
   activeWorkspace.current = selectedWorkspaceId;
   const observationSearchGeneration = useRef(0);
@@ -255,7 +274,15 @@ export function MemoryHubSettings(props?: {
           .join("\n"),
       );
       setWorkspaces(combined);
+      // "Open in Memory Hub" from a task reply shows the task's workspace.
+      const focusWorkspaceId = peekMemoryHubFocusWorkspace();
+      if (focusWorkspaceId && combined.some((w) => w.id === focusWorkspaceId)) {
+        setHubTab("knowledge");
+      }
       setSelectedWorkspaceId((prev) => {
+        if (focusWorkspaceId && combined.some((w) => w.id === focusWorkspaceId)) {
+          return focusWorkspaceId;
+        }
         const preferred = (props?.initialWorkspaceId || "").trim();
         if (preferred && combined.some((w) => w.id === preferred)) return preferred;
         if (prev && combined.some((w) => w.id === prev)) return prev;
@@ -947,6 +974,20 @@ export function MemoryHubSettings(props?: {
         <button
           type="button"
           role="tab"
+          aria-selected={hubTab === "review"}
+          className={`settings-tab ${hubTab === "review" ? "active" : ""}`}
+          onClick={() => setHubTab("review")}
+        >
+          Review
+          {reviewCount > 0 && (
+            <span className="memory-review-badge" aria-label={`${reviewCount} pending`}>
+              {reviewCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={hubTab === "settings"}
           className={`settings-tab ${hubTab === "settings" ? "active" : ""}`}
           onClick={() => setHubTab("settings")}
@@ -956,6 +997,22 @@ export function MemoryHubSettings(props?: {
       </div>
     </>
   );
+
+  if (hubTab === "review") {
+    return (
+      <div className="settings-section">
+        {hubHeader}
+        {selectedWorkspaceId ? (
+          <MemoryReviewTab
+            key={selectedWorkspaceId}
+            workspaceId={selectedWorkspaceId}
+            canWrite={canWriteWorkspace}
+            onCountChange={setReviewCount}
+          />
+        ) : null}
+      </div>
+    );
+  }
 
   if (hubTab === "knowledge") {
     return (
@@ -1425,6 +1482,21 @@ export function MemoryHubSettings(props?: {
             <p className="settings-form-hint memory-hub-top-gap">
               Last provider error: {supermemoryStatus.lastError}
             </p>
+          )}
+
+          {hasHostMethod("disconnectAndPurgeSupermemory") && (
+            <SupermemoryDisconnectPurge
+              status={supermemoryStatus}
+              onDone={() => {
+                void window.electronAPI
+                  .getSupermemoryStatus()
+                  .then((refreshed) => {
+                    setSupermemoryStatus(refreshed);
+                    setSupermemoryEnabled(refreshed?.enabled === true);
+                  })
+                  .catch(() => undefined);
+              }}
+            />
           )}
         </div>
       </div>

@@ -1,15 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  DREAMING_WORKSPACE_COOLDOWN_MS,
-  DreamingService,
-  dreamingCandidateFingerprint,
-} from "../DreamingService";
-import type {
-  CuratedMemoryEntry,
-  DreamingCandidate,
-  DreamingRun,
-  MemoryObservationSearchResult,
-} from "../../../shared/types";
+import { beforeEach, describe, expect, it } from "vitest";
+import { DREAMING_WORKSPACE_COOLDOWN_MS, DreamingService } from "../DreamingService";
+import type { MemoryWriter } from "../MemoryWriter";
+import type { DreamingCandidate, DreamingRun } from "../../../shared/types";
+
+// Curation itself is covered with a real database in memory-curation.test.ts; these tests
+// cover run scheduling (cooldown, overlapping triggers) with a writer that is not ready.
 
 describe("DreamingService", () => {
   let repo: FakeDreamingRepository;
@@ -95,112 +90,30 @@ describe("DreamingService", () => {
     repo = new FakeDreamingRepository();
   });
 
-  function observation(
-    overrides: Partial<MemoryObservationSearchResult> = {},
-  ): MemoryObservationSearchResult {
+  const curation = {
+    archiveEvidence: async () => [],
+    llmTokensSince: async () => 0,
+    undoneFingerprints: async () => [],
+  };
+
+  /** A writer whose lane migration has not finished: runs complete as `skipped`. */
+  function pendingWriter(gate?: Promise<void>): MemoryWriter {
     return {
-      memoryId: "mem-1",
-      workspaceId: "ws-1",
-      title: "Correction captured",
-      snippet: "Actually use Vite 7 instead of the old build guidance. Follow up on the migration.",
-      observationType: "correction",
-      origin: "task",
-      sourceLabel: "Memory",
-      privacyState: "normal",
-      concepts: ["Vite", "migration"],
-      filesRead: [],
-      filesModified: [],
-      tools: [],
-      sourceEventIds: [],
-      createdAt: 100,
-      rank: 1,
-      estimatedDetailTokens: 24,
-      ...overrides,
-    };
+      supportsCuration: true,
+      repository: {
+        isLaneMigrationComplete: async () => {
+          await gate;
+          return false;
+        },
+      },
+    } as unknown as MemoryWriter;
   }
-
-  function curated(overrides: Partial<CuratedMemoryEntry> = {}): CuratedMemoryEntry {
-    return {
-      id: "curated-1",
-      workspaceId: "ws-1",
-      target: "workspace",
-      kind: "project_fact",
-      content: "Use Vite 6 for renderer builds",
-      normalizedKey: "use vite 6 for renderer builds",
-      source: "agent_tool",
-      confidence: 0.85,
-      status: "active",
-      createdAt: 1,
-      updatedAt: 1,
-      ...overrides,
-    };
-  }
-
-  it("turns correction and open-loop evidence into proposed Dreaming candidates", async () => {
-    const service = new DreamingService(repo as never, {
-      now: () => 1000,
-      searchMemoryObservations: () => [observation()],
-      searchConversation: async () => [],
-      loadRecentConversation: async () => [],
-      listCuratedEntries: () => [],
-    });
-
-    const result = await service.run({
-      workspaceId: "ws-1",
-      workspacePath: "/tmp/ws-1",
-      triggerSource: "heartbeat",
-      triggerHeartbeatRunId: "hb-1",
-      instructions: "memory drift",
-    });
-
-    expect(result.run.status).toBe("completed");
-    expect(result.candidates.map((candidate) => candidate.action)).toEqual(
-      expect.arrayContaining(["correction", "open_loop"]),
-    );
-    expect(result.candidates[0]?.evidenceRefs[0]?.sourceUrlOrPath).toBe("memory:mem-1");
-  });
-
-  it("does not apply curated-memory candidates until they are accepted", async () => {
-    const applyCuratedMemory = vi.fn(async () => ({ success: true }));
-    const service = new DreamingService(repo as never, {
-      now: () => 1000,
-      searchMemoryObservations: () => [
-        observation({ snippet: "Use Vite 6 for renderer builds is outdated." }),
-      ],
-      searchConversation: async () => [],
-      loadRecentConversation: async () => [],
-      listCuratedEntries: () => [curated()],
-      applyCuratedMemory,
-    });
-
-    const result = await service.run({
-      workspaceId: "ws-1",
-      workspacePath: "/tmp/ws-1",
-      triggerSource: "task_completion",
-      sourceTaskId: "task-1",
-      taskPrompt: "Vite migration",
-    });
-    const archiveCandidate = result.candidates.find(
-      (candidate) => candidate.action === "curated_archive",
-    );
-
-    expect(archiveCandidate).toBeTruthy();
-    expect(applyCuratedMemory).not.toHaveBeenCalled();
-
-    repo.reviewCandidate({ id: archiveCandidate!.id, status: "accepted" });
-    const applied = await service.applyAcceptedCandidate(archiveCandidate!.id, "ws-1");
-
-    expect(applyCuratedMemory).toHaveBeenCalledOnce();
-    expect(applied?.status).toBe("applied");
-  });
 
   function evidenceService(now: () => number) {
     return new DreamingService(repo as never, {
       now,
-      searchMemoryObservations: () => [observation()],
-      searchConversation: async () => [],
-      loadRecentConversation: async () => [],
-      listCuratedEntries: () => [],
+      curation,
+      getWriter: () => pendingWriter(),
     });
   }
 
@@ -239,17 +152,12 @@ describe("DreamingService", () => {
     });
     const service = new DreamingService(repo as never, {
       now: () => 10_000,
-      searchMemoryObservations: () => [observation()],
-      searchConversation: async () => {
-        await gate;
-        return [];
-      },
-      loadRecentConversation: async () => [],
-      listCuratedEntries: () => [],
+      curation,
+      getWriter: () => pendingWriter(gate),
     });
 
     const first = service.run(request);
-    const overlapping = new DreamingService(repo as never).run({
+    const overlapping = new DreamingService(repo as never, { curation }).run({
       ...request,
       triggerSource: "system",
     });
@@ -260,31 +168,5 @@ describe("DreamingService", () => {
     expect(overlappingResult.skipped).toBe("in_flight");
     expect(overlappingResult.run.id).toBe(firstResult.run.id);
     expect(repo.runs.size).toBe(1);
-  });
-
-  it("does not re-propose candidates that are still open or were dismissed", async () => {
-    let clock = 10_000;
-    const service = evidenceService(() => clock);
-
-    const first = await service.run(request);
-    expect(first.candidates.length).toBeGreaterThan(0);
-    const dismissed = first.candidates[0]!;
-    repo.reviewCandidate({ id: dismissed.id, status: "rejected" });
-
-    clock += DREAMING_WORKSPACE_COOLDOWN_MS + 1;
-    const second = await service.run(request);
-    expect(second.skipped).toBeUndefined();
-    expect(second.candidates).toHaveLength(0);
-    expect(second.run.candidateCount).toBe(0);
-
-    // Applied candidates no longer block the same proposal.
-    for (const candidate of first.candidates) {
-      repo.reviewCandidate({ id: candidate.id, status: "applied" });
-    }
-    clock += DREAMING_WORKSPACE_COOLDOWN_MS + 1;
-    const third = await service.run(request);
-    expect(third.candidates.map(dreamingCandidateFingerprint).sort()).toEqual(
-      first.candidates.map(dreamingCandidateFingerprint).sort(),
-    );
   });
 });

@@ -36,6 +36,8 @@ import {
 } from "./MarkdownMemoryIndexService";
 import { MemoryTierService } from "./MemoryTierService";
 import { SupermemoryService } from "./SupermemoryService";
+import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository";
+import { MemoryWriter } from "./MemoryWriter";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
 import type { CoreMemoryScopeKind } from "../../shared/types";
@@ -180,6 +182,7 @@ export class MemoryService {
   /** The memory domain's statement port (DB6). */
   private static sql?: MemoryStatementPort;
   private static workspaceRepo?: WorkspaceRepository;
+  private static unsubscribeMemoryItemChanges?: () => void;
   private static ftsWorker: import("../database/FtsWorkerClient").FtsWorkerClient | null = null;
   private static storageEstimateByWorkspace = new Map<
     string,
@@ -221,8 +224,19 @@ export class MemoryService {
     this.settingsRepo = new MemorySettingsRepository(db);
     this.markdownIndex = new MarkdownMemoryIndexService(db);
     MemoryObservationService.initialize(db);
-    // Inspector edits (delete, redact, privacy changes) must not be served from cache.
-    MemoryObservationService.onVisibilityChanged(() => this.clearPromptRecallCache());
+    // Remote ids of Supermemory copies (SEC-17), so deletes here can forget them there.
+    SupermemoryRemoteRefRepository.initialize(this.sql);
+    // Inspector edits (delete, redact, privacy changes) must not be served from cache, and
+    // a suppressed or redacted row's Supermemory copy is forgotten.
+    MemoryObservationService.onVisibilityChanged(() => {
+      this.clearPromptRecallCache();
+      SupermemoryService.scheduleOrphanSweep();
+    });
+    // A deleted or archived memory item (Memory Hub, memory_forget) loses its copy too.
+    this.unsubscribeMemoryItemChanges?.();
+    this.unsubscribeMemoryItemChanges = MemoryWriter.onChange((change) => {
+      if (change.kind === "status") SupermemoryService.scheduleOrphanSweep();
+    });
     this.initialized = true;
 
     // Start periodic cleanup
@@ -550,19 +564,23 @@ export class MemoryService {
       options?.allowExternalMirror !== false &&
       (await this.isExternalMemoryMirrorAllowed(workspaceId))
     ) {
-      void SupermemoryService.mirrorMemory({
-        workspace: {
-          id: workspaceId,
-          name: workspaceId,
-        },
-        taskId,
-        memoryType: type,
-        content: truncatedContent,
-        createdAt: memory.createdAt,
-        origin: "external_mirror",
-      }).catch((error) => {
-        logger.warn("[MemoryService] Failed to mirror memory to Supermemory:", error);
-      });
+      // The workspace name, not its id: a `{workspaceName}` container template must address
+      // the container reads use (SEC-17).
+      void this.workspaceRefFor(workspaceId)
+        .then((workspace) =>
+          SupermemoryService.mirrorMemory({
+            workspace,
+            taskId,
+            memoryType: type,
+            content: truncatedContent,
+            createdAt: memory.createdAt,
+            origin: "external_mirror",
+            localRef: `archive:${memory.id}`,
+          }),
+        )
+        .catch((error) => {
+          logger.warn("[MemoryService] Failed to mirror memory to Supermemory:", error);
+        });
     }
 
     // Enforce per-workspace storage cap (best-effort).
@@ -1563,6 +1581,7 @@ export class MemoryService {
 
     const deleted = await this.memoryRepo.deleteByIds(workspaceId, [memoryId]);
     if (deleted <= 0) return false;
+    SupermemoryService.scheduleOrphanSweep();
 
     this.importedEmbeddings.delete(memoryId);
     this.memoryEmbeddingsByWorkspace.delete(workspaceId);
@@ -1621,6 +1640,7 @@ export class MemoryService {
       // ignore
     }
     const deleted = await this.memoryRepo.deleteImported(workspaceId);
+    if (deleted > 0) SupermemoryService.scheduleOrphanSweep();
     // Clear caches for this workspace (best-effort).
     for (const [memoryId, entry] of this.importedEmbeddings.entries()) {
       if (entry.workspaceId === workspaceId) {
@@ -1766,6 +1786,7 @@ export class MemoryService {
     this.embeddingBackfillInProgress.delete(workspaceId);
     this.clearCompressionStateForWorkspace(workspaceId);
     this.promptRecallCache.clear();
+    SupermemoryService.scheduleOrphanSweep();
   }
 
   static async deleteEntries(workspaceId: string, ids: string[]): Promise<number> {
@@ -1783,6 +1804,8 @@ export class MemoryService {
     }
     if (deleted > 0) {
       this.promptRecallCache.clear();
+      // Their Supermemory copies go too (SEC-17).
+      SupermemoryService.scheduleOrphanSweep();
     }
     return deleted;
   }
@@ -2942,6 +2965,16 @@ export class MemoryService {
    * Test-only/in-memory callers may not initialize a workspace repository; in
    * that compatibility case the explicit caller option remains authoritative.
    */
+  /** `{ id, name }` of a workspace for Supermemory container tags (name falls back to id). */
+  private static async workspaceRefFor(workspaceId: string): Promise<{ id: string; name: string }> {
+    try {
+      const workspace = await this.workspaceRepo?.findById(workspaceId);
+      return { id: workspaceId, name: workspace?.name || workspaceId };
+    } catch {
+      return { id: workspaceId, name: workspaceId };
+    }
+  }
+
   private static async isExternalMemoryMirrorAllowed(workspaceId: string): Promise<boolean> {
     if (!this.workspaceRepo) return true;
     try {
@@ -3011,6 +3044,9 @@ export class MemoryService {
     this.compressionBudgetByWorkspace.clear();
     this.compressionDiagnosticsByWorkspace.clear();
     this.workspaceRepo = undefined;
+    this.unsubscribeMemoryItemChanges?.();
+    this.unsubscribeMemoryItemChanges = undefined;
+    SupermemoryRemoteRefRepository.setInstance(null);
     this.initialized = false;
     logger.info("[MemoryService] Shutdown complete");
   }

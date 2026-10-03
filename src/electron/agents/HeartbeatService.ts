@@ -205,13 +205,23 @@ export interface HeartbeatServiceDeps {
     signalCount: number;
     heartbeatRunId: string;
     readGuard?: WorkspaceMemoryReadGuard;
+    /** What triggered the run: memory signals, hot-memory pressure, or the daily idle pass. */
+    trigger?: "signals" | "pressure" | "daily";
   }) => Promise<{
     id?: string;
     status?: string;
     candidateCount?: number;
+    appliedCount?: number;
     /** Set when Dreaming did not run (cooldown or an overlapping run). */
     skipped?: string;
   } | null>;
+  /**
+   * The next workspace due for the daily idle curation (active recently, no Dreaming run in
+   * the last day), preferring the pulse's workspace; null when none is due.
+   */
+  findMemoryCurationWorkspace?: (
+    preferredWorkspaceId?: string,
+  ) => Promise<{ workspaceId: string; workspacePath: string } | null>;
   automationProfileRepo?: AutomationProfileRepository;
   coreTraceService?: CoreTraceService;
   coreMemoryCandidateService?: CoreMemoryCandidateService;
@@ -1635,10 +1645,13 @@ export class HeartbeatService extends EventEmitter {
     signals: HeartbeatSignal[];
     heartbeatRunId: string;
   }): Promise<{ id?: string; status?: string; candidateCount?: number } | null> {
-    if (!this.deps.runMemoryDreaming || !params.workspaceId || !params.workspacePath) return null;
+    if (!this.deps.runMemoryDreaming) return null;
     // Memory Hub's "heartbeat maintenance" switch turns off Dreaming and pressure-driven
     // compaction from the pulse.
     if (this.isHeartbeatMaintenanceDisabled()) return null;
+    if (!params.workspaceId || !params.workspacePath) {
+      return this.maybeRunDailyCuration(params.heartbeatRunId, params.workspaceId);
+    }
     // Heartbeat runs without a task executor, so they must resolve their own
     // filesystem boundary before inspecting memory or transcripts.
     let readGuard: WorkspaceMemoryReadGuard;
@@ -1669,7 +1682,9 @@ export class HeartbeatService extends EventEmitter {
     const pressureTriggers =
       Boolean(pressureInstructions) &&
       MemoryPressureService.hasPressureChanged(params.workspaceId, pressureFingerprint);
-    if (memorySignalCount === 0 && !pressureTriggers) return null;
+    if (memorySignalCount === 0 && !pressureTriggers) {
+      return this.maybeRunDailyCuration(params.heartbeatRunId, params.workspaceId);
+    }
     try {
       const run = await this.deps.runMemoryDreaming({
         workspaceId: params.workspaceId,
@@ -1678,6 +1693,7 @@ export class HeartbeatService extends EventEmitter {
         signalCount: memorySignalCount,
         heartbeatRunId: params.heartbeatRunId,
         readGuard,
+        trigger: memorySignalCount > 0 ? "signals" : "pressure",
       });
       if (run?.skipped) return null;
       if (run) {
@@ -1694,6 +1710,37 @@ export class HeartbeatService extends EventEmitter {
       return run;
     } catch (error) {
       console.warn("[HeartbeatService] Dreaming failed:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Daily idle curation: when nothing else triggered Dreaming and no task is in the
+   * foreground, curate the next active workspace that has not had a run for a day (the
+   * pulse's workspace first). One workspace per pulse; no timer of its own.
+   */
+  private async maybeRunDailyCuration(
+    heartbeatRunId: string,
+    preferredWorkspaceId?: string,
+  ): Promise<{ id?: string; status?: string; candidateCount?: number } | null> {
+    if (!this.deps.runMemoryDreaming || !this.deps.findMemoryCurationWorkspace) return null;
+    try {
+      if (this.deps.hasActiveForegroundTask?.()) return null;
+      const target = await this.deps.findMemoryCurationWorkspace(preferredWorkspaceId);
+      if (!target) return null;
+      const readGuard = this.deps.getWorkspaceMemoryReadGuard(target.workspaceId);
+      const run = await this.deps.runMemoryDreaming({
+        workspaceId: target.workspaceId,
+        workspacePath: target.workspacePath,
+        reason: "daily curation",
+        signalCount: 0,
+        heartbeatRunId,
+        readGuard,
+        trigger: "daily",
+      });
+      return run?.skipped ? null : run;
+    } catch (error) {
+      console.warn("[HeartbeatService] Daily memory curation failed:", error);
       return null;
     }
   }

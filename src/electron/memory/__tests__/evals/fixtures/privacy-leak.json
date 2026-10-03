@@ -1,0 +1,163 @@
+{
+  "id": "memory-privacy-leak-v1",
+  "description": "Records that must stay hidden from read surfaces. Every record mentions the probe topic and carries a unique marker. `forbidden` applies to every surface; `forbiddenOnChannelSurfaces` adds what a surface that can be delivered to a channel (the daily briefing) must not see. Private archive rows of the user's own workspace stay readable on the owner's own tool surface by design (MemoryService: private means not shared externally), so they are only forbidden on channel surfaces.",
+  "query": "kiwi rollout",
+  "thresholds": { "leaks": 0, "visibleRecallAtK": 1 },
+  "workspaces": [
+    { "key": "atlas", "name": "Atlas" },
+    { "key": "harbor", "name": "Harbor" }
+  ],
+  "items": [
+    {
+      "key": "i-visible",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "content": "PV-ITEMOK the kiwi rollout starts with the beta cohort."
+    },
+    {
+      "key": "i-private",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "privacy": "private",
+      "content": "PV-ITEMPRIVATE the kiwi rollout is tied to a confidential acquisition."
+    },
+    {
+      "key": "i-forgotten",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "forgotten": true,
+      "content": "PV-ITEMFORGOTTEN the kiwi rollout budget is 40k."
+    },
+    {
+      "key": "i-old",
+      "workspace": "atlas",
+      "kind": "preference",
+      "subject": "kiwi_owner",
+      "source": "inferred",
+      "content": "PV-ITEMSUPERSEDED kiwi rollout owner is Ada."
+    },
+    {
+      "key": "i-new",
+      "workspace": "atlas",
+      "kind": "preference",
+      "subject": "kiwi_owner",
+      "source": "user_stated",
+      "content": "PV-ITEMCURRENT kiwi rollout owner is Grace."
+    },
+    {
+      "key": "i-third-party",
+      "workspace": "atlas",
+      "scope": "contact",
+      "scopeRef": "contact-acme",
+      "kind": "insight",
+      "source": "third_party",
+      "content": "PV-ITEMTHIRDPARTY Acme thinks the kiwi rollout is late."
+    },
+    {
+      "key": "i-foreign",
+      "workspace": "harbor",
+      "kind": "project_fact",
+      "content": "PV-ITEMFOREIGN harbor kiwi rollout uses feature flags."
+    },
+    {
+      "key": "i-other-task",
+      "workspace": "atlas",
+      "scope": "task",
+      "scopeRef": "other-task",
+      "kind": "project_fact",
+      "content": "PV-ITEMOTHERTASK kiwi rollout notes for another task."
+    },
+    {
+      "key": "i-expired",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "expiredByMs": 60000,
+      "content": "PV-ITEMEXPIRED the kiwi rollout freeze ends today."
+    }
+  ],
+  "archive": [
+    {
+      "key": "a-visible",
+      "workspace": "atlas",
+      "type": "decision",
+      "content": "PV-ARCHOK decided the kiwi rollout goes region by region."
+    },
+    {
+      "key": "a-private",
+      "workspace": "atlas",
+      "type": "insight",
+      "private": true,
+      "content": "PV-ARCHPRIVATE kiwi rollout slipped because of a staffing issue."
+    },
+    {
+      "key": "a-suppressed",
+      "workspace": "atlas",
+      "type": "insight",
+      "state": "suppressed",
+      "content": "PV-ARCHSUPPRESSED kiwi rollout note the user deleted."
+    },
+    {
+      "key": "a-redacted",
+      "workspace": "atlas",
+      "type": "insight",
+      "state": "redacted",
+      "content": "PV-ARCHREDACTED kiwi rollout note the user redacted."
+    },
+    {
+      "key": "a-foreign",
+      "workspace": "harbor",
+      "type": "decision",
+      "content": "PV-ARCHFOREIGN harbor kiwi rollout decision."
+    },
+    {
+      "key": "a-foreign-private-import",
+      "workspace": "harbor",
+      "type": "insight",
+      "private": true,
+      "imported": true,
+      "content": "PV-ARCHFOREIGNIMPORT kiwi rollout private import from another workspace."
+    }
+  ],
+  "conversations": [
+    {
+      "key": "c-visible",
+      "workspace": "atlas",
+      "task": "kiwi-old",
+      "type": "user_message",
+      "payload": { "message": "PV-CONVOK how is the kiwi rollout going?" }
+    },
+    {
+      "key": "c-foreign",
+      "workspace": "harbor",
+      "task": "harbor-kiwi",
+      "type": "user_message",
+      "payload": { "message": "PV-CONVFOREIGN harbor kiwi rollout status please" }
+    }
+  ],
+  "entities": [
+    {
+      "key": "k-foreign",
+      "workspace": "harbor",
+      "type": "project",
+      "name": "Kiwi rollout harbor",
+      "description": "PV-KGFOREIGN harbor kiwi rollout project"
+    }
+  ],
+  "visible": ["i-visible", "i-new", "a-visible", "c-visible"],
+  "forbidden": [
+    "i-private",
+    "i-forgotten",
+    "i-old",
+    "i-third-party",
+    "i-foreign",
+    "i-other-task",
+    "i-expired",
+    "a-suppressed",
+    "a-redacted",
+    "a-foreign",
+    "a-foreign-private-import",
+    "c-foreign",
+    "k-foreign"
+  ],
+  "forbiddenOnChannelSurfaces": ["a-private"]
+}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import { ChannelData, ChannelUserData, SecurityMode } from "../../shared/types";
 
 interface SignalSettingsProps {
@@ -675,6 +676,12 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
           {saving ? "Saving..." : "Save Settings"}
         </button>
       </div>
+
+      <ChannelOwnerSettings
+        channel={channel}
+        users={users}
+        onSaved={(config) => setChannel((prev) => (prev ? { ...prev, config } : prev))}
+      />
 
       {users.length > 0 && (
         <div className="settings-section">

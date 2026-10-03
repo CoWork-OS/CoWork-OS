@@ -1213,6 +1213,7 @@ export class PermissionEngine {
     const isDeleteLike =
       approvalType === "delete_file" ||
       approvalType === "delete_multiple" ||
+      approvalType === "memory_delete" ||
       toolName === "delete_file";
     const isDataExport =
       approvalType === "data_export" ||
@@ -1238,6 +1239,7 @@ export class PermissionEngine {
       approvalType === "risk_gate" ||
       approvalType === "delete_file" ||
       approvalType === "delete_multiple" ||
+      approvalType === "memory_delete" ||
       approvalType === "data_export" ||
       (approvalType === "external_service" && !request.mcpToolPolicy) ||
       approvalType === "location_access" ||

@@ -7,6 +7,8 @@ import type {
 import type { Workspace } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
+import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository";
+import type { SupermemoryRemoteRef } from "./supermemory-remote-refs-sql";
 
 const STORAGE_KEY = "supermemory";
 const DEFAULT_BASE_URL = "https://api.supermemory.ai";
@@ -68,6 +70,45 @@ interface SupermemoryForgetResponse {
   id?: string;
   forgotten?: boolean;
 }
+
+interface SupermemoryDocumentResponse {
+  id?: string;
+  status?: string;
+}
+
+/** A Supermemory HTTP error, with the status code when the server answered. */
+export class SupermemoryRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "SupermemoryRequestError";
+  }
+}
+
+/**
+ * Whether a failure says the service is unhealthy (and counts toward the circuit breaker).
+ * A 4xx is about the request — a bad id, a deleted document, a rejected key — and must not
+ * pause every other call; 408 and 429 are the server asking to slow down, so they count.
+ */
+export function countsTowardCircuitBreaker(error: unknown): boolean {
+  const status = error instanceof SupermemoryRequestError ? error.status : undefined;
+  if (typeof status !== "number") return true;
+  if (status === 408 || status === 429) return true;
+  return status < 400 || status >= 500;
+}
+
+export interface SupermemoryRemoteForgetResult {
+  /** Remote copies deleted (or already gone) whose local mapping was dropped. */
+  forgotten: number;
+  /** Remote copies that could not be deleted; their mapping is kept for a retry. */
+  failed: number;
+  errors: string[];
+}
+
+const ORPHAN_SWEEP_DELAY_MS = 1_500;
+const REMOTE_FORGET_PAGE = 200;
 
 const DEFAULT_SETTINGS: Required<
   Omit<SupermemorySettings, "apiKey"> & {
@@ -379,14 +420,23 @@ export class SupermemoryService {
       }),
     });
 
-    return {
-      containerTag,
-      memoryIds: Array.isArray(response?.memories)
-        ? response.memories
-            .map((item) => (typeof item?.id === "string" ? item.id : ""))
-            .filter(Boolean)
-        : [],
-    };
+    const memoryIds = Array.isArray(response?.memories)
+      ? response.memories
+          .map((item) => (typeof item?.id === "string" ? item.id : ""))
+          .filter(Boolean)
+      : [];
+    // Remote-only writes: kept so "Disconnect & purge" and workspace purges reach them.
+    for (const memoryId of memoryIds) {
+      await this.recordRemoteRef({
+        localRef: `external:${memoryId}`,
+        remoteId: memoryId,
+        remoteKind: "memory",
+        containerTag,
+        workspaceId: args.workspace.id,
+        taskId: args.taskId ?? null,
+      });
+    }
+    return { containerTag, memoryIds };
   }
 
   static async forget(args: {
@@ -407,11 +457,199 @@ export class SupermemoryService {
       }),
     });
 
+    const forgotten = response?.forgotten === true;
+    if (forgotten && args.memoryId) {
+      const repository = SupermemoryRemoteRefRepository.get();
+      try {
+        const rows = (await repository?.findByRemoteIds([args.memoryId])) ?? [];
+        await repository?.deleteByIds(rows.map((row) => row.id));
+      } catch (error) {
+        console.warn("[SupermemoryService] Could not drop the remote id mapping:", error);
+      }
+    }
     return {
       containerTag,
       id: typeof response?.id === "string" ? response.id : args.memoryId,
-      forgotten: response?.forgotten === true,
+      forgotten,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Remote ids (SEC-17): forget remote copies when the local record goes away.
+  // ---------------------------------------------------------------------------
+
+  private static orphanSweepTimer: ReturnType<typeof setTimeout> | null = null;
+  private static orphanSweepRunning: Promise<SupermemoryRemoteForgetResult | null> | null = null;
+
+  private static async recordRemoteRef(input: {
+    localRef: string;
+    remoteId: string;
+    remoteKind: "document" | "memory";
+    containerTag: string;
+    workspaceId?: string | null;
+    taskId?: string | null;
+  }): Promise<void> {
+    const repository = SupermemoryRemoteRefRepository.get();
+    if (!repository) return;
+    try {
+      await repository.record({ ...input, createdAt: Date.now() });
+    } catch (error) {
+      console.warn("[SupermemoryService] Could not record the remote id:", error);
+    }
+  }
+
+  /** Delete one remote copy. A 404 means it is already gone, which counts as forgotten. */
+  private static async deleteRemoteCopy(ref: SupermemoryRemoteRef): Promise<void> {
+    try {
+      if (ref.remoteKind === "document") {
+        await this.request(`/v3/documents/${encodeURIComponent(ref.remoteId)}`, {
+          method: "DELETE",
+        });
+      } else {
+        await this.request<SupermemoryForgetResponse>("/v4/memories", {
+          method: "DELETE",
+          body: JSON.stringify({ containerTag: ref.containerTag, id: ref.remoteId }),
+        });
+      }
+    } catch (error) {
+      if (error instanceof SupermemoryRequestError && error.status === 404) return;
+      throw error;
+    }
+  }
+
+  /** Delete the given remote copies; mappings of the deleted ones are dropped. */
+  static async forgetRemoteCopies(refs: SupermemoryRemoteRef[]): Promise<SupermemoryRemoteForgetResult> {
+    const result: SupermemoryRemoteForgetResult = { forgotten: 0, failed: 0, errors: [] };
+    const repository = SupermemoryRemoteRefRepository.get();
+    const done: number[] = [];
+    for (const ref of refs) {
+      try {
+        await this.deleteRemoteCopy(ref);
+        done.push(ref.id);
+        result.forgotten += 1;
+      } catch (error) {
+        result.failed += 1;
+        if (result.errors.length < 5) {
+          result.errors.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+    if (repository && done.length > 0) await repository.deleteByIds(done);
+    return result;
+  }
+
+  /**
+   * Forget every remote copy whose local record was deleted, suppressed, redacted or made
+   * private (supermemory-remote-refs-sql.ts `listOrphans`). Runs only while Supermemory is
+   * connected; otherwise the mappings wait for the next connected sweep or a purge.
+   */
+  static async sweepOrphanedCopies(): Promise<SupermemoryRemoteForgetResult | null> {
+    const repository = SupermemoryRemoteRefRepository.get();
+    if (!repository || !this.isConfigured()) return null;
+    const total: SupermemoryRemoteForgetResult = { forgotten: 0, failed: 0, errors: [] };
+    for (let page = 0; page < 20; page += 1) {
+      const orphans = await repository.listOrphans(REMOTE_FORGET_PAGE);
+      if (orphans.length === 0) break;
+      const result = await this.forgetRemoteCopies(orphans);
+      total.forgotten += result.forgotten;
+      total.failed += result.failed;
+      total.errors.push(...result.errors.slice(0, 5 - total.errors.length));
+      // Stop when a page made no progress (service down): the rows stay for the next sweep.
+      if (result.forgotten === 0 || orphans.length < REMOTE_FORGET_PAGE) break;
+    }
+    return total;
+  }
+
+  /**
+   * Schedule an orphan sweep after a local delete (debounced, fire-and-forget). Called by
+   * the delete paths: archive deletes and inspector suppression, memory item deletes,
+   * task-delete and workspace purges.
+   */
+  static scheduleOrphanSweep(): void {
+    if (!SupermemoryRemoteRefRepository.get() || this.orphanSweepTimer) return;
+    this.orphanSweepTimer = setTimeout(() => {
+      this.orphanSweepTimer = null;
+      if (this.orphanSweepRunning) {
+        // A sweep is running; sweep again once it finishes.
+        void this.orphanSweepRunning.finally(() => this.scheduleOrphanSweep());
+        return;
+      }
+      this.orphanSweepRunning = this.sweepOrphanedCopies()
+        .catch((error) => {
+          console.warn("[SupermemoryService] Remote forget sweep failed:", error);
+          return null;
+        })
+        .finally(() => {
+          this.orphanSweepRunning = null;
+        });
+    }, ORPHAN_SWEEP_DELAY_MS);
+    this.orphanSweepTimer.unref?.();
+  }
+
+  /** Forget every remote copy recorded for one workspace (Clear All Memories). */
+  static async forgetWorkspaceCopies(workspaceId: string): Promise<SupermemoryRemoteForgetResult> {
+    const repository = SupermemoryRemoteRefRepository.get();
+    if (!repository) return { forgotten: 0, failed: 0, errors: [] };
+    if (!this.isConfigured()) {
+      const pending = await repository.list({ workspaceId, limit: 10_000 });
+      return { forgotten: 0, failed: pending.length, errors: [] };
+    }
+    return this.forgetAllRecorded(workspaceId);
+  }
+
+  private static async forgetAllRecorded(
+    workspaceId?: string,
+  ): Promise<SupermemoryRemoteForgetResult> {
+    const total: SupermemoryRemoteForgetResult = { forgotten: 0, failed: 0, errors: [] };
+    const repository = SupermemoryRemoteRefRepository.get();
+    if (!repository) return total;
+    const attempted = new Set<number>();
+    for (;;) {
+      const rows = (
+        await repository.list({ workspaceId: workspaceId ?? null, limit: REMOTE_FORGET_PAGE })
+      ).filter((row) => !attempted.has(row.id));
+      if (rows.length === 0) break;
+      for (const row of rows) attempted.add(row.id);
+      const result = await this.forgetRemoteCopies(rows);
+      total.forgotten += result.forgotten;
+      total.failed += result.failed;
+      total.errors.push(...result.errors.slice(0, 5 - total.errors.length));
+    }
+    return total;
+  }
+
+  /**
+   * "Disconnect & purge": delete every remote copy CoWork recorded, then disable the
+   * integration. When a copy cannot be deleted the integration stays enabled (so the purge
+   * can be retried) and the failure is reported.
+   */
+  static async disconnectAndPurge(): Promise<
+    SupermemoryRemoteForgetResult & { success: boolean; disabled: boolean; error?: string }
+  > {
+    const repository = SupermemoryRemoteRefRepository.get();
+    const pending = repository ? await repository.count() : 0;
+    if (pending > 0 && !this.isConfigured()) {
+      return {
+        success: false,
+        disabled: false,
+        forgotten: 0,
+        failed: pending,
+        errors: [],
+        error:
+          "Supermemory is not connected, so its copies cannot be deleted. Reconnect it first, then purge.",
+      };
+    }
+    const result = await this.forgetAllRecorded();
+    if (result.failed > 0) {
+      return {
+        ...result,
+        success: false,
+        disabled: false,
+        error: `${result.failed} remote ${result.failed === 1 ? "copy" : "copies"} could not be deleted; Supermemory stays connected so you can retry.`,
+      };
+    }
+    this.saveSettings({ ...this.loadSettings(), enabled: false });
+    return { ...result, success: true, disabled: true };
   }
 
   static async mirrorMemory(args: {
@@ -422,6 +660,8 @@ export class SupermemoryService {
     createdAt?: number;
     origin?: MemoryWriteOrigin;
     skipMemoryWriteGate?: boolean;
+    /** The local record this copies (`archive:<id>`), so deleting it forgets the copy. */
+    localRef?: string;
   }): Promise<void> {
     const settings = this.loadSettings();
     if (!this.isConfigured() || settings.mirrorMemoryWrites === false) {
@@ -442,13 +682,14 @@ export class SupermemoryService {
           containerTag,
           memoryType: args.memoryType,
           createdAt: args.createdAt || Date.now(),
+          ...(args.localRef ? { localRef: args.localRef } : {}),
         },
         proposedValue: args.content,
       });
       if (!gate.allowed) return;
     }
 
-    await this.request(
+    const response = await this.request<SupermemoryDocumentResponse>(
       "/v3/documents",
       {
         method: "POST",
@@ -467,6 +708,17 @@ export class SupermemoryService {
       },
       { timeoutMs: 10_000 },
     );
+    const documentId = typeof response?.id === "string" ? response.id.trim() : "";
+    if (documentId && args.localRef) {
+      await this.recordRemoteRef({
+        localRef: args.localRef,
+        remoteId: documentId,
+        remoteKind: "document",
+        containerTag,
+        workspaceId: args.workspace.id,
+        taskId: args.taskId ?? null,
+      });
+    }
   }
 
   static async buildPromptContext(args: {
@@ -697,8 +949,9 @@ export class SupermemoryService {
 
       if (!response.ok) {
         const bodyText = await response.text().catch(() => "");
-        throw new Error(
+        throw new SupermemoryRequestError(
           `Supermemory request failed (${response.status}): ${bodyText || response.statusText || "Unknown error"}`,
+          response.status,
         );
       }
 
@@ -706,7 +959,7 @@ export class SupermemoryService {
       this.recordSuccess();
       return json;
     } catch (error) {
-      if (!options?.ignoreCircuitBreaker) {
+      if (!options?.ignoreCircuitBreaker && countsTowardCircuitBreaker(error)) {
         this.recordFailure(error);
       }
       throw error;

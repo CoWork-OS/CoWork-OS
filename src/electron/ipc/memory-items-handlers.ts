@@ -6,6 +6,7 @@
  */
 import { ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
+import { attributeMemoryUse, type MemoryUsedTimelineEvent } from "../../shared/memory-used";
 import type { MemoryItemsHubService } from "../memory/MemoryItemsHubService";
 import { RATE_LIMIT_CONFIGS, rateLimiter } from "../utils/rate-limiter";
 import { validateInput } from "../utils/validation";
@@ -16,6 +17,7 @@ import {
   MemoryItemsClearGlobalRequestSchema,
   MemoryItemsListRequestSchema,
   MemoryItemUpdateRequestSchema,
+  MemoryUsedForTaskRequestSchema,
 } from "./memory-ipc-validation";
 
 export interface MemoryItemsIpcDeps {
@@ -24,6 +26,15 @@ export interface MemoryItemsIpcDeps {
   workspaceExists: (workspaceId: string) => Promise<boolean>;
   /** Throws when the channel is over its rate limit. */
   checkRateLimit?: (channel: string) => void;
+  /**
+   * The task's `memory_used`, reply and user-message events (oldest first), or null when
+   * the task does not exist in the workspace. The events are hidden from the timeline;
+   * this is the one path that reads them for the per-reply "Memory used" affordance.
+   */
+  loadMemoryUsedTimeline?: (
+    workspaceId: string,
+    taskId: string,
+  ) => Promise<MemoryUsedTimelineEvent[] | null>;
 }
 
 type Handler = (raw: unknown) => Promise<unknown>;
@@ -80,6 +91,13 @@ export function createMemoryItemsIpcHandlers(deps: MemoryItemsIpcDeps): Record<s
     [IPC_CHANNELS.MEMORY_ITEMS_GET]: read(
       (raw) => validateInput(MemoryItemRefRequestSchema, raw, "memory item"),
       (value) => deps.service.get(value.workspaceId, value.id),
+    ),
+    [IPC_CHANNELS.MEMORY_ITEMS_USED_FOR_TASK]: read(
+      (raw) => validateInput(MemoryUsedForTaskRequestSchema, raw, "memory used for task"),
+      async (value) => {
+        const events = (await deps.loadMemoryUsedTimeline?.(value.workspaceId, value.taskId)) ?? [];
+        return attributeMemoryUse(value.taskId, events);
+      },
     ),
     [IPC_CHANNELS.MEMORY_ITEMS_WHY]: read(
       (raw) => validateInput(MemoryItemRefRequestSchema, raw, "memory item"),

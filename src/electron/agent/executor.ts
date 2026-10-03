@@ -8803,11 +8803,20 @@ ${transcript}
   }
 
   /**
-   * "Memory used" attribution: one `memory_used` task event per surface whenever the set of
-   * injected refs changes (memory_items `memory:<id>`, archive `archive:<id>`, external
-   * provider ids), and a use counted for the memory_items refs. The event type is hidden
+   * "Memory used" attribution: one `memory_used` task event per surface and turn, and again
+   * whenever the set of injected refs changes within the turn (memory_items `memory:<id>`,
+   * archive `archive:<id>`, external provider ids), and a use counted for the memory_items
+   * refs. The task UI attributes the events to the reply that follows them. The event type is hidden
    * from the primary timeline and never captured into memory (salience gate).
    */
+  /**
+   * Start a new attribution turn (a chat turn, plan, step or follow-up): every surface
+   * reports its refs again, so the reply of each turn can show the memory it used.
+   */
+  private resetMemoryUsedAttribution(): void {
+    this.memoryUsedKeys?.clear();
+  }
+
   private recordMemoryUsed(
     surface: string,
     refs: string[],
@@ -9109,6 +9118,7 @@ ${transcript}
       ? PersonalityManager.getPersonalityPromptById(personalityIdOverride)
       : PersonalityManager.getPersonalityPrompt(contextMode);
     const identityPrompt = PersonalityManager.getIdentityPrompt();
+    this.resetMemoryUsedAttribution();
     const memoryDecision = await this.resolveMemoryInjectionForPrompt(message);
     const awarenessSnapshotBlock = this.buildAwarenessSnapshotBlock(memoryDecision);
     const externalProfileContext = await this.buildSupermemoryProfileBlock(message, memoryDecision);
@@ -28553,6 +28563,7 @@ You are continuing a previous conversation. The context from the previous conver
       ? PersonalityManager.getPersonalityPromptById(personalityIdOverride)
       : PersonalityManager.getPersonalityPrompt(contextMode);
     const identityPrompt = PersonalityManager.getIdentityPrompt();
+    this.resetMemoryUsedAttribution();
     const memoryDecision = await this.resolveMemoryInjectionForPrompt(rawPrompt);
     const awarenessSnapshotBlock = this.buildAwarenessSnapshotBlock(memoryDecision);
     const roleContext = this.getRoleContextPrompt();
@@ -29921,6 +29932,7 @@ You are continuing a previous conversation. The context from the previous conver
       this.getContractPrompt(),
       gatewayContext,
     );
+    this.resetMemoryUsedAttribution();
     const planningMemoryDecision = await this.resolveMemoryInjectionForPrompt();
     try {
       const readGuard = (candidatePath: string) => this.canReadWorkspacePath(candidatePath);
@@ -32045,6 +32057,7 @@ Return ONLY a JSON object:
     // L1 (memory_items recall for the request) and playbook / summaries from the
     // synthesizer, within one budget.
     const gatewayContext = this.task.agentConfig?.gatewayContext ?? "private";
+    this.resetMemoryUsedAttribution();
     const memoryDecision = await this.resolveMemoryInjectionForPrompt(this.lastUserMessage);
     const allowMemoryInjection = memoryDecision.memory;
     const allowTrustedSharedMemory =
@@ -41020,6 +41033,7 @@ Return ONLY a JSON object:
       : PersonalityManager.getPersonalityPrompt(contextMode, { surface: "execution" });
     const identityPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
     const gatewayContext = this.task.agentConfig?.gatewayContext ?? "private";
+    this.resetMemoryUsedAttribution();
     const memoryDecision = await this.resolveMemoryInjectionForPrompt(executionMessage);
     const allowMemoryInjection = memoryDecision.memory;
     const memoryFeatureSettings = this.loadExecutionPromptMemoryFeatures();

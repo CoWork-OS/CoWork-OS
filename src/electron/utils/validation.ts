@@ -22,6 +22,7 @@ import {
   TaskStatus,
 } from "../../shared/types";
 import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
+import { validateGatewayOwnerIds } from "../../shared/gateway-owner-ids";
 import { DEFAULT_GUARDRAIL_SETTINGS } from "../../shared/guardrail-defaults";
 import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
 
@@ -2122,8 +2123,25 @@ export const AddChannelSchema = z.discriminatedUnion("type", [
   AddEmailChannelSchema,
 ]);
 
+/**
+ * `ownerUserIds` (SEC-16): the channel accounts that are the workspace owner. Checked with
+ * the same rules the settings UI uses, then trimmed and deduplicated.
+ */
+export const GatewayOwnerUserIdsSchema = z
+  .array(z.string().max(1000))
+  .max(200)
+  .transform((value, ctx) => {
+    const result = validateGatewayOwnerIds(value);
+    if (!result.ok) {
+      ctx.addIssue({ code: "custom", message: result.error });
+      return z.NEVER;
+    }
+    return result.ids;
+  });
+
 export const ChannelConfigSchema = z
   .object({
+    ownerUserIds: GatewayOwnerUserIdsSchema.optional(),
     selfChatMode: z.boolean().optional(),
     supervisor: DiscordSupervisorConfigSchema.optional(),
     progressRelayMode: z.enum(["minimal", "curated"]).optional(),
@@ -3188,6 +3206,22 @@ export const PersonalityConfigV2Schema = z
       message: `Personality config must be under ${MAX_PERSONALITY_CONFIG_BYTES / 1024}KB`,
     },
   );
+
+/**
+ * Options of a personality save: the response style the settings form loaded, so main can
+ * tell a style the user changed from a stale copy (withSettingsResponseStyleMirror).
+ */
+export const PersonalitySaveOptionsSchema = z
+  .object({ responseStyleBaseline: CommunicationStyleOverrideSchema.nullable().optional() })
+  .strict();
+
+/** Parse the optional options argument of a personality save (absent → no options). */
+export function parsePersonalitySaveOptions(
+  raw: unknown,
+): z.infer<typeof PersonalitySaveOptionsSchema> {
+  if (raw === undefined || raw === null) return {};
+  return validateInput(PersonalitySaveOptionsSchema, raw, "personality save options");
+}
 
 export const AwarenessUpdateBeliefSchema = z.object({
   id: z.string().min(1).max(200),

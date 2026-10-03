@@ -8,6 +8,7 @@ import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
 
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
+import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 
 type Any = any;
 
@@ -297,12 +298,14 @@ export class FeedbackService {
     if (!state) return;
 
     const now = Date.now();
+    const pathGuard = createBackgroundKitPathGuard(workspace);
 
     // === Weekly feedback log ===
     const pending = state.pendingEntries.splice(0, state.pendingEntries.length);
     if (pending.length > 0) {
       try {
         const dirAbs = path.join(workspace.path, FEEDBACK_DIR);
+        pathGuard(dirAbs, "write");
         ensureWorkspaceDirectorySync(workspace.path, dirAbs);
 
         const groups = new Map<string, { absPath: string; entries: FeedbackEntry[] }>();
@@ -322,7 +325,9 @@ export class FeedbackService {
 
         for (const group of groups.values()) {
           let current: Any = { entries: [] as FeedbackEntry[] };
+          pathGuard(group.absPath, "write");
           if (fs.existsSync(group.absPath)) {
+            pathGuard(group.absPath, "read");
             try {
               const raw = fs.readFileSync(group.absPath, "utf8");
               const parsed = JSON.parse(raw);
@@ -346,6 +351,7 @@ export class FeedbackService {
       const absPath = path.join(workspace.path, MISTAKES_PATH);
       let current = "";
       if (fs.existsSync(absPath)) {
+        pathGuard(absPath, "read");
         try {
           current = fs.readFileSync(absPath, "utf8");
         } catch {
@@ -376,7 +382,7 @@ export class FeedbackService {
 
       const next = upsertMarkedSection(current, patterns.length > 0 ? patterns : ["- (none)"]);
       if (next !== current) {
-        writeKitFileWithSnapshot(absPath, next, "agent", "service:feedback_flush");
+        writeKitFileWithSnapshot(absPath, next, "agent", "service:feedback_flush", pathGuard);
       }
     } catch (error) {
       console.warn("[Feedback] Failed to write MISTAKES.md:", error);

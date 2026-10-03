@@ -455,6 +455,10 @@ export class MemoryWriteGate {
         content,
         createdAt: typeof payload.createdAt === "number" ? payload.createdAt : pending.createdAt,
         skipMemoryWriteGate: true,
+        // The archive row it copies, so deleting that row forgets the copy (SEC-17).
+        ...(this.asString(payload.localRef)?.startsWith("archive:")
+          ? { localRef: this.asString(payload.localRef) }
+          : {}),
       });
       return;
     }

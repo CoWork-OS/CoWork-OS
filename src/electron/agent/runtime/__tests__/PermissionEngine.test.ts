@@ -462,6 +462,24 @@ describe("PermissionEngine", () => {
     ).toBe("ask");
   });
 
+  it("classifies forgetting a memory (memory_delete) as a delete", () => {
+    for (const mode of ["default", "dangerous_only"] as const) {
+      expect(
+        evaluate({ toolName: "memory_forget", approvalType: "memory_delete", mode }).decision,
+      ).toBe("ask");
+    }
+    expect(
+      evaluate({
+        toolName: "memory_forget",
+        approvalType: "memory_delete",
+        workspace: { ...workspace, permissions: { ...workspace.permissions, delete: false } },
+      }),
+    ).toMatchObject({
+      decision: "deny",
+      reason: { type: "workspace_capability", capability: "delete" },
+    });
+  });
+
   it("prompts for destructive or ambiguous actions in dangerous_only mode", () => {
     expect(
       evaluate({

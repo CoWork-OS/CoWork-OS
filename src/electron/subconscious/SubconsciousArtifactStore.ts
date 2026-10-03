@@ -1,4 +1,9 @@
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
+import { createLogger } from "../utils/logger";
+import {
+  evaluateConfinedInternalWrite,
+  type BackgroundWriteWorkspace,
+} from "../security/background-write-guard";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -16,6 +21,21 @@ import type {
   SubconsciousTargetRef,
   SubconsciousTargetSummary,
 } from "../../shared/subconscious";
+
+const logger = createLogger("SubconsciousArtifacts");
+
+/** Every artifact write stays inside `<root>/.cowork/subconscious`. */
+const ARTIFACT_DIR = path.join(".cowork", "subconscious");
+
+export interface SubconsciousArtifactStoreOptions {
+  /**
+   * Registered workspace whose path is `root`, so its access profile governs the
+   * write. Roots that are not workspaces (the user data dir) are only confined.
+   */
+  findWorkspaceByRoot?: (root: string) => BackgroundWriteWorkspace | undefined;
+  /** Artifacts are written only while this returns true (Workflow Intelligence enabled). */
+  writesEnabled?: () => boolean;
+}
 
 function sanitizeKey(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, "_");
@@ -69,22 +89,30 @@ export class SubconsciousArtifactStore {
   constructor(
     private readonly resolveWorkspacePath: (workspaceId?: string) => string | undefined,
     private readonly resolveGlobalRoot: () => string,
+    private readonly options: SubconsciousArtifactStoreOptions = {},
   ) {}
 
   getBrainRoot(): string {
-    return path.join(this.resolveGlobalRoot(), ".cowork", "subconscious", "brain");
+    return path.join(this.resolveGlobalRoot(), ARTIFACT_DIR, "brain");
   }
 
   getJournalRoot(): string {
-    return path.join(this.resolveGlobalRoot(), ".cowork", "subconscious", "journal");
+    return path.join(this.resolveGlobalRoot(), ARTIFACT_DIR, "journal");
   }
 
+  /**
+   * Target artifacts live in the target workspace's own `.cowork`. A code
+   * target's `codeWorkspacePath` can be an enclosing git root, which is not
+   * the workspace and may not be covered by its access profile, so it is
+   * never used as a write root.
+   */
   getTargetRoot(target: SubconsciousTargetRef): string {
-    const workspacePath =
-      target.codeWorkspacePath ||
-      this.resolveWorkspacePath(target.workspaceId) ||
-      this.resolveGlobalRoot();
-    return path.join(workspacePath, ".cowork", "subconscious", "targets", sanitizeKey(target.key));
+    return path.join(
+      this.targetWorkspaceRoot(target),
+      ARTIFACT_DIR,
+      "targets",
+      sanitizeKey(target.key),
+    );
   }
 
   getRunRoot(target: SubconsciousTargetRef, runId: string): string {
@@ -93,22 +121,43 @@ export class SubconsciousArtifactStore {
 
   private targetWorkspaceRoot(target: SubconsciousTargetRef | null): string {
     if (!target) return this.resolveGlobalRoot();
-    return (
-      target?.codeWorkspacePath ||
-      this.resolveWorkspacePath(target?.workspaceId) ||
-      this.resolveGlobalRoot()
-    );
+    return this.resolveWorkspacePath(target.workspaceId) || this.resolveGlobalRoot();
   }
 
-  private async canWriteTargetArtifacts(target: SubconsciousTargetRef | null): Promise<boolean> {
-    if (!target) return true;
-    const workspacePath = target.codeWorkspacePath || this.resolveWorkspacePath(target.workspaceId);
-    if (!workspacePath) return true;
-    try {
-      return (await fs.stat(workspacePath)).isDirectory();
-    } catch {
+  /** Pre-fix location (repo root) of a code target's artifacts; read-only fallback. */
+  private legacyTargetRoot(target: SubconsciousTargetRef): string | null {
+    if (!target.codeWorkspacePath) return null;
+    const legacy = path.join(
+      target.codeWorkspacePath,
+      ARTIFACT_DIR,
+      "targets",
+      sanitizeKey(target.key),
+    );
+    return path.resolve(legacy) === path.resolve(this.getTargetRoot(target)) ? null : legacy;
+  }
+
+  /**
+   * Gate and prepare one artifact write: Workflow Intelligence must be enabled,
+   * the root must exist, and every path must stay inside `<root>/.cowork/subconscious`
+   * with no symlink on the way and the workspace access profile allowing the write.
+   * A denied write is logged and skipped; it never throws into the loop.
+   */
+  private async prepareWrite(root: string, dir: string, files: string[]): Promise<boolean> {
+    if (this.options.writesEnabled && !this.options.writesEnabled()) return false;
+    const decision = evaluateConfinedInternalWrite({
+      root,
+      confineTo: ARTIFACT_DIR,
+      targets: [dir, ...files],
+      workspace: this.options.findWorkspaceByRoot?.(root),
+    });
+    if (!decision.allowed) {
+      if (decision.reason !== "root_missing") {
+        logger.warn("Skipping artifact write", { root, dir, reason: decision.reason });
+      }
       return false;
     }
+    await ensureWorkspaceDirectory(root, dir);
+    return true;
   }
 
   async writeBrainState(
@@ -116,7 +165,8 @@ export class SubconsciousArtifactStore {
     targets: SubconsciousTargetSummary[],
   ): Promise<void> {
     const brainRoot = this.getBrainRoot();
-    await ensureWorkspaceDirectory(this.resolveGlobalRoot(), brainRoot);
+    const files = [path.join(brainRoot, "state.json"), path.join(brainRoot, "memory.jsonl")];
+    if (!(await this.prepareWrite(this.resolveGlobalRoot(), brainRoot, files))) return;
     await fs.writeFile(
       path.join(brainRoot, "state.json"),
       JSON.stringify({ summary, targets }, null, 2),
@@ -139,11 +189,13 @@ export class SubconsciousArtifactStore {
     evidence: SubconsciousEvidence[],
     backlog: SubconsciousBacklogItem[],
   ): Promise<void> {
-    if (!(await this.canWriteTargetArtifacts(target.target))) {
+    const targetRoot = this.getTargetRoot(target.target);
+    const files = ["state.json", "memory.jsonl", "backlog.md"].map((file) =>
+      path.join(targetRoot, file),
+    );
+    if (!(await this.prepareWrite(this.targetWorkspaceRoot(target.target), targetRoot, files))) {
       return;
     }
-    const targetRoot = this.getTargetRoot(target.target);
-    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(target.target), targetRoot);
     await fs.writeFile(
       path.join(targetRoot, "state.json"),
       JSON.stringify({ target, latestEvidence: evidence }, null, 2),
@@ -174,10 +226,18 @@ export class SubconsciousArtifactStore {
     dispatch?: SubconsciousDispatchRecord | null;
   }): Promise<string> {
     const runRoot = this.getRunRoot(params.target, params.run.id);
-    if (!(await this.canWriteTargetArtifacts(params.target))) {
+    const files = [
+      "evidence.json",
+      "ideas.jsonl",
+      "critique.jsonl",
+      "decision.json",
+      "winning-recommendation.md",
+      "next-backlog.md",
+      "dispatch.json",
+    ].map((file) => path.join(runRoot, file));
+    if (!(await this.prepareWrite(this.targetWorkspaceRoot(params.target), runRoot, files))) {
       return runRoot;
     }
-    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(params.target), runRoot);
     await fs.writeFile(
       path.join(runRoot, "evidence.json"),
       JSON.stringify(params.evidence, null, 2),
@@ -216,13 +276,10 @@ export class SubconsciousArtifactStore {
 
   async appendJournalEntry(entry: SubconsciousJournalEntry): Promise<void> {
     const journalRoot = this.getJournalRoot();
-    await ensureWorkspaceDirectory(this.resolveGlobalRoot(), journalRoot);
     const day = new Date(entry.createdAt).toISOString().slice(0, 10);
-    await fs.appendFile(
-      path.join(journalRoot, `${day}.jsonl`),
-      `${JSON.stringify(entry)}\n`,
-      "utf-8",
-    );
+    const journalFile = path.join(journalRoot, `${day}.jsonl`);
+    if (!(await this.prepareWrite(this.resolveGlobalRoot(), journalRoot, [journalFile]))) return;
+    await fs.appendFile(journalFile, `${JSON.stringify(entry)}\n`, "utf-8");
   }
 
   async readJournalEntries(targetKey?: string, limit = 50): Promise<SubconsciousJournalEntry[]> {
@@ -263,26 +320,31 @@ export class SubconsciousArtifactStore {
     target: SubconsciousTargetRef | null,
     items: SubconsciousMemoryItem[],
   ): Promise<void> {
-    if (!(await this.canWriteTargetArtifacts(target))) {
-      return;
-    }
     const root = target ? this.getTargetRoot(target) : this.getBrainRoot();
-    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(target), root);
-    await fs.writeFile(
-      path.join(root, "memory-index.json"),
-      JSON.stringify(items, null, 2),
-      "utf-8",
-    );
+    const indexFile = path.join(root, "memory-index.json");
+    if (!(await this.prepareWrite(this.targetWorkspaceRoot(target), root, [indexFile]))) return;
+    await fs.writeFile(indexFile, JSON.stringify(items, null, 2), "utf-8");
   }
 
   async readMemoryIndex(
     targetKey?: string,
     target?: SubconsciousTargetRef,
   ): Promise<SubconsciousMemoryItem[]> {
-    const root = targetKey && target ? this.getTargetRoot(target) : this.getBrainRoot();
-    const content = await fs
-      .readFile(path.join(root, "memory-index.json"), "utf-8")
-      .catch(() => "[]");
+    const roots =
+      targetKey && target
+        ? [this.getTargetRoot(target), this.legacyTargetRoot(target)]
+        : [this.getBrainRoot()];
+    let content = "[]";
+    for (const root of roots) {
+      if (!root) continue;
+      const found = await fs
+        .readFile(path.join(root, "memory-index.json"), "utf-8")
+        .catch(() => null);
+      if (found !== null) {
+        content = found;
+        break;
+      }
+    }
     try {
       return JSON.parse(content) as SubconsciousMemoryItem[];
     } catch {
@@ -294,29 +356,33 @@ export class SubconsciousArtifactStore {
     target: SubconsciousTargetRef | null,
     artifact: SubconsciousDreamArtifact,
   ): Promise<void> {
-    if (!(await this.canWriteTargetArtifacts(target))) {
-      return;
-    }
     const root = target
       ? path.join(this.getTargetRoot(target), "dreams")
       : path.join(this.getBrainRoot(), "dreams");
-    await ensureWorkspaceDirectory(this.targetWorkspaceRoot(target), root);
-    await fs.writeFile(
-      path.join(root, `${artifact.createdAt}-${sanitizeKey(artifact.id)}.json`),
-      JSON.stringify(artifact, null, 2),
-      "utf-8",
-    );
-    await fs.writeFile(path.join(root, "latest.json"), JSON.stringify(artifact, null, 2), "utf-8");
+    const artifactFile = path.join(root, `${artifact.createdAt}-${sanitizeKey(artifact.id)}.json`);
+    const latestFile = path.join(root, "latest.json");
+    if (
+      !(await this.prepareWrite(this.targetWorkspaceRoot(target), root, [artifactFile, latestFile]))
+    ) {
+      return;
+    }
+    await fs.writeFile(artifactFile, JSON.stringify(artifact, null, 2), "utf-8");
+    await fs.writeFile(latestFile, JSON.stringify(artifact, null, 2), "utf-8");
   }
 
   async readDreamArtifacts(
     target?: SubconsciousTargetRef,
     limit = 5,
   ): Promise<SubconsciousDreamArtifact[]> {
-    const root = target
+    let root = target
       ? path.join(this.getTargetRoot(target), "dreams")
       : path.join(this.getBrainRoot(), "dreams");
-    const files = await fs.readdir(root).catch(() => []);
+    let files = await fs.readdir(root).catch(() => [] as string[]);
+    const legacyRoot = target ? this.legacyTargetRoot(target) : null;
+    if (!files.length && legacyRoot) {
+      root = path.join(legacyRoot, "dreams");
+      files = await fs.readdir(root).catch(() => [] as string[]);
+    }
     const ordered = files
       .filter((file) => file.endsWith(".json") && file !== "latest.json")
       .sort()

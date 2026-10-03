@@ -6,6 +6,8 @@ import type {
   PermissionPromptDetails,
 } from "../../shared/types";
 import { buildApprovalCommandPreview } from "../../shared/approval-command-preview";
+import type { MemoryHubSource } from "../../shared/memory-hub-types";
+import { SOURCE_LABELS } from "./memory/memory-knowledge-model";
 
 type ScopeKey = "once" | "session" | "workspace" | "recurring" | "profile";
 
@@ -74,7 +76,7 @@ function formatApprovalTypeLabel(type: ApprovalType, toolName?: string | null): 
     case "show_in_folder":
       return "system action";
     default:
-      return type.replace(/_/g, " ");
+      return type === "memory_delete" ? "forget memory" : type.replace(/_/g, " ");
   }
 }
 
@@ -117,6 +119,8 @@ function titleForType(type: ApprovalType): string {
       return "Delete file";
     case "delete_multiple":
       return "Delete multiple items";
+    case "memory_delete":
+      return "Forget a memory";
     case "bulk_rename":
       return "Bulk rename";
     case "workspace_write":
@@ -142,6 +146,7 @@ function iconForType(type: ApprovalType): string {
   switch (type) {
     case "delete_file":
     case "delete_multiple":
+    case "memory_delete":
       return "🗑️";
     case "bulk_rename":
     case "workspace_write":
@@ -204,6 +209,29 @@ export function GenericApprovalDialog({
     rows.push({
       label: "Tool",
       value: <code className="session-approval-code">{toolName}</code>,
+    });
+  }
+
+  if (approval.type === "memory_delete") {
+    const memoryContent = readString(details, "content");
+    const memorySource = readString(details, "source");
+    const memoryReason = readString(details, "reason");
+    if (memoryContent) {
+      rows.push({ label: "Memory", value: memoryContent });
+    }
+    if (memorySource) {
+      rows.push({
+        label: "Source",
+        value: SOURCE_LABELS[memorySource as MemoryHubSource] ?? memorySource.replace(/_/g, " "),
+      });
+    }
+    if (memoryReason) {
+      rows.push({ label: "Why", value: memoryReason });
+    }
+    rows.push({
+      label: "What happens",
+      value:
+        "CoWork deletes this memory, and any synced remote copy, and stops using it in future tasks.",
     });
   }
 

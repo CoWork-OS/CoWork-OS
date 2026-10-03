@@ -48,8 +48,46 @@ describe("memory items IPC", () => {
         IPC_CHANNELS.MEMORY_ITEMS_DELETE,
         IPC_CHANNELS.MEMORY_ITEMS_WHY,
         IPC_CHANNELS.MEMORY_ITEMS_CLEAR_GLOBAL,
+        IPC_CHANNELS.MEMORY_ITEMS_USED_FOR_TASK,
       ].sort(),
     );
+  });
+
+  it("attributes a task's hidden memory_used events to its replies", async () => {
+    const loadMemoryUsedTimeline = vi.fn(async (workspaceId: string, taskId: string) =>
+      workspaceId === WS && taskId === "task-1"
+        ? [
+            { id: "u1", type: "user_message", timestamp: 1, payload: { message: "hi" } },
+            {
+              id: "mu1",
+              type: "memory_used",
+              timestamp: 2,
+              payload: { surface: "chat", refs: ["memory:a", "archive:b"] },
+            },
+            { id: "r1", type: "assistant_message", timestamp: 3, payload: { message: "x" } },
+          ]
+        : null,
+    );
+    const handlers = createMemoryItemsIpcHandlers({
+      service: {} as unknown as MemoryItemsHubService,
+      workspaceExists: async (id) => id === WS || id === OTHER_WS,
+      loadMemoryUsedTimeline,
+    });
+    const channel = IPC_CHANNELS.MEMORY_ITEMS_USED_FOR_TASK;
+    expect(await handlers[channel]({ workspaceId: WS, taskId: "task-1" })).toEqual({
+      taskId: "task-1",
+      replies: { r1: { eventId: "r1", refs: ["memory:a", "archive:b"], surfaces: ["chat"] } },
+      replyEventIds: ["r1"],
+    });
+    // A task of another workspace reads as having used nothing.
+    expect(await handlers[channel]({ workspaceId: OTHER_WS, taskId: "task-1" })).toEqual({
+      taskId: "task-1",
+      replies: {},
+      replyEventIds: [],
+    });
+    for (const bad of [{ workspaceId: WS }, { workspaceId: WS, taskId: "t", extra: 1 }, null]) {
+      await expect(handlers[channel](bad)).rejects.toThrow();
+    }
   });
 
   it("validates list filters and caps the page size", async () => {

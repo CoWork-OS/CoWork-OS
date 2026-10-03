@@ -6,6 +6,7 @@ import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
 
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
+import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 
 type Any = any;
 
@@ -252,8 +253,10 @@ export class LoreService {
 
     try {
       const absPath = path.join(workspace.path, LORE_PATH);
+      const pathGuard = createBackgroundKitPathGuard(workspace);
       let current = "";
       if (fs.existsSync(absPath)) {
+        pathGuard(absPath, "read");
         try {
           current = fs.readFileSync(absPath, "utf8");
         } catch {
@@ -280,7 +283,7 @@ export class LoreService {
 
       const next = upsertMarkedSection(current, merged.length > 0 ? merged : ["- (none)"]);
       if (next !== current) {
-        writeKitFileWithSnapshot(absPath, next, "agent", "service:lore_flush");
+        writeKitFileWithSnapshot(absPath, next, "agent", "service:lore_flush", pathGuard);
       }
 
       // Clear flushed entries.

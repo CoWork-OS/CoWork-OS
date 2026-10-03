@@ -276,6 +276,17 @@ describeWithSqlite("MemoryRecall", () => {
       expect(hits[0].content).toBeUndefined();
     });
 
+    it("damps one-term matches so a full match in a weaker lane can outrank them", async () => {
+      const weak = await remember({ content: "Run the linter before every commit" });
+      vi.mocked(deps.searchArchive).mockResolvedValue([
+        archiveHit("a-1", "Nightly backups run at 02:00 UTC to the eu-west bucket"),
+      ]);
+      const hits = await recall.query(
+        query({ text: "when do the nightly backups run", lanes: ["memory", "archive"] }),
+      );
+      expect(hits.map((hit) => hit.ref)).toEqual(["archive:a-1", `memory:${weak.id}`]);
+    });
+
     it("merges the same text found in two lanes into one hit", async () => {
       const fact = await remember({ content: "Releases are tagged on Thursdays" });
       vi.mocked(deps.searchMarkdown).mockResolvedValue([

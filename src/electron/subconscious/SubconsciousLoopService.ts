@@ -319,6 +319,12 @@ export class SubconsciousLoopService {
     this.artifactStore = new SubconsciousArtifactStore(
       (workspaceId?: string) => this.resolveWorkspacePath(workspaceId),
       () => this.resolveGlobalRoot(),
+      {
+        // Artifacts are written only while Workflow Intelligence is enabled, and
+        // under the owning workspace's access profile.
+        writesEnabled: () => this.getSettings().enabled,
+        findWorkspaceByRoot: (root: string) => this.findWorkspaceByRoot(root),
+      },
     );
     this.migrationService = new SubconsciousMigrationService(db);
   }
@@ -344,7 +350,9 @@ export class SubconsciousLoopService {
     this.migrationService.runOnce();
     await this.normalizeLegacyOutcomeVocabulary();
     await this.pruneSessionOnlyState();
-    await this.refreshTargets();
+    // A disabled loop does no target collection at startup; it would otherwise
+    // inspect every workspace. Enabling it later refreshes from saveSettings.
+    if (this.getSettings().enabled) await this.refreshTargets();
     logger.info("Service started", {
       enabled: this.getSettings().enabled,
       autoRun: this.getSettings().autoRun,
@@ -364,8 +372,16 @@ export class SubconsciousLoopService {
   }
 
   saveSettings(settings: SubconsciousSettings): SubconsciousSettings {
+    const wasEnabled = this.getSettings().enabled;
     SubconsciousSettingsManager.saveSettings(settings);
-    return this.getSettings();
+    const saved = this.getSettings();
+    if (this.started && !wasEnabled && saved.enabled) {
+      // start() skipped the refresh while disabled; catch up now.
+      void this.refreshTargets().catch((error) => {
+        logger.warn("Refresh after enabling failed:", error);
+      });
+    }
+    return saved;
   }
 
   async getBrainSummary(): Promise<SubconsciousBrainSummary> {
@@ -1462,6 +1478,13 @@ export class SubconsciousLoopService {
     return this.workspaceRepo
       .findAll()
       .find((workspace) => !workspace.isTemp && Boolean(workspace.path));
+  }
+
+  private findWorkspaceByRoot(root: string) {
+    const resolved = path.resolve(root);
+    return this.workspaceRepo
+      .findAll()
+      .find((workspace) => Boolean(workspace.path) && path.resolve(workspace.path) === resolved);
   }
 
   private resolveWorkspacePath(workspaceId?: string): string | undefined {

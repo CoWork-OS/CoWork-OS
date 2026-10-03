@@ -214,6 +214,7 @@ import {
 } from "../security/concurrency";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
+import { isThirdPartyGatewayTask } from "../gateway/gateway-sender-identity";
 import { buildSalientTaskEventCapture } from "../memory/memory-capture-salience";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
@@ -237,8 +238,7 @@ import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { AdaptiveStyleEngine } from "../memory/AdaptiveStyleEngine";
 import { MemoryConsolidator } from "../memory/MemoryConsolidator";
 import { MemoryWorkspacePurgeService } from "../memory/MemoryWorkspacePurgeService";
-import { DreamingRepository } from "../memory/DreamingRepository";
-import { DreamingService } from "../memory/DreamingService";
+import { createDreamingService } from "../memory/memory-review-wiring";
 import { MemoryPressureService } from "../memory/MemoryPressureService";
 import { TranscriptStore } from "../memory/TranscriptStore";
 import { DurableContextService } from "../memory/DurableContextService";
@@ -7089,6 +7089,8 @@ export class AgentDaemon extends EventEmitter {
       case "delete_file":
       case "delete_multiple":
         return "delete_file";
+      case "memory_delete":
+        return "memory_forget";
       case "network_access":
         return "web_fetch";
       case "data_export":
@@ -9874,9 +9876,7 @@ export class AgentDaemon extends EventEmitter {
         const pressureInstructions = MemoryPressureService.buildCompactionInstructions(
           await MemoryPressureService.analyze(workspace.path, canRead),
         );
-        const dreaming = await new DreamingService(
-          new DreamingRepository(this.dbManager.getDatabase()),
-        ).run({
+        const dreaming = await createDreamingService(this.dbManager.getDatabase()).run({
           workspaceId: task.workspaceId,
           workspacePath: workspace.path,
           triggerSource: "task_completion",
@@ -9902,6 +9902,7 @@ export class AgentDaemon extends EventEmitter {
               runId: result.dreaming.run.id,
               status: result.dreaming.run.status,
               candidateCount: result.dreaming.candidates.length,
+              appliedCount: result.dreaming.appliedLogIds?.length ?? 0,
             },
           });
         })
@@ -10750,15 +10751,20 @@ export class AgentDaemon extends EventEmitter {
     const isSharedGatewayContext = gatewayContext === "group" || gatewayContext === "public";
     const allowProfileIngest =
       !isSharedGatewayContext || task.agentConfig?.allowSharedContextMemory === true;
+    // SEC-16: a channel message from anyone but the workspace owner is not about the owner,
+    // so it never feeds awareness beliefs (the profile) or the owner's response style.
+    const senderIsOwner = !isThirdPartyGatewayTask(task);
     if (allowProfileIngest) {
       if (type === "user_message") {
         const text =
           (typeof payload?.message === "string" ? payload.message : "") ||
           (typeof payload?.content === "string" ? payload.content : "");
         if (text) {
-          getAwarenessService().captureConversation(text, task.workspaceId, taskId);
-          // Adaptive style observation — learns communication patterns from user messages
-          AdaptiveStyleEngine.observe(text);
+          if (senderIsOwner) {
+            getAwarenessService().captureConversation(text, task.workspaceId, taskId);
+            // Adaptive style observation — learns communication patterns from user messages
+            AdaptiveStyleEngine.observe(text);
+          }
 
           // Mid-conversation correction detection: capture when the user corrects the agent.
           // This is the single place a correction is detected; it yields one archive row.
@@ -10788,9 +10794,11 @@ export class AgentDaemon extends EventEmitter {
         const feedbackDecision =
           typeof payload?.decision === "string" ? payload.decision : undefined;
         const feedbackReason = typeof payload?.reason === "string" ? payload.reason : undefined;
-        getAwarenessService().captureFeedback(feedbackReason, task.workspaceId, taskId);
-        // Adaptive style observation — learns from explicit feedback signals
-        AdaptiveStyleEngine.observeFeedback(feedbackDecision, feedbackReason);
+        if (senderIsOwner) {
+          getAwarenessService().captureFeedback(feedbackReason, task.workspaceId, taskId);
+          // Adaptive style observation — learns from explicit feedback signals
+          AdaptiveStyleEngine.observeFeedback(feedbackDecision, feedbackReason);
+        }
       }
     }
     if (isSharedGatewayContext && task.agentConfig?.allowSharedContextMemory !== true) {

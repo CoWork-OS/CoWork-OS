@@ -151,6 +151,25 @@ describe("memory layers for prompt surfaces", () => {
     expect(markUsed).toHaveBeenCalledWith(["memory:a", "memory:b"]);
   });
 
+  it("reports the same refs again in a new turn, so each reply can show what it used", async () => {
+    const executor = createExecutor();
+    executor.emitEvent = vi.fn();
+    vi.spyOn(MemoryContextBuilderService.prototype, "buildLayers").mockResolvedValue({
+      l0: { layer: "l0", text: "MEMORY\n- rule", refs: ["memory:a"], tokens: 4, truncated: false },
+      l1: null,
+      source: "memory_items",
+    });
+    vi.spyOn(MemoryContextBuilderService.prototype, "markUsed").mockResolvedValue(undefined);
+    const options = { surface: "step", focus: "deploy", l0: true, l1Tokens: 200 };
+
+    await executor.buildMemoryLayersForPrompt(allowAll(), options);
+    await executor.buildMemoryLayersForPrompt(allowAll(), options);
+    expect(executor.emitEvent).toHaveBeenCalledTimes(1);
+    executor.resetMemoryUsedAttribution();
+    await executor.buildMemoryLayersForPrompt(allowAll(), options);
+    expect(executor.emitEvent).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the undecorated prompt as the memory query", () => {
     const executor = createExecutor();
     executor.task.rawPrompt = "";

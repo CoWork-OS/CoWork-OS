@@ -298,6 +298,112 @@ describeWithSqlite("MemoryRetentionService (LIFE-3)", () => {
     ).toEqual(["new-failure", "old-backed-success"]);
   });
 
+  it("prunes settled memory-write approvals after 30 days and keeps pending ones", async () => {
+    const workspace = addWorkspace("approvals", { read: true, write: true, delete: true });
+    const pending = db.prepare(
+      `INSERT INTO pending_memory_writes
+         (id, workspace_id, target, action, origin, summary, payload_json, status, created_at, reviewed_at)
+       VALUES (?, ?, 'memory', 'add', 'agent', 's', '{}', ?, ?, ?)`,
+    );
+    pending.run("rejected-old", workspace.id, "rejected", now - 60 * DAY, now - 40 * DAY);
+    pending.run("applied-old", workspace.id, "applied", now - 60 * DAY, now - 31 * DAY);
+    pending.run("failed-unreviewed-old", workspace.id, "failed", now - 45 * DAY, null);
+    pending.run("rejected-recent-review", workspace.id, "rejected", now - 60 * DAY, now - DAY);
+    pending.run("pending-old", workspace.id, "pending", now - 90 * DAY, null);
+    pending.run("applying-old", workspace.id, "applying", now - 90 * DAY, null);
+
+    const result = await (await makeService()).runOnce();
+
+    expect(result.counts.pendingWrites).toBe(3);
+    expect(
+      (
+        db.prepare("SELECT id FROM pending_memory_writes ORDER BY id").all() as Array<{
+          id: string;
+        }>
+      ).map((row) => row.id),
+    ).toEqual(["applying-old", "pending-old", "rejected-recent-review"]);
+  });
+
+  it("purges excluded markdown index rows of every workspace once", async () => {
+    const opened = addWorkspace("opened", { read: true, write: true, delete: true });
+    const neverOpened = addWorkspace("never-opened", { read: true, write: true, delete: true });
+    const fileRow = db.prepare(
+      `INSERT INTO memory_markdown_files (workspace_id, path, content_hash, mtime, size, updated_at)
+       VALUES (?, ?, 'h', 1, 1, 1)`,
+    );
+    const chunkRow = db.prepare(
+      `INSERT INTO memory_markdown_chunks (id, workspace_id, path, start_line, end_line, text, embedding, mtime, updated_at)
+       VALUES (?, ?, ?, 1, 2, 'text', '[]', 1, 1)`,
+    );
+    const ftsAvailable = Boolean(
+      db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'memory_markdown_chunks_fts'").get(),
+    );
+    const ftsRow = ftsAvailable
+      ? db.prepare(
+          `INSERT INTO memory_markdown_chunks_fts (text, chunk_id, workspace_id, path, start_line, end_line)
+           VALUES ('text', ?, ?, ?, 1, 2)`,
+        )
+      : null;
+    const seed = (workspaceId: string, relPath: string) => {
+      fileRow.run(workspaceId, relPath);
+      const id = randomUUID();
+      chunkRow.run(id, workspaceId, relPath);
+      ftsRow?.run(id, workspaceId, relPath);
+    };
+    for (const workspace of [opened, neverOpened]) {
+      seed(workspace.id, "MEMORY.md");
+      seed(workspace.id, "projects/alpha/NOTES.md");
+      seed(workspace.id, ".history/MEMORY.md/2026-01-01.md");
+      seed(workspace.id, "subconscious/brain/summary.md");
+      seed(workspace.id, "chronicle/2026-10-01.md");
+      seed(workspace.id, "memory/transcripts/t1.md");
+      seed(workspace.id, "memory/topics/topic.md");
+      seed(workspace.id, "memory/locks/a.md");
+      seed(workspace.id, "tmp/x.md");
+      seed(workspace.id, "notes/scratchpad-today.md");
+      seed(workspace.id, "projects/alpha/.history/NOTES.md/1.md");
+    }
+    // Only orphan FTS rows of an excluded path are also removed.
+    if (ftsRow) ftsRow.run("orphan", neverOpened.id, "tmp/orphan.md");
+
+    const service = await makeService();
+    const result = await service.runOnce();
+
+    expect(result.counts.markdownIndexPurge).toBe(9 * 2 + (ftsRow ? 1 : 0));
+    const remaining = (table: string) =>
+      (
+        db.prepare(`SELECT workspace_id, path FROM ${table} ORDER BY path`).all() as Array<{
+          workspace_id: string;
+          path: string;
+        }>
+      ).map((row) => `${row.workspace_id === opened.id ? "opened" : "never"}:${row.path}`);
+    const expected = [
+      "opened:MEMORY.md",
+      "never:MEMORY.md",
+      "opened:projects/alpha/NOTES.md",
+      "never:projects/alpha/NOTES.md",
+    ];
+    for (const table of [
+      "memory_markdown_files",
+      "memory_markdown_chunks",
+      ...(ftsRow ? ["memory_markdown_chunks_fts"] : []),
+    ]) {
+      expect(remaining(table).sort()).toEqual([...expected].sort());
+    }
+    expect(
+      count(
+        "SELECT COUNT(*) AS n FROM maintenance_state WHERE key = 'memory:markdown_index_exclusion_purge:v1'",
+      ),
+    ).toBe(1);
+
+    // Recorded: later runs do not scan the index again.
+    seed(neverOpened.id, "tmp/new.md");
+    expect((await service.runOnce()).counts.markdownIndexPurge).toBe(0);
+    expect(count("SELECT COUNT(*) AS n FROM memory_markdown_files WHERE path = 'tmp/new.md'")).toBe(
+      1,
+    );
+  });
+
   it("keeps only the newest 50 non-current working states per agent and workspace", async () => {
     const workspace = addWorkspace("working-state", { read: true, write: true, delete: true });
     db.pragma("foreign_keys = OFF");

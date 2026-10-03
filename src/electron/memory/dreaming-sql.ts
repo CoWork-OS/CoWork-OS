@@ -41,8 +41,9 @@ export class DreamingStore {
         `INSERT INTO dreaming_runs (
           id, workspace_id, scope_kind, scope_ref, status, trigger_source,
           trigger_heartbeat_run_id, source_task_id, instructions, summary,
-          evidence_count, candidate_count, error, started_at, completed_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          evidence_count, candidate_count, applied_count, queued_count, llm_tokens, llm_calls,
+          stats, error, started_at, completed_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -57,6 +58,11 @@ export class DreamingStore {
         run.summary || null,
         run.evidenceCount,
         run.candidateCount,
+        run.appliedCount ?? 0,
+        run.queuedCount ?? 0,
+        run.llmTokens ?? 0,
+        run.llmCalls ?? 0,
+        run.stats ? JSON.stringify(run.stats) : null,
         run.error || null,
         run.startedAt,
         run.completedAt || null,
@@ -70,7 +76,17 @@ export class DreamingStore {
     patch: Partial<
       Pick<
         DreamingRun,
-        "status" | "summary" | "evidenceCount" | "candidateCount" | "error" | "completedAt"
+        | "status"
+        | "summary"
+        | "evidenceCount"
+        | "candidateCount"
+        | "appliedCount"
+        | "queuedCount"
+        | "llmTokens"
+        | "llmCalls"
+        | "stats"
+        | "error"
+        | "completedAt"
       >
     >,
   ): DreamingRun | undefined {
@@ -91,6 +107,26 @@ export class DreamingStore {
     if (patch.candidateCount !== undefined) {
       fields.push("candidate_count = ?");
       values.push(patch.candidateCount);
+    }
+    if (patch.appliedCount !== undefined) {
+      fields.push("applied_count = ?");
+      values.push(patch.appliedCount);
+    }
+    if (patch.queuedCount !== undefined) {
+      fields.push("queued_count = ?");
+      values.push(patch.queuedCount);
+    }
+    if (patch.llmTokens !== undefined) {
+      fields.push("llm_tokens = ?");
+      values.push(patch.llmTokens);
+    }
+    if (patch.llmCalls !== undefined) {
+      fields.push("llm_calls = ?");
+      values.push(patch.llmCalls);
+    }
+    if (patch.stats !== undefined) {
+      fields.push("stats = ?");
+      values.push(JSON.stringify(patch.stats));
     }
     if (patch.error !== undefined) {
       fields.push("error = ?");
@@ -146,8 +182,9 @@ export class DreamingStore {
       .prepare(
         `INSERT INTO dreaming_candidates (
           id, run_id, workspace_id, action, target, current_value, proposed_value,
-          rationale, confidence, evidence_refs, status, created_at, reviewed_at, resolution
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          rationale, confidence, evidence_refs, status, created_at, reviewed_at, resolution,
+          operation, review_reason, origin, fingerprint
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         candidate.id,
@@ -164,6 +201,10 @@ export class DreamingStore {
         candidate.createdAt,
         candidate.reviewedAt || null,
         candidate.resolution || null,
+        candidate.operation ? JSON.stringify(candidate.operation) : null,
+        candidate.reviewReason || null,
+        candidate.origin || null,
+        candidate.fingerprint || null,
       );
     return candidate;
   }
@@ -198,6 +239,10 @@ export class DreamingStore {
     if (request.action) {
       conditions.push("action = ?");
       values.push(request.action);
+    }
+    if (request.target) {
+      conditions.push("target = ?");
+      values.push(request.target);
     }
     if (request.status) {
       conditions.push("status = ?");
@@ -237,6 +282,11 @@ export class DreamingStore {
       summary: row.summary || undefined,
       evidenceCount: Number(row.evidence_count || 0),
       candidateCount: Number(row.candidate_count || 0),
+      appliedCount: Number(row.applied_count || 0),
+      queuedCount: Number(row.queued_count || 0),
+      llmTokens: Number(row.llm_tokens || 0),
+      llmCalls: Number(row.llm_calls || 0),
+      stats: parseJson<Record<string, number> | undefined>(row.stats, undefined),
       error: row.error || undefined,
       startedAt: Number(row.started_at),
       completedAt: row.completed_at ? Number(row.completed_at) : undefined,
@@ -260,6 +310,10 @@ export class DreamingStore {
       createdAt: Number(row.created_at),
       reviewedAt: row.reviewed_at ? Number(row.reviewed_at) : undefined,
       resolution: row.resolution || undefined,
+      operation: parseJson<Record<string, unknown> | undefined>(row.operation, undefined),
+      reviewReason: row.review_reason || undefined,
+      origin: row.origin || undefined,
+      fingerprint: row.fingerprint || undefined,
     };
   }
 }

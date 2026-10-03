@@ -171,6 +171,7 @@ import {
 } from "../../chronicle";
 import { taskDisablesMemoryCapture } from "../../memory/no-memory-directive";
 import { MemoryWriter } from "../../memory/MemoryWriter";
+import { isThirdPartyGatewayTask } from "../../gateway/gateway-sender-identity";
 import {
   MEMORY_LANE_STORES,
   preferredNameCandidate,
@@ -2028,8 +2029,13 @@ export class ToolRegistry {
     return true;
   }
 
-  private toolHandlesApprovalInternally(toolName: string): boolean {
+  private toolHandlesApprovalInternally(toolName: string, input?: Any): boolean {
     return (
+      // memory_forget asks before deleting a local memory, except one this task's agent
+      // inferred itself (MemoryTools.confirmForget); Supermemory ids keep the
+      // external_service approval of the policy pipeline.
+      (toolName === "memory_forget" &&
+        !(typeof input?.id === "string" && input.id.trim().startsWith("external:"))) ||
       toolName === "run_command" ||
       toolName === "delete_file" ||
       toolName === "run_applescript" ||
@@ -2352,7 +2358,7 @@ export class ToolRegistry {
       if (pipeline.decision === "require_approval") {
         if (
           pipeline.approvalSource === "semantic_review" ||
-          !this.toolHandlesApprovalInternally(context.request.name) ||
+          !this.toolHandlesApprovalInternally(context.request.name, context.request.input) ||
           pipeline.approvalSource === "workspace_policy" ||
           pipeline.approvalSource === "runtime_metadata"
         ) {
@@ -10233,6 +10239,7 @@ ${skillDescriptions}`;
     name: string;
     message: string;
   } {
+    this.assertOwnerProfileWrite("set_user_name");
     const rawUserName = input.name?.trim();
 
     if (!rawUserName || rawUserName.length === 0) {
@@ -10275,6 +10282,24 @@ ${skillDescriptions}`;
   }
 
   /**
+   * SEC-16: the user's name and response style are facts about the workspace owner; a
+   * task started over a channel by someone else may not change them.
+   */
+  private assertOwnerProfileWrite(tool: string): void {
+    let task: Task | undefined;
+    try {
+      task = this.daemon.getTask?.(this.taskId);
+    } catch {
+      task = undefined;
+    }
+    if (isThirdPartyGatewayTask(task)) {
+      throw new Error(
+        `${tool} changes the workspace owner's profile, and this task came from someone else over a channel.`,
+      );
+    }
+  }
+
+  /**
    * Set response style preferences
    */
   private setResponseStyle(input: {
@@ -10287,6 +10312,7 @@ ${skillDescriptions}`;
     changes: string[];
     message: string;
   } {
+    this.assertOwnerProfileWrite("set_response_style");
     const changes: string[] = [];
     const style: Any = {};
 

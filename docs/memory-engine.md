@@ -1,9 +1,15 @@
 # Memory Engine — design and Phase 2 foundation
 
-**Status.** Phase 2 foundation, 2026-10-03. The write side described here is implemented: the
-`memory_items` store, `MemoryWriter`, the one-time lane migration, dual writes from the legacy
-stores, and purge/retention. On the read side, `MemoryRecall` and the consolidated agent memory
-tools are implemented (§4b); see §4a for the prompt read path.
+**Status.** Phase 2 foundation, 2026-10-03, with the Phase 3 additions noted inline. The write
+side described here is implemented: the `memory_items` store, `MemoryWriter`, the one-time lane
+migration, dual writes from the legacy stores, and purge/retention. On the read side,
+`MemoryRecall` and the consolidated agent memory tools are implemented (§4b); see §4a for the
+prompt read path.
+
+**Embeddings: decision (2026-10-03).** A real local embedding model (audit DATA-6, roadmap
+Phase 3 item 2) is skipped by decision. Recall stays lexical: one Unicode FTS query builder
+per lane and weighted reciprocal-rank fusion (§4b). The memory evals (`npm run
+qa:memory-evals`) are the gate for recall quality.
 
 This document refines §8 of the [memory system audit](memory-system-audit-2026-10-03.md).
 Engineers building recall, prompt assembly, the tool surface or the Memory Hub should treat
@@ -122,6 +128,15 @@ type MemoryWriteResult =
    - `third_party` text may only be written to `contact` or `task` scope (`third_party_scope`)
      and defaults to `private`. Third-party text never becomes a fact about the user.
    - `<no-memory>` in `originText`, or `noMemory`, drops the write.
+   - **Channel senders (SEC-16).** The gateway router records on each task whether the sender
+     is the workspace owner (`gateway/gateway-sender-identity.ts`: a self-chat channel, or the
+     sender listed in the channel config's `ownerUserIds`, set under "Your Account on This
+     Channel" in each channel's settings; never a group; see
+     [channels.md](channels.md#your-account-on-a-channel-memory)). For any other
+     channel task, user messages and feedback do not feed awareness beliefs or the adaptive
+     style, `memory_remember` writes a private `contact`-scope `third_party` item
+     (`scope_ref = gateway:<channel>:<user id>`), and `memory_curate`, `set_user_name` and
+     `set_response_style` are refused.
    - Workspace memory settings of `originWorkspaceId ?? workspaceId` (live writes only): memory
      off (`enabled = false` or privacy mode `disabled`) blocks `inferred`, `third_party`,
      `import` and `system` writes, while explicit acts (`user_stated`, `user_confirmed`, `curated`)
@@ -215,7 +230,7 @@ surface-level contract on top of it. Playbook capture uses the same task gate.
   curated or user-stated, or preferences that are named subjects or trusted at least as
   `curated`. Cached until the hot-memory version changes. `preferred_name` and
   `response_style` are left out because the identity and personality prompts render them.
-  Until the lane migration has run, or without a writer (node daemon, CLI), L0 comes from the
+  Until the lane migration has run, or without a writer (CLI), L0 comes from the
   legacy stores through the same lane mappers.
 - **L1:** `memory_items_fts` match for the request (`memoryItems_contextSearch`,
   `memory-context-sql.ts`; the shared Unicode query builder; LIKE without FTS5), minus what L0
@@ -240,10 +255,25 @@ Where each layer lands:
 `task.prompt` no longer carries relationship memory. Retrieval queries use the undecorated
 prompt (`rawPrompt`, with any strategy block stripped).
 
-**Attribution.** Each surface emits a `memory_used` task event when its set of injected refs
-changes: `{ surface, refs, source }` with `memory:<id>`, `archive:<id>` and `external:<provider>`.
-The event is hidden from the main timeline, is not indexed as conversation and is ignored by the
-archive salience gate. `memory:` refs are counted with `markUsed`.
+**Attribution.** Each surface emits a `memory_used` task event once per turn (chat turn, plan,
+step, follow-up; `resetMemoryUsedAttribution`) and again when its set of injected refs changes
+within the turn: `{ surface, refs, source }` with `memory:<id>`, `archive:<id>` and
+`external:<provider>`. The event is hidden from the main timeline, is not indexed as
+conversation and is ignored by the archive salience gate. `memory:` refs are counted with
+`markUsed`.
+
+**"Memory used" per reply (Phase 3).** The events never reach the renderer's event list. The
+`memoryItems:usedForTask` IPC reads them with the task's replies and user messages and
+attributes them in main (`shared/memory-used.ts`): the events after the latest user message or
+reply belong to the next `assistant_message` / `task_completed`; a turn without a reply drops
+its events. Each chat reply shows a small "Memory used (N)" toggle
+(`renderer/components/memory/MemoryUsedAffordance.tsx`, per-task cache in
+`memory-used-store.ts`) that expands to the facts (resolved with `memoryItems:get`: content,
+source badge, "Open in Memory Hub", which opens the "What CoWork knows" tab filtered to the
+item and switches the Hub to the task's workspace), task-history notes and external context
+it used. The browser host serves the same attribution as `getMemoryUsedForTask`
+(`host/services/browser-memory-methods.ts`, workspace read authority, task bound to the
+workspace).
 
 **Read-side syncs (`memory-read-side.ts`)**, active once the lane migration has finished:
 
@@ -255,7 +285,11 @@ archive salience gate. `memory:` refs are counted with `markUsed`.
   `response_style` item exists. Feedback received meanwhile is dropped. A response style
   changed in Settings is written as that item (`withSettingsResponseStyleMirror`); a save
   that leaves the style unchanged writes nothing, so an adapted style is not turned into a
-  user choice by an unrelated settings save.
+  user choice by an unrelated settings save. A stale form copy is not a choice either: the
+  Personality settings form sends the style it loaded (`responseStyleBaseline`); when the
+  saved style equals it, nothing is recorded and the newer (adapted) style is kept. Callers
+  without a baseline (onboarding, import, browser host) skip the record when the save exactly
+  undoes the engine's latest adaptation of every changed dimension.
 
 ### 4b. Recall and the agent tool surface (implemented)
 
@@ -269,6 +303,14 @@ archive salience gate. `memory:` refs are counted with `markUsed`.
   packs, read-only), `external` (Supermemory; only when `policy.allowExternal` and configured).
 - **One FTS builder.** The memory lane uses `database/fts-query.ts` (Unicode, prefix-aware,
   operator-safe: all terms, then any term), with a term-match fallback when FTS5 is missing.
+  Any-term (OR) queries drop function words of a small English, German, Turkish, French and
+  Spanish stopword list, unless the query has nothing else; all-terms (AND) queries keep every
+  term. Without this, "when do we ship the postgres 16 migration" matched every row containing
+  "the" or "we".
+- **Knowledge graph.** `searchEntities` matches entity names and descriptions through FTS, and
+  fills the remaining slots with entities whose observations contain the query's distinctive
+  terms (observations are not in the FTS index); those hits carry the matching observations,
+  so the recall hit shows them.
 - **Visibility, once per lane.** Memory items: `active`, unexpired, global or this workspace,
   task scope only for the active task, contact scope only for `contactRef`; `private` only with
   `policy.includePrivate` (or the handled contact's own items); minimum trust `inferred` unless
@@ -276,9 +318,12 @@ archive salience gate. `memory:` refs are counted with `markUsed`.
   this workspace plus non-private imports. Conversations, KG, files: this workspace only; files
   through the caller's read guard and inside `.cowork/`.
 - **Fusion.** Weighted reciprocal rank (k = 60): memory 1.0, archive 0.8, conversations 0.7,
-  knowledge 0.6 (topic packs ×0.6), external 0.5; imported archive rows count half. Hits with the
-  same normalized text are merged (strongest lane kept, all lane ranks recorded). `relevance` is
-  the fused score relative to the best hit.
+  knowledge 0.6 (topic packs ×0.6), external 0.5; imported archive rows count half. Each
+  contribution is scaled by term coverage: `0.4 + 0.6 × coverage`, where coverage is the share
+  of the query's distinctive (non-stopword) terms in the hit's text, applied when the query
+  has at least two such terms. Rank fusion alone let a one-word match in a strong lane outrank
+  a full match in a weaker lane. Hits with the same normalized text are merged (strongest lane
+  kept, all lane ranks recorded). `relevance` is the fused score relative to the best hit.
 - **Hits** add `snippet`, `relevance`, `tokenEstimate`, `kind` and `provenance` to the contract
   type. `detail: "full"` adds `content` (≤ 4000 characters); `ids` expand lane-qualified refs
   (`memory:`, `archive:`, `event:`, `kg:`, `doc:<start>-<end>:<path>`, `topic:<file>`) with the
@@ -290,7 +335,13 @@ archive salience gate. `memory:` refs are counted with `markUsed`.
 Agent tools (`agent/tools/memory-tools.ts`, audit §8.3): `memory_recall`, `memory_remember`
 (facts through `MemoryWriter` as `user_stated` only when the model sets `user_asked` and the
 user's latest message asks to remember, else `inferred`; `outcome`/`error`/`note` to the
-archive), `memory_forget` (Memory Hub delete path for items, own archive rows, Supermemory ids),
+archive), `memory_forget` (Memory Hub delete path for items, own archive rows, Supermemory ids;
+asks the user first through the permission engine as a `memory_delete` approval (classified as
+a delete; the dialog is titled "Forget a memory" and shows the memory and its source; channel
+approval messages leave the memory text out) — prompted in the default and dangerous-only
+modes, allowed by bypass modes or a saved rule — except for
+an item this task's agent inferred itself and that no other record merged into; Supermemory
+ids keep the pipeline's `external_service` approval),
 `context_recall` (active task). The 16 earlier tools are hidden aliases for one release
 (`LEGACY_MEMORY_TOOL_ALIASES` in `shared/types.ts`). Routing guidance is one generated hint of
 about 90 tokens naming only visible tools (`memory-tool-routing.ts`).
@@ -312,10 +363,20 @@ Mapping lives in `memory-items-lanes.ts` and is shared by the migration and the 
 ### Lane migration
 
 `MemoryItemsLaneMigration.ts`, scheduled by `memory-engine-bootstrap.ts` (`startMemoryEngine`,
-called from `main.ts` after `MemoryService.initialize`) **120 s after startup**, off the hot path.
+called from `main.ts` and from the node daemon's `src/daemon/main.ts` after
+`MemoryService.initialize`) **120 s after startup**, off the hot path.
 
 - Runs once per profile; the marker is `maintenance_state.memory_items_lane_migration_v1` with a
   JSON summary of per-lane written/skipped counts.
+- **One process at a time.** The desktop app and the node daemon may share a profile. Before
+  running, a process claims the job (`maintenance-claim-sql.ts`, unit
+  `memoryMaintenance_claim`): one IMMEDIATE transaction checks the marker and the claim row
+  `memory_items_lane_migration_v1:claim` and writes its own claim, so only one process runs it.
+  The claim is a one-hour lease released when the run ends (also on failure), so a process
+  that died mid-run does not block the job for good. The one-time archive cleanup
+  (`MemoryCleanupMigration`, `memory_cleanup_migration_v1`) is claimed the same way; the
+  payload-table migration runs inside schema initialization under the profile's migration
+  lock, and the core-memory duplicate cleanup is a single transaction.
 - Every record goes through `MemoryWriter.ingest` with `mode: "migration"`, so the normal
   salience, redaction, dedupe and supersession rules apply. A record whose `{store, id}` already
   exists (as primary ref or alias) is skipped, so an interrupted or forced re-run adds nothing.
@@ -422,6 +483,70 @@ read/write/delete checks).
   recall for the most recent task prompt, the kit slice, playbook and summaries). Before the
   lane migration both come from the legacy stores, as in a task.
 
+## 5b. Dreaming: the curator of `memory_items` (Phase 3)
+
+Audit §8.2 "Dreaming as the only curator". `DreamingService.ts` runs the curation;
+`MemoryCurator.ts` holds the deterministic heuristics (pure); `memory-curation-llm.ts` the
+optional LLM step; `memory-curation-sql.ts` / `memory-curation-units.ts` apply and undo
+operations; `MemoryReviewService.ts` backs the Memory Hub Review tab.
+
+**Inputs** (per workspace): active `global` and `workspace` items (contact and task items are
+never curated), archive outcomes of the last 30 days (`decision`, `error`, `insight`
+including `[CORRECTION]` rows, `preference`, `constraint`, `correction_rule`,
+`workflow_pattern`; suppressed and redacted rows excluded), and conversation-index hits that
+show an overdue commitment was done.
+
+**Operations** (fixed set; `MEMORY_CURATION_OPS` in `shared/memory-review-types.ts`):
+
+| Operation | Heuristic | Safe (auto-applied) when | Otherwise |
+|---|---|---|---|
+| `merge` | same scope and kind, derived subject, word-set Jaccard ≥ 0.75 (0.6–0.75 → review); keeps the strongest item (trust, pin, reinforcement, confidence, use, recency), supersedes the rest, folds their refs into `aliases` and their reinforcement into the keeper | all items have the same trust and none is `user_stated`/`user_confirmed` | review |
+| `resolve_conflict` | same scope and kind, topic overlap ≥ 0.5 with opposite polarity (negation or an antonym pair); suggests the more trusted item, then the newer | never | always review |
+| `promote` | archive outcomes of one kind that recur (Jaccard ≥ 0.5) in ≥ 2 distinct tasks and match no active item; corrections → `correction`, preferences → `preference`, constraints → `rule`, other outcomes → `project_fact`; written as `inferred` with `source_ref.aliases = archive:<id>` | kind is not `rule` and no evidence is private, imported or captured from the screen | review (accepting writes `user_confirmed`) |
+| `decay` | unused (last use / update) for 60–180 days by kind, extended by reinforcement; trust ≤ 0.6; not pinned; never `identity` or `rule` | source is `inferred` | review (`import`) |
+| `expire_commitment` | past `dueAt` with a done signal (archive or conversation), or ≥ 30 days overdue | done signal and not stated/confirmed by the user | review |
+
+At most one operation per item per run; at most 25 automatic operations and 20 queued
+proposals per run. Items the user stated or confirmed are never changed automatically: the
+store refuses it (`protected`) unless the user accepted the change in the Review tab.
+
+**Apply and undo.** Every applied operation goes through `MemoryWriter.applyCuration`
+(serialized with other writes; a promotion runs the writer's salience, redaction and policy
+steps) and is one transaction with its `memory_curation_log` row: op, item ids, created
+ids, before/after snapshots, run id, origin (`auto` or `review`), `applied_at`,
+`undone_at`. `MemoryWriter.undoCuration` restores the prior status, pin, reinforcement,
+confidence and provenance, and tombstones items the operation created. Undo is refused when
+an item changed since, or when reactivating would collide with an active item holding the
+same content or subject. Undone and rejected changes are never applied or proposed again
+(fingerprints). Log rows that quote an item are deleted when the item is really deleted
+(forget, task purge, Clear All Memories, clear global); retention drops log rows after 90
+days.
+
+**LLM synthesis** (`dreamingLlmEnabled`, off by default; `dreamingLlmDailyTokenBudget`,
+default 20 000 tokens per day across workspaces, counted from `dreaming_runs.llm_tokens`).
+One call per run on the configured provider (cheap profile, usage telemetry
+`memory_curation`). The model sees aliases (`i3`, `e7`), never ids or private items; its
+answer must be strict JSON matching a zod schema, may only use `merge`,
+`resolve_conflict`, `promote` (≥ 2 tasks) and `decay`, and may only reference aliases it was
+given. Everything it proposes is queued for review.
+
+**Triggers.** Heartbeat memory signals and hot-memory pressure (6 h workspace cooldown, as in
+Phase 1), task completion when `backgroundConsolidationEnabled`, Box Brain imports, a manual
+"Run Dreaming now" in the Review tab, and a once-daily idle pass: a pulse with no other
+Dreaming trigger and no foreground task curates the next workspace with a task created in the last
+14 days and no Dreaming run in the last 24 hours (the pulse's workspace first; one per
+pulse; no timer of its own). Runs wait for the lane migration. `dreaming_runs` records
+`applied_count`, `queued_count`, `llm_tokens`, `llm_calls` and per-operation `stats`.
+
+**Review tab** (Memory Hub, `memoryReview:*` IPC, zod-validated in main,
+`memory-review-ipc-validation.ts`; same methods in the browser host): pending proposals
+with their items, why, why it needs review and evidence, with Accept / Reject; recent
+changes with Undo; the AI synthesis switch and today's token use. The tab label shows the
+pending count. A proposal whose items are gone or changed is dismissed instead of applied.
+
+The pre-curator constant-text candidates are gone; open ones were closed as `dismissed`
+by the schema setup (`memory-curation-log-sql.ts`).
+
 ## 6. The archive (`memories`) and its future
 
 - **Now (Phase 2):** `memories` stays the episodic store: task outcomes, resolved errors,
@@ -449,13 +574,43 @@ read/write/delete checks).
   the legacy profile stores. Deleting a workspace row cascades to its items (on connections with
   foreign keys on).
 - **Retention** (`MemoryRetentionService`, step `memoryItems`, `MEMORY_ITEM_RETENTION_RULES`):
-  daily, drops `deleted` tombstones and items whose `expires_at` has passed.
+  daily, drops `deleted` tombstones and items whose `expires_at` has passed. Step
+  `pendingWrites` drops memory-write approvals that are `applied`, `rejected` or `failed` and
+  were reviewed (or created, if never reviewed) more than 30 days ago; `pending` and
+  `applying` rows stay.
+- **Markdown index exclusions.** Step `markdownIndexPurge` runs once per profile (marker
+  `memory:markdown_index_exclusion_purge:v1` in `maintenance_state`, deferred with the first
+  retention run): it deletes file, chunk and chunk-FTS rows of every workspace whose path the
+  index excludes (`markdown-index-exclusions.ts`: `.history/`, `subconscious/`, `chronicle/`,
+  `memory/transcripts/`, `memory/topics/`, `memory/locks/`, `tmp/`, `scratchpad*`, nested
+  `.history`, and stale rows from the old workspace-root index). The per-workspace purge still
+  runs when a workspace's index syncs.
+- **Shutdown.** The desktop app and the node daemon stop retention and the engine's deferred
+  jobs and flush queued `MemoryWriter` writes (shutdown step "memory engine") before the
+  conversation index, the memory service and the database close.
+- **Supermemory copies (SEC-17).** `supermemory_remote_refs` (`supermemory-remote-refs-sql.ts`)
+  maps each remote copy to its local record: `archive:<id>` for a mirrored archive row
+  (`/v3/documents`, document id), `external:<id>` for an explicit remote remember
+  (`/v4/memories`), with the container it went to. Mirror writes address the workspace
+  *name* for `{workspaceName}` templates, as reads do. After an archive delete, an inspector
+  suppression or redaction, a privacy change, a memory-item delete, `memory_forget` or a task
+  delete, a debounced orphan sweep (`SupermemoryService.scheduleOrphanSweep`) deletes copies
+  whose local record is gone or hidden; Clear All Memories deletes every copy recorded for the
+  workspace; "Disconnect & purge" in the Supermemory card deletes every recorded copy and
+  disables the integration only when all deletes succeeded. A 404 counts as forgotten; other
+  failures keep the mapping for the next sweep. 4xx answers (except 408 and 429) no longer count
+  toward the circuit breaker. Copies sent before the table existed have no remote id and stay
+  remote.
 
 ## 8. Gaps and next steps
 
 1. Done for prompts (§4a) and the Memory Hub layer preview (§5a). Open: the mailbox prompt
    (`RelationshipMemoryService.buildPromptContext`), then retire the legacy stores and their dual
-   writes. The node daemon has no `MemoryWriter`, so its prompts use the legacy L0 source.
+   writes. The node daemon now starts the same engine as the desktop app (`startMemoryEngine`:
+   `MemoryWriter`, read-side syncs, the claimed lane migration), `MemoryRetentionService`, the
+   knowledge graph and Lore, and flushes queued `memory_items` writes and the conversation
+   index at shutdown, so its prompts use `memory_items` once the migration has run. The desktop
+   app flushes the same way (§7).
 2. Done: kit-file edits and Memory Hub edits go through `MemoryWriter` (§5, §5a); kit edits
    carry `curated` trust because agent and user writes to the files cannot be told apart.
    Open: trigger back-sync without waiting for the next kit sync.
@@ -470,3 +625,8 @@ read/write/delete checks).
 7. Producers not yet routed through `MemoryWriter`: the deprecated `memory_curate` alias
    (still the curated dual-write path), core memory candidates, Chronicle, imports,
    Supermemory. Agent fact writes go through `MemoryWriter` (`memory_remember`, §4b).
+8. Retire the legacy stores and their dual writes (curated memory, user profile facts,
+   relationship memory; §5 "Dual writes") after one release on `memory_items`, together with
+   the 16 hidden tool aliases.
+9. Real local embeddings are out of scope (decision above). Revisit only if the memory evals
+   show a recall gap that lexical recall and fusion tuning cannot close.

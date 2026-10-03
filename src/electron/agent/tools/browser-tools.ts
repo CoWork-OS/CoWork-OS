@@ -336,6 +336,15 @@ export class BrowserTools {
     return actions.slice(0, prefixLength);
   }
 
+  private headlessDiagnosticsSummary(): { consoleSummary: Any; networkSummary: Any } {
+    try {
+      const summary = this.browserService.getDiagnosticsSummary();
+      return { consoleSummary: summary.console, networkSummary: summary.network };
+    } catch {
+      return { consoleSummary: { count: 0, recent: [] }, networkSummary: { count: 0, recent: [] } };
+    }
+  }
+
   private syncVisibleAccessPolicy(input?: unknown): void {
     this.browserWorkbenchService.setAccessPolicy?.({
       taskId: this.taskId,
@@ -1414,7 +1423,10 @@ export class BrowserTools {
       },
       {
         name: "browser_console",
-        description: "Return recent browser console messages with secrets redacted",
+        description:
+          "Return recent browser console messages and uncaught page errors (last 120, secrets " +
+          "redacted). Use it to check a page for JavaScript errors after an action; it fails when no " +
+          "browser session is open rather than reporting an empty log.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1427,7 +1439,10 @@ export class BrowserTools {
       },
       {
         name: "browser_network",
-        description: "Return recent browser network requests/responses with secrets redacted",
+        description:
+          "Return recent browser network responses (method, status, URL) and failed requests (last " +
+          "120, secrets redacted). Use it to diagnose failing API calls or requests blocked by the " +
+          "network policy (errorText net::ERR_BLOCKED_BY_CLIENT).",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -2052,8 +2067,7 @@ export class BrowserTools {
           refSupport: false,
           message:
             "Headless snapshot has no Browser V2 refs. Each node carries a CSS selector that browser_click, browser_fill, browser_type, browser_select and browser_get_text accept.",
-          consoleSummary: { count: 0, recent: [] },
-          networkSummary: { count: 0, recent: [] },
+          ...this.headlessDiagnosticsSummary(),
         };
       }
 
@@ -2562,7 +2576,17 @@ export class BrowserTools {
           this.getSessionId(input),
         );
         if (result) return result;
-        return { success: true, entries: [] };
+        const consoleLog = this.browserService.getConsoleLog();
+        if (!this.browserService.hasSession() && consoleLog.entries.length === 0) {
+          // An empty list here would read as "no errors" for a page that was never loaded.
+          return {
+            success: false,
+            error:
+              "No browser session is open, so there are no console messages to report. " +
+              "Navigate first; console output is captured from then on.",
+          };
+        }
+        return { success: true, backend: "playwright-local", ...consoleLog };
       }
 
       case "browser_network": {
@@ -2571,7 +2595,16 @@ export class BrowserTools {
           this.getSessionId(input),
         );
         if (result) return result;
-        return { success: true, entries: [] };
+        const networkLog = this.browserService.getNetworkLog();
+        if (!this.browserService.hasSession() && networkLog.entries.length === 0) {
+          return {
+            success: false,
+            error:
+              "No browser session is open, so there are no requests to report. " +
+              "Navigate first; requests are captured from then on.",
+          };
+        }
+        return { success: true, backend: "playwright-local", ...networkLog };
       }
 
       case "browser_downloads": {

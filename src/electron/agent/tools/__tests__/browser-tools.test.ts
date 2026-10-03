@@ -1218,6 +1218,65 @@ describe("BrowserTools headless browser capabilities", () => {
     });
   });
 
+  it("returns captured headless console and network entries", async () => {
+    const consoleLog = {
+      entries: [{ level: "error", text: "boom", timestamp: 1 }],
+      dropped: 0,
+    };
+    const networkLog = {
+      entries: [{ url: "https://example.com/api", status: 500, timestamp: 1 }],
+      dropped: 0,
+    };
+    const { tools } = makeHeadlessTools({
+      getConsoleLog: vi.fn().mockReturnValue(consoleLog),
+      getNetworkLog: vi.fn().mockReturnValue(networkLog),
+    });
+
+    expect(await tools.executeTool("browser_console", {})).toMatchObject({
+      success: true,
+      ...consoleLog,
+    });
+    expect(await tools.executeTool("browser_network", {})).toMatchObject({
+      success: true,
+      ...networkLog,
+    });
+  });
+
+  it("does not report an empty console as success when no browser was opened", async () => {
+    const { tools } = makeHeadlessTools({
+      hasSession: () => false,
+      getConsoleLog: vi.fn().mockReturnValue({ entries: [], dropped: 0 }),
+      getNetworkLog: vi.fn().mockReturnValue({ entries: [], dropped: 0 }),
+    });
+
+    const consoleResult = await tools.executeTool("browser_console", {});
+    const networkResult = await tools.executeTool("browser_network", {});
+
+    expect(consoleResult.success).toBe(false);
+    expect(consoleResult.error).toContain("No browser session");
+    expect(networkResult.success).toBe(false);
+  });
+
+  it("summarizes captured diagnostics in the headless snapshot", async () => {
+    const { tools } = makeHeadlessTools({
+      getContent: vi.fn().mockResolvedValue({
+        url: "https://example.com",
+        title: "Example",
+        links: [],
+        interactive: [],
+      }),
+      getDiagnosticsSummary: vi.fn().mockReturnValue({
+        console: { count: 2, recent: ["boom"] },
+        network: { count: 1, recent: ["500 https://example.com/api"] },
+      }),
+    });
+
+    const result = await tools.executeTool("browser_snapshot", {});
+
+    expect(result.consoleSummary).toEqual({ count: 2, recent: ["boom"] });
+    expect(result.networkSummary).toEqual({ count: 1, recent: ["500 https://example.com/api"] });
+  });
+
   it("describes headless popup handling on the tab tools", () => {
     const definitions = BrowserTools.getToolDefinitions();
     const descriptionOf = (name: string) =>

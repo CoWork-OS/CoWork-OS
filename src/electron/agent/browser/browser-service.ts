@@ -3,10 +3,13 @@ import {
   Browser,
   Page,
   BrowserContext,
+  ConsoleMessage,
   Dialog,
   Download,
   Locator,
   ElementHandle,
+  Request as PlaywrightRequest,
+  Response as PlaywrightResponse,
   Route,
 } from "playwright";
 import * as path from "path";
@@ -274,6 +277,41 @@ export interface BrowserDownloadEntry {
   tabId?: string;
   timestamp: number;
 }
+
+export interface BrowserConsoleEntry {
+  level: string;
+  text: string;
+  /** "pageerror" for uncaught exceptions */
+  source?: string;
+  url?: string;
+  tabId?: string;
+  timestamp: number;
+}
+
+export interface BrowserNetworkEntry {
+  method?: string;
+  url: string;
+  status?: number;
+  resourceType?: string;
+  failed?: boolean;
+  errorText?: string;
+  tabId?: string;
+  timestamp: number;
+}
+
+export interface BrowserDiagnosticLog<T> {
+  entries: T[];
+  /** Older entries that fell out of the bounded buffer */
+  dropped: number;
+}
+
+export interface BrowserDiagnosticSummary {
+  count: number;
+  recent: string[];
+}
+
+/** Same bound as the visible workbench diagnostics. */
+const MAX_DIAGNOSTIC_ENTRIES = 120;
 
 /** Workspace folder (relative) that headless downloads are saved into. */
 export const BROWSER_DOWNLOADS_DIR = "downloads";
@@ -765,6 +803,10 @@ export class BrowserService {
   private reservedDownloadPaths = new Set<string>();
   private downloadReservations: Promise<unknown> = Promise.resolve();
   private downloadCount = 0;
+  private consoleEntries: BrowserConsoleEntry[] = [];
+  private networkEntries: BrowserNetworkEntry[] = [];
+  private consoleDropped = 0;
+  private networkDropped = 0;
 
   constructor(workspace: Workspace, options: BrowserOptions = {}) {
     this.workspace = workspace;
@@ -937,12 +979,137 @@ export class BrowserService {
       page.on("close", () => this.handlePageClosed(tabId));
       page.on("dialog", (dialog: Dialog) => this.handleDialog(dialog, tabId));
       page.on("download", (download: Download) => this.handleDownload(download, tabId));
+      this.captureDiagnostics(page, tabId);
     }
     if (openedBySite) {
       this.pushActionEvent({ kind: "tab_opened", tabId });
       for (const notify of this.tabOpenedWaiters) notify();
     }
     return tabId;
+  }
+
+  /** Records console output, page errors and requests into bounded, redacted buffers. */
+  private captureDiagnostics(page: Page, tabId: string): void {
+    const pageUrl = () => {
+      try {
+        return redactBrowserText(page.url(), 300);
+      } catch {
+        return "";
+      }
+    };
+    const record = (fn: () => void) => {
+      try {
+        fn();
+      } catch (error) {
+        log.debug("Could not record browser diagnostic:", error);
+      }
+    };
+    page.on("console", (message: ConsoleMessage) =>
+      record(() =>
+        this.pushConsole({
+          level: message.type(),
+          text: redactBrowserText(message.text(), 1200),
+          url: pageUrl(),
+          tabId,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
+    page.on("pageerror", (error: Error) =>
+      record(() =>
+        this.pushConsole({
+          level: "error",
+          source: "pageerror",
+          text: redactBrowserText(error?.message || String(error), 1200),
+          url: pageUrl(),
+          tabId,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
+    page.on("response", (response: PlaywrightResponse) =>
+      record(() => {
+        const request = response.request();
+        this.pushNetwork({
+          method: request.method(),
+          url: redactBrowserText(response.url(), 1200),
+          status: response.status(),
+          resourceType: request.resourceType(),
+          tabId,
+          timestamp: Date.now(),
+        });
+      }),
+    );
+    page.on("requestfailed", (request: PlaywrightRequest) =>
+      record(() =>
+        this.pushNetwork({
+          method: request.method(),
+          url: redactBrowserText(request.url(), 1200),
+          resourceType: request.resourceType(),
+          failed: true,
+          errorText: redactBrowserText(request.failure()?.errorText || "", 600),
+          tabId,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
+  }
+
+  private pushConsole(entry: BrowserConsoleEntry): void {
+    this.consoleEntries.push(entry);
+    if (this.consoleEntries.length > MAX_DIAGNOSTIC_ENTRIES) {
+      this.consoleDropped += this.consoleEntries.length - MAX_DIAGNOSTIC_ENTRIES;
+      this.consoleEntries = this.consoleEntries.slice(-MAX_DIAGNOSTIC_ENTRIES);
+    }
+  }
+
+  private pushNetwork(entry: BrowserNetworkEntry): void {
+    this.networkEntries.push(entry);
+    if (this.networkEntries.length > MAX_DIAGNOSTIC_ENTRIES) {
+      this.networkDropped += this.networkEntries.length - MAX_DIAGNOSTIC_ENTRIES;
+      this.networkEntries = this.networkEntries.slice(-MAX_DIAGNOSTIC_ENTRIES);
+    }
+  }
+
+  /** Console messages and uncaught page errors of every tab, oldest first. */
+  getConsoleLog(): BrowserDiagnosticLog<BrowserConsoleEntry> {
+    return {
+      entries: this.consoleEntries.map((entry) => ({ ...entry })),
+      dropped: this.consoleDropped,
+    };
+  }
+
+  /** Finished (with status) and failed requests of every tab, oldest first. */
+  getNetworkLog(): BrowserDiagnosticLog<BrowserNetworkEntry> {
+    return {
+      entries: this.networkEntries.map((entry) => ({ ...entry })),
+      dropped: this.networkDropped,
+    };
+  }
+
+  /** Counts and the last few entries, in the visible workbench snapshot's format. */
+  getDiagnosticsSummary(): {
+    console: BrowserDiagnosticSummary;
+    network: BrowserDiagnosticSummary;
+  } {
+    return {
+      console: {
+        count: this.consoleEntries.length + this.consoleDropped,
+        recent: this.consoleEntries
+          .slice(-5)
+          .map((entry) => `${entry.level}: ${entry.text}`.slice(0, 220)),
+      },
+      network: {
+        count: this.networkEntries.length + this.networkDropped,
+        recent: this.networkEntries
+          .slice(-5)
+          .map((entry) =>
+            `${entry.failed ? `failed ${entry.errorText || ""}` : (entry.status ?? "")} ${entry.url}`
+              .trim()
+              .slice(0, 220),
+          ),
+      },
+    };
   }
 
   private pushActionEvent(event: BrowserActionEventInput): void {

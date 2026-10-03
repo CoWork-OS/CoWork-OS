@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { ContextManager, getTokenizerInflation, truncateToolResult } from "../context-manager";
+import {
+  ContextManager,
+  estimateMessageTokens,
+  getTokenizerInflation,
+  truncateToolResult,
+} from "../context-manager";
 import type { LLMMessage } from "../llm";
 
 describe("ContextManager.compactMessagesWithMeta", () => {
@@ -606,5 +611,30 @@ describe("truncateToolResult keeps structured results valid", () => {
         big(file.path.slice(4, 5)).slice(0, file.nextStartChar),
       );
     }
+  });
+});
+
+describe("estimateMessageTokens with Anthropic thinking", () => {
+  it("counts replayable thinking blocks, which are sent back with the turn", () => {
+    const content: LLMMessage["content"] = [{ type: "text", text: "Done." }];
+    const plain: LLMMessage = { role: "assistant", content };
+    const withThinking: LLMMessage = {
+      role: "assistant",
+      content,
+      reasoning: [
+        {
+          format: "anthropic",
+          model: "claude-opus-4-8",
+          data: { block: { type: "thinking", thinking: "", signature: "s".repeat(4_000) } },
+        },
+        {
+          format: "anthropic",
+          model: "claude-opus-4-8",
+          data: { block: { type: "redacted_thinking", data: "r".repeat(400) } },
+        },
+      ],
+    };
+
+    expect(estimateMessageTokens(withThinking) - estimateMessageTokens(plain)).toBe(1_100);
   });
 });

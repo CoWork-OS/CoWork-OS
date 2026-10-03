@@ -1,4 +1,5 @@
 import type { LLMProviderType } from "../../../shared/types";
+import { getAnthropicModelCapabilities } from "../../../shared/anthropic-model-capabilities";
 import { estimateTotalTokens } from "../context-manager";
 import type { ContextManager } from "../context-manager";
 import type { LLMContent, LLMMessage } from "./types";
@@ -244,11 +245,15 @@ function getKnownHardCap(
 }
 
 /** Models that think/reason before answering unless told not to. */
-function isThinkingByDefaultModel(modelId: string): boolean {
+function isThinkingByDefaultModel(modelId: string, providerType = ""): boolean {
   const normalized = String(modelId || "").toLowerCase();
   return (
     isOpenAIReasoningModel(normalized) ||
-    /claude-(?:(?:opus|sonnet|haiku)-[5-9]|fable|mythos)/.test(normalized)
+    /claude-(?:(?:opus|sonnet|haiku)-[5-9]|fable|mythos)/.test(normalized) ||
+    // The Anthropic providers send adaptive thinking to Opus/Sonnet 4.6+ too
+    // (anthropic-thinking.ts), and max_tokens includes the thinking.
+    ((providerType === "anthropic" || providerType === "azure-anthropic") &&
+      getAnthropicModelCapabilities(modelId)?.thinkingMode === "adaptive")
   );
 }
 
@@ -259,6 +264,7 @@ function getPolicyDefault(
   phase: "initial" | "escalated",
   localProfile?: LocalModelExecutionProfile | null,
   modelId = "",
+  providerType = "",
 ): number {
   if (localProfile) {
     if (phase === "escalated") return localProfile.finalOutputTokens;
@@ -281,7 +287,7 @@ function getPolicyDefault(
   }
 
   if (initialOverride !== null) return initialOverride;
-  const reasoningFloor = isThinkingByDefaultModel(modelId)
+  const reasoningFloor = isThinkingByDefaultModel(modelId, providerType)
     ? DEFAULT_REASONING_INITIAL_MAX_TOKENS
     : 0;
   if (requestKind === "tool_followup") {
@@ -408,6 +414,9 @@ export function resolveOutputTokenBudget(input: OutputTokenPolicyInput): Resolve
     input.phase,
     localProfile,
     input.modelId,
+    String(input.providerType || "")
+      .toLowerCase()
+      .trim(),
   );
   const knownHardCap = getKnownHardCap(providerFamily, routedFamily, input.modelId);
 

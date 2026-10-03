@@ -43,6 +43,10 @@ describe("output-token-policy", () => {
     // Thinking/reasoning models spend part of the budget before the answer.
     expect(resolve("openai", "gpt-5.5")).toBeGreaterThanOrEqual(32_000);
     expect(resolve("anthropic", "claude-opus-5-5")).toBeGreaterThanOrEqual(32_000);
+    // Opus/Sonnet 4.6 think only when asked; the Anthropic providers ask.
+    expect(resolve("anthropic", "claude-opus-4-6")).toBeGreaterThanOrEqual(32_000);
+    expect(resolve("azure-anthropic", "claude-sonnet-4-6")).toBeGreaterThanOrEqual(32_000);
+    expect(resolve("bedrock", "anthropic.claude-opus-4-6")).toBe(16_000);
     // Known model caps still apply.
     expect(resolve("anthropic", "claude-3-5-sonnet-20241022")).toBe(8_192);
   });

@@ -224,6 +224,28 @@ export function estimateMessageTokens(message: LLMMessage): number {
       tokens += estimateImageTokens(content);
     }
   }
+  return tokens + estimateAnthropicThinkingTokens(message);
+}
+
+/**
+ * Anthropic thinking blocks ride on `reasoning` and are sent back with the turn
+ * (see llm/anthropic-thinking.ts). The signature carries the encrypted thinking,
+ * so its length stands in for the thinking even when the text is omitted.
+ */
+function estimateAnthropicThinkingTokens(message: LLMMessage): number {
+  if (message.role !== "assistant" || !Array.isArray(message.reasoning)) return 0;
+  let tokens = 0;
+  for (const item of message.reasoning) {
+    if (item?.format !== "anthropic") continue;
+    const block = (item.data as { block?: Any } | undefined)?.block;
+    if (block?.type === "thinking") {
+      tokens +=
+        estimateTokens(String(block.thinking || "")) +
+        estimateTokens(String(block.signature || ""));
+    } else if (block?.type === "redacted_thinking") {
+      tokens += estimateTokens(String(block.data || ""));
+    }
+  }
   return tokens;
 }
 

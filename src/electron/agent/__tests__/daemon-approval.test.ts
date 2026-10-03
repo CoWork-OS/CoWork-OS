@@ -1387,3 +1387,137 @@ describe("boundary authorization broker", () => {
     expect(daemon.evaluatePermissionRequest).not.toHaveBeenCalled();
   });
 });
+
+describe("inline approval card routing (legacy approval queue off)", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+  const useInlineCardRuntime = () => {
+    for (const key of ["NODE_ENV", "COWORK_APPROVAL_PROMPTS", "VITEST", "COWORK_HEADLESS"]) {
+      savedEnv[key] = process.env[key];
+    }
+    process.env.NODE_ENV = "production";
+    delete process.env.COWORK_APPROVAL_PROMPTS;
+    delete process.env.VITEST;
+    delete process.env.COWORK_HEADLESS;
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const askEvaluation = (trackingKey: string) => {
+    const reason = { type: "mode", mode: "default", summary: "Boundary crossing." };
+    return {
+      evaluation: { decision: "ask", reason },
+      promptDetails: { reason, scopePreview: trackingKey, suggestedActions: [] },
+      scope: { kind: "tool", toolName: "run_command" },
+      trackingKey,
+      runtime: null,
+      workspace: undefined,
+    };
+  };
+
+  const buildDaemon = (task: Record<string, unknown>, trackingKey = "tool:run_command") =>
+    ({
+      sessionAutoApproveAll: false,
+      approvalRepo: {
+        create: vi.fn((row: Record<string, unknown>) => ({ id: "approval-auto", ...row })),
+        update: vi.fn(),
+      },
+      requestAssistantApproval: vi.fn().mockResolvedValue(false),
+      canSessionAutoApproveType: AgentDaemon.prototype["canSessionAutoApproveType"],
+      canAutoReviewApprove: AgentDaemon.prototype["canAutoReviewApprove"],
+      isAutoReviewSafeCommand: AgentDaemon.prototype["isAutoReviewSafeCommand"],
+      logEvent: vi.fn(),
+      updateTask: vi.fn(),
+      evaluatePermissionRequest: vi.fn().mockReturnValue(askEvaluation(trackingKey)),
+      taskRepo: { findById: vi.fn().mockReturnValue({ id: "task-inline", ...task }) },
+      pendingApprovals: new Map(),
+    }) as Any;
+
+  it("lets the Approve for me automatic review approve a safe ask before any card", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "approve_for_me" } });
+
+    const approved = await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "run_command",
+      "Run git status",
+      { command: "git status" },
+    );
+
+    expect(approved).toBe(true);
+    expect(daemon.requestAssistantApproval).not.toHaveBeenCalled();
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-inline",
+      "approval_granted",
+      expect.objectContaining({ reason: "auto_review", autoReviewReason: "safe_read_shell_command" }),
+    );
+  });
+
+  it("escalates an Approve for me ask the automatic review cannot approve to the card", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "approve_for_me" } });
+    daemon.requestAssistantApproval.mockResolvedValue(true);
+
+    const approved = await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "run_command",
+      "Delete build output",
+      { command: "rm -rf build" },
+    );
+
+    expect(approved).toBe(true);
+    expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+    expect(daemon.approvalRepo.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["data export", "data_export", { tool: "export_data", destination: "s3://bucket" }, undefined],
+    ["location access", "location_access", { tool: "get_current_location" }, undefined],
+    ["explicit operation consent", "run_command", { command: "git status" }, true],
+  ])(
+    "never lets the automatic review grant %s under Approve for me",
+    async (_label, type, details, requireExplicitApproval) => {
+      useInlineCardRuntime();
+      const daemon = buildDaemon({ agentConfig: { accessProfileId: "approve_for_me" } });
+
+      const approved = await AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task-inline",
+        type,
+        "Boundary crossing",
+        details,
+        requireExplicitApproval ? { requireExplicitApproval } : undefined,
+      );
+
+      expect(approved).toBe(false);
+      expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+      expect(
+        daemon.logEvent.mock.calls.some(
+          (call: Any[]) => call[1] === "approval_granted" && call[2]?.reason === "auto_review",
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("keeps Ask for approval asks on the card even when the command is a safe read", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
+
+    await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "run_command",
+      "Run git status",
+      { command: "git status" },
+    );
+
+    expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+  });
+});

@@ -7788,74 +7788,17 @@ export class AgentDaemon extends EventEmitter {
       return false;
     }
 
-    // Any decision that remains `ask` is delivered as an inline assistant/task
-    // question when popup approvals are disabled. A permission that evaluated
-    // to `allow` already returned above; hard denies returned below. Keeping
-    // this branch at the final ask boundary means network, credentials,
-    // exports, MCP, and external-file requests all share the same no-popup
-    // response path.
-    if (
-      approvalPromptsDisabled() &&
-      (permission.evaluation.decision === "ask" ||
-        !allowAutoApprove ||
-        shouldUseAssistantApprovalInput(type, enrichedDetails, {
-          allowAutoApprove,
-          requireExplicitApproval: opts?.requireExplicitApproval,
-        }))
-    ) {
-      if (isAutomatedTaskLike(task) || task?.agentConfig?.humanInputPolicy === "none") {
-        this.logEvent(taskId, "log", {
-          type: "tool_authorization",
-          decision: "deny",
-          reason: "interactive_approval_unavailable",
-          approvalType: type,
-        });
-        return false;
-      }
-
-      const assistantRequester =
-        typeof (this as Any).requestAssistantApproval === "function"
-          ? (this as Any).requestAssistantApproval
-          : AgentDaemon.prototype.requestAssistantApproval;
-      const approved = await assistantRequester.call(
-        this,
-        taskId,
-        type,
-        description,
-        permissionDetails,
-        permission.runtime,
-        permission.trackingKey,
-        opts?.signal,
-      );
-      // The card can wait indefinitely. Like a queued approval, an "Allow
-      // once" answer only counts if the operation identity and the task's
-      // authority are unchanged since the card was raised.
-      if (
-        approved &&
-        typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
-        !(await this.isApprovalAuthorityCurrent({
-          taskId,
-          type,
-          details: permissionDetails,
-        } as ApprovalRequest))
-      ) {
-        permission.runtime?.recordPermissionDenial(permission.trackingKey);
-        this.logEvent(taskId, "approval_denied", {
-          assistantInput: true,
-          approvalType: type,
-          reason: "approval_authority_changed",
-        });
-        return false;
-      }
-      if (approved && type === "external_file_access") {
-        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
-      }
-      return approved;
-    }
-
     const explicitProfileSelected = typeof task?.agentConfig?.accessProfileId === "string";
+    // The automatic safety review is the profile's own reviewer, so it decides
+    // before any human surface: the inline card (legacy queue off) or the
+    // queued approval. It only ever approves narrow safe reads (see
+    // `canAutoReviewApprove`); everything else escalates. With the legacy queue
+    // off only a profile that documents `reviewer: "auto-review"` (Approve for
+    // me) gets it; the queue keeps its historical eligibility for profile-less
+    // tasks. An explicit consent requirement is never satisfied by the review.
     const autoReviewEnabledForProfile =
-      accessProfile.definition.reviewer === "auto-review" || !explicitProfileSelected;
+      accessProfile.definition.reviewer === "auto-review" ||
+      (!explicitProfileSelected && !approvalPromptsDisabled());
     const autoReviewProfile =
       explicitProfileSelected ||
       (accessProfile.definition.domainRules?.length || 0) > 0 ||
@@ -7863,7 +7806,7 @@ export class AgentDaemon extends EventEmitter {
         ? accessProfile
         : undefined;
     const autoReview =
-      allowAutoApprove && autoReviewEnabledForProfile
+      allowAutoApprove && !opts?.requireExplicitApproval && autoReviewEnabledForProfile
         ? this.canAutoReviewApprove(
             taskId,
             type as ApprovalType | undefined,
@@ -7931,6 +7874,71 @@ export class AgentDaemon extends EventEmitter {
         permissionReason: permission.evaluation.reason,
       });
       return true;
+    }
+
+    // Any decision that remains `ask` is delivered as an inline assistant/task
+    // question when popup approvals are disabled. A permission that evaluated
+    // to `allow` already returned above; hard denies returned below. Keeping
+    // this branch at the final ask boundary means network, credentials,
+    // exports, MCP, and external-file requests all share the same no-popup
+    // response path.
+    if (
+      approvalPromptsDisabled() &&
+      (permission.evaluation.decision === "ask" ||
+        !allowAutoApprove ||
+        shouldUseAssistantApprovalInput(type, enrichedDetails, {
+          allowAutoApprove,
+          requireExplicitApproval: opts?.requireExplicitApproval,
+        }))
+    ) {
+      if (isAutomatedTaskLike(task) || task?.agentConfig?.humanInputPolicy === "none") {
+        this.logEvent(taskId, "log", {
+          type: "tool_authorization",
+          decision: "deny",
+          reason: "interactive_approval_unavailable",
+          approvalType: type,
+        });
+        return false;
+      }
+
+      const assistantRequester =
+        typeof (this as Any).requestAssistantApproval === "function"
+          ? (this as Any).requestAssistantApproval
+          : AgentDaemon.prototype.requestAssistantApproval;
+      const approved = await assistantRequester.call(
+        this,
+        taskId,
+        type,
+        description,
+        permissionDetails,
+        permission.runtime,
+        permission.trackingKey,
+        opts?.signal,
+      );
+      // The card can wait indefinitely. Like a queued approval, an "Allow
+      // once" answer only counts if the operation identity and the task's
+      // authority are unchanged since the card was raised.
+      if (
+        approved &&
+        typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+        !(await this.isApprovalAuthorityCurrent({
+          taskId,
+          type,
+          details: permissionDetails,
+        } as ApprovalRequest))
+      ) {
+        permission.runtime?.recordPermissionDenial(permission.trackingKey);
+        this.logEvent(taskId, "approval_denied", {
+          assistantInput: true,
+          approvalType: type,
+          reason: "approval_authority_changed",
+        });
+        return false;
+      }
+      if (approved && type === "external_file_access") {
+        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+      }
+      return approved;
     }
 
     if (isAutomatedTaskLike(task) || task?.agentConfig?.humanInputPolicy === "none") {

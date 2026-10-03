@@ -17,6 +17,12 @@ const XML_TOOL_PATTERNS: RegExp[] = [
   /<parameters>\s*[\s\S]*?<\/parameters>/gi,
   /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/gi,
   /\[TOOL_RESULT\][\s\S]*?\[\/TOOL_RESULT\]/gi,
+  // Llama/Qwen `<function=name>{...}</function>` outside a <tool_call> block
+  /<function=[a-z_][\w.-]*>[\s\S]*?<\/function>/gi,
+  // Llama 3 `<|python_tag|>{...}`, up to its end-of-message token
+  /<\|python_tag\|>[\s\S]*?(?:<\|eo[mt]_id\|>|$)/gi,
+  // Mistral `[TOOL_CALLS][...]` / `[TOOL_CALLS]name[ARGS]{...}` runs to the end of the turn
+  /\[TOOL_CALLS\]\s*(?:[[{]|[a-z_][\w.-]*(?:\[CALL_ID\][\w-]*)?\[ARGS\])[\s\S]*$/gi,
 ];
 
 const TOOL_TEXT_MARKERS = [
@@ -128,13 +134,33 @@ function hasStructuredInvokeCall(input: string): boolean {
   );
 }
 
-const TAGGED_TOOL_CALL_OPENER = /<tool_call>|<function=[a-z_][\w.-]*>/gi;
+const TAGGED_TOOL_CALL_OPENER =
+  /<tool_call>|<function=[a-z_][\w.-]*>|<\|python_tag\|>|\[TOOL_CALLS\]/gi;
+
+/** Body that must follow each opener for it to be a call, and its partial (streaming) form. */
+function taggedCallBodyPatterns(opener: string): { complete: RegExp; partial: RegExp } {
+  const lower = opener.toLowerCase();
+  if (lower === "<tool_call>") {
+    return { complete: /^\s*(?:\{\s*"name"\s*:|<function=[a-z_])/i, partial: /^\s*(?:\{[^}]*)?$/ };
+  }
+  if (lower === "<|python_tag|>") {
+    return { complete: /^\s*[[{]/, partial: /^\s*$/ };
+  }
+  if (lower === "[tool_calls]") {
+    return {
+      complete: /^\s*(?:[[{]|[a-z_][\w.-]*(?:\[CALL_ID\][\w-]*)?\[ARGS\])/i,
+      partial: /^\s*[\w.-]*$/,
+    };
+  }
+  return { complete: /^\s*(?:\{|<parameter=)/i, partial: /^\s*$/ };
+}
 
 /**
- * Hermes/Qwen `<tool_call>{"name": ...}</tool_call>` blocks and Llama/Qwen
- * `<function=name>{...}` or `<function=name><parameter=...>` calls. A bare tag
- * in prose ("the <tool_call> tag wraps each call") is not a call: the tag must
- * be followed by a call body.
+ * Hermes/Qwen `<tool_call>{"name": ...}</tool_call>` blocks, Llama/Qwen
+ * `<function=name>{...}` or `<function=name><parameter=...>` calls, Llama 3
+ * `<|python_tag|>{...}` and Mistral `[TOOL_CALLS][...]`. A bare tag in prose
+ * ("the <tool_call> tag wraps each call") is not a call: the tag must be
+ * followed by a call body.
  */
 function hasTaggedToolCall(input: string, allowPartial: boolean): boolean {
   TAGGED_TOOL_CALL_OPENER.lastIndex = 0;
@@ -143,14 +169,9 @@ function hasTaggedToolCall(input: string, allowPartial: boolean): boolean {
     if (isToolCallExplanationContext(input, match.index)) continue;
 
     const body = input.slice(match.index + match[0].length);
-    const isToolCallTag = match[0].toLowerCase() === "<tool_call>";
-    const startsCallBody = isToolCallTag
-      ? /^\s*(?:\{\s*"name"\s*:|<function=[a-z_])/i.test(body)
-      : /^\s*(?:\{|<parameter=)/i.test(body);
-    if (startsCallBody) return true;
-    if (allowPartial && (isToolCallTag ? /^\s*(?:\{[^}]*)?$/ : /^\s*$/).test(body)) {
-      return true;
-    }
+    const bodyPatterns = taggedCallBodyPatterns(match[0]);
+    if (bodyPatterns.complete.test(body)) return true;
+    if (allowPartial && bodyPatterns.partial.test(body)) return true;
   }
   return false;
 }

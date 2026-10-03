@@ -132,6 +132,43 @@ describe("sanitizeToolCallTextFromAssistant", () => {
     expect(responseLooksLikeUnexecutedToolCall('<tool_call>\n{"na')).toBe(false);
   });
 
+  it("detects Llama python_tag and Mistral TOOL_CALLS calls emitted as text", () => {
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        '<|python_tag|>{"name": "list_directory", "parameters": {"path": "."}}',
+      ),
+    ).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        '[TOOL_CALLS][{"name": "list_directory", "arguments": {"path": "."}}]',
+      ),
+    ).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall('[TOOL_CALLS]list_directory[ARGS]{"path": "."}'),
+    ).toBe(true);
+    expect(responseLooksLikeUnexecutedToolCall("[TOOL_CALLS]", { allowPartial: true })).toBe(true);
+    expect(
+      responseLooksLikeUnexecutedToolCall(
+        'Mistral prefixes calls with `[TOOL_CALLS][{"name": "x"}]` in its output.',
+      ),
+    ).toBe(false);
+    expect(
+      responseLooksLikeUnexecutedToolCall("The [TOOL_CALLS] token marks a call in Mistral output."),
+    ).toBe(false);
+  });
+
+  it("strips python_tag, TOOL_CALLS and standalone function-tag calls", () => {
+    for (const markup of [
+      '<|python_tag|>{"name": "list_directory", "parameters": {"path": "."}}<|eom_id|>',
+      '[TOOL_CALLS][{"name": "list_directory", "arguments": {"path": "."}}]',
+      '<function=list_directory>{"path": "."}</function>',
+    ]) {
+      const result = sanitizeToolCallTextFromAssistant(`Checking the folder.\n${markup}`);
+      expect(result.text).toBe("Checking the folder.");
+      expect(result.hadToolCallText).toBe(true);
+    }
+  });
+
   it("ignores tool_call and function tags in code, examples and plain prose", () => {
     expect(
       responseLooksLikeUnexecutedToolCall(

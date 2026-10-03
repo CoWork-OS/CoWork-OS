@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Background processes**: `run_command` can start dev servers and watchers in the background, with `process_output` and `stop_process` to read and stop them; processes stop when their task is cancelled, deleted or idle.
+- **Anthropic extended thinking**: adaptive or budgeted thinking and effort per model, with thinking blocks replayed unchanged across tool calls to the same model.
+- **Local model tool calls**: tool calls that local models write as text are run as real tool calls, with a text-protocol fallback for servers that reject native tools.
+
+### Changed
+
+- **Defaults that limited the agent**: shell networking and per-command unsandboxed approval are on by default; policy asks show the inline Deny / Allow once card in interactive tasks instead of being denied (unattended runs still deny, and cards time out after 5 minutes); new workspaces can delete inside the workspace; the token budget is 2M per user turn, the iteration limit 500 with auto-continuation, web search 25 per task; `run_command` accepts timeouts up to 30 minutes and `execute_code` up to 300 s; Docker sandboxes use a fuller image with more memory; sub-agents inherit the parent's model; Gemini receives images; high-risk code and operations tasks get automatic review; stale default models are updated.
+- **macOS sandbox**: git, `/dev/null`, toolchain caches and installs, TLS and proxy settings work inside the sandbox, and files and folders can be removed or renamed in the workspace, while credential stores, `.git` and policy files stay protected.
+
 ### Fixed
 
+- **Browser reliability**: visible-browser selector and ref actions verify they landed and fail clearly on stale or covered targets; the headless browser tracks popups and tabs, saves downloads into the workspace, reports dialogs, supports uploads and captures console and network logs.
+- **Blocked-command patterns**: match dangerous commands and targets instead of substrings, so `curl … | grep` and `rm -rf ./dist` are no longer blocked.
 - **Agent tool feedback**: failed shell commands now give the model their exit code and the tail of stderr/stdout instead of only `exit code 1`; `run_command` honors the executor's 120 s / 5 min budgets (approval time no longer counts), runs non-interactively, keeps the end of long output, and no longer re-runs a command after a persistent-shell timeout. Local commands that merely mention `fetch`, `axios` or a loopback URL are no longer blocked as shell networking.
 - **Reading and editing files**: truncated `read_file`/`read_files` results report what was delivered and where to continue; repeat-read caching serves only the identical window; distinct edits and test re-runs are no longer blocked as loops; `edit_file` tolerates CRLF and numbered-view prefixes, points misses at the closest lines, and refuses to re-encode non-UTF-8 files; grep keeps partial matches, honors `.gitignore`, and glob matches Windows paths; `web_fetch` extracts PDF text, decodes declared charsets, and pages long results.
 - **Routing and step contracts**: work follow-ups ("do it", "why is the test still failing?") keep tool access; questions about the user's project read the workspace first; refinements no longer wipe conversation history; coding and non-English requests route to execution; scoped prohibitions ("don't edit vendor/") no longer make tasks read-only or plan-only; equivalent tools satisfy step contracts; inspect-then-fix and fix-and-verify steps are not failed for doing the fix; test runs are required only on run intent and after the last edit.
@@ -20,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **PDF parsing and local sockets**: every main-process PDF parse runs in bounded workers (time, memory, text and concurrency limits); network-enabled sandboxed commands can no longer reach other programs' local sockets such as the Docker daemon.
 - **Agent harness hardening**: the prompt-injection filter annotates tool results instead of rewriting them and catches phrases split across lines; grep's `.gitignore` lookup is confined to repositories inside the workspace; fetched PDFs parse in a worker with memory, time and text limits; generic cookie dialogs are auto-dismissed only when they overlay the page and only with reject choices; queued orchestration tasks count against the child-agent limit.
 - **Process sandbox policy**: enforce read-only subtrees, recursive Git/policy protections, and separate delete authority across macOS process backends; reject Docker mount configurations that cannot enforce those boundaries. Host directory moves/removals require guarded file tools on macOS.
 - **Code execution permission**: require shell capability and shell approval handling for Python, JavaScript, and shell `execute_code` calls.

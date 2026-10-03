@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { appendAssistantResponseToConversation } from "../../executor-loop-utils";
 import { AnthropicCompatibleProvider } from "../anthropic-compatible-provider";
-import type { LLMRequest } from "../types";
+import { AzureAnthropicProvider } from "../azure-anthropic-provider";
+import type { LLMMessage, LLMRequest } from "../types";
 
 function mockUnauthorizedResponse(message = "unauthorized"): Response {
   return {
@@ -540,5 +542,151 @@ describe("AnthropicCompatibleProvider stop reasons", () => {
     });
 
     expect(response.stopReason).toBe(expected);
+  });
+});
+
+describe("Anthropic-compatible thinking", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const toolTurn = [
+    { type: "thinking", thinking: "", signature: "sig-compat" },
+    { type: "tool_use", id: "tool-1", name: "read_file", input: { path: "a.ts" } },
+  ];
+
+  function okResponse(content: unknown[], stopReason = "end_turn") {
+    return {
+      ok: true,
+      json: async () => ({
+        content,
+        stop_reason: stopReason,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    };
+  }
+
+  function sentBodies(fetchMock: ReturnType<typeof vi.fn>): Any[] {
+    return fetchMock.mock.calls.map((call: Any[]) => JSON.parse(call[1].body));
+  }
+
+  function azureProvider(effort?: LLMRequest["reasoningEffort"]) {
+    return new AzureAnthropicProvider({
+      type: "azure-anthropic",
+      model: "claude-opus-4-6",
+      azureAnthropicApiKey: "azure-key",
+      azureAnthropicEndpoint: "https://example.openai.azure.com",
+      azureAnthropicDeployment: "claude-opus-4-6",
+      ...(effort ? { azureAnthropicReasoningEffort: effort } : {}),
+    });
+  }
+
+  it("sends adaptive thinking and the saved effort to Claude models on Azure Anthropic", async () => {
+    const fetchMock = vi.fn(async () => okResponse([{ type: "text", text: "ok" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await azureProvider("high").createMessage({
+      model: "claude-opus-4-6",
+      maxTokens: 16_000,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    const [body] = sentBodies(fetchMock);
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "high" });
+    expect(body).not.toHaveProperty("temperature");
+    expect(body).not.toHaveProperty("tool_choice");
+  });
+
+  it("sends no thinking parameters to generic Anthropic-compatible endpoints", async () => {
+    const fetchMock = vi.fn(async () => okResponse([{ type: "text", text: "ok" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new AnthropicCompatibleProvider({
+      type: "anthropic-compatible",
+      providerName: "Anthropic-Compatible",
+      apiKey: "test-key",
+      baseUrl: "https://example.com/anthropic",
+      defaultModel: "claude-opus-4-6",
+    });
+
+    await provider.createMessage({
+      model: "claude-opus-4-6",
+      maxTokens: 16_000,
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      reasoningEffort: "high",
+    });
+
+    const [body] = sentBodies(fetchMock);
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("output_config");
+    expect(body.max_tokens).toBe(16_000);
+  });
+
+  it("replays an endpoint's thinking blocks to the same model and strips them elsewhere", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse(toolTurn, "tool_use"))
+      .mockResolvedValue(okResponse([{ type: "text", text: "done" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new AnthropicCompatibleProvider({
+      type: "minimax-portal",
+      providerName: "MiniMax Portal",
+      apiKey: "minimax-test",
+      baseUrl: "https://api.minimax.io/anthropic",
+      defaultModel: "MiniMax-M2.1",
+    });
+    const messages: LLMMessage[] = [{ role: "user", content: "Read a.ts" }];
+    const base = { maxTokens: 1_000, system: "system" };
+
+    const first = await provider.createMessage({ ...base, model: "MiniMax-M2.1", messages });
+    expect(first.content).toEqual([toolTurn[1]]);
+    appendAssistantResponseToConversation(messages, first, 0);
+    messages.push({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "tool-1", content: "contents" }],
+    });
+
+    await provider.createMessage({ ...base, model: "MiniMax-M2.1", messages });
+    await provider.createMessage({ ...base, model: "MiniMax-M2.5", messages });
+
+    const bodies = sentBodies(fetchMock);
+    expect(bodies[1].messages[1]).toEqual({ role: "assistant", content: toolTurn });
+    expect(bodies[2].messages[1]).toEqual({ role: "assistant", content: [toolTurn[1]] });
+  });
+
+  it("retries once without thinking when the endpoint rejects a replayed block", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse(toolTurn, "tool_use"))
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        json: async () => ({ error: { message: "Invalid `signature` in `thinking` block" } }),
+      })
+      .mockResolvedValue(okResponse([{ type: "text", text: "done" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = azureProvider();
+    const messages: LLMMessage[] = [{ role: "user", content: "Read a.ts" }];
+    const base = { model: "claude-opus-4-6", maxTokens: 16_000, system: "system" };
+
+    appendAssistantResponseToConversation(
+      messages,
+      await provider.createMessage({ ...base, messages }),
+      0,
+    );
+    messages.push({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "tool-1", content: "contents" }],
+    });
+    const response = await provider.createMessage({ ...base, messages });
+
+    expect(response.content).toEqual([{ type: "text", text: "done" }]);
+    const bodies = sentBodies(fetchMock);
+    expect(JSON.stringify(bodies[1])).toContain("sig-compat");
+    expect(JSON.stringify(bodies[2])).not.toContain("sig-compat");
+    expect(bodies[2]).not.toHaveProperty("thinking");
   });
 });

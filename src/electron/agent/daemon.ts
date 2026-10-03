@@ -7841,6 +7841,26 @@ export class AgentDaemon extends EventEmitter {
         permission.trackingKey,
         opts?.signal,
       );
+      // The card can wait indefinitely. Like a queued approval, an "Allow
+      // once" answer only counts if the operation identity and the task's
+      // authority are unchanged since the card was raised.
+      if (
+        approved &&
+        typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+        !(await this.isApprovalAuthorityCurrent({
+          taskId,
+          type,
+          details: permissionDetails,
+        } as ApprovalRequest))
+      ) {
+        permission.runtime?.recordPermissionDenial(permission.trackingKey);
+        this.logEvent(taskId, "approval_denied", {
+          assistantInput: true,
+          approvalType: type,
+          reason: "approval_authority_changed",
+        });
+        return false;
+      }
       if (approved && type === "external_file_access") {
         this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
       }

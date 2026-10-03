@@ -360,6 +360,86 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     }
   });
 
+  it.each([
+    ["unchanged", "key-original", true],
+    ["changed while the card was open", "key-after-profile-change", false],
+  ])(
+    "revalidates an inline Allow once answer when authority is %s",
+    async (_label, currentKey, expected) => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+      const previousVitest = process.env.VITEST;
+      process.env.NODE_ENV = "production";
+      delete process.env.COWORK_APPROVAL_PROMPTS;
+      delete process.env.VITEST;
+
+      const ask = {
+        decision: "ask",
+        reason: { type: "mode", mode: "default", summary: "Prompt for network read." },
+      };
+      const evaluatePermissionRequest = vi
+        .fn()
+        .mockReturnValueOnce({
+          evaluation: ask,
+          promptDetails: { reason: ask.reason, scopePreview: "domain docs.example.com" },
+          scope: { kind: "domain", toolName: "web_fetch", domain: "docs.example.com" },
+          trackingKey: "domain:web_fetch:docs.example.com",
+          runtime: null,
+          workspace: undefined,
+          authorizationKey: "key-original",
+        })
+        .mockReturnValue({
+          evaluation: ask,
+          workspace: { permissions: { accessApprovalPolicy: "on-request" } },
+          authorizationKey: currentKey,
+        });
+      const daemonLike = {
+        sessionAutoApproveAll: false,
+        approvalRepo: { create: vi.fn(), update: vi.fn() },
+        requestAssistantApproval: vi.fn().mockResolvedValue(true),
+        isApprovalAuthorityCurrent: AgentDaemon.prototype["isApprovalAuthorityCurrent"],
+        logEvent: vi.fn(),
+        updateTask: vi.fn(),
+        evaluatePermissionRequest,
+        taskRepo: {
+          findById: vi.fn().mockReturnValue({
+            id: "task-card",
+            status: "executing",
+            agentConfig: { accessProfileId: "ask_for_approval" },
+          }),
+        },
+        pendingApprovals: new Map(),
+      } as Any;
+
+      try {
+        const approved = await AgentDaemon.prototype.requestApproval.call(
+          daemonLike,
+          "task-card",
+          "network_access",
+          "Approve action",
+          { tool: "web_fetch", params: { url: "https://docs.example.com/page" } },
+        );
+
+        expect(approved).toBe(expected);
+        expect(daemonLike.requestAssistantApproval).toHaveBeenCalledTimes(1);
+        expect(evaluatePermissionRequest).toHaveBeenCalledTimes(2);
+        expect(
+          daemonLike.logEvent.mock.calls.some(
+            (call: Any[]) =>
+              call[1] === "approval_denied" && call[2]?.reason === "approval_authority_changed",
+          ),
+        ).toBe(!expected);
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+        else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+        if (previousVitest === undefined) delete process.env.VITEST;
+        else process.env.VITEST = previousVitest;
+      }
+    },
+  );
+
   it("does not session auto-approve network reads denied by network policy", async () => {
     vi.useFakeTimers();
     vi.mocked(evaluateNetworkPolicy).mockReturnValueOnce({

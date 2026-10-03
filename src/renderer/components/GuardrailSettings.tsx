@@ -763,6 +763,11 @@ export function GuardrailSettings() {
             step={1}
           />
         </div>
+        <p className="settings-hint">
+          Defaults: {DEFAULTS.webSearchMaxUsesPerTask} per task, {DEFAULTS.webSearchMaxUsesPerStep}{" "}
+          per step. Left at its default, the per-task cap scales with the task's budget profile
+          (lower for strict tasks, higher for long-running ones).
+        </p>
         <div className="settings-subsection">
           <h4>Allowed Domains (optional)</h4>
           <p className="settings-description">

@@ -137,6 +137,7 @@ import {
 } from "./runtime/worker-role-registry";
 import { enrichToolEventPayload } from "./runtime/tool-event-enrichment";
 import { resolveSkillSlashAlias } from "./skill-slash-aliases";
+import { resolveWebSearchUseCaps } from "./web-search-budget";
 import { SandboxRunner } from "./sandbox/runner";
 import {
   LLMProvider,
@@ -689,14 +690,6 @@ const EXECUTOR_BUDGET_CONTRACTS: Record<ExecutorBudgetProfile, ExecutorBudgetCon
     maxAutoRecoverySteps: 2,
   },
 };
-
-const WEB_SEARCH_PROFILE_MAX_USES_PER_TASK: Record<ExecutorBudgetProfile, number> = {
-  strict: 4,
-  balanced: 8,
-  aggressive: 16,
-};
-
-const WEB_SEARCH_MAX_USES_PER_STEP_DEFAULT = 3;
 
 function resolveExecutorBudgetProfile(
   requestedProfile: Task["budgetProfile"],
@@ -1420,12 +1413,6 @@ export class TaskExecutor {
     // Current providers return live index results. Keep this as a dedicated
     // capability gate so future providers can advertise strict cached support.
     return false;
-  }
-
-  private getProfileDefaultWebSearchMaxUsesPerTask(profile: ExecutorBudgetProfile): number {
-    return (
-      WEB_SEARCH_PROFILE_MAX_USES_PER_TASK[profile] ?? WEB_SEARCH_PROFILE_MAX_USES_PER_TASK.balanced
-    );
   }
 
   private static readonly PINNED_MEMORY_RECALL_TAG = PINNED_CONTEXT_TAGS.memoryRecall.open;
@@ -8061,9 +8048,6 @@ ${transcript}
     );
     const guardrailSettings = GuardrailManager.loadSettings();
     this.followUpAutoRecovery = task.agentConfig?.followUpAutoRecovery ?? true;
-    const profileWebSearchTaskCap = this.getProfileDefaultWebSearchMaxUsesPerTask(
-      this.budgetProfile,
-    );
     const guardrailWebSearchMode = this.normalizeWebSearchMode(
       (guardrailSettings as Partial<GuardrailSettings>).webSearchMode,
       "cached",
@@ -8083,30 +8067,17 @@ ${transcript}
       });
     }
     this.webSearchMode = effectiveWebSearchMode;
-    const guardrailWebSearchTaskCap = TaskExecutor.clampInt(
-      (guardrailSettings as Partial<GuardrailSettings>).webSearchMaxUsesPerTask,
-      profileWebSearchTaskCap,
-      1,
-      500,
-    );
-    this.webSearchMaxUsesPerTask = TaskExecutor.clampInt(
-      task.agentConfig?.webSearchMaxUsesPerTask,
-      guardrailWebSearchTaskCap,
-      1,
-      500,
-    );
-    const guardrailWebSearchStepCap = TaskExecutor.clampInt(
-      (guardrailSettings as Partial<GuardrailSettings>).webSearchMaxUsesPerStep,
-      WEB_SEARCH_MAX_USES_PER_STEP_DEFAULT,
-      1,
-      100,
-    );
-    this.webSearchMaxUsesPerStep = TaskExecutor.clampInt(
-      task.agentConfig?.webSearchMaxUsesPerStep,
-      guardrailWebSearchStepCap,
-      1,
-      100,
-    );
+    const webSearchUseCaps = resolveWebSearchUseCaps({
+      profile: this.budgetProfile,
+      guardrailMaxUsesPerTask: (guardrailSettings as Partial<GuardrailSettings>)
+        .webSearchMaxUsesPerTask,
+      guardrailMaxUsesPerStep: (guardrailSettings as Partial<GuardrailSettings>)
+        .webSearchMaxUsesPerStep,
+      taskMaxUsesPerTask: task.agentConfig?.webSearchMaxUsesPerTask,
+      taskMaxUsesPerStep: task.agentConfig?.webSearchMaxUsesPerStep,
+    });
+    this.webSearchMaxUsesPerTask = webSearchUseCaps.perTask;
+    this.webSearchMaxUsesPerStep = webSearchUseCaps.perStep;
     this.webSearchAllowedDomains = this.normalizeDomainPatternList(
       (guardrailSettings as Partial<GuardrailSettings>).webSearchAllowedDomains,
     );

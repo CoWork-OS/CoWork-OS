@@ -46,10 +46,13 @@ export const DEFAULT_GUARDRAIL_SETTINGS: Readonly<GuardrailSettings> = Object.fr
   enforceAllowedDomains: false,
   allowedDomains: [],
 
-  // Web search policy
+  // Web search policy — raised from 8 per task / 3 per step, which cut research
+  // tasks short. While the per-task cap is left at this default, the task's budget
+  // profile scales it (strict 12, balanced 25, aggressive 50; see
+  // agent/web-search-budget.ts); a customized value applies to every profile.
   webSearchMode: "cached",
-  webSearchMaxUsesPerTask: 8,
-  webSearchMaxUsesPerStep: 3,
+  webSearchMaxUsesPerTask: 25,
+  webSearchMaxUsesPerStep: 8,
   webSearchAllowedDomains: [],
   webSearchBlockedDomains: [],
 

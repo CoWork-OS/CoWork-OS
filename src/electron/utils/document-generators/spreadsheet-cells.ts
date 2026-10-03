@@ -29,14 +29,41 @@ export function coerceNumericText(value: string): number | string {
 }
 
 /**
+ * A cell value ExcelJS can only write as plain data. ExcelJS reads object values by shape, as a
+ * formula ({ formula }), hyperlink ({ text, hyperlink }), rich text or error cell, and the tool
+ * cell schemas do not restrict the type, so an object or array from tool input is written as its
+ * JSON text instead.
+ */
+export function toPlainSpreadsheetValue(
+  value: unknown,
+): string | number | boolean | Date | null | undefined {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value instanceof Date
+  ) {
+    return value;
+  }
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
  * Normalises one cell for ExcelJS: "=..." strings become formulas and, unless disabled (header
- * rows keep their labels as text), numeric text becomes a number.
+ * rows keep their labels as text), numeric text becomes a number. Other values are made plain
+ * (see toPlainSpreadsheetValue).
  */
 export function normalizeSpreadsheetCell(
   value: unknown,
   options: { coerceNumbers?: boolean } = {},
 ): unknown {
-  if (typeof value !== "string") return value;
+  if (typeof value !== "string") return toPlainSpreadsheetValue(value);
   const trimmed = value.trim();
   if (trimmed.startsWith("=") && trimmed.length > 1) {
     return { formula: trimmed.slice(1) };

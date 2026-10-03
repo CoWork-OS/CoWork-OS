@@ -5,7 +5,7 @@
  */
 
 import * as fs from "fs";
-import { normalizeSpreadsheetCell } from "./spreadsheet-cells";
+import { normalizeSpreadsheetCell, toPlainSpreadsheetValue } from "./spreadsheet-cells";
 
 interface SheetDefinition {
   name: string;
@@ -44,8 +44,8 @@ export async function generateXLSX(
   for (const sheetDef of options.sheets) {
     const sheet = workbook.addWorksheet(sheetDef.name);
 
-    // Headers
-    const headerRow = sheet.addRow(sheetDef.headers);
+    // Headers: kept as text ("=..." is not a formula here), but never as ExcelJS objects.
+    const headerRow = sheet.addRow(sheetDef.headers.map(toPlainSpreadsheetValue));
     headerRow.eachCell((cell) => {
       cell.fill = {
         type: "pattern",

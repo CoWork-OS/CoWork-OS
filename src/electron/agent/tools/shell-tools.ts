@@ -9,6 +9,7 @@ import { BuiltinToolsSettingsManager, type RunCommandApprovalMode } from "./buil
 import { ShellSessionManager, isLikelyInteractiveCommand } from "./shell-session-manager";
 import { createSandbox } from "../sandbox/sandbox-factory";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
+import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
 import { createLogger } from "../../utils/logger";
 
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
@@ -755,19 +756,7 @@ export class ShellTools {
   }
 
   private shouldAllowShellNetwork(policies: AdminPolicies): boolean {
-    if (this.workspace.permissions?.network !== true) return false;
-    if (this.workspace.permissions.accessNetworkMode === "disabled") return false;
-    // The shell has no domain-aware egress proxy. A scoped domain profile must
-    // therefore fail closed for shell networking instead of bypassing its
-    // allow/deny rules through curl, node, or another subprocess.
-    if ((this.workspace.permissions.accessDomainRules?.length || 0) > 0) return false;
-    const network = policies.runtime.network;
-    return (
-      network.allowShellNetwork === true &&
-      network.defaultAction === "allow" &&
-      network.allowedDomains.length === 0 &&
-      network.blockedDomains.length === 0
-    );
+    return canEnableSubprocessNetwork(this.workspace.permissions, policies);
   }
 
   private async runCommandInSandbox(
@@ -796,6 +785,16 @@ export class ShellTools {
       const policies = options.policies;
       const sandboxAllowed = policies.runtime.allowedSandboxTypes.includes(sandbox.type);
       if (sandbox.type === "none" || !sandboxAllowed) {
+        if (!this.shouldAllowShellNetwork(policies)) {
+          this.daemon.logEvent(this.taskId, "sandbox_denied", {
+            tool: "run_command",
+            reason: "no_os_sandbox_available",
+            sandboxType: sandbox.type,
+          });
+          throw new Error(
+            "run_command requires an OS-level sandbox to enforce network restrictions.",
+          );
+        }
         if (this.allowUnsandboxedShellFallback(policies)) {
           this.daemon.logEvent(this.taskId, "shell_sandbox_bypassed", {
             command,
@@ -1398,7 +1397,7 @@ export class ShellTools {
         hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions) ||
         (this.workspace.permissions.accessDomainRules?.length || 0) > 0,
     });
-    if (shouldSandboxCommand) {
+    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies)) {
       const sandboxResult = await this.runCommandInSandbox(command, {
         cwd,
         timeout,

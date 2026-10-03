@@ -30,6 +30,7 @@ import { GeminiProvider } from "./gemini-provider";
 import { OPENROUTER_DEFAULT_MODEL, OpenRouterProvider } from "./openrouter-provider";
 import { getOpenRouterAttributionHeaders } from "./openrouter-attribution";
 import { OpenAIProvider } from "./openai-provider";
+import { getOpenAISiwcClientId } from "./openai-siwc-oauth";
 import { AzureOpenAIProvider } from "./azure-openai-provider";
 import { AzureAnthropicProvider } from "./azure-anthropic-provider";
 import { GroqProvider } from "./groq-provider";
@@ -65,6 +66,7 @@ import type {
   LlmProfile,
   LLMProviderFallbackConfig,
   JevSettingsData,
+  LLMSettingsData,
   MoaModelSlot,
   MoaPreset,
   PromptCachingSettings,
@@ -1002,7 +1004,11 @@ export interface LLMSettings {
     authMethod?: "api_key" | "oauth";
     /** ChatGPT plan from the sign-in token ("free", "go", "plus", ...), used for default models. */
     chatgptPlanType?: string;
-  } & Omit<ProviderRoutingSettings, "reasoningEffort">;
+  } & Pick<
+    NonNullable<LLMSettingsData["openai"]>,
+    "oauthVariant" | "siwcHostId" | "siwcClientId" | "siwcSubject" | "siwcIdToken"
+  > &
+    Omit<ProviderRoutingSettings, "reasoningEffort">;
   azure?: {
     apiKey?: string;
     endpoint?: string;
@@ -2206,6 +2212,27 @@ export class LLMProviderFactory {
   /**
    * Clear cached settings
    */
+  /** Persists refreshed OpenAI OAuth tokens (legacy Codex or Sign in with ChatGPT). */
+  static persistOpenAIOAuthTokens(
+    tokens: Parameters<NonNullable<LLMProviderConfig["openaiOAuthTokenUpdater"]>>[0],
+  ): void {
+    const latestSettings = this.loadSettings();
+    latestSettings.openai = {
+      ...latestSettings.openai,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      tokenExpiresAt: tokens.expires_at,
+      // SIWC refreshes carry no account metadata; keep what sign-in stored.
+      accountId: tokens.accountId ?? latestSettings.openai?.accountId,
+      email: tokens.email ?? latestSettings.openai?.email,
+      authMethod: "oauth",
+      chatgptPlanType: tokens.planType || latestSettings.openai?.chatgptPlanType,
+      ...(tokens.id_token ? { siwcIdToken: tokens.id_token } : {}),
+    };
+    this.saveSettings(latestSettings);
+    this.clearCache();
+  }
+
   static clearCache(): void {
     this.cachedSettings = null;
   }
@@ -2299,23 +2326,13 @@ export class LLMProviderFactory {
         normalizeSecret(overrideConfig?.openaiAccessToken) || settings.openai?.accessToken,
       openaiRefreshToken: settings.openai?.refreshToken,
       openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
+      // An access-token override is never a SIWC token; keep the legacy path for it.
+      openaiSiwcClientId: normalizeSecret(overrideConfig?.openaiAccessToken)
+        ? undefined
+        : getOpenAISiwcClientId(settings),
       openaiOAuthTokenUpdater:
         overrideConfig?.openaiOAuthTokenUpdater ||
-        (async (tokens) => {
-          const latestSettings = this.loadSettings();
-          latestSettings.openai = {
-            ...latestSettings.openai,
-            accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
-            tokenExpiresAt: tokens.expires_at,
-            accountId: tokens.accountId,
-            email: tokens.email,
-            authMethod: "oauth",
-            chatgptPlanType: tokens.planType || latestSettings.openai?.chatgptPlanType,
-          };
-          this.saveSettings(latestSettings);
-          this.clearCache();
-        }),
+        ((tokens) => this.persistOpenAIOAuthTokens(tokens)),
       // Azure OpenAI config - from settings only
       azureApiKey: normalizeSecret(overrideConfig?.azureApiKey) || settings.azure?.apiKey,
       azureEndpoint: overrideConfig?.azureEndpoint || settings.azure?.endpoint,
@@ -4258,6 +4275,8 @@ export class LLMProviderFactory {
           openaiAccessToken: accessToken,
           openaiRefreshToken: refreshToken,
           openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
+          openaiSiwcClientId: getOpenAISiwcClientId(settings),
+          openaiOAuthTokenUpdater: (tokens) => this.persistOpenAIOAuthTokens(tokens),
         });
         const models = await provider.getAvailableModels();
         logger.debug(`Found ${models.length} OpenAI models via pi-ai SDK`);

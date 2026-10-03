@@ -338,6 +338,8 @@ export function BrowserWorkbenchView({
 }: BrowserWorkbenchViewProps) {
   const initialNavigationUrl = normalizeUrl(initialUrl || "");
   const webviewRef = useRef<Any>(null);
+  const guardedKeyRef = useRef<string | null>(null);
+  const [guardedKey, setGuardedKey] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const annotationImageRef = useRef<HTMLImageElement | null>(null);
   const annotationCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -491,7 +493,7 @@ export function BrowserWorkbenchView({
   const notifyStatus = useCallback(() => {
     const webview = webviewRef.current;
     const webContentsId = getReadyWebContentsId(webview);
-    if (typeof webContentsId !== "number") return;
+    if (typeof webContentsId !== "number" || guardedKeyRef.current !== webviewKey) return;
     const nextUrl = typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
     const nextTitle =
       typeof webview?.getTitle === "function" ? webview.getTitle() : titleRef.current;
@@ -503,9 +505,9 @@ export function BrowserWorkbenchView({
       title: nextTitle,
     });
     onStatusChangeRef.current?.({ url: nextUrl, title: nextTitle });
-  }, [getReadyWebContentsId, sessionId, taskId]);
+  }, [getReadyWebContentsId, sessionId, taskId, webviewKey]);
 
-  const registerSession = useCallback(() => {
+  const registerSession = useCallback(async () => {
     const webview = webviewRef.current;
     const webContentsId = getReadyWebContentsId(webview);
     if (typeof webContentsId !== "number") return;
@@ -513,15 +515,22 @@ export function BrowserWorkbenchView({
     const nextUrl = typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
     const nextTitle =
       typeof webview?.getTitle === "function" ? webview.getTitle() : titleRef.current;
-    void window.electronAPI.registerBrowserWorkbenchSession?.({
-      taskId,
-      sessionId,
-      webContentsId,
-      url: nextUrl,
-      title: nextTitle,
-    });
-    onStatusChangeRef.current?.({ url: nextUrl, title: nextTitle });
-  }, [getReadyWebContentsId, sessionId, taskId]);
+    if (!window.electronAPI.registerBrowserWorkbenchSession) return;
+    try {
+      await window.electronAPI.registerBrowserWorkbenchSession({
+        taskId,
+        sessionId,
+        webContentsId,
+        url: nextUrl,
+        title: nextTitle,
+      });
+      if (webviewRef.current !== webview) return;
+      guardedKeyRef.current = webviewKey;
+      setGuardedKey(webviewKey);
+    } catch {
+      setToolbarNotice("Browser network guards could not be installed.");
+    }
+  }, [getReadyWebContentsId, sessionId, taskId, webviewKey]);
 
   const updateActiveTab = useCallback(
     (patch: Partial<BrowserWorkbenchTab>) => {
@@ -610,6 +619,7 @@ export function BrowserWorkbenchView({
     if (!webview) return;
     const handleNavigate = (event: Any) => {
       const nextUrl = event?.url || webview.getURL?.() || "";
+      if (nextUrl === "about:blank" && guardedKeyRef.current !== webviewKey) return;
       activeUrlRef.current = nextUrl;
       setUrlText(nextUrl);
       setActiveUrl(nextUrl);
@@ -649,6 +659,8 @@ export function BrowserWorkbenchView({
         });
       }
       registeredWebContentsIdRef.current = null;
+      guardedKeyRef.current = null;
+      setGuardedKey(null);
       webviewDomReadyRef.current = false;
       activeUrlRef.current = "";
       titleRef.current = "";
@@ -693,6 +705,8 @@ export function BrowserWorkbenchView({
         });
       }
       registeredWebContentsIdRef.current = null;
+      guardedKeyRef.current = null;
+      setGuardedKey(null);
       webviewDomReadyRef.current = false;
       webview.removeEventListener("dom-ready", handleDomReady);
       webview.removeEventListener("did-navigate", handleNavigate);
@@ -1681,7 +1695,7 @@ export function BrowserWorkbenchView({
             <webview
               key={webviewKey}
               ref={webviewRef}
-              src={activeUrl}
+              src={guardedKey === webviewKey ? activeUrl : "about:blank"}
               className="browser-workbench-webview"
               style={{
                 width: "100%",

@@ -254,12 +254,9 @@ export function ContextPolicySettings({
         .context-tabs {
           display: flex;
           gap: 8px;
-          padding: 4px;
-          background: var(--color-bg-tertiary, #0f0f1a);
-          border-radius: 8px;
         }
 
-        .tab {
+        .context-policy-settings .tab {
           flex: 1;
           display: flex;
           align-items: center;
@@ -275,23 +272,23 @@ export function ContextPolicySettings({
           transition: all 0.2s ease;
         }
 
-        .tab:hover {
+        .context-policy-settings .tab:hover {
           color: var(--color-text-primary, #fff);
           background: var(--color-bg-secondary, #1a1a2e);
         }
 
-        .tab.active {
-          background: var(--color-accent, #6366f1);
-          color: white;
+        .context-policy-settings .tab.active {
+          background: var(--color-accent-subtle);
+          color: var(--color-text);
         }
 
-        .settings-section {
+        .context-policy-settings .settings-section {
           display: flex;
           flex-direction: column;
           gap: 12px;
         }
 
-        .settings-section h4 {
+        .context-policy-settings .settings-section h4 {
           margin: 0;
           font-size: 14px;
           font-weight: 600;

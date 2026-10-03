@@ -1453,7 +1453,7 @@ export function MemoryHubSettings(props?: {
             }}
           >
             {layerPreview.layers.map((layer) => (
-              <div key={layer.layer} className="settings-card">
+              <div key={layer.layer} className="settings-card settings-item-card">
                 <div className="memory-hub-row">
                   <div className="memory-hub-section-title">{layer.title}</div>
                   <span className={badgeClass(layer.injectedByDefault ? "success" : "neutral")}>
@@ -1906,7 +1906,7 @@ export function MemoryHubSettings(props?: {
               ) : (
                 <div className="memory-hub-column">
                   {awarenessBeliefs.slice(0, 12).map((belief) => (
-                    <div key={belief.id} className="settings-card">
+                    <div key={belief.id} className="settings-card settings-item-card">
                       <div
                         style={{
                           display: "flex",
@@ -2068,7 +2068,7 @@ export function MemoryHubSettings(props?: {
                     }}
                   >
                     {Object.entries(autonomyConfig.actionPolicies).map(([actionType, policy]) => (
-                      <div key={actionType} className="settings-card">
+                      <div key={actionType} className="settings-card settings-item-card">
                         <div className="memory-hub-primary-label">{actionType}</div>
                         <div className="memory-hub-top-gap-sm">
                           <select
@@ -2175,7 +2175,7 @@ export function MemoryHubSettings(props?: {
                     What chief-of-staff mode wants to do next and why.
                   </p>
                   {(autonomyDecisions || []).slice(0, 8).map((decision) => (
-                    <div key={decision.id} className="settings-card memory-hub-top-gap-sm">
+                    <div key={decision.id} className="settings-card settings-item-card memory-hub-top-gap-sm">
                       <div className="memory-hub-row">
                         <div className="memory-hub-primary-label">{decision.title}</div>
                         <span

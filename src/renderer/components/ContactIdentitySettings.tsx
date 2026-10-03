@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import type {
   ContactIdentity,
   ContactIdentityCandidate,
@@ -17,7 +17,7 @@ function statCard(label: string, value: number) {
       key={label}
       style={{
         padding: "14px",
-        borderRadius: "12px",
+        borderRadius: "var(--radius-md)",
         border: "1px solid var(--color-border-subtle)",
         background: "var(--color-bg-secondary)",
       }}
@@ -30,18 +30,6 @@ function statCard(label: string, value: number) {
       </div>
     </div>
   );
-}
-
-function actionButtonStyle(kind: "default" | "danger" = "default"): CSSProperties {
-  return {
-    padding: "6px 10px",
-    borderRadius: "8px",
-    border: `1px solid ${kind === "danger" ? "rgba(204, 73, 73, 0.25)" : "var(--color-border-subtle)"}`,
-    background: kind === "danger" ? "rgba(204, 73, 73, 0.08)" : "var(--color-bg-elevated)",
-    color: kind === "danger" ? "var(--color-danger, #c44949)" : "var(--color-text-secondary)",
-    fontSize: "0.75rem",
-    cursor: "pointer",
-  };
 }
 
 const MANUAL_HANDLE_TYPES: Array<{ value: ContactIdentityHandleType; label: string }> = [
@@ -171,15 +159,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
         <div className="settings-card">Loading identity coverage…</div>
       ) : (
         <div style={{ display: "grid", gap: "16px" }}>
-          <div
-            style={{
-              padding: "16px",
-              borderRadius: "14px",
-              border: "1px solid var(--color-border-subtle)",
-              background:
-                "linear-gradient(180deg, rgba(124,92,191,0.08) 0%, var(--color-bg-secondary) 100%)",
-            }}
-          >
+          <div>
             <div
               style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--color-text-primary)" }}
             >
@@ -213,30 +193,12 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                   }
                 }}
                 placeholder="Search by name, email, handle, phone, or CRM ID"
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "10px 12px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.8rem",
-                }}
+                className="settings-input"
               />
               <select
                 value={manualTargetIdentityId}
                 onChange={(event) => setManualTargetIdentityId(event.target.value)}
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "10px 12px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.8rem",
-                }}
+                className="settings-select"
               >
                 <option value="">Choose target identity</option>
                 {identities.map((identity) => (
@@ -248,7 +210,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
               </select>
               <button
                 type="button"
-                style={actionButtonStyle()}
+                className="settings-button small"
                 onClick={() => void runManualSearch(manualSearchQuery)}
                 disabled={manualSearchLoading || !workspaceId || !manualSearchQuery.trim()}
               >
@@ -269,16 +231,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                 onChange={(event) =>
                   setManualHandleType(event.target.value as ContactIdentityHandleType)
                 }
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "9px 11px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.78rem",
-                }}
+                className="settings-select"
               >
                 {MANUAL_HANDLE_TYPES.map((handleType) => (
                   <option key={handleType.value} value={handleType.value}>
@@ -290,38 +243,20 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                 value={manualHandleValue}
                 onChange={(event) => setManualHandleValue(event.target.value)}
                 placeholder="Handle or record value"
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "9px 11px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.78rem",
-                }}
+                className="settings-input"
               />
               <input
                 value={manualHandleDisplayValue}
                 onChange={(event) => setManualHandleDisplayValue(event.target.value)}
                 placeholder="Display label"
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "9px 11px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.78rem",
-                }}
+                className="settings-input"
               />
             </div>
 
             <div style={{ marginTop: "10px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <button
                 type="button"
-                style={actionButtonStyle()}
+                className="settings-button small"
                 onClick={() => {
                   setManualHandleValue(manualSearchQuery.trim());
                   setManualHandleDisplayValue(manualSearchQuery.trim());
@@ -332,7 +267,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
               </button>
               <button
                 type="button"
-                style={actionButtonStyle()}
+                className="settings-button small"
                 onClick={() => {
                   setManualSearchQuery("");
                   setManualSearchResults([]);
@@ -342,7 +277,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
               </button>
               <button
                 type="button"
-                style={actionButtonStyle()}
+                className="settings-button small"
                 onClick={() => {
                   if (!workspaceId || !manualTargetIdentityId || !manualHandleValue.trim()) return;
                   void runManualAction(`manual:${manualTargetIdentityId}:${manualHandleType}`, () =>
@@ -369,7 +304,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                     key={result.id}
                     style={{
                       padding: "12px",
-                      borderRadius: "12px",
+                      borderRadius: "var(--radius-md)",
                       border: "1px solid var(--color-border-subtle)",
                       background: "var(--color-bg-elevated)",
                     }}
@@ -418,7 +353,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                       >
                         <button
                           type="button"
-                          style={actionButtonStyle()}
+                          className="settings-button small"
                           onClick={() => {
                             setManualHandleType(result.handleType);
                             setManualHandleValue(result.normalizedValue);
@@ -429,7 +364,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                         </button>
                         <button
                           type="button"
-                          style={actionButtonStyle()}
+                          className="settings-button small"
                           onClick={() => void handleManualLink(result)}
                           disabled={
                             manualBusyKey === result.id || !manualTargetIdentityId || !workspaceId
@@ -467,15 +402,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
           {sections.map((section) => {
             const items = candidates.filter((candidate) => candidate.status === section.key);
             return (
-              <div
-                key={section.key}
-                style={{
-                  padding: "14px",
-                  borderRadius: "12px",
-                  border: "1px solid var(--color-border-subtle)",
-                  background: "var(--color-bg-secondary)",
-                }}
-              >
+              <div key={section.key}>
                 <div
                   style={{
                     fontSize: "0.92rem",
@@ -580,7 +507,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                               {section.key === "suggested" && (
                                 <>
                                   <button
-                                    style={actionButtonStyle()}
+                                    className="settings-button small"
                                     onClick={() =>
                                       void runAction(candidate.id, () =>
                                         window.electronAPI.confirmIdentityLink(candidate.id),
@@ -591,7 +518,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                                     Confirm
                                   </button>
                                   <button
-                                    style={actionButtonStyle("danger")}
+                                    className="settings-button small danger"
                                     onClick={() =>
                                       void runAction(candidate.id, () =>
                                         window.electronAPI.rejectIdentityLink(candidate.id),
@@ -606,7 +533,7 @@ export function ContactIdentitySettings({ workspaceId }: ContactIdentitySettings
                               {(section.key === "confirmed" || section.key === "auto_linked") &&
                                 linkedHandle && (
                                   <button
-                                    style={actionButtonStyle("danger")}
+                                    className="settings-button small danger"
                                     onClick={() =>
                                       void runAction(candidate.id, () =>
                                         window.electronAPI.unlinkIdentityHandle(linkedHandle.id),

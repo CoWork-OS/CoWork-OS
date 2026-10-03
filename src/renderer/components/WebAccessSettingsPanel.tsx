@@ -109,14 +109,18 @@ export const WebAccessSettingsPanel: React.FC = () => {
       </p>
 
       <div className="settings-group">
-        <label className="settings-toggle-row">
-          <span>Enable Web Access</span>
-          <input
-            type="checkbox"
-            checked={config.enabled}
-            onChange={(e) => saveSettings({ enabled: e.target.checked })}
-          />
-        </label>
+        <div className="settings-section-header">
+          <span className="settings-label">Enable Web Access</span>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              aria-label="Enable Web Access"
+              checked={config.enabled}
+              onChange={(e) => saveSettings({ enabled: e.target.checked })}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
 
         {config.enabled && (
           <>
@@ -128,7 +132,6 @@ export const WebAccessSettingsPanel: React.FC = () => {
                 min={1024}
                 max={65535}
                 onChange={(e) => saveSettings({ port: Number(e.target.value) })}
-                style={{ width: 100 }}
               />
             </div>
 
@@ -146,7 +149,7 @@ export const WebAccessSettingsPanel: React.FC = () => {
                 >
                   {accessUrl}
                 </code>
-                {status?.running && <span style={{ color: "#22c55e", fontSize: 11 }}>Running</span>}
+                {status?.running && <span style={{ color: "var(--color-success)", fontSize: 11 }}>Running</span>}
               </div>
             </div>
 
@@ -169,21 +172,7 @@ export const WebAccessSettingsPanel: React.FC = () => {
                   >
                     {config.token.slice(0, 8)}...{config.token.slice(-4)}
                   </code>
-                  <button
-                    onClick={copyToken}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: "4px 8px",
-                      border: "1px solid var(--color-border)",
-                      borderRadius: 4,
-                      background: "var(--color-bg-glass)",
-                      color: "var(--color-text-secondary)",
-                      cursor: "pointer",
-                      fontSize: 11,
-                    }}
-                  >
+                  <button className="settings-button small" onClick={copyToken}>
                     {copied ? <Check size={12} /> : <Copy size={12} />}
                     {copied ? "Copied" : "Copy"}
                   </button>

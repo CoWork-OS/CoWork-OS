@@ -30,6 +30,7 @@ vi.mock("electron-updater", () => ({
   },
 }));
 
+import { autoUpdater } from "electron-updater";
 import { UpdateManager } from "../update-manager";
 
 function updateInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
@@ -62,6 +63,30 @@ describe("UpdateManager platform compatibility", () => {
     mocks.downloadUpdate.mockResolvedValue([]);
   });
 
+  it("never installs a downloaded artifact on ordinary application exit", async () => {
+    const manager = new UpdateManager("darwin", () => "24.0.0");
+    await (manager as Any).electronUpdaterUpdate();
+    expect(autoUpdater.autoInstallOnAppQuit).toBe(false);
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+  it("retains installation denial after artifact verification fails", async () => {
+    const manager = new UpdateManager("darwin", () => "24.0.0");
+    vi.spyOn(manager as Any, "verifyDownloadedArtifact").mockResolvedValue({
+      status: "failed",
+      reason: "signature_invalid",
+    });
+    mocks.downloadUpdate.mockImplementationOnce(async () => {
+      const handler = mocks.updaterOn.mock.calls.find(
+        (call) => call[0] === "update-downloaded",
+      )![1];
+      handler({ version: "0.5.52", downloadedFile: "/tmp/TEST DATA.zip" });
+      return [];
+    });
+    await expect((manager as Any).electronUpdaterUpdate()).rejects.toThrow();
+    expect(autoUpdater.autoInstallOnAppQuit).toBe(false);
+    expect((manager as Any).updateReadyToInstall).toBe(false);
+    expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
   it("reports a newer release without offering it on Monterey", async () => {
     const manager = new UpdateManager("darwin", () => "21.6.0");
 

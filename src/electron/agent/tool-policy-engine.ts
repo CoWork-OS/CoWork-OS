@@ -419,6 +419,12 @@ export function evaluateToolAvailability(
     return { decision: "defer", reason: "empty_tool_name", metadata };
   }
 
+  // A connected MCP catalog is already an explicit user configuration. Tool
+  // discovery must work in any language without requiring protocol keywords.
+  if (normalizedToolName.startsWith("mcp_") || runtime?.capabilityTags.includes("mcp")) {
+    return { decision: "allow", metadata };
+  }
+
   if (hasToolAffinity(normalizedToolName, ctx.requiredTools)) {
     return { decision: "allow", metadata };
   }

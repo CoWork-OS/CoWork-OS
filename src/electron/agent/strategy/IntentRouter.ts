@@ -34,6 +34,38 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export class IntentRouter {
+  static hasSourceBackedRetrievalSignal(text: string): boolean {
+    const normalized = String(text || "")
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/\u0307/g, "");
+    // Use Unicode boundaries: JS \b does not recognize Turkish letters. Match
+    // retrieval actions and source objects independently of connector names.
+    const sourceScope =
+      /(?:^|[^\p{L}\p{N}_])(?:records?|decisions?|precedents?|sources?|citations?|passages?|databases?|documents?|reports?|(?:kayıt|karar|emsal|kaynak|alıntı|belge|dosya)[\p{L}]*)(?=$|[^\p{L}\p{N}_])/u.test(
+        normalized,
+      );
+    const retrievalAction =
+      /(?:^|[^\p{L}\p{N}_])(?:research|investigate|search|look up|retrieve|fetch|find|verify|check|compare|recommend|suggest|(?:bul|ara|araştır|getir|doğrula|karşılaştır)(?:abilir|ebilir|yabilir|yebilir|ır|ir|ur|ür|yın|yin|ın|in|ınız|iniz|abiliriz|ebiliriz|yabiliriz|yebiliriz|abilirsen|ebilirsen|yabilirsen|yebilirsen)?)(?=$|[^\p{L}\p{N}_])/u;
+    const proceduralQuestion =
+      /\b(?:how (?:should|can|do) i|how to|explain how|teach me how)\b|(?:^|[^\p{L}\p{N}_])nasıl\s+(?:bulurum|arayabilirim|araştırabilirim)(?=$|[^\p{L}\p{N}_])/u;
+    const deniedRetrieval =
+      /\b(?:do not|don't|never)\s+(?:research|investigate|search|look up|retrieve|fetch|find|verify|check|compare)\b/;
+    // A procedural advice question can be followed by a separate request to
+    // gather evidence. Do not let the first sentence suppress that request.
+    return (
+      sourceScope &&
+      normalized
+        .split(/[.!?;\n]+/u)
+        .some(
+          (clause) =>
+            retrievalAction.test(clause) &&
+            !proceduralQuestion.test(clause) &&
+            !deniedRetrieval.test(clause),
+        )
+    );
+  }
+
   private static hasDocumentAnalysisSignal(text: string): boolean {
     const normalized = String(text || "").toLowerCase();
     const documentScope =
@@ -185,6 +217,7 @@ export class IntentRouter {
     if (writingSignal) return "writing";
 
     const researchSignal =
+      this.hasSourceBackedRetrievalSignal(lower) ||
       this.hasDocumentAnalysisSignal(lower) ||
       /\b(research|investigate|look up|find out|analyze|analysis|compare|benchmark|sources?|citations?|market scan|trend)\b/.test(
         lower,
@@ -280,6 +313,7 @@ export class IntentRouter {
     );
     const documentAnalysisSignal = this.hasDocumentAnalysisSignal(lower);
     add("execution", 6, "document-analysis", documentAnalysisSignal);
+    add("execution", 6, "source-backed-retrieval", this.hasSourceBackedRetrievalSignal(lower));
     add(
       "execution",
       2,
@@ -316,7 +350,8 @@ export class IntentRouter {
       "terminal-transcript",
       terminalTranscriptMentioned && shellCommandMentioned,
     );
-    add("advice", 1, "question-form", /\?/.test(text));
+    // Punctuation does not distinguish advice from a polite request to act.
+    // Unrecognized languages retain the normal tool-capable conversation path.
     add(
       "execution",
       3,
@@ -474,10 +509,6 @@ export class IntentRouter {
     } else if (executionLike >= 3) {
       intent = "execution";
     } else if (planningLike >= 2) {
-      intent = "advice";
-    } else if (planningLike >= 1 && chatLike === 0) {
-      // Question with no chat signals (e.g. "have you raised this PR yet?")
-      // should be treated as advice rather than defaulting to chat
       intent = "advice";
     } else {
       intent = "chat";

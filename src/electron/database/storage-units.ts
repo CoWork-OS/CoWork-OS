@@ -1140,6 +1140,8 @@ export const STORAGE_UNITS = {
   }),
   workspace_findAll: storeUnit((db: Database.Database) => new WorkspaceStore(db), "findAll", {
     readonly: true,
+    // Workspace pickers read committed state; keep them out of the write/maintenance queue.
+    report: true,
   }),
   workspace_existsByPath: storeUnit(
     (db: Database.Database) => new WorkspaceStore(db),

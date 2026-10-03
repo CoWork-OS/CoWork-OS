@@ -286,6 +286,19 @@
   flex: 1;
 }
 
+.tray-settings .tray-notification-style {
+  width: 160px;
+  max-width: 100%;
+  flex: 0 0 160px;
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .tray-settings .tray-notification-style {
+    flex-basis: auto;
+  }
+}
+
 .tray-settings-option-title {
   display: block;
   font-size: 13px;
@@ -2082,7 +2095,13 @@
 .oauth-connected {
   display: flex;
   flex-direction: column;
+  align-items: flex-start; /* size buttons to their label instead of stretching */
   gap: 12px;
+}
+
+.oauth-connected > p,
+.oauth-login > p {
+  margin: 0; /* the flex gap already spaces these */
 }
 
 .oauth-status {
@@ -2102,7 +2121,29 @@
 .oauth-login {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 12px;
+}
+
+/* Model picker with an inline refresh action, capped to a readable width */
+.openai-model-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.openai-model-picker > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.openai-model-picker > button {
+  flex-shrink: 0;
+}
+
+.openai-request-controls .settings-form-grid {
+  max-width: 560px;
 }
 
 .oauth-login-btn {
@@ -2432,5 +2473,1071 @@
 }
 
 .provider-config-form .button-small {
+  margin-top: 8px;
+}
+
+.llm-provider-more-button {
+  justify-self: start; /* parent is a grid, where align-self alone does not apply */
+  margin-top: 8px;
+}
+
+.llm-provider-content .settings-subsection > button {
+  align-self: flex-start;
+}
+
+.llm-provider-content .settings-subsection > .settings-input[type="number"] {
+  max-width: 160px;
+}
+
+/* ------------------------------------------------------------------------
+   Frameless settings theme
+   Group containers on every settings tab sit directly on the page, flush with
+   the tab heading. Kept framed on purpose: status/feedback boxes (errors,
+   results, warnings, info/tip callouts, pairing codes), per-item cards and
+   rows, stat tiles, selectable tiles, tables and code blocks. Scoped to
+   .settings-content so shared classes keep their frames elsewhere; the extra
+   specificity also beats theme overrides and component-embedded <style> rules.
+   ------------------------------------------------------------------------ */
+.settings-page-layout
+  .settings-content
+  :is(
+    .settings-section.onboarding-section,
+    .settings-card:not(.is-selected):not(.settings-item-card):not(.skillhub-card):not(
+        .skillhub-quarantine-card
+      ):not(.memory-observation-result):not([role="status"]),
+    .settings-combined-section,
+    .settings-combined-section-header,
+    .settings-combined-body,
+    .system-security-section--tray .tray-settings > .settings-section,
+    .system-security-section--safety .settings-combined-body > .settings-section,
+    .system-security-section--permissions .settings-subsection,
+    .system-security-section--admin .settings-panel > .settings-section,
+    .relationship-stats,
+    .form-section,
+    .skillhub-group,
+    .skillhub-group summary,
+    .skillhub-group-content,
+    .infra-setup-section,
+    .infra-status-section,
+    .infra-wallet-card,
+    .infra-wallet-safety,
+    .infra-how-it-works,
+    .managed-accounts-panel,
+    .mcp-add-form,
+    .registry-filters,
+    .builtin-tool-category,
+    .builtin-tool-category-header,
+    .builtin-tool-list,
+    .builtin-tool-advanced,
+    .status-card,
+    .memory-list,
+    .memory-preview-card,
+    .insights-card,
+    .insights-hero-card,
+    .sc-status-card,
+    .sc-card,
+    .council-source-card,
+    .context-comparison,
+    .hooks-token-section
+  ) {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding-inline: 0; /* the frame's inset would now misalign it with the heading */
+  transform: none; /* neutralise hover lifts on now-frameless cards */
+}
+
+/* Light theme painted whole panels with a translucent white fill. */
+.settings-page-layout .settings-content .settings-panel {
+  background: transparent;
+}
+
+/* Sections that lost their frames get a hairline divider so they stay distinct. */
+.settings-page-layout
+  .settings-content
+  :is(
+    .settings-combined-section + .settings-combined-section,
+    .builtin-tool-category + .builtin-tool-category
+  ) {
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 16px;
+}
+
+/* Nested panel titles (e.g. "Model Access" under "AI & Models") read as
+   sub-headings, not a second page title. */
+.settings-page-layout .more-channels-content :is(.more-channels-header, .llm-provider-header) h2,
+.settings-page-layout .settings-content :is(.sc-title, .insights-header h2) {
+  font-size: 15px;
+}
+
+/* Panels that carried their own page padding/insets now align with the column. */
+.settings-page-layout .settings-content :is(.add-tools-panel, .sc-panel) {
+  padding: 0;
+  max-width: none;
+}
+
+.settings-page-layout .more-channels-content > .settings-subsection {
+  padding-left: 0;
+}
+
+.settings-page-layout .settings-content .personality-settings {
+  max-width: none;
+}
+
+/* Personality sub-tabs match the frameless pill tabs used elsewhere. */
+.settings-page-layout .settings-content .personality-nav-btn {
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.settings-page-layout .settings-content .personality-nav-btn:hover {
+  background: var(--color-bg-glass-hover);
+  color: var(--color-text);
+}
+
+.settings-page-layout .settings-content .personality-nav-btn.active {
+  background: var(--color-accent-subtle);
+  color: var(--color-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* App-style two-pane panels need the full width and keep their pane frames. */
+.settings-content:has(.cp-container),
+.settings-content:has(.task-trace-debugger) {
+  padding: 24px 32px;
+}
+
+/* Everyday Agent's settings mode reuses the app's main-content shell. */
+.settings-page-layout .settings-content .everyday-agent-main.settings-mode {
+  background: transparent !important; /* beats .main-content's !important light fill */
+  padding-top: 0;
+}
+
+/* Appearance group labels sit below the section heading in the hierarchy. */
+.settings-page-layout .settings-content .appearance-section h4 {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+/* Duplicate "Agent Security" heading under its own section header. */
+.system-security-section--agent-security .agent-security-heading h2 {
+  display: none;
+}
+
+/* Jev's sticky save bar blends with the page instead of a translucent band. */
+.settings-page-layout .jev-settings-save-bar {
+  background: var(--color-bg-primary);
+}
+
+/* Field widths across all tabs: one full-field width and one short width, so
+   stacked forms keep a single right edge. Text inputs, dropdowns and the
+   searchable select share 560px; number fields share 220px. Search boxes and
+   textareas keep the full column. */
+.settings-page-layout .settings-content
+  :is(select, .searchable-select, input):where(
+    :not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(
+        [type="color"]
+      ):not([type="hidden"]):not([type="search"])
+  ) {
+  max-width: 560px;
+}
+
+.settings-page-layout .settings-content
+  :is(.llm-provider-search .settings-input, .cp-search-input, .ps-input) {
+  max-width: none;
+}
+
+.settings-page-layout .settings-content input[type="number"] {
+  max-width: 220px;
+}
+
+.settings-page-layout .settings-content .settings-input.settings-input-number {
+  width: 220px;
+  flex: none;
+}
+
+/* Buttons inside flex-column / grid containers size to their label. */
+.settings-page-layout .settings-content
+  :is(
+    .settings-subsection,
+    .form-group,
+    .settings-card,
+    .computer-use-status-card,
+    .council-source-card
+  )
+  > :is(button, .settings-button, .button-primary, .button-secondary, .button-danger) {
+  align-self: flex-start;
+}
+
+.settings-page-layout .settings-content .ea-preview-form > button {
+  justify-self: start;
+}
+
+.settings-page-layout .settings-content .update-button {
+  width: auto;
+}
+
+/* Council / Skills form fields match the standard settings inputs. */
+.settings-page-layout .settings-content .form-group :is(input, textarea, select) {
+  background: var(--color-bg-input);
+  font-size: 13px;
+}
+
+/* Profiles (System & Security) */
+.profile-settings-group {
+  margin-bottom: 16px;
+}
+
+.profile-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.profile-settings-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.profile-settings-path {
+  margin-bottom: 0;
+}
+
+.profile-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.profile-settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-settings-actions,
+.profile-settings-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-settings-form .settings-input {
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+
+.profile-settings-status {
+  margin: 12px 0 0;
+}
+
+.profile-settings-error {
+  color: var(--color-error);
+}
+
+/* Field label that follows another field in the same section. */
+.settings-label--spaced {
+  margin-top: 10px;
+}
+
+/* Infrastructure headings use the standard section heading size. */
+.settings-page-layout .settings-content
+  :is(.infra-setup-info, .infra-wallet-card, .infra-config-section, .infra-danger-section, .infra-how-it-works)
+  h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Short fixed-format fields (e.g. phone prefixes). */
+.settings-page-layout .settings-input.settings-input--narrow {
+  width: 100px;
+}
+
+/* Range sliders: the bg-tertiary track was only visible against the old card
+   fill; on the frameless page it disappeared, leaving floating thumbs. */
+.settings-page-layout .settings-content .settings-slider {
+  max-width: 420px;
+  background: var(--color-border);
+}
+
+.settings-page-layout .settings-content .settings-slider:hover {
+  background: var(--color-border-light, var(--color-border));
+}
+
+.settings-page-layout .settings-content .settings-slider:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+/* Unchecked toggle tracks and progress tracks also relied on the old card fill.
+   Only the unchecked state is touched so the accent "on" state still wins. */
+.settings-page-layout .settings-content input:not(:checked) + .toggle-slider {
+  background-color: var(--color-border-light, var(--color-border));
+}
+
+.settings-page-layout .settings-content .toggle-slider::before {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.settings-page-layout .settings-content .progress-bar {
+  background: var(--color-border);
+}
+
+/* Empty bar tracks used a 3–5% glass tint that only read against the old card
+   fills; give them the same visible track as sliders and progress bars. */
+.settings-page-layout .settings-content
+  :is(.insights-hero-rate-bar, .insights-bar-track, .insights-hour-bar.no-data, .chatgpt-import-progress-bar-container) {
+  background: var(--color-border);
+}
+
+.settings-page-layout .settings-content .cm-profile-tools-badge {
+  background: var(--color-border);
+}
+
+/* System & Security sections clipped content for their old rounded frame; now
+   frameless, that clipping cut off the selected profile card's border and ring. */
+.settings-page-layout .settings-content :is(.settings-combined-section, .builtin-tool-category) {
+  overflow: visible;
+}
+
+/* ------------------------------------------------------------------------
+   Canonical settings controls
+   Every settings tab uses one look per control type, matching the AI & Models
+   reference: flat 13px controls, --radius-md corners, 1px border, input fill,
+   accent focus ring. Tabs historically used six button systems (button-*,
+   settings-button, btn-*, chatgpt-import-btn-*, ea-*-button, memory-inline-btn)
+   and several select/input variants; they are all mapped here. Scoped to
+   .settings-content; specificity beats theme and component-embedded rules.
+   ------------------------------------------------------------------------ */
+
+/* Buttons: secondary is the default look. */
+.settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .button-secondary,
+    .button-danger,
+    .settings-button,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .chatgpt-import-btn,
+    .ea-primary-button,
+    .ea-secondary-button,
+    .memory-inline-btn,
+    .regenerate-button
+  ) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: normal;
+  text-align: center;
+  text-transform: none;
+  box-shadow: none;
+  transform: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* Glossy overlays from the older button system. */
+.settings-page-layout .settings-content
+  :is(.button-primary, .button-secondary, .settings-button, .btn-primary, .btn-secondary)::before {
+  display: none;
+}
+
+.settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .button-secondary,
+    .button-danger,
+    .settings-button,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .chatgpt-import-btn,
+    .ea-primary-button,
+    .ea-secondary-button,
+    .memory-inline-btn,
+    .regenerate-button
+  ):hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light, var(--color-border));
+  box-shadow: none;
+  transform: none;
+}
+
+/* Small. */
+.settings-page-layout .settings-content
+  :is(.button-small, .btn-sm, .btn-xs, .settings-button.small, .memory-inline-btn) {
+  min-height: 28px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* Primary. */
+.settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .settings-button.primary,
+    .settings-button-primary,
+    .btn-primary,
+    .chatgpt-import-btn-primary,
+    .ea-primary-button,
+    .regenerate-button
+  ),
+.settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .settings-button.primary,
+    .settings-button-primary,
+    .btn-primary,
+    .chatgpt-import-btn-primary,
+    .ea-primary-button,
+    .regenerate-button
+  ):hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast, #fff);
+}
+
+html.visual-calm .settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .settings-button.primary,
+    .settings-button-primary,
+    .btn-primary,
+    .chatgpt-import-btn-primary,
+    .ea-primary-button,
+    .regenerate-button
+  ),
+html.visual-calm .settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .settings-button.primary,
+    .settings-button-primary,
+    .btn-primary,
+    .chatgpt-import-btn-primary,
+    .ea-primary-button,
+    .regenerate-button
+  ):hover:not(:disabled) {
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+}
+
+.settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .settings-button.primary,
+    .settings-button-primary,
+    .btn-primary,
+    .chatgpt-import-btn-primary,
+    .ea-primary-button,
+    .regenerate-button
+  ):hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+/* Danger. */
+.settings-page-layout .settings-content
+  :is(.button-danger, .settings-button.danger, .settings-button-danger, .btn-danger, .memory-inline-btn.danger) {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
+}
+
+.settings-page-layout .settings-content
+  :is(.button-danger, .settings-button.danger, .settings-button-danger, .btn-danger, .memory-inline-btn.danger):hover:not(
+    :disabled
+  ) {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.18);
+}
+
+.settings-page-layout .settings-content
+  :is(
+    .button-primary,
+    .button-secondary,
+    .button-danger,
+    .settings-button,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger,
+    .chatgpt-import-btn,
+    .ea-primary-button,
+    .ea-secondary-button,
+    .memory-inline-btn,
+    .regenerate-button
+  ):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Dropdowns: every native select matches the searchable-select trigger. */
+.settings-page-layout .settings-content select:where(:not([multiple]):not(.ps-select)) {
+  min-height: 38px;
+  padding: 9px 34px 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-input);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  box-shadow: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.settings-page-layout .settings-content .searchable-select-trigger {
+  min-height: 38px;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-input);
+  font-size: 13px;
+  box-shadow: none;
+}
+
+/* Text inputs and textareas. Horizontal padding is left alone so inputs with
+   leading icons keep their inset. */
+.settings-page-layout .settings-content
+  :is(input, textarea):where(
+    :not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(
+        [type="color"]
+      ):not([type="hidden"]):not([type="submit"]):not([type="button"]):not(.cp-search-input):not(
+        .ps-input
+      )
+  ) {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-input);
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: none;
+}
+
+.settings-page-layout .settings-content
+  input:where(
+    :not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(
+        [type="color"]
+      ):not([type="hidden"]):not([type="submit"]):not([type="button"]):not(.cp-search-input):not(
+        .ps-input
+      )
+  ) {
+  min-height: 38px;
+}
+
+/* Shared hover / focus for all field-like controls. */
+.settings-page-layout .settings-content
+  :is(select:not([multiple]), .searchable-select-trigger, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea):hover:not(
+    :disabled
+  ):not(:focus) {
+  border-color: var(--color-border-light, var(--color-border));
+}
+
+.settings-page-layout .settings-content
+  :is(select, .searchable-select-trigger, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea):focus,
+.settings-page-layout .settings-content .searchable-select-trigger:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.settings-page-layout .settings-content :is(select, input, textarea):disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Selected state for preset/choice buttons (e.g. local model presets). */
+.settings-page-layout .settings-content :is(.button-secondary, .settings-button).is-selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+/* Tab rows: every sub-tab / filter / toggle row uses the frameless pill tabs of
+   the AI & Models reference (.more-channels-tab). */
+.settings-page-layout .settings-content
+  :is(.settings-tabs, .mcp-settings-nav, .insights-period-filter, .insights-awu-toggle, .cm-filter-tabs) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-page-layout .settings-content
+  :is(
+    .settings-tab,
+    .mcp-nav-button,
+    .insights-period-btn,
+    .insights-awu-toggle-btn,
+    .cm-filter-tab,
+    .context-policy-settings .tab
+  ) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.settings-page-layout .settings-content
+  :is(
+    .settings-tab,
+    .mcp-nav-button,
+    .insights-period-btn,
+    .insights-awu-toggle-btn,
+    .cm-filter-tab,
+    .context-policy-settings .tab
+  ):hover:not(.active):not(.cm-filter-tab--active) {
+  background: var(--color-bg-glass-hover);
+  color: var(--color-text);
+}
+
+.settings-page-layout .settings-content
+  :is(
+    .settings-tab.active,
+    .mcp-nav-button.active,
+    .insights-period-btn.active,
+    .insights-awu-toggle-btn.active,
+    .cm-filter-tab--active,
+    .context-policy-settings .tab.active
+  ) {
+  background: var(--color-accent-subtle);
+  color: var(--color-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Toggle switches: .settings-toggle and .toggle-switch had conflicting sizes and
+   knob travel from three rule sets; one canonical 40×22 switch. */
+.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
+}
+
+.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) .toggle-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) .toggle-slider::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: #fff;
+  transform: translateX(0);
+  transition: transform 0.2s ease;
+}
+
+.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) input:checked + .toggle-slider {
+  background-color: var(--color-accent);
+}
+
+.settings-page-layout .settings-content
+  :is(.settings-toggle, .toggle-switch)
+  input:checked
+  + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.settings-page-layout .settings-content
+  :is(.settings-toggle, .toggle-switch)
+  input:focus-visible
+  + .toggle-slider {
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Label + field rows (Safety, Permissions): a fixed label column so every field
+   starts at the same x, instead of following each label's text width. */
+.settings-page-layout .settings-content .settings-inline-input:has(> label:first-child) {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  column-gap: 16px;
+  margin-top: 10px;
+}
+
+.settings-page-layout .settings-content .settings-inline-input > label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: normal;
+}
+
+/* One field width per row type so the field column lines up: short fields
+   (numbers, dropdowns) share 220px; free-text fields can grow to 420px. */
+.settings-page-layout .settings-content .settings-inline-input > :is(input, select) {
+  width: 100%;
+  max-width: 560px;
+}
+
+.settings-page-layout .settings-content
+  .settings-inline-input
+  > :is(select, input[type="number"], .settings-input-number) {
+  width: 100%;
+  max-width: 220px;
+  text-align: left;
+}
+
+.settings-page-layout .settings-content .settings-inline-input + .settings-hint {
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .settings-page-layout .settings-content .settings-inline-input {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+}
+
+/* A second header inside one section (e.g. "Continuation Compaction" under
+   "Execution Continuation") starts a new group: space it and add a hairline. */
+.settings-page-layout .settings-content .settings-section > .settings-section-header:not(:first-child) {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/* Consecutive setting groups inside a System & Security section are separated.
+   Listed with the same contextual selectors as the frameless override so the
+   divider is not stripped by it; vertical padding from the old boxes is dropped. */
+.settings-page-layout .settings-content
+  :is(
+    .settings-combined-body > .settings-section,
+    .system-security-section--safety .settings-combined-body > .settings-section,
+    .system-security-section--tray .tray-settings > .settings-section,
+    .system-security-section--admin .settings-panel > .settings-section
+  ) {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.settings-page-layout .settings-content
+  :is(
+    .settings-combined-body > .settings-section + .settings-section,
+    .system-security-section--safety .settings-combined-body > .settings-section + .settings-section,
+    .system-security-section--tray .tray-settings > .settings-section + .settings-section,
+    .system-security-section--admin .settings-panel > .settings-section + .settings-section
+  ) {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/* ------------------------------------------------------------------------
+   Settings form building blocks (System & Security and every tab using them)
+   Group  = .settings-section: header row (title + optional toggle), description,
+            then fields. Sub-group = .settings-subsection / .settings-form-group:
+            no indent, 13px semibold title. Field rows = .settings-inline-input.
+            List editors = .settings-input-group (input + Add on one row) followed
+            by .pattern-list chips and an empty-state hint.
+   ------------------------------------------------------------------------ */
+.settings-page-layout .settings-content .settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.settings-page-layout .settings-content .settings-section-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-page-layout .settings-content .settings-section > .settings-description {
+  margin: 0 0 4px;
+  max-width: 680px;
+}
+
+/* Sub-groups: flush with the group, titled like a field group. */
+.settings-page-layout .settings-content .settings-section > :is(.settings-subsection, .settings-form-group) {
+  margin-top: 20px;
+  padding-left: 0;
+}
+
+.settings-page-layout .settings-content .settings-subsection {
+  gap: 8px;
+}
+
+.settings-page-layout .settings-content .settings-subsection > h4,
+.settings-page-layout .settings-content .settings-form-group > .settings-section-header > label:first-child {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-page-layout .settings-content .settings-subsection > .settings-description {
+  margin: 0;
+}
+
+/* List editor: input and its Add button on one row. */
+.settings-page-layout .settings-content .settings-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.settings-page-layout .settings-content .settings-input-group > :is(input, select) {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.settings-page-layout .settings-content .settings-input-group > button {
+  flex: none;
+}
+
+.settings-page-layout .settings-content .pattern-list {
+  gap: 6px;
+  margin-top: 0;
+}
+
+/* Hints: tight under their field; a closing note for the whole group gets air. */
+.settings-page-layout .settings-content .settings-section .settings-hint {
+  margin: 6px 0 0;
+  max-width: 680px;
+}
+
+.settings-page-layout .settings-content
+  .settings-section
+  > :is(.settings-subsection, .settings-form-group)
+  + .settings-hint {
+  margin-top: 16px;
+}
+
+/* Buttons that follow a field row (e.g. "Reset learned style"). */
+.settings-page-layout .settings-content .settings-form-group > button,
+.settings-page-layout .settings-content .settings-inline-input + button {
+  margin-top: 12px;
+}
+
+/* Inline-input rows with a trailing hint keep the hint under the field. */
+.settings-page-layout .settings-content .settings-inline-input:has(> label:first-child) > .settings-hint {
+  grid-column: 2;
+  margin-top: 4px;
+}
+
+/* Permissions: custom access profile cards, the new-profile form and rule rows. */
+.access-profile-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.access-profile-card {
+  display: grid;
+  gap: 2px;
+}
+
+.access-profile-card-title {
+  font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.access-profile-form {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 560px);
+  align-items: center;
+  column-gap: 16px;
+  row-gap: 10px;
+  margin-top: 12px;
+}
+
+.access-profile-form > label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.access-profile-form-submit {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.settings-list-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.settings-list-row > :first-child {
+  min-width: 0;
+}
+
+.settings-list-row-title {
+  margin-bottom: 4px;
+}
+
+/* Compact controls in dense rows and toolbars (Built-in Tools per-tool rows,
+   Connectors category filter, Usage Insights date picker): same look, small size. */
+.settings-page-layout .settings-content
+  :is(
+    .builtin-tool-timeout-input,
+    .builtin-tool-mode-select,
+    .builtin-tool-priority-select,
+    .cm-category-select,
+    .insights-custom-picker-input
+  ) {
+  min-height: 30px;
+  height: auto;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  font-size: 12px;
+}
+
+.settings-page-layout .settings-content
+  :is(.builtin-tool-mode-select, .builtin-tool-priority-select, .cm-category-select) {
+  padding-right: 28px;
+  padding-left: 10px;
+  background-position: right 10px center;
+}
+
+/* Anything with the hidden attribute stays hidden, even when a class sets display. */
+.settings-page-layout .settings-content [hidden] {
+  display: none !important;
+}
+
+/* Settings sidebar: draw the focus ring inside the item. The scrolling nav list
+   clips overflow, so the default outside ring lost its left edge. */
+html .settings-nav-items .settings-nav-item:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Scroll areas that hold interactive rows clip overflow; draw focus rings inside
+   so the first/last row's ring is not cut off (same fix as the sidebar). */
+.settings-page-layout .settings-content
+  :is(
+    .memory-list,
+    .memory-inspector-shell,
+    .memory-inspector-facts,
+    .registry-tools-list,
+    .sc-targets-list,
+    .insights-table-wrap,
+    .agent-security-table-wrap,
+    .awareness-grid
+  )
+  :focus-visible {
+  outline-offset: -2px;
+}
+
+/* Frameless group containers drop the vertical padding their old boxes needed;
+   their own margins / parent gaps already space consecutive groups. */
+.settings-page-layout .settings-content
+  :is(
+    .settings-section.onboarding-section,
+    .settings-card:not(.is-selected):not(.settings-item-card):not(.skillhub-card):not(
+        .skillhub-quarantine-card
+      ):not(.memory-observation-result):not([role="status"]),
+    .relationship-stats,
+    .form-section,
+    .infra-setup-section,
+    .infra-status-section,
+    .infra-wallet-card,
+    .infra-wallet-safety,
+    .infra-how-it-works,
+    .managed-accounts-panel,
+    .mcp-add-form,
+    .registry-filters,
+    .status-card,
+    .memory-preview-card,
+    .insights-card,
+    .insights-hero-card,
+    .sc-status-card,
+    .sc-card,
+    .council-source-card,
+    .context-comparison,
+    .hooks-token-section
+  ) {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Usage Insights two-column cards are frameless; a wider column gap keeps the
+   two columns visually separate. */
+.settings-page-layout .settings-content .insights-two-col {
+  column-gap: 32px;
+  row-gap: 24px;
+}
+
+/* Managed accounts: collapsed add/edit form. */
+.managed-accounts-form {
+  margin-top: 16px;
+}
+
+.managed-accounts-form-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Button that reveals a collapsed "add" form. */
+.settings-page-layout .settings-content .settings-collapsed-trigger {
+  align-self: flex-start;
   margin-top: 8px;
 }

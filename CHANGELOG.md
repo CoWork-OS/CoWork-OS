@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Browser connection enforcement**: install visible-browser guards before first navigation, resolve task permissions during registration, and pin Chromium connections through a policy-enforcing local proxy, including redirects. WebSockets and external CDP attachment are refused; shared cookie partitions require every active task to permit the destination.
+- **Subprocess and tunnel authority**: apply administrator network restrictions to code execution and unsandboxed shell fallback; serialize live tunnel updates, revoke replaced relay clients, and contain malformed client messages while retaining audit and heartbeat traffic.
+- **Document and webhook limits**: cap Office/OpenDocument archive input, entry count, actual expanded bytes, and PPTX table dimensions; authenticate cron webhooks before incrementally reading their 1 MiB body limit.
+- **Git and updater hardening**: disable repository fsmonitor hooks in browser Git operations and disable updater installation on ordinary application exit. These changes are local and unreleased.
+- See the [October 2 browser and runtime fix record](docs/security-fixes-2026-10-02-browser-runtime.md) for these nine findings and two hardening items, source and test mappings, compatibility changes, and local verification limits.
 - **Process sandbox policy**: enforce read-only subtrees, recursive Git/policy protections, and separate delete authority across macOS process backends; reject Docker mount configurations that cannot enforce those boundaries. Host directory moves/removals require guarded file tools on macOS.
 - **Code execution permission**: require shell capability and shell approval handling for Python, JavaScript, and shell `execute_code` calls.
 - **Saved provider credentials**: bind credential reuse to the configured endpoint during model discovery, connection tests, and settings saves; changed destinations require replacement credentials.

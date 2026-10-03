@@ -186,6 +186,7 @@ describe("OpenAIProvider structured errors", () => {
             type: "object",
             properties: {
               query: { type: "string" },
+              chamber: { type: "string" },
             },
             required: ["query"],
           },
@@ -209,7 +210,12 @@ describe("OpenAIProvider structured errors", () => {
             type: "function",
             name: "lookup",
             description: "Lookup status",
-            parameters: expect.objectContaining({ type: "object" }),
+            parameters: expect.objectContaining({
+              type: "object",
+              properties: { query: { type: "string" }, chamber: { type: "string" } },
+              required: ["query"],
+            }),
+            strict: false,
           },
         ],
         input: [

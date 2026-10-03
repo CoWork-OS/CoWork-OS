@@ -3346,6 +3346,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openaiOAuthStart: (options?: { persist?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_START, options),
   openaiOAuthLogout: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_OAUTH_LOGOUT),
+  openaiSiwcStart: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENAI_SIWC_START),
   getBedrockModels: (config?: {
     region?: string;
     accessKeyId?: string;
@@ -6490,6 +6491,13 @@ export interface ElectronAPI {
     };
   }>;
   openaiOAuthLogout: () => Promise<{ success: boolean }>;
+  /** Official Sign in with ChatGPT; persists the session on success. */
+  openaiSiwcStart: () => Promise<{
+    success: boolean;
+    error?: string;
+    email?: string;
+    recommendedModel?: string;
+  }>;
   getBedrockModels: (config?: {
     region?: string;
     accessKeyId?: string;

@@ -3,6 +3,10 @@ import * as path from "path";
 import * as fs from "fs/promises";
 import { Workspace } from "../../../shared/types";
 import { normalizeBrowserUrl } from "../../browser/browser-session-manager";
+import {
+  createBrowserNetworkProxy,
+  type BrowserNetworkProxy,
+} from "../../security/browser-network-proxy";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 import {
   assertWorkspaceFilesystemAccess,
@@ -27,11 +31,8 @@ export interface BrowserOptions {
    */
   channel?: "chromium" | "chrome" | "brave";
   /**
-   * Chrome DevTools Protocol endpoint for attaching to an existing Chrome instance.
-   * Use when you want to control a signed-in browser session. Enable remote debugging:
-   * - Launch Chrome with --remote-debugging-port=9222
-   * - Or visit chrome://inspect/#devices and enable "Discover USB devices" / remote targets
-   * - Endpoint is typically http://localhost:9222 or the WebSocket URL from the version endpoint
+   * Legacy Chrome DevTools Protocol endpoint. External contexts are rejected
+   * because their existing connections cannot be brought under network policy.
    */
   debuggerUrl?: string;
 }
@@ -117,7 +118,7 @@ export class BrowserService {
   private workspace: Workspace;
   private options: BrowserOptions;
   private isAttached = false;
-  private configuredPages = new WeakSet<object>();
+  private networkProxy: BrowserNetworkProxy | null = null;
 
   constructor(workspace: Workspace, options: BrowserOptions = {}) {
     this.workspace = workspace;
@@ -181,50 +182,29 @@ export class BrowserService {
   }
 
   private async configurePage(page: Page): Promise<void> {
-    if (this.configuredPages.has(page as object)) return;
-    this.configuredPages.add(page as object);
-
-    // Some unit-test adapters and older Playwright-compatible clients do not
-    // expose request interception. Navigation is still checked below; avoid
-    // turning that compatibility gap into a runtime crash.
-    if (typeof (page as Any).route !== "function") return;
-
-    await page.route("**/*", async (route) => {
-      const requestUrl = route.request().url();
-      let parsed: URL;
-      try {
-        parsed = new URL(requestUrl);
-      } catch {
-        await route.abort("blockedbyclient").catch(() => {});
-        return;
-      }
-      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-        try {
-          this.assertNetworkUrlAllowed(requestUrl, "browser_request");
-        } catch {
-          await route.abort("blockedbyclient").catch(() => {});
-          return;
-        }
-      } else if (
-        parsed.protocol !== "data:" &&
-        parsed.protocol !== "blob:" &&
-        parsed.protocol !== "about:"
-      ) {
-        await route.abort("blockedbyclient").catch(() => {});
-        return;
-      }
-      await route.continue().catch(() => {});
-    });
+    page.setDefaultTimeout(this.options.timeout!);
+    this.assertPageUrlAllowed(page.url());
   }
 
-  private configureContext(context: BrowserContext): void {
-    if (typeof (context as Any).on !== "function") return;
-    context.on("page", (page: Page) => {
-      void this.configurePage(page).catch(() => {
-        // Navigation and current-page checks remain authoritative if request
-        // interception cannot be installed on a newly opened page.
-      });
+  private async configureContext(context: BrowserContext): Promise<void> {
+    if (typeof context.route !== "function" || typeof context.routeWebSocket !== "function") {
+      throw new Error("Browser context does not support required network guards");
+    }
+    if (context.serviceWorkers().length)
+      throw new Error("Cannot attach to a browser context with active service workers");
+    await context.routeWebSocket("**/*", (socket) =>
+      socket.close({ code: 1008, reason: "WebSockets are disabled by browser network policy" }),
+    );
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      try {
+        this.assertNetworkUrlAllowed(request.url(), "browser_request");
+        await route.continue();
+      } catch {
+        await route.abort("blockedbyclient").catch(() => {});
+      }
     });
+    for (const page of context.pages()) await this.configurePage(page);
   }
 
   private isRetryableBrowserError(error: unknown): boolean {
@@ -369,28 +349,17 @@ export class BrowserService {
     try {
       const debuggerUrl = this.options.debuggerUrl?.trim();
       if (debuggerUrl) {
-        // Attach to existing Chrome via Chrome DevTools Protocol
-        // Enable with: chrome --remote-debugging-port=9222
-        // Or visit chrome://inspect/#devices for WebSocket URL
-        const endpoint =
-          debuggerUrl.startsWith("ws://") || debuggerUrl.startsWith("wss://")
-            ? debuggerUrl
-            : debuggerUrl.replace(/\/$/, "");
-        browser = await chromium.connectOverCDP(endpoint);
-        const contexts = browser.contexts();
-        context = contexts[0] ?? (await browser.newContext({ viewport: this.options.viewport }));
-        this.configureContext(context);
-        const page = context.pages()[0] ?? (await context.newPage());
-        page.setDefaultTimeout(this.options.timeout!);
-        await this.configurePage(page);
-        this.assertPageUrlAllowed(page.url());
-        this.browser = browser;
-        this.context = context;
-        this.page = page;
-        this.isAttached = true;
-        return;
+        // Existing CDP sockets and workers predate interception and cannot be
+        // revoked safely without disrupting the externally owned browser.
+        throw new Error(
+          "External browser attachment is unavailable under enforced network policy. Use a dedicated browser profile instead.",
+        );
       }
 
+      this.networkProxy = await createBrowserNetworkProxy((url) =>
+        this.assertNetworkUrlAllowed(url, "browser_request"),
+      );
+      const proxy = { server: this.networkProxy.url, bypass: "<-loopback>" };
       const channel = this.options.channel === "chrome" ? "chrome" : undefined;
       const executablePath =
         this.options.channel === "brave" ? await this.resolveBraveExecutablePath() : undefined;
@@ -407,24 +376,39 @@ export class BrowserService {
 
         context = await chromium.launchPersistentContext(this.options.userDataDir, {
           headless: this.options.headless,
+          proxy,
+          args: [
+            "--disable-http2",
+            "--disable-quic",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+          ],
           ...(channel ? { channel } : {}),
           ...(executablePath ? { executablePath } : {}),
           viewport: this.options.viewport,
+          serviceWorkers: "block",
         });
         browser = context.browser();
       } else {
         browser = await chromium.launch({
           headless: this.options.headless,
+          proxy,
+          args: [
+            "--disable-http2",
+            "--disable-quic",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+          ],
           ...(channel ? { channel } : {}),
           ...(executablePath ? { executablePath } : {}),
         });
 
         context = await browser.newContext({
+          proxy,
           viewport: this.options.viewport,
+          serviceWorkers: "block",
         });
       }
 
-      this.configureContext(context);
+      await this.configureContext(context);
       const page = context.pages()[0] ?? (await context.newPage());
       page.setDefaultTimeout(this.options.timeout!);
       await this.configurePage(page);
@@ -434,6 +418,8 @@ export class BrowserService {
       this.context = context;
       this.page = page;
     } catch (error) {
+      await this.networkProxy?.close();
+      this.networkProxy = null;
       // Cleanup partial initialization on error
       if (context) {
         await context.close().catch(() => {});
@@ -450,8 +436,8 @@ export class BrowserService {
       const looksLikeLocked = /lock|already in use|profile.*in use/i.test(msg);
       if (isChromeProfile && (looksLikeNotFound || looksLikeLocked)) {
         const hint = looksLikeNotFound
-          ? "Google Chrome may not be installed, or Playwright cannot find it. Install Chrome or use browser_attach with debugger_url to connect to an existing Chrome instance."
-          : "Chrome is likely already running with this profile. Close Chrome or use browser_attach with debugger_url to connect to the running instance.";
+          ? "Google Chrome may not be installed, or Playwright cannot find it. Install Chrome and use a dedicated profile directory."
+          : "Chrome is likely already running with this profile. Close Chrome or use a separate profile directory.";
         throw new Error(`${msg} ${hint}`);
       }
       throw error;
@@ -1114,6 +1100,8 @@ export class BrowserService {
    * Close the browser (or disconnect when attached to existing Chrome)
    */
   async close(): Promise<void> {
+    await this.networkProxy?.close();
+    this.networkProxy = null;
     if (this.isAttached) {
       // Attached mode: only disconnect, do not close user's browser tabs
       if (this.browser) {

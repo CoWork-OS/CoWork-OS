@@ -13,6 +13,7 @@ import { ISandbox, SandboxOptions, createSandbox } from "../sandbox/sandbox-fact
 import { createSecureTempFile } from "../sandbox/security-utils";
 import type { Workspace } from "../../../shared/types";
 import type { LLMTool } from "../llm/types";
+import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
 
 export interface CodeExecInput {
   language: "python" | "javascript" | "shell";
@@ -70,9 +71,15 @@ export class CodeExecTools {
         "execute_code network access cannot be combined with domain-scoped network rules; use a profile without domain rules or keep network disabled.",
       );
     }
+    if (!canEnableSubprocessNetwork(permissions)) {
+      throw new Error("execute_code network access is disabled by administrator policy.");
+    }
   }
 
   async executeCode(input: CodeExecInput): Promise<CodeExecResult> {
+    if (input.allow_network !== undefined && typeof input.allow_network !== "boolean") {
+      throw new Error("execute_code allow_network must be a boolean.");
+    }
     if (this.workspace.permissions?.shell !== true) {
       throw new Error("execute_code requires workspace shell permission.");
     }
@@ -83,6 +90,14 @@ export class CodeExecTools {
       permissions.accessSandboxMode === "danger-full-access" &&
       permissions.accessApprovalPolicy === "never" &&
       permissions.unrestrictedFileAccess === true;
+    if (
+      sandbox.type === "none" &&
+      (input.allow_network !== true || !canEnableSubprocessNetwork(permissions))
+    ) {
+      throw new Error(
+        "execute_code cannot enforce network restrictions without an OS-level sandbox.",
+      );
+    }
     if (sandbox.type === "none" && !unrestrictedProfile) {
       throw new Error(
         "execute_code requires an OS-level sandbox. Configure Docker or macOS sandboxing before using this tool.",
@@ -96,7 +111,7 @@ export class CodeExecTools {
     const options: SandboxOptions = {
       timeout: timeoutSec * 1000,
       maxOutputSize: MAX_OUTPUT_BYTES,
-      allowNetwork: input.allow_network ?? false,
+      allowNetwork: input.allow_network === true,
       cwd: this.workspace.path,
     };
 

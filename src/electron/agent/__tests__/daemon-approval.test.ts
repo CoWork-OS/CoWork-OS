@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { AgentDaemon } from "../daemon";
 import { PermissionSettingsManager } from "../../security/permission-settings-manager";
+import { MCPClientManager } from "../../mcp/client/MCPClientManager";
 
 vi.mock("../../admin/policies", () => ({
   loadPolicies: vi.fn(() => ({
@@ -29,6 +30,36 @@ vi.mock("../../security/network-policy", () => ({
 }));
 
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+
+describe("AgentDaemon MCP startup recovery", () => {
+  it("waits for the initial connected tool catalog before resuming a task", async () => {
+    let finishDiscovery!: () => void;
+    const discovery = new Promise<void>((resolve) => {
+      finishDiscovery = resolve;
+    });
+    const initialize = vi
+      .spyOn(MCPClientManager.getInstance(), "initialize")
+      .mockReturnValue(discovery);
+    const daemonLike = {
+      resumeInterruptedTask: vi.fn().mockResolvedValue(undefined),
+      failTask: vi.fn(),
+      logEvent: vi.fn(),
+    };
+    try {
+      const recovery = AgentDaemon.prototype["resumeInterruptedTasks"].call(daemonLike as Any, [
+        { id: "mcp-recovery", title: "Find a decision" } as Any,
+      ]);
+      expect(initialize).toHaveBeenCalledOnce();
+      expect(daemonLike.resumeInterruptedTask).not.toHaveBeenCalled();
+      finishDiscovery();
+      await recovery;
+      expect(daemonLike.resumeInterruptedTask).toHaveBeenCalledOnce();
+      expect(daemonLike.failTask).not.toHaveBeenCalled();
+    } finally {
+      initialize.mockRestore();
+    }
+  });
+});
 
 describe("AgentDaemon.requestApproval auto-approve controls", () => {
   afterEach(() => {
@@ -154,16 +185,20 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       logEvent: vi.fn(),
     }) as Any;
 
-    const result = await AgentDaemon.prototype.evaluateToolPermission.call(daemonLike, "task-auto", {
-      approvalType: "external_service",
-      toolName: "write_file",
-      details: {
-        path: "package.json",
-        params: {
+    const result = await AgentDaemon.prototype.evaluateToolPermission.call(
+      daemonLike,
+      "task-auto",
+      {
+        approvalType: "external_service",
+        toolName: "write_file",
+        details: {
           path: "package.json",
+          params: {
+            path: "package.json",
+          },
         },
       },
-    });
+    );
 
     expect(result.decision).toBe("allow");
     expect(result.reason).toEqual(

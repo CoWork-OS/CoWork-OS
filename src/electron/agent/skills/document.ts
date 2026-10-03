@@ -1,3 +1,4 @@
+import { loadDocumentArchive, readDocumentArchiveBuffer } from "../../security/document-archive";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -16,7 +17,6 @@ import {
 } from "docx";
 import PDFDocument from "pdfkit";
 import * as mammoth from "mammoth";
-import JSZip from "jszip";
 import { Workspace } from "../../../shared/types";
 
 export interface ContentBlock {
@@ -461,7 +461,7 @@ export class DocumentBuilder {
   async readDocument(
     inputPath: string,
   ): Promise<{ html: string; text: string; messages: string[] }> {
-    const buffer = await fsPromises.readFile(inputPath);
+    const buffer = await readDocumentArchiveBuffer(inputPath);
     const result = await mammoth.convertToHtml({ buffer });
     const textResult = await mammoth.extractRawText({ buffer });
 
@@ -488,8 +488,8 @@ export class DocumentBuilder {
     );
 
     // Read the DOCX file as a ZIP
-    const docxBuffer = await fsPromises.readFile(inputPath);
-    const zip = await JSZip.loadAsync(docxBuffer);
+    const docxBuffer = await readDocumentArchiveBuffer(inputPath);
+    const zip = await loadDocumentArchive(docxBuffer);
 
     // Get the main document.xml
     const documentXml = zip.file("word/document.xml");
@@ -758,8 +758,8 @@ export class DocumentBuilder {
     );
 
     // Read the DOCX file
-    const docxBuffer = await fsPromises.readFile(inputPath);
-    const zip = await JSZip.loadAsync(docxBuffer);
+    const docxBuffer = await readDocumentArchiveBuffer(inputPath);
+    const zip = await loadDocumentArchive(docxBuffer);
 
     const documentXml = zip.file("word/document.xml");
     if (!documentXml) {
@@ -901,8 +901,8 @@ export class DocumentBuilder {
     );
 
     // Read the DOCX file
-    const docxBuffer = await fsPromises.readFile(inputPath);
-    const zip = await JSZip.loadAsync(docxBuffer);
+    const docxBuffer = await readDocumentArchiveBuffer(inputPath);
+    const zip = await loadDocumentArchive(docxBuffer);
 
     const documentXml = zip.file("word/document.xml");
     if (!documentXml) {
@@ -967,8 +967,8 @@ export class DocumentBuilder {
       return { success: false, message: "No blockIds provided", sectionsAdded: 0 };
     }
 
-    const docxBuffer = await fsPromises.readFile(inputPath);
-    const zip = await JSZip.loadAsync(docxBuffer);
+    const docxBuffer = await readDocumentArchiveBuffer(inputPath);
+    const zip = await loadDocumentArchive(docxBuffer);
     const documentXml = zip.file("word/document.xml");
     if (!documentXml) {
       throw new Error("Invalid DOCX file: missing word/document.xml");
@@ -1032,8 +1032,8 @@ export class DocumentBuilder {
       level: number;
     }>
   > {
-    const docxBuffer = await fsPromises.readFile(inputPath);
-    const zip = await JSZip.loadAsync(docxBuffer);
+    const docxBuffer = await readDocumentArchiveBuffer(inputPath);
+    const zip = await loadDocumentArchive(docxBuffer);
 
     const documentXml = zip.file("word/document.xml");
     if (!documentXml) {

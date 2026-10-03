@@ -233,6 +233,9 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
   const [workspaceRulesLoading, setWorkspaceRulesLoading] = useState(false);
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
   const [newProfile, setNewProfile] = useState<AccessProfileDefinition>(DEFAULT_CUSTOM_PROFILE);
+  // Secondary "add" forms stay collapsed until the user asks for them.
+  const [profileFormOpen, setProfileFormOpen] = useState(false);
+  const [ruleFormOpen, setRuleFormOpen] = useState(false);
 
   useEffect(() => {
     void loadSettings();
@@ -356,6 +359,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
     };
     setSettings(nextSettings);
     setRuleDraft(DEFAULT_RULE_DRAFT);
+    setRuleFormOpen(false);
     setStatusMessage("Rule added locally. Save to persist it.");
   };
 
@@ -433,6 +437,7 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       id: `custom_${(settings.accessProfiles?.length || 0) + 2}`,
       label: "Custom profile",
     });
+    setProfileFormOpen(false);
     setStatusMessage("Custom profile added locally. Save to persist it.");
   };
 
@@ -574,40 +579,44 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         {(settings.accessProfiles || []).length === 0 ? (
           <p className="settings-hint">No custom profiles yet.</p>
         ) : (
-          <div style={{ display: "grid", gap: "12px" }}>
+          <div className="access-profile-list">
             {(settings.accessProfiles || []).map((profile) => (
-              <div
-                key={profile.id}
-                className="settings-inline-input"
-                style={{ display: "grid", gap: "8px" }}
-              >
-                <div className="settings-label">{profile.id}</div>
-                <input
-                  className="settings-input"
-                  value={profile.label}
-                  aria-label={`${profile.id} label`}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
-                        label: e.target.value,
-                      }),
-                    })
-                  }
-                />
-                <input
-                  className="settings-input"
-                  value={profile.description}
-                  aria-label={`${profile.id} description`}
-                  onChange={(e) =>
-                    setSettings({
-                      ...settings,
-                      accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
-                        description: e.target.value,
-                      }),
-                    })
-                  }
-                />
+              <div key={profile.id} className="settings-card settings-item-card access-profile-card">
+                <div className="access-profile-card-title">{profile.id}</div>
+                <div className="settings-inline-input">
+                  <label htmlFor={`${profile.id}-label`}>Label</label>
+                  <input
+                    id={`${profile.id}-label`}
+                    className="settings-input"
+                    value={profile.label}
+                    aria-label={`${profile.id} label`}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
+                          label: e.target.value,
+                        }),
+                      })
+                    }
+                  />
+                </div>
+                <div className="settings-inline-input">
+                  <label htmlFor={`${profile.id}-description`}>Description</label>
+                  <input
+                    id={`${profile.id}-description`}
+                    className="settings-input"
+                    value={profile.description}
+                    aria-label={`${profile.id} description`}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
+                          description: e.target.value,
+                        }),
+                      })
+                    }
+                  />
+                </div>
                 <div className="settings-inline-input">
                   <label htmlFor={`${profile.id}-extends`}>Inherit from</label>
                   <select
@@ -794,49 +803,66 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
             ))}
           </div>
         )}
-        <div
-          className="settings-inline-input"
-          style={{ display: "grid", gap: "8px", marginTop: "12px" }}
-        >
-          <label>New profile ID</label>
-          <input
-            className="settings-input"
-            value={newProfile.id}
-            onChange={(e) => setNewProfile((profile) => ({ ...profile, id: e.target.value }))}
-            placeholder="custom_workspace"
-          />
-          <label>Display label</label>
-          <input
-            className="settings-input"
-            value={newProfile.label}
-            onChange={(e) => setNewProfile((profile) => ({ ...profile, label: e.target.value }))}
-            placeholder="Custom workspace"
-          />
-          <label htmlFor="new-access-profile-extends">Inherit from</label>
-          <select
-            id="new-access-profile-extends"
-            className="settings-select"
-            value={newProfile.extends || ""}
-            onChange={(e) =>
-              setNewProfile((profile) => ({
-                ...profile,
-                extends: e.target.value ? (e.target.value as AccessProfileId) : undefined,
-              }))
-            }
+        {profileFormOpen ? (
+          <div className="access-profile-form">
+            <label>New profile ID</label>
+            <input
+              className="settings-input"
+              value={newProfile.id}
+              onChange={(e) => setNewProfile((profile) => ({ ...profile, id: e.target.value }))}
+              placeholder="custom_workspace"
+            />
+            <label>Display label</label>
+            <input
+              className="settings-input"
+              value={newProfile.label}
+              onChange={(e) => setNewProfile((profile) => ({ ...profile, label: e.target.value }))}
+              placeholder="Custom workspace"
+            />
+            <label htmlFor="new-access-profile-extends">Inherit from</label>
+            <select
+              id="new-access-profile-extends"
+              className="settings-select"
+              value={newProfile.extends || ""}
+              onChange={(e) =>
+                setNewProfile((profile) => ({
+                  ...profile,
+                  extends: e.target.value ? (e.target.value as AccessProfileId) : undefined,
+                }))
+              }
+            >
+              <option value="">None</option>
+              {inheritanceOptions
+                .filter((candidate) => candidate.id !== newProfile.id)
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.label}
+                  </option>
+                ))}
+            </select>
+            <button
+              className="button-secondary access-profile-form-submit"
+              onClick={addCustomProfile}
+              disabled={saving}
+            >
+              Add custom profile
+            </button>
+            <button
+              className="button-secondary access-profile-form-submit"
+              onClick={() => setProfileFormOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            className="button-secondary button-small settings-collapsed-trigger"
+            onClick={() => setProfileFormOpen(true)}
+            aria-expanded={false}
           >
-            <option value="">None</option>
-            {inheritanceOptions
-              .filter((candidate) => candidate.id !== newProfile.id)
-              .map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.label}
-                </option>
-              ))}
-          </select>
-          <button className="button-secondary" onClick={addCustomProfile} disabled={saving}>
-            Add custom profile
+            New profile
           </button>
-        </div>
+        )}
       </div>
 
       <div className="settings-subsection">
@@ -848,11 +874,10 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
             {settings.rules.map((rule, index) => (
               <div
                 key={`${rule.source}:${index}:${scopeToLabel(rule.scope)}`}
-                className="settings-inline-input"
-                style={{ alignItems: "flex-start", justifyContent: "space-between" }}
+                className="settings-list-row"
               >
                 <div style={{ minWidth: 0 }}>
-                  <div className="settings-label" style={{ marginBottom: "4px" }}>
+                  <div className="settings-label settings-list-row-title">
                     {rule.effect.toUpperCase()} via {rule.source}
                   </div>
                   <div className="settings-hint">{scopeToLabel(rule.scope)}</div>
@@ -867,135 +892,153 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
       </div>
 
       <div className="settings-subsection">
-        <h4 style={{ margin: "0 0 8px" }}>Add rule</h4>
-        <div className="settings-inline-input">
-          <label>Effect</label>
-          <select
-            className="settings-select"
-            value={ruleDraft.effect}
-            onChange={(e) =>
-              setRuleDraft((prev) => ({ ...prev, effect: e.target.value as RuleDraft["effect"] }))
-            }
-          >
-            <option value="allow">Allow</option>
-            <option value="deny">Deny</option>
-            <option value="ask">Ask</option>
-          </select>
-        </div>
-
-        <div className="settings-inline-input">
-          <label>Scope</label>
-          <select
-            className="settings-select"
-            value={ruleDraft.scopeKind}
-            onChange={(e) =>
-              setRuleDraft((prev) => ({
-                ...prev,
-                scopeKind: e.target.value as RuleDraft["scopeKind"],
-              }))
-            }
-          >
-            <option value="tool">Tool</option>
-            <option value="domain">Domain</option>
-            <option value="path">Path</option>
-            <option value="command_prefix">Command prefix</option>
-            <option value="mcp_server">MCP server</option>
-          </select>
-        </div>
-
-        {ruleDraft.scopeKind === "tool" && (
-          <div className="settings-inline-input">
-            <label>Tool name</label>
-            <input
-              className="settings-input"
-              value={ruleDraft.toolName}
-              onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
-              placeholder="run_command"
-            />
-          </div>
-        )}
-
-        {ruleDraft.scopeKind === "path" && (
+        {ruleFormOpen ? (
           <>
+            <h4 style={{ margin: "0 0 8px" }}>Add rule</h4>
             <div className="settings-inline-input">
-              <label>Tool name</label>
-              <input
-                className="settings-input"
-                value={ruleDraft.toolName}
-                onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
-                placeholder="edit_file"
-              />
+              <label>Effect</label>
+              <select
+                className="settings-select"
+                value={ruleDraft.effect}
+                onChange={(e) =>
+                  setRuleDraft((prev) => ({ ...prev, effect: e.target.value as RuleDraft["effect"] }))
+                }
+              >
+                <option value="allow">Allow</option>
+                <option value="deny">Deny</option>
+                <option value="ask">Ask</option>
+              </select>
             </div>
+
             <div className="settings-inline-input">
-              <label>Path prefix</label>
-              <input
-                className="settings-input"
-                value={ruleDraft.path}
-                onChange={(e) => setRuleDraft((prev) => ({ ...prev, path: e.target.value }))}
-                placeholder="/Users/you/project/src"
-              />
+              <label>Scope</label>
+              <select
+                className="settings-select"
+                value={ruleDraft.scopeKind}
+                onChange={(e) =>
+                  setRuleDraft((prev) => ({
+                    ...prev,
+                    scopeKind: e.target.value as RuleDraft["scopeKind"],
+                  }))
+                }
+              >
+                <option value="tool">Tool</option>
+                <option value="domain">Domain</option>
+                <option value="path">Path</option>
+                <option value="command_prefix">Command prefix</option>
+                <option value="mcp_server">MCP server</option>
+              </select>
+            </div>
+
+            {ruleDraft.scopeKind === "tool" && (
+              <div className="settings-inline-input">
+                <label>Tool name</label>
+                <input
+                  className="settings-input"
+                  value={ruleDraft.toolName}
+                  onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
+                  placeholder="run_command"
+                />
+              </div>
+            )}
+
+            {ruleDraft.scopeKind === "path" && (
+              <>
+                <div className="settings-inline-input">
+                  <label>Tool name</label>
+                  <input
+                    className="settings-input"
+                    value={ruleDraft.toolName}
+                    onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
+                    placeholder="edit_file"
+                  />
+                </div>
+                <div className="settings-inline-input">
+                  <label>Path prefix</label>
+                  <input
+                    className="settings-input"
+                    value={ruleDraft.path}
+                    onChange={(e) => setRuleDraft((prev) => ({ ...prev, path: e.target.value }))}
+                    placeholder="/Users/you/project/src"
+                  />
+                </div>
+              </>
+            )}
+
+            {ruleDraft.scopeKind === "domain" && (
+              <>
+                <div className="settings-inline-input">
+                  <label>Tool name</label>
+                  <input
+                    className="settings-input"
+                    value={ruleDraft.toolName}
+                    onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
+                    placeholder="http_request"
+                  />
+                </div>
+                <div className="settings-inline-input">
+                  <label>Domain</label>
+                  <input
+                    className="settings-input"
+                    value={ruleDraft.domain}
+                    onChange={(e) => setRuleDraft((prev) => ({ ...prev, domain: e.target.value }))}
+                    placeholder="api.example.com"
+                  />
+                </div>
+              </>
+            )}
+
+            {ruleDraft.scopeKind === "command_prefix" && (
+              <div className="settings-inline-input">
+                <label>Command prefix</label>
+                <input
+                  className="settings-input"
+                  value={ruleDraft.prefix}
+                  onChange={(e) => setRuleDraft((prev) => ({ ...prev, prefix: e.target.value }))}
+                  placeholder="git status"
+                />
+              </div>
+            )}
+
+            {ruleDraft.scopeKind === "mcp_server" && (
+              <div className="settings-inline-input">
+                <label>MCP server name</label>
+                <input
+                  className="settings-input"
+                  value={ruleDraft.serverName}
+                  onChange={(e) => setRuleDraft((prev) => ({ ...prev, serverName: e.target.value }))}
+                  placeholder="github"
+                />
+              </div>
+            )}
+
+            <div className="settings-actions">
+              <button
+                className="button-secondary"
+                onClick={() => {
+                  setRuleDraft(DEFAULT_RULE_DRAFT);
+                  setRuleFormOpen(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button className="button-secondary" onClick={loadSettings}>
+                Reload
+              </button>
+              <button className="button-primary" onClick={addRule} disabled={!canAddRule}>
+                Add Rule
+              </button>
             </div>
           </>
-        )}
-
-        {ruleDraft.scopeKind === "domain" && (
-          <>
-            <div className="settings-inline-input">
-              <label>Tool name</label>
-              <input
-                className="settings-input"
-                value={ruleDraft.toolName}
-                onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
-                placeholder="http_request"
-              />
-            </div>
-            <div className="settings-inline-input">
-              <label>Domain</label>
-              <input
-                className="settings-input"
-                value={ruleDraft.domain}
-                onChange={(e) => setRuleDraft((prev) => ({ ...prev, domain: e.target.value }))}
-                placeholder="api.example.com"
-              />
-            </div>
-          </>
-        )}
-
-        {ruleDraft.scopeKind === "command_prefix" && (
-          <div className="settings-inline-input">
-            <label>Command prefix</label>
-            <input
-              className="settings-input"
-              value={ruleDraft.prefix}
-              onChange={(e) => setRuleDraft((prev) => ({ ...prev, prefix: e.target.value }))}
-              placeholder="git status"
-            />
-          </div>
-        )}
-
-        {ruleDraft.scopeKind === "mcp_server" && (
-          <div className="settings-inline-input">
-            <label>MCP server name</label>
-            <input
-              className="settings-input"
-              value={ruleDraft.serverName}
-              onChange={(e) => setRuleDraft((prev) => ({ ...prev, serverName: e.target.value }))}
-              placeholder="github"
-            />
-          </div>
-        )}
-
-        <div className="settings-actions">
-          <button className="button-secondary" onClick={() => setRuleDraft(DEFAULT_RULE_DRAFT)}>
-            Reset Draft
+        ) : (
+          <button
+            className="button-secondary button-small settings-collapsed-trigger"
+            onClick={() => setRuleFormOpen(true)}
+            aria-expanded={false}
+          >
+            Add rule
           </button>
-          <button className="button-secondary" onClick={loadSettings}>
-            Reload
-          </button>
-          <button className="button-primary" onClick={addRule} disabled={!canAddRule}>
-            Add Rule
-          </button>
-        </div>
+        )}
       </div>
 
       {statusMessage && <div className="settings-hint">{statusMessage}</div>}
@@ -1016,11 +1059,10 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
             {workspaceRules.map((rule) => (
               <div
                 key={rule.id || `${rule.source}:${scopeToLabel(rule.scope)}`}
-                className="settings-inline-input"
-                style={{ alignItems: "flex-start", justifyContent: "space-between" }}
+                className="settings-list-row"
               >
                 <div style={{ minWidth: 0 }}>
-                  <div className="settings-label" style={{ marginBottom: "4px" }}>
+                  <div className="settings-label settings-list-row-title">
                     {rule.effect.toUpperCase()} via workspace
                   </div>
                   <div className="settings-hint">{scopeToLabel(rule.scope)}</div>

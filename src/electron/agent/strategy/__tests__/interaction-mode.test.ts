@@ -9,6 +9,18 @@ import {
 import { sanitizeTaskMessageParams } from "../../../control-plane/sanitize";
 
 describe("interactive mode contract", () => {
+  it.each(["chat", "smart"] as const)(
+    "respects %s mode when a question requests source retrieval",
+    (mode) => {
+      const config = resolveInteractionMode(
+        { accessProfileId: "read_only" },
+        { mode },
+        "Dayanak kayıtlarında emsal bir karar bulabilir misin?",
+      );
+      expect(config.executionMode).toBe(mode === "chat" ? "chat" : "execute");
+      expect(config.accessProfileId).toBe("read_only");
+    },
+  );
   it.each(["/goal implement this", "/review", "/custom-skill run"])(
     "rejects Chat action shortcut %s",
     (prompt) => {

@@ -15,6 +15,10 @@ The [September 30 fix record](security-fixes-2026-09-30.md) covers the preceding
 six fixes. This follow-up strengthens additional paths in HTTP tools, search,
 Pulse, tunnels, and skill imports.
 
+The subsequent [browser and runtime fix record](security-fixes-2026-10-02-browser-runtime.md)
+documents nine further findings and two hardening changes from the October 2
+scan, with separate compatibility and verification evidence.
+
 ## Findings, fixes, and compatibility
 
 ### HTTP redirects could disclose caller credentials — Medium

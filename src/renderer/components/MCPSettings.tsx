@@ -11,6 +11,7 @@ import type { AddToolsSelection } from "./AddToolsPanel";
 // Types (matching preload types)
 type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
 type MCPConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
+type MCPToolApprovalMode = "auto" | "prompt" | "writes" | "approve";
 
 interface MCPServerConfig {
   id: string;
@@ -40,6 +41,8 @@ interface MCPServerConfig {
   };
   connectionTimeout?: number;
   requestTimeout?: number;
+  defaultToolsApprovalMode?: MCPToolApprovalMode;
+  toolApprovals?: Record<string, MCPToolApprovalMode>;
 }
 
 interface MCPTool {
@@ -218,6 +221,7 @@ export function MCPSettings({
   const [editingServer, setEditingServer] = useState<string | null>(null);
   const [editServerArgs, setEditServerArgs] = useState("");
   const [editServerEnv, setEditServerEnv] = useState("");
+  const [editApprovalMode, setEditApprovalMode] = useState<MCPToolApprovalMode>("auto");
   const [editServerPaths, setEditServerPaths] = useState<string[]>([]);
 
   useEffect(() => {
@@ -536,6 +540,7 @@ export function MCPSettings({
           .join("\n")
       : "";
     setEditServerEnv(envString);
+    setEditApprovalMode(config.defaultToolsApprovalMode || "auto");
 
     setEditingServer(serverId);
   };
@@ -573,6 +578,7 @@ export function MCPSettings({
       await invokeMcpApi("updateMCPServer", editingServer, {
         args: args.length > 0 ? args : undefined,
         env: Object.keys(env).length > 0 ? env : undefined,
+        defaultToolsApprovalMode: editApprovalMode,
       });
 
       setEditingServer(null);
@@ -1021,7 +1027,7 @@ export function MCPSettings({
                           <button
                             className="button-small button-secondary"
                             onClick={() => handleOpenEditServer(serverStatus.id)}
-                            title="Configure arguments and environment variables"
+                            title="Configure tool approvals, arguments and environment variables"
                           >
                             Configure
                           </button>
@@ -1462,6 +1468,26 @@ export function MCPSettings({
               </button>
             </div>
             <div className="mcp-modal-content">
+              <div className="settings-field">
+                <label htmlFor="mcp-tool-approval-mode">Tool approvals</label>
+                <select
+                  id="mcp-tool-approval-mode"
+                  className="settings-select"
+                  value={editApprovalMode}
+                  onChange={(event) =>
+                    setEditApprovalMode(event.target.value as MCPToolApprovalMode)
+                  }
+                >
+                  <option value="auto">Automatic</option>
+                  <option value="writes">Ask before writes</option>
+                  <option value="prompt">Ask before every call</option>
+                  <option value="approve">Allow without asking</option>
+                </select>
+                <p className="settings-hint">
+                  Automatic allows read-only tools and follows Full access for other calls.
+                  Workspace rules and administrator restrictions still apply.
+                </p>
+              </div>
               {/* Filesystem Server: Show Allowed Paths UI */}
               {isFilesystemServer(settings?.servers.find((s) => s.id === editingServer)) && (
                 <div className="settings-field">

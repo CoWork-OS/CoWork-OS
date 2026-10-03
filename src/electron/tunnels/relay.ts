@@ -61,7 +61,7 @@ export async function startTunnelRelayServer(
 ): Promise<TunnelRelayServer> {
   const records = new Map<string, RelayTunnelRecord>();
   const sessions = new Map<string, RelaySession>();
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 25 * 1024 * 1024 + 16 * 1024 });
   const server = http.createServer(async (req, res) => {
     try {
       await handleHttpRequest(req, res, records, sessions, {
@@ -104,7 +104,14 @@ export async function startTunnelRelayServer(
         pending: new Map(),
       };
       sessions.set(tunnelId, session);
-      ws.on("message", (data) => handleClientMessage(session, data.toString()));
+      ws.on("error", () => ws.terminate());
+      ws.on("message", (data) => {
+        try {
+          handleClientMessage(session, data.toString());
+        } catch {
+          ws.close(1008, "Invalid tunnel message");
+        }
+      });
       ws.on("close", () => {
         if (sessions.get(tunnelId) === session) {
           sessions.delete(tunnelId);
@@ -175,6 +182,16 @@ async function handleHttpRequest(
       createdAt: Date.now(),
       policy: sanitizeRelayPolicy(body.policy),
     };
+    const previous = sessions.get(record.id);
+    if (previous) {
+      sessions.delete(record.id);
+      for (const pending of previous.pending.values()) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error("Tunnel configuration replaced"));
+      }
+      previous.pending.clear();
+      previous.ws.terminate();
+    }
     records.set(record.id, record);
     sendJson(res, 201, record);
     return;
@@ -221,7 +238,7 @@ async function handleHttpRequest(
     const payload = (await readJsonBody(req)) as JSONRPCRequest;
     validateJsonRpcRequest(payload);
     const bodyBytes = Buffer.byteLength(JSON.stringify(payload), "utf-8");
-    const policyResult = enforceTunnelPolicy(session.policy, payload, bodyBytes);
+    const policyResult = enforceTunnelPolicy(record.policy, payload, bodyBytes);
     if (!policyResult.approved) {
       sendJson(res, 403, { error: policyResult.reason });
       return;
@@ -239,10 +256,16 @@ async function handleHttpRequest(
 }
 
 function handleClientMessage(session: RelaySession, raw: string): void {
-  let message: TunnelClientMessage;
-  try {
-    message = JSON.parse(raw) as TunnelClientMessage;
-  } catch {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) throw new Error("Tunnel message must be an object");
+  const message = parsed as unknown as TunnelClientMessage;
+  if (message.type === "audit_event") {
+    if (!isRecord(message.event)) throw new Error("Invalid tunnel audit event");
+    return;
+  }
+  if (message.type === "pong") {
+    if (typeof message.timestamp !== "number" || !Number.isFinite(message.timestamp))
+      throw new Error("Invalid tunnel pong");
     return;
   }
   if (message.type === "hello") {
@@ -251,6 +274,12 @@ function handleClientMessage(session: RelaySession, raw: string): void {
     return;
   }
   if (message.type === "mcp_response") {
+    if (typeof message.requestId !== "string" || !isRecord(message.payload)) {
+      throw new Error("Invalid tunnel response");
+    }
+    if (Buffer.byteLength(JSON.stringify(message.payload)) > session.policy.maxResponseBytes) {
+      throw new Error("Tunnel response exceeds size limit");
+    }
     const pending = session.pending.get(message.requestId);
     if (!pending) return;
     clearTimeout(pending.timeout);
@@ -259,12 +288,17 @@ function handleClientMessage(session: RelaySession, raw: string): void {
     return;
   }
   if (message.type === "mcp_error") {
+    if (typeof message.requestId !== "string" || typeof message.error !== "string") {
+      throw new Error("Invalid tunnel error");
+    }
     const pending = session.pending.get(message.requestId);
     if (!pending) return;
     clearTimeout(pending.timeout);
     session.pending.delete(message.requestId);
     pending.reject(new Error(message.error));
+    return;
   }
+  throw new Error("Unsupported tunnel message");
 }
 
 function forwardToClient(

@@ -242,13 +242,29 @@ The app includes Playwright for web automation:
 
 | Capability         | Details                         |
 | ------------------ | ------------------------------- |
-| Navigate to URLs   | Any URL (user-controlled tasks) |
+| Navigate to URLs   | Destinations allowed by task and administrator network policy |
 | Fill forms         | As directed by task             |
 | Take screenshots   | Saved to workspace              |
 | Execute JavaScript | Within page context only        |
 | Mode               | Headless by default             |
 
 **User agent**: `CoWork OS Browser Automation`
+
+Visible browser guests start at `about:blank`; main-process request guards and a
+local connection proxy must be installed before remote navigation. Registration
+resolves the task's effective access profile, and missing policies deny remote
+traffic. Chromium's proxy validates and pins each destination connection,
+including redirects, while preserving native cookies and TLS verification.
+Tabs sharing a persistent cookie partition require every active owner to permit
+the destination. Browser WebSockets are blocked. External CDP attachment is
+unavailable because existing sockets can predate interception; use a dedicated
+browser profile. Environment proxies are refused when destination pinning cannot
+be guaranteed.
+
+Subprocess network access requires an unrestricted task network policy and
+explicit administrator permission. Domain restrictions require an OS sandbox
+that disables process networking; unsandboxed execution cannot claim to enforce
+network denial.
 
 ### Chronicle Screen Context
 
@@ -349,6 +365,14 @@ ClawHub downloads are limited to **5 MiB** compressed; incremental extraction
 limits each file to **512 KiB** and total expanded content to **5 MiB**, with a
 **200-entry** archive limit.
 
+DOCX, ODT, PPTX, and XLSX inputs use a shared archive boundary: **50 MiB** input,
+**2,048 entries**, **16 MiB** per expanded part, **64 MiB** cumulative expansion,
+and a **10-second** expansion deadline. Unsupported ZIP layouts and oversized
+inputs are rejected before parser or writer use. PPTX table expansion also caps
+spans, dimensions, and total cells before allocation. Cron webhook triggers
+authenticate their header before reading a body and reject input over **1 MiB**
+with HTTP 413.
+
 See the [2026-09-30 security fix record](security-fixes-2026-09-30.md) for the
 implementation map, validation results, and reproduction commands.
 
@@ -360,6 +384,15 @@ over 16 KiB, and Git skill imports reject symlinks before reading skill content.
 Read-only MCP tunnels now block every tool call, including allowlisted tools;
 discovery and resource reads remain available. See the follow-up record for
 compatibility changes and the limits of local verification.
+
+The [October 2 browser and runtime record](security-fixes-2026-10-02-browser-runtime.md)
+documents nine further findings and two hardening changes, also local and
+unreleased. It covers subprocess administrator policy, browser startup guards,
+WebSocket refusal and pinned connections, live tunnel revocation, document
+archive/table limits, cron webhook authentication and buffering, and relay
+message containment. It also records Git fsmonitor and updater quit hardening,
+the 223-test remediation run, compatibility restrictions, and outstanding
+release and platform acceptance.
 
 ### External Link Handling
 

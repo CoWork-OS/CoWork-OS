@@ -4379,8 +4379,7 @@ a,
 }
 
 .theme-light .settings-sidebar {
-  background: var(--color-bg-sidebar);
-  border-color: rgba(0, 0, 0, 0.12);
+  background: transparent;
 }
 
 .settings-page-layout {
@@ -4393,10 +4392,8 @@ a,
   width: 220px;
   padding: 16px;
   margin: 16px 0 16px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: 16px;
-  box-shadow: var(--shadow-sm);
-  background: var(--color-bg-secondary);
+  /* Frameless: the nav sits directly on the page next to the content card. */
+  background: transparent;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -4407,11 +4404,10 @@ a,
   display: flex;
   flex-direction: column;
   min-width: 0;
-  margin: 16px 16px 16px 12px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 16px;
-  box-shadow: var(--shadow-sm);
+  /* Frameless, matching the settings sidebar; no right/bottom margin so the
+     scrollbar sits at the window edge and content isn't clipped early. */
+  margin: 0 0 0 12px;
+  background: transparent;
   overflow: hidden;
 }
 
@@ -4573,7 +4569,10 @@ a,
 
 .settings-content {
   flex: 1;
-  padding: 24px 32px;
+  /* Center an 880px reading column; padding (not margin) keeps the scrollbar at
+     the window edge. */
+  /* Top padding aligns page titles with the sidebar title (16px margin + 16px). */
+  padding: 32px max(32px, calc((100% - 880px) / 2)) 24px;
   overflow-y: auto;
   position: relative;
   width: 100%;
@@ -18348,15 +18347,13 @@ a,
   margin: 0;
 }
 
+/* Frameless tab rows: the active tab's pill marks the selection. */
 .more-channels-tabs,
 .llm-provider-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 4px;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
+  padding: 0;
 }
 
 .llm-provider-search {
@@ -18467,21 +18464,13 @@ a,
   margin-left: 4px;
 }
 
+/* Frameless settings content, matching the frameless sidebar and main section. */
 .more-channels-content,
 .llm-provider-content {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-tertiary);
-  padding: 20px;
+  padding: 0;
 }
 
 /* Light theme overrides */
-.theme-light .more-channels-tabs,
-.theme-light .llm-provider-tabs {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.12);
-}
-
 .theme-light .more-channels-tab:hover,
 .theme-light .llm-provider-tab:hover {
   background: rgba(0, 0, 0, 0.06);
@@ -18491,12 +18480,6 @@ a,
 .theme-light .llm-provider-tab.active {
   background: white;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-}
-
-.theme-light .more-channels-content,
-.theme-light .llm-provider-content {
-  background: rgba(255, 255, 255, 0.6);
-  border-color: rgba(0, 0, 0, 0.12);
 }
 
 .dispatch-loading {
@@ -22798,41 +22781,34 @@ a,
   font-family: var(--font-ui);
 }
 
-/* Message actions: collapse to zero height when hidden, show on hover */
-.density-focused .message-actions {
-  opacity: 0;
-  height: 0;
-  overflow: hidden;
-  margin: 0;
-  transition:
-    opacity 0.15s ease,
-    height 0.15s ease;
-}
-
-.density-focused .chat-message:hover .message-actions {
-  opacity: 1;
-  height: auto;
-  overflow: visible;
-}
-
-/* Copy button below user messages: also collapse */
+/* Message actions: reserve their space and fade in on hover, so revealing
+   them never shifts the surrounding layout. */
+.density-focused .message-actions,
 .density-focused .chat-message.user-message > .message-copy-btn {
   opacity: 0;
-  height: 0;
-  overflow: hidden;
-  margin: 0;
-  padding: 0;
+  visibility: hidden;
   transition:
     opacity 0.15s ease,
-    height 0.15s ease;
+    visibility 0.15s ease;
 }
 
-.density-focused .chat-message.user-message:hover > .message-copy-btn {
+.density-focused .chat-message:hover .message-actions,
+.density-focused .chat-message:focus-within .message-actions,
+.density-focused .chat-message.user-message:hover > .message-copy-btn,
+.density-focused .chat-message.user-message:focus-within > .message-copy-btn {
   opacity: 1;
-  height: auto;
-  overflow: visible;
-  padding: 4px 8px;
-  margin-top: 4px;
+  visibility: visible;
+}
+
+/* The reserved copy row already spaces the user turn, so tuck it under the
+   bubble and drop the turn's bottom margin by about the row's height. */
+.density-focused .chat-message.user-message > .message-copy-btn {
+  margin-top: 2px;
+  padding: 2px 6px;
+}
+
+.density-focused .chat-message.user-message {
+  margin-bottom: 8px;
 }
 
 .density-focused .message-copy-btn {
@@ -23199,6 +23175,13 @@ a,
 .right-panel .cli-context-tool-usage-list::-webkit-scrollbar-thumb,
 .right-panel .cli-context-file-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
+  background: transparent;
+}
+
+/* Thumb only shows while the list is hovered; the stable gutter keeps rows
+   from shifting when it appears. */
+.right-panel .cli-context-tool-usage-list:hover::-webkit-scrollbar-thumb,
+.right-panel .cli-context-file-list:hover::-webkit-scrollbar-thumb {
   background: var(--right-panel-row-border);
 }
 

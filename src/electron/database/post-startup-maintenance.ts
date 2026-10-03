@@ -523,15 +523,26 @@ export function repairControlPlaneOrphan(
 }
 
 /**
- * Delete task events whose task is gone, in rowid order, at most `limit` per chunk. The
- * cursor only moves forward, so a large table is scanned once in total.
+ * Inspect at most `limit` task events per chunk and delete those whose task is gone.
+ * Advance past inspected rows even when none are orphans, so a sparse-orphan table
+ * cannot turn one chunk into a full-table scan that occupies the database worker.
  */
 export function deleteOrphanTaskEventsChunk(
   db: Database.Database,
   afterRowid: number,
   limit: number,
 ): { deleted: number; nextRowid: number; done: boolean } {
-  // One statement: pick the next orphans in rowid order and delete them.
+  const range = db
+    .prepare(
+      `SELECT MAX(row_id) AS last_rowid, COUNT(*) AS row_count
+       FROM (
+         SELECT rowid AS row_id FROM task_events
+         WHERE rowid > ? ORDER BY rowid LIMIT ?
+       )`,
+    )
+    .get(afterRowid, limit) as { last_rowid: number | null; row_count: number };
+  if (range.last_rowid === null) return { deleted: 0, nextRowid: afterRowid, done: true };
+
   const deleted = db
     .prepare(
       `DELETE FROM task_events
@@ -539,16 +550,15 @@ export function deleteOrphanTaskEventsChunk(
          SELECT te.rowid
          FROM task_events te
          WHERE te.rowid > ?
+           AND te.rowid <= ?
            AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = te.task_id)
-         ORDER BY te.rowid
-         LIMIT ?
        )
        RETURNING rowid AS row_id`,
     )
-    .all(afterRowid, limit) as Array<{ row_id: number }>;
+    .all(afterRowid, range.last_rowid) as Array<{ row_id: number }>;
   return {
     deleted: deleted.length,
-    nextRowid: deleted.reduce((max, row) => Math.max(max, row.row_id), afterRowid),
-    done: deleted.length < limit,
+    nextRowid: range.last_rowid,
+    done: range.row_count < limit,
   };
 }

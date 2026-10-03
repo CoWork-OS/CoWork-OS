@@ -86,6 +86,7 @@ import { MCPClientManager } from "../../mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../../mcp/settings";
 import { MCPRegistryManager } from "../../mcp/registry/MCPRegistryManager";
 import type { MCPServerConfig, MCPTool, MCPToolProperty } from "../../mcp/types";
+import { getConfiguredMcpToolPolicy, resolveMcpToolPolicy } from "../../mcp/tool-policy";
 import {
   ConnectorCapability,
   IntegrationAuthMethod,
@@ -821,6 +822,8 @@ export class ToolRegistry {
               id: server.id,
               enabled: server.enabled,
               transport: server.transport,
+              defaultToolsApprovalMode: server.defaultToolsApprovalMode,
+              toolApprovals: server.toolApprovals,
             }))
             .sort((a, b) => a.id.localeCompare(b.id)),
           managerVersion: mcpManagerVersion,
@@ -1838,6 +1841,7 @@ export class ToolRegistry {
 
   private getApprovalTypeForTool(toolName: string, input?: Any): ApprovalType | null {
     const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    if (getConfiguredMcpToolPolicy(canonicalToolName)) return "external_service";
     if (canonicalToolName === "Skill") return null;
     if (canonicalToolName === "request_protected_credential") return "protected_credential";
     if (
@@ -3330,28 +3334,42 @@ export class ToolRegistry {
       const mcpTools = mcpManager.getAllTools();
       const settings = MCPSettingsManager.loadSettings();
       const prefix = settings.toolNamePrefix || "mcp_";
-      const serverNamesById = new Map(
-        (settings.servers || []).map((server) => [server.id, server.name]),
-      );
+      const serversById = new Map((settings.servers || []).map((server) => [server.id, server]));
 
-      const definitions = mcpTools.map(
-        (tool: { name: string; description?: string; inputSchema: Any }) => {
-          const serverId =
-            typeof (mcpManager as Any).getServerIdForTool === "function"
-              ? (mcpManager as Any).getServerIdForTool(tool.name)
-              : null;
-          const serverName = serverId ? serverNamesById.get(serverId) : null;
-          const baseDescription = tool.description || `MCP tool: ${tool.name}`;
+      const definitions = mcpTools.flatMap((tool: MCPTool) => {
+        const serverId =
+          typeof (mcpManager as Any).getServerIdForTool === "function"
+            ? (mcpManager as Any).getServerIdForTool(tool.name)
+            : null;
+        const server = serverId ? serversById.get(serverId) : undefined;
+        if (server?.enabled === false) return [];
+        const serverName = server?.name;
+        const policy = server ? resolveMcpToolPolicy(tool, server) : undefined;
+        const readOnly = policy?.readOnly === true;
+        const baseDescription = tool.description || `MCP tool: ${tool.name}`;
 
-          return {
-            name: `${prefix}${tool.name}`,
-            description: serverName
-              ? `${baseDescription} Provided by MCP server "${serverName}".`
-              : baseDescription,
-            input_schema: tool.inputSchema,
-          };
-        },
-      );
+        return {
+          name: `${prefix}${tool.name}`,
+          description: serverName
+            ? `${baseDescription} Provided by MCP server "${serverName}".`
+            : baseDescription,
+          input_schema: { ...tool.inputSchema, properties: tool.inputSchema.properties || {} },
+          runtime: {
+            ...getDefaultRuntimeToolMetadata(`${prefix}${tool.name}`),
+            readOnly,
+            concurrencyClass: readOnly ? ("read_parallel" as const) : ("serial_only" as const),
+            interruptBehavior: readOnly ? ("cancel" as const) : ("block" as const),
+            approvalKind: "external_service" as const,
+            sideEffectLevel: readOnly ? ("none" as const) : ("medium" as const),
+            deferLoad: false,
+            alwaysExpose: true,
+            supportsContextMutation: !readOnly,
+            capabilityTags: ["mcp" as const, "integration" as const],
+            exposure: "always" as const,
+            resultKind: "integration" as const,
+          },
+        };
+      });
       return definitions;
     } catch {
       // MCP not initialized yet, return empty array
@@ -5101,6 +5119,10 @@ ${skillDescriptions}`;
     if (!mcpManager.hasTool(mcpToolName)) {
       return null;
     }
+    const configuredPolicy = getConfiguredMcpToolPolicy(name);
+    if (configuredPolicy?.enabled === false) {
+      throw new Error(`MCP server for "${name}" is disabled`);
+    }
     const endpointDecision = this.evaluateMcpEndpointNetworkPolicy(name);
     if (endpointDecision?.action === "deny") {
       throw new Error(`MCP endpoint access denied for "${name}": ${endpointDecision.reason}`);
@@ -5184,9 +5206,15 @@ ${skillDescriptions}`;
     // Check if it's an MCP CallResult format
     if (result.content && Array.isArray(result.content)) {
       if (result.isError) {
-        throw new Error(
-          result.content.map((c: Any) => c.text || "").join("\n") || "MCP tool execution failed",
-        );
+        // An MCP tool error is a result for the model to inspect and correct,
+        // not a broken transport or a reason to disable the connected tool.
+        return {
+          ...result,
+          source: "mcp",
+          success: false,
+          error:
+            result.content.map((c: Any) => c.text || "").join("\n") || "MCP tool execution failed",
+        };
       }
 
       // Handle image/video content from MCP tools and persist them as workspace artifacts.

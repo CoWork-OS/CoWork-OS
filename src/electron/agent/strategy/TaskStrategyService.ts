@@ -309,6 +309,7 @@ export class TaskStrategyService {
         "cloud-storage-query",
         "shell-troubleshooting",
         "terminal-transcript",
+        "source-backed-retrieval",
       ].includes(signal),
     );
 

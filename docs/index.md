@@ -111,6 +111,9 @@ hero:
       text: Security Fixes
       link: /security-fixes-2026-10-02
     - theme: alt
+      text: Browser and Runtime Security Fixes
+      link: /security-fixes-2026-10-02-browser-runtime
+    - theme: alt
       text: Access Profiles
       link: /access-profiles
     - theme: alt

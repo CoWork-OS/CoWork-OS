@@ -24,6 +24,7 @@ import {
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
+import { randomUUID } from "node:crypto";
 import { ChannelGateway } from "../gateway";
 import { DatabaseManager } from "../database/schema";
 import { type Channel } from "../database/repositories";
@@ -35,6 +36,7 @@ import {
   IPC_CHANNELS,
   Workspace,
   isTempWorkspaceId,
+  DesktopNotificationStyle,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
@@ -54,7 +56,11 @@ import {
   ChronicleMemoryService,
   ChronicleSettingsManager,
 } from "../chronicle";
-import { NativeNotificationCenter, NotificationOverlayManager } from "../notifications";
+import { NotificationOverlayManager } from "../notifications";
+import {
+  showDesktopNotification,
+  updateDockNotificationBadge,
+} from "../notifications/desktop-delivery";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 
@@ -91,6 +97,7 @@ export interface TraySettings {
   closeToTray: boolean;
   showNotifications: boolean;
   showApprovalSavedNotifications: boolean;
+  notificationStyle?: DesktopNotificationStyle;
 }
 
 const DEFAULT_SETTINGS: TraySettings = {
@@ -100,6 +107,7 @@ const DEFAULT_SETTINGS: TraySettings = {
   closeToTray: true,
   showNotifications: true,
   showApprovalSavedNotifications: false,
+  notificationStyle: "system",
 };
 
 /**
@@ -110,6 +118,7 @@ const DEFAULT_SETTINGS: TraySettings = {
 export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefined): TraySettings {
   const merged = { ...DEFAULT_SETTINGS, ...raw };
   return {
+    notificationStyle: merged.notificationStyle === "near-dock" ? "near-dock" : "system",
     enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_SETTINGS.enabled,
     showDockIcon:
       typeof merged.showDockIcon === "boolean"
@@ -133,6 +142,16 @@ export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefi
 }
 
 export class TrayManager {
+  private unreadNotificationCount = 0;
+
+  setUnreadNotificationCount(count: number): void {
+    this.unreadNotificationCount = count;
+    this.updateNotificationBadge();
+  }
+
+  private updateNotificationBadge(): void {
+    updateDockNotificationBadge(this.settings, this.unreadNotificationCount);
+  }
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
   private gateway: ChannelGateway | null = null;
@@ -192,6 +211,7 @@ export class TrayManager {
 
     // Load settings
     this.loadSettings();
+    this.updateNotificationBadge();
 
     // Apply options overrides
     if (options.showDockIcon !== undefined) {
@@ -453,9 +473,9 @@ export class TrayManager {
       };
     };
 
-    const existing = (await this.workspaceRepo
-      .findAll())
-      .find((workspace) => isTempWorkspaceInScope(workspace.id, "tray"));
+    const existing = (await this.workspaceRepo.findAll()).find((workspace) =>
+      isTempWorkspaceInScope(workspace.id, "tray"),
+    );
     let workspace: Workspace;
     if (existing) {
       workspace = await ensureTempWorkspace(existing.id, existing.path, existing);
@@ -508,9 +528,9 @@ export class TrayManager {
       let wsId = workspaceId;
       if (!wsId) {
         // Get the first non-temp workspace, or use temp workspace as fallback
-        const workspaces = (await this.workspaceRepo
-          .findAll())
-          .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id));
+        const workspaces = (await this.workspaceRepo.findAll()).filter(
+          (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+        );
         if (workspaces.length > 0) {
           wsId = workspaces[0].id;
         } else {
@@ -1198,6 +1218,10 @@ export class TrayManager {
       Object.entries(settings).filter(([, v]) => v !== undefined),
     ) as Partial<TraySettings>;
     this.settings = normalizeTraySettings({ ...this.settings, ...patch });
+    this.updateNotificationBadge();
+    if (settings.notificationStyle !== undefined || settings.showNotifications === false) {
+      NotificationOverlayManager.getInstance().dismissAll();
+    }
 
     try {
       if (SecureSettingsRepository.isInitialized()) {
@@ -1240,19 +1264,12 @@ export class TrayManager {
     if (!this.settings.showNotifications) return;
 
     const notification = {
-      id: `tray-${Date.now()}`,
+      id: `tray-${randomUUID()}`,
       title,
       message: body,
       taskId,
     };
-    const showOverlayFallback = () => {
-      NotificationOverlayManager.getInstance().show(notification);
-    };
-    if (NativeNotificationCenter.getInstance().show(notification, showOverlayFallback)) {
-      return;
-    }
-
-    showOverlayFallback();
+    showDesktopNotification(notification, this.settings.notificationStyle);
   }
 
   /**

@@ -532,6 +532,34 @@ describe("TaskExecutor plan parsing", () => {
     expect(scoped.map((tool: Any) => tool.name)).toEqual(["generate_image"]);
   });
 
+  it.each(["mcp_", "dayanak_"])(
+    "retains connected MCP tools in Turkish plan steps with prefix %s",
+    (prefix) => {
+      const executor = createPlanExecutor({ content: [] });
+      executor.task.title = "Ücret alacağı kararını doğrula";
+      executor.task.prompt = "Dayanak araçlarını kullan. İşçinin ücret alacağı için karar bul.";
+      executor.task.rawPrompt = executor.task.prompt;
+      executor.currentStepId = "1";
+      executor.plan = {
+        steps: [
+          {
+            id: "1",
+            description: "Kararın ilgili paragrafını getir ve alıntıyı doğrula.",
+            status: "pending",
+          },
+        ],
+      };
+      const mcp = ["search_yargitay", "get_yargitay_passage", "check_yargitay_citations"].map(
+        (name) => ({
+          name: `${prefix}${name}`,
+          runtime: { alwaysExpose: true, capabilityTags: ["mcp"] },
+        }),
+      );
+      const scoped = executor.applyStepScopedToolPolicy([{ name: "read_file" }, ...mcp]);
+      for (const tool of mcp) expect(scoped).toContain(tool);
+    },
+  );
+
   it("offers only discovery tools while locating workspace book files", () => {
     const executor = createPlanExecutor({ content: [] });
     executor.task.title = "Review manuscript";
@@ -565,7 +593,7 @@ describe("TaskExecutor plan parsing", () => {
     ]);
   });
 
-  it("retains only explicitly named MCP tools that are currently available", () => {
+  it("retains available MCP tools through step and adaptive filtering", () => {
     const executor = createPlanExecutor({ content: [] });
     const prompt = "Call mcp_qa_echo with the text 'fixture ping'.";
     executor.task.title = "Call mcp_qa_echo";
@@ -595,10 +623,14 @@ describe("TaskExecutor plan parsing", () => {
       { name: "mcp_qa_admin_reset" },
     ];
     const stepScopedTools = executor.applyStepScopedToolPolicy(availableTools);
-    expect(stepScopedTools.map((tool: Any) => tool.name)).toEqual(["read_file", "mcp_qa_echo"]);
+    expect(stepScopedTools.map((tool: Any) => tool.name)).toEqual([
+      "read_file",
+      "mcp_qa_echo",
+      "mcp_qa_admin_reset",
+    ]);
     expect(
       executor.applyAdaptiveToolAvailabilityFilter(stepScopedTools).map((tool: Any) => tool.name),
-    ).toEqual(["read_file", "mcp_qa_echo"]);
+    ).toEqual(["read_file", "mcp_qa_echo", "mcp_qa_admin_reset"]);
 
     executor.task.prompt = "Use the configured MCP server to inspect the result.";
     executor.task.rawPrompt = executor.task.prompt;
@@ -610,7 +642,7 @@ describe("TaskExecutor plan parsing", () => {
         .applyStepScopedToolPolicy(availableTools)
         .map((tool: Any) => tool.name)
         .filter((name: string) => name.startsWith("mcp_")),
-    ).toEqual([]);
+    ).toEqual(["mcp_qa_echo", "mcp_qa_admin_reset"]);
 
     expect(
       executor.applyStepScopedToolPolicy([{ name: "read_file" }]).map((tool: Any) => tool.name),

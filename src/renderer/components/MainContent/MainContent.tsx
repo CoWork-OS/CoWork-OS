@@ -131,7 +131,6 @@ import { useIsCalmTheme } from "../../hooks/useIsCalmTheme";
 import { CalmAccessMenu, type CalmAccessMenuProps } from "../calm/CalmTopBar";
 import { CalmModeToggle } from "../calm/CalmModeToggle";
 import { CalmBriefingCard } from "../calm/CalmBriefingCard";
-import { CalmAgentAvatar } from "../calm/CalmAgentAvatar";
 import {
   hasTaskOutputs,
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -12066,17 +12065,6 @@ function MainContentComponent({
               markdownComponents={markdownComponents}
               replay={isReplayMode}
               telemetryEnabled={rendererPerfLoggingEnabled}
-              leading={
-                isCalm ? (
-                  <span className="calm-strip-agent">
-                    <CalmAgentAvatar
-                      size={22}
-                      animated={taskStatusStripModel.state === "working"}
-                    />
-                    <span className="calm-strip-agent-name">{agentContext.agentName}</span>
-                  </span>
-                ) : undefined
-              }
               onOpenOutput={(outputPath) => {
                 if (onViewTaskOutputs) {
                   onViewTaskOutputs(task.id, outputPath);

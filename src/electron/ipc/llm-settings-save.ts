@@ -161,6 +161,7 @@ export function buildSavedLLMSettings(
     delete openaiSettings.tokenExpiresAt;
     delete openaiSettings.accountId;
     delete openaiSettings.email;
+    delete openaiSettings.oauthVariant;
   }
   if (shouldPreserveOpenAIOAuthTokens && existingOpenAISettings) {
     openaiSettings = {

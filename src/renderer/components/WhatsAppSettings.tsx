@@ -439,11 +439,10 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
               <label>Response Prefix</label>
               <input
                 type="text"
-                className="settings-input"
+                className="settings-input settings-input--narrow"
                 placeholder="🤖"
                 value={responsePrefix}
                 onChange={(e) => setResponsePrefix(e.target.value)}
-                style={{ width: "100px" }}
               />
               <p className="settings-hint">
                 Prefix added to bot messages (e.g., "🤖" or "[CoWork]")
@@ -636,11 +635,10 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <input
                   type="text"
-                  className="settings-input"
+                  className="settings-input settings-input--narrow"
                   placeholder="🤖"
                   value={responsePrefix}
                   onChange={(e) => setResponsePrefix(e.target.value)}
-                  style={{ width: "100px" }}
                 />
                 {channel && (
                   <button
@@ -832,11 +830,10 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <input
                 type="text"
-                className="settings-input"
+                className="settings-input settings-input--narrow"
                 placeholder="🤖"
                 value={responsePrefix}
                 onChange={(e) => setResponsePrefix(e.target.value)}
-                style={{ width: "100px" }}
               />
               <button className="button-secondary" onClick={handleUpdateResponsePrefix}>
                 Save

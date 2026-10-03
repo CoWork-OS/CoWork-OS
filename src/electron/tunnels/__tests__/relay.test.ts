@@ -38,6 +38,43 @@ describe("secure MCP tunnel relay", () => {
     await createTunnel(port);
   });
 
+  it.each(["null", "[]", JSON.stringify({ type: "mcp_response", requestId: "x", payload: null })])(
+    "isolates malformed authenticated message %s",
+    async (payload) => {
+      relay = await startTunnelRelayServer({ port: 0, adminToken: ADMIN_TOKEN });
+      const created = await createTunnel(relay.port);
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${relay.port}/v1/tunnels/connect?tunnel_id=${created.id}`,
+        { headers: { authorization: `Bearer ${created.clientToken}` } },
+      );
+      await waitForOpen(ws);
+      const closed = new Promise<number>((resolve) => ws.once("close", resolve));
+      ws.send(payload);
+      expect(await closed).toBe(1008);
+      await createTunnel(relay.port);
+    },
+  );
+  it("revokes a connected client when its record is replaced", async () => {
+    relay = await startTunnelRelayServer({ port: 0, adminToken: ADMIN_TOKEN });
+    const created = await createTunnel(relay.port);
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${relay.port}/v1/tunnels/connect?tunnel_id=${created.id}`,
+      { headers: { authorization: `Bearer ${created.clientToken}` } },
+    );
+    await waitForOpen(ws);
+    const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()));
+    const updated = await createTunnel(relay.port, { id: created.id, policy: { readOnly: true } });
+    await closed;
+    const response = await fetch(`http://127.0.0.1:${relay.port}/v1/tunnels/${created.id}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${updated.callerToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(response.status).toBe(503);
+  });
   it("requires an admin token to create relay tunnel credentials", async () => {
     relay = await startTunnelRelayServer({ port: 0 });
     const response = await fetch(`http://127.0.0.1:${relay.port}/v1/tunnels`, {
@@ -94,6 +131,14 @@ describe("secure MCP tunnel relay", () => {
     ws.on("message", (data) => {
       const message = JSON.parse(data.toString());
       if (message.type !== "mcp_request") return;
+      ws.send(
+        JSON.stringify({
+          type: "audit_event",
+          tunnelId: created.id,
+          event: { outcome: "allowed" },
+        }),
+      );
+      ws.send(JSON.stringify({ type: "pong", tunnelId: created.id, timestamp: Date.now() }));
       ws.send(
         JSON.stringify({
           type: "mcp_response",

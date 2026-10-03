@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildUnavailableToolResult,
   buildNormalizedToolResult,
@@ -10,7 +10,42 @@ import {
   isHardToolFailure,
   normalizeToolFailureReason,
   preflightValidateAndRepairToolInput,
+  recordToolFailureOutcome,
 } from "../executor-tool-execution-utils";
+
+describe("MCP application errors", () => {
+  it("keeps the tool callable even when its error text resembles a hard failure", () => {
+    const error = "TEST DATA invalid_chamber request_id=432-429; not configured";
+    const result = { source: "mcp", isError: true, success: false, error };
+    const recordFailure = vi.fn(() => true);
+    const persistentToolFailures = new Map<string, number>();
+    for (let i = 0; i < 6; i++) {
+      expect(
+        recordToolFailureOutcome({
+          toolName: "dayanak_search_yargitay",
+          failureReason: error,
+          result,
+          persistentToolFailures,
+          recordFailure,
+          isHardToolFailure,
+        }),
+      ).toEqual({ shouldDisable: false, isHardFailure: false, failureCount: 0 });
+    }
+    expect(recordFailure).not.toHaveBeenCalled();
+    expect(isHardToolFailure("dayanak_search_yargitay", result, error)).toBe(false);
+    expect(persistentToolFailures.size).toBe(0);
+    const normalized = buildNormalizedToolResult({
+      toolName: "dayanak_search_yargitay",
+      toolUseId: "test-call",
+      result,
+      rawResult: JSON.stringify(result),
+      sanitizeToolResult: (_name, text) => text,
+      getToolFailureReason,
+    });
+    expect(normalized.toolResult.is_error).toBe(true);
+    expect(normalized.toolResult.content).toContain("invalid_chamber");
+  });
+});
 
 describe("isEffectivelyIdempotentToolCall", () => {
   const baseIdempotent = (toolName: string) =>

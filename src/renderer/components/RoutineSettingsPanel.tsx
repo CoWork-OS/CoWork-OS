@@ -9,6 +9,7 @@ import {
   type RoutineHookStatus,
 } from "./routine-hook-metadata";
 import { getRoutineListDisplayState } from "./routine-list-state";
+import { loadRoutineSettingsData } from "./routine-settings-load";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 
 type CronSchedule =
@@ -260,52 +261,6 @@ const compactCheckboxGroupStyle = {
   alignItems: "center",
 } satisfies CSSProperties;
 
-type RoutineButtonTone = "primary" | "secondary" | "danger";
-
-function routineButtonStyle(tone: RoutineButtonTone, disabled = false): CSSProperties {
-  const toneStyle: Record<RoutineButtonTone, CSSProperties> = {
-    primary: {
-      background: "var(--color-accent)",
-      borderColor: "var(--color-accent)",
-      color: "#0f172a",
-    },
-    secondary: {
-      background: "var(--color-bg-secondary, rgba(127, 127, 127, 0.08))",
-      borderColor: "var(--color-border, rgba(127, 127, 127, 0.2))",
-      color: "var(--color-text-primary)",
-    },
-    danger: {
-      background: "var(--color-error-subtle, rgba(248, 113, 113, 0.12))",
-      borderColor: "color-mix(in srgb, var(--color-error) 45%, transparent)",
-      color: "var(--color-error)",
-    },
-  };
-
-  return {
-    appearance: "none",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    minHeight: 36,
-    width: "fit-content",
-    maxWidth: "100%",
-    padding: "8px 14px",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderRadius: 999,
-    font: "inherit",
-    fontSize: 14,
-    fontWeight: 600,
-    lineHeight: 1,
-    whiteSpace: "nowrap",
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.55 : 1,
-    transition: "background-color 120ms ease, border-color 120ms ease, opacity 120ms ease",
-    ...toneStyle[tone],
-  };
-}
-
 function createDefaultFormState(workspaceId = ""): RoutineFormState {
   return {
     enabled: true,
@@ -379,6 +334,8 @@ export function RoutineSettingsPanel({
   > | null>(null);
   const [loading, setLoading] = useState(true);
   const [routinesLoaded, setRoutinesLoaded] = useState(false);
+  const [runsLoaded, setRunsLoaded] = useState(false);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -419,34 +376,62 @@ export function RoutineSettingsPanel({
     setLoading(true);
     setError(null);
     try {
-      const [routineList, routineRuns, workspaceList, hookMetadata, servers, schedulerStatus] =
-        await Promise.all([
-          window.electronAPI.listRoutines(),
-          window.electronAPI.listRoutineRuns?.(undefined, 200) || Promise.resolve([]),
-          window.electronAPI.listWorkspaces(),
+      const data = await loadRoutineSettingsData({
+        routines: () => window.electronAPI.listRoutines(),
+        runs: () => window.electronAPI.listRoutineRuns?.(undefined, 200) || Promise.resolve([]),
+        workspaces: () => window.electronAPI.listWorkspaces(),
+        hooks: () =>
           loadRoutineHookMetadata(
             hasHostMethods,
             () => window.electronAPI.getHooksStatus(),
             () => window.electronAPI.getHooksSettings(),
           ),
+        servers: () =>
           hasHostMethod("getMCPStatus") ? invokeMcpApi("getMCPStatus") : Promise.resolve([]),
+        cron: () =>
           hasHostMethod("getCronStatus")
-            ? window.electronAPI.getCronStatus().catch(() => null)
+            ? window.electronAPI.getCronStatus()
             : Promise.resolve(null),
-        ]);
-
-      setRoutines((routineList || []) as Routine[]);
-      setRuns((routineRuns || []) as RoutineRun[]);
-      setWorkspaces(workspaceList || []);
-      setHooksStatus(hookMetadata.status);
-      setHooksSettings(hookMetadata.settings);
-      setMcpServers(Array.isArray(servers) ? servers : []);
-      setCronStatus(schedulerStatus);
-      setRoutinesLoaded(true);
-
-      if (!form.workspaceId && workspaceList?.length) {
-        setForm((current) => ({ ...current, workspaceId: workspaceList[0].id }));
+      });
+      const errors: string[] = [];
+      function apply<T>(
+        label: string,
+        result: PromiseSettledResult<T>,
+        accept: (value: T) => void,
+      ) {
+        if (result.status === "fulfilled") accept(result.value);
+        else {
+          const reason =
+            result.reason instanceof Error ? result.reason.message : String(result.reason);
+          errors.push(`${label} could not be loaded: ${reason}`);
+        }
       }
+      apply("Routines", data.routines, (value) => {
+        setRoutines((value || []) as Routine[]);
+        setRoutinesLoaded(true);
+      });
+      apply("Recent runs", data.runs, (value) => {
+        setRuns((value || []) as RoutineRun[]);
+        setRunsLoaded(true);
+      });
+      setWorkspacesLoaded(data.workspaces.status === "fulfilled");
+      apply("Workspaces", data.workspaces, (value) => {
+        setWorkspaces(value || []);
+        if (value?.length) {
+          setForm((current) =>
+            current.workspaceId ? current : { ...current, workspaceId: value[0].id },
+          );
+        }
+      });
+      apply("Webhook settings", data.hooks, (value) => {
+        setHooksStatus(value.status);
+        setHooksSettings(value.settings);
+      });
+      apply("Connectors", data.servers, (value) =>
+        setMcpServers(Array.isArray(value) ? value : []),
+      );
+      apply("Scheduler status", data.cron, setCronStatus);
+      setError(errors.length ? errors.join("\n") : null);
     } catch (err: Any) {
       setError(err.message || "Failed to load routines");
     } finally {
@@ -772,10 +757,14 @@ export function RoutineSettingsPanel({
             </p>
           </div>
           <button
-            style={routineButtonStyle("primary", !routinesLoaded)}
+            className="settings-button primary"
             onClick={startCreate}
-            disabled={!routinesLoaded}
-            title={!routinesLoaded ? "Load routines before creating one" : undefined}
+            disabled={!routinesLoaded || !workspacesLoaded}
+            title={
+              !routinesLoaded || !workspacesLoaded
+                ? "Load routines and workspaces before creating one"
+                : undefined
+            }
           >
             <Plus size={16} />
             New Routine
@@ -799,7 +788,10 @@ export function RoutineSettingsPanel({
 
         {error && (
           <div className="settings-error" style={{ marginTop: 12 }}>
-            {error}
+            <div style={{ whiteSpace: "pre-line" }}>{error}</div>
+            <button className="settings-button" onClick={() => void loadAll()}>
+              Retry loading
+            </button>
           </div>
         )}
       </div>
@@ -808,7 +800,7 @@ export function RoutineSettingsPanel({
         <div className="settings-section" style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h4 style={{ margin: 0 }}>{editingRoutineId ? "Edit Routine" : "Create Routine"}</h4>
-            <button style={routineButtonStyle("secondary")} onClick={resetForm}>
+            <button className="settings-button" onClick={resetForm}>
               Cancel
             </button>
           </div>
@@ -1366,7 +1358,7 @@ export function RoutineSettingsPanel({
               gap: 8,
               padding: 14,
               border: "1px solid var(--color-border, rgba(127, 127, 127, 0.2))",
-              borderRadius: 12,
+              borderRadius: "var(--radius-md)",
               fontSize: 13,
               lineHeight: 1.5,
             }}
@@ -1407,9 +1399,9 @@ export function RoutineSettingsPanel({
 
           <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
             <button
-              style={routineButtonStyle("primary", saving)}
+              className="settings-button primary"
               onClick={saveRoutine}
-              disabled={saving}
+              disabled={saving || !workspacesLoaded}
             >
               <Save size={16} />
               {saving ? "Saving..." : "Save Routine"}
@@ -1421,7 +1413,7 @@ export function RoutineSettingsPanel({
       <div className="settings-section" style={{ display: "grid", gap: 16 }}>
         {routineListDisplayState === "unavailable" ? (
           <div className="settings-empty-state" role="status">
-            The routine list has not loaded. Retry after the browser host is available.
+            The routine list could not be loaded. Use Retry loading to try again.
           </div>
         ) : routineListDisplayState === "empty" ? (
           <div className="settings-empty-state">
@@ -1438,7 +1430,7 @@ export function RoutineSettingsPanel({
                 key={routine.id}
                 style={{
                   border: "1px solid var(--color-border, rgba(127, 127, 127, 0.2))",
-                  borderRadius: 16,
+                  borderRadius: "var(--radius-md)",
                   padding: 16,
                   display: "grid",
                   gap: 14,
@@ -1472,7 +1464,7 @@ export function RoutineSettingsPanel({
 
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <button
-                      style={routineButtonStyle("secondary", saving)}
+                      className="settings-button"
                       onClick={() => runRoutineNow(routine.id)}
                       disabled={saving}
                     >
@@ -1480,14 +1472,14 @@ export function RoutineSettingsPanel({
                       Run Now
                     </button>
                     <button
-                      style={routineButtonStyle("secondary")}
+                      className="settings-button"
                       onClick={() => startEdit(routine)}
                     >
                       <Pencil size={16} />
                       Edit
                     </button>
                     <button
-                      style={routineButtonStyle("danger", saving)}
+                      className="settings-button danger"
                       onClick={() => deleteRoutine(routine.id)}
                       disabled={saving}
                     >
@@ -1519,7 +1511,7 @@ export function RoutineSettingsPanel({
                   <div
                     style={{
                       border: "1px solid var(--color-border, rgba(127, 127, 127, 0.2))",
-                      borderRadius: 12,
+                      borderRadius: "var(--radius-md)",
                       padding: 12,
                       display: "grid",
                       gap: 8,
@@ -1534,7 +1526,7 @@ export function RoutineSettingsPanel({
                     </code>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
-                        style={routineButtonStyle("secondary")}
+                        className="settings-button"
                         onClick={() =>
                           copyText(
                             `${apiBaseUrl}/${apiTrigger.path || `routines/${routine.id}/${apiTrigger.id}`}`,
@@ -1546,14 +1538,14 @@ export function RoutineSettingsPanel({
                       {apiTrigger.token && window.coworkBrowserHost !== true && (
                         <>
                           <button
-                            style={routineButtonStyle("secondary")}
+                            className="settings-button"
                             onClick={() => copyText(apiTrigger.token || "")}
                           >
                             Copy Token
                           </button>
                           {hasHostMethod("regenerateRoutineApiToken") && (
                             <button
-                              style={routineButtonStyle("secondary", saving)}
+                              className="settings-button"
                               onClick={() => regenerateApiToken(routine, apiTrigger.id)}
                               disabled={saving}
                             >
@@ -1574,7 +1566,9 @@ export function RoutineSettingsPanel({
 
                 <div style={{ display: "grid", gap: 8 }}>
                   <strong>Recent Runs</strong>
-                  {routineRuns.length === 0 ? (
+                  {!runsLoaded ? (
+                    <div className="settings-help">Recent runs could not be loaded.</div>
+                  ) : routineRuns.length === 0 ? (
                     <div className="settings-help">No runs recorded yet.</div>
                   ) : (
                     routineRuns.map((run) => (
@@ -1582,7 +1576,7 @@ export function RoutineSettingsPanel({
                         key={run.id}
                         style={{
                           border: "1px solid var(--color-border, rgba(127, 127, 127, 0.16))",
-                          borderRadius: 10,
+                          borderRadius: "var(--radius-md)",
                           padding: 10,
                           display: "grid",
                           gap: 6,

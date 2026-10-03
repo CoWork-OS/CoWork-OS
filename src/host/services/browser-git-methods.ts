@@ -1002,7 +1002,13 @@ function readOnlyGitOptions(cwd: string) {
     maxBuffer: MAX_GIT_OUTPUT_BYTES,
     timeout: GIT_COMMAND_TIMEOUT_MS,
     shell: false,
-    env: { ...env, GIT_OPTIONAL_LOCKS: "0" },
+    env: {
+      ...env,
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.fsmonitor",
+      GIT_CONFIG_VALUE_0: "false",
+    },
   };
 }
 

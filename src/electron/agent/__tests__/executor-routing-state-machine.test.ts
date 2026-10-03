@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TaskExecutor } from "../executor";
 import { TaskStrategyService } from "../strategy/TaskStrategyService";
+import { IntentRouter } from "../strategy/IntentRouter";
 import type { TaskStrategySnapshot } from "../strategy/TaskStrategySnapshot";
 import { makeRoute } from "../strategy/__tests__/task-strategy-test-fixtures";
 
@@ -38,6 +39,19 @@ function createExecutorWithSnapshot(snapshot?: Partial<TaskStrategySnapshot>) {
 }
 
 describe("TaskExecutor routing state machine gates", () => {
+  it.each([
+    "Dayanak kayıtlarında emsal bir Yargıtay kararı bulabilir misin?",
+    "Dayanak kayıtlarından emsal bir Yargıtay kararı araştır.",
+    "Could you recommend an approach after searching? Search the source records first.",
+    "Podes consultar os registos desse serviço?",
+  ])("avoids the tool-free answer-first call for retrieval phrasing: %s", (prompt) => {
+    const route = IntentRouter.route("", prompt);
+    const strategy = TaskStrategyService.derive(route, undefined, { prompt });
+    const executor = createExecutorWithSnapshot(strategy.snapshot);
+    expect(executor.shouldEmitAnswerFirst()).toBe(false);
+    expect(executor.shouldShortCircuitAfterAnswerFirst()).toBe(false);
+    expect(executor.shouldShortCircuitSimpleNonExecuteAnswer()).toBe(false);
+  });
   // These assertions intentionally call private routing gates: the public executor
   // flow is too expensive for this state-machine matrix.
   it("uses terminal quick-answer snapshots for answer-first LLM calls", () => {

@@ -41,4 +41,17 @@ describe("report units", () => {
       "writer:statements.unit:controlPlane_createIssue",
     ]);
   });
+
+  it("routes workspace listing to the reader but keeps workspace mutations on the writer", async () => {
+    const log: string[] = [];
+    setStatementClient("storage", "/tmp/cowork-report-units.db", client("writer", log));
+    setReportReaderClient("/tmp/cowork-report-units.db", client("reader", log));
+    const port = new StatementPort<never>(db, "storage", {});
+    await port.unit("workspace_findAll" as never, [] as never);
+    await port.unit("workspace_create" as never, [] as never);
+    expect(log).toEqual([
+      "reader:statements.readUnit:workspace_findAll",
+      "writer:statements.unit:workspace_create",
+    ]);
+  });
 });

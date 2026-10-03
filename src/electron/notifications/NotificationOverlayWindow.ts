@@ -1,13 +1,15 @@
 /**
- * NotificationOverlayWindow — macOS-style top-right notification banner
+ * NotificationOverlayWindow — desktop banners and optional macOS Dock cards
  *
  * Creates frameless, transparent, always-on-top BrowserWindows that display
- * rounded notification banners aligned to the top-right of the display work area (same
- * region as system notifications). Follows the same pattern as QuickInputWindow
+ * rounded notifications at the top-right or near the Dock, inside the display work area.
+ * Follows the same pattern as QuickInputWindow
  * (data URL, console-message IPC).
  */
 
 import { BrowserWindow, Rectangle, screen } from "electron";
+import type { DesktopNotificationStyle } from "../../shared/types";
+import { getOverlayLayout } from "./overlay-layout";
 
 interface OverlayNotification {
   id: string;
@@ -22,15 +24,12 @@ interface ActiveOverlay {
   notification: OverlayNotification;
   dismissTimer: NodeJS.Timeout;
   index: number;
+  style: DesktopNotificationStyle;
+  displayId: number;
 }
 
-const NOTIFICATION_WIDTH = 370;
-const NOTIFICATION_HEIGHT = 92;
-const GAP = 10;
-const MENU_BAR_GAP = 8;
-/** Inset from the work-area edge — matches typical macOS banner padding */
-const HORIZONTAL_MARGIN = 16;
 const DISMISS_TIMEOUT = 5000;
+const DOCK_DISMISS_TIMEOUT = 10000;
 const FADE_DURATION = 300;
 const MAX_VISIBLE = 5;
 
@@ -42,6 +41,9 @@ export class NotificationOverlayManager {
   private anchorBoundsProvider: (() => Rectangle | null) | null = null;
 
   private onClickCallback: ((notificationId: string, taskId?: string) => void) | null = null;
+  private onReadCallback: ((notificationId: string) => void) | null = null;
+  private listening = false;
+  private readonly onDisplayChange = () => this.repositionOverlays();
 
   static getInstance(): NotificationOverlayManager {
     if (!NotificationOverlayManager.instance) {
@@ -65,25 +67,53 @@ export class NotificationOverlayManager {
     this.onClickCallback = callback;
   }
 
-  show(notification: OverlayNotification): void {
+  setOnRead(callback: (notificationId: string) => void): void {
+    this.onReadCallback = callback;
+  }
+
+  show(notification: OverlayNotification, style: DesktopNotificationStyle = "system"): void {
+    if (this.activeOverlays.has(notification.id)) this.dismiss(notification.id);
+    if (!this.listening) {
+      screen.on("display-metrics-changed", this.onDisplayChange);
+      screen.on("display-removed", this.onDisplayChange);
+      this.listening = true;
+    }
+    const trayBounds = this.anchorBoundsProvider?.();
+    const display =
+      style === "near-dock"
+        ? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+        : trayBounds
+          ? screen.getDisplayMatching(trayBounds)
+          : screen.getPrimaryDisplay();
+    const layout = getOverlayLayout(display, style, 0);
+    const capacity = Math.max(
+      1,
+      Math.min(MAX_VISIBLE, Math.floor((display.workArea.height - 32) / (layout.height + 10))),
+    );
     // Cap visible notifications — dismiss oldest if needed
-    if (this.activeOverlays.size >= MAX_VISIBLE) {
+    while (this.activeOverlays.size >= capacity) {
       const oldest = this.activeOverlays.values().next().value;
       if (oldest) this.dismiss(oldest.notification.id);
     }
 
-    const win = this.createOverlayWindow(notification);
+    const win = this.createOverlayWindow(notification, style, display.id);
 
-    const dismissTimer = setTimeout(() => {
-      this.dismiss(notification.id);
-    }, DISMISS_TIMEOUT);
+    const dismissTimer = setTimeout(
+      () => {
+        this.dismiss(notification.id);
+      },
+      style === "near-dock" ? DOCK_DISMISS_TIMEOUT : DISMISS_TIMEOUT,
+    );
 
     this.activeOverlays.set(notification.id, {
       window: win,
       notification,
       dismissTimer,
       index: this.activeOverlays.size,
+      style,
+      displayId: display.id,
     });
+    this.repositionOverlays();
   }
 
   dismiss(id: string): void {
@@ -115,6 +145,11 @@ export class NotificationOverlayManager {
   }
 
   destroy(): void {
+    if (this.listening) {
+      screen.removeListener("display-metrics-changed", this.onDisplayChange);
+      screen.removeListener("display-removed", this.onDisplayChange);
+      this.listening = false;
+    }
     for (const [, overlay] of this.activeOverlays) {
       clearTimeout(overlay.dismissTimer);
       if (overlay.window && !overlay.window.isDestroyed()) {
@@ -125,15 +160,16 @@ export class NotificationOverlayManager {
     NotificationOverlayManager.instance = null;
   }
 
-  private createOverlayWindow(notification: OverlayNotification): BrowserWindow {
+  private createOverlayWindow(
+    notification: OverlayNotification,
+    style: DesktopNotificationStyle,
+    displayId: number,
+  ): BrowserWindow {
     const isMac = process.platform === "darwin";
-    const { x, y } = this.getPosition(this.activeOverlays.size);
+    const layout = this.getPosition(this.activeOverlays.size, style, displayId);
 
     const win = new BrowserWindow({
-      width: NOTIFICATION_WIDTH,
-      height: NOTIFICATION_HEIGHT,
-      x,
-      y,
+      ...layout,
       frame: false,
       transparent: isMac,
       resizable: false,
@@ -158,10 +194,13 @@ export class NotificationOverlayManager {
       win.setAlwaysOnTop(true, "floating");
     }
 
-    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(this.getHtml(notification))}`);
+    win.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(this.getHtml(notification, style))}`,
+    );
 
     win.once("ready-to-show", () => {
-      win.showInactive();
+      if (this.activeOverlays.get(notification.id)?.window === win && !win.isDestroyed())
+        win.showInactive();
     });
 
     win.webContents.on("console-message", (_event, _level, message) => {
@@ -172,44 +211,37 @@ export class NotificationOverlayManager {
         this.dismiss(notification.id);
       } else if (message === "__DISMISS__") {
         this.dismiss(notification.id);
+      } else if (message === "__READ__") {
+        this.onReadCallback?.(notification.id);
+        this.dismiss(notification.id);
       }
     });
 
     return win;
   }
 
-  private getPosition(stackIndex: number): { x: number; y: number } {
-    const trayBounds = this.anchorBoundsProvider ? this.anchorBoundsProvider() : null;
-
-    // Use the display that contains the tray so multi-monitor setups get correct edges.
-    const display = trayBounds ? screen.getDisplayMatching(trayBounds) : screen.getPrimaryDisplay();
-    const { workArea } = display;
-
-    // Top-right of the work area (standard macOS notification placement). Do not center on the
-    // tray icon — that clips the banner when the icon sits flush with the screen edge.
-    const maxLeft = workArea.x + workArea.width - NOTIFICATION_WIDTH - HORIZONTAL_MARGIN;
-    const x = Math.round(Math.max(workArea.x + HORIZONTAL_MARGIN, maxLeft));
-
-    const topY = workArea.y + MENU_BAR_GAP;
-    const y = topY + stackIndex * (NOTIFICATION_HEIGHT + GAP);
-
-    return { x, y };
+  private getPosition(
+    stackIndex: number,
+    style: DesktopNotificationStyle,
+    displayId: number,
+  ): Rectangle {
+    const display =
+      screen.getAllDisplays().find((candidate) => candidate.id === displayId) ??
+      screen.getPrimaryDisplay();
+    return getOverlayLayout(display, style, stackIndex);
   }
 
   private repositionOverlays(): void {
-    let index = 0;
+    const indices = new Map<string, number>();
     for (const [, overlay] of this.activeOverlays) {
+      const key = `${overlay.displayId}:${overlay.style}`;
+      const index = indices.get(key) ?? 0;
       overlay.index = index;
-      const { x, y } = this.getPosition(index);
+      const layout = this.getPosition(index, overlay.style, overlay.displayId);
       if (overlay.window && !overlay.window.isDestroyed()) {
-        overlay.window.setBounds({
-          x,
-          y,
-          width: NOTIFICATION_WIDTH,
-          height: NOTIFICATION_HEIGHT,
-        });
+        overlay.window.setBounds(layout);
       }
-      index++;
+      indices.set(key, index + 1);
     }
   }
 
@@ -222,7 +254,7 @@ export class NotificationOverlayManager {
       .replace(/'/g, "&#039;");
   }
 
-  private getHtml(notification: OverlayNotification): string {
+  private getHtml(notification: OverlayNotification, style: DesktopNotificationStyle): string {
     const title = this.escapeHtml(notification.title);
     const message = this.escapeHtml(notification.message);
     return `<!DOCTYPE html>
@@ -420,9 +452,26 @@ export class NotificationOverlayManager {
     width: 11px;
     height: 11px;
   }
+  .read { display: none; }
+  body.dock #n { align-items: center; padding: 16px; gap: 12px; border-radius: 28px; transform-origin: bottom center; }
+  body.dock #n::before { background: rgba(16, 17, 19, 0.96); }
+  body.dock .app-icon { width: 28px; height: 28px; min-width: 28px; border-radius: 8px; }
+  body.dock .app-icon svg { width: 19px; height: 19px; }
+  body.dock .app-name { color: #46d7af; }
+  body.dock .meta { justify-content: space-between; margin-bottom: 5px; }
+  body.dock .sub { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  body.dock .title { font-size: 13px; }
+  body.dock .dismiss, body.dock .read { position: static; display: flex; flex-shrink: 0; width: 44px; height: 44px; opacity: 1; cursor: pointer; }
+  body.dock .read { align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.1); border-radius: 50%; background: rgba(255,255,255,.12); color: white; }
+  body.dock .dismiss svg, body.dock .read svg { width: 20px; height: 20px; }
+  body.dock .read:hover { background: rgba(255,255,255,.2); }
+  body.dock #n { animation-name: dock-in; }
+  body.dock #n.out { animation-name: dock-out; }
+  @keyframes dock-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes dock-out { to { opacity: 0; transform: translateY(12px) scale(.98); } }
 </style>
 </head>
-<body>
+<body class="${style === "near-dock" ? "dock" : "banner"}">
   <div id="n" onclick="console.log('__CLICK__')">
     <div class="app-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-linecap="round" stroke-linejoin="round">
@@ -440,7 +489,10 @@ export class NotificationOverlayManager {
       <div class="title">${title}</div>
       <div class="sub">${message}</div>
     </div>
-    <button class="dismiss" type="button" aria-label="Dismiss" onclick="event.stopPropagation(); console.log('__DISMISS__')">
+    <button class="read" type="button" aria-label="Mark as read" title="Mark as read" onclick="event.stopPropagation(); console.log('__READ__')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4 10-10" /></svg>
+    </button>
+    <button class="dismiss" type="button" aria-label="Dismiss" title="Dismiss" onclick="event.stopPropagation(); console.log('__DISMISS__')">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
       </svg>
@@ -449,7 +501,7 @@ export class NotificationOverlayManager {
   <script>
     setTimeout(function(){
       document.getElementById('n').classList.add('out');
-    }, ${DISMISS_TIMEOUT - FADE_DURATION});
+    }, ${(style === "near-dock" ? DOCK_DISMISS_TIMEOUT : DISMISS_TIMEOUT) - FADE_DURATION});
   </script>
 </body>
 </html>`;

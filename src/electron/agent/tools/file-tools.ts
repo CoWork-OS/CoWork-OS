@@ -1,3 +1,4 @@
+import { readDocumentArchiveBuffer } from "../../security/document-archive";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -1365,7 +1366,9 @@ export class FileTools {
     window: ReadWindow;
   }> {
     try {
-      const result = await mammoth.extractRawText({ path: fullPath });
+      const result = await mammoth.extractRawText({
+        buffer: await readDocumentArchiveBuffer(fullPath),
+      });
       const sliced = this.sliceContentWindow(result.value || "", readWindow);
       let content = sliced.content;
 

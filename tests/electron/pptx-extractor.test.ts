@@ -24,6 +24,21 @@ describe("pptx-extractor", () => {
     tempDirs = [];
   });
 
+  it.each(["1000000000", "1e9", "9007199254740993"])(
+    "rejects oversized span %s before expansion",
+    async (span) => {
+      const file = await createTempPptx(
+        `<p:sld><a:tbl><a:tr><a:tc><a:txBody><a:p><a:t>Cell</a:t></a:p></a:txBody><a:tcPr><a:gridSpan val=${span}/></a:tcPr></a:tc></a:tr></a:tbl></p:sld>`,
+      );
+      await expect(extractPptxContentFromFile(file)).rejects.toThrow("span exceeds");
+    },
+  );
+  it("preserves a legitimate merged table", async () => {
+    const file = await createTempPptx(
+      `<p:sld><a:tbl><a:tr><a:tc><a:txBody><a:p><a:t>Merged</a:t></a:p></a:txBody><a:tcPr><a:gridSpan val="2"/></a:tcPr></a:tc></a:tr></a:tbl></p:sld>`,
+    );
+    expect(await extractPptxContentFromFile(file)).toContain("Merged");
+  });
   it("extracts slide text from pptx files", async () => {
     const pptxPath = await createTempPptx(`
       <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">

@@ -910,19 +910,6 @@ html.visual-calm .calm-task .task-status-strip-phase {
   color: var(--calm-text-muted);
 }
 
-html.visual-calm .calm-strip-agent {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding-right: 4px;
-}
-
-html.visual-calm .calm-strip-agent-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--calm-agent);
-}
-
 /* ---------- Result / briefing cards ---------- */
 
 html.visual-calm .calm-result-card {
@@ -1055,34 +1042,6 @@ html.visual-calm .calm-task .summary-event-card .event-summary-text {
   font-size: 14.5px;
   font-weight: 500;
   color: var(--calm-text);
-}
-
-/* ---------- Agent ---------- */
-
-html.visual-calm .calm-agent-avatar {
-  flex-shrink: 0;
-  display: block;
-}
-
-html.visual-calm .calm-agent-avatar.animated {
-  animation: calm-agent-bob 2.4s ease-in-out infinite;
-  transform-origin: 50% 80%;
-}
-
-@keyframes calm-agent-bob {
-  0%,
-  100% {
-    transform: translateY(0) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-2px) rotate(-3deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  html.visual-calm .calm-agent-avatar.animated {
-    animation: none;
-  }
 }
 
 /* ---------- Fixes from the live walkthrough ---------- */

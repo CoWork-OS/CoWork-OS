@@ -775,6 +775,8 @@ export class UpdateManager {
       }
       const { autoUpdater } = electronUpdater;
       autoUpdater.autoDownload = false;
+      // Installation must only follow our verified explicit Install & Restart path.
+      autoUpdater.autoInstallOnAppQuit = false;
 
       if (!this.updaterEventsConfigured) {
         this.updaterEventsConfigured = true;

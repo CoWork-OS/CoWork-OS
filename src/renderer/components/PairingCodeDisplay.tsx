@@ -226,7 +226,8 @@ export function PairingCodeDisplay({
         }
 
         .regenerate-button {
-          display: flex;
+          display: inline-flex;
+          align-self: flex-start;
           align-items: center;
           justify-content: center;
           gap: 8px;

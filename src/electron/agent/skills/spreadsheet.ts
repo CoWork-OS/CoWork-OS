@@ -1,3 +1,4 @@
+import { readDocumentArchiveBuffer } from "../../security/document-archive";
 import * as fs from "fs/promises";
 import * as path from "path";
 import ExcelJS from "exceljs";
@@ -149,7 +150,9 @@ export class SpreadsheetBuilder {
    */
   async read(inputPath: string): Promise<SheetData[]> {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(inputPath);
+    await workbook.xlsx.load(
+      (await readDocumentArchiveBuffer(inputPath)) as unknown as ExcelJS.Buffer,
+    );
 
     const sheets: SheetData[] = [];
 

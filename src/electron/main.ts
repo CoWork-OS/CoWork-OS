@@ -216,6 +216,7 @@ import { setupCanvasHandlers, cleanupCanvasHandlers } from "./ipc/canvas-handler
 import { setupQAHandlers } from "./ipc/qa-handlers";
 import { getBrowserWorkbenchService } from "./browser/browser-workbench-service";
 import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessService";
+import { getBrowserSessionManager } from "./browser/browser-session-manager";
 import { isAllowedWebviewUrl } from "./browser/webview-url-policy";
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
 import { getActiveTempWorkspaceLeases } from "./utils/temp-workspace-lease";
@@ -625,6 +626,14 @@ app.on("web-contents-created", (_event, contents) => {
     }
 
     const targetUrl = typeof params?.src === "string" ? params.src : "";
+    const partition = String(params?.partition || webPreferences.partition || "");
+    if (partition.startsWith("persist:cowork-browser-")) {
+      getBrowserSessionManager().prepareSessionNetworkGuards(session.fromPartition(partition));
+    }
+    if (partition.startsWith("persist:cowork-browser-") && targetUrl !== "about:blank") {
+      event.preventDefault();
+      return;
+    }
     try {
       CanvasManager.getInstance().prepareWebview(webPreferences, params);
     } catch {
@@ -4546,11 +4555,31 @@ if (isMacSafeStorageMigrationWorker) {
       return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false;
     });
 
-    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_REGISTER, (_event, data: Any) => {
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_REGISTER, async (_event, data: Any) => {
       if (!data || typeof data.taskId !== "string" || typeof data.webContentsId !== "number") {
         throw new Error("Invalid browser workbench registration");
       }
-      getBrowserWorkbenchService().registerSession({
+      const task = new TaskStore(dbManager.getDatabase()).findById(data.taskId);
+      const workspace =
+        task && new WorkspaceStore(dbManager.getDatabase()).findById(task.workspaceId);
+      if (!task || !workspace) throw new Error("Browser task workspace not found");
+      const effective = applyAccessProfileToWorkspace(
+        workspace,
+        resolveEffectiveAccessProfile({
+          task,
+          workspace,
+          settings: PermissionSettingsManager.loadSettings(),
+          adminPolicies: loadPolicies(),
+        }),
+      );
+      getBrowserWorkbenchService().setAccessPolicy({
+        taskId: task.id,
+        sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        networkEnabled: effective.permissions.network === true,
+        accessNetworkMode: effective.permissions.accessNetworkMode,
+        profileDomainRules: effective.permissions.accessDomainRules,
+      });
+      await getBrowserWorkbenchService().registerSession({
         taskId: data.taskId,
         sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
         webContentsId: data.webContentsId,

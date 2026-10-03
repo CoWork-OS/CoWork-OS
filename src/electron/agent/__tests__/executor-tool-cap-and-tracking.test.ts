@@ -42,6 +42,18 @@ function buildTools(countBuiltIn: number, countMcp: number) {
 }
 
 describe("TaskExecutor adaptive tool cap + file tracking", () => {
+  it("retains connected MCP tools even when built-ins fill the tool budget", () => {
+    const executor = createExecutor("execution");
+    executor.task.prompt = "İşçinin ücret alacağı hakkında karar bul.";
+    const mcp = ["search_yargitay", "get_yargitay_passage", "check_yargitay_citations"].map(
+      (name) => ({
+        name: `dayanak_${name}`,
+        runtime: { alwaysExpose: true, capabilityTags: ["mcp"] },
+      }),
+    );
+    const capped = executor.capToolCount([...buildTools(150, 0), ...mcp]);
+    for (const tool of mcp) expect(capped).toContain(tool);
+  });
   it("does not enforce a strict 80-tool cap for execution intent", () => {
     const executor = createExecutor("execution");
     const tools = buildTools(10, 160);

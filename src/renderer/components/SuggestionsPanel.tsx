@@ -189,16 +189,16 @@ export function SuggestionsPanel({
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 720 }}>
+    <div>
       <div style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--color-text)" }}>
           Workflow Intelligence Suggestions
         </h3>
         <p
           style={{
             margin: "4px 0 0",
             fontSize: 13,
-            color: "var(--text-secondary)",
+            color: "var(--color-text-secondary)",
             lineHeight: 1.4,
           }}
         >
@@ -208,11 +208,11 @@ export function SuggestionsPanel({
       </div>
 
       {workspacesLoading ? (
-        <div style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
+        <div style={{ padding: 24, textAlign: "center", color: "var(--color-text-secondary)" }}>
           Loading workspaces...
         </div>
       ) : workspaces.length === 0 ? (
-        <div style={{ padding: 24, color: "var(--text-secondary)" }}>
+        <div style={{ padding: 24, color: "var(--color-text-secondary)" }}>
           No workspaces found. Create a workspace first.
         </div>
       ) : (
@@ -249,9 +249,9 @@ export function SuggestionsPanel({
                 height: 38,
                 padding: "0 14px",
                 borderRadius: 999,
-                border: "1px solid var(--border-color, #e5e7eb)",
-                background: "var(--card-bg, #fff)",
-                color: "var(--text-primary)",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-bg-secondary)",
+                color: "var(--color-text)",
                 fontSize: 12,
                 fontWeight: 600,
                 cursor: loading || refreshing ? "not-allowed" : "pointer",
@@ -263,7 +263,7 @@ export function SuggestionsPanel({
           </div>
 
           {loading && (
-            <div style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
+            <div style={{ padding: 24, textAlign: "center", color: "var(--color-text-secondary)" }}>
               Loading suggestions...
             </div>
           )}
@@ -273,8 +273,8 @@ export function SuggestionsPanel({
               style={{
                 padding: 12,
                 borderRadius: 6,
-                background: "var(--error-bg, #fef2f2)",
-                color: "var(--error-text, #dc2626)",
+                background: "rgba(239, 68, 68, 0.1)",
+                color: "var(--color-error)",
                 fontSize: 13,
                 marginBottom: 12,
               }}
@@ -288,12 +288,12 @@ export function SuggestionsPanel({
               style={{
                 padding: 24,
                 fontSize: 13,
-                color: "var(--text-secondary)",
-                border: "1px dashed var(--border-color, #e5e7eb)",
+                color: "var(--color-text-secondary)",
+                border: "1px dashed var(--color-border)",
                 borderRadius: 8,
               }}
             >
-              <div style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
+              <div style={{ fontWeight: 600, color: "var(--color-text)", marginBottom: 8 }}>
                 No active suggestions
               </div>
               <div style={{ lineHeight: 1.6 }}>
@@ -313,8 +313,8 @@ export function SuggestionsPanel({
                   style={{
                     padding: 14,
                     borderRadius: 8,
-                    border: "1px solid var(--border-color, #e5e7eb)",
-                    background: "var(--card-bg, #fff)",
+                    border: "1px solid var(--color-border)",
+                    background: "var(--color-bg-secondary)",
                   }}
                 >
                   <div
@@ -343,7 +343,7 @@ export function SuggestionsPanel({
                         <span
                           style={{
                             fontSize: 11,
-                            color: "var(--text-tertiary, #9ca3af)",
+                            color: "var(--color-text-muted)",
                           }}
                         >
                           {workspaceNameById.get(s.workspaceId) || "Workspace"}
@@ -352,7 +352,7 @@ export function SuggestionsPanel({
                       <span
                         style={{
                           fontSize: 11,
-                          color: "var(--text-tertiary, #9ca3af)",
+                          color: "var(--color-text-muted)",
                         }}
                       >
                         {timeAgo(s.createdAt)}
@@ -361,7 +361,7 @@ export function SuggestionsPanel({
                     <span
                       style={{
                         fontSize: 11,
-                        color: "var(--text-tertiary, #9ca3af)",
+                        color: "var(--color-text-muted)",
                       }}
                     >
                       {Math.round(s.confidence * 100)}% confidence
@@ -372,7 +372,7 @@ export function SuggestionsPanel({
                     style={{
                       fontSize: 14,
                       fontWeight: 500,
-                      color: "var(--text-primary)",
+                      color: "var(--color-text)",
                       marginBottom: 4,
                     }}
                   >
@@ -382,7 +382,7 @@ export function SuggestionsPanel({
                   <div
                     style={{
                       fontSize: 13,
-                      color: "var(--text-secondary)",
+                      color: "var(--color-text-secondary)",
                       lineHeight: 1.4,
                       marginBottom: 10,
                     }}
@@ -398,7 +398,7 @@ export function SuggestionsPanel({
                           padding: "5px 12px",
                           borderRadius: 5,
                           border: "none",
-                          background: "var(--accent-color, #3b82f6)",
+                          background: "var(--color-accent)",
                           color: "#fff",
                           fontSize: 12,
                           fontWeight: 500,
@@ -413,9 +413,9 @@ export function SuggestionsPanel({
                       style={{
                         padding: "5px 12px",
                         borderRadius: 5,
-                        border: "1px solid var(--border-color, #e5e7eb)",
+                        border: "1px solid var(--color-border)",
                         background: "transparent",
-                        color: "var(--text-secondary)",
+                        color: "var(--color-text-secondary)",
                         fontSize: 12,
                         cursor: "pointer",
                       }}
@@ -427,9 +427,9 @@ export function SuggestionsPanel({
                       style={{
                         padding: "5px 12px",
                         borderRadius: 5,
-                        border: "1px solid var(--border-color, #e5e7eb)",
+                        border: "1px solid var(--color-border)",
                         background: "transparent",
-                        color: "var(--text-secondary)",
+                        color: "var(--color-text-secondary)",
                         fontSize: 12,
                         cursor: "pointer",
                       }}
@@ -447,7 +447,7 @@ export function SuggestionsPanel({
               style={{
                 marginTop: 16,
                 fontSize: 12,
-                color: "var(--text-tertiary, #9ca3af)",
+                color: "var(--color-text-muted)",
                 textAlign: "center",
               }}
             >

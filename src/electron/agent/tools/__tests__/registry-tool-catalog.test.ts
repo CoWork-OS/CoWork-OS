@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PermissionEngine } from "../../runtime/PermissionEngine";
+import { getConfiguredMcpToolPolicy } from "../../../mcp/tool-policy";
+import type { MCPServerConfig } from "../../../mcp/types";
 import { resolveWorkerRoleAgentConfig } from "../../runtime/worker-role-registry";
 import {
   applyAccessProfileToWorkspace,
@@ -19,7 +21,7 @@ const mockMcpState = {
 
 const mockMcpSettings = {
   toolNamePrefix: "mcp_",
-  servers: [] as Array<{ id: string; name: string }>,
+  servers: [] as Array<Partial<MCPServerConfig> & { id: string; name: string }>,
 };
 const mockMcpCallTool = vi.fn().mockResolvedValue({ content: [] });
 
@@ -429,6 +431,107 @@ describe("ToolRegistry tool catalog versioning", () => {
     const tool = registry.getTools().find((entry) => entry.name === "mcp_search_docs");
 
     expect(tool?.description).toContain('Provided by MCP server "Shuttle".');
+  });
+
+  it("uses annotations for MCP metadata and exposes all connected tools", () => {
+    mockMcpSettings.toolNamePrefix = "dayanak_";
+    mockMcpSettings.servers = [{ id: "dayanak", name: "Dayanak Lens", enabled: true }];
+    mockMcpState.tools = [
+      {
+        name: "get_yargitay_passage",
+        annotations: { readOnlyHint: true },
+        serverId: "dayanak",
+        inputSchema: { type: "object" },
+      },
+      { name: "search_and_delete", serverId: "dayanak", inputSchema: { type: "object" } },
+    ];
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-mcp-annotations");
+    const read = registry.getRuntimeMetadata("dayanak_get_yargitay_passage");
+    expect(read.readOnly).toBe(true);
+    expect(read.concurrencyClass).toBe("read_parallel");
+    expect(read.alwaysExpose).toBe(true);
+    expect(read.deferLoad).toBe(false);
+    expect(read.capabilityTags).toContain("mcp");
+    expect(registry.getRuntimeMetadata("dayanak_search_and_delete").readOnly).toBe(false);
+    expect(registry.getRuntimeMetadata("dayanak_search_and_delete").concurrencyClass).toBe(
+      "serial_only",
+    );
+  });
+
+  it("dispatches all three Dayanak tools under Full access without approval calls", async () => {
+    mockMcpSettings.servers = [{ id: "dayanak", name: "Dayanak Lens", enabled: true }];
+    const names = ["search_yargitay", "get_yargitay_passage", "check_yargitay_citations"];
+    mockMcpState.tools = names.map((name) => ({
+      name,
+      serverId: "dayanak",
+      annotations: { readOnlyHint: true },
+      inputSchema: { type: "object" },
+    }));
+    const workspace = createWorkspace();
+    workspace.permissions = {
+      ...workspace.permissions,
+      accessProfileId: "full_access",
+      accessSandboxMode: "danger-full-access",
+      accessApprovalPolicy: "never",
+      accessNetworkMode: "enabled",
+    };
+    const daemon = {
+      ...createDaemon(),
+      evaluateToolPermission: vi.fn((_taskId: string, request: Any) =>
+        PermissionEngine.evaluate({
+          workspace,
+          toolName: request.toolName,
+          toolInput: request.details?.params,
+          approvalType: request.approvalType,
+          mode: "bypass_permissions",
+          rules: [],
+          mcpToolPolicy: getConfiguredMcpToolPolicy(request.toolName),
+        }),
+      ),
+      requestApproval: vi.fn(),
+    };
+    const registry = new ToolRegistry(workspace, daemon as Any, "task-dayanak-full-access");
+    for (const name of names) {
+      await registry.executeToolWithRuntime(`mcp_${name}`, { test: "TEST DATA" });
+    }
+    expect(mockMcpCallTool).toHaveBeenCalledTimes(3);
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+
+    // A saved policy update must invalidate the catalog and immediately take
+    // effect without reconnecting or trusting model-supplied authority fields.
+    const version = registry.getToolCatalogVersion();
+    mockMcpSettings.servers[0].defaultToolsApprovalMode = "prompt";
+    expect(registry.getToolCatalogVersion()).not.toBe(version);
+    await expect(
+      registry.executeToolWithRuntime("mcp_search_yargitay", { approvalMode: "approve" }),
+    ).rejects.toThrow("never");
+    expect(mockMcpCallTool).toHaveBeenCalledTimes(3);
+
+    mockMcpSettings.servers[0].enabled = false;
+    expect(registry.getTools().some((tool) => tool.name === "mcp_search_yargitay")).toBe(false);
+    await expect(registry.executeToolWithRuntime("mcp_search_yargitay", {})).rejects.toThrow(
+      "disabled",
+    );
+    expect(mockMcpCallTool).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns MCP application errors intact so a corrected call can use the same tool", async () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-mcp-error");
+    const failure = {
+      isError: true,
+      content: [{ type: "text", text: '{"error":{"code":"invalid_chamber"}}' }],
+      structuredContent: { error: { code: "invalid_chamber" } },
+    };
+    const result = await (registry as Any).formatMCPResult(failure, "search_yargitay", {});
+    expect(result).toEqual({
+      ...failure,
+      source: "mcp",
+      success: false,
+      error: failure.content[0].text,
+    });
+    await expect(
+      (registry as Any).formatMCPResult({ content: [{ type: "text", text: "matched decision" }] }),
+    ).resolves.toBe("matched decision");
   });
 
   it("invalidates cached tool definitions when built-in tool settings change", () => {

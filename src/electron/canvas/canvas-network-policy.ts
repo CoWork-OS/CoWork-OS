@@ -50,7 +50,7 @@ export function installCanvasNetworkGuards(
     }
   };
   contents.session.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
-    callback({ cancel: !allowed(details.url) });
+    callback({ cancel: /^wss?:/.test(details.url) || !allowed(details.url) });
   });
   contents.on("will-navigate", (event, url) => {
     if (!allowed(url)) event.preventDefault();

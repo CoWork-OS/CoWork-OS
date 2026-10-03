@@ -1,3 +1,4 @@
+import { readDocumentArchiveBuffer } from "../../security/document-archive";
 /**
  * Document Parser Tools
  *
@@ -288,7 +289,7 @@ export class DocumentParserTools {
 
   private async parseDocx(filePath: string): Promise<string> {
     const mammoth = await import("mammoth");
-    const buffer = await fs.readFile(filePath);
+    const buffer = await readDocumentArchiveBuffer(filePath);
     const result = await mammoth.extractRawText({ buffer });
     return result.value || "";
   }
@@ -296,7 +297,9 @@ export class DocumentParserTools {
   private async parseXlsx(filePath: string, format: "text" | "structured"): Promise<string> {
     const ExcelJS = await import("exceljs");
     const workbook = new ExcelJS.default.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.load(
+      (await readDocumentArchiveBuffer(filePath)) as unknown as import("exceljs").Buffer,
+    );
 
     const lines: string[] = [];
     workbook.eachSheet((sheet) => {

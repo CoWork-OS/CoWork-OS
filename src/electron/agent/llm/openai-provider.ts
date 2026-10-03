@@ -29,6 +29,7 @@ import {
   LLMTextVerbosity,
 } from "./types";
 import { OpenAIOAuth, OpenAIOAuthTokens } from "./openai-oauth";
+import { OpenAISiwcError, OpenAISiwcOAuth, SIWC_RESOURCE, siwcFetch } from "./openai-siwc-oauth";
 import { imageToTextFallback } from "./image-utils";
 import { loadPiAiModule } from "./pi-ai-loader";
 import {
@@ -71,6 +72,45 @@ const CHATGPT_SUBSCRIPTION_MODEL_IDS = [
   "gpt-5.1-codex-max",
 ];
 const UNSUPPORTED_CHATGPT_SUBSCRIPTION_MODEL_IDS = new Set(["gpt-5.1-codex-mini"]);
+// Sign in with ChatGPT (SIWC) plan usage: the preview route rejects these Responses
+// fields, requires store=false/stream=true, and only accepts function tools grouped
+// in a namespace. https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+const SIWC_UNSUPPORTED_RESPONSES_FIELDS = [
+  "background",
+  "conversation",
+  "max_output_tokens",
+  "max_tool_calls",
+  "metadata",
+  "moderation",
+  "multi_agent",
+  "previous_response_id",
+  "prompt",
+  "prompt_cache_retention",
+  "safety_identifier",
+  "temperature",
+  "top_logprobs",
+  "top_p",
+  "truncation",
+  "user",
+] as const;
+const SIWC_TOOL_NAMESPACE = "cowork";
+// Models confirmed to work through SIWC plan usage even though OpenAI's /models
+// catalog does not list them (verified 2026-10-02 with gpt-6.1-sol).
+const SIWC_UNLISTED_MODEL_IDS = ["gpt-6.1-sol"];
+// The SIWC route rejects prompt-cache fields for every request, and providers are
+// created per task, so remember the rejection for the whole app session.
+let siwcPromptCacheUnsupported = false;
+const SIWC_NON_RETRYABLE_ERROR_CODES = new Set([
+  "subscription_sharing_user_not_eligible",
+  "subscription_sharing_usage_limit_exceeded",
+  "subscription_sharing_unsupported_capability",
+  "subscription_sharing_route_not_supported",
+  "subscription_sharing_invalid_user",
+]);
+const SIWC_RETRYABLE_ERROR_CODES = new Set([
+  "subscription_sharing_usage_unavailable",
+  "subscription_sharing_user_unavailable",
+]);
 const logger = createLogger("OpenAI");
 
 const isToolResult = (item: LLMContent | LLMToolResult): item is LLMToolResult =>
@@ -107,6 +147,8 @@ export class OpenAIProvider implements LLMProvider {
   private openaiBaseUrl?: string;
   private forceResponsesApi: boolean;
   private oauthTokenUpdater?: LLMProviderConfig["openaiOAuthTokenUpdater"];
+  /** Set when the OAuth tokens come from Sign in with ChatGPT (public Responses API). */
+  private siwcClientId?: string;
   // ChatGPT's compatibility backend can reject prompt-cache metadata for an
   // entire provider session. Remember that capability after the first explicit
   // rejection so every later turn does not pay for another failed request and
@@ -139,8 +181,9 @@ export class OpenAIProvider implements LLMProvider {
             : 0,
       };
       this.authMethod = "oauth";
+      this.siwcClientId = config.openaiSiwcClientId?.trim() || undefined;
       logger.debug(
-        `Using OAuth authentication with pi-ai SDK (token expires: ${
+        `Using ${this.siwcClientId ? "Sign in with ChatGPT" : "OAuth authentication with pi-ai SDK"} (token expires: ${
           this.oauthTokens.expires_at
             ? new Date(this.oauthTokens.expires_at).toISOString()
             : "unknown"
@@ -160,6 +203,9 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
+    if (this.isSiwc()) {
+      return this.createMessageWithSiwc(request);
+    }
     if (this.authMethod === "oauth") {
       return this.createMessageWithOAuth(request);
     } else {
@@ -216,7 +262,9 @@ export class OpenAIProvider implements LLMProvider {
     return wrapped;
   }
 
-  private async persistOAuthTokens(tokens: OpenAIOAuthTokens | undefined): Promise<void> {
+  private async persistOAuthTokens(
+    tokens: Parameters<NonNullable<LLMProviderConfig["openaiOAuthTokenUpdater"]>>[0] | undefined,
+  ): Promise<void> {
     if (!tokens || !this.oauthTokenUpdater) return;
     try {
       await this.oauthTokenUpdater(tokens);
@@ -353,8 +401,11 @@ export class OpenAIProvider implements LLMProvider {
       return "low";
     }
     // The public API exposes Astra's highest setting as `max`; `ultra` is
-    // reserved for the ChatGPT subscription compatibility backend.
-    return this.authMethod === "api_key" && configured === "ultra" ? "max" : configured;
+    // reserved for the ChatGPT subscription compatibility backend. SIWC uses the
+    // public API even though it authenticates with OAuth.
+    return (this.authMethod === "api_key" || this.isSiwc()) && configured === "ultra"
+      ? "max"
+      : configured;
   }
 
   private getOpenAITextVerbosity(request: LLMRequest): LLMTextVerbosity | undefined {
@@ -453,14 +504,21 @@ export class OpenAIProvider implements LLMProvider {
     return input;
   }
 
-  private toResponsesTools(
-    tools: LLMTool[],
-  ): Array<{ type: "function"; name: string; description: string; parameters: Any }> {
+  private toResponsesTools(tools: LLMTool[]): Array<{
+    type: "function";
+    name: string;
+    description: string;
+    parameters: Any;
+    strict: false;
+  }> {
     return tools.map((tool) => ({
       type: "function" as const,
       name: tool.name,
       description: tool.description,
       parameters: this.sanitizeResponsesSchema(tool.input_schema),
+      // Responses defaults to strict normalization, which makes optional MCP
+      // filters mandatory. Preserve the server's original required fields.
+      strict: false,
     }));
   }
 
@@ -627,6 +685,231 @@ export class OpenAIProvider implements LLMProvider {
           }
         : undefined,
     };
+  }
+
+  private isSiwc(): boolean {
+    return this.authMethod === "oauth" && Boolean(this.siwcClientId);
+  }
+
+  /** Returns a current SIWC access token, refreshing and persisting rotated tokens. */
+  private async getSiwcAccessToken(): Promise<string> {
+    if (!this.oauthTokens || !this.siwcClientId) {
+      throw new Error("Sign in with ChatGPT tokens not available");
+    }
+    const { accessToken, newTokens } = await OpenAISiwcOAuth.getAccessToken(
+      this.siwcClientId,
+      this.oauthTokens,
+    );
+    if (newTokens) {
+      this.oauthTokens = {
+        ...this.oauthTokens,
+        access_token: newTokens.access_token,
+        refresh_token: newTokens.refresh_token,
+        expires_at: newTokens.expires_at,
+      };
+      await this.persistOAuthTokens({ ...this.oauthTokens, id_token: newTokens.id_token });
+    }
+    return accessToken;
+  }
+
+  /** Builds a Responses body that satisfies the SIWC plan-usage preview route. */
+  buildSiwcResponsesBody(request: LLMRequest): Record<string, Any> {
+    const model = this.mapToCodexModel(request.model || this.model || DEFAULT_CODEX_MODEL);
+    const body: Record<string, Any> = this.buildResponsesBody({ ...request, model });
+    for (const field of SIWC_UNSUPPORTED_RESPONSES_FIELDS) delete body[field];
+    body.model = model;
+    body.store = false;
+    body.stream = true;
+    body.input = (Array.isArray(body.input) ? body.input : []).map((item: Any) => {
+      if (item?.type === "message" && item.role === "system") {
+        // Explicit system items are rejected; developer messages are accepted.
+        return { ...item, role: "developer" };
+      }
+      if (item?.type === "function_call" || item?.type === "function_call_output") {
+        return { ...item, namespace: SIWC_TOOL_NAMESPACE };
+      }
+      return item;
+    });
+    if (Array.isArray(body.tools) && body.tools.length > 0) {
+      body.tools = [
+        {
+          type: "namespace",
+          name: SIWC_TOOL_NAMESPACE,
+          description: "CoWork OS tools available to this task.",
+          tools: body.tools,
+        },
+      ];
+    } else {
+      delete body.tools;
+      delete body.tool_choice;
+    }
+    return body;
+  }
+
+  /** Converts SIWC admission/stream errors into actionable provider errors. */
+  private toSiwcProviderError(error: Any): Error {
+    const status = Number(error?.status) || undefined;
+    const body = error?.error && typeof error.error === "object" ? error.error : undefined;
+    const code = String(error?.code || body?.code || body?.error?.code || "").trim() || undefined;
+    const detail =
+      String(body?.detail || body?.message || error?.message || "").trim() ||
+      "ChatGPT request failed";
+    let message = detail;
+    let retryable: boolean | undefined;
+    switch (code) {
+      case "subscription_sharing_user_not_eligible":
+        message =
+          "Your ChatGPT plan can't be used in CoWork OS. Sign in with an eligible ChatGPT Plus or Pro account, or use an OpenAI API key.";
+        break;
+      case "subscription_sharing_usage_limit_exceeded":
+        message =
+          "CoWork OS reached its ChatGPT usage limit. Wait for the limit to reset or raise the CoWork OS cap in ChatGPT settings.";
+        break;
+      case "subscription_sharing_unsupported_capability":
+        message = `This request uses a feature Sign in with ChatGPT doesn't support yet: ${detail}`;
+        break;
+      case "subscription_sharing_invalid_user":
+        message = "ChatGPT no longer accepts this sign-in. Sign in with ChatGPT again in Settings.";
+        break;
+      default:
+        if (status === 401) {
+          message = `ChatGPT rejected the sign-in (401). Sign in with ChatGPT again in Settings. ${detail}`;
+        } else if (status === 403) {
+          message = `ChatGPT plan usage is not available for this request (403): ${detail}`;
+        }
+    }
+    if (code && SIWC_NON_RETRYABLE_ERROR_CODES.has(code)) retryable = false;
+    if ((code && SIWC_RETRYABLE_ERROR_CODES.has(code)) || status === 503) retryable = true;
+    if (error instanceof OpenAISiwcError) retryable = false;
+
+    const wrapped = this.toStructuredProviderError({ ...error, message, code, status }, "oauth");
+    if (retryable !== undefined) (wrapped as OpenAIProviderError).retryable = retryable;
+    (wrapped as Any).cause = error;
+    return wrapped;
+  }
+
+  /**
+   * Create message using Sign in with ChatGPT plan usage (public Responses API,
+   * streamed; success only on `response.completed`).
+   */
+  private async createMessageWithSiwc(request: LLMRequest): Promise<LLMResponse> {
+    if (request.promptCache && siwcPromptCacheUnsupported) {
+      return this.createMessageWithSiwc({ ...request, promptCache: undefined });
+    }
+    const body = this.buildSiwcResponsesBody(request);
+    try {
+      const accessToken = await this.getSiwcAccessToken();
+      // Retries are owned by the executor so usage-limit errors are not replayed.
+      const client = new OpenAI({ apiKey: accessToken, baseURL: SIWC_RESOURCE, maxRetries: 0 });
+      logger.debug(`Calling Responses API via Sign in with ChatGPT with model: ${body.model}`);
+      const stream = await (client as Any).responses.create(
+        body,
+        request.signal ? { signal: request.signal } : undefined,
+      );
+      let finalResponse: Any;
+      // With store=false the terminal event can omit `output`; keep the streamed
+      // items (and raw text deltas as a last resort) to rebuild it.
+      const streamedItems: Any[] = [];
+      let streamedText = "";
+      for await (const event of stream as AsyncIterable<Any>) {
+        if (event?.type === "response.output_item.done" && event.item) {
+          const index = Number.isInteger(event.output_index)
+            ? event.output_index
+            : streamedItems.length;
+          streamedItems[index] = event.item;
+        } else if (
+          event?.type === "response.output_text.delta" &&
+          typeof event.delta === "string"
+        ) {
+          streamedText += event.delta;
+        } else if (event?.type === "response.completed" || event?.type === "response.incomplete") {
+          finalResponse = event.response;
+        } else if (event?.type === "response.failed") {
+          const failure = event.response?.error || {};
+          throw Object.assign(new Error(failure.message || "ChatGPT response failed"), {
+            code: failure.code,
+          });
+        } else if (event?.type === "error") {
+          throw Object.assign(new Error(event.message || "ChatGPT stream error"), {
+            code: event.code,
+          });
+        }
+      }
+      if (!finalResponse) {
+        throw Object.assign(new Error("ChatGPT stream ended before the response completed"), {
+          code: "ECONNRESET",
+        });
+      }
+      const finalOutput: Any[] =
+        Array.isArray(finalResponse.output) && finalResponse.output.length > 0
+          ? finalResponse.output
+          : streamedItems.filter(Boolean);
+      if (finalOutput.length === 0 && streamedText) {
+        finalOutput.push({
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: streamedText }],
+        });
+      }
+      return this.convertResponsesResponse({ ...finalResponse, output: finalOutput }, body.model);
+    } catch (error: Any) {
+      if (error?.name === "AbortError" || error?.message?.includes("aborted")) {
+        logger.info("Request aborted");
+        throw new Error("Request cancelled");
+      }
+      if (
+        request.promptCache &&
+        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
+      ) {
+        siwcPromptCacheUnsupported = true;
+        logger.warn("SIWC prompt cache controls rejected; retrying without cache controls", {
+          model: body.model,
+          status: error?.status,
+        });
+        return this.createMessageWithSiwc({ ...request, promptCache: undefined });
+      }
+      logger.error("Sign in with ChatGPT API error:", {
+        status: error?.status,
+        code: error?.code,
+        message: error?.message,
+      });
+      throw this.toSiwcProviderError(error);
+    }
+  }
+
+  /** Lists models included with the user's ChatGPT plan (`visibility == "list"`). */
+  private async getSiwcModels(): Promise<Array<{ id: string; name: string; description: string }>> {
+    const accessToken = await this.getSiwcAccessToken();
+    const response = await siwcFetch(`${SIWC_RESOURCE}/models`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to list ChatGPT plan models (${response.status})`);
+    }
+    const payload = (await response.json()) as Any;
+    const entries: Any[] = Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : [];
+    const hasVisibility = entries.some((entry) => typeof entry?.visibility === "string");
+    logger.info(
+      "Sign in with ChatGPT model catalog:",
+      entries
+        .map((entry) => `${entry?.slug || entry?.id || "?"}(${entry?.visibility ?? "none"})`)
+        .join(", "),
+    );
+    return entries
+      .filter((entry) => !hasVisibility || entry?.visibility === "list")
+      .map((entry) => {
+        const id = String(entry?.slug || entry?.id || "").trim();
+        return {
+          id,
+          name: String(entry?.display_name || "").trim() || this.formatModelName(id),
+          description: this.getModelDescription(id),
+        };
+      })
+      .filter((model) => model.id);
   }
 
   /**
@@ -800,6 +1083,15 @@ export class OpenAIProvider implements LLMProvider {
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
+      if (this.isSiwc()) {
+        await this.createMessageWithSiwc({
+          model: this.model,
+          maxTokens: 16,
+          system: "",
+          messages: [{ role: "user", content: "Hi" }],
+        });
+        return { success: true };
+      }
       if (this.authMethod === "oauth") {
         const { getModels, complete: piAiComplete } = await loadPiAiModule();
         // For OAuth, try to get the API key and make a simple request
@@ -869,6 +1161,34 @@ export class OpenAIProvider implements LLMProvider {
    * For OAuth: uses pi-ai SDK's model list for openai-codex provider
    */
   async getAvailableModels(): Promise<Array<{ id: string; name: string; description: string }>> {
+    if (this.isSiwc()) {
+      try {
+        const models = await this.getSiwcModels();
+        if (models.length > 0) {
+          logger.info(`Listed ${models.length} ChatGPT plan models via Sign in with ChatGPT.`);
+          for (const id of SIWC_UNLISTED_MODEL_IDS) {
+            if (!models.some((model) => model.id === id)) {
+              models.push({
+                id,
+                name: this.formatModelName(id),
+                description: `${this.getModelDescription(id)} (not in OpenAI's list for your plan)`,
+              });
+            }
+          }
+          const priority = (id: string) => {
+            const index = CHATGPT_SUBSCRIPTION_MODEL_IDS.indexOf(id);
+            return index >= 0 ? index : CHATGPT_SUBSCRIPTION_MODEL_IDS.length;
+          };
+          return models.sort((a, b) => priority(a.id) - priority(b.id));
+        }
+        logger.warn("Sign in with ChatGPT returned no listable models; using built-in defaults.");
+        return this.getDefaultCodexModels();
+      } catch (error) {
+        logger.error("Failed to list Sign in with ChatGPT models; using built-in defaults:", error);
+        return this.getDefaultCodexModels();
+      }
+    }
+
     // For OAuth authentication, use pi-ai SDK's model list
     if (this.authMethod === "oauth") {
       logger.debug("Using OAuth - fetching models from pi-ai SDK...");

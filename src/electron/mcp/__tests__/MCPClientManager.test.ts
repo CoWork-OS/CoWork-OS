@@ -160,6 +160,16 @@ describe("MCPClientManager startup optimizations", () => {
   });
 
   describe("parallel server connections", () => {
+    it("shares startup initialization with task recovery and publishes a complete catalog", async () => {
+      const [startup, recovery] = await Promise.all([
+        manager.initialize().then(() => manager.getAllTools()),
+        manager.initialize().then(() => manager.getAllTools()),
+      ]);
+      expect(startup).toHaveLength(3);
+      expect(recovery).toEqual(startup);
+      expect(MCPSettingsManager.beginBatch).toHaveBeenCalledTimes(1);
+      expect(MCPSettingsManager.endBatch).toHaveBeenCalledTimes(1);
+    });
     it("should connect faster than sequential (parallel execution)", async () => {
       const start = Date.now();
       await manager.initialize();

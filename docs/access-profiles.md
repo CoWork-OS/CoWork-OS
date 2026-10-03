@@ -407,3 +407,7 @@ reviewed migration snapshot; do not replay pending approvals during rollback.
 Boundary grants are tied to operation arguments and policy identity. Changing
 the task scope invalidates incompatible cached grants. Existing approval history
 remains readable; new allowed actions do not manufacture approval history.
+
+### First-time Full access confirmation
+
+Selecting Full access from the chat picker or Permissions settings shows a warning before the selection takes effect. The dialog explains file access, terminal commands, internet and connected apps (including computer use), sensitive-data exposure, and prompt injection. Cancel keeps the previous selection; Confirm applies it and remembers acknowledgement on this device. Later selections do not repeat the warning. Explicit deny rules, administrator policies, and operating system permissions remain in force.

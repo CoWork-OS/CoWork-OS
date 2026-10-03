@@ -40547,6 +40547,7 @@ Return ONLY a JSON object:
     // Progress (edits, commands that now pass, first reads) resets the
     // tool-use streak that drives the stop nudge and the tool lock.
     const toolLoopProgress = new ToolLoopProgressTracker();
+    let followUpTurnLimitWarningInjected = false;
     let unexecutedActionNudgeCount = 0;
     let intentOnlyNudgeInjected = false;
     let followUpToolCallsLocked = false;
@@ -40734,6 +40735,24 @@ Return ONLY a JSON object:
             `${this.logTag}   ┌ Follow-up iteration ${iterationCount}/${maxIterations} | elapsed=${followUpElapsed}s | ` +
               `toolCalls=${followUpToolCallCount} | maxTokensRecoveries=${maxTokensRecoveryCount}/${maxMaxTokensRecoveries}`,
           );
+          const followUpTurnsLeft = maxIterations - iterationCount + 1;
+          if (!followUpTurnLimitWarningInjected && followUpTurnsLeft <= 2) {
+            followUpTurnLimitWarningInjected = true;
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: buildLoopTurnLimitWarningUtil(followUpTurnsLeft, "follow-up"),
+                },
+              ],
+            });
+            this.emitEvent("log", {
+              metric: "follow_up_turn_limit_warning",
+              iteration: iterationCount,
+              turnsLeft: followUpTurnsLeft,
+            });
+          }
 
           try {
             ({

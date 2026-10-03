@@ -6265,6 +6265,23 @@ describe("TaskExecutor step loop control", () => {
       ).toHaveLength(1);
     });
 
+    it("warns two turns before the follow-up's turn limit", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 31 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      responses.push(textResponse("The modules split request handling from domain logic."));
+      const executor = createFollowUpExecutor(responses);
+
+      await sendFollowUp(executor, "Walk through every module and explain how they connect");
+
+      const warnings = userTexts(executor).filter((text) =>
+        text.includes("turns left in this follow-up"),
+      );
+      expect(warnings).toEqual([
+        "[TURN_LIMIT] You have 2 turns left in this follow-up. Finish the current change, then summarize what is done and what remains.",
+      ]);
+    });
+
     it("does not lock follow-up tool calls while the turns keep reading new files", async () => {
       const responses: LLMResponse[] = Array.from({ length: 14 }, (_, index) =>
         toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),

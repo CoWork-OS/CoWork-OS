@@ -6,7 +6,11 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import * as typescript from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import { installGracefulShutdown, runShutdownSteps } from "../graceful-shutdown";
+import {
+  closeWindowsForShutdown,
+  installGracefulShutdown,
+  runShutdownSteps,
+} from "../graceful-shutdown";
 
 class TestApp extends EventEmitter {
   exits = 0;
@@ -282,5 +286,50 @@ describe("graceful Electron shutdown", () => {
       { quiescent: true, failedSteps: [] },
       { quiescent: false, failedSteps: ["fails"] },
     ]);
+  });
+});
+
+class TestWindow extends EventEmitter {
+  destroyed = false;
+  closeCalls = 0;
+  constructor(private readonly closesAfterMs: number | null) {
+    super();
+  }
+  isDestroyed(): boolean {
+    return this.destroyed;
+  }
+  close(): void {
+    this.closeCalls += 1;
+    if (this.closesAfterMs === null) return;
+    setTimeout(() => {
+      this.destroyed = true;
+      this.emit("closed");
+    }, this.closesAfterMs);
+  }
+}
+
+describe("closeWindowsForShutdown", () => {
+  it("closes open windows and waits until they are gone", async () => {
+    const fast = new TestWindow(0);
+    const slow = new TestWindow(20);
+    const gone = new TestWindow(0);
+    gone.destroyed = true;
+
+    await closeWindowsForShutdown([fast, slow, gone]);
+
+    expect(fast.closeCalls).toBe(1);
+    expect(slow.closeCalls).toBe(1);
+    expect(slow.isDestroyed()).toBe(true);
+    expect(gone.closeCalls).toBe(0);
+  });
+
+  it("stops waiting for a window that does not close", async () => {
+    const stuck = new TestWindow(null);
+    const started = Date.now();
+
+    await closeWindowsForShutdown([stuck], 30);
+
+    expect(stuck.closeCalls).toBe(1);
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });

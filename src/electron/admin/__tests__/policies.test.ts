@@ -224,6 +224,27 @@ describe("loadPoliciesStrict", () => {
       }),
     );
   });
+
+  it("allows shell networking by default and keeps an explicit admin choice", async () => {
+    mockFs.existsSync.mockReturnValue(false);
+    const { loadPolicies: freshLoadPolicies } = await import("../policies");
+    expect(freshLoadPolicies().runtime.network.allowShellNetwork).toBe(true);
+
+    vi.resetModules();
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ version: 2, runtime: { network: { defaultAction: "allow" } } }),
+    );
+    const { loadPoliciesStrict: withoutField } = await import("../policies");
+    expect(withoutField()?.runtime.network.allowShellNetwork).toBe(true);
+
+    vi.resetModules();
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ version: 2, runtime: { network: { allowShellNetwork: false } } }),
+    );
+    const { loadPoliciesStrict: explicitlyOff } = await import("../policies");
+    expect(explicitlyOff()?.runtime.network.allowShellNetwork).toBe(false);
+  });
 });
 
 describe("policy change notifications", () => {

@@ -183,7 +183,11 @@ const DEFAULT_POLICIES: AdminPolicies = {
       allowedDomains: [],
       blockedDomains: [],
       allowedInternalHosts: [],
-      allowShellNetwork: false,
+      // On by default so coding tasks can install dependencies and use git remotes from the
+      // shell. Shell egress still needs a network-enabled profile with no domain rules, an
+      // unrestricted network policy (default allow, no allow/block lists), and approval in
+      // on-request network mode; administrators can turn it off here.
+      allowShellNetwork: true,
     },
     autoReview: {
       enabled: true,
@@ -283,7 +287,10 @@ function normalizePolicies(parsed: any): AdminPolicies {
         allowedInternalHosts: normalizeStringList(
           parsed.runtime?.network?.allowedInternalHosts,
         ).filter((pattern) => pattern !== "*" && !pattern.startsWith("**.")),
-        allowShellNetwork: parsed.runtime?.network?.allowShellNetwork === true,
+        allowShellNetwork:
+          typeof parsed.runtime?.network?.allowShellNetwork === "boolean"
+            ? parsed.runtime.network.allowShellNetwork
+            : DEFAULT_POLICIES.runtime.network.allowShellNetwork,
       },
       autoReview: {
         enabled: parsed.runtime?.autoReview?.enabled !== false,

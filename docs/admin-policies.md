@@ -94,7 +94,7 @@ network, and shell egress below that selection.
       "defaultAction": "allow",
       "allowedDomains": [],
       "blockedDomains": [],
-      "allowShellNetwork": false
+      "allowShellNetwork": true
     },
     "autoReview": {
       "enabled": true
@@ -177,7 +177,7 @@ replace the profile selector and they cannot widen a profile:
 | `requireSandboxForShell`                                    | Requires OS sandboxing for command execution and can constrain a full-access/unsandboxed request to the sandboxed compatibility path.                                                       |
 | `allowUnsandboxedShell`                                     | Allows an explicit environment-gated local fallback only when the administrator permits it. When no OS sandbox exists (Windows, Linux without Docker) and `requireSandboxForShell` is off, it also lets the user approve individual commands to run unsandboxed; each approval is explicit and never auto-approved. It is not a user-facing profile and is not a general bypass. |
 | `network.defaultAction`, `allowedDomains`, `blockedDomains` | Apply administrator network policy before legacy domain guardrails and profile/network-tool evaluation. Blocked destinations remain blocked.                                                |
-| `network.allowShellNetwork`                                 | Coarse command-process egress gate. Shell networking is not domain-scoped today; full access still needs this gate and an unrestricted profile network posture.                             |
+| `network.allowShellNetwork`                                 | Coarse command-process egress gate, on by default so package installs and git remotes work. Shell networking is not domain-scoped today, so it also needs an unrestricted profile network posture and network policy (no domain lists); set it to `false` to block shell egress. |
 | `autoReview.enabled`                                        | Controls the narrow automatic-review helper. It cannot grant an action outside the selected profile or suppress hard/export/location approvals.                                             |
 
 For a profile with domain rules, arbitrary subprocess/code networking fails

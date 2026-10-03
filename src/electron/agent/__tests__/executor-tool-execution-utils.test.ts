@@ -510,6 +510,34 @@ describe("tool failure normalization", () => {
     });
   });
 
+  it("points a timed-out dev server at background: true instead of a longer timeout", () => {
+    const hint = "Run it with run_command background: true.";
+    const result = {
+      success: false,
+      stdout: "  VITE v5  ready in 300 ms\n  Local:   http://localhost:5173/\n",
+      stderr: "",
+      exitCode: null,
+      terminationReason: "timeout",
+      hint,
+    };
+
+    const normalized = buildNormalizedToolResult({
+      toolName: "run_command",
+      toolUseId: "tool-dev-server-timeout",
+      result,
+      rawResult: JSON.stringify(result),
+      sanitizeToolResult: (_toolName, resultText) => resultText,
+      getToolFailureReason,
+      includeRunCommandTerminationContext: true,
+    });
+
+    expect(normalized.toolResult.content).toContain(
+      `[TIMEOUT] Command exceeded time limit. ${hint}`,
+    );
+    expect(normalized.toolResult.content).not.toContain("Using a longer timeout");
+    expect(normalized.toolResult.content).toContain("http://localhost:5173/");
+  });
+
   it("keeps the summary at the end of long successful run_command output", () => {
     const result = {
       success: true,

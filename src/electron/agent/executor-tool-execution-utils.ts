@@ -480,6 +480,10 @@ function getRunCommandTerminationContext(result: Any): string {
         "Do not retry automatically. Ask the user if they want you to continue or try a different approach."
       );
     case "timeout":
+      // ShellTools adds a hint when the command looks like a server or watcher.
+      if (typeof result.hint === "string" && result.hint.trim()) {
+        return `[TIMEOUT] Command exceeded time limit. ${result.hint.trim()}`;
+      }
       return (
         "[TIMEOUT] Command exceeded time limit. " +
         "Consider: 1) Breaking into smaller steps, 2) Using a longer timeout if available, 3) Asking the user to run this manually."

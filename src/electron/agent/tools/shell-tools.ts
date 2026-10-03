@@ -70,6 +70,7 @@ type RunCommandResult = {
   exitCode: number | null;
   truncated?: boolean;
   terminationReason?: CommandTerminationReason;
+  hint?: string;
 };
 
 /**
@@ -455,6 +456,38 @@ export function resolveRunCommandTimeoutMs(input: unknown, runtimeTimeoutMs?: un
       ? DEFAULT_TIMEOUT
       : Math.max(budgetMs - EXECUTOR_DEADLINE_GRACE_MS, Math.ceil(budgetMs / 2)));
   return Math.min(Math.round(resolvedMs), MAX_TIMEOUT);
+}
+
+// Commands that normally run until stopped: dev servers, file servers, watchers.
+const LONG_RUNNING_COMMAND_PATTERN = new RegExp(
+  [
+    String.raw`\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|serve|watch|preview)\b`,
+    String.raw`\bvite\b(?!\s+build)`,
+    String.raw`\b(?:next|nuxt|astro|remix)\s+(?:dev|start)\b`,
+    String.raw`\b(?:ng|webpack)\s+serve\b|\bwebpack-dev-server\b`,
+    String.raw`\breact-scripts\s+start\b|\bgatsby\s+develop\b`,
+    String.raw`\b(?:nodemon|http-server|live-server|serve|uvicorn|gunicorn)\b`,
+    String.raw`\bhttp\.server\b|\bSimpleHTTPServer\b|\bflask\s+run\b|\brunserver\b`,
+    String.raw`\b(?:rails\s+s(?:erver)?|jekyll\s+serve|hugo\s+server)\b`,
+    String.raw`(?:^|\s)--watch\b|\btail\s+-f\b`,
+  ].join("|"),
+  "i",
+);
+
+export const LONG_RUNNING_COMMAND_HINT =
+  "This looks like a server or watcher that runs until it is stopped. Run it with " +
+  "run_command background: true, read its output with process_output, and stop it with " +
+  "stop_process when you are done.";
+
+export function looksLikeLongRunningCommand(command: string): boolean {
+  return LONG_RUNNING_COMMAND_PATTERN.test(String(command || ""));
+}
+
+function withLongRunningCommandHint(command: string, result: RunCommandResult): RunCommandResult {
+  if (result.terminationReason !== "timeout" || !looksLikeLongRunningCommand(command)) {
+    return result;
+  }
+  return { ...result, hint: LONG_RUNNING_COMMAND_HINT };
 }
 
 function describeLoopbackViolation(violation: LoopbackListenerViolation): string {
@@ -1599,7 +1632,8 @@ export class ShellTools {
     },
   ): Promise<RunCommandResult> {
     const { cwd, policies } = await this.authorizeCommand(command, options);
-    return this.runAuthorizedCommand(command, cwd, policies, options);
+    const result = await this.runAuthorizedCommand(command, cwd, policies, options);
+    return withLongRunningCommandHint(command, result);
   }
 
   /**

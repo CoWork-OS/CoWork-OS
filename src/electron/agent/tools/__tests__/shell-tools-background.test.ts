@@ -41,7 +41,7 @@ import { spawn } from "node:child_process";
 import { createSandbox } from "../../sandbox/sandbox-factory";
 import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
-import { ShellTools } from "../shell-tools";
+import { ShellTools, LONG_RUNNING_COMMAND_HINT, looksLikeLongRunningCommand } from "../shell-tools";
 import {
   MAX_BACKGROUND_PROCESSES_PER_TASK,
   getBackgroundProcessManager,
@@ -370,4 +370,47 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     expect(stopContainer).toHaveBeenCalled();
     expect(cleanupSandbox).toHaveBeenCalledTimes(1);
   }, 15_000);
+
+  describe("foreground timeouts", () => {
+    it("suggests background: true when a server-like command times out", async () => {
+      const { shellTools } = newShellTools();
+      // The separator keeps the command off the persistent shell.
+      const result = await shellTools.runCommand("tail -f /dev/null; true", {
+        cwd: workspacePath,
+        timeout: 800,
+      });
+      expect(result).toMatchObject({
+        terminationReason: "timeout",
+        hint: LONG_RUNNING_COMMAND_HINT,
+      });
+    }, 15_000);
+
+    it("does not add the hint to other timeouts", async () => {
+      const { shellTools } = newShellTools();
+      const result = await shellTools.runCommand("sleep 5; true", {
+        cwd: workspacePath,
+        timeout: 800,
+      });
+      expect(result.terminationReason).toBe("timeout");
+      expect(result.hint).toBeUndefined();
+    }, 15_000);
+
+    it.each([
+      ["npm run dev", true],
+      ["pnpm dev", true],
+      ["yarn start", true],
+      ["npx vite --port 5173", true],
+      ["next dev", true],
+      ["python3 -m http.server 8000", true],
+      ["npx serve dist", true],
+      ["nodemon server.js", true],
+      ["tsc --watch", true],
+      ["npx vite build", false],
+      ["npm run build", false],
+      ["npm test", false],
+      ["git status", false],
+    ])("classifies %s as long-running=%s", (command, expected) => {
+      expect(looksLikeLongRunningCommand(command)).toBe(expected);
+    });
+  });
 });

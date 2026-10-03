@@ -1,3 +1,4 @@
+import { useFullAccessConfirmation } from "../FullAccessConfirmationDialog";
 import { createPortal } from "react-dom";
 import { BrowserProfileNotice } from "./BrowserProfileNotice";
 import {
@@ -9337,7 +9338,8 @@ function MainContentComponent({
     if (eventFallback) return eventFallback;
     return isLowSignalPauseMessage(pauseMessage, effectivePauseReasonCode) ? "" : pauseMessage;
   }, [effectivePauseReasonCode, events, lastAssistantMessage, latestPauseEvent]);
-  const handlePermissionProfileSelect = useCallback(
+  const fullAccessConfirmation = useFullAccessConfirmation();
+  const applyPermissionProfileSelect = useCallback(
     (profileId: AccessProfileId) => {
       const profile = [...BUILTIN_ACCESS_PROFILES, ...accessProfiles].find(
         (candidate) => candidate.id === profileId,
@@ -9371,6 +9373,17 @@ function MainContentComponent({
       }
     },
     [accessProfiles, effectivePauseReasonCode, onSendMessage, task?.id, task?.status],
+  );
+  const handlePermissionProfileSelect = useCallback(
+    (profileId: AccessProfileId) => {
+      const profile = resolveAccessProfileDefinition(profileId, accessProfiles);
+      fullAccessConfirmation.request(
+        profile.sandbox === "danger-full-access" && profile.approval === "never",
+        () => applyPermissionProfileSelect(profileId),
+      );
+      setShowPermissionDropdown(false);
+    },
+    [accessProfiles, applyPermissionProfileSelect, fullAccessConfirmation.request],
   );
   const handleOpenAccessProfilePicker = useCallback(() => {
     setShowPermissionDropdown(true);
@@ -9559,6 +9572,7 @@ function MainContentComponent({
   if (!task) {
     return (
       <div className={`main-content${isCalm ? " calm-main calm-welcome" : ""}`}>
+        {fullAccessConfirmation.dialog}
         <div className="main-body welcome-view">
           <div
             className={`welcome-content cli-style${uiDensity === "focused" ? " welcome-content-focused" : ""}`}
@@ -11036,6 +11050,7 @@ function MainContentComponent({
         isCalm ? " calm-main calm-task" : ""
       }`}
     >
+      {fullAccessConfirmation.dialog}
       {import.meta.env.VITE_FIRST_TASK_BETA === "1" &&
         task?.source === "sample" &&
         onFirstTaskReady &&

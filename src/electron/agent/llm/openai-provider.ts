@@ -103,6 +103,17 @@ const SIWC_UNLISTED_MODEL_IDS = ["gpt-6.1-sol"];
 // The SIWC route rejects prompt-cache fields for every request, and providers are
 // created per task, so remember the rejection for the whole app session.
 let siwcPromptCacheUnsupported = false;
+// The ChatGPT OAuth and API-key routes can reject prompt-cache fields per model. Providers
+// are created per task, so an instance flag would re-pay the failed request on every task;
+// remember rejections by route and model for the whole app session instead.
+const promptCacheRejectedModels = new Set<string>();
+const promptCacheRejectionKey = (route: "oauth" | "api_key", model: string | undefined) =>
+  `${route}:${model || ""}`;
+/** Test hook: forget remembered prompt-cache rejections. */
+export function resetPromptCacheRejectionsForTests(): void {
+  siwcPromptCacheUnsupported = false;
+  promptCacheRejectedModels.clear();
+}
 const SIWC_NON_RETRYABLE_ERROR_CODES = new Set([
   "subscription_sharing_user_not_eligible",
   "subscription_sharing_usage_limit_exceeded",
@@ -157,7 +168,6 @@ export class OpenAIProvider implements LLMProvider {
   // rejection so every later turn does not pay for another failed request and
   // retry. A new provider instance (for example after account/model changes)
   // starts with a fresh capability probe.
-  private oauthPromptCacheUnsupported = false;
 
   constructor(config: LLMProviderConfig) {
     const apiKey = config.openaiApiKey;
@@ -558,6 +568,12 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private async createResponsesMessageWithApiKey(request: LLMRequest): Promise<LLMResponse> {
+    if (
+      request.promptCache &&
+      promptCacheRejectedModels.has(promptCacheRejectionKey("api_key", request.model))
+    ) {
+      return this.createResponsesMessageWithApiKey({ ...request, promptCache: undefined });
+    }
     try {
       logger.debug(`Calling Responses API with model: ${request.model}`);
       const body = this.buildResponsesBody(request);
@@ -576,6 +592,7 @@ export class OpenAIProvider implements LLMProvider {
         request.promptCache &&
         isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
       ) {
+        promptCacheRejectedModels.add(promptCacheRejectionKey("api_key", request.model));
         logger.warn("Responses prompt cache controls rejected; retrying without cache controls", {
           model: request.model,
           status: error?.status,
@@ -912,7 +929,10 @@ export class OpenAIProvider implements LLMProvider {
       throw new Error("OAuth tokens not available");
     }
 
-    if (request.promptCache && this.oauthPromptCacheUnsupported) {
+    if (
+      request.promptCache &&
+      promptCacheRejectedModels.has(promptCacheRejectionKey("oauth", request.model))
+    ) {
       return this.createMessageWithOAuth({ ...request, promptCache: undefined });
     }
 
@@ -1035,7 +1055,7 @@ export class OpenAIProvider implements LLMProvider {
         request.promptCache &&
         isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
       ) {
-        this.oauthPromptCacheUnsupported = true;
+        promptCacheRejectedModels.add(promptCacheRejectionKey("oauth", request.model));
         logger.warn("ChatGPT prompt cache controls rejected; retrying without cache controls", {
           model: request.model,
           status: error?.status,

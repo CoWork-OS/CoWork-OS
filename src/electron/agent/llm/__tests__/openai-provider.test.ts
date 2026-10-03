@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LLMProviderConfig, LLMRequest } from "../types";
-import { OpenAIProvider } from "../openai-provider";
+import { OpenAIProvider, resetPromptCacheRejectionsForTests } from "../openai-provider";
 
 const completeMock = vi.fn();
 const getModelsMock = vi.fn();
@@ -53,6 +53,7 @@ function makeRequest(): LLMRequest {
 
 describe("OpenAIProvider structured errors", () => {
   beforeEach(() => {
+    resetPromptCacheRejectionsForTests();
     vi.clearAllMocks();
     getModelsMock.mockReturnValue([{ id: "gpt-5.3-codex-spark" }]);
     getApiKeyFromTokensMock.mockResolvedValue({ apiKey: "test-key", newTokens: null });
@@ -1123,6 +1124,35 @@ describe("OpenAIProvider structured errors", () => {
     expect(secondTurnOptions.cacheRetention).toBe("none");
     expect(secondTurnOptions.sessionId).toBeUndefined();
     expect(secondTurnOptions.onPayload).toBeUndefined();
+  });
+
+  it("remembers an OAuth prompt-cache rejection across provider instances", async () => {
+    completeMock
+      .mockResolvedValueOnce({
+        stopReason: "error",
+        errorMessage: "Unsupported parameter: prompt_cache_key",
+      })
+      .mockResolvedValue({
+        stopReason: "stop",
+        content: [{ type: "text", text: "ok" }],
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      });
+    const cachedRequest: LLMRequest = {
+      ...makeRequest(),
+      promptCache: {
+        mode: "openai_key",
+        ttl: "1h",
+        explicitRecentMessages: 3,
+        cacheKey: "unsupported-session",
+      },
+    };
+
+    // Providers are created per task: the second task must not repeat the rejected request.
+    await new OpenAIProvider(makeConfig()).createMessage(cachedRequest);
+    await new OpenAIProvider(makeConfig()).createMessage(cachedRequest);
+
+    expect(completeMock).toHaveBeenCalledTimes(3);
+    expect((completeMock.mock.calls[2]?.[2] as Any).cacheRetention).toBe("none");
   });
 
   it("includes turn-only context once when cache prefix splitting is enabled", async () => {

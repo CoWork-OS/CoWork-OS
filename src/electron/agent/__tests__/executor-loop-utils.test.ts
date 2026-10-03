@@ -603,9 +603,9 @@ describe("ToolLoopProgressTracker", () => {
     tracker.recordOutcome("run_command", { command: "npm test" }, true);
     expect(tracker.consumeTurnProgress()).toBe(false);
 
-    tracker.recordOutcome("read_file", { path: "src/a.ts" }, true);
+    expect(tracker.recordOutcome("read_file", { path: "src/a.ts" }, true)).toBe(true);
     expect(tracker.consumeTurnProgress()).toBe(true);
-    tracker.recordOutcome("read_file", { path: "src/a.ts" }, true);
+    expect(tracker.recordOutcome("read_file", { path: "src/a.ts" }, true)).toBe(false);
     expect(tracker.consumeTurnProgress()).toBe(false);
     tracker.recordOutcome("read_file", { path: "src/b.ts" }, false);
     expect(tracker.consumeTurnProgress()).toBe(false);

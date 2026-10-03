@@ -760,31 +760,33 @@ export class ToolLoopProgressTracker {
   private mutationEpoch = 0;
   private turnMadeProgress = false;
 
-  recordOutcome(toolName: string, input: unknown, succeeded: boolean): void {
+  /** Record a finished tool call; returns whether the call made progress. */
+  recordOutcome(toolName: string, input: unknown, succeeded: boolean): boolean {
     const canonicalToolName = canonicalizeToolName(String(toolName || ""));
+    let madeProgress = false;
     if (canonicalToolName === "run_command") {
       const command = normalizeCommandText(input);
-      if (!command) return;
+      if (!command) return false;
       if (!succeeded) {
         this.failedCommands.add(command);
       } else if (this.failedCommands.delete(command)) {
-        this.turnMadeProgress = true;
+        madeProgress = true;
       }
-      return;
-    }
-    if (!succeeded) return;
-    if (isFileMutationToolName(canonicalToolName)) {
+    } else if (succeeded && isFileMutationToolName(canonicalToolName)) {
       this.mutationEpoch += 1;
-      this.turnMadeProgress = true;
-      return;
-    }
-    if (canonicalToolName === "read_file" || canonicalToolName === "read_files") {
+      madeProgress = true;
+    } else if (
+      succeeded &&
+      (canonicalToolName === "read_file" || canonicalToolName === "read_files")
+    ) {
       for (const target of extractReadTargets(input)) {
         if (this.readTargets.has(target)) continue;
         this.readTargets.add(target);
-        this.turnMadeProgress = true;
+        madeProgress = true;
       }
     }
+    if (madeProgress) this.turnMadeProgress = true;
+    return madeProgress;
   }
 
   /** Whether calls since the previous check made progress; clears the flag. */

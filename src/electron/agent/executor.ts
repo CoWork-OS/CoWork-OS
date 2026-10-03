@@ -11936,6 +11936,13 @@ ${transcript}
     return null;
   }
 
+  /** A run_command call that runs tests or a build/check. */
+  private isVerificationCommandCall(toolName: string, input: Any): boolean {
+    if (canonicalizeToolNameUtil(toolName) !== "run_command") return false;
+    const command = typeof input?.command === "string" ? input.command : "";
+    return Boolean(command) && this.getVerificationCommandKind(command) !== null;
+  }
+
   /**
    * Whether a failed call counts toward the repeated-failure ("STOP retrying")
    * nudge. A failing test or build run counts only when it repeats the previous
@@ -32052,6 +32059,10 @@ Return ONLY a JSON object:
       // Progress (edits, commands that now pass, first reads) resets the
       // tool-use streak and decides which red test runs are repeats.
       const toolLoopProgress = new ToolLoopProgressTracker();
+      // Turns before the first write that read a new file or ran a test/build
+      // command; each one extends the first-write checkpoint (bounded).
+      let firstWriteInvestigationTurns = 0;
+      let iterationInvestigated = false;
       let structuredInputEnforcementAttempts = 0;
       let autonomousDecisionRecoveryAttempts = 0;
       let verificationRewindAttempted = false;
@@ -32593,6 +32604,7 @@ Return ONLY a JSON object:
           messages = state.messages;
           continueLoop = state.continueLoop;
           emptyResponseCount = state.emptyResponseCount;
+          iterationInvestigated = false;
 
           const availableToolNames = this.buildAvailableToolNameSet(availableTools);
 
@@ -34299,6 +34311,9 @@ Return ONLY a JSON object:
                           });
                           this.recordCrossStepToolFailure(content.name, failureMessage);
                           toolLoopProgress.recordOutcome(canonicalContentName, content.input, false);
+                          if (this.isVerificationCommandCall(canonicalContentName, content.input)) {
+                            iterationInvestigated = true;
+                          }
                           if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
                             hasHardToolFailureAttempt = true;
                           }
@@ -34661,11 +34676,21 @@ Return ONLY a JSON object:
                             toolSucceeded,
                           );
                         }
-                        toolLoopProgress.recordOutcome(
+                        const madeLoopProgress = toolLoopProgress.recordOutcome(
                           canonicalContentName,
                           content.input,
                           toolSucceeded,
                         );
+                        // Investigation for the first-write checkpoint: a first read
+                        // of a file or a test/build run (edits count as writes).
+                        if (
+                          (madeLoopProgress &&
+                            (canonicalContentName === "read_file" ||
+                              canonicalContentName === "read_files")) ||
+                          this.isVerificationCommandCall(canonicalContentName, content.input)
+                        ) {
+                          iterationInvestigated = true;
+                        }
 
                         if (
                           expectsImageVerification &&
@@ -36709,9 +36734,15 @@ Return ONLY a JSON object:
             descriptionHasWriteIntent(step.description || "") ||
             /\b(render)\b/i.test(step.description || "");
           const firstWriteCheckpointEscalationIteration = creationHeavyStep ? 3 : 2;
+          if (iterationInvestigated && !mutationSatisfiedForCheckpoint) {
+            firstWriteInvestigationTurns += 1;
+          }
+          // Reading new files and running tests is how a fix starts; each such
+          // turn buys one more turn before the first write is due, up to 6.
           const firstWriteCheckpointFailIteration =
             (creationHeavyStep ? 6 : 4) +
-            (bootstrapMutationAttempted && !bootstrapMutationSucceeded ? 1 : 0);
+            (bootstrapMutationAttempted && !bootstrapMutationSucceeded ? 1 : 0) +
+            Math.min(firstWriteInvestigationTurns, 6);
 
           if (
             !stepFailed &&

@@ -6042,6 +6042,52 @@ describe("TaskExecutor step loop control", () => {
       );
     });
 
+    it("gives a fix step that keeps investigating extra turns before the first-write checkpoint", async () => {
+      let runs = 0;
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+          toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+          toolCall("run_command", { command: "npm test -- login" }, "c1"),
+          toolCall("read_file", { path: "src/auth/token.ts" }, "r3"),
+          toolCall("run_command", { command: "npm test -- login --verbose" }, "c2"),
+          toolCall("read_file", { path: "src/auth/util.ts" }, "r4"),
+          toolCall("read_file", { path: "src/auth/types.ts" }, "r5"),
+          toolCall("glob", { path: "src", pattern: "**/*.ts" }, "g1"),
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          toolCall("run_command", { command: "npm test -- login" }, "c3"),
+          textResponse("Fixed the null check in src/auth/login.ts; npm test -- login passes."),
+        ],
+        {
+          run_command: () =>
+            ++runs < 3
+              ? { success: false, exitCode: 1, stdout: "1 failing", stderr: "" }
+              : { success: true, exitCode: 0, stdout: "12 passing", stderr: "" },
+        },
+      );
+      const step = fixStep("long-investigation");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executedTools(executor)).toContain("edit_file");
+    });
+
+    it("still fails a fix step that only keeps reading, at a bounded checkpoint", async () => {
+      const executor = createCodeStepExecutor(
+        Array.from({ length: 30 }, (_, index) =>
+          toolCall("read_file", { path: `src/auth/file${index}.ts` }, `r${index}`),
+        ),
+      );
+      const step = fixStep("read-only-fix");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("artifact_write_checkpoint_failed");
+      expect((executor as Any).callLLMWithRetry.mock.calls.length).toBeLessThanOrEqual(13);
+    });
+
     it("does not block a test run while the guard is active", async () => {
       const executor = createCodeStepExecutor([
         toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),

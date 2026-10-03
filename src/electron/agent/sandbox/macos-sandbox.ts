@@ -44,6 +44,8 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
   timeout: 5 * 60 * 1000, // 5 minutes
   maxOutputSize: 100 * 1024, // 100KB
   allowNetwork: false,
+  allowLoopbackListen: false,
+  detached: false,
   allowedReadPaths: [],
   allowedWritePaths: [],
   envPassthrough: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR"],
@@ -238,6 +240,7 @@ export class MacOSSandbox implements ISandbox {
       cwd,
       env,
       shell: false,
+      detached: opts.detached === true,
       stdio: ["pipe", "pipe", "pipe"],
     });
     opts.onProcess?.(proc);
@@ -613,6 +616,18 @@ ${tempWriteRules}
   (remote udp "localhost:*")
 )
 `;
+      if (options.allowLoopbackListen === true) {
+        profile += `
+; Local TCP servers (dev servers, test servers). Egress stays limited to
+; loopback above, but seatbelt matches a (local ... "localhost:*") filter for
+; 0.0.0.0 and LAN addresses too, so this alone does not keep a server off the
+; network: the caller pairs it with LoopbackListenerGuard, which stops a
+; process group that listens on a non-loopback address. TCP only; UDP binds
+; stay denied.
+(allow network-bind (local tcp "localhost:*"))
+(allow network-inbound (local tcp "localhost:*"))
+`;
+      }
     }
 
     // Allow additional read paths (with validation and escaping)

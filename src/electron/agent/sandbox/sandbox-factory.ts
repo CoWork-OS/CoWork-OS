@@ -34,6 +34,14 @@ export interface SandboxOptions {
   maxOutputSize?: number;
   /** Allow network access */
   allowNetwork?: boolean;
+  /**
+   * With network denied, still let the command accept TCP connections so local
+   * servers work. macOS seatbelt cannot limit this to loopback, so a caller
+   * that sets it must also watch the process group with LoopbackListenerGuard.
+   */
+  allowLoopbackListen?: boolean;
+  /** spawnProcess only: lead a new process group so the whole tree can be stopped. */
+  detached?: boolean;
   /** Additional allowed paths for read access */
   allowedReadPaths?: string[];
   /** Additional allowed paths for write access */

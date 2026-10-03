@@ -175,6 +175,61 @@ describe("MacOSSandbox", () => {
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  describe("loopback servers with network denied", () => {
+    const LISTEN_RULES = [
+      '(allow network-bind (local tcp "localhost:*"))',
+      '(allow network-inbound (local tcp "localhost:*"))',
+    ];
+
+    function profileFor(options: { allowNetwork?: boolean; allowLoopbackListen?: boolean }) {
+      const workspace = makeWorkspace();
+      workspace.permissions.network = options.allowNetwork === true;
+      const sandbox = new MacOSSandbox(workspace);
+      const { process: proc } = sandbox.spawnProcess("/bin/sh", ["-c", "true"], {
+        cwd: "/tmp/cowork workspace",
+        ...options,
+      });
+      const [, args] = spawnMock.mock.calls[spawnMock.mock.calls.length - 1];
+      const profile = fs.readFileSync(args[1], "utf8");
+      proc.emit("close", 0, null);
+      return profile;
+    }
+
+    it("keeps listening denied unless the caller opts in", () => {
+      const profile = profileFor({});
+      for (const rule of LISTEN_RULES) expect(profile).not.toContain(rule);
+      expect(profile).toContain("(deny network*)");
+    });
+
+    it("allows TCP listening, keeps egress loopback-only and leaves UDP binds denied", () => {
+      const profile = profileFor({ allowLoopbackListen: true });
+      for (const rule of LISTEN_RULES) expect(profile).toContain(rule);
+      expect(profile).toContain("(deny network*)");
+      expect(profile).toContain('(allow network-outbound\n  (remote tcp "localhost:*")');
+      expect(profile).not.toContain("(allow network*)");
+      expect(profile).not.toMatch(/\(local (?:ip|udp) "/);
+      expect(profile).not.toContain('(local tcp "*:*")');
+    });
+
+    it("needs no listen rule when network is already allowed", () => {
+      const profile = profileFor({ allowNetwork: true, allowLoopbackListen: true });
+      expect(profile).toContain("(allow network*)");
+      for (const rule of LISTEN_RULES) expect(profile).not.toContain(rule);
+    });
+  });
+
+  it("starts long-running processes in their own process group only when asked", () => {
+    const sandbox = new MacOSSandbox(makeWorkspace());
+    sandbox.spawnProcess("/bin/sh", ["-c", "true"], { cwd: "/tmp/cowork workspace" });
+    sandbox.spawnProcess("/bin/sh", ["-c", "true"], {
+      cwd: "/tmp/cowork workspace",
+      detached: true,
+    });
+
+    expect(spawnMock.mock.calls[0][2]).toMatchObject({ detached: false });
+    expect(spawnMock.mock.calls[1][2]).toMatchObject({ detached: true });
+  });
+
   it("runs commands with non-interactive defaults without overriding passed-through values", async () => {
     const previousPager = process.env.PAGER;
     process.env.PAGER = "less";

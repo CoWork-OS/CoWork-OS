@@ -68,6 +68,8 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
   timeout: 5 * 60 * 1000, // 5 minutes
   maxOutputSize: 100 * 1024, // 100KB
   allowNetwork: false,
+  allowLoopbackListen: false,
+  detached: false,
   allowedReadPaths: [],
   allowedWritePaths: [],
   envPassthrough: ["LANG", "TERM"],

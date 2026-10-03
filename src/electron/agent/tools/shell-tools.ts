@@ -16,7 +16,10 @@ import { getBackgroundProcessManager, type BackgroundProcessLaunch } from "./bac
 import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
 import { OUTPUT_TRUNCATED_MARKER, boundOutput } from "../sandbox/bounded-output";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
-import { RUN_COMMAND_DEFAULT_TIMEOUT_MS, RUN_COMMAND_MAX_TIMEOUT_MS } from "../run-command-timeouts";
+import {
+  RUN_COMMAND_DEFAULT_TIMEOUT_MS,
+  RUN_COMMAND_MAX_TIMEOUT_MS,
+} from "../run-command-timeouts";
 import { createLogger } from "../../utils/logger";
 
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";

@@ -6224,6 +6224,59 @@ describe("TaskExecutor step loop control", () => {
     });
   });
 
+  describe("verification rewind", () => {
+    it("gives the rewound verification step the failed checks to fix", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse(
+            "FAIL_BLOCKING: the whitepaper is missing the required Tokenomics and Roadmap sections.",
+          ),
+          textResponse("OK"),
+        ],
+        {},
+      );
+      (executor as Any).verificationOutcomeV2Enabled = true;
+      const step: Any = {
+        id: "verify-rewind-context",
+        description: "Final verification: Review the completed whitepaper for completeness",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      const rerunStepContext = JSON.stringify(
+        ((executor as Any).conversationHistory as Any[]).find((entry) => entry.role === "user")
+          ?.content,
+      );
+      expect(rerunStepContext).toContain("VERIFICATION REWIND");
+      expect(rerunStepContext).toContain("fix only the required checklist gaps");
+      expect(rerunStepContext).toContain("missing the required Tokenomics and Roadmap sections");
+    });
+  });
+
+  describe("context capacity exhaustion", () => {
+    it("reports how many recovery attempts actually ran when recovery stops early", async () => {
+      const executor = createExecutorWithStubs([], {});
+      (executor as Any).callLLMWithRetry = vi.fn(async () => {
+        throw new Error("prompt is too long: 250000 tokens > 200000 maximum");
+      });
+      (executor as Any).recoverFromContextCapacityOverflow = vi.fn(async (opts: Any) => ({
+        recovered: false,
+        exhausted: true,
+        messages: opts.messages,
+      }));
+      const step: Any = { id: "ctx-early", description: "Summarize the logs", status: "pending" };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("after 1 recovery attempt");
+      expect(String(step.error || "")).not.toContain("after 2 attempts");
+    });
+  });
+
   describe("step soft deadline", () => {
     afterEach(() => {
       vi.useRealTimers();

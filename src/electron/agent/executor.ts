@@ -31894,6 +31894,11 @@ Return ONLY a JSON object:
       if (dataUnitGuidance) {
         stepContext += `\n\n${dataUnitGuidance}`;
       }
+      const verificationRewindInstruction = (step as Any).__verificationRewindInstruction;
+      if (verificationRewindAlreadyAttempted && typeof verificationRewindInstruction === "string") {
+        stepContext += `\n\nVERIFICATION REWIND:\n${verificationRewindInstruction}`;
+      }
+      delete (step as Any).__verificationRewindInstruction;
       if (isVerifyStep) {
         stepContext += this.isReadOnlyFactFindingVerificationStep(step)
           ? "\n\nREAD-ONLY FACT-FINDING RESPONSE (REQUIRED): Perform the requested check and return a concise finding with the supporting evidence. A verified negative finding still completes the check; do not answer with only `OK`."
@@ -32563,8 +32568,12 @@ Return ONLY a JSON object:
             }
             if (recovery.exhausted) {
               stepFailed = true;
+              // Recovery can stop before its budget (nothing left to compact).
+              const attemptsRun =
+                contextCapacityRecoveryCount +
+                (contextCapacityRecoveryCount < maxContextCapacityRecoveries ? 1 : 0);
               lastFailureReason =
-                `Context capacity recovery exhausted after ${maxContextCapacityRecoveries} attempts. ` +
+                `Context capacity recovery exhausted after ${attemptsRun} recovery attempt${attemptsRun === 1 ? "" : "s"}. ` +
                 `Provider continued returning context/window overflow errors.`;
               continueLoop = false;
               return {
@@ -37529,17 +37538,12 @@ Return ONLY a JSON object:
           checkpointType: "rewind",
           rewindAttempt: 1,
         });
-        messages.push({
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text:
-                "Verification rewind attempt: fix only required checklist gaps now. " +
-                "Keep optional enhancements out of scope and return explicit pass/fail for required checks.",
-            },
-          ],
-        });
+        // The re-run starts from a fresh message list, so the instruction and
+        // the failed checks travel in its step context.
+        (step as Any).__verificationRewindInstruction =
+          "Verification rewind attempt: fix only the required checklist gaps now. " +
+          "Keep optional enhancements out of scope, re-check the required items, and answer in this step's verification response format.\n" +
+          `Previous verification result: ${String(finalAssistantText || lastFailureReason || "").slice(0, 1500)}`;
 
         // Persist the failed verification turn, then allow one immediate rewind
         // iteration instead of falling through into terminal step failure.
@@ -40799,8 +40803,12 @@ Return ONLY a JSON object:
               return { recovered: true as const, messages };
             }
             if (recovery.exhausted) {
+              // Recovery can stop before its budget (nothing left to compact).
+              const attemptsRun =
+                contextCapacityRecoveryCount +
+                (contextCapacityRecoveryCount < maxContextCapacityRecoveries ? 1 : 0);
               throw this.createContextCapacityRecoveryExhaustedError(
-                `Context capacity recovery exhausted after ${maxContextCapacityRecoveries} attempts during follow-up processing.`,
+                `Context capacity recovery exhausted after ${attemptsRun} recovery attempt${attemptsRun === 1 ? "" : "s"} during follow-up processing.`,
               );
             }
             throw llmError;

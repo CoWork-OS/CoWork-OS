@@ -6360,6 +6360,29 @@ describe("TaskExecutor step loop control", () => {
       );
       expect(locks).toHaveLength(1);
     });
+
+    it("gives each follow-up message its own token budget", async () => {
+      const executor = createFollowUpExecutor([
+        textResponse("The login handler reads user.name without a null check."),
+      ]);
+      // Run the real budget checks against the default guardrails.
+      executor.checkBudgets = (TaskExecutor.prototype as Any).checkBudgets;
+      executor.lifetimeTurnCount = 0;
+      executor.maxLifetimeTurns = 3000;
+      executor.maxGlobalTurns = null;
+      executor.iterationCount = 0;
+      executor.unpricedModelIds = new Set();
+      // Earlier turns of this thread already used 3,000,000 tokens, more than
+      // one turn's budget. Before the cap was per turn, this message failed
+      // with "Token budget exceeded" before reaching the model.
+      executor.usageOffsetInputTokens = 2_800_000;
+      executor.usageOffsetOutputTokens = 200_000;
+
+      await sendFollowUp(executor, "Is there a null check problem in login?");
+
+      expect(executor.callLLMWithRetry).toHaveBeenCalledTimes(1);
+      expect(executor.tokenBudgetTurnStartTokens).toBe(3_000_000);
+    });
   });
 
   describe("verification rewind", () => {

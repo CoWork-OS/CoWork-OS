@@ -169,10 +169,12 @@ export function GuardrailSettings() {
           </label>
         </div>
         <p className="settings-description">
-          Limit the total tokens (input + output) used per task to prevent runaway costs.
+          Limit the tokens (input + output) a task can use for each message you send. Automatic
+          continuations within that turn share the same budget; the cost budget below caps spend
+          across the whole task.
         </p>
         <div className="settings-inline-input">
-          <label>Max tokens per task:</label>
+          <label>Max tokens per turn:</label>
           <input
             type="number"
             className="settings-input settings-input-number"
@@ -190,8 +192,9 @@ export function GuardrailSettings() {
           />
         </div>
         <p className="settings-hint">
-          Typical tasks use 5,000-50,000 tokens. Default: 100,000 (about $0.30-$7.50 depending on
-          model)
+          Models without prompt caching (most local models) count the whole prompt on every call, so
+          long coding turns can use over a million tokens. Default:{" "}
+          {DEFAULTS.maxTokensPerTask.toLocaleString()}
         </p>
       </div>
 

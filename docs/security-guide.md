@@ -113,7 +113,7 @@ CoWork OS includes configurable guardrails in **Settings > Guardrails** to limit
 
 | Guardrail              | Description                                                        | Default            |
 | ---------------------- | ------------------------------------------------------------------ | ------------------ |
-| **Token Budget**       | Max tokens (input + output) per task; a task's own budget always applies but can only lower this limit | 100,000 (enabled)  |
+| **Token Budget**       | Max tokens (input + output) per user turn (each follow-up message starts a new count); a task's own budget counts the whole task, always applies, and can only lower this limit | 2,000,000 (enabled) |
 | **Cost Budget**        | Max estimated cost (USD) per task; a task's own budget always applies but can only lower this limit | $10.00 (enabled)   |
 | **Iteration Limit**    | Max LLM calls per task                                             | 50 (enabled)       |
 | **Dangerous Commands** | Block dangerous command-tool commands matching patterns            | Enabled            |

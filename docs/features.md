@@ -1113,7 +1113,7 @@ When disabled, CoWork does not render those cards and skips their home-screen da
 
 | Guardrail                         | Default            | Range                                           |
 | --------------------------------- | ------------------ | ----------------------------------------------- |
-| **Token Budget**                  | 100,000            | 1K - 10M                                        |
+| **Token Budget** (per user turn)  | 2,000,000          | 1K - 10M                                        |
 | **Cost Budget**                   | $10.00 (enabled)   | $0.01 - $100                                    |
 | **Iteration Limit**               | 50                 | 5 - 500                                         |
 | **Dangerous Command Blocking**    | Enabled            | On/Off + custom                                 |

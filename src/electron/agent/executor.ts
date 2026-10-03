@@ -6531,6 +6531,12 @@ ${transcript}
   private usageOffsetInputTokens: number = 0;
   private usageOffsetOutputTokens: number = 0;
   private usageOffsetCost: number = 0;
+  /**
+   * Cumulative input+output tokens when the current user turn began. The global
+   * token budget counts usage above this mark, so each follow-up message gets a
+   * full budget while continuation windows within one turn keep accumulating.
+   */
+  private tokenBudgetTurnStartTokens: number = 0;
   private iterationCount: number = 0;
   private totalToolCallCount = 0;
   private webSearchToolCallCount = 0;
@@ -9639,15 +9645,20 @@ ${transcript}
       );
     }
 
-    // Check token budget
+    // Check token budget. The global cap counts the current user turn only, so a
+    // long thread is not stopped by what earlier messages used; the cumulative
+    // cost cap below remains the lifetime spend guard. A task's own budgetTokens
+    // still counts the whole task.
     const totalTokens = this.getCumulativeInputTokens() + this.getCumulativeOutputTokens();
-    const tokenCheck = GuardrailManager.isTokenBudgetExceeded(totalTokens, {
+    const turnTokens = Math.max(0, totalTokens - (Number(this.tokenBudgetTurnStartTokens) || 0));
+    const tokenCheck = GuardrailManager.isTokenBudgetExceeded(turnTokens, {
       taskBudget: this.task.budgetTokens,
+      taskTokensUsed: totalTokens,
     });
     if (tokenCheck.exceeded) {
       throw new Error(
         `Token budget exceeded: ${tokenCheck.used.toLocaleString()}/${tokenCheck.limit.toLocaleString()} tokens ` +
-          `(${tokenCheck.source === "task" ? "this task's budget" : "Settings > Guardrails"}). ` +
+          `(${tokenCheck.source === "task" ? "this task's budget" : "this turn, Settings > Guardrails"}). ` +
           `Estimated cost: ${formatCost(this.getCumulativeCost())}`,
       );
     }
@@ -10375,6 +10386,36 @@ ${transcript}
 
   private getCumulativeInputTokens(): number {
     return this.usageOffsetInputTokens + this.totalInputTokens;
+  }
+
+  /** Start the per-turn token count at the task's current cumulative usage. */
+  private beginTokenBudgetTurn(): void {
+    this.tokenBudgetTurnStartTokens =
+      this.getCumulativeInputTokens() + this.getCumulativeOutputTokens();
+  }
+
+  /**
+   * The cumulative token total when the latest user message arrived, from the
+   * llm_usage totals recorded before it. Lets a task rebuilt after a restart
+   * resume the current turn's count instead of charging it every earlier turn.
+   */
+  private static tokenBudgetTurnStartFromEvents(events: TaskEvent[]): number {
+    let lastUserMessageIndex = -1;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      if (events[index]?.type === "user_message") {
+        lastUserMessageIndex = index;
+        break;
+      }
+    }
+    for (let index = lastUserMessageIndex - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type !== "llm_usage") continue;
+      const totals = event.payload?.totals;
+      const input = Number(totals?.inputTokens) || 0;
+      const output = Number(totals?.outputTokens) || 0;
+      return Math.max(0, input + output);
+    }
+    return 0;
   }
 
   private getCumulativeOutputTokens(): number {
@@ -18983,6 +19024,7 @@ ${transcript}
   rebuildConversationFromEvents(events: TaskEvent[]): void {
     this.sessionKickoffSummarySettled = taskSessionKickoffIsSettled(events);
     this.getSessionRuntime().restoreFromEvents(events);
+    this.tokenBudgetTurnStartTokens = TaskExecutor.tokenBudgetTurnStartFromEvents(events);
     this.currentPromptCacheContext = null;
     this.systemPromptBlocks = Array.isArray(this.stableSystemBlocks)
       ? this.stableSystemBlocks.slice()
@@ -40109,6 +40151,8 @@ Return ONLY a JSON object:
     if (!recoveredFromTurnLimit) {
       this.followUpRecoveryAttemptsInCurrentMessage = 0;
       this.lastFollowUpRecoveryBlockReason = "";
+      // A new user message gets its own token budget (Settings > Guardrails).
+      this.beginTokenBudgetTurn();
       // A new user message is a new request (the user may have fixed the
       // environment), so failures from earlier turns no longer block tools.
       this.crossStepToolFailures = new Map();

@@ -51,3 +51,41 @@ describe("guardrail settings schema defaults", () => {
     expect(GuardrailManager.getDefaults().customBlockedPatterns).toEqual([]);
   });
 });
+
+describe("token budget defaults", () => {
+  it("allows 2,000,000 tokens per user turn by default", () => {
+    // 100,000 counted every turn of the task stopped local providers (no cache
+    // reporting) within a handful of calls and ended long threads.
+    expect(GuardrailManager.getDefaults()).toMatchObject({
+      tokenBudgetEnabled: true,
+      maxTokensPerTask: 2_000_000,
+    });
+    expect(GuardrailManager.isTokenBudgetExceeded(1_999_999).exceeded).toBe(false);
+    expect(GuardrailManager.isTokenBudgetExceeded(2_000_000)).toMatchObject({
+      exceeded: true,
+      limit: 2_000_000,
+      source: "global",
+    });
+  });
+
+  it("keeps the $10 cumulative cost cap as the lifetime spend guard", () => {
+    expect(GuardrailManager.getDefaults()).toMatchObject({
+      costBudgetEnabled: true,
+      maxCostPerTask: 10,
+    });
+  });
+
+  it("measures a task's own budgetTokens against whole-task usage", () => {
+    // The global cap counts the current turn; an explicit task budget counts
+    // everything the task has used.
+    expect(
+      GuardrailManager.isTokenBudgetExceeded(1_000, { taskBudget: 50_000, taskTokensUsed: 60_000 }),
+    ).toMatchObject({ exceeded: true, used: 60_000, limit: 50_000, source: "task" });
+    expect(
+      GuardrailManager.isTokenBudgetExceeded(1_000, { taskBudget: 50_000, taskTokensUsed: 40_000 }),
+    ).toMatchObject({ exceeded: false, source: "task" });
+    expect(
+      GuardrailManager.isTokenBudgetExceeded(1_000, { taskTokensUsed: 9_000_000 }),
+    ).toMatchObject({ exceeded: false, used: 1_000, source: "global" });
+  });
+});

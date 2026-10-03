@@ -13,8 +13,13 @@
 import type { GuardrailSettings } from "./types";
 
 export const DEFAULT_GUARDRAIL_SETTINGS: Readonly<GuardrailSettings> = Object.freeze({
-  // Token Budget
-  maxTokensPerTask: 100000,
+  // Token Budget — counted per user turn: a follow-up message starts a new count,
+  // continuation windows inside one turn keep accumulating. Raised from 100,000
+  // (counted over the whole task): local providers report no cache reads, so every
+  // call re-counts the full prompt and hit 100,000 within 3-6 calls, and long chat
+  // threads died once their lifetime total crossed it. The cumulative cost cap
+  // below remains the lifetime spend guard.
+  maxTokensPerTask: 2_000_000,
   tokenBudgetEnabled: true,
 
   // Cost Budget — on by default so a runaway task cannot silently spend without bound.

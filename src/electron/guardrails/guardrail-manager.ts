@@ -330,7 +330,14 @@ export class GuardrailManager {
    */
   static isTokenBudgetExceeded(
     tokensUsed: number,
-    options?: { taskBudget?: number },
+    options?: {
+      taskBudget?: number;
+      /**
+       * Whole-task usage for Task.budgetTokens. `tokensUsed` is what the global
+       * cap counts (the current user turn); defaults to `tokensUsed`.
+       */
+      taskTokensUsed?: number;
+    },
   ): {
     exceeded: boolean;
     used: number;
@@ -347,9 +354,10 @@ export class GuardrailManager {
     ) {
       // A budget set on the task itself (API, CLI, automations) is always enforced,
       // but it can only tighten the global guardrail, never raise it.
+      const taskTokensUsed = options?.taskTokensUsed ?? tokensUsed;
       return {
-        exceeded: tokensUsed >= taskBudget,
-        used: tokensUsed,
+        exceeded: taskTokensUsed >= taskBudget,
+        used: taskTokensUsed,
         limit: taskBudget,
         source: "task",
       };

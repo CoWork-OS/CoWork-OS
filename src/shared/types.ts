@@ -11233,7 +11233,7 @@ export interface SearchConfigStatus {
 
 // Guardrail Settings types
 export interface GuardrailSettings {
-  // Token Budget (per task)
+  // Token Budget (per user turn; a follow-up message starts a new count)
   maxTokensPerTask: number;
   tokenBudgetEnabled: boolean;
 

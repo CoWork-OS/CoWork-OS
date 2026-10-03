@@ -34,6 +34,7 @@ import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
 } from "../../../shared/human-input-policy";
+import { isTerminalTaskStatus } from "../../../shared/task-status";
 import {
   compareBotHandoffEventOrder,
   isBotHandoffMessageDelivered,
@@ -11025,6 +11026,42 @@ ${skillDescriptions}`;
     };
   }
 
+  /**
+   * Child-agent slots this task's running orchestration runs hold beyond its active child tasks.
+   * A run starts its queued nodes, up to its maxParallel, as its children finish, so those slots
+   * are taken even though no active child task shows it yet. Only nodes that become child tasks
+   * of this task count, and a paused (or blocked, interrupted) child keeps its run slot without
+   * counting, like in the active-child count itself.
+   */
+  private async countReservedChildAgentSlots(childTasks: Task[]): Promise<number> {
+    if (typeof this.daemon.listOrchestrationGraphsByRootTask !== "function") return 0;
+    const childStatusById = new Map(childTasks.map((task) => [task.id, task.status]));
+    let reserved = 0;
+    for (const { run, nodes } of await this.daemon.listOrchestrationGraphsByRootTask(this.taskId)) {
+      if (run.status !== "running") continue;
+      let active = 0;
+      let held = 0;
+      let upcoming = 0;
+      for (const node of nodes) {
+        const becomesChildTask =
+          node.dispatchTarget !== "remote_acp" &&
+          (node.parentTaskId === undefined
+            ? node.dispatchTarget !== "local_role"
+            : node.parentTaskId === this.taskId);
+        if (!becomesChildTask) continue;
+        if (node.status === "pending" || node.status === "ready") upcoming += 1;
+        if (node.status !== "running") continue;
+        const status = node.taskId ? childStatusById.get(node.taskId) : undefined;
+        // No visible child yet means dispatch is in flight; a finished child frees its slot.
+        if (status === undefined) upcoming += 1;
+        else if (ACTIVE_CHILD_AGENT_STATUSES.has(status)) active += 1;
+        else if (!isTerminalTaskStatus(status)) held += 1;
+      }
+      reserved += Math.max(0, Math.min(run.maxParallel - held, active + upcoming) - active);
+    }
+    return reserved;
+  }
+
   private async spawnAgent(input: {
     prompt: string;
     title?: string;
@@ -11079,18 +11116,22 @@ ${skillDescriptions}`;
     const activeChildTasks = childTasks.filter((task) =>
       ACTIVE_CHILD_AGENT_STATUSES.has(task.status),
     );
-    if (phaseCEnabled && activeChildTasks.length >= activeSubAgentLimit) {
+    const reservedSlots = phaseCEnabled ? await this.countReservedChildAgentSlots(childTasks) : 0;
+    const usedSlots = activeChildTasks.length + reservedSlots;
+    if (phaseCEnabled && usedSlots >= activeSubAgentLimit) {
       const activeIds = activeChildTasks.slice(0, 5).map((task) => task.id);
       this.daemon.logEvent(this.taskId, "agent_spawn_blocked", {
         reason: "fanout_limit_reached",
         activeChildCount: activeChildTasks.length,
+        reservedSlots,
         activeSubAgentLimit,
         activeChildIds: activeIds,
       });
       return {
         success: false,
         message:
-          `Cannot spawn agent: active child-agent limit reached (${activeChildTasks.length}/${activeSubAgentLimit}). ` +
+          `Cannot spawn agent: active child-agent limit reached (${usedSlots}/${activeSubAgentLimit}` +
+          `${reservedSlots > 0 ? `, including ${reservedSlots} held for queued orchestration tasks` : ""}). ` +
           `Wait for existing child agents to finish before spawning more.`,
         error: "FANOUT_LIMIT_REACHED",
       };
@@ -11521,12 +11562,16 @@ ${skillDescriptions}`;
       1,
       20,
     );
-    const activeChildTasks = (await this.daemon.getChildTasks(this.taskId)).filter((task) =>
+    const childTasks = await this.daemon.getChildTasks(this.taskId);
+    const activeChildTasks = childTasks.filter((task) =>
       ACTIVE_CHILD_AGENT_STATUSES.has(task.status),
     );
     // The fan-out limit caps how many children run at once, not how many tasks one call may
     // queue: the graph runs at most the free slots in parallel and starts the rest as they finish.
-    const freeSlots = activeSubAgentLimit - activeChildTasks.length;
+    // Slots that earlier runs hold for their own queued tasks are not free.
+    const reservedSlots = phaseCEnabled ? await this.countReservedChildAgentSlots(childTasks) : 0;
+    const usedSlots = activeChildTasks.length + reservedSlots;
+    const freeSlots = activeSubAgentLimit - usedSlots;
     if (phaseCEnabled && freeSlots <= 0) {
       return {
         success: false,
@@ -11536,7 +11581,8 @@ ${skillDescriptions}`;
         error: "FANOUT_LIMIT_REACHED",
         message:
           `Cannot orchestrate agents: active child-agent limit reached ` +
-          `(${activeChildTasks.length}/${activeSubAgentLimit}). ` +
+          `(${usedSlots}/${activeSubAgentLimit}` +
+          `${reservedSlots > 0 ? `, including ${reservedSlots} held for queued orchestration tasks` : ""}). ` +
           `Wait for existing child agents to finish before orchestrating more.`,
       };
     }

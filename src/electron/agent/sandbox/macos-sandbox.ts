@@ -527,10 +527,22 @@ export class MacOSSandbox implements ISandbox {
   (subpath "/private/var/db")
   (subpath "/private/var/select")
 ${workspaceAncestorRules}
-  (literal "/dev/null")
   (literal "/dev/urandom")
   (literal "/dev/random")
 ${tempReadRules}
+)
+
+; Standard device nodes. Git opens /dev/null read-write at startup and shells
+; redirect to it; /dev/fd and /dev/std* only reach descriptors the process
+; already holds. /dev/tty stays denied: a command spawned without a new
+; session could otherwise read from or inject into the user's terminal.
+(allow file-read* file-write-data
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/stdin")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (subpath "/dev/fd")
 )
 
 ; Allow homebrew on macOS

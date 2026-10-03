@@ -129,6 +129,29 @@ describe("MacOSSandbox", () => {
     await expect(resultPromise).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("grants /dev/null and the standard streams for data, but not the terminal", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const sandbox = new MacOSSandbox(makeWorkspace());
+    const resultPromise = sandbox.execute("git status", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+    });
+
+    const [, args] = spawnMock.mock.calls[0];
+    const profile = fs.readFileSync(args[1], "utf8");
+    proc.emit("close", 0, null);
+    await resultPromise;
+    const deviceRule = profile.slice(profile.indexOf("(allow file-read* file-write-data"));
+    expect(deviceRule).toMatch(/^\(allow file-read\* file-write-data\n {2}\(literal "\/dev\/null"\)/);
+    expect(deviceRule.slice(0, deviceRule.indexOf("\n)\n"))).toContain('(subpath "/dev/fd")');
+    expect(profile).not.toContain('"/dev/tty"');
+    expect(profile).not.toMatch(/file-write\*[^\n]*\/dev\//);
+  });
+
   it("allows Homebrew launchers to resolve the /opt mount point", async () => {
     const proc = new EventEmitter() as ChildProcess;
     proc.stdout = new EventEmitter() as ChildProcess["stdout"];

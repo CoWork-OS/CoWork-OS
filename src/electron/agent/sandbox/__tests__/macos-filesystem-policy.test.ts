@@ -204,20 +204,111 @@ describe.skipIf(process.platform !== "darwin")("macOS filesystem policy executio
     expect(cleanup.exitCode, cleanup.stderr).toBe(0);
   });
 
-  it("blocks moving a protected ancestor or importing protected names from private scratch", async () => {
+  it("keeps a nested repository immutable when its parent moves, and blocks protected names in scratch", async () => {
     const parent = path.join(workspace.path, "parent");
-    fs.mkdirSync(path.join(parent, ".git"), { recursive: true });
-    expect(
-      (
-        await execute(
-          `require('fs').renameSync(${JSON.stringify(parent)}, ${JSON.stringify(path.join(workspace.path, "moved"))})`,
-        )
-      ).exitCode,
-    ).not.toBe(0);
+    fs.mkdirSync(path.join(parent, ".git", "hooks"), { recursive: true });
+    const moved = path.join(workspace.path, "moved");
+    const result = await execute(
+      `const fs=require('fs');fs.renameSync(${JSON.stringify(parent)}, ${JSON.stringify(moved)});` +
+        `try{fs.writeFileSync(${JSON.stringify(path.join(moved, ".git", "hooks", "pre-commit"))},'x');process.exit(3)}catch{}` +
+        `try{fs.renameSync(${JSON.stringify(path.join(moved, ".git"))}, ${JSON.stringify(path.join(moved, "plain"))});process.exit(4)}catch{}`,
+    );
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(fs.existsSync(path.join(moved, ".git", "hooks"))).toBe(true);
+    expect(fs.existsSync(path.join(moved, ".git", "hooks", "pre-commit"))).toBe(false);
     const scratch = await execute(
       "require('fs').mkdirSync(require('path').join(require('os').tmpdir(),'.git'))",
     );
     expect(scratch.exitCode).not.toBe(0);
+  });
+
+  it("keeps a nested repository moved into private scratch when scratch is cleaned up", async () => {
+    const nested = path.join(workspace.path, "vendor");
+    fs.mkdirSync(path.join(nested, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(nested, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const sandbox = new MacOSSandbox(workspace);
+    const result = await sandbox.execute(
+      process.execPath,
+      [
+        "-e",
+        `const fs=require('fs'),os=require('os'),path=require('path');fs.renameSync(${JSON.stringify(nested)}, path.join(os.tmpdir(),'vendor'));console.log(os.tmpdir())`,
+      ],
+      { cwd: workspace.path },
+    );
+    expect(result.exitCode, result.stderr).toBe(0);
+    const scratchDir = result.stdout.trim();
+    sandbox.cleanup();
+    const head = path.join(scratchDir, "vendor", ".git", "HEAD");
+    expect(fs.readFileSync(head, "utf8")).toContain("main");
+    fs.rmSync(scratchDir, { recursive: true, force: true });
+  });
+
+  it("permits directory removal, moves and rename-into-place inside the workspace", async () => {
+    const dist = path.join(workspace.path, "dist");
+    fs.mkdirSync(path.join(dist, "assets"), { recursive: true });
+    fs.writeFileSync(path.join(dist, "assets", "app.js"), "old");
+    fs.mkdirSync(path.join(workspace.path, "src"));
+    const result = await execute(
+      [
+        "const fs=require('fs'),path=require('path'),ws=process.cwd();",
+        // vite/next style: clean the output directory
+        "fs.rmSync(path.join(ws,'dist'),{recursive:true});",
+        // build under a temporary name, rename into place (cargo target, uv)
+        "fs.mkdirSync(path.join(ws,'targetTmp1/debug'),{recursive:true});",
+        "fs.renameSync(path.join(ws,'targetTmp1'),path.join(ws,'target'));",
+        // mv src lib; rmdir an empty directory
+        "fs.renameSync(path.join(ws,'src'),path.join(ws,'lib'));",
+        "fs.mkdirSync(path.join(ws,'empty'));fs.rmdirSync(path.join(ws,'empty'));",
+        // atomic file replace
+        "fs.writeFileSync(path.join(ws,'config.json'),'{}');",
+        "fs.writeFileSync(path.join(ws,'config.json.tmp'),'{\"v\":2}');",
+        "fs.renameSync(path.join(ws,'config.json.tmp'),path.join(ws,'config.json'));",
+      ].join(""),
+    );
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(fs.existsSync(dist)).toBe(false);
+    expect(fs.existsSync(path.join(workspace.path, "target", "debug"))).toBe(true);
+    expect(fs.existsSync(path.join(workspace.path, "lib"))).toBe(true);
+    expect(fs.readFileSync(path.join(workspace.path, "config.json"), "utf8")).toBe('{"v":2}');
+  });
+
+  it("keeps the workspace root and directories outside the workspace from moving", async () => {
+    const outside = path.join(base, "outside-root");
+    fs.mkdirSync(path.join(outside, "dir"), { recursive: true });
+    workspace.permissions.accessWorkspaceRoots = [workspace.path, outside];
+    const moveRoot = await execute(
+      `require('fs').renameSync(process.cwd(), require('path').join(require('os').tmpdir(),'ws'))`,
+    );
+    expect(moveRoot.exitCode).not.toBe(0);
+    expect(fs.existsSync(workspace.path)).toBe(true);
+    const moveOutside = await execute(
+      `require('fs').renameSync(${JSON.stringify(path.join(outside, "dir"))}, ${JSON.stringify(path.join(outside, "moved"))})`,
+    );
+    expect(moveOutside.exitCode).not.toBe(0);
+    expect(fs.existsSync(path.join(outside, "dir"))).toBe(true);
+    const removeOutside = await execute(
+      `require('fs').rmdirSync(${JSON.stringify(path.join(outside, "dir"))})`,
+    );
+    expect(removeOutside.exitCode).not.toBe(0);
+  });
+
+  it("keeps a read-only subtree's ancestors fixed so the rule cannot be shed", async () => {
+    const parent = path.join(workspace.path, "parent");
+    const inputs = path.join(parent, "inputs");
+    fs.mkdirSync(inputs, { recursive: true });
+    fs.writeFileSync(path.join(inputs, "data.txt"), "original");
+    workspace.permissions.accessFilesystemRules = [{ path: inputs, access: "read" }];
+    const result = await execute(
+      `const fs=require('fs');fs.renameSync(${JSON.stringify(parent)}, ${JSON.stringify(path.join(workspace.path, "elsewhere"))});fs.writeFileSync(${JSON.stringify(path.join(workspace.path, "elsewhere", "inputs", "data.txt"))},'changed')`,
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(fs.readFileSync(path.join(inputs, "data.txt"), "utf8")).toBe("original");
+    const sibling = path.join(workspace.path, "sibling");
+    fs.mkdirSync(sibling);
+    const unrelated = await execute(
+      `require('fs').renameSync(${JSON.stringify(sibling)}, ${JSON.stringify(sibling + "-moved")})`,
+    );
+    expect(unrelated.exitCode, unrelated.stderr).toBe(0);
   });
 
   it.each([false, true])(

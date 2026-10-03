@@ -1,3 +1,4 @@
+import { estimateTokens } from "./context-manager";
 import type { LLMMessage } from "./llm";
 import {
   buildReasoningExhaustedGuidance,
@@ -8,6 +9,12 @@ import {
   resolveOutputTokenBudget,
   type OutputTruncationClassification,
 } from "./llm/output-token-policy";
+import { isQualityRewriteFaithful } from "./quality-pass-output";
+
+/** Longer drafts are where rewrites truncate at max_tokens or condense away detail. */
+export const QUALITY_PASS_MAX_DRAFT_TOKENS = 1_000;
+const QUALITY_PASS_MIN_REWRITE_TOKENS = 1_600;
+const QUALITY_PASS_REWRITE_TOKEN_HEADROOM = 1.3;
 
 export interface QualityPassDraftResult {
   text: string;
@@ -308,6 +315,8 @@ export async function requestLLMResponseWithAdaptiveBudget(opts: {
 export async function maybeApplyQualityPasses(opts: {
   response: Any;
   enabled: boolean;
+  /** Follow-up replies skip quality passes: the extra calls double reply latency. */
+  phase?: "step" | "follow_up";
   contextLabel: string;
   userIntent: string;
   getQualityPassCount: () => number;
@@ -317,9 +326,10 @@ export async function maybeApplyQualityPasses(opts: {
     contextLabel: string;
     userIntent: string;
     draft: string;
+    maxTokens: number;
   }) => Promise<QualityPassDraftResult>;
 }): Promise<Any> {
-  if (!opts.enabled) return opts.response;
+  if (!opts.enabled || opts.phase === "follow_up") return opts.response;
 
   const qualityPasses = opts.getQualityPassCount();
   if (qualityPasses <= 1 || opts.response.stopReason !== "end_turn") {
@@ -331,6 +341,8 @@ export async function maybeApplyQualityPasses(opts: {
 
   const draftText = opts.extractTextFromLLMContent(opts.response.content).trim();
   if (!draftText) return opts.response;
+  const draftTokens = estimateTokens(draftText);
+  if (draftTokens > QUALITY_PASS_MAX_DRAFT_TOKENS) return opts.response;
 
   const passes: 2 | 3 = qualityPasses === 2 ? 2 : 3;
   const improved = await opts.applyQualityPassesToDraft({
@@ -338,12 +350,19 @@ export async function maybeApplyQualityPasses(opts: {
     contextLabel: opts.contextLabel,
     userIntent: opts.userIntent,
     draft: draftText,
+    maxTokens: Math.max(
+      QUALITY_PASS_MIN_REWRITE_TOKENS,
+      Math.ceil(draftTokens * QUALITY_PASS_REWRITE_TOKEN_HEADROOM),
+    ),
   });
   if (!improved.accepted) {
     return opts.response;
   }
   const improvedTrimmed = String(improved.text || "").trim();
   if (!improvedTrimmed || improvedTrimmed === draftText) {
+    return opts.response;
+  }
+  if (!isQualityRewriteFaithful(improvedTrimmed, draftText)) {
     return opts.response;
   }
 

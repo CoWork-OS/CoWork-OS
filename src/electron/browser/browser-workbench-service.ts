@@ -3,9 +3,17 @@ import * as path from "path";
 import type { AccessDomainRule } from "../../shared/access-profiles";
 import type { WorkspacePermissions } from "../../shared/types";
 import { IPC_CHANNELS } from "../../shared/types";
-import { BrowserSessionManager, getBrowserSessionManager } from "./browser-session-manager";
+import {
+  BrowserSessionManager,
+  type BrowserSnapshotOptions,
+  getBrowserSessionManager,
+} from "./browser-session-manager";
 import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
 import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import {
+  buildSelectOptionExpression,
+  buildSelectorResolverExpression,
+} from "./browser-page-scripts";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -79,33 +87,19 @@ function normalizeUrl(rawUrl?: unknown): string {
   return `https://${value}`;
 }
 
-function compactTextScript(selector: string): string {
+/**
+ * Page expression: resolve `selector` with the shared resolver and run `body`
+ * with `el` bound to the element. Selector errors become `{ success: false }`.
+ */
+function withResolvedElementScript(selector: string, body: string): string {
   return `
     (() => {
       const selector = ${JSON.stringify(selector)};
-      const candidates = selector.startsWith("text=")
-        ? Array.from(document.querySelectorAll("button, a, input, textarea, select, [role=button], [tabindex], *"))
-            .filter((el) => (el.textContent || el.value || "").toLowerCase().includes(selector.slice(5).toLowerCase()))
-        : Array.from(document.querySelectorAll(selector));
-      const el = candidates.find((candidate) => {
-        const rect = candidate.getBoundingClientRect();
-        const style = window.getComputedStyle(candidate);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-      }) || candidates[0];
-      if (!el) return null;
-      return el;
-    })()
-  `;
-}
-
-function findElementActionScript(selector: string, action: string): string {
-  return `
-    (() => {
-      const selector = ${JSON.stringify(selector)};
-      const el = ${compactTextScript(selector)};
-      if (!el) return { success: false, error: "Element not found: ${selector.replace(/"/g, '\\"')}" };
-      el.scrollIntoView({ block: "center", inline: "center" });
-      ${action}
+      const el = ${buildSelectorResolverExpression(selector)};
+      if (typeof el === "string") {
+        return { success: false, selector, error: el.startsWith("invalid:") ? "Invalid selector: " + el.slice(8) : "Element not found: " + selector };
+      }
+      ${body}
     })()
   `;
 }
@@ -303,8 +297,16 @@ export class BrowserWorkbenchService {
     `);
   }
 
-  async snapshot(taskId: string, sessionId?: unknown): Promise<AnyRecord | null> {
-    return (await this.browserSessionManager.snapshot({ taskId, sessionId })) as AnyRecord | null;
+  async snapshot(
+    taskId: string,
+    sessionId?: unknown,
+    options: BrowserSnapshotOptions = {},
+  ): Promise<AnyRecord | null> {
+    return (await this.browserSessionManager.snapshot({
+      taskId,
+      sessionId,
+      ...options,
+    })) as AnyRecord | null;
   }
 
   async clickRef(taskId: string, ref: string, sessionId?: unknown): Promise<AnyRecord | null> {
@@ -453,26 +455,41 @@ export class BrowserWorkbenchService {
     return await this.browserSessionManager.traceStop(taskId, sessionId);
   }
 
+  /**
+   * Click by selector through the same CDP path as ref clicks: resolve the
+   * element, scroll it into view, hit-test the point, dispatch real mouse
+   * events and confirm the element received them.
+   */
   async click(taskId: string, selector: string, sessionId?: unknown): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
-    const point = await this.moveCursorToElement(session, contents, selector, "click", "Click");
-    const result = await contents.executeJavaScript(
-      findElementActionScript(
-        selector,
-        `
-      el.click();
-      return { success: true, element: selector, url: location.href, content: (document.body?.innerText || "").slice(0, 2000) };
-    `,
-      ),
-    );
-    if (point && result?.success) {
-      this.emitCursor(session, { ...point, kind: "click", label: "Click", pulse: true });
+    await this.moveCursorToElement(session, contents, selector, "click", "Click");
+    const result = await this.browserSessionManager.clickSelector({ taskId, sessionId, selector });
+    if (result?.success && typeof result.x === "number" && typeof result.y === "number") {
+      this.emitCursor(session, {
+        x: result.x,
+        y: result.y,
+        kind: "click",
+        label: "Click",
+        pulse: true,
+      });
     }
     return result;
   }
 
+  async hover(taskId: string, selector: string, sessionId?: unknown): Promise<AnyRecord | null> {
+    const session = this.getSession(taskId, sessionId);
+    const contents = await this.getWebContents(session);
+    if (!contents) return null;
+    const result = await this.browserSessionManager.hoverSelector({ taskId, sessionId, selector });
+    if (result?.success && typeof result.x === "number" && typeof result.y === "number") {
+      this.emitCursor(session, { x: result.x, y: result.y, kind: "move", label: "Hover" });
+    }
+    return result;
+  }
+
+  /** Fill by selector: select-all + trusted text insertion, then read the value back. */
   async fill(
     taskId: string,
     selector: string,
@@ -483,18 +500,13 @@ export class BrowserWorkbenchService {
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     await this.moveCursorToElement(session, contents, selector, "fill", "Fill");
-    return await contents.executeJavaScript(
-      findElementActionScript(
-        selector,
-        `
-      el.focus();
-      el.value = ${JSON.stringify(value)};
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      return { success: true, selector, value: el.value, url: location.href };
-    `,
-      ),
-    );
+    const result = await this.browserSessionManager.fillSelector({
+      taskId,
+      sessionId,
+      selector,
+      value: String(value ?? ""),
+    });
+    return result ? { selector, ...result } : result;
   }
 
   async type(
@@ -507,29 +519,22 @@ export class BrowserWorkbenchService {
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     await this.moveCursorToElement(session, contents, selector, "type", "Type");
-    const focusResult = await contents.executeJavaScript(
-      findElementActionScript(
-        selector,
-        `
-      el.focus();
-      return { success: true };
-    `,
-      ),
-    );
-    if (!focusResult?.success) return focusResult;
-    await contents.insertText(String(text || ""));
-    return { success: true, selector, url: contents.getURL?.() || "" };
+    const result = await this.browserSessionManager.typeSelector({
+      taskId,
+      sessionId,
+      selector,
+      text: String(text ?? ""),
+    });
+    return result ? { selector, ...result } : result;
   }
 
   async press(taskId: string, key: string, sessionId?: unknown): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!contents) return null;
-    const keyCode = String(key || "");
-    this.emitCursor(session, { x: 42, y: 42, kind: "press", label: keyCode || "Key", pulse: true });
-    contents.sendInputEvent({ type: "keyDown", keyCode });
-    contents.sendInputEvent({ type: "keyUp", keyCode });
-    return { success: true, key: keyCode, url: contents.getURL?.() || "" };
+    const keyName = String(key || "");
+    this.emitCursor(session, { x: 42, y: 42, kind: "press", label: keyName || "Key", pulse: true });
+    return await this.browserSessionManager.pressKey({ taskId, sessionId, key: keyName });
   }
 
   async scroll(
@@ -582,8 +587,11 @@ export class BrowserWorkbenchService {
         const selector = ${JSON.stringify(selector)};
         const deadline = Date.now() + ${Math.max(1000, Number(timeoutMs) || 30000)};
         const tick = () => {
-          const el = ${compactTextScript(selector)};
-          if (el) return resolve({ success: true, selector, url: location.href });
+          const el = ${buildSelectorResolverExpression(selector)};
+          if (typeof el === "string" && el.startsWith("invalid:")) {
+            return resolve({ success: false, selector, error: "Invalid selector: " + el.slice(8) });
+          }
+          if (typeof el !== "string") return resolve({ success: true, selector, url: location.href });
           if (Date.now() > deadline) return resolve({ success: false, selector, error: "Timed out waiting for selector" });
           setTimeout(tick, 250);
         };
@@ -606,20 +614,8 @@ export class BrowserWorkbenchService {
     const contents = await this.getWebContents(session);
     if (!contents) return null;
     await this.moveCursorToElement(session, contents, selector, "select", "Select");
-    return await contents.executeJavaScript(
-      findElementActionScript(
-        selector,
-        `
-      if (!(el instanceof HTMLSelectElement)) {
-        return { success: false, selector, error: "Element is not a select dropdown" };
-      }
-      el.value = ${JSON.stringify(value)};
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      return { success: true, selector, value: el.value, url: location.href };
-    `,
-      ),
-    );
+    const result = await contents.executeJavaScript(buildSelectOptionExpression(selector, value));
+    return result && typeof result === "object" ? { selector, ...result } : result;
   }
 
   async getText(taskId: string, selector: string, sessionId?: unknown): Promise<AnyRecord | null> {
@@ -628,11 +624,9 @@ export class BrowserWorkbenchService {
     if (!contents) return null;
     const point = await this.moveCursorToElement(session, contents, selector, "read", "Read");
     const result = await contents.executeJavaScript(
-      findElementActionScript(
+      withResolvedElementScript(
         selector,
-        `
-      return { success: true, text: (el.innerText || el.textContent || el.value || "").trim(), selector };
-    `,
+        `return { success: true, text: (el.innerText || el.textContent || el.value || "").trim(), selector };`,
       ),
     );
     if (point && result?.success) {
@@ -1035,9 +1029,8 @@ export class BrowserWorkbenchService {
   ): Promise<{ x: number; y: number } | null> {
     const result = await contents.executeJavaScript(`
       (() => {
-        const selector = ${JSON.stringify(selector)};
-        const el = ${compactTextScript(selector)};
-        if (!el) return null;
+        const el = ${buildSelectorResolverExpression(selector)};
+        if (!el || typeof el === "string") return null;
         el.scrollIntoView({ block: "center", inline: "center" });
         const rect = el.getBoundingClientRect();
         if (!Number.isFinite(rect.left) || !Number.isFinite(rect.top)) return null;

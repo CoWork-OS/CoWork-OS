@@ -128,6 +128,124 @@ describe("TaskExecutor context-overflow recovery", () => {
     ).toBe(true);
   });
 
+  it("does not report recovery when compaction cannot shrink the request", async () => {
+    const executor = makeExecutor();
+    executor.contextManager.proactiveCompactWithMeta = vi.fn((messages: Any[]) => ({
+      messages,
+      meta: {
+        removedMessages: { didRemove: false, count: 0, messages: [], tokensAfter: 1 },
+        truncatedToolResults: { didTruncate: false, count: 0, tokensAfter: 1 },
+        kind: "none",
+      },
+    }));
+    const messages: Any[] = [
+      { role: "user", content: [{ type: "text", text: "A".repeat(4000) }] },
+      { role: "assistant", content: [{ type: "text", text: "B".repeat(4000) }] },
+    ];
+
+    const result = await (executor as Any).recoverFromContextCapacityOverflow({
+      error: new Error("Context length exceeded for this model"),
+      messages,
+      systemPromptTokens: 0,
+      phase: "step",
+      stepId: "step-1",
+      attempt: 0,
+      maxAttempts: 3,
+    });
+
+    // Retrying the identical request would only hit the same overflow again.
+    expect(result.recovered).toBe(false);
+    expect(result.exhausted).toBe(true);
+    expect(result.messages).toBe(messages);
+    expect((executor as Any).emitEvent).toHaveBeenCalledWith(
+      "context_capacity_recovery_failed",
+      expect.objectContaining({ phase: "step", reason: "no_reduction_possible" }),
+    );
+  });
+
+  it("tightens the compaction target until something can be removed", async () => {
+    const executor = makeExecutor();
+    const ratios: number[] = [];
+    executor.contextManager.proactiveCompactWithMeta = vi.fn(
+      (messages: Any[], _systemPromptTokens: number, ratio: number) => {
+        ratios.push(ratio);
+        const remove = ratio < 0.2;
+        return {
+          messages: remove ? messages.slice(1) : messages,
+          meta: {
+            removedMessages: {
+              didRemove: remove,
+              count: remove ? 1 : 0,
+              messages: remove ? messages.slice(0, 1) : [],
+              tokensAfter: 1,
+            },
+            truncatedToolResults: { didTruncate: false, count: 0, tokensAfter: 1 },
+            kind: remove ? "message_removal" : "none",
+          },
+        };
+      },
+    );
+    const messages: Any[] = [
+      { role: "user", content: [{ type: "text", text: "A".repeat(4000) }] },
+      { role: "assistant", content: [{ type: "text", text: "B".repeat(4000) }] },
+    ];
+
+    const result = await (executor as Any).recoverFromContextCapacityOverflow({
+      error: new Error("Context length exceeded for this model"),
+      messages,
+      systemPromptTokens: 0,
+      phase: "follow_up",
+      attempt: 0,
+      maxAttempts: 3,
+    });
+
+    expect(result.recovered).toBe(true);
+    expect(ratios[0]).toBeCloseTo(0.35);
+    expect(ratios[ratios.length - 1]).toBeLessThan(0.2);
+  });
+
+  it("sizes the first target from the token counts the provider reports", async () => {
+    const executor = makeExecutor();
+    executor.contextManager.getAvailableTokens = vi.fn(() => 188_000);
+    const ratios: number[] = [];
+    executor.contextManager.proactiveCompactWithMeta = vi.fn(
+      (messages: Any[], _systemPromptTokens: number, ratio: number) => {
+        ratios.push(ratio);
+        return {
+          messages: messages.slice(1),
+          meta: {
+            removedMessages: {
+              didRemove: true,
+              count: 1,
+              messages: messages.slice(0, 1),
+              tokensAfter: 1,
+            },
+            truncatedToolResults: { didTruncate: false, count: 0, tokensAfter: 1 },
+            kind: "message_removal",
+          },
+        };
+      },
+    );
+    // About 20K estimated tokens, while the provider counts 10K more than it allows.
+    const messages: Any[] = [
+      { role: "user", content: [{ type: "text", text: "A".repeat(40_000) }] },
+      { role: "assistant", content: [{ type: "text", text: "B".repeat(40_000) }] },
+    ];
+
+    await (executor as Any).recoverFromContextCapacityOverflow({
+      error: new Error(
+        '400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}',
+      ),
+      messages,
+      systemPromptTokens: 0,
+      phase: "step",
+      attempt: 0,
+      maxAttempts: 3,
+    });
+
+    expect(ratios[0]).toBeLessThan(0.1);
+  });
+
   it("tags exhausted follow-up recovery with the terminal context code", () => {
     const executor = makeExecutor();
     const error = (executor as Any).createContextCapacityRecoveryExhaustedError(

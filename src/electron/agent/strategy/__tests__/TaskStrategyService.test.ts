@@ -13,6 +13,19 @@ describe("TaskStrategyService execution-mode routing", () => {
 
     expect(strategy.executionMode).toBe("execute");
   });
+
+  it.each([
+    "Instead of a modal, build a dropdown",
+    "Rather than a new file, do it inside utils.ts",
+    "Focus only on the files you changed",
+    "Forget the X fixes, pivot to building the new onboarding flow",
+  ])("executes redirect and steering requests instead of planning them: %s", (prompt) => {
+    const route = IntentRouter.route("", prompt);
+    const strategy = TaskStrategyService.derive(route, undefined, { title: "", prompt });
+
+    expect(route.intent).toBe("redirect");
+    expect(strategy.executionMode).toBe("execute");
+  });
 });
 
 describe("TaskStrategyService deriveLlmProfile", () => {
@@ -108,6 +121,54 @@ describe("TaskStrategyService getRelevantToolSet", () => {
     const chat = TaskStrategyService.getRelevantToolSet("chat");
     expect(chat.has("tool_search")).toBe(true);
   });
+
+  it("lets thinking tasks read the workspace without mutating it", () => {
+    const thinking = TaskStrategyService.getRelevantToolSet("thinking", "code");
+    for (const tool of ["tool_search", "read_file", "list_directory", "glob", "grep"]) {
+      expect(thinking.has(tool)).toBe(true);
+    }
+    expect(thinking.has("search_files")).toBe(true);
+    for (const tool of ["write_file", "edit_file", "delete_file", "run_command"]) {
+      expect(thinking.has(tool)).toBe(false);
+    }
+  });
+});
+
+describe("TaskStrategyService code-project domain", () => {
+  const deriveDomain = (
+    prompt: string,
+    isCodeProjectWorkspace: boolean,
+    existing?: Parameters<typeof TaskStrategyService.derive>[1],
+  ) => {
+    const route = IntentRouter.route("", prompt);
+    const strategy = TaskStrategyService.derive(route, existing, {
+      title: "",
+      prompt,
+      isCodeProjectWorkspace: () => isCodeProjectWorkspace,
+    });
+    return { route, strategy };
+  };
+
+  it("treats a cue-less action request in a code project as a code task", () => {
+    const { route, strategy } = deriveDomain("Integrate Stripe checkout", true);
+
+    expect(route.domain).toBe("general");
+    expect(strategy.taskDomain).toBe("code");
+    expect(strategy.snapshot.taskDomain).toBe("code");
+  });
+
+  it.each([
+    ["Integrate Stripe checkout", false, undefined],
+    ["How should I structure my week?", true, undefined],
+    ["Integrate Stripe checkout", true, { taskDomain: "general" as const }],
+  ])(
+    "keeps the routed or explicit domain for %s (code project=%s, existing=%o)",
+    (prompt, isCodeProjectWorkspace, existing) => {
+      const { route, strategy } = deriveDomain(prompt, isCodeProjectWorkspace, existing);
+
+      expect(strategy.taskDomain).toBe(existing?.taskDomain ?? route.domain);
+    },
+  );
 });
 
 describe("TaskStrategyService decoratePrompt", () => {
@@ -221,6 +282,68 @@ image_generation_contract:
     expect(prompt).toContain("gather only the information needed");
     expect(prompt).toContain("call generate_image once");
     expect(prompt).not.toContain("Do not search files");
+  });
+});
+
+describe("TaskStrategyService buildExecutionStrategyPrompt", () => {
+  it("renders nothing for a routine execution task", () => {
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        taskIntent: "execution",
+        executionMode: "execute",
+        taskDomain: "code",
+      }),
+    ).toBe("");
+  });
+
+  it("renders the deep-work contract without pointing steps at checklist tools", () => {
+    const prompt = TaskStrategyService.buildExecutionStrategyPrompt({
+      taskIntent: "deep_work",
+      deepWorkMode: true,
+      executionMode: "execute",
+      taskDomain: "research",
+    });
+
+    expect(prompt).toContain("TASK STRATEGY:");
+    expect(prompt).toContain("scratchpad_write");
+    expect(prompt).toContain("Validate deliverables against the request");
+    expect(prompt).not.toContain("task_list_");
+  });
+
+  it("renders the workflow and simple image contracts", () => {
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        taskIntent: "workflow",
+        executionMode: "execute",
+        taskDomain: "general",
+      }),
+    ).toContain("Multi-phase workflow");
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        taskIntent: "execution",
+        executionMode: "execute",
+        taskDomain: "media",
+        imageGeneration: "simple",
+      }),
+    ).toContain("call generate_image once");
+  });
+
+  it("only advertises the debug ingest endpoint in debug mode", () => {
+    const ingestUrl = "http://127.0.0.1:4000/cowork-debug/t1/ingest?token=abc";
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        executionMode: "debug",
+        taskDomain: "code",
+        debugIngestUrl: ingestUrl,
+      }),
+    ).toContain(ingestUrl);
+    expect(
+      TaskStrategyService.buildExecutionStrategyPrompt({
+        executionMode: "execute",
+        taskDomain: "code",
+        debugIngestUrl: ingestUrl,
+      }),
+    ).toBe("");
   });
 });
 

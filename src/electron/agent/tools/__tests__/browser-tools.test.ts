@@ -879,4 +879,530 @@ describe("BrowserTools browser_navigate", () => {
     expect(result.refSupport).toBe(false);
     expect(result.nodes[0].ref).toBeUndefined();
   });
+
+  it("lists buttons and inputs with usable selectors in the headless snapshot", async () => {
+    const { tools } = makeTools({
+      getSession: vi.fn().mockReturnValue(null),
+    });
+    (tools as Any).browserService = {
+      getContent: vi.fn().mockResolvedValue({
+        url: "https://example.com/signup",
+        title: "Sign up",
+        text: "Create your account",
+        links: [{ text: "Docs", href: "https://example.com/docs" }],
+        forms: [],
+        interactive: [
+          { role: "textbox", name: "Email", selector: "#email", type: "email" },
+          { role: "button", name: "Create account", selector: 'button[name="create"]' },
+          { role: "link", name: "Docs", selector: 'a[href="/docs"]', href: "/docs" },
+        ],
+      }),
+    };
+
+    const result = await tools.executeTool("browser_snapshot", {});
+
+    expect(result.refSupport).toBe(false);
+    expect(result.nodes).toEqual([
+      { role: "textbox", name: "Email", selector: "#email", type: "email" },
+      { role: "button", name: "Create account", selector: 'button[name="create"]' },
+      { role: "link", name: "Docs", selector: 'a[href="/docs"]', href: "/docs" },
+    ]);
+    expect(result.nodes.every((node: Any) => node.ref === undefined)).toBe(true);
+    expect(result.message).toContain("selector");
+  });
+
+  it("passes pagination and scope options to the headless content reader", async () => {
+    const { tools } = makeTools({
+      getSession: vi.fn().mockReturnValue(null),
+    });
+    const getContent = vi.fn().mockResolvedValue({
+      url: "https://example.com/report",
+      title: "Report",
+      textScope: "page",
+      offset: 10_000,
+      totalChars: 30_000,
+      truncated: true,
+      nextOffset: 15_000,
+      text: "...",
+      links: [],
+      forms: [],
+      interactive: [],
+    });
+    (tools as Any).browserService = { getContent };
+
+    const result = await tools.executeTool("browser_get_content", {
+      offset: 10_000,
+      max_chars: 5_000,
+      scope: "page",
+    });
+
+    expect(getContent).toHaveBeenCalledWith({ offset: 10_000, maxChars: 5_000, scope: "page" });
+    expect(result).toMatchObject({ truncated: true, nextOffset: 15_000 });
+  });
+
+  it("paginates visible workbench content when max_chars is requested", async () => {
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue({
+        taskId: "task-1",
+        sessionId: "default",
+        webContentsId: 123,
+      }),
+      getContent: vi.fn().mockResolvedValue({
+        url: "https://example.com/long",
+        title: "Long page",
+        text: "x".repeat(12_000),
+        links: [],
+        forms: [],
+      }),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_get_content", {
+      offset: 4_000,
+      max_chars: 5_000,
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      offset: 4_000,
+      totalChars: 12_000,
+      truncated: true,
+      nextOffset: 9_000,
+    });
+    expect(result.text).toHaveLength(5_000);
+  });
+
+  it("documents pagination options on browser_get_content", () => {
+    const getContentTool = BrowserTools.getToolDefinitions().find(
+      (tool) => tool.name === "browser_get_content",
+    );
+
+    expect(getContentTool?.input_schema.properties).toHaveProperty("offset");
+    expect(getContentTool?.input_schema.properties).toHaveProperty("max_chars");
+    expect(getContentTool?.input_schema.properties).toHaveProperty("scope");
+  });
+
+  const visibleSession = () =>
+    vi.fn().mockReturnValue({ taskId: "task-1", sessionId: "default", webContentsId: 123 });
+
+  it("passes snapshot paging and filter options to the visible workbench", async () => {
+    const browserWorkbenchService = {
+      getSession: visibleSession(),
+      snapshot: vi.fn().mockResolvedValue({
+        success: true,
+        url: "https://shop.example/",
+        nodes: [],
+        truncated: true,
+        nextOffset: 280,
+      }),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_snapshot", {
+      offset: 140,
+      limit: 140,
+      interactive_only: true,
+      query: "cart",
+    });
+
+    expect(result).toMatchObject({ truncated: true, nextOffset: 280 });
+    expect(browserWorkbenchService.snapshot).toHaveBeenCalledWith("task-1", undefined, {
+      offset: 140,
+      limit: 140,
+      interactiveOnly: true,
+      query: "cart",
+    });
+  });
+
+  it("runs visible act_batch actions by ref and stops when the workbench returns nothing", async () => {
+    const browserWorkbenchService = {
+      getSession: visibleSession(),
+      clickRef: vi.fn().mockResolvedValue({ success: true }),
+      fillRef: vi.fn().mockResolvedValue({ success: true, value: "a@b.co" }),
+      click: vi.fn().mockResolvedValue(null),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_act_batch", {
+      actions: [
+        { type: "fill", ref: "b2:snap-1:2", value: "a@b.co" },
+        { type: "click", ref: "b2:snap-1:3" },
+        { type: "click", selector: "text=Continue" },
+        { type: "click", selector: "text=Never reached" },
+      ],
+    });
+
+    expect(browserWorkbenchService.fillRef).toHaveBeenCalledWith(
+      "task-1",
+      "b2:snap-1:2",
+      "a@b.co",
+      undefined,
+    );
+    expect(browserWorkbenchService.clickRef).toHaveBeenCalledWith(
+      "task-1",
+      "b2:snap-1:3",
+      undefined,
+    );
+    expect(result.success).toBe(false);
+    expect(result.completed).toBe(3);
+    expect(result.results[2]).toMatchObject({
+      success: false,
+      error: expect.stringContaining("no longer available"),
+    });
+    expect(browserWorkbenchService.click).toHaveBeenCalledTimes(1);
+  });
+
+  it("hovers by selector in the visible workbench", async () => {
+    const browserWorkbenchService = {
+      getSession: visibleSession(),
+      hover: vi.fn().mockResolvedValue({ success: true, x: 10, y: 20 }),
+    };
+    const { tools } = makeTools(browserWorkbenchService);
+
+    const result = await tools.executeTool("browser_hover", { selector: "text=Menu" });
+
+    expect(result).toMatchObject({ success: true });
+    expect(browserWorkbenchService.hover).toHaveBeenCalledWith("task-1", "text=Menu", undefined);
+  });
+
+  it("teaches observe -> act -> verify with refs in the visible browser tool descriptions", () => {
+    const definitions = BrowserTools.getToolDefinitions();
+    const descriptionOf = (name: string) =>
+      definitions.find((tool) => tool.name === name)?.description || "";
+
+    expect(descriptionOf("browser_snapshot")).toContain("observe -> act -> verify");
+    expect(descriptionOf("browser_snapshot")).toContain("snapshot again");
+    expect(descriptionOf("browser_click")).toContain("preferably by ref from browser_snapshot");
+    expect(descriptionOf("browser_click")).toContain("call browser_snapshot to verify");
+    expect(descriptionOf("browser_fill")).toContain("success:false means the value did not take");
+  });
+});
+
+describe("BrowserTools headless browser capabilities", () => {
+  const workspace = {
+    id: "workspace-1",
+    path: "/tmp",
+    permissions: { read: true, write: true, delete: false, network: true, shell: false },
+  } as Any;
+
+  const makeHeadlessTools = (browserService: Any, workspaceOverride: Any = workspace) => {
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn(),
+    } as Any;
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue(null),
+      getTabs: vi.fn().mockReturnValue([]),
+      getConsole: vi.fn().mockReturnValue(null),
+      getNetwork: vi.fn().mockReturnValue(null),
+      getDownloads: vi.fn().mockReturnValue(null),
+      uploadFile: vi.fn(),
+      handleDialog: vi.fn(),
+    };
+    const tools = new BrowserTools(
+      workspaceOverride,
+      daemon,
+      "task-1",
+      browserWorkbenchService as Any,
+    );
+    (tools as Any).browserService = { hasSession: () => true, close: vi.fn(), ...browserService };
+    return { tools, daemon, browserWorkbenchService };
+  };
+
+  it("lists, switches and closes headless tabs", async () => {
+    const tabs = [
+      { tabId: "tab-1", url: "https://example.com/", title: "Home", active: false },
+      { tabId: "tab-2", url: "https://example.com/popup", title: "Popup", active: true },
+    ];
+    const browserService = {
+      listTabs: vi.fn().mockResolvedValue(tabs),
+      switchTab: vi.fn().mockResolvedValue({ success: true, tab: { ...tabs[0], active: true } }),
+      closeTab: vi.fn().mockResolvedValue({ success: true, closedTabId: "tab-2" }),
+    };
+    const { tools } = makeHeadlessTools(browserService);
+
+    const listed = await tools.executeTool("browser_tabs", {});
+    expect(listed).toMatchObject({ success: true, tabs });
+
+    const switched = await tools.executeTool("browser_switch_tab", { tab_id: "tab-1" });
+    expect(browserService.switchTab).toHaveBeenCalledWith("tab-1");
+    expect(switched).toMatchObject({ success: true, tab: { tabId: "tab-1", active: true } });
+
+    const closed = await tools.executeTool("browser_close_tab", { tab_id: "tab-2" });
+    expect(browserService.closeTab).toHaveBeenCalledWith("tab-2");
+    expect(closed).toMatchObject({ success: true, closedTabId: "tab-2" });
+  });
+
+  it("arms the next headless dialog decision instead of requiring the visible workbench", async () => {
+    const armNextDialog = vi.fn().mockReturnValue({
+      nextDialog: { action: "accept", promptText: "my-project" },
+      lastDialog: { type: "prompt", message: "Name?", action: "dismissed", timestamp: 1 },
+    });
+    const { tools, browserWorkbenchService } = makeHeadlessTools({ armNextDialog });
+
+    const result = await tools.executeTool("browser_handle_dialog", {
+      accept: true,
+      prompt_text: "my-project",
+    });
+
+    expect(browserWorkbenchService.handleDialog).not.toHaveBeenCalled();
+    expect(armNextDialog).toHaveBeenCalledWith({ accept: true, promptText: "my-project" });
+    expect(result).toMatchObject({
+      success: true,
+      nextDialog: { action: "accept", promptText: "my-project" },
+    });
+    expect(result.message).toContain("repeat");
+
+    await tools.executeTool("browser_handle_dialog", { accept: false });
+    expect(armNextDialog).toHaveBeenLastCalledWith({ accept: false });
+  });
+
+  it("stops a headless batch when a confirm dialog was dismissed", async () => {
+    const click = vi.fn().mockResolvedValue({
+      success: true,
+      dialog: { type: "confirm", message: "Delete?", action: "dismissed", timestamp: 1 },
+    });
+    const fill = vi.fn();
+    const { tools } = makeHeadlessTools({ click, fill });
+
+    const result = await tools.executeTool("browser_act_batch", {
+      actions: [
+        { type: "click", selector: "#delete" },
+        { type: "fill", selector: "#name", value: "x" },
+      ],
+    });
+
+    expect(fill).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.results[0]).toMatchObject({
+      type: "click",
+      dialog: { type: "confirm", action: "dismissed" },
+    });
+    expect(result.error).toContain("browser_handle_dialog");
+  });
+
+  it("lists headless downloads saved into the workspace", async () => {
+    const entries = [
+      {
+        id: "download-1",
+        status: "saved",
+        suggestedFilename: "report.csv",
+        url: "https://example.com/export",
+        path: "downloads/report.csv",
+        size: 8,
+        timestamp: 1,
+      },
+    ];
+    const { tools } = makeHeadlessTools({ listDownloads: vi.fn().mockReturnValue(entries) });
+
+    const result = await tools.executeTool("browser_downloads", {});
+
+    expect(result).toMatchObject({ success: true, directory: "downloads", entries });
+    const definition = BrowserTools.getToolDefinitions().find(
+      (tool) => tool.name === "browser_downloads",
+    );
+    expect(definition?.description).toContain("downloads/");
+  });
+
+  describe("headless browser_upload_file", () => {
+    let workspaceRoot: string;
+    let externalRoot: string;
+    let uploadWorkspace: Any;
+
+    const setup = () => {
+      workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "browser-upload-headless-ws-"));
+      externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "browser-upload-headless-ext-"));
+      uploadWorkspace = {
+        ...workspace,
+        path: workspaceRoot,
+        permissions: { ...workspace.permissions, allowedPaths: [], unrestrictedFileAccess: false },
+      };
+    };
+    const cleanup = () => {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+      fs.rmSync(externalRoot, { recursive: true, force: true });
+    };
+
+    it("uploads a workspace file into a headless file input", async () => {
+      setup();
+      try {
+        fs.writeFileSync(path.join(workspaceRoot, "resume.pdf"), "pdf");
+        const uploadFile = vi.fn().mockResolvedValue({ success: true, selector: "#cv" });
+        const { tools, browserWorkbenchService } = makeHeadlessTools(
+          { uploadFile },
+          uploadWorkspace,
+        );
+
+        const result = await tools.executeTool("browser_upload_file", {
+          file_path: "resume.pdf",
+          selector: "#cv",
+        });
+
+        expect(result.success).toBe(true);
+        expect(browserWorkbenchService.uploadFile).not.toHaveBeenCalled();
+        expect(uploadFile).toHaveBeenCalledWith(
+          "#cv",
+          fs.realpathSync(path.join(workspaceRoot, "resume.pdf")),
+          undefined,
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    it("asks before uploading a file outside the workspace and honours a denial", async () => {
+      setup();
+      try {
+        const externalFile = path.join(externalRoot, "id-card.png");
+        fs.writeFileSync(externalFile, "png");
+        const uploadFile = vi.fn().mockResolvedValue({ success: true });
+        const { tools, daemon } = makeHeadlessTools({ uploadFile }, uploadWorkspace);
+        daemon.requestApproval.mockResolvedValue(false);
+
+        await expect(
+          tools.executeTool("browser_upload_file", { file_path: externalFile, selector: "#id" }),
+        ).rejects.toThrow("Read permission not granted");
+        expect(daemon.requestApproval).toHaveBeenCalled();
+        expect(uploadFile).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    });
+
+    it("rejects a symlink that escapes the workspace before touching the page", async () => {
+      setup();
+      try {
+        const externalFile = path.join(externalRoot, "secret.txt");
+        fs.writeFileSync(externalFile, "secret");
+        try {
+          fs.symlinkSync(externalFile, path.join(workspaceRoot, "upload.txt"));
+        } catch {
+          return;
+        }
+        const uploadFile = vi.fn();
+        const { tools } = makeHeadlessTools({ uploadFile }, uploadWorkspace);
+
+        await expect(
+          tools.executeTool("browser_upload_file", { file_path: "upload.txt", selector: "#f" }),
+        ).rejects.toThrow("Read permission not granted");
+        expect(uploadFile).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    });
+
+    it("requires a selector for headless uploads", async () => {
+      setup();
+      try {
+        fs.writeFileSync(path.join(workspaceRoot, "resume.pdf"), "pdf");
+        const uploadFile = vi.fn();
+        const { tools } = makeHeadlessTools({ uploadFile }, uploadWorkspace);
+
+        const result = await tools.executeTool("browser_upload_file", {
+          file_path: "resume.pdf",
+          ref: "b2:snap:4",
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("selector");
+        expect(uploadFile).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    });
+  });
+
+  it("returns captured headless console and network entries", async () => {
+    const consoleLog = {
+      entries: [{ level: "error", text: "boom", timestamp: 1 }],
+      dropped: 0,
+    };
+    const networkLog = {
+      entries: [{ url: "https://example.com/api", status: 500, timestamp: 1 }],
+      dropped: 0,
+    };
+    const { tools } = makeHeadlessTools({
+      getConsoleLog: vi.fn().mockReturnValue(consoleLog),
+      getNetworkLog: vi.fn().mockReturnValue(networkLog),
+    });
+
+    expect(await tools.executeTool("browser_console", {})).toMatchObject({
+      success: true,
+      ...consoleLog,
+    });
+    expect(await tools.executeTool("browser_network", {})).toMatchObject({
+      success: true,
+      ...networkLog,
+    });
+  });
+
+  it("does not report an empty console as success when no browser was opened", async () => {
+    const { tools } = makeHeadlessTools({
+      hasSession: () => false,
+      getConsoleLog: vi.fn().mockReturnValue({ entries: [], dropped: 0 }),
+      getNetworkLog: vi.fn().mockReturnValue({ entries: [], dropped: 0 }),
+    });
+
+    const consoleResult = await tools.executeTool("browser_console", {});
+    const networkResult = await tools.executeTool("browser_network", {});
+
+    expect(consoleResult.success).toBe(false);
+    expect(consoleResult.error).toContain("No browser session");
+    expect(networkResult.success).toBe(false);
+  });
+
+  it("summarizes captured diagnostics in the headless snapshot", async () => {
+    const { tools } = makeHeadlessTools({
+      getContent: vi.fn().mockResolvedValue({
+        url: "https://example.com",
+        title: "Example",
+        links: [],
+        interactive: [],
+      }),
+      getDiagnosticsSummary: vi.fn().mockReturnValue({
+        console: { count: 2, recent: ["boom"] },
+        network: { count: 1, recent: ["500 https://example.com/api"] },
+      }),
+    });
+
+    const result = await tools.executeTool("browser_snapshot", {});
+
+    expect(result.consoleSummary).toEqual({ count: 2, recent: ["boom"] });
+    expect(result.networkSummary).toEqual({ count: 1, recent: ["500 https://example.com/api"] });
+  });
+
+  it("reports requested and executed counts when action selection runs only a prefix", async () => {
+    const click = vi.fn().mockResolvedValue({ success: true });
+    const fill = vi.fn().mockResolvedValue({ success: true });
+    const { tools } = makeHeadlessTools({ click, fill });
+    const actions = [
+      { type: "click", selector: "#open" },
+      { type: "fill", selector: "#name", value: "x" },
+      { type: "click", selector: "#save" },
+    ];
+    vi.spyOn(tools as Any, "selectBrowserActionsWithJev").mockResolvedValue(actions.slice(0, 1));
+
+    const result = await tools.executeTool("browser_act_batch", { actions });
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(fill).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      total: 3,
+      requested: 3,
+      completed: 1,
+      deferred: 2,
+      incomplete: true,
+    });
+    expect(result.message).toContain("1 of 3");
+  });
+
+  it("describes headless popup handling on the tab tools", () => {
+    const definitions = BrowserTools.getToolDefinitions();
+    const descriptionOf = (name: string) =>
+      definitions.find((tool) => tool.name === name)?.description;
+    expect(descriptionOf("browser_tabs")).toContain("popup");
+    expect(descriptionOf("browser_switch_tab")).toContain("browser_tabs");
+    expect(descriptionOf("browser_close_tab")).toContain("headless");
+  });
 });

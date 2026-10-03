@@ -1,4 +1,6 @@
 import type { LLMMessage, LLMToolResult } from "./llm";
+import { MAX_TOKENS_RECOVERY_PROMPT_PREFIX } from "./llm/output-token-policy";
+import { canonicalizeToolName, isFileMutationToolName } from "./tool-semantics";
 
 export interface ToolLoopCall {
   tool: string;
@@ -126,23 +128,41 @@ export function appendRecoveryAssistantMessage(
   });
 }
 
-export function appendMaxTokensRecoveryUserMessage(messages: LLMMessage[]): void {
+export function appendMaxTokensRecoveryUserMessage(
+  messages: LLMMessage[],
+  opts: { truncatedToolCall?: boolean } = {},
+): void {
+  // A truncated tool call is dropped before this prompt, so the model must
+  // re-issue the work in smaller calls. For text, "continue where you left off"
+  // produced a second fragment that replaced the first in the recorded answer,
+  // so the model is asked for the whole answer again (with a larger budget).
+  const text = opts.truncatedToolCall
+    ? `${MAX_TOKENS_RECOVERY_PROMPT_PREFIX}, so its unfinished tool call was discarded and did not run. ` +
+      "Re-issue the work in smaller pieces:\n" +
+      "1. Split large file content across MULTIPLE write_file or edit_file calls " +
+      "(write the first part now, then append the rest in follow-up calls).\n" +
+      "2. Reduce parallel tool calls to only what is necessary.\n" +
+      "3. Keep any text before the tool call short."
+    : `${MAX_TOKENS_RECOVERY_PROMPT_PREFIX} before it finished. ` +
+      "Reply with the complete response again from the beginning, written more concisely so it " +
+      "fits in a single message. Do not mention the earlier attempt.";
   messages.push({
     role: "user",
-    content: [
-      {
-        type: "text",
-        text:
-          "Your response was cut off because it exceeded the output token limit. " +
-          "You MUST reduce the size of your next response. Strategies:\n" +
-          "1. If writing a file, split the content across MULTIPLE write_file calls " +
-          "(e.g., write the first half now, then the second half in the next turn).\n" +
-          "2. Reduce parallel tool calls to only what is necessary (use serial calls when output pressure is high).\n" +
-          "3. Write shorter, more concise content.\n" +
-          "Continue from where you left off.",
-      },
-    ],
+    content: [{ type: "text", text }],
   });
+}
+
+/** Visible text for a turn that stopped on max_tokens and could not be retried. */
+export function buildMaxTokensExhaustedNotice(response: Any): string {
+  const partial = ((response?.content || []) as Any[])
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => String(block.text))
+    .join("\n")
+    .trim();
+  const notice =
+    "This response was cut off because it exceeded the output token limit and could not be " +
+    "completed in this turn. Ask me to continue, or split the request into smaller parts.";
+  return partial ? `${partial}\n\n${notice}` : notice;
 }
 
 export function handleMaxTokensRecovery(opts: {
@@ -203,9 +223,14 @@ export function handleMaxTokensRecovery(opts: {
   }
 
   appendRecoveryAssistantMessage(opts.messages, opts.response);
-  appendMaxTokensRecoveryUserMessage(opts.messages);
+  appendMaxTokensRecoveryUserMessage(opts.messages, {
+    truncatedToolCall: (opts.response.content || []).some((c: Any) => c?.type === "tool_use"),
+  });
   return { action: "retry", recoveryCount: nextRecoveryCount };
 }
+
+export const EMPTY_RESPONSE_NUDGE =
+  "Your last response was empty. Continue the task: call the next tool or give your final answer.";
 
 export function appendAssistantResponseToConversation(
   messages: LLMMessage[],
@@ -223,9 +248,12 @@ export function appendAssistantResponseToConversation(
     return 0;
   }
 
+  // Answer an empty reply with a user nudge. A synthetic assistant placeholder
+  // would leave the transcript ending on an assistant turn (a prefill), which
+  // Claude 4.6+ models reject with HTTP 400 on the next request.
   messages.push({
-    role: "assistant",
-    content: [{ type: "text", text: "I understand. Let me continue." }],
+    role: "user",
+    content: [{ type: "text", text: EMPTY_RESPONSE_NUDGE }],
   });
   return emptyResponseCount + 1;
 }
@@ -658,6 +686,149 @@ export function maybeInjectStopReasonNudge(opts: {
   return true;
 }
 
+/**
+ * Consecutive tool-use turns since the last turn that made progress. A turn
+ * that edited a file, got a previously failing command to pass, or read a file
+ * for the first time starts a new streak, so the stop nudge and the follow-up
+ * tool lock respond to tool use that is not converging rather than to any
+ * long run of tool calls.
+ */
+export function nextToolUseStreak(opts: {
+  stopReason: string | undefined;
+  previousStreak: number;
+  previousTurnMadeProgress: boolean;
+}): number {
+  if (opts.stopReason !== "tool_use") return 0;
+  return opts.previousTurnMadeProgress ? 1 : opts.previousStreak + 1;
+}
+
+function normalizeCommandText(input: unknown): string {
+  const command = (input as { command?: unknown } | null | undefined)?.command;
+  return typeof command === "string" ? command.replace(/\s+/g, " ").trim() : "";
+}
+
+function extractReadTargets(input: unknown): string[] {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const targets: string[] = [];
+  for (const key of ["path", "file_path", "filePath"]) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) targets.push(value.trim());
+  }
+  for (const key of ["paths", "files"]) {
+    const value = obj[key];
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === "string" && entry.trim()) targets.push(entry.trim());
+      }
+    }
+  }
+  return targets;
+}
+
+/**
+ * Outcome signature of a failed command: exit code plus the tail of its
+ * output, with timings normalized so two identical failing runs match.
+ */
+export function buildCommandFailureSignature(result: unknown, fallbackMessage = ""): string {
+  const obj = (result && typeof result === "object" ? result : {}) as Record<string, unknown>;
+  const output =
+    [obj.stderr, obj.stdout, obj.error]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join("\n") || fallbackMessage;
+  const normalized = output
+    .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi, "<duration>")
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\b/g, "<time>")
+    .replace(/\s+/g, " ")
+    .trim();
+  const exitCode = typeof obj.exitCode === "number" ? String(obj.exitCode) : "";
+  return `${exitCode}|${normalized.slice(-600)}`;
+}
+
+/**
+ * Tracks whether tool calls in a step or follow-up are making progress: a
+ * successful file edit, a command that passes after failing, or a first
+ * successful read of a file. Also decides which failing test/build runs count
+ * as repeats of the same failure.
+ */
+export class ToolLoopProgressTracker {
+  private readonly readTargets = new Set<string>();
+  private readonly failedCommands = new Set<string>();
+  private readonly lastCommandFailure = new Map<
+    string,
+    { signature: string; mutationEpoch: number }
+  >();
+  private mutationEpoch = 0;
+  private turnMadeProgress = false;
+
+  /** Record a finished tool call; returns whether the call made progress. */
+  recordOutcome(toolName: string, input: unknown, succeeded: boolean): boolean {
+    const canonicalToolName = canonicalizeToolName(String(toolName || ""));
+    let madeProgress = false;
+    if (canonicalToolName === "run_command") {
+      const command = normalizeCommandText(input);
+      if (!command) return false;
+      if (!succeeded) {
+        this.failedCommands.add(command);
+      } else if (this.failedCommands.delete(command)) {
+        madeProgress = true;
+      }
+    } else if (succeeded && isFileMutationToolName(canonicalToolName)) {
+      this.mutationEpoch += 1;
+      madeProgress = true;
+    } else if (
+      succeeded &&
+      (canonicalToolName === "read_file" || canonicalToolName === "read_files")
+    ) {
+      for (const target of extractReadTargets(input)) {
+        if (this.readTargets.has(target)) continue;
+        this.readTargets.add(target);
+        madeProgress = true;
+      }
+    }
+    if (madeProgress) this.turnMadeProgress = true;
+    return madeProgress;
+  }
+
+  /** Whether calls since the previous check made progress; clears the flag. */
+  consumeTurnProgress(): boolean {
+    const madeProgress = this.turnMadeProgress;
+    this.turnMadeProgress = false;
+    return madeProgress;
+  }
+
+  /**
+   * Whether a failing test/build run repeats the previous failure of the same
+   * command unchanged (same output, no successful edit since). A red run after
+   * a change is the normal fix-and-retest cycle, not a retry loop.
+   */
+  isIdenticalRepeatFailure(command: string, failureSignature: string): boolean {
+    const key = String(command || "").replace(/\s+/g, " ").trim();
+    const previous = this.lastCommandFailure.get(key);
+    this.lastCommandFailure.set(key, {
+      signature: failureSignature,
+      mutationEpoch: this.mutationEpoch,
+    });
+    return Boolean(
+      previous &&
+        previous.signature === failureSignature &&
+        previous.mutationEpoch === this.mutationEpoch,
+    );
+  }
+}
+
+/**
+ * Warning shown a couple of turns before a step or follow-up reaches its own
+ * turn cap, so the model can land the current change and report what is left
+ * instead of being cut off mid-edit.
+ */
+export function buildLoopTurnLimitWarning(turnsLeft: number, scope: "step" | "follow-up"): string {
+  const turns = Math.max(1, Math.floor(turnsLeft));
+  return (
+    `[TURN_LIMIT] You have ${turns} turn${turns === 1 ? "" : "s"} left in this ${scope}. ` +
+    "Finish the current change, then summarize what is done and what remains."
+  );
+}
+
 export function shouldLockFollowUpToolCalls(opts: {
   stopReason: string | undefined;
   consecutiveToolUseStops: number;
@@ -773,4 +944,32 @@ export function maybeInjectVariedFailureNudge(opts: {
   }
 
   return false;
+}
+
+const INTENT_ACTION_VERB = String.raw`(?:start|begin|check|look|read|list|search|inspect|explore|examine|review|open|run|execute|fetch|find|gather|collect|retrieve|analy[sz]e|investigate|scan|browse|query|call|use|grep|view|see|try|take a (?:look|peek)|dig|go through|walk through|compare|load|pull|download|navigate|visit|create|write|edit|update|fix|implement|build|install|test|verify|confirm|get|identify|locate|figure out|map|trace|debug|reproduce)`;
+const INTENT_SENTENCE = new RegExp(
+  String.raw`^(?:(?:first(?:ly)?|now|next|then|so|to (?:start|begin))[,]?\s+)?` +
+    String.raw`(?:i(?:'ll|’ll| will| am going to|'m going to|’m going to| need to| want to)|let me|let's|let’s)\s+` +
+    String.raw`(?:(?:go ahead and|quickly|first|now|also|then)\s+)*${INTENT_ACTION_VERB}\b`,
+  "i",
+);
+const INTERJECTION_SENTENCE =
+  /^(?:ok(?:ay)?|sure|alright|great|got it|understood|of course|absolutely|certainly|perfect)[.!]?$/i;
+
+/**
+ * True when a reply only announces what the model is about to do ("I'll start
+ * by listing the project files.") and carries no result. A turn that ends on
+ * such text without a tool call has not done the work it describes. Lists,
+ * code, tables or a colon introducing content are treated as results.
+ */
+export function isForwardLookingIntentOnlyText(text: string): boolean {
+  const trimmed = String(text || "").trim();
+  if (!trimmed || trimmed.length > 320) return false;
+  if (/```|:\s+\S|\n\s*(?:[-*•]|\d+[.)])\s|\|/.test(trimmed)) return false;
+  const sentences = trimmed
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0 && !INTERJECTION_SENTENCE.test(sentence));
+  if (sentences.length === 0 || sentences.length > 3) return false;
+  return sentences.every((sentence) => INTENT_SENTENCE.test(sentence));
 }

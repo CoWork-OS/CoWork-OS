@@ -831,12 +831,15 @@ export class BedrockProvider implements LLMProvider {
             ?.ttl
         : undefined;
 
+    const cacheReadTokens = Number(response.usage?.cacheReadInputTokens || 0);
     return {
       content,
       stopReason: this.mapStopReason(response.stopReason),
       usage: response.usage
         ? {
-            inputTokens: response.usage.inputTokens || 0,
+            // Converse reports cache reads/writes outside inputTokens; the shared
+            // usage contract counts them inside it.
+            inputTokens: (response.usage.inputTokens || 0) + cacheReadTokens + cacheWriteTokens,
             outputTokens: response.usage.outputTokens || 0,
             cachedTokens: response.usage.cacheReadInputTokens || undefined,
             cacheWriteTokens: cacheWriteTokens || undefined,
@@ -899,6 +902,19 @@ export class BedrockProvider implements LLMProvider {
         return "max_tokens";
       case "stop_sequence":
         return "stop_sequence";
+      case "content_filtered":
+      case "guardrail_intervened":
+        return "refusal";
+      // The context window, not max_tokens, cut the answer off: recover like a truncation.
+      case "model_context_window_exceeded":
+        return "max_tokens";
+      case "malformed_model_output":
+      case "malformed_tool_use":
+        // Bedrock could not parse the model's output; a fresh attempt usually succeeds.
+        throw Object.assign(new Error(`Bedrock returned malformed model output (${reason}).`), {
+          retryable: true,
+          code: reason,
+        });
       default:
         return "end_turn";
     }

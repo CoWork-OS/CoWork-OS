@@ -15,6 +15,7 @@ vi.mock("../../../utils/pdf-text", () => ({
 import { FileTools } from "../file-tools";
 import { GlobTools } from "../glob-tools";
 import { readFilesByPatterns } from "../read-files";
+import { truncateToolResult } from "../../context-manager";
 
 function writeFile(p: string, content: string): void {
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -202,6 +203,8 @@ describe("readFilesByPatterns", () => {
     expect(res.truncated).toBe(true);
     expect(res.files.length).toBeGreaterThan(0);
     expect(res.files[0].content.length).toBeLessThanOrEqual(1000);
+    // The cut file itself must say it is partial, not only the overall result.
+    expect(res.files[0]).toEqual(expect.objectContaining({ path: "src/big.txt", truncated: true }));
   });
 
   it("remaps stale absolute paths that include the workspace folder name", async () => {
@@ -567,6 +570,70 @@ describe("readFilesByPatterns", () => {
     expect(fs.readFileSync(path.join(tmpDir, "editor-startup-checklist.md"), "utf-8")).toBe(
       "manual",
     );
+  });
+
+  it("returns a default read_file window that fits one tool result and says where to continue", async () => {
+    const source = Array.from(
+      { length: 2_000 },
+      (_, i) => `export const value${i} = "${"x".repeat(40)}";`,
+    ).join("\n");
+    writeFile(path.join(tmpDir, "src", "big.ts"), source);
+
+    const first = await fileTools.readFile("src/big.ts");
+    const size = Buffer.byteLength(source);
+
+    expect(first.truncated).toBe(true);
+    expect(first.window).toEqual({ start: 0, end: 30_000, total: size });
+    expect(first.nextStartChar).toBe(30_000);
+    // Delivered as-is: the context budget does not have to cut a default read down.
+    expect(truncateToolResult(JSON.stringify(first))).toBe(JSON.stringify(first));
+
+    const second = await fileTools.readFile("src/big.ts", { startChar: first.nextStartChar });
+    expect(second.window?.start).toBe(30_000);
+    expect(second.content.startsWith(source.slice(30_000, 30_100))).toBe(true);
+  });
+
+  it("honors an explicit read_file maxChars", async () => {
+    writeFile(path.join(tmpDir, "src", "big.txt"), "y".repeat(80_000));
+
+    const out = await fileTools.readFile("src/big.txt", { maxChars: 50_000 });
+
+    expect(out.window).toEqual({ start: 0, end: 50_000, total: 80_000 });
+    expect(out.nextStartChar).toBe(50_000);
+  });
+
+  it("never ends a read_file window inside a multi-byte character", async () => {
+    // "€" is 3 bytes, so byte 30000 falls inside a character.
+    const text = `a${"€".repeat(20_000)}`;
+    writeFile(path.join(tmpDir, "euro.txt"), text);
+
+    const first = await fileTools.readFile("euro.txt");
+    const second = await fileTools.readFile("euro.txt", { startChar: first.nextStartChar });
+
+    expect(first.window?.end).toBe(29_998);
+    expect(first.content).not.toContain("�");
+    expect(second.content.startsWith("€€€")).toBe(true);
+    expect(second.content).not.toContain("�");
+  });
+
+  it("uses a larger default window for extracted document text", async () => {
+    writeFile(path.join(tmpDir, "docs", "long.pdf"), "%PDF-1.7");
+    const text = "Lorem ipsum dolor sit amet.\n".repeat(10_000);
+    extractPdfTextMock.mockResolvedValue({
+      text,
+      pageCount: 90,
+      extractionMode: "pdf-parse",
+      usedFallback: false,
+      previewLimited: false,
+      extractionStatus: "complete",
+      extractionNote: "",
+    });
+
+    const out = await fileTools.readFile("docs/long.pdf");
+
+    expect(out.window?.end).toBe(100_000);
+    expect(out.nextStartChar).toBe(100_000);
+    expect(out.truncated).toBe(true);
   });
 
   it("returns canonical resolved path after case-insensitive fallback", async () => {

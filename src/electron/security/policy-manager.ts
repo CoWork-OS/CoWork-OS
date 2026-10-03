@@ -22,6 +22,7 @@ import {
   ToolGroupName,
   TOOL_RISK_LEVELS,
   CONTEXT_TOOL_RESTRICTIONS,
+  DEFAULT_BLOCKED_COMMAND_PATTERNS,
 } from "../../shared/types";
 import { GuardrailSettings } from "../../shared/types";
 
@@ -139,7 +140,7 @@ export class SecurityPolicyManager {
     // Check blocked patterns (always denied, cannot be overridden)
     if (guardrails.blockDangerousCommands) {
       const allBlockedPatterns = [
-        ...getDefaultBlockedPatterns(),
+        ...DEFAULT_BLOCKED_COMMAND_PATTERNS,
         ...guardrails.customBlockedPatterns,
       ];
 
@@ -476,31 +477,6 @@ export class SecurityPolicyManager {
 }
 
 /**
- * Default blocked command patterns (security-critical)
- */
-function getDefaultBlockedPatterns(): string[] {
-  return [
-    "sudo",
-    "rm\\s+-rf\\s+/",
-    "rm\\s+-rf\\s+~",
-    "rm\\s+-rf\\s+/\\*",
-    "rm\\s+-rf\\s+\\*",
-    "mkfs",
-    "dd\\s+if=",
-    ":\\(\\)\\{\\s*:\\|:\\&\\s*\\};:", // Fork bomb
-    "curl.*\\|.*bash",
-    "wget.*\\|.*bash",
-    "curl.*\\|.*sh",
-    "wget.*\\|.*sh",
-    "chmod\\s+777",
-    ">\\s*/dev/sd",
-    "mv\\s+/\\*",
-    "format\\s+c:",
-    "del\\s+/f\\s+/s\\s+/q",
-  ];
-}
-
-/**
  * Match a command against a glob-like pattern
  */
 function matchGlobPattern(command: string, pattern: string): boolean {
@@ -553,6 +529,11 @@ export function isToolAllowedQuick(
   }
   if ((toolName === "run_command" || toolName === "execute_code") && !permissions.shell) {
     return false;
+  }
+  // Background process tools only act on processes run_command started, so they
+  // are offered exactly where run_command is.
+  if (toolName === "process_output" || toolName === "stop_process") {
+    return isToolAllowedQuick("run_command", workspace, gatewayContext);
   }
   if (
     SecurityPolicyManager.requiresNetworkPermission(toolName) &&

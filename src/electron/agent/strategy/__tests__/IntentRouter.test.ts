@@ -203,6 +203,70 @@ bounded_research=true
     expect(routed.intent).not.toBe("advice");
   });
 
+  describe("coding requests", () => {
+    it.each([
+      ["Add dark mode to the settings screen", "code"],
+      ["Refactor UserService to use dependency injection", "code"],
+      ["Upgrade React to v19", "code"],
+      ["Fix the null check in src/parser.ts", "code"],
+      ["Convert this class component to a functional component", "code"],
+      ["Add pagination to the orders table in src/pages/Orders.tsx", "code"],
+      ["Rename getUser to fetchUser everywhere", "code"],
+      ["Set up ESLint", "code"],
+      ["Clean up unused dependencies", "code"],
+      ["Make the login page remember the user's email", "code"],
+      ["Debug why login fails on Safari", "code"],
+      ["The app crashes on startup with TypeError: cannot read properties of undefined", "code"],
+      [
+        "src/utils/date.ts dosyasındaki tarih ayrıştırma hatasını düzelt ve testleri çalıştır",
+        "code",
+      ],
+      ["package.json içindeki bağımlılıkları güncelle", "code"],
+      ["Behebe den Fehler in der Login-Funktion und füge Unit-Tests hinzu", "code"],
+      ["修复登录页面的错误并添加单元测试", "code"],
+      ["帮我写一个Python脚本，把这个文件夹里的所有图片转换成PNG格式", "code"],
+    ])("routes %s to execution in the %s domain", (prompt, domain) => {
+      const routed = IntentRouter.route("", prompt);
+      expect(routed.intent).toBe("execution");
+      expect(routed.domain).toBe(domain);
+    });
+
+    it.each([
+      "Optimize the image loading on the homepage",
+      "Integrate Stripe checkout",
+      "Bu projedeki giriş sayfasına şifre sıfırlama özelliği ekle",
+      "Corrige el error en la función de inicio de sesión y añade pruebas",
+      "Ajoute une validation au formulaire d'inscription",
+      "Crea una hoja de cálculo con las ventas del último trimestre",
+      "The settings page should remember the last selected tab",
+    ])("routes the request %s to execution", (prompt) => {
+      expect(IntentRouter.route("", prompt).intent).toBe("execution");
+    });
+
+    it.each([
+      ["Erstelle eine Präsentation über unsere Quartalszahlen", "code"],
+      ["Write a LinkedIn post about our launch", "code"],
+      ["Draft an email to the team about the offsite", "code"],
+    ])("does not put the non-code request %s in the %s domain", (prompt, domain) => {
+      expect(IntentRouter.route("", prompt).domain).not.toBe(domain);
+    });
+
+    it.each([
+      "How can I improve my sleep?",
+      "What should I add to my resume?",
+      "Why does login fail on Safari?",
+    ])("keeps the question %s out of execution", (prompt) => {
+      expect(IntentRouter.route("", prompt).intent).not.toBe("execution");
+    });
+
+    it.each(["hi", "thanks!", "ok", "who are you", "Sounds good", "My name is Mesut"])(
+      "keeps the casual message %s as chat",
+      (prompt) => {
+        expect(IntentRouter.route("", prompt).intent).toBe("chat");
+      },
+    );
+  });
+
   describe("redirect intent", () => {
     it("routes the canonical failure case — 'ignore X fixes, focus on new features'", () => {
       const prompt =
@@ -318,6 +382,36 @@ bounded_research=true
     it("does not incorrectly route plain execution tasks as redirect", () => {
       const routed = IntentRouter.route("", "build a REST API for user authentication");
       expect(routed.intent).not.toBe("redirect");
+    });
+
+    it.each([
+      "Instead of a modal, build a dropdown",
+      "Don't change the API; focus on the caching layer you just added",
+      "Leave the backend as is and focus on the frontend validation",
+      "Rather than a new file, do it inside utils.ts",
+      "Focus only on the files you changed",
+      "Ignore the flaky e2e test for now and look at the unit test failure",
+      "ignore the openclaw related fixes for its codebase and focus on new features or enhancements",
+      "Start over and build it in Rust",
+      "Let's do something different with the caching layer you just added",
+      "Scrap that and apply the same fix to the API layer",
+      "Don't forget the changelog",
+      "Add a new task type to the scheduler",
+      "Start over",
+      "Scrap the previous approach and use Redis instead",
+    ])("keeps steering and refinement follow-ups attached to prior work: %s", (message) => {
+      expect(IntentRouter.isHistoryResetRedirect(message)).toBe(false);
+    });
+
+    it.each([
+      "Forget that. New task: write a poem about the sea",
+      "Scrap that and write a haiku about autumn",
+      "Forget the X fixes, pivot to building the new onboarding flow",
+      "Never mind that. Let's start over with a landing page for the bakery",
+      "Something completely different: plan a team offsite agenda",
+      "Forget the previous plan and draft a hiring email",
+    ])("treats explicit pivots that do not refer back as a history reset: %s", (message) => {
+      expect(IntentRouter.isHistoryResetRedirect(message)).toBe(true);
     });
   });
 });

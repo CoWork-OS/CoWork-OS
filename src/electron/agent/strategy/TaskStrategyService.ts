@@ -183,7 +183,13 @@ export class TaskStrategyService {
   static derive(
     route: IntentRoute,
     existing?: AgentConfig,
-    taskContext?: { title?: string; prompt?: string; lastProgressScore?: number },
+    taskContext?: {
+      title?: string;
+      prompt?: string;
+      lastProgressScore?: number;
+      /** Lazily reports whether the task's workspace is a code project. */
+      isCodeProjectWorkspace?: () => boolean;
+    },
   ): DerivedTaskStrategy {
     const defaults: Record<
       IntentRoute["intent"],
@@ -314,11 +320,14 @@ export class TaskStrategyService {
 
     // Strict execute gate:
     // - Always execute for explicit execution/workflow/deep-work intents
+    // - Redirects ("instead of a modal, build a dropdown") ask for work too;
+    //   falling through to plan mode blocked every edit they requested
     // - For mixed intent, require hard execution cues; otherwise keep plan mode
     const inferredExecutionMode: ExecutionMode =
       route.intent === "execution" ||
       route.intent === "workflow" ||
       route.intent === "deep_work" ||
+      route.intent === "redirect" ||
       (route.intent === "mixed" && (hasHardExecutionSignal || artifactCreationSignal)) ||
       buildVerifyRenderArtifactRequested ||
       buildRenderArtifactRequested
@@ -342,7 +351,9 @@ export class TaskStrategyService {
         ? existingExecutionMode
         : inferredExecutionMode;
     const taskDomain =
-      existing?.taskDomain && existing.taskDomain !== "auto" ? existing.taskDomain : route.domain;
+      existing?.taskDomain && existing.taskDomain !== "auto"
+        ? existing.taskDomain
+        : this.resolveRoutedDomain(route, taskContext?.isCodeProjectWorkspace);
     const strictConstraintArtifactTask = this.isStrictConstraintArtifactTask(
       `${taskContext?.title || ""}\n${taskContext?.prompt || ""}`,
     );
@@ -411,6 +422,31 @@ export class TaskStrategyService {
       llmProfileHint,
       snapshot,
     };
+  }
+
+  /**
+   * An action request with no domain cue ("Integrate Stripe checkout", or a
+   * request in a language the router has no vocabulary for) is a code change
+   * when the workspace is a code project. Left as "general" it ran under the
+   * non-code loop guards (a stop-calling-tools nudge after 5 tool turns) and
+   * could not use git mutation tools.
+   */
+  private static resolveRoutedDomain(
+    route: IntentRoute,
+    isCodeProjectWorkspace?: () => boolean,
+  ): TaskDomain {
+    if (route.domain !== "general" || !isCodeProjectWorkspace) return route.domain;
+    const actionIntent =
+      route.intent === "execution" ||
+      route.intent === "workflow" ||
+      route.intent === "deep_work" ||
+      route.intent === "redirect";
+    if (!actionIntent) return route.domain;
+    try {
+      return isCodeProjectWorkspace() ? "code" : route.domain;
+    } catch {
+      return route.domain;
+    }
   }
 
   private static deriveDirectResponseMode(params: {
@@ -702,6 +738,64 @@ export class TaskStrategyService {
   }
 
   /**
+   * decoratePrompt appends its contracts to task.prompt, but the executor builds
+   * planner and step text from rawPrompt, so those contracts never reach the model.
+   * This renders the ones that still apply as a compact, session-scoped system
+   * prompt section from live task state (routed intent, current mode/domain, the
+   * executor's image-task detection, and the debug session's ingest URL).
+   *
+   * Deliberately left out: relationship memory (personal; memory injection is gated
+   * elsewhere), machine flags, the execution/mode contracts (covered by the base and
+   * mode sections), maps routing (base instruction), workspace hygiene (coding
+   * workflow section), and the checklist contract (plan steps do not expose the
+   * task_list tools).
+   */
+  static buildExecutionStrategyPrompt(params: {
+    taskIntent?: string;
+    deepWorkMode?: boolean;
+    executionMode: ExecutionMode;
+    taskDomain: TaskDomain;
+    imageGeneration?: "simple" | "grounded";
+    debugIngestUrl?: string;
+  }): string {
+    const lines: string[] = [];
+    if (params.deepWorkMode || params.taskIntent === "deep_work") {
+      lines.push(
+        "- Long-running autonomous task: when something fails, research alternatives before retrying; record progress, blockers, and decisions with scratchpad_write and reread them with scratchpad_read.",
+        params.taskDomain === "code" || params.taskDomain === "operations"
+          ? "- Before claiming completion, run the relevant tests, lint, and build checks; if they fail, find the root cause, fix it, and re-run until they pass or a real blocker remains."
+          : "- Validate deliverables against the request before finishing; keep user-facing output concise unless detail is requested.",
+        "- Finish with a concrete outcome summary and any explicit blockers.",
+      );
+    } else if (params.taskIntent === "workflow") {
+      lines.push(
+        "- Multi-phase workflow: finish each phase before starting the next, carry each phase's output forward, and report progress at phase boundaries.",
+      );
+    }
+    if (params.imageGeneration === "simple") {
+      lines.push(
+        "- Simple image request: call generate_image once, share the result, and finish. Do not search files, use the scratchpad, ask for art direction, run analyze_image, or add subjective review unless the user asks.",
+      );
+    } else if (params.imageGeneration === "grounded") {
+      lines.push(
+        "- Grounded image request: gather only the facts the image prompt needs, call generate_image once with a concrete prompt, share the result, and finish without analyze_image or subjective review unless the user asks.",
+      );
+    }
+    if (params.executionMode === "debug") {
+      lines.push(
+        "- Debug mode: form hypotheses and collect runtime evidence before large speculative fixes; add minimal instrumentation marked `cowork-debug` and remove it before finishing.",
+        "- Use request_user_input when the user must reproduce or confirm something.",
+      );
+      if (params.debugIngestUrl) {
+        lines.push(
+          `- Runtime log ingest for this task: instrumented code can POST JSON or text to ${params.debugIngestUrl}. Entries appear in the user's task timeline, not in your context, so ask the user for relevant lines or use logs you can read yourself.`,
+        );
+      }
+    }
+    return lines.length > 0 ? ["TASK STRATEGY:", ...lines].join("\n") : "";
+  }
+
+  /**
    * Returns the set of tool names relevant for a given intent.
    * If the set contains "*", all tools should be offered.
    * For lighter intents (chat, advice, planning, thinking), a reduced set is returned
@@ -771,10 +865,25 @@ export class TaskStrategyService {
       return new Set(["*"]);
     }
 
-    // Chat / thinking: keep the lightweight discovery path so sessions can still
-    // surface deferred MCP/integration capabilities when the user asks about them.
-    if (intent === "chat" || intent === "thinking") {
+    // Chat: keep the lightweight discovery path so sessions can still surface
+    // deferred MCP/integration capabilities when the user asks about them.
+    if (intent === "chat") {
       return new Set(["tool_search"]);
+    }
+
+    // Thinking ("help me figure out why the app crashes on startup") reasons
+    // about the user's own material, so it may read the workspace but not change it.
+    if (intent === "thinking") {
+      return new Set([
+        "tool_search",
+        "read_file",
+        "read_files",
+        "list_directory",
+        "get_file_info",
+        "search_files",
+        "glob",
+        "grep",
+      ]);
     }
 
     // Advice and planning: core + web + documents

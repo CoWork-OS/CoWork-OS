@@ -6,6 +6,7 @@ import type {
   LLMReasoningEffort,
 } from "../../../shared/types";
 import {
+  getLlmModelDefaultReasoningEffort,
   getLlmModelReasoningEfforts,
   getLlmReasoningEffortOptions,
 } from "../../../shared/llm-model-selection";
@@ -253,10 +254,18 @@ export function ModelDropdown({
     selectedModelInfo?.openaiAuthMethod,
     selectedReasoningEfforts,
   );
+  // With no saved effort the provider sends none, which is the model's API default
+  // (off for budget-thinking models), so show that rather than a generic "medium".
+  const selectedModelDefaultEffort = getLlmModelDefaultReasoningEffort(
+    selectedProvider,
+    selectedModel,
+  );
   const effectiveReasoningEffort =
     selectedReasoningEffort && selectedReasoningEfforts.includes(selectedReasoningEffort)
       ? selectedReasoningEffort
-      : undefined;
+      : selectedModelDefaultEffort && selectedReasoningEfforts.includes(selectedModelDefaultEffort)
+        ? selectedModelDefaultEffort
+        : undefined;
 
   const normalizedSearch = search.trim().toLowerCase();
   const filteredModels = currentProviderModels.filter((model) => {
@@ -299,12 +308,15 @@ export function ModelDropdown({
     const reasoningEfforts =
       modelInfo?.reasoningEfforts ||
       getLlmModelReasoningEfforts(providerType, modelKey, modelInfo?.openaiAuthMethod);
+    const modelDefaultEffort = getLlmModelDefaultReasoningEffort(providerType, modelKey);
     const reasoningEffort =
       selectedReasoningEffort && reasoningEfforts.includes(selectedReasoningEffort)
         ? selectedReasoningEffort
-        : reasoningEfforts.includes("medium")
-          ? "medium"
-          : reasoningEfforts[0];
+        : modelDefaultEffort && reasoningEfforts.includes(modelDefaultEffort)
+          ? modelDefaultEffort
+          : reasoningEfforts.includes("medium")
+            ? "medium"
+            : reasoningEfforts[0];
 
     onModelChange({
       providerType,

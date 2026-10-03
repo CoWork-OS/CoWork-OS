@@ -3,11 +3,15 @@ import { BUILTIN_ACCESS_PROFILES } from "../../../../shared/access-profiles";
 import { getAccessProfilePresentation } from "../access-profile-presentation";
 
 describe("getAccessProfilePresentation", () => {
-  it("explains that on-request profiles cannot prompt in the default runtime", () => {
-    const presentation = getAccessProfilePresentation(BUILTIN_ACCESS_PROFILES[0], false);
-    expect(presentation.label).toContain("prompts off");
-    expect(presentation.description).toContain("blocked");
-    expect(presentation.notice).toContain("Approval prompts are off");
+  it("explains that on-request profiles ask inline in the default runtime", () => {
+    const profile = BUILTIN_ACCESS_PROFILES[0];
+    const presentation = getAccessProfilePresentation(profile, false);
+    expect(presentation.label).toBe(profile.label);
+    expect(presentation.label).not.toContain("prompts off");
+    expect(presentation.description).toContain(profile.description);
+    expect(presentation.description).toContain("Deny / Allow once");
+    expect(presentation.description).not.toContain("blocked");
+    expect(presentation.notice).toBeNull();
   });
 
   it("keeps the configured profile copy when prompts are available", () => {

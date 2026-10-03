@@ -77,6 +77,8 @@ const READ_PARALLEL_TOOLS = new Set([
   "supermemory_profile",
   "supermemory_search",
   "scratchpad_read",
+  // Reads buffered output of this task's own background processes.
+  "process_output",
 ]);
 
 const EXCLUSIVE_TOOLS = new Set([
@@ -87,6 +89,7 @@ const EXCLUSIVE_TOOLS = new Set([
   "rename_file",
   "copy_file",
   "run_command",
+  "stop_process",
   "run_applescript",
   "spawn_agent",
   "orchestrate_agents",
@@ -127,6 +130,7 @@ const IDEMPOTENT_TOOLS = new Set([
   "supermemory_profile",
   "supermemory_search",
   "scratchpad_read",
+  "process_output",
 ]);
 
 const FILE_SCOPE_KEYS = [
@@ -302,6 +306,9 @@ function inferSchedulerScopeKeys(toolName: string, input: Any): ToolExecutionSco
   }
   if (toolName === "run_command" || toolName === "run_applescript") {
     return [{ kind: "process", key: toolName }];
+  }
+  if (toolName === "stop_process") {
+    return [{ kind: "process", key: "run_command" }];
   }
   if (toolName.startsWith("mcp_") || toolName.endsWith("_action")) {
     return [{ kind: "external_service", key: getExternalServiceScope(toolName) }];

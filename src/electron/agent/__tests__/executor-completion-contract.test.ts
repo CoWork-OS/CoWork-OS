@@ -3,10 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { FileMutationVerifier } from "../file-mutation-verifier";
 import {
+  buildCompletionContract,
   buildCompletionGuidancePrompt,
   detectReadOnlyConstraint,
   extractExplicitOutputExtensions,
+  getFinalOutcomeGuardError,
   hasUnrecoveredBlockingPlanFailureForAssistantOutput,
   hasUnrecoveredToolFailureForAssistantOutput,
   hasVerificationEvidence,
@@ -191,6 +194,123 @@ describe("TaskExecutor completion contract integration", () => {
     ).toBe(true);
   });
 
+  describe("verification evidence from evidence-producing tools", () => {
+    const evidencedAnswers = [
+      "Yes. The Pro plan includes SAML SSO; the pricing page lists it under Pro features alongside audit logs, while the Starter plan does not include it.",
+      "No — SSO is only offered on the Enterprise tier. The Pro plan lists SCIM-free team management, priority support and 50 GB storage.",
+    ];
+    const neutralSteps = [
+      "Fetch the pricing page",
+      "Open https://example.com/pricing and extract the plan feature lists",
+      "Answer whether the Pro plan includes SSO",
+    ];
+    const fabricatedReport =
+      "`npm test`: passed, exit 0\n`npm run build`: passed, exit 0\n\nFinal verdict: green";
+
+    it.each([
+      ["web_fetch"],
+      ["browser_navigate", "browser_get_content"],
+      ["scrape_page"],
+      ["parse_document"],
+      ["read_pdf_visual"],
+      ["mcp_notion_get_page"],
+      ["notion_action"],
+      ["git_log"],
+      ["execute_code"],
+    ])("accepts a direct answer backed by %s regardless of step wording", (...tools) => {
+      for (const bestCandidate of evidencedAnswers) {
+        for (const description of neutralSteps) {
+          expect(
+            hasVerificationEvidence({
+              bestCandidate,
+              planSteps: [{ status: "completed", description }],
+              successfulTools: tools,
+            }),
+          ).toBe(true);
+          expect(
+            hasVerificationEvidence({
+              bestCandidate,
+              planSteps: [{ status: "completed", description }],
+              toolResultMemory: tools.map((tool) => ({ tool })),
+            }),
+          ).toBe(true);
+        }
+      }
+    });
+
+    it("rejects a fabricated command report when no tool ran", () => {
+      expect(responseHasExecutionReportEvidenceSignal(fabricatedReport)).toBe(true);
+      expect(hasVerificationEvidence({ bestCandidate: fabricatedReport })).toBe(false);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: [{ status: "completed", description: "Verify the build and tests" }],
+        }),
+      ).toBe(false);
+    });
+
+    it("requires a command or API tool before reported command results count", () => {
+      const steps = [{ status: "completed", description: "Check build health" }];
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: steps,
+          successfulTools: ["read_file", "glob"],
+        }),
+      ).toBe(false);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: steps,
+          successfulTools: ["read_file", "run_command"],
+        }),
+      ).toBe(true);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: fabricatedReport,
+          planSteps: steps,
+          successfulTools: ["execute_code"],
+        }),
+      ).toBe(true);
+    });
+
+    it("does not count writes, orchestration, or self-state reads as evidence", () => {
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: evidencedAnswers[0],
+          planSteps: [{ status: "completed", description: "Review the pricing page" }],
+          successfulTools: [
+            "write_file",
+            "create_document",
+            "scratchpad_read",
+            "search_memories",
+            "task_list_list",
+            "spawn_agent",
+            "canvas_push",
+            "revise_plan",
+          ],
+        }),
+      ).toBe(false);
+    });
+
+    it("still rejects an operational status even when evidence tools ran", () => {
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: "Done.",
+          planSteps: [{ status: "completed", description: "Fetch the pricing page" }],
+          successfulTools: ["web_fetch"],
+        }),
+      ).toBe(false);
+      expect(
+        hasVerificationEvidence({
+          bestCandidate: "Created: pricing-notes.md",
+          planSteps: [{ status: "completed", description: "Fetch the pricing page" }],
+          successfulTools: ["web_fetch"],
+        }),
+      ).toBe(false);
+    });
+  });
+
   it("keeps bounded read content for later plan steps", () => {
     const executor = createExecuteHarness({
       title: "Extract a report",
@@ -217,6 +337,51 @@ describe("TaskExecutor completion contract integration", () => {
         "Read meeting-notes.txt and create tmp/action-items.md from those notes.",
       ),
     ).toEqual([".md"]);
+  });
+
+  it("does not read a file named as the subject of the request as a requested output", () => {
+    for (const prompt of [
+      "Write a summary of README.md",
+      "Create a short summary of notes.txt in chat",
+      "Build a table of the totals in data.csv",
+      "Make a summary of the docs/guide.md file",
+      "Write a short overview about config.json",
+    ]) {
+      expect(extractExplicitOutputExtensions("", prompt)).toEqual([]);
+    }
+  });
+
+  it("keeps explicit output paths, including ones written after an input reference", () => {
+    expect(
+      extractExplicitOutputExtensions(
+        "",
+        "Analyze sales.csv and create a PDF report saved as reports/q3.pdf",
+      ),
+    ).toEqual([".pdf"]);
+    expect(extractExplicitOutputExtensions("", "Write a summary of the meeting to summary.md")).toEqual(
+      [".md"],
+    );
+    expect(
+      extractExplicitOutputExtensions("", "Create a README for the project as README.md"),
+    ).toEqual([".md"]);
+    expect(
+      extractExplicitOutputExtensions("", "Generate a report using data from input.csv to output.md"),
+    ).toEqual([".md"]);
+  });
+
+  it("answers a summary of a named file inline without demanding a new file", async () => {
+    const answer =
+      "README.md describes the CLI setup: install with npm, configure .env, then run `npm start`.";
+    const executor = createExecuteHarness({
+      title: "README summary",
+      prompt: "Write a summary of README.md",
+      lastOutput: answer,
+      planStepDescription: "Read README.md and summarize it",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith("task-1", answer, expect.any(Object));
   });
 
   it("does not require an input extension during output verification", () => {
@@ -1332,6 +1497,139 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     );
   });
 
+  it("explains a waived verification failure in the completed summary", async () => {
+    const answer =
+      "Release notes for v2.3: faster sync, a new export dialog, and fewer crashes on startup.";
+    const executor = createExecuteHarness({
+      title: "Release notes",
+      prompt: [
+        "[AGENT_STRATEGY_CONTEXT_V1]",
+        "timeout_finalize_bias=true",
+        "[/AGENT_STRATEGY_CONTEXT_V1]",
+        "Draft release notes for v2.3 in chat and run the test suite.",
+      ].join("\n"),
+      lastOutput: answer,
+    });
+    executor.createPlan = vi.fn(async function createPlanStub(this: Any) {
+      this.plan = {
+        description: "Plan",
+        steps: [
+          { id: "1", description: "Draft the release notes", status: "pending" },
+          {
+            id: "2",
+            description: "Verify: run the test suite",
+            status: "pending",
+            kind: "verification",
+          },
+        ],
+      };
+    });
+    executor.executePlan = vi.fn(async function executePlanStub(this: Any) {
+      const [draft, verify] = this.plan.steps;
+      draft.status = "completed";
+      verify.status = "failed";
+      verify.error = "npm test exited with code 1: 2 tests failed in sync.spec.ts";
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
+    expect(metadata).toMatchObject({ terminalStatus: "partial_success", waiveFailedStepIds: ["2"] });
+    expect(summary.startsWith(answer)).toBe(true);
+    expect(summary).toContain("Completion notes:");
+    expect(summary).toContain('"Verify: run the test suite"');
+    expect(summary).toContain("npm test exited with code 1: 2 tests failed in sync.spec.ts");
+  });
+
+  it("passes the file-mutation footer to completeTask, not only the in-memory task", async () => {
+    const answer = "The deploy script builds the app and uploads the bundle to the CDN.";
+    const executor = createExecuteHarness({
+      title: "Deploy script",
+      prompt: "Explain what the deploy script does.",
+      lastOutput: answer,
+    });
+    (executor as Any).fileMutationVerifier = new FileMutationVerifier();
+    (executor as Any).fileMutationVerifier.recordMutationResult({
+      toolName: "write_file",
+      input: { path: "docs/deploy.md" },
+      succeeded: false,
+      error: "EACCES: permission denied",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
+    const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
+    expect(metadata).toMatchObject({ terminalStatus: "ok" });
+    expect(summary.startsWith(answer)).toBe(true);
+    expect(summary).not.toContain("Completion notes:");
+    expect(summary).toContain("File-mutation verifier: 1 file(s) were NOT modified");
+    expect(summary).toContain('write_file("docs/deploy.md"): EACCES: permission denied');
+    expect((executor as Any).task.resultSummary).toBe(summary);
+  });
+
+  it("does not let a long claim replace an explicitly requested output file", async () => {
+    const claim = "I created reports/q3.pdf with the quarterly analysis.";
+    expect(claim.length).toBeGreaterThanOrEqual(50);
+    const executor = createExecuteHarness({
+      title: "Quarterly report",
+      prompt: "Analyze sales.csv and create a PDF report saved as reports/q3.pdf",
+      lastOutput: claim,
+      createdFiles: [],
+      planStepDescription: "Write the PDF report",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing artifact evidence"),
+      }),
+    );
+  });
+
+  it("keeps the inline-answer exemption only for inferred artifact contracts", () => {
+    const guard = (prompt: string, bestCandidate: string, createdFiles: string[] = []) => {
+      const contract = buildCompletionContract({
+        taskTitle: "Report",
+        taskPrompt: prompt,
+        requiresDirectAnswer: false,
+        requiresDecisionSignal: false,
+        isWatchSkipRecommendationTask: false,
+      });
+      return getFinalOutcomeGuardError({
+        contract,
+        preferBestEffortCompletion: false,
+        softDeadlineTriggered: false,
+        cancelReason: null,
+        bestCandidate,
+        hasExecutionEvidence: true,
+        hasArtifactEvidence: false,
+        createdFiles,
+        responseDirectlyAddressesPrompt: () => true,
+        fallbackContainsDirectAnswer: () => true,
+        hasVerificationEvidence: () => true,
+      });
+    };
+    const longAnswer =
+      "Revenue grew 12% quarter over quarter, led by the enterprise tier; churn held at 3%.";
+
+    expect(guard("Write a summary report of the launch feedback.", longAnswer)).toBeNull();
+    expect(guard("Export the summary to summary.md", longAnswer)).toMatch(
+      /missing artifact evidence.*\.md/,
+    );
+    expect(guard("Create a spreadsheet of the open invoices.", longAnswer)).toMatch(
+      /missing artifact evidence.*\.xlsx/,
+    );
+    expect(guard("Write a summary report of the launch feedback.", longAnswer, ["notes.txt"])).toMatch(
+      /missing artifact evidence/,
+    );
+  });
+
   it("fails web-app shipping tasks before Playwright QA when artifact evidence is missing", async () => {
     const executor = createExecuteHarness({
       title: "Build a simple todo app in React",
@@ -1800,6 +2098,202 @@ End with a final section titled "Verification Evidence".`,
         error: expect.stringContaining("missing verification evidence"),
       }),
     );
+  });
+
+  it("completes a browsed-page answer whose wording has no review phrasing", async () => {
+    const answer =
+      "Yes. The Pro plan includes SAML SSO; the pricing page lists it under Pro features alongside audit logs, while the Starter plan does not include it.";
+    const executor = createExecuteHarness({
+      title: "Pricing check",
+      prompt: "Review https://example.com/pricing and tell me whether the Pro plan includes SSO.",
+      lastOutput: answer,
+      planStepDescription: "Fetch the pricing page",
+    });
+    (executor as Any).successfulToolUsageCounts = new Map([
+      ["browser_navigate", 1],
+      ["browser_get_content", 1],
+    ]);
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      answer,
+      expect.any(Object),
+    );
+  });
+
+  it("fails a fabricated command report when no tool ran", async () => {
+    const executor = createExecuteHarness({
+      title: "Build health",
+      prompt:
+        "Check build health: run npm test and npm run build, then report exit codes and the final build-health verdict.",
+      lastOutput:
+        "`npm test`: passed, exit 0\n`npm run build`: passed, exit 0\n\nFinal verdict: green",
+      planStepDescription: "Run the build and test commands",
+    });
+
+    await (executor as Any).execute();
+
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("counts a command that ran to a failing exit status as evidence for its report", async () => {
+    const report =
+      "`npm run build` failed with exit code 1 (type error in src/app.ts).\n\nFinal verdict: broken";
+    const createExecutor = () => {
+      const executor = createExecuteHarness({
+        title: "Build health",
+        prompt: "Run npm run build and report the exit code and the final build-health verdict.",
+        lastOutput: report,
+        planStepDescription: "Run the build",
+      });
+      (executor as Any).emitEvent = vi.fn();
+      (executor as Any).emitToolLaneFinished = vi.fn();
+      return executor;
+    };
+    const emitRunCommandResult = (executor: Any, result: Record<string, unknown>) =>
+      executor.emitNormalizedToolExecutionResult({
+        toolName: "run_command",
+        toolUseId: "tool-1",
+        result,
+        rawResult: JSON.stringify(result),
+        correlation: { toolUseId: "tool-1", toolCallIndex: 1, toolBatchPhase: "step" },
+      });
+
+    const ranAndFailed = createExecutor();
+    emitRunCommandResult(ranAndFailed, {
+      success: false,
+      exitCode: 1,
+      stdout: "",
+      stderr: "src/app.ts(3,1): error TS2304",
+      terminationReason: "normal",
+    });
+    await (ranAndFailed as Any).execute();
+    expect(ranAndFailed.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      report,
+      expect.any(Object),
+    );
+
+    const timedOut = createExecutor();
+    emitRunCommandResult(timedOut, {
+      success: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      terminationReason: "timeout",
+    });
+    await (timedOut as Any).execute();
+    expect(timedOut.daemon.completeTask).not.toHaveBeenCalled();
+    expect(timedOut.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("re-prompts once for an evidence-grounded answer when tools ran but the answer cites nothing", async () => {
+    const groundedAnswer =
+      "According to the fetched pricing page, the Pro plan costs $49 per month and adds SSO and audit logs over the $19 Starter plan.";
+    const executor = createExecuteHarness({
+      title: "Pricing review",
+      prompt: "Review https://example.com/pricing and summarize how the plans differ.",
+      lastOutput: "The Pro plan costs $49 per month and adds SSO and audit logs over Starter.",
+      planStepDescription: "Fetch the pricing page",
+    });
+    (executor as Any).toolResultMemory = [
+      {
+        tool: "web_fetch",
+        summary: "Pro: $49/month, SAML SSO, audit logs. Starter: $19/month.",
+        timestamp: Date.now(),
+      },
+    ];
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: groundedAnswer }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+    (executor as Any).emitEvent = vi.fn();
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledWith(
+      expect.objectContaining({ maxTokens: 1200 }),
+      35_000,
+      "Final answer verification synthesis",
+    );
+    const synthesisPrompt = (executor as Any).createMessageWithTimeout.mock.calls[0][0].messages[0]
+      .content[0].text as string;
+    expect(synthesisPrompt).toContain("Pro: $49/month, SAML SSO, audit logs.");
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
+      "task-1",
+      groundedAnswer,
+      expect.any(Object),
+    );
+  });
+
+  it("keeps failing when the single verification re-prompt still cites no evidence", async () => {
+    const executor = createExecuteHarness({
+      title: "Pricing review",
+      prompt: "Review https://example.com/pricing and summarize how the plans differ.",
+      lastOutput: "The Pro plan costs $49 per month and adds SSO and audit logs over Starter.",
+      planStepDescription: "Fetch the pricing page",
+    });
+    (executor as Any).toolResultMemory = [
+      { tool: "web_fetch", summary: "Pro: $49/month. Starter: $19/month.", timestamp: Date.now() },
+    ];
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: "The plans differ in price and features." }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        status: "failed",
+        error: expect.stringContaining("missing verification evidence"),
+      }),
+    );
+  });
+
+  it("does not re-prompt for verification evidence when no evidence tool ran", async () => {
+    const executor = createExecuteHarness({
+      title: "Video decision",
+      prompt:
+        "Transcribe this video and then let me know if I should spend my time watching it or skip it.",
+      lastOutput: "You should skip it because it repeats beginner concepts.",
+      planStepDescription: "Transcribe the video",
+    });
+    (executor as Any).createMessageWithTimeout = vi.fn(async () => ({
+      content: [{ type: "text", text: "Based on the transcript, you should skip it." }],
+      usage: { inputTokens: 10, outputTokens: 20, cachedTokens: 0 },
+    }));
+    (executor as Any).updateTracking = vi.fn();
+
+    await (executor as Any).execute();
+
+    expect((executor as Any).createMessageWithTimeout).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "Final answer verification synthesis",
+    );
+    expect(executor.daemon.completeTask).not.toHaveBeenCalled();
   });
 
   it("accepts structured documentation-drift reports when repo evidence tools were used", async () => {
@@ -2500,10 +2994,13 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
 
     expect(executor.daemon.completeTask).toHaveBeenCalledWith(
       "task-1",
-      "Refined the app shell.",
+      expect.stringMatching(/^Refined the app shell\.\n\nCompletion notes:\n/),
       expect.objectContaining({
         waiveFailedStepIds: expect.arrayContaining(["2"]),
       }),
+    );
+    expect(executor.daemon.completeTask.mock.calls[0][1]).toContain(
+      'Step "Refine the experience" failed (waived)',
     );
   });
 
@@ -2540,7 +3037,7 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
 
     expect(executor.daemon.completeTask).toHaveBeenCalledWith(
       "task-1",
-      "Found repository stats from web sources.",
+      expect.stringMatching(/^Found repository stats from web sources\.\n\nCompletion notes:\n/),
       expect.objectContaining({
         terminalKind: "timed_out",
         terminalStatus: "partial_success",
@@ -2548,6 +3045,9 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
         waiveFailedStepIds: [],
       }),
     );
+    const summary = executor.daemon.completeTask.mock.calls[0][1];
+    expect(summary).toContain("Soft deadline reached during execution.");
+    expect(summary).toContain("Step soft-deadline reached after 810s");
   });
 
   it("finalizes soft-deadline runs without waiting on LLM recovery", async () => {
@@ -2702,6 +3202,35 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
         "Read the two named CSV files, but do not create, write, edit, move, or delete any file or directory.",
       ),
     ).toBe(true);
+  });
+
+  it.each([
+    "Refactor parseDate in src/date.ts without modifying its public signature.",
+    "Fix the login bug. Do not make changes to the database schema.",
+    "Fix the failing test. Don't edit files under vendor/.",
+    "Implement the cache layer. Do not create files outside src/cache.",
+    "Bump the version to 2.1.0; no file changes beyond package.json.",
+    "Update the README without creating new files.",
+    "Add a read-only mode toggle to the editor settings.",
+    "Make the `email` field read-only in the profile form.",
+    "Mount the config volume as read-only in docker-compose.yml.",
+    "Create a read-only Postgres user for the analytics dashboard.",
+    "Give the reporting service read-only access to the orders table.",
+  ])("does not treat a scoped prohibition or read-only feature as read-only: %s", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(false);
+  });
+
+  it.each([
+    "Review the auth module and report issues. Do not edit any files.",
+    "This is read-only: explain how the scheduler works.",
+    "Read-only review: list the risky migrations in this repo.",
+    "Stay read-only and summarize the open pull requests.",
+    "Explain the build pipeline without modifying anything.",
+    "Inspect the deployment config. Do not make any changes.",
+    "Audit the logging setup without editing any files.",
+    "Do not make any changes to the codebase; just describe the module layout.",
+  ])("keeps a genuine read-only constraint: %s", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(true);
   });
 });
 

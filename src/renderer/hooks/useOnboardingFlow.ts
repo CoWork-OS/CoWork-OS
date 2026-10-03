@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { LLMProviderType, LLMSettingsData, PersonaId } from "../../shared/types";
 import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
+import { GEMINI_DEFAULT_MODEL } from "../../shared/llm-provider-catalog";
 import {
   deriveOnboardingPersonalityPreset,
   deriveOnboardingPersona,
@@ -329,7 +330,7 @@ export function getOnboardingDefaultModel(provider: LLMProviderType): string {
     case "openai":
       return "gpt-6-astra";
     case "gemini":
-      return "gemini-2.0-flash";
+      return GEMINI_DEFAULT_MODEL;
     case "ollama":
       return "llama3.2";
     case "openrouter":

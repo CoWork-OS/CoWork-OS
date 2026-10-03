@@ -6,6 +6,10 @@
  */
 
 import { AgentRoleRepository } from "../agents/agent-repository-facades";
+import {
+  GEMINI_DEFAULT_MODEL,
+  OPENROUTER_DEFAULT_MODEL_ID,
+} from "../../shared/llm-provider-catalog";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import {
   ChannelRepository,
@@ -40,6 +44,7 @@ import { Channel } from "../database/repositories";
 import type Database from "better-sqlite3";
 import { AgentDaemon } from "../agent/daemon";
 import {
+  DEFAULT_WORKSPACE_PERMISSIONS,
   Task,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
@@ -1042,13 +1047,7 @@ export class MessageRouter {
     const jobDir = path.join(root, dirName);
     fs.mkdirSync(jobDir, { recursive: true });
 
-    const permissions: WorkspacePermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      shell: false,
-    };
+    const permissions: WorkspacePermissions = { ...DEFAULT_WORKSPACE_PERMISSIONS };
     const name = `Scheduled: ${jobName}`.trim();
     return this.workspaceRepo.create(name, jobDir, permissions);
   }
@@ -6055,13 +6054,13 @@ export class MessageRouter {
       }
 
       case "gemini": {
-        currentModel = settings.gemini?.model || "gemini-2.0-flash";
+        currentModel = settings.gemini?.model || GEMINI_DEFAULT_MODEL;
         const cachedGemini = LLMProviderFactory.getCachedModels("gemini");
         if (cachedGemini && cachedGemini.length > 0) {
           models = cachedGemini;
         } else {
           models = [
-            { key: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash" },
+            { key: GEMINI_DEFAULT_MODEL, displayName: "Gemini 2.5 Flash" },
             { key: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro" },
             { key: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash" },
           ];
@@ -6070,15 +6069,15 @@ export class MessageRouter {
       }
 
       case "openrouter": {
-        currentModel = settings.openrouter?.model || "anthropic/claude-3.5-sonnet";
+        currentModel = settings.openrouter?.model || OPENROUTER_DEFAULT_MODEL_ID;
         const cachedOpenRouter = LLMProviderFactory.getCachedModels("openrouter");
         if (cachedOpenRouter && cachedOpenRouter.length > 0) {
           models = cachedOpenRouter.slice(0, 10); // Limit to 10 for readability
         } else {
           models = [
             {
-              key: "anthropic/claude-3.5-sonnet",
-              displayName: "Claude 3.5 Sonnet",
+              key: OPENROUTER_DEFAULT_MODEL_ID,
+              displayName: "Claude Sonnet 4.6",
             },
             { key: "openai/gpt-4o", displayName: "GPT-4o" },
             { key: "google/gemini-pro", displayName: "Gemini Pro" },
@@ -6201,13 +6200,13 @@ export class MessageRouter {
       }
 
       case "gemini": {
-        currentModel = settings.gemini?.model || "gemini-2.0-flash";
+        currentModel = settings.gemini?.model || GEMINI_DEFAULT_MODEL;
         const cachedGemini = LLMProviderFactory.getCachedModels("gemini");
         if (cachedGemini && cachedGemini.length > 0) {
           models = cachedGemini;
         } else {
           models = [
-            { key: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash" },
+            { key: GEMINI_DEFAULT_MODEL, displayName: "Gemini 2.5 Flash" },
             { key: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro" },
             { key: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash" },
           ];
@@ -6216,15 +6215,15 @@ export class MessageRouter {
       }
 
       case "openrouter": {
-        currentModel = settings.openrouter?.model || "anthropic/claude-3.5-sonnet";
+        currentModel = settings.openrouter?.model || OPENROUTER_DEFAULT_MODEL_ID;
         const cachedOpenRouter = LLMProviderFactory.getCachedModels("openrouter");
         if (cachedOpenRouter && cachedOpenRouter.length > 0) {
           models = cachedOpenRouter.slice(0, 10);
         } else {
           models = [
             {
-              key: "anthropic/claude-3.5-sonnet",
-              displayName: "Claude 3.5 Sonnet",
+              key: OPENROUTER_DEFAULT_MODEL_ID,
+              displayName: "Claude Sonnet 4.6",
             },
             { key: "openai/gpt-4o", displayName: "GPT-4o" },
             { key: "google/gemini-pro", displayName: "Gemini Pro" },

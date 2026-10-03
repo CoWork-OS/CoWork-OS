@@ -33,6 +33,17 @@ import {
   escapeSandboxProfileString,
   validatePathForSandboxProfile,
 } from "./security-utils";
+import { applyNonInteractiveEnvDefaults } from "./non-interactive-env";
+import {
+  macOSToolchainProfileRules,
+  resolveMacOSToolchainAccess,
+  writeSanitizedNpmrc,
+  type MacOSToolchainAccess,
+} from "./macos-toolchain-access";
+import { BoundedOutputBuffer } from "./bounded-output";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("MacOSSandbox");
 
 /**
  * Default sandbox options
@@ -42,11 +53,66 @@ const DEFAULT_OPTIONS: Required<SandboxOptions> = {
   timeout: 5 * 60 * 1000, // 5 minutes
   maxOutputSize: 100 * 1024, // 100KB
   allowNetwork: false,
+  allowLoopbackListen: false,
+  detached: false,
   allowedReadPaths: [],
   allowedWritePaths: [],
   envPassthrough: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR"],
   onProcess: () => undefined,
 };
+
+/**
+ * Kill a sandboxed command together with every process it started. Signalling
+ * only the shell leaves its children running, and they keep the output pipes
+ * (and the caller waiting on them) open.
+ */
+function killProcessGroup(proc: ChildProcess): void {
+  if (proc.pid) {
+    try {
+      process.kill(-proc.pid, "SIGKILL");
+      return;
+    } catch {
+      // The group may already be gone; fall back to the direct child.
+    }
+  }
+  proc.kill("SIGKILL");
+}
+
+/**
+ * True when `root` holds a .git or .cowork/policy entry, or is too large to
+ * check. The profile lets nothing create those names in private scratch, so
+ * one found there is a nested repository (or policy directory) whose parent
+ * was moved out of the workspace; deleting scratch would delete it.
+ */
+function holdsProtectedEntry(root: string, limit = 50_000): boolean {
+  const pending = [root];
+  let seen = 0;
+  while (pending.length > 0) {
+    const dir = pending.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (++seen > limit) return true;
+      const name = entry.name.toLowerCase();
+      if (name === ".git") return true;
+      if (!entry.isDirectory()) continue;
+      const child = path.join(dir, entry.name);
+      if (name === ".cowork") {
+        try {
+          if (fs.readdirSync(child).some((item) => item.toLowerCase() === "policy")) return true;
+        } catch {
+          // Unreadable: fall through and walk it like any other directory.
+        }
+      }
+      pending.push(child);
+    }
+  }
+  return false;
+}
 
 const PROTECTED_WORKSPACE_WRITE_RELATIVE_PATHS = [
   ".git",
@@ -100,7 +166,8 @@ export class MacOSSandbox implements ISandbox {
         error: "Network access denied",
       };
     }
-    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
+    const toolchain = this.resolveToolchainAccess();
+    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts, toolchain);
     if (!this.sandboxProfile) {
       return {
         exitCode: 1,
@@ -125,13 +192,15 @@ export class MacOSSandbox implements ISandbox {
     }
 
     // Build minimal, safe environment
-    const env = this.buildSafeEnvironment(opts.envPassthrough);
+    const env = this.buildSafeEnvironment(opts.envPassthrough, toolchain);
 
     let proc: ChildProcess;
     const spawnOptions: SpawnOptions = {
       cwd,
       env,
       shell: false,
+      // Lead a new process group so a timeout can stop the whole command.
+      detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     };
 
@@ -147,45 +216,30 @@ export class MacOSSandbox implements ISandbox {
     opts.onProcess?.(proc);
 
     return new Promise((resolve) => {
-      let stdout = "";
-      let stderr = "";
+      // Keep the start and the end of long output; errors and summaries print last.
+      const stdout = new BoundedOutputBuffer(opts.maxOutputSize);
+      const stderr = new BoundedOutputBuffer(opts.maxOutputSize);
       let killed = false;
       let timedOut = false;
 
       const timeoutHandle = setTimeout(() => {
         timedOut = true;
         killed = true;
-        proc.kill("SIGKILL");
+        killProcessGroup(proc);
       }, opts.timeout);
 
-      proc.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stdout.length + chunk.length <= opts.maxOutputSize) {
-          stdout += chunk;
-        } else if (stdout.length < opts.maxOutputSize) {
-          stdout += chunk.slice(0, opts.maxOutputSize - stdout.length);
-          stdout += "\n[Output truncated]";
-        }
-      });
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stderr.length + chunk.length <= opts.maxOutputSize) {
-          stderr += chunk;
-        } else if (stderr.length < opts.maxOutputSize) {
-          stderr += chunk.slice(0, opts.maxOutputSize - stderr.length);
-          stderr += "\n[Output truncated]";
-        }
-      });
+      proc.stdout?.on("data", (data: Buffer) => stdout.append(data.toString()));
+      proc.stderr?.on("data", (data: Buffer) => stderr.append(data.toString()));
 
       proc.on("close", (code) => {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: code ?? 1,
-          stdout,
-          stderr,
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
           killed,
           timedOut,
+          truncated: stdout.truncated || stderr.truncated,
         });
       });
 
@@ -193,11 +247,12 @@ export class MacOSSandbox implements ISandbox {
         clearTimeout(timeoutHandle);
         resolve({
           exitCode: 1,
-          stdout,
+          stdout: stdout.toString(),
           stderr: err.message,
           killed,
           timedOut,
           error: err.message,
+          truncated: stdout.truncated,
         });
       });
     });
@@ -221,16 +276,18 @@ export class MacOSSandbox implements ISandbox {
       throw new Error(`Working directory not allowed: ${cwd}`);
     }
 
-    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
+    const toolchain = this.resolveToolchainAccess();
+    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts, toolchain);
     if (!this.sandboxProfile) {
       throw new Error("macOS sandbox profile unavailable; refusing unsandboxed execution.");
     }
     const { profilePath, cleanup: cleanupProfile } = this.writeTempProfile();
-    const env = this.buildSafeEnvironment(opts.envPassthrough);
+    const env = this.buildSafeEnvironment(opts.envPassthrough, toolchain);
     const proc = spawn("sandbox-exec", ["-f", profilePath, command, ...args], {
       cwd,
       env,
       shell: false,
+      detached: opts.detached === true,
       stdio: ["pipe", "pipe", "pipe"],
     });
     opts.onProcess?.(proc);
@@ -272,10 +329,19 @@ export class MacOSSandbox implements ISandbox {
   cleanup(): void {
     this.sandboxProfile = undefined;
     if (this.runtimeTempDir) {
-      try {
-        fs.rmSync(this.runtimeTempDir, { recursive: true, force: true });
-      } catch {
-        // Best-effort cleanup; the directory is private to this sandbox.
+      if (holdsProtectedEntry(this.runtimeTempDir)) {
+        // A command may move a workspace directory into scratch; if that
+        // directory holds a nested repository, removing scratch would delete
+        // its history, which the sandbox itself is never allowed to do.
+        log.warn(
+          `Keeping sandbox scratch ${this.runtimeTempDir}: it holds a .git or .cowork/policy entry moved out of the workspace.`,
+        );
+      } else {
+        try {
+          fs.rmSync(this.runtimeTempDir, { recursive: true, force: true });
+        } catch {
+          // Best-effort cleanup; the directory is private to this sandbox.
+        }
       }
       this.runtimeTempDir = undefined;
     }
@@ -430,9 +496,31 @@ export class MacOSSandbox implements ISandbox {
   }
 
   /**
+   * Home-directory toolchain grants, PATH and environment for this command.
+   * Cache writes follow the workspace write capability: a read-only profile
+   * must not leave anything behind outside its private scratch directory.
+   */
+  private resolveToolchainAccess(): MacOSToolchainAccess {
+    const permissions = this.workspace.permissions;
+    return resolveMacOSToolchainAccess({
+      homeDir: this.getHomeDir(),
+      env: process.env,
+      workspacePath: this.workspace.path,
+      allowWrites: permissions.write === true && permissions.accessSandboxMode !== "read-only",
+    });
+  }
+
+  private getHomeDir(): string {
+    return process.env.HOME || os.homedir();
+  }
+
+  /**
    * Build a minimal, safe environment for command execution
    */
-  private buildSafeEnvironment(passthrough: string[]): Record<string, string | undefined> {
+  private buildSafeEnvironment(
+    passthrough: string[],
+    toolchain: MacOSToolchainAccess,
+  ): Record<string, string | undefined> {
     const safeEnv: Record<string, string | undefined> = {};
 
     for (const key of passthrough) {
@@ -440,32 +528,35 @@ export class MacOSSandbox implements ISandbox {
         safeEnv[key] = process.env[key];
       }
     }
+    // Toolchain configuration only: proxies (without credentials), CA
+    // bundles and relocated toolchain homes. Never tokens or keys.
+    Object.assign(safeEnv, toolchain.env);
 
-    safeEnv.HOME = process.env.HOME || os.homedir();
+    safeEnv.HOME = this.getHomeDir();
     safeEnv.USER = process.env.USER || os.userInfo().username;
     safeEnv.SHELL = process.env.SHELL || "/bin/bash";
     safeEnv.TERM = "xterm-256color";
     safeEnv.LANG = process.env.LANG || "en_US.UTF-8";
     safeEnv.TMPDIR = this.getRuntimeTempDirIfScoped();
+    safeEnv.PATH = toolchain.path;
 
-    safeEnv.PATH = [
-      "/opt/homebrew/bin",
-      "/opt/homebrew/sbin",
-      "/usr/local/bin",
-      "/usr/bin",
-      "/bin",
-      "/usr/sbin",
-      "/sbin",
-    ].join(":");
+    // The user's npmrc keeps registry, proxy and script settings, but its
+    // auth tokens stay outside the sandbox (the original file is denied).
+    const npmrc = writeSanitizedNpmrc(this.getHomeDir(), process.env, this.getRuntimeTempDir());
+    if (npmrc) safeEnv.NPM_CONFIG_USERCONFIG = npmrc;
 
-    return safeEnv;
+    return applyNonInteractiveEnvDefaults(safeEnv);
   }
 
   /**
    * Generate macOS sandbox-exec profile
    * Paths are escaped to prevent sandbox profile injection attacks
    */
-  private generateSandboxProfile(allowNetwork: boolean, options: SandboxOptions = {}): string {
+  private generateSandboxProfile(
+    allowNetwork: boolean,
+    options: SandboxOptions = {},
+    toolchain: MacOSToolchainAccess = this.resolveToolchainAccess(),
+  ): string {
     const permissions = this.workspace.permissions;
     const finiteFilesystemScope = this.hasBoundedFilesystemScope();
     const tempDir = finiteFilesystemScope ? this.getRuntimeTempDir() : os.tmpdir();
@@ -517,10 +608,34 @@ export class MacOSSandbox implements ISandbox {
   (subpath "/private/var/db")
   (subpath "/private/var/select")
 ${workspaceAncestorRules}
-  (literal "/dev/null")
   (literal "/dev/urandom")
   (literal "/dev/random")
 ${tempReadRules}
+)
+
+; Standard device nodes. Git opens /dev/null read-write at startup and shells
+; redirect to it; /dev/fd and /dev/std* only reach descriptors the process
+; already holds. /dev/tty stays denied: a command spawned without a new
+; session could otherwise read from or inject into the user's terminal.
+(allow file-read* file-write-data
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/stdin")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (subpath "/dev/fd")
+)
+
+; Name resolution and TLS configuration read by curl, git, pip and others.
+; The /etc link and /private/etc itself are traversed, not listed.
+(allow file-read-metadata (literal "/etc") (literal "/private/etc"))
+(allow file-read*
+  (literal "/private/etc/hosts")
+  (literal "/private/etc/resolv.conf")
+  (literal "/private/etc/services")
+  (literal "/private/etc/protocols")
+  (literal "/private/etc/localtime")
+  (subpath "/private/etc/ssl")
 )
 
 ; Allow homebrew on macOS
@@ -531,7 +646,7 @@ ${tempReadRules}
   (literal "/opt")
   (subpath "/opt/homebrew")
 )
-
+${macOSToolchainProfileRules(toolchain)}
 `;
     if (permissions.read) {
       profile += `
@@ -590,9 +705,28 @@ ${tempWriteRules}
 
     // Allow network if permitted
     if (allowNetwork) {
+      // Network access is for the network. A Unix-domain socket reaches a
+      // local program instead, often with the user's full authority: the
+      // Docker daemon (a host-root container is one request away), an
+      // ssh-agent, database servers. Keep those out; DNS goes through
+      // mDNSResponder's socket, and sockets the command creates in its own
+      // workspace or private scratch keep working. (The shared host temp
+      // directory is not included: editors and agents keep IPC sockets there.)
+      const ownSockets = [
+        ...workspaceAliases,
+        ...this.getMacOSPathAliases(this.getRuntimeTempDir()),
+      ]
+        .map((alias) => `  (remote unix-socket (subpath "${escapeSandboxProfileString(alias)}"))`)
+        .join("\n");
       profile += `
 ; Allow network access
 (allow network*)
+; ...except other programs' local sockets
+(deny network-outbound (remote unix-socket))
+(allow network-outbound
+  (remote unix-socket (path-literal "/private/var/run/mDNSResponder"))
+${ownSockets}
+)
 `;
     } else {
       profile += `
@@ -606,6 +740,18 @@ ${tempWriteRules}
   (remote udp "localhost:*")
 )
 `;
+      if (options.allowLoopbackListen === true) {
+        profile += `
+; Local TCP servers (dev servers, test servers). Egress stays limited to
+; loopback above, but seatbelt matches a (local ... "localhost:*") filter for
+; 0.0.0.0 and LAN addresses too, so this alone does not keep a server off the
+; network: the caller pairs it with LoopbackListenerGuard, which stops a
+; process group that listens on a non-loopback address. TCP only; UDP binds
+; stay denied.
+(allow network-bind (local tcp "localhost:*"))
+(allow network-inbound (local tcp "localhost:*"))
+`;
+      }
     }
 
     // Allow additional read paths (with validation and escaping)
@@ -662,13 +808,18 @@ ${tempWriteRules}
 
     // Allow essential mach services
     profile += `
-; Allow essential mach services
+; Allow essential mach services. trustd.agent evaluates TLS certificates for
+; tools that use the system trust store (pip, go, cargo); the opendirectoryd
+; services answer user and group name lookups (getpwuid, id, git identity).
 (allow mach-lookup
   (global-name "com.apple.CoreServices.coreservicesd")
   (global-name "com.apple.SecurityServer")
   (global-name "com.apple.system.logger")
   (global-name "com.apple.cfprefsd.daemon")
   (global-name "com.apple.cfprefsd.agent")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.opendirectoryd.membership")
 )
 `;
 
@@ -679,6 +830,7 @@ ${tempWriteRules}
         options,
         this.getRuntimeTempDir(),
         finiteFilesystemScope,
+        { writableCaches: toolchain.writeDirs, gitMarkerCaches: toolchain.gitMarkerCaches },
       )
     );
   }

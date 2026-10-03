@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import type { Workspace } from "../../../../shared/types";
 
 const spawnMock = vi.hoisted(() => vi.fn());
@@ -202,6 +204,49 @@ describe("DockerSandbox access-profile enforcement", () => {
     ).toBe(true);
   });
 
+  it("keeps the start and the end of long command output", async () => {
+    const { workspace } = fixture();
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementation(() => proc);
+    const sandbox = new DockerSandbox(workspace);
+    Object.assign(sandbox, { initialized: true });
+
+    const resultPromise = sandbox.execute("npm test", [], { maxOutputSize: 1_000 });
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled());
+    proc.stdout?.emit("data", Buffer.from(`RUN v1\n${"ok\n".repeat(2_000)}`));
+    proc.stdout?.emit("data", Buffer.from("FAIL src/x.test.ts > adds\n"));
+    proc.emit("close", 1, null);
+    const result = await resultPromise;
+
+    expect(result.stdout.startsWith("RUN v1")).toBe(true);
+    expect(result.stdout).toContain("FAIL src/x.test.ts > adds");
+    expect(result.stdout).toContain("[Output truncated]");
+    expect(result.truncated).toBe(true);
+  });
+
+  it("runs commands with non-interactive defaults without overriding configured values", () => {
+    const { workspace } = fixture();
+    const sandbox = new DockerSandbox(workspace, { env: { PAGER: "more" } });
+    const args = (sandbox as Any).buildDockerArgs({}) as string[];
+    const envValues = args.filter((_arg, index) => args[index - 1] === "-e");
+
+    expect(envValues).toEqual(
+      expect.arrayContaining([
+        "GIT_TERMINAL_PROMPT=0",
+        "GIT_EDITOR=true",
+        "GIT_PAGER=cat",
+        "PIP_NO_INPUT=1",
+        "DEBIAN_FRONTEND=noninteractive",
+        "PAGER=more",
+      ]),
+    );
+    expect(envValues).not.toContain("PAGER=cat");
+    expect(envValues.some((value) => value.startsWith("CI="))).toBe(false);
+  });
+
   it("does not let explicit temporary write options expose a protected workspace file", () => {
     const { workspace } = fixture();
     workspace.permissions.write = true;
@@ -323,5 +368,121 @@ describe("DockerSandbox access-profile enforcement", () => {
     expect(result).toMatchObject({ exitCode: 1, error: "Path access denied" });
     expect(result.stderr).toContain("escapes /workspace");
     expect(spawnMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("DockerSandbox default container", () => {
+  const fakeProc = () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    return proc;
+  };
+  const argAfter = (args: string[], flag: string): string[] =>
+    args.flatMap((arg, index) => (args[index - 1] === flag ? [arg] : []));
+  // A read-only workspace mount keeps these tests about container defaults, not mount policy.
+  const readOnlyWorkspace = () =>
+    makeWorkspace({ permissions: { ...makeWorkspace().permissions, write: false } });
+
+  beforeEach(() => {
+    spawnMock.mockReset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("runs in a Debian-based Node image that ships git, python and build tools", async () => {
+    const proc = fakeProc();
+    spawnMock.mockImplementation(() => proc);
+    const sandbox = new DockerSandbox(readOnlyWorkspace());
+    Object.assign(sandbox, { initialized: true });
+
+    const resultPromise = sandbox.execute("git status");
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled());
+    proc.emit("close", 0, null);
+    await resultPromise;
+
+    const args = spawnMock.mock.calls[0][1] as string[];
+    const image = args[args.indexOf("/bin/sh") - 1];
+    expect(image).toBe("node:24-bookworm");
+    expect(image).not.toMatch(/alpine|slim/);
+  });
+
+  it("keeps the image and resource limits overridable through dockerConfig", () => {
+    const workspace = readOnlyWorkspace();
+    (workspace.permissions as { dockerConfig?: unknown }).dockerConfig = {
+      image: "mcr.microsoft.com/devcontainers/python:3",
+      cpuLimit: 0.5,
+      memoryLimit: "1g",
+    };
+    const sandbox = new DockerSandbox(workspace);
+    const args = (sandbox as Any).buildDockerArgs({}) as string[];
+
+    expect((sandbox as Any).config.image).toBe("mcr.microsoft.com/devcontainers/python:3");
+    expect(argAfter(args, "--cpus")).toEqual(["0.5"]);
+    expect(argAfter(args, "--memory")).toEqual(["1g"]);
+  });
+
+  it("gives builds enough CPU and memory by default", () => {
+    const sandbox = new DockerSandbox(readOnlyWorkspace());
+    const args = (sandbox as Any).buildDockerArgs({}) as string[];
+
+    expect(argAfter(args, "--memory")).toEqual(["4g"]);
+    const hostCpus = Math.max(1, os.availableParallelism());
+    expect(argAfter(args, "--cpus")).toEqual([String(Math.min(2, hostCpus))]);
+  });
+
+  it("lets build tools execute from /tmp and write to a private HOME", () => {
+    const sandbox = new DockerSandbox(readOnlyWorkspace());
+    const args = (sandbox as Any).buildDockerArgs({}) as string[];
+    const tmpfs = argAfter(args, "--tmpfs");
+    const envValues = argAfter(args, "-e");
+
+    const tmp = tmpfs.find((mount) => mount.startsWith("/tmp:"));
+    expect(tmp).toBeDefined();
+    expect(tmp).not.toContain("noexec");
+    expect(tmp).toContain("nosuid");
+    expect(tmp).toMatch(/size=1g\b/);
+
+    const home = tmpfs.find((mount) => mount.startsWith("/home/cowork:"));
+    expect(home).toBeDefined();
+    expect(home).toContain("rw");
+    expect(home).toContain("mode=1777");
+    expect(envValues).toContain("HOME=/home/cowork");
+
+    // The hardening around those mounts is unchanged.
+    expect(args).toContain("--read-only");
+    expect(argAfter(args, "--cap-drop")).toEqual(["ALL"]);
+    expect(argAfter(args, "--security-opt")).toEqual(["no-new-privileges:true"]);
+    expect(argAfter(args, "--network")).toEqual(["none"]);
+  });
+
+  it("does not override a HOME the workspace configures", () => {
+    const sandbox = new DockerSandbox(readOnlyWorkspace(), { env: { HOME: "/workspace/.home" } });
+    const envValues = argAfter((sandbox as Any).buildDockerArgs({}) as string[], "-e");
+
+    expect(envValues).toContain("HOME=/workspace/.home");
+    expect(envValues).not.toContain("HOME=/home/cowork");
+  });
+
+  it("lets a large default image finish pulling instead of killing it after two minutes", async () => {
+    vi.useFakeTimers();
+    const inspect = fakeProc();
+    const pull = fakeProc();
+    spawnMock.mockImplementation((_cmd: string, args: string[]) =>
+      args[0] === "image" ? inspect : pull,
+    );
+    const sandbox = new DockerSandbox(readOnlyWorkspace());
+
+    const pulled = (sandbox as Any).pullImageIfNeeded() as Promise<void>;
+    inspect.emit("close", 1, null);
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(2));
+    expect(spawnMock.mock.calls[1][1]).toEqual(["pull", "node:24-bookworm"]);
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(pull.kill).not.toHaveBeenCalled();
+    pull.emit("close", 0, null);
+    await expect(pulled).resolves.toBeUndefined();
   });
 });

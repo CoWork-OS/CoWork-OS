@@ -2,15 +2,27 @@
  * PDF Generator — converts markdown or structured sections into a styled PDF.
  *
  * Uses Playwright with a local Chromium-family browser to render HTML → PDF.
- * Falls back to a styled HTML file if browser PDF rendering is unavailable.
+ * Falls back to a styled HTML file if browser PDF rendering is unavailable,
+ * and reports that no PDF was produced.
  */
 
 import * as fs from "fs";
 import { execFileSync } from "node:child_process";
+import { parseMarkdownTableAt, type MarkdownTable } from "./markdown-tables";
 
 interface PDFSection {
   heading?: string;
   content: string;
+}
+
+export interface PDFGenerationResult {
+  /** True only when a PDF was written. */
+  success: boolean;
+  path: string;
+  size: number;
+  format: "pdf" | "html";
+  /** Why no PDF was rendered; set when the HTML fallback was written. */
+  error?: string;
 }
 
 interface PDFOptions {
@@ -103,8 +115,9 @@ function resolveBrowserExecutable(): string | undefined {
 export async function generatePDF(
   outputPath: string,
   options: PDFOptions,
-): Promise<{ success: boolean; path: string; size: number }> {
+): Promise<PDFGenerationResult> {
   const html = buildHTML(options);
+  let failure = "No Chrome, Chromium, Edge, or Brave browser was found to render the PDF";
 
   // Try Playwright first (available if browser tools are installed)
   try {
@@ -114,6 +127,7 @@ export async function generatePDF(
       playwrightModule.default?.chromium ||
       playwrightModule.playwright?.chromium;
     const executablePath = resolveBrowserExecutable();
+    if (!chromium) failure = "Playwright is not available to render the PDF";
 
     if (chromium && executablePath) {
       const browser = await chromium.launch({
@@ -137,18 +151,20 @@ export async function generatePDF(
       }
 
       const stat = fs.statSync(outputPath);
-      return { success: true, path: outputPath, size: stat.size };
+      return { success: true, path: outputPath, size: stat.size, format: "pdf" };
     }
-  } catch {
+  } catch (error) {
     // Playwright or a local browser is unavailable; fall through to HTML file.
+    failure = `PDF rendering failed: ${error instanceof Error ? error.message : String(error)}`;
   }
 
-  // Fallback: write styled HTML (can be opened in any browser and printed to PDF)
+  // Fallback: write styled HTML (can be opened in any browser and printed to
+  // PDF). This is not the requested PDF, so it is not reported as success.
   const htmlPath = outputPath.replace(/\.pdf$/i, ".html");
   const finalPath = htmlPath === outputPath ? `${outputPath}.html` : htmlPath;
   fs.writeFileSync(finalPath, html, "utf-8");
   const stat = fs.statSync(finalPath);
-  return { success: true, path: finalPath, size: stat.size };
+  return { success: false, path: finalPath, size: stat.size, format: "html", error: failure };
 }
 
 function buildHTML(options: PDFOptions): string {
@@ -204,9 +220,58 @@ function buildHTML(options: PDFOptions): string {
 </html>`;
 }
 
+const TABLE_PLACEHOLDER = /\u0000table:(\d+)\u0000/g;
+
+/** Inline markdown (code, bold, italic, links) for already-escaped text. */
+function renderInlineMarkdown(escaped: string): string {
+  return escaped
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+}
+
+function renderTable(table: MarkdownTable): string {
+  // Keep every cell, even in rows longer than the header.
+  const width = Math.max(table.header.length, ...table.rows.map((row) => row.length));
+  const cells = (row: string[], tag: "th" | "td") =>
+    Array.from({ length: width }, (_, index) => {
+      const alignment = table.alignments[index];
+      const style = alignment ? ` style="text-align: ${alignment}"` : "";
+      return `<${tag}${style}>${renderInlineMarkdown(escapeHtml(row[index] ?? ""))}</${tag}>`;
+    }).join("");
+  const head = `<thead><tr>${cells(table.header, "th")}</tr></thead>`;
+  const body = table.rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("");
+  return `<table>${head}${body ? `<tbody>${body}</tbody>` : ""}</table>`;
+}
+
+/**
+ * Replaces GitHub-flavored tables (outside code fences) with placeholder
+ * lines the line-based rules leave alone; the tables are put back at the end.
+ */
+function extractTables(md: string): { markdown: string; tables: string[] } {
+  const lines = md.split("\n");
+  const kept: string[] = [];
+  const tables: string[] = [];
+  let inFence = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^\s*```/.test(lines[index])) inFence = !inFence;
+    const parsed = inFence ? null : parseMarkdownTableAt(lines, index);
+    if (parsed) {
+      kept.push(`\u0000table:${tables.length}\u0000`);
+      tables.push(renderTable(parsed.table));
+      index = parsed.end - 1;
+    } else {
+      kept.push(lines[index]);
+    }
+  }
+  return { markdown: kept.join("\n"), tables };
+}
+
 /** Minimal markdown → HTML converter for common patterns. */
 function markdownToHtml(md: string): string {
-  let html = escapeHtml(md);
+  const { markdown, tables } = extractTables(md);
+  let html = escapeHtml(markdown);
 
   // Code blocks
   html = html.replace(
@@ -234,9 +299,9 @@ function markdownToHtml(md: string): string {
   // Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
   // Paragraphs (lines not already wrapped)
-  html = html.replace(/^(?!<[hupob]|<li|<hr|<block)(.+)$/gm, "<p>$1</p>");
+  html = html.replace(/^(?!<[hupob]|<li|<hr|<block|\u0000)(.+)$/gm, "<p>$1</p>");
 
-  return html;
+  return html.replace(TABLE_PLACEHOLDER, (_m, index) => tables[Number(index)]);
 }
 
 function escapeHtml(str: string): string {

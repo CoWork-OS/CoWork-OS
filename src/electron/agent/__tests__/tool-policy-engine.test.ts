@@ -6,6 +6,19 @@ import {
   hasNativeDesktopGuiIntent,
 } from "../tool-policy-engine";
 
+describe("tool-policy-engine background process tools", () => {
+  it("lets plan mode read background output but not stop processes", () => {
+    const plan = { executionMode: "plan" as const, taskDomain: "code" as const };
+    expect(evaluateToolPolicy("process_output", plan).decision).toBe("allow");
+    expect(evaluateToolPolicy("stop_process", plan).decision).toBe("deny");
+    expect(evaluateToolPolicy("run_command", plan).decision).toBe("deny");
+  });
+
+  it.each(["process_output", "stop_process"])("always exposes %s alongside run_command", (tool) => {
+    expect(evaluateToolAvailability(tool, { taskText: "" }).decision).toBe("allow");
+  });
+});
+
 describe("tool-policy-engine request_user_input gating", () => {
   it.each(["auto", "code", "operations"] as const)(
     "requires shell for execute_code in %s",

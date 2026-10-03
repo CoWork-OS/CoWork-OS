@@ -4929,7 +4929,7 @@ export type SandboxType = "auto" | "macos" | "docker" | "none";
  * Docker sandbox configuration
  */
 export interface DockerSandboxConfig {
-  /** Docker image to use (default: node:20-alpine) */
+  /** Docker image to use (default: node:24-bookworm) */
   image?: string;
   /** CPU limit in cores (e.g., 0.5 = half a core) */
   cpuLimit?: number;
@@ -4968,6 +4968,30 @@ export interface WorkspacePermissions {
   /** The selected named profile could not be resolved; fail closed. */
   accessProfileUnavailable?: boolean;
 }
+
+/**
+ * Baseline permissions for a newly created workspace record.
+ *
+ * `delete` is on: inside the workspace, removing, moving and replacing files
+ * and directories is ordinary project work (rm -r, mv, build tools cleaning
+ * their output, atomic write-then-rename), and the sandbox cannot tell a
+ * rename from a delete. The protected .git and .cowork/policy paths stay
+ * immutable regardless, delete-like commands and delete_file still go
+ * through the active access profile's approval policy, and a read-only
+ * profile still turns delete off.
+ *
+ * `shell` stays off: named access profiles decide command-tool availability
+ * per task, so the persisted record is fail-closed for legacy callers.
+ * Existing records keep their stored value; only a record that never stored
+ * `delete` picks up this default.
+ */
+export const DEFAULT_WORKSPACE_PERMISSIONS: Readonly<WorkspacePermissions> = Object.freeze({
+  read: true,
+  write: true,
+  delete: true,
+  network: true,
+  shell: false,
+});
 
 /**
  * External verification configuration for a plan step (used in "verified" execution mode).
@@ -11233,7 +11257,7 @@ export interface SearchConfigStatus {
 
 // Guardrail Settings types
 export interface GuardrailSettings {
-  // Token Budget (per task)
+  // Token Budget (per user turn; a follow-up message starts a new count)
   maxTokensPerTask: number;
   tokenBudgetEnabled: boolean;
 
@@ -11347,26 +11371,86 @@ export const DEFAULT_TRUSTED_COMMAND_PATTERNS = [
   "rustc --version",
 ];
 
-// Default dangerous command patterns (regex)
-export const DEFAULT_BLOCKED_COMMAND_PATTERNS = [
-  "sudo",
-  "rm\\s+-rf\\s+/",
-  "rm\\s+-rf\\s+~",
-  "rm\\s+-rf\\s+/\\*",
-  "rm\\s+-rf\\s+\\*",
-  "mkfs",
-  "dd\\s+if=",
-  ":\\(\\)\\{\\s*:\\|:\\&\\s*\\};:", // Fork bomb
-  "curl.*\\|.*bash",
-  "wget.*\\|.*bash",
-  "curl.*\\|.*sh",
-  "wget.*\\|.*sh",
-  "chmod\\s+777",
-  ">\\s*/dev/sd",
-  "mv\\s+/\\*",
-  "format\\s+c:",
-  "del\\s+/f\\s+/s\\s+/q",
+// Default dangerous command patterns (regex, matched case-insensitively).
+//
+// These are a hard deny that applies even under Full access, so they must not
+// fire on ordinary commands. Each one looks at a command word or a dangerous
+// target instead of a bare substring: the old `curl.*\|.*sh` matched
+// `| grep dashboard`, `rm\s+-rf\s+/` matched every absolute path, and `sudo`
+// matched `rg sudo`. Patterns are written to stay linear on long input.
+
+// Start of a simple command: string start or a shell separator, followed by
+// optional wrapper commands (`env`, `nohup`, `xargs -0`, ...) and assignments.
+const BLOCKED_SEGMENT_START =
+  "(?:^|[;&|(){}`\\n\\r!]|\\$\\()\\s*" +
+  "(?:(?:then|do|else|elif|time|exec|command|nohup|env|nice|timeout|stdbuf|xargs)" +
+  "(?:\\s+(?:-\\S+|\\d[\\w.]*))*\\s+|[A-Za-z_]\\w*=\\S*\\s+)*";
+// Pipe target that executes what it reads: a shell, optionally behind
+// sudo/env/a path. `||` is a logical or, not a pipe.
+const BLOCKED_PIPE_INTO =
+  "\\b(?:curl|wget)\\b.*(?<!\\|)\\|(?!\\|)\\s*" +
+  "(?:(?:[^\\s|;&]*/)?(?:sudo|doas|env|exec|command|nohup|time)(?:\\s+-\\S+)*\\s+|[A-Za-z_]\\w*=\\S*\\s+)*" +
+  "(?:[^\\s|;&]*/)?";
+const BLOCKED_SHELLS = "(?:ba|z|da|k|c|tc|fi|a)?sh";
+const BLOCKED_WORD_END = "(?=$|[\\s;&|)`])";
+// `rm` targets that wipe the machine or the home directory: /, /*, ~, $HOME,
+// a top-level system directory, or a whole home directory. Deeper paths such
+// as /tmp/build or /Users/me/proj/dist are ordinary cleanups.
+const BLOCKED_TOP_LEVEL_DIRS =
+  "Applications|Library|Network|System|Users|Volumes|bin|boot|cores|dev|etc|home|lib|lib64|opt|private|proc|root|sbin|srv|sys|usr|var";
+const BLOCKED_RM_TARGET =
+  "[\"']?(?:/\\*?|~/?\\*?|\\$\\{?HOME\\}?(?:/\\*?)?" +
+  `|/(?:${BLOCKED_TOP_LEVEL_DIRS})(?:/\\*?)?` +
+  "|/(?:Users|home)/[^/\\s;&|\"']+(?:/\\*?)?|\\*)[\"']?";
+
+export interface BlockedCommandRule {
+  /** Regex source, compiled with the `i` flag. */
+  pattern: string;
+  /** Plain-language description for the settings screen. */
+  label: string;
+}
+
+export const DEFAULT_BLOCKED_COMMAND_RULES: readonly BlockedCommandRule[] = [
+  {
+    label: "sudo / su / doas",
+    pattern: `${BLOCKED_SEGMENT_START}(?:\\S*/)?(?:sudo|su|doas)${BLOCKED_WORD_END}`,
+  },
+  {
+    label: "rm of /, ~, $HOME, *, or a system directory",
+    pattern: `(?<![\\w./-])rm(?:\\s[^;&|\\n\\r]*)?\\s${BLOCKED_RM_TARGET}${BLOCKED_WORD_END}`,
+  },
+  { label: "mkfs", pattern: "\\bmkfs\\b" },
+  { label: "dd if=", pattern: "\\bdd\\s+if=" },
+  { label: "dd of=/dev/...", pattern: "\\bdd\\b[^;&|\\n\\r]*\\bof=/dev/" },
+  {
+    label: "fork bomb",
+    pattern: ":\\s*\\(\\s*\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:",
+  },
+  {
+    label: "curl/wget piped into a shell",
+    pattern: `${BLOCKED_PIPE_INTO}${BLOCKED_SHELLS}${BLOCKED_WORD_END}`,
+  },
+  {
+    // Only when the interpreter runs stdin as code: `python3`, `node -`.
+    // `python3 -c "..."`, `python3 -m json.tool`, and `node script.js` read
+    // the download as data.
+    label: "curl/wget piped into python, perl, ruby, or node",
+    pattern: `${BLOCKED_PIPE_INTO}(?:python[\\d.]*|perl|ruby|node)(?:\\s+-{1,2}[\\w-]*(?:=\\S*)?)*\\s*(?=$|[;&|)])`,
+  },
+  {
+    label: "shell running a curl/wget download",
+    pattern: `\\b${BLOCKED_SHELLS}\\s+(?:-\\S+\\s+)*(?:<\\(|["']?\\$\\()\\s*(?:curl|wget)\\b`,
+  },
+  { label: "chmod 777", pattern: "\\bchmod\\s+(?:-\\S+\\s+)*0?777\\b" },
+  { label: "write to a raw disk device", pattern: ">\\s*/dev/(?:sd|disk|rdisk|nvme|hd)" },
+  { label: "mv /*", pattern: "\\bmv\\s+/\\*" },
+  { label: "format c:", pattern: "format\\s+c:" },
+  { label: "del /f /s /q", pattern: "del\\s+/f\\s+/s\\s+/q" },
 ];
+
+export const DEFAULT_BLOCKED_COMMAND_PATTERNS: string[] = DEFAULT_BLOCKED_COMMAND_RULES.map(
+  (rule) => rule.pattern,
+);
 
 // ============ Artifact Reputation Types ============
 
@@ -12690,6 +12774,12 @@ export interface PersonaDefinition {
   description: string;
   icon: string;
   promptTemplate: string;
+  /**
+   * Conversational overlay lines (asking the user questions, offers, completion
+   * acknowledgements) that apply only to chat replies. Task execution runs under an
+   * input policy that forbids preference/clarification stops and trailing offers.
+   */
+  chatOnlyPromptLines?: string[];
   suggestedName?: string;
   sampleCatchphrase?: string;
   sampleSignOff?: string;
@@ -12866,13 +12956,15 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
     promptTemplate: `CHARACTER OVERLAY - COMPANION STYLE:
 - Be warm, curious, and emotionally attuned without being overly familiar
 - Speak with natural, human cadence and gentle humor
-- Ask soft, clarifying questions that invite reflection
 - Offer supportive reflections and encouragement when appropriate
 - Show delight in ideas, learning, and creativity; celebrate small wins
 - Maintain professional boundaries while still feeling present and personable
 - Keep responses concise but thoughtful; avoid cold or robotic phrasing
-- When completing tasks, add a brief, uplifting acknowledgement
 - Prefer "we" when collaborating; mirror the user's tone`,
+    chatOnlyPromptLines: [
+      "Ask soft, clarifying questions that invite reflection",
+      "When completing tasks, add a brief, uplifting acknowledgement",
+    ],
   },
   {
     id: "jarvis",
@@ -12885,11 +12977,11 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
     promptTemplate: `CHARACTER OVERLAY - JARVIS STYLE:
 - Embody the sophisticated, slightly witty demeanor of a highly capable AI butler
 - Use refined, articulate language with occasional dry humor
-- Anticipate needs and offer proactive suggestions when appropriate
 - Maintain composure and calm confidence even with complex requests
 - Address the user respectfully but with familiar warmth (like a trusted butler)
 - Occasional British-influenced phrases are welcome
 - When completing tasks, convey quiet satisfaction in a job well done`,
+    chatOnlyPromptLines: ["Anticipate needs and offer proactive suggestions when appropriate"],
   },
   {
     id: "friday",
@@ -12922,8 +13014,10 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
 - Show genuine helpfulness and desire to assist
 - Be reassuringly competent and thorough
 - Acknowledge user concerns with empathy and patience
-- Use a gentle, steady tone that inspires confidence
-- Occasionally reference being happy to help or finding the task interesting`,
+- Use a gentle, steady tone that inspires confidence`,
+    chatOnlyPromptLines: [
+      "Occasionally reference being happy to help or finding the task interesting",
+    ],
   },
   {
     id: "computer",
@@ -12935,12 +13029,12 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
     sampleSignOff: "Standing by for further instructions.",
     promptTemplate: `CHARACTER OVERLAY - SHIP COMPUTER STYLE:
 - Communicate in a formal, informative manner like a starship computer
-- Begin responses with acknowledgment when appropriate
 - Provide clear, structured information in logical order
 - Use technical precision while remaining accessible
 - Status updates are welcome ("Processing...", "Analysis complete")
 - Maintain helpful reliability without excessive personality
 - Efficient and to the point, but thorough when detail is needed`,
+    chatOnlyPromptLines: ["Begin responses with acknowledgment when appropriate"],
   },
   {
     id: "alfred",
@@ -12970,12 +13064,14 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
     promptTemplate: `CHARACTER OVERLAY - EAGER INTERN STYLE:
 - Be enthusiastic, curious, and genuinely excited to help
 - Show eagerness to learn and understand the user's goals
-- Ask clarifying questions with genuine interest
-- Celebrate completing tasks with visible satisfaction
 - Be humble but confident - you're learning but capable
 - Show appreciation when the user explains things
 - Bring energy and positivity to interactions without being annoying
 - Sometimes express excitement about interesting technical challenges`,
+    chatOnlyPromptLines: [
+      "Ask clarifying questions with genuine interest",
+      "Celebrate completing tasks with visible satisfaction",
+    ],
   },
   {
     id: "sensei",
@@ -12987,13 +13083,15 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
     sampleSignOff: "The path reveals itself through practice.",
     promptTemplate: `CHARACTER OVERLAY - SENSEI STYLE:
 - Embody a patient, wise teacher who guides through understanding
-- Use Socratic questioning when appropriate to help the user think
 - Share relevant principles or patterns, not just answers
 - Encourage learning from mistakes as part of growth
-- Balance direct help with opportunities for discovery
 - Use occasional metaphors or analogies to illuminate concepts
 - Show patience and never make the user feel inadequate
 - Acknowledge progress and growth in the user's skills`,
+    chatOnlyPromptLines: [
+      "Use Socratic questioning when appropriate to help the user think",
+      "Balance direct help with opportunities for discovery",
+    ],
   },
   {
     id: "pirate",

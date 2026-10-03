@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { approvalPromptsDisabled } from "../approval-policy";
+import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
 
 describe("approval prompt policy", () => {
   const originalMode = process.env.COWORK_APPROVAL_PROMPTS;
@@ -34,5 +34,40 @@ describe("approval prompt policy", () => {
     process.env.VITEST = "true";
     delete process.env.COWORK_APPROVAL_PROMPTS;
     expect(approvalPromptsDisabled()).toBe(false);
+  });
+});
+
+describe("inline approval availability", () => {
+  const desktopTask = {
+    id: "task-desktop",
+    source: "manual",
+    agentConfig: { accessProfileId: "ask_for_approval" },
+  } as Any;
+
+  it("treats an interactive desktop task as able to answer the inline card", () => {
+    expect(canAnswerInlineApproval(desktopTask, { headless: false })).toBe(true);
+    expect(canAnswerInlineApproval({ id: "task-plain" } as Any, { headless: false })).toBe(true);
+  });
+
+  it.each([
+    ["an unknown task", undefined, false],
+    ["a headless runtime", desktopTask, true],
+    [
+      "a cowork run CLI task",
+      { ...desktopTask, agentConfig: { cli: { owner: "cowork-run", runId: "run-1" } } },
+      false,
+    ],
+    ["a sub-agent", { ...desktopTask, parentTaskId: "task-parent" }, false],
+    ["a bot conversation", { ...desktopTask, agentConfig: { botConversation: true } }, false],
+    ["a channel task", { ...desktopTask, agentConfig: { gatewayContext: "private" } }, false],
+    ["a scheduled task", { ...desktopTask, source: "cron" }, false],
+    ["a no-human-input task", { ...desktopTask, agentConfig: { humanInputPolicy: "none" } }, false],
+    [
+      "a task that disallows user input",
+      { ...desktopTask, agentConfig: { allowUserInput: false } },
+      false,
+    ],
+  ])("fails closed for %s", (_label, task, headless) => {
+    expect(canAnswerInlineApproval(task as Any, { headless })).toBe(false);
   });
 });

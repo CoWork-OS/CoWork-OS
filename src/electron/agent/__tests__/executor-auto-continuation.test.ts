@@ -453,3 +453,223 @@ describe("TaskExecutor continuation budgets", () => {
     }
   });
 });
+
+describe("TaskExecutor per-turn token budget", () => {
+  function stubOtherBudgets() {
+    vi.spyOn(GuardrailManager, "isIterationLimitExceeded").mockReturnValue({
+      exceeded: false,
+      iterations: 0,
+      limit: 500,
+    });
+    vi.spyOn(GuardrailManager, "isCostBudgetExceeded").mockReturnValue({
+      exceeded: false,
+      cost: 0,
+      limit: 10,
+      source: "global",
+    });
+  }
+
+  function makeUsageExecutor(overrides: Record<string, unknown> = {}): Any {
+    return makeExecutor({
+      globalTurnCount: 1,
+      maxGlobalTurns: null,
+      lifetimeTurnCount: 10,
+      maxLifetimeTurns: 3000,
+      iterationCount: 1,
+      usageOffsetInputTokens: 2_400_000,
+      usageOffsetOutputTokens: 100_000,
+      totalInputTokens: 40_000,
+      totalOutputTokens: 10_000,
+      usageOffsetCost: 0,
+      totalCost: 0,
+      ...overrides,
+    });
+  }
+
+  it("counts only tokens used since the current user turn started", () => {
+    stubOtherBudgets();
+    const tokenBudgetSpy = vi.spyOn(GuardrailManager, "isTokenBudgetExceeded");
+    try {
+      // 2,550,000 tokens over the whole task, 2,500,000 of them in earlier turns.
+      const executor = makeUsageExecutor({ tokenBudgetTurnStartTokens: 2_500_000 });
+
+      expect(() => executor.checkBudgets()).not.toThrow();
+      expect(tokenBudgetSpy).toHaveBeenCalledWith(
+        50_000,
+        expect.objectContaining({ taskTokensUsed: 2_550_000 }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("still stops a single turn that exceeds the token budget", () => {
+    stubOtherBudgets();
+    try {
+      const executor = makeUsageExecutor({ tokenBudgetTurnStartTokens: 0 });
+      expect(() => executor.checkBudgets()).toThrow(/Token budget exceeded/i);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("starts a new count when a user turn begins and keeps it across continuations", () => {
+    stubOtherBudgets();
+    try {
+      const executor = makeUsageExecutor();
+      expect(() => executor.checkBudgets()).toThrow(/Token budget exceeded/i);
+
+      executor.beginTokenBudgetTurn();
+      expect(executor.tokenBudgetTurnStartTokens).toBe(2_550_000);
+      expect(() => executor.checkBudgets()).not.toThrow();
+
+      // A continuation window folds the window's usage into the offsets; the
+      // turn's count must carry over rather than restart.
+      executor.usageOffsetInputTokens += executor.totalInputTokens + 1_900_000;
+      executor.totalInputTokens = 0;
+      expect(() => executor.checkBudgets()).not.toThrow();
+      executor.totalOutputTokens += 100_000;
+      expect(() => executor.checkBudgets()).toThrow(/Token budget exceeded/i);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("restores the turn start from task events after a restart", () => {
+    const usage = (inputTokens: number, outputTokens: number) => ({
+      type: "llm_usage",
+      payload: { totals: { inputTokens, outputTokens, cost: 0 } },
+    });
+    const events = [
+      { type: "user_message", payload: { message: "first" } },
+      usage(900_000, 100_000),
+      usage(1_800_000, 200_000),
+      { type: "user_message", payload: { message: "second" } },
+      usage(1_900_000, 250_000),
+    ];
+
+    expect((TaskExecutor as Any).tokenBudgetTurnStartFromEvents(events)).toBe(2_000_000);
+    expect((TaskExecutor as Any).tokenBudgetTurnStartFromEvents(events.slice(0, 3))).toBe(0);
+    expect((TaskExecutor as Any).tokenBudgetTurnStartFromEvents([])).toBe(0);
+  });
+});
+
+describe("TaskExecutor iteration limit", () => {
+  function stubBudgetsWithIterationLimit(exceeded: boolean) {
+    vi.spyOn(GuardrailManager, "isIterationLimitExceeded").mockImplementation((iterations) => ({
+      exceeded,
+      iterations,
+      limit: 500,
+    }));
+    vi.spyOn(GuardrailManager, "isTokenBudgetExceeded").mockReturnValue({
+      exceeded: false,
+      used: 0,
+      limit: 2_000_000,
+      source: "global",
+    });
+    vi.spyOn(GuardrailManager, "isCostBudgetExceeded").mockReturnValue({
+      exceeded: false,
+      cost: 0,
+      limit: 10,
+      source: "global",
+    });
+  }
+
+  function captureBudgetError(executor: Any): unknown {
+    try {
+      executor.checkBudgets();
+    } catch (error) {
+      return error;
+    }
+    throw new Error("checkBudgets did not throw");
+  }
+
+  function makeIterationExecutor(overrides: Record<string, unknown> = {}): Any {
+    return makeExecutor({
+      globalTurnCount: 500,
+      maxGlobalTurns: null,
+      iterationCount: 500,
+      lifetimeTurnCount: 500,
+      maxLifetimeTurns: 3000,
+      turnBudgetPolicy: "adaptive_unbounded",
+      turnlessExecutionV4Enabled: true,
+      ...overrides,
+    });
+  }
+
+  it("reports hitting the iteration limit as a turn-window limit", () => {
+    stubBudgetsWithIterationLimit(true);
+    try {
+      const executor = makeIterationExecutor();
+      const error = captureBudgetError(executor);
+
+      expect(String((error as Error).message)).toMatch(/Iteration limit exceeded: 500\/500/);
+      expect((error as Any).code).toBe("TURN_LIMIT_EXCEEDED");
+      expect(executor.isTurnLimitExceededError(error)).toBe(true);
+      expect(executor.isWindowTurnLimitExceededError(error)).toBe(true);
+      expect(executor.isBudgetExhaustionError(error)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("auto-continues after the iteration limit like a turn-window limit", async () => {
+    stubBudgetsWithIterationLimit(true);
+    try {
+      const executor = makeIterationExecutor();
+      const continueAfterBudgetExhausted = vi
+        .spyOn(executor.runtime, "continueAfterBudgetExhausted")
+        .mockResolvedValue(undefined);
+
+      const continued = await executor.maybeAutoContinueAfterTurnLimit(
+        captureBudgetError(executor),
+      );
+
+      expect(continued).toBe(true);
+      expect(executor.continuationCount).toBe(1);
+      expect(continueAfterBudgetExhausted).toHaveBeenCalledWith(
+        "auto",
+        expect.objectContaining({ progressScore: 0.5 }),
+        true,
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("stops at the auto-continuation cap", async () => {
+    stubBudgetsWithIterationLimit(true);
+    try {
+      const executor = makeIterationExecutor({ continuationCount: 3, maxAutoContinuations: 3 });
+      const continueAfterBudgetExhausted = vi.spyOn(
+        executor.runtime,
+        "continueAfterBudgetExhausted",
+      );
+
+      const continued = await executor.maybeAutoContinueAfterTurnLimit(
+        captureBudgetError(executor),
+      );
+
+      expect(continued).toBe(false);
+      expect(continueAfterBudgetExhausted).not.toHaveBeenCalled();
+      expect(executor.emitEvent).toHaveBeenCalledWith(
+        "auto_continuation_blocked",
+        expect.objectContaining({
+          reason: expect.stringContaining("Auto continuation limit reached"),
+        }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("counts the iterations left toward the soft-landing turn budget", () => {
+    stubBudgetsWithIterationLimit(false);
+    try {
+      const executor = makeIterationExecutor({ iterationCount: 497 });
+      expect(executor.getRemainingTurnBudget()).toBe(3);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

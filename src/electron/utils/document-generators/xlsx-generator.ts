@@ -5,6 +5,7 @@
  */
 
 import * as fs from "fs";
+import { normalizeSpreadsheetCell, toPlainSpreadsheetValue } from "./spreadsheet-cells";
 
 interface SheetDefinition {
   name: string;
@@ -43,8 +44,8 @@ export async function generateXLSX(
   for (const sheetDef of options.sheets) {
     const sheet = workbook.addWorksheet(sheetDef.name);
 
-    // Headers
-    const headerRow = sheet.addRow(sheetDef.headers);
+    // Headers: kept as text ("=..." is not a formula here), but never as ExcelJS objects.
+    const headerRow = sheet.addRow(sheetDef.headers.map(toPlainSpreadsheetValue));
     headerRow.eachCell((cell) => {
       cell.fill = {
         type: "pattern",
@@ -64,7 +65,8 @@ export async function generateXLSX(
 
     // Data rows
     for (const rowData of sheetDef.rows) {
-      const row = sheet.addRow(rowData);
+      // "=..." strings become formulas and numeric text becomes numbers (see spreadsheet-cells).
+      const row = sheet.addRow(rowData.map((cell) => normalizeSpreadsheetCell(cell)));
       row.eachCell((cell) => {
         cell.font = { size: 11 };
         cell.alignment = { vertical: "middle" };

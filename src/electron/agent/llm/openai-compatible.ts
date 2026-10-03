@@ -397,8 +397,30 @@ export function mapStopReason(finishReason?: string): LLMResponse["stopReason"] 
     case "tool_calls":
       return "tool_use";
     case "content_filter":
-      return "stop_sequence";
+      return "refusal";
     default:
       return "end_turn";
   }
+}
+
+/** Stop reason for an OpenAI Responses API result (OpenAI and Azure adapters). */
+export function mapResponsesApiStopReason(
+  response: Any,
+  hasToolUse: boolean,
+): LLMResponse["stopReason"] {
+  if (hasToolUse) return "tool_use";
+  const incompleteReason = String(response?.incomplete_details?.reason || "");
+  const refusedInOutput =
+    Array.isArray(response?.output) &&
+    response.output.some(
+      (item: Any) =>
+        item?.type === "message" &&
+        Array.isArray(item.content) &&
+        item.content.some((part: Any) => part?.type === "refusal"),
+    );
+  if (incompleteReason === "content_filter" || refusedInOutput) return "refusal";
+  if (incompleteReason === "max_output_tokens" || response?.status === "incomplete") {
+    return "max_tokens";
+  }
+  return "end_turn";
 }

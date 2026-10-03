@@ -34,6 +34,9 @@ preserving an explicit human decision where policy requires one. Set
 `COWORK_APPROVAL_PROMPTS=on` before launching CoWork only when you need the
 legacy approval queue for diagnostics. Hard denials, administrator policy,
 protected operating-system paths, and `approval: "never"` remain fail-closed.
+Runs with nobody to answer the card (headless mode, `cowork run`, sub-agents,
+bot and channel conversations, scheduled or no-human-input tasks) deny the
+request instead.
 
 Full access is still subject to hard guardrails, protected operating-system
 paths, administrator policy, and explicit export/location/credential consent.
@@ -52,8 +55,8 @@ its reviewer handles only eligible exceptions.
 
 Explicit ask rules, external side effects, protected credentials, and eligible
 filesystem/network boundary crossings remain separate requirements. In an
-interactive task they produce the inline assistant decision card; in an
-automated task with no human-input channel they fail closed. Explicit denials
+interactive task they produce the inline assistant decision card; in a task
+with nobody to answer it they fail closed. Explicit denials
 and custom scope ceilings cannot be overridden by an approval. A bounded profile
 can also use `approval: "never"`: allowed work runs; missing authority is
 reported as a denial, without entering an approval wait. Approval cards and

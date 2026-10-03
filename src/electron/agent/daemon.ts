@@ -87,6 +87,7 @@ import { routeModelWithJev } from "./jev/model-routing";
 import { createDecisionService } from "./decisions";
 import { decideTaskStrategyWithJev } from "./jev/task-strategy-decision";
 import {
+  DEFAULT_WORKSPACE_PERMISSIONS,
   Task,
   ApprovalRequest,
   ApprovalResponseAction,
@@ -182,7 +183,8 @@ import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/ta
 import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
 import { APPROVAL_REQUEST_TIMEOUT_MS } from "./approval-timeouts";
-import { approvalPromptsDisabled } from "./approval-policy";
+import { approvalPromptsDisabled, canAnswerInlineApproval } from "./approval-policy";
+import { isHeadlessMode } from "../utils/runtime-mode";
 import {
   buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
@@ -282,7 +284,7 @@ import {
   deriveReviewGateDecision,
   inferMutationFromSummary,
   resolveEntropySweepPolicy,
-  resolveReviewPolicy,
+  resolveEffectiveReviewPolicy,
   scoreTaskRisk,
 } from "../eval/risk";
 import { buildEntropySweepPrompt, collectBlastRadiusPaths } from "./post-task-entropy-sweep";
@@ -301,6 +303,7 @@ import {
   type ChatInlineFrame,
 } from "../../shared/mailbox";
 import { extractCanonicalTaskImpactMetrics } from "./canonical-task-impact";
+import { getBackgroundProcessManager } from "./tools/background-processes";
 
 export interface AgentDaemonOptions {
   startupRecovery?: boolean;
@@ -673,6 +676,13 @@ function parseSessionRetentionDurationMs(raw: unknown): number | undefined {
   };
   return Math.floor(value * multipliers[unit]);
 }
+
+const INLINE_APPROVAL_UNAVAILABLE_MESSAGE =
+  "Approval denied: nobody can answer an approval card for this task " +
+  "(CLI, headless, sub-agent, automated, or no-human-input task).";
+const INLINE_APPROVAL_TIMEOUT_MESSAGE =
+  "Approval denied: no response to the approval request within " +
+  `${Math.round(APPROVAL_REQUEST_TIMEOUT_MS / 60_000)} minutes.`;
 
 /**
  * AgentDaemon is the core orchestrator that manages task execution
@@ -1494,12 +1504,50 @@ export class AgentDaemon extends EventEmitter {
     return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
   }
 
+  /**
+   * Whether a task's workspace is a code project. Action requests with no
+   * domain cue ("Integrate Stripe checkout") are code tasks there. Temporary
+   * workspaces and paths the access policy does not let us read never count.
+   */
+  private isCodeProjectWorkspace(workspaceId: string | undefined): boolean {
+    if (!workspaceId || isTempWorkspaceId(workspaceId)) return false;
+    try {
+      const workspace = this.workspaceRepo.findById(workspaceId);
+      if (!workspace || workspace.isTemp || !workspace.path) return false;
+      const access = evaluateWorkspaceFilesystemAccess(workspace, workspace.path, "read");
+      if (access.decision !== "allow") return false;
+      const projectMarkers = [
+        ".git",
+        "package.json",
+        "tsconfig.json",
+        "deno.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "setup.py",
+        "Cargo.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "Gemfile",
+        "composer.json",
+        "mix.exs",
+        "CMakeLists.txt",
+        "Makefile",
+      ];
+      return projectMarkers.some((marker) => fs.existsSync(path.join(workspace.path, marker)));
+    } catch {
+      return false;
+    }
+  }
+
   private deriveTaskStrategy(input: {
     title: string;
     prompt: string;
     routingPrompt?: string;
     agentConfig?: AgentConfig;
     lastProgressScore?: number;
+    workspaceId?: string;
   }): {
     route: IntentRoute;
     strategy: DerivedTaskStrategy;
@@ -1523,6 +1571,7 @@ export class AgentDaemon extends EventEmitter {
       title: input.title,
       prompt: input.prompt,
       lastProgressScore: input.lastProgressScore,
+      isCodeProjectWorkspace: () => this.isCodeProjectWorkspace(input.workspaceId),
     });
     const agentConfig = TaskStrategyService.applyToAgentConfig(input.agentConfig, strategy);
     const hasExplicitModelOverride =
@@ -1619,25 +1668,12 @@ export class AgentDaemon extends EventEmitter {
       routingPrompt: task.rawPrompt || task.userPrompt || task.prompt,
       agentConfig: task.agentConfig,
       lastProgressScore: task.lastProgressScore,
+      workspaceId: task.workspaceId,
     });
-    let nextAgentConfig = derived.agentConfig;
-    let agentConfigChanged = derived.agentConfigChanged;
-
-    // Reliability default: optionally auto-enable balanced review policy for code/operations tasks.
-    // This stays opt-in to preserve backward compatibility.
-    const autoReviewPolicyEnabled = parseBooleanEnv("COWORK_REVIEW_POLICY_ENABLE_AUTO", false);
-    if (autoReviewPolicyEnabled && !nextAgentConfig.reviewPolicy) {
-      if (derived.strategy.taskDomain === "code" || derived.strategy.taskDomain === "operations") {
-        const configured = (process.env.COWORK_REVIEW_POLICY_AUTO_DEFAULT || "balanced")
-          .trim()
-          .toLowerCase();
-        nextAgentConfig = {
-          ...nextAgentConfig,
-          reviewPolicy: configured === "strict" ? "strict" : "balanced",
-        };
-        agentConfigChanged = true;
-      }
-    }
+    const nextAgentConfig = derived.agentConfig;
+    const agentConfigChanged = derived.agentConfigChanged;
+    // The automatic review for high-risk code/operations tasks is resolved at
+    // completion (resolveEffectiveReviewPolicy), once the risk is known.
 
     if (task.strategyLock) {
       return {
@@ -4339,6 +4375,7 @@ export class AgentDaemon extends EventEmitter {
       prompt: params.prompt,
       routingPrompt: params.prompt,
       agentConfig: taskAgentConfig,
+      workspaceId: params.workspaceId,
     });
     const isCronTask = params.source === "cron";
     const cronBudgetProfile = isCronTask
@@ -6154,6 +6191,14 @@ export class AgentDaemon extends EventEmitter {
     if (!existing) {
       throw new Error(`Task ${taskId} not found`);
     }
+    // Background processes (run_command background: true) outlive a finished
+    // turn so follow-ups can use them; cancelling or deleting the task, even a
+    // completed one whose executor is gone, stops them.
+    await getBackgroundProcessManager()
+      .stopAllForTask(taskId, "task_cancelled")
+      .catch((error) =>
+        log.error(`[cancel] Stopping background processes failed for ${taskId}:`, error),
+      );
     // Don't clobber terminal states.
     if (
       existing.status === "completed" ||
@@ -7489,34 +7534,68 @@ export class AgentDaemon extends EventEmitter {
       throw new Error("Approval request cancelled because tool execution ended");
     }
 
+    const storedTask = this.taskRepo.findById(taskId);
+    const task =
+      typeof (this as Any).getTaskWithTransientAgentConfig === "function"
+        ? this.getTaskWithTransientAgentConfig(storedTask)
+        : storedTask;
+    if (!canAnswerInlineApproval(task, { headless: isHeadlessMode() })) {
+      runtime?.recordPermissionDenial?.(trackingKey);
+      this.logEvent(taskId, "log", {
+        type: "tool_authorization",
+        decision: "deny",
+        reason: "interactive_approval_unavailable",
+        approvalType: type,
+        message: INLINE_APPROVAL_UNAVAILABLE_MESSAGE,
+      });
+      return false;
+    }
+
     this.logEvent(taskId, "assistant_message", {
       message: buildAssistantApprovalMessage(type, description, details),
       source: "assistant_approval_request",
       approvalType: type,
     });
 
+    const dismissPendingCard: AgentDaemon["dismissPendingAssistantApproval"] =
+      typeof (this as Any).dismissPendingAssistantApproval === "function"
+        ? (this as Any).dismissPendingAssistantApproval
+        : AgentDaemon.prototype["dismissPendingAssistantApproval"];
     let abortListener: (() => void) | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
       const inputRequester =
         typeof (this as Any).requestUserInput === "function"
           ? (this as Any).requestUserInput
           : AgentDaemon.prototype.requestUserInput;
-      const responsePromise = inputRequester.call(
+      const responsePromise: Promise<InputRequestResponse> = inputRequester.call(
         this,
         taskId,
         buildAssistantApprovalRequest(type, description, details),
       );
-      const response = signal
-        ? await Promise.race([
-            responsePromise,
-            new Promise<never>((_, reject) => {
-              abortListener = () =>
-                reject(new Error("Approval request cancelled because tool execution ended"));
-              signal.addEventListener("abort", abortListener, { once: true });
-              if (signal.aborted) abortListener();
-            }),
-          ])
-        : await responsePromise;
+      // An unanswered card must not block the tool forever. It times out like
+      // a queued approval and resolves as a denial.
+      const waiters: Promise<InputRequestResponse>[] = [
+        responsePromise,
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            reject(new Error(INLINE_APPROVAL_TIMEOUT_MESSAGE));
+          }, APPROVAL_REQUEST_TIMEOUT_MS);
+        }),
+      ];
+      if (signal) {
+        waiters.push(
+          new Promise<never>((_, reject) => {
+            abortListener = () =>
+              reject(new Error("Approval request cancelled because tool execution ended"));
+            signal.addEventListener("abort", abortListener, { once: true });
+            if (signal.aborted) abortListener();
+          }),
+        );
+      }
+      const response = await Promise.race(waiters);
       if (signal?.aborted) {
         throw new Error("Approval request cancelled because tool execution ended");
       }
@@ -7542,26 +7621,33 @@ export class AgentDaemon extends EventEmitter {
       }
       return approved;
     } catch (error) {
-      if (signal?.aborted) {
-        const pending =
-          typeof (this.inputRequestRepo as Any)?.findPendingByTaskId === "function"
-            ? (await this.inputRequestRepo.findPendingByTaskId(taskId))[0]
-            : undefined;
-        if (pending) {
-          if (typeof (this.inputRequestRepo as Any)?.resolve === "function") {
-            await this.inputRequestRepo.resolve(pending.id, "dismissed");
-          }
-          const pendingWait = this.pendingInputRequests?.get(pending.id);
-          if (pendingWait && !pendingWait.resolved) {
-            pendingWait.resolved = true;
-            this.pendingInputRequests.delete(pending.id);
-            pendingWait.reject(error);
-          }
-          this.logEvent(taskId, "input_request_dismissed", {
-            requestId: pending.id,
-            reason: "tool_execution_cancelled",
+      if (timedOut && !signal?.aborted) {
+        await dismissPendingCard.call(this, taskId, error, "approval_timeout");
+        runtime?.recordPermissionDenial?.(trackingKey);
+        const currentTask = this.taskRepo.findById(taskId);
+        if (currentTask && !isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask))) {
+          // The tool continues with the denial, so the task is running again.
+          this.updateTask(taskId, {
+            status: "executing",
+            terminalStatus: undefined,
+            failureClass: undefined,
           });
         }
+        this.logEvent(taskId, "assistant_message", {
+          message: INLINE_APPROVAL_TIMEOUT_MESSAGE,
+          source: "assistant_approval_timeout",
+          approvalType: type,
+        });
+        this.logEvent(taskId, "approval_denied", {
+          assistantInput: true,
+          approvalType: type,
+          reason: "timeout",
+          message: INLINE_APPROVAL_TIMEOUT_MESSAGE,
+        });
+        return false;
+      }
+      if (signal?.aborted) {
+        await dismissPendingCard.call(this, taskId, error, "tool_execution_cancelled");
         throw error;
       }
       const errorMessage = String((error as Any)?.message || error || "");
@@ -7576,8 +7662,32 @@ export class AgentDaemon extends EventEmitter {
       });
       return false;
     } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       if (abortListener && signal) signal.removeEventListener("abort", abortListener);
     }
+  }
+
+  /** Dismiss the task's open approval card and release its waiter. */
+  private async dismissPendingAssistantApproval(
+    taskId: string,
+    error: unknown,
+    reason: string,
+  ): Promise<void> {
+    const pending =
+      typeof (this.inputRequestRepo as Any)?.findPendingByTaskId === "function"
+        ? (await this.inputRequestRepo.findPendingByTaskId(taskId))[0]
+        : undefined;
+    if (!pending) return;
+    if (typeof (this.inputRequestRepo as Any)?.resolve === "function") {
+      await this.inputRequestRepo.resolve(pending.id, "dismissed");
+    }
+    const pendingWait = this.pendingInputRequests?.get(pending.id);
+    if (pendingWait && !pendingWait.resolved) {
+      pendingWait.resolved = true;
+      this.pendingInputRequests.delete(pending.id);
+      pendingWait.reject(error);
+    }
+    this.logEvent(taskId, "input_request_dismissed", { requestId: pending.id, reason });
   }
 
   async requestApproval(
@@ -7752,54 +7862,17 @@ export class AgentDaemon extends EventEmitter {
       return false;
     }
 
-    // Any decision that remains `ask` is delivered as an inline assistant/task
-    // question when popup approvals are disabled. A permission that evaluated
-    // to `allow` already returned above; hard denies returned below. Keeping
-    // this branch at the final ask boundary means network, credentials,
-    // exports, MCP, and external-file requests all share the same no-popup
-    // response path.
-    if (
-      approvalPromptsDisabled() &&
-      (permission.evaluation.decision === "ask" ||
-        !allowAutoApprove ||
-        shouldUseAssistantApprovalInput(type, enrichedDetails, {
-          allowAutoApprove,
-          requireExplicitApproval: opts?.requireExplicitApproval,
-        }))
-    ) {
-      if (isAutomatedTaskLike(task) || task?.agentConfig?.humanInputPolicy === "none") {
-        this.logEvent(taskId, "log", {
-          type: "tool_authorization",
-          decision: "deny",
-          reason: "interactive_approval_unavailable",
-          approvalType: type,
-        });
-        return false;
-      }
-
-      const assistantRequester =
-        typeof (this as Any).requestAssistantApproval === "function"
-          ? (this as Any).requestAssistantApproval
-          : AgentDaemon.prototype.requestAssistantApproval;
-      const approved = await assistantRequester.call(
-        this,
-        taskId,
-        type,
-        description,
-        permissionDetails,
-        permission.runtime,
-        permission.trackingKey,
-        opts?.signal,
-      );
-      if (approved && type === "external_file_access") {
-        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
-      }
-      return approved;
-    }
-
     const explicitProfileSelected = typeof task?.agentConfig?.accessProfileId === "string";
+    // The automatic safety review is the profile's own reviewer, so it decides
+    // before any human surface: the inline card (legacy queue off) or the
+    // queued approval. It only ever approves narrow safe reads (see
+    // `canAutoReviewApprove`); everything else escalates. With the legacy queue
+    // off only a profile that documents `reviewer: "auto-review"` (Approve for
+    // me) gets it; the queue keeps its historical eligibility for profile-less
+    // tasks. An explicit consent requirement is never satisfied by the review.
     const autoReviewEnabledForProfile =
-      accessProfile.definition.reviewer === "auto-review" || !explicitProfileSelected;
+      accessProfile.definition.reviewer === "auto-review" ||
+      (!explicitProfileSelected && !approvalPromptsDisabled());
     const autoReviewProfile =
       explicitProfileSelected ||
       (accessProfile.definition.domainRules?.length || 0) > 0 ||
@@ -7807,7 +7880,7 @@ export class AgentDaemon extends EventEmitter {
         ? accessProfile
         : undefined;
     const autoReview =
-      allowAutoApprove && autoReviewEnabledForProfile
+      allowAutoApprove && !opts?.requireExplicitApproval && autoReviewEnabledForProfile
         ? this.canAutoReviewApprove(
             taskId,
             type as ApprovalType | undefined,
@@ -7875,6 +7948,78 @@ export class AgentDaemon extends EventEmitter {
         permissionReason: permission.evaluation.reason,
       });
       return true;
+    }
+
+    // Any decision that remains `ask` is delivered as an inline assistant/task
+    // question when popup approvals are disabled. A permission that evaluated
+    // to `allow` already returned above; hard denies returned below. Keeping
+    // this branch at the final ask boundary means network, credentials,
+    // exports, MCP, and external-file requests all share the same no-popup
+    // response path.
+    if (
+      approvalPromptsDisabled() &&
+      (permission.evaluation.decision === "ask" ||
+        !allowAutoApprove ||
+        shouldUseAssistantApprovalInput(type, enrichedDetails, {
+          allowAutoApprove,
+          requireExplicitApproval: opts?.requireExplicitApproval,
+        }))
+    ) {
+      // Tool-internal asks (e.g. run_command's own approval) reach this point
+      // after the tool policy pipeline already allowed the call, so check the
+      // same answerability rule here. Nobody answers the card in `cowork run`,
+      // headless, sub-agent, bot, automated or no-human-input tasks; waiting
+      // on it would hang the task.
+      if (!canAnswerInlineApproval(task, { headless: isHeadlessMode() })) {
+        permission.runtime?.recordPermissionDenial(permission.trackingKey);
+        this.logEvent(taskId, "log", {
+          type: "tool_authorization",
+          decision: "deny",
+          reason: "interactive_approval_unavailable",
+          approvalType: type,
+          message: INLINE_APPROVAL_UNAVAILABLE_MESSAGE,
+        });
+        return false;
+      }
+
+      const assistantRequester =
+        typeof (this as Any).requestAssistantApproval === "function"
+          ? (this as Any).requestAssistantApproval
+          : AgentDaemon.prototype.requestAssistantApproval;
+      const approved = await assistantRequester.call(
+        this,
+        taskId,
+        type,
+        description,
+        permissionDetails,
+        permission.runtime,
+        permission.trackingKey,
+        opts?.signal,
+      );
+      // The card can stay open for up to the approval timeout. Like a queued
+      // approval, an "Allow once" answer only counts if the operation identity
+      // and the task's authority are unchanged since the card was raised.
+      if (
+        approved &&
+        typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+        !(await this.isApprovalAuthorityCurrent({
+          taskId,
+          type,
+          details: permissionDetails,
+        } as ApprovalRequest))
+      ) {
+        permission.runtime?.recordPermissionDenial(permission.trackingKey);
+        this.logEvent(taskId, "approval_denied", {
+          assistantInput: true,
+          approvalType: type,
+          reason: "approval_authority_changed",
+        });
+        return false;
+      }
+      if (approved && type === "external_file_access") {
+        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+      }
+      return approved;
     }
 
     if (isAutomatedTaskLike(task) || task?.agentConfig?.humanInputPolicy === "none") {
@@ -12208,13 +12353,7 @@ export class AgentDaemon extends EventEmitter {
    * Create a new workspace with default permissions
    */
   createWorkspace(name: string, path: string): Workspace {
-    const defaultPermissions: WorkspacePermissions = {
-      read: true,
-      write: true,
-      delete: false,
-      network: true,
-      shell: false,
-    };
+    const defaultPermissions: WorkspacePermissions = { ...DEFAULT_WORKSPACE_PERMISSIONS };
     return this.workspaceRepo.create(name, path, defaultPermissions);
   }
 
@@ -13191,7 +13330,9 @@ export class AgentDaemon extends EventEmitter {
       message:
         result.verdict === "PASS"
           ? "Post-completion verifier confirmed deliverables."
-          : "Post-completion verifier found issues.",
+          : result.incomplete
+            ? "Post-completion verifier did not complete; the result is unverified."
+            : "Post-completion verifier found issues.",
       report: result.report.slice(0, 2000),
       verificationVerdict: result.verdict,
     });
@@ -13975,7 +14116,11 @@ export class AgentDaemon extends EventEmitter {
       historicalEvents,
       metadata?.outputSummary,
     );
-    const reviewPolicy = resolveReviewPolicy(existingTask.agentConfig?.reviewPolicy);
+    const { policy: reviewPolicy, source: reviewPolicySource } = resolveEffectiveReviewPolicy({
+      requestedPolicy: existingTask.agentConfig?.reviewPolicy,
+      taskDomain: existingTask.agentConfig?.taskDomain,
+      riskLevel: risk.level,
+    });
     const reviewDecision = deriveReviewGateDecision({
       policy: reviewPolicy,
       riskLevel: risk.level,
@@ -14358,9 +14503,10 @@ export class AgentDaemon extends EventEmitter {
       });
     }
 
+    // The automatic high-risk review adds a verifier, not a post-task sweep.
     const entropyPolicy = resolveEntropySweepPolicy(
       existingTask.agentConfig?.entropySweepPolicy,
-      reviewPolicy,
+      reviewPolicySource === "auto" ? "off" : reviewPolicy,
     );
     const entropyDecision = deriveEntropySweepDecision({
       policy: entropyPolicy,
@@ -17332,6 +17478,14 @@ export class AgentDaemon extends EventEmitter {
       ]);
     } finally {
       if (cancellationTimer) clearTimeout(cancellationTimer);
+    }
+
+    // Background processes of tasks whose executor was already evicted have no
+    // executor to cancel; stop whatever is left.
+    try {
+      await getBackgroundProcessManager().stopAll("app_shutdown");
+    } catch (error) {
+      log.error("Failed to stop background processes on shutdown:", error);
     }
 
     // Commit rows the worker has not written, then project what the shutdown logged;

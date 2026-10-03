@@ -20,6 +20,18 @@ import {
   normalizeSystemBlocks,
 } from "./prompt-cache";
 import { isOpenCodeGoBaseUrl, normalizeOpenCodeGoModelId } from "./opencode-go-routing";
+import { ensureNoTrailingAssistantPrefill } from "./assistant-prefill";
+import {
+  anthropicReasoningFromResponse,
+  anthropicThinkingPrefixSeed,
+  applyAnthropicThinkingReplay,
+  classifyAnthropicThinkingRejection,
+  planAnthropicThinking,
+  trailingToolTurnStartsWithThinking,
+} from "./anthropic-thinking";
+import { createLogger } from "../../utils/logger";
+
+const logger = createLogger("AnthropicCompatible");
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -82,6 +94,18 @@ export interface AnthropicCompatibleProviderOptions {
   apiKey: string;
   baseUrl: string;
   defaultModel: string;
+  /**
+   * Send Anthropic thinking/effort parameters for recognised Claude models. Only
+   * for endpoints that serve Anthropic's own models (Azure Anthropic); thinking
+   * blocks returned by any endpoint are replayed regardless.
+   */
+  sendThinkingConfig?: boolean;
+  reasoningEffort?: string;
+}
+
+interface ThinkingRequestOptions {
+  replay: boolean;
+  sendConfig: boolean;
 }
 
 export class AnthropicCompatibleProvider implements LLMProvider {
@@ -93,6 +117,10 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   private providerName: string;
   private promptCacheAutoSupported = true;
   private managedPromptCacheSupported = true;
+  private readonly sendThinkingConfig: boolean;
+  private readonly reasoningEffort?: string;
+  /** Models whose endpoint rejected thinking/effort parameters (sticky per instance). */
+  private readonly thinkingConfigRejectedModels = new Set<string>();
 
   constructor(options: AnthropicCompatibleProviderOptions) {
     this.type = options.type;
@@ -102,6 +130,8 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     this.defaultModel = options.defaultModel;
     this.providerName = options.providerName;
     this.managedPromptCacheSupported = !isNanoGptBaseUrl(options.baseUrl);
+    this.sendThinkingConfig = options.sendThinkingConfig === true;
+    this.reasoningEffort = options.reasoningEffort;
   }
 
   private normalizeModelForEndpoint(model: string): string {
@@ -115,8 +145,11 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
     const model = this.normalizeModelForEndpoint(request.model || this.defaultModel);
-    const normalizedMessages = assertNormalizedTurnTranscript(request.messages, (message) =>
-      console.warn(`[${this.providerName}] ${message}`),
+    const normalizedMessages = ensureNoTrailingAssistantPrefill(
+      assertNormalizedTurnTranscript(request.messages, (message) =>
+        console.warn(`[${this.providerName}] ${message}`),
+      ),
+      model,
     );
     const requestedPromptCache =
       request.promptCache?.mode === "disabled" || !this.managedPromptCacheSupported
@@ -127,6 +160,11 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         ? { ...requestedPromptCache, mode: "anthropic_explicit" as const }
         : requestedPromptCache;
 
+    const thinking: ThinkingRequestOptions = {
+      replay: true,
+      sendConfig: this.sendThinkingConfig && !this.thinkingConfigRejectedModels.has(model),
+    };
+
     try {
       console.log(`[${this.providerName}] Calling API with model: ${model}`);
       return await this.sendRequest({
@@ -135,11 +173,33 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         tools,
         model,
         promptCache: effectivePromptCache,
+        thinking,
       });
     } catch (error: Any) {
       if (error.name === "AbortError" || error.message?.includes("aborted")) {
         console.log(`[${this.providerName}] Request aborted`);
         throw new Error("Request cancelled");
+      }
+
+      // A thinking block or parameter the endpoint rejects: retry once without them.
+      const rejection = classifyAnthropicThinkingRejection(
+        error?.status,
+        error?.providerMessage || error?.message || "",
+      );
+      if (rejection && error?.usedThinking === true) {
+        logger.warn(
+          `${this.providerName} rejected thinking; retrying without thinking blocks or parameters`,
+          { model, status: error?.status, reason: rejection },
+        );
+        if (rejection === "config") this.thinkingConfigRejectedModels.add(model);
+        return await this.sendRequest({
+          request,
+          normalizedMessages,
+          tools,
+          model,
+          promptCache: effectivePromptCache,
+          thinking: { replay: false, sendConfig: false },
+        });
       }
 
       if (
@@ -158,6 +218,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
           tools,
           model,
           promptCache: undefined,
+          thinking,
         });
       }
 
@@ -323,8 +384,38 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     tools: Array<{ name: string; description: string; input_schema: Any }> | undefined;
     model: string;
     promptCache: LLMRequest["promptCache"] | undefined;
+    thinking: ThinkingRequestOptions;
   }): Promise<LLMResponse> {
-    const messages = this.buildMessagesPayload(args.normalizedMessages, args.promptCache);
+    const systemTexts = normalizeSystemBlocks(args.request.system, args.request.systemBlocks).map(
+      (block) => block.text,
+    );
+    const replay = applyAnthropicThinkingReplay({
+      messages: args.normalizedMessages,
+      converted: this.convertMessages(args.normalizedMessages),
+      model: args.model,
+      provider: this.type,
+      seed: anthropicThinkingPrefixSeed(
+        systemTexts.length > 0 ? systemTexts : [args.request.system],
+        args.tools,
+      ),
+      replay: args.thinking.replay,
+    });
+    let plan = args.thinking.sendConfig
+      ? planAnthropicThinking({
+          model: args.model,
+          maxTokens: args.request.maxTokens,
+          effort: args.request.reasoningEffort || this.reasoningEffort,
+        })
+      : { maxTokens: args.request.maxTokens };
+    if (plan.thinking?.type === "enabled" && !trailingToolTurnStartsWithThinking(replay.messages)) {
+      // Budget-mode thinking needs the tool-calling turn to start with its thinking.
+      plan = {
+        ...(plan.outputConfig ? { outputConfig: plan.outputConfig } : {}),
+        maxTokens: args.request.maxTokens,
+      };
+    }
+    const usedThinking = replay.replayedBlocks > 0 || Boolean(plan.thinking || plan.outputConfig);
+    const messages = this.buildMessagesPayload(replay.messages, args.promptCache);
     const response = await fetch(this.messagesUrl, {
       method: "POST",
       headers: {
@@ -339,10 +430,12 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       },
       body: JSON.stringify({
         model: args.model,
-        max_tokens: args.request.maxTokens,
+        max_tokens: plan.maxTokens,
         system: this.buildSystemPayload(args.request, args.promptCache),
         messages,
         ...(args.tools && { tools: args.tools }),
+        ...(plan.thinking && { thinking: plan.thinking }),
+        ...(plan.outputConfig && { output_config: plan.outputConfig }),
         ...(args.promptCache?.mode === "anthropic_auto"
           ? { cache_control: buildAnthropicCacheMarker(args.promptCache.ttl) }
           : {}),
@@ -378,11 +471,12 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       error.status = response.status;
       error.providerMessage = providerMessage || undefined;
       error.errorData = errorData;
+      (error as LLMProviderError & { usedThinking?: boolean }).usedThinking = usedThinking;
       throw error;
     }
 
     const data = (await response.json()) as Any;
-    return this.convertResponse(data);
+    return this.convertResponse(data, { model: args.model, prefixHash: replay.prefixHash });
   }
 
   private buildSystemPayload(
@@ -409,10 +503,9 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   }
 
   private buildMessagesPayload(
-    messages: LLMMessage[],
+    converted: Array<{ role: string; content: Any }>,
     promptCache: LLMRequest["promptCache"] | undefined,
   ): Array<{ role: string; content: Any }> {
-    const converted = this.convertMessages(messages);
     if (promptCache?.mode !== "anthropic_explicit") {
       return converted;
     }
@@ -435,7 +528,10 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     }));
   }
 
-  private convertResponse(response: Any): LLMResponse {
+  private convertResponse(
+    response: Any,
+    produced: { model: string; prefixHash: string },
+  ): LLMResponse {
     const content: LLMContent[] = (response.content || [])
       .filter((block: Any) => block.type === "text" || block.type === "tool_use")
       .map((block: Any) => {
@@ -453,8 +549,20 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         };
       });
 
+    const visibleContent: LLMContent[] =
+      content.length > 0 ? content : [{ type: "text", text: "" }];
+    const reasoning = anthropicReasoningFromResponse({
+      content: response.content,
+      visibleContent: this.convertMessages([{ role: "assistant", content: visibleContent }])[0]
+        ?.content,
+      model: produced.model,
+      provider: this.type,
+      prefixHash: produced.prefixHash,
+    });
+
     return {
-      content: content.length > 0 ? content : [{ type: "text", text: "" }],
+      content: visibleContent,
+      ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason: this.mapStopReason(response.stop_reason),
       usage: extractAnthropicUsage(response.usage),
     };
@@ -470,6 +578,13 @@ export class AnthropicCompatibleProvider implements LLMProvider {
         return "max_tokens";
       case "stop_sequence":
         return "stop_sequence";
+      case "refusal":
+        return "refusal";
+      // The context window, not max_tokens, cut the answer off: recover like a truncation.
+      case "model_context_window_exceeded":
+      // A resumable server-side pause: continue the turn like a truncated one.
+      case "pause_turn":
+        return "max_tokens";
       default:
         return "end_turn";
     }

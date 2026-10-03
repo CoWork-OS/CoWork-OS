@@ -61,6 +61,7 @@ const READ_PARALLEL_TOOLS = new Set([
   "browser_screenshot",
   "browser_wait",
   "screen_context_resolve",
+  "process_output",
 ]);
 
 const EXCLUSIVE_TOOLS = new Set([
@@ -71,6 +72,7 @@ const EXCLUSIVE_TOOLS = new Set([
   "rename_file",
   "copy_file",
   "run_command",
+  "stop_process",
   "run_applescript",
   "spawn_agent",
   "orchestrate_agents",
@@ -173,6 +175,9 @@ const ALWAYS_EXPOSE_TOOLS = new Set([
   "web_search",
   "http_request",
   "run_command",
+  // Background process control, offered together with run_command.
+  "process_output",
+  "stop_process",
   "write_file",
   "edit_file",
   "create_directory",
@@ -209,7 +214,14 @@ function inferCapabilityTags(toolName: string): RuntimeToolCapabilityTag[] {
   const exposure = getToolExposureMetadata(toolName);
   tags.add(exposure.lane as RuntimeToolCapabilityTag);
   if (toolName.startsWith("mcp_")) tags.add("mcp");
-  if (toolName === "run_command" || toolName === "execute_code") tags.add("shell");
+  if (
+    toolName === "run_command" ||
+    toolName === "execute_code" ||
+    toolName === "process_output" ||
+    toolName === "stop_process"
+  ) {
+    tags.add("shell");
+  }
   if (toolName.startsWith("browser_")) tags.add("browser");
   if (toolName.startsWith("canvas_")) tags.add("artifact");
   if (toolName.endsWith("_action")) tags.add("integration");
@@ -308,7 +320,9 @@ function inferSideEffectLevel(toolName: string, readOnly: boolean): RuntimeToolS
 }
 
 function inferResultKind(toolName: string): RuntimeToolResultKind {
-  if (toolName === "run_command") return "command";
+  if (toolName === "run_command" || toolName === "process_output" || toolName === "stop_process") {
+    return "command";
+  }
   if (toolName.startsWith("browser_")) return "browser";
   if (toolName.endsWith("_action") || toolName.startsWith("mcp_")) return "integration";
   if (

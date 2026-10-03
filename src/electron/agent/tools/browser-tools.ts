@@ -4,7 +4,12 @@ import * as path from "path";
 import { createHash } from "node:crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
-import { BrowserService } from "../browser/browser-service";
+import {
+  BROWSER_DOWNLOADS_DIR,
+  BrowserService,
+  paginatePageText,
+  type PageContentOptions,
+} from "../browser/browser-service";
 import {
   BrowserUseApiError,
   BrowserUseCloudClient,
@@ -62,6 +67,51 @@ function getWhatsAppCompatibilityIssue(content: { url?: string; title?: string; 
       "If browser access is explicitly required, attach a supported signed-in Chrome session with browser_attach.",
     ],
   };
+}
+
+const BROWSER_ACTION_EVENT_FIELDS = [
+  "dialog",
+  "dialogs",
+  "switchedToTab",
+  "newTabs",
+  "activeTabClosed",
+  "dialogDecisionExpired",
+  "downloads",
+] as const;
+
+/** Side effects a headless action reported (dialogs, popups, closed tabs), for batch steps. */
+function pickBrowserActionEvents(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== "object") return {};
+  const source = result as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const field of BROWSER_ACTION_EVENT_FIELDS) {
+    if (source[field] !== undefined) picked[field] = source[field];
+  }
+  return picked;
+}
+
+/** A confirm/prompt/beforeunload that was dismissed, i.e. the page's action was cancelled. */
+function findDismissedBlockingDialog(
+  result: unknown,
+): { type: string; message: string; action: string } | null {
+  if (!result || typeof result !== "object") return null;
+  const source = result as { dialog?: unknown; dialogs?: unknown };
+  const dialogs = Array.isArray(source.dialogs) ? source.dialogs : [source.dialog];
+  for (const dialog of dialogs) {
+    if (!dialog || typeof dialog !== "object") continue;
+    const entry = dialog as { type?: unknown; message?: unknown; action?: unknown };
+    if (
+      entry.action === "dismissed" &&
+      (entry.type === "confirm" || entry.type === "prompt" || entry.type === "beforeunload")
+    ) {
+      return {
+        type: String(entry.type),
+        message: String(entry.message ?? ""),
+        action: "dismissed",
+      };
+    }
+  }
+  return null;
 }
 
 interface BrowserUseCloudSessionState {
@@ -139,6 +189,21 @@ export class BrowserTools {
       return Math.round(rawTimeout);
     }
     return undefined;
+  }
+
+  private getPageContentOptions(input: unknown): PageContentOptions {
+    const toolInput = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    const options: PageContentOptions = {};
+    if (typeof toolInput.offset === "number" && Number.isFinite(toolInput.offset)) {
+      options.offset = toolInput.offset;
+    }
+    if (typeof toolInput.max_chars === "number" && Number.isFinite(toolInput.max_chars)) {
+      options.maxChars = toolInput.max_chars;
+    }
+    if (toolInput.scope === "page" || toolInput.scope === "auto") {
+      options.scope = toolInput.scope;
+    }
+    return options;
   }
 
   private getSessionId(input: unknown): string | undefined {
@@ -269,6 +334,15 @@ export class BrowserTools {
       : 0;
     if (prefixLength <= 0) return null;
     return actions.slice(0, prefixLength);
+  }
+
+  private headlessDiagnosticsSummary(): { consoleSummary: Any; networkSummary: Any } {
+    try {
+      const summary = this.browserService.getDiagnosticsSummary();
+      return { consoleSummary: summary.console, networkSummary: summary.network };
+    } catch {
+      return { consoleSummary: { count: 0, recent: [] }, networkSummary: { count: 0, recent: [] } };
+    }
   }
 
   private syncVisibleAccessPolicy(input?: unknown): void {
@@ -921,15 +995,10 @@ export class BrowserTools {
       {
         name: "browser_navigate",
         description:
-          "Navigate the browser to a URL. By default, CoWork uses background/headless browser control unless settings or the tool input request a visible workbench. " +
-          "If a visible workbench session already exists, continue using it even when profile/browser_channel options are supplied. " +
-          "Optional: set visible=true or browser_surface='visible' when the user wants to watch or interact with the shared browser. " +
-          "Optional: set force_headless=true or browser_surface='headless' when the user explicitly asks for background/headless Playwright. " +
-          "Optional: set profile to use a Playwright browser profile or external signed-in Chrome fallback (not the embedded workbench). " +
-          'Optional: set browser_channel to "chrome" (system Google Chrome) or "brave" (system Brave); default is bundled Chromium. ' +
-          "NOTE: For RESEARCH tasks (finding news, trends, discussions), use web_search instead - it aggregates results from multiple sources. " +
-          "For simply reading a specific URL, use web_fetch - it is faster and lighter. " +
-          "Use browser_navigate ONLY when you need to interact with the page (click, fill forms, take screenshots) or when the page requires JavaScript rendering.",
+          "Navigate the browser to a URL. Routing follows the Browser automation setting: background mode (the default) uses a headless browser; " +
+          "visible mode uses the in-app browser workbench, and an already-open workbench session is always reused. " +
+          "Use web_search for research and web_fetch to simply read a URL; use browser_navigate when you must interact " +
+          "(click, fill, screenshots) or need JavaScript rendering.",
         input_schema: {
           type: "object" as const,
           properties: browserNavigateProperties,
@@ -978,10 +1047,31 @@ export class BrowserTools {
       {
         name: "browser_snapshot",
         description:
-          "Get a compact accessibility snapshot of the current browser tab. Prefer refs from this snapshot for browser_click, browser_fill, browser_type, browser_get_text, browser_hover, browser_drag, and browser_upload_file.",
+          "Get a compact accessibility snapshot of the current browser tab. Prefer refs from this snapshot over CSS selectors for browser_click, browser_fill, browser_type, browser_get_text, browser_hover, browser_drag, and browser_upload_file. " +
+          "Work in an observe -> act -> verify loop: snapshot, act on a ref, then snapshot again after any action that can change the page (navigation, submit, opening a menu or dialog) to confirm the effect and get fresh refs; refs from before a navigation are rejected as stale. " +
+          "When truncated is true, page with offset=nextOffset or narrow with interactive_only/query.",
         input_schema: {
           type: "object" as const,
           properties: {
+            offset: {
+              type: "number",
+              description:
+                "Visible workbench: skip this many nodes (pass nextOffset from a truncated snapshot). Default 0",
+            },
+            limit: {
+              type: "number",
+              description: "Visible workbench: maximum nodes to return (default 140, max 400).",
+            },
+            interactive_only: {
+              type: "boolean",
+              description:
+                "Visible workbench: only return buttons, links, fields and other controls.",
+            },
+            query: {
+              type: "string",
+              description:
+                "Visible workbench: only return nodes whose name or value contains this text (case-insensitive).",
+            },
             session_id: {
               type: "string",
               description: "Optional visible in-app browser workbench session id.",
@@ -991,7 +1081,11 @@ export class BrowserTools {
       },
       {
         name: "browser_tabs",
-        description: "List tabs for the active browser session",
+        description:
+          "List tabs for the active browser session. In the headless browser, pages the site opens " +
+          "(popups, target=_blank links, OAuth sign-in windows) become separate tabs: an action that " +
+          "opens one switches to it and reports switchedToTab, and a popup that closes itself returns " +
+          "control to the page that opened it (reported as activeTabClosed).",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1004,7 +1098,9 @@ export class BrowserTools {
       },
       {
         name: "browser_switch_tab",
-        description: "Switch to a browser tab by tab id",
+        description:
+          "Switch to a browser tab by tab id from browser_tabs, e.g. to return to the original page " +
+          "after a popup or to continue in a page opened with target=_blank.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1019,7 +1115,9 @@ export class BrowserTools {
       },
       {
         name: "browser_close_tab",
-        description: "Close a browser tab by tab id",
+        description:
+          "Close a headless browser tab by tab id from browser_tabs (e.g. a finished popup); later " +
+          "actions target the tab that opened it. The visible workbench tab cannot be closed here.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1035,13 +1133,28 @@ export class BrowserTools {
       {
         name: "browser_get_content",
         description:
-          "Get the text content, links, and forms from the current page. " +
-          "NOTE: For RESEARCH tasks, use web_search first - it is more efficient for finding information across multiple sources. " +
-          "If you just need to read a specific URL, use web_fetch - it is faster and does not require opening a browser. " +
-          "Use this only after browser_navigate when you need JavaScript-rendered content or to inspect forms/links for interaction.",
+          "Get the rendered text, links, forms, and visible interactive elements (with selectors for browser_click/browser_fill) of the current page. " +
+          "Long text is paginated: when truncated is true, call again with offset=nextOffset. " +
+          "For research use web_search; to read a known URL use web_fetch (faster, no browser). " +
+          "Use this after browser_navigate for JavaScript-rendered content or to find elements to interact with.",
         input_schema: {
           type: "object" as const,
           properties: {
+            offset: {
+              type: "number",
+              description:
+                "Character offset to start reading the page text from; pass nextOffset from a truncated result. Default: 0",
+            },
+            max_chars: {
+              type: "number",
+              description: "Maximum characters of page text to return (default 10000, max 25000).",
+            },
+            scope: {
+              type: "string",
+              enum: ["auto", "page"],
+              description:
+                "auto (default): the whole page when it fits, otherwise the main content region first. page: always read the whole page.",
+            },
             session_id: {
               type: "string",
               description: "Optional visible in-app browser workbench session id.",
@@ -1051,7 +1164,9 @@ export class BrowserTools {
       },
       {
         name: "browser_click",
-        description: "Click on an element on the page",
+        description:
+          "Click an element, preferably by ref from browser_snapshot. Returns success:false with the reason when the element is covered by another element, outside the viewport, or did not receive the click. " +
+          "After a click that may change the page, call browser_snapshot to verify the result before the next action.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1062,11 +1177,15 @@ export class BrowserTools {
             selector: {
               type: "string",
               description:
-                'CSS selector or text selector (e.g., "button.submit", "text=Login", "#myButton")',
+                "Fallback when no ref is available: CSS selector (e.g. #myButton, button:has-text('Log in')), " +
+                "text selector (text=Login matches a substring, text='Log in' is exact), or role selector (role=button[name='Sign in'])",
             },
             timeout_ms: {
               type: "number",
-              description: "Action timeout in ms. Use 60000+ for slow pages (default: 90_000)",
+              description:
+                "Max ms to wait for the element and complete the action (default: 15000). " +
+                "Raise it only for elements that render slowly; a selector that matches " +
+                "nothing fails fast with candidate selectors.",
             },
             session_id: {
               type: "string",
@@ -1082,7 +1201,11 @@ export class BrowserTools {
           type: "object" as const,
           properties: {
             ref: { type: "string", description: "Preferred Browser V2 ref from browser_snapshot" },
-            selector: { type: "string", description: "CSS selector fallback" },
+            selector: {
+              type: "string",
+              description:
+                "Selector fallback (visible workbench only), same forms as browser_click",
+            },
             session_id: {
               type: "string",
               description: "Optional visible in-app browser workbench session id.",
@@ -1108,7 +1231,9 @@ export class BrowserTools {
       },
       {
         name: "browser_fill",
-        description: "Fill a form field with text",
+        description:
+          "Replace the contents of a text field (input, textarea or contenteditable), preferably by ref from browser_snapshot. " +
+          "The field is read back afterwards; success:false means the value did not take (read-only, maxlength, wrong element).",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1127,7 +1252,10 @@ export class BrowserTools {
             },
             timeout_ms: {
               type: "number",
-              description: "Action timeout in ms. Use 60000+ for slow pages (default: 90_000)",
+              description:
+                "Max ms to wait for the element and complete the action (default: 15000). " +
+                "Raise it only for elements that render slowly; a selector that matches " +
+                "nothing fails fast with candidate selectors.",
             },
             session_id: {
               type: "string",
@@ -1161,7 +1289,10 @@ export class BrowserTools {
             },
             timeout_ms: {
               type: "number",
-              description: "Action timeout in ms. Use 60000+ for slow pages (default: 90_000)",
+              description:
+                "Max ms to wait for the element and complete the action (default: 15000). " +
+                "Raise it only for elements that render slowly; a selector that matches " +
+                "nothing fails fast with candidate selectors.",
             },
             session_id: {
               type: "string",
@@ -1173,7 +1304,9 @@ export class BrowserTools {
       },
       {
         name: "browser_press",
-        description: "Press a keyboard key (e.g., Enter, Tab, Escape)",
+        description:
+          "Press a key or combo on the focused element (e.g. Enter to submit the focused form field, Tab, Escape, Shift+Tab). " +
+          "Take a browser_snapshot afterwards when the key can change the page.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1280,7 +1413,9 @@ export class BrowserTools {
       {
         name: "browser_upload_file",
         description:
-          "Upload a workspace-readable file into a file input, preferably using a Browser V2 ref from browser_snapshot",
+          "Upload a workspace-readable file into a file input (input[type=file]). Use a Browser V2 ref " +
+          "from browser_snapshot in the visible workbench, or a CSS selector (required in the headless " +
+          "browser; hidden file inputs work). Files outside the workspace need the user's approval.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1300,7 +1435,12 @@ export class BrowserTools {
       },
       {
         name: "browser_handle_dialog",
-        description: "Accept or dismiss the latest JavaScript dialog in the browser",
+        description:
+          "Accept or dismiss a JavaScript dialog (alert/confirm/prompt). In the visible workbench this " +
+          "answers the open dialog. In the headless browser dialogs are dismissed as soon as they open " +
+          "and reported on the action that caused them as dialog: {type, message, action}; to accept " +
+          "one (e.g. a confirm() you intend to approve) or answer a prompt, call this first and then " +
+          "repeat that action. The decision applies to the next action only.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1315,7 +1455,10 @@ export class BrowserTools {
       },
       {
         name: "browser_console",
-        description: "Return recent browser console messages with secrets redacted",
+        description:
+          "Return recent browser console messages and uncaught page errors (last 120, secrets " +
+          "redacted). Use it to check a page for JavaScript errors after an action; it fails when no " +
+          "browser session is open rather than reporting an empty log.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1328,7 +1471,10 @@ export class BrowserTools {
       },
       {
         name: "browser_network",
-        description: "Return recent browser network requests/responses with secrets redacted",
+        description:
+          "Return recent browser network responses (method, status, URL) and failed requests (last " +
+          "120, secrets redacted). Use it to diagnose failing API calls or requests blocked by the " +
+          "network policy (errorText net::ERR_BLOCKED_BY_CLIENT).",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1341,7 +1487,11 @@ export class BrowserTools {
       },
       {
         name: "browser_downloads",
-        description: "Return recent downloads observed in the browser session",
+        description:
+          "List downloads from the browser session. Headless downloads are saved into the workspace " +
+          `${BROWSER_DOWNLOADS_DIR}/ folder as they start and listed with status, path, size and ` +
+          "suggestedFilename; a download the workspace file policy does not allow is rejected and " +
+          "not written. An action that starts a download also reports it in its result.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1484,7 +1634,10 @@ export class BrowserTools {
         name: "browser_act_batch",
         description:
           "Execute a batch of browser actions in sequence. Use for multi-step interactions (e.g. fill form, click submit, wait for result). " +
-          "Each action can have an optional delay_ms before it runs. Actions: click, fill, type, press, wait, scroll.",
+          "Each action can have an optional delay_ms before it runs. Actions: click, fill, type, press, wait, scroll. " +
+          "The result reports total (requested) and completed (executed) steps; when fewer ran, incomplete is true " +
+          "and the remaining steps must be sent again. The batch stops at a failed step or at a confirm/prompt " +
+          "dialog the headless browser dismissed; take a browser_snapshot afterwards to verify the outcome.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -1500,7 +1653,13 @@ export class BrowserTools {
                   },
                   selector: {
                     type: "string",
-                    description: "CSS selector (required for click, fill, type, wait)",
+                    description:
+                      "CSS/text/role selector (required for click, fill, type, wait unless ref is given)",
+                  },
+                  ref: {
+                    type: "string",
+                    description:
+                      "Visible workbench only: Browser V2 ref from browser_snapshot for click, fill or type. Refs go stale once an earlier action in the batch navigates.",
                   },
                   value: { type: "string", description: "Value for fill" },
                   text: { type: "string", description: "Text for type" },
@@ -1766,6 +1925,7 @@ export class BrowserTools {
           action: "navigate",
           url: result.url,
           title: result.title,
+          ...(result.consentDismissed ? { consentDismissed: result.consentDismissed } : {}),
         });
         if (result.isError) {
           const statusText =
@@ -1918,55 +2078,68 @@ export class BrowserTools {
           const result = await this.browserWorkbenchService.snapshot(
             this.taskId,
             this.getSessionId(input),
+            {
+              offset: typeof input?.offset === "number" ? input.offset : undefined,
+              limit: typeof input?.limit === "number" ? input.limit : undefined,
+              interactiveOnly: input?.interactive_only === true,
+              query: typeof input?.query === "string" ? input.query : undefined,
+            },
           );
           if (result) {
             this.daemon.logEvent(this.taskId, "browser_action", {
               action: "snapshot",
               url: result.url,
               nodeCount: Array.isArray(result.nodes) ? result.nodes.length : undefined,
+              truncated: result.truncated === true,
               visible: true,
             });
             return result;
           }
         }
         const content = await this.browserService.getContent();
+        const interactive = Array.isArray(content.interactive) ? content.interactive : [];
         return {
           success: true,
           sessionId: "headless",
           tabId: "active",
           url: content.url,
           title: content.title,
-          nodes: content.links.slice(0, 60).map((link) => ({
-            role: "link",
-            name: link.text,
-            text: link.href,
-          })),
+          nodes:
+            interactive.length > 0
+              ? interactive
+              : content.links.slice(0, 60).map((link) => ({
+                  role: "link",
+                  name: link.text,
+                  text: link.href,
+                })),
           refSupport: false,
           message:
-            "Headless snapshot is read-only and does not provide Browser V2 refs. Use selector-based tools or open a visible Browser Workbench session for ref actions.",
-          consoleSummary: { count: 0, recent: [] },
-          networkSummary: { count: 0, recent: [] },
+            "Headless snapshot has no Browser V2 refs. Each node carries a CSS selector that browser_click, browser_fill, browser_type, browser_select and browser_get_text accept.",
+          ...this.headlessDiagnosticsSummary(),
         };
       }
 
       case "browser_tabs": {
         const tabs = this.browserWorkbenchService.getTabs(this.taskId, this.getSessionId(input));
         if (tabs.length > 0) return { success: true, tabs };
-        return {
-          success: true,
-          tabs: [
-            {
-              tabId: "active",
-              title: "",
-              url: this.browserService.getUrl() || "",
-              active: true,
-              backend: "playwright-local",
-            },
-          ],
-        };
+        if (!this.browserService.hasSession()) {
+          return { success: true, tabs: [], message: "No browser session is open." };
+        }
+        return { success: true, tabs: await this.browserService.listTabs() };
       }
 
       case "browser_switch_tab": {
+        if (!this.hasVisibleWorkbenchSession(input) && this.browserService.hasSession()) {
+          const tabId = typeof input?.tab_id === "string" ? input.tab_id.trim() : "";
+          if (!tabId) return { success: false, error: "tab_id is required" };
+          const result = await this.browserService.switchTab(tabId);
+          this.daemon.logEvent(this.taskId, "browser_action", {
+            action: "switch_tab",
+            tabId,
+            success: result.success,
+          });
+          return result;
+        }
         const tabs = this.browserWorkbenchService.getTabs(this.taskId, this.getSessionId(input));
         const target = tabs.find((tab: Any) => tab.tabId === input?.tab_id);
         if (target?.active) return { success: true, tab: target };
@@ -1977,6 +2150,17 @@ export class BrowserTools {
       }
 
       case "browser_close_tab": {
+        if (!this.hasVisibleWorkbenchSession(input) && this.browserService.hasSession()) {
+          const tabId = typeof input?.tab_id === "string" ? input.tab_id.trim() : "";
+          if (!tabId) return { success: false, error: "tab_id is required" };
+          const result = await this.browserService.closeTab(tabId);
+          this.daemon.logEvent(this.taskId, "browser_action", {
+            action: "close_tab",
+            tabId,
+            success: result.success,
+          });
+          return result;
+        }
         return {
           success: false,
           error:
@@ -1996,10 +2180,24 @@ export class BrowserTools {
               url: result.url,
               visible: true,
             });
+            const options = this.getPageContentOptions(input);
+            if (
+              typeof result.text === "string" &&
+              (options.offset !== undefined || options.maxChars !== undefined)
+            ) {
+              const { url, title, text, ...rest } = result;
+              return {
+                success: true,
+                url,
+                title,
+                ...paginatePageText(text, options.offset, options.maxChars),
+                ...rest,
+              };
+            }
             return { success: true, ...result };
           }
         }
-        const result = await this.browserService.getContent();
+        const result = await this.browserService.getContent(this.getPageContentOptions(input));
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "get_content",
           url: result.url,
@@ -2072,6 +2270,19 @@ export class BrowserTools {
             success: false,
             error: "browser_hover ref requires an active visible Browser V2 snapshot.",
           };
+        }
+        if (
+          typeof input?.selector === "string" &&
+          input.selector.trim() &&
+          this.shouldPreferVisibleWorkbench(input) &&
+          this.hasVisibleWorkbenchSession(input)
+        ) {
+          const result = await this.browserWorkbenchService.hover(
+            this.taskId,
+            input.selector,
+            this.getSessionId(input),
+          );
+          if (result) return result;
         }
         return {
           success: false,
@@ -2364,11 +2575,28 @@ export class BrowserTools {
           });
           if (result) return result;
         }
-        return {
-          success: false,
-          error:
-            "browser_upload_file requires an active visible Browser V2 session and a file input ref or selector.",
-        };
+        // Headless: the path already passed the same workspace read checks and external-file
+        // approval as the visible workbench above.
+        const selector = typeof input?.selector === "string" ? input.selector.trim() : "";
+        if (!selector) {
+          return {
+            success: false,
+            error:
+              "The headless browser has no snapshot refs; pass selector for the input[type=file] " +
+              "(browser_get_content lists inputs with selectors).",
+          };
+        }
+        const result = await this.browserService.uploadFile(
+          selector,
+          filePath,
+          this.getTimeoutMs(input),
+        );
+        this.daemon.logEvent(this.taskId, "browser_action", {
+          action: "upload_file",
+          selector,
+          success: result.success,
+        });
+        return result;
       }
 
       case "browser_handle_dialog": {
@@ -2381,9 +2609,25 @@ export class BrowserTools {
           });
           if (result) return result;
         }
+        if (!this.browserService.hasSession()) {
+          return { success: false, error: "No browser session is open. Navigate first." };
+        }
+        // Headless dialogs are answered as soon as they open (dismissed by default), so the
+        // decision applies to the next dialog, which the agent triggers by repeating the action.
+        const accept = input?.accept !== false;
+        const promptText = typeof input?.prompt_text === "string" ? input.prompt_text : undefined;
+        const armed = this.browserService.armNextDialog({
+          accept,
+          ...(promptText !== undefined ? { promptText } : {}),
+        });
+        this.daemon.logEvent(this.taskId, "browser_action", { action: "handle_dialog", accept });
         return {
-          success: false,
-          error: "browser_handle_dialog requires an active visible Browser V2 session.",
+          success: true,
+          ...armed,
+          message:
+            `The next JavaScript dialog will be ${accept ? "accepted" : "dismissed"}. ` +
+            "Headless dialogs are answered as soon as they open, so repeat the action that " +
+            "opens it now; the decision lapses after that one action.",
         };
       }
 
@@ -2393,7 +2637,17 @@ export class BrowserTools {
           this.getSessionId(input),
         );
         if (result) return result;
-        return { success: true, entries: [] };
+        const consoleLog = this.browserService.getConsoleLog();
+        if (!this.browserService.hasSession() && consoleLog.entries.length === 0) {
+          // An empty list here would read as "no errors" for a page that was never loaded.
+          return {
+            success: false,
+            error:
+              "No browser session is open, so there are no console messages to report. " +
+              "Navigate first; console output is captured from then on.",
+          };
+        }
+        return { success: true, backend: "playwright-local", ...consoleLog };
       }
 
       case "browser_network": {
@@ -2402,7 +2656,16 @@ export class BrowserTools {
           this.getSessionId(input),
         );
         if (result) return result;
-        return { success: true, entries: [] };
+        const networkLog = this.browserService.getNetworkLog();
+        if (!this.browserService.hasSession() && networkLog.entries.length === 0) {
+          return {
+            success: false,
+            error:
+              "No browser session is open, so there are no requests to report. " +
+              "Navigate first; requests are captured from then on.",
+          };
+        }
+        return { success: true, backend: "playwright-local", ...networkLog };
       }
 
       case "browser_downloads": {
@@ -2411,7 +2674,12 @@ export class BrowserTools {
           this.getSessionId(input),
         );
         if (result) return result;
-        return { success: true, entries: [] };
+        return {
+          success: true,
+          backend: "playwright-local",
+          directory: BROWSER_DOWNLOADS_DIR,
+          entries: this.browserService.listDownloads(),
+        };
       }
 
       case "browser_storage": {
@@ -2594,10 +2862,27 @@ export class BrowserTools {
         if (actions.length === 0) {
           return { success: false, error: "actions array is required and must not be empty" };
         }
+        const requestedCount = actions.length;
         const selectedActions = await this.selectBrowserActionsWithJev(input, actions);
         if (selectedActions && selectedActions.length < actions.length) {
           actions = selectedActions;
         }
+        // Action selection may run only a prefix; report against what the caller asked for.
+        const deferredCount = requestedCount - actions.length;
+        const batchCounts = {
+          total: requestedCount,
+          requested: requestedCount,
+          ...(deferredCount > 0
+            ? {
+                deferred: deferredCount,
+                incomplete: true,
+                message:
+                  `Only the first ${actions.length} of ${requestedCount} actions were selected to run; ` +
+                  "check the page (browser_snapshot or browser_get_content) and send the remaining " +
+                  "actions again.",
+              }
+            : {}),
+        };
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
           const results: Array<{ type: string; success: boolean; error?: string }> = [];
           for (let i = 0; i < actions.length; i++) {
@@ -2605,28 +2890,49 @@ export class BrowserTools {
             const delayMs = typeof act.delay_ms === "number" && act.delay_ms > 0 ? act.delay_ms : 0;
             if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
             const actType = String(act.type || "").toLowerCase();
+            const actRef = typeof act.ref === "string" ? act.ref.trim() : "";
             try {
               let result: Any = null;
               if (actType === "click") {
-                result = await this.browserWorkbenchService.click(
-                  this.taskId,
-                  String(act.selector || ""),
-                  this.getSessionId(input),
-                );
+                result = actRef
+                  ? await this.browserWorkbenchService.clickRef(
+                      this.taskId,
+                      actRef,
+                      this.getSessionId(input),
+                    )
+                  : await this.browserWorkbenchService.click(
+                      this.taskId,
+                      String(act.selector || ""),
+                      this.getSessionId(input),
+                    );
               } else if (actType === "fill") {
-                result = await this.browserWorkbenchService.fill(
-                  this.taskId,
-                  String(act.selector || ""),
-                  String(act.value ?? ""),
-                  this.getSessionId(input),
-                );
+                result = actRef
+                  ? await this.browserWorkbenchService.fillRef(
+                      this.taskId,
+                      actRef,
+                      String(act.value ?? ""),
+                      this.getSessionId(input),
+                    )
+                  : await this.browserWorkbenchService.fill(
+                      this.taskId,
+                      String(act.selector || ""),
+                      String(act.value ?? ""),
+                      this.getSessionId(input),
+                    );
               } else if (actType === "type") {
-                result = await this.browserWorkbenchService.type(
-                  this.taskId,
-                  String(act.selector || ""),
-                  String(act.text ?? ""),
-                  this.getSessionId(input),
-                );
+                result = actRef
+                  ? await this.browserWorkbenchService.typeRef(
+                      this.taskId,
+                      actRef,
+                      String(act.text ?? ""),
+                      this.getSessionId(input),
+                    )
+                  : await this.browserWorkbenchService.type(
+                      this.taskId,
+                      String(act.selector || ""),
+                      String(act.text ?? ""),
+                      this.getSessionId(input),
+                    );
               } else if (actType === "press") {
                 result = await this.browserWorkbenchService.press(
                   this.taskId,
@@ -2662,12 +2968,20 @@ export class BrowserTools {
                 });
                 break;
               }
+              if (!result) {
+                results.push({
+                  type: actType,
+                  success: false,
+                  error: "The visible browser workbench session is no longer available.",
+                });
+                break;
+              }
               results.push({
                 type: actType,
-                success: result?.success !== false,
-                error: result?.error,
+                success: result.success !== false,
+                error: result.error,
               });
-              if (result?.success === false) break;
+              if (result.success === false) break;
             } catch (err) {
               results.push({
                 type: actType,
@@ -2680,7 +2994,7 @@ export class BrowserTools {
           const allSuccess = results.every((r) => r.success);
           this.daemon.logEvent(this.taskId, "browser_action", {
             action: "act_batch",
-            count: actions.length,
+            count: requestedCount,
             completed: results.length,
             success: allSuccess,
             visible: true,
@@ -2689,11 +3003,12 @@ export class BrowserTools {
             success: allSuccess,
             results,
             completed: results.length,
-            total: actions.length,
+            ...batchCounts,
           };
         }
-        const results: Array<{ type: string; success: boolean; error?: string }> = [];
+        const results: Array<{ type: string; success: boolean; error?: string } & Any> = [];
         const timeoutMs = this.getTimeoutMs(input);
+        let stoppedForDialog: Any = null;
         for (let i = 0; i < actions.length; i++) {
           const act = actions[i] as Record<string, unknown>;
           const delayMs = typeof act.delay_ms === "number" && act.delay_ms > 0 ? act.delay_ms : 0;
@@ -2702,41 +3017,32 @@ export class BrowserTools {
           }
           const actType = String(act.type || "").toLowerCase();
           try {
+            let r: Any;
             if (actType === "click") {
-              const r = await this.browserService.click(
+              r = await this.browserService.click(
                 String(act.selector || ""),
                 (act.timeout_ms as number) || timeoutMs,
               );
-              results.push({ type: "click", success: r.success, error: r.error });
-              if (!r.success) break;
             } else if (actType === "fill") {
-              const r = await this.browserService.fill(
+              r = await this.browserService.fill(
                 String(act.selector || ""),
                 String(act.value ?? ""),
                 (act.timeout_ms as number) || timeoutMs,
               );
-              results.push({ type: "fill", success: r.success, error: r.error });
-              if (!r.success) break;
             } else if (actType === "type") {
-              const r = await this.browserService.type(
+              r = await this.browserService.type(
                 String(act.selector || ""),
                 String(act.text ?? ""),
                 typeof act.delay_ms === "number" ? act.delay_ms : 50,
                 (act.timeout_ms as number) || timeoutMs,
               );
-              results.push({ type: "type", success: r.success, error: r.error });
-              if (!r.success) break;
             } else if (actType === "press") {
-              const r = await this.browserService.press(String(act.key || ""));
-              results.push({ type: "press", success: r.success, error: (r as Any).error });
-              if (!r.success) break;
+              r = await this.browserService.press(String(act.key || ""));
             } else if (actType === "wait") {
-              const r = await this.browserService.waitForSelector(
+              r = await this.browserService.waitForSelector(
                 String(act.selector || ""),
                 (act.timeout_ms as number) || timeoutMs || 10000,
               );
-              results.push({ type: "wait", success: r.success, error: (r as Any).error });
-              if (!r.success) break;
             } else if (actType === "scroll") {
               const direction =
                 act.direction === "up" ||
@@ -2745,11 +3051,10 @@ export class BrowserTools {
                 act.direction === "bottom"
                   ? act.direction
                   : "down";
-              const r = await this.browserService.scroll(
+              r = await this.browserService.scroll(
                 direction,
                 typeof act.amount === "number" ? act.amount : undefined,
               );
-              results.push({ type: "scroll", success: (r as Any).success });
             } else {
               results.push({
                 type: actType,
@@ -2758,6 +3063,17 @@ export class BrowserTools {
               });
               break;
             }
+            results.push({
+              type: actType,
+              success: r?.success === true,
+              ...(r?.error ? { error: r.error } : {}),
+              ...pickBrowserActionEvents(r),
+            });
+            if (r?.success !== true) break;
+            // A dismissed confirm/prompt means the page did not do what this step asked for;
+            // running the remaining steps would act on the wrong state.
+            stoppedForDialog = findDismissedBlockingDialog(r);
+            if (stoppedForDialog) break;
           } catch (err) {
             results.push({
               type: actType,
@@ -2767,18 +3083,28 @@ export class BrowserTools {
             break;
           }
         }
-        const allSuccess = results.every((r) => r.success);
+        const allSuccess = !stoppedForDialog && results.every((r) => r.success);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "act_batch",
-          count: actions.length,
+          count: requestedCount,
           completed: results.length,
           success: allSuccess,
+          ...(stoppedForDialog ? { stoppedForDialog: stoppedForDialog.type } : {}),
         });
         return {
           success: allSuccess,
           results,
           completed: results.length,
-          total: actions.length,
+          ...batchCounts,
+          ...(stoppedForDialog
+            ? {
+                stoppedForDialog,
+                error:
+                  `Stopped after step ${results.length}: the page opened a ${stoppedForDialog.type} ` +
+                  `dialog ("${stoppedForDialog.message}") that was dismissed, so that step did not ` +
+                  "take effect. To approve it, call browser_handle_dialog with accept=true and repeat the step.",
+              }
+            : {}),
         };
       }
 

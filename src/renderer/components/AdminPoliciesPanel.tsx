@@ -27,7 +27,7 @@ interface AdminPolicies {
       windows: Array<{ days: number[]; start: string; end: string }>;
     };
   };
-  runtime: {
+  runtime: ShellRuntimePolicies & {
     agentSecurity: {
       enabled: boolean;
       mode: "monitor" | "enforce";
@@ -52,6 +52,98 @@ interface AdminPolicies {
     orgName?: string;
     orgPluginDir?: string;
   };
+}
+
+type SandboxBackend = "macos" | "docker" | "none";
+
+/** Shell sandbox and shell network fields of AdminPolicies.runtime. */
+export interface ShellRuntimePolicies {
+  requireSandboxForShell?: boolean;
+  allowUnsandboxedShell?: boolean;
+  allowedSandboxTypes?: SandboxBackend[];
+  network?: { allowShellNetwork?: boolean };
+}
+
+const SANDBOX_BACKEND_LABELS: Record<SandboxBackend, string> = {
+  macos: "macOS sandbox",
+  docker: "Docker",
+  none: "none (unsandboxed)",
+};
+
+function formatPolicyFlag(value: boolean | undefined): string {
+  return typeof value === "boolean" ? (value ? "On" : "Off") : "Not reported";
+}
+
+/**
+ * Read-only view of the admin policies that decide whether shell commands run
+ * in an OS sandbox and whether they can reach the network. They are changed
+ * through the admin policy file, and any loosening through the update path
+ * asks for confirmation in a system dialog, so there are no controls here.
+ */
+export function ShellSandboxPolicySummary({
+  runtime,
+}: {
+  runtime: ShellRuntimePolicies | undefined;
+}) {
+  const sandboxTypes = runtime?.allowedSandboxTypes;
+  const rows: Array<{ label: string; value: string; effect: string }> = [
+    {
+      label: "Require OS sandbox for shell commands",
+      value: formatPolicyFlag(runtime?.requireSandboxForShell),
+      effect:
+        "On: every shell command runs inside an OS sandbox, Full access profiles fall back to " +
+        "Default for shell work, and commands are refused on a computer with no sandbox. Off: " +
+        "a Full access profile may run shell commands outside the sandbox.",
+    },
+    {
+      label: "Allow unsandboxed shell fallback",
+      value: formatPolicyFlag(runtime?.allowUnsandboxedShell),
+      effect:
+        "On: when no allowed OS sandbox is available, a command can run without one after you " +
+        "approve that single command (only while the sandbox is not required), or without a " +
+        "prompt under Full access when COWORK_ALLOW_UNSANDBOXED_SHELL=1 is set. Off: such " +
+        "commands are refused.",
+    },
+    {
+      label: "Allowed sandbox backends",
+      value: Array.isArray(sandboxTypes)
+        ? sandboxTypes.length > 0
+          ? sandboxTypes.map((type) => SANDBOX_BACKEND_LABELS[type] ?? type).join(", ")
+          : "None"
+        : "Not reported",
+      effect:
+        "Sandboxes shell commands may run in. A command whose available sandbox is not listed " +
+        "is refused unless the unsandboxed fallback applies.",
+    },
+    {
+      label: "Allow network access from shell commands",
+      value: formatPolicyFlag(runtime?.network?.allowShellNetwork),
+      effect:
+        "On: shell commands may use the network when the workspace allows network access, the " +
+        "access profile has no domain rules, and the admin network policy is unrestricted " +
+        "(default allow, no allowed or blocked domains). Off: shell commands get no outbound " +
+        "network access.",
+    },
+  ];
+
+  return (
+    <div className="settings-section">
+      <h3>Shell Sandbox &amp; Network</h3>
+      <p className="ap-hint">
+        Read-only. Your administrator sets these in policies.json in the CoWork data folder;
+        loosening any of them asks for confirmation in a system dialog.
+      </p>
+      {rows.map((row) => (
+        <div className="ap-field" key={row.label}>
+          <div className="ap-policy-row">
+            <span className="ap-label">{row.label}</span>
+            <span className="ap-policy-value">{row.value}</span>
+          </div>
+          <span className="ap-hint">{row.effect}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function AdminPoliciesPanel() {
@@ -520,6 +612,8 @@ export function AdminPoliciesPanel() {
         </div>
       </div>
 
+      <ShellSandboxPolicySummary runtime={policies?.runtime} />
+
       {/* Installation Policies */}
       <div className="settings-section">
         <h3>Installation Permissions</h3>
@@ -618,6 +712,21 @@ export function AdminPoliciesPanel() {
         .ap-row {
           display: flex;
           gap: 16px;
+        }
+        .ap-policy-row {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .ap-policy-row .ap-label {
+          margin-bottom: 0;
+        }
+        .ap-policy-value {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--color-text-primary);
+          white-space: nowrap;
         }
         .ap-toggle-row {
           display: flex;

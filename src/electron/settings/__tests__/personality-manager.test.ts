@@ -505,6 +505,26 @@ describe("PersonalityManager - agent name", () => {
       expect(prompt).toContain("project-a");
     });
 
+    it("keeps changing relationship counters out of the execution identity", () => {
+      mockStoredSettings = {
+        relationship: {
+          userName: "Alice",
+          tasksCompleted: 25,
+          projectsWorkedOn: ["project-a", "project-b"],
+        },
+      };
+      PersonalityManager.clearCache();
+
+      const before = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+      PersonalityManager.recordTaskCompleted("project-c");
+      const after = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+
+      expect(after).toBe(before);
+      expect(after).toContain('The user\'s name is "Alice"');
+      expect(after).not.toContain("tasks together");
+      expect(after).not.toContain("project-a");
+    });
+
     it('should include instructions for handling "who am I" when user name is set', () => {
       mockStoredSettings = { relationship: { userName: "Bob" } };
       PersonalityManager.clearCache();
@@ -514,6 +534,39 @@ describe("PersonalityManager - agent name", () => {
       expect(prompt).toContain("who am I");
       expect(prompt).toContain("USER's stored name");
       expect(prompt).toContain("NOT system-derived info");
+    });
+
+    it("does not ask task execution to append offers or work around denied permissions", () => {
+      const chatPrompt = PersonalityManager.getIdentityPrompt();
+      const executionPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+
+      expect(chatPrompt).toMatch(/offer to automate recurring work/i);
+      expect(executionPrompt).not.toMatch(/offer to automate recurring work/i);
+      expect(executionPrompt).not.toMatch(/offer to create a skill/i);
+      expect(executionPrompt).toMatch(/statement, not a (?:trailing )?question/i);
+      for (const prompt of [chatPrompt, executionPrompt]) {
+        expect(prompt).not.toContain("exhausting all creative paths");
+        expect(prompt).toMatch(/never work around a denied permission/i);
+      }
+    });
+
+    it("describes the host platform instead of always claiming macOS", () => {
+      const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+      try {
+        Object.defineProperty(process, "platform", { ...originalPlatform, value: "win32" });
+        const windowsPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+        Object.defineProperty(process, "platform", { ...originalPlatform, value: "darwin" });
+        const macPrompt = PersonalityManager.getIdentityPrompt({ surface: "execution" });
+
+        expect(windowsPrompt).not.toContain("for macOS");
+        expect(windowsPrompt).not.toMatch(/AppleScript|iMessage|Apple Calendar/);
+        expect(windowsPrompt).toContain("Windows Desktop:");
+        expect(macPrompt).not.toContain("for macOS");
+        expect(macPrompt).toContain("Run AppleScript for deep OS automation");
+        expect(macPrompt).toContain("iMessage");
+      } finally {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
     });
 
     it("should include instructions to ask for name when user is unknown", () => {
@@ -686,6 +739,39 @@ describe("PersonalityManager - personas", () => {
       expect(prompt).toContain("CHARACTER OVERLAY - JARVIS STYLE");
       expect(prompt).toContain("sophisticated");
     });
+
+    it("keeps conversational persona lines in chat but not in task execution", () => {
+      mockStoredSettings = { activePersonality: "professional", activePersona: "companion" };
+      PersonalityManager.clearCache();
+
+      const chatPrompt = PersonalityManager.getPersonalityPrompt();
+      const executionPrompt = PersonalityManager.getPersonalityPrompt(undefined, {
+        surface: "execution",
+      });
+
+      expect(chatPrompt).toContain("Ask soft, clarifying questions that invite reflection");
+      expect(chatPrompt).toContain("uplifting acknowledgement");
+      expect(executionPrompt).toContain("CHARACTER OVERLAY - COMPANION STYLE");
+      expect(executionPrompt).toContain("Be warm, curious, and emotionally attuned");
+      expect(executionPrompt).not.toMatch(/clarifying questions/i);
+      expect(executionPrompt).not.toMatch(/uplifting acknowledgement/i);
+    });
+
+    it.each(["intern", "sensei", "jarvis"] as const)(
+      "drops question-asking and offer lines from the %s overlay in task execution",
+      (persona) => {
+        mockStoredSettings = { activePersonality: "professional", activePersona: persona };
+        PersonalityManager.clearCache();
+
+        const executionPrompt = PersonalityManager.getPersonalityPrompt(undefined, {
+          surface: "execution",
+        });
+
+        expect(executionPrompt).toContain("CHARACTER OVERLAY");
+        expect(executionPrompt).not.toMatch(/clarifying questions|Socratic questioning/i);
+        expect(executionPrompt).not.toMatch(/offer proactive suggestions/i);
+      },
+    );
 
     it("should not include persona prompt for none persona", () => {
       mockStoredSettings = {

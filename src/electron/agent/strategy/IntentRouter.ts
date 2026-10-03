@@ -1,4 +1,5 @@
 import type { ConversationMode, TaskDomain, TaskStrategyIntent } from "../../../shared/types";
+import { hasStructuralCodeSignal } from "./code-signals";
 
 export type RoutedIntent = TaskStrategyIntent;
 
@@ -28,6 +29,58 @@ interface IntentScores {
 // the distant "do" even though it is only rationale plus a constraint.
 const REDIRECT_CONTRAST_PATTERN =
   /\b(?:instead\s+of|rather\s+than)\b[^.!?\n]{0,150}\b(?:focus|work|do(?!\s+not\b)|build|create|look|tackle|explore|concentrate)\b/i;
+
+// Phrases that abandon the previous work outright ("Forget that. New task: ...").
+// Contrast ("instead of X, build Y") and scope narrowing ("focus only on ...")
+// are not here: they steer the current work and need its context.
+const EXPLICIT_PIVOT_PATTERN = new RegExp(
+  [
+    "(?<!\\b(?:don['’]?t|do\\s+not|never|not)\\s+)\\bforget\\s+(?:about\\s+)?(?:that|this|it|everything|all\\s+(?:of\\s+)?(?:that|this)|what\\s+(?:i|we|you)\\s+(?:said|asked|did)\\b|(?:the|my|your|our)\\s+(?:previous|prior|last|earlier|old|original|current|whole|entire)\\b[^.!?;:,\\n]{0,80}?(?=\\s*(?:[.!?;:,\\n]|$|\\band\\b)))",
+    "\\bstart\\s+(?:over|afresh|fresh|from\\s+scratch)\\b",
+    "(?:^|[.!?;\\n]\\s*)(?:(?:ok(?:ay)?|alright|now|so|next)[,\\s]+)?(?:here['’]?s\\s+|i\\s+have\\s+|(?:moving|switching)\\s+(?:on\\s+)?to\\s+)?(?:a\\s+|an\\s+|one\\s+|another\\s+)?(?:new|different|separate|unrelated)\\s+(?:task|topic|question|request|project)\\b",
+    "(?<!\\btry\\s+)\\bsomething\\s+(?:completely\\s+|totally\\s+|entirely\\s+)?(?:different|unrelated)\\b(?!\\s+(?:with|for|to|in|on|about|from|than)\\b)",
+    "\\bscrap\\s+(?:that|this|it|everything|all\\s+(?:of\\s+)?(?:that|this)|(?:the|my|your|our)\\s+(?:previous|prior|last|earlier|old|original|current|whole|entire)\\b[^.!?;:,\\n]{0,80}?(?=\\s*(?:[.!?;:,\\n]|$|\\band\\b)))",
+    "\\bnever\\s*mind\\s+(?:that|this|it|(?:the|my)\\s+(?:previous|last|earlier|above)\\b[^.!?;:,\\n]{0,40})",
+    "\\bpivot\\s+(?:to|away)\\b",
+  ].join("|"),
+  "gi",
+);
+
+// After the pivot phrase itself is removed, any of these means the new request
+// builds on or varies the earlier work ("start over and build it in Rust", "scrap
+// the previous approach and use Redis instead"), so its history must stay.
+const REFERS_TO_PRIOR_WORK_PATTERN =
+  /\b(?:it|its|that|those|them|instead|rather|differently|this\s+time|another\s+(?:way|approach)|the\s+same|same\s+(?:as|way|thing|approach|pattern|fix|change|code)|existing|above|earlier|previous(?:ly)?|prior|so\s+far|already|you\s+(?:just\s+|already\s+)?(?:added|changed|wrote|created|made|did|built|fixed|implemented|updated|modified|touched|edited|generated|refactored|removed|renamed|set\s+up)|your\s+(?:change|changes|fix|fixes|code|implementation|work|edits?|version|approach|branch|pr|commit|draft|output|result|solution))\b/i;
+
+// Change verbs missing from the action-verb list ("Add dark mode ...", "Upgrade
+// React ..."). They also appear in questions ("How can I improve my sleep?"), so
+// they count only in request position: at the start of a clause that is not a
+// question, after please/let's/"I need you to", or in "can you ...".
+const REQUEST_ACTION_VERBS =
+  "(?:add|refactor|change|upgrade|downgrade|convert|optimi[sz]e|integrate|improve|rewrite|port|translate|replace|extend|enable|disable|bump|patch|adjust|tweak|simplify|restructure|reorgani[sz]e|redesign|rework|polish|harden|locali[sz]e|internationali[sz]e|deprecate|debug|set\\s+up|setup|clean\\s+up|wire\\s+up|hook\\s+up|speed\\s+up)";
+const CLAUSE_START_ACTION_PATTERN = new RegExp(
+  `(?:^|[,:]\\s*|\\b(?:and|then|also|please|pls|now|just|let['’]?s|let\\s+us|i\\s+(?:want|need)\\s+you\\s+to|(?:we|i|you)\\s+(?:need|have|want)\\s+to|need\\s+to|go\\s+ahead\\s+and)\\s+)${REQUEST_ACTION_VERBS}\\b`,
+);
+const MODAL_REQUEST_ACTION_PATTERN = new RegExp(
+  `\\b(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?(?:also\\s+)?${REQUEST_ACTION_VERBS}\\b`,
+);
+
+// A few high-frequency imperatives in other languages (tr, de, es, fr, zh) so a
+// request such as "giriş sayfasına ... ekle" is not routed to chat.
+const NON_ENGLISH_REQUEST_PATTERN =
+  /(?:^|[^\p{L}])(?:ekle|düzelt|yap|oluştur|güncelle|füge|behebe|erstelle|ändere|aktualisiere|añade|agrega|arregla|crea|corrige|ajoute|crée)(?:y?[ıiuü]n)?(?=$|[^\p{L}])|添加|修复|创建|实现|帮我/u;
+
+// Programming vocabulary for the code domain. Word boundaries only count Latin
+// letters, so a short keyword such as "pr" does not match inside "präsentation"
+// while "Python" next to Chinese text ("写一个Python脚本") still does.
+const CODE_KEYWORD_PATTERN =
+  /(?<![\p{Script=Latin}\p{N}_])(?:code|coding|typescript|javascript|python|rust|java|node|repo|repository|branch|commit|pull request|pr|diff|test|build|lint|debug|bug|stack trace|api|sdk)(?![\p{Script=Latin}\p{N}_])/u;
+const CODE_VOCABULARY_PATTERN =
+  /(?<![\p{Script=Latin}\p{N}_])(?:refactor(?:ing)?|codebase|monorepo|frontend|backend|endpoints?|dependenc(?:y|ies)|unit[\s-]+tests?|regex|sql|graphql|json|yaml|html|css|npm|pnpm|yarn|pytest|jest|vitest|eslint|prettier|webpack|git|github|gitlab|linter|oauth|jwt|webhooks?|dark\s+mode|null\s+check|http\s+client|(?:class|functional|react|ui|reusable)\s+components?|(?:login|signup|sign-up|sign-in|checkout|settings|onboarding|auth)\s+(?:page|screen|form|flow|function|module|button|endpoint|component|view))(?![\p{Script=Latin}\p{N}_])|单元测试|代码|函数|前端|后端/u;
+// Framework and language names that are also English words ("react") count
+// only when capitalized as proper nouns.
+const CODE_PROPER_NOUN_PATTERN =
+  /\b(?:React|Vue|Angular|Svelte|Next\.js|Nuxt|Django|Flask|Rails|Laravel|Spring Boot|Kotlin|Golang|PHP)\b/;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -134,6 +187,54 @@ export class IntentRouter {
     return this.getRedirectSignals(lower).length > 0;
   }
 
+  /** A change verb such as "add" or "upgrade" used as a request rather than inside a question. */
+  private static hasRequestedAction(lower: string): boolean {
+    return lower.split(/(?<=[.!?;])\s+|\n+/).some((sentence) => {
+      const clause = sentence.trim();
+      if (!clause) return false;
+      if (MODAL_REQUEST_ACTION_PATTERN.test(clause)) return true;
+      return !/\?\s*$/.test(clause) && CLAUSE_START_ACTION_PATTERN.test(clause);
+    });
+  }
+
+  /** An instruction of at least two words: not a question or a remark about oneself. */
+  private static looksLikeRequest(lower: string): boolean {
+    const trimmed = lower.trim();
+    if (!trimmed || trimmed.includes("?")) return false;
+    if (
+      /^(?:who|what|when|where|why|how|which|whose|is|are|am|was|were|do|does|did|have|has|had|should|shall)\b/.test(
+        trimmed,
+      ) ||
+      /^(?:my\s+name\s+is|i(?:['’]m|\s+am)\s|i\s+(?:feel|felt|was|guess|love|like|hate)\b)/.test(
+        trimmed,
+      )
+    ) {
+      return false;
+    }
+    if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(trimmed)) {
+      return trimmed.length >= 2;
+    }
+    return trimmed.split(/\s+/).length >= 2;
+  }
+
+  /**
+   * Whether a follow-up abandons the earlier work so completely that its
+   * conversation history should be replaced. Only an explicit pivot ("forget
+   * that", "start over", "new task:", "scrap that", "never mind that") that does
+   * not refer back to the earlier work qualifies. Contrast and scope-narrowing
+   * messages ("Instead of a modal, build a dropdown", "Focus only on the files
+   * you changed") are redirect intents too, but they refine the current work.
+   */
+  static isHistoryResetRedirect(text: string): boolean {
+    const lower = String(text || "").toLowerCase();
+    const withoutPivots = lower.replace(EXPLICIT_PIVOT_PATTERN, " ");
+    if (withoutPivots === lower) return false;
+    // "Start over" or "Forget that." alone names no new work yet; keep the
+    // context the next message will need.
+    if ((withoutPivots.match(/[\p{L}\p{N}]+/gu) || []).length < 2) return false;
+    return !REFERS_TO_PRIOR_WORK_PATTERN.test(withoutPivots);
+  }
+
   private static stripStrategyContext(text: string): string {
     if (!text) return text;
     const open = "[AGENT_STRATEGY_CONTEXT_V1]";
@@ -149,27 +250,22 @@ export class IntentRouter {
     return [before, after].filter(Boolean).join("\n\n").trim();
   }
 
-  private static inferDomain(lower: string): TaskDomain {
+  private static inferDomain(lower: string, text: string): TaskDomain {
     const compileCodeSignal =
       /\bcompile\b/.test(lower) &&
       /\b(code|coding|typescript|javascript|python|rust|java|node|repo|repository|branch|commit|pull request|pr|diff|test|build|lint|debug|bug|stack trace|api|sdk|binary|program)\b/.test(
         lower,
       );
 
-    const codeKeywordSignal =
-      /\b(code|coding|typescript|javascript|python|rust|java|node|repo|repository|branch|commit|pull request|pr|diff|test|build|lint|debug|bug|stack trace|api|sdk)\b/.test(
-        lower,
-      );
-    const pathLikeSignal = /\/[a-z0-9_./-]+/.test(lower);
-    const codePathCue =
-      /\b(src|dist|lib|package\.json|tsconfig|node_modules|dockerfile|makefile|readme\.md)\b/.test(
-        lower,
-      ) || /\.[a-z0-9]{1,5}\b/.test(lower);
     const codeSignal =
-      codeKeywordSignal ||
+      CODE_KEYWORD_PATTERN.test(lower) ||
       compileCodeSignal ||
       /`[^`]+`/.test(lower) ||
-      (pathLikeSignal && codePathCue && codeKeywordSignal);
+      // File paths, identifiers, code fences, and stack traces mark code work in
+      // any language ("src/utils/date.ts içindeki hatayı düzelt").
+      hasStructuralCodeSignal(text) ||
+      CODE_VOCABULARY_PATTERN.test(lower) ||
+      CODE_PROPER_NOUN_PATTERN.test(text);
     if (codeSignal) return "code";
 
     const operationsSignal =
@@ -251,6 +347,22 @@ export class IntentRouter {
       /\b(how are you|how's it going|what's up|good night)\b/.test(lower),
     );
     add(
+      "chat",
+      3,
+      "acknowledgement",
+      /^(?:(?:ok(?:ay)?|k|cool|nice|great|awesome|perfect|got\s+it|sounds\s+good|makes\s+sense|understood|noted|no\s+worries|all\s+good|alright|fine|lol|haha|no|nope|thanks|thank\s+you|thx|(?:good|nice|great)\s+(?:job|work|one)|well\s+done)[\s.!,]*)+$/.test(
+        lower.trim(),
+      ),
+    );
+    add(
+      "chat",
+      3,
+      "self-introduction",
+      /^(?:who\s+are\s+you|what\s+are\s+you|what\s+can\s+you\s+do|tell\s+me\s+about\s+yourself|introduce\s+yourself)[\s.!?]*$/.test(
+        lower.trim(),
+      ),
+    );
+    add(
       "advice",
       3,
       "advice-question",
@@ -278,6 +390,8 @@ export class IntentRouter {
         lower,
       ),
     );
+    add("execution", 3, "requested-action", this.hasRequestedAction(lower));
+    add("execution", 3, "non-english-request", NON_ENGLISH_REQUEST_PATTERN.test(lower));
     const documentAnalysisSignal = this.hasDocumentAnalysisSignal(lower);
     add("execution", 6, "document-analysis", documentAnalysisSignal);
     add(
@@ -479,6 +593,11 @@ export class IntentRouter {
       // Question with no chat signals (e.g. "have you raised this PR yet?")
       // should be treated as advice rather than defaulting to chat
       intent = "advice";
+    } else if (chatLike === 0 && this.looksLikeRequest(lower)) {
+      // A request with no chat cue whose wording the lists above miss ("The
+      // settings page should remember the last tab", another language) still
+      // asks for work; routing it to chat stripped its tools in plan mode.
+      intent = "execution";
     } else {
       intent = "chat";
     }
@@ -522,7 +641,7 @@ export class IntentRouter {
       complexity = "low";
     }
 
-    const domain = this.inferDomain(lower);
+    const domain = this.inferDomain(lower, text);
 
     return {
       intent,

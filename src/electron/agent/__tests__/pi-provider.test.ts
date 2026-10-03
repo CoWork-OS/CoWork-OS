@@ -146,7 +146,8 @@ describe("PiProvider", () => {
         }),
       );
       expect(response.usage).toEqual({
-        inputTokens: 100,
+        // Inclusive usage contract: 100 uncached + 80 cache reads + 20 cache writes.
+        inputTokens: 200,
         outputTokens: 5,
         cachedTokens: 80,
         cacheWriteTokens: 20,

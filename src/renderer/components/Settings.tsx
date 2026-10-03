@@ -88,7 +88,11 @@ import {
   type MoaModelSlot,
   type MoaPreset,
 } from "../../shared/types";
-import { CUSTOM_PROVIDER_MAP } from "../../shared/llm-provider-catalog";
+import {
+  CUSTOM_PROVIDER_MAP,
+  GEMINI_DEFAULT_MODEL,
+  OPENROUTER_DEFAULT_MODEL_ID,
+} from "../../shared/llm-provider-catalog";
 import {
   getModelAccessDescriptor,
   isFeaturedProvider,
@@ -1549,7 +1553,7 @@ export function Settings({
 
   // Gemini state
   const [geminiApiKey, setGeminiApiKey] = useState("");
-  const [geminiModel, setGeminiModel] = useState("gemini-2.0-flash");
+  const [geminiModel, setGeminiModel] = useState(GEMINI_DEFAULT_MODEL);
   const [geminiModels, setGeminiModels] = useState<
     Array<{ name: string; displayName: string; description: string }>
   >([]);
@@ -1558,7 +1562,7 @@ export function Settings({
   // OpenRouter state
   const [openrouterApiKey, setOpenrouterApiKey] = useState("");
   const [openrouterBaseUrl, setOpenrouterBaseUrl] = useState("");
-  const [openrouterModel, setOpenrouterModel] = useState("anthropic/claude-3.5-sonnet");
+  const [openrouterModel, setOpenrouterModel] = useState(OPENROUTER_DEFAULT_MODEL_ID);
   const [openrouterParetoMinCodingScore, setOpenrouterParetoMinCodingScore] = useState("");
   const [openrouterModels, setOpenrouterModels] = useState<
     Array<{ id: string; name: string; context_length: number }>
@@ -3826,13 +3830,13 @@ export function Settings({
         break;
       case "gemini":
         setGeminiApiKey("");
-        setGeminiModel("gemini-2.0-flash");
+        setGeminiModel(GEMINI_DEFAULT_MODEL);
         setGeminiModels([]);
         break;
       case "openrouter":
         setOpenrouterApiKey("");
         setOpenrouterBaseUrl("");
-        setOpenrouterModel("anthropic/claude-3.5-sonnet");
+        setOpenrouterModel(OPENROUTER_DEFAULT_MODEL_ID);
         setOpenrouterModels([]);
         break;
       case "openai":
@@ -6156,7 +6160,7 @@ export function Settings({
                 <input
                   type="text"
                   className="settings-input"
-                  placeholder="gemini-2.0-flash"
+                  placeholder={GEMINI_DEFAULT_MODEL}
                   value={geminiModel}
                   onChange={(e) => setGeminiModel(e.target.value)}
                 />
@@ -6229,7 +6233,7 @@ export function Settings({
                 <input
                   type="text"
                   className="settings-input"
-                  placeholder="anthropic/claude-3.5-sonnet"
+                  placeholder={OPENROUTER_DEFAULT_MODEL_ID}
                   value={openrouterModel}
                   onChange={(e) => setOpenrouterModel(e.target.value)}
                 />

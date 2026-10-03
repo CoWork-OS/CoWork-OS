@@ -327,8 +327,17 @@ export function applyAnthropicCacheMarker(
   }
 
   if (Array.isArray(content) && content.length > 0) {
-    const last = content[content.length - 1];
-    if (last && typeof last === "object") {
+    // Thinking blocks cannot carry cache_control; mark the last block before them.
+    const last = [...content]
+      .reverse()
+      .find(
+        (block) =>
+          block &&
+          typeof block === "object" &&
+          block.type !== "thinking" &&
+          block.type !== "redacted_thinking",
+      );
+    if (last) {
       (last as Record<string, Any>).cache_control = cacheMarker;
     }
   }
@@ -400,16 +409,45 @@ export function extractAnthropicUsage(usage: Any):
       ? reportedCacheWriteTokens
       : cacheWrite5mTokens + cacheWrite1hTokens;
 
+  const safeCached = Number.isFinite(cachedTokens) && cachedTokens > 0 ? cachedTokens : 0;
+  const safeCacheWrite =
+    Number.isFinite(cacheWriteTokens) && cacheWriteTokens > 0 ? cacheWriteTokens : 0;
   return {
-    inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+    // Anthropic's input_tokens excludes cache reads and writes; the shared usage
+    // contract (LLMResponse.usage) counts them inside inputTokens.
+    inputTokens: (Number.isFinite(inputTokens) ? inputTokens : 0) + safeCached + safeCacheWrite,
     outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
-    ...(Number.isFinite(cachedTokens) && cachedTokens > 0 ? { cachedTokens } : {}),
-    ...(Number.isFinite(cacheWriteTokens) && cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+    ...(safeCached > 0 ? { cachedTokens: safeCached } : {}),
+    ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
     ...(cacheWrite1hTokens > 0
       ? { cacheWriteTtl: "1h" as const }
       : cacheWrite5mTokens > 0
         ? { cacheWriteTtl: "5m" as const }
         : {}),
+  };
+}
+
+/**
+ * pi-ai reports disjoint counters for every upstream (`input` excludes cache
+ * reads and writes); fold them into the inclusive usage contract.
+ */
+export function extractPiAiUsage(
+  usage: Any,
+):
+  | { inputTokens: number; outputTokens: number; cachedTokens?: number; cacheWriteTokens?: number }
+  | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  const count = (value: unknown) => {
+    const numeric = Number(value ?? 0);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+  const cachedTokens = count(usage.cacheRead);
+  const cacheWriteTokens = count(usage.cacheWrite);
+  return {
+    inputTokens: count(usage.input) + cachedTokens + cacheWriteTokens,
+    outputTokens: count(usage.output),
+    ...(cachedTokens > 0 ? { cachedTokens } : {}),
+    ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
   };
 }
 

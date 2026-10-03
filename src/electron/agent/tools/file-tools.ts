@@ -47,9 +47,14 @@ import {
   type AccessFilesystemOperation,
 } from "../../security/access-profile-paths";
 
-// Limits to prevent context overflow
-const DEFAULT_READ_WINDOW_CHARS = 300 * 1024; // 300KB default read window
+// Limits to prevent context overflow. Default windows are sized to what one tool result
+// can deliver to the model (context-manager caps a result at ~40K chars, ~120K for
+// DOCX/PDF/PPTX, after JSON escaping), so a default read is never silently cut down and
+// long files are paged deliberately via nextStartChar.
+const DEFAULT_READ_WINDOW_CHARS = 30_000;
+const DEFAULT_DOCUMENT_READ_WINDOW_CHARS = 100_000;
 const MAX_READ_WINDOW_CHARS = 1_000_000; // 1MB max read window
+const PPTX_MIN_EXTRACTION_CHARS = 300 * 1024;
 const MAX_DIR_ENTRIES = 100; // Max files to list per directory
 const MAX_SEARCH_RESULTS = 50; // Max search results
 const WRITE_FILE_LINE_STATS_MAX_BYTES = 1024 * 1024; // Skip line stats when overwriting larger files
@@ -64,6 +69,23 @@ interface ReadWindow {
 interface ReadWindowOptions {
   startChar: number;
   maxChars: number;
+}
+
+/**
+ * Bytes of buffer[0, length) that end on a UTF-8 character boundary, so a read window
+ * never splits a character (which would decode to U+FFFD on both sides of the cut).
+ */
+function utf8CompleteLength(buffer: Buffer, length: number): number {
+  let index = length - 1;
+  let continuationBytes = 0;
+  while (index >= 0 && continuationBytes < 3 && (buffer[index]! & 0xc0) === 0x80) {
+    index -= 1;
+    continuationBytes += 1;
+  }
+  if (index <= 0) return length;
+  const lead = buffer[index]!;
+  const sequenceLength = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+  return sequenceLength > continuationBytes + 1 ? index : length;
 }
 
 interface WriteFileOptions {
@@ -1083,6 +1105,7 @@ export class FileTools {
     format?: string;
     path: string;
     window?: ReadWindow;
+    nextStartChar?: number;
     provenance?: SensitiveSourceRef;
   }> {
     // Validate input
@@ -1090,6 +1113,12 @@ export class FileTools {
       throw new Error("Invalid path: path must be a non-empty string");
     }
     const readWindow = this.normalizeReadWindowOptions(options);
+    const documentReadWindow = this.normalizeReadWindowOptions(
+      options,
+      DEFAULT_DOCUMENT_READ_WINDOW_CHARS,
+    );
+    const continuation = (window: ReadWindow) =>
+      window.end < window.total ? { nextStartChar: window.end } : {};
 
     this.checkPermission("read");
     const normalizedPathInput = this.expandHomeShortcutPath(relativePath);
@@ -1158,33 +1187,36 @@ export class FileTools {
 
       // Handle DOCX files
       if (ext === ".docx") {
-        const out = await this.readDocxFile(fullPath, stats.size, readWindow);
+        const out = await this.readDocxFile(fullPath, stats.size, documentReadWindow);
         return {
           ...out,
           content: this.applyReadProvenance(out.content, provenance),
           path: outputPath,
+          ...continuation(out.window),
           provenance,
         };
       }
 
       // Handle PDF files
       if (ext === ".pdf") {
-        const out = await this.readPdfFile(fullPath, stats.size, readWindow);
+        const out = await this.readPdfFile(fullPath, stats.size, documentReadWindow);
         return {
           ...out,
           content: this.applyReadProvenance(out.content, provenance),
           path: outputPath,
+          ...continuation(out.window),
           provenance,
         };
       }
 
       // Handle PPTX files
       if (ext === ".pptx") {
-        const out = await this.readPptxFile(fullPath, stats.size, readWindow);
+        const out = await this.readPptxFile(fullPath, stats.size, documentReadWindow);
         return {
           ...out,
           content: this.applyReadProvenance(out.content, provenance),
           path: outputPath,
+          ...continuation(out.window),
           provenance,
         };
       }
@@ -1201,29 +1233,37 @@ export class FileTools {
 
       const fileHandle = await fs.open(fullPath, "r");
       let content = "";
+      let deliveredBytes = 0;
       try {
         if (bytesToRead > 0) {
           const buffer = Buffer.alloc(bytesToRead);
           const readRes = await fileHandle.read(buffer, 0, bytesToRead, start);
-          content = buffer.toString("utf-8", 0, readRes.bytesRead);
+          deliveredBytes = readRes.bytesRead;
+          // Keep a partial window on a character boundary so paging never splits one.
+          if (start + deliveredBytes < stats.size) {
+            deliveredBytes = utf8CompleteLength(buffer, deliveredBytes);
+          }
+          content = buffer.toString("utf-8", 0, deliveredBytes);
         }
       } finally {
         await fileHandle.close();
       }
 
-      const end = start + bytesToRead;
+      const end = start + deliveredBytes;
       const truncated = start > 0 || end < stats.size;
       if (truncated) {
         content += `\n\n[... File window ${start}-${end} of ${stats.size} bytes ...]`;
       }
       content = this.applyReadProvenance(content, provenance);
+      const window = { start, end, total: stats.size };
 
       return {
         content,
         size: stats.size,
         truncated,
         path: outputPath,
-        window: { start, end, total: stats.size },
+        window,
+        ...continuation(window),
         provenance,
       };
     } catch (error) {
@@ -1311,10 +1351,13 @@ export class FileTools {
     return null;
   }
 
-  private normalizeReadWindowOptions(options?: {
-    startChar?: number;
-    maxChars?: number;
-  }): ReadWindowOptions {
+  private normalizeReadWindowOptions(
+    options?: {
+      startChar?: number;
+      maxChars?: number;
+    },
+    defaultMaxChars: number = DEFAULT_READ_WINDOW_CHARS,
+  ): ReadWindowOptions {
     const startCandidate = Number(options?.startChar);
     const maxCharsCandidate = Number(options?.maxChars);
 
@@ -1322,7 +1365,7 @@ export class FileTools {
       Number.isFinite(startCandidate) && startCandidate >= 0 ? Math.floor(startCandidate) : 0;
     const maxChars = Number.isFinite(maxCharsCandidate)
       ? Math.floor(maxCharsCandidate)
-      : DEFAULT_READ_WINDOW_CHARS;
+      : defaultMaxChars;
 
     return {
       startChar,
@@ -1472,7 +1515,7 @@ export class FileTools {
     try {
       const extractionLimit = Math.min(
         MAX_READ_WINDOW_CHARS,
-        Math.max(readWindow.startChar + readWindow.maxChars + 1024, DEFAULT_READ_WINDOW_CHARS),
+        Math.max(readWindow.startChar + readWindow.maxChars + 1024, PPTX_MIN_EXTRACTION_CHARS),
       );
       const extracted = await extractPptxContentFromFile(fullPath, {
         outputCharLimit: extractionLimit,
@@ -2283,6 +2326,7 @@ export class FileTools {
     matches: Array<{ path: string; type: "filename" | "content" }>;
     totalFound: number;
     truncated?: boolean;
+    truncationReason?: string;
   }> {
     // Validate input
     if (!query || typeof query !== "string") {
@@ -2300,9 +2344,16 @@ export class FileTools {
     const matches: Array<{ path: string; type: "filename" | "content" }> = [];
     let filesSearched = 0;
     const maxFilesToSearch = 500; // Limit files to search for performance
+    // Set when the file cap stops the walk with entries left, so an empty or short result is
+    // not reported as a complete search.
+    let fileCapReached = false;
+    const shouldStop = () => {
+      if (filesSearched >= maxFilesToSearch) fileCapReached = true;
+      return matches.length >= MAX_SEARCH_RESULTS || fileCapReached;
+    };
 
     const searchRecursive = async (dir: string) => {
-      if (matches.length >= MAX_SEARCH_RESULTS || filesSearched >= maxFilesToSearch) {
+      if (shouldStop()) {
         return;
       }
 
@@ -2314,7 +2365,7 @@ export class FileTools {
       }
 
       for (const entry of entries) {
-        if (matches.length >= MAX_SEARCH_RESULTS || filesSearched >= maxFilesToSearch) {
+        if (shouldStop()) {
           break;
         }
 
@@ -2378,7 +2429,14 @@ export class FileTools {
       return {
         matches: matches.slice(0, MAX_SEARCH_RESULTS),
         totalFound: matches.length,
-        truncated: matches.length >= MAX_SEARCH_RESULTS,
+        truncated: matches.length >= MAX_SEARCH_RESULTS || fileCapReached,
+        ...(fileCapReached
+          ? {
+              truncationReason:
+                `Stopped after searching ${maxFilesToSearch} files; later files were not checked, so a missing match does not mean the text is absent. ` +
+                "Use grep (file contents) or glob (file names) with a narrower path to search the rest.",
+            }
+          : {}),
       };
     } catch (error) {
       throw new Error(`Search failed: ${(error as Error).message}`);

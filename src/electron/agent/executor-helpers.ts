@@ -12,13 +12,14 @@
  * - Utility functions (timeout, backoff, sleep, date formatting, question detection)
  */
 
+import { createHash } from "crypto";
 import * as path from "path";
 import {
   canonicalizeToolName,
-  getToolDedupeClass,
   isArtifactGenerationToolName,
   isFileMutationToolName,
 } from "./tool-semantics";
+import { classifyProviderError } from "./llm/provider-error-classifier";
 
 // ===== Custom Error =====
 
@@ -120,6 +121,44 @@ export const CONTEXT_CAPACITY_ERROR_PATTERNS = [
   /maximum number of input tokens/i,
   /reduce the length of the messages/i,
   /invalid_request_error.*(context|tokens|length)/i,
+  // Anthropic / Vertex: "prompt is too long: 210000 tokens > 200000 maximum"
+  /prompt is too long/i,
+  // Bedrock: "Input is too long for requested model."
+  /input is too long/i,
+  // Gemini: "The input token count (N) exceeds the maximum number of tokens allowed (M)."
+  /input token count[^.]*exceeds/i,
+  // llama.cpp: "the request exceeds the available context size, try increasing it"
+  /exceeds the available context size/i,
+  // Anthropic: "input length and `max_tokens` exceed context limit: N + M > L"
+  /exceeds? (?:the )?context limit/i,
+  // xAI: "This model's maximum prompt length is N but the request contains M tokens."
+  /maximum prompt length/i,
+];
+
+// The requested output size (max_tokens) is over the model's output cap. That is
+// an output-budget problem: compacting the input cannot fix it.
+const OUTPUT_TOKEN_CAP_ERROR_PATTERNS = [
+  /max_tokens:\s*\d+\s*>\s*\d+/i,
+  /maximum allowed number of output tokens/i,
+  /max_(?:completion_)?tokens is too large/i,
+  /supports at most \d+ completion tokens/i,
+  /max(?:imum)?[_ ]?output[_ ]?tokens/i,
+];
+
+// Wording that names the input as too long; it wins over an output-cap match.
+const INPUT_OVERFLOW_ERROR_PATTERNS = [
+  /prompt is too long/i,
+  /input is too long/i,
+  /input too long/i,
+  /prompt too long/i,
+  /context length/i,
+  /context window/i,
+  /context limit/i,
+  /context size/i,
+  /maximum context/i,
+  /input token count/i,
+  /maximum prompt length/i,
+  /reduce the length of the messages/i,
 ];
 
 // Patterns that indicate input-dependent errors (not tool failures)
@@ -218,15 +257,12 @@ export function isNonRetryableError(errorMessage: string): boolean {
 /**
  * Check if an LLM provider error is non-retryable.
  * For LLM providers, 429/rate limit/too many requests are TRANSIENT — retry with backoff.
- * Only billing/quota/payment errors are non-retryable.
+ * Only billing/quota/payment errors are non-retryable, including an exhausted
+ * quota reported as a 429 ("You exceeded your current quota").
  */
 export function isNonRetryableLLMError(errorMessage: string): boolean {
-  const msg = String(errorMessage || "").toLowerCase();
-  // Rate limit (429) is transient for LLM — we retry
-  if (/429|rate limit|too many requests|free-models-per-min/i.test(msg)) return false;
-  // Billing/quota/payment are non-retryable
-  return /quota.*exceeded|exceeds?.*usage.*limit|resource.*exhausted|billing|payment.*required|upgrade your plan/i.test(
-    msg,
+  return (
+    classifyProviderError({ message: String(errorMessage || "") }).reason === "quota_exhausted"
   );
 }
 
@@ -256,7 +292,52 @@ export function isContextCapacityError(errorLike: unknown): boolean {
         ? String((errorLike as Any).message || "")
         : "";
   if (!message.trim()) return false;
-  return CONTEXT_CAPACITY_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  if (!CONTEXT_CAPACITY_ERROR_PATTERNS.some((pattern) => pattern.test(message))) return false;
+  const isOutputCapError = OUTPUT_TOKEN_CAP_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  return (
+    !isOutputCapError || INPUT_OVERFLOW_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+  );
+}
+
+/**
+ * Token counts a context-overflow error reports, when it reports them:
+ * `requested` is what the provider counted for the request and `limit` what it
+ * allows. Returns null when the message carries no usable counts.
+ */
+export function parseContextOverflowTokenCounts(
+  errorLike: unknown,
+): { requested: number; limit: number } | null {
+  const message =
+    typeof errorLike === "string"
+      ? errorLike
+      : typeof errorLike === "object" && errorLike !== null
+        ? String((errorLike as Any).message || "")
+        : "";
+  const toNumber = (value: string | undefined) => Number(String(value || "").replace(/,/g, ""));
+  const counts = (requested: number, limit: number) =>
+    Number.isFinite(requested) && Number.isFinite(limit) && limit > 0 && requested > limit
+      ? { requested, limit }
+      : null;
+
+  // Anthropic: "input length and `max_tokens` exceed context limit: 198000 + 8192 > 200000"
+  let match = /(\d[\d,]*)\s*\+\s*(\d[\d,]*)\s*>\s*(\d[\d,]*)/.exec(message);
+  if (match) return counts(toNumber(match[1]) + toNumber(match[2]), toNumber(match[3]));
+  // Anthropic: "prompt is too long: 210000 tokens > 200000 maximum"
+  match = /(\d[\d,]*)\s*tokens?\s*>\s*(\d[\d,]*)/i.exec(message);
+  if (match) return counts(toNumber(match[1]), toNumber(match[2]));
+  // Gemini: "input token count (1100000) exceeds the maximum number of tokens allowed (1048576)"
+  match = /input token count \(?(\d[\d,]*)\)?[^(]*\((\d[\d,]*)\)/i.exec(message);
+  if (match) return counts(toNumber(match[1]), toNumber(match[2]));
+  // OpenAI-compatible: "maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens"
+  match =
+    /maximum (?:context|prompt) length is (\d[\d,]*)[\s\S]*?(?:resulted in|requested(?: about)?|contains) (\d[\d,]*)/i.exec(
+      message,
+    );
+  if (match) return counts(toNumber(match[2]), toNumber(match[1]));
+  // Mistral: "Prompt contains 40000 tokens ... too large for model with 32768 maximum context length"
+  match = /contains (\d[\d,]*) tokens[\s\S]*?with (\d[\d,]*) maximum context length/i.exec(message);
+  if (match) return counts(toNumber(match[1]), toNumber(match[2]));
+  return null;
 }
 
 /**
@@ -430,14 +511,152 @@ export function isAskingQuestion(text: string): boolean {
 
 // ===== Tool Call Deduplicator =====
 
+/** JSON with object keys sorted at every level, so equal inputs always serialize alike. */
+function stableStringify(value: unknown): string {
+  return (
+    JSON.stringify(value, (_key, nested) =>
+      nested && typeof nested === "object" && !Array.isArray(nested)
+        ? Object.fromEntries(
+            Object.keys(nested)
+              .sort()
+              .map((key) => [key, (nested as Record<string, unknown>)[key]]),
+          )
+        : nested,
+    ) ?? ""
+  );
+}
+
+/** Short stable fingerprint of a tool input, independent of key order. */
+export function hashToolInput(input: unknown): string {
+  return createHash("sha256").update(stableStringify(input)).digest("hex").slice(0, 16);
+}
+
+// Outputs where writing renamed variants (report_v2.md, report_final.md) is a known
+// retry pattern. Source files with numbered names (step-1.ts, step-2.ts) are distinct work.
+const DOCUMENT_ARTIFACT_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".rtf",
+  ".doc",
+  ".docx",
+  ".odt",
+  ".pdf",
+  ".ppt",
+  ".pptx",
+  ".key",
+  ".xls",
+  ".xlsx",
+  ".ods",
+  ".csv",
+  ".tsv",
+]);
+
+// Local tools that only read. Exploring a codebase legitimately takes many distinct
+// reads and searches, so these are exempt from the per-minute rate limit.
+const LOCAL_READ_ONLY_TOOLS = new Set([
+  "grep",
+  "glob",
+  "read_files",
+  "parse_document",
+  "count_text",
+  "text_metrics",
+]);
+
+// Input fields naming the file a mutation or artifact tool writes, in priority order.
+const SEMANTIC_TARGET_INPUT_KEYS = [
+  "filename",
+  "path",
+  "file_path",
+  "destPath",
+  "destination",
+  "newPath",
+  "sourcePath",
+  "outputPath",
+  "output_path",
+];
+
+function getSemanticTarget(input: Any): {
+  targetKey?: string;
+  target: string;
+  normalizedTarget: string;
+} {
+  const targetKey = SEMANTIC_TARGET_INPUT_KEYS.find(
+    (key) => typeof input?.[key] === "string" && input[key].trim(),
+  );
+  const target = targetKey ? String(input[targetKey]).trim() : "";
+  const normalizedTarget = target
+    .replace(/\\/g, "/")
+    .replace(/^(?:\.\/)+/, "")
+    .toLowerCase();
+  return { targetKey, target, normalizedTarget };
+}
+
+export type DuplicateCallOutcome = "succeeded" | "failed" | "unknown";
+
+export interface DuplicateCheckResult {
+  isDuplicate: boolean;
+  reason?: string;
+  cachedResult?: string;
+  kind?: "exact" | "semantic" | "rate_limit";
+  /** Outcome of the last identical call, for exact duplicates. */
+  previousOutcome?: DuplicateCallOutcome;
+}
+
+interface SemanticCall {
+  signature: string;
+  /**
+   * mutation: identity of a file change (only an identical change repeats it);
+   * document_variant: renamed versions of one document; similar: near-identical calls.
+   */
+  kind: "mutation" | "document_variant" | "similar";
+  target: string;
+}
+
+/** Whether a recorded tool result reports failure, mirroring the executor's success test. */
+function describeRecordedOutcome(result?: string): {
+  outcome: DuplicateCallOutcome;
+  detail: string;
+} {
+  if (typeof result !== "string" || !result.trim()) return { outcome: "unknown", detail: "" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return { outcome: "unknown", detail: "" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { outcome: "unknown", detail: "" };
+  }
+  const record = parsed as Record<string, unknown>;
+  const exitCode =
+    typeof record.exitCode === "number"
+      ? record.exitCode
+      : typeof record.exit_code === "number"
+        ? record.exit_code
+        : undefined;
+  if (record.success !== false && (exitCode === undefined || exitCode === 0)) {
+    return { outcome: "succeeded", detail: "" };
+  }
+  const message = [record.error, record.stderr, record.message]
+    .find((value) => typeof value === "string" && value.trim())
+    ?.toString()
+    .trim()
+    .split("\n")[0]
+    ?.slice(0, 160);
+  const parts = [exitCode !== undefined ? `exit code ${exitCode}` : "", message || ""];
+  return { outcome: "failed", detail: parts.filter(Boolean).join(": ") };
+}
+
 /**
  * Tracks recent tool calls to detect and prevent duplicate/repetitive calls
  * This prevents the agent from getting stuck in loops calling the same tool
  *
  * Features:
  * - Exact duplicate detection (same tool + same params)
- * - Semantic duplicate detection (same tool + similar params, e.g., filename variants)
- * - Rate limiting per tool
+ * - Semantic duplicate detection: an identical file change repeated, renamed variants of
+ *   the same document, or near-identical searches/navigations
+ * - Rate limiting per tool (local read-only tools are exempt)
  */
 export class ToolCallDeduplicator {
   private recentCalls: Map<string, { count: number; lastCallTime: number; lastResult?: string }> =
@@ -473,47 +692,61 @@ export class ToolCallDeduplicator {
    * Generate a hash key for a tool call based on name and input
    */
   private getCallKey(toolName: string, input: Any): string {
-    // Normalize input by sorting keys for consistent hashing
-    const normalizedInput = JSON.stringify(input, Object.keys(input || {}).sort());
-    return `${toolName}:${normalizedInput}`;
+    // Sort keys at every level: a top-level key list as JSON.stringify replacer would
+    // drop nested keys and make calls with different nested inputs look identical.
+    return `${toolName}:${stableStringify(input)}`;
   }
 
   /**
-   * Extract semantic signature from input for pattern matching
-   * This normalizes filenames, paths, etc. to detect "same operation, different target"
+   * Extract semantic signature from input for pattern matching.
+   * File changes are identified by target + content, so only an identical change counts
+   * as a repeat; renamed variants of one document and near-identical searches collapse.
    */
-  private getSemanticSignature(toolName: string, input: Any): string {
-    if (!input) return toolName;
+  private getSemanticSignature(toolName: string, input: Any): SemanticCall {
     const canonicalToolName = canonicalizeToolName(toolName);
+    if (!input) return { signature: canonicalToolName, kind: "similar", target: "" };
 
     if (canonicalToolName === "browser_navigate") {
       const rawUrl = String(input.url || "").trim();
       const normalizedUrl = this.normalizeUrlForSemanticSignature(rawUrl);
-      return `${canonicalToolName}:url:${normalizedUrl}`;
+      return {
+        signature: `${canonicalToolName}:url:${normalizedUrl}`,
+        kind: "similar",
+        target: "",
+      };
     }
 
-    // For file operations, normalize the filename to detect variants
     if (
-      canonicalToolName === "write_file" ||
-      canonicalToolName === "copy_file" ||
+      isFileMutationToolName(canonicalToolName) ||
       isArtifactGenerationToolName(canonicalToolName)
     ) {
-      const filename = input.filename || input.path || "";
-      // Extract base name without version suffixes like _v2.4, _COMPLETE, _Final, etc.
-      const baseName = filename
-        .replace(/[_-]v?\d+(\.\d+)?/gi, "") // Remove version numbers
-        .replace(/[_-](complete|final|updated|new|copy|backup|draft)/gi, "") // Remove common suffixes
-        .replace(/\.[^.]+$/, ""); // Remove extension
-      return `${getToolDedupeClass(canonicalToolName)}:file:${baseName}`;
-    }
-
-    if (canonicalToolName === "copy_file") {
-      const destPath = input.destPath || input.destination || "";
-      const baseName = destPath
-        .replace(/[_-]v?\d+(\.\d+)?/gi, "")
-        .replace(/[_-](complete|final|updated|new|copy|backup|draft)/gi, "")
-        .replace(/\.[^.]+$/, "");
-      return `${getToolDedupeClass(canonicalToolName)}:copy:${baseName}`;
+      const { targetKey, target, normalizedTarget } = getSemanticTarget(input);
+      const extension = path.posix.extname(normalizedTarget);
+      const writesDocument =
+        (canonicalToolName === "write_file" || canonicalToolName === "copy_file") &&
+        DOCUMENT_ARTIFACT_EXTENSIONS.has(extension);
+      if (isArtifactGenerationToolName(canonicalToolName) || writesDocument) {
+        // Same directory, same extension, name differing only by version-like suffixes.
+        const stem = path.posix
+          .basename(normalizedTarget, extension)
+          .replace(/[_-]v?\d+(\.\d+)?/gi, "")
+          .replace(/[_-](complete|final|updated|new|copy|backup|draft)/gi, "");
+        const directory = path.posix.dirname(normalizedTarget);
+        return {
+          signature: `${canonicalToolName}:variant:${directory}/${stem}${extension}`,
+          kind: "document_variant",
+          target,
+        };
+      }
+      // The target is part of the signature already (normalized), so leave its spelling
+      // out of the change fingerprint.
+      const change = { ...input };
+      if (targetKey) delete change[targetKey];
+      return {
+        signature: `${canonicalToolName}:${normalizedTarget}:${hashToolInput(change)}`,
+        kind: "mutation",
+        target,
+      };
     }
 
     // For web searches, normalize the query to detect similar searches
@@ -532,16 +765,24 @@ export class ToolCallDeduplicator {
         .replace(/["']/g, "")
         .replace(/\s+/g, " ")
         .trim();
-      return `${canonicalToolName}:search:${normalizedQuery}`;
+      return {
+        signature: `${canonicalToolName}:search:${normalizedQuery}`,
+        kind: "similar",
+        target: "",
+      };
     }
 
     // For read operations, just use tool name (reading same file repeatedly is OK)
     if (canonicalToolName === "read_file" || canonicalToolName === "list_directory") {
-      return `${canonicalToolName}:${input.path || ""}`;
+      return {
+        signature: `${canonicalToolName}:${input.path || ""}`,
+        kind: "similar",
+        target: "",
+      };
     }
 
     // Default: use tool name only for semantic grouping
-    return canonicalToolName;
+    return { signature: canonicalToolName, kind: "similar", target: "" };
   }
 
   private normalizeUrlForSemanticSignature(rawUrl: string): string {
@@ -585,6 +826,10 @@ export class ToolCallDeduplicator {
    * Check rate limit for a tool
    */
   private resolveRateLimitForCall(toolName: string, input: Any): number {
+    // Reads and searches change nothing; exact repeats are caught by duplicate detection.
+    if (ToolCallDeduplicator.isIdempotentTool(toolName) || LOCAL_READ_ONLY_TOOLS.has(toolName)) {
+      return Number.POSITIVE_INFINITY;
+    }
     // Some cloud listing APIs legitimately require many small paginated calls.
     // Keep strict limits for mutating actions, but allow higher throughput for read-only actions.
     if (toolName.endsWith("_action") && input && typeof input.action === "string") {
@@ -632,12 +877,10 @@ export class ToolCallDeduplicator {
   /**
    * Check for semantic duplicates (similar operations with slight variations)
    */
-  private checkSemanticDuplicate(
-    toolName: string,
-    input: Any,
-  ): { isDuplicate: boolean; reason?: string } {
+  private checkSemanticDuplicate(toolName: string, input: Any): DuplicateCheckResult {
     const now = Date.now();
-    const signature = this.getSemanticSignature(toolName, input);
+    const { signature, kind, target } = this.getSemanticSignature(toolName, input);
+    const windowSeconds = this.windowMs / 1000;
 
     // Get recent calls with this semantic signature
     const patterns = this.semanticPatterns.get(signature) || [];
@@ -646,24 +889,48 @@ export class ToolCallDeduplicator {
     const recentPatterns = patterns.filter((p) => now - p.time <= this.windowMs);
     this.semanticPatterns.set(signature, recentPatterns);
 
-    // Check if we have too many semantically similar calls
-    if (recentPatterns.length >= this.maxSemanticSimilar) {
-      return {
-        isDuplicate: true,
-        reason:
-          `Detected ${recentPatterns.length + 1} semantically similar "${toolName}" calls within ${this.windowMs / 1000}s. ` +
-          `This appears to be a retry loop with slight parameter variations. ` +
-          `Please try a different approach or check if the previous operation actually succeeded.`,
-      };
+    if (kind === "document_variant") {
+      // Rewriting a document already written is an edit of it; only another renamed
+      // version (report_v2.md, report_final.md, ...) adds a variant.
+      const variants = new Set(
+        recentPatterns.map((pattern) => getSemanticTarget(pattern.input).target),
+      );
+      const isNewVariant = !Array.from(variants).some(
+        (variant) => variant.toLowerCase() === target.toLowerCase(),
+      );
+      if (isNewVariant && variants.size >= this.maxSemanticSimilar) {
+        return {
+          isDuplicate: true,
+          reason:
+            `${variants.size} versions of the same document were already written in the last ` +
+            `${windowSeconds}s under names that differ only by version-like suffixes ` +
+            `(${Array.from(variants).join(", ")}). Update one of them instead of adding "${target}".`,
+          kind: "semantic",
+        };
+      }
+    } else if (recentPatterns.length >= this.maxSemanticSimilar) {
+      // Check if we have too many semantically similar calls
+      const reason =
+        kind === "mutation"
+          ? `This exact "${toolName}" change${target ? ` to "${target}"` : ""} was already ` +
+            `attempted ${recentPatterns.length} times in the last ${windowSeconds}s. Repeating it ` +
+            "will not change the outcome: check whether it already applied or why it failed."
+          : `Detected ${recentPatterns.length + 1} semantically similar "${toolName}" calls within ${windowSeconds}s. ` +
+            `This appears to be a retry loop with slight parameter variations. ` +
+            `Please try a different approach or check if the previous operation actually succeeded.`;
+      return { isDuplicate: true, reason, kind: "semantic" };
     }
 
+    // The per-run cap is for near-identical searches/navigations; distinct file changes
+    // and documents are real work however many a long task needs.
     const totalSeen = this.semanticTotalCounts.get(signature) || 0;
-    if (totalSeen >= this.maxSemanticPerRun) {
+    if (kind === "similar" && totalSeen >= this.maxSemanticPerRun) {
       return {
         isDuplicate: true,
         reason:
           `Per-run duplicate cap reached for "${toolName}" semantic signature after ${totalSeen} attempts. ` +
           "Stop retrying near-identical calls and synthesize from current evidence.",
+        kind: "semantic",
       };
     }
 
@@ -674,10 +941,7 @@ export class ToolCallDeduplicator {
    * Check if a tool call is a duplicate and should be blocked
    * @returns Object with isDuplicate flag and optional cached result
    */
-  checkDuplicate(
-    toolName: string,
-    input: Any,
-  ): { isDuplicate: boolean; reason?: string; cachedResult?: string } {
+  checkDuplicate(toolName: string, input: Any): DuplicateCheckResult {
     const now = Date.now();
     const canonicalToolName = canonicalizeToolName(toolName);
 
@@ -689,6 +953,8 @@ export class ToolCallDeduplicator {
       "browser_get_text",
       "browser_evaluate",
       "canvas_push",
+      // Polls a running background process; the same call returns new output.
+      "process_output",
     ];
     if (statefulTools.includes(canonicalToolName)) {
       return { isDuplicate: false };
@@ -697,7 +963,7 @@ export class ToolCallDeduplicator {
     // 1. Check rate limit first
     const rateLimitCheck = this.checkRateLimit(canonicalToolName, input);
     if (rateLimitCheck.exceeded) {
-      return { isDuplicate: true, reason: rateLimitCheck.reason };
+      return { isDuplicate: true, reason: rateLimitCheck.reason, kind: "rate_limit" };
     }
 
     // 2. Check exact duplicate
@@ -716,10 +982,21 @@ export class ToolCallDeduplicator {
       now - existing.lastCallTime <= this.windowMs &&
       existing.count >= this.maxDuplicates
     ) {
+      const { outcome, detail } = describeRecordedOutcome(existing.lastResult);
+      const outcomeText =
+        outcome === "failed"
+          ? `, and the last one failed${detail ? ` (${detail})` : ""}`
+          : outcome === "succeeded"
+            ? ", and the last one succeeded"
+            : "";
       return {
         isDuplicate: true,
-        reason: `Tool "${canonicalToolName}" called ${existing.count + 1} times with identical parameters within ${this.windowMs / 1000}s. This appears to be a duplicate call.`,
+        reason:
+          `Tool "${canonicalToolName}" was already called ${existing.count} times with these exact ` +
+          `parameters in the last ${this.windowMs / 1000}s${outcomeText}.`,
         cachedResult: existing.lastResult,
+        kind: "exact",
+        previousOutcome: outcome,
       };
     }
 
@@ -765,7 +1042,7 @@ export class ToolCallDeduplicator {
     }
 
     // Record semantic pattern
-    const signature = this.getSemanticSignature(canonicalToolName, input);
+    const { signature } = this.getSemanticSignature(canonicalToolName, input);
     const patterns = this.semanticPatterns.get(signature) || [];
     patterns.push({ input, time: now });
     this.semanticPatterns.set(signature, patterns);
@@ -786,7 +1063,33 @@ export class ToolCallDeduplicator {
   reset(): void {
     this.recentCalls.clear();
     this.semanticPatterns.clear();
+    // Per-run caps are scoped to a step or follow-up; otherwise one long session keeps
+    // a signature blocked for good once the cap is reached.
+    this.semanticTotalCounts.clear();
     // Don't reset rate limit counters - they should persist across steps
+  }
+
+  /**
+   * After a workspace change, forget repeats of calls whose result depends on workspace
+   * state (reads, listings, searches, commands such as test runs): running them again can
+   * now give a different result. Repeats of file changes themselves are still tracked.
+   * `except` keeps the history of the call that made the change, so a command repeated
+   * back-to-back is still caught.
+   */
+  clearHistoryAfterWorkspaceMutation(except?: { toolName: string; input: Any }): void {
+    this.clearReadOnlyHistory();
+    const keepKey = except
+      ? this.getCallKey(canonicalizeToolName(except.toolName), except.input)
+      : null;
+    const dependsOnWorkspace = (toolName: string): boolean => {
+      const canonical = canonicalizeToolName(toolName);
+      return !isFileMutationToolName(canonical) && !isArtifactGenerationToolName(canonical);
+    };
+    for (const key of Array.from(this.recentCalls.keys())) {
+      if (key !== keepKey && dependsOnWorkspace(key.split(":", 1)[0] || "")) {
+        this.recentCalls.delete(key);
+      }
+    }
   }
 
   /**
@@ -1199,20 +1502,75 @@ export class ToolFailureTracker {
 
 // ===== File Operation Tracker =====
 
+const MUTATION_TARGET_INPUT_KEYS = [
+  "path",
+  "file_path",
+  "filename",
+  "destPath",
+  "destination",
+  "newPath",
+  "oldPath",
+  "sourcePath",
+  "targetPath",
+  "outputPath",
+  "output_path",
+];
+
+/** Every file path a file-mutating tool call names, in its input or its reported result. */
+export function collectMutationTargetPaths(input: unknown, result?: unknown): string[] {
+  const paths = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === "string" && value.trim()) paths.add(value.trim());
+  };
+  if (input && typeof input === "object") {
+    for (const key of MUTATION_TARGET_INPUT_KEYS) add((input as Record<string, unknown>)[key]);
+  }
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+    add(record.path);
+    if (Array.isArray(record.outputPaths)) record.outputPaths.forEach(add);
+  }
+  return Array.from(paths);
+}
+
+// Common exploration tools that never write files but are not "read-only" by name.
+const NON_MUTATING_EXPLORATION_TOOLS = new Set([
+  "grep",
+  "glob",
+  "parse_document",
+  "web_fetch",
+  "count_text",
+  "text_metrics",
+]);
+
+/**
+ * Whether a tool can change workspace files without naming them in its input, such as
+ * shell commands, code execution, sub-agents, or integrations. File-mutation tools name
+ * their targets and read-only tools change nothing, so neither counts.
+ */
+export function toolMayChangeFilesImplicitly(toolName: string): boolean {
+  const canonicalToolName = canonicalizeToolName(toolName);
+  if (isFileMutationToolName(canonicalToolName)) return false;
+  if (ToolCallDeduplicator.isIdempotentTool(canonicalToolName)) return false;
+  return !NON_MUTATING_EXPLORATION_TOOLS.has(canonicalToolName);
+}
+
 /**
  * Tracks file operations to detect redundant reads and duplicate file creations
  * Helps prevent the agent from reading the same file multiple times or
  * creating multiple versions of the same document
  */
 export class FileOperationTracker {
-  // Track files that have been read (path -> { count, lastReadTime, contentSummary })
+  // Track files that have been read (path -> { count, lastReadTime, contentSummary }).
+  // Repeat-read throttling and cached results are kept per read window, so a cached
+  // result is only ever served for the identical read_file call.
   private readFiles: Map<
     string,
     {
       count: number;
       lastReadTime: number;
       contentLength: number;
-      cachedResult?: string;
+      windows: Map<string, { count: number; lastReadTime: number; cachedResult?: string }>;
     }
   > = new Map();
   // Track files that have been created (normalized name -> full path)
@@ -1227,22 +1585,47 @@ export class FileOperationTracker {
 
   private readonly maxReadsPerFile: number = 2;
   private readonly readCooldownMs: number = 30000; // 30 seconds between reads of same file
-  private readonly maxCachedReadResultLength: number = 20000;
+  // Large enough for a budget-bounded read result (see truncateToolResult); a longer
+  // result is not cached rather than cached in a cut-down, invalid form.
+  private readonly maxCachedReadResultLength: number = 130_000;
   private readonly maxListingsPerDir: number = 2;
   private readonly listingCooldownMs: number = 60000; // 60 seconds between listings of same directory
 
   /**
-   * Check if a file read should be blocked (redundant read)
+   * Identity of a read_file call apart from its path: the requested window
+   * (startChar/maxChars) and any other options, normalized so equivalent calls match.
+   */
+  private buildReadWindowKey(input?: unknown): string {
+    if (!input || typeof input !== "object") return "{}";
+    const params: Record<string, unknown> = {};
+    for (const key of Object.keys(input).sort()) {
+      if (key === "path") continue;
+      const value = (input as Record<string, unknown>)[key];
+      if (value === undefined || value === null || value === "") continue;
+      const numeric = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+      params[key] = typeof numeric === "number" && Number.isFinite(numeric) ? numeric : value;
+    }
+    if (typeof params.startChar === "number" && params.startChar <= 0) delete params.startChar;
+    return JSON.stringify(params);
+  }
+
+  /**
+   * Check if a file read should be blocked (redundant read). Only an identical call
+   * (same path and window) counts as a repeat, and only its own result is returned.
    * @returns Object with blocked flag and reason if blocked
    */
-  checkFileRead(filePath: string): {
+  checkFileRead(
+    filePath: string,
+    input?: unknown,
+  ): {
     blocked: boolean;
     reason?: string;
     suggestion?: string;
     cachedResult?: string;
+    cachedAgeMs?: number;
   } {
     const normalized = this.normalizePath(filePath);
-    const existing = this.readFiles.get(normalized);
+    const existing = this.readFiles.get(normalized)?.windows.get(this.buildReadWindowKey(input));
     const now = Date.now();
 
     if (existing) {
@@ -1256,14 +1639,18 @@ export class FileOperationTracker {
         return { blocked: false };
       }
 
-      // If file was read recently (within cooldown), block
-      if (timeSinceLastRead < this.readCooldownMs && existing.count >= this.maxReadsPerFile) {
+      // If the same window was read recently (within cooldown), block
+      if (existing.count >= this.maxReadsPerFile) {
         return {
           blocked: true,
-          reason: `File "${filePath}" was already read ${existing.count} times in the last ${this.readCooldownMs / 1000}s`,
+          reason:
+            `read_file was already called ${existing.count} times for "${filePath}" with the ` +
+            `same window in the last ${this.readCooldownMs / 1000}s`,
           suggestion:
-            "Use the content from the previous read instead of reading the file again. If you need specific parts, describe what you need.",
+            "Use the content from the previous read instead of reading the same window again. " +
+            "To read a different part of the file, call read_file with a different startChar.",
           cachedResult: existing.cachedResult,
+          cachedAgeMs: timeSinceLastRead,
         };
       }
     }
@@ -1272,34 +1659,34 @@ export class FileOperationTracker {
   }
 
   /**
-   * Record a file read operation
+   * Record a file read operation. `input` is the read_file input that produced the
+   * result, so later checks can tell windows of the same file apart.
    */
-  recordFileRead(filePath: string, content: string): void {
+  recordFileRead(filePath: string, content: string, input?: unknown): void {
     const normalized = this.normalizePath(filePath);
-    const existing = this.readFiles.get(normalized);
     const now = Date.now();
     const safeContent = typeof content === "string" ? content : String(content ?? "");
     const contentLength = safeContent.length;
-    const truncatedContent =
-      contentLength > this.maxCachedReadResultLength
-        ? `${safeContent.slice(0, this.maxCachedReadResultLength)}\n\n[... cached content truncated ...]`
-        : safeContent;
 
-    if (existing) {
-      existing.count++;
-      existing.lastReadTime = now;
-      existing.contentLength = contentLength;
-      if (truncatedContent) {
-        existing.cachedResult = truncatedContent;
-      }
+    let entry = this.readFiles.get(normalized);
+    if (!entry) {
+      entry = { count: 0, lastReadTime: now, contentLength, windows: new Map() };
+      this.readFiles.set(normalized, entry);
     } else {
-      this.readFiles.set(normalized, {
-        count: 1,
-        lastReadTime: now,
-        contentLength,
-        cachedResult: truncatedContent,
-      });
+      // Re-insert so the map stays ordered from least to most recently read.
+      this.readFiles.delete(normalized);
+      this.readFiles.set(normalized, entry);
     }
+    entry.count++;
+    entry.lastReadTime = now;
+    entry.contentLength = contentLength;
+
+    const windowKey = this.buildReadWindowKey(input);
+    const window = entry.windows.get(windowKey) || { count: 0, lastReadTime: now };
+    window.count++;
+    window.lastReadTime = now;
+    window.cachedResult = contentLength <= this.maxCachedReadResultLength ? safeContent : undefined;
+    entry.windows.set(windowKey, window);
 
     this.incrementOperation("read_file");
   }
@@ -1510,11 +1897,37 @@ export class FileOperationTracker {
   }
 
   /**
-   * Invalidate cached read tracking for a file that was modified.
+   * Invalidate cached read tracking for a file that was modified. With a workspace root,
+   * absolute and workspace-relative spellings of the same file are matched too.
    */
-  invalidateFileRead(filePath: string): void {
+  invalidateFileRead(filePath: string, workspaceRoot?: string): void {
     const normalized = this.normalizePath(filePath);
     this.readFiles.delete(normalized);
+    const target = this.comparablePath(filePath, workspaceRoot);
+    for (const key of Array.from(this.readFiles.keys())) {
+      if (this.comparablePath(key, workspaceRoot) === target) {
+        this.readFiles.delete(key);
+      }
+    }
+  }
+
+  private comparablePath(filePath: string, workspaceRoot?: string): string {
+    let comparable = this.normalizePath(filePath).replace(/\/{2,}/g, "/");
+    const root = workspaceRoot ? this.normalizePath(workspaceRoot).replace(/\/+$/, "") : "";
+    if (root && comparable.startsWith(`${root}/`)) {
+      comparable = comparable.slice(root.length + 1);
+    }
+    return comparable.replace(/^(?:\.\/)+/, "");
+  }
+
+  /**
+   * Drop every cached read result (but keep the list of files read) after a tool
+   * that can change files without naming them, such as a shell command.
+   */
+  invalidateAllFileReads(): void {
+    for (const entry of this.readFiles.values()) {
+      entry.windows.clear();
+    }
   }
 
   /**
@@ -1563,21 +1976,22 @@ export class FileOperationTracker {
   getKnowledgeSummary(): string {
     const parts: string[] = [];
 
-    // List files that have been read
+    // The maps are in insertion order, so the most recent entries are at the end.
+    // List files that have been read (10 most recent, newest first)
     if (this.readFiles.size > 0) {
-      const files = Array.from(this.readFiles.keys()).slice(0, 10); // Limit to 10 most recent
+      const files = Array.from(this.readFiles.keys()).slice(-10).reverse();
       parts.push(`Files already read: ${files.join(", ")}`);
     }
 
     // List files that have been created
     if (this.createdFilePaths.size > 0) {
-      const created = Array.from(this.createdFilePaths.values()).slice(0, 10);
+      const created = Array.from(this.createdFilePaths.values()).slice(-10).reverse();
       parts.push(`Files created: ${created.join(", ")}`);
     }
 
     // List directories that have been explored
     if (this.directoryListings.size > 0) {
-      const dirs = Array.from(this.directoryListings.keys()).slice(0, 5);
+      const dirs = Array.from(this.directoryListings.keys()).slice(-5).reverse();
       parts.push(`Directories explored: ${dirs.join(", ")}`);
     }
 
@@ -1610,7 +2024,12 @@ export class FileOperationTracker {
     // Restore read files (minimal info - we know they were read but not full details)
     if (state.readFiles) {
       for (const filePath of state.readFiles) {
-        this.readFiles.set(filePath, { count: 1, lastReadTime: now, contentLength: 0 });
+        this.readFiles.set(filePath, {
+          count: 1,
+          lastReadTime: now,
+          contentLength: 0,
+          windows: new Map(),
+        });
       }
     }
 

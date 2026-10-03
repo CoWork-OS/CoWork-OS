@@ -51,12 +51,13 @@ import type {
   StreamProgressCallback,
 } from "../llm";
 import { estimateTokens, estimateTotalTokens, type ContextManager } from "../context-manager";
-import { calculateCost, getCacheTokenAccounting, isModelPriced } from "../llm/pricing";
+import { calculateCost, isModelPriced } from "../llm/pricing";
 import { sanitizeToolCallHistory } from "../llm/openai-compatible";
 import {
   FileOperationTracker,
   ToolFailureTracker,
   isContextCapacityError,
+  parseContextOverflowTokenCounts,
 } from "../executor-helpers";
 import { requestLLMResponseWithAdaptiveBudget as requestLLMResponseWithAdaptiveBudgetUtil } from "../executor-llm-turn-utils";
 import { filterToolsByPolicy } from "../tool-policy-engine";
@@ -77,6 +78,10 @@ import type { ToolRegistry } from "../tools/registry";
 import type { JevContextCompactionResult } from "../jev/context-compaction-decision";
 import { DurableContextService } from "../../memory/DurableContextService";
 import { InputSanitizer } from "../security/input-sanitizer";
+import { findPinnedContextBlockContent, PINNED_CONTEXT_TAGS } from "../pinned-context-blocks";
+
+// Lowest compaction target a provider-overflow retry tightens to.
+const OVERFLOW_RECOVERY_MIN_TARGET_RATIO = 0.05;
 
 interface WebEvidenceEntry {
   tool: "web_search" | "web_fetch";
@@ -603,6 +608,18 @@ interface RuntimeRecoverySourceFreshness {
 export const CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE =
   "CONTEXT_CAPACITY_RECOVERY_EXHAUSTED" as const;
 
+/** Minimum deadline for a text turn; longer budgets get proportionally more time. */
+const TEXT_TURN_BASE_TIMEOUT_MS = 120_000;
+
+/** Bounds for the one larger retry of a text turn that produced no text. */
+const TEXT_EMPTY_OUTPUT_RETRY_MIN_TOKENS = 8_192;
+const TEXT_EMPTY_OUTPUT_RETRY_MAX_TOKENS = 32_000;
+
+/** Sent after a partial text answer that stopped on max_tokens. */
+export const TEXT_CONTINUATION_PROMPT =
+  "Your previous message was cut off by the output limit. Continue exactly where it stopped, " +
+  "mid-word or mid-sentence if needed. Do not repeat what you already wrote.";
+
 export class ContextCapacityExhaustedError extends Error {
   readonly code = CONTEXT_CAPACITY_RECOVERY_EXHAUSTED_CODE;
   readonly phase: "step" | "follow_up";
@@ -752,6 +769,8 @@ export class SessionRuntime {
     let continuationPrefix = "";
     let continuationAttempts = 0;
     let assistantText = "";
+    // Set once when reasoning spent the whole budget and produced no text.
+    let emptyOutputRetryMaxTokens: number | null = null;
 
     const outcome = await new TurnKernel(
       {
@@ -762,13 +781,19 @@ export class SessionRuntime {
       },
       {
         requestResponse: async () => {
-          const requestMessages =
+          // Continue with the partial answer followed by a user turn: ending the
+          // request on the assistant turn (prefill) is rejected by Claude 4.6+.
+          const requestMessages: LLMMessage[] =
             continuationPrefix.trim().length > 0
               ? [
                   ...messages,
                   {
                     role: "assistant" as const,
                     content: [{ type: "text" as const, text: continuationPrefix }],
+                  },
+                  {
+                    role: "user" as const,
+                    content: [{ type: "text" as const, text: TEXT_CONTINUATION_PROMPT }],
                   },
                 ]
               : messages;
@@ -781,21 +806,25 @@ export class SessionRuntime {
           if (promptCacheExtras.promptCache?.ttl) {
             this.state.promptCache.promptCacheTtl = promptCacheExtras.promptCache.ttl;
           }
+          const maxTokens =
+            emptyOutputRetryMaxTokens ??
+            (continuationPrefix.trim().length > 0
+              ? opts.continuationMaxTokens
+              : opts.initialMaxTokens);
           const response = await this.deps.callLLMWithRetry(
-            () =>
+            (attempt) =>
               this.deps.createMessageWithTimeout(
                 {
                   model: this.deps.getModelMetadata().modelId,
-                  maxTokens:
-                    continuationPrefix.trim().length > 0
-                      ? opts.continuationMaxTokens
-                      : opts.initialMaxTokens,
+                  maxTokens,
                   system: opts.systemPrompt,
                   messages: requestMessages,
                   ...promptCacheExtras,
                   ...(opts.onStreamProgress ? { onStreamProgress: opts.onStreamProgress } : {}),
                 },
-                120_000,
+                // Sized from the output budget: a fixed 120 s aborted long answers
+                // mid-generation and then replayed them.
+                this.deps.getRetryTimeoutMs(TEXT_TURN_BASE_TIMEOUT_MS, attempt, false, maxTokens),
                 continuationPrefix.trim().length > 0
                   ? `${opts.operationLabel} (continuation)`
                   : opts.operationLabel,
@@ -820,6 +849,24 @@ export class SessionRuntime {
         },
         handleResponse: async ({ response }, state) => {
           const text = this.extractTextFromLLMContent(response.content || []);
+          if (
+            response.stopReason === "max_tokens" &&
+            !text.trim() &&
+            emptyOutputRetryMaxTokens === null
+          ) {
+            // Hidden reasoning consumed the whole output budget. Repeat the same
+            // request once with a larger budget instead of returning the canned
+            // empty fallback.
+            const spentBudget =
+              continuationPrefix.trim().length > 0
+                ? opts.continuationMaxTokens
+                : opts.initialMaxTokens;
+            emptyOutputRetryMaxTokens = Math.min(
+              TEXT_EMPTY_OUTPUT_RETRY_MAX_TOKENS,
+              Math.max(TEXT_EMPTY_OUTPUT_RETRY_MIN_TOKENS, spentBudget * 4),
+            );
+            return { continueLoop: true, emptyResponseCount: 0, repeatIteration: true };
+          }
           if (
             opts.allowContinuation &&
             response.stopReason === "max_tokens" &&
@@ -1069,9 +1116,11 @@ export class SessionRuntime {
     }
     this.taskListVerificationReminderPending = false;
     return [
+      PINNED_CONTEXT_TAGS.taskListReminder.open,
       "CHECKLIST REMINDER:",
       "- All implementation checklist items are complete.",
       "- Before finishing, add a verification checklist item and run it when appropriate.",
+      PINNED_CONTEXT_TAGS.taskListReminder.close,
     ].join("\n");
   }
 
@@ -1092,10 +1141,7 @@ export class SessionRuntime {
       safeOutput,
       safeCached,
       safeCacheWrite,
-      getCacheTokenAccounting(
-        this.deps.getModelMetadata().providerType,
-        this.deps.getModelMetadata().modelId,
-      ),
+      "inclusive",
       {
         providerType: this.deps.getModelMetadata().providerType,
         cacheTtl: cacheWriteTtl || this.state.promptCache.promptCacheTtl,
@@ -1106,7 +1152,10 @@ export class SessionRuntime {
     const costKnown = isModelPriced(modelId, providerType);
     if (!costKnown && (safeInput > 0 || safeOutput > 0)) this.unpricedModelIds.add(modelId);
 
-    this.state.usage.totalInputTokens += safeInput;
+    // Count new input only (cache reads excluded) so the token budget measures the
+    // same work for every provider: OpenAI re-reports the whole cached prompt
+    // each turn while Anthropic's raw counters did not.
+    this.state.usage.totalInputTokens += Math.max(0, safeInput - safeCached);
     this.state.usage.totalOutputTokens += safeOutput;
     this.state.usage.totalCost += deltaCost;
     this.recordLlmTurn();
@@ -2079,15 +2128,18 @@ export class SessionRuntime {
     );
     this.deps.checkBudgets();
 
+    // Pinned blocks are found again by these tags on every iteration, so each
+    // one is updated in place instead of being stacked into message[0].
+    const tags = PINNED_CONTEXT_TAGS;
     const userProfileBlock = this.deps.buildUserProfileBlock(10);
     if (userProfileBlock) {
       this.deps.upsertPinnedUserBlock(messages, {
-        tag: "PINNED_USER_PROFILE",
+        tag: tags.userProfile.open,
         content: userProfileBlock,
-        insertAfterTag: "PINNED_COMPACTION_SUMMARY",
+        insertAfterTag: tags.compactionSummary.open,
       });
     } else {
-      this.deps.removePinnedUserBlock(messages, "PINNED_USER_PROFILE");
+      this.deps.removePinnedUserBlock(messages, tags.userProfile.open);
     }
 
     if (opts.allowSharedContextInjection) {
@@ -2099,15 +2151,15 @@ export class SessionRuntime {
 
       if (lastSharedContextBlock) {
         this.deps.upsertPinnedUserBlock(messages, {
-          tag: "PINNED_SHARED_CONTEXT",
+          tag: tags.sharedContext.open,
           content: lastSharedContextBlock,
-          insertAfterTag: "PINNED_USER_PROFILE",
+          insertAfterTag: tags.userProfile.open,
         });
       } else {
-        this.deps.removePinnedUserBlock(messages, "PINNED_SHARED_CONTEXT");
+        this.deps.removePinnedUserBlock(messages, tags.sharedContext.open);
       }
     } else {
-      this.deps.removePinnedUserBlock(messages, "PINNED_SHARED_CONTEXT");
+      this.deps.removePinnedUserBlock(messages, tags.sharedContext.open);
     }
 
     if (opts.allowMemoryInjection) {
@@ -2122,30 +2174,30 @@ export class SessionRuntime {
 
       if (lastTurnMemoryRecallBlock) {
         this.deps.upsertPinnedUserBlock(messages, {
-          tag: "PINNED_MEMORY_RECALL",
+          tag: tags.memoryRecall.open,
           content: lastTurnMemoryRecallBlock,
           insertAfterTag: lastSharedContextBlock
-            ? "PINNED_SHARED_CONTEXT"
-            : "PINNED_COMPACTION_SUMMARY",
+            ? tags.sharedContext.open
+            : tags.compactionSummary.open,
         });
       } else {
-        this.deps.removePinnedUserBlock(messages, "PINNED_MEMORY_RECALL");
+        this.deps.removePinnedUserBlock(messages, tags.memoryRecall.open);
       }
     }
 
     const taskListReminder = this.consumeTaskListVerificationReminder(opts.checklistUpdatedAfter);
     if (taskListReminder) {
       this.deps.upsertPinnedUserBlock(messages, {
-        tag: "PINNED_TASK_LIST_REMINDER",
+        tag: tags.taskListReminder.open,
         content: taskListReminder,
         insertAfterTag: lastTurnMemoryRecallBlock
-          ? "PINNED_MEMORY_RECALL"
+          ? tags.memoryRecall.open
           : lastSharedContextBlock
-            ? "PINNED_SHARED_CONTEXT"
-            : "PINNED_COMPACTION_SUMMARY",
+            ? tags.sharedContext.open
+            : tags.compactionSummary.open,
       });
     } else {
-      this.deps.removePinnedUserBlock(messages, "PINNED_TASK_LIST_REMINDER");
+      this.deps.removePinnedUserBlock(messages, tags.taskListReminder.open);
     }
 
     await this.deps.maybePreCompactionMemoryFlush({
@@ -2280,11 +2332,7 @@ export class SessionRuntime {
           }
 
           if (summaryResult.summaryBlock) {
-            const summaryText = this.deps.extractPinnedBlockContent(
-              summaryResult.summaryBlock,
-              "PINNED_COMPACTION_SUMMARY",
-              "PINNED_COMPACTION_SUMMARY_CLOSE",
-            );
+            const summaryText = this.extractCompactionSummaryText(summaryResult.summaryBlock);
             this.emitBestEffortEvent("context_summarized", {
               compactionId: compactionSession.compactionId,
               summaryPreview: compactPreview(InputSanitizer.sanitizeMemoryContent(summaryText)),
@@ -2334,11 +2382,7 @@ export class SessionRuntime {
             }
 
             if (summaryResult.summaryBlock) {
-              const summaryText = this.deps.extractPinnedBlockContent(
-                summaryResult.summaryBlock,
-                "PINNED_COMPACTION_SUMMARY",
-                "PINNED_COMPACTION_SUMMARY_CLOSE",
-              );
+              const summaryText = this.extractCompactionSummaryText(summaryResult.summaryBlock);
               this.emitBestEffortEvent("context_summarized", {
                 compactionId: compactionSession.compactionId,
                 summaryPreview: compactPreview(InputSanitizer.sanitizeMemoryContent(summaryText)),
@@ -2396,11 +2440,7 @@ export class SessionRuntime {
           });
         }
         const summaryText = compactionSummaryBlock
-          ? this.deps.extractPinnedBlockContent(
-              compactionSummaryBlock,
-              "PINNED_COMPACTION_SUMMARY",
-              "PINNED_COMPACTION_SUMMARY_CLOSE",
-            )
+          ? this.extractCompactionSummaryText(compactionSummaryBlock)
           : undefined;
         this.completeCompaction({
           compactionId: compactionSession.compactionId,
@@ -2465,6 +2505,14 @@ export class SessionRuntime {
     };
   }
 
+  private extractCompactionSummaryText(summaryBlock: string): string {
+    return this.deps.extractPinnedBlockContent(
+      summaryBlock,
+      PINNED_CONTEXT_TAGS.compactionSummary.open,
+      PINNED_CONTEXT_TAGS.compactionSummary.close,
+    );
+  }
+
   /**
    * Install one durable compaction summary for every compaction path.
    *
@@ -2513,10 +2561,15 @@ export class SessionRuntime {
         ? Math.max(200, Math.floor(opts.maxOutputTokens))
         : Math.min(4000, Math.max(800, Math.floor(slack * 0.6)));
 
+    // The new summary replaces the current one, so the summarizer gets it as input.
+    const previousSummary =
+      findPinnedContextBlockContent(opts.messages, PINNED_CONTEXT_TAGS.compactionSummary.open) ||
+      undefined;
     let summaryBlock = await buildSummary({
       removedMessages,
       maxOutputTokens: requestedMaxOutputTokens,
       contextLabel: opts.contextLabel,
+      ...(previousSummary ? { previousSummary } : {}),
     });
     if (typeof summaryBlock !== "string" || summaryBlock.trim().length === 0) {
       throw new Error("compaction_summary_empty");
@@ -2541,7 +2594,7 @@ export class SessionRuntime {
       | undefined;
     if (typeof upsertPinnedUserBlock === "function") {
       upsertPinnedUserBlock(replacementMessages, {
-        tag: "PINNED_COMPACTION_SUMMARY",
+        tag: PINNED_CONTEXT_TAGS.compactionSummary.open,
         content: summaryBlock,
       });
     }
@@ -2601,6 +2654,32 @@ export class SessionRuntime {
     }
   }
 
+  /**
+   * Compaction target for a provider-overflow retry. Each retry halves the base
+   * target. When the provider reports its own count and limit, the local estimate
+   * evidently undercounts, so the target also drops by the reported overshoot.
+   */
+  private resolveOverflowTargetRatio(
+    error: unknown,
+    attempt: number,
+    currentTokens: number,
+    systemPromptTokens: number,
+  ): number {
+    let ratio = CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO / 2 ** Math.max(0, attempt);
+    const overflow = parseContextOverflowTokenCounts(error);
+    const contextManager = this.deps.getContextManager() as Any;
+    const availableTokens =
+      typeof contextManager?.getAvailableTokens === "function"
+        ? Number(contextManager.getAvailableTokens(systemPromptTokens))
+        : NaN;
+    if (overflow && Number.isFinite(availableTokens) && availableTokens > 0) {
+      const overshoot = overflow.requested - overflow.limit;
+      const targetTokens = currentTokens - Math.ceil(overshoot * 1.1) - 1000;
+      ratio = Math.min(ratio, targetTokens / availableTokens);
+    }
+    return Math.max(OVERFLOW_RECOVERY_MIN_TARGET_RATIO, ratio);
+  }
+
   async recoverFromContextCapacityOverflow(opts: {
     error: unknown;
     messages: LLMMessage[];
@@ -2630,13 +2709,19 @@ export class SessionRuntime {
     }
 
     const tokensBefore = estimateTotalTokens(opts.messages);
+    let targetRatio = this.resolveOverflowTargetRatio(
+      opts.error,
+      opts.attempt,
+      tokensBefore,
+      opts.systemPromptTokens,
+    );
     const installsInHistory = this.state.transcript.conversationHistory === opts.messages;
     const compactionSession = this.beginCompaction({
       trigger: "capacity_recovery",
       phase: "mid_turn",
       reason: "provider_context_capacity_error",
       inputTokens: tokensBefore,
-      targetRatio: CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+      targetRatio,
       extra: {
         phase: opts.phase,
         stepId: opts.stepId,
@@ -2655,21 +2740,38 @@ export class SessionRuntime {
     });
 
     try {
-      const proactive = this.deps
-        .getContextManager()
-        .proactiveCompactWithMeta(
+      const contextManager = this.deps.getContextManager();
+      let proactive = contextManager.proactiveCompactWithMeta(
+        opts.messages,
+        opts.systemPromptTokens,
+        targetRatio,
+      );
+      // The provider rejected this request, so a target the local estimate already
+      // meets is too loose: tighten it until compaction can drop something.
+      while (
+        !proactive.meta.removedMessages.didRemove &&
+        proactive.meta.truncatedToolResults?.didTruncate !== true &&
+        targetRatio > OVERFLOW_RECOVERY_MIN_TARGET_RATIO
+      ) {
+        targetRatio = Math.max(OVERFLOW_RECOVERY_MIN_TARGET_RATIO, targetRatio / 2);
+        proactive = contextManager.proactiveCompactWithMeta(
           opts.messages,
           opts.systemPromptTokens,
-          CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+          targetRatio,
         );
+      }
       let compactedMessages = proactive.messages;
       let removedMessages = proactive.meta.removedMessages.messages;
+      let truncatedToolResults = proactive.meta.truncatedToolResults?.didTruncate === true;
       if (!proactive.meta.removedMessages.didRemove) {
-        const fallback = this.deps
-          .getContextManager()
-          .compactMessagesWithMeta(compactedMessages, opts.systemPromptTokens);
+        const fallback = contextManager.compactMessagesWithMeta(
+          compactedMessages,
+          opts.systemPromptTokens,
+        );
         compactedMessages = fallback.messages;
         removedMessages = fallback.meta.removedMessages.messages;
+        truncatedToolResults =
+          truncatedToolResults || fallback.meta.truncatedToolResults?.didTruncate === true;
       }
       const summaryResult = await this.installCompactionSummary({
         messages: compactedMessages,
@@ -2709,6 +2811,33 @@ export class SessionRuntime {
             reason: exhaustedError.reason,
             retryable: attemptNumber < opts.maxAttempts,
             failureStage: "budget_check",
+            inputTokens: tokensBefore,
+            extra: { phase: opts.phase, stepId: opts.stepId },
+          });
+        }
+        return { recovered: false, exhausted: true, messages: opts.messages };
+      }
+
+      if ((removedMessages.length === 0 && !truncatedToolResults) || tokensAfter >= tokensBefore) {
+        // Nothing could be dropped, so a retry would only resend the same request.
+        this.emitBestEffortEvent("context_capacity_recovery_failed", {
+          phase: opts.phase,
+          stepId: opts.stepId,
+          attempt: attemptNumber,
+          maxAttempts: opts.maxAttempts,
+          reason: "no_reduction_possible",
+          providerError: reason,
+          tokensBefore,
+          tokensAfter,
+        });
+        if (compactionSession) {
+          this.failCompaction({
+            compactionId: compactionSession.compactionId,
+            trigger: "capacity_recovery",
+            phase: "mid_turn",
+            reason: "no_reduction_possible",
+            retryable: false,
+            failureStage: "compact",
             inputTokens: tokensBefore,
             extra: { phase: opts.phase, stepId: opts.stepId },
           });
@@ -2756,13 +2885,9 @@ export class SessionRuntime {
           replacementMessageCount: compactedMessages.length,
           removedMessageCount: removedMessages.length,
           removedApproxTokens: Math.max(0, tokensBefore - tokensAfter),
-          targetRatio: CONTEXT_COMPACTION_OVERFLOW_TARGET_RATIO,
+          targetRatio,
           summaryPreview: summaryResult.summaryBlock
-            ? this.deps.extractPinnedBlockContent(
-                summaryResult.summaryBlock,
-                "PINNED_COMPACTION_SUMMARY",
-                "PINNED_COMPACTION_SUMMARY_CLOSE",
-              )
+            ? this.extractCompactionSummaryText(summaryResult.summaryBlock)
             : undefined,
           fallbackUsed: !summaryResult.summaryBlock,
           extra: {
@@ -2910,11 +3035,7 @@ export class SessionRuntime {
         ...this.projectTaskState(),
       });
       const summaryText = summaryBlock
-        ? this.deps.extractPinnedBlockContent(
-            summaryBlock,
-            "PINNED_COMPACTION_SUMMARY",
-            "PINNED_COMPACTION_SUMMARY_CLOSE",
-          )
+        ? this.extractCompactionSummaryText(summaryBlock)
         : undefined;
       this.completeCompaction({
         compactionId: compactionSession.compactionId,
@@ -2939,13 +3060,7 @@ export class SessionRuntime {
         this.emitBestEffortEvent("context_summarized", {
           compactionId: compactionSession.compactionId,
           summaryPreview: compactPreview(
-            InputSanitizer.sanitizeMemoryContent(
-              this.deps.extractPinnedBlockContent(
-                summaryBlock,
-                "PINNED_COMPACTION_SUMMARY",
-                "PINNED_COMPACTION_SUMMARY_CLOSE",
-              ),
-            ),
+            InputSanitizer.sanitizeMemoryContent(this.extractCompactionSummaryText(summaryBlock)),
           ),
           summaryRef: `compaction:${compactionSession.compactionId}`,
           removedCount: compacted.meta.removedMessages.count,

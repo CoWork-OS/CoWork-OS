@@ -93,3 +93,15 @@ describe("current OpenAI prompt-cache pricing", () => {
     ).toBeCloseTo(6, 10);
   });
 });
+
+describe("cost accounting guards", () => {
+  it("never bills a negative cost when cache counters do not fit inside the input count", () => {
+    // Disjoint counters (input excludes a large cache read) reported for a route
+    // treated as inclusive used to produce a negative regular-input charge.
+    const cost = calculateCost("gpt-5.4", 1_000, 100, 90_000, 0, "inclusive", {
+      providerType: "openai",
+    });
+    expect(cost).toBeGreaterThan(0);
+    expect(cost).toBeCloseTo(calculateCost("gpt-5.4", 1_000, 100, 90_000, 0, "disjoint"), 10);
+  });
+});

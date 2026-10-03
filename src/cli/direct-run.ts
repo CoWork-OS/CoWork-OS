@@ -46,6 +46,7 @@ import {
 } from "../electron/utils/runtime-mode";
 import { isTerminalTaskStatus } from "../shared/task-status";
 import type { AgentConfig, CliTaskOwnership, Task } from "../shared/types";
+import { DEFAULT_WORKSPACE_PERMISSIONS } from "../shared/types";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
 import { buildTaskTitle } from "./format";
 import { NumbatService } from "../electron/security/numbat";
@@ -1082,13 +1083,7 @@ async function runLocalMetadataCommand(
         (await workspaces.create(
           args.workspaceName || path.basename(workspacePath) || "Workspace",
           workspacePath,
-          {
-            read: true,
-            write: true,
-            delete: false,
-            network: true,
-            shell: false,
-          },
+          { ...DEFAULT_WORKSPACE_PERMISSIONS },
         ));
       writeEvent(
         args,

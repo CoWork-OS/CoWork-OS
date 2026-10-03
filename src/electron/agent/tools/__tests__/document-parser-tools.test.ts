@@ -132,6 +132,42 @@ describe("DocumentParserTools", () => {
     expect(extractPdfTextMock).toHaveBeenCalledTimes(0);
   });
 
+  it("renders spreadsheet formula cells as their cached result or formula text", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Revenue");
+    sheet.addRow(["Region", "Revenue"]);
+    sheet.addRow(["EMEA", 1200]);
+    sheet.addRow(["APAC", 800]);
+    sheet.addRow(["Total", { formula: "SUM(B2:B3)" }]);
+    sheet.addRow(["Cached", { formula: "B2*2", result: 2400 }]);
+    await workbook.xlsx.writeFile(path.join(tmpDir, "revenue.xlsx"));
+
+    const tools = new DocumentParserTools({
+      id: "ws-1",
+      name: "Test Workspace",
+      path: tmpDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: false,
+        shell: false,
+        allowedPaths: [],
+      },
+    } as Any);
+
+    const text = await tools.parseDocument({ path: "revenue.xlsx" });
+    const structured = await tools.parseDocument({ path: "revenue.xlsx", format: "structured" });
+
+    for (const result of [text, structured]) {
+      expect(result.content).not.toContain("[object Object]");
+      expect(result.content).toContain("=SUM(B2:B3)");
+      expect(result.content).toContain("2400");
+    }
+  });
+
   it("returns lossless continuation metadata for bounded document windows", async () => {
     fs.writeFileSync(path.join(tmpDir, "long.txt"), "0123456789".repeat(30));
     const tools = new DocumentParserTools({

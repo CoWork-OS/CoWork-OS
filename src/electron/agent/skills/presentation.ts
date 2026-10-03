@@ -1,7 +1,10 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { Workspace } from "../../../shared/types";
-import { generatePPTX } from "../../utils/document-generators/pptx-generator";
+import {
+  generatePPTX,
+  type PptxGenerationResult,
+} from "../../utils/document-generators/pptx-generator";
 
 type PresentationSlideType =
   | "cover"
@@ -85,15 +88,15 @@ export class PresentationBuilder {
     outputPath: string,
     slides: SlideContent[],
     options: PresentationOptions = {},
-  ): Promise<void> {
+  ): Promise<PptxGenerationResult | undefined> {
     const ext = path.extname(outputPath).toLowerCase();
 
     if (ext === ".md") {
       await this.createMarkdownSlides(outputPath, slides);
-      return;
+      return undefined;
     }
 
-    await generatePPTX(outputPath, {
+    return generatePPTX(outputPath, {
       title: options.title,
       author: options.author || "CoWork OS",
       subject: options.subject,

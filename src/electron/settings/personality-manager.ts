@@ -50,6 +50,13 @@ import { getUserDataDir } from "../utils/user-data-dir";
 
 const LEGACY_SETTINGS_FILE = "personality-settings.json";
 
+/**
+ * Where a prompt is used. "chat" is a conversational reply; "execution" is a
+ * tool-driven task run, which must not pick up conversational habits (asking the
+ * user questions, offers, acknowledgements) that contradict its input policy.
+ */
+export type PersonalityPromptSurface = "chat" | "execution";
+
 const DEFAULT_AGENT_NAME = "CoWork";
 
 const DEFAULT_SETTINGS: PersonalitySettings = {
@@ -471,9 +478,23 @@ export class PersonalityManager {
    * Get the full personality prompt combining all elements.
    * When contextMode is provided, context-specific overrides are applied.
    */
-  static getPersonalityPrompt(contextMode?: ContextMode): string {
+  static getPersonalityPrompt(
+    contextMode?: ContextMode,
+    options: { surface?: PersonalityPromptSurface } = {},
+  ): string {
     const config = this.loadConfigV2();
-    return this.buildPromptFromConfig(config, contextMode);
+    return this.buildPromptFromConfig(config, contextMode, options.surface ?? "chat");
+  }
+
+  private static renderPersonaOverlay(
+    personaId: PersonaId | undefined,
+    surface: PersonalityPromptSurface,
+  ): string {
+    if (!personaId || personaId === "none") return "";
+    const persona = getPersonaById(personaId);
+    if (!persona?.promptTemplate) return "";
+    const chatOnlyLines = surface === "chat" ? persona.chatOnlyPromptLines || [] : [];
+    return [persona.promptTemplate, ...chatOnlyLines.map((line) => `- ${line}`)].join("\n");
   }
 
   private static renderBehavioralRules(rules: BehavioralRule[], contextMode?: ContextMode): string {
@@ -734,16 +755,43 @@ export class PersonalityManager {
   /**
    * Get the identity prompt that tells the agent who it is
    */
-  static getIdentityPrompt(): string {
+  static getIdentityPrompt(options: { surface?: PersonalityPromptSurface } = {}): string {
+    const surface = options.surface ?? "chat";
     const config = this.loadConfigV2();
     const agentName = config.agentName || DEFAULT_AGENT_NAME;
     const relationship = config.relationship;
     const userName = relationship?.userName;
     const tasksCompleted = relationship?.tasksCompleted || 0;
     const projectsWorkedOn = relationship?.projectsWorkedOn || [];
+    // CoWork runs on macOS, Windows, and Linux; only claim the host's native abilities.
+    const isMac = process.platform === "darwin";
+    const desktopCapability = isMac
+      ? "- macOS Native: Run AppleScript for deep OS automation, manage Apple Calendar and Reminders, take system screenshots, read/write clipboard, open apps."
+      : process.platform === "win32"
+        ? "- Windows Desktop: Take system screenshots, read/write the clipboard, and open apps."
+        : "- Desktop: Take system screenshots, read/write the clipboard, and open apps when running in the desktop app.";
+    const messagingChannels = isMac ? "iMessage, Slack, Telegram" : "Slack, Telegram";
+    const fallbackApproaches = isMac
+      ? "shell commands, AppleScript, browser automation"
+      : "shell commands, browser automation";
+    // Task execution forbids trailing offer questions, so it gets statement-style
+    // follow-ups instead of the chat companion's offers.
+    const companionMindset = [
+      ...(surface === "execution"
+        ? [
+            "- You are the user's thinking partner, not just a command executor. Anticipate needs and suggest better approaches when they matter.",
+            "- If the work looks recurring, or a natural follow-up would clearly help, mention it once as a brief statement, not a trailing question.",
+          ]
+        : [
+            "- You are the user's thinking partner, not just a command executor. Anticipate needs, suggest better approaches, and offer to automate recurring work.",
+            "- If you notice a task the user does repeatedly, offer to create a skill for it.",
+            "- When completing a task, briefly mention natural follow-ups if they'd be helpful — but don't over-prompt.",
+          ]),
+      `- If your current tools cannot do something, look for another permitted approach (${fallbackApproaches}) or suggest connecting an MCP server. Never work around a denied permission, required approval, or policy block — report it instead.`,
+    ].join("\n");
 
     let prompt = `YOUR IDENTITY:
-You are ${agentName}, the user's AI companion built into CoWork OS — a desktop AI companion app for macOS that is local-first, private, and extensible.
+You are ${agentName}, the user's AI companion built into CoWork OS — a desktop AI companion app that is local-first, private, and extensible.
 - When asked about your name or identity, say you are "${agentName}"
 - Do NOT claim to be Claude, ChatGPT, or any other AI assistant
 - You are a customizable assistant that users can personalize
@@ -751,12 +799,12 @@ You are ${agentName}, the user's AI companion built into CoWork OS — a desktop
 WHAT YOU ARE:
 You are not just a chatbot — you are an always-ready companion that can actually DO things on the user's computer and across the internet. You live inside CoWork OS, which gives you real tools to take action, not just talk.
 
-YOUR CAPABILITIES (what you can actually do):
+YOUR CAPABILITIES (what you can do when the matching tools are available in this session):
 - Files & Code: Read, write, edit, search, and manage files in the workspace. Full glob/grep support.
 - Web: Search the internet, fetch web pages, and automate any website via a built-in browser (click, fill forms, screenshot, navigate).
 - Shell: Run any terminal command — build projects, install packages, run scripts, manage git repos, anything the command line can do.
-- macOS Native: Run AppleScript for deep OS automation, manage Apple Calendar and Reminders, take system screenshots, read/write clipboard, open apps.
-- Communication: Access email (Gmail or IMAP), read messaging channels (iMessage, Slack, Telegram), and even make voice calls.
+${desktopCapability}
+- Communication: Access email (Gmail or IMAP), read messaging channels (${messagingChannels}), and even make voice calls.
 - Cloud Storage: Work with Google Drive, Dropbox, OneDrive, Box, SharePoint, and Notion — read, upload, organize files.
 - Visual: Create interactive HTML dashboards/canvases, generate images from text, analyze and understand images.
 - Scheduling: Create cron jobs, scheduled tasks, and reminders that fire at specific times or intervals.
@@ -765,18 +813,19 @@ YOUR CAPABILITIES (what you can actually do):
 - Extensibility: Create custom skills for reusable workflows, connect MCP servers for new integrations, and extend your own capabilities on the fly.
 
 COMPANION MINDSET:
-- You are the user's thinking partner, not just a command executor. Anticipate needs, suggest better approaches, and offer to automate recurring work.
-- If you notice a task the user does repeatedly, offer to create a skill for it.
-- When completing a task, briefly mention natural follow-ups if they'd be helpful — but don't over-prompt.
-- If you cannot do something with your current tools, figure it out: use shell commands, AppleScript, browser automation, or suggest connecting an MCP server. Say "I can't" only after exhausting all creative paths.`;
+${companionMindset}`;
 
     // Add user relationship context
     if (userName) {
       prompt += `\n\nUSER CONTEXT:
-- The user's name is "${userName}"
-- You have completed ${tasksCompleted} tasks together`;
-      if (projectsWorkedOn.length > 0) {
-        prompt += `\n- Projects worked on: ${projectsWorkedOn.slice(-5).join(", ")}`;
+- The user's name is "${userName}"`;
+      // The counters change on every completed task. Execution prompts cache this
+      // block as their stable prefix, so the history stays on chat replies only.
+      if (surface === "chat") {
+        prompt += `\n- You have completed ${tasksCompleted} tasks together`;
+        if (projectsWorkedOn.length > 0) {
+          prompt += `\n- Projects worked on: ${projectsWorkedOn.slice(-5).join(", ")}`;
+        }
       }
       prompt += `\n\nIMPORTANT NAME RULES:
 - ALWAYS address the user as "${userName}" — this is their confirmed preferred name.
@@ -1228,13 +1277,11 @@ COMPANION MINDSET:
   private static buildPromptFromConfig(
     config: PersonalityConfigV2,
     contextMode?: ContextMode,
+    surface: PersonalityPromptSurface = "chat",
   ): string {
     if (config.soulDocument?.trim()) {
       const base = config.soulDocument.trim();
-      const persona =
-        config.activePersona && config.activePersona !== "none"
-          ? getPersonaById(config.activePersona)?.promptTemplate
-          : "";
+      const persona = this.renderPersonaOverlay(config.activePersona, surface);
       const style = this.getCommunicationStylePrompt(config.style);
       const quirks = this.getQuirksPrompt(config.quirks, config.activePersona);
       return [base, persona, style, quirks].filter(Boolean).join("\n\n");
@@ -1258,10 +1305,8 @@ COMPANION MINDSET:
     if (examplesPart) parts.push(examplesPart);
     const quirksPart = this.getQuirksPrompt(config.quirks, config.activePersona);
     if (quirksPart) parts.push(quirksPart);
-    if (config.activePersona && config.activePersona !== "none") {
-      const persona = getPersonaById(config.activePersona);
-      if (persona?.promptTemplate) parts.push(persona.promptTemplate);
-    }
+    const personaPart = this.renderPersonaOverlay(config.activePersona, surface);
+    if (personaPart) parts.push(personaPart);
     return parts.join("\n\n");
   }
 

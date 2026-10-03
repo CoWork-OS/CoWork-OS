@@ -1,7 +1,12 @@
-import * as fs from "fs/promises";
+import * as path from "path";
 import type { PdfReviewData } from "./pdf-review";
 import { extractPdfReviewData } from "./pdf-review";
-import { parsePdfBuffer } from "./pdf-parser";
+import {
+  LOCAL_PDF_PARSE_LIMITS,
+  PdfParseLimitError,
+  parsePdfBufferBounded,
+  readPdfFileBounded,
+} from "./bounded-pdf-parser";
 import type { PdfReviewExtractionMode } from "../../shared/types";
 
 export type PdfTextExtractionMode = "pdf-parse" | PdfReviewExtractionMode;
@@ -156,42 +161,79 @@ function choosePreferredText(
   return { text: normalizeWhitespace(primary), source: "primary" };
 }
 
+/**
+ * A limit hit while extracting a PDF (size, deadline or memory), worded so the model knows the
+ * file itself is the problem and what to do instead of retrying the same read.
+ */
+function pdfTooLargeOrComplex(pdfPath: string, error: PdfParseLimitError): PdfParseLimitError {
+  return new PdfParseLimitError(
+    `${path.basename(pdfPath)} is too large or complex to extract safely (${error.message}). ` +
+      "Do not retry the same read: split it into smaller PDFs (for example " +
+      "`qpdf in.pdf --pages . 1-50 -- part-1.pdf`) and read those, or use read_pdf_visual " +
+      "on a few specific pages.",
+  );
+}
+
+function textLayerCutNote(): string {
+  return `[... PDF text truncated at ${LOCAL_PDF_PARSE_LIMITS.maxTextChars} characters ...]`;
+}
+
+/**
+ * Extracts a PDF's text: the embedded text layer first, then the pdf.js/OCR review reader when
+ * that is missing or poor. All parsing of the (untrusted) file runs in bounded workers; a PDF
+ * over the size, deadline or memory limits fails with PdfParseLimitError.
+ */
 export async function extractPdfText(
   pdfPath: string,
   options: ExtractPdfTextOptions = {},
 ): Promise<PdfTextData> {
-  const buffer = await fs.readFile(pdfPath);
+  let buffer: Buffer;
+  try {
+    buffer = await readPdfFileBounded(pdfPath);
+  } catch (error) {
+    if (error instanceof PdfParseLimitError) throw pdfTooLargeOrComplex(pdfPath, error);
+    throw error;
+  }
 
   let parsedText = "";
   let parsedPageCount = 1;
   let parsedTextSuspicious = false;
+  let parsedTextCut = false;
 
   try {
-    const parsed = await parsePdfBuffer(buffer);
+    const parsed = await parsePdfBufferBounded(buffer, LOCAL_PDF_PARSE_LIMITS);
     parsedText = normalizeWhitespace(parsed.text || "");
     parsedPageCount = Math.max(1, Math.floor(parsed.numpages || 1));
     parsedTextSuspicious = Boolean(parsedText) && isSuspiciousPdfText(parsedText);
+    parsedTextCut = parsed.textTruncated === true;
 
     if (isMeaningfulText(parsedText, options)) {
       return {
-        text: parsedText,
+        text: parsedTextCut ? `${parsedText}\n\n${textLayerCutNote()}` : parsedText,
         pageCount: parsedPageCount,
         extractionMode: "pdf-parse",
         usedFallback: false,
-        previewLimited: false,
-        extractionStatus: "complete",
-        extractionNote: "complete via embedded text layer; OCR not needed",
+        previewLimited: parsedTextCut,
+        extractionStatus: parsedTextCut ? "preview" : "complete",
+        extractionNote: parsedTextCut
+          ? `partial: embedded text layer cut at ${LOCAL_PDF_PARSE_LIMITS.maxTextChars} characters`
+          : "complete via embedded text layer; OCR not needed",
       };
     }
-  } catch {
+  } catch (error) {
+    // The review reader runs the same pdf.js engine, so a PDF that blew a limit here would only
+    // burn another full deadline there.
+    if (error instanceof PdfParseLimitError) throw pdfTooLargeOrComplex(pdfPath, error);
     parsedText = "";
     parsedTextSuspicious = false;
+    parsedTextCut = false;
   }
 
   let reviewText = "";
   let reviewPageCount = parsedPageCount;
   let reviewMode: PdfReviewExtractionMode = "fallback";
   let reviewPreviewLimited = false;
+  let reviewLimitError: PdfParseLimitError | null = null;
 
   try {
     const review = await extractPdfReviewData(pdfPath, {
@@ -210,9 +252,10 @@ export async function extractPdfText(
     reviewPageCount = Math.max(1, Math.floor(review.pageCount || reviewPageCount || 1));
     reviewMode = review.extractionMode || "fallback";
     reviewPreviewLimited = Boolean(review.truncatedPages);
-  } catch {
+  } catch (error) {
     reviewText = "";
     reviewPreviewLimited = false;
+    if (error instanceof PdfParseLimitError) reviewLimitError = error;
   }
 
   const chosen =
@@ -221,19 +264,22 @@ export async function extractPdfText(
       : choosePreferredText(parsedText, reviewText);
   if (chosen.text) {
     const usingFallback = chosen.source === "fallback";
+    const primaryCut = !usingFallback && parsedTextCut;
     return {
-      text: chosen.text,
+      text: primaryCut ? `${chosen.text}\n\n${textLayerCutNote()}` : chosen.text,
       pageCount: usingFallback ? reviewPageCount : parsedPageCount,
       extractionMode: usingFallback ? reviewMode : "pdf-parse",
       usedFallback: usingFallback,
-      previewLimited: usingFallback ? reviewPreviewLimited : false,
+      previewLimited: usingFallback ? reviewPreviewLimited : primaryCut,
       extractionStatus: usingFallback
         ? reviewPreviewLimited
           ? "preview"
           : reviewMode === "ocrmypdf" || reviewMode === "page-ocr"
             ? "ocr"
             : "recovered"
-        : "complete",
+        : primaryCut
+          ? "preview"
+          : "complete",
       extractionNote: usingFallback
         ? reviewPreviewLimited
           ? "partial preview extracted from fallback reader; later pages were omitted"
@@ -242,9 +288,13 @@ export async function extractPdfText(
             : reviewMode === "page-ocr"
               ? "complete via page OCR fallback"
               : "complete via fallback PDF text reader"
-        : "complete via embedded text layer; OCR not needed",
+        : primaryCut
+          ? `partial: embedded text layer cut at ${LOCAL_PDF_PARSE_LIMITS.maxTextChars} characters`
+          : "complete via embedded text layer; OCR not needed",
     };
   }
+
+  if (reviewLimitError) throw pdfTooLargeOrComplex(pdfPath, reviewLimitError);
 
   return {
     text: NO_DOCUMENT_TEXT_PLACEHOLDER,

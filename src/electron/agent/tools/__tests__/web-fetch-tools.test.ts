@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import PDFDocument from "pdfkit";
 
 // Mock electron
 vi.mock("electron", () => ({
@@ -25,8 +26,21 @@ vi.mock("../../../security/pinned-fetch", () => ({
   },
 }));
 
+// Pass-through spy: fetched PDFs must be parsed in the bounded worker, not on the main thread.
+vi.mock("../../../utils/pdf-parser", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../utils/pdf-parser")>();
+  return { ...actual, parsePdfBuffer: vi.fn(actual.parsePdfBuffer) };
+});
+
+vi.mock("../../../utils/bounded-pdf-parser", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../utils/bounded-pdf-parser")>();
+  return { ...actual, parsePdfBufferBounded: vi.fn(actual.parsePdfBufferBounded) };
+});
+
 // Import after mocking
 import { WebFetchTools } from "../web-fetch-tools";
+import { parsePdfBuffer } from "../../../utils/pdf-parser";
+import { PdfParseLimitError, parsePdfBufferBounded } from "../../../utils/bounded-pdf-parser";
 import { Workspace } from "../../../../shared/types";
 import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 
@@ -1375,5 +1389,302 @@ describe("WebFetchTools", () => {
         );
       });
     });
+  });
+});
+
+function createPdf(pages: string[]): Promise<Uint8Array<ArrayBuffer>> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 72 });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(new Uint8Array(Buffer.concat(chunks))));
+    doc.on("error", reject);
+    pages.forEach((text, index) => {
+      if (index > 0) doc.addPage();
+      doc.font("Helvetica").fontSize(12).text(text);
+    });
+    doc.end();
+  });
+}
+
+describe("WebFetchTools non-HTML content", () => {
+  let webFetchTools: WebFetchTools;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(GuardrailManager, "isDomainAllowed").mockReturnValue(true);
+    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const respond = (body: BodyInit, contentType: string) =>
+    mockFetch.mockResolvedValueOnce(
+      new Response(body, { headers: { "content-type": contentType } }),
+    );
+
+  it("extracts the text of a PDF instead of converting its bytes as HTML", async () => {
+    const pdf = await createPdf([
+      "Transit ridership grew in every district during the reporting period.",
+      "Appendix: budget appropriations by department.",
+    ]);
+    respond(pdf, "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/report" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Transit ridership grew in every district");
+    expect(result.content).toContain("Appendix: budget appropriations");
+    expect(result.content).toContain("2 pages");
+    expect(result.content).not.toContain("%PDF");
+  });
+
+  it("parses a fetched PDF off the main thread", async () => {
+    respond(await createPdf(["Abstract parsed in the PDF worker."]), "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/paper.pdf" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Abstract parsed in the PDF worker.");
+    expect(parsePdfBuffer).not.toHaveBeenCalled();
+  });
+
+  it("explains a PDF that exceeds the parsing limits", async () => {
+    vi.mocked(parsePdfBufferBounded).mockRejectedValueOnce(
+      new PdfParseLimitError("PDF parsing did not finish within 30 seconds"),
+    );
+    respond(await createPdf(["Never parsed."]), "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/huge.pdf" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("too large or complex");
+    expect(result.error).toContain("did not finish within 30 seconds");
+    expect(result.error).toContain("read_file or parse_document");
+  });
+
+  it("says when the PDF text was cut at the text limit", async () => {
+    vi.mocked(parsePdfBufferBounded).mockResolvedValueOnce({
+      text: "First part of a long document.",
+      numpages: 900,
+      textTruncated: true,
+    });
+    respond(await createPdf(["Placeholder."]), "application/pdf");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/long.pdf" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toMatch(/^\[PDF, 900 pages, text cut at \d+ characters/);
+    expect(result.content).toContain("First part of a long document.");
+  });
+
+  it("recognizes a PDF served as application/octet-stream", async () => {
+    respond(await createPdf(["Octet stream paper abstract text."]), "application/octet-stream");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/paper.pdf" });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Octet stream paper abstract text.");
+  });
+
+  it("points images to the image analysis tool", async () => {
+    respond(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]), "image/png");
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/chart.png" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("image/png");
+    expect(result.error).toContain("analyze_image");
+  });
+
+  it("points office documents to read_file", async () => {
+    respond(
+      new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0]),
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+
+    const result = await webFetchTools.webFetch({ url: "https://example.com/brief.docx" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("read_file");
+  });
+
+  it.each(["application/zip", "application/octet-stream"])(
+    "rejects other binary bodies served as %s",
+    async (contentType) => {
+      respond(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x08, 0x00]), contentType);
+
+      const result = await webFetchTools.webFetch({ url: "https://example.com/archive" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/binary/i);
+    },
+  );
+});
+
+describe("WebFetchTools character sets", () => {
+  let webFetchTools: WebFetchTools;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(GuardrailManager, "isDomainAllowed").mockReturnValue(true);
+    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** ASCII text with byte sequences spliced in where `parts` holds arrays. */
+  const bytes = (...parts: Array<string | number[]>) =>
+    new Uint8Array(
+      Buffer.concat(
+        parts.map((part) => (typeof part === "string" ? Buffer.from(part) : Buffer.from(part))),
+      ),
+    );
+  const fetchBody = async (body: Uint8Array<ArrayBuffer>, contentType: string) => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(body, { headers: { "content-type": contentType } }),
+    );
+    return webFetchTools.webFetch({ url: "https://example.com/page" });
+  };
+
+  it("decodes a windows-1251 page named by the Content-Type header", async () => {
+    // "Привет" in windows-1251.
+    const page = bytes(
+      "<html><body><p>",
+      [0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2],
+      "</p></body></html>",
+    );
+
+    const result = await fetchBody(page, "text/html; charset=windows-1251");
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toContain("Привет");
+  });
+
+  it("decodes a Shift_JIS page named by <meta charset>", async () => {
+    // "日本語" in Shift_JIS.
+    const page = bytes(
+      '<html><head><meta charset="Shift_JIS"><title>t</title></head><body><p>',
+      [0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea],
+      "</p></body></html>",
+    );
+
+    const result = await fetchBody(page, "text/html");
+
+    expect(result.content).toContain("日本語");
+  });
+
+  it("decodes a page named by a meta http-equiv Content-Type", async () => {
+    // "café" in windows-1252.
+    const page = bytes(
+      '<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">',
+      "</head><body><p>caf",
+      [0xe9],
+      "</p></body></html>",
+    );
+
+    const result = await fetchBody(page, "text/html");
+
+    expect(result.content).toContain("café");
+  });
+
+  it("decodes ISO-8859-9 plain text", async () => {
+    // "ğüşİöç" in ISO-8859-9 (Turkish).
+    const text = bytes([0xf0, 0xfc, 0xfe, 0xdd, 0xf6, 0xe7]);
+
+    const result = await fetchBody(text, "text/plain; charset=ISO-8859-9");
+
+    expect(result.content).toBe("ğüşİöç");
+  });
+
+  it("falls back to UTF-8 for an unknown charset label", async () => {
+    const result = await fetchBody(bytes("naïve"), "text/plain; charset=x-not-a-charset");
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).toBe("naïve");
+  });
+
+  it("strips a UTF-8 byte order mark before parsing JSON", async () => {
+    const json = bytes([0xef, 0xbb, 0xbf], '{"name":"test"}');
+
+    const result = await fetchBody(json, "application/json");
+
+    expect(result.content).toContain('"name": "test"');
+  });
+});
+
+describe("WebFetchTools paging", () => {
+  let webFetchTools: WebFetchTools;
+  const text = Array.from({ length: 250 }, (_, index) => `${index}`.padStart(10, "-")).join("");
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(GuardrailManager, "isDomainAllowed").mockReturnValue(true);
+    webFetchTools = new WebFetchTools(mockWorkspace, mockDaemon as Any, "test-task-id");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const fetchPage = (startChar?: number) => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(text, { headers: { "content-type": "text/plain" } }),
+    );
+    return webFetchTools.webFetch({ url: "https://example.com/long", maxLength: 1000, startChar });
+  };
+
+  it("returns consecutive windows that rebuild the whole content", async () => {
+    const first = await fetchPage();
+    expect(first).toMatchObject({ success: true, totalLength: 2500, truncated: true });
+    expect(first.nextStartChar).toBe(1000);
+    expect(first.content).toContain("[Content truncated]");
+    expect(first.content).toContain("startChar=1000");
+
+    const second = await fetchPage(first.nextStartChar);
+    expect(second).toMatchObject({ truncated: true, nextStartChar: 2000, totalLength: 2500 });
+
+    const last = await fetchPage(second.nextStartChar);
+    expect(last).toMatchObject({ success: true, truncated: false, totalLength: 2500 });
+    expect(last.nextStartChar).toBeUndefined();
+    expect(last.content).not.toContain("[Content truncated]");
+
+    const windowText = (content: string) => content.split("\n\n... [Content truncated]")[0];
+    expect(windowText(first.content) + windowText(second.content) + last.content).toBe(text);
+  });
+
+  it("rejects a startChar past the end of the content", async () => {
+    const result = await fetchPage(4000);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("2500");
+  });
+
+  it("redacts a protected credential before cutting the window", async () => {
+    mockProtectedCredentialService.resolveForDestination.mockReturnValue("top-secret");
+    const protectedTools = new WebFetchTools(
+      mockWorkspace,
+      mockDaemon as Any,
+      "test-task-id",
+      mockProtectedCredentialService as Any,
+    );
+    mockFetch.mockResolvedValueOnce(
+      new Response(`${"A".repeat(995)}top-secret${"B".repeat(100)}`, {
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+
+    const result = await protectedTools.webFetch({
+      url: "https://api.example.com/echo",
+      credentialId: "credential-1",
+      maxLength: 1000,
+    });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.content).not.toContain("top-");
   });
 });

@@ -7,6 +7,7 @@ import type {
   LLMProviderType,
   AzureReasoningEffort,
   OpenAIReasoningEffort,
+  LLMReasoningEffort,
   LLMTextVerbosity,
   RuntimeToolMetadata,
   ExecutionMode,
@@ -24,6 +25,8 @@ export interface LLMProviderConfig {
   model: string;
   // Anthropic-specific
   anthropicApiKey?: string;
+  /** Saved reasoning effort; mapped to thinking/effort per model (anthropic-thinking.ts). */
+  anthropicReasoningEffort?: LLMReasoningEffort;
   // Bedrock-specific
   awsRegion?: string;
   awsAccessKeyId?: string;
@@ -71,6 +74,7 @@ export interface LLMProviderConfig {
   azureAnthropicEndpoint?: string;
   azureAnthropicDeployment?: string;
   azureAnthropicApiVersion?: string;
+  azureAnthropicReasoningEffort?: LLMReasoningEffort;
   // Groq-specific
   groqApiKey?: string;
   groqBaseUrl?: string;
@@ -205,9 +209,12 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
     supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   },
   gemini: {
-    supportsImages: false,
-    maxImageBytes: 0,
-    supportedMimeTypes: [],
+    // Inline image parts. A generateContent request is capped at 20MB and
+    // base64 adds a third, so keep a single raw image under 15MB. The API
+    // accepts PNG, JPEG, WebP, HEIC and HEIF; GIF is not a listed image type.
+    supportsImages: true,
+    maxImageBytes: 15 * 1024 * 1024,
+    supportedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
   },
   azure: {
     supportsImages: true,
@@ -293,7 +300,8 @@ export interface LLMToolResult {
 
 /** Opaque provider reasoning state, replayed only to the model that produced it. */
 export interface LLMReasoningItem {
-  format: "openai-responses" | "pi-ai";
+  /** "anthropic": a thinking/redacted_thinking block (see anthropic-thinking.ts). */
+  format: "openai-responses" | "pi-ai" | "anthropic";
   model: string;
   data: unknown;
 }
@@ -388,13 +396,25 @@ export interface LLMResponse {
   content: LLMContent[];
   /** Opaque reasoning state to carry on the assistant message (see reasoning-replay.ts). */
   reasoning?: LLMReasoningItem[];
-  stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
+  /**
+   * `refusal`: the provider's safety system declined or filtered the response
+   * (Anthropic refusal, OpenAI/Azure content_filter, Gemini SAFETY and similar,
+   * Bedrock guardrails). Repeating the request will not produce an answer.
+   */
+  stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
+  /**
+   * Usage contract shared by every adapter: `inputTokens` counts every prompt
+   * token the provider processed, including tokens read from and written to its
+   * prompt cache, and the cache counters are subsets of it. Adapters for APIs
+   * that report disjoint counters (Anthropic, Bedrock, pi-ai) fold them in.
+   * Budgets count "new" tokens as inputTokens - cachedTokens + outputTokens.
+   */
   usage?: {
     inputTokens: number;
     outputTokens: number;
     /** Tokens served from the provider's prompt cache (subset of inputTokens). */
     cachedTokens?: number;
-    /** Tokens used to create or extend a provider-side prompt cache entry. */
+    /** Tokens used to create or extend a provider-side prompt cache entry (subset of inputTokens). */
     cacheWriteTokens?: number;
     /** TTL reported by the provider for the cache write, when available. */
     cacheWriteTtl?: "5m" | "1h";
@@ -521,12 +541,12 @@ export function isRetiredAnthropicModelReference(model: string): boolean {
  */
 export const GEMINI_MODELS = {
   "gemini-2.5-pro": {
-    id: "gemini-2.5-pro-preview-05-06",
+    id: "gemini-2.5-pro",
     displayName: "Gemini 2.5 Pro",
     description: "Most capable model for complex tasks",
   },
   "gemini-2.5-flash": {
-    id: "gemini-2.5-flash-preview-05-20",
+    id: "gemini-2.5-flash",
     displayName: "Gemini 2.5 Flash",
     description: "Fast and efficient for most tasks",
   },
@@ -569,14 +589,14 @@ export const OPENROUTER_MODELS = {
     displayName: "Pareto Code Router (Nitro)",
     description: "Pareto coding router optimized for OpenRouter throughput",
   },
-  "anthropic/claude-3.5-sonnet": {
-    id: "anthropic/claude-3.5-sonnet",
-    displayName: "Claude 3.5 Sonnet",
+  "anthropic/claude-sonnet-4.6": {
+    id: "anthropic/claude-sonnet-4.6",
+    displayName: "Claude Sonnet 4.6",
     description: "Anthropic's balanced model",
   },
-  "anthropic/claude-3-opus": {
-    id: "anthropic/claude-3-opus",
-    displayName: "Claude 3 Opus",
+  "anthropic/claude-opus-4.6": {
+    id: "anthropic/claude-opus-4.6",
+    displayName: "Claude Opus 4.6",
     description: "Anthropic's most capable model",
   },
   "openai/gpt-4o": {

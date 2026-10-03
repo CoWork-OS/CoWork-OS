@@ -1,3 +1,4 @@
+import { execFile } from "child_process";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -8,11 +9,41 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
-import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  isAccessPathWithin,
+} from "../../security/access-profile-paths";
 import { LLMTool } from "../llm/types";
 import { BoundedRegex, RegexDeadlineError } from "./bounded-regex";
 
 const MAX_GREP_OUTPUT_BYTES = 50_000;
+// Larger files are skipped; their lines would be copied wholesale into the regex worker.
+const MAX_GREP_FILE_BYTES = 1024 * 1024;
+// Listing gitignored paths is an optimization; past these limits grep walks without it.
+const GIT_IGNORE_LIST_TIMEOUT_MS = 5_000;
+const GIT_IGNORE_LIST_MAX_BYTES = 8 * 1024 * 1024;
+// Git pointer files (`.git` files, `commondir`, a worktree's `gitdir`) hold one path; anything
+// larger is not one.
+const MAX_GIT_POINTER_FILE_BYTES = 4096;
+
+/** Explicit --git-dir skips git's own "dubious ownership" check, so it is repeated here. */
+function isOwnedByCurrentUser(stats: fs.Stats): boolean {
+  return typeof process.getuid !== "function" || stats.uid === process.getuid();
+}
+
+/**
+ * The real path a git pointer file names (a `.git` file's "gitdir: <path>", a git directory's
+ * `commondir`, a linked worktree's `gitdir`), resolved against `baseDir` as git does. Null
+ * unless the pointer is a small regular file and its target is owned by the current user.
+ */
+function readGitPointer(file: string, prefix: string, baseDir: string): string | null {
+  const stats = fs.lstatSync(file, { throwIfNoEntry: false });
+  if (!stats?.isFile() || stats.size > MAX_GIT_POINTER_FILE_BYTES) return null;
+  const content = fs.readFileSync(file, "utf8").replace(/[\r\n]+$/, "");
+  if (!content.startsWith(prefix) || content.length === prefix.length) return null;
+  const target = fs.realpathSync(path.resolve(baseDir, content.slice(prefix.length)));
+  return isOwnedByCurrentUser(fs.statSync(target)) ? target : null;
+}
 
 /**
  * GrepTools provides powerful regex-based content search
@@ -43,6 +74,7 @@ export class GrepTools {
           "Powerful regex-based content search across files. " +
           'Supports full regex syntax (e.g., "async function.*fetch", "class\\s+\\w+"). ' +
           "Searches text files only; binary formats like PDF/DOCX are skipped. " +
+          "In a git repository, files ignored by .gitignore are skipped unless path names them. " +
           "Use this to find code patterns, function definitions, imports, etc. " +
           "PREFERRED over search_files for content search.",
         input_schema: {
@@ -110,6 +142,7 @@ export class GrepTools {
     totalMatches: number;
     filesSearched: number;
     truncated: boolean;
+    truncationReason?: string;
     error?: string;
     warning?: string;
   }> {
@@ -127,24 +160,8 @@ export class GrepTools {
       message: `Grep search: "${pattern}"${searchPath ? ` in ${searchPath}` : ""}${globPattern ? ` (${globPattern})` : ""}`,
     });
 
-    const evaluator = new BoundedRegex();
+    const evaluator = this.createRegexEvaluator();
     try {
-      if (
-        (await this.isDocumentHeavyWorkspace()) &&
-        (!globPattern || /\.(pdf|docx)\b/i.test(globPattern))
-      ) {
-        return {
-          success: true,
-          pattern,
-          matches: [],
-          totalMatches: 0,
-          filesSearched: 0,
-          truncated: false,
-          warning:
-            "Workspace appears document-heavy (PDF/DOCX/PPTX). The grep tool only searches text files. Use read_file for those documents.",
-        };
-      }
-
       // Compile regex
       if (pattern.length > 4096) throw new Error("Regex pattern exceeds the 4096-character limit");
       let regex: RegExp;
@@ -180,14 +197,58 @@ export class GrepTools {
         throw new Error("Access denied by project access rules");
       }
 
+      // A path naming one file searches just that file, under the same limits as a directory walk.
+      const baseStats = fs.statSync(checkedBasePath);
+      if (baseStats.isFile()) {
+        const unsearchable = this.isBinaryFile(checkedBasePath)
+          ? "is a binary or document file and the grep tool only searches text files"
+          : baseStats.size > MAX_GREP_FILE_BYTES
+            ? "is larger than 1 MB, which the grep tool does not search"
+            : null;
+        if (unsearchable) {
+          return {
+            success: true,
+            pattern,
+            matches: [],
+            totalMatches: 0,
+            filesSearched: 0,
+            truncated: false,
+            warning: `${searchPath} ${unsearchable}. Use read_file to read it.`,
+          };
+        }
+      }
+
+      // Judge the directory actually being searched. Its text files are still searched; the
+      // warning only explains why PDF/DOCX content cannot match.
+      let warning: string | undefined;
+      if (baseStats.isDirectory() && (await this.isDocumentHeavyWorkspace(checkedBasePath))) {
+        if (globPattern && /\.(pdf|docx)\b/i.test(globPattern)) {
+          return {
+            success: true,
+            pattern,
+            matches: [],
+            totalMatches: 0,
+            filesSearched: 0,
+            truncated: false,
+            warning:
+              "The grep tool only searches text files, so PDF/DOCX documents cannot match. Use read_file for those documents.",
+          };
+        }
+        warning =
+          "Search path appears document-heavy (PDF/DOCX/PPTX). The grep tool only searched its text files; use read_file for those documents.";
+      }
+
       // Find files to search
-      const files = await this.findFilesToSearch(
-        checkedBasePath,
-        globPattern,
-        agentRoleId,
-        projectAccessCache,
-        evaluator,
-      );
+      const found = baseStats.isFile()
+        ? { files: [checkedBasePath], gitIgnoredSkipped: 0 }
+        : await this.findFilesToSearch(
+            checkedBasePath,
+            globPattern,
+            agentRoleId,
+            projectAccessCache,
+            evaluator,
+          );
+      const files = found.files;
       const matches: Array<{
         file: string;
         line?: number;
@@ -198,9 +259,10 @@ export class GrepTools {
 
       let totalMatches = 0;
       let truncated = false;
+      let truncationReason: string | undefined;
 
       // Search each file
-      for (const file of files) {
+      for (const [fileIndex, file] of files.entries()) {
         if (truncated) break;
 
         if (evaluateWorkspaceFilesystemAccess(this.workspace, file, "read").decision !== "allow") {
@@ -281,9 +343,25 @@ export class GrepTools {
             }
           }
         } catch (error) {
-          if (error instanceof RegexDeadlineError) throw error;
+          if (error instanceof RegexDeadlineError) {
+            const progress = `after searching ${fileIndex} of ${files.length} files`;
+            // Matches found before the time budget ran out stay useful; only an empty search fails.
+            if (matches.length === 0) {
+              throw new RegexDeadlineError(
+                `${error.message} ${progress} (no matches so far). Narrow path or glob, or simplify the pattern.`,
+              );
+            }
+            truncated = true;
+            truncationReason = `${error.message} ${progress}, so these results are partial. Narrow path or glob to search the remaining files.`;
+            break;
+          }
           // Skip files we can't read (binary, permissions, etc.)
         }
+      }
+
+      if (matches.length === 0 && found.gitIgnoredSkipped > 0) {
+        const note = `${found.gitIgnoredSkipped} files or directories ignored by .gitignore were not searched; pass one as path to search it.`;
+        warning = warning ? `${warning} ${note}` : note;
       }
 
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -294,6 +372,7 @@ export class GrepTools {
           totalMatches,
           filesSearched: files.length,
           truncated,
+          ...(truncationReason ? { truncationReason } : {}),
         },
       });
       const budgeted = this.applyOutputBudget(matches);
@@ -305,6 +384,8 @@ export class GrepTools {
         totalMatches,
         filesSearched: files.length,
         truncated: truncated || budgeted.truncated,
+        ...(truncationReason ? { truncationReason } : {}),
+        ...(warning ? { warning } : {}),
       };
     } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -324,6 +405,11 @@ export class GrepTools {
     } finally {
       await evaluator.close();
     }
+  }
+
+  /** Regex evaluator for one grep call (its time budget spans the whole search). */
+  protected createRegexEvaluator(): BoundedRegex {
+    return new BoundedRegex();
   }
 
   private applyOutputBudget<
@@ -375,9 +461,10 @@ export class GrepTools {
     agentRoleId: string | null,
     projectAccessCache: Map<string, boolean>,
     evaluator: BoundedRegex,
-  ): Promise<string[]> {
+  ): Promise<{ files: string[]; gitIgnoredSkipped: number }> {
     const files: string[] = [];
     const globRegex = globPattern ? this.globToRegex(globPattern) : null;
+    const gitIgnored = { paths: await this.listGitIgnoredPaths(basePath), skipped: 0 };
 
     await this.walkDirectory(
       basePath,
@@ -387,9 +474,122 @@ export class GrepTools {
       agentRoleId,
       projectAccessCache,
       evaluator,
+      gitIgnored,
     );
 
-    return files;
+    return { files, gitIgnoredSkipped: gitIgnored.skipped };
+  }
+
+  /**
+   * Untracked paths git ignores under `directory` (.gitignore, .git/info/exclude, global
+   * excludes), "/"-separated relative to it, with a trailing "/" for whole directories. Only a
+   * repository found between `directory` and the workspace root counts, so an enclosing repo
+   * (such as a dotfiles repo in the home directory) cannot hide workspace files. A requested
+   * directory that is itself ignored is searched as asked. Any failure means "nothing ignored".
+   */
+  private async listGitIgnoredPaths(directory: string): Promise<Set<string>> {
+    const ignored = new Set<string>();
+    const repository = this.findWorkspaceGitRepository(directory);
+    if (!repository) return ignored;
+    // Read-only and hardened against repository config: no fsmonitor hook, no optional locks,
+    // no inherited GIT_* overrides, no prompts. The repository is named explicitly (git does no
+    // discovery, and --work-tree overrides core.worktree), so it cannot be redirected outside
+    // the workspace.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+    );
+    const stdout = await new Promise<string | null>((resolve) => {
+      execFile(
+        "git",
+        [
+          `--git-dir=${repository.gitDir}`,
+          `--work-tree=${repository.workTree}`,
+          "--no-optional-locks",
+          "--no-pager",
+          "-c",
+          "core.fsmonitor=false",
+          "ls-files",
+          "--others",
+          "--ignored",
+          "--exclude-standard",
+          "--directory",
+          "-z",
+        ],
+        {
+          cwd: repository.searchDir,
+          encoding: "utf8",
+          timeout: GIT_IGNORE_LIST_TIMEOUT_MS,
+          maxBuffer: GIT_IGNORE_LIST_MAX_BYTES,
+          windowsHide: true,
+          env: {
+            ...env,
+            // The validated common directory, so git does not re-read the commondir file.
+            GIT_COMMON_DIR: repository.commonDir,
+            GIT_OPTIONAL_LOCKS: "0",
+            GIT_TERMINAL_PROMPT: "0",
+          },
+        },
+        (error, output) => resolve(error ? null : output),
+      );
+    });
+    const entries = stdout ? stdout.split("\0").filter(Boolean) : [];
+    if (entries.includes("./")) return ignored;
+    for (const entry of entries) ignored.add(entry);
+    return ignored;
+  }
+
+  /**
+   * The repository nearest to `directory` between it and the workspace root, with real paths.
+   * Its `.git` must be a directory or a `.git` file ("gitdir: <path>"), owned by the current
+   * user, and its git directory and any `commondir` must resolve inside the workspace, except
+   * for a linked worktree checked out here: its git directory, in a repository outside the
+   * workspace, names this `.git` file back (git worktree add writes that), which a file planted
+   * in the workspace cannot arrange. Otherwise a planted `.git` file, symlink or `commondir`
+   * would make git read config, index and excludes from elsewhere, so the grep runs without
+   * .gitignore filtering instead.
+   */
+  private findWorkspaceGitRepository(
+    directory: string,
+  ): { gitDir: string; commonDir: string; workTree: string; searchDir: string } | null {
+    try {
+      const workspaceRoot = fs.realpathSync(this.workspace.path);
+      const searchDir = fs.realpathSync(directory);
+      let current = searchDir;
+      const relative = path.relative(workspaceRoot, current);
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        return null;
+      }
+      for (;;) {
+        const dotGit = path.join(current, ".git");
+        const dotGitStats = fs.lstatSync(dotGit, { throwIfNoEntry: false });
+        if (dotGitStats) {
+          if (!isOwnedByCurrentUser(dotGitStats)) return null;
+          const gitDir = dotGitStats.isDirectory()
+            ? dotGit
+            : dotGitStats.isFile()
+              ? readGitPointer(dotGit, "gitdir: ", current)
+              : null;
+          if (!gitDir || !fs.statSync(gitDir).isDirectory()) return null;
+          const inWorkspace = isAccessPathWithin(workspaceRoot, gitDir);
+          if (!inWorkspace && readGitPointer(path.join(gitDir, "gitdir"), "", gitDir) !== dotGit) {
+            return null;
+          }
+          const commonDirFile = path.join(gitDir, "commondir");
+          const commonDir = fs.lstatSync(commonDirFile, { throwIfNoEntry: false })
+            ? readGitPointer(commonDirFile, "", gitDir)
+            : gitDir;
+          if (!commonDir || !fs.statSync(commonDir).isDirectory()) return null;
+          // A git directory in the workspace is workspace content: its commondir must stay there.
+          if (inWorkspace && !isAccessPathWithin(workspaceRoot, commonDir)) return null;
+          return { gitDir, commonDir, workTree: current, searchDir };
+        }
+        const parent = path.dirname(current);
+        if (current === workspaceRoot || parent === current) return null;
+        current = parent;
+      }
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -403,6 +603,7 @@ export class GrepTools {
     agentRoleId: string | null,
     projectAccessCache: Map<string, boolean>,
     evaluator: BoundedRegex,
+    gitIgnored: { paths: ReadonlySet<string>; skipped: number },
     depth: number = 0,
   ): Promise<void> {
     // Limit recursion depth
@@ -449,7 +650,12 @@ export class GrepTools {
 
     // Glob candidates are tested in one worker round trip per batch; flush before
     // recursing so files keep their directory-walk order.
-    const globCandidates: Array<{ fullPath: string; relative: string; name: string }> = [];
+    const globCandidates: Array<{
+      fullPath: string;
+      relative: string;
+      name: string;
+      ignored: boolean;
+    }> = [];
     const flushGlobCandidates = async () => {
       if (!globRegex || globCandidates.length === 0) return;
       const batch = globCandidates.splice(0);
@@ -462,7 +668,9 @@ export class GrepTools {
         ),
       );
       batch.forEach((candidate, index) => {
-        if (matched.has(2 * index) || matched.has(2 * index + 1)) files.push(candidate.fullPath);
+        if (!matched.has(2 * index) && !matched.has(2 * index + 1)) return;
+        if (candidate.ignored) gitIgnored.skipped += 1;
+        else files.push(candidate.fullPath);
       });
     };
 
@@ -471,7 +679,7 @@ export class GrepTools {
 
       for (const entry of entries) {
         const fullPath = path.join(currentPath, entry.name);
-        const relativePath = path.relative(basePath, fullPath);
+        const relativePath = path.relative(basePath, fullPath).split(path.sep).join("/");
 
         if (
           evaluateWorkspaceFilesystemAccess(this.workspace, fullPath, "read").decision !== "allow"
@@ -480,6 +688,10 @@ export class GrepTools {
         }
 
         if (entry.isDirectory()) {
+          if (!skipDirs.includes(entry.name) && gitIgnored.paths.has(`${relativePath}/`)) {
+            gitIgnored.skipped += 1;
+            continue;
+          }
           await flushGlobCandidates();
           await this.walkDirectory(
             fullPath,
@@ -489,6 +701,7 @@ export class GrepTools {
             agentRoleId,
             projectAccessCache,
             evaluator,
+            gitIgnored,
             depth + 1,
           );
         } else if (entry.isFile()) {
@@ -502,18 +715,19 @@ export class GrepTools {
           try {
             const stats = fs.statSync(fullPath);
             // Skip files larger than 1MB
-            if (stats.size > 1024 * 1024) continue;
+            if (stats.size > MAX_GREP_FILE_BYTES) continue;
           } catch {
             continue;
           }
 
-          // Apply glob filter if specified
+          // Apply glob filter if specified; ignored files only count as skipped if they match it.
+          const ignored = gitIgnored.paths.has(relativePath);
           if (globRegex) {
-            globCandidates.push({
-              fullPath,
-              relative: relativePath.split(path.sep).join("/"),
-              name: entry.name,
-            });
+            globCandidates.push({ fullPath, relative: relativePath, name: entry.name, ignored });
+            continue;
+          }
+          if (ignored) {
+            gitIgnored.skipped += 1;
             continue;
           }
 
@@ -635,11 +849,13 @@ export class GrepTools {
   }
 
   /**
-   * Heuristic: detect workspaces dominated by PDF/DOCX files
+   * Heuristic: detect directories (the workspace root by default) dominated by PDF/DOCX files
    */
-  private async isDocumentHeavyWorkspace(): Promise<boolean> {
+  private async isDocumentHeavyWorkspace(
+    directory: string = this.workspace.path,
+  ): Promise<boolean> {
     try {
-      const entries = await fsPromises.readdir(this.workspace.path, { withFileTypes: true });
+      const entries = await fsPromises.readdir(directory, { withFileTypes: true });
       let fileCount = 0;
       let docCount = 0;
       const maxEntries = 200;

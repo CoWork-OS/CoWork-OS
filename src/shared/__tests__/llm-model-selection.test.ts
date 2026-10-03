@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getLlmModelDefaultReasoningEffort,
   getLlmReasoningEffortOptions,
   getLlmModelReasoningEfforts,
   withLlmModelSelectionMetadata,
@@ -114,6 +115,59 @@ describe("llm model selection metadata", () => {
 
     expect(azureModels[0].reasoningEfforts).toEqual(["low", "medium", "high", "extra_high"]);
     expect(openAiModels[0].reasoningEfforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+});
+
+describe("Anthropic model effort selection", () => {
+  it("exposes the effort levels each Anthropic model accepts", () => {
+    expect(getLlmModelReasoningEfforts("anthropic", "opus-4-6")).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
+    expect(getLlmModelReasoningEfforts("anthropic", "claude-opus-4-8")).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(getLlmModelReasoningEfforts("anthropic", "claude-opus-5-5")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(getLlmModelReasoningEfforts("azure-anthropic", "claude-sonnet-4-6")).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
+    expect(getLlmModelReasoningEfforts("azure-anthropic", "my-deployment")).toEqual([]);
+    // Bedrock does not send thinking parameters yet.
+    expect(getLlmModelReasoningEfforts("bedrock", "anthropic.claude-opus-4-6")).toEqual([]);
+  });
+
+  it("preselects each model's API default effort", () => {
+    expect(getLlmModelDefaultReasoningEffort("anthropic", "claude-opus-5-5")).toBe("medium");
+    expect(getLlmModelDefaultReasoningEffort("anthropic", "opus-4-6")).toBe("high");
+    expect(getLlmModelDefaultReasoningEffort("anthropic", "haiku-4-5")).toBe("none");
+    expect(getLlmModelDefaultReasoningEffort("openai", "gpt-6-sol")).toBeUndefined();
+  });
+
+  it("attaches Anthropic effort metadata to the model list", () => {
+    const models = withLlmModelSelectionMetadata("anthropic", [
+      { key: "opus-4-6", displayName: "Opus 4.6", description: "Anthropic" },
+      { key: "sonnet-3-5", displayName: "Sonnet 3.5", description: "Anthropic" },
+    ]);
+    expect(models[0].reasoningEfforts).toEqual(["none", "low", "medium", "high", "max"]);
+    expect(models[1].reasoningEfforts).toBeUndefined();
   });
 });
 

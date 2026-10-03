@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { deriveReviewGateDecision, scoreTaskRisk } from "../risk";
+import { deriveReviewGateDecision, resolveEffectiveReviewPolicy, scoreTaskRisk } from "../risk";
 import type { TaskEvent } from "../../../shared/types";
 
 function toolCallEvent(tool: string, input: Record<string, unknown> = {}): TaskEvent {
@@ -162,5 +162,67 @@ describe("deriveReviewGateDecision", () => {
     expect(decision.strictCompletionContract).toBe(true);
     expect(decision.runVerificationAgent).toBe(true);
     expect(decision.explicitEvidenceRequired).toBe(true);
+  });
+});
+
+describe("resolveEffectiveReviewPolicy", () => {
+  const ENV_KEYS = [
+    "COWORK_REVIEW_POLICY_DEFAULT",
+    "COWORK_REVIEW_POLICY_ENABLE_AUTO",
+    "COWORK_REVIEW_POLICY_AUTO_DEFAULT",
+  ] as const;
+  const saved = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+  for (const key of ENV_KEYS) delete process.env[key];
+
+  it("reviews high-risk code and operations tasks by default", () => {
+    for (const taskDomain of ["code", "operations"]) {
+      expect(
+        resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain, riskLevel: "high" }),
+      ).toEqual({ policy: "balanced", source: "auto" });
+    }
+  });
+
+  it("leaves low/medium-risk tasks and other domains unreviewed", () => {
+    for (const riskLevel of ["low", "medium"] as const) {
+      expect(
+        resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain: "code", riskLevel }),
+      ).toEqual({ policy: "off", source: "default" });
+    }
+    expect(
+      resolveEffectiveReviewPolicy({
+        requestedPolicy: undefined,
+        taskDomain: "writing",
+        riskLevel: "high",
+      }),
+    ).toEqual({ policy: "off", source: "default" });
+  });
+
+  it("honours an explicit task policy, the env default, and the auto opt-out", () => {
+    expect(
+      resolveEffectiveReviewPolicy({ requestedPolicy: "off", taskDomain: "code", riskLevel: "high" }),
+    ).toEqual({ policy: "off", source: "explicit" });
+
+    process.env.COWORK_REVIEW_POLICY_DEFAULT = "off";
+    expect(
+      resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain: "code", riskLevel: "high" }),
+    ).toEqual({ policy: "off", source: "env_default" });
+    delete process.env.COWORK_REVIEW_POLICY_DEFAULT;
+
+    process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO = "false";
+    expect(
+      resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain: "code", riskLevel: "high" }),
+    ).toEqual({ policy: "off", source: "default" });
+
+    process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO = "true";
+    process.env.COWORK_REVIEW_POLICY_AUTO_DEFAULT = "strict";
+    expect(
+      resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain: "code", riskLevel: "high" }),
+    ).toEqual({ policy: "strict", source: "auto" });
   });
 });

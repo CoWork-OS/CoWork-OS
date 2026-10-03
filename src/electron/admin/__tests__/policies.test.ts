@@ -224,6 +224,59 @@ describe("loadPoliciesStrict", () => {
       }),
     );
   });
+
+  it("allows shell networking by default and keeps an explicit admin choice", async () => {
+    mockFs.existsSync.mockReturnValue(false);
+    const { loadPolicies: freshLoadPolicies } = await import("../policies");
+    expect(freshLoadPolicies().runtime.network.allowShellNetwork).toBe(true);
+
+    vi.resetModules();
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ version: 2, runtime: { network: { defaultAction: "allow" } } }),
+    );
+    const { loadPoliciesStrict: withoutField } = await import("../policies");
+    expect(withoutField()?.runtime.network.allowShellNetwork).toBe(true);
+
+    vi.resetModules();
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ version: 2, runtime: { network: { allowShellNetwork: false } } }),
+    );
+    const { loadPoliciesStrict: explicitlyOff } = await import("../policies");
+    expect(explicitlyOff()?.runtime.network.allowShellNetwork).toBe(false);
+  });
+
+  it("permits per-command unsandboxed shell approval by default and keeps an explicit admin choice", async () => {
+    mockFs.existsSync.mockReturnValue(false);
+    const { loadPolicies: freshLoadPolicies } = await import("../policies");
+    const defaults = freshLoadPolicies().runtime;
+    expect(defaults.allowUnsandboxedShell).toBe(true);
+    expect(defaults.requireSandboxForShell).toBe(false);
+
+    vi.resetModules();
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ version: 2, runtime: { requireSandboxForShell: false } }),
+    );
+    const { loadPoliciesStrict: withoutField } = await import("../policies");
+    expect(withoutField()?.runtime.allowUnsandboxedShell).toBe(true);
+
+    // An admin who requires a sandbox but predates this field must not gain the
+    // environment-gated unsandboxed fallback from the new default.
+    vi.resetModules();
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ version: 2, runtime: { requireSandboxForShell: true } }),
+    );
+    const { loadPoliciesStrict: sandboxRequired } = await import("../policies");
+    expect(sandboxRequired()?.runtime.allowUnsandboxedShell).toBe(false);
+
+    vi.resetModules();
+    mockFs.readFileSync.mockReturnValue(
+      JSON.stringify({ version: 2, runtime: { allowUnsandboxedShell: false } }),
+    );
+    const { loadPoliciesStrict: explicitlyOff } = await import("../policies");
+    expect(explicitlyOff()?.runtime.allowUnsandboxedShell).toBe(false);
+  });
 });
 
 describe("policy change notifications", () => {

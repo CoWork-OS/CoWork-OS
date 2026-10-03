@@ -2,14 +2,14 @@
  * Tests for step failure/verification behavior in TaskExecutor.executeStep
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { checkpointCrashRoundTrip } from "../../../../tests/helpers/checkpoint-crash-roundtrip";
 import { AwaitingUserInputError, TaskExecutor } from "../executor";
 import type { LLMResponse } from "../llm";
-import { FileOperationTracker } from "../executor-helpers";
+import { FileOperationTracker, ToolCallDeduplicator } from "../executor-helpers";
 import { fromOpenAICompatibleResponse } from "../llm/openai-compatible";
 import { ContextCapacityExhaustedError } from "../runtime/SessionRuntime";
 
@@ -405,7 +405,9 @@ describe("TaskExecutor executeStep failure handling", () => {
     const timeout = (executor as Any).getRetryTimeoutMs(120_000, undefined, false, 8_192);
     const tokenCap = (executor as Any).applyRetryTokenCap(16_000, undefined, 120_000, false);
 
-    expect(timeout).toBe(120_000);
+    // An 8K text budget needs more than the 120 s base at the fallback throughput.
+    expect(timeout).toBeGreaterThanOrEqual(120_000);
+    expect(timeout).toBeLessThanOrEqual(600_000);
     expect(Number.isFinite(timeout)).toBe(true);
     expect(Number.isFinite(tokenCap)).toBe(true);
     expect(tokenCap).toBeGreaterThan(0);
@@ -507,6 +509,79 @@ describe("TaskExecutor executeStep failure handling", () => {
 
     expect(step.status).toBe("failed");
     expect(step.error).toBeDefined();
+  });
+
+  it("ends the step on a provider safety refusal instead of re-asking until the loop budget", async () => {
+    executor = createExecutorWithStubs([], {});
+    // Exercise the real retry path so the provider outcome is classified.
+    executor.callLLMWithRetry = (TaskExecutor.prototype as Any).callLLMWithRetry;
+    const createMessageWithTimeout = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "" }],
+      stopReason: "refusal",
+      usage: { inputTokens: 10, outputTokens: 0 },
+    });
+    (executor as Any).createMessageWithTimeout = createMessageWithTimeout;
+
+    const step: Any = { id: "1", description: "Summarize the findings", status: "pending" };
+    let thrown: Any;
+    try {
+      await (executor as Any).executeStep(step);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(createMessageWithTimeout).toHaveBeenCalledTimes(1);
+    expect(String(thrown?.message || step.error)).toMatch(/declined/i);
+  });
+
+  it("retries a truncated tool call instead of failing the step on the first max_tokens", async () => {
+    const truncatedWrite: LLMResponse = {
+      stopReason: "max_tokens",
+      content: [
+        { type: "text", text: "Writing the notes now." },
+        {
+          type: "tool_use",
+          id: "t1",
+          name: "write_file",
+          input: { path: "notes.md", content: "# Notes\npartial" },
+        },
+      ],
+    };
+    executor = createExecutorWithStubs(
+      [
+        truncatedWrite,
+        toolUseResponse("write_file", { path: "notes.md", content: "# Notes\nshort" }),
+        textResponse("Saved the notes to notes.md."),
+      ],
+      {},
+    );
+    const step: Any = { id: "1", description: "Write notes.md", status: "pending" };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status).not.toBe("failed");
+    expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(3);
+    // The truncated call never ran; only the re-issued write did.
+    const writes = (executor as Any).toolRegistry.executeTool.mock.calls.filter(
+      ([name]: [string]) => name === "write_file",
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0][1]).toMatchObject({ content: "# Notes\nshort" });
+  });
+
+  it("does not claim repeated recovery attempts when a truncation cannot be retried", async () => {
+    executor = createExecutorWithStubs(
+      [{ stopReason: "max_tokens", content: [{ type: "text", text: "partial" }] }],
+      {},
+    );
+    (executor as Any).getRemainingTurnBudget = vi.fn().mockReturnValue(0);
+    const step: Any = { id: "1", description: "Summarize the findings", status: "pending" };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status).toBe("failed");
+    expect(String(step.error)).toContain("output token limit");
+    expect(String(step.error)).not.toMatch(/\(\d+ recovery attempts\)/);
   });
 
   it("fails before provider dispatch when retained context exceeds the hard budget", async () => {
@@ -2878,6 +2953,241 @@ relationship_memory:
     }
   });
 
+  async function runSingleFileMutationStep(opts: {
+    description: string;
+    tool: "edit_file" | "write_file";
+    relPath: string;
+    responses?: LLMResponse[];
+  }): Promise<{ step: Any; fileNow: string }> {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-equivalent-mutation-"));
+    const target = path.join(tempDir, opts.relPath);
+    fs.writeFileSync(target, "value = 1");
+    const input =
+      opts.tool === "edit_file"
+        ? { file_path: opts.relPath, old_string: "value = 1", new_string: "value = 2" }
+        : { path: opts.relPath, content: "value = 2" };
+    executor = createExecutorWithStubs(
+      opts.responses || [
+        toolUseResponse(opts.tool, input),
+        textResponse(`Updated ${opts.relPath} as requested.`),
+      ],
+      {},
+    );
+    (executor as Any).toolRegistry.getTools = () => (executor as Any).getAvailableTools();
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).task.prompt = opts.description;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file" || name === "write_file") {
+        fs.writeFileSync(target, "value = 2");
+        return name === "edit_file"
+          ? { success: true, file_path: opts.relPath, replacements: 1 }
+          : { success: true, path: opts.relPath, bytesWritten: 9 };
+      }
+      return { success: true };
+    });
+    const step: Any = {
+      id: "equivalent-mutation",
+      description: opts.description,
+      status: "pending",
+    };
+    try {
+      await (executor as Any).executeStep(step);
+      return { step, fileNow: fs.readFileSync(target, "utf8") };
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  it.each([
+    ["Fix the failing assertion in parser.test.ts", "edit_file", "parser.test.ts"],
+    ["Remove the unused import from a.ts", "edit_file", "a.ts"],
+    ["Fix the null check in parser.ts", "write_file", "parser.ts"],
+    ["Make the xlsx parser in xlsx.ts handle merged cells", "edit_file", "xlsx.ts"],
+    ["Implement the PDF export feature in pdf-export.ts", "write_file", "pdf-export.ts"],
+  ] as const)(
+    "accepts an equivalent file mutation for %s (via %s)",
+    async (description, tool, relPath) => {
+      const { step, fileNow } = await runSingleFileMutationStep({ description, tool, relPath });
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fileNow).toBe("value = 2");
+    },
+  );
+
+  it("never requires both write_file and edit_file and keeps generators out of code steps", () => {
+    executor = createExecutorWithStubs([], {});
+    (executor as Any).toolRegistry.getTools = () => (executor as Any).getAvailableTools();
+    const required = (description: string): string[] =>
+      Array.from(
+        (executor as Any).resolveStepExecutionContract({
+          id: "contract",
+          description,
+          status: "pending",
+        }).requiredTools,
+      );
+
+    for (const description of [
+      "Fix the failing test in parser.test.ts",
+      "Remove the unused import from src/a.ts",
+      "Update config.json to add the timeout key",
+      "Write unit tests for the CSV importer in csv.test.ts",
+    ]) {
+      const tools = required(description);
+      expect(tools.includes("write_file") && tools.includes("edit_file"), description).toBe(false);
+    }
+    expect(required("Fix the failing test in parser.test.ts")).toEqual(["edit_file"]);
+    expect(required("Make the xlsx parser in src/xlsx.ts handle merged cells")).not.toContain(
+      "create_spreadsheet",
+    );
+    expect(
+      required("Update the Excel export in src/exporter.ts to add a date column"),
+    ).not.toContain("create_spreadsheet");
+    expect(required("Implement the PDF export feature in src/export/pdf.ts")).not.toContain(
+      "create_document",
+    );
+    expect(
+      required("Read the PDF spec in docs/spec.pdf and write a summary to notes.md"),
+    ).not.toContain("create_document");
+    expect(required("Generate a PDF report of the Q3 sales figures")).toContain("create_document");
+    expect(required("Generate PDF invoices for each customer")).toContain("create_document");
+    expect(required("Build a PDF viewer component for the invoice page")).not.toContain(
+      "create_document",
+    );
+    expect(required("Export the cleaned results to an Excel workbook")).toContain(
+      "create_spreadsheet",
+    );
+
+    // A generator the registry does not offer can never satisfy the contract.
+    (executor as Any).toolRegistry.getTools = () => [{ name: "write_file" }, { name: "edit_file" }];
+    expect(required("Generate a PDF report of the Q3 sales figures")).not.toContain(
+      "create_document",
+    );
+  });
+
+  it.each([
+    ["search_files", { query: "getUser", path: "src" }],
+    ["run_command", { command: "rg -n getUser src" }],
+  ] as const)("satisfies an explicit grep requirement with %s", async (tool, input) => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse(tool, input),
+        textResponse("Found 2 usages of getUser: src/a.ts:10 and src/b.ts:22."),
+      ],
+      {},
+    );
+    (executor as Any).toolRegistry.getTools = () => [
+      { name: "grep" },
+      { name: "search_files" },
+      { name: "run_command" },
+      { name: "read_file" },
+    ];
+    executor.toolRegistry.executeTool = vi.fn(async () => ({
+      success: true,
+      matches: [{ path: "src/a.ts", line: 10 }],
+      stdout: "src/a.ts:10:getUser",
+      exitCode: 0,
+    }));
+    const step: Any = {
+      id: "grep-equivalent",
+      description: "Use grep to find all usages of getUser in src",
+      status: "pending",
+    };
+    expect(Array.from((executor as Any).resolveStepExecutionContract(step).requiredTools)).toEqual([
+      "grep",
+    ]);
+    await (executor as Any).executeStep(step);
+    expect(step.status, String(step.error || "")).toBe("completed");
+  });
+
+  it("names the file-change group instead of write_file when nudging an edit step", async () => {
+    const { step } = await runSingleFileMutationStep({
+      description: "Remove the unused import from a.ts",
+      tool: "edit_file",
+      relPath: "a.ts",
+      responses: [
+        textResponse("I removed the unused import."),
+        toolUseResponse("edit_file", {
+          file_path: "a.ts",
+          old_string: "value = 1",
+          new_string: "value = 2",
+        }),
+        textResponse("Removed the unused import from a.ts."),
+      ],
+    });
+    expect(step.status, String(step.error || "")).toBe("completed");
+    const nudge = ((executor as Any).conversationHistory as Any[])
+      .filter((entry) => entry.role === "user")
+      .flatMap((entry) => (Array.isArray(entry.content) ? entry.content : []))
+      .map((block: Any) => String(block?.text || ""))
+      .find((text: string) => text.includes("Do not finalize this step with text-only output."));
+    expect(nudge).toContain("edit_file for targeted edits to an existing file");
+    expect(nudge).not.toMatch(/required mutation tools now: write_file/);
+  });
+
+  it("names the file-change group when the mutation starvation guard fires", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-existing-target-"));
+    fs.writeFileSync(path.join(tempDir, "README.md"), "# Project\n\nExisting docs.\n");
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("read_file", { path: "README.md" }),
+        toolUseResponse("list_directory", { path: "." }),
+        toolUseResponse("read_file", { path: "README.md" }),
+        toolUseResponse("edit_file", {
+          file_path: "README.md",
+          old_string: "Existing docs.",
+          new_string: "Existing docs.\n\n## Usage\n\nRun the app.",
+        }),
+        textResponse("Added a usage section to README.md."),
+      ],
+      {},
+    );
+    (executor as Any).workspace.path = tempDir;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file") {
+        fs.appendFileSync(path.join(tempDir, "README.md"), "\n## Usage\n\nRun the app.\n");
+        return { success: true, file_path: "README.md", replacements: 1 };
+      }
+      if (name === "read_file") {
+        return { success: true, path: "README.md", content: "# Project" };
+      }
+      return { success: true, files: ["README.md"] };
+    });
+    const step: Any = {
+      id: "existing-target",
+      description: "Add a usage section to README.md",
+      status: "pending",
+    };
+    try {
+      expect(
+        Array.from((executor as Any).resolveStepExecutionContract(step).requiredTools),
+      ).toEqual(["write_file"]);
+      await (executor as Any).executeStep(step);
+      // edit_file satisfies the write_file requirement.
+      expect(step.status, String(step.error || "")).toBe("completed");
+      const starvationNudge = ((executor as Any).conversationHistory as Any[])
+        .filter((entry) => entry.role === "user")
+        .flatMap((entry) => (Array.isArray(entry.content) ? entry.content : []))
+        .map((block: Any) => String(block?.text || ""))
+        .find((text: string) => text.includes("Mutation starvation guard"));
+      expect(starvationNudge).toContain("edit_file for targeted edits to an existing file");
+      expect(starvationNudge).not.toContain("Pending required mutation tools: write_file");
+
+      // The first-write checkpoint must not ask for starter content in an existing file.
+      const existingHint = (executor as Any).buildFirstWriteCheckpointHint(
+        ["write_file"],
+        "README.md",
+      );
+      expect(existingHint).toContain(
+        '"README.md" already exists: change it in place with edit_file',
+      );
+      expect(existingHint).not.toContain("starter content");
+      expect(
+        (executor as Any).buildFirstWriteCheckpointHint(["write_file"], "docs/NEW.md"),
+      ).toContain("minimal valid starter content");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("still fails true inspection steps when they mutate the workspace", async () => {
     executor = createExecutorWithStubs(
       [
@@ -2909,6 +3219,92 @@ relationship_memory:
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  async function runInspectThenEditStep(opts: {
+    description: string;
+    relPath: string;
+    before: string;
+    after: string;
+    taskPrompt?: string;
+  }): Promise<{ step: Any; contract: Any; fileNow: string }> {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-inspect-edit-"));
+    const target = path.join(tempDir, opts.relPath);
+    fs.writeFileSync(target, opts.before);
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("read_file", { path: opts.relPath }),
+        toolUseResponse("edit_file", {
+          file_path: opts.relPath,
+          old_string: opts.before,
+          new_string: opts.after,
+        }),
+        textResponse(`Found the problem in ${opts.relPath} and corrected it.`),
+      ],
+      {},
+    );
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).task.prompt = opts.taskPrompt || opts.description;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file") {
+        fs.writeFileSync(target, opts.after);
+        return { success: true, file_path: opts.relPath, replacements: 1 };
+      }
+      if (name === "read_file") {
+        return { success: true, path: opts.relPath, content: fs.readFileSync(target, "utf8") };
+      }
+      return { success: true };
+    });
+    const step: Any = { id: "inspect-edit", description: opts.description, status: "pending" };
+    try {
+      const contract = (executor as Any).resolveStepExecutionContract(step);
+      await (executor as Any).executeStep(step);
+      return { step, contract, fileNow: fs.readFileSync(target, "utf8") };
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  it.each([
+    ["Investigate the root cause of the crash in parser.ts and patch it", "parser.ts"],
+    ["Check the config in server.ts and correct the port number", "server.ts"],
+    ["Look into the flaky test in retry.test.ts and stabilize it", "retry.test.ts"],
+    ["Analyze the slow query in repo.ts and optimize it", "repo.ts"],
+    ["Inspect the migration in 001.sql and change the column type", "001.sql"],
+    ["Review the CSS in app.css and adjust the spacing", "app.css"],
+    ["Investigate the crash and patch the null check", "parser.ts"],
+  ])(
+    "does not fail an inspect-then-fix step for its requested edit: %s",
+    async (description, relPath) => {
+      const { step, contract, fileNow } = await runInspectThenEditStep({
+        description,
+        relPath,
+        before: "value = 1",
+        after: "value = 2",
+      });
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fileNow).toBe("value = 2");
+      if (/\.\w+\b/.test(description)) {
+        expect(contract.mode).toBe("mutation_required");
+      }
+    },
+  );
+
+  it.each([
+    "Investigate the root cause of the crash in parser.ts",
+    "Investigate the crash and propose a fix",
+    "Look into the parser crash but do not modify any files yet",
+  ])("still fails a purely inspective step that edits files: %s", async (description) => {
+    const { step } = await runInspectThenEditStep({
+      description,
+      relPath: "parser.ts",
+      before: "value = 1",
+      after: "value = 2",
+    });
+    expect(step.status).toBe("failed");
+    expect(String(step.error || "")).toContain(
+      "Analysis/inspection step performed a workspace mutation",
+    );
   });
 
   it("reuses prior mutation evidence for refinement steps when current-step target verification is present", async () => {
@@ -3814,6 +4210,189 @@ relationship_memory:
     );
   });
 
+  it("runs eight distinct edit_file calls across two turns without loop blocking", async () => {
+    const files = Array.from({ length: 8 }, (_, i) => `src/feature${i}.ts`);
+    const editTurn = (paths: string[]) =>
+      multiToolUseResponse(
+        paths.map((file_path) => ({
+          name: "edit_file",
+          input: { file_path, old_string: "getUser(", new_string: "fetchUser(" },
+        })),
+      );
+    executor = createExecutorWithStubs(
+      [
+        editTurn(files.slice(0, 4)),
+        editTurn(files.slice(4)),
+        textResponse("Renamed getUser to fetchUser in all 8 files."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    const step: Any = {
+      id: "rename-across-files",
+      description: "Rename getUser to fetchUser across the src/ files",
+      status: "pending",
+    };
+
+    await runtime.executeStep(step);
+
+    const edits = runtime.toolRegistry.executeTool.mock.calls.filter(
+      (call: Any[]) => call[0] === "edit_file",
+    );
+    expect(edits.map((call: Any[]) => call[1].file_path)).toEqual(files);
+    const blocked = runtime.daemon.logEvent.mock.calls.filter(
+      (call: Any[]) => call[1] === "tool_blocked",
+    );
+    expect(blocked).toEqual([]);
+  });
+
+  it("re-runs a failing test command after edits instead of reporting it as a duplicate success", async () => {
+    const testRun = { command: "pytest tests/test_login.py -x" };
+    const edit = (from: string, to: string) => ({
+      file_path: "app/login.py",
+      old_string: from,
+      new_string: to,
+    });
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", testRun),
+        toolUseResponse("edit_file", edit("a", "b")),
+        toolUseResponse("run_command", testRun),
+        toolUseResponse("edit_file", edit("b", "c")),
+        toolUseResponse("run_command", testRun),
+        toolUseResponse("edit_file", edit("c", "d")),
+        toolUseResponse("run_command", testRun),
+        textResponse("The login test still fails after three fixes."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    runtime.fileOperationTracker = new FileOperationTracker();
+    delete runtime.recordFileOperation;
+    runtime.toolRegistry.executeTool = vi.fn(async (name: string) =>
+      name === "run_command"
+        ? { success: false, exitCode: 1, stdout: "1 failed", stderr: "AssertionError" }
+        : { success: true, file_path: "app/login.py", replacements: 1 },
+    );
+    const step: Any = {
+      id: "fix-login-test",
+      description: "Make the failing login test pass",
+      status: "pending",
+    };
+
+    await runtime.executeStep(step).catch(() => undefined);
+
+    const testRuns = runtime.toolRegistry.executeTool.mock.calls.filter(
+      (call: Any[]) => call[0] === "run_command",
+    );
+    expect(testRuns).toHaveLength(4);
+    const duplicateBlocks = runtime.daemon.logEvent.mock.calls.filter(
+      (call: Any[]) => call[1] === "tool_blocked" && call[2]?.reason === "duplicate_call",
+    );
+    expect(duplicateBlocks).toEqual([]);
+  });
+
+  it("blocks only an identical repeated change once a step's mutation is satisfied", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-repeat-mutation-"));
+    fs.writeFileSync(path.join(tempDir, "app.js"), "const a = 1;\nconst b = 2;\n", "utf8");
+    const editA = { file_path: "app.js", old_string: "const a = 1;", new_string: "const a = 10;" };
+    const editB = { file_path: "app.js", old_string: "const b = 2;", new_string: "const b = 20;" };
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("edit_file", editA),
+        toolUseResponse("edit_file", editB),
+        toolUseResponse("edit_file", editB),
+        textResponse("Updated both constants in app.js."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    runtime.workspace.path = tempDir;
+    runtime.reliabilityV2DisableBootstrapWrite = true;
+    runtime.toolRegistry.executeTool = vi.fn(async (name: string, input: Any) => {
+      if (name !== "edit_file") return { success: true };
+      const filePath = path.join(tempDir, String(input.file_path));
+      const current = fs.readFileSync(filePath, "utf8");
+      if (!current.includes(input.old_string)) {
+        return { success: false, file_path: input.file_path, error: "old_string not found" };
+      }
+      fs.writeFileSync(filePath, current.replace(input.old_string, input.new_string), "utf8");
+      return { success: true, file_path: input.file_path, replacements: 1 };
+    });
+    const step: Any = {
+      id: "update-constants",
+      description: "Implement the new constant values in `app.js`.",
+      status: "pending",
+    };
+
+    try {
+      await runtime.executeStep(step);
+
+      const edits = runtime.toolRegistry.executeTool.mock.calls.filter(
+        (call: Any[]) => call[0] === "edit_file",
+      );
+      expect(edits.map((call: Any[]) => call[1])).toEqual([editA, editB]);
+      expect(fs.readFileSync(path.join(tempDir, "app.js"), "utf8")).toBe(
+        "const a = 10;\nconst b = 20;\n",
+      );
+      expect(runtime.daemon.logEvent).toHaveBeenCalledWith(
+        "task-1",
+        "tool_blocked",
+        expect.objectContaining({ tool: "edit_file", reason: "mutation_already_satisfied" }),
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a read that follows an edit of the same file in one batch instead of serving cached content", async () => {
+    executor = createExecutorWithStubs(
+      [
+        multiToolUseResponse([
+          {
+            name: "edit_file",
+            input: { file_path: "src/app.ts", old_string: "old();", new_string: "fresh();" },
+          },
+          { name: "read_file", input: { path: "src/app.ts" } },
+        ]),
+        textResponse("Updated src/app.ts to call fresh()."),
+      ],
+      {},
+    );
+    const runtime = executor as Any;
+    const staleRead = JSON.stringify({ content: "old();\n", size: 7, path: "src/app.ts" });
+    runtime.fileOperationTracker = new FileOperationTracker();
+    runtime.fileOperationTracker.recordFileRead("src/app.ts", staleRead, { path: "src/app.ts" });
+    runtime.fileOperationTracker.recordFileRead("src/app.ts", staleRead, { path: "src/app.ts" });
+    runtime.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    delete runtime.checkFileOperation;
+    delete runtime.recordFileOperation;
+    runtime.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "edit_file") return { success: true, file_path: "src/app.ts", replacements: 1 };
+      if (name === "read_file") return { content: "fresh();\n", size: 9, path: "src/app.ts" };
+      return { success: true };
+    });
+    const step: Any = {
+      id: "edit-then-read",
+      description: "Update src/app.ts to call fresh() and check the result",
+      status: "pending",
+    };
+
+    await runtime.executeStep(step);
+
+    const executedTools = runtime.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0]);
+    expect(executedTools).toEqual(["edit_file", "read_file"]);
+    const results = runtime.conversationHistory.flatMap((message: Any) =>
+      Array.isArray(message.content)
+        ? message.content.filter((block: Any) => block.type === "tool_result")
+        : [],
+    );
+    const readResult = results.find((result: Any) => result.tool_use_id === "tool-1-read_file");
+    expect(JSON.parse(readResult.content).content).toBe("fresh();\n");
+  });
+
   it("rejects malformed provider calls while executing valid siblings and preserving the snapshot", async () => {
     const response = fromOpenAICompatibleResponse({
       choices: [
@@ -4017,6 +4596,94 @@ relationship_memory:
         passed: true,
       }),
     );
+  });
+
+  it("completes a final run-tests-and-fix step that reports the tests now pass", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-verify-fix-"));
+    const target = path.join(tempDir, "sum.ts");
+    fs.writeFileSync(target, "export const sum = (a, b) => a - b;");
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", { command: "npm test" }),
+        toolUseResponse("edit_file", {
+          file_path: "sum.ts",
+          old_string: "a - b",
+          new_string: "a + b",
+        }),
+        toolUseResponse("run_command", { command: "npm test" }),
+        textResponse(
+          "The first test run showed sum() subtracting; I fixed sum.ts to add, re-ran npm test and all 12 tests now pass.",
+        ),
+      ],
+      {},
+    );
+    (executor as Any).workspace.path = tempDir;
+    (executor as Any).task.prompt = "Fix the sum bug and make sure the tests pass.";
+    let runs = 0;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string) => {
+      if (name === "run_command") {
+        runs += 1;
+        return runs === 1
+          ? { success: false, exitCode: 1, stdout: "1 failing: expected 3 got -1", stderr: "" }
+          : { success: true, exitCode: 0, stdout: "12 passing", stderr: "" };
+      }
+      if (name === "edit_file") {
+        fs.writeFileSync(target, "export const sum = (a, b) => a + b;");
+        return { success: true, file_path: "sum.ts", replacements: 1 };
+      }
+      return { success: true };
+    });
+    const step: Any = {
+      id: "2",
+      description: "Run the test suite to verify the fix and address any failures",
+      status: "pending",
+    };
+    (executor as Any).plan = {
+      description: "Plan",
+      steps: [
+        { id: "1", description: "Fix the sum bug in sum.ts", status: "completed" },
+        step,
+      ],
+    };
+
+    try {
+      expect((executor as Any).isVerificationStep(step)).toBe(false);
+      await (executor as Any).executeStep(step);
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fs.readFileSync(target, "utf8")).toContain("a + b");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["All 12 tests now pass.", "completed"],
+    [
+      "Re-ran the suite after the earlier failure; all tests pass and the build is green.",
+      "completed",
+    ],
+    ["42 tests passed, 0 tests failed.", "completed"],
+    ["12 tests passed, 2 failed: test_a and test_b.", "failed"],
+    ["All tests pass except test_login, which still fails.", "failed"],
+    ["No tests were found; the build succeeded.", "failed"],
+  ])("judges a final verification report by its outcome: %s", async (report, expected) => {
+    executor = createExecutorWithStubs(
+      [toolUseResponse("run_command", { command: "npm test" }), textResponse(report)],
+      { run_command: { success: true, exitCode: 0, stdout: "test output" } },
+    );
+    const step: Any = {
+      id: "verify-tests",
+      description: "Verify that the test suite passes",
+      status: "pending",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [step] };
+
+    await (executor as Any).executeStep(step);
+
+    expect(step.status, String(step.error || "")).toBe(expected);
+    if (expected === "failed") {
+      expect(String(step.error || "")).toContain("Verification failed");
+    }
   });
 
   it("fails final verification steps unless the response is exactly OK", async () => {
@@ -5220,7 +5887,7 @@ relationship_memory:
       checkDuplicate: vi.fn().mockReturnValue({ isDuplicate: false }),
       recordCall: vi.fn(),
       resetMutationHistoryForNewStep: vi.fn(),
-      clearReadOnlyHistory: vi.fn(),
+      clearHistoryAfterWorkspaceMutation: vi.fn(),
     };
 
     // Call the real recordFileOperation (restore it from prototype)
@@ -5236,5 +5903,985 @@ relationship_memory:
     );
 
     expect(mockTracker.recordFileCreation).toHaveBeenCalledWith("/tmp/test-output.md");
+  });
+});
+
+describe("TaskExecutor step loop control", () => {
+  let originalConsoleLog: typeof console.log;
+  let originalConsoleError: typeof console.error;
+  const tempDirs: string[] = [];
+
+  beforeAll(() => {
+    originalConsoleLog = console.log;
+    originalConsoleError = console.error;
+    console.log = () => {};
+    console.error = () => {};
+  });
+
+  afterAll(() => {
+    console.log = originalConsoleLog;
+    console.error = originalConsoleError;
+    for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function toolCall(name: string, input: Record<string, Any>, id: string): LLMResponse {
+    return { stopReason: "tool_use", content: [{ type: "tool_use", id, name, input }] };
+  }
+
+  /**
+   * An executor whose workspace holds src/auth/login.ts, so an edit_file call
+   * leaves real mutation evidence. `handlers` overrides individual tool results.
+   */
+  function createCodeStepExecutor(
+    responses: LLMResponse[],
+    handlers: Record<string, (input: Any) => Any> = {},
+  ) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-loop-control-"));
+    tempDirs.push(tempDir);
+    fs.mkdirSync(path.join(tempDir, "src", "auth"), { recursive: true });
+    const target = path.join(tempDir, "src", "auth", "login.ts");
+    fs.writeFileSync(target, "export const login = (user) => user.name;\n");
+    // An mtime after the step started would make any successful run_command
+    // look like a verified workspace write of the target.
+    const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    fs.utimesSync(target, anHourAgo, anHourAgo);
+    const executor = createExecutorWithStubs(responses, {});
+    (executor as Any).workspace.path = tempDir;
+    executor.toolRegistry.executeTool = vi.fn(async (name: string, input: Any) => {
+      if (handlers[name]) return handlers[name](input);
+      if (name === "edit_file") {
+        fs.writeFileSync(target, "export const login = (user) => user?.name;\n");
+        return { success: true, file_path: "src/auth/login.ts", replacements: 1 };
+      }
+      if (name === "read_file") {
+        return { success: true, path: input?.path, content: "export const login = (user) => user.name;" };
+      }
+      return { success: true };
+    });
+    return executor;
+  }
+
+  const userTexts = (executor: Any): string[] =>
+    ((executor.conversationHistory || []) as Any[])
+      .filter((entry) => entry.role === "user")
+      .flatMap((entry) => (Array.isArray(entry.content) ? entry.content : [entry.content]))
+      .map((block: Any) => (typeof block === "string" ? block : String(block?.text || "")));
+
+  const fixLoginEdit = {
+    file_path: "src/auth/login.ts",
+    old_string: "user.name",
+    new_string: "user?.name",
+  };
+
+  describe("mutation starvation guard", () => {
+    const fixStep = (id: string): Any => ({
+      id,
+      description: "Fix the null check bug in src/auth/login.ts",
+      status: "pending",
+    });
+    const starvationBlocks = (executor: Any) =>
+      executor.daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "tool_blocked" && call[2]?.reason === "mutation_starvation_guard",
+      );
+    const executedTools = (executor: Any): string[] =>
+      executor.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0]);
+
+    it("lets a fix step investigate with reads and a test run before its first edit", async () => {
+      const executor = createCodeStepExecutor([
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+        toolCall("run_command", { command: "npm test -- login" }, "c1"),
+        toolCall("read_file", { path: "src/auth/token.ts" }, "r3"),
+        toolCall("glob", { path: "src", pattern: "**/*auth*" }, "g1"),
+        toolCall("read_file", { path: "src/auth/__tests__/login.test.ts" }, "r4"),
+        toolCall("edit_file", fixLoginEdit, "e1"),
+        textResponse("Fixed the null check in src/auth/login.ts."),
+      ]);
+      const step = fixStep("investigate-then-fix");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executedTools(executor)).toEqual([
+        "read_file",
+        "read_file",
+        "run_command",
+        "read_file",
+        "glob",
+        "read_file",
+        "edit_file",
+      ]);
+      expect(starvationBlocks(executor)).toEqual([]);
+    });
+
+    it("blocks exploration for at most one turn after the guard fires", async () => {
+      const executor = createCodeStepExecutor([
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        toolCall("list_directory", { path: "src/auth" }, "l1"),
+        toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+        toolCall("read_file", { path: "src/auth/token.ts" }, "r3"),
+        toolCall("read_file", { path: "src/auth/token.ts" }, "r4"),
+        toolCall("edit_file", fixLoginEdit, "e1"),
+        textResponse("Fixed the null check in src/auth/login.ts."),
+      ]);
+      const step = fixStep("starvation-one-turn");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(starvationBlocks(executor)).toHaveLength(1);
+      expect(executedTools(executor)).toEqual([
+        "read_file",
+        "list_directory",
+        "read_file",
+        "read_file",
+        "edit_file",
+      ]);
+      expect(userTexts(executor).some((text) => text.includes("Mutation starvation guard"))).toBe(
+        true,
+      );
+    });
+
+    it("gives a fix step that keeps investigating extra turns before the first-write checkpoint", async () => {
+      let runs = 0;
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+          toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+          toolCall("run_command", { command: "npm test -- login" }, "c1"),
+          toolCall("read_file", { path: "src/auth/token.ts" }, "r3"),
+          toolCall("run_command", { command: "npm test -- login --verbose" }, "c2"),
+          toolCall("read_file", { path: "src/auth/util.ts" }, "r4"),
+          toolCall("read_file", { path: "src/auth/types.ts" }, "r5"),
+          toolCall("glob", { path: "src", pattern: "**/*.ts" }, "g1"),
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          toolCall("run_command", { command: "npm test -- login" }, "c3"),
+          textResponse("Fixed the null check in src/auth/login.ts; npm test -- login passes."),
+        ],
+        {
+          run_command: () =>
+            ++runs < 3
+              ? { success: false, exitCode: 1, stdout: "1 failing", stderr: "" }
+              : { success: true, exitCode: 0, stdout: "12 passing", stderr: "" },
+        },
+      );
+      const step = fixStep("long-investigation");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executedTools(executor)).toContain("edit_file");
+    });
+
+    it("still fails a fix step that only keeps reading, at a bounded checkpoint", async () => {
+      const executor = createCodeStepExecutor(
+        Array.from({ length: 30 }, (_, index) =>
+          toolCall("read_file", { path: `src/auth/file${index}.ts` }, `r${index}`),
+        ),
+      );
+      const step = fixStep("read-only-fix");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("artifact_write_checkpoint_failed");
+      expect((executor as Any).callLLMWithRetry.mock.calls.length).toBeLessThanOrEqual(13);
+    });
+
+    it("does not block a test run while the guard is active", async () => {
+      const executor = createCodeStepExecutor([
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        toolCall("list_directory", { path: "src/auth" }, "l1"),
+        toolCall("read_file", { path: "src/auth/session.ts" }, "r2"),
+        toolCall("run_command", { command: "npm test -- login" }, "c1"),
+        toolCall("edit_file", fixLoginEdit, "e1"),
+        textResponse("Fixed the null check in src/auth/login.ts."),
+      ]);
+      const step = fixStep("starvation-allows-tests");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(starvationBlocks(executor)).toEqual([]);
+      expect(executedTools(executor)).toContain("run_command");
+    });
+  });
+
+  describe("unexecuted actions", () => {
+    const inspectStep = (id: string): Any => ({
+      id,
+      description: "Inspect the project structure and list the main modules",
+      status: "pending",
+    });
+    const actionNudges = (executor: Any) =>
+      userTexts(executor).filter((text) =>
+        text.includes("You described a next action but didn't call a tool"),
+      );
+    const listing = {
+      success: true,
+      path: ".",
+      items: [
+        { name: "api", type: "directory" },
+        { name: "core", type: "directory" },
+      ],
+    };
+
+    it("runs the tool after a textual tool call instead of ending the step", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse(
+            '<tool_call>\n{"name": "list_directory", "arguments": {"path": "."}}\n</tool_call>',
+          ),
+          toolCall("list_directory", { path: "." }, "l1"),
+          textResponse("The main modules are api (HTTP handlers) and core (domain logic)."),
+        ],
+        { list_directory: listing },
+      );
+      const step = inspectStep("textual-tool-call");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledWith("list_directory", {
+        path: ".",
+      });
+      expect(actionNudges(executor)).toHaveLength(1);
+    });
+
+    it("nudges once when the step ends on a stated intent without calling a tool", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse("I'll start by listing the project files."),
+          toolCall("list_directory", { path: "." }, "l1"),
+          textResponse("The main modules are api (HTTP handlers) and core (domain logic)."),
+        ],
+        { list_directory: listing },
+      );
+      const step = inspectStep("intent-only");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledTimes(1);
+      expect(actionNudges(executor)).toHaveLength(1);
+    });
+
+    it("stops nudging after one intent-only reminder", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse("Let me check the project structure first."),
+          textResponse("Let me check the project structure first."),
+          textResponse("Let me check the project structure first."),
+        ],
+        {},
+      );
+      const step = inspectStep("intent-only-bounded");
+
+      await (executor as Any).executeStep(step);
+
+      expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(2);
+      expect(actionNudges(executor)).toHaveLength(1);
+    });
+
+    it("does not nudge a direct answer", async () => {
+      const executor = createExecutorWithStubs(
+        [textResponse("The project has two main modules: api and core.")],
+        {},
+      );
+      const step = inspectStep("direct-answer");
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(1);
+      expect(actionNudges(executor)).toEqual([]);
+    });
+  });
+
+  describe("step turn limit", () => {
+    it("warns two turns before the step's turn limit and plans a continuation after progress", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 33 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      const executor = createCodeStepExecutor(responses);
+      const step: Any = {
+        id: "long-step",
+        description: "Inspect the project modules and describe how they are organized",
+        status: "pending",
+      };
+      const nextStep: Any = { id: "next-step", description: "Write the summary", status: "pending" };
+      (executor as Any).plan = { description: "Plan", steps: [step, nextStep] };
+      (executor as Any).maxPlanRevisions = 5;
+      (executor as Any).planRevisionCount = 0;
+
+      await (executor as Any).executeStep(step);
+
+      const llmCalls = (executor as Any).callLLMWithRetry.mock.calls.length;
+      expect(llmCalls).toBe(32);
+      const warnings = userTexts(executor).filter((text) =>
+        text.includes("turns left in this step"),
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("You have 2 turns left in this step");
+      // The warning arrives before the last two model turns.
+      const history = (executor as Any).conversationHistory as Any[];
+      const warningIndex = history.findIndex(
+        (entry) =>
+          entry.role === "user" &&
+          JSON.stringify(entry.content).includes("turns left in this step"),
+      );
+      expect(history.slice(warningIndex).filter((entry) => entry.role === "assistant")).toHaveLength(
+        2,
+      );
+
+      expect(step.status).toBe("failed");
+      const planDescriptions = (executor as Any).plan.steps.map((entry: Any) => entry.description);
+      expect(
+        planDescriptions.some((description: string) =>
+          description.startsWith("Continue the unfinished step"),
+        ),
+      ).toBe(true);
+      expect(planDescriptions).toContain("Write the summary");
+    });
+
+    it("keeps a dead stop for a step that hit its turn limit without any progress", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 33 }, (_, index) =>
+        toolCall("read_file", { path: `src/missing${index}.ts` }, `r${index}`),
+      );
+      const executor = createCodeStepExecutor(responses, {
+        read_file: (input: Any) => ({
+          success: false,
+          error: `ENOENT: no such file or directory, open '${input?.path}'`,
+        }),
+      });
+      const step: Any = {
+        id: "long-step-no-progress",
+        description: "Inspect the project modules and describe how they are organized",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+      (executor as Any).maxPlanRevisions = 5;
+      (executor as Any).planRevisionCount = 0;
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect((executor as Any).plan.steps).toHaveLength(1);
+    });
+  });
+
+  describe("follow-up turns", () => {
+    /** Drives the real follow-up loop (sendMessageUnified) with the step harness stubs. */
+    function createFollowUpExecutor(
+      responses: LLMResponse[],
+      handlers: Record<string, (input: Any) => Any> = {},
+    ) {
+      const executor = createCodeStepExecutor(responses, handlers) as Any;
+      executor.task.status = "completed";
+      executor.task.agentConfig = { executionMode: "execute", retainMemory: false };
+      executor.daemon.getTask = vi.fn(() => executor.task);
+      executor.provider = { type: "openai" };
+      executor.toolRegistry.setCanvasSessionCutoff = vi.fn();
+      executor.toolCallDeduplicator.reset = vi.fn();
+      executor.turnSuccessfulToolUsageCounts = new Map();
+      executor.finalizeSuccessfulFollowUp = vi.fn();
+      return executor;
+    }
+    const sendFollowUp = (executor: Any, message: string) =>
+      executor.sendMessageUnified(message, undefined, undefined, {
+        suppressUserMessageEvent: true,
+      });
+
+    it("nudges a follow-up that only states its next action, then runs the tool", async () => {
+      const executor = createFollowUpExecutor([
+        textResponse("Let me check src/auth/login.ts first."),
+        toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+        textResponse("login() reads user.name without a null check."),
+      ]);
+
+      await sendFollowUp(executor, "Is there a null check problem in login?");
+
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledWith("read_file", {
+        path: "src/auth/login.ts",
+      });
+      expect(
+        userTexts(executor).filter((text) =>
+          text.includes("You described a next action but didn't call a tool"),
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("warns two turns before the follow-up's turn limit", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 31 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      responses.push(textResponse("The modules split request handling from domain logic."));
+      const executor = createFollowUpExecutor(responses);
+
+      await sendFollowUp(executor, "Walk through every module and explain how they connect");
+
+      const warnings = userTexts(executor).filter((text) =>
+        text.includes("turns left in this follow-up"),
+      );
+      expect(warnings).toEqual([
+        "[TURN_LIMIT] You have 2 turns left in this follow-up. Finish the current change, then summarize what is done and what remains.",
+      ]);
+    });
+
+    it("does not lock follow-up tool calls while the turns keep reading new files", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 14 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      responses.push(textResponse("The modules split request handling from domain logic."));
+      const executor = createFollowUpExecutor(responses);
+      executor.guardrailPhaseAEnabled = true;
+
+      await sendFollowUp(executor, "Walk through every module and explain how they connect");
+
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledTimes(14);
+      const locks = executor.daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "tool_use_lock_enabled",
+      );
+      expect(locks).toEqual([]);
+    });
+
+    it("still locks follow-up tool calls when the same file is read over and over", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 14 }, (_, index) =>
+        toolCall("read_file", { path: "src/module0.ts", offset: index }, `r${index}`),
+      );
+      responses.push(textResponse("The module exports the request handlers."));
+      const executor = createFollowUpExecutor(responses);
+      executor.guardrailPhaseAEnabled = true;
+
+      await sendFollowUp(executor, "Walk through every module and explain how they connect");
+
+      const locks = executor.daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "tool_use_lock_enabled",
+      );
+      expect(locks).toHaveLength(1);
+    });
+
+    it("gives each follow-up message its own token budget", async () => {
+      const executor = createFollowUpExecutor([
+        textResponse("The login handler reads user.name without a null check."),
+      ]);
+      // Run the real budget checks against the default guardrails.
+      executor.checkBudgets = (TaskExecutor.prototype as Any).checkBudgets;
+      executor.lifetimeTurnCount = 0;
+      executor.maxLifetimeTurns = 3000;
+      executor.maxGlobalTurns = null;
+      executor.iterationCount = 0;
+      executor.unpricedModelIds = new Set();
+      // Earlier turns of this thread already used 3,000,000 tokens, more than
+      // one turn's budget. Before the cap was per turn, this message failed
+      // with "Token budget exceeded" before reaching the model.
+      executor.usageOffsetInputTokens = 2_800_000;
+      executor.usageOffsetOutputTokens = 200_000;
+
+      await sendFollowUp(executor, "Is there a null check problem in login?");
+
+      expect(executor.callLLMWithRetry).toHaveBeenCalledTimes(1);
+      expect(executor.tokenBudgetTurnStartTokens).toBe(3_000_000);
+    });
+  });
+
+  describe("verification rewind", () => {
+    it("gives the rewound verification step the failed checks to fix", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          textResponse(
+            "FAIL_BLOCKING: the whitepaper is missing the required Tokenomics and Roadmap sections.",
+          ),
+          textResponse("OK"),
+        ],
+        {},
+      );
+      (executor as Any).verificationOutcomeV2Enabled = true;
+      const step: Any = {
+        id: "verify-rewind-context",
+        description: "Final verification: Review the completed whitepaper for completeness",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      const rerunStepContext = JSON.stringify(
+        ((executor as Any).conversationHistory as Any[]).find((entry) => entry.role === "user")
+          ?.content,
+      );
+      expect(rerunStepContext).toContain("VERIFICATION REWIND");
+      expect(rerunStepContext).toContain("fix only the required checklist gaps");
+      expect(rerunStepContext).toContain("missing the required Tokenomics and Roadmap sections");
+    });
+  });
+
+  describe("context capacity exhaustion", () => {
+    it("reports how many recovery attempts actually ran when recovery stops early", async () => {
+      const executor = createExecutorWithStubs([], {});
+      (executor as Any).callLLMWithRetry = vi.fn(async () => {
+        throw new Error("prompt is too long: 250000 tokens > 200000 maximum");
+      });
+      (executor as Any).recoverFromContextCapacityOverflow = vi.fn(async (opts: Any) => ({
+        recovered: false,
+        exhausted: true,
+        messages: opts.messages,
+      }));
+      const step: Any = { id: "ctx-early", description: "Summarize the logs", status: "pending" };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("after 1 recovery attempt");
+      expect(String(step.error || "")).not.toContain("after 2 attempts");
+    });
+  });
+
+  describe("step soft deadline", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("lets the in-flight turn finish, then asks for a summary and leaves later steps unstarted", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const executor = createCodeStepExecutor([]);
+      const originalController: AbortController = (executor as Any).abortController;
+      const requests: Any[][] = [];
+      let call = 0;
+      (executor as Any).callLLMWithRetry = vi.fn(async (...args: Any[]) => {
+        requests.push(args);
+        call += 1;
+        if (call === 1) {
+          // A slow model turn that is still running when the soft deadline passes.
+          return await new Promise((resolve, reject) => {
+            const signal: AbortSignal = (executor as Any).abortController.signal;
+            signal.addEventListener("abort", () => reject(new Error("Request cancelled")));
+            setTimeout(
+              () => resolve(toolCall("read_file", { path: "src/auth/login.ts" }, "r1")),
+              14 * 60 * 1000,
+            );
+          });
+        }
+        return textResponse(
+          "Read src/auth/login.ts and found the unguarded user.name access; the fix itself is still to do.",
+        );
+      });
+      const step: Any = {
+        id: "slow-step",
+        description: "Inspect src/auth/login.ts and explain the null check problem",
+        status: "pending",
+      };
+      const laterStep: Any = { id: "later-step", description: "Write the report", status: "pending" };
+      (executor as Any).plan = { description: "Plan", steps: [step, laterStep] };
+
+      const run = (executor as Any).executePlan();
+      await vi.advanceTimersByTimeAsync(14 * 60 * 1000);
+      await run;
+
+      expect(originalController.signal.aborted).toBe(false);
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledWith("read_file", {
+        path: "src/auth/login.ts",
+      });
+      expect(userTexts(executor).some((text) => text.includes("[STEP_TIME_LIMIT]"))).toBe(true);
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(laterStep.status).toBe("pending");
+      expect((executor as Any).softDeadlineTriggered).toBe(true);
+      expect(requests).toHaveLength(2);
+    });
+
+    it("completes normally when the final step finishes in the turn that was running", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const executor = createCodeStepExecutor([]);
+      (executor as Any).callLLMWithRetry = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve(
+                  textResponse(
+                    "login() reads user.name without checking that user exists, so a missing user throws.",
+                  ),
+                ),
+              14 * 60 * 1000,
+            );
+          }),
+      );
+      const step: Any = {
+        id: "slow-final-step",
+        description: "Inspect src/auth/login.ts and explain the null check problem",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+
+      const run = (executor as Any).executePlan();
+      await vi.advanceTimersByTimeAsync(14 * 60 * 1000);
+      await run;
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect((executor as Any).softDeadlineTriggered).toBe(false);
+      expect(userTexts(executor).some((text) => text.includes("[STEP_TIME_LIMIT]"))).toBe(false);
+    });
+  });
+
+  describe("progress-aware loop guards", () => {
+    it("flags only identical repeated edits of one file as a tool loop", () => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      const hunks: Any[] = [];
+      const hunkHits = [1, 2, 3, 4, 5, 6].map((index) =>
+        executor.detectToolLoop(hunks, "edit_file", {
+          file_path: "src/api/client.ts",
+          old_string: `getUser${index}`,
+          new_string: `fetchUser${index}`,
+        }),
+      );
+      expect(hunkHits).toEqual([false, false, false, false, false, false]);
+
+      const repeats: Any[] = [];
+      const repeatHits = [1, 2, 3, 4, 5].map(() =>
+        executor.detectToolLoop(repeats, "edit_file", {
+          file_path: "src/api/client.ts",
+          old_string: "getUser",
+          new_string: "fetchUser",
+        }),
+      );
+      expect(repeatHits).toEqual([false, false, false, false, true]);
+    });
+
+    it("does not send the repeated-failure stop nudge during a red-green fix loop", async () => {
+      const responses: LLMResponse[] = [];
+      for (let attempt = 1; attempt <= 6; attempt += 1) {
+        responses.push(toolCall("run_command", { command: "npm test -- login" }, `c${attempt}`));
+        responses.push(
+          toolCall(
+            "edit_file",
+            { file_path: "src/auth/login.ts", old_string: `v${attempt}`, new_string: `v${attempt + 1}` },
+            `e${attempt}`,
+          ),
+        );
+      }
+      responses.push(toolCall("run_command", { command: "npm test -- login" }, "c-final"));
+      responses.push(textResponse("Fixed the null check; npm test -- login passes."));
+      let runs = 0;
+      const executor = createCodeStepExecutor(responses, {
+        run_command: () =>
+          ++runs <= 6
+            ? { success: false, exitCode: 1, stdout: "1 failing", stderr: "" }
+            : { success: true, exitCode: 0, stdout: "5 passing", stderr: "" },
+      });
+      const step: Any = {
+        id: "red-green-loop",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(runs).toBe(7);
+      const variedFailureEvents = (executor as Any).daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "varied_failure_loop_detected",
+      );
+      expect(variedFailureEvents).toEqual([]);
+    });
+
+    it("still sends the repeated-failure nudge when the same failing run repeats unchanged", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 6 }, (_, index) =>
+        toolCall("run_command", { command: "npm test -- login" }, `c${index}`),
+      );
+      responses.push(textResponse("The login test keeps failing; the blocker is the missing fixture."));
+      const executor = createCodeStepExecutor(responses, {
+        run_command: () => ({ success: false, exitCode: 1, stdout: "1 failing", stderr: "" }),
+      });
+      const step: Any = {
+        id: "unchanged-red-runs",
+        description: "Run the login tests and report the result",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      const variedFailureEvents = (executor as Any).daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "varied_failure_loop_detected",
+      );
+      expect(variedFailureEvents).toHaveLength(1);
+    });
+
+    it("does not tell a step to stop calling tools while each turn reads a new file", async () => {
+      const executor = createCodeStepExecutor([]);
+      (executor as Any).guardrailPhaseAEnabled = true;
+      const threshold = (executor as Any).getLoopGuardrailForMode("analysis_only")
+        .stopReasonToolUseStreak as number;
+      const responses: LLMResponse[] = Array.from({ length: threshold + 2 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      responses.push(textResponse("The modules split request handling from domain logic."));
+      (executor as Any).callLLMWithRetry = vi.fn(async () => responses.shift());
+      const step: Any = {
+        id: "read-many-files",
+        description: "Inspect the project modules and describe how they are organized",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(
+        userTexts(executor).some((text) => text.includes("You have been in repeated tool-use turns")),
+      ).toBe(false);
+    });
+  });
+
+  describe("recovery from tool failures", () => {
+    it("completes a step that recovers from an unavailable tool through an available alternative", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          toolCall("browser_navigate", { url: "https://example.com" }, "b1"),
+          toolCall("web_fetch", { url: "https://example.com" }, "f1"),
+          textResponse(
+            "Example Domain is a reserved illustrative domain; the page says it may be used in documentation without permission.",
+          ),
+        ],
+        {
+          web_fetch: {
+            success: true,
+            content: "Example Domain. This domain is for use in illustrative examples.",
+          },
+        },
+      );
+      const step: Any = {
+        id: "unavailable-then-alternative",
+        description: "Summarize what https://example.com says",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(executor.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0])).toEqual([
+        "web_fetch",
+      ]);
+    });
+
+    it("still stops a step that calls the same unavailable tool again instead of the alternative", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          toolCall("browser_navigate", { url: "https://example.com" }, "b1"),
+          toolCall("browser_navigate", { url: "https://example.com" }, "b2"),
+          textResponse("Example Domain is a reserved illustrative domain."),
+        ],
+        {},
+      );
+      const step: Any = {
+        id: "unavailable-repeated",
+        description: "Summarize what https://example.com says",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(2);
+      expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
+    });
+
+    it("keeps researching after a site-specific fetch block and completes on the next source", async () => {
+      let fetches = 0;
+      const executor = createExecutorWithStubs(
+        [
+          toolCall("web_fetch", { url: "https://a.example.com/release" }, "f1"),
+          toolCall("web_fetch", { url: "https://b.example.com/release-notes" }, "f2"),
+          textResponse(
+            "According to the release notes on b.example.com, the widget ships in Q3 and supports offline mode.",
+          ),
+        ],
+        {},
+      );
+      executor.toolRegistry.executeTool = vi.fn(async () =>
+        ++fetches === 1
+          ? {
+              success: false,
+              error: "Request blocked by the site's bot protection (HTTP 403)",
+            }
+          : { success: true, content: "Release notes: ships in Q3 with offline mode." },
+      );
+      const step: Any = {
+        id: "blocked-fetch-then-success",
+        description: "Find when the widget ships",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(fetches).toBe(2);
+    });
+
+    it("still fails a step whose hard tool failure is never followed by a successful tool", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          {
+            stopReason: "tool_use",
+            content: [
+              { type: "tool_use", id: "r1", name: "read_file", input: { path: "notes.md" } },
+              { type: "tool_use", id: "s1", name: "web_search", input: { query: "widget ship date" } },
+            ],
+          },
+          textResponse("The widget ships in Q3."),
+        ],
+        {
+          read_file: { success: true, content: "Widget planning notes" },
+          web_search: { success: false, error: "web_search is not configured for this workspace" },
+        },
+      );
+      const step: Any = {
+        id: "unrecovered-hard-failure",
+        description: "Find when the widget ships",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("not configured");
+    });
+
+    it("does not count edit mismatches or site-specific HTTP errors toward the cross-step tool block", async () => {
+      const executor = createExecutorWithStubs(
+        [
+          {
+            stopReason: "tool_use",
+            content: [
+              ...Array.from({ length: 4 }, (_, index) => ({
+                type: "tool_use" as const,
+                id: `e${index}`,
+                name: "edit_file",
+                input: { file_path: "notes.md", old_string: `missing ${index}`, new_string: "x" },
+              })),
+              ...Array.from({ length: 4 }, (_, index) => ({
+                type: "tool_use" as const,
+                id: `f${index}`,
+                name: "web_fetch",
+                input: { url: `https://site${index}.example.com` },
+              })),
+            ],
+          },
+          textResponse("Could not apply the edits; none of the sources were reachable."),
+        ],
+        {},
+      );
+      executor.toolRegistry.executeTool = vi.fn(async (name: string) =>
+        name === "edit_file"
+          ? {
+              success: false,
+              error: "old_string found 2 times in file. Use replace_all: true to replace all occurrences.",
+            }
+          : { success: false, error: "HTTP 403: Forbidden" },
+      );
+      const step: Any = {
+        id: "cross-step-input-errors",
+        description: "Review the notes and the vendor pages",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step).catch(() => undefined);
+
+      expect((executor as Any).crossStepToolFailures.get("edit_file") || 0).toBe(0);
+      expect((executor as Any).crossStepToolFailures.get("web_fetch") || 0).toBe(0);
+    });
+
+    it("clears cross-step tool failure counts when a new follow-up message starts", async () => {
+      const executor = createExecutorWithStubs([], {});
+      (executor as Any).crossStepToolFailures = new Map([["web_fetch", 9]]);
+      const sentinel = new Error("stop after follow-up setup");
+      (executor as Any).daemon.getTask = vi.fn(() => {
+        throw sentinel;
+      });
+
+      await expect((executor as Any).sendMessageUnified("Try the vendor site again")).rejects.toBe(
+        sentinel,
+      );
+
+      expect((executor as Any).crossStepToolFailures.size).toBe(0);
+    });
+  });
+
+  describe("run_command failures", () => {
+    it("does not treat a later read as recovery from a failing test run", async () => {
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          toolCall("run_command", { command: "npm test -- login" }, "c1"),
+          toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+          textResponse("Fixed the null check in login.ts; the login flow works now."),
+        ],
+        {
+          run_command: () => ({ success: false, exitCode: 1, stdout: "1 failing", stderr: "" }),
+        },
+      );
+      const step: Any = {
+        id: "fix-red-tests",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("run_command failed: the last test run did not pass");
+      expect(userTexts(executor).some((text) => text.includes("has not been re-run"))).toBe(true);
+      // The failure is recoverable like any other failed command.
+      expect((executor as Any).shouldAutoPlanRecovery(step, String(step.error || ""))).toBe(true);
+    });
+
+    it("clears a failing test run once the tests pass after the fix", async () => {
+      let runs = 0;
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("run_command", { command: "npm test -- login" }, "c1"),
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          toolCall("run_command", { command: "npm test" }, "c2"),
+          textResponse("Fixed the null check in login.ts; npm test passes."),
+        ],
+        {
+          run_command: () =>
+            ++runs === 1
+              ? { success: false, exitCode: 1, stdout: "1 failing", stderr: "" }
+              : { success: true, exitCode: 0, stdout: "12 passing", stderr: "" },
+        },
+      );
+      const step: Any = {
+        id: "fix-green-tests",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+    });
+
+    it("still lets a later tool recover from a failed search command", async () => {
+      const executor = createCodeStepExecutor(
+        [
+          toolCall("run_command", { command: "grep -rn nullCheck src" }, "c1"),
+          toolCall("read_file", { path: "src/auth/login.ts" }, "r1"),
+          toolCall("edit_file", fixLoginEdit, "e1"),
+          textResponse("Fixed the null check in login.ts."),
+        ],
+        {
+          run_command: () => ({ success: false, exitCode: 1, stdout: "", stderr: "" }),
+        },
+      );
+      const step: Any = {
+        id: "fix-after-grep",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+    });
   });
 });

@@ -52,6 +52,7 @@ import {
   CUSTOM_PROVIDER_CATALOG,
   CUSTOM_PROVIDER_MAP,
   CUSTOM_PROVIDER_IDS,
+  GEMINI_DEFAULT_MODEL,
   type ProviderCatalogEntry,
 } from "../../../shared/llm-provider-catalog";
 import { withLlmModelSelectionMetadata } from "../../../shared/llm-model-selection";
@@ -279,6 +280,12 @@ function parseMaxTokensLimitFromError(error: Any): number | null {
   if (!message) return null;
 
   const patterns = [
+    // Anthropic: "max_tokens: 70000 > 64000, which is the maximum allowed number of output tokens"
+    /max_tokens:\s*\d+\s*>\s*(\d+)/i,
+    // OpenAI: "This model supports at most 16384 completion tokens"
+    /supports at most\s+(\d+)\s+(?:completion|output)\s+tokens/i,
+    // Generic: "max_tokens (70000) exceeds the maximum of 64000"
+    /(?:max_tokens|max_output_tokens|max_completion_tokens|maxOutputTokens)\b[^\n]*?\b(?:exceeds?|greater than|larger than)\b[^0-9\n]*(\d+)/i,
     /model limit of\s+(\d+)/i,
     /lower than\s+(\d+)/i,
     /max(?:imum)?\s+tokens(?:\s+value)?\s+(?:that is\s+)?lower than\s+(\d+)/i,
@@ -2267,6 +2274,8 @@ export class LLMProviderFactory {
       anthropicApiKey:
         normalizeSecret(overrideConfig?.anthropicApiKey) ||
         resolveAnthropicCredential(settings.anthropic),
+      anthropicReasoningEffort:
+        overrideConfig?.anthropicReasoningEffort || settings.anthropic?.reasoningEffort,
       // Bedrock config - from settings only
       awsRegion: overrideConfig?.awsRegion || settings.bedrock?.region || "us-east-1",
       awsAccessKeyId: overrideConfig?.awsAccessKeyId || settings.bedrock?.accessKeyId,
@@ -2330,6 +2339,8 @@ export class LLMProviderFactory {
       azureAnthropicDeployment,
       azureAnthropicApiVersion:
         overrideConfig?.azureAnthropicApiVersion || settings.azureAnthropic?.apiVersion,
+      azureAnthropicReasoningEffort:
+        overrideConfig?.azureAnthropicReasoningEffort || settings.azureAnthropic?.reasoningEffort,
       // Groq config - from settings only
       groqApiKey: normalizeSecret(overrideConfig?.groqApiKey) || settings.groq?.apiKey,
       groqBaseUrl: overrideConfig?.groqBaseUrl || settings.groq?.baseUrl,
@@ -2510,7 +2521,7 @@ export class LLMProviderFactory {
 
     // For Gemini, use the specific Gemini model if provided or default
     if (providerType === "gemini") {
-      return geminiModel || "gemini-2.0-flash";
+      return geminiModel || GEMINI_DEFAULT_MODEL;
     }
 
     // For OpenRouter, use the specific model if provided or default
@@ -2933,7 +2944,7 @@ export class LLMProviderFactory {
       }
 
       case "gemini": {
-        const currentModel = settings.gemini?.model || "gemini-2.0-flash";
+        const currentModel = settings.gemini?.model || GEMINI_DEFAULT_MODEL;
         const modelList =
           settings.cachedGeminiModels && settings.cachedGeminiModels.length > 0
             ? settings.cachedGeminiModels
@@ -3885,12 +3896,12 @@ export class LLMProviderFactory {
 
     const defaultModels = [
       {
-        name: "gemini-2.5-pro-preview-05-06",
+        name: "gemini-2.5-pro",
         displayName: "Gemini 2.5 Pro",
         description: "Most capable model for complex tasks",
       },
       {
-        name: "gemini-2.5-flash-preview-05-20",
+        name: "gemini-2.5-flash",
         displayName: "Gemini 2.5 Flash",
         description: "Fast and efficient for most tasks",
       },
@@ -4066,14 +4077,14 @@ export class LLMProviderFactory {
         context_length: 200000,
       },
       {
-        id: "anthropic/claude-3.5-sonnet",
-        name: "Claude 3.5 Sonnet",
-        context_length: 200000,
+        id: "anthropic/claude-sonnet-4.6",
+        name: "Claude Sonnet 4.6",
+        context_length: 1000000,
       },
       {
-        id: "anthropic/claude-3-opus",
-        name: "Claude 3 Opus",
-        context_length: 200000,
+        id: "anthropic/claude-opus-4.6",
+        name: "Claude Opus 4.6",
+        context_length: 1000000,
       },
       { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000 },
       { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", context_length: 128000 },

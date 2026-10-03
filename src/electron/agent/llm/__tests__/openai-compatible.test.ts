@@ -35,6 +35,13 @@ describe("parseOpenAICompatibleToolArguments", () => {
 });
 
 describe("fromOpenAICompatibleResponse", () => {
+  it("reports a content-filtered completion as a refusal rather than a stop sequence", () => {
+    const response = fromOpenAICompatibleResponse({
+      choices: [{ message: { content: "" }, finish_reason: "content_filter" }],
+    });
+    expect(response.stopReason).toBe("refusal");
+  });
+
   it("keeps valid siblings and rejects malformed arguments by call ID", () => {
     const response = fromOpenAICompatibleResponse({
       choices: [

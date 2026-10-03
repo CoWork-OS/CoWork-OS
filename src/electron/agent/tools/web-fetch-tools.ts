@@ -4,10 +4,95 @@ import { LLMTool } from "../llm/types";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 import { pinnedFetch } from "../../security/pinned-fetch";
 import { readBoundedResponse } from "../../security/bounded-response";
+import {
+  DEFAULT_PDF_PARSE_LIMITS,
+  PdfParseLimitError,
+  parsePdfBufferBounded,
+} from "../../utils/bounded-pdf-parser";
 
 import { ProtectedCredentialService } from "../../security/protected-credential-service";
 
 const MAX_HTTP_RESPONSE_BYTES = 5 * 1024 * 1024;
+// A truncated PDF cannot be parsed, so PDFs get their own (still bounded) limit and are never cut.
+const MAX_PDF_RESPONSE_BYTES = 20 * 1024 * 1024;
+
+const GENERIC_BINARY_MIME_TYPES = new Set([
+  "application/octet-stream",
+  "binary/octet-stream",
+  "application/download",
+  "application/force-download",
+  "application/x-download",
+]);
+const OFFICE_DOCUMENT_MIME_PATTERN =
+  /^application\/(msword|vnd\.openxmlformats-officedocument\.|vnd\.ms-(excel|powerpoint)|vnd\.oasis\.opendocument\.)/;
+const ARCHIVE_OR_PROGRAM_MIME_PATTERN =
+  /^application\/(zip|gzip|x-gzip|x-tar|x-bzip2|x-xz|zstd|x-7z-compressed|x-rar-compressed|vnd\.rar|java-archive|wasm|x-msdownload|x-msi|vnd\.android\.package-archive|x-apple-diskimage|x-sqlite3|vnd\.sqlite3)$/;
+const SAVE_TO_WORKSPACE_HINT =
+  "Save it into the workspace (for example with run_command and curl -o)";
+
+/** Content types web_fetch cannot render as text, with what to do instead. */
+function describeUnreadableContentType(mimeType: string): string | null {
+  if (mimeType.startsWith("image/") && mimeType !== "image/svg+xml") {
+    return `The URL returned an image (${mimeType}); web_fetch only returns text. ${SAVE_TO_WORKSPACE_HINT} and call analyze_image on the saved file.`;
+  }
+  if (OFFICE_DOCUMENT_MIME_PATTERN.test(mimeType)) {
+    return `The URL returned a document (${mimeType}) that web_fetch cannot extract. ${SAVE_TO_WORKSPACE_HINT} and read it with read_file or parse_document.`;
+  }
+  if (/^(audio|video|font)\//.test(mimeType) || ARCHIVE_OR_PROGRAM_MIME_PATTERN.test(mimeType)) {
+    return `The URL returned binary content (${mimeType}) that web_fetch cannot read as text. ${SAVE_TO_WORKSPACE_HINT} and use a tool that understands the format.`;
+  }
+  return null;
+}
+
+function hasPdfSignature(body: Uint8Array): boolean {
+  // The PDF header may follow up to 1 KB of leading bytes.
+  return Buffer.from(body.buffer, body.byteOffset, Math.min(body.byteLength, 1024)).includes(
+    "%PDF-",
+  );
+}
+
+/** NUL bytes in the first 8 KB mark binary data; UTF-16 text (with a byte order mark) is exempt. */
+function looksBinary(body: Uint8Array): boolean {
+  const utf16Bom =
+    body.length >= 2 &&
+    ((body[0] === 0xff && body[1] === 0xfe) || (body[0] === 0xfe && body[1] === 0xff));
+  return !utf16Bom && body.subarray(0, 8192).includes(0);
+}
+
+/**
+ * Decode a text body: byte order mark first, then the Content-Type charset, then (for HTML) a
+ * <meta charset> or http-equiv declaration near the top. Unknown labels fall back to UTF-8.
+ */
+function decodeTextBody(body: Uint8Array, contentType: string, isHtml: boolean): string {
+  let label: string | undefined;
+  if (body[0] === 0xef && body[1] === 0xbb && body[2] === 0xbf) label = "utf-8";
+  else if (body[0] === 0xff && body[1] === 0xfe) label = "utf-16le";
+  else if (body[0] === 0xfe && body[1] === 0xff) label = "utf-16be";
+  label ??= /;\s*charset\s*=\s*("?)([^";\s]+)\1/i.exec(contentType)?.[2];
+  if (!label && isHtml) {
+    const head = Buffer.from(body.buffer, body.byteOffset, Math.min(body.byteLength, 4096));
+    label = /<meta\s[^>]*?charset\s*=\s*["']?\s*([\w.:+-]+)/i.exec(head.toString("latin1"))?.[1];
+    // A <meta> tag readable as ASCII cannot be in UTF-16, so browsers read such pages as UTF-8.
+    if (label && /^utf-?16/i.test(label)) label = "utf-8";
+  }
+  let decoder: TextDecoder;
+  try {
+    decoder = new TextDecoder(label ?? "utf-8");
+  } catch {
+    decoder = new TextDecoder("utf-8");
+  }
+  return decoder.decode(body);
+}
+
+function isTextLikeMimeType(mimeType: string): boolean {
+  return (
+    mimeType.startsWith("text/") ||
+    mimeType.includes("json") ||
+    mimeType.includes("xml") ||
+    mimeType.includes("html") ||
+    mimeType.includes("javascript")
+  );
+}
 
 const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const MAX_PROTECTED_CREDENTIAL_PREFIX_LENGTH = 256;
@@ -196,7 +281,7 @@ export class WebFetchTools {
       {
         name: "web_fetch",
         description:
-          "Fetch and read content from a SPECIFIC URL. PREFERRED for reading a known page. Returns the page content as readable text/markdown. " +
+          "Fetch and read content from a SPECIFIC URL. PREFERRED for reading a known page. Returns the page content as readable text/markdown; for PDFs it returns the extracted text (images and other binary files are refused with guidance). " +
           "Use this when you have an exact URL to read (from search results, user-provided, or known documentation). " +
           "For RESEARCH/DISCOVERY tasks (finding information on a topic), use web_search FIRST instead. " +
           "Much faster than browser tools. Use browser_navigate only for interactive pages or JavaScript-heavy content.",
@@ -218,7 +303,13 @@ export class WebFetchTools {
             },
             maxLength: {
               type: "number",
-              description: "Maximum content length to return (default: 50000 characters)",
+              description:
+                "Maximum content length to return per call (default: 50000 characters). Longer content is returned in parts; see startChar.",
+            },
+            startChar: {
+              type: "number",
+              description:
+                "Character offset into the extracted content to start from (default: 0). When a result has truncated: true, call web_fetch again with the same url, selector and includeLinks and startChar set to the returned nextStartChar.",
             },
             credentialId: {
               type: "string",
@@ -309,6 +400,7 @@ export class WebFetchTools {
     selector?: string;
     includeLinks?: boolean;
     maxLength?: number;
+    startChar?: number;
     credentialId?: string;
     credentialHeader?: string;
     credentialPrefix?: string;
@@ -318,17 +410,31 @@ export class WebFetchTools {
     title?: string;
     content: string;
     contentLength: number;
+    /** Length of the whole extracted content; content is the window starting at startChar. */
+    totalLength?: number;
+    startChar?: number;
+    truncated?: boolean;
+    nextStartChar?: number;
     error?: string;
   }> {
     const {
       url,
       selector,
       includeLinks = true,
-      maxLength = 50000,
       credentialId,
       credentialHeader,
       credentialPrefix,
     } = input;
+    const requestedMaxLength = Number(input.maxLength);
+    const maxLength =
+      Number.isFinite(requestedMaxLength) && requestedMaxLength >= 1
+        ? Math.floor(requestedMaxLength)
+        : 50000;
+    const requestedStartChar = Number(input.startChar);
+    const startChar =
+      Number.isFinite(requestedStartChar) && requestedStartChar > 0
+        ? Math.floor(requestedStartChar)
+        : 0;
     let credentialSecret: string | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
 
@@ -374,20 +480,46 @@ export class WebFetchTools {
       }
 
       const contentType = response.headers.get("content-type") || "";
+      const mimeType = contentType.split(";")[0].trim().toLowerCase();
+      const unreadable = describeUnreadableContentType(mimeType);
+      if (unreadable) {
+        await response.body?.cancel();
+        throw new Error(unreadable);
+      }
+      const declaredPdf = mimeType === "application/pdf" || mimeType === "application/x-pdf";
+      const mayBePdf =
+        declaredPdf ||
+        ((mimeType === "" || GENERIC_BINARY_MIME_TYPES.has(mimeType)) &&
+          /\.pdf$/i.test(parsedUrl.pathname));
+      let body: Uint8Array;
+      try {
+        body = await readBoundedResponse(
+          response,
+          mayBePdf ? MAX_PDF_RESPONSE_BYTES : MAX_HTTP_RESPONSE_BYTES,
+          "HTTP response",
+          controller.signal,
+          { truncate: !mayBePdf },
+        );
+      } catch (error: Any) {
+        if (mayBePdf && /exceeds the \d+-byte limit/.test(String(error?.message))) {
+          throw new Error(
+            `The PDF is larger than ${MAX_PDF_RESPONSE_BYTES / (1024 * 1024)} MB, the web_fetch limit. ${SAVE_TO_WORKSPACE_HINT} and read it with read_file or parse_document.`,
+          );
+        }
+        throw error;
+      }
       let content: string;
       let title: string | undefined;
 
-      if (contentType.includes("application/json")) {
+      if (declaredPdf || hasPdfSignature(body)) {
+        ({ content, title } = await this.extractPdfContent(body));
+      } else if (!isTextLikeMimeType(mimeType) && looksBinary(body)) {
+        throw new Error(
+          `The URL returned binary content (${mimeType || "no content type"}) that web_fetch cannot read as text. ${SAVE_TO_WORKSPACE_HINT} and use a tool that understands the format.`,
+        );
+      } else if (contentType.includes("application/json")) {
         // JSON response - format nicely, with fallback to raw text
-        const rawText = Buffer.from(
-          await readBoundedResponse(
-            response,
-            MAX_HTTP_RESPONSE_BYTES,
-            "HTTP response",
-            controller.signal,
-            { truncate: true },
-          ),
-        ).toString("utf8");
+        const rawText = decodeTextBody(body, contentType, false);
         try {
           const json = JSON.parse(rawText);
           content = JSON.stringify(json, null, 2);
@@ -398,38 +530,31 @@ export class WebFetchTools {
         title = "JSON Response";
       } else if (contentType.includes("text/plain")) {
         // Plain text
-        content = Buffer.from(
-          await readBoundedResponse(
-            response,
-            MAX_HTTP_RESPONSE_BYTES,
-            "HTTP response",
-            controller.signal,
-            { truncate: true },
-          ),
-        ).toString("utf8");
+        content = decodeTextBody(body, contentType, false);
         title = "Plain Text";
       } else {
         // HTML - convert to markdown
-        const html = Buffer.from(
-          await readBoundedResponse(
-            response,
-            MAX_HTTP_RESPONSE_BYTES,
-            "HTTP response",
-            controller.signal,
-            { truncate: true },
-          ),
-        ).toString("utf8");
+        const html = decodeTextBody(body, contentType, true);
         const result = this.htmlToMarkdown(html, selector, includeLinks);
         content = result.content;
         title = result.title;
       }
 
-      // Truncate if needed
-      if (content.length > maxLength) {
-        content = content.substring(0, maxLength) + "\n\n... [Content truncated]";
-      }
+      // Redact before cutting the window so a secret split across two windows never leaks in part.
       content = redactSecret(content, credentialSecret);
       title = title ? redactSecret(title, credentialSecret) : title;
+      const totalLength = content.length;
+      if (startChar > totalLength) {
+        throw new Error(
+          `startChar ${startChar} is past the end of the content (${totalLength} characters).`,
+        );
+      }
+      const end = Math.min(totalLength, startChar + maxLength);
+      const truncated = end < totalLength;
+      content = content.slice(startChar, end);
+      if (truncated) {
+        content += `\n\n... [Content truncated] Continue with startChar=${end} (${totalLength} chars total).`;
+      }
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "web_fetch",
@@ -437,7 +562,9 @@ export class WebFetchTools {
           url,
           title,
           contentLength: content.length,
-          truncated: content.length > maxLength,
+          totalLength,
+          startChar,
+          truncated,
         },
       });
 
@@ -447,6 +574,10 @@ export class WebFetchTools {
         title,
         content,
         contentLength: content.length,
+        totalLength,
+        ...(startChar > 0 ? { startChar } : {}),
+        truncated,
+        ...(truncated ? { nextStartChar: end } : {}),
       };
     } catch (error: Any) {
       const errorMessage = redactSecret(
@@ -674,6 +805,47 @@ export class WebFetchTools {
     }
 
     return url;
+  }
+
+  /**
+   * Extract a fetched PDF's text layer with the same parser read_file uses. Scanned PDFs have no
+   * text layer; read_file/parse_document can OCR them once saved, so point there instead. The
+   * bytes are untrusted, so they are parsed in a worker under a deadline, heap and text limit.
+   */
+  private async extractPdfContent(body: Uint8Array): Promise<{ content: string; title: string }> {
+    let parsed: Awaited<ReturnType<typeof parsePdfBufferBounded>>;
+    try {
+      parsed = await parsePdfBufferBounded(body);
+    } catch (error: Any) {
+      const reason =
+        error instanceof PdfParseLimitError
+          ? `The PDF is too large or complex for web_fetch to extract (${error.message}).`
+          : `The URL returned a PDF whose text could not be extracted (${error?.message || "unknown error"}).`;
+      throw new Error(
+        `${reason} ${SAVE_TO_WORKSPACE_HINT} and read it with read_file or parse_document.`,
+      );
+    }
+    const pageCount = parsed.numpages
+      ? `${parsed.numpages} page${parsed.numpages === 1 ? "" : "s"}`
+      : "unknown page count";
+    const text = (parsed.text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\u0000/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (!text) {
+      throw new Error(
+        `The PDF (${pageCount}) has no extractable text layer; it may be scanned. ${SAVE_TO_WORKSPACE_HINT} and read it with read_file or parse_document, which can run OCR.`,
+      );
+    }
+    const cut = parsed.textTruncated
+      ? `, text cut at ${DEFAULT_PDF_PARSE_LIMITS.maxTextChars} characters (read_file or parse_document on a saved copy reads the rest)`
+      : "";
+    return {
+      content: `[PDF, ${pageCount}${cut}]\n\n${text}`,
+      title: parsed.title?.trim() || "PDF Document",
+    };
   }
 
   /**

@@ -1,12 +1,10 @@
 import type { LLMToolResult } from "../llm/types";
-import { LLMProviderFactory } from "../llm/provider-factory";
 import type { ToolScheduleCallReport } from "./ToolScheduler";
 
 export interface ToolBatchSummaryInput {
   phase: "step" | "follow_up" | "verification" | "delegation" | "team";
   callReports: ToolScheduleCallReport[];
   assistantIntent?: string;
-  disableModel?: boolean;
 }
 
 export interface ToolBatchSummaryResult {
@@ -208,78 +206,17 @@ function buildDeterministicLabel(input: ToolBatchSummaryInput): string {
   return titleCase(`${readableTool} batch${plural}`.trim());
 }
 
-function getSummaryPrompt(input: ToolBatchSummaryInput): string {
-  const toolLines = input.callReports.map((report, index) => {
-    const inputText = compactText(JSON.stringify(report.call.toolUse.input || {}), 160);
-    const outputText = describeToolResult(report.toolResult);
-    return [
-      `${index + 1}. ${report.effectiveToolName || report.call.toolUse.name}`,
-      inputText ? `   input: ${inputText}` : "",
-      outputText ? `   output: ${outputText}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-  });
-  return [
-    "You label completed tool batches for a timeline UI.",
-    "Return only a short label of 2-6 words.",
-    "Prefer an action-oriented phrase such as 'Read auth config' or 'Ran failing tests'.",
-    "Do not use punctuation, quotes, bullets, or explanations.",
-    "",
-    `Phase: ${input.phase}`,
-    ...(input.assistantIntent
-      ? [`Assistant intent: ${compactText(input.assistantIntent, 240)}`]
-      : []),
-    "",
-    "Completed tools:",
-    ...toolLines,
-  ].join("\n");
-}
-
 export class ToolBatchSummaryGenerator {
-  async generateSummary(input: ToolBatchSummaryInput): Promise<ToolBatchSummaryResult> {
-    const fallback = buildDeterministicLabel(input);
-    if (input.disableModel || input.callReports.length <= 1) {
-      return {
-        semanticSummary: fallback,
-        source: "fallback",
-      };
-    }
-
-    try {
-      const provider = LLMProviderFactory.createProvider({
-        type: LLMProviderFactory.loadSettings().providerType,
-      });
-      const selection = LLMProviderFactory.resolveTaskModelSelection();
-      const response = await provider.createMessage({
-        model: selection.modelId,
-        maxTokens: 32,
-        system: "You label completed tool batches with short, timeline-friendly phrases.",
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: getSummaryPrompt(input) }],
-          },
-        ],
-      });
-      const text = response.content
-        .filter((item): item is { type: "text"; text: string } => item.type === "text")
-        .map((item) => item.text)
-        .join("\n")
-        .trim();
-      const label = normalizeLabel(text);
-      if (label) {
-        return {
-          semanticSummary: label,
-          source: "model",
-        };
-      }
-    } catch {
-      // best-effort fallback
-    }
-
+  /**
+   * Labels a completed tool batch for the timeline. The label is built from the
+   * batch itself because it sits on the tool-execution critical path: a model
+   * call here added an uncancellable round-trip per batch (queued behind local
+   * inference admission), bypassed the task's cost budget, and sent tool inputs
+   * and outputs to the globally configured provider instead of the task's own.
+   */
+  generateSummary(input: ToolBatchSummaryInput): ToolBatchSummaryResult {
     return {
-      semanticSummary: fallback,
+      semanticSummary: buildDeterministicLabel(input),
       source: "fallback",
     };
   }

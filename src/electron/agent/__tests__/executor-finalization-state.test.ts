@@ -160,7 +160,7 @@ describe("TaskExecutor terminal finalization state", () => {
     expect(executor.task.coreOutcome).toBe("partial");
     expect(executor.daemon.completeTask).toHaveBeenCalledWith(
       "task-terminal-state",
-      "Partial result gathered before stop.",
+      expect.stringMatching(/^Partial result gathered before stop\.\n\nCompletion notes:\n/),
       expect.objectContaining({
         terminalStatus: "partial_success",
         failureClass: "budget_exhausted",
@@ -170,6 +170,11 @@ describe("TaskExecutor terminal finalization state", () => {
         failedStepIds: ["step-1"],
       }),
     );
+    const summary = executor.daemon.completeTask.mock.calls[0][1];
+    expect(summary).toContain(
+      '- Step "Collect evidence" failed: Step soft-deadline reached after 54s',
+    );
+    expect(summary).toContain('- Not finished: "Finish remaining work".');
   });
 
   it("forwards recovered failed step IDs so the daemon completion gate can resolve them", () => {
@@ -210,11 +215,12 @@ describe("TaskExecutor terminal finalization state", () => {
 
     expect(executor.daemon.completeTask).toHaveBeenCalledWith(
       "task-terminal-state",
-      "Recovered result.",
+      expect.stringMatching(/^Recovered result\./),
       expect.objectContaining({
         recoveredFailedStepIds: ["step-1"],
       }),
     );
+    expect(executor.daemon.completeTask.mock.calls[0][1]).not.toContain("Original attempt failed");
   });
 
   it("does not waive a recovery that was planned but never completed", () => {

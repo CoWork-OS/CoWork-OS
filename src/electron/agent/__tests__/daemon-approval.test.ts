@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { AgentDaemon } from "../daemon";
 import { PermissionSettingsManager } from "../../security/permission-settings-manager";
+import { APPROVAL_REQUEST_TIMEOUT_MS } from "../approval-timeouts";
 
 vi.mock("../../admin/policies", () => ({
   loadPolicies: vi.fn(() => ({
@@ -359,6 +360,86 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       else process.env.VITEST = previousVitest;
     }
   });
+
+  it.each([
+    ["unchanged", "key-original", true],
+    ["changed while the card was open", "key-after-profile-change", false],
+  ])(
+    "revalidates an inline Allow once answer when authority is %s",
+    async (_label, currentKey, expected) => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+      const previousVitest = process.env.VITEST;
+      process.env.NODE_ENV = "production";
+      delete process.env.COWORK_APPROVAL_PROMPTS;
+      delete process.env.VITEST;
+
+      const ask = {
+        decision: "ask",
+        reason: { type: "mode", mode: "default", summary: "Prompt for network read." },
+      };
+      const evaluatePermissionRequest = vi
+        .fn()
+        .mockReturnValueOnce({
+          evaluation: ask,
+          promptDetails: { reason: ask.reason, scopePreview: "domain docs.example.com" },
+          scope: { kind: "domain", toolName: "web_fetch", domain: "docs.example.com" },
+          trackingKey: "domain:web_fetch:docs.example.com",
+          runtime: null,
+          workspace: undefined,
+          authorizationKey: "key-original",
+        })
+        .mockReturnValue({
+          evaluation: ask,
+          workspace: { permissions: { accessApprovalPolicy: "on-request" } },
+          authorizationKey: currentKey,
+        });
+      const daemonLike = {
+        sessionAutoApproveAll: false,
+        approvalRepo: { create: vi.fn(), update: vi.fn() },
+        requestAssistantApproval: vi.fn().mockResolvedValue(true),
+        isApprovalAuthorityCurrent: AgentDaemon.prototype["isApprovalAuthorityCurrent"],
+        logEvent: vi.fn(),
+        updateTask: vi.fn(),
+        evaluatePermissionRequest,
+        taskRepo: {
+          findById: vi.fn().mockReturnValue({
+            id: "task-card",
+            status: "executing",
+            agentConfig: { accessProfileId: "ask_for_approval" },
+          }),
+        },
+        pendingApprovals: new Map(),
+      } as Any;
+
+      try {
+        const approved = await AgentDaemon.prototype.requestApproval.call(
+          daemonLike,
+          "task-card",
+          "network_access",
+          "Approve action",
+          { tool: "web_fetch", params: { url: "https://docs.example.com/page" } },
+        );
+
+        expect(approved).toBe(expected);
+        expect(daemonLike.requestAssistantApproval).toHaveBeenCalledTimes(1);
+        expect(evaluatePermissionRequest).toHaveBeenCalledTimes(2);
+        expect(
+          daemonLike.logEvent.mock.calls.some(
+            (call: Any[]) =>
+              call[1] === "approval_denied" && call[2]?.reason === "approval_authority_changed",
+          ),
+        ).toBe(!expected);
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+        else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+        if (previousVitest === undefined) delete process.env.VITEST;
+        else process.env.VITEST = previousVitest;
+      }
+    },
+  );
 
   it("does not session auto-approve network reads denied by network policy", async () => {
     vi.useFakeTimers();
@@ -1305,5 +1386,293 @@ describe("boundary authorization broker", () => {
       }),
     ).toBe(false);
     expect(daemon.evaluatePermissionRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("inline approval card routing (legacy approval queue off)", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+  const useInlineCardRuntime = () => {
+    for (const key of ["NODE_ENV", "COWORK_APPROVAL_PROMPTS", "VITEST", "COWORK_HEADLESS"]) {
+      savedEnv[key] = process.env[key];
+    }
+    process.env.NODE_ENV = "production";
+    delete process.env.COWORK_APPROVAL_PROMPTS;
+    delete process.env.VITEST;
+    delete process.env.COWORK_HEADLESS;
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const askEvaluation = (trackingKey: string) => {
+    const reason = { type: "mode", mode: "default", summary: "Boundary crossing." };
+    return {
+      evaluation: { decision: "ask", reason },
+      promptDetails: { reason, scopePreview: trackingKey, suggestedActions: [] },
+      scope: { kind: "tool", toolName: "run_command" },
+      trackingKey,
+      runtime: null,
+      workspace: undefined,
+    };
+  };
+
+  const buildDaemon = (task: Record<string, unknown>, trackingKey = "tool:run_command") =>
+    ({
+      sessionAutoApproveAll: false,
+      approvalRepo: {
+        create: vi.fn((row: Record<string, unknown>) => ({ id: "approval-auto", ...row })),
+        update: vi.fn(),
+      },
+      requestAssistantApproval: vi.fn().mockResolvedValue(false),
+      canSessionAutoApproveType: AgentDaemon.prototype["canSessionAutoApproveType"],
+      canAutoReviewApprove: AgentDaemon.prototype["canAutoReviewApprove"],
+      isAutoReviewSafeCommand: AgentDaemon.prototype["isAutoReviewSafeCommand"],
+      logEvent: vi.fn(),
+      updateTask: vi.fn(),
+      evaluatePermissionRequest: vi.fn().mockReturnValue(askEvaluation(trackingKey)),
+      taskRepo: { findById: vi.fn().mockReturnValue({ id: "task-inline", ...task }) },
+      pendingApprovals: new Map(),
+    }) as Any;
+
+  it("lets the Approve for me automatic review approve a safe ask before any card", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "approve_for_me" } });
+
+    const approved = await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "run_command",
+      "Run git status",
+      { command: "git status" },
+    );
+
+    expect(approved).toBe(true);
+    expect(daemon.requestAssistantApproval).not.toHaveBeenCalled();
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-inline",
+      "approval_granted",
+      expect.objectContaining({ reason: "auto_review", autoReviewReason: "safe_read_shell_command" }),
+    );
+  });
+
+  it("escalates an Approve for me ask the automatic review cannot approve to the card", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "approve_for_me" } });
+    daemon.requestAssistantApproval.mockResolvedValue(true);
+
+    const approved = await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "run_command",
+      "Delete build output",
+      { command: "rm -rf build" },
+    );
+
+    expect(approved).toBe(true);
+    expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+    expect(daemon.approvalRepo.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["data export", "data_export", { tool: "export_data", destination: "s3://bucket" }, undefined],
+    ["location access", "location_access", { tool: "get_current_location" }, undefined],
+    ["explicit operation consent", "run_command", { command: "git status" }, true],
+  ])(
+    "never lets the automatic review grant %s under Approve for me",
+    async (_label, type, details, requireExplicitApproval) => {
+      useInlineCardRuntime();
+      const daemon = buildDaemon({ agentConfig: { accessProfileId: "approve_for_me" } });
+
+      const approved = await AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task-inline",
+        type,
+        "Boundary crossing",
+        details,
+        requireExplicitApproval ? { requireExplicitApproval } : undefined,
+      );
+
+      expect(approved).toBe(false);
+      expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+      expect(
+        daemon.logEvent.mock.calls.some(
+          (call: Any[]) => call[1] === "approval_granted" && call[2]?.reason === "auto_review",
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("keeps Ask for approval asks on the card even when the command is a safe read", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
+
+    await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "run_command",
+      "Run git status",
+      { command: "git status" },
+    );
+
+    expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "a cowork run CLI task",
+      {
+        agentConfig: {
+          accessProfileId: "ask_for_approval",
+          cli: { owner: "cowork-run", runId: "r1" },
+        },
+      },
+      false,
+    ],
+    [
+      "a sub-agent",
+      { parentTaskId: "parent-1", agentConfig: { accessProfileId: "ask_for_approval" } },
+      false,
+    ],
+    ["a headless runtime", { agentConfig: { accessProfileId: "ask_for_approval" } }, true],
+  ])(
+    "denies a tool-internal ask immediately for %s instead of raising an unanswerable card",
+    async (_label, task, headless) => {
+      useInlineCardRuntime();
+      if (headless) process.env.COWORK_HEADLESS = "1";
+      const daemon = buildDaemon(task);
+
+      const approved = await AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task-inline",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+      );
+
+      expect(approved).toBe(false);
+      expect(daemon.requestAssistantApproval).not.toHaveBeenCalled();
+      expect(daemon.logEvent).toHaveBeenCalledWith(
+        "task-inline",
+        "log",
+        expect.objectContaining({
+          type: "tool_authorization",
+          decision: "deny",
+          reason: "interactive_approval_unavailable",
+        }),
+      );
+    },
+  );
+
+  it("still raises the card for an interactive desktop task", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
+    daemon.requestAssistantApproval.mockResolvedValue(true);
+
+    await expect(
+      AgentDaemon.prototype.requestApproval.call(
+        daemon,
+        "task-inline",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+      ),
+    ).resolves.toBe(true);
+    expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+  });
+
+  const buildCardDaemon = (task: Record<string, unknown>) => {
+    const rows = new Map<string, Record<string, Any>>();
+    return {
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({ id: "task-card", status: "executing", ...task }),
+      },
+      inputRequestRepo: {
+        create: vi.fn(async (row: Record<string, Any>) => {
+          const created = { id: `req-${rows.size + 1}`, ...row };
+          rows.set(created.id, created);
+          return created;
+        }),
+        findPendingByTaskId: vi.fn(async (taskId: string) =>
+          [...rows.values()].filter((row) => row.taskId === taskId && row.status === "pending"),
+        ),
+        resolve: vi.fn(async (id: string, status: string) => {
+          const row = rows.get(id);
+          if (row) row.status = status;
+        }),
+      },
+      pendingInputRequests: new Map(),
+      logEvent: vi.fn(),
+      updateTask: vi.fn(),
+    } as Any;
+  };
+
+  it("refuses to raise an approval card for a CLI-owned task", async () => {
+    useInlineCardRuntime();
+    const daemon = buildCardDaemon({
+      agentConfig: { cli: { owner: "cowork-run", runId: "r1" } },
+    });
+    const runtime = { recordPermissionDenial: vi.fn() };
+
+    await expect(
+      AgentDaemon.prototype["requestAssistantApproval"].call(
+        daemon,
+        "task-card",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+        runtime,
+        "tool:run_command",
+      ),
+    ).resolves.toBe(false);
+    expect(daemon.inputRequestRepo.create).not.toHaveBeenCalled();
+    expect(runtime.recordPermissionDenial).toHaveBeenCalledWith("tool:run_command");
+  });
+
+  it("denies an unanswered approval card after the approval timeout", async () => {
+    useInlineCardRuntime();
+    vi.useFakeTimers();
+    const daemon = buildCardDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
+    const runtime = { recordPermissionDenial: vi.fn(), recordPermissionSuccess: vi.fn() };
+
+    let settled: boolean | "rejected" | undefined;
+    void AgentDaemon.prototype["requestAssistantApproval"]
+      .call(
+        daemon,
+        "task-card",
+        "run_command",
+        "Install dependencies",
+        { command: "npm install" },
+        runtime,
+        "tool:run_command",
+      )
+      .then(
+        (value: boolean) => (settled = value),
+        () => (settled = "rejected"),
+      );
+
+    await vi.advanceTimersByTimeAsync(APPROVAL_REQUEST_TIMEOUT_MS - 1);
+    expect(settled).toBeUndefined();
+    expect(daemon.pendingInputRequests.size).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(false);
+    expect(daemon.pendingInputRequests.size).toBe(0);
+    expect(daemon.inputRequestRepo.resolve).toHaveBeenCalledWith("req-1", "dismissed");
+    expect(runtime.recordPermissionDenial).toHaveBeenCalledWith("tool:run_command");
+    expect(runtime.recordPermissionSuccess).not.toHaveBeenCalled();
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-card",
+      "approval_denied",
+      expect.objectContaining({ assistantInput: true, reason: "timeout" }),
+    );
+    expect(daemon.updateTask).toHaveBeenLastCalledWith(
+      "task-card",
+      expect.objectContaining({ status: "executing" }),
+    );
   });
 });

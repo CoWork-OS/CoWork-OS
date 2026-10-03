@@ -6,6 +6,31 @@ import {
 } from "../runtime-tool-scheduler-spec";
 
 describe("runtime-tool-scheduler-spec", () => {
+  it("reads background output in parallel and stops processes exclusively", () => {
+    const output = resolveDefaultRuntimeToolSchedulerSpec({
+      toolName: "process_output",
+      input: { process_id: "bg-1" },
+    });
+    expect(output).toMatchObject({
+      concurrencyClass: "read_parallel",
+      readOnly: true,
+      idempotent: true,
+    });
+
+    const stop = resolveDefaultRuntimeToolSchedulerSpec({
+      toolName: "stop_process",
+      input: { process_id: "bg-1" },
+    });
+    expect(stop).toMatchObject({
+      concurrencyClass: "exclusive",
+      readOnly: false,
+      idempotent: false,
+    });
+    expect(
+      resolveToolExecutionScopeKeys({ spec: stop, toolName: "stop_process", input: {} }),
+    ).toEqual([{ kind: "process", key: "run_command" }]);
+  });
+
   it("marks mcp tools fail-closed as serial by default", () => {
     const spec = resolveDefaultRuntimeToolSchedulerSpec({
       toolName: "mcp_demo_read_file",

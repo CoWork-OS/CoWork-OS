@@ -55,7 +55,11 @@ import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { mailboxLlmQuickReplies, mailboxLlmSimilarThreadIds } from "./mailbox-inbox-product-llm";
 import { mergeMailboxCapabilities, resolveMailboxProviderBackend } from "./MailboxProviderClient";
 import { getMailboxForwardingServiceInstance } from "./mailbox-forwarding-singleton";
-import { parsePdfBuffer } from "../utils/pdf-parser";
+import {
+  LOCAL_PDF_PARSE_LIMITS,
+  PdfParseLimitError,
+  parsePdfBufferBounded,
+} from "../utils/bounded-pdf-parser";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
@@ -4079,8 +4083,16 @@ export class MailboxService {
     const filename = row.filename.toLowerCase();
     const mimeType = (row.mime_type || "").toLowerCase();
     if (mimeType === "application/pdf" || filename.endsWith(".pdf")) {
-      const parsed = await parsePdfBuffer(bytes);
-      return { text: parsed.text || "", mode: "pdf-parse" };
+      // Attachments are untrusted: parse in a bounded worker, never on the main thread.
+      try {
+        const parsed = await parsePdfBufferBounded(bytes, LOCAL_PDF_PARSE_LIMITS);
+        return { text: parsed.text || "", mode: "pdf-parse" };
+      } catch (error) {
+        if (error instanceof PdfParseLimitError) {
+          throw new Error(`PDF attachment is too large or complex to extract (${error.message}).`);
+        }
+        throw error;
+      }
     }
     if (
       mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||

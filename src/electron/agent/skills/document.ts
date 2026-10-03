@@ -18,6 +18,8 @@ import PDFDocument from "pdfkit";
 import * as mammoth from "mammoth";
 import JSZip from "jszip";
 import { Workspace } from "../../../shared/types";
+import { parseMarkdownTable } from "../../utils/document-generators/markdown-tables";
+import { needsUnicodeFont, resolvePdfFonts } from "../../utils/pdf-unicode-fonts";
 
 export interface ContentBlock {
   type: string; // 'heading' | 'paragraph' | 'list' | 'table' | 'code'
@@ -26,6 +28,99 @@ export interface ContentBlock {
   items?: string[]; // For lists
   rows?: string[][]; // For tables
   language?: string; // For code blocks
+}
+
+/**
+ * A content block as a tool call sends it: tables and lists often carry only
+ * rows/items, and cells may be numbers.
+ */
+export type ContentBlockInput = Omit<Partial<ContentBlock>, "items" | "rows"> & {
+  items?: unknown[];
+  rows?: unknown[];
+};
+
+export interface DocumentCreateReport {
+  /** Blocks in the request. */
+  requestedBlocks: number;
+  /** Blocks written to the document. */
+  renderedBlocks: number;
+  /** Blocks with nothing to write, by position in the request. */
+  droppedBlocks: Array<{ index: number; type: string; reason: string }>;
+  warnings: string[];
+}
+
+/** A normalized block: every field a renderer reads is present. */
+interface RenderBlock {
+  type: string;
+  text: string;
+  level: number;
+  items: string[];
+  rows: string[][];
+  language?: string;
+}
+
+const LIST_MARKER = /^\s*(?:[-*+•]|\d+[.)])\s+/;
+
+function blockText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+/** Rows as strings, padded to one column count; empty when no cell has text. */
+function normalizeRows(value: unknown): string[][] {
+  if (!Array.isArray(value)) return [];
+  const rows = value.map((row): string[] =>
+    Array.isArray(row)
+      ? row.map(blockText)
+      : row && typeof row === "object"
+        ? Object.values(row).map(blockText)
+        : [blockText(row)],
+  );
+  if (!rows.some((row) => row.some((cell) => cell.trim()))) return [];
+  const columns = Math.max(...rows.map((row) => row.length));
+  return rows.map((row) => [...row, ...Array<string>(columns - row.length).fill("")]);
+}
+
+function renderBlock(type: string, fields: Partial<RenderBlock>): RenderBlock {
+  return { type, text: "", level: 1, items: [], rows: [], ...fields };
+}
+
+/** Maps one requested block to what gets drawn, or the reason nothing can be. */
+function normalizeBlock(raw: unknown): RenderBlock | { type: string; reason: string } {
+  const block: ContentBlockInput =
+    raw && typeof raw === "object" ? (raw as ContentBlockInput) : { text: blockText(raw) };
+  const type = (typeof block.type === "string" && block.type.trim().toLowerCase()) || "paragraph";
+  const text = blockText(block.text);
+  const hasText = text.trim().length > 0;
+  const items = Array.isArray(block.items)
+    ? block.items.map((item) => blockText(item).trim()).filter(Boolean)
+    : [];
+  const rows = normalizeRows(block.rows);
+  const level = Math.min(Math.max(Math.trunc(Number(block.level)) || 1, 1), 6);
+
+  if (type === "table") {
+    if (rows.length > 0) return renderBlock(type, { rows });
+    // A markdown table sent as text becomes a real table rather than pipes.
+    const parsed = hasText ? parseMarkdownTable(text) : null;
+    if (parsed) return renderBlock(type, { rows: normalizeRows([parsed.header, ...parsed.rows]) });
+    return hasText ? renderBlock("paragraph", { text }) : { type, reason: "no rows" };
+  }
+  if (type === "list") {
+    const lines =
+      items.length > 0
+        ? items
+        : text
+            .split("\n")
+            .map((line) => line.replace(LIST_MARKER, "").trim())
+            .filter(Boolean);
+    return lines.length > 0 ? renderBlock(type, { items: lines }) : { type, reason: "no items" };
+  }
+  const language = typeof block.language === "string" ? block.language : undefined;
+  if (hasText) return renderBlock(type, { text, level, language });
+  if (items.length > 0) return renderBlock("list", { items });
+  if (rows.length > 0) return renderBlock("table", { rows });
+  return { type, reason: "no text" };
 }
 
 export interface DocumentOptions {
@@ -64,35 +159,46 @@ export class DocumentBuilder {
   async create(
     outputPath: string,
     format: "docx" | "pdf" | "md",
-    content: ContentBlock[] | ContentBlock | string | undefined,
+    content: ContentBlockInput[] | ContentBlockInput | string | undefined,
     options: DocumentOptions = {},
-  ): Promise<void> {
+  ): Promise<DocumentCreateReport> {
     // Normalize content to always be an array
-    const normalizedContent = this.normalizeContent(content);
+    const { blocks, droppedBlocks, requestedBlocks } = this.normalizeContent(content);
     const ext = path.extname(outputPath).toLowerCase();
+    const report: DocumentCreateReport = {
+      requestedBlocks,
+      renderedBlocks: blocks.length,
+      droppedBlocks,
+      warnings: [],
+    };
 
     // Allow format override via extension
     if (ext === ".md" || format === "md") {
-      await this.createMarkdown(outputPath, normalizedContent);
-      return;
+      await this.createMarkdown(outputPath, blocks);
+      return report;
     }
 
     if (ext === ".pdf" || format === "pdf") {
-      await this.createPDF(outputPath, normalizedContent, options);
-      return;
+      report.warnings.push(...(await this.createPDF(outputPath, blocks, options)));
+      return report;
     }
 
     // Default to Word document
-    await this.createDocx(outputPath, normalizedContent, options);
+    await this.createDocx(outputPath, blocks, options);
+    return report;
   }
 
   /**
-   * Normalizes content input to always be an array of ContentBlocks
+   * Normalizes content input into the blocks the renderers draw. Tables and
+   * lists may arrive with only rows/items; blocks with nothing to draw are
+   * reported instead of being counted as written.
    * Throws an error if content is empty or invalid to prevent creating empty documents
    */
-  private normalizeContent(
-    content: ContentBlock[] | ContentBlock | string | undefined,
-  ): ContentBlock[] {
+  private normalizeContent(content: ContentBlockInput[] | ContentBlockInput | string | undefined): {
+    blocks: RenderBlock[];
+    droppedBlocks: DocumentCreateReport["droppedBlocks"];
+    requestedBlocks: number;
+  } {
     // Handle undefined/null - FAIL instead of creating empty document
     if (!content) {
       throw new Error(
@@ -106,45 +212,38 @@ export class DocumentBuilder {
       if (content.trim().length === 0) {
         throw new Error("Document content cannot be empty. Please provide text content.");
       }
-      return [{ type: "paragraph", text: content }];
+      return {
+        blocks: [renderBlock("paragraph", { text: content })],
+        droppedBlocks: [],
+        requestedBlocks: 1,
+      };
     }
 
-    // Handle single object (not an array)
-    if (!Array.isArray(content)) {
-      if (!content.text || content.text.trim().length === 0) {
-        throw new Error(
-          "Content block must have non-empty text. " +
-            `Received block with type "${content.type}" but empty or missing text.`,
-        );
-      }
-      return [content];
-    }
+    const input = Array.isArray(content) ? content : [content];
 
     // Already an array - ensure it's not empty
-    if (content.length === 0) {
+    if (input.length === 0) {
       throw new Error(
         "Document content array cannot be empty. " +
           'Please provide at least one content block (e.g., [{ type: "paragraph", text: "Your text" }]).',
       );
     }
 
-    // Validate each block has content
-    const emptyBlocks = content.filter((block) => !block.text || block.text.trim().length === 0);
-    if (emptyBlocks.length > 0) {
-      console.warn(
-        `[DocumentBuilder] Found ${emptyBlocks.length} empty content blocks, filtering them out`,
+    const blocks: RenderBlock[] = [];
+    const droppedBlocks: DocumentCreateReport["droppedBlocks"] = [];
+    input.forEach((block, index) => {
+      const normalized = normalizeBlock(block);
+      if ("reason" in normalized) droppedBlocks.push({ index, ...normalized });
+      else blocks.push(normalized);
+    });
+    if (blocks.length === 0) {
+      throw new Error(
+        "All content blocks are empty. Provide text, list items, or table rows. " +
+          `Received ${input.length} block(s), none with anything to write.`,
       );
-      const validBlocks = content.filter((block) => block.text && block.text.trim().length > 0);
-      if (validBlocks.length === 0) {
-        throw new Error(
-          "All content blocks have empty text. Please provide content blocks with actual text. " +
-            `Received ${content.length} blocks but all had empty or missing text fields.`,
-        );
-      }
-      return validBlocks;
     }
 
-    return content;
+    return { blocks, droppedBlocks, requestedBlocks: input.length };
   }
 
   /**
@@ -152,7 +251,7 @@ export class DocumentBuilder {
    */
   private async createDocx(
     outputPath: string,
-    content: ContentBlock[],
+    content: RenderBlock[],
     options: DocumentOptions,
   ): Promise<void> {
     const children: Paragraph[] = [];
@@ -182,8 +281,7 @@ export class DocumentBuilder {
           break;
 
         case "list": {
-          const items = block.items || block.text.split("\n").filter((line) => line.trim());
-          for (const item of items) {
+          for (const item of block.items) {
             children.push(
               new Paragraph({
                 children: [new TextRun({ text: item, size: (options.fontSize || 12) * 2 })],
@@ -197,8 +295,14 @@ export class DocumentBuilder {
 
         case "table": {
           if (block.rows && block.rows.length > 0) {
+            // Size the grid to the A4 text width; without widths docx writes
+            // 100-twip grid columns that some readers draw as slivers.
+            const textWidth =
+              11906 - ((options.margins?.left || 1) + (options.margins?.right || 1)) * 1440;
+            const columnCount = block.rows[0].length;
             const table = new Table({
               width: { size: 100, type: WidthType.PERCENTAGE },
+              columnWidths: Array<number>(columnCount).fill(Math.floor(textWidth / columnCount)),
               rows: block.rows.map(
                 (row, rowIndex) =>
                   new TableRow({
@@ -285,13 +389,18 @@ export class DocumentBuilder {
   }
 
   /**
-   * Creates a PDF document
+   * Creates a PDF document. Returns warnings about text it cannot draw.
    */
   private async createPDF(
     outputPath: string,
-    content: ContentBlock[],
+    content: RenderBlock[],
     options: DocumentOptions,
-  ): Promise<void> {
+  ): Promise<string[]> {
+    // The built-in PDF fonts only encode Latin-1; text beyond that needs an
+    // embedded Unicode font or it is written as the wrong glyphs.
+    const fontChoice = resolvePdfFonts(
+      content.flatMap((block) => [block.text, ...block.items, ...block.rows.flat()]).join("\n"),
+    );
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({
         size: "LETTER",
@@ -311,6 +420,15 @@ export class DocumentBuilder {
       const stream = fs.createWriteStream(outputPath);
       doc.pipe(stream);
 
+      const fonts = { regular: "Helvetica", bold: "Helvetica-Bold" };
+      if (fontChoice.font) {
+        const { regular, bold } = fontChoice.font;
+        doc.registerFont("UnicodeRegular", regular.path, regular.postscriptName);
+        doc.registerFont("UnicodeBold", bold.path, bold.postscriptName);
+        fonts.regular = "UnicodeRegular";
+        fonts.bold = "UnicodeBold";
+      }
+
       const baseFontSize = options.fontSize || 12;
 
       for (const block of content) {
@@ -318,23 +436,22 @@ export class DocumentBuilder {
           case "heading": {
             const level = Math.min(Math.max(block.level || 1, 1), 6);
             const fontSize = baseFontSize + (7 - level) * 2; // h1 = base+12, h6 = base+2
-            doc.font("Helvetica-Bold").fontSize(fontSize).text(block.text, { paragraphGap: 10 });
+            doc.font(fonts.bold).fontSize(fontSize).text(block.text, { paragraphGap: 10 });
             doc.moveDown(0.5);
             break;
           }
 
           case "paragraph":
             doc
-              .font("Helvetica")
+              .font(fonts.regular)
               .fontSize(baseFontSize)
               .text(block.text, { paragraphGap: 8, lineGap: 4 });
             doc.moveDown(0.5);
             break;
 
           case "list": {
-            const items = block.items || block.text.split("\n").filter((line) => line.trim());
-            doc.font("Helvetica").fontSize(baseFontSize);
-            for (const item of items) {
+            doc.font(fonts.regular).fontSize(baseFontSize);
+            for (const item of block.items) {
               doc.text(`• ${item}`, { indent: 20, paragraphGap: 4 });
             }
             doc.moveDown(0.5);
@@ -342,25 +459,34 @@ export class DocumentBuilder {
           }
 
           case "table": {
-            if (block.rows && block.rows.length > 0) {
-              doc.font("Helvetica").fontSize(baseFontSize - 1);
+            if (block.rows.length > 0) {
+              doc.font(fonts.regular).fontSize(baseFontSize - 1);
               const columnCount = block.rows[0].length;
               const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
               const colWidth = pageWidth / columnCount;
 
               for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex++) {
                 const row = block.rows[rowIndex];
+                doc.font(rowIndex === 0 ? fonts.bold : fonts.regular);
+                // A row is as tall as its tallest cell and starts on a new
+                // page when it would cross the bottom margin.
+                const rowHeight = Math.max(
+                  ...row.map((cell) => doc.heightOfString(cell || " ", { width: colWidth - 10 })),
+                );
+                if (doc.y + rowHeight > doc.page.height - doc.page.margins.bottom) {
+                  doc.addPage();
+                }
                 const startY = doc.y;
 
                 // Draw cells
                 for (let colIndex = 0; colIndex < row.length; colIndex++) {
                   const x = doc.page.margins.left + colIndex * colWidth;
-                  doc.font(rowIndex === 0 ? "Helvetica-Bold" : "Helvetica");
                   doc.text(row[colIndex], x, startY, {
                     width: colWidth - 10,
                     continued: false,
                   });
                 }
+                doc.y = startY + rowHeight;
 
                 // Draw horizontal line
                 doc
@@ -370,6 +496,8 @@ export class DocumentBuilder {
 
                 doc.moveDown(0.3);
               }
+              // Cells moved the cursor into the last column; later blocks start at the margin.
+              doc.x = doc.page.margins.left;
               doc.moveDown(0.5);
             }
             break;
@@ -377,7 +505,8 @@ export class DocumentBuilder {
 
           case "code":
             doc
-              .font("Courier")
+              // Courier is Latin-1 only; code with other characters uses the Unicode font.
+              .font(fontChoice.font && needsUnicodeFont(block.text) ? fonts.regular : "Courier")
               .fontSize(baseFontSize - 2)
               .fillColor("#333333")
               .text(block.text, { paragraphGap: 8 });
@@ -386,14 +515,14 @@ export class DocumentBuilder {
             break;
 
           default:
-            doc.font("Helvetica").fontSize(baseFontSize).text(block.text);
+            doc.font(fonts.regular).fontSize(baseFontSize).text(block.text);
             doc.moveDown(0.5);
         }
       }
 
       doc.end();
 
-      stream.on("finish", resolve);
+      stream.on("finish", () => resolve(fontChoice.warnings));
       stream.on("error", reject);
     });
   }
@@ -401,7 +530,7 @@ export class DocumentBuilder {
   /**
    * Creates a Markdown document (fallback)
    */
-  private async createMarkdown(outputPath: string, content: ContentBlock[]): Promise<void> {
+  private async createMarkdown(outputPath: string, content: RenderBlock[]): Promise<void> {
     const markdown = content
       .map((block) => {
         switch (block.type) {
@@ -412,8 +541,7 @@ export class DocumentBuilder {
           case "paragraph":
             return `${block.text}\n`;
           case "list": {
-            const items = block.items || block.text.split("\n").filter((line) => line.trim());
-            return items.map((item) => `- ${item}`).join("\n") + "\n";
+            return block.items.map((item) => `- ${item}`).join("\n") + "\n";
           }
           case "table": {
             if (!block.rows || block.rows.length === 0) return "";

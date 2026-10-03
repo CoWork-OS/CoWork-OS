@@ -254,10 +254,18 @@ export function ModelDropdown({
     selectedModelInfo?.openaiAuthMethod,
     selectedReasoningEfforts,
   );
+  // With no saved effort the provider sends none, which is the model's API default
+  // (off for budget-thinking models), so show that rather than a generic "medium".
+  const selectedModelDefaultEffort = getLlmModelDefaultReasoningEffort(
+    selectedProvider,
+    selectedModel,
+  );
   const effectiveReasoningEffort =
     selectedReasoningEffort && selectedReasoningEfforts.includes(selectedReasoningEffort)
       ? selectedReasoningEffort
-      : undefined;
+      : selectedModelDefaultEffort && selectedReasoningEfforts.includes(selectedModelDefaultEffort)
+        ? selectedModelDefaultEffort
+        : undefined;
 
   const normalizedSearch = search.trim().toLowerCase();
   const filteredModels = currentProviderModels.filter((model) => {

@@ -909,10 +909,17 @@ fed by the same canonical filesystem evaluator:
 - Uses a minimal, filtered subprocess environment
 
 The macOS backend also enforces positive read-only filesystem rules, recursive
-Git and policy-path protection, and the separate delete capability. It prevents
-host directory removal and moves because renaming a parent can bypass a protected
-descendant. Private scratch directories remain available for temporary work.
-Use guarded file tools for directory mutations.
+Git and policy-path protection, and the separate delete capability. With delete
+on, files and directories inside the workspace can be removed, moved and
+replaced (`rm -r`, `mv`, build tools that clean their output directory or
+rename a temporary directory into place). The workspace root and every
+directory on the way to a profile filesystem rule stay fixed, so a move cannot
+shed a rule; `.git` and `.cowork/policy` stay immutable wherever their parent is
+moved, and no writable location can create them, so a repository cannot be
+assembled elsewhere and moved in. A nested repository moved into private
+scratch is kept rather than deleted when scratch is cleaned up. Directory
+removal and moves stay denied in host roots outside the workspace. Private
+scratch directories remain available for temporary work.
 
 Developer toolchains work inside the macOS sandbox without opening the home
 directory: installs and configuration (`~/.cargo/bin`, `~/.rustup`, `~/.nvm`,

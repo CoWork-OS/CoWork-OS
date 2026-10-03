@@ -61,8 +61,10 @@ export function macOSFilesystemRestrictions(
   // Renaming a directory checks the directory itself, not its descendants.
   // Otherwise moving a parent can remove a read/deny boundary, carry protected
   // git/policy data outside the workspace, or import it under an innocent name.
-  // Seatbelt cannot inspect descendants atomically: host directory moves and
-  // removals must use the guarded file tools. Private scratch stays usable.
+  // Seatbelt cannot inspect descendants atomically, so directory moves and
+  // removals are denied in host roots outside the workspace. Inside the
+  // workspace they are allowed when delete is on (see below). Private
+  // scratch stays usable.
   const hostWriteRoots = [
     workspace.path,
     ...(workspace.permissions.accessWorkspaceRoots || []),
@@ -106,10 +108,37 @@ export function macOSFilesystemRestrictions(
   }
   const privateScratch = union(aliases(runtimeTempDir).map(subpath));
   const hostMutations = `(require-all ${hostWrites} (require-not ${privateScratch}))`;
-  result += `(deny file-write-unlink (require-all (vnode-type DIRECTORY) ${hostMutations}))\n`;
 
   if (workspace.permissions.delete !== true) {
+    // Without delete, nothing in a host root may be unlinked or renamed away.
     result += `(deny file-write-unlink ${hostMutations})\n`;
+  } else {
+    // With delete on, the workspace behaves like a normal project directory:
+    // rm -r, rmdir, mv of directories, build tools that clean their output
+    // directory and tools that build a directory under a temporary name and
+    // rename it into place. What stays fixed:
+    // - The workspace root, so the workspace cannot be moved away.
+    // - Every directory on the way to a profile filesystem rule, so moving a
+    //   parent cannot carry a denied or read-only subtree to a new, unruled
+    //   path. (The rule targets themselves are pinned by the rules below.)
+    // - Git and policy names: the regex denials below make .git and
+    //   .cowork/policy immutable wherever they are reachable for writes,
+    //   including after their parent directory has been moved, and no
+    //   writable location (workspace, scratch, toolchain caches) can create
+    //   one, so a repository cannot be assembled elsewhere and moved in.
+    const workspaceRoots = [...new Set([...aliases(workspace.path), path.resolve(workspace.path)])];
+    const workspaceTree = union(workspaceRoots.map(subpath));
+    const pins = new Set(workspaceRoots);
+    const rulePaths = (workspace.permissions.accessFilesystemRules || []).map((rule) => rule.path);
+    for (const entry of collectPolicyPathEntries(workspace.path, rulePaths)) {
+      if (workspaceRoots.some((root) => isWithin(root, entry))) pins.add(entry);
+    }
+    for (const pin of pins) {
+      validatePathForSandboxProfile(pin);
+      result += `(deny file-write-unlink (literal "${escapeSandboxProfileString(pin)}"))\n`;
+    }
+    const outsideWorkspace = `(require-all ${hostMutations} (require-not ${workspaceTree}))`;
+    result += `(deny file-write-unlink (require-all (vnode-type DIRECTORY) ${outsideWorkspace}))\n`;
   }
   for (const rule of rules) {
     if (rule.access === "deny") {
@@ -180,4 +209,12 @@ export function macOSFilesystemRestrictions(
     }
   }
   return result;
+}
+
+function isWithin(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative === "" ||
+    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  );
 }

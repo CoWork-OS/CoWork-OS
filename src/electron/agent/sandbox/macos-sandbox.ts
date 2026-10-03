@@ -41,6 +41,9 @@ import {
   type MacOSToolchainAccess,
 } from "./macos-toolchain-access";
 import { BoundedOutputBuffer } from "./bounded-output";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("MacOSSandbox");
 
 /**
  * Default sandbox options
@@ -73,6 +76,42 @@ function killProcessGroup(proc: ChildProcess): void {
     }
   }
   proc.kill("SIGKILL");
+}
+
+/**
+ * True when `root` holds a .git or .cowork/policy entry, or is too large to
+ * check. The profile lets nothing create those names in private scratch, so
+ * one found there is a nested repository (or policy directory) whose parent
+ * was moved out of the workspace; deleting scratch would delete it.
+ */
+function holdsProtectedEntry(root: string, limit = 50_000): boolean {
+  const pending = [root];
+  let seen = 0;
+  while (pending.length > 0) {
+    const dir = pending.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (++seen > limit) return true;
+      const name = entry.name.toLowerCase();
+      if (name === ".git") return true;
+      if (!entry.isDirectory()) continue;
+      const child = path.join(dir, entry.name);
+      if (name === ".cowork") {
+        try {
+          if (fs.readdirSync(child).some((item) => item.toLowerCase() === "policy")) return true;
+        } catch {
+          // Unreadable: fall through and walk it like any other directory.
+        }
+      }
+      pending.push(child);
+    }
+  }
+  return false;
 }
 
 const PROTECTED_WORKSPACE_WRITE_RELATIVE_PATHS = [
@@ -290,10 +329,19 @@ export class MacOSSandbox implements ISandbox {
   cleanup(): void {
     this.sandboxProfile = undefined;
     if (this.runtimeTempDir) {
-      try {
-        fs.rmSync(this.runtimeTempDir, { recursive: true, force: true });
-      } catch {
-        // Best-effort cleanup; the directory is private to this sandbox.
+      if (holdsProtectedEntry(this.runtimeTempDir)) {
+        // A command may move a workspace directory into scratch; if that
+        // directory holds a nested repository, removing scratch would delete
+        // its history, which the sandbox itself is never allowed to do.
+        log.warn(
+          `Keeping sandbox scratch ${this.runtimeTempDir}: it holds a .git or .cowork/policy entry moved out of the workspace.`,
+        );
+      } else {
+        try {
+          fs.rmSync(this.runtimeTempDir, { recursive: true, force: true });
+        } catch {
+          // Best-effort cleanup; the directory is private to this sandbox.
+        }
       }
       this.runtimeTempDir = undefined;
     }

@@ -271,6 +271,10 @@ export class OutputFilter {
    * byte, or edits built from it stop matching and writes can persist corrupted text.
    * When something is detected, a `_contentWarning` field is added to a JSON object
    * result (or a one-line prefix to any other result) quoting the first matched line.
+   *
+   * Pass the raw tool result, once: content that looks annotated already (a leading warning
+   * or a `_contentWarning` field) is scanned like any other, since the tool's source could
+   * have written it. Cached results are stored raw and annotated when served.
    */
   static sanitizeToolResult(toolName: string, result: string): string {
     if (!this.CONTENT_TOOLS.has(toolName) || typeof result !== "string" || !result) {
@@ -285,17 +289,8 @@ export class OutputFilter {
     }
 
     const isObject = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
-    // Already annotated by this filter. A same-named field from anywhere else does not count.
-    const existingWarning = isObject
-      ? (parsed as Record<string, unknown>)[this.CONTENT_WARNING_KEY]
-      : undefined;
-    if (
-      (typeof existingWarning === "string" &&
-        existingWarning.startsWith(this.CONTENT_WARNING_TEXT)) ||
-      result.startsWith(`${this.CONTENT_WARNING_PREFIX} ${this.CONTENT_WARNING_TEXT}`)
-    ) {
-      return result;
-    }
+    const hasWarningField =
+      isObject && Object.prototype.hasOwnProperty.call(parsed, this.CONTENT_WARNING_KEY);
 
     const texts: string[] = [];
     if (parsed === undefined) {
@@ -322,7 +317,7 @@ export class OutputFilter {
     const body = result.slice(leadingWhitespace.length);
     if (
       isObject &&
-      existingWarning === undefined &&
+      !hasWarningField &&
       body.startsWith("{") &&
       Object.keys(parsed as object).length > 0
     ) {

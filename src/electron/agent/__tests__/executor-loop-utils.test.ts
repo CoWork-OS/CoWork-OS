@@ -2,17 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import type { LLMMessage } from "../llm";
 import {
   appendAssistantResponseToConversation,
+  buildCommandFailureSignature,
   buildMaxTokensExhaustedNotice,
   computeToolFailureDecision,
   handleMaxTokensRecovery,
   isForwardLookingIntentOnlyText,
   maybeInjectLowProgressNudge,
   maybeInjectStopReasonNudge,
+  nextToolUseStreak,
   recordPackagingFailureFingerprint,
   shouldRetryEmptyFollowUpEndTurn,
   shouldAllowBotMessagingDuringFollowUpToolLock,
   shouldForceStopAfterSkippedToolOnlyTurns,
   shouldLockFollowUpToolCalls,
+  ToolLoopProgressTracker,
   type ToolLoopCall,
   updateSkippedToolOnlyTurnStreak,
 } from "../executor-loop-utils";
@@ -524,5 +527,106 @@ describe("isForwardLookingIntentOnlyText", () => {
     "I checked the files. Let me know if you want me to change anything.",
   ])("does not treat an answer as intent-only: %s", (text) => {
     expect(isForwardLookingIntentOnlyText(text)).toBe(false);
+  });
+});
+
+describe("progress-aware tool-use streak", () => {
+  // Drives the stop nudge and the follow-up lock the way the follow-up loop
+  // does, returning the turn at which tool calls get locked (or -1).
+  const lockTurn = (turnMadeProgress: (turn: number) => boolean, turns = 30): number => {
+    let streak = 0;
+    let nudged = false;
+    let toolCalls = 0;
+    let previousTurnMadeProgress = false;
+    for (let turn = 1; turn <= turns; turn += 1) {
+      streak = nextToolUseStreak({ stopReason: "tool_use", previousStreak: streak, previousTurnMadeProgress });
+      toolCalls += 1;
+      nudged = maybeInjectStopReasonNudge({
+        stopReason: "tool_use",
+        consecutiveToolUseStops: streak,
+        consecutiveMaxTokenStops: 0,
+        remainingTurns: 1_000,
+        messages: [],
+        phaseLabel: "follow-up",
+        stopReasonNudgeInjected: nudged,
+        minToolUseStreak: 5,
+        log: () => undefined,
+      });
+      if (
+        shouldLockFollowUpToolCalls({
+          stopReason: "tool_use",
+          consecutiveToolUseStops: streak,
+          followUpToolCallCount: toolCalls,
+          stopReasonNudgeInjected: nudged,
+          remainingTurns: 1_000,
+          allowImmediateTurnBudgetLock: false,
+          minStreak: 10,
+          minToolCalls: 8,
+        })
+      ) {
+        return turn;
+      }
+      previousTurnMadeProgress = turnMadeProgress(turn);
+    }
+    return -1;
+  };
+
+  it("restarts the streak after a turn that made progress and resets it on a non-tool stop", () => {
+    expect(nextToolUseStreak({ stopReason: "tool_use", previousStreak: 7, previousTurnMadeProgress: false })).toBe(8);
+    expect(nextToolUseStreak({ stopReason: "tool_use", previousStreak: 7, previousTurnMadeProgress: true })).toBe(1);
+    expect(nextToolUseStreak({ stopReason: "end_turn", previousStreak: 7, previousTurnMadeProgress: false })).toBe(0);
+  });
+
+  it("does not lock follow-up tool calls while turns keep editing files or fixing tests", () => {
+    expect(lockTurn((turn) => turn % 3 === 0)).toBe(-1);
+  });
+
+  it("still locks tool calls when tool use stops converging", () => {
+    expect(lockTurn(() => false)).toBe(10);
+    // Progress early on does not exempt a later run of non-converging turns.
+    expect(lockTurn((turn) => turn === 4)).toBe(14);
+  });
+});
+
+describe("ToolLoopProgressTracker", () => {
+  it("treats edits, a failing command that now passes and first reads of a file as progress", () => {
+    const tracker = new ToolLoopProgressTracker();
+    tracker.recordOutcome("edit_file", { file_path: "a.ts", old_string: "a", new_string: "b" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(true);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+
+    tracker.recordOutcome("run_command", { command: "npm test" }, false);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+    tracker.recordOutcome("run_command", { command: "npm  test" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(true);
+    tracker.recordOutcome("run_command", { command: "npm test" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+
+    tracker.recordOutcome("read_file", { path: "src/a.ts" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(true);
+    tracker.recordOutcome("read_file", { path: "src/a.ts" }, true);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+    tracker.recordOutcome("read_file", { path: "src/b.ts" }, false);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+  });
+
+  it("counts a failing run toward repeated failures only when it repeats unchanged", () => {
+    const tracker = new ToolLoopProgressTracker();
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|1 failed")).toBe(false);
+    expect(tracker.isIdenticalRepeatFailure("pytest  tests/test_login.py", "1|1 failed")).toBe(true);
+    // A different failure is progress, not a repeat.
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(false);
+    // An edit between runs makes the next red run part of a fix cycle.
+    tracker.recordOutcome("edit_file", { file_path: "app/login.py" }, true);
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(false);
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(true);
+  });
+
+  it("builds a failure signature that ignores timings but keeps the outcome", () => {
+    const first = buildCommandFailureSignature({ exitCode: 1, stdout: "1 failed in 0.42s" });
+    const second = buildCommandFailureSignature({ exitCode: 1, stdout: "1 failed in 0.57s" });
+    const different = buildCommandFailureSignature({ exitCode: 1, stdout: "2 failed in 0.57s" });
+    expect(first).toBe(second);
+    expect(first).not.toBe(different);
   });
 });

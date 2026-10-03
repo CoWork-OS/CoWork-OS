@@ -6152,6 +6152,114 @@ describe("TaskExecutor step loop control", () => {
     });
   });
 
+  describe("progress-aware loop guards", () => {
+    it("flags only identical repeated edits of one file as a tool loop", () => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      const hunks: Any[] = [];
+      const hunkHits = [1, 2, 3, 4, 5, 6].map((index) =>
+        executor.detectToolLoop(hunks, "edit_file", {
+          file_path: "src/api/client.ts",
+          old_string: `getUser${index}`,
+          new_string: `fetchUser${index}`,
+        }),
+      );
+      expect(hunkHits).toEqual([false, false, false, false, false, false]);
+
+      const repeats: Any[] = [];
+      const repeatHits = [1, 2, 3, 4, 5].map(() =>
+        executor.detectToolLoop(repeats, "edit_file", {
+          file_path: "src/api/client.ts",
+          old_string: "getUser",
+          new_string: "fetchUser",
+        }),
+      );
+      expect(repeatHits).toEqual([false, false, false, false, true]);
+    });
+
+    it("does not send the repeated-failure stop nudge during a red-green fix loop", async () => {
+      const responses: LLMResponse[] = [];
+      for (let attempt = 1; attempt <= 6; attempt += 1) {
+        responses.push(toolCall("run_command", { command: "npm test -- login" }, `c${attempt}`));
+        responses.push(
+          toolCall(
+            "edit_file",
+            { file_path: "src/auth/login.ts", old_string: `v${attempt}`, new_string: `v${attempt + 1}` },
+            `e${attempt}`,
+          ),
+        );
+      }
+      responses.push(toolCall("run_command", { command: "npm test -- login" }, "c-final"));
+      responses.push(textResponse("Fixed the null check; npm test -- login passes."));
+      let runs = 0;
+      const executor = createCodeStepExecutor(responses, {
+        run_command: () =>
+          ++runs <= 6
+            ? { success: false, exitCode: 1, stdout: "1 failing", stderr: "" }
+            : { success: true, exitCode: 0, stdout: "5 passing", stderr: "" },
+      });
+      const step: Any = {
+        id: "red-green-loop",
+        description: "Fix the null check bug in src/auth/login.ts",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(runs).toBe(7);
+      const variedFailureEvents = (executor as Any).daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "varied_failure_loop_detected",
+      );
+      expect(variedFailureEvents).toEqual([]);
+    });
+
+    it("still sends the repeated-failure nudge when the same failing run repeats unchanged", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 6 }, (_, index) =>
+        toolCall("run_command", { command: "npm test -- login" }, `c${index}`),
+      );
+      responses.push(textResponse("The login test keeps failing; the blocker is the missing fixture."));
+      const executor = createCodeStepExecutor(responses, {
+        run_command: () => ({ success: false, exitCode: 1, stdout: "1 failing", stderr: "" }),
+      });
+      const step: Any = {
+        id: "unchanged-red-runs",
+        description: "Run the login tests and report the result",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      const variedFailureEvents = (executor as Any).daemon.logEvent.mock.calls.filter(
+        (call: Any[]) => call[1] === "varied_failure_loop_detected",
+      );
+      expect(variedFailureEvents).toHaveLength(1);
+    });
+
+    it("does not tell a step to stop calling tools while each turn reads a new file", async () => {
+      const executor = createCodeStepExecutor([]);
+      (executor as Any).guardrailPhaseAEnabled = true;
+      const threshold = (executor as Any).getLoopGuardrailForMode("analysis_only")
+        .stopReasonToolUseStreak as number;
+      const responses: LLMResponse[] = Array.from({ length: threshold + 2 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      responses.push(textResponse("The modules split request handling from domain logic."));
+      (executor as Any).callLLMWithRetry = vi.fn(async () => responses.shift());
+      const step: Any = {
+        id: "read-many-files",
+        description: "Inspect the project modules and describe how they are organized",
+        status: "pending",
+      };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(
+        userTexts(executor).some((text) => text.includes("You have been in repeated tool-use turns")),
+      ).toBe(false);
+    });
+  });
+
   describe("recovery from tool failures", () => {
     it("completes a step that recovers from an unavailable tool through an available alternative", async () => {
       const executor = createExecutorWithStubs(

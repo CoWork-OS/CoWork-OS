@@ -386,6 +386,7 @@ import {
 } from "./agent-policy";
 import {
   appendAssistantResponseToConversation as appendAssistantResponseToConversationUtil,
+  buildCommandFailureSignature as buildCommandFailureSignatureUtil,
   buildMaxTokensExhaustedNotice as buildMaxTokensExhaustedNoticeUtil,
   computeToolFailureDecision as computeToolFailureDecisionUtil,
   handleMaxTokensRecovery as handleMaxTokensRecoveryUtil,
@@ -395,11 +396,13 @@ import {
   maybeInjectStopReasonNudge as maybeInjectStopReasonNudgeUtil,
   maybeInjectToolLoopBreak as maybeInjectToolLoopBreakUtil,
   maybeInjectVariedFailureNudge as maybeInjectVariedFailureNudgeUtil,
+  nextToolUseStreak as nextToolUseStreakUtil,
   recordPackagingFailureFingerprint as recordPackagingFailureFingerprintUtil,
   shouldRetryEmptyFollowUpEndTurn as shouldRetryEmptyFollowUpEndTurnUtil,
   shouldAllowBotMessagingDuringFollowUpToolLock as shouldAllowBotMessagingDuringFollowUpToolLockUtil,
   shouldForceStopAfterSkippedToolOnlyTurns as shouldForceStopAfterSkippedToolOnlyTurnsUtil,
   shouldLockFollowUpToolCalls as shouldLockFollowUpToolCallsUtil,
+  ToolLoopProgressTracker,
   type ToolLoopCall,
   updateSkippedToolOnlyTurnStreak as updateSkippedToolOnlyTurnStreakUtil,
 } from "./executor-loop-utils";
@@ -11921,6 +11924,35 @@ ${transcript}
     return (this.namedTestCommands || []).some((named) => normalized.includes(named));
   }
 
+  /** "test" for test runs, "build" for build/compile/type-check/lint runs. */
+  private getVerificationCommandKind(command: string): "test" | "build" | null {
+    if (this.isTestCommand(command)) return "test";
+    if (isBuildCheckCommandUtil(command)) return "build";
+    return null;
+  }
+
+  /**
+   * Whether a failed call counts toward the repeated-failure ("STOP retrying")
+   * nudge. A failing test or build run counts only when it repeats the previous
+   * failure of the same command unchanged; a red run after an edit is the
+   * normal fix-and-retest cycle. Other failures always count.
+   */
+  private countsTowardRepeatedToolFailures(
+    progress: ToolLoopProgressTracker,
+    toolName: string,
+    input: Any,
+    result: Any,
+    failureReason: string,
+  ): boolean {
+    if (canonicalizeToolNameUtil(toolName) !== "run_command") return true;
+    const command = typeof input?.command === "string" ? input.command : "";
+    if (!command || !this.getVerificationCommandKind(command)) return true;
+    return progress.isIdenticalRepeatFailure(
+      command,
+      buildCommandFailureSignatureUtil(result, failureReason),
+    );
+  }
+
   /**
    * Track test and build/check commands whose latest run in a step failed. Only
    * a later successful run of the same command, or of another command of the
@@ -11935,11 +11967,7 @@ ${transcript}
     const command =
       typeof input?.command === "string" ? input.command.replace(/\s+/g, " ").trim() : "";
     if (!command) return;
-    const kind = this.isTestCommand(command)
-      ? "test"
-      : isBuildCheckCommandUtil(command)
-        ? "build"
-        : null;
+    const kind = this.getVerificationCommandKind(command);
     if (!succeeded) {
       if (kind) unresolved.set(kind, command);
       return;
@@ -21957,6 +21985,16 @@ You are continuing a previous conversation. The context from the previous conver
     const file = this.extractToolTarget(toolName, input);
     if (!file) return "";
 
+    // Edits and writes to one file with different content are separate changes
+    // (a multi-hunk edit), not a loop; only an identical change repeated is.
+    if (isFileMutationToolNameUtil(canonicalizeToolNameUtil(toolName))) {
+      const payloadHash = createHash("sha1")
+        .update(JSON.stringify(input ?? null))
+        .digest("hex")
+        .slice(0, 12);
+      return `${file}#${payloadHash}`;
+    }
+
     const category = this.normalizeToolCategory(toolName, input);
 
     // For read-like ops, include the line-range so different sections don't match
@@ -21986,7 +22024,7 @@ You are continuing a previous conversation. The context from the previous conver
    */
   private extractToolBaseTarget(toolName: string, input: Any): string {
     const category = this.normalizeToolCategory(toolName, input);
-    if (category === "read") {
+    if (category === "read" || isFileMutationToolNameUtil(canonicalizeToolNameUtil(toolName))) {
       const file = this.extractToolTarget(toolName, input);
       if (file) return file;
     }
@@ -31978,6 +32016,9 @@ Return ONLY a JSON object:
       let aliasRecoverableFailureReason = "";
       let consecutiveToolUseStops = 0;
       let consecutiveMaxTokenStops = 0;
+      // Progress (edits, commands that now pass, first reads) resets the
+      // tool-use streak and decides which red test runs are repeats.
+      const toolLoopProgress = new ToolLoopProgressTracker();
       let structuredInputEnforcementAttempts = 0;
       let autonomousDecisionRecoveryAttempts = 0;
       let verificationRewindAttempted = false;
@@ -32496,11 +32537,11 @@ Return ONLY a JSON object:
             stepAttemptedToolUse = true;
           }
           const remainingTurnsAfterResponse = this.getRemainingTurnBudget();
-          if (response.stopReason === "tool_use") {
-            consecutiveToolUseStops += 1;
-          } else {
-            consecutiveToolUseStops = 0;
-          }
+          consecutiveToolUseStops = nextToolUseStreakUtil({
+            stopReason: response.stopReason,
+            previousStreak: consecutiveToolUseStops,
+            previousTurnMadeProgress: toolLoopProgress.consumeTurnProgress(),
+          });
           if (response.stopReason === "max_tokens") {
             consecutiveMaxTokenStops += 1;
           } else {
@@ -34137,6 +34178,13 @@ Return ONLY a JSON object:
                             failureReason: failureMessage,
                             result: { error: failureMessage },
                             persistentToolFailures,
+                            countTowardRepeatedFailures: this.countsTowardRepeatedToolFailures(
+                              toolLoopProgress,
+                              content.name,
+                              content.input,
+                              { error: failureMessage },
+                              failureMessage,
+                            ),
                             recordFailure: (toolName, error) => {
                               if (suppressDisableForPathDrift) {
                                 this.emitEvent("tool_disable_suppressed_recoverable_path_drift", {
@@ -34156,6 +34204,7 @@ Return ONLY a JSON object:
                               this.isHardToolFailure(toolName, toolResult, error),
                           });
                           this.recordCrossStepToolFailure(content.name, failureMessage);
+                          toolLoopProgress.recordOutcome(canonicalContentName, content.input, false);
                           if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
                             hasHardToolFailureAttempt = true;
                           }
@@ -34518,6 +34567,11 @@ Return ONLY a JSON object:
                             toolSucceeded,
                           );
                         }
+                        toolLoopProgress.recordOutcome(
+                          canonicalContentName,
+                          content.input,
+                          toolSucceeded,
+                        );
 
                         if (
                           expectsImageVerification &&
@@ -34633,6 +34687,13 @@ Return ONLY a JSON object:
                               failureReason: result.error || reason,
                               result,
                               persistentToolFailures,
+                              countTowardRepeatedFailures: this.countsTowardRepeatedToolFailures(
+                                toolLoopProgress,
+                                content.name,
+                                content.input,
+                                result,
+                                reason,
+                              ),
                               recordFailure: (toolName, error) => {
                                 if (suppressDisableForPathDrift) {
                                   this.emitEvent("tool_disable_suppressed_recoverable_path_drift", {
@@ -40370,6 +40431,9 @@ Return ONLY a JSON object:
     let autonomousDecisionRecoveryAttempts = 0;
     let consecutiveToolUseStops = 0;
     let consecutiveMaxTokenStops = 0;
+    // Progress (edits, commands that now pass, first reads) resets the
+    // tool-use streak that drives the stop nudge and the tool lock.
+    const toolLoopProgress = new ToolLoopProgressTracker();
     let followUpToolCallsLocked = false;
     let followUpToolLockReason:
       | "persistent_tool_use_streak"
@@ -40647,11 +40711,11 @@ Return ONLY a JSON object:
             (item: Any) => item?.type === "tool_use",
           );
           const remainingTurnsAfterResponse = this.getRemainingTurnBudget();
-          if (response.stopReason === "tool_use") {
-            consecutiveToolUseStops += 1;
-          } else {
-            consecutiveToolUseStops = 0;
-          }
+          consecutiveToolUseStops = nextToolUseStreakUtil({
+            stopReason: response.stopReason,
+            previousStreak: consecutiveToolUseStops,
+            previousTurnMadeProgress: toolLoopProgress.consumeTurnProgress(),
+          });
           if (response.stopReason === "max_tokens") {
             consecutiveMaxTokenStops += 1;
           } else {
@@ -41593,6 +41657,13 @@ Return ONLY a JSON object:
                             failureReason: failureMessage,
                             result: { error: failureMessage },
                             persistentToolFailures,
+                            countTowardRepeatedFailures: this.countsTowardRepeatedToolFailures(
+                              toolLoopProgress,
+                              content.name,
+                              content.input,
+                              { error: failureMessage },
+                              failureMessage,
+                            ),
                             recordFailure: (toolName, error) => {
                               if (suppressDisableForPathDrift) {
                                 this.emitEvent("tool_disable_suppressed_recoverable_path_drift", {
@@ -41615,6 +41686,7 @@ Return ONLY a JSON object:
                               this.isHardToolFailure(toolName, toolResult, error),
                           });
                           this.recordCrossStepToolFailure(canonicalContentName, failureMessage);
+                          toolLoopProgress.recordOutcome(canonicalContentName, content.input, false);
                           if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
                             hasHardToolFailureAttempt = true;
                           }
@@ -41685,6 +41757,11 @@ Return ONLY a JSON object:
                         this.recordFileOperation(content.name, content.input, result);
 
                         const toolSucceeded = !(result && result.success === false);
+                        toolLoopProgress.recordOutcome(
+                          canonicalContentName,
+                          content.input,
+                          toolSucceeded,
+                        );
                         if (toolSucceeded) {
                           hadSuccessfulToolCall = true;
                           this.taskHadAnyToolSuccess = true;
@@ -41759,6 +41836,13 @@ Return ONLY a JSON object:
                               failureReason: reason,
                               result,
                               persistentToolFailures,
+                              countTowardRepeatedFailures: this.countsTowardRepeatedToolFailures(
+                                toolLoopProgress,
+                                content.name,
+                                content.input,
+                                result,
+                                reason,
+                              ),
                               recordFailure: (toolName, error) => {
                                 if (suppressDisableForPathDrift) {
                                   this.emitEvent("tool_disable_suppressed_recoverable_path_drift", {

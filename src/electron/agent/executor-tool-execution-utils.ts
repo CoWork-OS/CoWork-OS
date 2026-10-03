@@ -1182,6 +1182,8 @@ export function recordToolFailureOutcome(opts: {
   persistentToolFailures: Map<string, number>;
   recordFailure: (toolName: string, error: string) => boolean;
   isHardToolFailure: (toolName: string, result: Any, reason: string) => boolean;
+  /** False for a failure that is not a retry of the same thing (e.g. a red test run after an edit). */
+  countTowardRepeatedFailures?: boolean;
 }): {
   shouldDisable: boolean;
   isHardFailure: boolean;
@@ -1189,7 +1191,9 @@ export function recordToolFailureOutcome(opts: {
 } {
   const shouldDisable = opts.recordFailure(opts.toolName, opts.failureReason);
   const isHardFailure = opts.isHardToolFailure(opts.toolName, opts.result, opts.failureReason);
-  const failureCount = (opts.persistentToolFailures.get(opts.toolName) || 0) + 1;
+  const previousCount = opts.persistentToolFailures.get(opts.toolName) || 0;
+  const failureCount =
+    opts.countTowardRepeatedFailures === false ? previousCount : previousCount + 1;
   opts.persistentToolFailures.set(opts.toolName, failureCount);
   return {
     shouldDisable,

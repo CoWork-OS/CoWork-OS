@@ -1,5 +1,6 @@
 import type { LLMMessage, LLMToolResult } from "./llm";
 import { MAX_TOKENS_RECOVERY_PROMPT_PREFIX } from "./llm/output-token-policy";
+import { canonicalizeToolName, isFileMutationToolName } from "./tool-semantics";
 
 export interface ToolLoopCall {
   tool: string;
@@ -683,6 +684,134 @@ export function maybeInjectStopReasonNudge(opts: {
     ],
   });
   return true;
+}
+
+/**
+ * Consecutive tool-use turns since the last turn that made progress. A turn
+ * that edited a file, got a previously failing command to pass, or read a file
+ * for the first time starts a new streak, so the stop nudge and the follow-up
+ * tool lock respond to tool use that is not converging rather than to any
+ * long run of tool calls.
+ */
+export function nextToolUseStreak(opts: {
+  stopReason: string | undefined;
+  previousStreak: number;
+  previousTurnMadeProgress: boolean;
+}): number {
+  if (opts.stopReason !== "tool_use") return 0;
+  return opts.previousTurnMadeProgress ? 1 : opts.previousStreak + 1;
+}
+
+function normalizeCommandText(input: unknown): string {
+  const command = (input as { command?: unknown } | null | undefined)?.command;
+  return typeof command === "string" ? command.replace(/\s+/g, " ").trim() : "";
+}
+
+function extractReadTargets(input: unknown): string[] {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const targets: string[] = [];
+  for (const key of ["path", "file_path", "filePath"]) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) targets.push(value.trim());
+  }
+  for (const key of ["paths", "files"]) {
+    const value = obj[key];
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === "string" && entry.trim()) targets.push(entry.trim());
+      }
+    }
+  }
+  return targets;
+}
+
+/**
+ * Outcome signature of a failed command: exit code plus the tail of its
+ * output, with timings normalized so two identical failing runs match.
+ */
+export function buildCommandFailureSignature(result: unknown, fallbackMessage = ""): string {
+  const obj = (result && typeof result === "object" ? result : {}) as Record<string, unknown>;
+  const output =
+    [obj.stderr, obj.stdout, obj.error]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join("\n") || fallbackMessage;
+  const normalized = output
+    .replace(/\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi, "<duration>")
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\b/g, "<time>")
+    .replace(/\s+/g, " ")
+    .trim();
+  const exitCode = typeof obj.exitCode === "number" ? String(obj.exitCode) : "";
+  return `${exitCode}|${normalized.slice(-600)}`;
+}
+
+/**
+ * Tracks whether tool calls in a step or follow-up are making progress: a
+ * successful file edit, a command that passes after failing, or a first
+ * successful read of a file. Also decides which failing test/build runs count
+ * as repeats of the same failure.
+ */
+export class ToolLoopProgressTracker {
+  private readonly readTargets = new Set<string>();
+  private readonly failedCommands = new Set<string>();
+  private readonly lastCommandFailure = new Map<
+    string,
+    { signature: string; mutationEpoch: number }
+  >();
+  private mutationEpoch = 0;
+  private turnMadeProgress = false;
+
+  recordOutcome(toolName: string, input: unknown, succeeded: boolean): void {
+    const canonicalToolName = canonicalizeToolName(String(toolName || ""));
+    if (canonicalToolName === "run_command") {
+      const command = normalizeCommandText(input);
+      if (!command) return;
+      if (!succeeded) {
+        this.failedCommands.add(command);
+      } else if (this.failedCommands.delete(command)) {
+        this.turnMadeProgress = true;
+      }
+      return;
+    }
+    if (!succeeded) return;
+    if (isFileMutationToolName(canonicalToolName)) {
+      this.mutationEpoch += 1;
+      this.turnMadeProgress = true;
+      return;
+    }
+    if (canonicalToolName === "read_file" || canonicalToolName === "read_files") {
+      for (const target of extractReadTargets(input)) {
+        if (this.readTargets.has(target)) continue;
+        this.readTargets.add(target);
+        this.turnMadeProgress = true;
+      }
+    }
+  }
+
+  /** Whether calls since the previous check made progress; clears the flag. */
+  consumeTurnProgress(): boolean {
+    const madeProgress = this.turnMadeProgress;
+    this.turnMadeProgress = false;
+    return madeProgress;
+  }
+
+  /**
+   * Whether a failing test/build run repeats the previous failure of the same
+   * command unchanged (same output, no successful edit since). A red run after
+   * a change is the normal fix-and-retest cycle, not a retry loop.
+   */
+  isIdenticalRepeatFailure(command: string, failureSignature: string): boolean {
+    const key = String(command || "").replace(/\s+/g, " ").trim();
+    const previous = this.lastCommandFailure.get(key);
+    this.lastCommandFailure.set(key, {
+      signature: failureSignature,
+      mutationEpoch: this.mutationEpoch,
+    });
+    return Boolean(
+      previous &&
+        previous.signature === failureSignature &&
+        previous.mutationEpoch === this.mutationEpoch,
+    );
+  }
 }
 
 export function shouldLockFollowUpToolCalls(opts: {

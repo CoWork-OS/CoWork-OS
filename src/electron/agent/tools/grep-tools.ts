@@ -22,7 +22,8 @@ const MAX_GREP_FILE_BYTES = 1024 * 1024;
 // Listing gitignored paths is an optimization; past these limits grep walks without it.
 const GIT_IGNORE_LIST_TIMEOUT_MS = 5_000;
 const GIT_IGNORE_LIST_MAX_BYTES = 8 * 1024 * 1024;
-// A `.git` file ("gitdir: <path>") or `commondir` file holds one path; anything larger is not one.
+// Git pointer files (`.git` files, `commondir`, a worktree's `gitdir`) hold one path; anything
+// larger is not one.
 const MAX_GIT_POINTER_FILE_BYTES = 4096;
 
 /** Explicit --git-dir skips git's own "dubious ownership" check, so it is repeated here. */
@@ -31,27 +32,17 @@ function isOwnedByCurrentUser(stats: fs.Stats): boolean {
 }
 
 /**
- * The real directory named by a git pointer file (a `.git` file's "gitdir: <path>", or a git
- * directory's `commondir`), resolved against `baseDir` as git does. Null unless it is a
- * directory owned by the current user inside `workspaceRoot`.
+ * The real path a git pointer file names (a `.git` file's "gitdir: <path>", a git directory's
+ * `commondir`, a linked worktree's `gitdir`), resolved against `baseDir` as git does. Null
+ * unless the pointer is a small regular file and its target is owned by the current user.
  */
-function resolveContainedGitPointer(
-  file: string,
-  prefix: string,
-  baseDir: string,
-  workspaceRoot: string,
-): string | null {
-  const stats = fs.lstatSync(file);
-  if (!stats.isFile() || stats.size > MAX_GIT_POINTER_FILE_BYTES) return null;
+function readGitPointer(file: string, prefix: string, baseDir: string): string | null {
+  const stats = fs.lstatSync(file, { throwIfNoEntry: false });
+  if (!stats?.isFile() || stats.size > MAX_GIT_POINTER_FILE_BYTES) return null;
   const content = fs.readFileSync(file, "utf8").replace(/[\r\n]+$/, "");
   if (!content.startsWith(prefix) || content.length === prefix.length) return null;
   const target = fs.realpathSync(path.resolve(baseDir, content.slice(prefix.length)));
-  const targetStats = fs.statSync(target);
-  return targetStats.isDirectory() &&
-    isOwnedByCurrentUser(targetStats) &&
-    isAccessPathWithin(workspaceRoot, target)
-    ? target
-    : null;
+  return isOwnedByCurrentUser(fs.statSync(target)) ? target : null;
 }
 
 /**
@@ -549,11 +540,13 @@ export class GrepTools {
 
   /**
    * The repository nearest to `directory` between it and the workspace root, with real paths.
-   * Its `.git` must be a directory or a `.git` file ("gitdir: <path>", as in submodules and
-   * linked worktrees), and its git directory and any `commondir` must resolve inside the
-   * workspace and be owned by the current user. Otherwise a planted `.git` file, symlink or
-   * `commondir` would make git read config, index and excludes from outside the workspace, so
-   * the grep runs without .gitignore filtering instead.
+   * Its `.git` must be a directory or a `.git` file ("gitdir: <path>"), owned by the current
+   * user, and its git directory and any `commondir` must resolve inside the workspace, except
+   * for a linked worktree checked out here: its git directory, in a repository outside the
+   * workspace, names this `.git` file back (git worktree add writes that), which a file planted
+   * in the workspace cannot arrange. Otherwise a planted `.git` file, symlink or `commondir`
+   * would make git read config, index and excludes from elsewhere, so the grep runs without
+   * .gitignore filtering instead.
    */
   private findWorkspaceGitRepository(
     directory: string,
@@ -574,14 +567,20 @@ export class GrepTools {
           const gitDir = dotGitStats.isDirectory()
             ? dotGit
             : dotGitStats.isFile()
-              ? resolveContainedGitPointer(dotGit, "gitdir: ", current, workspaceRoot)
+              ? readGitPointer(dotGit, "gitdir: ", current)
               : null;
-          if (!gitDir) return null;
+          if (!gitDir || !fs.statSync(gitDir).isDirectory()) return null;
+          const inWorkspace = isAccessPathWithin(workspaceRoot, gitDir);
+          if (!inWorkspace && readGitPointer(path.join(gitDir, "gitdir"), "", gitDir) !== dotGit) {
+            return null;
+          }
           const commonDirFile = path.join(gitDir, "commondir");
           const commonDir = fs.lstatSync(commonDirFile, { throwIfNoEntry: false })
-            ? resolveContainedGitPointer(commonDirFile, "", gitDir, workspaceRoot)
+            ? readGitPointer(commonDirFile, "", gitDir)
             : gitDir;
-          if (!commonDir) return null;
+          if (!commonDir || !fs.statSync(commonDir).isDirectory()) return null;
+          // A git directory in the workspace is workspace content: its commondir must stay there.
+          if (inWorkspace && !isAccessPathWithin(workspaceRoot, commonDir)) return null;
           return { gitDir, commonDir, workTree: current, searchDir };
         }
         const parent = path.dirname(current);

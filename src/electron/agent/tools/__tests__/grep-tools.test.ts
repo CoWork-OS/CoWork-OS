@@ -583,6 +583,19 @@ describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
     return gitDir;
   };
 
+  // A repository outside the workspace with a commit and a linked worktree checked out at
+  // `worktreePath`, as the isolated-worktree task mode creates them.
+  const outsideRepositoryWithWorktree = (worktreePath: string) => {
+    const repo = tempDir("cowork-grep-main-repo-");
+    gitRepository(repo, "ignored.txt\n");
+    const identity = ["-c", "user.email=t@example.com", "-c", "user.name=t"];
+    const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...identity, ...args]);
+    git("add", ".gitignore");
+    git("commit", "-q", "-m", "init");
+    git("worktree", "add", "-q", "-b", `wt-${path.basename(worktreePath)}`, worktreePath);
+    return path.join(repo, ".git", "worktrees", path.basename(worktreePath));
+  };
+
   beforeEach(() => {
     vi.mocked(execFile).mockClear();
   });
@@ -682,6 +695,15 @@ describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
       (dir: string) => fs.symlinkSync(outsideRepositoryIgnoringTs(), path.join(dir, ".git")),
     ],
     [
+      "a .git file names another worktree's git directory",
+      (dir: string) => {
+        const otherWorktree = path.join(tempDir("cowork-grep-other-worktree-"), "other");
+        const gitDir = outsideRepositoryWithWorktree(otherWorktree);
+        fs.appendFileSync(path.join(gitDir, "..", "..", "info", "exclude"), "*.ts\n");
+        fs.writeFileSync(path.join(dir, ".git"), `gitdir: ${gitDir}\n`);
+      },
+    ],
+    [
       "the .git directory's commondir points outside the workspace",
       (dir: string) => {
         gitRepository(dir, "");
@@ -699,6 +721,24 @@ describe.skipIf(!gitAvailable)("GrepTools .gitignore support", () => {
     expect(result.success).toBe(true);
     expect(matchedFiles(result)).toEqual(["app.ts"]);
     expect(gitCalls()).toEqual([]);
+  });
+
+  it("uses a linked worktree whose repository is outside the workspace", async () => {
+    const worktree = path.join(tempDir("cowork-grep-worktree-parent-"), "task-worktree");
+    const gitDir = outsideRepositoryWithWorktree(worktree);
+    fs.writeFileSync(path.join(worktree, "kept.txt"), "needle\n");
+    fs.writeFileSync(path.join(worktree, "ignored.txt"), "needle\n");
+
+    const result = await toolFor(worktree).grep({ pattern: "needle", outputMode: "files_only" });
+
+    expect(matchedFiles(result)).toEqual(["kept.txt"]);
+    expect(gitCalls()).toHaveLength(1);
+    expect(gitCalls()[0][1]).toEqual(
+      expect.arrayContaining([
+        `--git-dir=${fs.realpathSync(gitDir)}`,
+        `--work-tree=${fs.realpathSync(worktree)}`,
+      ]),
+    );
   });
 
   it("uses a .git file whose git directory is inside the workspace", async () => {

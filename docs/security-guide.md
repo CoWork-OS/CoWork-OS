@@ -225,8 +225,8 @@ When command tools are exposed by the active access profile:
 `run_command` first requires the active access profile to expose command tools, then applies
 guardrails, approval, and the selected access profile. Restricted profiles use the native macOS or Docker sandbox when
 available; if no OS sandbox is available (Windows, or Linux without Docker), execution fails closed. The one
-exception is an administrator opt-in: when admin policy sets `allowUnsandboxedShell: true` and does not set
-`requireSandboxForShell`, CoWork asks you to approve each such command explicitly before it runs with your full
+exception is per-command approval: unless admin policy sets `requireSandboxForShell` or turns off
+`allowUnsandboxedShell` (on by default), CoWork asks you to approve each such command explicitly before it runs with your full
 user permissions. That prompt cannot be auto-approved or answered by a "never ask" profile. Scoped filesystem rules are
 canonicalized before execution so symlinks and path traversal cannot escape the approved roots.
 Domain-scoped network rules are enforced for built-in network tools; arbitrary shell networking is

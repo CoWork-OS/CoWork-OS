@@ -96,7 +96,11 @@ export interface AdminPolicies {
     allowedSandboxTypes: AdminSandboxType[];
     /** Require OS-level sandboxing for shell commands. */
     requireSandboxForShell: boolean;
-    /** Whether explicit env-gated unsandboxed shell fallback is allowed. */
+    /**
+     * Whether a shell command may run without an OS sandbox: per command with the user's
+     * explicit approval when no sandbox exists (and requireSandboxForShell is off), or via
+     * the env-gated development fallback.
+     */
     allowUnsandboxedShell: boolean;
     /** Network policy applied before legacy guardrail domain checks. */
     network: {
@@ -177,7 +181,10 @@ const DEFAULT_POLICIES: AdminPolicies = {
     allowedPermissionModes: [],
     allowedSandboxTypes: ["macos", "docker"],
     requireSandboxForShell: false,
-    allowUnsandboxedShell: false,
+    // On by default so Windows and Linux-without-Docker users can run shell commands at all:
+    // with no OS sandbox, each command then needs the user's explicit approval, which can
+    // never be auto-approved. It has no effect while requireSandboxForShell is on.
+    allowUnsandboxedShell: true,
     network: {
       defaultAction: "allow",
       allowedDomains: [],
@@ -274,10 +281,14 @@ function normalizePolicies(parsed: any): AdminPolicies {
         typeof parsed.runtime?.requireSandboxForShell === "boolean"
           ? parsed.runtime.requireSandboxForShell
           : DEFAULT_POLICIES.runtime.requireSandboxForShell,
+      // A policy that requires a sandbox but predates this field keeps it off, so the
+      // permissive default cannot open the environment-gated unsandboxed fallback there.
       allowUnsandboxedShell:
         typeof parsed.runtime?.allowUnsandboxedShell === "boolean"
           ? parsed.runtime.allowUnsandboxedShell
-          : DEFAULT_POLICIES.runtime.allowUnsandboxedShell,
+          : parsed.runtime?.requireSandboxForShell === true
+            ? false
+            : DEFAULT_POLICIES.runtime.allowUnsandboxedShell,
       network: {
         defaultAction: parsed.runtime?.network?.defaultAction === "deny" ? "deny" : "allow",
         allowedDomains: normalizeStringList(parsed.runtime?.network?.allowedDomains),

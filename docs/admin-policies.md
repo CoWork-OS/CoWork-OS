@@ -89,7 +89,7 @@ network, and shell egress below that selection.
     "allowedPermissionModes": [],
     "allowedSandboxTypes": ["macos", "docker"],
     "requireSandboxForShell": false,
-    "allowUnsandboxedShell": false,
+    "allowUnsandboxedShell": true,
     "network": {
       "defaultAction": "allow",
       "allowedDomains": [],
@@ -175,7 +175,7 @@ replace the profile selector and they cannot widen a profile:
 | `allowedPermissionModes`                                    | Constrains legacy permission-mode mappings. An explicitly selected profile is still subject to the resulting admin ceiling. An empty list allows all legacy modes.                          |
 | `allowedSandboxTypes`                                       | Restricts the sandbox backends that may enforce a profile. An unavailable backend fails closed; it does not become an unsandboxed fallback. Valid values are `macos`, `docker`, and `none`. |
 | `requireSandboxForShell`                                    | Requires OS sandboxing for command execution and can constrain a full-access/unsandboxed request to the sandboxed compatibility path.                                                       |
-| `allowUnsandboxedShell`                                     | Allows an explicit environment-gated local fallback only when the administrator permits it. When no OS sandbox exists (Windows, Linux without Docker) and `requireSandboxForShell` is off, it also lets the user approve individual commands to run unsandboxed; each approval is explicit and never auto-approved. It is not a user-facing profile and is not a general bypass. |
+| `allowUnsandboxedShell`                                     | On by default. When no OS sandbox exists (Windows, Linux without Docker) and `requireSandboxForShell` is off, the user can approve individual commands to run unsandboxed; each approval is explicit and never auto-approved, and a "never ask" profile denies it. It also permits the environment-gated local development fallback. Set it to `false` to make commands fail closed on machines without an OS sandbox. A policy file that sets `requireSandboxForShell: true` without this field treats it as `false`. It is not a user-facing profile and is not a general bypass. |
 | `network.defaultAction`, `allowedDomains`, `blockedDomains` | Apply administrator network policy before legacy domain guardrails and profile/network-tool evaluation. Blocked destinations remain blocked.                                                |
 | `network.allowShellNetwork`                                 | Coarse command-process egress gate, on by default so package installs and git remotes work. Shell networking is not domain-scoped today, so it also needs an unrestricted profile network posture and network policy (no domain lists); set it to `false` to block shell egress. |
 | `autoReview.enabled`                                        | Controls the narrow automatic-review helper. It cannot grant an action outside the selected profile or suppress hard/export/location approvals.                                             |

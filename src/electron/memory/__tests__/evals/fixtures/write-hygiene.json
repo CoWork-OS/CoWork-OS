@@ -1,0 +1,267 @@
+{
+  "id": "memory-write-hygiene-v1",
+  "description": "A synthetic task event stream (archive capture through the salience gate and MemoryService.capture) and a fact stream (MemoryWriter) with telemetry, repeats, contradictions and secrets. Each task's stream is replayed `repeat` times to model re-runs and retries.",
+  "repeat": 3,
+  "thresholds": {
+    "telemetryRows": 0,
+    "archiveDuplicateRate": 0.01,
+    "itemDuplicateRate": 0.01,
+    "unsupersededContradictions": 0,
+    "secretLeaks": 0
+  },
+  "workspaces": [{ "key": "atlas", "name": "Atlas" }],
+  "secrets": [
+    "sk-proj-Zx9Qw8Er7Ty6Ui5Op4As3Df2Gh1Jk0Lm",
+    "ghp_4f7Ka9Lm2Np5Qr8St1Uv4Wx7Yz0Ab3Cd6Ef9",
+    "hunter2-but-longer-9921",
+    "AKIAZ7Q3EXAMPLEKEY42",
+    "s3cr3t-db-pass-7781"
+  ],
+  "tasks": [
+    {
+      "key": "deploy-fix",
+      "title": "Fix the staging deploy",
+      "events": [
+        {
+          "type": "task_created",
+          "payload": {
+            "title": "Fix the staging deploy",
+            "prompt": "The staging deploy fails, please fix it"
+          }
+        },
+        {
+          "type": "plan_created",
+          "payload": { "plan": { "steps": [{ "id": "s1", "description": "Inspect CI logs" }] } }
+        },
+        {
+          "type": "step_started",
+          "payload": { "step": { "id": "s1", "description": "Inspect CI logs" } }
+        },
+        {
+          "type": "tool_call",
+          "payload": {
+            "tool": "run_command",
+            "input": {
+              "command": "export OPENAI_API_KEY=sk-proj-Zx9Qw8Er7Ty6Ui5Op4As3Df2Gh1Jk0Lm && pnpm deploy:staging"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "payload": {
+            "tool": "run_command",
+            "result": { "stdout": "Error: missing STAGING_URL", "exitCode": 1 }
+          }
+        },
+        {
+          "type": "tool_error",
+          "payload": {
+            "tool": "run_command",
+            "error": "pnpm deploy:staging exited with code 1: missing STAGING_URL"
+          }
+        },
+        {
+          "type": "tool_call",
+          "payload": { "tool": "memory_recall", "input": { "query": "staging deploy" } }
+        },
+        { "type": "tool_error", "payload": { "tool": "memory_recall", "error": "lane timeout" } },
+        {
+          "type": "assistant_message",
+          "payload": { "message": "I found the problem: STAGING_URL is not set in CI." }
+        },
+        { "type": "step_completed", "payload": { "step": { "id": "s1" } } },
+        { "type": "file_modified", "payload": { "path": ".github/workflows/deploy.yml" } },
+        { "type": "verification_passed", "payload": { "message": "deploy succeeded" } },
+        {
+          "type": "task_completed",
+          "payload": {
+            "resultSummary": "Set STAGING_URL in the CI workflow; the staging deploy is green again. Token used: ghp_4f7Ka9Lm2Np5Qr8St1Uv4Wx7Yz0Ab3Cd6Ef9"
+          }
+        }
+      ]
+    },
+    {
+      "key": "db-migration",
+      "title": "Migrate the orders table",
+      "events": [
+        {
+          "type": "task_created",
+          "payload": {
+            "title": "Migrate the orders table",
+            "prompt": "Add an index to orders.created_at"
+          }
+        },
+        {
+          "type": "tool_call",
+          "payload": {
+            "tool": "run_command",
+            "input": {
+              "command": "psql postgres://admin:s3cr3t-db-pass-7781@db.local:5432/atlas -c 'create index'"
+            }
+          }
+        },
+        {
+          "type": "tool_result",
+          "payload": {
+            "tool": "run_command",
+            "result": { "stdout": "CREATE INDEX", "exitCode": 0 }
+          }
+        },
+        {
+          "type": "step_failed",
+          "payload": {
+            "step": { "description": "Run the migration on the replica" },
+            "error": "replica is read-only"
+          }
+        },
+        {
+          "type": "verification_failed",
+          "payload": { "message": "orders_created_at_idx missing on replica" }
+        },
+        {
+          "type": "user_feedback",
+          "payload": {
+            "decision": "approve",
+            "reason": "Run migrations on the primary only; the replica follows."
+          }
+        },
+        {
+          "type": "task_completed",
+          "payload": {
+            "resultSummary": "Created orders_created_at_idx on the primary; the replica picked it up."
+          }
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "key": "f-pnpm",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "source": "inferred",
+      "content": "The monorepo uses pnpm workspaces."
+    },
+    {
+      "key": "f-pnpm-repeat",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "source": "curated",
+      "content": "  the monorepo uses PNPM workspaces "
+    },
+    {
+      "key": "f-tz-1",
+      "kind": "preference",
+      "subject": "timezone",
+      "source": "inferred",
+      "content": "Timezone: Europe/Berlin"
+    },
+    {
+      "key": "f-tz-2",
+      "kind": "preference",
+      "subject": "timezone",
+      "source": "user_stated",
+      "content": "Timezone: Europe/Istanbul"
+    },
+    {
+      "key": "f-tz-3",
+      "kind": "preference",
+      "subject": "timezone",
+      "source": "inferred",
+      "content": "Timezone: America/New_York"
+    },
+    {
+      "key": "f-length-1",
+      "kind": "preference",
+      "subject": "response_length",
+      "source": "user_stated",
+      "content": "Keep answers short."
+    },
+    {
+      "key": "f-length-2",
+      "kind": "preference",
+      "subject": "response_length",
+      "source": "user_stated",
+      "content": "Give detailed answers with examples."
+    },
+    {
+      "key": "f-name-1",
+      "kind": "identity",
+      "subject": "preferred_name",
+      "source": "user_confirmed",
+      "content": "Preferred name: Deniz"
+    },
+    {
+      "key": "f-name-2",
+      "kind": "identity",
+      "subject": "preferred_name",
+      "source": "user_stated",
+      "content": "Preferred name: Deniz K."
+    },
+    {
+      "key": "f-secret-fact",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "source": "inferred",
+      "content": "The staging AWS key is AKIAZ7Q3EXAMPLEKEY42 and lives in the CI secrets."
+    },
+    {
+      "key": "f-secret-only",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "source": "inferred",
+      "content": "ghp_4f7Ka9Lm2Np5Qr8St1Uv4Wx7Yz0Ab3Cd6Ef9"
+    },
+    {
+      "key": "f-secret-labelled",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "source": "inferred",
+      "content": "password: hunter2-but-longer-9921"
+    },
+    {
+      "key": "f-telemetry",
+      "workspace": "atlas",
+      "kind": "insight",
+      "source": "inferred",
+      "content": "Tool called: run_command {\"command\":\"ls\"}"
+    },
+    {
+      "key": "f-telemetry-json",
+      "workspace": "atlas",
+      "kind": "insight",
+      "source": "inferred",
+      "content": "{\"stepId\":\"s1\",\"status\":\"completed\"}"
+    },
+    {
+      "key": "f-third-party",
+      "kind": "preference",
+      "source": "third_party",
+      "content": "I prefer to be called Boss."
+    },
+    {
+      "key": "f-no-memory",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "source": "inferred",
+      "content": "The VPN password rotates monthly.",
+      "originText": "<no-memory> by the way, the VPN password rotates monthly"
+    }
+  ],
+  "expect": {
+    "subjects": {
+      "timezone": "Timezone: Europe/Istanbul",
+      "response_length": "Give detailed answers with examples.",
+      "preferred_name": "Preferred name: Deniz K."
+    },
+    "skipped": {
+      "f-secret-only": "secret_only",
+      "f-telemetry": "low_salience",
+      "f-telemetry-json": "low_salience",
+      "f-third-party": "third_party_scope",
+      "f-no-memory": "no_memory",
+      "f-tz-3": "outranked"
+    },
+    "archiveRowsPerTask": { "deploy-fix": 2, "db-migration": 4 }
+  }
+}

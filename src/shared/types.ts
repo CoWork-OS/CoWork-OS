@@ -101,6 +101,10 @@ export interface MemoryFeaturesSettings {
   structuredObservationsEnabled?: boolean;
   /** Show the Memory Hub observation inspector. */
   memoryInspectorEnabled?: boolean;
+  /** Let Dreaming add LLM-synthesized curation proposals (always queued for review). */
+  dreamingLlmEnabled?: boolean;
+  /** Daily token budget of Dreaming's LLM synthesis, across workspaces. */
+  dreamingLlmDailyTokenBudget?: number;
 }
 
 export type MemoryWriteApprovalStatus = "pending" | "applying" | "applied" | "rejected" | "failed";
@@ -240,6 +244,19 @@ export interface SupermemoryConfigStatus {
   circuitBreakerUntil?: number | null;
   lastError?: string | null;
   isConfigured: boolean;
+  /** Remote copies CoWork recorded (and can delete with "Disconnect & purge"). */
+  mirroredCopies?: number;
+}
+
+/** Result of Supermemory "Disconnect & purge" (SEC-17). */
+export interface SupermemoryDisconnectPurgeResult {
+  success: boolean;
+  /** The integration was disabled (only after every recorded copy was deleted). */
+  disabled: boolean;
+  forgotten: number;
+  failed: number;
+  errors: string[];
+  error?: string;
 }
 
 export type MemoryWakeUpLayerId = "L0" | "L1" | "L2" | "L3";
@@ -1658,6 +1675,8 @@ export type ToolType =
 export type ApprovalType =
   | "delete_file"
   | "delete_multiple"
+  /** Forgetting a saved memory (`memory_forget`). Classified as a delete. */
+  | "memory_delete"
   | "bulk_rename"
   | "workspace_write"
   | "network_access"
@@ -2371,6 +2390,14 @@ export interface AgentConfig {
   integrationMentions?: IntegrationMentionSelection[];
   /** Optional origin channel that created the task (used for channel-aware gating) */
   originChannel?: ChannelType;
+  /**
+   * Set by the gateway router (never accepted from the renderer): whether the channel
+   * sender is the workspace owner. Only the owner's messages may become facts about the
+   * user (audit SEC-16); a channel task without it counts as third-party.
+   */
+  gatewaySenderIsOwner?: boolean;
+  /** Contact reference of the channel sender (`gateway:<channel>:<user id>`), set with it. */
+  gatewaySenderRef?: string;
   /** Resolved gateway specialization record that shaped the task. */
   channelSpecializationId?: string;
   /** Explicit maximum number of LLM turns before forcing completion. Unset means no window cap for normal main-task routing. */
@@ -5645,16 +5672,30 @@ export type DreamingCandidateAction =
   | "open_loop"
   | "recurring_task"
   | "constraint"
-  | "correction";
+  | "correction"
+  // Memory curator (Phase 3): one action per curation operation over memory_items.
+  | "memory_merge"
+  | "memory_resolve_conflict"
+  | "memory_promote"
+  | "memory_decay"
+  | "memory_expire_commitment";
 
 export type DreamingCandidateTarget =
   | "curated_memory"
   | "archive_memory"
   | "topic_pack"
   | "core_memory"
-  | "suggestion_policy";
+  | "suggestion_policy"
+  | "memory_items";
 
-export type DreamingCandidateStatus = "proposed" | "accepted" | "rejected" | "applied" | "merged";
+/** `dismissed`: closed without review (a retired legacy proposal, or its items are gone). */
+export type DreamingCandidateStatus =
+  | "proposed"
+  | "accepted"
+  | "rejected"
+  | "applied"
+  | "merged"
+  | "dismissed";
 
 export interface DreamingRun {
   id: string;
@@ -5669,6 +5710,15 @@ export interface DreamingRun {
   summary?: string;
   evidenceCount: number;
   candidateCount: number;
+  /** Curation operations applied automatically by this run. */
+  appliedCount?: number;
+  /** Curation proposals queued for review by this run. */
+  queuedCount?: number;
+  /** Tokens spent on LLM synthesis (input + output). */
+  llmTokens?: number;
+  llmCalls?: number;
+  /** Per-operation counts and skip reasons (JSON object). */
+  stats?: Record<string, number>;
   error?: string;
   startedAt: number;
   completedAt?: number;
@@ -5690,6 +5740,14 @@ export interface DreamingCandidate {
   createdAt: number;
   reviewedAt?: number;
   resolution?: string;
+  /** Curation operation of a memory-curator proposal (JSON; see memory-review-types.ts). */
+  operation?: Record<string, unknown>;
+  /** Why the proposal was queued for review rather than applied. */
+  reviewReason?: string;
+  /** `heuristic` or `llm`. */
+  origin?: string;
+  /** Identity across runs, so a rejected or undone change is not proposed again. */
+  fingerprint?: string;
 }
 
 export interface ListDreamingRunsRequest {
@@ -5703,13 +5761,17 @@ export interface ListDreamingCandidatesRequest {
   workspaceId?: string;
   runId?: string;
   action?: DreamingCandidateAction;
+  target?: DreamingCandidateTarget;
   status?: DreamingCandidateStatus;
   limit?: number;
 }
 
 export interface ReviewDreamingCandidateRequest {
   id: string;
-  status: Extract<DreamingCandidateStatus, "accepted" | "rejected" | "merged" | "applied">;
+  status: Extract<
+    DreamingCandidateStatus,
+    "accepted" | "rejected" | "merged" | "applied" | "dismissed"
+  >;
   resolution?: string;
 }
 
@@ -9754,6 +9816,16 @@ export const IPC_CHANNELS = {
   MEMORY_ITEMS_DELETE: "memoryItems:delete",
   MEMORY_ITEMS_WHY: "memoryItems:why",
   MEMORY_ITEMS_CLEAR_GLOBAL: "memoryItems:clearGlobal",
+  MEMORY_ITEMS_USED_FOR_TASK: "memoryItems:usedForTask",
+
+  // Memory Hub "Review": Dreaming's curation proposals and applied changes (Phase 3)
+  MEMORY_REVIEW_GET: "memoryReview:get",
+  MEMORY_REVIEW_COUNT: "memoryReview:count",
+  MEMORY_REVIEW_ACCEPT: "memoryReview:accept",
+  MEMORY_REVIEW_REJECT: "memoryReview:reject",
+  MEMORY_REVIEW_UNDO: "memoryReview:undo",
+  MEMORY_REVIEW_RUN_NOW: "memoryReview:runNow",
+  MEMORY_REVIEW_SET_LLM: "memoryReview:setLlmEnabled",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",
@@ -9784,6 +9856,7 @@ export const IPC_CHANNELS = {
   SUPERMEMORY_SAVE_SETTINGS: "supermemory:saveSettings",
   SUPERMEMORY_TEST_CONNECTION: "supermemory:testConnection",
   SUPERMEMORY_GET_STATUS: "supermemory:getStatus",
+  SUPERMEMORY_DISCONNECT_PURGE: "supermemory:disconnectAndPurge",
 
   // Migration Status (for showing one-time notifications after app rename)
   MIGRATION_GET_STATUS: "migration:getStatus",
@@ -10689,6 +10762,8 @@ export interface ChannelData {
     deduplicationEnabled?: boolean;
     responsePrefix?: string;
     ingestNonSelfChatsInSelfChatMode?: boolean;
+    /** The owner's own account ids on this channel (SEC-16; see gateway-owner-ids.ts). */
+    ownerUserIds?: string[];
     [key: string]: unknown;
   };
 }

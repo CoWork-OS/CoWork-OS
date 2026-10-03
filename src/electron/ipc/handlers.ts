@@ -53,6 +53,8 @@ import { reconcilePendingSampleAttempts } from "../first-task/reconcile-attempts
 import { verifyReleaseBrief } from "../first-task/verify-release-brief";
 import { randomUUID } from "node:crypto";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import { createBackgroundKitPathGuard } from "../security/background-write-guard";
+import { withEffectiveAccessProfile } from "../security/effective-workspace";
 import { withSettingsResponseStyleMirror } from "../memory/memory-read-side";
 import { RELEASE_BRIEF_ACCESS_PROFILE_ID } from "../security/access-profile-resolver";
 import * as path from "path";
@@ -422,6 +424,7 @@ import {
   ForkSessionSchema,
   PersonalityImportSchema,
   PersonalityConfigV2Schema,
+  parsePersonalitySaveOptions,
   ContextModeSchema,
   MAX_PERSONALITY_PREVIEW_BYTES,
   AwarenessConfigSchema,
@@ -540,10 +543,18 @@ import { MemoryItemsHubService } from "../memory/MemoryItemsHubService";
 import { MemoryWriter } from "../memory/MemoryWriter";
 import { createLegacyMemoryMirror } from "../memory/memory-items-legacy-mirror";
 import { setupMemoryItemsHandlers } from "./memory-items-handlers";
+import {
+  MEMORY_USED_EVENT_TYPES,
+  MEMORY_USED_MAX_EVENTS,
+  toMemoryUsedTimelineEvent,
+} from "../../shared/memory-used";
+import { createMemoryReviewService } from "../memory/memory-review-wiring";
+import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
 import { SupermemoryService } from "../memory/SupermemoryService";
+import { SupermemoryRemoteRefRepository } from "../memory/SupermemoryRemoteRefRepository";
 import { MemoryWriteGate } from "../memory/MemoryWriteGate";
 import { UserProfileService } from "../memory/UserProfileService";
 import {
@@ -9679,9 +9690,12 @@ export async function setupIpcHandlers(
     return PersonalityManager.loadSettings();
   });
 
-  ipcMain.handle(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, async (_, settings) => {
+  ipcMain.handle(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, async (_, settings, rawOptions) => {
+    const options = parsePersonalitySaveOptions(rawOptions);
     // A response style chosen here is user-stated memory (locks style adaptation).
-    withSettingsResponseStyleMirror(() => PersonalityManager.saveSettings(settings));
+    withSettingsResponseStyleMirror(() => PersonalityManager.saveSettings(settings), {
+      baseline: options.responseStyleBaseline ?? null,
+    });
     // Event emission is handled by PersonalityManager.saveSettings()
     return { success: true };
   });
@@ -9721,15 +9735,21 @@ export async function setupIpcHandlers(
     return PersonalityManager.loadConfigV2();
   });
 
-  ipcMain.handle(IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2, async (_, config: unknown) => {
-    const validated = validateInput(PersonalityConfigV2Schema, config, "personality config");
-    const toSave = {
-      ...validated,
-      version: 2,
-    } as import("../../shared/types").PersonalityConfigV2;
-    withSettingsResponseStyleMirror(() => PersonalityManager.saveConfigV2(toSave));
-    return { success: true };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2,
+    async (_, config: unknown, rawOptions?: unknown) => {
+      const validated = validateInput(PersonalityConfigV2Schema, config, "personality config");
+      const options = parsePersonalitySaveOptions(rawOptions);
+      const toSave = {
+        ...validated,
+        version: 2,
+      } as import("../../shared/types").PersonalityConfigV2;
+      withSettingsResponseStyleMirror(() => PersonalityManager.saveConfigV2(toSave), {
+        baseline: options.responseStyleBaseline ?? null,
+      });
+      return { success: true };
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_EXPORT, async (_, format?: "json" | "md") => {
     return PersonalityManager.exportProfile(format ?? "json");
@@ -11553,6 +11573,26 @@ export async function setupIpcHandlers(
       getTask: async (taskId) => {
         const task = await taskRepo.findById(taskId);
         return task ? { id: task.id, title: task.title, workspaceId: task.workspaceId } : undefined;
+      },
+      syncKitFiles: (workspaceId) => CuratedMemoryService.syncWorkspaceFiles(workspaceId),
+    }),
+    workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+    // Per-reply "Memory used": the hidden memory_used events with the replies they precede.
+    loadMemoryUsedTimeline: async (workspaceId, taskId) => {
+      const task = await taskRepo.findById(taskId);
+      if (!task || task.workspaceId !== workspaceId) return null;
+      return taskEventRepo
+        .findByTaskIdAndTypes(taskId, [...MEMORY_USED_EVENT_TYPES], MEMORY_USED_MAX_EVENTS)
+        .map(toMemoryUsedTimelineEvent);
+    },
+  });
+
+  // Memory Hub "Review": Dreaming's curation proposals, applied changes and undo.
+  setupMemoryReviewHandlers({
+    service: createMemoryReviewService(db, {
+      resolveWorkspace: async (workspaceId) => {
+        const workspace = await workspaceRepo.findById(workspaceId);
+        return workspace?.path ? { id: workspace.id, path: workspace.path } : null;
       },
       syncKitFiles: (workspaceId) => CuratedMemoryService.syncWorkspaceFiles(workspaceId),
     }),
@@ -13418,10 +13458,19 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
       }
 
       const workspacePath = await getWorkspacePath(request.workspaceId);
+      const onboardingWorkspace = await workspaceRepo.findById(request.workspaceId);
+      if (!onboardingWorkspace) throw new Error("Workspace not found");
       await OnboardingProfileService.applyWorkspaceProfile(
         request.workspaceId,
         workspacePath,
         request.data,
+        {
+          // Kit writes follow the workspace's effective access profile.
+          pathGuard: createBackgroundKitPathGuard(
+            withEffectiveAccessProfile(onboardingWorkspace),
+            "workspace kit file",
+          ),
+        },
       );
 
       return {
@@ -13456,6 +13505,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
       checkRateLimit(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
       const args = validateInput(KitOpenFileRequestSchema, rawArgs, "kit open file");
       const workspacePath = await getWorkspacePath(args.workspaceId);
+      const kitWorkspace = await workspaceRepo.findById(args.workspaceId);
 
       // Markdown under .cowork/ only, never a protected segment (.cowork/policy, .git),
       // and symlinks may not escape .cowork. Only known kit files are seeded.
@@ -13464,6 +13514,14 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
 
       if (!fsSync.existsSync(absPath)) {
         if (!seedable) throw new Error("Kit file not found");
+        // Seeding writes a file: it must stay in the workspace and pass the workspace's
+        // effective access profile (a read-only profile cannot seed kit files).
+        if (!kitWorkspace) throw new Error("Workspace not found");
+        const pathGuard = createBackgroundKitPathGuard(
+          withEffectiveAccessProfile(kitWorkspace),
+          "workspace kit file",
+        );
+        pathGuard(absPath, "write");
         await fs.mkdir(path.dirname(absPath), { recursive: true });
         const stamp = getLocalDateStamp(new Date());
         let defaultContent = withKitFrontmatter(
@@ -13484,7 +13542,13 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
           );
         }
 
-        writeKitFileWithSnapshot(absPath, defaultContent, "system", "seed missing kit file");
+        writeKitFileWithSnapshot(
+          absPath,
+          defaultContent,
+          "system",
+          "seed missing kit file",
+          pathGuard,
+        );
       }
 
       await shell.openPath(absPath);
@@ -13718,7 +13782,13 @@ function setupMemoryHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_GET_STATUS, async () => {
     try {
-      return SupermemoryService.getConfigStatus();
+      const mirroredCopies = await SupermemoryRemoteRefRepository.get()
+        ?.count()
+        .catch(() => undefined);
+      return {
+        ...SupermemoryService.getConfigStatus(),
+        ...(typeof mirroredCopies === "number" ? { mirroredCopies } : {}),
+      };
     } catch (error) {
       logger.error("[Supermemory] Failed to get status:", error);
       throw error;
@@ -13738,6 +13808,25 @@ function setupMemoryHandlers(): void {
     } catch (error) {
       logger.error("[Supermemory] Failed to save settings:", error);
       throw error;
+    }
+  });
+
+  // "Disconnect & purge" (SEC-17): delete the remote copies CoWork recorded, then disable.
+  // No payload; destructive and remote, so rate-limited like a settings save.
+  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE, async () => {
+    checkRateLimit(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE, RATE_LIMIT_CONFIGS.limited);
+    try {
+      return await SupermemoryService.disconnectAndPurge();
+    } catch (error) {
+      logger.error("[Supermemory] Disconnect and purge failed:", error);
+      return {
+        success: false,
+        disabled: false,
+        forgotten: 0,
+        failed: 0,
+        errors: [],
+        error: error instanceof Error ? error.message : "Disconnect and purge failed",
+      };
     }
   });
 

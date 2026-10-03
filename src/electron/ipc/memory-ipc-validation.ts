@@ -324,6 +324,11 @@ export const MemoryItemRefRequestSchema = z
   .object({ workspaceId: WorkspaceIdSchema, id: MemoryItemIdSchema })
   .strict();
 
+/** "Memory used" per reply of one task, read for the task UI (the task's workspace). */
+export const MemoryUsedForTaskRequestSchema = z
+  .object({ workspaceId: WorkspaceIdSchema, taskId: StringIdSchema })
+  .strict();
+
 /**
  * A fact the user adds by hand: always `user_stated` (set in main, never by the
  * renderer), global or bound to the workspace the Hub is showing.

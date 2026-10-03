@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import {
   AddChannelRequest,
   ChannelData,
@@ -504,6 +505,12 @@ export function WebhookChannelSettings({
           </div>
         )}
       </div>
+
+      <ChannelOwnerSettings
+        channel={channel}
+        users={users}
+        onSaved={(config) => setChannel((prev) => (prev ? { ...prev, config } : prev))}
+      />
 
       <div className="settings-section">
         <h3>Authorized Users</h3>

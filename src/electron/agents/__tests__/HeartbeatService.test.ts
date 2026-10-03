@@ -721,6 +721,44 @@ describe("HeartbeatService v3", () => {
     expect(runMemoryDreaming).not.toHaveBeenCalled();
   });
 
+  it("runs the daily idle curation for a due workspace when nothing else triggered Dreaming", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const runMemoryDreaming = vi.fn(async () => ({
+      id: "daily-1",
+      status: "completed",
+      candidateCount: 0,
+    }));
+    const findMemoryCurationWorkspace = vi.fn(async () => ({
+      workspaceId: "workspace-2",
+      workspacePath: "/tmp/workspace-2",
+    }));
+    const service = createService({ runMemoryDreaming, findMemoryCurationWorkspace });
+
+    const result = await service.triggerHeartbeat("agent-1");
+
+    expect(findMemoryCurationWorkspace).toHaveBeenCalledOnce();
+    expect(runMemoryDreaming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-2",
+        workspacePath: "/tmp/workspace-2",
+        trigger: "daily",
+        signalCount: 0,
+      }),
+    );
+    expect(result.dreamingRunId).toBe("daily-1");
+  });
+
+  it("skips the daily curation when no workspace is due", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
+    const none = createService({
+      runMemoryDreaming,
+      findMemoryCurationWorkspace: async () => null,
+    });
+    await none.triggerHeartbeat("agent-1");
+    expect(runMemoryDreaming).not.toHaveBeenCalled();
+  });
+
   it("reconciles stale agent heartbeat runs on service start without touching issue-linked runs", async () => {
     createAgent("agent-1");
     const service = createService();

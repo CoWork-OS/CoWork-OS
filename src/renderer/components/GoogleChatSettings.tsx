@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import {
   ChannelData,
   ChannelUserData,
@@ -559,6 +560,12 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
           isSaving={savingPolicy}
         />
       </div>
+
+      <ChannelOwnerSettings
+        channel={channel}
+        users={users}
+        onSaved={(config) => setChannel((prev) => (prev ? { ...prev, config } : prev))}
+      />
 
       <div className="settings-section">
         <h4>Authorized Users</h4>

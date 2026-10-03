@@ -51,6 +51,11 @@ import {
 import { CuratedMemoryService } from "../electron/memory/CuratedMemoryService";
 import { MemoryService } from "../electron/memory/MemoryService";
 import { DurableContextService } from "../electron/memory/DurableContextService";
+import { MemoryWriter } from "../electron/memory/MemoryWriter";
+import { MemoryRetentionService } from "../electron/memory/MemoryRetentionService";
+import { startMemoryEngine } from "../electron/memory/memory-engine-bootstrap";
+import { KnowledgeGraphService } from "../electron/knowledge-graph/KnowledgeGraphService";
+import { LoreService } from "../electron/agents/LoreService";
 import { CrossSignalService } from "../electron/agents/CrossSignalService";
 import { FeedbackService } from "../electron/agents/FeedbackService";
 import { attachAgentDaemonTaskBridge, registerControlPlaneMethods } from "./control-plane-methods";
@@ -339,14 +344,42 @@ async function main(): Promise<void> {
   }
 
   let ftsWorkerClient: FtsWorkerClient | null = null;
+  // The host connection for the memory-side services below (one handle, as on desktop).
+  const memoryHostDb = dbManager.getDatabase();
+  let stopMemoryEngine: (() => void) | null = null;
+  let memoryRetentionService: MemoryRetentionService | null = null;
   // Initialize memory before queue recovery starts. AgentDaemon.initialize() can
   // immediately resume queued tasks, and their early timeline events capture to memory.
   try {
     MemoryService.initialize(dbManager);
     CuratedMemoryService.initialize(dbManager);
+    // Memory engine, as on desktop (docs/memory-engine.md): the MemoryWriter (dual writes
+    // into memory_items, memory_remember), the read-side syncs and the deferred one-time
+    // lane migration. The migration is claimed in the database, so a desktop app on the
+    // same profile never runs it at the same time.
+    const memoryStatements = MemoryService.getStatements();
+    if (memoryStatements) {
+      stopMemoryEngine = startMemoryEngine(memoryStatements, {
+        getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
+      });
+    }
     console.log("[Daemon] Memory Service initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Memory Service:", error);
+  }
+  // Daily retention for memory items and background-loop history (LIFE-3); the first
+  // run is deferred well past startup.
+  try {
+    memoryRetentionService = new MemoryRetentionService();
+    memoryRetentionService.start();
+  } catch (error) {
+    console.error("[Daemon] Failed to start memory retention:", error);
+  }
+  try {
+    // Knowledge graph lane of memory recall and the kg_* tools (database only).
+    KnowledgeGraphService.initialize(memoryHostDb);
+  } catch (error) {
+    console.error("[Daemon] Failed to initialize Knowledge Graph Service:", error);
   }
   try {
     // Off-main-thread memory search, as on desktop; without it prompt recall returns nothing.
@@ -373,7 +406,7 @@ async function main(): Promise<void> {
 
   // Optional cross-agent helpers (best-effort).
   try {
-    const crossSignalService = new CrossSignalService(dbManager.getDatabase());
+    const crossSignalService = new CrossSignalService(memoryHostDb);
     await crossSignalService.start(agentDaemon);
     console.log("[Daemon] CrossSignalService initialized");
   } catch (error) {
@@ -381,11 +414,22 @@ async function main(): Promise<void> {
   }
 
   try {
-    const feedbackService = new FeedbackService(dbManager.getDatabase());
+    const feedbackService = new FeedbackService(memoryHostDb);
     await feedbackService.start(agentDaemon);
     console.log("[Daemon] FeedbackService initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize FeedbackService:", error);
+  }
+
+  // Workspace lore (.cowork/LORE.md) from task completions, as on desktop.
+  let loreService: LoreService | null = null;
+  try {
+    loreService = new LoreService(memoryHostDb);
+    await loreService.start(agentDaemon);
+    console.log("[Daemon] LoreService initialized");
+  } catch (error) {
+    loreService = null;
+    console.error("[Daemon] Failed to initialize LoreService:", error);
   }
 
   // Initialize MCP client manager (best-effort).
@@ -792,9 +836,28 @@ async function main(): Promise<void> {
           run: () => NumbatService.getInstance()?.shutdown(),
         },
         {
+          name: "lore",
+          run: async () => {
+            await loreService?.stop();
+            loreService = null;
+          },
+        },
+        {
           name: "MCP servers",
           requiresQuiescence: true,
           run: () => mcpClientManager?.shutdown(),
+        },
+        // Stop the deferred memory jobs and let queued memory_items writes land.
+        {
+          name: "memory engine",
+          requiresQuiescence: true,
+          run: async () => {
+            memoryRetentionService?.stop();
+            memoryRetentionService = null;
+            stopMemoryEngine?.();
+            stopMemoryEngine = null;
+            await MemoryWriter.get()?.flush();
+          },
         },
         // Conversation-index writes are batched (250 ms); write the queue before closing.
         {

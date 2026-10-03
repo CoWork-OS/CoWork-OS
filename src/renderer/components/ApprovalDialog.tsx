@@ -42,6 +42,7 @@ export function ApprovalDialog({ approval, onApprove, onDeny }: ApprovalDialogPr
     switch (type) {
       case "delete_file":
       case "delete_multiple":
+      case "memory_delete":
         return "🗑️";
       case "bulk_rename":
         return "📝";
@@ -60,6 +61,7 @@ export function ApprovalDialog({ approval, onApprove, onDeny }: ApprovalDialogPr
     switch (type) {
       case "delete_file":
       case "delete_multiple":
+      case "memory_delete":
         return "approval-danger";
       case "network_access":
       case "external_service":

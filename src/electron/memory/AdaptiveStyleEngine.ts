@@ -27,7 +27,7 @@ import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PersonalityManager } from "../settings/personality-manager";
 import { MemoryWriter } from "./MemoryWriter";
-import { hasExplicitResponseStyle } from "./memory-read-side";
+import { hasExplicitResponseStyle, setResponseStyleAdaptationSource } from "./memory-read-side";
 import { MEMORY_LANE_STORES, responseStyleCandidate } from "./memory-items-lanes";
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -600,3 +600,7 @@ export class AdaptiveStyleEngine {
     }
   }
 }
+
+// Settings saves compare against the engine's adaptations to tell a stale form copy from a
+// style the user chose (withSettingsResponseStyleMirror).
+setResponseStyleAdaptationSource(() => AdaptiveStyleEngine.getAdaptationHistory());

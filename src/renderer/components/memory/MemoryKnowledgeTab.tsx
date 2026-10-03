@@ -8,6 +8,7 @@ import {
   type MemoryHubWhy,
 } from "../../../shared/memory-hub-types";
 import { hasHostMethod } from "../../host/browser-capabilities";
+import { takeMemoryHubFocus } from "./memory-hub-focus";
 import "./memory-knowledge.css";
 import {
   KIND_LABELS,
@@ -480,7 +481,8 @@ export function MemoryKnowledgeTab({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  // "Open in Memory Hub" (per-reply Memory used) starts the tab filtered to that item.
+  const [query, setQuery] = useState(() => takeMemoryHubFocus(workspaceId)?.query ?? "");
   const [kindFilter, setKindFilter] = useState<MemoryHubKind | "">("");
   const [sourceFilter, setSourceFilter] = useState<MemoryHubSource | "">("");
   const [pinnedOnly, setPinnedOnly] = useState(false);

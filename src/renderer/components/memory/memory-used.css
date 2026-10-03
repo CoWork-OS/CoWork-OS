@@ -1,0 +1,73 @@
+/* Per-reply "Memory used (N)" affordance (MemoryUsedAffordance.tsx). */
+.memory-used {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.memory-used-toggle {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.memory-used-toggle:hover,
+.memory-used-toggle:focus-visible {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.memory-used-panel {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  border-radius: 8px;
+  max-width: 640px;
+}
+
+.memory-used-hint {
+  color: var(--color-text-muted);
+}
+
+.memory-used-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memory-used-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.memory-used-item--gone .memory-used-text {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.memory-used-text {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.memory-used-open {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent, var(--color-text));
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.memory-used-open:hover,
+.memory-used-open:focus-visible {
+  text-decoration: underline;
+}

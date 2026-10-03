@@ -161,4 +161,28 @@ describe("OnboardingProfileService", () => {
     expect(toolsDoc).toContain("No core apps or tools recorded yet.");
     expect(toolsDoc).not.toContain("Slack, Linear");
   });
+  it("checks every kit path with the caller's guard and writes nothing it denies", async () => {
+    const checked: Array<[string, string]> = [];
+    await OnboardingProfileService.applyWorkspaceProfile("ws-guard", tmpDir, buildProfile(), {
+      pathGuard: (absPath, operation) => {
+        checked.push([path.relative(tmpDir, absPath), operation]);
+      },
+    });
+    expect(checked).toContainEqual([path.join(KIT_DIR_NAME, "USER.md"), "write"]);
+    expect(checked).toContainEqual([path.join(KIT_DIR_NAME, "TOOLS.md"), "write"]);
+
+    const deniedDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-onboarding-denied-"));
+    try {
+      await expect(
+        OnboardingProfileService.applyWorkspaceProfile("ws-denied", deniedDir, buildProfile(), {
+          pathGuard: () => {
+            throw new Error("Access denied for workspace kit file");
+          },
+        }),
+      ).rejects.toThrow("Access denied");
+      expect(fs.existsSync(path.join(deniedDir, KIT_DIR_NAME, "USER.md"))).toBe(false);
+    } finally {
+      fs.rmSync(deniedDir, { recursive: true, force: true });
+    }
+  });
 });

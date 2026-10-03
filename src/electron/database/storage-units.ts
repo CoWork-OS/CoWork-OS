@@ -118,6 +118,11 @@ export const STORAGE_UNITS = {
     "findScopedTimelineHistoryPage",
     { readonly: true },
   ),
+  taskEvent_findByTaskIdAndTypes: storeUnit(
+    (db: Database.Database) => new TaskEventRepository(db),
+    "findByTaskIdAndTypes",
+    { readonly: true },
+  ),
   taskEvent_findScopedMutationPage: storeUnit(
     (db: Database.Database) => new TaskEventRepository(db),
     "findScopedMutationPage",

@@ -84,6 +84,7 @@ const workspace = {
 function makeDaemon(userMessage = "fix the deploy script", prompt = "fix the deploy script") {
   return {
     logEvent: vi.fn(),
+    requestApproval: vi.fn(async () => true),
     getTask: vi.fn(() => ({ id: "task-1", prompt, rawPrompt: prompt })),
     getTaskEvents: vi.fn(() =>
       userMessage
@@ -270,6 +271,48 @@ describeWithSqlite("memory tools", () => {
   });
 
   describe("memory_remember", () => {
+    it("keeps what a third-party channel sender says out of the user's facts (SEC-16)", async () => {
+      const daemon = makeDaemon("Remember that I prefer to be called Bob");
+      daemon.getTask.mockReturnValue({
+        id: "task-1",
+        prompt: "hi",
+        agentConfig: {
+          originChannel: "telegram",
+          gatewayContext: "private",
+          gatewaySenderIsOwner: false,
+          gatewaySenderRef: "gateway:telegram:42",
+        },
+      });
+      const tools = new MemoryTools(workspace, daemon, "task-1");
+      const result = await tools.remember({
+        content: "Prefers to be called Bob",
+        kind: "preference",
+        scope: "global",
+        user_asked: true,
+        pin: true,
+      });
+      expect(result).toMatchObject({ success: true, source: "third_party", scope: "contact" });
+      const [row] = rowsOf(db);
+      expect(row).toMatchObject({
+        source: "third_party",
+        scope: "contact",
+        scope_ref: "gateway:telegram:42",
+        privacy: "private",
+        pinned: 0,
+      });
+      expect(rowsOf(db, "scope = 'global'")).toHaveLength(0);
+
+      // Curated (profile kit) writes are refused for them.
+      const curate = await tools.executeLegacyAlias("memory_curate", {
+        action: "add",
+        target: "user",
+        kind: "identity",
+        content: "Name is Bob",
+      });
+      expect((curate as Any).success).toBe(false);
+      expect(mocks.curate).not.toHaveBeenCalled();
+    });
+
     it("stores a fact as inferred unless the user explicitly asked", async () => {
       const tools = new MemoryTools(workspace, makeDaemon("fix the deploy script"), "task-1");
       const result = await tools.remember({
@@ -442,6 +485,75 @@ describeWithSqlite("memory tools", () => {
       });
       expect(rowsOf(db, "id = ?", keep.id)[0].status).toBe("active");
       expect((await tools.forget({ match: "nothing like this" })).success).toBe(false);
+    });
+
+    describe("approval", () => {
+      it("asks before deleting a memory and keeps it when the user declines", async () => {
+        const item = await seed("The user prefers dark mode", {
+          kind: "preference",
+          scope: "global",
+          workspaceId: null,
+          source: "user_stated",
+        });
+        const daemon = makeDaemon();
+        daemon.requestApproval.mockResolvedValueOnce(false);
+        const tools = new MemoryTools(workspace, daemon, "task-1");
+
+        const denied = await tools.forget({ id: `memory:${item.id}`, reason: "outdated" });
+        expect(denied).toMatchObject({ success: false, denied: true });
+        expect(daemon.requestApproval).toHaveBeenCalledWith(
+          "task-1",
+          "memory_delete",
+          expect.stringContaining("dark mode"),
+          expect.objectContaining({
+            tool: "memory_forget",
+            memory: `memory:${item.id}`,
+            source: "user_stated",
+            reason: "outdated",
+          }),
+        );
+        expect(rowsOf(db, "id = ?", item.id)[0].status).toBe("active");
+
+        expect((await tools.forget({ id: `memory:${item.id}` })).success).toBe(true);
+        expect(rowsOf(db, "id = ?", item.id)[0].status).toBe("deleted");
+      });
+
+      it("forgets a fact this task's agent inferred without asking", async () => {
+        const daemon = makeDaemon();
+        const tools = new MemoryTools(workspace, daemon, "task-1");
+        const remembered = await tools.remember({
+          content: "The build uses pnpm workspaces",
+          kind: "project_fact",
+          scope: "task",
+        });
+        expect(remembered).toMatchObject({ success: true });
+        expect(await tools.forget({ id: String(remembered.id) })).toEqual({
+          success: true,
+          forgotten: remembered.id,
+        });
+        expect(daemon.requestApproval).not.toHaveBeenCalled();
+      });
+
+      it("asks for inferred facts of other tasks, for match deletes and for archive rows", async () => {
+        const other = await seed("Release notes live in docs/releases", {
+          source: "inferred",
+          taskId: "task-0",
+          sourceRef: { store: "agent_tool", id: "r-1", taskId: "task-0" },
+        });
+        mocks.getFullDetails.mockResolvedValue([
+          { id: "a-1", workspaceId: "ws-1", content: "Deploy went fine" },
+        ]);
+        const daemon = makeDaemon();
+        daemon.requestApproval.mockResolvedValue(false);
+        const tools = new MemoryTools(workspace, daemon, "task-1");
+
+        expect((await tools.forget({ id: `memory:${other.id}` })).denied).toBe(true);
+        expect((await tools.forget({ match: "release notes docs" })).denied).toBe(true);
+        expect((await tools.forget({ id: "archive:a-1" })).denied).toBe(true);
+        expect(daemon.requestApproval).toHaveBeenCalledTimes(3);
+        expect(rowsOf(db, "id = ?", other.id)[0].status).toBe("active");
+        expect(mocks.deleteEntries).not.toHaveBeenCalled();
+      });
     });
 
     it("points knowledge-graph and conversation ids to the right place", async () => {

@@ -23,7 +23,7 @@
       "getDatabase": 1
     },
     "src/daemon/main.ts": {
-      "getDatabase": 10
+      "getDatabase": 9
     },
     "src/electron/acp/acp-sql.ts": {
       "prepare": 5

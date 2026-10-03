@@ -44,9 +44,12 @@ import {
 import type { MemoryRecallHit } from "../../memory/memory-engine-contracts";
 import {
   MEMORY_ITEM_KINDS,
+  type MemoryItem,
   type MemoryItemKind,
   type MemoryItemScope,
+  type MemoryItemSource,
 } from "../../memory/memory-items-types";
+import { isThirdPartyGatewayTask } from "../../gateway/gateway-sender-identity";
 import {
   CONTEXT_RECALL_TOOL,
   MEMORY_FORGET_TOOL,
@@ -63,6 +66,18 @@ import {
 
 export const NO_MEMORY_WRITE_ERROR =
   "Memory writes are disabled for this task (<no-memory>). Nothing was saved.";
+
+export const FORGET_DENIED_ERROR =
+  "The user did not approve forgetting this memory. It was kept; do not retry.";
+
+/** What memory_forget is about to delete, for the approval prompt. */
+interface ForgetTarget {
+  ref: string;
+  content: string;
+  source?: string;
+  /** Created by this task's agent, so it may be forgotten without asking. */
+  selfCreated: boolean;
+}
 
 /**
  * Whether a task's `<no-memory>` directive (or one in the content itself) blocks explicit
@@ -539,15 +554,21 @@ export class MemoryTools {
       return this.saveToArchive(tool, content, ARCHIVE_FALLBACK_TYPES[itemKind]);
     }
 
-    const scope: MemoryItemScope =
-      input?.scope === "global" || input?.scope === "workspace" || input?.scope === "task"
+    // SEC-16: in a task started over a channel by someone other than the workspace owner,
+    // "remember" is about that person: a private contact-scope third-party item, never a
+    // fact about the user (MemoryWriter keeps third-party text out of user scopes).
+    const thirdPartySender = this.thirdPartyGatewaySender();
+    const scope: MemoryItemScope = thirdPartySender
+      ? "contact"
+      : input?.scope === "global" || input?.scope === "workspace" || input?.scope === "task"
         ? input.scope
         : GLOBAL_BY_DEFAULT.has(itemKind)
           ? "global"
           : "workspace";
     const userText = this.latestUserText();
-    const source =
-      input?.user_asked === true && isExplicitRememberRequest(userText)
+    const source: MemoryItemSource = thirdPartySender
+      ? "third_party"
+      : input?.user_asked === true && isExplicitRememberRequest(userText)
         ? "user_stated"
         : "inferred";
     const pin = input?.pin === true;
@@ -589,12 +610,12 @@ export class MemoryTools {
         kind: itemKind,
         scope,
         workspaceId: scope === "global" ? null : this.workspace.id,
-        scopeRef: scope === "task" ? this.taskId : null,
+        scopeRef: thirdPartySender ?? (scope === "task" ? this.taskId : null),
         ...(asString(input?.subject, 120) ? { subjectKey: asString(input?.subject, 120) } : {}),
         source,
         sourceRef: { store: "agent_tool", id: randomUUID(), taskId: this.taskId },
         confidence: source === "user_stated" ? 1 : 0.7,
-        pinned: pin,
+        pinned: pin && !thirdPartySender,
         taskId: this.taskId,
         originWorkspaceId: this.workspace.id,
         originText: userText,
@@ -740,16 +761,35 @@ export class MemoryTools {
         switch (parsed.kind) {
           case "item":
           case "uuid": {
-            if (await this.forgetItem(parsed.id)) return done(`memory:${parsed.id}`);
-            if (parsed.kind === "uuid" && (await this.forgetArchiveRow(parsed.id))) {
-              return done(`archive:${parsed.id}`);
+            const item = await this.findForgettableItem(parsed.id);
+            if (item) {
+              if (!(await this.confirmForget(this.forgetTargetOfItem(item), input?.reason))) {
+                return fail(FORGET_DENIED_ERROR, { denied: true });
+              }
+              await this.deleteItem(item.id);
+              return done(`memory:${parsed.id}`);
+            }
+            if (parsed.kind === "uuid") {
+              const row = await this.findForgettableArchiveRow(parsed.id);
+              if (row) {
+                if (!(await this.confirmForget(row, input?.reason))) {
+                  return fail(FORGET_DENIED_ERROR, { denied: true });
+                }
+                if (await this.deleteArchiveRow(parsed.id)) return done(`archive:${parsed.id}`);
+              }
             }
             return fail(`No memory "${id}" in this workspace.`);
           }
-          case "archive":
-            return (await this.forgetArchiveRow(parsed.id))
+          case "archive": {
+            const row = await this.findForgettableArchiveRow(parsed.id);
+            if (!row) return fail(`No memory "${id}" in this workspace.`);
+            if (!(await this.confirmForget(row, input?.reason))) {
+              return fail(FORGET_DENIED_ERROR, { denied: true });
+            }
+            return (await this.deleteArchiveRow(parsed.id))
               ? done(`archive:${parsed.id}`)
               : fail(`No memory "${id}" in this workspace.`);
+          }
           case "external": {
             if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
               return fail("Supermemory is not connected or network access is off.");
@@ -778,11 +818,24 @@ export class MemoryTools {
         });
       }
       const target = parseRecallRef(candidates[0].ref);
-      if (target?.lane === "memory" && (await this.forgetItem(target.id))) {
-        return done(candidates[0].ref);
+      if (target?.lane === "memory") {
+        const item = await this.findForgettableItem(target.id);
+        if (item) {
+          if (!(await this.confirmForget(this.forgetTargetOfItem(item), input?.reason))) {
+            return fail(FORGET_DENIED_ERROR, { denied: true });
+          }
+          await this.deleteItem(item.id);
+          return done(candidates[0].ref);
+        }
       }
-      if (target?.lane === "archive" && (await this.forgetArchiveRow(target.id))) {
-        return done(candidates[0].ref);
+      if (target?.lane === "archive") {
+        const row = await this.findForgettableArchiveRow(target.id);
+        if (row) {
+          if (!(await this.confirmForget(row, input?.reason))) {
+            return fail(FORGET_DENIED_ERROR, { denied: true });
+          }
+          if (await this.deleteArchiveRow(target.id)) return done(candidates[0].ref);
+        }
       }
       return fail(`Could not forget "${candidates[0].ref}".`);
     } catch (error) {
@@ -813,11 +866,9 @@ export class MemoryTools {
     return visible;
   }
 
-  /** Delete a memory item this workspace may see (and the legacy record it mirrors). */
-  private async forgetItem(id: string): Promise<boolean> {
-    const writer = MemoryWriter.get();
-    if (!writer) return false;
-    // Same visibility as recall: this workspace, global scope, this task; private included.
+  /** A memory item this workspace may see (same visibility as recall; private included). */
+  private async findForgettableItem(id: string): Promise<MemoryItem | null> {
+    if (!MemoryWriter.get()) return null;
     const { hits } = await MemoryRecallService.getDefault().recall({
       text: "",
       workspaceId: this.workspace.id,
@@ -828,21 +879,76 @@ export class MemoryTools {
       surface: "tool",
       policy: { includePrivate: true },
     });
-    if (!hits[0]?.item) return false;
+    return hits[0]?.item ?? null;
+  }
+
+  private forgetTargetOfItem(item: MemoryItem): ForgetTarget {
+    const aliases = Array.isArray(item.sourceRef?.aliases) ? item.sourceRef.aliases : [];
+    return {
+      ref: `memory:${item.id}`,
+      content: item.content,
+      source: item.source,
+      selfCreated:
+        item.source === "inferred" &&
+        item.taskId === this.taskId &&
+        item.sourceRef?.store === "agent_tool" &&
+        aliases.length === 0,
+    };
+  }
+
+  /** Delete a memory item (and the legacy record it mirrors), as the Memory Hub does. */
+  private async deleteItem(id: string): Promise<void> {
     const hub = new MemoryItemsHubService({
       getWriter: () => MemoryWriter.get(),
       legacy: createLegacyMemoryMirror(),
       syncKitFiles: (workspaceId) => this.syncKitFiles(workspaceId),
     });
     await hub.delete({ workspaceId: this.workspace.id, id });
-    return true;
   }
 
-  /** Delete an archive row owned by this workspace (never another workspace's import). */
-  private async forgetArchiveRow(id: string): Promise<boolean> {
+  /** An archive row owned by this workspace (never another workspace's import). */
+  private async findForgettableArchiveRow(id: string): Promise<ForgetTarget | null> {
     const [memory] = await MemoryService.getFullDetails([id]);
-    if (!memory || memory.workspaceId !== this.workspace.id) return false;
+    if (!memory || memory.workspaceId !== this.workspace.id) return null;
+    return { ref: `archive:${id}`, content: String(memory.content ?? ""), selfCreated: false };
+  }
+
+  private async deleteArchiveRow(id: string): Promise<boolean> {
     return (await MemoryService.deleteEntries(this.workspace.id, [id])) > 0;
+  }
+
+  /**
+   * Ask the user before a memory is deleted. Deletes are destructive and a prompt-injected
+   * agent could otherwise erase what the user told CoWork, so this goes through the
+   * permission engine as a delete (`memory_delete`): it prompts in the default and
+   * dangerous-only modes and is allowed only by bypass modes or a rule the user saved.
+   * A fact this task's agent inferred itself (`memory_remember` without the user asking,
+   * not merged with any other record) is forgotten without a prompt.
+   */
+  private async confirmForget(target: ForgetTarget, reason?: unknown): Promise<boolean> {
+    if (target.selfCreated) return true;
+    if (typeof this.daemon.requestApproval !== "function") return false;
+    const preview = target.content.replace(/\s+/g, " ").trim().slice(0, 160);
+    try {
+      return (
+        (await this.daemon.requestApproval(
+          this.taskId,
+          "memory_delete",
+          `Forget a saved memory: "${preview}"`,
+          {
+            tool: MEMORY_FORGET_TOOL,
+            memory: target.ref,
+            content: preview,
+            ...(target.source ? { source: target.source } : {}),
+            ...(typeof reason === "string" && reason.trim()
+              ? { reason: reason.trim().slice(0, 300) }
+              : {}),
+          },
+        )) === true
+      );
+    } catch {
+      return false;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1067,6 +1173,14 @@ export class MemoryTools {
         return withNotice(await this.remember({ content: input?.content, kind }, routing));
       }
       case "memory_curate":
+        if (this.thirdPartyGatewaySender()) {
+          // SEC-16: curated entries feed the user's profile kit (USER.md / MEMORY.md).
+          return withNotice({
+            success: false,
+            error:
+              "This task came from someone other than the workspace owner; curated memory is not changed for them. Use memory_remember.",
+          });
+        }
         if (this.workspace.permissions?.write === false) {
           return withNotice({
             success: false,
@@ -1249,6 +1363,22 @@ export class MemoryTools {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The contact reference of the channel sender when this task came from someone other
+   * than the workspace owner (SEC-16), else null.
+   */
+  private thirdPartyGatewaySender(): string | null {
+    let task: ReturnType<AgentDaemon["getTask"]> | undefined;
+    try {
+      task = this.daemon.getTask?.(this.taskId);
+    } catch {
+      task = undefined;
+    }
+    if (!isThirdPartyGatewayTask(task)) return null;
+    const ref = task?.agentConfig?.gatewaySenderRef;
+    return typeof ref === "string" && ref.trim() ? ref.trim().slice(0, 200) : "unattributed";
   }
 
   /** Supermemory may be queried: the workspace allows network access at all. */

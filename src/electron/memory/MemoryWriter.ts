@@ -19,6 +19,14 @@ import type Database from "better-sqlite3";
 import { createLogger } from "../utils/logger";
 import { bumpHotMemoryVersion } from "./hot-memory-version";
 import { MemoryItemsRepository } from "./MemoryItemsRepository";
+import { MemoryCurationRepository } from "./MemoryCurationRepository";
+import type {
+  CurationApplyOutcome,
+  CurationApplyRequest,
+  CurationItemOperation,
+  CurationStoreOperation,
+  CurationUndoOutcome,
+} from "./memory-curation-sql";
 import type { MemoryStatementPort } from "./memory-statement-port";
 import {
   MEMORY_ITEM_TRUST,
@@ -143,8 +151,21 @@ export type MemoryItemsRepositoryPort = Pick<
   | "setKitRenderState"
 >;
 
+export type MemoryCurationPort = Pick<MemoryCurationRepository, "apply" | "undo">;
+
+/** One curator operation as MemoryWriter takes it; a promotion carries a candidate. */
+export interface MemoryCurationApplyInput extends Omit<CurationApplyRequest, "operation" | "now"> {
+  operation: CurationItemOperation | { op: "promote"; candidate: MemoryCandidate };
+}
+
+export type MemoryCurationApplyResult =
+  | CurationApplyOutcome
+  | Extract<MemoryWriteResult, { status: "skipped" }>;
+
 export interface MemoryWriterDeps {
   repository: MemoryItemsRepositoryPort;
+  /** The curator's apply/undo store (memory-curation-sql.ts); absent in minimal writers. */
+  curation?: MemoryCurationPort;
   /** Workspace memory settings; null or a throw means "no settings" (allowed). */
   getWorkspacePolicy?: (workspaceId: string) => Promise<MemoryWorkspacePolicy | null>;
   now?: () => number;
@@ -199,6 +220,7 @@ export class MemoryWriter {
       this.instance = new MemoryWriter({
         ...options,
         repository: new MemoryItemsRepository(source),
+        curation: new MemoryCurationRepository(source),
       });
     }
     return this.instance;
@@ -252,6 +274,67 @@ export class MemoryWriter {
   /** Run `ingest` for one candidate; see the file comment for the pipeline. */
   ingest(candidate: MemoryCandidate): Promise<MemoryWriteResult> {
     return this.serialize(() => this.ingestNow(candidate));
+  }
+
+  /**
+   * Apply one memory-curator operation (Dreaming, docs/memory-engine.md §9) with its audit
+   * log row, atomically. A promotion's candidate runs this writer's salience, redaction and
+   * policy steps first. The store refuses items of another workspace, inactive items, and
+   * (unless the user accepted the change) items the user stated or confirmed.
+   */
+  applyCuration(input: MemoryCurationApplyInput): Promise<MemoryCurationApplyResult> {
+    return this.serialize(async () => {
+      const curation = this.requireCuration();
+      let operation: CurationStoreOperation;
+      if (input.operation.op === "promote") {
+        const prepared = await this.prepareWrite(input.operation.candidate);
+        if (!prepared.ok) return prepared.result;
+        operation = { op: "promote", write: prepared.write };
+      } else {
+        operation = input.operation;
+      }
+      const outcome = await curation.apply({
+        workspaceId: input.workspaceId,
+        runId: input.runId,
+        candidateId: input.candidateId,
+        origin: input.origin,
+        fingerprint: input.fingerprint,
+        summary: input.summary,
+        rationale: input.rationale,
+        allowProtected: input.allowProtected,
+        operation,
+        now: this.now(),
+      });
+      if (outcome.status === "applied") {
+        this.afterChange({
+          kind: "status",
+          itemIds: outcome.changedIds,
+          workspaceId: input.workspaceId,
+        });
+      }
+      return outcome;
+    });
+  }
+
+  /** Undo a logged curation operation (restores the touched items' prior state). */
+  undoCuration(logId: string, workspaceId: string): Promise<CurationUndoOutcome> {
+    return this.serialize(async () => {
+      const outcome = await this.requireCuration().undo(logId, workspaceId, this.now());
+      if (outcome.status === "undone") {
+        this.afterChange({ kind: "status", itemIds: outcome.changedIds, workspaceId });
+      }
+      return outcome;
+    });
+  }
+
+  /** Whether curation writes are available (a curation store was configured). */
+  get supportsCuration(): boolean {
+    return Boolean(this.deps.curation);
+  }
+
+  private requireCuration(): MemoryCurationPort {
+    if (!this.deps.curation) throw new Error("Memory curation store is not configured");
+    return this.deps.curation;
   }
 
   /** Close the items of a legacy record (all of its revisions). */
@@ -315,15 +398,48 @@ export class MemoryWriter {
   }
 
   private async ingestNow(candidate: MemoryCandidate): Promise<MemoryWriteResult> {
+    const prepared = await this.prepareWrite(candidate);
+    if (!prepared.ok) return prepared.result;
+    const { write, redactions } = prepared;
+    const outcome = await this.deps.repository.ingest(write);
+    if (outcome.action === "skipped") {
+      return { status: "skipped", reason: outcome.reason, holderId: outcome.holderId };
+    }
+
+    // 7–8. Invalidate caches and notify.
+    this.afterChange({
+      kind: "written",
+      itemIds: [outcome.item.id, ...outcome.supersededIds],
+      workspaceId: outcome.item.workspaceId,
+      scope: outcome.item.scope,
+    });
+    return {
+      status: "written",
+      action: outcome.action,
+      item: outcome.item,
+      supersededIds: outcome.supersededIds,
+      redactions,
+    };
+  }
+
+  /** Steps 1–3 (salience, redaction, policy) and the prepared write for steps 4–6. */
+  private async prepareWrite(
+    candidate: MemoryCandidate,
+  ): Promise<
+    | { ok: true; write: PreparedMemoryItemWrite; redactions: number }
+    | { ok: false; result: Extract<MemoryWriteResult, { status: "skipped" }> }
+  > {
+    const skip = (reason: MemoryWriteSkipReason) =>
+      ({ ok: false, result: { status: "skipped", reason } }) as const;
     // 1. Salience.
     let content = normalizeMemoryItemContent(candidate.content);
-    if (!content) return { status: "skipped", reason: "empty" };
+    if (!content) return skip("empty");
     if (
       content.length < MIN_SALIENT_CHARS ||
       !/[\p{L}\p{N}]/u.test(content) ||
       RAW_TELEMETRY.test(content)
     ) {
-      return { status: "skipped", reason: "low_salience" };
+      return skip("low_salience");
     }
 
     // 2. Redaction.
@@ -334,18 +450,18 @@ export class MemoryWriter {
         .split(REDACTED_SECRET)
         .join(" ")
         .replace(/[^\p{L}\p{N}]+/gu, "");
-      if (remainder.length < MIN_SALIENT_CHARS) return { status: "skipped", reason: "secret_only" };
+      if (remainder.length < MIN_SALIENT_CHARS) return skip("secret_only");
     }
 
     // 3. Policy.
     const scope = this.resolveScope(candidate);
-    if (!scope) return { status: "skipped", reason: "invalid_scope" };
+    if (!scope) return skip("invalid_scope");
     if (candidate.source === "third_party" && scope.scope !== "contact" && scope.scope !== "task") {
       // Third-party text (mail, screen, other people) never becomes a fact about the user.
-      return { status: "skipped", reason: "third_party_scope" };
+      return skip("third_party_scope");
     }
     if (candidate.noMemory || containsNoMemoryDirective(candidate.originText)) {
-      return { status: "skipped", reason: "no_memory" };
+      return skip("no_memory");
     }
     const mode = candidate.mode ?? "live";
     let privacy: MemoryItemPrivacy =
@@ -356,13 +472,13 @@ export class MemoryWriter {
       if (policy) {
         const disabled = !policy.enabled || policy.privacyMode === "disabled";
         if (disabled && !EXPLICIT_SOURCES.has(candidate.source)) {
-          return { status: "skipped", reason: "memory_disabled" };
+          return skip("memory_disabled");
         }
         if (policy.privacyMode === "strict") privacy = "private";
       }
     }
 
-    // 4–6. Dedupe, supersede and persist, atomically.
+    // The write for steps 4–6 (dedupe, supersede, persist), which run atomically in the store.
     const contentHash = hashMemoryItemContent(content);
     const named = normalizeSubjectKey(candidate.subjectKey);
     const inferredName =
@@ -400,25 +516,7 @@ export class MemoryWriter {
         ? { createdAt: Math.floor(candidate.createdAt) }
         : {}),
     };
-    const outcome = await this.deps.repository.ingest(write);
-    if (outcome.action === "skipped") {
-      return { status: "skipped", reason: outcome.reason, holderId: outcome.holderId };
-    }
-
-    // 7–8. Invalidate caches and notify.
-    this.afterChange({
-      kind: "written",
-      itemIds: [outcome.item.id, ...outcome.supersededIds],
-      workspaceId: outcome.item.workspaceId,
-      scope: outcome.item.scope,
-    });
-    return {
-      status: "written",
-      action: outcome.action,
-      item: outcome.item,
-      supersededIds: outcome.supersededIds,
-      redactions: redaction.count,
-    };
+    return { ok: true, write, redactions: redaction.count };
   }
 
   private resolveScope(

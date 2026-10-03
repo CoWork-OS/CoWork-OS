@@ -15,6 +15,9 @@ import {
   type VectorCandidate,
 } from "./markdown-index-sql";
 import { MARKDOWN_INDEX_READS, MARKDOWN_INDEX_WRITES } from "./markdown-index-units";
+import { isExcludedMarkdownIndexPath } from "./markdown-index-exclusions";
+
+export { isExcludedMarkdownIndexPath } from "./markdown-index-exclusions";
 import { createMemoryStatementPort } from "./memory-statement-port";
 
 export {
@@ -53,22 +56,6 @@ const IGNORED_DIRS = new Set([
 const INDEX_ROOT_DIRNAME = ".cowork";
 
 /**
- * Paths (relative to the index root) that hold generated or bulk artifacts, not
- * memory: kit history snapshots, subconscious and chronicle artifacts, raw
- * transcripts, generated topic packs, lock files, scratch files and scratchpads.
- */
-const EXCLUDED_INDEX_PREFIXES = [
-  ".history/",
-  "subconscious/",
-  "chronicle/",
-  "memory/transcripts/",
-  "memory/topics/",
-  "memory/locks/",
-  "tmp/",
-] as const;
-const EXCLUDED_INDEX_BASENAME = /^scratchpad[-_.]/i;
-
-/**
  * Resolve the index root for a workspace. Callers pass either the workspace root
  * or `<workspace>/.cowork`; both map to `<workspace>/.cowork`, so mixed callers no
  * longer re-root the index (and delete and rebuild it) on every switch.
@@ -78,21 +65,6 @@ export function resolveMarkdownIndexRoot(workspacePath: string): string {
   return path.basename(resolved) === INDEX_ROOT_DIRNAME
     ? resolved
     : path.join(resolved, INDEX_ROOT_DIRNAME);
-}
-
-/** Whether an index-root-relative path is excluded from the markdown index. */
-export function isExcludedMarkdownIndexPath(relPath: string): boolean {
-  const normalized = String(relPath || "")
-    .replace(/\\/g, "/")
-    .replace(/^\.\/+/, "");
-  if (!normalized) return true;
-  // Rows written when the index was rooted at the workspace root (or outside
-  // `.cowork`) are stale under the normalized root.
-  if (normalized.startsWith("../") || normalized.startsWith(`${INDEX_ROOT_DIRNAME}/`)) return true;
-  if (EXCLUDED_INDEX_PREFIXES.some((prefix) => normalized.startsWith(prefix))) return true;
-  const segments = normalized.split("/");
-  if (segments.some((segment) => segment === ".history")) return true;
-  return EXCLUDED_INDEX_BASENAME.test(segments[segments.length - 1] || "");
 }
 
 /**

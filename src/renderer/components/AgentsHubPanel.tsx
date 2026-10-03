@@ -203,6 +203,7 @@ const APPROVAL_TYPE_LABELS: Record<ApprovalType, string> = {
   workspace_write: "Workspace write",
   delete_file: "Delete file",
   delete_multiple: "Delete multiple",
+  memory_delete: "Forget a memory",
   bulk_rename: "Bulk rename",
   network_access: "Network access",
   external_file_access: "External file access",

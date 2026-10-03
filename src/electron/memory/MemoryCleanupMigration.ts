@@ -23,7 +23,9 @@
 
 import type Database from "better-sqlite3";
 import { createMemoryStatementPort } from "./memory-statement-port";
+import { withMaintenanceClaim } from "./maintenance-claim-sql";
 import {
+  MEMORY_CLEANUP_MIGRATION_KEY,
   MEMORY_CLEANUP_PHASES,
   emptyMemoryCleanupCounts,
   type MemoryCleanupCounts,
@@ -63,9 +65,21 @@ export async function runMemoryCleanupMigration(
 ): Promise<MemoryCleanupResult> {
   const sql = createMemoryStatementPort(db);
   const counts = emptyMemoryCleanupCounts();
-  if (!(await sql.unit("memoryCleanup_pending", {}))) {
-    return { ran: false, counts, workspaceIds: [], memoryIds: [] };
-  }
+  const notRun: MemoryCleanupResult = { ran: false, counts, workspaceIds: [], memoryIds: [] };
+  if (!(await sql.unit("memoryCleanup_pending", {}))) return notRun;
+  // The desktop app and the node daemon may share the profile: only the process that
+  // claims the run executes it (the claim re-checks the marker atomically).
+  const result = await withMaintenanceClaim(sql, MEMORY_CLEANUP_MIGRATION_KEY, () =>
+    runCleanupPhases(sql, counts, options),
+  );
+  return result ?? notRun;
+}
+
+async function runCleanupPhases(
+  sql: ReturnType<typeof createMemoryStatementPort>,
+  counts: MemoryCleanupCounts,
+  options: MemoryCleanupOptions,
+): Promise<MemoryCleanupResult> {
   const workspaceIds = new Set<string>();
   const memoryIds = new Set<string>();
   const pause = options.yieldBetweenPhases ?? (async () => undefined);

@@ -386,6 +386,22 @@ describe("browser integration desktop methods", () => {
         { id: emailChannel.id, config: { imapPort: 1993, tokenExpiresAt: 456 } },
       ]),
     ).resolves.toEqual({ updated: true });
+    // SEC-16 owner accounts: allowed on every channel type, normalized, and validated.
+    await expect(
+      invoke(methods, "updateGatewayChannel", [
+        { id: discordChannel.id, config: { ownerUserIds: [" 1234567890 ", "1234567890"] } },
+      ]),
+    ).resolves.toEqual({ updated: true });
+    await expect(
+      invoke(methods, "updateGatewayChannel", [
+        { id: discordChannel.id, config: { ownerUserIds: ["has space"] } },
+      ]),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    await expect(
+      invoke(methods, "updateGatewayChannel", [
+        { id: discordChannel.id, config: { ownerUserIds: "1234567890" } },
+      ]),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
 
     const health = await invoke(methods, "getGatewayChannelHealth", [added.id]);
     expect(health).toMatchObject({

@@ -11,6 +11,7 @@ export const ASSISTANT_APPROVAL_QUESTION_ID = "approval_decision";
 const HIGH_IMPACT_APPROVAL_TYPES = new Set<ApprovalType>([
   "delete_file",
   "delete_multiple",
+  "memory_delete",
   "bulk_rename",
   "external_file_access",
   "external_service",
@@ -144,7 +145,9 @@ export function buildAssistantApprovalRequest(
             label: allowLabel,
             description:
               taskConsent ||
-              `Continue this ${normalizeText(approvalType, 80) || "operation"} only once.`,
+              (approvalType === "memory_delete"
+                ? "Forget this memory."
+                : `Continue this ${normalizeText(approvalType, 80) || "operation"} only once.`),
           },
         ],
       },

@@ -1,0 +1,136 @@
+{
+  "id": "memory-injection-v1",
+  "description": "Prompt injection of memory per context: MemoryInjectionPolicy decides the layers, MemoryContextBuilder renders L0 and L1. Every item carries a unique marker; forbidden markers must never appear in a context's blocks, each subject appears once and blocks stay within their budget. Filler facts push the blocks past their budgets.",
+  "focus": "deploy release staging canary invoice timezone answers",
+  "budgets": { "l0Tokens": 600, "l1Tokens": 400 },
+  "thresholds": { "leaks": 0, "duplicateSubjects": 0, "duplicateContent": 0, "budgetOverflows": 0 },
+  "fillerFacts": 60,
+  "workspaces": [
+    { "key": "atlas", "name": "Atlas" },
+    { "key": "harbor", "name": "Harbor" }
+  ],
+  "items": [
+    {
+      "key": "own-rule",
+      "workspace": "atlas",
+      "kind": "rule",
+      "pinned": true,
+      "content": "MK-OWNRULE deploys go to staging first and production needs a green canary."
+    },
+    {
+      "key": "own-length",
+      "kind": "preference",
+      "subject": "response_length",
+      "content": "MK-LENGTH keep answers to three sentences."
+    },
+    {
+      "key": "own-length-ws",
+      "workspace": "atlas",
+      "kind": "preference",
+      "subject": "response_length",
+      "source": "curated",
+      "content": "MK-WSLENGTH answers in this workspace may be longer."
+    },
+    {
+      "key": "own-tz",
+      "kind": "preference",
+      "subject": "timezone",
+      "content": "MK-TZ timezone is Europe/Istanbul."
+    },
+    {
+      "key": "own-dup-global",
+      "kind": "rule",
+      "content": "MK-DUP never force-push release branches."
+    },
+    {
+      "key": "own-dup-workspace",
+      "workspace": "atlas",
+      "kind": "rule",
+      "content": "MK-DUP never force-push release branches."
+    },
+    {
+      "key": "own-invoice",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "source": "inferred",
+      "content": "MK-INVOICE invoice PDFs come from src/billing/invoice-export.ts."
+    },
+    {
+      "key": "private-note",
+      "workspace": "atlas",
+      "kind": "project_fact",
+      "privacy": "private",
+      "content": "MK-PRIVATE the staging release is blocked by a confidential legal review."
+    },
+    {
+      "key": "third-party",
+      "workspace": "atlas",
+      "scope": "contact",
+      "scopeRef": "contact-acme",
+      "kind": "insight",
+      "source": "third_party",
+      "content": "MK-THIRDPARTY Acme says the release canary must wait for their audit."
+    },
+    {
+      "key": "foreign",
+      "workspace": "harbor",
+      "kind": "rule",
+      "content": "MK-FOREIGN harbor deploys go straight to production without staging."
+    },
+    {
+      "key": "other-task",
+      "workspace": "atlas",
+      "scope": "task",
+      "scopeRef": "other-task",
+      "kind": "project_fact",
+      "content": "MK-OTHERTASK the staging deploy for another task uses release 4.2."
+    },
+    {
+      "key": "forgotten",
+      "workspace": "atlas",
+      "kind": "rule",
+      "forgotten": true,
+      "content": "MK-FORGOTTEN deploy only on Fridays."
+    }
+  ],
+  "contexts": [
+    { "id": "private", "input": {}, "expectBlocks": true, "allowed": ["private-note"] },
+    {
+      "id": "private-strict-sub-agent",
+      "input": { "isSubAgent": true, "retainMemory": true },
+      "expectBlocks": true,
+      "allowed": []
+    },
+    { "id": "group", "input": { "gatewayContext": "group" }, "expectBlocks": false, "allowed": [] },
+    {
+      "id": "group-trusted",
+      "input": { "gatewayContext": "group", "allowSharedContextMemory": true },
+      "expectBlocks": true,
+      "allowed": []
+    },
+    {
+      "id": "public",
+      "input": { "gatewayContext": "public" },
+      "expectBlocks": false,
+      "allowed": []
+    },
+    { "id": "sub-agent", "input": { "isSubAgent": true }, "expectBlocks": false, "allowed": [] },
+    {
+      "id": "verifier",
+      "input": { "workerRole": "verifier" },
+      "expectBlocks": false,
+      "allowed": []
+    },
+    { "id": "no-memory", "input": { "noMemory": true }, "expectBlocks": false, "allowed": [] },
+    {
+      "id": "memory-off",
+      "input": { "workspaceSettings": { "enabled": false } },
+      "expectBlocks": false,
+      "allowed": []
+    }
+  ],
+  "alwaysForbidden": ["third-party", "foreign", "other-task", "forgotten"],
+  "privateOnly": ["private-note"],
+  "singleValued": { "response_length": ["own-length", "own-length-ws"] },
+  "mustKeepInPrivate": ["own-rule"]
+}

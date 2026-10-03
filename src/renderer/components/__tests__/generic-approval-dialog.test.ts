@@ -62,6 +62,32 @@ describe("GenericApprovalDialog", () => {
     expect(html).not.toContain("Approve all for");
   });
 
+  it("shows the memory and its source when the agent asks to forget a memory", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(GenericApprovalDialog, {
+        approval: makeApproval({
+          type: "memory_delete",
+          description: 'Forget a saved memory: "The user prefers dark mode"',
+          details: {
+            tool: "memory_forget",
+            memory: "memory:abc",
+            content: "The user prefers dark mode",
+            source: "user_stated",
+            reason: "outdated",
+          },
+        }),
+        onRespond: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("Forget a memory");
+    expect(html).not.toContain("Delete multiple items");
+    expect(html).toContain("forget memory");
+    expect(html).toContain("The user prefers dark mode");
+    expect(html).toContain("You said");
+    expect(html).toContain("outdated");
+  });
+
   it("explains open_application approvals with the concrete app and system action", () => {
     const html = renderToStaticMarkup(
       React.createElement(GenericApprovalDialog, {

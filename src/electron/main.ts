@@ -164,9 +164,15 @@ import { BoxBrainService } from "./memory/BoxBrainService";
 import { MemoryRetentionService } from "./memory/MemoryRetentionService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
 import { startMemoryEngine } from "./memory/memory-engine-bootstrap";
+import { MemoryWriter } from "./memory/MemoryWriter";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
 import { DreamingRepository } from "./memory/DreamingRepository";
-import { DreamingService } from "./memory/DreamingService";
+import {
+  DREAMING_DAILY_INTERVAL_MS,
+  MEMORY_CURATION_ACTIVE_WINDOW_MS,
+} from "./memory/DreamingService";
+import { MemoryCurationRepository } from "./memory/MemoryCurationRepository";
+import { createDreamingService } from "./memory/memory-review-wiring";
 import { MemoryPressureService } from "./memory/MemoryPressureService";
 import { loadPolicies } from "./admin/policies";
 import { evaluateWorkspaceFilesystemAccess } from "./security/access-profile-paths";
@@ -387,6 +393,8 @@ let coreLearningPipelineService: CoreLearningPipelineService | null = null;
 let detachTaskLifecycleSync: (() => void) | null = null;
 let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
 let memoryRetentionService: MemoryRetentionService | null = null;
+/** Stops the memory engine's deferred jobs (lane migration, read-side syncs). */
+let stopMemoryEngine: (() => void) | null = null;
 let tempSandboxProfilePruneTimer: NodeJS.Timeout | null = null;
 let coreMemoryDistillTimer: NodeJS.Timeout | null = null;
 const TEMP_WORKSPACE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -2117,10 +2125,10 @@ if (isMacSafeStorageMigrationWorker) {
         // legacy lanes are copied in once, well after startup (docs/memory-engine.md).
         const memoryStatements = MemoryService.getStatements();
         if (memoryStatements) {
-          const stopMemoryEngine = startMemoryEngine(memoryStatements, {
+          // Stopped (and its queued writes flushed) by the "memory engine" shutdown step.
+          stopMemoryEngine = startMemoryEngine(memoryStatements, {
             getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
           });
-          app.on("will-quit", stopMemoryEngine);
         }
 
         // Initialize FTS worker thread for off-main-thread memory search
@@ -3131,31 +3139,60 @@ if (isMacSafeStorageMigrationWorker) {
             signalCount,
             heartbeatRunId,
             readGuard,
+            trigger,
           }) => {
-            const pressureInstructions = MemoryPressureService.buildCompactionInstructions(
-              await MemoryPressureService.analyze(workspacePath, readGuard),
-            );
-            const result = await new DreamingService(
-              new DreamingRepository(dbManager.getDatabase()),
-            ).run({
+            const pressureInstructions =
+              trigger === "daily"
+                ? ""
+                : MemoryPressureService.buildCompactionInstructions(
+                    await MemoryPressureService.analyze(workspacePath, readGuard),
+                  );
+            const result = await createDreamingService(dbManager.getDatabase()).run({
               workspaceId,
               workspacePath,
               triggerSource: "heartbeat",
               triggerHeartbeatRunId: heartbeatRunId,
               instructions: [
-                `Heartbeat saw ${signalCount} memory signal(s): ${reason}`,
+                trigger === "daily"
+                  ? "Daily idle curation."
+                  : `Heartbeat saw ${signalCount} memory signal(s): ${reason}`,
                 pressureInstructions,
               ]
                 .filter(Boolean)
                 .join("\n\n"),
               readGuard,
+              // The daily pass is due by definition; signal and pressure runs keep the cooldown.
+              bypassCooldown: trigger === "daily",
             });
             return {
               id: result.run.id,
               status: result.run.status,
               candidateCount: result.candidates.length,
+              appliedCount: result.appliedLogIds?.length ?? 0,
               skipped: result.skipped,
             };
+          },
+          findMemoryCurationWorkspace: async (preferredWorkspaceId) => {
+            const contexts = workspaceRepo
+              .findAll()
+              .filter(
+                (workspace) =>
+                  workspace.path && !workspace.isTemp && !isTempWorkspaceId(workspace.id),
+              );
+            const ordered = [
+              ...contexts.filter((workspace) => workspace.id === preferredWorkspaceId),
+              ...contexts.filter((workspace) => workspace.id !== preferredWorkspaceId),
+            ];
+            const now = Date.now();
+            const due = await new MemoryCurationRepository(
+              new DreamingRepository(db).statementPort,
+            ).dueWorkspaces(
+              ordered.map((workspace) => workspace.id).slice(0, 500),
+              now - MEMORY_CURATION_ACTIVE_WINDOW_MS,
+              now - DREAMING_DAILY_INTERVAL_MS,
+            );
+            const next = ordered.find((workspace) => workspace.id === due[0]);
+            return next ? { workspaceId: next.id, workspacePath: next.path } : null;
           },
           addNotification: async (params) => {
             const notificationService = getNotificationService();
@@ -4462,8 +4499,6 @@ if (isMacSafeStorageMigrationWorker) {
               clearInterval(tempWorkspacePruneTimer);
               tempWorkspacePruneTimer = null;
             }
-            memoryRetentionService?.stop();
-            memoryRetentionService = null;
             if (tempSandboxProfilePruneTimer) {
               clearInterval(tempSandboxProfilePruneTimer);
               tempSandboxProfilePruneTimer = null;
@@ -4622,6 +4657,19 @@ if (isMacSafeStorageMigrationWorker) {
           name: "MCP servers",
           requiresQuiescence: true,
           run: () => MCPClientManager.getInstance().shutdown(),
+        },
+        // Stop the deferred memory jobs and let queued memory_items writes land before the
+        // database closes (as the node daemon does).
+        {
+          name: "memory engine",
+          requiresQuiescence: true,
+          run: async () => {
+            memoryRetentionService?.stop();
+            memoryRetentionService = null;
+            stopMemoryEngine?.();
+            stopMemoryEngine = null;
+            await MemoryWriter.get()?.flush();
+          },
         },
         // Conversation-index writes are batched (250 ms); write the queue before closing.
         {

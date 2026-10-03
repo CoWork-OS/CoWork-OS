@@ -1,0 +1,107 @@
+.memory-review-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.memory-review-card,
+.memory-review-change {
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memory-review-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.memory-review-title {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.memory-review-proposed {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.memory-review-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memory-review-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+
+.memory-review-role {
+  flex: 0 0 auto;
+  min-width: 72px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.memory-review-item-content {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.memory-review-item--drop .memory-review-item-content,
+.memory-review-item--merge .memory-review-item-content,
+.memory-review-item--archive .memory-review-item-content {
+  color: var(--color-text-secondary);
+}
+
+.memory-review-why {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.memory-review-evidence summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.memory-review-evidence ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.memory-review-badge {
+  margin-left: 6px;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--color-accent, var(--color-border));
+  color: var(--color-text-on-accent, var(--color-text-primary));
+  font-size: 11px;
+  line-height: 16px;
+  display: inline-block;
+  text-align: center;
+}

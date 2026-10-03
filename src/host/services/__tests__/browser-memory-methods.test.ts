@@ -399,6 +399,47 @@ describe("browser memory items (What CoWork knows)", () => {
     expect(full.memoryItems.delete).toHaveBeenCalledWith({ workspaceId: WS, id: "item-1" });
   });
 
+  it("attributes memory used per reply, like the desktop IPC", async () => {
+    const loadMemoryUsedTimeline = vi.fn(async (workspaceId: string, taskId: string) =>
+      workspaceId === WS && taskId === "task-1"
+        ? [
+            { id: "u1", type: "user_message", timestamp: 1, payload: {} },
+            {
+              id: "m1",
+              type: "memory_used",
+              timestamp: 2,
+              payload: { surface: "chat", refs: ["memory:item-1"] },
+            },
+            { id: "r1", type: "assistant_message", timestamp: 3, payload: {} },
+          ]
+        : null,
+    );
+    const definitions = createBrowserMemoryDefinitions({
+      resolveWorkspace: async (workspaceId) =>
+        workspaceId === WS ? ({ ...workspace, id: WS } as Workspace) : null,
+      memoryItems: {} as never,
+      loadMemoryUsedTimeline,
+    });
+    const method = definitions.getMemoryUsedForTask;
+    expect(method).toBeDefined();
+    const call = (args: unknown[]) => method.handler(method.validate?.(args) ?? args, {} as never);
+
+    await expect(call([{ workspaceId: WS, taskId: "task-1" }])).resolves.toMatchObject({
+      taskId: "task-1",
+      replies: { r1: { refs: ["memory:item-1"], surfaces: ["chat"] } },
+      replyEventIds: ["r1"],
+    });
+    // A task outside the workspace reads as "nothing used".
+    await expect(call([{ workspaceId: WS, taskId: "other" }])).resolves.toMatchObject({
+      replies: {},
+      replyEventIds: [],
+    });
+    await expect(
+      call([{ workspaceId: "8c1f9e5d-4b63-4e9f-8c2b-3a7d2e0f1b22", taskId: "task-1" }]),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(() => method.validate?.([{ workspaceId: WS, taskId: "task-1", extra: 1 }])).toThrow();
+  });
+
   it("validates payloads with the desktop schemas", async () => {
     const { call, memoryItems } = setupItems({});
     await expect(

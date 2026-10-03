@@ -42,7 +42,11 @@ let tmpDir: string;
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-feedback-lifecycle-"));
   fs.mkdirSync(path.join(tmpDir, ".cowork"), { recursive: true });
-  workspaces.set("ws-1", { id: "ws-1", path: tmpDir });
+  workspaces.set("ws-1", {
+    id: "ws-1",
+    path: tmpDir,
+    permissions: { read: true, write: true, delete: true, network: false, shell: false },
+  });
   tasks.set("task-a", { id: "task-a", title: "Draft", workspaceId: "ws-1", assignedAgentRoleId: "role-a" });
   tasks.set("task-b", { id: "task-b", title: "Edit", workspaceId: "ws-1", assignedAgentRoleId: "role-b" });
   recentTaskEventsOfType.mockClear();
@@ -55,6 +59,24 @@ afterEach(() => {
   workspaces.clear();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
+
+/** The pathGuard passed to the last kit write enforces the workspace access boundary. */
+function expectGuardDeniesProtectedPaths(): void {
+  const guard = writeKitFileWithSnapshot.mock.calls.at(-1)?.[4] as
+    | ((absPath: string, operation: "read" | "write") => void)
+    | undefined;
+  expect(typeof guard).toBe("function");
+  expect(() => guard!(path.join(tmpDir, ".cowork", "MISTAKES.md"), "write")).not.toThrow();
+  expect(() => guard!(path.join(tmpDir, ".cowork", "policy", "tools.monty"), "write")).toThrow(
+    /protected_path/,
+  );
+  expect(() => guard!(path.join(tmpDir, ".git", "hooks", "pre-commit"), "write")).toThrow(
+    /protected_path/,
+  );
+  expect(() => guard!(path.join(os.tmpdir(), "elsewhere", "MISTAKES.md"), "write")).toThrow(
+    /Access denied/,
+  );
+}
 
 describe("FeedbackService", () => {
   it("rebuilds patterns from the full 90-day pattern window", async () => {
@@ -92,13 +114,43 @@ describe("FeedbackService", () => {
       expect.stringContaining("Researcher: Too vague"),
       "agent",
       "service:feedback_flush",
+      expect.any(Function),
     );
+    expectGuardDeniesProtectedPaths();
 
     // Events after stop are ignored.
     writeKitFileWithSnapshot.mockClear();
     daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "Late" });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(writeKitFileWithSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("FeedbackService access boundary", () => {
+  it("skips feedback writes when the workspace access profile denies writes", async () => {
+    workspaces.set("ws-1", {
+      id: "ws-1",
+      path: tmpDir,
+      permissions: { read: true, write: false, delete: false, network: false, shell: false },
+    });
+    const daemon = new EventEmitter();
+    const service = new FeedbackService({} as never);
+    await service.start(daemon as unknown as AgentDaemon);
+    daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "Too vague" });
+    await vi.waitFor(() => {
+      expect((service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size).toBe(1);
+    });
+
+    await service.stop();
+
+    expect(fs.existsSync(path.join(tmpDir, ".cowork", "feedback"))).toBe(false);
+    // The kit write (mocked here) receives a guard that refuses the write.
+    const guard = writeKitFileWithSnapshot.mock.calls.at(-1)?.[4] as
+      | ((absPath: string, operation: "read" | "write") => void)
+      | undefined;
+    expect(() => guard!(path.join(tmpDir, ".cowork", "MISTAKES.md"), "write")).toThrow(
+      /Access denied/,
+    );
   });
 });
 
@@ -127,6 +179,8 @@ describe("CrossSignalService", () => {
       expect.stringContaining("acme.com"),
       "agent",
       "service:cross_signals_flush",
+      expect.any(Function),
     );
+    expectGuardDeniesProtectedPaths();
   });
 });

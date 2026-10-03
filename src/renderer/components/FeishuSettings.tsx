@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import {
   ChannelData,
   ChannelUserData,
@@ -414,6 +415,12 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
           isSaving={savingPolicy}
         />
       </div>
+
+      <ChannelOwnerSettings
+        channel={channel}
+        users={users}
+        onSaved={(config) => setChannel((prev) => (prev ? { ...prev, config } : prev))}
+      />
 
       <div className="settings-section">
         <h3>Authorized Users</h3>

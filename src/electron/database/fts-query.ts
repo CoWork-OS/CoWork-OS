@@ -31,6 +31,12 @@ export interface FtsQueryOptions {
   maxTermLength?: number;
   /** Terms shorter than this (in code points) are dropped. */
   minTermLength?: number;
+  /**
+   * Drop stopwords (`the`, `when`, `und`, `ve`…) unless nothing else is left. Defaults to
+   * on for `any` queries in `buildFtsMatchQuery` (an OR over "the" matches everything) and
+   * off elsewhere; `all` queries keep every term.
+   */
+  dropStopwords?: boolean;
 }
 
 export const FTS_DEFAULT_MAX_TERMS = 12;
@@ -67,6 +73,49 @@ export function foldForMatch(text: string): string {
 }
 
 /**
+ * Function words in English, German, Turkish, French and Spanish, folded with
+ * `foldForMatch`. Dropped by `extractKeywords`, and from any-term (OR) queries, where a
+ * match on "the" or "when" would otherwise rank unrelated rows.
+ */
+const STOPWORDS = new Set(
+  [
+    // English
+    "a an the and or not but if then else of to in on at by for from with without into onto",
+    "is are was were be been being am do does did done doing have has had having can could",
+    "will would shall should may might must this that these those it its it's i me my mine we",
+    "us our you your he him his she her they them their there here what which who whom whose",
+    "when where why how all any each every some such no nor only own same so than too very",
+    "just also again about above below after before between through during up down out off",
+    "over under more most other into until while as because please thanks thank hi hello",
+    "let let's make use using used want need like get got go going via etc ok okay yes",
+    "one two new now then via per",
+    // German
+    "der die das den dem des ein eine einer eines einem einen und oder nicht ist sind war",
+    "mit für von zu zum zur im in auf aus bei nach über unter wie was wer wo auch noch",
+    "bitte ich du er sie es wir ihr mich mir dich dir uns euch kann können soll sollen",
+    // Turkish
+    "ve veya ile bir bu şu o için gibi da de ki mi mı mu mü ne ama fakat çok daha en",
+    "olarak olan ise ya hem lütfen bana beni sen ben biz siz onlar",
+    "nasıl neden niçin nerede kim hangi",
+    "wann warum welche welcher welches",
+    // French / Spanish (common accents)
+    "le la les un une des et ou est sont avec pour dans sur pas que qui el los las y o es",
+    "con por para en del al lo",
+    "quand comment pourquoi où quel quelle ce cette nous vous je tu il elle ils",
+    "cuándo cuando cómo como qué quién dónde este esta nosotros usted yo",
+  ]
+    .join(" ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => foldForMatch(word)),
+);
+
+/** Whether `term` is a function word of the stopword list (case- and accent-insensitive). */
+export function isFtsStopword(term: string): boolean {
+  return STOPWORDS.has(foldForMatch(term));
+}
+
+/**
  * Extract the search terms of `text`: Unicode word runs (with in-word joiners kept),
  * de-duplicated case- and accent-insensitively, bare FTS operator words removed
  * (unless they are the only term), capped in length and count.
@@ -81,6 +130,7 @@ export function extractFtsTerms(text: string, options: FtsQueryOptions = {}): st
   const seen = new Set<string>();
   const terms: string[] = [];
   const operators: string[] = [];
+  const stopwords: string[] = [];
   for (const match of input.matchAll(TERM_PATTERN)) {
     const term = cutCodePoints(match[0], maxTermLength);
     if (codePointLength(term) < minTermLength) continue;
@@ -91,11 +141,18 @@ export function extractFtsTerms(text: string, options: FtsQueryOptions = {}): st
       operators.push(term);
       continue;
     }
+    if (options.dropStopwords === true && STOPWORDS.has(key)) {
+      stopwords.push(term);
+      continue;
+    }
     terms.push(term);
     if (terms.length >= maxTerms) break;
   }
+  if (terms.length > 0) return terms;
+  // A query of only stopwords ("what is this") is still searched rather than emptied.
+  if (stopwords.length > 0) return stopwords.slice(0, maxTerms);
   // "not" alone is a legitimate (quoted) search; operators only drop next to real terms.
-  return terms.length > 0 ? terms : operators.slice(0, 1);
+  return operators.slice(0, 1);
 }
 
 /** Quote one term as an FTS5 string literal (terms never contain `"`, but stay safe). */
@@ -109,7 +166,10 @@ export function quoteFtsTerm(term: string, prefix = false): string {
  * The result only contains quoted terms, optional `*` prefix markers and AND/OR.
  */
 export function buildFtsMatchQuery(text: string, options: FtsQueryOptions = {}): string | null {
-  const terms = extractFtsTerms(text, options);
+  const terms = extractFtsTerms(text, {
+    ...options,
+    dropStopwords: options.dropStopwords ?? options.mode === "any",
+  });
   if (terms.length === 0) return null;
   const joiner = options.mode === "any" ? " OR " : " AND ";
   return terms.map((term) => quoteFtsTerm(term, options.prefix === true)).join(joiner);
@@ -153,35 +213,6 @@ export function likeContainsPattern(text: string): string {
 // ---------------------------------------------------------------------------
 // Keyword extraction (long prompt → short query)
 // ---------------------------------------------------------------------------
-
-const STOPWORDS = new Set(
-  [
-    // English
-    "a an the and or not but if then else of to in on at by for from with without into onto",
-    "is are was were be been being am do does did done doing have has had having can could",
-    "will would shall should may might must this that these those it its it's i me my mine we",
-    "us our you your he him his she her they them their there here what which who whom whose",
-    "when where why how all any each every some such no nor only own same so than too very",
-    "just also again about above below after before between through during up down out off",
-    "over under more most other into until while as because please thanks thank hi hello",
-    "let let's make use using used want need like get got go going via etc ok okay yes",
-    "one two new now then via per",
-    // German
-    "der die das den dem des ein eine einer eines einem einen und oder nicht ist sind war",
-    "mit für von zu zum zur im in auf aus bei nach über unter wie was wer wo auch noch",
-    "bitte ich du er sie es wir ihr mich mir dich dir uns euch kann können soll sollen",
-    // Turkish
-    "ve veya ile bir bu şu o için gibi da de ki mi mı mu mü ne ama fakat çok daha en",
-    "olarak olan ise ya hem lütfen bana beni sen ben biz siz onlar",
-    // French / Spanish (common accents)
-    "le la les un une des et ou est sont avec pour dans sur pas que qui el los las y o es",
-    "con por para en del al lo",
-  ]
-    .join(" ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => foldForMatch(word)),
-);
 
 /**
  * The most distinctive terms of a long text, at most `maxTerms` (≤ 12 by default):

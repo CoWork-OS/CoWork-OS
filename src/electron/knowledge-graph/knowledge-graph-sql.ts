@@ -13,7 +13,14 @@ import type {
   KGSubgraph,
   KGStats,
 } from "../../shared/knowledge-graph-types";
-import { buildFtsMatchQuery, LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "../database/fts-query";
+import {
+  buildFtsMatchQuery,
+  extractFtsTerms,
+  isFtsStopword,
+  LIKE_ESCAPE_CLAUSE,
+  likeContainsPattern,
+  termCoverage,
+} from "../database/fts-query";
 
 function safeJsonParse<T>(jsonString: string | null | undefined, defaultValue: T): T {
   if (!jsonString) return defaultValue;
@@ -461,8 +468,9 @@ export class KnowledgeGraphStore {
   searchEntities(workspaceId: string, query: string, limit = 10): KGSearchResult[] {
     const trimmed = query.trim();
     if (!trimmed) return [];
+    const results: KGSearchResult[] = [];
 
-    // Try FTS5 first
+    // Try FTS5 first (entity name and description).
     try {
       // Shared Unicode builder: accented and non-Latin names and file names are kept
       // (the old ASCII-only filter dropped them), and terms match as prefixes.
@@ -479,16 +487,26 @@ export class KnowledgeGraphStore {
           LIMIT ?
         `);
         const rows = stmt.all(ftsQuery, workspaceId, limit) as Any[];
-        if (rows.length > 0) {
-          return rows.map((r) => ({
-            entity: this.mapEntity(r),
-            score: Math.abs(r.rank || 0),
-          }));
+        for (const r of rows) {
+          results.push({ entity: this.mapEntity(r), score: Math.abs(r.rank || 0) });
         }
       }
     } catch {
       // FTS5 not available or query error, fall through to LIKE
     }
+
+    // Observations are not in the FTS index: entities whose observations mention the
+    // query's terms fill the remaining slots ("who owns X" when only an observation says so).
+    if (results.length < limit) {
+      const seen = new Set(results.map((result) => result.entity.id));
+      for (const result of this.searchEntitiesByObservation(workspaceId, trimmed, limit)) {
+        if (results.length >= limit) break;
+        if (seen.has(result.entity.id)) continue;
+        seen.add(result.entity.id);
+        results.push(result);
+      }
+    }
+    if (results.length > 0) return results;
 
     // Fallback: LIKE search, with `%` and `_` in the query matched literally.
     const likePattern = likeContainsPattern(trimmed);
@@ -506,6 +524,73 @@ export class KnowledgeGraphStore {
       entity: this.mapEntity(r),
       score: 1.0 / (i + 1), // simple rank-based score
     }));
+  }
+
+  /**
+   * Entities of the workspace with an observation containing any of the query's distinctive
+   * terms (stopwords dropped), best term coverage first. Score is the coverage in [0, 1];
+   * the matching observations (newest first, at most three) come with each result.
+   */
+  private searchEntitiesByObservation(
+    workspaceId: string,
+    query: string,
+    limit: number,
+  ): KGSearchResult[] {
+    // Only distinctive terms: a stopword-only query would match nearly every observation.
+    const terms = extractFtsTerms(query, {
+      maxTerms: 6,
+      minTermLength: 2,
+      dropStopwords: true,
+    }).filter((term) => !isFtsStopword(term));
+    if (terms.length === 0) return [];
+    const termClause = terms.map(() => `o.content LIKE ? ${LIKE_ESCAPE_CLAUSE}`).join(" OR ");
+    const rows = this.db
+      .prepare(
+        `SELECT e.*, t.name AS entity_type_name,
+                o.id AS obs_id, o.content AS obs_content, o.source AS obs_source,
+                o.source_task_id AS obs_source_task_id, o.created_at AS obs_created_at
+         FROM kg_observations o
+         JOIN kg_entities e ON o.entity_id = e.id
+         LEFT JOIN kg_entity_types t ON e.entity_type_id = t.id
+         WHERE e.workspace_id = ? AND (${termClause})
+         ORDER BY o.created_at DESC
+         LIMIT ?`,
+      )
+      .all(
+        workspaceId,
+        ...terms.map((term) => likeContainsPattern(term)),
+        Math.max(limit, 1) * 10,
+      ) as Any[];
+    const byEntity = new Map<string, { row: Any; observations: KGObservation[] }>();
+    for (const row of rows) {
+      const entry = byEntity.get(row.id) ?? { row, observations: [] };
+      byEntity.set(row.id, entry);
+      if (entry.observations.length < 3) {
+        entry.observations.push(
+          this.mapObservation({
+            id: row.obs_id,
+            entity_id: row.id,
+            content: row.obs_content,
+            source: row.obs_source,
+            source_task_id: row.obs_source_task_id,
+            created_at: row.obs_created_at,
+          }),
+        );
+      }
+    }
+    return [...byEntity.values()]
+      .map(({ row, observations }) => ({
+        entity: this.mapEntity(row),
+        observations,
+        score: termCoverage(
+          [row.name, row.description, ...observations.map((o) => o.content)]
+            .filter(Boolean)
+            .join(" "),
+          terms,
+        ),
+      }))
+      .sort((a, b) => b.score - a.score || (b.entity.confidence ?? 0) - (a.entity.confidence ?? 0))
+      .slice(0, limit);
   }
 
   // ─── Graph Traversal ──────────────────────────────────────────────

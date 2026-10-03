@@ -120,6 +120,7 @@ import { isCliAgentChildTask, resolveCliAgentType } from "../../../shared/cli-ag
 import { MultiLlmSelectionPanel } from "../MultiLlmSelectionPanel";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { AutoMailComposeFrame, MailComposeFrame } from "../MailComposeFrame";
+import { MemoryUsedAffordance } from "../memory/MemoryUsedAffordance";
 import type {
   AgentRoleData,
   LlmWikiVaultEntry,
@@ -1486,6 +1487,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     | (() => void | Promise<void>)
     | undefined;
   const agentContext = props.agentContext as AgentContext;
+  const onOpenSettings = props.onOpenSettings as ((tab?: SettingsTab) => void) | undefined;
   const childEvents = props.childEvents as TaskEvent[];
   const childTasks = props.childTasks as Task[];
   const collaborativeRun = props.collaborativeRun as AgentTeamRun | null;
@@ -3154,6 +3156,20 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               </button>
                             )}
                           </div>
+                          {/* Memory the reply used (hidden memory_used events, attributed in main). */}
+                          {!isBotConversation && (
+                            <MemoryUsedAffordance
+                              taskId={task.id}
+                              workspaceId={workspace?.id}
+                              eventId={event.id}
+                              onOpenMemoryHub={
+                                onOpenSettings
+                                  ? // App's settings opener accepts every Settings tab id.
+                                    () => onOpenSettings("memory" as SettingsTab)
+                                  : undefined
+                              }
+                            />
+                          )}
                           {isLastAssistant && stepFeedbackOpen && !isBotConversation && (
                             <div className="bubble-feedback-panel">
                               {currentStep && (
@@ -10952,6 +10968,7 @@ function MainContentComponent({
   const conversationFlow = (
     <TaskConversationFlow
       agentContext={agentContext}
+      onOpenSettings={onOpenSettings}
       activityGroupsById={statusActivityGroupsById}
       childEvents={childEvents}
       childTasks={childTasks}

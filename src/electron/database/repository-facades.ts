@@ -143,6 +143,8 @@ const TASK_EVENT_REPLAY_METHODS = [
   "findScopedTimelineSnapshot",
   "findScopedTimelineHistoryPage",
   "findScopedMutationPage",
+  // Browser host "Memory used" per reply (hidden memory_used events with their replies).
+  "findByTaskIdAndTypes",
 ] as const;
 export type TaskEventReplayRepository = AsyncStore<
   TaskEventRepositoryStore,

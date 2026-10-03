@@ -151,6 +151,8 @@ describe("MemoryFeaturesManager", () => {
       autoPromoteToCuratedMemoryEnabled: false,
       structuredObservationsEnabled: true,
       memoryInspectorEnabled: true,
+      dreamingLlmEnabled: false,
+      dreamingLlmDailyTokenBudget: 20000,
     });
   });
 

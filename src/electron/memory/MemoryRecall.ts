@@ -26,7 +26,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { createLogger } from "../utils/logger";
-import { foldForMatch } from "../database/fts-query";
+import { extractFtsTerms, foldForMatch, isFtsStopword, termCoverage } from "../database/fts-query";
 import type { Memory, MemorySearchResult } from "../database/repositories";
 import type {
   MemoryRecall,
@@ -83,6 +83,28 @@ const TOPIC_PACK_FACTOR = 0.6;
 
 /** Lowest trust admitted by default: everything but `third_party`. */
 const DEFAULT_MIN_TRUST = MEMORY_ITEM_TRUST.inferred;
+
+/**
+ * The distinctive terms of a recall query (stopwords dropped), used to damp candidates that
+ * matched only one weak term. Fewer than two such terms: no damping.
+ */
+function queryFocusTerms(text: string | undefined): string[] {
+  const terms = extractFtsTerms(String(text || ""), { maxTerms: 12 }).filter(
+    (term) => !isFtsStopword(term),
+  );
+  return terms.length >= 2 ? terms : [];
+}
+
+/**
+ * Weight of a candidate by how many of the query's distinctive terms its text contains:
+ * every lane ranks by its own score, and rank fusion alone lets a one-term match in a
+ * strong lane outrank a full match in a weaker lane.
+ */
+function coverageFactor(content: string, focusTerms: string[]): number {
+  if (focusTerms.length === 0) return 1;
+  return COVERAGE_FLOOR + (1 - COVERAGE_FLOOR) * termCoverage(content, focusTerms);
+}
+const COVERAGE_FLOOR = 0.4;
 
 export function lanesForScopes(scopes: Iterable<string> | undefined): MemoryRecallLane[] {
   const requested = new Set(
@@ -352,7 +374,7 @@ export class MemoryRecallService implements MemoryRecall {
         }
       }),
     );
-    const hits = this.fuse(lists, limit, request.detail === "full");
+    const hits = this.fuse(lists, limit, request.detail === "full", queryFocusTerms(request.text));
     return { hits, lanes, laneErrors, missing: [] };
   }
 
@@ -696,7 +718,12 @@ export class MemoryRecallService implements MemoryRecall {
   // Fusion
   // ---------------------------------------------------------------------------
 
-  private fuse(lists: LaneCandidate[][], limit: number, full: boolean): MemoryRecallHit[] {
+  private fuse(
+    lists: LaneCandidate[][],
+    limit: number,
+    full: boolean,
+    focusTerms: string[] = [],
+  ): MemoryRecallHit[] {
     interface Fused {
       candidate: LaneCandidate;
       score: number;
@@ -708,8 +735,9 @@ export class MemoryRecallService implements MemoryRecall {
       list.forEach((candidate, index) => {
         const rank = index + 1;
         const contribution =
-          (MEMORY_RECALL_LANE_WEIGHTS[candidate.lane] * (candidate.weightFactor ?? 1)) /
-          (RRF_K + rank);
+          ((MEMORY_RECALL_LANE_WEIGHTS[candidate.lane] * (candidate.weightFactor ?? 1)) /
+            (RRF_K + rank)) *
+          coverageFactor(candidate.content, focusTerms);
         const key = dedupeKey(candidate.content) || candidate.ref;
         const existing = byKey.get(key);
         if (existing) {

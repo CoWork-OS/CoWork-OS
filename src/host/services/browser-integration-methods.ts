@@ -14,6 +14,7 @@ import {
   type CustomSkillLoader,
 } from "../../electron/agent/custom-skill-loader";
 import { AddChannelSchema } from "../../electron/utils/validation";
+import { validateGatewayOwnerIds } from "../../shared/gateway-owner-ids";
 import { getSafeStorage } from "../../electron/utils/safe-storage";
 import type {
   AddChannelRequest,
@@ -207,6 +208,8 @@ const CHANNEL_PUBLIC_CONFIG_KEYS: Record<string, Set<string>> = {
     "microsoftGraphTokenScopes",
   ]),
 };
+/** Public config keys every channel type has: `ownerUserIds` (SEC-16 owner accounts). */
+const COMMON_CHANNEL_CONFIG_KEYS = new Set(["ownerUserIds"]);
 const CHANNEL_CREDENTIAL_CONFIG_KEYS: Record<string, Set<string>> = {
   telegram: new Set(["botToken"]),
   discord: new Set(["botToken"]),
@@ -237,6 +240,7 @@ const CHANNEL_CREDENTIAL_CONFIG_KEYS: Record<string, Set<string>> = {
   ]),
 };
 const CHANNEL_UPDATE_CONFIG_KEYS = new Set([
+  "ownerUserIds",
   "selfChatMode",
   "supervisor",
   "progressRelayMode",
@@ -440,6 +444,7 @@ function parseChannelConfigUpdate(
 ): Record<string, unknown> {
   if (JSON.stringify(config).length > 64 * 1024) return invalidRequest();
   const allowed = new Set([
+    ...COMMON_CHANNEL_CONFIG_KEYS,
     ...(CHANNEL_PUBLIC_CONFIG_KEYS[channelType] || []),
     ...(CHANNEL_CREDENTIAL_CONFIG_KEYS[channelType] || []),
     ...(channelType === "discord" ? ["guildIds"] : []),
@@ -449,6 +454,11 @@ function parseChannelConfigUpdate(
     if (!allowed.has(key) || !CHANNEL_UPDATE_CONFIG_KEYS.has(key)) return invalidRequest();
     if (key === "supervisor") {
       sanitized[key] = parseSchema(supervisorConfigSchema, value);
+    } else if (key === "ownerUserIds") {
+      if (!Array.isArray(value)) return invalidRequest();
+      const owners = validateGatewayOwnerIds(value);
+      if (!owners.ok) return invalidRequest();
+      sanitized[key] = owners.ids;
     } else if (Array.isArray(value)) {
       if (
         value.length > 200 ||
@@ -509,7 +519,7 @@ function publicGatewayChannel(channel: {
   const publicKeys = CHANNEL_PUBLIC_CONFIG_KEYS[channel.type] || new Set<string>();
   const config = Object.fromEntries(
     Object.entries(channel.config || {})
-      .filter(([key]) => publicKeys.has(key))
+      .filter(([key]) => publicKeys.has(key) || COMMON_CHANNEL_CONFIG_KEYS.has(key))
       .map(([key, value]) => [key, safePublicConfigValue(key, value)])
       .filter(([, value]) => value !== undefined),
   );

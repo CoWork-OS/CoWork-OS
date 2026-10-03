@@ -10,6 +10,9 @@ vi.mock("../../settings/personality-manager", () => ({
     getUserName: vi.fn(() => undefined),
     setUserName: vi.fn(),
     loadSettings: vi.fn(() => ({ responseStyle: personalityStyle.current })),
+    setResponseStyle: vi.fn((style: Record<string, string>) => {
+      personalityStyle.current = { ...personalityStyle.current, ...style };
+    }),
   },
 }));
 
@@ -19,6 +22,7 @@ import {
   hasExplicitResponseStyle,
   installMemoryReadSide,
   isMemoryReadSideActive,
+  isRevertOfStyleAdaptation,
   setExplicitResponseStyleState,
   withSettingsResponseStyleMirror,
   type MemoryReadSideHandle,
@@ -203,5 +207,121 @@ describeWithSqlite("memory read side", () => {
     } finally {
       MemoryWriter.setInstance(null);
     }
+  });
+
+  describe("stale settings saves", () => {
+    const adapted = { responseLength: "terse", emojiUsage: "minimal" };
+    const loadedByForm = { responseLength: "balanced", emojiUsage: "minimal" };
+    const history = [{ dimension: "responseLength", fromValue: "balanced", toValue: "terse" }];
+
+    const activeStyleItem = async () =>
+      (
+        await repository.list({
+          workspaceId: null,
+          scope: "global",
+          subjectKey: "response_style",
+          statuses: ["active"],
+        })
+      )[0];
+
+    beforeEach(async () => {
+      await repository.recordLaneMigration({});
+      handle = installMemoryReadSide(writer, deps);
+      MemoryWriter.setInstance(writer);
+      // The engine adapted the style after the form loaded it.
+      personalityStyle.current = { ...adapted };
+      await writer.ingest(
+        responseStyleCandidate(adapted, { source: "inferred", store: "adaptive_style" })!,
+      );
+      await settle();
+    });
+
+    afterEach(() => {
+      MemoryWriter.setInstance(null);
+      personalityStyle.current = { responseLength: "balanced", emojiUsage: "minimal" };
+    });
+
+    it("does not record a stale form copy and keeps the adapted style (baseline sent)", async () => {
+      withSettingsResponseStyleMirror(
+        () => {
+          personalityStyle.current = { ...loadedByForm };
+        },
+        { baseline: loadedByForm },
+      );
+      await settle();
+      expect(hasExplicitResponseStyle()).toBe(false);
+      expect((await activeStyleItem()).source).toBe("inferred");
+      // The stale copy did not revert what the engine adapted.
+      expect(personalityStyle.current.responseLength).toBe("terse");
+    });
+
+    it("records a style the user changed in the form (baseline sent)", async () => {
+      withSettingsResponseStyleMirror(
+        () => {
+          personalityStyle.current = { responseLength: "detailed", emojiUsage: "minimal" };
+        },
+        { baseline: loadedByForm },
+      );
+      await settle();
+      expect(hasExplicitResponseStyle()).toBe(true);
+      expect((await activeStyleItem()).source).toBe("user_stated");
+    });
+
+    it("without a baseline, does not record a save that exactly undoes the last adaptation", async () => {
+      withSettingsResponseStyleMirror(
+        () => {
+          personalityStyle.current = { ...loadedByForm };
+        },
+        { adaptationHistory: history },
+      );
+      await settle();
+      expect(hasExplicitResponseStyle()).toBe(false);
+
+      // Any other change is still the user's choice.
+      withSettingsResponseStyleMirror(
+        () => {
+          personalityStyle.current = { responseLength: "detailed", emojiUsage: "none" };
+        },
+        { adaptationHistory: history },
+      );
+      await settle();
+      expect(hasExplicitResponseStyle()).toBe(true);
+    });
+  });
+});
+
+describe("isRevertOfStyleAdaptation", () => {
+  const history = [
+    { dimension: "responseLength", fromValue: "detailed", toValue: "balanced" },
+    { dimension: "responseLength", fromValue: "balanced", toValue: "terse" },
+    { dimension: "emojiUsage", fromValue: "none", toValue: "minimal" },
+  ];
+
+  it("matches only the latest adaptation of every changed dimension", () => {
+    expect(
+      isRevertOfStyleAdaptation(
+        { responseLength: "terse", emojiUsage: "minimal" },
+        { responseLength: "balanced", emojiUsage: "none" },
+        history,
+      ),
+    ).toBe(true);
+    // An older value of the dimension is not the latest adaptation.
+    expect(
+      isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "detailed" }, history),
+    ).toBe(false);
+    // A changed dimension the engine never adapted is a user change.
+    expect(
+      isRevertOfStyleAdaptation(
+        { responseLength: "terse", codeCommentStyle: "minimal" },
+        { responseLength: "balanced", codeCommentStyle: "verbose" },
+        history,
+      ),
+    ).toBe(false);
+    expect(isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "terse" }, history)).toBe(
+      false,
+    );
+    expect(isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "balanced" }, [])).toBe(
+      false,
+    );
   });
 });

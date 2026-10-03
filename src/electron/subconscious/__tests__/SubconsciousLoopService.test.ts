@@ -339,6 +339,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
   it("writes global brain artifacts to the user data directory when no workspace root exists", async () => {
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
     const service = new SubconsciousLoopService(db);
+    service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true });
 
     const result = await service.refreshTargets();
 
@@ -395,6 +396,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
 
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
     const service = new SubconsciousLoopService(db, { getGlobalRoot: () => tmpDir });
+    service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true });
 
     await service.refreshTargets();
 
@@ -926,5 +928,94 @@ describeWithSqlite("SubconsciousLoopService", () => {
     expect(detail?.journal.length).toBeGreaterThan(0);
     expect(detail?.dreams.length).toBeGreaterThan(0);
     expect(detail?.memory.length).toBeGreaterThan(0);
+  });
+
+  describe("artifact write boundaries", () => {
+    const daemonStub = {} as unknown as import("../../agent/daemon").AgentDaemon;
+    const subconsciousDirs = (...roots: string[]) =>
+      roots.filter((root) => fs.existsSync(path.join(root, ".cowork", "subconscious")));
+
+    it("start() with Workflow Intelligence disabled writes no artifacts anywhere", async () => {
+      const workspace = insertWorkspace("disabled-wi");
+      initGitRepo(workspace.path, "https://github.com/acme/disabled.git");
+
+      const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+      const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+      await service.start(daemonStub);
+
+      expect(subconsciousDirs(workspace.path, tmpDir)).toEqual([]);
+      // An explicit refresh while disabled still writes nothing to disk.
+      await service.refreshTargets();
+      expect(subconsciousDirs(workspace.path, tmpDir)).toEqual([]);
+
+      // Enabling later catches up with a refresh.
+      service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true, autoRun: false });
+      await vi.waitFor(() => {
+        expect(
+          fs.existsSync(path.join(workspace.path, ".cowork", "subconscious", "brain", "state.json")),
+        ).toBe(true);
+      });
+      service.stop();
+    });
+
+    it("writes a nested workspace's artifacts under its own .cowork, never the enclosing git root", async () => {
+      const repoRoot = path.join(tmpDir, "outer-repo");
+      fs.mkdirSync(repoRoot, { recursive: true });
+      initGitRepo(repoRoot, "https://github.com/acme/widgets.git");
+      const nested = insertWorkspace(path.join("outer-repo", "packages", "app"));
+
+      const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+      const service = new SubconsciousLoopService(db, { getGlobalRoot: () => tmpDir });
+      service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true, autoRun: false });
+      await service.refreshTargets();
+
+      const codeTarget = (await service.listTargets()).find(
+        (target) => target.target.kind === "code_workspace",
+      );
+      expect(codeTarget?.target.workspaceId).toBe(nested.id);
+      expect(fs.existsSync(path.join(repoRoot, ".cowork"))).toBe(false);
+      expect(
+        fs.existsSync(
+          path.join(
+            nested.path,
+            ".cowork",
+            "subconscious",
+            "targets",
+            "code_workspace_github_acme_widgets",
+            "state.json",
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    it("skips artifact writes through a symlink that escapes the workspace", async () => {
+      const workspace = insertWorkspace("symlinked");
+      const outside = path.join(tmpDir, "outside-target");
+      fs.mkdirSync(outside, { recursive: true });
+      fs.mkdirSync(path.join(workspace.path, ".cowork"), { recursive: true });
+      fs.symlinkSync(outside, path.join(workspace.path, ".cowork", "subconscious"));
+
+      const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+      const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+      service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true, autoRun: false });
+
+      await expect(service.refreshTargets()).resolves.toBeDefined();
+      expect(fs.readdirSync(outside)).toEqual([]);
+    });
+
+    it("skips artifact writes when the workspace access profile denies writes", async () => {
+      const workspace = insertWorkspace("read-only");
+      db.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(
+        JSON.stringify({ read: true, write: false, delete: false, network: false, shell: false }),
+        workspace.id,
+      );
+
+      const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+      const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+      service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true, autoRun: false });
+
+      await expect(service.refreshTargets()).resolves.toBeDefined();
+      expect(subconsciousDirs(workspace.path)).toEqual([]);
+    });
   });
 });

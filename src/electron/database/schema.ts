@@ -7,6 +7,8 @@ import { createLogger } from "../utils/logger";
 import { ensureEverydayAgentSchema } from "../everyday-agent/schema";
 import { runMemoryPayloadMigration } from "../memory/memory-payload-migration-sql";
 import { ensureMemoryItemsSchema } from "../memory/memory-items-sql";
+import { ensureSupermemoryRemoteRefsSchema } from "../memory/supermemory-remote-refs-sql";
+import { ensureMemoryCurationSchema } from "../memory/memory-curation-log-sql";
 import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
 import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
@@ -8492,6 +8494,18 @@ export class DatabaseManager {
       ensureMemoryItemsSchema(this.db);
     } catch (error) {
       schemaLogger.warn("[DatabaseManager] memory_items schema initialization failed:", error);
+    }
+    // SEC-17: remote ids of Supermemory copies, so local deletes can forget them remotely.
+    try {
+      ensureSupermemoryRemoteRefsSchema(this.db);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] Supermemory remote refs schema failed:", error);
+    }
+    // Phase 3: the memory curator's audit log and Dreaming columns (memory-curation-log-sql).
+    try {
+      ensureMemoryCurationSchema(this.db);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] memory curation schema initialization failed:", error);
     }
   }
 

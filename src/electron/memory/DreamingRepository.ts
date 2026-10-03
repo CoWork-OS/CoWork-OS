@@ -22,6 +22,11 @@ export class DreamingRepository {
     this.sql = createMemoryStatementPort(db);
   }
 
+  /** The memory statement port, for repositories of the same domain (curation). */
+  get statementPort(): MemoryStatementPort {
+    return this.sql;
+  }
+
   createRun(
     input: Omit<DreamingRun, "id" | "createdAt"> & { id?: string; createdAt?: number },
   ): Promise<DreamingRun> {

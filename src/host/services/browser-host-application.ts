@@ -23,6 +23,11 @@ import {
 } from "../../shared/host-api/contracts";
 import { isTempWorkspaceId } from "../../shared/types";
 import {
+  MEMORY_USED_EVENT_TYPES,
+  MEMORY_USED_MAX_EVENTS,
+  toMemoryUsedTimelineEvent,
+} from "../../shared/memory-used";
+import {
   WebApplication,
   WebApplicationError,
   type WebDeploymentPolicy,
@@ -191,10 +196,21 @@ export function createBrowserHostApplication(
       resolveWorkspace: resolveBrowserWorkspace,
     }),
     ...createBrowserMemoryDefinitions({
+      db: options.db,
       resolveWorkspace: resolveBrowserWorkspace,
       getRecentTask: async (workspaceId) =>
         (await taskRepository.findByWorkspace(workspaceId, 1))[0] ?? null,
       getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+      loadMemoryUsedTimeline: async (workspaceId, taskId) => {
+        const task = await taskRepository.findById(taskId);
+        if (!task || task.workspaceId !== workspaceId) return null;
+        const events = await taskEventRepository.findByTaskIdAndTypes(
+          taskId,
+          [...MEMORY_USED_EVENT_TYPES],
+          MEMORY_USED_MAX_EVENTS,
+        );
+        return events.map(toMemoryUsedTimelineEvent);
+      },
     }),
     ...createBrowserReportDefinitions({
       db: options.db,

@@ -39,6 +39,12 @@ import type {
   MemoryHubMutationResult,
   MemoryHubWhy,
 } from "../shared/memory-hub-types";
+import type { MemoryUsedForTask } from "../shared/memory-used";
+import type {
+  MemoryReviewMutationResult,
+  MemoryReviewRunResult,
+  MemoryReviewState,
+} from "../shared/memory-review-types";
 import type {
   SpreadsheetApplyPatchesResult,
   SpreadsheetOpenWorkbookResult,
@@ -158,6 +164,7 @@ import type {
   ConvertAgentRoleToManagedAgentRequest,
   ConvertAutomationProfileToManagedAgentRequest,
   SupermemoryConfigStatus,
+  SupermemoryDisconnectPurgeResult,
   SupermemorySettings,
   WorkspaceKitInitRequest,
   WorkspaceKitProjectCreateRequest,
@@ -3681,8 +3688,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resetPersonalitySettings: (preserveRelationship?: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_RESET, preserveRelationship),
   getPersonalityConfigV2: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_CONFIG_V2),
-  savePersonalityConfigV2: (config: Any) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2, config),
+  savePersonalityConfigV2: (
+    config: Any,
+    options?: { responseStyleBaseline?: object | null },
+  ) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2, config, options),
   exportPersonalityProfile: (format?: "json" | "md") =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_EXPORT, format),
   importPersonalityProfile: (data: string) =>
@@ -4268,6 +4277,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_LIST, data),
   getMemoryItem: (data: { workspaceId: string; id: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_GET, data),
+  getMemoryUsedForTask: (data: { workspaceId: string; taskId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_USED_FOR_TASK, data),
   addMemoryItem: (data: {
     workspaceId: string;
     content: string;
@@ -4285,6 +4296,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_WHY, data),
   clearGlobalMemoryItems: (data: { workspaceId: string; confirm: true }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_CLEAR_GLOBAL, data),
+  // Memory Hub "Review" (Dreaming's curation proposals and applied changes)
+  getMemoryReview: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_GET, data),
+  getMemoryReviewCount: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_COUNT, data),
+  acceptMemoryProposal: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_ACCEPT, data),
+  rejectMemoryProposal: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_REJECT, data),
+  undoMemoryChange: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_UNDO, data),
+  runMemoryCuration: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_RUN_NOW, data),
+  setMemoryCurationLlmEnabled: (data: { workspaceId: string; enabled: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_SET_LLM, data),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -4335,6 +4361,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_SAVE_SETTINGS, settings),
   testSupermemoryConnection: () => ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_TEST_CONNECTION),
   getSupermemoryStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_GET_STATUS),
+  disconnectAndPurgeSupermemory: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE),
 
   // Self-improvement loop APIs
   getImprovementSettings: () =>
@@ -7228,7 +7256,11 @@ export interface ElectronAPI {
   setActivePersona: (personaId: string) => Promise<{ success: boolean }>;
   resetPersonalitySettings: (preserveRelationship?: boolean) => Promise<{ success: boolean }>;
   getPersonalityConfigV2: () => Promise<Any>;
-  savePersonalityConfigV2: (config: Any) => Promise<{ success: boolean }>;
+  /** `responseStyleBaseline`: the style the form loaded (tells a user change from a stale copy). */
+  savePersonalityConfigV2: (
+    config: Any,
+    options?: { responseStyleBaseline?: object | null },
+  ) => Promise<{ success: boolean }>;
   exportPersonalityProfile: (format?: "json" | "md") => Promise<string>;
   importPersonalityProfile: (data: string) => Promise<{ success: boolean }>;
   getPersonalityPreview: (draft: Any, contextMode?: string) => Promise<Any>;
@@ -7893,6 +7925,8 @@ export interface ElectronAPI {
   getDueSoonCommitments: (windowHours?: number) => Promise<{ items: Any[]; reminderText: string }>;
   listMemoryItems: (data: MemoryHubListRequest) => Promise<MemoryHubListResult>;
   getMemoryItem: (data: { workspaceId: string; id: string }) => Promise<MemoryHubItemDetail>;
+  /** Per-reply "Memory used" of a task (hidden memory_used events attributed to replies). */
+  getMemoryUsedForTask: (data: { workspaceId: string; taskId: string }) => Promise<MemoryUsedForTask>;
   addMemoryItem: (data: {
     workspaceId: string;
     content: string;
@@ -7916,6 +7950,25 @@ export interface ElectronAPI {
     workspaceId: string;
     confirm: true;
   }) => Promise<{ success: boolean; deleted: number; legacyRecords: number }>;
+  getMemoryReview: (data: { workspaceId: string }) => Promise<MemoryReviewState>;
+  getMemoryReviewCount: (data: { workspaceId: string }) => Promise<number>;
+  acceptMemoryProposal: (data: {
+    workspaceId: string;
+    id: string;
+  }) => Promise<MemoryReviewMutationResult>;
+  rejectMemoryProposal: (data: {
+    workspaceId: string;
+    id: string;
+  }) => Promise<MemoryReviewMutationResult>;
+  undoMemoryChange: (data: {
+    workspaceId: string;
+    id: string;
+  }) => Promise<MemoryReviewMutationResult>;
+  runMemoryCuration: (data: { workspaceId: string }) => Promise<MemoryReviewRunResult>;
+  setMemoryCurationLlmEnabled: (data: {
+    workspaceId: string;
+    enabled: boolean;
+  }) => Promise<MemoryReviewMutationResult>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;
@@ -7955,6 +8008,8 @@ export interface ElectronAPI {
   saveSupermemorySettings: (settings: SupermemorySettings) => Promise<{ success: boolean }>;
   testSupermemoryConnection: () => Promise<{ success: boolean; error?: string }>;
   getSupermemoryStatus: () => Promise<SupermemoryConfigStatus>;
+  /** Delete the remote copies CoWork recorded, then disable Supermemory (SEC-17). */
+  disconnectAndPurgeSupermemory: () => Promise<SupermemoryDisconnectPurgeResult>;
 
   // Self-improvement loop
   getImprovementSettings: () => Promise<ImprovementLoopSettings>;

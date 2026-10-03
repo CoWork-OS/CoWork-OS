@@ -7,6 +7,7 @@ import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
 
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
+import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 
 type Any = any;
 
@@ -334,6 +335,7 @@ export class CrossSignalService {
 
     const absPath = path.join(workspace.path, CROSS_SIGNALS_PATH);
     if (!fs.existsSync(absPath)) return;
+    const pathGuard = createBackgroundKitPathGuard(workspace);
 
     const nowMs = Date.now();
     const sectionLines = await this.buildSignalsSection(workspaceId, nowMs);
@@ -356,6 +358,7 @@ export class CrossSignalService {
 
     let current = "";
     try {
+      pathGuard(absPath, "read");
       current = fs.readFileSync(absPath, "utf8");
     } catch {
       return;
@@ -365,7 +368,7 @@ export class CrossSignalService {
     if (next === current) return;
 
     try {
-      writeKitFileWithSnapshot(absPath, next, "agent", "service:cross_signals_flush");
+      writeKitFileWithSnapshot(absPath, next, "agent", "service:cross_signals_flush", pathGuard);
     } catch (error) {
       console.warn("[CrossSignals] Failed to write CROSS_SIGNALS.md:", error);
     }

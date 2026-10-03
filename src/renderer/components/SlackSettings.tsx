@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import { ChannelData, ChannelUserData, SecurityMode } from "../../shared/types";
 import { ChannelSpecializationSettings } from "./ChannelSpecializationSettings";
 
@@ -451,6 +452,18 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
               )}
             </div>
           )}
+
+          <ChannelOwnerSettings
+            channel={selectedChannel}
+            users={users}
+            onSaved={(config) =>
+              setChannels((prev) =>
+                prev.map((entry) =>
+                  entry.id === selectedChannel.id ? { ...entry, config } : entry,
+                ),
+              )
+            }
+          />
 
           <div className="settings-section">
             <h4>Authorized Users</h4>

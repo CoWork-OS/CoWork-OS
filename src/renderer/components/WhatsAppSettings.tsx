@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import { Lightbulb } from "lucide-react";
 import { ChannelData, ChannelUserData, SecurityMode } from "../../shared/types";
 import { ResearchChannelsSettings } from "./ResearchChannelsSettings";
@@ -876,6 +877,12 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
           self-chat mode - your bot will appear as a separate contact.
         </div>
       </div>
+
+      <ChannelOwnerSettings
+        channel={channel}
+        users={users}
+        onSaved={(config) => setChannel((prev) => (prev ? { ...prev, config } : prev))}
+      />
 
       <div className="settings-section">
         <h4>Authorized Users</h4>

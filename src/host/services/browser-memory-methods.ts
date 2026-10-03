@@ -34,6 +34,18 @@ import { WebApplicationError } from "../web/WebApplication";
 import { MemoryHubError, MemoryItemsHubService } from "../../electron/memory/MemoryItemsHubService";
 import { MemoryWriter } from "../../electron/memory/MemoryWriter";
 import { createLegacyMemoryMirror } from "../../electron/memory/memory-items-legacy-mirror";
+import type Database from "better-sqlite3";
+import {
+  MemoryReviewError,
+  type MemoryReviewService,
+} from "../../electron/memory/MemoryReviewService";
+import { createMemoryReviewService } from "../../electron/memory/memory-review-wiring";
+import {
+  MemoryReviewProposalRequestSchema,
+  MemoryReviewSetLlmRequestSchema,
+  MemoryReviewUndoRequestSchema,
+  MemoryReviewWorkspaceRequestSchema,
+} from "../../electron/ipc/memory-review-ipc-validation";
 import {
   MemoryItemAddRequestSchema,
   MemoryItemPinRequestSchema,
@@ -41,7 +53,9 @@ import {
   MemoryItemsClearGlobalRequestSchema,
   MemoryItemsListRequestSchema,
   MemoryItemUpdateRequestSchema,
+  MemoryUsedForTaskRequestSchema,
 } from "../../electron/ipc/memory-ipc-validation";
+import { attributeMemoryUse, type MemoryUsedTimelineEvent } from "../../shared/memory-used";
 
 const id = z.string().trim().min(1).max(200);
 const scope = z.object({ workspaceId: id });
@@ -97,12 +111,14 @@ const featureBooleanKeys = [
   "autoPromoteToCuratedMemoryEnabled",
   "structuredObservationsEnabled",
   "memoryInspectorEnabled",
+  "dreamingLlmEnabled",
 ] as const;
 const featureSettings = z
   .object({
     ...Object.fromEntries(featureBooleanKeys.map((key) => [key, z.boolean().optional()])),
     durableContextMode: z.enum(["off", "experimental", "on"]).optional(),
     durableContextLargePayloadThreshold: z.number().int().min(1).max(1_000_000).optional(),
+    dreamingLlmDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryWriteApprovalMode: z
       .enum(["off", "curated_only", "external_only", "background_only", "all"])
       .optional(),
@@ -135,6 +151,19 @@ export function createBrowserMemoryDefinitions(options: {
   ) => Promise<{ id: string; title?: string | null; workspaceId?: string | null } | null>;
   /** Memory Hub service override (tests). */
   memoryItems?: MemoryItemsHubService;
+  /** Profile database, for the Memory Hub Review tab (Dreaming proposals and undo). */
+  db?: Database.Database;
+  /** Memory Hub Review service override (tests). */
+  memoryReview?: MemoryReviewService;
+  /**
+   * The task's `memory_used`, reply and user-message events (oldest first), or null when
+   * the task is not in the workspace. Same contract as the desktop IPC
+   * (`memoryItems:usedForTask`, memory-items-handlers.ts).
+   */
+  loadMemoryUsedTimeline?: (
+    workspaceId: string,
+    taskId: string,
+  ) => Promise<MemoryUsedTimelineEvent[] | null>;
 }): BrowserDesktopDefinitions {
   const requireWorkspace = async (
     workspaceId: string,
@@ -282,6 +311,44 @@ export function createBrowserMemoryDefinitions(options: {
         });
       },
     });
+  // Memory Hub "Review": same service and schemas as the desktop IPC (memoryReview:*).
+  const memoryReview =
+    options.memoryReview ??
+    (options.db
+      ? createMemoryReviewService(options.db, {
+          resolveWorkspace: async (workspaceId) => {
+            const workspace = await options.resolveWorkspace(workspaceId);
+            return workspace?.path ? { id: workspace.id, path: workspace.path } : null;
+          },
+          syncKitFiles: async (workspaceId) => {
+            const workspace = await options.resolveWorkspace(workspaceId);
+            if (!workspace?.permissions.write) return;
+            await CuratedMemoryService.syncWorkspaceFiles(workspaceId, {
+              readGuard: guardAllows(workspace, "read"),
+              writeGuard: guardAllows(workspace, "write"),
+            });
+          },
+        })
+      : null);
+  const reviewCall = async <T>(
+    run: (service: MemoryReviewService) => Promise<T> | T,
+  ): Promise<T> => {
+    if (!memoryReview) {
+      throw new WebApplicationError("HOST_UNAVAILABLE", "Memory review is unavailable.", 503);
+    }
+    try {
+      return await run(memoryReview);
+    } catch (error) {
+      if (error instanceof MemoryReviewError) {
+        throw new WebApplicationError(
+          error.code === "not_found" ? "NOT_FOUND" : "HOST_UNAVAILABLE",
+          error.message,
+          error.code === "not_found" ? 404 : 503,
+        );
+      }
+      throw error;
+    }
+  };
   const hubCall = async <T>(run: () => Promise<T>): Promise<T> => {
     try {
       return await run();
@@ -751,6 +818,13 @@ export function createBrowserMemoryDefinitions(options: {
     getMemoryItemWhy: workspaceAction(MemoryItemRefRequestSchema, "read", (value) =>
       hubCall(() => memoryItems.why(value.workspaceId, value.id)),
     ),
+    // Per-reply "Memory used" (hidden memory_used events attributed to the replies).
+    getMemoryUsedForTask: workspaceAction(MemoryUsedForTaskRequestSchema, "read", async (value) =>
+      attributeMemoryUse(
+        value.taskId,
+        (await options.loadMemoryUsedTimeline?.(value.workspaceId, value.taskId)) ?? [],
+      ),
+    ),
     addMemoryItem: workspaceAction(MemoryItemAddRequestSchema, "write", (value) =>
       hubCall(() => memoryItems.add(value)),
     ),
@@ -765,6 +839,29 @@ export function createBrowserMemoryDefinitions(options: {
     ),
     clearGlobalMemoryItems: workspaceAction(MemoryItemsClearGlobalRequestSchema, "delete", () =>
       hubCall(() => memoryItems.clearGlobal()),
+    ),
+    getMemoryReview: workspaceAction(MemoryReviewWorkspaceRequestSchema, "read", (value) =>
+      reviewCall((service) => service.state(value.workspaceId)),
+    ),
+    getMemoryReviewCount: workspaceAction(MemoryReviewWorkspaceRequestSchema, "read", (value) =>
+      reviewCall((service) => service.count(value.workspaceId)),
+    ),
+    acceptMemoryProposal: workspaceAction(MemoryReviewProposalRequestSchema, "write", (value) =>
+      reviewCall((service) => service.accept(value.workspaceId, value.id)),
+    ),
+    rejectMemoryProposal: workspaceAction(MemoryReviewProposalRequestSchema, "write", (value) =>
+      reviewCall((service) => service.reject(value.workspaceId, value.id)),
+    ),
+    undoMemoryChange: workspaceAction(MemoryReviewUndoRequestSchema, "write", (value) =>
+      reviewCall((service) => service.undo(value.workspaceId, value.id)),
+    ),
+    runMemoryCuration: workspaceAction(MemoryReviewWorkspaceRequestSchema, "write", (value) =>
+      reviewCall((service) => service.runNow(value.workspaceId)),
+    ),
+    setMemoryCurationLlmEnabled: workspaceAction(
+      MemoryReviewSetLlmRequestSchema,
+      "write",
+      (value) => reviewCall((service) => service.setLlmEnabled(value.enabled)),
     ),
     getMemoryObservationBackfillStatus: noArgs(() => MemoryObservationService.getBackfillStatus()),
     rebuildMemoryObservationMetadata: {

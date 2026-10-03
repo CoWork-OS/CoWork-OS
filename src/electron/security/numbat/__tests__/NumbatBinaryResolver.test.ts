@@ -99,6 +99,14 @@ describe("NumbatBinaryResolver", () => {
     delete process.env.COWORK_NUMBAT_SHA256;
     process.chdir(root);
 
-    expect(resolveNumbatBinary().path).not.toBe(maliciousBinary);
+    let resolvedPath: string | undefined;
+    try {
+      resolvedPath = resolveNumbatBinary().path;
+    } catch (error) {
+      // build/numbat is generated and absent in a fresh checkout. Resolution must
+      // then fail instead of falling back to the manifest planted in the cwd.
+      expect(String(error)).toContain("Bundled Numbat manifest is missing");
+    }
+    expect(resolvedPath).not.toBe(maliciousBinary);
   });
 });

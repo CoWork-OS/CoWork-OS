@@ -4559,9 +4559,9 @@ if (isMacSafeStorageMigrationWorker) {
       if (!data || typeof data.taskId !== "string" || typeof data.webContentsId !== "number") {
         throw new Error("Invalid browser workbench registration");
       }
-      const task = new TaskStore(dbManager.getDatabase()).findById(data.taskId);
-      const workspace =
-        task && new WorkspaceStore(dbManager.getDatabase()).findById(task.workspaceId);
+      if (!agentDaemon) throw new Error("Agent daemon is not ready");
+      const task = await agentDaemon.getTaskById(data.taskId);
+      const workspace = task && agentDaemon.getWorkspaceById(task.workspaceId);
       if (!task || !workspace) throw new Error("Browser task workspace not found");
       const effective = applyAccessProfileToWorkspace(
         workspace,

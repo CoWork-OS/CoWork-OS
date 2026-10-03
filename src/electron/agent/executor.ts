@@ -1002,6 +1002,18 @@ export class TaskExecutor {
   private testRunSuccessful = false;
   private lastTestRunCommand = "";
   private testRunInvalidatedByPath = "";
+  /** See recordVerificationCommandRun; lazily created. */
+  private verificationCommandLedger?: {
+    seq: number;
+    lastMutationSeq: number;
+    runs: Array<{
+      stepId: string;
+      kind: "test" | "build";
+      command: string;
+      succeeded: boolean;
+      seq: number;
+    }>;
+  };
   private readonly requiresExecutionToolRun: boolean;
   private executionToolRunObserved = false;
   private executionToolAttemptObserved = false;
@@ -12045,6 +12057,104 @@ ${transcript}
         unresolved.delete(failedKind);
       }
     }
+  }
+
+  private getVerificationCommandLedger(): {
+    seq: number;
+    lastMutationSeq: number;
+    runs: Array<{
+      stepId: string;
+      kind: "test" | "build";
+      command: string;
+      succeeded: boolean;
+      seq: number;
+    }>;
+  } {
+    this.verificationCommandLedger ??= { seq: 0, lastMutationSeq: 0, runs: [] };
+    return this.verificationCommandLedger;
+  }
+
+  /** Task-wide record of test and build/check runs, in order, by step. */
+  private recordVerificationCommandRun(stepId: string, input: Any, succeeded: boolean): void {
+    const command =
+      typeof input?.command === "string" ? input.command.replace(/\s+/g, " ").trim() : "";
+    if (!command) return;
+    const kind = this.getVerificationCommandKind(command);
+    if (!kind) return;
+    const ledger = this.getVerificationCommandLedger();
+    ledger.seq += 1;
+    ledger.runs.push({
+      stepId,
+      kind,
+      command: command.slice(0, 160),
+      succeeded,
+      seq: ledger.seq,
+    });
+    if (ledger.runs.length > 200) ledger.runs.splice(0, ledger.runs.length - 200);
+  }
+
+  /** A workspace change after a passing run makes that run stale evidence. */
+  private noteWorkspaceMutationForVerificationLedger(
+    toolName: string,
+    input: Any,
+    changedPath = "",
+  ): void {
+    if (this.isVerificationCommandCall(toolName, input)) return;
+    // Notes and reports cannot change a test or build outcome.
+    if (/\.(?:md|mdx|markdown|txt|rst|adoc|docx?|pdf|pptx|odt|rtf)$/i.test(changedPath.trim())) {
+      return;
+    }
+    const ledger = this.getVerificationCommandLedger();
+    ledger.seq += 1;
+    ledger.lastMutationSeq = ledger.seq;
+  }
+
+  /**
+   * A verification step that failed because its test or build command exited
+   * non-zero is resolved when a later step re-ran a command of the same kind
+   * and passed, that pass is the latest run of the kind, and nothing in the
+   * workspace changed after it. Any other failure, a red final run, or an edit
+   * after the passing run leaves the failure standing.
+   */
+  private reconcileVerificationCommandFailurePosthoc(
+    step: PlanStep,
+  ): StepContractReconciliationEntry | null {
+    const failureReason = String(step.error || "").trim();
+    if (!/\brun_command failed\b/i.test(failureReason)) return null;
+    if (this.hasBoundaryOrSecurityFailureReason(failureReason)) return null;
+    if (!this.isVerificationStepForCompletion(step)) return null;
+
+    const ledger = this.getVerificationCommandLedger();
+    const stepRuns = ledger.runs.filter((run) => run.stepId === step.id);
+    const lastStepRunByKind = new Map<string, (typeof stepRuns)[number]>();
+    for (const run of stepRuns) lastStepRunByKind.set(run.kind, run);
+    const failedKinds = Array.from(lastStepRunByKind.values()).filter((run) => !run.succeeded);
+    if (failedKinds.length === 0) return null;
+
+    const passingReruns: string[] = [];
+    for (const failedRun of failedKinds) {
+      const latest = [...ledger.runs].reverse().find((run) => run.kind === failedRun.kind);
+      if (
+        !latest ||
+        !latest.succeeded ||
+        latest.stepId === step.id ||
+        latest.seq <= failedRun.seq ||
+        latest.seq < ledger.lastMutationSeq
+      ) {
+        return null;
+      }
+      passingReruns.push(latest.command);
+    }
+
+    return {
+      originalFailure: failureReason,
+      reconciledBy: "later_passing_verification_command",
+      ts: Date.now(),
+      details: {
+        failedCommands: failedKinds.map((run) => run.command),
+        passingCommands: passingReruns,
+      },
+    };
   }
 
   /**
@@ -31205,11 +31315,12 @@ Return ONLY a JSON object:
       const reconciledStepIds = new Set<string>();
       for (const failedStep of unrecoveredFailedSteps) {
         const stepContract = this.resolveStepExecutionContract(failedStep);
-        const reconciliation = this.reconcileStepContractFailurePosthoc({
-          step: failedStep,
-          stepContract,
-          stepIndexById,
-        });
+        const reconciliation =
+          this.reconcileStepContractFailurePosthoc({
+            step: failedStep,
+            stepContract,
+            stepIndexById,
+          }) ?? this.reconcileVerificationCommandFailurePosthoc(failedStep);
         if (!reconciliation) continue;
 
         this.stepContractReconciliationLedger[failedStep.id] = reconciliation;
@@ -34452,6 +34563,19 @@ Return ONLY a JSON object:
                         this.recordFileOperation(content.name, content.input, result);
                         this.recordCommandExecution(content.name, content.input, result);
                         this.recordQAExecution(content.name, result);
+                        if (toolSucceeded && this.isFileMutationTool(content.name)) {
+                          this.noteWorkspaceMutationForVerificationLedger(
+                            content.name,
+                            content.input,
+                            String(
+                              content.input?.path ||
+                                content.input?.file_path ||
+                                content.input?.destPath ||
+                                content.input?.newPath ||
+                                "",
+                            ),
+                          );
+                        }
 
                         if (toolSucceeded) {
                           hadAnyToolSuccess = true;
@@ -34571,6 +34695,11 @@ Return ONLY a JSON object:
                               }
                               if (mutationSatisfiedByEvidence) {
                                 stepSucceededWithFileMutation = true;
+                                this.noteWorkspaceMutationForVerificationLedger(
+                                  content.name,
+                                  content.input,
+                                  String(evidence.reported_path || ""),
+                                );
                                 this.recordArtifactMutationLedgerEntry(evidence.reported_path, {
                                   stepId: step.id,
                                   tool: content.name,
@@ -34727,6 +34856,7 @@ Return ONLY a JSON object:
                           hadToolSuccessAfterRunCommandFailure = true;
                         }
                         if (canonicalContentName === "run_command") {
+                          this.recordVerificationCommandRun(step.id, content.input, toolSucceeded);
                           this.trackVerificationCommandOutcome(
                             unresolvedVerificationCommandFailures,
                             content.input,

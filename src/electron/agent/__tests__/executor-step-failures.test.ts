@@ -6883,5 +6883,147 @@ describe("TaskExecutor step loop control", () => {
 
       expect(step.status, String(step.error || "")).toBe("completed");
     });
+
+    describe("failed verification resolved by a later passing run", () => {
+      const red = {
+        success: false,
+        exitCode: 1,
+        terminationReason: "normal",
+        stdout: "",
+        stderr: "Error: no test specified",
+      };
+      const green = {
+        success: true,
+        exitCode: 0,
+        terminationReason: "normal",
+        stdout: "2 passing",
+        stderr: "",
+      };
+      const verifyStep = (): Any => ({
+        id: "4",
+        description:
+          "Verify: Run the complete configured test suite and confirm a zero exit code for the math tests.",
+        status: "pending",
+        kind: "verification",
+      });
+      const recoveryStep = (id: string): Any => ({
+        id,
+        description:
+          "Apply a corrected local tool/input strategy without external research and continue.",
+        status: "pending",
+        kind: "recovery",
+      });
+      const fixedStep = (): Any => ({
+        id: "3",
+        description: "Apply a minimal fix in src/auth/login.ts",
+        status: "completed",
+        kind: "primary",
+      });
+
+      async function finishPlan(executor: Any): Promise<unknown> {
+        executor.executeStep = vi.fn(async () => {});
+        try {
+          await executor.executePlan();
+          return null;
+        } catch (error) {
+          return error;
+        }
+      }
+
+      it("marks the verification failure recovered when a later step re-runs the tests green", async () => {
+        const runs = [red, green];
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("npm test fails: the test script is broken."),
+            toolCall("edit_file", fixLoginEdit, "e1"),
+            toolCall("run_command", { command: "npm test" }, "c2"),
+            textResponse("Fixed the test script; npm test passes with 2 tests."),
+          ],
+          { run_command: () => runs.shift() },
+        );
+        const verify = verifyStep();
+        const recovery = recoveryStep("revised-1");
+        (executor as Any).plan = {
+          description: "Plan",
+          steps: [fixedStep(), verify, recovery],
+        };
+
+        await (executor as Any).executeStep(verify);
+        expect(verify.status).toBe("failed");
+        expect(String(verify.error || "")).toMatch(/run_command failed/);
+        await (executor as Any).executeStep(recovery);
+        expect(recovery.status, String(recovery.error || "")).toBe("completed");
+
+        expect(await finishPlan(executor)).toBeNull();
+        expect((executor as Any).getResolvedRecoveredFailureStepIds()).toContain("4");
+        expect((executor as Any).getWaivableFailedStepIdsAtCompletion()).toEqual([]);
+        const notes = (executor as Any).buildCompletionNotes({
+          terminalStatus: "partial_success",
+          waivedStepIds: [],
+        });
+        expect(notes).not.toContain("Verify");
+        expect((executor as Any).daemon.logEvent).toHaveBeenCalledWith(
+          "task-1",
+          "step_contract_reconciled_posthoc",
+          expect.objectContaining({
+            stepId: "4",
+            reconciledBy: "later_passing_verification_command",
+          }),
+        );
+      });
+
+      it("keeps the verification failure when the final re-run also fails", async () => {
+        const runs = [red, red];
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("npm test fails: the test script is broken."),
+            toolCall("edit_file", fixLoginEdit, "e1"),
+            toolCall("run_command", { command: "npm test" }, "c2"),
+            textResponse("Tried another approach; npm test still fails."),
+          ],
+          { run_command: () => runs.shift() },
+        );
+        const verify = verifyStep();
+        const recovery = recoveryStep("revised-1");
+        (executor as Any).plan = {
+          description: "Plan",
+          steps: [fixedStep(), verify, recovery],
+        };
+
+        await (executor as Any).executeStep(verify);
+        await (executor as Any).executeStep(recovery);
+
+        expect(await finishPlan(executor)).toBeInstanceOf(Error);
+        expect((executor as Any).getResolvedRecoveredFailureStepIds()).not.toContain("4");
+      });
+
+      it("keeps the verification failure when files change after the passing run", async () => {
+        const runs = [red, green];
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("npm test fails: the test script is broken."),
+            toolCall("run_command", { command: "npm test" }, "c2"),
+            toolCall("edit_file", fixLoginEdit, "e1"),
+            textResponse("npm test passed; then tidied login.ts."),
+          ],
+          { run_command: () => runs.shift() },
+        );
+        const verify = verifyStep();
+        const recovery = recoveryStep("revised-1");
+        (executor as Any).plan = {
+          description: "Plan",
+          steps: [fixedStep(), verify, recovery],
+        };
+
+        await (executor as Any).executeStep(verify);
+        await (executor as Any).executeStep(recovery);
+
+        expect(await finishPlan(executor)).toBeInstanceOf(Error);
+        expect((executor as Any).getResolvedRecoveredFailureStepIds()).not.toContain("4");
+      });
+    });
   });
 });

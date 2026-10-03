@@ -2,6 +2,7 @@ import * as path from "path";
 import type { AccessDomainRule } from "../../shared/access-profiles";
 import { evaluateNetworkPolicy } from "../security/network-policy";
 import {
+  buildSelectorResolverExpression,
   DESCRIBE_NODE_FUNCTION,
   FOCUS_FUNCTION,
   HIT_TARGET_CHECK_FUNCTION,
@@ -10,11 +11,13 @@ import {
   READ_EVENT_PROBE_FUNCTION,
   READ_FIELD_FUNCTION,
   SET_FIELD_VALUE_FUNCTION,
+  ACTIVE_ELEMENT_EXPRESSION,
 } from "./browser-page-scripts";
 import {
   type KeyDefinition,
   MODIFIER_BITS,
   NAMED_KEYS,
+  parseKeyCombo,
   resolveKeyDefinition,
 } from "./browser-keyboard";
 import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
@@ -722,6 +725,22 @@ export class BrowserSessionManager {
     });
   }
 
+  async clickSelector(input: {
+    taskId: string;
+    sessionId?: unknown;
+    selector: string;
+  }): Promise<Any | null> {
+    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const contents = await this.getWebContents(session);
+    if (!session || !contents) return null;
+    await this.ensureDebugger(session, contents);
+    return await this.runAction(contents, { selector: input.selector }, async () => {
+      const backendNodeId = await this.resolveSelectorNode(contents, input.selector);
+      const click = await this.clickBackendNode(contents, backendNodeId);
+      return { ...click, element: input.selector, url: contents.getURL?.() || session.url };
+    });
+  }
+
   async hoverRef(input: { taskId: string; sessionId?: unknown; ref: string }): Promise<Any | null> {
     const { session, contents, target } = await this.resolveFreshRef(input);
     if (!session || !contents || !target) return null;
@@ -729,6 +748,28 @@ export class BrowserSessionManager {
     return await this.runAction(contents, { ref: input.ref }, async () => {
       const backendNodeId = this.requireBackendNode(target);
       const point = await this.getActionPoint(contents, backendNodeId, input.ref);
+      await this.assertHitTarget(contents, backendNodeId, point);
+      await this.sendCommand(contents, "Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: point.x,
+        y: point.y,
+      });
+      return { success: true, x: point.x, y: point.y, url: contents.getURL?.() || session.url };
+    });
+  }
+
+  async hoverSelector(input: {
+    taskId: string;
+    sessionId?: unknown;
+    selector: string;
+  }): Promise<Any | null> {
+    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const contents = await this.getWebContents(session);
+    if (!session || !contents) return null;
+    await this.ensureDebugger(session, contents);
+    return await this.runAction(contents, { selector: input.selector }, async () => {
+      const backendNodeId = await this.resolveSelectorNode(contents, input.selector);
+      const point = await this.getActionPoint(contents, backendNodeId);
       await this.assertHitTarget(contents, backendNodeId, point);
       await this.sendCommand(contents, "Input.dispatchMouseEvent", {
         type: "mouseMoved",
@@ -821,6 +862,23 @@ export class BrowserSessionManager {
     });
   }
 
+  async fillSelector(input: {
+    taskId: string;
+    sessionId?: unknown;
+    selector: string;
+    value: string;
+  }): Promise<Any | null> {
+    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const contents = await this.getWebContents(session);
+    if (!session || !contents) return null;
+    await this.ensureDebugger(session, contents);
+    return await this.runAction(contents, { selector: input.selector }, async () => {
+      const backendNodeId = await this.resolveSelectorNode(contents, input.selector);
+      const fill = await this.fillBackendNode(contents, backendNodeId, input.value);
+      return { ...fill, url: contents.getURL?.() || session.url };
+    });
+  }
+
   async typeRef(input: {
     taskId: string;
     sessionId?: unknown;
@@ -835,6 +893,57 @@ export class BrowserSessionManager {
       const typed = await this.typeIntoBackendNode(contents, backendNodeId, input.text, input.ref);
       return { ...typed, url: contents.getURL?.() || session.url };
     });
+  }
+
+  async typeSelector(input: {
+    taskId: string;
+    sessionId?: unknown;
+    selector: string;
+    text: string;
+  }): Promise<Any | null> {
+    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const contents = await this.getWebContents(session);
+    if (!session || !contents) return null;
+    await this.ensureDebugger(session, contents);
+    return await this.runAction(contents, { selector: input.selector }, async () => {
+      const backendNodeId = await this.resolveSelectorNode(contents, input.selector);
+      const typed = await this.typeIntoBackendNode(contents, backendNodeId, input.text);
+      return { ...typed, url: contents.getURL?.() || session.url };
+    });
+  }
+
+  /**
+   * Press a key or combo ("Enter", "Shift+Tab", "Control+a") on the focused
+   * element through CDP key events carrying key, code, keyCode and text, so
+   * default actions run (Enter submits a form, Tab moves focus).
+   */
+  async pressKey(input: { taskId: string; sessionId?: unknown; key: string }): Promise<Any | null> {
+    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const contents = await this.getWebContents(session);
+    if (!session || !contents) return null;
+    await this.ensureDebugger(session, contents);
+    const combo = parseKeyCombo(String(input.key ?? ""));
+    if (!combo) {
+      return {
+        success: false,
+        key: input.key,
+        error:
+          `Unsupported key "${String(input.key ?? "")}". Use a key name such as Enter, Tab, ` +
+          "Escape, Backspace, ArrowDown, a single character, or a combo like Shift+Tab.",
+      };
+    }
+    await this.dispatchKeyCombo(contents, combo);
+    const focused = await this.sendCommand(contents, "Runtime.evaluate", {
+      expression: ACTIVE_ELEMENT_EXPRESSION,
+      returnByValue: true,
+    }).catch(() => null);
+    const activeElement = focused?.result?.value;
+    return {
+      success: true,
+      key: input.key,
+      url: contents.getURL?.() || session.url,
+      ...(typeof activeElement === "string" && activeElement ? { focused: activeElement } : {}),
+    };
   }
 
   async getTextRef(input: {
@@ -1114,6 +1223,53 @@ export class BrowserSessionManager {
     return new BrowserActionError(
       "The matched element was removed from the page during the action. Retry, or take a browser_snapshot.",
     );
+  }
+
+  /** Resolve a selector in the page (CSS, text=, :has-text(), role=, xpath=) to a DOM node. */
+  private async resolveSelectorNode(contents: Any, selector: string): Promise<number> {
+    const evaluated = await this.sendCommand(contents, "Runtime.evaluate", {
+      expression: buildSelectorResolverExpression(selector),
+      returnByValue: false,
+      objectGroup: ACTION_OBJECT_GROUP,
+    });
+    if (evaluated?.exceptionDetails) {
+      const details = evaluated.exceptionDetails;
+      throw new BrowserActionError(
+        `Could not evaluate selector ${JSON.stringify(selector)}: ${
+          details.exception?.description || details.text || "page error"
+        }`,
+      );
+    }
+    const remote = evaluated?.result;
+    if (remote?.type === "string") {
+      const message = String(remote.value || "");
+      if (message.startsWith("invalid:")) {
+        throw new BrowserActionError(
+          `Invalid selector ${JSON.stringify(selector)}: ${message.slice("invalid:".length)}. ` +
+            'Use CSS (optionally with :has-text("...")), text=..., role=button[name="..."], ' +
+            "xpath=..., or a ref from browser_snapshot.",
+        );
+      }
+      throw new BrowserActionError(
+        `No element matches selector ${JSON.stringify(selector)}. ` +
+          "Take a browser_snapshot and use a ref, or check the selector.",
+      );
+    }
+    if (remote?.subtype !== "node" || !remote.objectId) {
+      throw new BrowserActionError(
+        `Selector ${JSON.stringify(selector)} did not resolve to an element.`,
+      );
+    }
+    const described = await this.sendCommand(contents, "DOM.describeNode", {
+      objectId: remote.objectId,
+    });
+    const backendNodeId = described?.node?.backendNodeId;
+    if (typeof backendNodeId !== "number") {
+      throw new BrowserActionError(
+        `Selector ${JSON.stringify(selector)} did not resolve to an element.`,
+      );
+    }
+    return backendNodeId;
   }
 
   private async describeBackendNode(contents: Any, backendNodeId: number): Promise<string> {

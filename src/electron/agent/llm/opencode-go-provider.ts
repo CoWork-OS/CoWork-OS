@@ -30,7 +30,9 @@ export class OpenCodeProvider implements LLMProvider {
     this.type = options.type;
     this.defaultModel = options.defaultModel;
     this.product = isOpenCodeGoBaseUrl(options.baseUrl) ? "go" : "zen";
-    this.openaiProvider = new OpenAICompatibleProvider(options);
+    // OpenCode serves hosted models that return native tool calls; text that
+    // looks like a call is not recovered here.
+    this.openaiProvider = new OpenAICompatibleProvider({ ...options, textToolCallFallback: false });
     const baseUrl = normalizeOpenCodeGoAnthropicBaseUrl(options.baseUrl);
     this.anthropicProvider = new AnthropicCompatibleProvider({
       ...options,

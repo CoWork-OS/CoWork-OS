@@ -13,6 +13,19 @@ import {
   type OpenAICompatibleToolOptions,
 } from "./openai-compatible";
 import { buildOpenAIPromptCacheFields, isPromptCacheRequestUnsupportedError } from "./prompt-cache";
+import {
+  applyTextToolCallFallback,
+  recordTextToolProtocolActivation,
+} from "./text-tool-call-parser";
+import {
+  areNativeToolsUnsupported,
+  isNativeToolsUnsupportedError,
+  isTextToolCallFallbackEnabledByDefault,
+  markNativeToolsUnsupported,
+  nativeToolSupportKey,
+  toTextToolProtocolMessages,
+  withTextToolProtocolInstructions,
+} from "./text-tool-protocol";
 
 const OPENCODE_GO_KIMI_MAX_COMPLETION_TOKENS = 32_768;
 
@@ -67,6 +80,14 @@ export class AtomicChatProviderError extends Error implements LLMProviderError {
     if (options && "cause" in options) {
       this.cause = options.cause;
     }
+  }
+}
+
+/** Internal signal: the server rejected native tools; resend with the text protocol. */
+class NativeToolsUnsupportedRetry extends Error {
+  constructor() {
+    super("Native tools unsupported; retrying with the text tool protocol");
+    this.name = "NativeToolsUnsupportedRetry";
   }
 }
 
@@ -164,6 +185,12 @@ export interface OpenAICompatibleProviderOptions {
   requestTimeoutMs?: number;
   /** Optional /models deadline used by local/embedded servers. */
   discoveryTimeoutMs?: number;
+  /**
+   * Recover tool calls the model writes as text and fall back to a
+   * prompt-described tool protocol when the server rejects native tools.
+   * Defaults to on for local model providers, off for hosted APIs.
+   */
+  textToolCallFallback?: boolean;
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -177,6 +204,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private extraHeaders?: Record<string, string>;
   private requestTimeoutMs?: number;
   private discoveryTimeoutMs?: number;
+  private readonly textToolCallFallback: boolean;
 
   constructor(options: OpenAICompatibleProviderOptions) {
     this.type = options.type;
@@ -189,6 +217,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.extraHeaders = options.extraHeaders;
     this.requestTimeoutMs = options.requestTimeoutMs;
     this.discoveryTimeoutMs = options.discoveryTimeoutMs;
+    this.textToolCallFallback =
+      options.textToolCallFallback ?? isTextToolCallFallbackEnabledByDefault(options.type);
   }
 
   private isAtomicChatProvider(): boolean {
@@ -360,13 +390,36 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return undefined;
   }
 
+  /**
+   * Messages for a model that cannot take native tools: tool history replayed
+   * as text and the tool protocol appended to the last leading system message,
+   * since many local chat templates accept only one system message.
+   */
+  private buildTextToolProtocolMessages(
+    request: LLMRequest,
+    supportsImages: boolean,
+  ): ReturnType<typeof toOpenAICompatibleMessages> {
+    const messages = toOpenAICompatibleMessages(
+      toTextToolProtocolMessages(request.messages),
+      request.system,
+      { supportsImages, systemBlocks: request.systemBlocks },
+    );
+    const instructions = withTextToolProtocolInstructions("", request.tools, request.toolChoice);
+    if (!instructions) return messages;
+    let lastSystem = -1;
+    while (messages[lastSystem + 1]?.role === "system") lastSystem += 1;
+    if (lastSystem < 0) {
+      return [{ role: "system", content: instructions }, ...messages];
+    }
+    const target = messages[lastSystem];
+    messages[lastSystem] = { ...target, content: `${target.content}\n\n${instructions}` };
+    return messages;
+  }
+
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
     const caps = PROVIDER_IMAGE_CAPS[this.type];
     const supportsImages = caps?.supportsImages === true;
-    const messages = toOpenAICompatibleMessages(request.messages, request.system, {
-      supportsImages,
-      systemBlocks: request.systemBlocks,
-    });
+    const offeredTools = request.tools && request.tools.length > 0 ? request.tools : undefined;
 
     const deadline = createRequestDeadline(
       request.signal,
@@ -380,9 +433,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
         request.model || this.defaultModel,
         deadline.signal,
       );
-      const tools = request.tools
-        ? toOpenAICompatibleTools(request.tools, this.getToolOptions(model))
-        : undefined;
+      const toolSupportKey = nativeToolSupportKey(this.type, this.normalizedBaseUrl, model);
+      const useTextProtocol =
+        this.textToolCallFallback && areNativeToolsUnsupported(toolSupportKey);
+      const messages = useTextProtocol
+        ? this.buildTextToolProtocolMessages(request, supportsImages)
+        : toOpenAICompatibleMessages(request.messages, request.system, {
+            supportsImages,
+            systemBlocks: request.systemBlocks,
+          });
+      const tools =
+        request.tools && !useTextProtocol
+          ? toOpenAICompatibleTools(request.tools, this.getToolOptions(model))
+          : undefined;
       const outputTokenField = this.getOutputTokenField(model);
       const maxOutputTokens = this.getMaxOutputTokens(model, request.maxTokens);
       console.log(`[${this.providerName}] Calling API with model: ${model}`);
@@ -416,6 +479,16 @@ export class OpenAICompatibleProvider implements LLMProvider {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = this.getErrorMessage(errorData);
+        if (
+          this.textToolCallFallback &&
+          tools &&
+          tools.length > 0 &&
+          isNativeToolsUnsupportedError(response.status, errorMessage)
+        ) {
+          markNativeToolsUnsupported(toolSupportKey);
+          recordTextToolProtocolActivation(this.type, model);
+          throw new NativeToolsUnsupportedRetry();
+        }
         if (this.isAtomicChatProvider()) {
           throw this.classifyAtomicHttpError(response.status, errorMessage);
         }
@@ -477,8 +550,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
         this.observeResponse(model, request, data);
       }
 
-      return fromOpenAICompatibleResponse(data);
+      const result = fromOpenAICompatibleResponse(data);
+      if (!this.textToolCallFallback || !offeredTools) return result;
+      return applyTextToolCallFallback(result, request, {
+        providerType: this.type,
+        model,
+        mode: useTextProtocol ? "text_protocol" : "native_tools",
+      });
     } catch (error: Any) {
+      if (error instanceof NativeToolsUnsupportedRetry) {
+        // The model is now marked, so this request goes out once more with the
+        // tools described in the prompt instead of the tools field.
+        return await this.createMessage(request);
+      }
       if (
         request.promptCache &&
         isPromptCacheRequestUnsupportedError(

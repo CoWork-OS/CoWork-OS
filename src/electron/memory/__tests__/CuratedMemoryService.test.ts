@@ -2,7 +2,8 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CuratedMemoryService } from "../CuratedMemoryService";
+import { CuratedMemoryService, balanceCuratedPromptEntries } from "../CuratedMemoryService";
+import { getHotMemoryVersion } from "../hot-memory-version";
 
 const createdDirs: string[] = [];
 
@@ -274,5 +275,55 @@ describe("CuratedMemoryService", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/multiple curated memories matched/i);
+  });
+});
+
+describe("curated prompt entry balance", () => {
+  const user = (n: number) => Array.from({ length: n }, (_, i) => `u${i}`);
+  const ws = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`);
+
+  it("keeps workspace rules when the user lane alone could fill the top 10", () => {
+    expect(balanceCuratedPromptEntries(user(12), ws(8), 10)).toEqual([...user(6), ...ws(4)]);
+  });
+
+  it("lets either lane fill slots the other leaves unused", () => {
+    expect(balanceCuratedPromptEntries(user(2), ws(12), 10)).toEqual([...user(2), ...ws(8)]);
+    expect(balanceCuratedPromptEntries(user(12), ws(1), 10)).toEqual([...user(9), ...ws(1)]);
+    expect(balanceCuratedPromptEntries(user(3), ws(2), 10)).toEqual([...user(3), ...ws(2)]);
+  });
+
+  it("reads both lanes separately for prompt entries and bumps the hot-memory version on writes", async () => {
+    const lists: Any[] = [];
+    const curatedRepo = {
+      list: (params: Any) => {
+        lists.push(params);
+        return params.target === "user" ? user(12) : ws(8);
+      },
+    };
+    (CuratedMemoryService as Any).curatedRepo = curatedRepo;
+    (CuratedMemoryService as Any).initialized = true;
+
+    const entries = await CuratedMemoryService.getPromptEntries("ws-1", 10);
+    expect(entries).toEqual([...user(6), ...ws(4)]);
+    expect(lists.map((params) => params.target).sort()).toEqual(["user", "workspace"]);
+
+    const workspacePath = await createWorkspace();
+    const before = getHotMemoryVersion();
+    (CuratedMemoryService as Any).curatedRepo = {
+      findByNormalizedKey: () => undefined,
+      create: (input: Any) => ({ ...input, id: "c-1", createdAt: 1, updatedAt: 1 }),
+      list: () => [],
+    };
+    (CuratedMemoryService as Any).workspaceRepo = {
+      findById: () => ({ id: "ws-1", path: workspacePath }),
+    };
+    await CuratedMemoryService.upsertDistilledEntry({
+      workspaceId: "ws-1",
+      target: "workspace",
+      kind: "workflow_rule",
+      content: "Run the linter before committing",
+      confidence: 0.9,
+    } as Any);
+    expect(getHotMemoryVersion()).toBeGreaterThan(before);
   });
 });

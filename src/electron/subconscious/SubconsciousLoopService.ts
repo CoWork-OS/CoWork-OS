@@ -483,10 +483,14 @@ export class SubconsciousLoopService {
     }
   }
 
-  async runNow(targetKey?: string): Promise<SubconsciousRun | null> {
+  async runNow(
+    targetKey?: string,
+    options: { skipRefresh?: boolean } = {},
+  ): Promise<SubconsciousRun | null> {
     const settings = this.getSettings();
     if (!settings.enabled) return null;
-    await this.refreshTargets();
+    // Callers that just refreshed (runFromHeartbeat) skip the second refresh and its git calls.
+    if (!options.skipRefresh) await this.refreshTargets();
     const target = targetKey
       ? await this.targetRepo.findByKey(targetKey)
       : await this.pickTargetForRun();
@@ -891,7 +895,7 @@ export class SubconsciousLoopService {
       });
       return null;
     }
-    return this.runNow(target.key);
+    return this.runNow(target.key, { skipRefresh: true });
   }
 
   private async resolveAutomationProfileForTarget(target: SubconsciousTargetRef) {

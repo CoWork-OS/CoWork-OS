@@ -243,13 +243,39 @@ describe("SessionRetentionService unit", () => {
       new Error("database delete failed"),
     );
 
-    await expect(retryService.pruneSessions({ all: true })).rejects.toThrow(
-      "database delete failed",
-    );
+    // A failed delete is isolated: the run completes, reports the task, and keeps its bytes.
+    const retryResult = await retryService.pruneSessions({ all: true });
+    expect(retryResult.deletedTaskIds).toEqual([]);
+    expect(retryResult.failedTaskIds).toEqual([retryTask.id]);
     expect(() =>
       retryStore.hydrate(retryTask.id, "retry-image", retryPersisted.refs),
     ).not.toThrow();
     fs.rmSync(retryRoot, { recursive: true, force: true });
+  });
+
+  it("keeps pruning other tasks when one task delete fails", async () => {
+    const tasks = [
+      makeTask({ id: "blocked-task", status: "completed" }),
+      makeTask({ id: "deletable-task", status: "completed" }),
+    ];
+    const service = makeService(tasks);
+    const repo = (service as unknown as { taskRepo: { delete: (id: string) => void } }).taskRepo;
+    const originalDelete = repo.delete;
+    repo.delete = (id: string) => {
+      if (id === "blocked-task") throw new Error("FOREIGN KEY constraint failed");
+      originalDelete(id);
+    };
+    const deletedCallbacks: string[] = [];
+
+    const result = await service.pruneSessions(
+      { all: true },
+      { onTaskDeleted: (task) => void deletedCallbacks.push(task.id) },
+    );
+
+    expect(result.deletedTaskIds).toEqual(["deletable-task"]);
+    expect(result.failedTaskIds).toEqual(["blocked-task"]);
+    expect(deletedCallbacks).toEqual(["deletable-task"]);
+    expect(tasks.map((task) => task.id)).toEqual(["blocked-task"]);
   });
 
   it("garbage-collects only old records with no authoritative receipt reference", () => {

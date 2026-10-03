@@ -532,7 +532,7 @@ import {
 } from "../hooks";
 import { initializeHookAgentIngress } from "../hooks/agent-ingress";
 import { MemoryService } from "../memory/MemoryService";
-import { DurableContextService } from "../memory/DurableContextService";
+import { MemoryWorkspacePurgeService } from "../memory/MemoryWorkspacePurgeService";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
@@ -5935,7 +5935,8 @@ export async function setupIpcHandlers(
     return sessionRetentionService.archiveSession(task.sessionId || task.id);
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, rawId: unknown) => {
+    const id = validateInput(UUIDSchema, rawId, "task ID");
     const existingTask = await taskRepo.findById(id);
     // Capture only validated durable refs while the receipt events still
     // exist. Release them after the DB delete succeeds so a failed delete
@@ -5954,9 +5955,19 @@ export async function setupIpcHandlers(
       }
     }
 
-    // Delete from database
-    await taskRepo.delete(id);
+    // Delete from database. An explicit user delete also removes the memory derived from
+    // the task (archive memories, KG facts, Playbook evidence) in the same transaction.
+    await taskRepo.delete(id, { purgeDerivedMemory: true });
     agentDaemon.releaseCapturedQueuedAttachmentRefs(id, queuedAttachmentRefs);
+
+    // Then the task's file-side memory: transcripts and Chronicle observations.
+    if (existingTask) {
+      const workspace = await workspaceRepo.findById(existingTask.workspaceId);
+      await MemoryWorkspacePurgeService.purgeTaskFiles({
+        taskId: id,
+        workspacePath: workspace?.path,
+      });
+    }
   });
 
   // ============ Sub-Agent / Parallel Agent Handlers ============
@@ -10791,7 +10802,7 @@ export async function setupIpcHandlers(
         searchMemory: async (_currentWorkspaceId, query, limit) => {
           const results: Any[] = [];
           for (const id of briefingWorkspaceIds) {
-            for (const memory of await MemoryService.searchAsync(id, query, limit)) {
+            for (const memory of await MemoryService.searchForBriefingAsync(id, query, limit)) {
               results.push({ ...memory, workspaceId: id, workspaceName: labelForWorkspace(id) });
             }
           }
@@ -13912,12 +13923,12 @@ function setupMemoryHandlers(): void {
   });
 
   // Clear all memories for a workspace
-  ipcMain.handle(IPC_CHANNELS.MEMORY_CLEAR, async (_, workspaceId: string) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_CLEAR, async (_, rawWorkspaceId: unknown) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_CLEAR, RATE_LIMIT_CONFIGS.limited);
     try {
-      await MemoryService.clearWorkspace(workspaceId);
-      await DurableContextService.clearWorkspace(workspaceId);
-      return { success: true };
+      const workspaceId = validateInput(WorkspaceIdSchema, rawWorkspaceId, "workspace id");
+      // Every memory store for the workspace, with per-store counts for the UI.
+      return await MemoryWorkspacePurgeService.purgeWorkspace({ id: workspaceId });
     } catch (error) {
       logger.error("[Memory] Failed to clear:", error);
       throw error;

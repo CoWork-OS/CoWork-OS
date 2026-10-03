@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import { WORKSPACE_KIT_CONTRACTS } from "../context/kit-contracts";
@@ -59,7 +60,43 @@ function levelForPressure(pressure: number): MemoryPressureFileStatus["level"] {
   return "ok";
 }
 
+/** Pressure fingerprint last handed to Dreaming, per workspace. */
+const handledPressureByWorkspace = new Map<string, string>();
+
 export class MemoryPressureService {
+  /**
+   * Stable fingerprint of the pressure that would trigger compaction: the files over budget or
+   * with duplicates, with their sizes. Empty when nothing needs compaction.
+   */
+  static fingerprint(report: MemoryPressureReport): string {
+    const parts = report.files
+      .filter((file) => file.level === "compact" || file.duplicateLineCount > 0)
+      .map((file) => `${file.relPath}:${file.charCount}:${file.duplicateLineCount}:${file.level}`)
+      .sort();
+    if (!parts.length) return "";
+    return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32);
+  }
+
+  /**
+   * Whether this pressure differs from the pressure last handed to Dreaming for the workspace.
+   * Unchanged pressure must not re-trigger Dreaming: nothing Dreaming proposes relieves it until
+   * a candidate is applied, which changes the files and therefore the fingerprint.
+   */
+  static hasPressureChanged(workspaceId: string, fingerprint: string): boolean {
+    if (!fingerprint) return false;
+    return handledPressureByWorkspace.get(workspaceId) !== fingerprint;
+  }
+
+  static markPressureHandled(workspaceId: string, fingerprint: string): void {
+    if (!fingerprint) return;
+    handledPressureByWorkspace.set(workspaceId, fingerprint);
+  }
+
+  /** Test hook. */
+  static resetHandledPressure(): void {
+    handledPressureByWorkspace.clear();
+  }
+
   static async analyze(
     workspacePath: string,
     readGuard?: FilesystemReadGuard,

@@ -35,16 +35,16 @@ export function setupSubconsciousHandlers(service: SubconsciousLoopService): voi
 
   ipcMain.handle(
     IPC_CHANNELS.SUBCONSCIOUS_SAVE_SETTINGS,
-    async (_event, settings: Partial<SubconsciousSettings>): Promise<SubconsciousSettings> => {
+    async (_event, input: Partial<SubconsciousSettings>): Promise<SubconsciousSettings> => {
+      // `phaseModels` was never read; drop it so older clients that still send it validate.
+      const { phaseModels: _legacyPhaseModels, ...settings } = (input || {}) as Partial<
+        SubconsciousSettings
+      > & { phaseModels?: unknown };
       const validated = validateInput(
         SubconsciousSettingsSchema,
         {
           ...DEFAULT_SUBCONSCIOUS_SETTINGS,
           ...settings,
-          phaseModels: {
-            ...DEFAULT_SUBCONSCIOUS_SETTINGS.phaseModels,
-            ...settings.phaseModels,
-          },
           dispatchDefaults: {
             ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults,
             ...settings.dispatchDefaults,

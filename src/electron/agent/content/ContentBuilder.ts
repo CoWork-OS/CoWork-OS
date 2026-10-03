@@ -9,6 +9,16 @@ import {
 import type { LLMSystemBlock } from "../llm";
 import type { ExecutionMode, TaskDomain } from "../../../shared/types";
 import { LayeredMemoryIndexService } from "../../memory/LayeredMemoryIndexService";
+import {
+  DESIGN_SYSTEM_MIN_TOKENS,
+  DESIGN_SYSTEM_SECTION_TOKENS,
+  EXTERNAL_MEMORY_SECTION_TOKENS,
+  MEMORY_CONTEXT_MIN_TOKENS,
+  MEMORY_CONTEXT_SECTION_TOKENS,
+  PROJECT_GUIDANCE_MIN_TOKENS,
+  PROJECT_GUIDANCE_SECTION_TOKENS,
+  TRANSCRIPT_CONTEXT_SECTION_TOKENS,
+} from "./prompt-budgets";
 
 export interface BuildExecutionPromptParams {
   workspaceId: string;
@@ -26,7 +36,16 @@ export interface BuildExecutionPromptParams {
   /** Strategy contracts that apply to this task (deep work, debug, image, workflow). */
   taskStrategyPrompt?: string;
   roleContext?: string;
+  /** Synthesized memory (kit + hot memory + structured memory); capped at the synthesizer budget. */
   memoryContext?: string;
+  /** Workspace DESIGN.md guidance for UI tasks. */
+  designSystemContext?: string;
+  /** Repo-root project instructions (AGENTS.md / CLAUDE.md) and docs map files. */
+  projectGuidanceContext?: string;
+  /** External memory provider context (Supermemory). */
+  externalMemoryContext?: string;
+  /** Transcript span hits from the query orchestrator. */
+  transcriptContext?: string;
   awarenessSnapshot?: string;
   infraContext?: string;
   /** Volatile infra status (wallet balance); turn-scoped so it cannot bust the cache. */
@@ -86,6 +105,8 @@ function makeSection(
     layerKind?: PromptSection["layerKind"];
     cacheScope?: PromptSection["cacheScope"];
     stableInputHash?: string;
+    truncation?: PromptSection["truncation"];
+    minTokens?: number;
   },
 ): PromptSection {
   const normalized = String(text || "").trim();
@@ -97,10 +118,67 @@ function makeSection(
     dropPriority: options?.dropPriority,
     layerKind: options?.layerKind,
     cacheScope: options?.cacheScope,
+    truncation: options?.truncation,
+    minTokens: options?.minTokens,
     stableInputHash:
       options?.stableInputHash ||
       (options?.cacheScope === "session" ? hashPromptSectionInput(normalized) : undefined),
   };
+}
+
+/**
+ * Memory-related sections. Each source has its own budget so one source cannot
+ * crowd out another, and all of them truncate on fragment boundaries.
+ * Drop order when the total budget overflows (first dropped first): transcript
+ * hits, external profile, then the synthesized memory (shrunk before dropped),
+ * then design-system context and project guidance (both shrunk before dropped).
+ */
+function buildMemoryContextSections(params: BuildExecutionPromptParams): PromptSection[] {
+  return [
+    makeSection(
+      "project_guidance",
+      params.projectGuidanceContext,
+      PROJECT_GUIDANCE_SECTION_TOKENS,
+      {
+        required: false,
+        dropPriority: 3.5,
+        layerKind: "optional",
+        cacheScope: "session",
+        truncation: "fragment",
+        minTokens: PROJECT_GUIDANCE_MIN_TOKENS,
+      },
+    ),
+    makeSection("design_system", params.designSystemContext, DESIGN_SYSTEM_SECTION_TOKENS, {
+      required: false,
+      dropPriority: 4.5,
+      layerKind: "optional",
+      cacheScope: "session",
+      truncation: "fragment",
+      minTokens: DESIGN_SYSTEM_MIN_TOKENS,
+    }),
+    makeSection("memory_context", params.memoryContext, MEMORY_CONTEXT_SECTION_TOKENS, {
+      required: false,
+      dropPriority: 5,
+      layerKind: "optional",
+      cacheScope: "turn",
+      truncation: "fragment",
+      minTokens: MEMORY_CONTEXT_MIN_TOKENS,
+    }),
+    makeSection("external_memory", params.externalMemoryContext, EXTERNAL_MEMORY_SECTION_TOKENS, {
+      required: false,
+      dropPriority: 6.5,
+      layerKind: "optional",
+      cacheScope: "turn",
+      truncation: "fragment",
+    }),
+    makeSection("transcript_context", params.transcriptContext, TRANSCRIPT_CONTEXT_SECTION_TOKENS, {
+      required: false,
+      dropPriority: 7.5,
+      layerKind: "optional",
+      cacheScope: "turn",
+      truncation: "fragment",
+    }),
+  ];
 }
 
 export class ContentBuilder {
@@ -170,12 +248,7 @@ export class ContentBuilder {
             layerKind: "on_demand",
             cacheScope: "turn",
           }),
-          makeSection("memory_context", params.memoryContext, 1200, {
-            required: false,
-            dropPriority: 5,
-            layerKind: "optional",
-            cacheScope: "turn",
-          }),
+          ...buildMemoryContextSections(params),
           makeSection("awareness_snapshot", params.awarenessSnapshot, 800, {
             required: false,
             dropPriority: 6,
@@ -291,12 +364,7 @@ export class ContentBuilder {
             layerKind: "on_demand",
             cacheScope: "turn",
           }),
-          makeSection("memory_context", params.memoryContext, 1200, {
-            required: false,
-            dropPriority: 5,
-            layerKind: "optional",
-            cacheScope: "turn",
-          }),
+          ...buildMemoryContextSections(params),
           makeSection("awareness_snapshot", params.awarenessSnapshot, 800, {
             required: false,
             dropPriority: 6,

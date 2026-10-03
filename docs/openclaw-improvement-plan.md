@@ -28,7 +28,7 @@ The remaining differences versus OpenClaw are now mostly product-shape choices r
 | **Archive recall**        | Markdown memory history                          | `MemoryService`, `search_memories`, imported ChatGPT history, indexed `.cowork/` markdown                         | CoWork keeps broader searchable recall separate from always-on injection |
 | **Session recall**        | Session-history tooling                          | `search_sessions` over transcript spans and checkpoints                                                           | Gap closed                                                               |
 | **Topic-focused recall**  | Workspace-native markdown browsing               | `memory_topics_load` packs focused topic files under `.cowork/memory/topics`                                      | CoWork now has an explicit topical recall path                           |
-| **Daily logs**            | `memory/YYYY-MM-DD.md` style files               | `DailyLogService` + `DailyLogSummarizer` under `.cowork/memory/daily` and `.cowork/memory/summaries`              | Primitive exists; writer wiring remains an optional follow-up            |
+| **Daily logs**            | `memory/YYYY-MM-DD.md` style files               | `DailyLogSummarizer` under `.cowork/memory/summaries` (one compact line per task) | Raw daily journal (`DailyLogService`) removed as unused                  |
 | **Style adaptation**      | Static persona files                             | `AdaptiveStyleEngine` with UI toggles in `GuardrailSettings`                                                      | CoWork ahead                                                             |
 | **Feedback learning**     | Limited in reviewed docs                         | Message/task thumbs, `FeedbackService`, `UserProfileService.ingestUserFeedback`, playbook reinforcement           | CoWork ahead                                                             |
 | **Privacy**               | Local-first                                      | Local-first plus `SecureSettingsRepository` encryption                                                            | CoWork ahead                                                             |
@@ -68,7 +68,7 @@ These are still reasonable OpenClaw-inspired improvements, but they are no longe
 
 1. Surface the memory-feature flags (`curatedMemoryEnabled`, `sessionRecallEnabled`, `topicMemoryEnabled`, `defaultArchiveInjectionEnabled`) in the Memory Hub instead of keeping them runtime/settings-only.
 2. Add a first-class UI for browsing generated topic packs under `.cowork/memory/topics`.
-3. Wire more automatic writers into `DailyLogService` if the product wants OpenClaw-style operational journaling to become a default workflow.
+3. If OpenClaw-style operational journaling becomes a default workflow, extend `DailyLogSummarizer`/`MemoryConsolidator` rather than reintroducing a separate raw journal.
 4. Add an “OpenClaw-like memory mode” setup guide that explains how to lean more heavily on `.cowork/USER.md`, `.cowork/MEMORY.md`, and daily logs.
 
 ---

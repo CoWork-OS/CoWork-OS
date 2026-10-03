@@ -62,11 +62,12 @@ export class QueryOrchestrator {
   }
 
   async buildExecutionPrompt(
-    params: BuildExecutionPromptParams & { transcriptContext?: string },
+    params: BuildExecutionPromptParams,
   ): Promise<BuildExecutionPromptResult> {
+    // Transcript hits get their own budgeted section instead of riding at the end
+    // of the memory section, where truncation used to cut them mid-block.
     const nextParams = {
       ...params,
-      memoryContext: [params.memoryContext, params.transcriptContext].filter(Boolean).join("\n\n"),
       allowLayeredMemory: this.features.layeredMemoryEnabled,
     };
     return ContentBuilder.buildExecutionPrompt(nextParams);

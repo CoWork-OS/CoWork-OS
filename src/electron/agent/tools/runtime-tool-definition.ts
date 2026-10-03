@@ -139,14 +139,12 @@ const DEFERRED_BY_DEFAULT_TOOLS = new Set([
   "monty_list_transforms",
   "monty_run_transform",
   "monty_transform_file",
-  // Memory internals (search_memories / memory_save stay visible)
-  "memory_timeline",
-  "memory_details",
-  "memory_topics_load",
-  "search_quotes",
-  "search_sessions",
-  "memory_curate",
-  "memory_curated_read",
+  // Memory recall and curation tools are always exposed (ALWAYS_EXPOSE_TOOLS);
+  // listing them here as well made the two lists contradict each other. The
+  // knowledge-graph reads are deferred: tool_search surfaces them when needed.
+  "kg_search",
+  "kg_get_neighbors",
+  "kg_get_subgraph",
   // Agent lifecycle management (spawn_agent / orchestrate_agents stay visible)
   "capture_agent_events",
   "send_agent_message",

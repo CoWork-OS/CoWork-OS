@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureWorkspaceDirectory, ensureWorkspaceDirectorySync } from "../workspace-directory";
-import { DailyLogService } from "../../memory/DailyLogService";
 import { DailyLogSummarizer } from "../../memory/DailyLogSummarizer";
 import { LayeredMemoryIndexService } from "../../memory/LayeredMemoryIndexService";
 import { TranscriptStore } from "../../memory/TranscriptStore";
@@ -29,7 +28,7 @@ afterEach(() => {
 describe("deleted workspace folders", () => {
   it("creates nested artifacts in an existing workspace", async () => {
     const root = workspace();
-    const directory = path.join(root, ".cowork", "memory", "daily");
+    const directory = path.join(root, ".cowork", "memory", "summaries");
     await ensureWorkspaceDirectory(root, directory);
     ensureWorkspaceDirectorySync(root, directory);
     expect(fs.statSync(directory).isDirectory()).toBe(true);
@@ -84,13 +83,6 @@ describe("deleted workspace folders", () => {
     const operations = [
       () => TranscriptStore.ensureLayout(root),
       () => LayeredMemoryIndexService.ensureLayout(root),
-      () =>
-        DailyLogService.appendEntry(root, {
-          timestamp: new Date().toISOString(),
-          source: "system",
-          category: "task",
-          text: "Background event",
-        }),
       () => DailyLogSummarizer.writeSummary(root, "2026-09-30", "Summary"),
       () => writeTemplate(root, ".cowork/MEMORY.md", "Memory", "missing"),
     ];

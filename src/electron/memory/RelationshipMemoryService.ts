@@ -2,10 +2,8 @@ import { v4 as uuidv4 } from "uuid";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import type { Task } from "../../shared/types";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
-import {
-  extractPreferredNameFromMessage,
-  sanitizePreferredNameMemoryLine,
-} from "../utils/preferred-name";
+import { bumpHotMemoryVersion } from "./hot-memory-version";
+import { sanitizePreferredNameMemoryLine } from "../utils/preferred-name";
 
 type RelationshipLayer = "identity" | "preferences" | "context" | "history" | "commitments";
 /**
@@ -165,101 +163,6 @@ export class RelationshipMemoryService {
     return this.listOpenCommitments(200, scope)
       .filter((item) => typeof item.dueAt === "number" && item.dueAt <= cutoff)
       .sort((a, b) => Number(a.dueAt || 0) - Number(b.dueAt || 0));
-  }
-
-  static ingestUserMessage(message: string, taskId?: string): void {
-    const text = String(message || "").trim();
-    if (!text) return;
-
-    const candidates: Array<Omit<RelationshipMemoryItem, "id" | "createdAt" | "updatedAt">> = [];
-    const _lower = text.toLowerCase();
-
-    const preferredName = extractPreferredNameFromMessage(text);
-    if (preferredName) {
-      candidates.push({
-        layer: "identity",
-        text: `Preferred name: ${preferredName}`,
-        confidence: 0.9,
-        source: "conversation",
-        lastTaskId: taskId,
-      });
-    }
-
-    const preferenceMatch = text.match(
-      /\b(?:i prefer|please always|please don't|i like|i dislike)\s+([^.!?\n]{3,120})/i,
-    );
-    if (preferenceMatch) {
-      candidates.push({
-        layer: "preferences",
-        text: preferenceMatch[0].trim(),
-        confidence: 0.78,
-        source: "conversation",
-        lastTaskId: taskId,
-      });
-    }
-
-    const contextMatch = text.match(
-      /\b(?:remember that|please remember|for future reference)\s+([^.!?\n]{3,150})/i,
-    );
-    if (contextMatch) {
-      candidates.push({
-        layer: "context",
-        text: contextMatch[0].trim(),
-        confidence: 0.8,
-        source: "conversation",
-        lastTaskId: taskId,
-      });
-    }
-
-    const commitmentMatch = text.match(
-      /\b(?:remind me to|please remember to|i need to|i must)\s+([^.!?\n]{3,150})/i,
-    );
-    if (commitmentMatch) {
-      const dueAt = this.parseDueAt(text, Date.now());
-      const normalizedLeadIn = commitmentMatch[0].toLowerCase();
-      candidates.push({
-        layer: "commitments",
-        text: commitmentMatch[0].trim(),
-        confidence:
-          normalizedLeadIn.startsWith("i need to") || normalizedLeadIn.startsWith("i must")
-            ? 0.74
-            : 0.82,
-        source: "conversation",
-        status: "open",
-        dueAt,
-        lastTaskId: taskId,
-      });
-    }
-
-    for (const candidate of candidates.slice(0, 4)) {
-      this.upsert(candidate);
-    }
-  }
-
-  static ingestUserFeedback(decision?: string, reason?: string, taskId?: string): void {
-    const feedback = String(reason || "").trim();
-    if (!feedback) return;
-
-    const lowered = feedback.toLowerCase();
-    if (/\b(concise|shorter|brief|more detail|detailed|tone|format)\b/.test(lowered)) {
-      this.upsert({
-        layer: "preferences",
-        text: `Feedback preference: ${feedback}`.slice(0, MAX_TEXT_LENGTH),
-        confidence: 0.86,
-        source: "feedback",
-        lastTaskId: taskId,
-      });
-    }
-
-    if (decision && /\b(reject|deny|denied)\b/i.test(decision)) {
-      this.upsert({
-        layer: "history",
-        text: `Rejected approach: ${feedback}`.slice(0, MAX_TEXT_LENGTH),
-        confidence: 0.72,
-        source: "feedback",
-        lastTaskId: taskId,
-      });
-    }
   }
 
   static recordTaskCompletion(
@@ -544,30 +447,6 @@ export class RelationshipMemoryService {
     });
   }
 
-  private static parseDueAt(text: string, nowMs: number): number | undefined {
-    const lower = text.toLowerCase();
-    const dayMs = 24 * 60 * 60 * 1000;
-    if (/\btoday\b/.test(lower)) return nowMs + 8 * 60 * 60 * 1000;
-    if (/\btomorrow\b/.test(lower)) return nowMs + dayMs;
-    if (/\bthis week\b/.test(lower)) return nowMs + 3 * dayMs;
-    if (/\bnext week\b/.test(lower)) return nowMs + 7 * dayMs;
-
-    const inDaysMatch = lower.match(/\bin\s+(\d{1,2})\s+days?\b/);
-    if (inDaysMatch) {
-      const days = Number(inDaysMatch[1]);
-      if (Number.isFinite(days) && days > 0) return nowMs + days * dayMs;
-    }
-
-    const isoDateMatch = lower.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
-    if (isoDateMatch) {
-      const parsed = Date.parse(
-        `${isoDateMatch[1]}-${isoDateMatch[2]}-${isoDateMatch[3]}T17:00:00`,
-      );
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return undefined;
-  }
-
   private static normalizeText(value: string): string {
     return String(value || "")
       .trim()
@@ -740,6 +619,7 @@ export class RelationshipMemoryService {
     };
 
     this.inMemoryProfile = next;
+    bumpHotMemoryVersion();
     if (!SecureSettingsRepository.isInitialized()) return;
     try {
       const repo = SecureSettingsRepository.getInstance();

@@ -94,6 +94,34 @@ describe("TaskExecutor tool allow-list semantics", () => {
     expect(allowlist.size).toBeGreaterThan(0);
   });
 
+  it("keeps read-only memory recall tools in every plan-step allowlist", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: {} };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+
+    for (const stepKind of ["analysis", "mutation_required", "verification"] as const) {
+      const allowlist = (TaskExecutor as Any).prototype.buildStepToolAllowlist.call(
+        executor,
+        { requiredTools: new Set<string>() },
+        stepKind,
+        "code",
+        "Update the config loader",
+      ) as Set<string>;
+      for (const tool of [
+        "search_memories",
+        "memory_search_index",
+        "memory_timeline",
+        "memory_details",
+        "search_quotes",
+        "search_sessions",
+        "memory_curated_read",
+        "memory_topics_load",
+      ]) {
+        expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(true);
+      }
+    }
+  });
+
   it("keeps selected Gmail integration tools in step-scoped analysis allowlists", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {

@@ -14,18 +14,13 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   verbatimRecallEnabled: true,
   wakeUpLayersEnabled: true,
   temporalKnowledgeEnabled: true,
-  promptStackV2Enabled: false,
   layeredMemoryEnabled: false,
   transcriptStoreEnabled: false,
   durableContextEnabled: false,
   durableContextMode: "off",
-  durableContextThreshold: 0.75,
-  durableContextFreshTailCount: 64,
   durableContextLargePayloadThreshold: 25000,
-  durableContextSummaryModel: "",
   backgroundConsolidationEnabled: false,
   queryOrchestratorEnabled: false,
-  sessionLineageEnabled: false,
   curatedMemoryEnabled: true,
   sessionRecallEnabled: true,
   topicMemoryEnabled: true,
@@ -66,28 +61,17 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     verbatimRecallEnabled: settings.verbatimRecallEnabled !== false,
     wakeUpLayersEnabled: settings.wakeUpLayersEnabled !== false,
     temporalKnowledgeEnabled: settings.temporalKnowledgeEnabled !== false,
-    promptStackV2Enabled: isEnabled(settings.promptStackV2Enabled),
     layeredMemoryEnabled: isEnabled(settings.layeredMemoryEnabled),
-    transcriptStoreEnabled: durableContextEnabled || isEnabled(settings.transcriptStoreEnabled),
+    // Transcript span writing follows its own flag. Durable context does not read
+    // spans, and coupling the two left span writing on after durable context was off.
+    transcriptStoreEnabled: isEnabled(settings.transcriptStoreEnabled),
     durableContextEnabled,
     durableContextMode: effectiveDurableMode,
-    durableContextThreshold: Math.min(
-      0.95,
-      Math.max(0.25, normalizePositiveNumber(settings.durableContextThreshold, 0.75)),
-    ),
-    durableContextFreshTailCount: Math.floor(
-      normalizePositiveNumber(settings.durableContextFreshTailCount, 64),
-    ),
     durableContextLargePayloadThreshold: Math.floor(
       normalizePositiveNumber(settings.durableContextLargePayloadThreshold, 25000),
     ),
-    durableContextSummaryModel:
-      typeof settings.durableContextSummaryModel === "string"
-        ? settings.durableContextSummaryModel.trim()
-        : "",
     backgroundConsolidationEnabled: isEnabled(settings.backgroundConsolidationEnabled),
     queryOrchestratorEnabled: isEnabled(settings.queryOrchestratorEnabled),
-    sessionLineageEnabled: isEnabled(settings.sessionLineageEnabled),
     curatedMemoryEnabled: settings.curatedMemoryEnabled !== false,
     sessionRecallEnabled: settings.sessionRecallEnabled !== false,
     topicMemoryEnabled: settings.topicMemoryEnabled !== false,

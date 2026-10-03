@@ -12,8 +12,10 @@ import {
   type QueuedAttachmentRecord,
   type QueuedAttachmentRef,
 } from "../agent/runtime/queued-attachment-store";
+import { createLogger } from "../utils/logger";
 
 type Any = Record<string, any>;
+const logger = createLogger("SessionRetentionService");
 
 const QUEUED_ATTACHMENT_ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000;
 
@@ -67,6 +69,8 @@ export interface SessionPruneResult {
   skippedActive: number;
   skippedPinned: number;
   deletedTaskIds: string[];
+  /** Tasks whose deletion failed; they are left in place for the next run. */
+  failedTaskIds: string[];
 }
 
 export class SessionRetentionService {
@@ -120,6 +124,8 @@ export class SessionRetentionService {
     options: {
       dryRun?: boolean;
       deleteTask?: (task: Task) => Promise<void> | void;
+      /** Runs after the task row is deleted, e.g. to remove its transcript files. */
+      onTaskDeleted?: (task: Task) => Promise<void> | void;
     } = {},
   ): Promise<SessionPruneResult> {
     const summaries = this.listSessions({
@@ -138,6 +144,7 @@ export class SessionRetentionService {
       skippedActive: summaries.filter((session) => !session.terminal).length,
       skippedPinned: summaries.filter((session) => session.pinned).length,
       deletedTaskIds: [],
+      failedTaskIds: [],
     };
 
     if (options.dryRun === true) return result;
@@ -148,14 +155,32 @@ export class SessionRetentionService {
 
     for (const session of candidates) {
       const tasks = this.tasksForSession(session.id, 10000);
+      let sessionFullyDeleted = true;
       for (const task of tasks) {
-        const queuedAttachmentRefs = this.captureQueuedAttachmentRefs(task.id);
-        await options.deleteTask?.(task);
-        this.taskRepo.delete(task.id);
-        this.releaseQueuedAttachmentRefs(task.id, queuedAttachmentRefs);
-        result.deletedTaskIds.push(task.id);
+        // One task that cannot be deleted (a foreign key, a locked file) must not abort
+        // the whole retention run; it is reported and retried on the next run.
+        try {
+          const queuedAttachmentRefs = this.captureQueuedAttachmentRefs(task.id);
+          await options.deleteTask?.(task);
+          this.taskRepo.delete(task.id);
+          this.releaseQueuedAttachmentRefs(task.id, queuedAttachmentRefs);
+          result.deletedTaskIds.push(task.id);
+        } catch (error) {
+          sessionFullyDeleted = false;
+          result.failedTaskIds.push(task.id);
+          logger.warn(`Session retention could not delete task ${task.id}:`, error);
+          continue;
+        }
+        try {
+          await options.onTaskDeleted?.(task);
+        } catch (error) {
+          logger.warn(`Session retention cleanup after deleting task ${task.id} failed:`, error);
+        }
       }
-      this.metadataRepo.delete(session.id);
+      // Keep the session's metadata (pin/archive state) while any of its tasks remain.
+      if (sessionFullyDeleted) {
+        this.metadataRepo.delete(session.id);
+      }
     }
 
     // A process can die after persist() and before the receipt event is

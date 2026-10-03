@@ -41,10 +41,7 @@ const DEFAULT_FEATURES: MemoryFeaturesSettings = {
   transcriptStoreEnabled: false,
   durableContextEnabled: false,
   durableContextMode: "off",
-  durableContextThreshold: 0.75,
-  durableContextFreshTailCount: 64,
   durableContextLargePayloadThreshold: 25000,
-  durableContextSummaryModel: "",
   memoryWriteApprovalMode: "off",
 };
 
@@ -133,7 +130,6 @@ export function MemoryHubSettings(props?: {
   const [supermemoryStatus, setSupermemoryStatus] = useState<SupermemoryConfigStatus | null>(null);
   const [supermemoryEnabled, setSupermemoryEnabled] = useState(false);
   const [supermemoryApiKey, setSupermemoryApiKey] = useState("");
-  const [supermemoryBaseUrl, setSupermemoryBaseUrl] = useState("https://api.supermemory.ai");
   const [supermemoryContainerTemplate, setSupermemoryContainerTemplate] =
     useState("cowork:{workspaceId}");
   const [supermemoryIncludeProfile, setSupermemoryIncludeProfile] = useState(true);
@@ -243,7 +239,6 @@ export function MemoryHubSettings(props?: {
       setAutonomyConfig(loadedAutonomyConfig);
       setSupermemoryStatus(loadedSupermemoryStatus);
       setSupermemoryEnabled(loadedSupermemoryStatus?.enabled === true);
-      setSupermemoryBaseUrl(loadedSupermemoryStatus?.baseUrl || "https://api.supermemory.ai");
       setSupermemoryContainerTemplate(
         loadedSupermemoryStatus?.containerTagTemplate || "cowork:{workspaceId}",
       );
@@ -836,7 +831,6 @@ export function MemoryHubSettings(props?: {
       await window.electronAPI.saveSupermemorySettings({
         enabled: supermemoryEnabled,
         apiKey: supermemoryApiKey || undefined,
-        baseUrl: supermemoryBaseUrl,
         containerTagTemplate: supermemoryContainerTemplate,
         includeProfileInPrompt: supermemoryIncludeProfile,
         mirrorMemoryWrites: supermemoryMirrorWrites,
@@ -1136,9 +1130,9 @@ export function MemoryHubSettings(props?: {
                     checkpointCaptureEnabled: e.target.checked
                       ? true
                       : features.checkpointCaptureEnabled,
-                    transcriptStoreEnabled: e.target.checked
-                      ? true
-                      : features.transcriptStoreEnabled,
+                    // Span writing was switched on together with durable context;
+                    // switch it off together as well so it cannot stay on unseen.
+                    transcriptStoreEnabled: e.target.checked,
                   })
                 }
                 disabled={saving}
@@ -1167,32 +1161,6 @@ export function MemoryHubSettings(props?: {
               <span className="toggle-slider" />
             </label>
           </div>
-        </div>
-
-        <div className="settings-form-group">
-          <label className="settings-label">Memory Write Review (optional)</label>
-          <select
-            value={features.memoryWriteApprovalMode || "off"}
-            onChange={(e) =>
-              saveFeatures({
-                memoryWriteApprovalMode: e.target
-                  .value as MemoryFeaturesSettings["memoryWriteApprovalMode"],
-              })
-            }
-            className="settings-select"
-            disabled={saving}
-          >
-            <option value="off">Off</option>
-            <option value="curated_only">Curated memory only</option>
-            <option value="external_only">External memory only</option>
-            <option value="background_only">Background writes only</option>
-            <option value="all">All durable memory writes</option>
-          </select>
-          <p className="settings-form-hint">
-            The normal no-prompt runtime commits new writes immediately. Review modes are kept for
-            controlled runs and only stage writes when COWORK_MEMORY_WRITE_APPROVAL_MODE is set;
-            they never open an approval popup.
-          </p>
         </div>
       </div>
 
@@ -1249,16 +1217,6 @@ export function MemoryHubSettings(props?: {
                 console.supermemory.ai
               </a>
             </p>
-          </div>
-
-          <div className="settings-field">
-            <label>Base URL</label>
-            <input
-              className="settings-input"
-              value={supermemoryBaseUrl}
-              onChange={(e) => setSupermemoryBaseUrl(e.target.value)}
-              placeholder="https://api.supermemory.ai"
-            />
           </div>
 
           <div className="settings-field">

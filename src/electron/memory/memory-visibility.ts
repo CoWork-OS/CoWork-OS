@@ -76,3 +76,8 @@ const RESERVED_IMPORT_PREFIX = /^\s*(?:\[imported from |\[cowork:prompt_recall=i
 export function neutralizeReservedImportPrefix(content: string): string {
   return RESERVED_IMPORT_PREFIX.test(content) ? `(saved) ${content.trimStart()}` : content;
 }
+
+/** Whether `content` reads as an imported row (global across workspaces). */
+export function hasReservedImportPrefix(content: string | null | undefined): boolean {
+  return typeof content === "string" && RESERVED_IMPORT_PREFIX.test(content);
+}

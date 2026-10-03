@@ -264,13 +264,6 @@ export interface SubconsciousBrainSummary {
   updatedAt: number;
 }
 
-export interface SubconsciousModelRouting {
-  collectingEvidence?: string;
-  ideation?: string;
-  critique?: string;
-  synthesis?: string;
-}
-
 export interface SubconsciousDispatchDefaults {
   autoDispatch: boolean;
   defaultKinds: Partial<Record<SubconsciousTargetKind, SubconsciousDispatchKind>>;
@@ -300,7 +293,6 @@ export interface SubconsciousSettings {
   dreamCadenceHours: number;
   autonomyMode: SubconsciousAutonomyMode;
   trustedTargetKeys: string[];
-  phaseModels: SubconsciousModelRouting;
   dispatchDefaults: SubconsciousDispatchDefaults;
   artifactRetentionDays: number;
   maxHypothesesPerRun: number;
@@ -353,11 +345,6 @@ export const DEFAULT_SUBCONSCIOUS_SETTINGS: SubconsciousSettings = {
   dreamCadenceHours: 24,
   autonomyMode: "recommendation_first",
   trustedTargetKeys: [],
-  phaseModels: {
-    ideation: "cheap",
-    critique: "strong",
-    synthesis: "strong",
-  },
   dispatchDefaults: {
     autoDispatch: false,
     defaultKinds: {

@@ -101,7 +101,7 @@ describe("HeartbeatDispatchEngine.execute", () => {
         dueChecklistItems: [{ id: "c1", title: "Check something" } as Any],
       }),
     );
-    expect(result.status).toBe("work_done");
+    expect(result.status).toBe("ok");
     expect(result.dispatchKind).toBe("runbook");
     expect(deps.createTask).not.toHaveBeenCalled();
   });

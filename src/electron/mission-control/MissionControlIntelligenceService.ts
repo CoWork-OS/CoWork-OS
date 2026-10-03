@@ -638,7 +638,12 @@ export class MissionControlIntelligenceStore {
       )
       .all(...params) as Any[];
     for (const candidate of candidates) {
-      const accepted = candidate.status === "accepted" || candidate.status === "merged";
+      // Expired or unwritable candidates are neither saved nor waiting for review.
+      if (candidate.status === "dismissed" || candidate.status === "skipped") continue;
+      const accepted =
+        candidate.status === "accepted" ||
+        candidate.status === "merged" ||
+        candidate.status === "applied";
       const item = this.repo.upsertItem({
         fingerprint: `memory-candidate:${candidate.id}`,
         category: "learnings",

@@ -20,6 +20,8 @@ import {
   ProactiveSuggestion,
   ProactiveTaskDefinition,
   Task,
+  type HeartbeatDispatchKind,
+  type TaskStatus,
   type AwarenessSummary,
   type AutonomyDecision,
   type ChiefOfStaffWorldModel,
@@ -42,7 +44,11 @@ import {
   type HeartbeatPulseDecision,
 } from "./HeartbeatPulseEngine";
 import { HeartbeatDispatchEngine } from "./HeartbeatDispatchEngine";
-import type { MemoryCaptureOptions } from "../memory/MemoryService";
+import {
+  TERMINAL_TASK_STATUSES,
+  type PruneHeartbeatRunsInput,
+  type PruneHeartbeatRunsResult,
+} from "./HeartbeatRunRepository";
 import { MemoryPressureService } from "../memory/MemoryPressureService";
 
 import { CoreTraceService } from "../core/CoreTraceService";
@@ -57,6 +63,25 @@ import {
 type HeartbeatWakeMode = "now" | "next-heartbeat";
 type HeartbeatWakeSource = "hook" | "cron" | "api" | "manual";
 type WorkspaceMemoryReadGuard = (candidatePath: string) => boolean;
+
+export interface HeartbeatWakeRequest {
+  text?: string;
+  mode?: HeartbeatWakeMode;
+  source?: HeartbeatWakeSource;
+  /** Workspace the wake is about; scopes and merges the resulting signal. */
+  workspaceId?: string;
+  /** Coarse wake kind (e.g. "file_change", "git") used instead of the text for merging. */
+  category?: string;
+}
+
+/** Dispatch runs still in flight after this long are treated as abandoned. */
+export const STALE_DISPATCH_MS = 12 * 60 * 60 * 1000;
+/** Reported runbook/cron items are not re-reported for at least this long. */
+const ADVISORY_ACK_MIN_MS = 60 * 60 * 1000;
+const HEARTBEAT_RUN_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** Wakes of the same kind within this window merge into one signal. */
+const WAKE_FINGERPRINT_BUCKET_MS = 60 * 60 * 1000;
+const URGENT_WAKE_MIN_RETENTION_MS = 2 * 60 * 60 * 1000;
 
 interface MaintenanceWorkspaceContext {
   workspaceId: string;
@@ -100,6 +125,8 @@ export interface HeartbeatServiceDeps {
   ) => Promise<Task>;
   updateTask?: (taskId: string, updates: Partial<Task>) => void;
   getTasksForAgent: (agentRoleId: string, workspaceId?: string) => Task[];
+  /** Current status of a task (undefined when it no longer exists); settles in-flight dispatches. */
+  getTaskStatus?: (taskId: string) => TaskStatus | undefined | Promise<TaskStatus | undefined>;
   getDefaultWorkspaceId: () => string | undefined;
   getDefaultWorkspacePath: () => string | undefined;
   getWorkspacePath: (workspaceId: string) => string | undefined;
@@ -164,21 +191,13 @@ export interface HeartbeatServiceDeps {
     signalCount: number;
     heartbeatRunId: string;
     readGuard?: WorkspaceMemoryReadGuard;
-  }) => Promise<{ id?: string; status?: string; candidateCount?: number } | null>;
-  captureMemory?: (
-    workspaceId: string,
-    taskId: string | undefined,
-    type:
-      | "observation"
-      | "preference"
-      | "constraint"
-      | "timing_preference"
-      | "workflow_pattern"
-      | "correction_rule",
-    content: string,
-    isPrivate?: boolean,
-    options?: MemoryCaptureOptions,
-  ) => Promise<unknown>;
+  }) => Promise<{
+    id?: string;
+    status?: string;
+    candidateCount?: number;
+    /** Set when Dreaming did not run (cooldown or an overlapping run). */
+    skipped?: string;
+  } | null>;
   automationProfileRepo?: AutomationProfileRepository;
   coreTraceService?: CoreTraceService;
   coreMemoryCandidateService?: CoreMemoryCandidateService;
@@ -213,6 +232,22 @@ function buildSignalSummary(signal: HeartbeatSignal): string {
 
 function isUsableWorkspaceId(value?: string): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isHeartbeatEnabled(agent: AgentRole): boolean {
+  return Boolean(agent.heartbeatPolicy?.enabled || agent.heartbeatEnabled);
+}
+
+function normalizeWakeCategory(category?: string): string {
+  const normalized = typeof category === "string" ? category.trim().toLowerCase() : "";
+  return normalized.replace(/[^a-z0-9_-]+/g, "_").slice(0, 40) || "general";
+}
+
+/** Dispatch kinds that are reported but not executed yet. */
+function isAdvisoryDispatchKind(
+  kind?: HeartbeatDispatchKind,
+): kind is "runbook" | "cron_handoff" {
+  return kind === "runbook" || kind === "cron_handoff";
 }
 
 function getProactiveTasks(agent: AgentRole): ProactiveTaskDefinition[] {
@@ -260,7 +295,16 @@ export class HeartbeatService extends EventEmitter {
   private timers = new Map<string, NodeJS.Timeout>();
   private running = new Set<string>();
   private runningPromises = new Map<string, Promise<HeartbeatResult>>();
-  private pendingManualOverrides = new Set<string>();
+  private pendingManualReplays = new Map<
+    string,
+    {
+      promise: Promise<HeartbeatResult>;
+      resolve: (result: HeartbeatResult | Promise<HeartbeatResult>) => void;
+    }
+  >();
+  private pendingImmediatePulses = new Set<string>();
+  private advisoryAcknowledgedAt = new Map<string, number>();
+  private retentionTimer: NodeJS.Timeout | null = null;
   private readonly maintenanceState = new HeartbeatMaintenanceStateStore();
   private readonly signalStore = new HeartbeatSignalStore();
   private readonly runRepo: HeartbeatRunRepository;
@@ -294,7 +338,14 @@ export class HeartbeatService extends EventEmitter {
     this.stopping = false;
     this.started = true;
     await this.runRepo.reconcileInterruptedAgentRuns();
+    await this.reconcileStaleDispatchRuns();
     await this.reconcileLegacyMigratedRuns();
+    await this.pruneRunHistorySafely();
+    if (this.retentionTimer) clearInterval(this.retentionTimer);
+    this.retentionTimer = setInterval(() => {
+      void this.pruneRunHistorySafely();
+    }, HEARTBEAT_RUN_RETENTION_INTERVAL_MS);
+    this.retentionTimer.unref?.();
     for (const agent of await this.deps.agentRoleRepo.findHeartbeatEnabled()) {
       this.scheduleHeartbeat(agent);
     }
@@ -305,12 +356,41 @@ export class HeartbeatService extends EventEmitter {
     this.stopping = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
-    this.pendingManualOverrides.clear();
+    if (this.retentionTimer) clearInterval(this.retentionTimer);
+    this.retentionTimer = null;
+    this.pendingImmediatePulses.clear();
     // Pulses can still be awaiting dispatch or learning work. Keep storage alive
     // until their completion bookkeeping has finished.
     await Promise.allSettled(this.runningPromises.values());
+    for (const [agentRoleId, replay] of this.pendingManualReplays) {
+      replay.resolve(this.stoppedResult(agentRoleId));
+    }
+    this.pendingManualReplays.clear();
     this.running.clear();
     this.runningPromises.clear();
+    await this.signalStore.flush();
+  }
+
+  /**
+   * Delete old pulse/dispatch history (default: older than 30 days, keeping the newest 200 runs
+   * per agent). Runs at startup and daily; retention services may call it directly.
+   */
+  async pruneRunHistory(input: PruneHeartbeatRunsInput = {}): Promise<PruneHeartbeatRunsResult> {
+    return this.runRepo.pruneRuns(input);
+  }
+
+  private async pruneRunHistorySafely(): Promise<void> {
+    if (this.stopping) return;
+    try {
+      const pruned = await this.pruneRunHistory();
+      if (pruned.runsDeleted > 0) {
+        console.info(
+          `[HeartbeatService] Pruned ${pruned.runsDeleted} heartbeat run(s) and ${pruned.eventsDeleted} event(s)`,
+        );
+      }
+    } catch (error) {
+      console.warn("[HeartbeatService] Failed to prune heartbeat run history:", error);
+    }
   }
 
   async triggerHeartbeat(agentRoleId: string): Promise<HeartbeatResult> {
@@ -335,28 +415,18 @@ export class HeartbeatService extends EventEmitter {
       fingerprint: `manual:${agentRoleId}:${Date.now()}`,
       reason: "Manual immediate wake",
     });
+    if (this.stopping) return this.stoppedResult(agentRoleId);
     if (this.running.has(agentRoleId)) {
-      this.pendingManualOverrides.add(agentRoleId);
-      const current = this.runningPromises.get(agentRoleId);
-      if (current) {
-        await current;
-      }
-      await Promise.resolve();
-      if (this.stopping) return this.stoppedResult(agentRoleId);
-      const replay = this.runningPromises.get(agentRoleId);
-      if (replay) return replay;
-      const refreshedAgent = await this.deps.agentRoleRepo.findById(agentRoleId);
-      if (!refreshedAgent) {
-        return {
-          agentRoleId,
-          status: "error",
-          pendingMentions: 0,
-          assignedTasks: 0,
-          relevantActivities: 0,
-          error: "Agent role not found after active pulse completed",
-        };
-      }
-      return this.executePulse(refreshedAgent, true);
+      // A pulse is in flight. Queue exactly one manual replay for when it finishes; every manual
+      // trigger that arrives meanwhile shares that replay.
+      const queued = this.pendingManualReplays.get(agentRoleId);
+      if (queued) return queued.promise;
+      let resolve!: (result: HeartbeatResult | Promise<HeartbeatResult>) => void;
+      const promise = new Promise<HeartbeatResult>((done) => {
+        resolve = done;
+      });
+      this.pendingManualReplays.set(agentRoleId, { promise, resolve });
+      return promise;
     }
     return this.executePulse(agent, true);
   }
@@ -389,36 +459,72 @@ export class HeartbeatService extends EventEmitter {
     return signals;
   }
 
-  async submitWakeRequest(
-    agentRoleId: string,
-    request: { text?: string; mode?: HeartbeatWakeMode; source?: HeartbeatWakeSource },
-  ): Promise<void> {
+  async submitWakeRequest(agentRoleId: string, request: HeartbeatWakeRequest): Promise<void> {
     const mode = request.mode === "now" ? "now" : "next-heartbeat";
     const source = request.source || "manual";
     const reason = normalizeWakeText(request.text);
+    const signalFamily = deriveSignalFamily(mode, source);
+    const workspaceId = isUsableWorkspaceId(request.workspaceId) ? request.workspaceId : undefined;
+    const now = Date.now();
+    // Wake texts carry window titles and file paths, so they must not be part of the
+    // fingerprint: wakes of the same kind merge per source, family, category, workspace and
+    // time bucket.
     const fingerprint =
       mode === "now" && source === "manual"
-        ? `manual:${agentRoleId}:${Date.now()}`
-        : `${source}:${mode}:${agentRoleId}:${reason.toLowerCase()}`;
+        ? `manual:${agentRoleId}:${now}`
+        : [
+            "wake",
+            source,
+            signalFamily,
+            normalizeWakeCategory(request.category),
+            workspaceId || "*",
+            Math.floor(now / WAKE_FINGERPRINT_BUCKET_MS),
+          ].join(":");
+    let expiresAt: number | undefined;
+    if (mode === "now") {
+      // An urgent wake must survive at least two pulse intervals of this agent.
+      const agent = await this.deps.agentRoleRepo.findById(agentRoleId);
+      expiresAt = now + Math.max(URGENT_WAKE_MIN_RETENTION_MS, 2 * this.getCadenceMs(agent));
+    }
     await this.submitHeartbeatSignal({
       agentRoleId,
-      signalFamily: deriveSignalFamily(mode, source),
+      workspaceId,
+      signalFamily,
       source,
       urgency: mode === "now" ? "critical" : source === "hook" ? "medium" : "low",
       confidence: mode === "now" ? 1 : source === "hook" ? 0.7 : 0.5,
       fingerprint,
       reason,
+      expiresAt,
     });
+    if (mode === "now") {
+      await this.requestImmediatePulse(agentRoleId);
+    }
   }
 
-  async submitWakeForAll(request: {
-    text?: string;
-    mode?: HeartbeatWakeMode;
-    source?: HeartbeatWakeSource;
-  }): Promise<void> {
+  async submitWakeForAll(request: HeartbeatWakeRequest): Promise<void> {
     for (const agent of await this.deps.agentRoleRepo.findHeartbeatEnabled()) {
       await this.submitWakeRequest(agent.id, request);
     }
+  }
+
+  /**
+   * Pulse an agent as soon as possible. Never starts a second concurrent pulse: while one is
+   * running, the immediate pulse is queued for right after it.
+   */
+  private async requestImmediatePulse(agentRoleId: string): Promise<void> {
+    if (!this.started || this.stopping) return;
+    if (this.running.has(agentRoleId)) {
+      this.pendingImmediatePulses.add(agentRoleId);
+      return;
+    }
+    const agent = await this.deps.agentRoleRepo.findById(agentRoleId);
+    if (!agent || !isHeartbeatEnabled(agent) || !this.started || this.stopping) return;
+    if (this.running.has(agentRoleId)) {
+      this.pendingImmediatePulses.add(agentRoleId);
+      return;
+    }
+    this.scheduleHeartbeat(agent, { immediate: true });
   }
 
   async updateAgentConfig(agentRoleId: string, _config: HeartbeatConfig): Promise<void> {
@@ -431,9 +537,9 @@ export class HeartbeatService extends EventEmitter {
     const timer = this.timers.get(agentRoleId);
     if (timer) clearTimeout(timer);
     this.timers.delete(agentRoleId);
-    this.running.delete(agentRoleId);
-    this.runningPromises.delete(agentRoleId);
-    this.pendingManualOverrides.delete(agentRoleId);
+    this.pendingImmediatePulses.delete(agentRoleId);
+    // An in-flight pulse keeps its running slot: releasing it here would let a second pulse
+    // start concurrently. The pulse releases the slot (and settles queued manual replays) itself.
     this.signalStore.clearDeferredState(agentRoleId);
   }
 
@@ -484,29 +590,33 @@ export class HeartbeatService extends EventEmitter {
     };
   }
 
-  private scheduleHeartbeat(agent: AgentRole): void {
-    if (!this.started || !(agent.heartbeatPolicy?.enabled || agent.heartbeatEnabled)) return;
+  /** Arm the agent's single pulse timer, replacing (and clearing) any existing one. */
+  private scheduleHeartbeat(agent: AgentRole, options: { immediate?: boolean } = {}): void {
+    if (!this.started || this.stopping || !isHeartbeatEnabled(agent)) return;
     const existing = this.timers.get(agent.id);
     if (existing) clearTimeout(existing);
+    this.timers.delete(agent.id);
     const nextHeartbeatAt = this.getNextHeartbeatTime(agent) || Date.now() + 30_000;
-    const delay = Math.max(1_000, nextHeartbeatAt - Date.now());
+    const delay = options.immediate ? 0 : Math.max(1_000, nextHeartbeatAt - Date.now());
     const runScheduledPulse = async () => {
       if (!this.started) return;
       try {
         const liveAgent = await this.deps.agentRoleRepo.findById(agent.id);
-        if (liveAgent?.heartbeatPolicy?.enabled || liveAgent?.heartbeatEnabled) {
-          await this.executePulse(liveAgent, false);
-          if (!this.started) return;
-          const refreshed = await this.deps.agentRoleRepo.findById(agent.id);
-          if (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled)
-            this.scheduleHeartbeat(refreshed);
-        }
+        // The pulse re-arms the timer when it releases its running slot.
+        if (liveAgent && isHeartbeatEnabled(liveAgent)) await this.executePulse(liveAgent, false);
       } catch (error) {
         console.error("[HeartbeatService] Scheduled heartbeat failed:", error);
+        if (this.started && !this.timers.has(agent.id) && !this.running.has(agent.id)) {
+          this.scheduleHeartbeat(agent);
+        }
       }
     };
-    // The pulse catches its own failures; the timer only starts it.
-    const timer = setTimeout(() => void runScheduledPulse(), delay);
+    const timer = setTimeout(() => {
+      // A fired timer is no longer pending; drop it so the pulse can re-arm the agent.
+      if (this.timers.get(agent.id) === timer) this.timers.delete(agent.id);
+      // The pulse catches its own failures; the timer only starts it.
+      void runScheduledPulse();
+    }, delay);
     this.timers.set(agent.id, timer);
   }
 
@@ -521,21 +631,101 @@ export class HeartbeatService extends EventEmitter {
     };
   }
 
-  private async executePulse(agent: AgentRole, manualOverride: boolean): Promise<HeartbeatResult> {
-    if (this.stopping) return this.stoppedResult(agent.id);
+  private executePulse(agent: AgentRole, manualOverride: boolean): Promise<HeartbeatResult> {
+    if (this.stopping) return Promise.resolve(this.stoppedResult(agent.id));
     if (this.running.has(agent.id)) {
       return (
-        this.runningPromises.get(agent.id) || {
+        this.runningPromises.get(agent.id) ||
+        Promise.resolve({
           agentRoleId: agent.id,
           status: "ok",
           pendingMentions: 0,
           assignedTasks: 0,
           relevantActivities: 0,
           triggerReason: "Pulse already running",
-        }
+        })
       );
     }
+    // Reserve the slot synchronously, before any await: otherwise a scheduled and a manual
+    // pulse can both pass the guard and dispatch twice.
+    this.running.add(agent.id);
+    const promise = Promise.resolve().then(() => this.runPulse(agent, manualOverride));
+    this.runningPromises.set(agent.id, promise);
+    return promise;
+  }
 
+  private async runPulse(agent: AgentRole, manualOverride: boolean): Promise<HeartbeatResult> {
+    try {
+      return await this.runPulseBody(agent, manualOverride);
+    } catch (error) {
+      // Failures before the pulse run row exists; later failures are recorded by the body.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[HeartbeatService] Heartbeat pulse failed:", error);
+      try {
+        await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "error");
+      } catch {
+        // Best effort only.
+      }
+      return {
+        agentRoleId: agent.id,
+        status: "error",
+        pendingMentions: 0,
+        assignedTasks: 0,
+        relevantActivities: 0,
+        error: message,
+      };
+    } finally {
+      await this.releasePulseSlot(agent.id);
+    }
+  }
+
+  /**
+   * Release the running slot and decide what runs next: a queued manual replay (exactly once),
+   * a queued immediate pulse, or the next scheduled pulse. The slot stays held while the agent
+   * is re-read so nothing can start in between.
+   */
+  private async releasePulseSlot(agentRoleId: string): Promise<void> {
+    let refreshed: AgentRole | undefined;
+    if (!this.stopping) {
+      try {
+        refreshed = await this.deps.agentRoleRepo.findById(agentRoleId);
+      } catch (error) {
+        console.error("[HeartbeatService] Failed to reload agent after a pulse:", error);
+      }
+    }
+    const replay = this.pendingManualReplays.get(agentRoleId);
+    this.pendingManualReplays.delete(agentRoleId);
+    const immediate = this.pendingImmediatePulses.delete(agentRoleId);
+    this.running.delete(agentRoleId);
+    this.runningPromises.delete(agentRoleId);
+
+    if (replay) {
+      if (this.stopping) {
+        replay.resolve(this.stoppedResult(agentRoleId));
+      } else if (!refreshed) {
+        replay.resolve({
+          agentRoleId,
+          status: "error",
+          pendingMentions: 0,
+          assignedTasks: 0,
+          relevantActivities: 0,
+          error: "Agent role not found after active pulse completed",
+        });
+      } else {
+        // The replay pulse re-arms the timer when it finishes.
+        replay.resolve(this.executePulse(refreshed, true));
+      }
+      return;
+    }
+    if (!this.started || this.stopping || !refreshed || !isHeartbeatEnabled(refreshed)) return;
+    if (immediate) {
+      this.scheduleHeartbeat(refreshed, { immediate: true });
+    } else if (!this.timers.has(agentRoleId)) {
+      this.scheduleHeartbeat(refreshed);
+    }
+  }
+
+  private async runPulseBody(agent: AgentRole, manualOverride: boolean): Promise<HeartbeatResult> {
     const dueChecklistItems = this.getDueChecklistItems(agent);
     const pulseSignals = this.signalStore.listAgentSignals(agent.id);
     const pulseMentions = await this.deps.mentionRepo.getPendingForAgent(agent.id);
@@ -550,6 +740,110 @@ export class HeartbeatService extends EventEmitter {
     const scopedChecklistItems = workspaceId
       ? dueChecklistItems.filter((item) => !item.workspaceId || item.workspaceId === workspaceId)
       : [];
+    const pendingMentions = pulseMentions.length;
+    const assignedTasks = pulseTasks.length;
+
+    // Cheap gates first: a quiet pulse creates no run or trace rows and triggers neither
+    // reflection nor Dreaming.
+    if (!manualOverride && !isWithinActiveHours(agent)) {
+      const result: HeartbeatResult = {
+        agentRoleId: agent.id,
+        status: "ok",
+        runType: "pulse",
+        pendingMentions,
+        assignedTasks,
+        relevantActivities: 0,
+        pulseOutcome: "idle",
+        triggerReason: "Outside active hours",
+      };
+      await this.finishPulse(agent, result);
+      return result;
+    }
+
+    await this.settleInFlightDispatches(agent.id);
+    const dueProactiveTasks = this.getDueProactiveTasks(agent, pulseSignals);
+    const now = Date.now();
+    // Runbook and cron hand-off items that were already reported stay due (they did not run)
+    // but must not keep winning every pulse over other work.
+    const decisionChecklistItems = scopedChecklistItems.filter(
+      (item) =>
+        !this.isAdvisoryAcknowledged(this.checklistKey(agent, item), item.cadenceMs, now),
+    );
+    const decisionProactiveTasks = dueProactiveTasks.filter(
+      (task) =>
+        !this.isAdvisoryAcknowledged(
+          this.proactiveKey(agent, task),
+          task.frequencyMinutes * 60 * 1000,
+          now,
+        ),
+    );
+    const dispatchesToday = await this.getDispatchesToday(agent.id);
+    const maxDispatchesPerDay =
+      agent.heartbeatPolicy?.maxDispatchesPerDay || agent.maxDispatchesPerDay || 6;
+    const decision = this.withDispatchEvidence(
+      this.pulseEngine.evaluate({
+        agent,
+        signals: pulseSignals,
+        pendingMentions,
+        assignedTasks,
+        hasActiveForegroundTask: workspaceId
+          ? (this.deps.hasActiveForegroundTask?.(workspaceId) ?? false)
+          : (this.deps.hasActiveForegroundTask?.() ?? false),
+        manualOverride,
+        dueChecklistItems: decisionChecklistItems,
+        dueProactiveTasks: decisionProactiveTasks,
+        cooldownUntil: await this.getDispatchCooldownUntil(agent),
+        dispatchesToday,
+        maxDispatchesPerDay,
+        hasInFlightDispatch: await this.runRepo.hasInFlightDispatch(agent.id, workspaceId),
+      }),
+      { agent, mentions: pulseMentions, tasks: pulseTasks, manualOverride },
+    );
+
+    if (decision.kind === "deferred") {
+      this.signalStore.setDeferredState(
+        agent.id,
+        decision.deferred || {
+          active: true,
+          compressedSignalCount: 0,
+        },
+      );
+      const result: HeartbeatResult = {
+        agentRoleId: agent.id,
+        status: "ok",
+        runType: "pulse",
+        pendingMentions,
+        assignedTasks,
+        relevantActivities: 0,
+        pulseOutcome: decision.kind,
+        triggerReason: decision.reason,
+        compressedSignalCount: decision.compressedSignalCount,
+        signalCount: decision.signalCount,
+        dueProactiveCount: decision.dueProactiveCount,
+        checklistDueCount: decision.dueChecklistCount,
+        dispatchesToday,
+        maxDispatchesPerDay,
+        deferred: true,
+        deferredReason: decision.reason,
+      };
+      this.emitHeartbeatEvent({
+        type: "pulse_deferred",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        result,
+        runType: "pulse",
+        deferred: decision.deferred,
+      });
+      await this.finishPulse(agent, result);
+      return result;
+    }
+
+    await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "running");
+    const relevantActivities = workspaceId
+      ? (await this.deps.activityRepo.list({ workspaceId, agentRoleId: agent.id, limit: 10 }))
+          .length
+      : 0;
     const pulseRun = await this.runRepo.create({
       agentRoleId: agent.id,
       workspaceId,
@@ -557,452 +851,184 @@ export class HeartbeatService extends EventEmitter {
       reason: manualOverride ? "manual_pulse" : "scheduled_pulse",
       status: "running",
     });
-    const profile = await this.deps.automationProfileRepo?.findByAgentRoleId(agent.id);
-    const coreTrace = profile
-      ? await this.deps.coreTraceService?.startTrace({
-          profileId: profile.id,
-          workspaceId,
-          targetKey: `agent_role:${agent.id}`,
-          sourceSurface: "heartbeat",
-          traceKind: "pulse_cycle",
-          status: "running",
-          heartbeatRunId: pulseRun.id,
-          startedAt: Date.now(),
-        })
-      : undefined;
-    if (coreTrace) {
-      await this.deps.coreTraceService?.appendPhaseEvent(
-        coreTrace.id,
-        "start",
-        "heartbeat.pulse_started",
-        manualOverride ? "Manual heartbeat pulse started." : "Scheduled heartbeat pulse started.",
-        {
-          agentRoleId: agent.id,
-          workspaceId,
-          runId: pulseRun.id,
-        },
-      );
-    }
-    this.emitHeartbeatEvent({
-      type: "pulse_started",
-      agentRoleId: agent.id,
-      agentName: agent.displayName,
-      timestamp: Date.now(),
-      runId: pulseRun.id,
-      runType: "pulse",
-    });
-
-    const promise = (async (): Promise<HeartbeatResult> => {
-      this.running.add(agent.id);
-      await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "running");
-      try {
-        const pendingMentions = pulseMentions.length;
-        const assignedTasks = pulseTasks.length;
-        const relevantActivities = workspaceId
-          ? (await this.deps.activityRepo.list({ workspaceId, agentRoleId: agent.id, limit: 10 }))
-              .length
-          : 0;
-
-        if (!manualOverride && !isWithinActiveHours(agent)) {
-          if (coreTrace) {
-            await this.deps.coreTraceService?.appendPhaseEvent(
-              coreTrace.id,
-              "gating",
-              "heartbeat.gated",
-              "Heartbeat pulse deferred because the operator is outside active hours.",
-            );
-            await this.deps.coreTraceService?.completeTrace(
-              coreTrace.id,
-              "completed",
-              "Outside active hours.",
-            );
-          }
-          const result: HeartbeatResult = {
-            agentRoleId: agent.id,
-            status: "ok",
-            runId: pulseRun.id,
-            runType: "pulse",
-            pendingMentions,
-            assignedTasks,
-            relevantActivities,
-            pulseOutcome: "idle",
-            triggerReason: "Outside active hours",
-          };
-          await this.runRepo.finish(pulseRun.id, {
-            status: "completed",
-            summary: "Outside active hours",
-          });
-          await this.finishPulse(agent, result);
-          return result;
-        }
-
-        const dueProactiveTasks = this.getDueProactiveTasks(agent, pulseSignals);
-        const dispatchesToday = await this.getDispatchesToday(agent.id);
-        const decision = this.pulseEngine.evaluate({
-          agent,
-          signals: pulseSignals,
-          pendingMentions,
-          assignedTasks,
-          hasActiveForegroundTask: workspaceId
-            ? (this.deps.hasActiveForegroundTask?.(workspaceId) ?? false)
-            : (this.deps.hasActiveForegroundTask?.() ?? false),
-          manualOverride,
-          dueChecklistItems: scopedChecklistItems,
-          dueProactiveTasks,
-          cooldownUntil: await this.getDispatchCooldownUntil(agent),
-          dispatchesToday,
-          maxDispatchesPerDay:
-            agent.heartbeatPolicy?.maxDispatchesPerDay || agent.maxDispatchesPerDay || 6,
-          hasInFlightDispatch: await this.runRepo.hasInFlightDispatch(agent.id, workspaceId),
-        });
-
-        let result: HeartbeatResult = {
-          agentRoleId: agent.id,
-          status: "ok",
-          runId: pulseRun.id,
-          runType: "pulse",
-          pendingMentions,
-          assignedTasks,
-          relevantActivities,
-          pulseOutcome: decision.kind,
-          triggerReason: decision.reason,
-          compressedSignalCount: decision.compressedSignalCount,
-          signalCount: decision.signalCount,
-          dueProactiveCount: decision.dueProactiveCount,
-          checklistDueCount: decision.dueChecklistCount,
-          dispatchesToday,
-          maxDispatchesPerDay:
-            agent.heartbeatPolicy?.maxDispatchesPerDay || agent.maxDispatchesPerDay || 6,
-        };
-
-        const reflectionRun = await this.maybeRunWorkflowReflection({
-          agent,
-          workspaceId,
-          decision,
-          pendingMentions,
-          assignedTasks,
-          relevantActivities,
-          heartbeatRunId: pulseRun.id,
-        });
-        if (reflectionRun) {
-          result = {
-            ...result,
-            reflectionRunId: reflectionRun.id,
-            reflectionOutcome: reflectionRun.outcome,
-          };
-          if (coreTrace) {
-            await this.deps.coreTraceService?.appendPhaseEvent(
-              coreTrace.id,
-              "decision",
-              "heartbeat.reflection_triggered",
-              "Heartbeat triggered workflow reflection from accumulated signals.",
-              {
-                reflectionRunId: reflectionRun.id,
-                reflectionOutcome: reflectionRun.outcome,
-              },
-            );
-          }
-        }
-
-        const dreamingRun = await this.maybeRunMemoryDreaming({
-          workspaceId,
-          workspacePath: workspaceId ? this.deps.getWorkspacePath(workspaceId) : undefined,
-          decision,
-          signals: pulseSignals,
-          heartbeatRunId: pulseRun.id,
-        });
-        if (dreamingRun) {
-          result = {
-            ...result,
-            dreamingRunId: dreamingRun.id,
-            dreamingCandidateCount: dreamingRun.candidateCount,
-          };
-          if (coreTrace) {
-            await this.deps.coreTraceService?.appendPhaseEvent(
-              coreTrace.id,
-              "decision",
-              "heartbeat.dreaming_triggered",
-              "Heartbeat triggered Dreaming from memory-drift signals.",
-              {
-                dreamingRunId: dreamingRun.id,
-                dreamingStatus: dreamingRun.status,
-                candidateCount: dreamingRun.candidateCount,
-              },
-            );
-          }
-        }
-
-        if (decision.kind === "deferred") {
-          if (coreTrace) {
-            await this.deps.coreTraceService?.appendPhaseEvent(
-              coreTrace.id,
-              "gating",
-              "heartbeat.deferred",
-              decision.reason,
-              {
-                compressedSignalCount: decision.compressedSignalCount,
-                signalCount: decision.signalCount,
-              },
-            );
-            await this.deps.coreTraceService?.completeTrace(
-              coreTrace.id,
-              "completed",
-              decision.reason,
-            );
-            await this.finalizeCoreLearning(coreTrace.id);
-          }
-          this.signalStore.setDeferredState(
-            agent.id,
-            decision.deferred || {
-              active: true,
-              compressedSignalCount: 0,
-            },
-          );
-          await this.runRepo.finish(pulseRun.id, { status: "completed", summary: decision.reason });
-          result.deferred = true;
-          result.deferredReason = decision.reason;
-          this.emitHeartbeatEvent({
-            type: "pulse_deferred",
-            agentRoleId: agent.id,
-            agentName: agent.displayName,
-            timestamp: Date.now(),
-            result,
-            runId: pulseRun.id,
-            runType: "pulse",
-            deferred: decision.deferred,
-          });
-          await this.finishPulse(agent, result);
-          return result;
-        }
-
-        this.signalStore.clearDeferredState(agent.id);
-
-        if (decision.kind === "idle" || !decision.dispatchKind) {
-          if (coreTrace) {
-            await this.deps.coreTraceService?.appendPhaseEvent(
-              coreTrace.id,
-              "decision",
-              "heartbeat.idle",
-              decision.reason,
-            );
-            await this.deps.coreTraceService?.completeTrace(
-              coreTrace.id,
-              "completed",
-              decision.reason,
-            );
-            await this.finalizeCoreLearning(coreTrace.id);
-          }
-          await this.runRepo.finish(pulseRun.id, { status: "completed", summary: decision.reason });
-          this.emitHeartbeatEvent({
-            type: "pulse_completed",
-            agentRoleId: agent.id,
-            agentName: agent.displayName,
-            timestamp: Date.now(),
-            result,
-            runId: pulseRun.id,
-            runType: "pulse",
-          });
-          await this.finishPulse(agent, result);
-          return result;
-        }
-
-        if (!workspaceId) {
-          if (coreTrace) {
-            await this.deps.coreTraceService?.appendPhaseEvent(
-              coreTrace.id,
-              "decision",
-              "heartbeat.no_workspace",
-              "Heartbeat could not dispatch because no workspace was available.",
-            );
-            await this.deps.coreTraceService?.completeTrace(
-              coreTrace.id,
-              "completed",
-              "No workspace available for heartbeat dispatch.",
-            );
-            await this.finalizeCoreLearning(coreTrace.id);
-          }
-          result = {
-            ...result,
-            pulseOutcome: "idle",
-            dispatchKind: undefined,
-            triggerReason: "No workspace available for heartbeat dispatch",
-          };
-          await this.runRepo.finish(pulseRun.id, {
-            status: "completed",
-            summary: "No workspace available for heartbeat dispatch",
-          });
-          this.emitHeartbeatEvent({
-            type: "dispatch_skipped",
-            agentRoleId: agent.id,
-            agentName: agent.displayName,
-            timestamp: Date.now(),
-            result,
-            runId: pulseRun.id,
-            runType: "pulse",
-            dispatchKind: decision.dispatchKind,
-          });
-          this.emitHeartbeatEvent({
-            type: "pulse_completed",
-            agentRoleId: agent.id,
-            agentName: agent.displayName,
-            timestamp: Date.now(),
-            result,
-            runId: pulseRun.id,
-            runType: "pulse",
-          });
-          await this.finishPulse(agent, result);
-          return result;
-        }
-
-        const dispatchRun = await this.runRepo.create({
-          agentRoleId: agent.id,
-          workspaceId,
-          runType: "dispatch",
-          dispatchKind: decision.dispatchKind,
-          reason: decision.reason,
-          evidenceRefs: decision.evidenceRefs,
-          status: "running",
-        });
-        this.emitHeartbeatEvent({
-          type: "dispatch_started",
-          agentRoleId: agent.id,
-          agentName: agent.displayName,
-          timestamp: Date.now(),
-          runId: dispatchRun.id,
-          runType: "dispatch",
-          dispatchKind: decision.dispatchKind,
-        });
-        if (coreTrace) {
-          await this.deps.coreTraceService?.appendPhaseEvent(
-            coreTrace.id,
-            "dispatch",
-            "heartbeat.dispatch_started",
-            `Heartbeat started ${decision.dispatchKind} dispatch.`,
-            {
-              dispatchRunId: dispatchRun.id,
-              dispatchKind: decision.dispatchKind,
-              reason: decision.reason,
-            },
-          );
-        }
-
-        let dispatchResult: HeartbeatResult;
-        try {
-          dispatchResult = await this.dispatchEngine.execute({
-            agent,
-            heartbeatRunId: dispatchRun.id,
+    let coreTrace: Awaited<ReturnType<CoreTraceService["startTrace"]>> | undefined;
+    try {
+      const profile = await this.deps.automationProfileRepo?.findByAgentRoleId(agent.id);
+      coreTrace = profile
+        ? await this.deps.coreTraceService?.startTrace({
+            profileId: profile.id,
             workspaceId,
-            reason: decision.reason,
-            signalSummaries: pulseSignals.map(buildSignalSummary).slice(0, 8),
-            evidenceRefs: decision.evidenceRefs,
-            dueChecklistItems: scopedChecklistItems,
-            dueProactiveTasks,
-            dispatchKind: decision.dispatchKind,
-          });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          await this.runRepo.recordEvent(dispatchRun.id, "dispatch.failed", {
-            dispatchKind: decision.dispatchKind,
-            triggerReason: decision.reason,
-            error: message,
-          });
-          await this.runRepo.finish(dispatchRun.id, {
-            status: "failed",
-            summary: decision.reason,
-            error: message,
-            evidenceRefs: decision.evidenceRefs,
-          });
-          throw error;
-        }
+            targetKey: `agent_role:${agent.id}`,
+            sourceSurface: "heartbeat",
+            traceKind: "pulse_cycle",
+            status: "running",
+            heartbeatRunId: pulseRun.id,
+            startedAt: Date.now(),
+          })
+        : undefined;
+      if (coreTrace) {
+        await this.deps.coreTraceService?.appendPhaseEvent(
+          coreTrace.id,
+          "start",
+          "heartbeat.pulse_started",
+          manualOverride ? "Manual heartbeat pulse started." : "Scheduled heartbeat pulse started.",
+          {
+            agentRoleId: agent.id,
+            workspaceId,
+            runId: pulseRun.id,
+          },
+        );
+      }
+      this.emitHeartbeatEvent({
+        type: "pulse_started",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        runId: pulseRun.id,
+        runType: "pulse",
+      });
 
-        await this.runRepo.recordEvent(dispatchRun.id, "dispatch.completed", {
-          dispatchKind: decision.dispatchKind,
-          triggerReason: decision.reason,
-        });
-        await this.runRepo.finish(dispatchRun.id, {
-          status: dispatchResult.status === "error" ? "failed" : "completed",
-          summary: decision.reason,
-          error: dispatchResult.error,
-          taskId: dispatchResult.taskCreated,
-          evidenceRefs: decision.evidenceRefs,
-        });
-        if (dispatchResult.taskCreated) {
-          await this.runRepo.attachTask(dispatchRun.id, dispatchResult.taskCreated);
-          if (coreTrace) {
-            await this.deps.coreTraceService?.attachTask(coreTrace.id, dispatchResult.taskCreated);
-          }
-        }
-        if (dispatchResult.status !== "error") {
-          this.markMaintenanceCompleted(
-            agent,
-            scopedChecklistItems,
-            dueProactiveTasks,
-            decision.kind,
-          );
-          this.signalStore.removeSignals(
-            agent.id,
-            pulseSignals
-              .filter((signal) => decision.signalIds.includes(signal.id))
-              .map((signal) => ({
-                id: signal.id,
-                lastSeenAt: signal.lastSeenAt,
-                mergedCount: signal.mergedCount,
-              })),
-          );
-        }
-        await this.deps.agentRoleRepo.updateHeartbeatRunTimestamps?.(agent.id, {
-          lastDispatchAt: Date.now(),
-          lastHeartbeatAt: Date.now(),
-          lastDispatchKind: decision.dispatchKind,
-        });
+      let result: HeartbeatResult = {
+        agentRoleId: agent.id,
+        status: "ok",
+        runId: pulseRun.id,
+        runType: "pulse",
+        pendingMentions,
+        assignedTasks,
+        relevantActivities,
+        pulseOutcome: decision.kind,
+        triggerReason: decision.reason,
+        compressedSignalCount: decision.compressedSignalCount,
+        signalCount: decision.signalCount,
+        dueProactiveCount: decision.dueProactiveCount,
+        checklistDueCount: decision.dueChecklistCount,
+        dispatchesToday,
+        maxDispatchesPerDay,
+      };
+
+      const reflectionRun = await this.maybeRunWorkflowReflection({
+        agent,
+        workspaceId,
+        decision,
+        pendingMentions,
+        assignedTasks,
+        relevantActivities,
+        heartbeatRunId: pulseRun.id,
+      });
+      if (reflectionRun) {
         result = {
           ...result,
-          status: dispatchResult.status,
-          dispatchKind: decision.dispatchKind,
-          taskCreated: dispatchResult.taskCreated,
-          runId: pulseRun.id,
+          reflectionRunId: reflectionRun.id,
+          reflectionOutcome: reflectionRun.outcome,
         };
-
-        await this.runRepo.finish(pulseRun.id, {
-          status: "completed",
-          summary: `${decision.kind}: ${decision.reason}`,
-        });
         if (coreTrace) {
           await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
-            "dispatch",
-            "heartbeat.dispatch_completed",
-            `${decision.dispatchKind} dispatch ${dispatchResult.status === "error" ? "failed" : "completed"}.`,
+            "decision",
+            "heartbeat.reflection_triggered",
+            "Heartbeat triggered workflow reflection from accumulated signals.",
             {
-              dispatchRunId: dispatchRun.id,
-              taskId: dispatchResult.taskCreated,
-              status: dispatchResult.status,
+              reflectionRunId: reflectionRun.id,
+              reflectionOutcome: reflectionRun.outcome,
             },
+          );
+        }
+      }
+
+      const dreamingRun = await this.maybeRunMemoryDreaming({
+        agentRoleId: agent.id,
+        workspaceId,
+        workspacePath: workspaceId ? this.deps.getWorkspacePath(workspaceId) : undefined,
+        decision,
+        signals: pulseSignals,
+        heartbeatRunId: pulseRun.id,
+      });
+      if (dreamingRun) {
+        result = {
+          ...result,
+          dreamingRunId: dreamingRun.id,
+          dreamingCandidateCount: dreamingRun.candidateCount,
+        };
+        if (coreTrace) {
+          await this.deps.coreTraceService?.appendPhaseEvent(
+            coreTrace.id,
+            "decision",
+            "heartbeat.dreaming_triggered",
+            "Heartbeat triggered Dreaming from memory-drift signals.",
+            {
+              dreamingRunId: dreamingRun.id,
+              dreamingStatus: dreamingRun.status,
+              candidateCount: dreamingRun.candidateCount,
+            },
+          );
+        }
+      }
+
+      this.signalStore.clearDeferredState(agent.id);
+
+      if (decision.kind === "idle" || !decision.dispatchKind) {
+        if (coreTrace) {
+          await this.deps.coreTraceService?.appendPhaseEvent(
+            coreTrace.id,
+            "decision",
+            "heartbeat.idle",
+            decision.reason,
           );
           await this.deps.coreTraceService?.completeTrace(
             coreTrace.id,
-            dispatchResult.status === "error" ? "failed" : "completed",
-            `${decision.kind}: ${decision.reason}`,
+            "completed",
+            decision.reason,
           );
           await this.finalizeCoreLearning(coreTrace.id);
         }
+        await this.runRepo.finish(pulseRun.id, { status: "completed", summary: decision.reason });
         this.emitHeartbeatEvent({
-          type: "dispatch_completed",
+          type: "pulse_completed",
           agentRoleId: agent.id,
           agentName: agent.displayName,
           timestamp: Date.now(),
           result,
-          runId: dispatchRun.id,
-          runType: "dispatch",
-          dispatchKind: decision.dispatchKind,
+          runId: pulseRun.id,
+          runType: "pulse",
         });
-        await this.recordDispatchOutcome({
-          agent,
-          workspaceId,
-          sourceRunId: dispatchRun.id,
-          trigger: manualOverride ? "manual" : "heartbeat",
-          decision,
-          dispatchResult,
+        await this.finishPulse(agent, result);
+        return result;
+      }
+
+      if (!workspaceId) {
+        if (coreTrace) {
+          await this.deps.coreTraceService?.appendPhaseEvent(
+            coreTrace.id,
+            "decision",
+            "heartbeat.no_workspace",
+            "Heartbeat could not dispatch because no workspace was available.",
+          );
+          await this.deps.coreTraceService?.completeTrace(
+            coreTrace.id,
+            "completed",
+            "No workspace available for heartbeat dispatch.",
+          );
+          await this.finalizeCoreLearning(coreTrace.id);
+        }
+        result = {
+          ...result,
+          pulseOutcome: "idle",
+          dispatchKind: undefined,
+          triggerReason: "No workspace available for heartbeat dispatch",
+        };
+        await this.runRepo.finish(pulseRun.id, {
+          status: "completed",
+          summary: "No workspace available for heartbeat dispatch",
+        });
+        this.emitHeartbeatEvent({
+          type: "dispatch_skipped",
+          agentRoleId: agent.id,
+          agentName: agent.displayName,
+          timestamp: Date.now(),
+          result,
+          runId: pulseRun.id,
+          runType: "pulse",
+          dispatchKind: decision.dispatchKind,
         });
         this.emitHeartbeatEvent({
           type: "pulse_completed",
@@ -1015,82 +1041,290 @@ export class HeartbeatService extends EventEmitter {
         });
         await this.finishPulse(agent, result);
         return result;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+      }
+
+      if (isAdvisoryDispatchKind(decision.dispatchKind)) {
+        // Runbooks and cron hand-offs are not executed yet; they only leave an activity entry.
+        // Until they are, they must not spend dispatch budget or cooldown (no dispatch run),
+        // mark checklist items done, or consume signals other dispatches still need.
+        const advisoryChecklistItems =
+          decision.dispatchKind === "runbook" ? decisionChecklistItems : [];
+        const advisoryProactiveTasks = decisionProactiveTasks.filter((task) =>
+          decision.dispatchKind === "cron_handoff"
+            ? task.executionMode === "cron_handoff"
+            : task.executionMode !== "pulse_only",
+        );
+        const advisoryResult = await this.dispatchEngine.execute({
+          agent,
+          heartbeatRunId: pulseRun.id,
+          workspaceId,
+          reason: decision.reason,
+          signalSummaries: pulseSignals.map(buildSignalSummary).slice(0, 8),
+          evidenceRefs: decision.evidenceRefs,
+          dueChecklistItems: advisoryChecklistItems,
+          dueProactiveTasks: advisoryProactiveTasks,
+          dispatchKind: decision.dispatchKind,
+        });
+        await this.runRepo.recordEvent(pulseRun.id, "dispatch.advisory", {
+          dispatchKind: decision.dispatchKind,
+          triggerReason: decision.reason,
+          checklistItems: advisoryChecklistItems.map((item) => item.title),
+          proactiveTasks: advisoryProactiveTasks.map((task) => task.name),
+        });
+        this.acknowledgeAdvisoryItems(agent, advisoryChecklistItems, advisoryProactiveTasks);
+        this.removeDecisionSignals(agent.id, pulseSignals, decision.signalIds);
+        result = {
+          ...result,
+          status: advisoryResult.status,
+          dispatchKind: decision.dispatchKind,
+        };
+        await this.runRepo.finish(pulseRun.id, {
+          status: "completed",
+          summary: `${decision.kind}: ${decision.reason}`,
+        });
         if (coreTrace) {
           await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
-            "error",
-            "heartbeat.error",
-            message,
+            "decision",
+            "heartbeat.advisory_dispatch",
+            `${decision.dispatchKind} noted; not executed.`,
           );
-          await this.deps.coreTraceService?.failTrace(coreTrace.id, message);
+          await this.deps.coreTraceService?.completeTrace(
+            coreTrace.id,
+            "completed",
+            `${decision.kind}: ${decision.reason}`,
+          );
           await this.finalizeCoreLearning(coreTrace.id);
         }
-        await this.runRepo.finish(pulseRun.id, { status: "failed", error: message });
-        const result: HeartbeatResult = {
-          agentRoleId: agent.id,
-          status: "error",
-          runId: pulseRun.id,
-          runType: "pulse",
-          pendingMentions: 0,
-          assignedTasks: 0,
-          relevantActivities: 0,
-          error: message,
-        };
-        await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "error");
         this.emitHeartbeatEvent({
-          type: "error",
+          type: "dispatch_completed",
           agentRoleId: agent.id,
           agentName: agent.displayName,
           timestamp: Date.now(),
           result,
-          error: message,
+          runId: pulseRun.id,
+          runType: "pulse",
+          dispatchKind: decision.dispatchKind,
+        });
+        this.emitHeartbeatEvent({
+          type: "pulse_completed",
+          agentRoleId: agent.id,
+          agentName: agent.displayName,
+          timestamp: Date.now(),
+          result,
           runId: pulseRun.id,
           runType: "pulse",
         });
-        await this.recordHeartbeatError(
-          agent,
-          pulseRun.id,
-          manualOverride ? "manual" : "heartbeat",
-          message,
-          workspaceId,
-        );
+        await this.finishPulse(agent, result);
         return result;
-      } finally {
-        this.running.delete(agent.id);
-        this.runningPromises.delete(agent.id);
-        const refreshed = this.stopping
-          ? undefined
-          : await this.deps.agentRoleRepo.findById(agent.id);
-        if (
-          this.pendingManualOverrides.has(agent.id) &&
-          (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled)
-        ) {
-          this.pendingManualOverrides.delete(agent.id);
-          queueMicrotask(() => {
-            if (this.stopping) return;
-            void Promise.resolve(this.deps.agentRoleRepo.findById(agent.id))
-              .then((replayAgent) => {
-                if (replayAgent?.heartbeatPolicy?.enabled || replayAgent?.heartbeatEnabled) {
-                  void this.executePulse(replayAgent, true);
-                }
-              })
-              .catch((error) => {
-                console.error("[HeartbeatService] Failed to replay a manual override:", error);
-              });
-          });
-        } else if (
-          this.started &&
-          (refreshed?.heartbeatPolicy?.enabled || refreshed?.heartbeatEnabled) &&
-          !this.timers.has(agent.id)
-        ) {
-          this.scheduleHeartbeat(refreshed);
+      }
+
+      const dispatchRun = await this.runRepo.create({
+        agentRoleId: agent.id,
+        workspaceId,
+        runType: "dispatch",
+        dispatchKind: decision.dispatchKind,
+        reason: decision.reason,
+        evidenceRefs: decision.evidenceRefs,
+        status: "running",
+      });
+      this.emitHeartbeatEvent({
+        type: "dispatch_started",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        runId: dispatchRun.id,
+        runType: "dispatch",
+        dispatchKind: decision.dispatchKind,
+      });
+      if (coreTrace) {
+        await this.deps.coreTraceService?.appendPhaseEvent(
+          coreTrace.id,
+          "dispatch",
+          "heartbeat.dispatch_started",
+          `Heartbeat started ${decision.dispatchKind} dispatch.`,
+          {
+            dispatchRunId: dispatchRun.id,
+            dispatchKind: decision.dispatchKind,
+            reason: decision.reason,
+          },
+        );
+      }
+
+      let dispatchResult: HeartbeatResult;
+      try {
+        dispatchResult = await this.dispatchEngine.execute({
+          agent,
+          heartbeatRunId: dispatchRun.id,
+          workspaceId,
+          reason: decision.reason,
+          signalSummaries: pulseSignals.map(buildSignalSummary).slice(0, 8),
+          evidenceRefs: decision.evidenceRefs,
+          dueChecklistItems: scopedChecklistItems,
+          dueProactiveTasks,
+          dispatchKind: decision.dispatchKind,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.runRepo.recordEvent(dispatchRun.id, "dispatch.failed", {
+          dispatchKind: decision.dispatchKind,
+          triggerReason: decision.reason,
+          error: message,
+        });
+        await this.runRepo.finish(dispatchRun.id, {
+          status: "failed",
+          summary: decision.reason,
+          error: message,
+          evidenceRefs: decision.evidenceRefs,
+        });
+        throw error;
+      }
+
+      // A created task is the dispatch's real work: the run stays in flight until the task
+      // reaches a terminal state (settleInFlightDispatches), so the in-flight guard holds.
+      const tracksTask =
+        dispatchResult.status !== "error" && Boolean(dispatchResult.taskCreated);
+      await this.runRepo.recordEvent(
+        dispatchRun.id,
+        tracksTask ? "dispatch.task_created" : "dispatch.completed",
+        {
+          dispatchKind: decision.dispatchKind,
+          triggerReason: decision.reason,
+          taskId: dispatchResult.taskCreated,
+        },
+      );
+      if (dispatchResult.taskCreated) {
+        await this.runRepo.attachTask(dispatchRun.id, dispatchResult.taskCreated);
+        if (coreTrace) {
+          await this.deps.coreTraceService?.attachTask(coreTrace.id, dispatchResult.taskCreated);
         }
       }
-    })();
-    this.runningPromises.set(agent.id, promise);
-    return promise;
+      if (!tracksTask) {
+        await this.runRepo.finish(dispatchRun.id, {
+          status: dispatchResult.status === "error" ? "failed" : "completed",
+          summary: decision.reason,
+          error: dispatchResult.error,
+          taskId: dispatchResult.taskCreated,
+          evidenceRefs: decision.evidenceRefs,
+        });
+      }
+      if (dispatchResult.status !== "error") {
+        this.markMaintenanceCompleted(
+          agent,
+          scopedChecklistItems,
+          dueProactiveTasks,
+          decision.kind,
+        );
+        this.removeDecisionSignals(agent.id, pulseSignals, decision.signalIds);
+      }
+      await this.deps.agentRoleRepo.updateHeartbeatRunTimestamps?.(agent.id, {
+        lastDispatchAt: Date.now(),
+        lastHeartbeatAt: Date.now(),
+        lastDispatchKind: decision.dispatchKind,
+      });
+      result = {
+        ...result,
+        status: dispatchResult.status,
+        dispatchKind: decision.dispatchKind,
+        taskCreated: dispatchResult.taskCreated,
+        runId: pulseRun.id,
+      };
+
+      await this.runRepo.finish(pulseRun.id, {
+        status: "completed",
+        summary: `${decision.kind}: ${decision.reason}`,
+      });
+      if (coreTrace) {
+        await this.deps.coreTraceService?.appendPhaseEvent(
+          coreTrace.id,
+          "dispatch",
+          "heartbeat.dispatch_completed",
+          `${decision.dispatchKind} dispatch ${dispatchResult.status === "error" ? "failed" : "completed"}.`,
+          {
+            dispatchRunId: dispatchRun.id,
+            taskId: dispatchResult.taskCreated,
+            status: dispatchResult.status,
+          },
+        );
+        await this.deps.coreTraceService?.completeTrace(
+          coreTrace.id,
+          dispatchResult.status === "error" ? "failed" : "completed",
+          `${decision.kind}: ${decision.reason}`,
+        );
+        await this.finalizeCoreLearning(coreTrace.id);
+      }
+      this.emitHeartbeatEvent({
+        type: "dispatch_completed",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        result,
+        runId: dispatchRun.id,
+        runType: "dispatch",
+        dispatchKind: decision.dispatchKind,
+      });
+      await this.recordDispatchOutcome({
+        agent,
+        workspaceId,
+        sourceRunId: dispatchRun.id,
+        trigger: manualOverride ? "manual" : "heartbeat",
+        decision,
+        dispatchResult,
+      });
+      this.emitHeartbeatEvent({
+        type: "pulse_completed",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        result,
+        runId: pulseRun.id,
+        runType: "pulse",
+      });
+      await this.finishPulse(agent, result);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (coreTrace) {
+        await this.deps.coreTraceService?.appendPhaseEvent(
+          coreTrace.id,
+          "error",
+          "heartbeat.error",
+          message,
+        );
+        await this.deps.coreTraceService?.failTrace(coreTrace.id, message);
+        await this.finalizeCoreLearning(coreTrace.id);
+      }
+      await this.runRepo.finish(pulseRun.id, { status: "failed", error: message });
+      const result: HeartbeatResult = {
+        agentRoleId: agent.id,
+        status: "error",
+        runId: pulseRun.id,
+        runType: "pulse",
+        pendingMentions: 0,
+        assignedTasks: 0,
+        relevantActivities: 0,
+        error: message,
+      };
+      await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "error");
+      this.emitHeartbeatEvent({
+        type: "error",
+        agentRoleId: agent.id,
+        agentName: agent.displayName,
+        timestamp: Date.now(),
+        result,
+        error: message,
+        runId: pulseRun.id,
+        runType: "pulse",
+      });
+      await this.recordHeartbeatError(
+        agent,
+        pulseRun.id,
+        manualOverride ? "manual" : "heartbeat",
+        message,
+        workspaceId,
+      );
+      return result;
+    }
   }
 
   private async finishPulse(agent: AgentRole, result: HeartbeatResult): Promise<void> {
@@ -1101,7 +1335,143 @@ export class HeartbeatService extends EventEmitter {
       lastHeartbeatAt: now,
       lastPulseResult: result.pulseOutcome,
     });
+    // The cadence restarts from this pulse: drop (and clear) any pending timer; the pulse
+    // re-arms exactly one when it releases its slot.
+    const timer = this.timers.get(agent.id);
+    if (timer) clearTimeout(timer);
     this.timers.delete(agent.id);
+  }
+
+  /**
+   * Settle this agent's dispatch runs whose task finished, vanished, or has been running for
+   * longer than STALE_DISPATCH_MS. Until then the run counts as in flight.
+   */
+  private async settleInFlightDispatches(agentRoleId: string): Promise<void> {
+    const runs = await this.runRepo.listRunningDispatches(agentRoleId);
+    if (runs.length === 0) return;
+    const now = Date.now();
+    for (const run of runs) {
+      let status: "completed" | "failed" | undefined;
+      let error: string | undefined;
+      if (run.taskId && this.deps.getTaskStatus) {
+        const taskStatus = await this.deps.getTaskStatus(run.taskId);
+        if (!taskStatus) {
+          status = "failed";
+          error = "Dispatched task no longer exists";
+        } else if (taskStatus === "completed") {
+          status = "completed";
+        } else if ((TERMINAL_TASK_STATUSES as readonly string[]).includes(taskStatus)) {
+          status = "failed";
+          error = `Dispatched task ended as ${taskStatus}`;
+        }
+      }
+      if (!status && now - (run.startedAt || run.createdAt) > STALE_DISPATCH_MS) {
+        status = "failed";
+        error = "Dispatch abandoned: still in flight after the stale-dispatch limit";
+      }
+      if (!status) continue;
+      await this.runRepo.recordEvent(run.id, "dispatch.settled", {
+        taskId: run.taskId,
+        status,
+        error,
+      });
+      await this.runRepo.finish(run.id, {
+        status,
+        summary: run.reason,
+        error,
+        taskId: run.taskId,
+      });
+    }
+  }
+
+  private async reconcileStaleDispatchRuns(): Promise<void> {
+    try {
+      const settled = await this.runRepo.reconcileStaleDispatchRuns({
+        maxAgeMs: STALE_DISPATCH_MS,
+        message: "Stale dispatch run reconciled at heartbeat startup",
+      });
+      if (settled > 0) {
+        console.info(`[HeartbeatService] Reconciled ${settled} stale dispatch run(s)`);
+      }
+    } catch (error) {
+      console.warn("[HeartbeatService] Failed to reconcile stale dispatch runs:", error);
+    }
+  }
+
+  /**
+   * Attach concrete evidence for the dispatch (pending mentions, assigned tasks, a manual wake)
+   * and refuse to create a task without any evidence: such dispatches become suggestions.
+   */
+  private withDispatchEvidence(
+    decision: HeartbeatPulseDecision,
+    context: {
+      agent: AgentRole;
+      mentions: AgentMention[];
+      tasks: Task[];
+      manualOverride: boolean;
+    },
+  ): HeartbeatPulseDecision {
+    if (!decision.dispatchKind) return decision;
+    const refs = new Set(decision.evidenceRefs);
+    for (const mention of context.mentions.slice(0, 10)) refs.add(`mention:${mention.id}`);
+    for (const task of context.tasks.slice(0, 10)) refs.add(`task:${task.id}`);
+    if (context.manualOverride) refs.add(`manual_wake:${context.agent.id}`);
+    const evidenceRefs = Array.from(refs);
+    if (decision.dispatchKind === "task" && evidenceRefs.length === 0) {
+      return {
+        ...decision,
+        kind: "suggestion",
+        dispatchKind: "suggestion",
+        reason: `${decision.reason} (no evidence refs; suggested instead of creating a task)`,
+        evidenceRefs,
+      };
+    }
+    return { ...decision, evidenceRefs };
+  }
+
+  private removeDecisionSignals(
+    agentRoleId: string,
+    pulseSignals: HeartbeatSignal[],
+    signalIds: string[],
+  ): void {
+    this.signalStore.removeSignals(
+      agentRoleId,
+      pulseSignals
+        .filter((signal) => signalIds.includes(signal.id))
+        .map((signal) => ({
+          id: signal.id,
+          lastSeenAt: signal.lastSeenAt,
+          mergedCount: signal.mergedCount,
+        })),
+    );
+  }
+
+  private checklistKey(agent: AgentRole, item: HeartbeatChecklistItem): string {
+    return `checklist:${agent.id}:${item.workspaceId || "*"}:${item.id}`;
+  }
+
+  private proactiveKey(agent: AgentRole, task: ProactiveTaskDefinition): string {
+    return `proactive:${agent.id}:${task.id}`;
+  }
+
+  private isAdvisoryAcknowledged(key: string, cadenceMs: number, now: number): boolean {
+    const acknowledgedAt = this.advisoryAcknowledgedAt.get(key);
+    if (!acknowledgedAt) return false;
+    return now - acknowledgedAt < Math.max(ADVISORY_ACK_MIN_MS, cadenceMs || 0);
+  }
+
+  private acknowledgeAdvisoryItems(
+    agent: AgentRole,
+    checklistItems: HeartbeatChecklistItem[],
+    proactiveTasks: ProactiveTaskDefinition[],
+  ): void {
+    const now = Date.now();
+    for (const item of checklistItems) {
+      this.advisoryAcknowledgedAt.set(this.checklistKey(agent, item), now);
+    }
+    for (const task of proactiveTasks) {
+      this.advisoryAcknowledgedAt.set(this.proactiveKey(agent, task), now);
+    }
   }
 
   private async recordDispatchOutcome(params: {
@@ -1191,6 +1561,7 @@ export class HeartbeatService extends EventEmitter {
   }
 
   private async maybeRunMemoryDreaming(params: {
+    agentRoleId: string;
     workspaceId?: string;
     workspacePath?: string;
     decision: HeartbeatPulseDecision;
@@ -1198,6 +1569,9 @@ export class HeartbeatService extends EventEmitter {
     heartbeatRunId: string;
   }): Promise<{ id?: string; status?: string; candidateCount?: number } | null> {
     if (!this.deps.runMemoryDreaming || !params.workspaceId || !params.workspacePath) return null;
+    // Memory Hub's "heartbeat maintenance" switch turns off Dreaming and pressure-driven
+    // compaction from the pulse.
+    if (this.isHeartbeatMaintenanceDisabled()) return null;
     // Heartbeat runs without a task executor, so they must resolve their own
     // filesystem boundary before inspecting memory or transcripts.
     let readGuard: WorkspaceMemoryReadGuard;
@@ -1207,23 +1581,30 @@ export class HeartbeatService extends EventEmitter {
       console.warn("[HeartbeatService] Could not resolve memory access profile:", error);
       return null;
     }
-    const memorySignalCount = params.signals.filter(
+    const memorySignals = params.signals.filter(
       (signal) =>
         signal.signalFamily === "memory_drift" ||
         signal.signalFamily === "correction_learning" ||
         signal.signalFamily === "cross_workspace_patterns",
-    ).length;
+    );
+    const memorySignalCount = memorySignals.length;
     let pressureInstructions = "";
+    let pressureFingerprint = "";
     try {
-      pressureInstructions = MemoryPressureService.buildCompactionInstructions(
-        await MemoryPressureService.analyze(params.workspacePath, readGuard),
-      );
+      const report = await MemoryPressureService.analyze(params.workspacePath, readGuard);
+      pressureInstructions = MemoryPressureService.buildCompactionInstructions(report);
+      pressureFingerprint = MemoryPressureService.fingerprint(report);
     } catch {
       pressureInstructions = "";
     }
-    if (memorySignalCount === 0 && !pressureInstructions) return null;
+    // Pressure only triggers Dreaming when it changed since the last run that handled it;
+    // otherwise unchanged pressure would re-trigger on every pulse.
+    const pressureTriggers =
+      Boolean(pressureInstructions) &&
+      MemoryPressureService.hasPressureChanged(params.workspaceId, pressureFingerprint);
+    if (memorySignalCount === 0 && !pressureTriggers) return null;
     try {
-      return await this.deps.runMemoryDreaming({
+      const run = await this.deps.runMemoryDreaming({
         workspaceId: params.workspaceId,
         workspacePath: params.workspacePath,
         reason: memorySignalCount > 0 ? params.decision.reason : "hot-memory pressure",
@@ -1231,9 +1612,30 @@ export class HeartbeatService extends EventEmitter {
         heartbeatRunId: params.heartbeatRunId,
         readGuard,
       });
+      if (run?.skipped) return null;
+      if (run) {
+        if (pressureInstructions) {
+          MemoryPressureService.markPressureHandled(params.workspaceId, pressureFingerprint);
+        }
+        // The signals were handed to Dreaming; keep them from re-triggering it.
+        this.removeDecisionSignals(
+          params.agentRoleId,
+          memorySignals,
+          memorySignals.map((signal) => signal.id),
+        );
+      }
+      return run;
     } catch (error) {
       console.warn("[HeartbeatService] Dreaming failed:", error);
       return null;
+    }
+  }
+
+  private isHeartbeatMaintenanceDisabled(): boolean {
+    try {
+      return this.deps.getMemoryFeaturesSettings?.()?.heartbeatMaintenanceEnabled === false;
+    } catch {
+      return false;
     }
   }
 
@@ -1260,15 +1662,20 @@ export class HeartbeatService extends EventEmitter {
     return latestDispatch.completedAt + cooldownMs;
   }
 
-  private getNextHeartbeatTime(agent: AgentRole): number | undefined {
-    if (!(agent.heartbeatPolicy?.enabled || agent.heartbeatEnabled)) return undefined;
-    const intervalMs =
-      (agent.heartbeatPolicy?.cadenceMinutes ||
-        agent.pulseEveryMinutes ||
-        agent.heartbeatIntervalMinutes ||
+  private getCadenceMs(agent?: AgentRole): number {
+    return (
+      (agent?.heartbeatPolicy?.cadenceMinutes ||
+        agent?.pulseEveryMinutes ||
+        agent?.heartbeatIntervalMinutes ||
         15) *
       60 *
-      1000;
+      1000
+    );
+  }
+
+  private getNextHeartbeatTime(agent: AgentRole): number | undefined {
+    if (!(agent.heartbeatPolicy?.enabled || agent.heartbeatEnabled)) return undefined;
+    const intervalMs = this.getCadenceMs(agent);
     const staggerMs =
       (agent.heartbeatPolicy?.staggerOffsetMinutes || agent.heartbeatStaggerOffset || 0) *
       60 *

@@ -16,27 +16,10 @@ export interface ExternalMemoryPrefetchResult {
   metadata?: Record<string, unknown>;
 }
 
-export interface ExternalMemorySyncTurnInput extends ExternalMemoryTurnContext {
-  userText?: string;
-  assistantText?: string;
-  memories?: string[];
-}
-
-export interface ExternalMemoryExtractSessionInput extends ExternalMemoryTurnContext {
-  transcriptSummary: string;
-}
-
 export interface ExternalMemoryProvider {
   id: string;
   isEnabled(): boolean;
   prefetch(context: ExternalMemoryTurnContext): Promise<ExternalMemoryPrefetchResult | null>;
-  syncTurn(input: ExternalMemorySyncTurnInput): Promise<void>;
-  extractSession(input: ExternalMemoryExtractSessionInput): Promise<void>;
-  forget(scope: {
-    workspace: Pick<Workspace, "id" | "name">;
-    memoryId?: string;
-    text?: string;
-  }): Promise<void>;
 }
 
 export class SupermemoryExternalProvider implements ExternalMemoryProvider {
@@ -57,54 +40,6 @@ export class SupermemoryExternalProvider implements ExternalMemoryProvider {
       providerId: this.id,
       context: profile,
     };
-  }
-
-  async syncTurn(input: ExternalMemorySyncTurnInput): Promise<void> {
-    if (!this.isEnabled() || input.allowExternalAccess === false) return;
-    for (const memory of input.memories || []) {
-      const content = memory.trim();
-      if (!content) continue;
-      await SupermemoryService.remember({
-        workspace: input.workspace,
-        content,
-        metadata: {
-          taskId: input.taskId,
-          sessionId: input.sessionId,
-          source: "turn_sync",
-        },
-        taskId: input.taskId,
-        origin: "background",
-      });
-    }
-  }
-
-  async extractSession(input: ExternalMemoryExtractSessionInput): Promise<void> {
-    if (!this.isEnabled() || input.allowExternalAccess === false || !input.transcriptSummary.trim())
-      return;
-    await SupermemoryService.remember({
-      workspace: input.workspace,
-      content: input.transcriptSummary,
-      metadata: {
-        taskId: input.taskId,
-        sessionId: input.sessionId,
-        source: "session_extract",
-      },
-      taskId: input.taskId,
-      origin: "background",
-    });
-  }
-
-  async forget(scope: {
-    workspace: Pick<Workspace, "id" | "name">;
-    memoryId?: string;
-    text?: string;
-  }): Promise<void> {
-    if (!this.isEnabled()) return;
-    await SupermemoryService.forget({
-      workspace: scope.workspace,
-      memoryId: scope.memoryId,
-      content: scope.text,
-    });
   }
 }
 

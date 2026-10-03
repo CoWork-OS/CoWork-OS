@@ -67,7 +67,13 @@ export interface AmbientMonitoringServiceDeps {
     metadata?: Record<string, unknown>;
   }) => void;
   emitTrigger: (event: TriggerEvent) => void;
-  wakeHeartbeats: (params: { text: string; mode?: "now" | "next-heartbeat" }) => void;
+  /** `workspaceId` and `category` let Heartbeat merge wakes whose text embeds paths. */
+  wakeHeartbeats: (params: {
+    text: string;
+    mode?: "now" | "next-heartbeat";
+    workspaceId?: string;
+    category?: string;
+  }) => void;
   captureAwarenessEvent?: (params: {
     source: "files" | "git" | "calendar";
     workspaceId?: string;
@@ -307,6 +313,8 @@ export class AmbientMonitoringService {
     this.deps.wakeHeartbeats({
       text: `Workspace file change detected in ${workspace.name || workspace.workspaceId}: ${activityType} ${relPath}`,
       mode: "next-heartbeat",
+      workspaceId: workspace.workspaceId,
+      category: "file_change",
     });
     this.deps.captureAwarenessEvent?.({
       source: "files",
@@ -348,6 +356,8 @@ export class AmbientMonitoringService {
       this.deps.wakeHeartbeats({
         text: `Git state changed in ${workspace.name || workspace.workspaceId}: ${description}`,
         mode: "next-heartbeat",
+        workspaceId: workspace.workspaceId,
+        category: "git",
       });
       this.deps.captureAwarenessEvent?.({
         source: "git",
@@ -419,6 +429,7 @@ export class AmbientMonitoringService {
     this.deps.wakeHeartbeats({
       text: "Calendar events changed across connected calendars.",
       mode: "next-heartbeat",
+      category: "calendar",
     });
     this.deps.captureAwarenessEvent?.({
       source: "calendar",

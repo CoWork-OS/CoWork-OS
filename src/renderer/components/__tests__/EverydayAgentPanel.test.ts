@@ -63,7 +63,6 @@ function profileResult({
         receiptsDays: 30,
         previewsDays: 30,
         connectorCacheDays: 7,
-        memoryCandidateDays: 30,
         routineProvenanceDays: 90,
       },
       browserProfilePolicy: {

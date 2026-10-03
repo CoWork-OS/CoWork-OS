@@ -56,9 +56,9 @@ The old monolithic synthesized-memory block mixed durable facts, broad archive r
    - workspace-kit essentials
 2. **L1 Essential Story** in `<cowork_structured_memory>` for ranked supporting context:
    - playbook patterns
-   - current knowledge graph entities/relationships
-   - daily summaries
-   - archive memory only when explicitly enabled
+   - daily activity summaries
+   - Box Brain hits when available
+   - the knowledge graph and archive memory are not part of this layer; the KG is reached through `kg_*` tools, and archive matches arrive through the per-turn recall block
 3. **L2 Topic Packs** as explicit `.cowork/memory/topics/*.md` loads through `memory_topics_load`
 4. **L3 Deep Recall** as explicit tools:
    - `search_quotes`
@@ -90,7 +90,7 @@ Default runtime behavior:
 
 Dreaming runs above the layered memory runtime as a review-first memory hygiene pass. It reads recent transcript spans, structured observations, and curated hot memory, then proposes `dreaming_candidates` for stale entries, corrections, open loops, recurring tasks, constraints, ignored-noise patterns, or curated-memory cleanup.
 
-Dreaming does not change what is injected into prompts by itself. Accepted candidates still flow through the owning memory service before they affect `L0`, `L1`, topic packs, or recall behavior.
+Dreaming does not change what is injected into prompts by itself. Candidates stay `proposed` because there is no review UI yet; once accepted, they are meant to flow through the owning memory service before they affect `L0`, `L1`, topic packs, or recall behavior.
 
 ### Sources
 
@@ -99,12 +99,12 @@ The runtime now thinks about sources by wake-up layer instead of one flat synthe
 | Layer                  | Sources                                                                                                           |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | **L0 Identity**        | `CuratedMemoryService`, `UserProfileService`, `RelationshipMemoryService`, workspace-kit essentials               |
-| **L1 Essential Story** | `PlaybookService`, `KnowledgeGraphService`, `DailyLogSummarizer`, optional archive fragments from `MemoryService` |
+| **L1 Essential Story** | `PlaybookService`, `DailyLogSummarizer`, Box Brain hits                                                            |
 | **L2 Topic Packs**     | `memory_topics_load` over `.cowork/memory/topics/*.md`                                                            |
 | **L3 Deep Recall**     | `search_quotes`, `search_sessions`, `search_memories`                                                             |
 | **Dreaming Evidence**  | transcript spans, structured observations, curated hot memory, and heartbeat memory-drift signals                 |
 
-`daily_summary` fragments come from `.cowork/memory/summaries/<YYYY-MM-DD>.md` files produced by `DailyLogSummarizer`. Raw daily log files (`.cowork/memory/daily/`) are **never** injected into prompts.
+`daily_summary` fragments come from `.cowork/memory/summaries/<YYYY-MM-DD>.md` files written by `MemoryConsolidator` through `DailyLogSummarizer` (see [Daily Summaries](#6-daily-summaries)).
 
 ### Output format
 
@@ -121,9 +121,6 @@ The runtime now thinks about sources by wake-up layer instead of one flat synthe
 <cowork_structured_memory>
 ## Past Task Patterns
 - [Playbook entry]
-
-## Known Entities
-- [KnowledgeGraph entity]
 
 ## Recent Summaries
 [Daily summary snippet]
@@ -170,8 +167,8 @@ The **Behavior Adaptation** section in Guardrail Settings exposes these toggles 
 
 ### Integration points
 
-- `daemon.ts` — calls `AdaptiveStyleEngine.observe(text)` after every `UserProfileService.ingestUserMessage()`
-- `daemon.ts` — calls `AdaptiveStyleEngine.observeFeedback(decision, reason)` alongside `UserProfileService.ingestUserFeedback()`
+- `daemon.ts` — calls `AdaptiveStyleEngine.observe(text)` for each user message (after `AwarenessService.captureConversation()`)
+- `daemon.ts` — calls `AdaptiveStyleEngine.observeFeedback(decision, reason)` for each `user_feedback` event; structured reasons such as `too_verbose` map directly to style signals
 - `GuardrailSettings.tsx` — renders toggle, drift input, and reset button under "Behavior Adaptation"
 
 ---
@@ -338,71 +335,17 @@ Agent Evolution (Day 45, 123 tasks completed):
 
 ---
 
-## 6. Daily Operational Log
+## 6. Daily Summaries
 
-**File:** `src/electron/memory/DailyLogService.ts`
-
-### Purpose
-
-Provides structured per-day journaling as input for the summary-first memory pipeline. Entries are written to `.cowork/memory/daily/<YYYY-MM-DD>.md`.
-
-### When to write entries
-
-| Category      | Trigger                                |
-| ------------- | -------------------------------------- |
-| `feedback`    | User thumbs-up/down events             |
-| `task`        | Task completions                       |
-| `decision`    | Notable agent decisions                |
-| `observation` | High-value memory saves or corrections |
-
-Raw log files are **never** injected into prompts directly. They exist only as input for `DailyLogSummarizer`.
-
-### Entry format
-
-```md
-## 2026-03-14T15:30:00.000Z
-
-source: user
-category: feedback
-taskId: task-abc123
-tags: tone, correction
-
-User flagged response as "wrong tone".
-```
-
-### API
-
-```ts
-await DailyLogService.appendEntry(workspacePath, {
-  timestamp: new Date().toISOString(),
-  source: "user",
-  category: "feedback",
-  text: "User flagged response as wrong tone.",
-  taskId: "task-abc123",
-  tags: ["tone"],
-});
-```
-
----
-
-## 7. Daily Log Summarizer
-
-**File:** `src/electron/memory/DailyLogSummarizer.ts`
+**Files:** `src/electron/memory/DailyLogSummarizer.ts` (read and write), `src/electron/memory/MemoryConsolidator.ts` (writer)
 
 ### Purpose
 
-Produces ranked `MemoryFragment` objects from pre-written daily summary files (`.cowork/memory/summaries/<YYYY-MM-DD>.md`). This completes the summary-first retrieval pipeline: summaries rank higher than raw log snippets but lower than user profile and relationship memory.
+Keeps a small per-day activity index in `.cowork/memory/summaries/<YYYY-MM-DD>.md` and turns recent days into ranked `daily_summary` fragments for the structured-memory lane. There is no separate raw daily log.
 
-### Directory layout
+### How summaries are written
 
-```
-.cowork/
-  memory/
-    daily/
-      2026-03-14.md    ← raw operational log (DailyLogService writes)
-    summaries/
-      2026-03-14.md    ← synthesized summary (written externally, e.g. cron)
-```
+When `backgroundConsolidationEnabled` is on (default off), `MemoryConsolidator` runs after each completed task and calls `DailyLogSummarizer.appendTaskLine()`. Each task gets one line, replaced if the task is consolidated again the same day. A file keeps at most 40 lines of at most 200 characters. Raw transcript payloads are never copied in; files in the older "Consolidated Signals" layout are replaced on the next append. A consolidation lock older than 10 minutes (left by a crashed run) is removed.
 
 ### Summary file format
 
@@ -413,56 +356,32 @@ source: daily_log_synthesizer
 day: 2026-03-14
 ---
 
-# Daily Summary
-
-## Important Decisions
-
-- ...
-
-## User Preferences Observed
-
-- ...
-
-## Active Threads
-
-- ...
-
-## Corrections / Lessons
-
-- ...
-
-## Follow-ups
-
-- ...
+## Task Activity
+- [task:<id>] 15:30 UTC: <task prompt excerpt> (12 transcript events)
 ```
+
+These summaries are an activity index, not a synthesis of decisions, preferences or lessons.
 
 ### Retrieval ranking
 
-| Source          | Base relevance       | Notes                        |
-| --------------- | -------------------- | ---------------------------- |
-| `user_profile`  | 0.70                 | Always somewhat relevant     |
-| `daily_summary` | 0.55 × recency decay | Recency half-life = 7 days   |
-| Raw daily logs  | never returned       | Not injected by this service |
+| Source          | Base relevance       | Notes                      |
+| --------------- | -------------------- | -------------------------- |
+| `user_profile`  | 0.70                 | Always somewhat relevant   |
+| `daily_summary` | 0.55 × recency decay | Recency half-life = 7 days |
 
 ### Integration
 
 `MemorySynthesizer.synthesize()` calls `DailyLogSummarizer.getRecentSummaryFragments()` for the last 7 days and adds the results to the structured-memory lane as `daily_summary` fragments. They render under `## Recent Summaries` inside `<cowork_structured_memory>`.
 
-### Helper
-
-```ts
-DailyLogSummarizer.countRecentSummaries(workspacePath, 7);
-// → number of summary files present in the last 7 days
-// Used by the Improvement Signals card
-```
+`DailyLogSummarizer.countRecentSummaries(workspacePath, 7)` returns the number of summary files in the last 7 days; `LayeredMemoryIndexService` uses it.
 
 ---
 
-## 8. Message Feedback
+## 7. Message Feedback
 
 **UI:** `src/renderer/components/MainContent/MainContent.tsx` (assistant-message feedback controls)
 
-**IPC:** `kit:submitMessageFeedback` → `UserProfileService.ingestUserFeedback()`
+**IPC:** `kit:submitMessageFeedback` → validated, then logged as a `user_feedback` task event
 
 ### Interaction
 
@@ -488,7 +407,7 @@ window.electronAPI.submitMessageFeedback({
 });
 ```
 
-Feedback is routed to `UserProfileService.ingestUserFeedback()` and (via daemon) to `AdaptiveStyleEngine.observeFeedback()`.
+The daemon handles the `user_feedback` event: it archives a compact `decision` memory, calls `AwarenessService.captureFeedback()` and `AdaptiveStyleEngine.observeFeedback()`, and `FeedbackService` records it in the auto-managed block of `.cowork/MISTAKES.md`. Feedback does not feed `UserProfileService` or `RelationshipMemoryService`. The daemon's memory and style handling is skipped for `<no-memory>` tasks, tasks with `retainMemory` off and shared (group/public) contexts.
 
 ---
 
@@ -503,9 +422,8 @@ All improvements respect CoWork OS's security-first positioning:
 | Playbook-to-Skill      | —                                                                                             | Always active (post-task hook)                 | 10 min cooldown, max 1/check               | Full proposal review workflow                         |
 | Channel Persona        | `channelPersonaEnabled`                                                                       | Off                                            | —                                          | Visible in system prompt                              |
 | Evolution Metrics      | —                                                                                             | Computed on-demand                             | —                                          | Read-only, no mutations                               |
-| Daily Log              | —                                                                                             | Available when a writer uses `DailyLogService` | File append only                           | Per-day markdown files                                |
-| Daily Summaries        | —                                                                                             | Active when summary files exist                | Token budget (ranked)                      | Summary files in `.cowork/memory/summaries/`          |
-| Message Feedback       | —                                                                                             | Always visible on completed messages           | IPC: `limited` tier                        | Routed to UserProfileService                          |
+| Daily Summaries        | `backgroundConsolidationEnabled` (writer)                                                     | Off; read when summary files exist             | 40 lines per day; token budget (ranked)    | Summary files in `.cowork/memory/summaries/`          |
+| Message Feedback       | —                                                                                             | Always visible on completed messages           | IPC: `limited` tier                        | `user_feedback` task event                            |
 
 ---
 

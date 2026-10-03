@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranscriptStore } from "../TranscriptStore";
-import { SessionRecallService } from "../SessionRecallService";
+import { MAX_CHECKPOINTS_PER_QUERY, SessionRecallService } from "../SessionRecallService";
 
 const createdDirs: string[] = [];
 const originalCheckpointLockRoot = process.env.COWORK_CHECKPOINT_LOCK_ROOT;
@@ -125,5 +125,58 @@ describe("SessionRecallService", () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.taskId).toBe("task-new");
     expect(results[0]?.type).toBe("checkpoint");
+  });
+
+  it("ignores previous generations and unsigned checkpoint files", async () => {
+    const workspacePath = await createWorkspace();
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-signed", {
+      explicitChatSummaryBlock: "first rollout plan",
+      timestamp: 100,
+    });
+    await TranscriptStore.writeCheckpoint(workspacePath, "task-signed", {
+      explicitChatSummaryBlock: "second rollout plan",
+      timestamp: 200,
+    });
+    const dir = path.join(workspacePath, ".cowork", "memory", "transcripts", "checkpoints");
+    await fs.writeFile(
+      path.join(dir, "task-forged.json"),
+      JSON.stringify({ explicitChatSummaryBlock: "forged rollout plan", timestamp: 300 }),
+    );
+
+    const results = await SessionRecallService.search({
+      workspacePath,
+      query: "rollout plan",
+      includeCheckpoints: true,
+      limit: 10,
+    });
+
+    expect(results.map((result) => result.taskId)).toEqual(["task-signed"]);
+    expect(results[0]?.snippet).toContain("second rollout plan");
+  });
+
+  it("reads only the most recent checkpoints for a workspace-wide query", async () => {
+    const workspacePath = await createWorkspace();
+    const dir = path.join(workspacePath, ".cowork", "memory", "transcripts", "checkpoints");
+    for (let index = 0; index < MAX_CHECKPOINTS_PER_QUERY + 5; index += 1) {
+      const taskId = `task-${String(index).padStart(3, "0")}`;
+      await TranscriptStore.writeCheckpoint(workspacePath, taskId, {
+        explicitChatSummaryBlock: "capped search",
+        timestamp: 1_000 + index,
+      });
+      const mtime = new Date(Date.now() - (MAX_CHECKPOINTS_PER_QUERY + 5 - index) * 60_000);
+      await fs.utimes(path.join(dir, `${taskId}.json`), mtime, mtime);
+    }
+    const loadSpy = vi.spyOn(TranscriptStore, "loadCheckpoint");
+
+    const results = await SessionRecallService.search({
+      workspacePath,
+      query: "capped search",
+      includeCheckpoints: true,
+      limit: 100,
+    });
+
+    expect(loadSpy).toHaveBeenCalledTimes(MAX_CHECKPOINTS_PER_QUERY);
+    expect(results).toHaveLength(MAX_CHECKPOINTS_PER_QUERY);
+    expect(results.some((result) => result.taskId === "task-000")).toBe(false);
   });
 });

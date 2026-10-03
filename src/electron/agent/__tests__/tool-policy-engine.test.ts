@@ -517,3 +517,25 @@ describe("Messages app intent", () => {
     expect(hasNativeDesktopGuiIntent(text)).toBe(true);
   });
 });
+
+describe("tool-policy-engine memory recall lane", () => {
+  it.each(["memory_search_index", "memory_timeline", "memory_details"])(
+    "exposes %s in the memory lane without system wording",
+    (tool) => {
+      const result = evaluateToolAvailability(tool, {
+        taskText: "Fix the failing login test we discussed last week",
+      });
+      expect(result.decision).toBe("allow");
+      expect(result.metadata.lane).toBe("memory");
+    },
+  );
+
+  it.each(["kg_search", "kg_get_neighbors", "kg_get_subgraph"])(
+    "puts knowledge-graph read %s in the memory lane",
+    (tool) => {
+      const result = evaluateToolAvailability(tool, { taskText: "Who owns the billing service?" });
+      expect(result.metadata.lane).toBe("memory");
+      expect(result.decision).toBe("allow");
+    },
+  );
+});

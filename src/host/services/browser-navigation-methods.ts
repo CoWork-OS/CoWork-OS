@@ -1129,6 +1129,7 @@ function validateEverydayProfileUpdate(value: unknown): EverydayAgentUpdateProfi
       "receiptsDays",
       "previewsDays",
       "connectorCacheDays",
+      // Legacy key: no longer stored or read, still accepted so older clients validate.
       "memoryCandidateDays",
       "routineProvenanceDays",
     ]);

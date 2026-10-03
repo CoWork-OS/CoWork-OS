@@ -1,4 +1,5 @@
 import { InputSanitizer } from "../agent/security/input-sanitizer";
+import { truncateAtFragmentBoundary } from "../agent/content/fragment-truncation";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { MemoryService } from "./MemoryService";
 import { PlaybookService } from "./PlaybookService";
@@ -60,7 +61,22 @@ export interface SynthesizeOptions {
    * this synchronous build. Without it, Box Brain falls back to the synchronous search.
    */
   boxBrainHits?: MemorySearchResult[];
+  /**
+   * Names of the tools the model can call this turn. When given, the default
+   * wake-up path adds a short memory-tool routing hint that names only these tools.
+   */
+  visibleToolNames?: Iterable<string>;
 }
+
+export interface HotMemoryOptions {
+  /** Include user profile facts (default true). Chat surfaces that pin the profile block pass false. */
+  includeUserProfile?: boolean;
+  /** Include relationship items (default true). */
+  includeRelationships?: boolean;
+}
+
+/** Upper bound for the routing hint added to the default wake-up path. */
+const ROUTING_HINT_MAX_TOKENS = 120;
 
 interface LayeredContextResult extends SynthesizedContext {
   layer: MemoryWakeUpLayerId;
@@ -111,6 +127,11 @@ function compositeScore(f: MemoryFragment, now: number): number {
     SCORE_WEIGHTS.confidence * f.confidence +
     SCORE_WEIGHTS.recency * recencyScore(f.updatedAt, now)
   );
+}
+
+function fitToBudget(text: string, tokenBudget: number, marker: string): string {
+  if (!text || estimateTokens(text) <= tokenBudget) return text;
+  return truncateAtFragmentBoundary(text, tokenBudget, marker);
 }
 
 function sanitize(text: string): string {
@@ -403,13 +424,14 @@ export class MemorySynthesizer {
   static async buildHotMemoryContext(
     workspaceId: string,
     tokenBudget = 900,
+    options: HotMemoryOptions = {},
   ): Promise<SynthesizedContext> {
     const now = Date.now();
     const fragments = dedupeAndRank(
       [
         ...(await extractCuratedFragments(workspaceId)),
-        ...extractUserProfileFragments(),
-        ...extractRelationshipFragments(),
+        ...(options.includeUserProfile === false ? [] : extractUserProfileFragments()),
+        ...(options.includeRelationships === false ? [] : extractRelationshipFragments()),
       ],
       now,
     );
@@ -552,6 +574,37 @@ export class MemorySynthesizer {
     };
   }
 
+  /**
+   * Compact memory-tool routing hint for the default wake-up path (at most
+   * ROUTING_HINT_MAX_TOKENS). Only tools in `visibleToolNames` are named, so the
+   * hint never points at a tool the model cannot call.
+   */
+  static buildMemoryRoutingHint(visibleToolNames: Iterable<string>): string {
+    const visible = new Set(visibleToolNames);
+    const routes: Array<[string, string]> = [
+      ["search_memories", "past decisions/context"],
+      ["memory_search_index", "observation index (then memory_timeline/memory_details)"],
+      ["search_quotes", "exact wording"],
+      ["search_sessions", "earlier task transcripts"],
+      ["memory_curated_read", "curated rules/preferences"],
+      ["memory_topics_load", "topic packs"],
+      ["context_grep", "compacted context of this task"],
+    ];
+    const lines: string[] = [];
+    for (const [tool, use] of routes) {
+      if (!visible.has(tool)) continue;
+      lines.push(`- ${use}: \`${tool}\``);
+    }
+    if (lines.length === 0) return "";
+    const hint = [
+      "<cowork_recall_hints>",
+      "Memory above is a summary. To recall more, use:",
+      ...lines,
+      "</cowork_recall_hints>",
+    ].join("\n");
+    return fitToBudget(hint, ROUTING_HINT_MAX_TOKENS, "");
+  }
+
   static buildRecallHintsContext(): string {
     const features = MemoryFeaturesManager.loadSettings();
     const hints: string[] = [];
@@ -593,8 +646,14 @@ export class MemorySynthesizer {
     l0: LayeredContextResult;
     l1: LayeredContextResult;
     recallHints: string;
+    routingHint: string;
   }> {
-    const budget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+    const fullBudget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+    const routingHint = options.visibleToolNames
+      ? this.buildMemoryRoutingHint(options.visibleToolNames)
+      : "";
+    // The routing hint is part of the requested budget, not on top of it.
+    const budget = Math.max(320, fullBudget - estimateTokens(routingHint));
     const includeWorkspaceKit = options.includeWorkspaceKit !== false;
     const kitBudget = includeWorkspaceKit ? Math.floor(budget * 0.3) : 0;
     const remainingBudget = Math.max(320, budget - kitBudget);
@@ -614,17 +673,15 @@ export class MemorySynthesizer {
     let kitText = "";
     if (includeWorkspaceKit) {
       try {
+        // Repo-level project instructions and docs maps have their own prompt
+        // section; this slice carries the `.cowork` kit, memory files first.
         const rawKit = buildWorkspaceKitContext(workspacePath, taskPrompt, new Date(), {
           agentRoleId: options.agentRoleId ?? null,
           readGuard: options.filesystemReadGuard,
+          includeProjectGuidance: false,
         });
         if (rawKit) {
-          const kitTokens = estimateTokens(rawKit);
-          kitText =
-            kitTokens <= kitBudget
-              ? rawKit
-              : rawKit.slice(0, kitBudget * CHARS_PER_TOKEN) +
-                "\n[... workspace context truncated]";
+          kitText = fitToBudget(rawKit, kitBudget, "[... workspace context truncated]");
         }
       } catch {
         kitText = "";
@@ -666,6 +723,7 @@ export class MemorySynthesizer {
       l0,
       l1,
       recallHints: this.buildRecallHintsContext(),
+      routingHint,
     };
   }
 
@@ -825,8 +883,15 @@ export class MemorySynthesizer {
         options,
         settings,
       );
-      const finalParts = [layered.l0.text, layered.l1.text].filter(Boolean);
-      const finalText = finalParts.join("\n\n");
+      const budget = options.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+      const finalParts = [layered.l0.text, layered.l1.text, layered.routingHint].filter(Boolean);
+      // Fragment budgets ignore headers and wrappers; keep the whole block within
+      // the requested budget so the prompt section cap never cuts it again.
+      const finalText = fitToBudget(
+        finalParts.join("\n\n"),
+        budget,
+        "[... memory truncated for budget]",
+      );
       return {
         text: finalText,
         totalTokens: estimateTokens(finalText),
@@ -878,17 +943,15 @@ export class MemorySynthesizer {
     let kitText = "";
     if (options.includeWorkspaceKit !== false) {
       try {
+        // Repo-level project instructions and docs maps have their own prompt
+        // section; this slice carries the `.cowork` kit, memory files first.
         const rawKit = buildWorkspaceKitContext(workspacePath, taskPrompt, new Date(), {
           agentRoleId: options.agentRoleId ?? null,
           readGuard: options.filesystemReadGuard,
+          includeProjectGuidance: false,
         });
         if (rawKit) {
-          const kitTokens = estimateTokens(rawKit);
-          kitText =
-            kitTokens <= kitBudget
-              ? rawKit
-              : rawKit.slice(0, kitBudget * CHARS_PER_TOKEN) +
-                "\n[... workspace context truncated]";
+          kitText = fitToBudget(rawKit, kitBudget, "[... workspace context truncated]");
         }
       } catch {
         kitText = "";
@@ -897,7 +960,11 @@ export class MemorySynthesizer {
 
     const recallHints = this.buildRecallHintsContext();
     const finalParts = [kitText, hot.text, structured.text, recallHints].filter(Boolean);
-    const finalText = finalParts.join("\n\n");
+    const finalText = fitToBudget(
+      finalParts.join("\n\n"),
+      budget,
+      "[... memory truncated for budget]",
+    );
     const sourceAttribution: Record<MemorySourceKind, number> = {
       curated_memory: hot.sourceAttribution.curated_memory,
       user_profile: hot.sourceAttribution.user_profile,

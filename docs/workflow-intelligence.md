@@ -23,7 +23,7 @@ The new model makes the boundaries explicit:
 | `Memory`      | Stores durable preferences, workflow patterns, corrections, open loops, recurring tasks, and ignored-noise signals | Yes, through Memory Hub and retrieved context |
 | `Heartbeat`   | Decides when enough fresh signal exists to think again                                                             | Mostly visible through Mission Control status |
 | `Reflection`  | Evaluates evidence, generates hypotheses, critiques them, and chooses a recommended next action                    | No, except in diagnostics/settings            |
-| `Dreaming`    | Reviews recent sessions, memory observations, corrections, and drift signals to propose memory updates             | Yes, through reviewable memory candidates     |
+| `Dreaming`    | Reviews recent sessions, memory observations, corrections, and drift signals to propose memory updates             | Not yet; candidates have no review UI         |
 | `Suggestions` | Presents reviewable next actions with evidence, confidence, and controls                                           | Yes                                           |
 
 `Subconscious` remains an internal compatibility name in some code paths, database tables, artifact folders, and logs. Product copy and docs should use `Workflow Intelligence` unless they are describing those internals directly.
@@ -94,17 +94,17 @@ Accepted candidates flow through the core memory distillation path. This keeps d
 
 ## Dreaming As Memory Curation
 
-Dreaming is the offline memory-maintenance lane. It runs after meaningful task completion and can also be triggered by Heartbeat when `memory_drift`, `correction_learning`, or `cross_workspace_patterns` signals appear.
+Dreaming is the offline memory-maintenance lane. It runs after task completion when `backgroundConsolidationEnabled` is on (default off), and Heartbeat can trigger it when `memory_drift` or `correction_learning` signals appear (the daemon emits `correction_learning` when it detects a user correction) or hot-memory pressure changes. Automatic runs are limited to one per workspace every 6 hours.
 
-Dreaming reads bounded evidence from session checkpoints, transcript spans, structured memory observations, and curated hot memory. It writes `dreaming_runs` and `dreaming_candidates`, not final memory mutations. Candidates remain reviewable by default and can propose curated-memory adds/replacements/archives, stale archive flags, topic-pack refreshes, ignored-noise patterns, open loops, recurring tasks, constraints, or corrections.
+Dreaming reads bounded evidence from session checkpoints, transcript spans, structured memory observations, and curated hot memory. It writes `dreaming_runs` and `dreaming_candidates`, not final memory mutations. Candidates stay `proposed`: there is no review UI yet and nothing accepts or applies them. They can propose curated-memory adds/replacements/archives, stale archive flags, topic-pack refreshes, ignored-noise patterns, open loops, recurring tasks, constraints, or corrections.
 
-This keeps Dreaming useful without making it a second memory system: accepted candidates still flow through existing Memory, Curated Memory, topic-pack, or Core Harness paths.
+This keeps Dreaming from becoming a second memory system: once a review surface exists, accepted candidates are meant to flow through existing Memory, Curated Memory, topic-pack, or Core Harness paths.
 
 See [Dreaming](dreaming.md) for the canonical memory-curation contract.
 
 ## Heartbeat As Scheduler
 
-Heartbeat owns the "when should we think?" decision.
+Heartbeat owns the "when should we think?" decision for Reflection. Some other background loops (for example AutonomyEngine, core memory distillation and Box Brain polling) still run on their own timers.
 
 Heartbeat can trigger reflection when signals justify it, for example:
 
@@ -139,7 +139,7 @@ Workflow Intelligence appears in:
 - **Settings > Automations > Workflow Intelligence**: policy, target, run, and diagnostic controls
 - **Suggestions panel**: review, act, snooze, and dismiss active suggestions
 - **Mission Control**: heartbeat state, traces, core harness learning, and dispatched work
-- **Memory Hub**: durable memories, Dreaming candidates, and candidate learning created from accepted/corrected/ignored patterns
+- **Memory Hub**: durable memories and pending memory writes. Dreaming candidates are not shown anywhere in the app yet.
 
 Reflection internals remain inspectable for power users, but suggestions are the primary user-facing output.
 
@@ -172,6 +172,8 @@ The artifact contract remains useful for debugging:
 ```
 
 SQLite remains the fast index/query layer. Memory remains the durable learning source of truth.
+
+A daily retention job removes `subconscious_*` rows older than 90 days, and run artifact directories and journal files older than `artifactRetentionDays`.
 
 ## Relation To Core Harness
 

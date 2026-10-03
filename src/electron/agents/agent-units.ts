@@ -8,7 +8,6 @@ import { AgentTeamRunStore } from "./AgentTeamRunRepository";
 import { AgentTeamThoughtStore } from "./AgentTeamThoughtRepository";
 import { AutomationProfileStore } from "./AutomationProfileRepository";
 import { AgentTeamStore } from "./AgentTeamRepository";
-import { HeartbeatPolicyStore } from "./HeartbeatPolicyRepository";
 import { HeartbeatRunStore } from "./HeartbeatRunRepository";
 import { MentionStore } from "./MentionRepository";
 import { TaskSubscriptionStore } from "./TaskSubscriptionRepository";
@@ -403,34 +402,6 @@ export const AGENT_UNITS = {
       readonly: true,
     },
   ),
-  heartbeatPolicy_findByAgentRoleId: storeUnit(
-    (db: Database.Database) => new HeartbeatPolicyStore(db),
-    "findByAgentRoleId",
-    {
-      readonly: true,
-    },
-  ),
-  heartbeatPolicy_listAll: storeUnit(
-    (db: Database.Database) => new HeartbeatPolicyStore(db),
-    "listAll",
-    {
-      readonly: true,
-    },
-  ),
-  heartbeatPolicy_upsert: storeUnit(
-    (db: Database.Database) => new HeartbeatPolicyStore(db),
-    "upsert",
-    {
-      readonly: false,
-    },
-  ),
-  heartbeatPolicy_deleteByAgentRoleId: storeUnit(
-    (db: Database.Database) => new HeartbeatPolicyStore(db),
-    "deleteByAgentRoleId",
-    {
-      readonly: false,
-    },
-  ),
   heartbeatRun_create: storeUnit((db: Database.Database) => new HeartbeatRunStore(db), "create", {
     readonly: false,
   }),
@@ -462,6 +433,21 @@ export const AGENT_UNITS = {
     {
       readonly: false,
     },
+  ),
+  heartbeatRun_reconcileStaleDispatchRuns: storeUnit(
+    (db: Database.Database) => new HeartbeatRunStore(db),
+    "reconcileStaleDispatchRuns",
+    { readonly: false },
+  ),
+  heartbeatRun_listRunningDispatches: storeUnit(
+    (db: Database.Database) => new HeartbeatRunStore(db),
+    "listRunningDispatches",
+    { readonly: true },
+  ),
+  heartbeatRun_pruneRuns: storeUnit(
+    (db: Database.Database) => new HeartbeatRunStore(db),
+    "pruneRuns",
+    { readonly: false },
   ),
   heartbeatRun_get: storeUnit((db: Database.Database) => new HeartbeatRunStore(db), "get", {
     readonly: true,

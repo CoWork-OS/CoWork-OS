@@ -7,7 +7,6 @@ import type { AgentTeamRunStore } from "./AgentTeamRunRepository";
 import type { AgentTeamThoughtStore } from "./AgentTeamThoughtRepository";
 import type { AutomationProfileStore } from "./AutomationProfileRepository";
 import type { AgentTeamStore } from "./AgentTeamRepository";
-import type { HeartbeatPolicyStore } from "./HeartbeatPolicyRepository";
 import { HeartbeatRunStore } from "./HeartbeatRunRepository";
 import type { MentionStore } from "./MentionRepository";
 import type { TaskSubscriptionStore } from "./TaskSubscriptionRepository";
@@ -158,21 +157,6 @@ export const AgentTeamRepository = serviceRepositoryFacade<
   (typeof AGENT_TEAM_METHODS)[number]
 >("agentTeam_", AGENT_TEAM_METHODS);
 
-const HEARTBEAT_POLICY_METHODS = [
-  "findByAgentRoleId",
-  "listAll",
-  "upsert",
-  "deleteByAgentRoleId",
-] as const;
-export type HeartbeatPolicyRepository = AsyncStore<
-  HeartbeatPolicyStore,
-  (typeof HEARTBEAT_POLICY_METHODS)[number]
->;
-export const HeartbeatPolicyRepository = serviceRepositoryFacade<
-  HeartbeatPolicyStore,
-  (typeof HEARTBEAT_POLICY_METHODS)[number]
->("heartbeatPolicy_", HEARTBEAT_POLICY_METHODS);
-
 const HEARTBEAT_RUN_METHODS = [
   "create",
   "finish",
@@ -180,6 +164,9 @@ const HEARTBEAT_RUN_METHODS = [
   "recordEvent",
   "reconcileInterruptedAgentRuns",
   "reconcileLegacyMigratedRuns",
+  "reconcileStaleDispatchRuns",
+  "listRunningDispatches",
+  "pruneRuns",
   "get",
   "listRecentDispatches",
   "getLatestRun",

@@ -172,6 +172,27 @@ describe("DailyBriefingService", () => {
     expect(memSection!.items[0].label).toContain("Workflow pattern:");
   });
 
+  it("never shows private, suppressed, redacted or imported memories (SEC-14)", async () => {
+    const deps = makeDeps({
+      searchMemory: () => [
+        { summary: "Prefers short status updates", type: "preference" },
+        { summary: "Private salary preference", type: "preference", isPrivate: true },
+        { summary: "Private by state", type: "preference", privacyState: "private" },
+        { summary: "Deleted in the inspector", type: "preference", privacyState: "suppressed" },
+        { summary: "Redacted by the user", type: "preference", privacyState: "redacted" },
+        {
+          summary: "[Imported from ChatGPT — other workspace]\nprefers vim",
+          type: "preference",
+        },
+      ],
+    });
+    const briefing = await new DailyBriefingService(deps).generateBriefing("ws-1");
+    const memSection = briefing.sections.find((s) => s.type === "memory_highlights");
+    expect(memSection!.items.map((item) => item.label)).toEqual([
+      expect.stringContaining("Prefers short status updates"),
+    ]);
+  });
+
   // ── Suggestions section ────────────────────────────────────────
 
   it("includes active suggestions", async () => {

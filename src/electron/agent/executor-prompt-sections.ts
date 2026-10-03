@@ -1,5 +1,6 @@
 import { ExecutionMode, TaskDomain } from "../../shared/types";
 import { estimateTokens, truncateToTokens } from "./context-manager";
+import { truncateAtFragmentBoundary } from "./content/fragment-truncation";
 
 import { createHash } from "crypto";
 
@@ -14,6 +15,16 @@ export interface PromptSection {
   stableInputHash?: string;
   // Larger value means drop earlier when total budget is exceeded.
   dropPriority?: number;
+  /**
+   * "fragment" truncates on line boundaries and closes wrapper tags left open
+   * (memory/context blocks); the default cuts at a character offset.
+   */
+  truncation?: "chars" | "fragment";
+  /**
+   * When set, an over-budget composition shrinks this section (down to this many
+   * tokens) before dropping it. Only applies to fragment-truncated sections.
+   */
+  minTokens?: number;
 }
 
 export interface PromptCompositionResult {
@@ -138,6 +149,15 @@ function budgetSection(section: PromptSection, truncatedSections: string[]): str
   if (!section.maxTokens || section.maxTokens <= 0) {
     return raw;
   }
+  if (section.truncation === "fragment") {
+    const fitted = truncateAtFragmentBoundary(
+      raw,
+      section.maxTokens,
+      `[Prompt section '${section.key}' truncated for budget.]`,
+    ).trim();
+    if (fitted !== raw) truncatedSections.push(section.key);
+    return fitted;
+  }
   const trimmed = truncateToTokens(raw, section.maxTokens).trim();
   if (trimmed !== raw) {
     truncatedSections.push(section.key);
@@ -195,6 +215,30 @@ export function composePromptSections(
 
     for (const candidate of removable) {
       if (totalTokens <= totalBudgetTokens) break;
+      const overflow = totalTokens - totalBudgetTokens;
+      if (
+        candidate.truncation === "fragment" &&
+        typeof candidate.minTokens === "number" &&
+        candidate.tokens - overflow >= candidate.minTokens
+      ) {
+        // Shrink on fragment boundaries instead of dropping the whole section.
+        const shrunk = truncateAtFragmentBoundary(
+          candidate.text,
+          candidate.tokens - overflow,
+          `[Prompt section '${candidate.key}' truncated for total budget.]`,
+        ).trim();
+        const shrunkTokens = estimateTokens(shrunk);
+        if (shrunk && shrunkTokens < candidate.tokens) {
+          working = working.map((section) =>
+            section.key === candidate.key
+              ? { ...section, text: shrunk, tokens: shrunkTokens }
+              : section,
+          );
+          if (!truncatedSections.includes(candidate.key)) truncatedSections.push(candidate.key);
+          totalTokens -= candidate.tokens - shrunkTokens;
+          continue;
+        }
+      }
       working = working.filter((section) => section.key !== candidate.key);
       droppedSections.push(candidate.key);
       totalTokens -= candidate.tokens;

@@ -147,6 +147,8 @@ export class HeartbeatDispatchEngine {
         };
       }
       case "runbook": {
+        // Runbooks are not executed yet: this only records that they are due, so the result
+        // reports no work done.
         this.deps.recordActivity?.({
           workspaceId: input.workspaceId,
           agentRoleId: input.agent.id,
@@ -160,7 +162,7 @@ export class HeartbeatDispatchEngine {
         });
         return {
           agentRoleId: input.agent.id,
-          status: "work_done",
+          status: "ok",
           runId: input.heartbeatRunId,
           runType: "dispatch",
           pendingMentions: 0,

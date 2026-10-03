@@ -7,6 +7,7 @@ import type {
   CoreTrace,
   CoreTraceEvent,
 } from "../../shared/types";
+import { isRoutineCoreOutcome } from "./core-memory-hygiene";
 
 function hashParts(parts: Array<string | undefined>): string {
   const hash = createHash("sha1");
@@ -76,6 +77,9 @@ export class CoreFailureMiningService {
     trace: CoreTrace,
     events: CoreTraceEvent[],
   ): Array<Omit<CoreFailureRecord, "id">> {
+    // Idle, deferred, gated or cooldown pulses and reflection runs without fresh evidence are
+    // healthy outcomes, not failures.
+    if (isRoutineCoreOutcome(trace, events)) return [];
     const text = [
       trace.summary,
       trace.error,
@@ -100,10 +104,8 @@ export class CoreFailureMiningService {
         event.phase === "error" ||
         eventType.includes("error") ||
         eventType.includes("failed") ||
-        eventType.includes("no_evidence") ||
         eventType.includes("dispatch_skipped") ||
-        eventType.includes("no_work") ||
-        eventType.includes("deferred")
+        eventType.includes("no_work")
       ) {
         inferred.push({
           summary: event.summary,

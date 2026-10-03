@@ -1041,7 +1041,6 @@ export class EverydayAgentStore {
         receiptsDays: clampInteger(input.retention?.receiptsDays, 1, 3650, 180),
         previewsDays: clampInteger(input.retention?.previewsDays, 1, 3650, 30),
         connectorCacheDays: clampInteger(input.retention?.connectorCacheDays, 1, 3650, 30),
-        memoryCandidateDays: clampInteger(input.retention?.memoryCandidateDays, 1, 3650, 90),
         routineProvenanceDays: clampInteger(input.retention?.routineProvenanceDays, 1, 3650, 180),
       },
       browserProfilePolicy: {

@@ -37,6 +37,32 @@ describe("runtime tool definition metadata", () => {
     expect(metadata.approvalKind).toBe("shell_sensitive");
   });
 
+  it.each([
+    "search_memories",
+    "memory_search_index",
+    "memory_timeline",
+    "memory_details",
+    "search_quotes",
+    "search_sessions",
+    "memory_topics_load",
+    "memory_curate",
+    "memory_curated_read",
+  ])("exposes memory tool %s directly instead of both deferring and exposing it", (tool) => {
+    const metadata = getDefaultRuntimeToolMetadata(tool);
+    expect(metadata.alwaysExpose).toBe(true);
+    expect(metadata.deferLoad).toBe(false);
+  });
+
+  it.each(["kg_search", "kg_get_neighbors", "kg_get_subgraph"])(
+    "defers knowledge-graph read %s so tool_search can surface it",
+    (tool) => {
+      const metadata = getDefaultRuntimeToolMetadata(tool);
+      expect(metadata.deferLoad).toBe(true);
+      expect(metadata.alwaysExpose).toBe(false);
+      expect(metadata.capabilityTags).toContain("memory");
+    },
+  );
+
   it("keeps bot-team handoffs discoverable without prompt wording", () => {
     const metadata = getDefaultRuntimeToolMetadata("send_agent_message");
     expect(metadata.alwaysExpose).toBe(true);

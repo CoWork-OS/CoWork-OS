@@ -48,4 +48,30 @@ describe("MemoryPressureService", () => {
       "The active access profile does not allow reading this file.",
     );
   });
+
+  it("re-triggers only when the pressure fingerprint changes", async () => {
+    MemoryPressureService.resetHandledPressure();
+    const memoryFile = path.join(tmpDir, ".cowork", "MEMORY.md");
+    writeFile(memoryFile, "- Use deterministic prompts\n- Use deterministic prompts\n");
+    const first = MemoryPressureService.fingerprint(await MemoryPressureService.analyze(tmpDir));
+    expect(first).not.toBe("");
+    expect(MemoryPressureService.hasPressureChanged("ws-1", first)).toBe(true);
+
+    MemoryPressureService.markPressureHandled("ws-1", first);
+    const again = MemoryPressureService.fingerprint(await MemoryPressureService.analyze(tmpDir));
+    expect(again).toBe(first);
+    expect(MemoryPressureService.hasPressureChanged("ws-1", again)).toBe(false);
+    expect(MemoryPressureService.hasPressureChanged("ws-2", again)).toBe(true);
+
+    writeFile(memoryFile, "- Use deterministic prompts\n- Use deterministic prompts\n- One more line here\n");
+    const changed = MemoryPressureService.fingerprint(await MemoryPressureService.analyze(tmpDir));
+    expect(MemoryPressureService.hasPressureChanged("ws-1", changed)).toBe(true);
+  });
+
+  it("has an empty fingerprint when nothing needs compaction", async () => {
+    writeFile(path.join(tmpDir, ".cowork", "MEMORY.md"), "- A single small entry\n");
+    const report = await MemoryPressureService.analyze(tmpDir);
+    expect(MemoryPressureService.fingerprint(report)).toBe("");
+    expect(MemoryPressureService.hasPressureChanged("ws-1", "")).toBe(false);
+  });
 });

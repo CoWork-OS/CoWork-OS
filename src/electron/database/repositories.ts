@@ -3,7 +3,13 @@ import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
 import { buildAgentVisibleMemorySql } from "../memory/memory-visibility";
+import {
+  buildMemoryLastActivitySql,
+  buildRetentionProtectedMemorySql,
+} from "../memory/memory-retention";
 import { PRUNE_TASK_EVENTS_BATCH_SQL } from "./maintenance-sql";
+import { purgeTaskDerivedRows } from "../memory/memory-purge-sql";
+import { deleteWorkspaceMemoriesOlderThan } from "../memory/memory-retention-sql";
 import {
   flushPendingTimelineEvent,
   flushPendingTimelineTask,
@@ -20,6 +26,7 @@ import {
   taskBelongsToWorkspace,
 } from "./browser-replay-sql";
 import {
+  type CapturedMemoryResult,
   type CapturedMemoryWrite,
   insertCapturedMemory,
   insertMemoryRow,
@@ -1530,9 +1537,17 @@ export class TaskStore {
     return rows.map((row) => this.mapRowToTask(row));
   }
 
-  delete(id: string): void {
+  /**
+   * Delete a task and everything that references it. Conversation records derived from the
+   * task (durable context, transcript span index rows) always go with it. Learned memory
+   * derived from it (archive memories, KG facts, Playbook evidence) is deleted only when
+   * `purgeDerivedMemory` is set, which an explicit user delete does (SEC-15); automatic
+   * session retention leaves learned memory to memory retention and only unlinks it.
+   */
+  delete(id: string, options: { purgeDerivedMemory?: boolean } = {}): void {
     // Commit rows the database worker has not written yet, so none arrive after deletion.
     flushPendingTimelineTask(this.db, id);
+    const purgeDerivedMemory = options?.purgeDerivedMemory === true;
     // Use transaction to ensure atomic deletion
     const deleteTransaction = this.db.transaction((taskId: string) => {
       // Delete related records from all tables with foreign keys to tasks
@@ -1569,7 +1584,14 @@ export class TaskStore {
       );
       deleteWorkingState.run(taskId);
 
-      // Nullify task_id in memories rather than deleting them
+      // Memory-side rows derived from this task (SEC-15): durable context and transcript
+      // span index rows always; with purgeDerivedMemory also archive memories (explicit
+      // saves and imports are kept and only unlinked below), KG facts sourced from the
+      // task and Playbook evidence. Dreaming runs and pending memory writes are unlinked
+      // so their foreign keys cannot block the delete (LIFE-4).
+      purgeTaskDerivedRows(this.db, taskId, { purgeDerivedMemory });
+
+      // Unlink the memories that survive the purge above.
       const clearMemoryTaskId = this.db.prepare(
         "UPDATE memories SET task_id = NULL WHERE task_id = ?",
       );
@@ -6718,7 +6740,7 @@ export class MemoryStore {
   ]);
 
   /** One capture (memory, embedding, observation) in one transaction (DB6). */
-  insertCaptured(write: CapturedMemoryWrite): { observationStored: boolean } {
+  insertCaptured(write: CapturedMemoryWrite): CapturedMemoryResult {
     return this.db.transaction(() => insertCapturedMemory(this.db, write))();
   }
 
@@ -7284,11 +7306,13 @@ export class MemoryStore {
     workspaceId: string,
     limit = 200,
   ): Array<{ id: string; createdAt: number; approxBytes: number }> {
+    // Imports, Playbook rows, explicit saves and curated promotions are never pruned
+    // for space; least recently useful rows go first.
     const stmt = this.db.prepare(`
       SELECT id, created_at, (length(content) + COALESCE(length(summary), 0)) as approx_bytes
       FROM memories
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC
+      WHERE workspace_id = ? AND NOT ${buildRetentionProtectedMemorySql("memories.id", "memories.content")}
+      ORDER BY ${buildMemoryLastActivitySql()} ASC
       LIMIT ?
     `);
     const rows = stmt.all(workspaceId, limit) as Array<{
@@ -7345,15 +7369,14 @@ export class MemoryStore {
   }
 
   /**
-   * Cleanup old memories based on retention policy
+   * Cleanup old memories based on retention policy: rows not used (created or
+   * referenced) since the cutoff. Imports, Playbook rows, explicit saves and curated
+   * promotions are kept (see memory-retention.ts). Child embeddings go first.
    */
   deleteOlderThan(workspaceId: string, cutoffTimestamp: number): number {
-    const stmt = this.db.prepare(`
-      DELETE FROM memories
-      WHERE workspace_id = ? AND created_at < ?
-    `);
-    const result = stmt.run(workspaceId, cutoffTimestamp);
-    return result.changes;
+    return this.db.transaction(() =>
+      deleteWorkspaceMemoriesOlderThan(this.db, workspaceId, cutoffTimestamp),
+    )();
   }
 
   /**

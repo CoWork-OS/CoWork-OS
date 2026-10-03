@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { randomBytes } from "node:crypto";
 import { build } from "esbuild";
 
 /** Exercise the real filesystem store with no access to the application database. */
@@ -9,13 +10,17 @@ export async function checkpointCrashRoundTrip(workspace: string, snapshot: unkn
   const entry = path.join(workspace, "checkpoint-worker.cjs");
   const input = path.join(workspace, "snapshot-input.json");
   const checkpointLockRoot = path.join(workspace, "isolated-checkpoint-locks");
+  const signingKey = randomBytes(32).toString("hex");
   await fs.writeFile(input, JSON.stringify(snapshot));
   await build({
     stdin: {
       contents: `
         import fs from "node:fs";
         import { TranscriptStore } from "./src/electron/memory/TranscriptStore";
+        import { setCheckpointSigningKeyForTests } from "./src/electron/memory/checkpoint-signing";
         TranscriptStore.setDatabaseForTests(null);
+        // Checkpoints are signed; writer and reader share the parent's test key.
+        setCheckpointSigningKeyForTests(process.env.COWORK_TEST_CHECKPOINT_SIGNING_KEY || null);
         const [mode, workspace, input] = process.argv.slice(2);
         if (mode === "write") {
           TranscriptStore.writeCheckpoint(workspace, "task-1", JSON.parse(fs.readFileSync(input, "utf8")))
@@ -49,8 +54,15 @@ export async function checkpointCrashRoundTrip(workspace: string, snapshot: unkn
             path: "database",
             namespace: "test-db",
           }));
-          builder.onLoad({ filter: /.*/, namespace: "test-db" }, () => ({
-            contents: "export const DatabaseManager = {};",
+          builder.onResolve({ filter: /\/database\/SecureSettingsRepository$/ }, () => ({
+            path: "secure-settings",
+            namespace: "test-db",
+          }));
+          builder.onLoad({ filter: /.*/, namespace: "test-db" }, (args) => ({
+            contents:
+              args.path === "secure-settings"
+                ? "export const SecureSettingsRepository = { isInitialized: () => false };"
+                : "export const DatabaseManager = {};",
             loader: "js",
           }));
         },
@@ -62,6 +74,7 @@ export async function checkpointCrashRoundTrip(workspace: string, snapshot: unkn
     env: {
       ...process.env,
       COWORK_CHECKPOINT_LOCK_ROOT: checkpointLockRoot,
+      COWORK_TEST_CHECKPOINT_SIGNING_KEY: signingKey,
     },
   });
   let stderr = "";
@@ -97,6 +110,7 @@ export async function checkpointCrashRoundTrip(workspace: string, snapshot: unkn
       env: {
         ...process.env,
         COWORK_CHECKPOINT_LOCK_ROOT: checkpointLockRoot,
+        COWORK_TEST_CHECKPOINT_SIGNING_KEY: signingKey,
       },
     });
     if (reader.status !== 0) throw new Error(`Fresh checkpoint reader failed: ${reader.stderr}`);

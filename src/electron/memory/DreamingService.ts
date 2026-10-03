@@ -52,6 +52,47 @@ export interface DreamingServiceDeps {
   now?: () => number;
 }
 
+/** Minimum spacing between automatic Dreaming runs of one workspace. */
+export const DREAMING_WORKSPACE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+/** Candidate statuses that block re-proposing the same candidate in a later run. */
+const BLOCKING_CANDIDATE_STATUSES = new Set<DreamingCandidate["status"]>([
+  "proposed",
+  "accepted",
+  "rejected",
+]);
+
+export type DreamingSkipReason = "cooldown" | "in_flight";
+
+export interface DreamingRunResult {
+  run: DreamingRun;
+  candidates: DreamingCandidate[];
+  /**
+   * Set when this request did not start a run: `run` is then the recent run (cooldown) or the
+   * overlapping run (in_flight).
+   */
+  skipped?: DreamingSkipReason;
+}
+
+/** Runs in progress per workspace, shared by every trigger and service instance. */
+const inFlightRunsByWorkspace = new Map<string, Promise<DreamingRunResult>>();
+
+/** Identity of a candidate across runs, used to avoid proposing the same thing again. */
+export function dreamingCandidateFingerprint(
+  candidate: Pick<
+    DreamingCandidate,
+    "workspaceId" | "action" | "target" | "currentValue" | "proposedValue"
+  >,
+): string {
+  return [
+    candidate.workspaceId,
+    candidate.action,
+    candidate.target,
+    normalizeText(candidate.currentValue || "").toLowerCase(),
+    normalizeText(candidate.proposedValue).toLowerCase(),
+  ].join("::");
+}
+
 export interface RunDreamingRequest {
   workspaceId: string;
   workspacePath: string;
@@ -63,6 +104,8 @@ export interface RunDreamingRequest {
   taskPrompt?: string;
   instructions?: string;
   readGuard?: TranscriptReadGuard;
+  /** Run even within the workspace cooldown. Manual triggers always bypass it. */
+  bypassCooldown?: boolean;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -150,9 +193,46 @@ export class DreamingService {
     private readonly deps: DreamingServiceDeps = {},
   ) {}
 
-  async run(
-    request: RunDreamingRequest,
-  ): Promise<{ run: DreamingRun; candidates: DreamingCandidate[] }> {
+  /**
+   * Run Dreaming for a workspace. At most one run per workspace is in progress at a time (an
+   * overlapping request shares the running one), and automatic triggers are spaced by
+   * DREAMING_WORKSPACE_COOLDOWN_MS.
+   */
+  async run(request: RunDreamingRequest): Promise<DreamingRunResult> {
+    const inFlight = inFlightRunsByWorkspace.get(request.workspaceId);
+    if (inFlight) {
+      const shared = await inFlight;
+      return { run: shared.run, candidates: [], skipped: "in_flight" };
+    }
+    let release!: () => void;
+    const execution = (async (): Promise<DreamingRunResult> => {
+      const recent =
+        request.bypassCooldown || request.triggerSource === "manual"
+          ? undefined
+          : await this.findRunWithinCooldown(request.workspaceId);
+      if (recent) return { run: recent, candidates: [], skipped: "cooldown" };
+      return this.execute(request);
+    })().finally(() => release());
+    release = () => {
+      if (inFlightRunsByWorkspace.get(request.workspaceId) === execution) {
+        inFlightRunsByWorkspace.delete(request.workspaceId);
+      }
+    };
+    inFlightRunsByWorkspace.set(request.workspaceId, execution);
+    return execution;
+  }
+
+  private async findRunWithinCooldown(workspaceId: string): Promise<DreamingRun | undefined> {
+    const now = this.deps.now?.() ?? Date.now();
+    const runs = await this.repo.listRuns({ workspaceId, limit: 10 });
+    return runs.find(
+      (run) =>
+        run.status !== "failed" &&
+        now - (run.startedAt || run.createdAt) < DREAMING_WORKSPACE_COOLDOWN_MS,
+    );
+  }
+
+  private async execute(request: RunDreamingRequest): Promise<DreamingRunResult> {
     const now = this.deps.now?.() ?? Date.now();
     const run = await this.repo.createRun({
       workspaceId: request.workspaceId,
@@ -170,8 +250,13 @@ export class DreamingService {
 
     try {
       const evidence = await this.gatherEvidence(request);
-      const candidateInputs = this.proposeCandidates(run, evidence);
-      const candidates = await this.repo.bulkCreateCandidates(candidateInputs);
+      const candidateInputs = await this.withoutKnownCandidates(
+        request.workspaceId,
+        this.proposeCandidates(run, evidence),
+      );
+      const candidates = candidateInputs.length
+        ? await this.repo.bulkCreateCandidates(candidateInputs)
+        : [];
       const completed = await this.repo.updateRun(run.id, {
         status:
           evidence.observations.length ||
@@ -196,6 +281,24 @@ export class DreamingService {
       });
       return { run: failed || run, candidates: [] };
     }
+  }
+
+  /**
+   * Drop candidates already proposed, accepted or rejected in an earlier run of this workspace,
+   * so repeated runs do not pile up the same proposals.
+   */
+  private async withoutKnownCandidates(
+    workspaceId: string,
+    candidates: Array<Omit<DreamingCandidate, "id" | "createdAt">>,
+  ): Promise<Array<Omit<DreamingCandidate, "id" | "createdAt">>> {
+    if (!candidates.length) return candidates;
+    const existing = await this.repo.listCandidates({ workspaceId, limit: 500 });
+    const known = new Set(
+      existing
+        .filter((candidate) => BLOCKING_CANDIDATE_STATUSES.has(candidate.status))
+        .map(dreamingCandidateFingerprint),
+    );
+    return candidates.filter((candidate) => !known.has(dreamingCandidateFingerprint(candidate)));
   }
 
   async applyAcceptedCandidate(
@@ -282,9 +385,9 @@ export class DreamingService {
       this.deps.loadRecentTranscriptSpans || TranscriptStore.loadRecentSpans.bind(TranscriptStore);
     const listCuratedEntries =
       this.deps.listCuratedEntries ||
-      ((workspaceId) => {
+      (async (workspaceId: string) => {
         try {
-          return CuratedMemoryService.list(workspaceId, { status: "active", limit: 100 });
+          return await CuratedMemoryService.list(workspaceId, { status: "active", limit: 100 });
         } catch {
           return [];
         }

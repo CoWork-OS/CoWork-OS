@@ -2,6 +2,7 @@ import type { LLMTool } from "../llm/types";
 import type { Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import { SupermemoryService } from "../../memory/SupermemoryService";
+import { explicitMemoryWriteBlocked, NO_MEMORY_WRITE_ERROR } from "./memory-tools";
 
 export class SupermemoryTools {
   constructor(
@@ -227,6 +228,23 @@ export class SupermemoryTools {
       hasContainerTag: Boolean(input.containerTag),
       contentLength: input.content.length,
     });
+
+    if (explicitMemoryWriteBlocked(this.daemon, this.taskId, input.content)) {
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "supermemory_remember",
+        success: false,
+        blocked: true,
+        reason: "no_memory_directive",
+      });
+      return {
+        success: false,
+        containerTag: input.containerTag || "",
+        memoryIds: [],
+        blocked: true,
+        error: NO_MEMORY_WRITE_ERROR,
+        message: NO_MEMORY_WRITE_ERROR,
+      };
+    }
 
     const result = await SupermemoryService.remember({
       workspace: this.workspace,

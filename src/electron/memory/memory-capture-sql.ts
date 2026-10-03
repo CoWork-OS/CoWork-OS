@@ -31,6 +31,25 @@ export interface CapturedMemoryWrite {
   };
   embedding?: { values: number[]; updatedAt: number };
   observation?: ObservationMetadataRow;
+  /**
+   * Content-hash dedupe (audit DATA-2): when a memory of the same workspace and type with
+   * the same normalized content hash was created at or after `since`, nothing is
+   * inserted; that memory's reference count and `last_referenced_at` are bumped instead.
+   */
+  dedupe?: CaptureDedupe;
+}
+
+export interface CaptureDedupe {
+  /** `observationContentHash` of the memory's content. */
+  contentHash: string;
+  /** Oldest `created_at` a duplicate may have (the retention window). */
+  since: number;
+}
+
+export interface CapturedMemoryResult {
+  observationStored: boolean;
+  /** Set when the capture matched an existing memory and nothing was inserted. */
+  duplicateOf?: string;
 }
 
 const MAX_ARRAY_ITEMS = 12;
@@ -136,13 +155,64 @@ export function writeObservationMetadata(
 }
 
 /**
+ * The oldest memory of the same workspace and type whose normalized content hash matches,
+ * created inside the dedupe window. The observation hash index answers most lookups; rows
+ * without an observation (structured observations off) fall back to exact content.
+ */
+export function findDuplicateCapture(
+  db: Database.Database,
+  memory: CapturedMemoryWrite["memory"],
+  dedupe: CaptureDedupe,
+): string | null {
+  const byHash = db
+    .prepare(
+      `SELECT m.id FROM memory_observation_metadata o
+       JOIN memories m ON m.id = o.memory_id
+       WHERE o.workspace_id = ? AND o.content_hash = ? AND m.type = ? AND m.created_at >= ?
+       ORDER BY m.created_at ASC
+       LIMIT 1`,
+    )
+    .get(memory.workspaceId, dedupe.contentHash, memory.type, dedupe.since) as
+    | { id?: string }
+    | undefined;
+  if (byHash?.id) return byHash.id;
+  const byContent = db
+    .prepare(
+      `SELECT id FROM memories
+       WHERE workspace_id = ? AND type = ? AND created_at >= ? AND content = ?
+       ORDER BY created_at ASC
+       LIMIT 1`,
+    )
+    .get(memory.workspaceId, memory.type, dedupe.since, memory.content) as
+    | { id?: string }
+    | undefined;
+  return byContent?.id ?? null;
+}
+
+/**
  * Apply one capture inside the caller's transaction. The observation is an auxiliary
  * index: it commits in a savepoint, so its failure keeps the memory (as before).
+ *
+ * A duplicate (see `CapturedMemoryWrite.dedupe`) inserts nothing and only bumps the
+ * existing row's reference bookkeeping; `updated_at` is left alone so the stored
+ * embedding stays current and the FTS update trigger does not fire.
  */
 export function insertCapturedMemory(
   db: Database.Database,
   write: CapturedMemoryWrite,
-): { observationStored: boolean } {
+): CapturedMemoryResult {
+  if (write.dedupe) {
+    const duplicateOf = findDuplicateCapture(db, write.memory, write.dedupe);
+    if (duplicateOf) {
+      db.prepare(
+        `UPDATE memories
+         SET reference_count = COALESCE(reference_count, 0) + 1,
+             last_referenced_at = MAX(COALESCE(last_referenced_at, 0), ?)
+         WHERE id = ?`,
+      ).run(write.memory.createdAt, duplicateOf);
+      return { observationStored: false, duplicateOf };
+    }
+  }
   insertMemoryRow(db, write.memory);
   if (write.embedding) {
     upsertMemoryEmbeddingRows(

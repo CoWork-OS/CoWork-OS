@@ -7,6 +7,7 @@
 
 import { serviceStatements } from "../database/service-statements";
 import { randomUUID } from "crypto";
+import { hasReservedImportPrefix, isAgentVisiblePrivacyState } from "../memory/memory-visibility";
 import {
   Briefing,
   BriefingConfig,
@@ -481,6 +482,19 @@ export class DailyBriefingService {
     for (const query of queries) searched.push(await this.deps.searchMemory(workspaceId, query, 5));
     const memories = this.dedupeBriefingItems(
       searched.flat().filter((memory: Any) => {
+        // The briefing can be delivered to a channel (SEC-14): never private, suppressed,
+        // redacted or imported rows, whatever the search dependency returned.
+        if (memory?.isPrivate === true || memory?.privacyState === "private") return false;
+        if (memory?.privacyState && !isAgentVisiblePrivacyState(memory.privacyState)) {
+          return false;
+        }
+        if (
+          hasReservedImportPrefix(memory?.content) ||
+          hasReservedImportPrefix(memory?.snippet) ||
+          hasReservedImportPrefix(memory?.summary)
+        ) {
+          return false;
+        }
         const type = String(memory?.type || "");
         if (
           ![

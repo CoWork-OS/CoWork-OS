@@ -84,17 +84,16 @@ describe("MemoryTierService", () => {
       ]);
     });
 
-    it("evicts stale short-tier memory with low reference count, embeddings first", async () => {
+    it("never evicts: tiers do not expire rows (retention_days governs removal)", async () => {
       const oldDate = Date.now() - 10 * 24 * 60 * 60 * 1000; // 10 days old
       const { db, sql, read } = makeDb([
         { id: "stale", tier: "short", reference_count: 0, created_at: oldDate },
         { id: "fresh", tier: "short", reference_count: 0, created_at: Date.now() },
       ]);
-      db.pragma("foreign_keys = ON");
       db.prepare("INSERT INTO memory_embeddings (memory_id) VALUES ('stale')").run();
       const result = await MemoryTierService.runPromotionPass(sql);
-      expect(result.evicted).toBe(1);
-      expect(read("stale")).toBeUndefined();
+      expect(result.evicted).toBe(0);
+      expect(read("stale")).toBeDefined();
       expect(read("fresh")).toBeDefined();
     });
 

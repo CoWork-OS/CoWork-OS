@@ -27,11 +27,11 @@ write governance.
 Those lanes map into runtime layers as:
 
 - **L0 Identity**: curated user/workspace memory + `USER.md` essentials
-- **L1 Essential Story**: durable decisions, weekly/daily synthesis, active commitments
+- **L1 Essential Story**: playbook patterns, daily activity summaries, active commitments
 - **L2 Topic Packs**: focused topic files loaded on demand
 - **L3 Deep Recall**: unified recall and verbatim quote search across tasks/messages/files/memory/KG
 
-Chronicle fits this model as a **screen-context evidence source**, not as a fifth memory lane. Raw passive frames stay ephemeral in app-local storage. Only task-used Chronicle observations are promoted into workspace state and become searchable through unified recall as `screen_context`. When enabled, those promoted observations can also create linked `screen_context` memory entries through the normal memory service instead of bypassing it.
+Chronicle fits this model as a **screen-context evidence source**, not as a fifth memory lane. Raw passive frames stay ephemeral in app-local storage. When a task uses `screen_context_resolve`, only the single top match is promoted into workspace state, and only if its confidence is at least `0.5`, the task did not opt out with `<no-memory>`, and the access profile allows writing the Chronicle directory. Promoted observations become searchable through unified recall as `screen_context`. When enabled, they can also create linked `screen_context` memory entries through the normal memory service; those entries are always private, so they stay local and are never mirrored to Supermemory.
 
 ---
 
@@ -42,8 +42,9 @@ explicit review mode is enabled. CoWork's normal local runtime has no approval
 prompts, so it commits new memory writes immediately. This remains true when a
 previous session saved a review mode in Memory Hub; the saved setting is kept
 for compatibility, but it cannot recreate an approval surface while the
-no-prompt policy is active. To exercise the review queue deliberately in a
-headless or controlled run, set `COWORK_MEMORY_WRITE_APPROVAL_MODE`:
+no-prompt policy is active. Memory Hub no longer offers a review-mode select.
+To exercise the review queue deliberately in a headless or controlled run, set
+`COWORK_MEMORY_WRITE_APPROVAL_MODE`:
 
 - `curated_only`: stage writes to the hot `.cowork/USER.md` / `.cowork/MEMORY.md` layer.
 - `external_only`: stage writes before anything is saved or mirrored to Supermemory.
@@ -73,7 +74,7 @@ Read-only recall tools are not staged. Search, profile fetch, inspector views, a
 ## Overview
 
 ```text
-User messages / task events / accepted distill candidates
+User corrections / salient task events / accepted distill candidates
         │
         ├─→ CuratedMemoryService
         │     ├─→ curated_memory_entries (SQLite)
@@ -81,7 +82,7 @@ User messages / task events / accepted distill candidates
         │     └─→ .cowork/MEMORY.md (auto block)
         │
         ├─→ MemoryService
-        │     ├─→ memories + embeddings + summaries (archive lane)
+        │     ├─→ memories + embeddings (archive lane)
         │     └─→ MemoryObservationService
         │           └─→ memory_observation_metadata + FTS sidecar
         │
@@ -96,8 +97,8 @@ User messages / task events / accepted distill candidates
         │     ├─→ dreaming_runs
         │     └─→ dreaming_candidates (reviewable memory maintenance proposals)
         │
-        └─→ DailyLogService / DailyLogSummarizer
-              └─→ .cowork/memory/daily + summaries
+        └─→ MemoryConsolidator / DailyLogSummarizer
+              └─→ .cowork/memory/summaries (one line per task per day)
 
 MemorySynthesizer.synthesize()
         │
@@ -105,7 +106,7 @@ MemorySynthesizer.synthesize()
         │     ├─→ workspace kit essentials
         │     └─→ hot curated memory
         └─→ L1 Essential Story
-              └─→ playbook / KG / daily summaries
+              └─→ playbook / daily summaries / Box Brain hits
 
 Explicit recall tools
         ├─→ memory_search_index
@@ -165,28 +166,33 @@ Curated hot memory is injected by default through `<cowork_hot_memory>`.
 
 ### Dreaming interaction
 
-Dreaming can propose curated-memory additions, replacements, or archives when recent evidence shows a correction, contradiction, duplicate entry, open loop, recurring cadence, or durable constraint. Those proposals remain `dreaming_candidates` until accepted and applied through `CuratedMemoryService`; Dreaming is not allowed to bypass the curated-memory write path.
+Dreaming can propose curated-memory additions, replacements, or archives when recent evidence shows a correction, contradiction, duplicate entry, open loop, recurring cadence, or durable constraint. Those proposals remain `dreaming_candidates`; there is no review UI yet, so no candidate is currently accepted or applied. Once accepted, a change must go through `CuratedMemoryService`; Dreaming is not allowed to bypass the curated-memory write path.
 
 ---
 
 ## Lane 2 — Recall Archive
 
 **Service:** `src/electron/memory/MemoryService.ts`  
-**Storage:** `memories`, `memory_embeddings`, `memory_summaries`
+**Storage:** `memories`, `memory_embeddings`
 **Structured sidecar:** `src/electron/memory/MemoryObservationService.ts`, `memory_observation_metadata`
 
 This is the broad searchable archive:
 
-- observations
-- decisions
-- errors
-- insights
+- task outcomes (completion summaries)
+- decisions and user feedback
+- errors that affected a task (tool errors, failed steps, verification failures)
+- user corrections and insights
+- explicit `memory_save` entries
 - imported ChatGPT history
 - compressed summaries
+
+Capture is salience-gated (`src/electron/memory/memory-capture-salience.ts`). The daemon no longer archives raw telemetry such as tool calls and results, step progress, plan JSON, assistant messages or file events; the task timeline keeps those. Events from memory-recall tools are never archived, so recalled memories are not re-captured as new ones. A user correction is captured once, where it is detected.
 
 Chronicle-promoted observations remain provenance-rich `screen_context` records so unified recall can surface them separately from ordinary memory text. When background Chronicle memory generation is enabled, the runtime can also create linked `screen_context` memory rows derived from those observations. Those derived rows are summaries with provenance warnings, not raw frame dumps.
 
 This lane still uses hybrid lexical + local semantic retrieval, but it is **not injected by default**. The feature flag `defaultArchiveInjectionEnabled` now defaults to `false`.
+
+The per-turn recall block (`<cowork_memory_recall>`) is query-driven: each turn it injects archive and `.cowork` note matches for the current query. The unconditional "recent memories" lane in that block runs only when `defaultArchiveInjectionEnabled` is on. Both lanes skip memories captured by the current task, so the agent does not see its own tool events echoed back.
 
 ### Structured observations
 
@@ -196,7 +202,7 @@ This gives CoWork a compact index for retrieval and a user-inspectable control p
 
 Backfill is deterministic and local. It derives metadata from existing content and summaries without per-row LLM calls. It does not run as a synchronous startup write path; Memory Hub shows status and can trigger rebuild explicitly.
 
-Destructive inspector actions are workspace-scoped. Delete is implemented as confirmed soft-delete: the observation becomes `suppressed`, the underlying memory is marked private, and the row is excluded from default search and prompt recall instead of being hard-deleted directly.
+Destructive inspector actions are workspace-scoped. Delete is implemented as confirmed soft-delete: the observation becomes `suppressed`, the underlying memory is marked private, and the row is excluded from default search, prompt recall and every agent read path (`search_memories`, `memory_search_index`/`timeline`/`details`) instead of being hard-deleted directly. Rebuild never loosens an existing privacy state.
 
 ### Retrieval path
 
@@ -205,12 +211,17 @@ Destructive inspector actions are workspace-scoped. Delete is implemented as con
 - `memory_timeline` returns compact neighboring observations around an anchor ID or query
 - `memory_details` expands only selected observation IDs and is scoped to the active workspace
 - archive recall can still be injected when explicitly enabled for a workspace/runtime
-- `MemoryTierService` still tracks reference counts and promotes/evicts archive entries over time
+- `MemoryTierService` tracks reference counts (search hits and prompt injections) and promotes entries between tiers; it never deletes rows
+
+### Retention
+
+Archive rows are removed only by the workspace's `retention_days` setting (default 90) and storage cap, measured from the later of creation and last reference. There is no separate short-tier expiry. Imported rows, Playbook rows, explicit saves and curated promotions are never removed by retention.
 
 ### Privacy path
 
 - `<no-memory>` disables automatic capture for the relevant task content
 - `<private>...</private>` redacts that segment from captured memory and marks affected derived entries private when needed
+- secrets are redacted before storage; private rows are never injected into prompts
 - private, redacted, and suppressed observations are excluded from Supermemory mirroring
 - redacted and suppressed observations are excluded from both search-based prompt recall and recent-memory prompt recall
 
@@ -218,7 +229,7 @@ Destructive inspector actions are workspace-scoped. Delete is implemented as con
 
 Dreaming uses structured observations as compact evidence for memory maintenance. It can detect likely stale archive facts, contradictions, and repeated patterns, but it records proposals in `dreaming_candidates` rather than editing `memories` or `memory_observation_metadata` directly.
 
-Dreaming candidates keep evidence refs so future Memory Hub review can show why a proposal exists before any archive, replacement, or topic-pack update is applied.
+Dreaming candidates keep evidence refs so a future Memory Hub review surface can show why a proposal exists before any archive, replacement, or topic-pack update is applied. That surface does not exist yet.
 
 ## Screen Context Evidence — Chronicle Promotions
 
@@ -292,9 +303,10 @@ If mirroring is enabled in Memory Hub, `MemoryService.capture(...)` best-effort 
 
 Current boundary:
 
-- private or strict-mode entries are not mirrored
+- private or strict-mode entries are not mirrored (this includes all Chronicle-derived memories)
 - workspace kit files remain local
 - full conversation turn-by-turn sync is not implemented yet
+- remote ids are not stored, so deleting, suppressing or clearing local memory does not remove the mirrored copy from Supermemory
 
 ### Failure handling
 
@@ -311,8 +323,12 @@ Recent task/session history is now a first-class recall lane rather than somethi
 
 Stored artifacts include:
 
-- transcript spans under `.cowork/memory/transcripts/spans/*.jsonl`
+- transcript spans under `.cowork/memory/transcripts/spans/*.jsonl`, indexed once in SQLite (`transcript_spans`)
 - lightweight checkpoints under `.cowork/memory/transcripts/checkpoints/*.json`
+
+Full `conversation_snapshot` events are not stored as spans (the task database keeps the latest snapshot), and oversized payloads are stored as a preview. Transcript retention follows task-event retention (90 days). Deleting a task removes its spans, JSONL file, checkpoints and lock file.
+
+Checkpoints are signed with an `hmac-sha256` key held in encrypted settings. A checkpoint without a valid signature (including legacy unkeyed `sha256` ones) is never used for restore; the runtime falls back to the snapshot in the task database. Permission state is never restored from a checkpoint file.
 
 Each checkpoint can now carry two complementary artifacts:
 
@@ -368,28 +384,15 @@ Topic packs are for topical work such as “bring me the onboarding context for 
 
 ---
 
-## Daily Logs and Summaries
+## Daily Summaries
 
-### Operational Daily Log
-
-**Service:** `src/electron/memory/DailyLogService.ts`  
-**Location:** `.cowork/memory/daily/<YYYY-MM-DD>.md`
-
-When another runtime path or automation writes entries through `DailyLogService`, the files act as raw operational journals for:
-
-- user feedback events
-- task completions
-- notable decisions
-- high-value observations or corrections
-
-Raw daily logs are never injected into prompts.
-
-### Daily Summaries
-
-**Service:** `src/electron/memory/DailyLogSummarizer.ts`  
+**Writer:** `src/electron/memory/MemoryConsolidator.ts` (via `DailyLogSummarizer.appendTaskLine`)  
+**Reader:** `src/electron/memory/DailyLogSummarizer.ts`  
 **Location:** `.cowork/memory/summaries/<YYYY-MM-DD>.md`
 
-Daily summaries remain part of the structured memory lane. They are ranked below curated/user relationship facts and above raw archive snippets when archive injection is enabled.
+When `backgroundConsolidationEnabled` is on (default off), each completed task adds or replaces one line in today's summary under `## Task Activity`: the time, a short excerpt of the task prompt and the number of transcript events. A file keeps at most 40 lines of at most 200 characters. Raw transcript payloads are never copied into the summary; older summaries in the previous "Consolidated Signals" layout are replaced on the next append. A consolidation lock left behind by a crashed run is removed after 10 minutes.
+
+Recent summaries (last 7 days) are injected as `daily_summary` fragments in `L1 Essential Story`. They are an activity index, not a synthesis of decisions or preferences. There is no separate raw daily log.
 
 ---
 
@@ -400,7 +403,7 @@ Daily summaries remain part of the structured memory lane. They are ranked below
 Prompt synthesis now builds separate sections instead of one monolithic synthesized-memory block:
 
 - `<cowork_hot_memory>` — `L0 Identity`: curated hot memory + user/profile + active relationship items
-- `<cowork_structured_memory>` — `L1 Essential Story`: playbook, daily summaries, active commitments, and current KG context
+- `<cowork_structured_memory>` — `L1 Essential Story`: playbook, daily summaries and active commitments. The knowledge graph is not injected in the default wake-up path; agents reach it through the `kg_*` tools.
 - optional Supermemory profile block — external profile/search context appended only when enabled
 
 `L2 Topic Packs` and `L3 Deep Recall` are not injected into the live prompt by default. They stay explicit and tool-driven.
@@ -414,16 +417,19 @@ Workspace kit context is still injected separately and placed before the memory 
 
 ### Budgeting
 
-- total memory synthesis budget defaults to `2800` estimated tokens
-- workspace kit keeps roughly `35%` of the budget
-- remaining budget is split between hot memory and structured memory
-- fragment selection happens before rendering, so truncation does not cut markup blocks mid-stream
+- plan steps request `1820` estimated tokens from the synthesizer (`MEMORY_CONTEXT_SECTION_TOKENS` in `src/electron/agent/content/prompt-budgets.ts`), and the `memory_context` prompt section is capped at the same value
+- in the default wake-up path the workspace kit keeps roughly `30%` of the budget; `.cowork/USER.md`, `MEMORY.md`, `RULES.md`, `.cowork/AGENTS.md` and `IDENTITY.md` come first in that slice
+- repo-root `AGENTS.md`/`CLAUDE.md` and docs map files are not part of the memory slice; they have their own `project_guidance` section (1000 tokens)
+- design-system context (`design_system`, 1200 tokens), the external memory profile (`external_memory`, 400) and transcript hits (`transcript_context`, 400) also have their own sections
+- remaining budget is split between hot memory and structured memory; a short memory-tool routing hint (at most 120 tokens, naming only tools the model can call) is included in that budget
+- truncation always happens on fragment boundaries and closes any wrapper tag it left open; when the whole prompt is over budget, memory, design-system and project-guidance sections shrink before they are dropped
+- follow-ups, chat and planning get a compact L0 block (curated memory plus identity, 450 tokens), cached per task and rebuilt after curated, profile or relationship writes
 
 ### Default injection behavior
 
 - `L0 Identity`: **on**
 - `L1 Essential Story`: **on**
-- archive memory: **off by default**
+- archive memory: **off by default** (the per-turn recall block still injects query matches)
 - Supermemory profile injection: **optional**
 - `L2 Topic Packs`: **tool-driven**
 - `L3 Deep Recall` (`memory_search_index`, `memory_timeline`, `memory_details`, `search_quotes`, `search_sessions`, `search_memories`): **tool-driven**
@@ -443,21 +449,33 @@ Memory Hub also shows a preview of the current `L0/L1` payload plus the `L2/L3` 
 
 ---
 
+## Deleting Memory
+
+**Service:** `src/electron/memory/MemoryWorkspacePurgeService.ts`
+
+- **Task delete:** in the same transaction as the task row, durable context, transcript span rows, and the archive memories (except imported rows and explicit saves), KG facts and Playbook evidence derived from the task are removed, and task foreign keys in `dreaming_runs` and `pending_memory_writes` are cleared. The task's transcript files (JSONL spans, checkpoints, lock file) and its Chronicle observations are removed afterwards.
+- **Clear All Memories** (per workspace, from Memory settings): archive memories and observations, durable context, curated entries (and the auto-managed blocks in `.cowork/USER.md` / `.cowork/MEMORY.md`), knowledge graph, Dreaming runs and candidates, core memory candidates, Playbook evidence, pending memory writes, transcripts, topic packs and `.cowork/memory/MEMORY.md`, daily summaries and Chronicle observations. Each store is cleared separately and the result reports per-store counts and failures.
+- **Not covered:** copies already mirrored to Supermemory. The local runtime does not keep remote ids, so it cannot delete them; remove them in Supermemory directly.
+
+---
+
 ## Message Feedback → Memory
 
-User feedback still flows into memory/personalization systems:
+User feedback flows into personalization, not into profile or relationship memory:
 
 ```text
 User clicks 👍 or 👎 (+ optional reason)
         │
         ▼
-kit:submitMessageFeedback IPC
+kit:submitMessageFeedback IPC (validated)
         │
         ▼
-UserProfileService.ingestUserFeedback()
+user_feedback task event
         │
-        ├─→ RelationshipMemoryService
-        └─→ AdaptiveStyleEngine.observeFeedback()  [if enabled]
+        ├─→ archive memory (`decision` row: decision + reason)
+        ├─→ AwarenessService.captureFeedback()
+        ├─→ AdaptiveStyleEngine.observeFeedback()  [if enabled]
+        └─→ FeedbackService → `.cowork/MISTAKES.md` auto block
 ```
 
 Feedback reason values: `incorrect`, `too_verbose`, `ignored_instructions`, `wrong_tone`, `unsafe`.

@@ -163,6 +163,17 @@ export class PlaybookService {
   }
 
   /**
+   * Record a mid-task user correction in the Playbook ledger only: the task's success
+   * evidence is invalidated as `corrected_by_user`. No memory row is written; the
+   * correction itself is archived once by the caller.
+   */
+  static async recordUserCorrection(workspaceId: string, taskId: string): Promise<void> {
+    const store = this.getEvidenceStore();
+    if (!store) return;
+    await store.invalidateTask(workspaceId, taskId, "corrected_by_user");
+  }
+
+  /**
    * Capture a Playbook outcome after task completion or failure.
    *
    * Returns `recorded` only when the memory (and, for a success, its evidence row) exists.

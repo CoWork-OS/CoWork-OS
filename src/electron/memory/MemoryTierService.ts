@@ -1,19 +1,20 @@
 /**
  * Memory Tier Service
  *
- * Manages three-tier memory promotion and TTL-based eviction.
+ * Manages three-tier memory promotion. Tiers never expire rows: removal is governed
+ * only by the workspace's `retention_days` and storage cap (MemoryService.runCleanup).
  *
  * Tiers:
- *   short  → new memories; evicted after 7 days if reference_count < 2
+ *   short  → new memories
  *   medium → promoted when reference_count >= 3
- *   long   → promoted when reference_count >= 10 (never auto-evicted)
+ *   long   → promoted when reference_count >= 10
  *
  * Usage:
  *   Call MemoryTierService.recordReference(sql, memoryId) whenever a memory
- *   is returned from search results.
+ *   is returned from search results or injected into a prompt.
  *
  *   Call MemoryTierService.runPromotionPass(sql) periodically (e.g., from
- *   MemoryService's cleanup interval) to promote/evict memories.
+ *   MemoryService's cleanup interval) to promote memories.
  *
  *   `sql` is the memory statement port (DB6): the database worker when memory is
  *   routed there, the host connection otherwise.
@@ -33,11 +34,6 @@ export interface TierPromotionRule {
   toTier: MemoryTier;
   minReferenceCount: number;
 }
-
-/** Days before a short-tier memory is evicted if underreferenced */
-const SHORT_TIER_TTL_DAYS = 7;
-/** Minimum references required to avoid short-tier eviction */
-const SHORT_TIER_EVICTION_THRESHOLD = 2;
 
 export class MemoryTierService {
   static readonly PROMOTION_RULES: TierPromotionRule[] = [
@@ -71,7 +67,8 @@ export class MemoryTierService {
   }
 
   /**
-   * Run a full promotion + eviction pass across all memories, in one transaction.
+   * Run a full promotion pass across all memories, in one transaction. It never deletes
+   * (`evicted` is always 0); retention lives in MemoryService.runCleanup.
    * Intended to be called from MemoryService's hourly cleanup interval.
    */
   static async runPromotionPass(sql: MemoryStatementPort): Promise<PromotionPassResult> {
@@ -80,8 +77,6 @@ export class MemoryTierService {
       result = await sql.unit("tier_promotionPass", {
         shortToMediumAt: this.PROMOTION_RULES[0].minReferenceCount,
         mediumToLongAt: this.PROMOTION_RULES[1].minReferenceCount,
-        evictCreatedBefore: Date.now() - SHORT_TIER_TTL_DAYS * 24 * 60 * 60 * 1000,
-        evictBelowReferences: SHORT_TIER_EVICTION_THRESHOLD,
       });
     } catch (err) {
       logger.warn("[MemoryTierService] Promotion pass failed:", err);

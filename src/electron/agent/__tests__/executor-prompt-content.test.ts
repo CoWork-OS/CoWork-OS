@@ -24,7 +24,6 @@ vi.mock("electron", () => ({
 
 vi.mock("../../memory/MemoryService", () => ({
   MemoryService: {
-    getContextForInjection: vi.fn().mockReturnValue(""),
   },
 }));
 

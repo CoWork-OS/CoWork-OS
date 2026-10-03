@@ -20,6 +20,29 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** A lock older than this is left over from a crashed run and is removed. */
+export const CONSOLIDATION_LOCK_STALE_MS = 10 * 60 * 1000;
+
+async function acquireConsolidationLock(lockPath: string): Promise<fs.FileHandle | null> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fs.open(lockPath, "wx");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "EEXIST" || attempt > 0) return null;
+      try {
+        const stat = await fs.lstat(lockPath);
+        if (!stat.isFile() || Date.now() - stat.mtimeMs <= CONSOLIDATION_LOCK_STALE_MS) {
+          return null;
+        }
+        await fs.rm(lockPath, { force: true });
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 export class MemoryConsolidator {
   static async run(params: {
     workspaceId: string;
@@ -62,9 +85,8 @@ export class MemoryConsolidator {
     let lockHandle: fs.FileHandle | null = null;
     const phases: MemoryConsolidationPhase[] = [];
 
-    try {
-      lockHandle = await fs.open(lockPath, "wx");
-    } catch {
+    lockHandle = await acquireConsolidationLock(lockPath);
+    if (!lockHandle) {
       return {
         ok: true,
         phases,
@@ -85,43 +107,23 @@ export class MemoryConsolidator {
         : [];
 
       phases.push("gather_signal");
-      const searchResults = params.taskId
-        ? await TranscriptStore.searchSpans({
-            workspacePath: params.workspacePath,
-            taskId: params.taskId,
-            query: params.taskPrompt,
-            limit: 8,
-            readGuard: params.readGuard,
-          })
-        : [];
+      // Only counts and the task's own prompt are kept from the transcript. Raw span
+      // payloads are never copied into the summary, because summaries are injected
+      // into later prompts.
+      const eventCount = recentSpans.length;
 
       phases.push("consolidate");
-      const summaryBody = [
-        "## Consolidated Signals",
-        recentSpans.length > 0
-          ? `- Recent transcript events: ${recentSpans.length}`
-          : "- Recent transcript events: none captured",
-        searchResults.length > 0
-          ? `- Query-matched spans: ${searchResults.length}`
-          : "- Query-matched spans: none",
-        "",
-        ...searchResults.slice(0, 5).map((entry) => {
-          const payload =
-            typeof entry.payload === "string"
-              ? entry.payload
-              : JSON.stringify(entry.payload).slice(0, 240);
-          return `- [${entry.type}] ${payload}`;
-        }),
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      await DailyLogSummarizer.writeSummary(
-        params.workspacePath,
-        todayIso(),
-        summaryBody,
-        params.writeGuard,
-      );
+      if (params.taskId && eventCount > 0) {
+        const promptExcerpt = params.taskPrompt.replace(/\s+/g, " ").trim().slice(0, 140);
+        const time = new Date().toISOString().slice(11, 16);
+        await DailyLogSummarizer.appendTaskLine(
+          params.workspacePath,
+          todayIso(),
+          params.taskId,
+          `${time} UTC: ${promptExcerpt || "task completed"} (${eventCount} transcript events)`,
+          params.writeGuard,
+        );
+      }
       const summaryPath = DailyLogSummarizer.resolveSummaryPath(params.workspacePath, todayIso());
 
       phases.push("prune_index");

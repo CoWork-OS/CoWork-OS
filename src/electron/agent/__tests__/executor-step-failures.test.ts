@@ -28,7 +28,6 @@ vi.mock("../../settings/personality-manager", () => ({
 
 vi.mock("../../memory/MemoryService", () => ({
   MemoryService: {
-    getContextForInjection: vi.fn().mockReturnValue(""),
   },
 }));
 

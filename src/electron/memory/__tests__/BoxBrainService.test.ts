@@ -269,6 +269,98 @@ describeWithSqlite("BoxBrainService", () => {
     });
   });
 
+  it("calls MemoryService with its class binding when no memory deps are injected", async () => {
+    const { MemoryService } = await import("../MemoryService");
+    const now = 1_800_000_000_000;
+    let entries: Array<Record<string, unknown>> = [
+      { id: "file-1", type: "file", name: "Policy.md", etag: "1", size: 42 },
+    ];
+    const settings: BoxSettingsData = {
+      enabled: true,
+      accessToken: "test-access-token",
+      mcpEnabled: true,
+      brain: {
+        enabled: true,
+        workspaceId: workspace.id,
+        rootFolderId: "0",
+        syncIntervalMinutes: 60,
+        maxItemsPerRun: 20,
+        includeContent: true,
+        useBoxAiSummaries: false,
+        improvementEnabled: false,
+        maxContentChars: 10000,
+      },
+    };
+    const server: MCPServerConfig = {
+      id: "box-server",
+      name: "Box MCP",
+      enabled: true,
+      transport: "streamable-http",
+      url: "https://mcp.box.com",
+    };
+    const tools = [makeTool("list_folder_content_by_folder_id"), makeTool("get_file_content")];
+    const mcpManager = {
+      connectServer: vi.fn(async () => undefined),
+      getServerTools: vi.fn(() => tools),
+      callServerTool: vi.fn(async (_serverId: string, toolName: string) => {
+        const result =
+          toolName === "list_folder_content_by_folder_id"
+            ? { entries, next_marker: null }
+            : { text: "Policy text" };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] } as MCPCallResult;
+      }),
+    };
+    const memory = {
+      id: "memory-1",
+      workspaceId: workspace.id,
+      type: "observation" as const,
+      content: "indexed Box reference",
+      summary: "indexed Box reference",
+      tokens: 3,
+      isCompressed: true,
+      isPrivate: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const receivers: unknown[] = [];
+    const captureSpy = vi
+      .spyOn(MemoryService, "capture")
+      .mockImplementation(async function (this: unknown) {
+        receivers.push(this);
+        return memory;
+      } as unknown as typeof MemoryService.capture);
+    const deleteSpy = vi
+      .spyOn(MemoryService, "deleteEntries")
+      .mockImplementation(async function (this: unknown) {
+        receivers.push(this);
+        return 1;
+      } as unknown as typeof MemoryService.deleteEntries);
+
+    try {
+      const service = new BoxBrainService(db, {
+        getSettings: () => settings,
+        getMcpManager: () => mcpManager,
+        getBoxMcpServer: () => server,
+        listWorkspaces: () => [workspace],
+        now: () => now,
+        wait: async () => undefined,
+      });
+
+      const first = await service.syncNow();
+      expect(first).toMatchObject({ success: true, indexedCount: 1 });
+      expect(captureSpy).toHaveBeenCalledTimes(1);
+
+      entries = [];
+      const second = await service.syncNow();
+      expect(second).toMatchObject({ success: true, deletedCount: 1 });
+      expect(deleteSpy).toHaveBeenCalledWith(workspace.id, ["memory-1"]);
+      expect(receivers).toEqual([MemoryService, MemoryService]);
+    } finally {
+      captureSpy.mockRestore();
+      deleteSpy.mockRestore();
+    }
+  });
+
   it("preserves unseen items when a paginated crawl reaches the run cap", async () => {
     let entries: Array<Record<string, unknown>> = [
       {

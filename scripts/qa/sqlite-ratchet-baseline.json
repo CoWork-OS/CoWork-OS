@@ -6,9 +6,9 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1524,
-    "getDatabase": 132,
-    "runtimeImport": 50
+    "prepare": 1584,
+    "getDatabase": 135,
+    "runtimeImport": 49
   },
   "files": {
     "src/cli/direct-run.ts": {
@@ -95,12 +95,8 @@
       "prepare": 10,
       "runtimeImport": 1
     },
-    "src/electron/agents/HeartbeatPolicyRepository.ts": {
-      "prepare": 5,
-      "runtimeImport": 1
-    },
     "src/electron/agents/HeartbeatRunRepository.ts": {
-      "prepare": 12,
+      "prepare": 19,
       "runtimeImport": 1
     },
     "src/electron/agents/MentionRepository.ts": {
@@ -147,12 +143,15 @@
       "runtimeImport": 1
     },
     "src/electron/core/CoreLearningsRepository.ts": {
-      "prepare": 2,
+      "prepare": 3,
       "runtimeImport": 1
     },
     "src/electron/core/CoreMemoryCandidateRepository.ts": {
-      "prepare": 4,
+      "prepare": 7,
       "runtimeImport": 1
+    },
+    "src/electron/core/CoreMemoryCleanupRepository.ts": {
+      "prepare": 10
     },
     "src/electron/core/CoreMemoryDistillRunRepository.ts": {
       "prepare": 4,
@@ -199,17 +198,17 @@
       "prepare": 1
     },
     "src/electron/database/post-startup-maintenance.ts": {
-      "prepare": 9
+      "prepare": 10
     },
     "src/electron/database/profile-lifecycle.ts": {
       "prepare": 3
     },
     "src/electron/database/repositories.ts": {
-      "prepare": 285,
+      "prepare": 284,
       "runtimeImport": 1
     },
     "src/electron/database/schema.ts": {
-      "prepare": 34,
+      "prepare": 32,
       "getDatabase": 1,
       "runtimeImport": 1
     },
@@ -316,7 +315,7 @@
       "prepare": 8
     },
     "src/electron/memory/durable-context-sql.ts": {
-      "prepare": 29
+      "prepare": 28
     },
     "src/electron/memory/DurableContextService.ts": {
       "getDatabase": 1
@@ -325,13 +324,24 @@
       "prepare": 21
     },
     "src/electron/memory/memory-capture-sql.ts": {
-      "prepare": 3
+      "prepare": 7
+    },
+    "src/electron/memory/memory-cleanup-sql.ts": {
+      "prepare": 20
     },
     "src/electron/memory/memory-observation-sql.ts": {
       "prepare": 12
     },
+    "src/electron/memory/memory-purge-sql.ts": {
+      "prepare": 3,
+      "getDatabase": 2
+    },
+    "src/electron/memory/memory-retention-sql.ts": {
+      "prepare": 7,
+      "getDatabase": 1
+    },
     "src/electron/memory/memory-units.ts": {
-      "prepare": 4
+      "prepare": 2
     },
     "src/electron/memory/MemoryService.ts": {
       "getDatabase": 2,
@@ -343,6 +353,9 @@
     },
     "src/electron/memory/PlaybookEvidenceStore.ts": {
       "prepare": 9
+    },
+    "src/electron/memory/transcript-sql.ts": {
+      "prepare": 15
     },
     "src/electron/memory/TranscriptStore.ts": {
       "getDatabase": 3,

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DreamingService } from "../DreamingService";
+import {
+  DREAMING_WORKSPACE_COOLDOWN_MS,
+  DreamingService,
+  dreamingCandidateFingerprint,
+} from "../DreamingService";
 import type {
   CuratedMemoryEntry,
   DreamingCandidate,
@@ -48,6 +52,21 @@ describe("DreamingService", () => {
         this.candidates.set(candidate.id, candidate);
         return candidate;
       });
+    }
+
+    listRuns(request: { workspaceId?: string; limit?: number } = {}): DreamingRun[] {
+      return Array.from(this.runs.values())
+        .filter((run) => !request.workspaceId || run.workspaceId === request.workspaceId)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, request.limit ?? 100);
+    }
+
+    listCandidates(request: { workspaceId?: string; limit?: number } = {}): DreamingCandidate[] {
+      return Array.from(this.candidates.values())
+        .filter(
+          (candidate) => !request.workspaceId || candidate.workspaceId === request.workspaceId,
+        )
+        .slice(0, request.limit ?? 100);
     }
 
     findCandidateById(id: string): DreamingCandidate | undefined {
@@ -173,5 +192,99 @@ describe("DreamingService", () => {
 
     expect(applyCuratedMemory).toHaveBeenCalledOnce();
     expect(applied?.status).toBe("applied");
+  });
+
+  function evidenceService(now: () => number) {
+    return new DreamingService(repo as never, {
+      now,
+      searchMemoryObservations: () => [observation()],
+      searchTranscriptSpans: async () => [],
+      loadRecentTranscriptSpans: async () => [],
+      listCuratedEntries: () => [],
+    });
+  }
+
+  const request = {
+    workspaceId: "ws-1",
+    workspacePath: "/tmp/ws-1",
+    triggerSource: "heartbeat" as const,
+    instructions: "memory drift",
+  };
+
+  it("applies a per-workspace cooldown to automatic triggers but not to manual runs", async () => {
+    let clock = 10_000;
+    const service = evidenceService(() => clock);
+
+    const first = await service.run(request);
+    clock += 60 * 60 * 1000;
+    const second = await service.run({ ...request, triggerSource: "task_completion" });
+    const otherWorkspace = await service.run({ ...request, workspaceId: "ws-2" });
+    const manual = await service.run({ ...request, triggerSource: "manual" });
+
+    expect(first.skipped).toBeUndefined();
+    expect(second.skipped).toBe("cooldown");
+    expect(second.run.id).toBe(first.run.id);
+    expect(otherWorkspace.skipped).toBeUndefined();
+    expect(manual.skipped).toBeUndefined();
+    expect(repo.runs.size).toBe(3);
+
+    clock += DREAMING_WORKSPACE_COOLDOWN_MS;
+    expect((await service.run(request)).skipped).toBeUndefined();
+  });
+
+  it("shares one run between overlapping triggers for the same workspace", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const service = new DreamingService(repo as never, {
+      now: () => 10_000,
+      searchMemoryObservations: () => [observation()],
+      searchTranscriptSpans: async () => {
+        await gate;
+        return [];
+      },
+      loadRecentTranscriptSpans: async () => [],
+      listCuratedEntries: () => [],
+    });
+
+    const first = service.run(request);
+    const overlapping = new DreamingService(repo as never).run({
+      ...request,
+      triggerSource: "system",
+    });
+    release();
+    const [firstResult, overlappingResult] = await Promise.all([first, overlapping]);
+
+    expect(firstResult.skipped).toBeUndefined();
+    expect(overlappingResult.skipped).toBe("in_flight");
+    expect(overlappingResult.run.id).toBe(firstResult.run.id);
+    expect(repo.runs.size).toBe(1);
+  });
+
+  it("does not re-propose candidates that are still open or were dismissed", async () => {
+    let clock = 10_000;
+    const service = evidenceService(() => clock);
+
+    const first = await service.run(request);
+    expect(first.candidates.length).toBeGreaterThan(0);
+    const dismissed = first.candidates[0]!;
+    repo.reviewCandidate({ id: dismissed.id, status: "rejected" });
+
+    clock += DREAMING_WORKSPACE_COOLDOWN_MS + 1;
+    const second = await service.run(request);
+    expect(second.skipped).toBeUndefined();
+    expect(second.candidates).toHaveLength(0);
+    expect(second.run.candidateCount).toBe(0);
+
+    // Applied candidates no longer block the same proposal.
+    for (const candidate of first.candidates) {
+      repo.reviewCandidate({ id: candidate.id, status: "applied" });
+    }
+    clock += DREAMING_WORKSPACE_COOLDOWN_MS + 1;
+    const third = await service.run(request);
+    expect(third.candidates.map(dreamingCandidateFingerprint).sort()).toEqual(
+      first.candidates.map(dreamingCandidateFingerprint).sort(),
+    );
   });
 });

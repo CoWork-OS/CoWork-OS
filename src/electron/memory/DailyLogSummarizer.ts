@@ -3,15 +3,10 @@ import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
  * DailyLogSummarizer — Produces ranked MemoryFragments from daily log summaries.
  *
  * Directory layout:
- *   .cowork/memory/daily/<YYYY-MM-DD>.md    — raw operational log (written by DailyLogService)
- *   .cowork/memory/summaries/<YYYY-MM-DD>.md — synthesized summary (written here)
+ *   .cowork/memory/summaries/<YYYY-MM-DD>.md — daily summary (written here)
  *
  * Retrieval rule:
- *   - Prefers existing summaries over raw daily logs.
- *   - Returns fragments ranked lower than user_profile / relationship memory,
- *     but higher than raw daily log snippets.
- *   - Raw daily log content is NEVER returned by this service (use DailyLogService directly
- *     only for low-level journaling; never inject raw logs into prompts).
+ *   - Returns fragments ranked lower than user_profile / relationship memory.
  */
 
 import fs from "fs/promises";
@@ -25,6 +20,19 @@ const SUMMARY_CONFIDENCE = 0.75;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
+}
+
+const TASK_ACTIVITY_HEADING = "## Task Activity";
+const DAILY_SUMMARY_MAX_TASK_LINES = 40;
+const DAILY_SUMMARY_LINE_MAX_CHARS = 200;
+
+/** Collapse text to one bounded line with no control characters. */
+function toSingleLine(text: string, maxChars: number): string {
+  const collapsed = String(text || "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return collapsed.length > maxChars ? `${collapsed.slice(0, maxChars - 1).trimEnd()}…` : collapsed;
 }
 
 function fingerprint(text: string): string {
@@ -67,6 +75,57 @@ export class DailyLogSummarizer {
     const absPath = this.resolveSummaryPath(workspacePath, dayIso);
     const header = `---\nupdated: ${new Date().toISOString().slice(0, 10)}\nsource: daily_log_synthesizer\nday: ${dayIso}\n---\n\n`;
     await fs.writeFile(absPath, header + summaryContent.trim() + "\n", "utf8");
+  }
+
+  /**
+   * Adds (or replaces) one compact line for a task in the day's summary, keeping at most
+   * `maxLines` lines so the file stays small. Lines carry a `[task:<id>]` marker so a task
+   * re-consolidated later the same day replaces its earlier line instead of duplicating it.
+   * Legacy summaries in the older "Consolidated Signals" layout are discarded on first
+   * append because they could contain raw transcript payloads.
+   */
+  static async appendTaskLine(
+    workspacePath: string,
+    dayIso: string,
+    taskId: string,
+    line: string,
+    writeGuard?: (candidatePath: string) => boolean,
+    maxLines = DAILY_SUMMARY_MAX_TASK_LINES,
+  ): Promise<boolean> {
+    const dir = this.resolveSummaryDir(workspacePath);
+    const absPath = this.resolveSummaryPath(workspacePath, dayIso);
+    if (writeGuard) {
+      try {
+        if (!writeGuard(dir) || !writeGuard(absPath)) return false;
+      } catch {
+        return false;
+      }
+    }
+    const safeTaskId = String(taskId || "")
+      .replace(/[^A-Za-z0-9_-]/g, "")
+      .slice(0, 64);
+    const text = toSingleLine(line, DAILY_SUMMARY_LINE_MAX_CHARS);
+    if (!safeTaskId || !text) return false;
+
+    await ensureWorkspaceDirectory(workspacePath, dir);
+    let existing = "";
+    try {
+      existing = await fs.readFile(absPath, "utf8");
+    } catch {
+      existing = "";
+    }
+    const marker = `[task:${safeTaskId}]`;
+    const body = existing.replace(/^---[\s\S]*?---\n/, "");
+    const previousLines = body.includes(TASK_ACTIVITY_HEADING)
+      ? body
+          .split("\n")
+          .filter((entry) => /^- \[task:[A-Za-z0-9_-]+\] /.test(entry))
+          .filter((entry) => !entry.startsWith(`- ${marker} `))
+      : [];
+    const lines = [...previousLines, `- ${marker} ${text}`].slice(-Math.max(1, maxLines));
+    const header = `---\nupdated: ${new Date().toISOString().slice(0, 10)}\nsource: daily_log_synthesizer\nday: ${dayIso}\n---\n\n`;
+    await fs.writeFile(absPath, `${header}${TASK_ACTIVITY_HEADING}\n${lines.join("\n")}\n`, "utf8");
+    return true;
   }
 
   /**

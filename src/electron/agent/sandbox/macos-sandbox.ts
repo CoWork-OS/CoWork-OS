@@ -34,6 +34,12 @@ import {
   validatePathForSandboxProfile,
 } from "./security-utils";
 import { applyNonInteractiveEnvDefaults } from "./non-interactive-env";
+import {
+  macOSToolchainProfileRules,
+  resolveMacOSToolchainAccess,
+  writeSanitizedNpmrc,
+  type MacOSToolchainAccess,
+} from "./macos-toolchain-access";
 import { BoundedOutputBuffer } from "./bounded-output";
 
 /**
@@ -121,7 +127,8 @@ export class MacOSSandbox implements ISandbox {
         error: "Network access denied",
       };
     }
-    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
+    const toolchain = this.resolveToolchainAccess();
+    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts, toolchain);
     if (!this.sandboxProfile) {
       return {
         exitCode: 1,
@@ -146,7 +153,7 @@ export class MacOSSandbox implements ISandbox {
     }
 
     // Build minimal, safe environment
-    const env = this.buildSafeEnvironment(opts.envPassthrough);
+    const env = this.buildSafeEnvironment(opts.envPassthrough, toolchain);
 
     let proc: ChildProcess;
     const spawnOptions: SpawnOptions = {
@@ -230,12 +237,13 @@ export class MacOSSandbox implements ISandbox {
       throw new Error(`Working directory not allowed: ${cwd}`);
     }
 
-    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts);
+    const toolchain = this.resolveToolchainAccess();
+    this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts, toolchain);
     if (!this.sandboxProfile) {
       throw new Error("macOS sandbox profile unavailable; refusing unsandboxed execution.");
     }
     const { profilePath, cleanup: cleanupProfile } = this.writeTempProfile();
-    const env = this.buildSafeEnvironment(opts.envPassthrough);
+    const env = this.buildSafeEnvironment(opts.envPassthrough, toolchain);
     const proc = spawn("sandbox-exec", ["-f", profilePath, command, ...args], {
       cwd,
       env,
@@ -440,9 +448,31 @@ export class MacOSSandbox implements ISandbox {
   }
 
   /**
+   * Home-directory toolchain grants, PATH and environment for this command.
+   * Cache writes follow the workspace write capability: a read-only profile
+   * must not leave anything behind outside its private scratch directory.
+   */
+  private resolveToolchainAccess(): MacOSToolchainAccess {
+    const permissions = this.workspace.permissions;
+    return resolveMacOSToolchainAccess({
+      homeDir: this.getHomeDir(),
+      env: process.env,
+      workspacePath: this.workspace.path,
+      allowWrites: permissions.write === true && permissions.accessSandboxMode !== "read-only",
+    });
+  }
+
+  private getHomeDir(): string {
+    return process.env.HOME || os.homedir();
+  }
+
+  /**
    * Build a minimal, safe environment for command execution
    */
-  private buildSafeEnvironment(passthrough: string[]): Record<string, string | undefined> {
+  private buildSafeEnvironment(
+    passthrough: string[],
+    toolchain: MacOSToolchainAccess,
+  ): Record<string, string | undefined> {
     const safeEnv: Record<string, string | undefined> = {};
 
     for (const key of passthrough) {
@@ -450,23 +480,22 @@ export class MacOSSandbox implements ISandbox {
         safeEnv[key] = process.env[key];
       }
     }
+    // Toolchain configuration only: proxies (without credentials), CA
+    // bundles and relocated toolchain homes. Never tokens or keys.
+    Object.assign(safeEnv, toolchain.env);
 
-    safeEnv.HOME = process.env.HOME || os.homedir();
+    safeEnv.HOME = this.getHomeDir();
     safeEnv.USER = process.env.USER || os.userInfo().username;
     safeEnv.SHELL = process.env.SHELL || "/bin/bash";
     safeEnv.TERM = "xterm-256color";
     safeEnv.LANG = process.env.LANG || "en_US.UTF-8";
     safeEnv.TMPDIR = this.getRuntimeTempDirIfScoped();
+    safeEnv.PATH = toolchain.path;
 
-    safeEnv.PATH = [
-      "/opt/homebrew/bin",
-      "/opt/homebrew/sbin",
-      "/usr/local/bin",
-      "/usr/bin",
-      "/bin",
-      "/usr/sbin",
-      "/sbin",
-    ].join(":");
+    // The user's npmrc keeps registry, proxy and script settings, but its
+    // auth tokens stay outside the sandbox (the original file is denied).
+    const npmrc = writeSanitizedNpmrc(this.getHomeDir(), process.env, this.getRuntimeTempDir());
+    if (npmrc) safeEnv.NPM_CONFIG_USERCONFIG = npmrc;
 
     return applyNonInteractiveEnvDefaults(safeEnv);
   }
@@ -475,7 +504,11 @@ export class MacOSSandbox implements ISandbox {
    * Generate macOS sandbox-exec profile
    * Paths are escaped to prevent sandbox profile injection attacks
    */
-  private generateSandboxProfile(allowNetwork: boolean, options: SandboxOptions = {}): string {
+  private generateSandboxProfile(
+    allowNetwork: boolean,
+    options: SandboxOptions = {},
+    toolchain: MacOSToolchainAccess = this.resolveToolchainAccess(),
+  ): string {
     const permissions = this.workspace.permissions;
     const finiteFilesystemScope = this.hasBoundedFilesystemScope();
     const tempDir = finiteFilesystemScope ? this.getRuntimeTempDir() : os.tmpdir();
@@ -545,6 +578,18 @@ ${tempReadRules}
   (subpath "/dev/fd")
 )
 
+; Name resolution and TLS configuration read by curl, git, pip and others.
+; The /etc link and /private/etc itself are traversed, not listed.
+(allow file-read-metadata (literal "/etc") (literal "/private/etc"))
+(allow file-read*
+  (literal "/private/etc/hosts")
+  (literal "/private/etc/resolv.conf")
+  (literal "/private/etc/services")
+  (literal "/private/etc/protocols")
+  (literal "/private/etc/localtime")
+  (subpath "/private/etc/ssl")
+)
+
 ; Allow homebrew on macOS
 (allow file-read*
   ; Homebrew's Python launcher resolves /opt before following the
@@ -553,7 +598,7 @@ ${tempReadRules}
   (literal "/opt")
   (subpath "/opt/homebrew")
 )
-
+${macOSToolchainProfileRules(toolchain)}
 `;
     if (permissions.read) {
       profile += `
@@ -696,13 +741,18 @@ ${tempWriteRules}
 
     // Allow essential mach services
     profile += `
-; Allow essential mach services
+; Allow essential mach services. trustd.agent evaluates TLS certificates for
+; tools that use the system trust store (pip, go, cargo); the opendirectoryd
+; services answer user and group name lookups (getpwuid, id, git identity).
 (allow mach-lookup
   (global-name "com.apple.CoreServices.coreservicesd")
   (global-name "com.apple.SecurityServer")
   (global-name "com.apple.system.logger")
   (global-name "com.apple.cfprefsd.daemon")
   (global-name "com.apple.cfprefsd.agent")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.opendirectoryd.membership")
 )
 `;
 
@@ -713,6 +763,7 @@ ${tempWriteRules}
         options,
         this.getRuntimeTempDir(),
         finiteFilesystemScope,
+        { writableCaches: toolchain.writeDirs, gitMarkerCaches: toolchain.gitMarkerCaches },
       )
     );
   }

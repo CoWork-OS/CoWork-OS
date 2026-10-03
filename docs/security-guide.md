@@ -215,7 +215,7 @@ When command tools are exposed by the active access profile:
 | Aspect                | Implementation                                                |
 | --------------------- | ------------------------------------------------------------- |
 | Working directory     | Restricted to the active workspace and profile-approved roots |
-| Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR)     |
+| Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR) plus toolchain configuration (proxies without credentials, CA bundles, relocated toolchain homes) |
 | API keys              | **Never passed** to subprocesses                              |
 | Timeout               | 2 minutes by default (5 for installs, builds and tests); a command may ask for up to 30 minutes, capped by the current step's time budget |
 | Output limit          | 100KB (truncated if exceeded)                                 |
@@ -913,6 +913,23 @@ Git and policy-path protection, and the separate delete capability. It prevents
 host directory removal and moves because renaming a parent can bypass a protected
 descendant. Private scratch directories remain available for temporary work.
 Use guarded file tools for directory mutations.
+
+Developer toolchains work inside the macOS sandbox without opening the home
+directory: installs and configuration (`~/.cargo/bin`, `~/.rustup`, `~/.nvm`,
+`~/.pyenv`, `~/.local/bin`, `~/.gitconfig`, ...) are read-only, package
+download and build caches (`~/.npm`, `~/Library/Caches/{go-build,pip,uv,...}`,
+`~/.cargo/registry`, `~/go/pkg`, ...) are read-write for writable workspaces,
+and PATH comes from the user's PATH plus known toolchain locations. Credential
+stores (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gcloud`, `~/.docker`,
+`~/.netrc`, `~/.kube`, `~/.npmrc`, Keychains, browser profiles, Mail and
+Messages) are denied after those grants. npm sees a copy of `~/.npmrc` with
+auth lines removed, so registry and script settings apply but tokens never
+enter the sandbox; installs from registries that require authentication must
+run outside it. Writable caches deny Git and policy names (except uv's empty
+per-bucket `.git` marker files) so they cannot stage a repository for the
+workspace. Residual risk: these caches are shared with your own builds, so a
+sandboxed command can leave cache content that a later unsandboxed build
+consumes, as it can with the workspace's own scripts and dependencies.
 
 Docker checks every host mount against the active filesystem policy. It refuses
 mounts that expose denied descendants, writable mounts that violate read-only or

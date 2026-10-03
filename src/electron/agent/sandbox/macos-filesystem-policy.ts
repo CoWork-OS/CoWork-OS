@@ -7,6 +7,14 @@ import { resolveAccessControlledPath } from "../../security/access-profile-paths
 import { escapeSandboxProfileString, validatePathForSandboxProfile } from "./security-utils";
 import { collectPolicyPathEntries } from "./policy-paths";
 
+/** Writable locations outside the workspace that are not policy roots. */
+export interface MacOSWritableCacheRoots {
+  /** Toolchain caches granted read-write (npm, go, pip, ...). */
+  writableCaches?: readonly string[];
+  /** Caches among those that keep a `.git` marker file in each top-level bucket (uv). */
+  gitMarkerCaches?: readonly string[];
+}
+
 /**
  * Final, authoritative restrictions shared by both macOS process backends.
  * Positive grants elsewhere in a profile must not erase these boundaries.
@@ -16,6 +24,7 @@ export function macOSFilesystemRestrictions(
   options: SandboxOptions,
   runtimeTempDir: string,
   bounded: boolean,
+  caches: MacOSWritableCacheRoots = {},
 ): string {
   const aliases = (rawPath: string): string[] => {
     const canonical = resolveAccessControlledPath(workspace.path, rawPath);
@@ -123,12 +132,42 @@ export function macOSFilesystemRestrictions(
   // Keep the pre-existing process sandbox's stronger .cowork/.env protection.
   // Scratch must reject protected names too: otherwise a process could build
   // a protected tree there and rename its innocent parent into the workspace.
-  for (const root of [...aliases(workspace.path), ...aliases(runtimeTempDir)]) {
-    const regexRoot = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Toolchain caches are the same kind of staging area (and a symlink in the
+  // workspace could point into one), so they carry the protected-name denial
+  // as well.
+  const regexRoot = (root: string): string => root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const protectedNameFilter = (root: string): string => {
     const protectedSegments =
       "[.][gG][iI][tT]|[.][cC][oO][wW][oO][rR][kK]/[pP][oO][lL][iI][cC][yY]";
-    const regex = `^${regexRoot}/(.*/)?(${protectedSegments})(/|$)`;
-    result += `(deny file-write* (regex ${JSON.stringify(regex)}))\n`;
+    const regex = `^${regexRoot(root)}/(.*/)?(${protectedSegments})(/|$)`;
+    return `(regex ${JSON.stringify(regex)})`;
+  };
+  const protectedNameRegex = (root: string): string =>
+    `(deny file-write* ${protectedNameFilter(root)})\n`;
+  const markerCaches = new Set(caches.gitMarkerCaches || []);
+  for (const cache of caches.writableCaches || []) {
+    validatePathForSandboxProfile(cache);
+    // No tool moves or removes its cache root; doing so would carry the
+    // whole cache, markers included, into the workspace.
+    result += `(deny file-write-unlink (literal "${escapeSandboxProfileString(cache)}"))\n`;
+    if (!markerCaches.has(cache)) {
+      result += protectedNameRegex(cache);
+      continue;
+    }
+    // The only exception is the regular `.git` marker file directly inside a
+    // versioned top-level bucket (sdists-v9/.git). Buckets themselves can
+    // then never be moved, so a marker (whatever it is rewritten to contain)
+    // never lands in the workspace as a git pointer. uv's own staging
+    // directories (.tmpXXXX) do not match the bucket pattern: they stay
+    // movable and cannot hold a marker.
+    const bucket = `^${regexRoot(cache)}/[a-z0-9-]+-v[0-9]+`;
+    const marker = `(require-all (vnode-type REGULAR-FILE) (regex ${JSON.stringify(`${bucket}/[.]git$`)}))`;
+    const bucketDir = `(require-all (vnode-type DIRECTORY) (regex ${JSON.stringify(`${bucket}$`)}))`;
+    result += `(deny file-write* (require-all ${protectedNameFilter(cache)} (require-not ${marker})))\n`;
+    result += `(deny file-write-unlink ${bucketDir})\n`;
+  }
+  for (const root of [...aliases(workspace.path), ...aliases(runtimeTempDir)]) {
+    result += protectedNameRegex(root);
     for (const relativePath of [
       ".git",
       ".cowork",

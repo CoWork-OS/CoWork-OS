@@ -152,6 +152,38 @@ describe("MacOSSandbox", () => {
     expect(profile).not.toMatch(/file-write\*[^\n]*\/dev\//);
   });
 
+  it("adds toolchain grants and TLS trust without opening $HOME", async () => {
+    const proc = new EventEmitter() as ChildProcess;
+    proc.stdout = new EventEmitter() as ChildProcess["stdout"];
+    proc.stderr = new EventEmitter() as ChildProcess["stderr"];
+    proc.kill = vi.fn(() => true) as unknown as ChildProcess["kill"];
+    spawnMock.mockImplementationOnce(() => proc);
+    const sandbox = new MacOSSandbox(makeWorkspace());
+    const resultPromise = sandbox.execute("npm ci", [], {
+      cwd: "/tmp/cowork workspace",
+      timeout: 1000,
+    });
+
+    const [, args, options] = spawnMock.mock.calls[0];
+    const profile = fs.readFileSync(args[1], "utf8");
+    proc.emit("close", 0, null);
+    await resultPromise;
+    const home = process.env.HOME || os.homedir();
+    expect(profile).toContain('(global-name "com.apple.trustd.agent")');
+    expect(profile).toContain(`(subpath "${path.join(home, ".npm")}")`);
+    expect(profile).not.toContain(`(subpath "${home}")`);
+    const secretDeny = `(deny file-read* file-write* (subpath "${path.join(home, ".ssh")}"))`;
+    expect(profile).toContain(secretDeny);
+    // User-configured workspace grants come later and keep the final say.
+    expect(profile.indexOf(secretDeny)).toBeLessThan(profile.indexOf("; Allow reading workspace"));
+    expect(options.env.PATH.split(":").slice(-4)).toEqual([
+      "/usr/bin",
+      "/bin",
+      "/usr/sbin",
+      "/sbin",
+    ]);
+  });
+
   it("allows Homebrew launchers to resolve the /opt mount point", async () => {
     const proc = new EventEmitter() as ChildProcess;
     proc.stdout = new EventEmitter() as ChildProcess["stdout"];

@@ -295,6 +295,7 @@ import {
 import { OrchestrationGraphRepository } from "./orchestration/orchestration-graph-repository-facades";
 import { OrchestrationGraphStore } from "./orchestration/OrchestrationGraphRepository";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
+import { getConfiguredMcpToolPolicy } from "../mcp/tool-policy";
 import { getMailboxServiceInstance } from "../mailbox/MailboxService";
 import { type RecurringApprovalFingerprintInput } from "../security/recurring-approval-service";
 import { RecurringApprovalService } from "../security/recurring-approval-repository-facades";
@@ -3021,6 +3022,14 @@ export class AgentDaemon extends EventEmitter {
    * Called from initialize() after a short delay to let the app finish starting.
    */
   private async resumeInterruptedTasks(tasks: Task[]): Promise<void> {
+    // Desktop MCP startup runs in the background. Recovery must wait for the
+    // first catalog so the resumed turn does not tell the model its tools are
+    // unavailable just before the configured servers finish connecting.
+    try {
+      await MCPClientManager.getInstance().initialize();
+    } catch (error) {
+      log.warn("MCP startup was unavailable during task recovery:", error);
+    }
     for (const task of tasks) {
       try {
         console.log(`[AgentDaemon] Resuming interrupted task ${task.id}: ${task.title}`);
@@ -7120,6 +7129,7 @@ export class AgentDaemon extends EventEmitter {
       command: typeof details?.command === "string" ? details.command : null,
       path: typeof details?.path === "string" ? details.path : null,
       serverName,
+      mcpToolPolicy: getConfiguredMcpToolPolicy(toolName),
       allowPersistence,
       denyState: runtime
         ? runtime.getPermissionDenialState(

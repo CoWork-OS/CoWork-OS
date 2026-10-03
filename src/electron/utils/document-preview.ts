@@ -3,11 +3,11 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
-import JSZip from "jszip";
 import mammoth from "mammoth";
 import { canEditDocumentInApp, getDocumentFormatLabel } from "../../shared/document-formats";
 import type { DocumentPreview } from "../../shared/document-preview";
 import { parseDocxBlocksFromBuffer } from "../documents/docx-blocks";
+import { loadDocumentArchive, readDocumentArchiveBuffer } from "../security/document-archive";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,7 +68,7 @@ function extractOdtTextFromXml(xml: string): string {
 }
 
 async function buildDocxLikePreview(filePath: string, format: string): Promise<DocumentPreview> {
-  const buffer = await fs.readFile(filePath);
+  const buffer = await readDocumentArchiveBuffer(filePath);
   const htmlResult = await mammoth.convertToHtml({ buffer });
   const textResult = await mammoth.extractRawText({ buffer });
   let blocks: DocumentPreview["blocks"];
@@ -99,8 +99,8 @@ async function buildDocxLikePreview(filePath: string, format: string): Promise<D
 }
 
 async function buildOdtPreview(filePath: string, format: string): Promise<DocumentPreview> {
-  const buffer = await fs.readFile(filePath);
-  const zip = await JSZip.loadAsync(buffer);
+  const buffer = await readDocumentArchiveBuffer(filePath);
+  const zip = await loadDocumentArchive(buffer);
   const contentXml = await zip.file("content.xml")?.async("text");
   if (!contentXml) {
     return {

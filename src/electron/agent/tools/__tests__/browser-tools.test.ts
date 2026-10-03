@@ -712,6 +712,19 @@ describe("BrowserTools browser_navigate", () => {
     expect((tools as Any).ensureBrowserConfigured).not.toHaveBeenCalled();
   });
 
+  it("preserves the managed session when external attachment is refused", async () => {
+    const { tools } = makeTools();
+    const original = { close: vi.fn() };
+    (tools as Any).browserService = original;
+    await expect(
+      tools.executeTool("browser_attach", {
+        debugger_url: "http://localhost:9222",
+        confirm_real_browser_control: true,
+      }),
+    ).rejects.toThrow("External browser attachment");
+    expect((tools as Any).browserService).toBe(original);
+    expect(original.close).not.toHaveBeenCalled();
+  });
   it("requires explicit consent before attaching to a real browser", async () => {
     const { tools } = makeTools();
     (tools as Any).browserService = {

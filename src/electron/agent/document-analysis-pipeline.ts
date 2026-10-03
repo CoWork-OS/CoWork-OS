@@ -1,3 +1,4 @@
+import { readDocumentArchiveBuffer } from "../security/document-archive";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
@@ -127,7 +128,9 @@ export async function extractDocumentForAnalysis(
   let text = "";
   if (extension === ".docx") {
     const mammoth = await import("mammoth");
-    const result = await mammoth.extractRawText({ path: resolvedDocument });
+    const result = await mammoth.extractRawText({
+      buffer: await readDocumentArchiveBuffer(resolvedDocument),
+    });
     text = result.value || "";
   } else if (extension === ".pdf") {
     const result = await extractPdfText(resolvedDocument, {

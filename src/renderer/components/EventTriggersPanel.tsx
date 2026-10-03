@@ -420,19 +420,8 @@ export const EventTriggersPanel: React.FC<{
           </span>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "6px 12px",
-            border: "1px solid var(--color-border)",
-            borderRadius: 6,
-            background: "var(--color-bg-elevated)",
-            color: "var(--color-text)",
-            cursor: "pointer",
-            fontSize: 12,
-          }}
+onClick={() => setShowForm(!showForm)}
+          className="settings-button small"
         >
           <Plus size={14} /> Add Trigger
         </button>
@@ -493,16 +482,7 @@ export const EventTriggersPanel: React.FC<{
                   },
                 ]);
               }}
-              className="event-triggers-select"
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: "var(--radius-md)",
-                border: "1px solid var(--color-border)",
-                background: "var(--color-bg-input)",
-                color: "var(--color-text)",
-                fontSize: 13,
-              }}
+              className="settings-select event-triggers-select"
             >
               {SOURCES.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -535,16 +515,7 @@ export const EventTriggersPanel: React.FC<{
                 <select
                   value={getConditionValue("serverId")}
                   onChange={(e) => upsertCondition("serverId", e.target.value)}
-                  className="event-triggers-select"
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 6,
-                    border: "1px solid var(--color-border)",
-                    background: "var(--color-bg-input)",
-                    color: "var(--color-text)",
-                    fontSize: 12,
-                  }}
+                  className="settings-select event-triggers-select"
                 >
                   <option value="">Any connected server</option>
                   {mcpServers.map((server) => (
@@ -596,16 +567,8 @@ export const EventTriggersPanel: React.FC<{
                 <select
                   value={c.field}
                   onChange={(e) => updateCondition(i, { field: e.target.value })}
-                  className="event-triggers-select"
-                  style={{
-                    flex: 1,
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid var(--color-border)",
-                    background: "var(--color-bg-input)",
-                    color: "var(--color-text)",
-                    fontSize: 12,
-                  }}
+                  className="settings-select event-triggers-select"
+                  style={{ flex: 1 }}
                 >
                   {fields.map((f) => (
                     <option key={f} value={f}>
@@ -616,16 +579,8 @@ export const EventTriggersPanel: React.FC<{
                 <select
                   value={c.operator}
                   onChange={(e) => updateCondition(i, { operator: e.target.value })}
-                  className="event-triggers-select"
-                  style={{
-                    flex: 1,
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid var(--color-border)",
-                    background: "var(--color-bg-input)",
-                    color: "var(--color-text)",
-                    fontSize: 12,
-                  }}
+                  className="settings-select event-triggers-select"
+                  style={{ flex: 1 }}
                 >
                   {OPERATORS.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -688,17 +643,8 @@ export const EventTriggersPanel: React.FC<{
               onChange={(e) =>
                 setActionType(e.target.value === "wake_agent" ? "wake_agent" : "create_task")
               }
-              className="event-triggers-select"
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: "var(--radius-md)",
-                border: "1px solid var(--color-border)",
-                background: "var(--color-bg-input)",
-                color: "var(--color-text)",
-                fontSize: 13,
-                marginBottom: 6,
-              }}
+              className="settings-select event-triggers-select"
+              style={{ marginBottom: 6 }}
             >
               <option value="create_task">Create task</option>
               <option value="wake_agent">Wake agent</option>
@@ -736,36 +682,13 @@ export const EventTriggersPanel: React.FC<{
           </div>
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button
-              onClick={() => setShowForm(false)}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "1px solid var(--color-border)",
-                background: "none",
-                color: "var(--color-text-secondary)",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
+            <button className="settings-button" onClick={() => setShowForm(false)}>
               Cancel
             </button>
             <button
               onClick={handleAdd}
               disabled={!name.trim() || (actionType === "wake_agent" && !actionAgentRoleId.trim())}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "none",
-                background: "var(--color-accent)",
-                color: "#fff",
-                cursor: "pointer",
-                fontSize: 12,
-                opacity:
-                  name.trim() && (actionType !== "wake_agent" || actionAgentRoleId.trim())
-                    ? 1
-                    : 0.5,
-              }}
+              className="settings-button primary"
             >
               Create Trigger
             </button>

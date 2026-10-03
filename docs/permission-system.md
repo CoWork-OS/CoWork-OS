@@ -55,7 +55,7 @@ argument changes or revoked authority cannot reuse the old grant.
 
 The local runtime does not render the legacy approval queue by default. An
 `allow` decision executes silently. When policy still returns `ask`—including
-network/on-request access, credential use, data export, MCP or other external
+network/on-request access, credential use, data export, or unapproved external
 side effects, eligible outside-workspace paths, or an explicit
 `allowAutoApprove: false` request—the daemon emits an assistant message and a
 durable inline input card with **Deny** and **Allow once**. It does not create an
@@ -72,6 +72,14 @@ card was open, the answer is treated as a denial. Set
 `COWORK_APPROVAL_PROMPTS=on` before launch only to restore the legacy queue for
 diagnostics. Pending approval rows and assistant approval cards fail closed on
 restart rather than resuming an unconfirmed action.
+
+Configured MCP calls use server/tool approval policy after hard restrictions and
+explicit permission rules. `auto` permits annotated reads, and permits other
+calls under unrestricted Full access; `writes` asks for tools not marked
+read-only, `prompt` asks for every call, and `approve` permits calls within hard
+policy. `approval: "never"` still denies any explicitly required prompt. MCP
+annotations determine read-only metadata; tool names do not. See
+[MCP policy and profiles](access-profiles.md) for configuration and boundaries.
 
 ## Rule Sources
 

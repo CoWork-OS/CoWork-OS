@@ -719,7 +719,9 @@ End with a final section titled "Verification Evidence".`,
       fakeThis.agentPolicyConfig = null;
       const step = {
         id: "s-checklist-existing-write",
-        description: `Verification step: write checklist to ${checklistPath} and verify links/style.`,
+        // Workspace-relative, so words in the checkout's own path (".../bugfix/...")
+        // cannot change the step's intent.
+        description: `Verification step: write checklist to ${path.relative(process.cwd(), checklistPath)} and verify links/style.`,
         kind: "verification",
         status: "pending",
       };

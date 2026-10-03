@@ -365,7 +365,8 @@ export async function evaluateToolPolicyPipeline(
     // blanket shell/destructive/etc gate after the authority has allowed it.
     // Unknown runtime metadata still requires explicit consent below.
     runtimeRequirementAuthorized = Boolean(
-      opts.workspace.permissions.accessProfileId &&
+      (opts.workspace.permissions.accessProfileId ||
+        permission.metadata?.mcpToolPolicyAuthorized) &&
       opts.runtimeApprovalType &&
       resolvedPermissionApprovalType === opts.runtimeApprovalType,
     );

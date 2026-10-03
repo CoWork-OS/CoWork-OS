@@ -6,6 +6,10 @@ import {
   type OpenAIOAuthTokens,
 } from "../../electron/agent/llm/openai-oauth";
 import { LLMProviderFactory } from "../../electron/agent/llm";
+import {
+  clearOpenAIOAuthSession,
+  revokeStoredSiwcSession,
+} from "../../electron/agent/llm/openai-siwc-oauth";
 import type { BrowserProviderSignIn } from "../../shared/host-api/provider-sign-in";
 import type { BrowserDesktopDefinitions } from "./browser-desktop-rpc";
 import { WebApplicationError } from "../web/WebApplication";
@@ -42,6 +46,7 @@ export function createBrowserProviderSignIn(options?: {
           accountId: tokens.accountId,
           email: tokens.email,
           authMethod: "oauth",
+          oauthVariant: "codex",
           chatgptPlanType: tokens.planType,
           apiKey: undefined,
         },
@@ -197,19 +202,12 @@ export function createBrowserProviderSignIn(options?: {
       mutation: true,
       minArgs: 0,
       maxArgs: 0,
-      handler: () => {
+      handler: async () => {
+        await revokeStoredSiwcSession(LLMProviderFactory.loadSettings().openai);
         const settings = LLMProviderFactory.loadSettings();
         LLMProviderFactory.saveSettings({
           ...settings,
-          openai: {
-            ...settings.openai,
-            accessToken: undefined,
-            refreshToken: undefined,
-            tokenExpiresAt: undefined,
-            accountId: undefined,
-            email: undefined,
-            authMethod: undefined,
-          },
+          openai: clearOpenAIOAuthSession(settings.openai),
           cachedOpenAIModels: undefined,
         });
         for (const flow of flows.values()) cancel(flow);

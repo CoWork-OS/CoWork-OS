@@ -55,6 +55,8 @@ export interface LLMProviderConfig {
   openaiAccessToken?: string; // OAuth access token
   openaiRefreshToken?: string; // OAuth refresh token
   openaiTokenExpiresAt?: number; // OAuth token expiry timestamp
+  /** Issued Sign in with ChatGPT client ID; when set, OAuth tokens are SIWC tokens. */
+  openaiSiwcClientId?: string;
   openaiOAuthTokenUpdater?: (tokens: {
     access_token: string;
     refresh_token: string;
@@ -62,6 +64,7 @@ export interface LLMProviderConfig {
     email?: string;
     accountId?: string;
     planType?: string;
+    id_token?: string;
   }) => void | Promise<void>;
   // Azure OpenAI-specific
   azureApiKey?: string;

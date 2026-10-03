@@ -42,6 +42,8 @@ export function ChannelSpecializationSettings({ channelId }: ChannelSpecializati
   const [enabled, setEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The editor stays collapsed until the user creates or picks a specialization.
+  const [formOpen, setFormOpen] = useState(false);
 
   const selected = useMemo(
     () => specializations.find((item) => item.id === selectedId) || null,
@@ -93,6 +95,7 @@ export function ChannelSpecializationSettings({ channelId }: ChannelSpecializati
     setAllowSharedContextMemory(false);
     setEnabled(true);
     setError(null);
+    setFormOpen(false);
   };
 
   const toggleRestriction = (restriction: string) => {
@@ -179,9 +182,12 @@ export function ChannelSpecializationSettings({ channelId }: ChannelSpecializati
           <select
             className="settings-select"
             value={selectedId}
-            onChange={(event) => setSelectedId(event.target.value)}
+            onChange={(event) => {
+              setSelectedId(event.target.value);
+              setFormOpen(Boolean(event.target.value));
+            }}
           >
-            <option value="">New specialization</option>
+            <option value="">Choose a specialization to edit</option>
             {specializations.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name || item.threadId || item.chatId || "Channel default"}
@@ -192,145 +198,160 @@ export function ChannelSpecializationSettings({ channelId }: ChannelSpecializati
         </div>
       )}
 
-      <div className="settings-field">
-        <label>Chat or group</label>
-        <select
-          className="settings-select"
-          value={chatId}
-          onChange={(event) => setChatId(event.target.value)}
+      {formOpen ? (
+        <>
+          <div className="settings-field">
+            <label>Chat or group</label>
+            <select
+              className="settings-select"
+              value={chatId}
+              onChange={(event) => setChatId(event.target.value)}
+            >
+              <option value="">Whole channel default</option>
+              {chats.map((chat) => (
+                <option key={chat.chatId} value={chat.chatId}>
+                  {formatChatLabel(chat)}
+                </option>
+              ))}
+            </select>
+            <input
+              className="settings-input"
+              value={chatId}
+              onChange={(event) => setChatId(event.target.value)}
+              placeholder="Or paste chat/group ID"
+            />
+          </div>
+
+          <div className="settings-field">
+            <label>Topic/thread ID</label>
+            <input
+              className="settings-input"
+              value={threadId}
+              onChange={(event) => setThreadId(event.target.value)}
+              placeholder="Optional topic/thread ID"
+            />
+          </div>
+
+          <div className="settings-field">
+            <label>Display name</label>
+            <input
+              className="settings-input"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Support group, research topic, etc."
+            />
+          </div>
+
+          <div className="settings-field">
+            <label>Workspace</label>
+            <select
+              className="settings-select"
+              value={workspaceId}
+              onChange={(event) => setWorkspaceId(event.target.value)}
+            >
+              <option value="">Channel default</option>
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="settings-field">
+            <label>Agent role</label>
+            <select
+              className="settings-select"
+              value={agentRoleId}
+              onChange={(event) => setAgentRoleId(event.target.value)}
+            >
+              <option value="">Channel default</option>
+              {agentRoles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.displayName || role.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="settings-field">
+            <label>Guidance</label>
+            <textarea
+              className="settings-textarea"
+              value={systemGuidance}
+              onChange={(event) => setSystemGuidance(event.target.value)}
+              placeholder="Instructions added to new tasks from this scope"
+              rows={4}
+            />
+          </div>
+
+          <div className="settings-field">
+            <label>Tool restrictions</label>
+            <div className="checkbox-group">
+              {DEFAULT_TOOL_RESTRICTIONS.map((restriction) => (
+                <label key={restriction} className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={toolRestrictions.includes(restriction)}
+                    onChange={() => toggleRestriction(restriction)}
+                  />
+                  {restriction}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={allowSharedContextMemory}
+              onChange={(event) => setAllowSharedContextMemory(event.target.checked)}
+            />
+            Allow shared memory context for this group/topic
+          </label>
+
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
+            />
+            Enabled
+          </label>
+
+          {duplicateScope && (
+            <p className="settings-hint warning">
+              Saving will replace the existing specialization for this scope.
+            </p>
+          )}
+          {error && <p className="settings-hint warning">{error}</p>}
+
+          <div className="settings-actions">
+            <button className="button-primary" onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : selectedId ? "Update Specialization" : "Save Specialization"}
+            </button>
+            {selectedId && (
+              <button className="button-danger" onClick={handleDelete} disabled={saving}>
+                Delete
+              </button>
+            )}
+            <button className="button-secondary" onClick={resetForm} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <button
+          className="button-secondary button-small settings-collapsed-trigger"
+          onClick={() => {
+            resetForm();
+            setFormOpen(true);
+          }}
+          aria-expanded={false}
         >
-          <option value="">Whole channel default</option>
-          {chats.map((chat) => (
-            <option key={chat.chatId} value={chat.chatId}>
-              {formatChatLabel(chat)}
-            </option>
-          ))}
-        </select>
-        <input
-          className="settings-input"
-          value={chatId}
-          onChange={(event) => setChatId(event.target.value)}
-          placeholder="Or paste chat/group ID"
-        />
-      </div>
-
-      <div className="settings-field">
-        <label>Topic/thread ID</label>
-        <input
-          className="settings-input"
-          value={threadId}
-          onChange={(event) => setThreadId(event.target.value)}
-          placeholder="Optional topic/thread ID"
-        />
-      </div>
-
-      <div className="settings-field">
-        <label>Display name</label>
-        <input
-          className="settings-input"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Support group, research topic, etc."
-        />
-      </div>
-
-      <div className="settings-field">
-        <label>Workspace</label>
-        <select
-          className="settings-select"
-          value={workspaceId}
-          onChange={(event) => setWorkspaceId(event.target.value)}
-        >
-          <option value="">Channel default</option>
-          {workspaces.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>
-              {workspace.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="settings-field">
-        <label>Agent role</label>
-        <select
-          className="settings-select"
-          value={agentRoleId}
-          onChange={(event) => setAgentRoleId(event.target.value)}
-        >
-          <option value="">Channel default</option>
-          {agentRoles.map((role) => (
-            <option key={role.id} value={role.id}>
-              {role.displayName || role.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="settings-field">
-        <label>Guidance</label>
-        <textarea
-          className="settings-textarea"
-          value={systemGuidance}
-          onChange={(event) => setSystemGuidance(event.target.value)}
-          placeholder="Instructions added to new tasks from this scope"
-          rows={4}
-        />
-      </div>
-
-      <div className="settings-field">
-        <label>Tool restrictions</label>
-        <div className="checkbox-group">
-          {DEFAULT_TOOL_RESTRICTIONS.map((restriction) => (
-            <label key={restriction} className="settings-checkbox">
-              <input
-                type="checkbox"
-                checked={toolRestrictions.includes(restriction)}
-                onChange={() => toggleRestriction(restriction)}
-              />
-              {restriction}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <label className="settings-checkbox">
-        <input
-          type="checkbox"
-          checked={allowSharedContextMemory}
-          onChange={(event) => setAllowSharedContextMemory(event.target.checked)}
-        />
-        Allow shared memory context for this group/topic
-      </label>
-
-      <label className="settings-checkbox">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(event) => setEnabled(event.target.checked)}
-        />
-        Enabled
-      </label>
-
-      {duplicateScope && (
-        <p className="settings-hint warning">
-          Saving will replace the existing specialization for this scope.
-        </p>
+          New specialization
+        </button>
       )}
-      {error && <p className="settings-hint warning">{error}</p>}
-
-      <div className="settings-actions">
-        <button className="button-primary" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : selectedId ? "Update Specialization" : "Save Specialization"}
-        </button>
-        {selectedId && (
-          <button className="button-danger" onClick={handleDelete} disabled={saving}>
-            Delete
-          </button>
-        )}
-        <button className="button-secondary" onClick={resetForm} disabled={saving}>
-          Reset
-        </button>
-      </div>
     </div>
   );
 }

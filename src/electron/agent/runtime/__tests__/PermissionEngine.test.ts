@@ -28,6 +28,139 @@ function evaluate(input: Partial<Parameters<typeof PermissionEngine.evaluate>[0]
 }
 
 describe("PermissionEngine", () => {
+  describe("configured MCP authority", () => {
+    const fullWorkspace = {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        accessProfileId: "full_access",
+        accessSandboxMode: "danger-full-access" as const,
+        accessApprovalPolicy: "never" as const,
+        accessNetworkMode: "enabled" as const,
+      },
+    };
+    const mcpToolPolicy = {
+      serverName: "Dayanak Lens",
+      approvalMode: "auto" as const,
+      readOnly: true,
+      enabled: true,
+      endpoint: "http://127.0.0.1:4318/mcp",
+    };
+    const mcpRequest = {
+      workspace: fullWorkspace,
+      toolName: "mcp_search_yargitay",
+      approvalType: "external_service" as const,
+      mcpToolPolicy,
+    };
+
+    it.each([true, false])(
+      "allows configured MCP calls in Full access (readOnly=%s)",
+      (readOnly) => {
+        const result = evaluate({ ...mcpRequest, mcpToolPolicy: { ...mcpToolPolicy, readOnly } });
+        expect(result.decision).toBe("allow");
+        expect(result.metadata?.mcpToolPolicyAuthorized).toBe(true);
+      },
+    );
+
+    it("allows annotated reads with on-request networking without blanket MCP consent", () => {
+      expect(
+        evaluate({
+          ...mcpRequest,
+          workspace: {
+            ...fullWorkspace,
+            permissions: {
+              ...fullWorkspace.permissions,
+              accessSandboxMode: "workspace-write",
+              accessApprovalPolicy: "on-request",
+              accessNetworkMode: "on-request",
+            },
+          },
+        }).decision,
+      ).toBe("allow");
+    });
+
+    it.each(["prompt", "writes"] as const)(
+      "keeps explicit %s approval policy under never",
+      (approvalMode) => {
+        expect(
+          evaluate({
+            ...mcpRequest,
+            mcpToolPolicy: { ...mcpToolPolicy, approvalMode, readOnly: false },
+          }).decision,
+        ).toBe("deny");
+      },
+    );
+
+    it("asks for unannotated tools with an interactive bounded profile", () => {
+      expect(
+        evaluate({
+          ...mcpRequest,
+          workspace: {
+            ...fullWorkspace,
+            permissions: {
+              ...fullWorkspace.permissions,
+              accessSandboxMode: "workspace-write",
+              accessApprovalPolicy: "on-request",
+            },
+          },
+          mcpToolPolicy: { ...mcpToolPolicy, readOnly: false },
+        }).decision,
+      ).toBe("ask");
+    });
+
+    it.each([
+      { network: false },
+      { accessNetworkMode: "disabled" as const },
+      { accessDomainRules: [{ pattern: "127.0.0.1", access: "deny" as const }] },
+      { accessProfileUnavailable: true },
+    ])("preserves hard restrictions %j", (permissions) => {
+      expect(
+        evaluate({
+          ...mcpRequest,
+          workspace: {
+            ...fullWorkspace,
+            permissions: { ...fullWorkspace.permissions, ...permissions },
+          },
+          mcpToolPolicy: { ...mcpToolPolicy, approvalMode: "approve" },
+        }).decision,
+      ).toBe("deny");
+    });
+
+    it("preserves explicit tool denies and disabled servers", () => {
+      expect(
+        evaluate({
+          ...mcpRequest,
+          rules: [
+            {
+              source: "workspace_db",
+              effect: "deny",
+              scope: { kind: "mcp_server", serverName: "Dayanak Lens" },
+            } as PermissionRule,
+          ],
+        }).decision,
+      ).toBe("deny");
+      expect(
+        evaluate({ ...mcpRequest, mcpToolPolicy: { ...mcpToolPolicy, enabled: false } }).decision,
+      ).toBe("deny");
+    });
+
+    it("does not allow unknown MCP names without configured authority", () => {
+      expect(evaluate({ ...mcpRequest, mcpToolPolicy: undefined }).decision).toBe("deny");
+    });
+
+    it("keeps read-only profiles closed to writes even with approve", () => {
+      expect(
+        evaluate({
+          ...mcpRequest,
+          workspace: {
+            ...fullWorkspace,
+            permissions: { ...fullWorkspace.permissions, accessSandboxMode: "read-only" },
+          },
+          mcpToolPolicy: { ...mcpToolPolicy, approvalMode: "approve", readOnly: false },
+        }).decision,
+      ).toBe("deny");
+    });
+  });
   it.each([false, true])(
     "enforces shell capability for execute_code with network=%s",
     (network) => {

@@ -670,7 +670,7 @@ describe("ShellTools auto-approval", () => {
           defaultAction: "allow",
           allowedDomains: [],
           blockedDomains: [],
-          allowShellNetwork: false,
+          allowShellNetwork: true,
         },
         autoReview: { enabled: true },
         telemetry: { enabled: false },
@@ -749,6 +749,15 @@ describe("ShellTools auto-approval", () => {
     expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
   });
 
+  it("refuses unsandboxed fallback when administrator networking is restricted", async () => {
+    process.env.COWORK_ALLOW_UNSANDBOXED_SHELL = "1";
+    sandboxMocks.createSandbox.mockResolvedValueOnce({ ...sandboxMocks.sandbox, type: "none" });
+    await expect(shellTools.runCommand(SAFE_CMD_1, { cwd: process.cwd() })).rejects.toThrow(
+      "enforce network restrictions",
+    );
+    expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
+  });
+
   it("allows explicit unsandboxed development fallback when requested", async () => {
     process.env.COWORK_ALLOW_UNSANDBOXED_SHELL = "1";
     vi.mocked(loadPolicies).mockReturnValueOnce({
@@ -766,7 +775,7 @@ describe("ShellTools auto-approval", () => {
           defaultAction: "allow",
           allowedDomains: [],
           blockedDomains: [],
-          allowShellNetwork: false,
+          allowShellNetwork: true,
         },
         autoReview: { enabled: true },
         telemetry: { enabled: false },

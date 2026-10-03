@@ -138,7 +138,9 @@ export class BrowserWorkbenchService {
     this.mainWindow = window;
   }
 
-  registerSession(registration: BrowserWorkbenchSessionRegistration): BrowserWorkbenchSession {
+  async registerSession(
+    registration: BrowserWorkbenchSessionRegistration,
+  ): Promise<BrowserWorkbenchSession> {
     const session: BrowserWorkbenchSession = {
       ...registration,
       sessionId: normalizeSessionId(registration.sessionId),
@@ -146,7 +148,7 @@ export class BrowserWorkbenchService {
     };
     const key = sessionKey(session.taskId, session.sessionId);
     this.sessions.set(key, session);
-    this.browserSessionManager.registerElectronWorkbenchSession(session);
+    await this.browserSessionManager.registerElectronWorkbenchSession(session);
     const waiters = this.waiters.get(key);
     if (waiters) {
       this.waiters.delete(key);
@@ -252,6 +254,7 @@ export class BrowserWorkbenchService {
   }): Promise<AnyRecord | null> {
     const url = normalizeUrl(input.url);
     if (!url) return null;
+    this.browserSessionManager.assertUrlAllowed(input.taskId, url, input.sessionId);
     const session =
       this.getSession(input.taskId, input.sessionId) ||
       (await this.requestOpen({ taskId: input.taskId, sessionId: input.sessionId, url }));
@@ -1067,12 +1070,11 @@ export class BrowserWorkbenchService {
 
   private async getWebContents(session: BrowserWorkbenchSession | null): Promise<Any | null> {
     if (!session) return null;
-    const electron = await import("electron");
-    const contents = (electron as Any).webContents?.fromId?.(session.webContentsId);
-    if (!contents || contents.isDestroyed?.()) {
-      this.unregisterSession(session);
-      return null;
-    }
+    const contents = await this.browserSessionManager.getGuardedWebContents(
+      session.taskId,
+      session.sessionId,
+    );
+    if (!contents) this.unregisterSession(session);
     return contents;
   }
 }

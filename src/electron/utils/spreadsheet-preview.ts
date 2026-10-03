@@ -1,3 +1,4 @@
+import { readDocumentArchiveBuffer } from "../security/document-archive";
 import ExcelJS from "exceljs";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -70,7 +71,9 @@ export async function buildSpreadsheetPreviewFromFile(
   filePath: string,
 ): Promise<SpreadsheetPreview> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
+  await workbook.xlsx.load(
+    (await readDocumentArchiveBuffer(filePath)) as unknown as ExcelJS.Buffer,
+  );
 
   const sheets = workbook.worksheets.map((worksheet) => {
     const sourceRowCount = Math.max(worksheet.actualRowCount || 0, worksheet.rowCount || 0);
@@ -357,8 +360,11 @@ export async function writeSpreadsheetPreviewToFile(
 ): Promise<SpreadsheetPreview> {
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.readFile(filePath);
-  } catch {
+    await workbook.xlsx.load(
+      (await readDocumentArchiveBuffer(filePath)) as unknown as ExcelJS.Buffer,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     // If the file was removed between preview and save, recreate a workbook.
   }
 

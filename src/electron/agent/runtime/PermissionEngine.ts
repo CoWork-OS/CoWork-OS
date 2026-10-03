@@ -39,6 +39,7 @@ import {
 } from "../security/export-permission-context";
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
 import { domainMatches } from "../../security/network-policy";
+import type { MCPToolPolicy } from "../../mcp/tool-policy";
 import {
   evaluateWorkspaceFilesystemAccess,
   type AccessFilesystemOperation,
@@ -69,6 +70,8 @@ export interface PermissionEngineRequest {
   command?: string | null;
   path?: string | null;
   serverName?: string | null;
+  /** Trusted catalog/settings metadata, resolved by the runtime rather than the caller. */
+  mcpToolPolicy?: MCPToolPolicy;
   allowPersistence?: boolean;
   denyState?: {
     consecutiveDenials: number;
@@ -313,6 +316,25 @@ export class PermissionEngine {
       });
     }
 
+    if (request.mcpToolPolicy) {
+      const mcp = request.mcpToolPolicy;
+      const fullAccess = profile?.sandbox === "danger-full-access" && profile.approval === "never";
+      const allowed =
+        mcp.approvalMode === "approve" ||
+        (mcp.approvalMode === "writes" && mcp.readOnly) ||
+        (mcp.approvalMode === "auto" && (mcp.readOnly || fullAccess));
+      return this.withAccessProfileApprovalPolicy(request, facts, {
+        decision: allowed ? "allow" : "ask",
+        reason: {
+          type: "other",
+          summary: allowed
+            ? "The configured MCP tool is authorized by its tool policy and active access profile."
+            : "The configured MCP tool requires approval under its tool policy.",
+          metadata: { mcpApprovalMode: mcp.approvalMode, readOnly: mcp.readOnly },
+        },
+      });
+    }
+
     // `on-request` is a mandatory approval boundary, but it is not a hard
     // allow. Evaluate explicit rules first so a narrower deny rule still wins
     // over the profile's approval requirement.
@@ -380,6 +402,24 @@ export class PermissionEngine {
     const isNetworkBoundaryFact = this.isNetworkBoundaryFact(facts);
     const profile = this.getRuntimeAccessProfile(request);
 
+    if (request.mcpToolPolicy?.enabled === false) {
+      return {
+        decision: "deny",
+        reason: { type: "other", summary: "The MCP server is disabled." },
+      };
+    }
+
+    if (!profile && request.mode === "plan" && request.mcpToolPolicy?.readOnly === false) {
+      return {
+        decision: "deny",
+        reason: {
+          type: "mode",
+          mode: "plan",
+          summary: "Plan mode does not permit mutating MCP calls.",
+        },
+      };
+    }
+
     if (permissions.accessProfileUnavailable === true) {
       return {
         decision: "deny",
@@ -407,6 +447,7 @@ export class PermissionEngine {
       (facts.isWorkspaceWriteLike ||
         facts.isDeleteLike ||
         facts.isShell ||
+        (request.mcpToolPolicy && !request.mcpToolPolicy.readOnly) ||
         this.externalFileMutationRequested(request, facts))
     ) {
       return {
@@ -628,6 +669,7 @@ export class PermissionEngine {
       ...(result.matchedRule ? { matchedRule: result.matchedRule } : {}),
       metadata: {
         ...(result.metadata || {}),
+        ...(request.mcpToolPolicy && decision === "allow" ? { mcpToolPolicyAuthorized: true } : {}),
         ...(profile
           ? {
               accessPolicyVersion: this.getAccessPolicyVersion(request),
@@ -1133,8 +1175,14 @@ export class PermissionEngine {
       request.workspace.path,
       request.path || this.extractPath(request.toolInput),
     );
-    const normalizedServerName = normalizeServerName(request.serverName || "");
-    const normalizedDomain = extractDomainFromUrl(extractUrlFromToolInput(request.toolInput)) || "";
+    const normalizedServerName = normalizeServerName(
+      request.mcpToolPolicy?.serverName || request.serverName || "",
+    );
+    const normalizedDomain =
+      extractDomainFromUrl(
+        request.mcpToolPolicy?.endpoint || extractUrlFromToolInput(request.toolInput),
+      ) || "";
+    const isMcp = Boolean(request.mcpToolPolicy) || toolName.startsWith("mcp_");
     const isHttpRequestReadOnly = this.isReadOnlyHttpRequest(request.toolInput, toolName);
     const isShell =
       approvalType === "run_command" || toolName === "run_command" || toolName === "execute_code";
@@ -1168,23 +1216,24 @@ export class PermissionEngine {
       approvalType === "delete_file" ||
       approvalType === "delete_multiple" ||
       approvalType === "data_export" ||
-      approvalType === "external_service" ||
+      (approvalType === "external_service" && !request.mcpToolPolicy) ||
       approvalType === "location_access" ||
       approvalType === "protected_credential" ||
       isDeleteLike ||
       isDataExport ||
       isProtectedCredential ||
       isLocationAccess ||
-      toolName.endsWith("_action") ||
+      (!isMcp && toolName.endsWith("_action")) ||
       toolName === "voice_call" ||
-      toolName.startsWith("mcp_");
+      (isMcp && !request.mcpToolPolicy);
     const isWorkspaceWriteLike = this.isWorkspaceWriteTool(toolName);
     const isExternalSideEffect =
-      (approvalType === "external_service" && !isWorkspaceWriteLike) ||
+      (approvalType === "external_service" && !isWorkspaceWriteLike && !request.mcpToolPolicy) ||
+      (request.mcpToolPolicy !== undefined && !request.mcpToolPolicy.readOnly) ||
       isLocationAccess ||
       isProtectedCredential ||
       isDataExport ||
-      toolName.endsWith("_action") ||
+      (!isMcp && toolName.endsWith("_action")) ||
       toolName === "voice_call";
     const isCodeExecutionNetworkAccess =
       toolName === "execute_code" &&
@@ -1202,7 +1251,6 @@ export class PermissionEngine {
       // newlines merges heredoc bodies and separate commands into one line.
       (isShell && isLikelyNetworkShellCommand(rawCommand));
     const isNonWorkspaceInteraction = this.isNonWorkspaceInteractionTool(toolName, approvalType);
-    const isMcp = toolName.startsWith("mcp_");
     const isMutatingTool = this.isMutatingTool(toolName);
     const isWriteLike =
       isDeleteLike ||

@@ -17,6 +17,7 @@ import { LLMTool, MODELS } from "../llm/types";
 import { LLMProviderFactory, type LLMSettings } from "../llm/provider-factory";
 import { OpenAIProvider } from "../llm/openai-provider";
 import type { OpenAIOAuthTokens } from "../llm/openai-oauth";
+import { getOpenAISiwcClientId } from "../llm/openai-siwc-oauth";
 import { downscaleImage } from "./image-utils";
 import { createLogger } from "../../utils/logger";
 import { buildSensitiveSourceRefForPath } from "../security/export-permission-context";
@@ -654,9 +655,12 @@ export class VisionTools {
           const refreshToken = settings.openai?.refreshToken?.trim();
           const canUseOAuth = Boolean(accessToken && refreshToken);
           const useOAuth = settings.openai?.authMethod === "oauth" && canUseOAuth;
+          const siwcClientId = getOpenAISiwcClientId(settings);
           const model = modelOverride || settings.openai?.model || "gpt-6-astra";
           this.assertNetworkAccess(
-            useOAuth ? "https://chatgpt.com/backend-api" : "https://api.openai.com/v1",
+            useOAuth && !siwcClientId
+              ? "https://chatgpt.com/backend-api"
+              : "https://api.openai.com/v1",
             toolName,
           );
           let text: string;
@@ -665,6 +669,7 @@ export class VisionTools {
               accessToken: accessToken!,
               refreshToken: refreshToken!,
               tokenExpiresAt: settings.openai?.tokenExpiresAt,
+              siwcClientId,
               model,
               prompt,
               base64,
@@ -685,6 +690,7 @@ export class VisionTools {
               accessToken: accessToken!,
               refreshToken: refreshToken!,
               tokenExpiresAt: settings.openai?.tokenExpiresAt,
+              siwcClientId,
               model,
               prompt,
               base64,
@@ -1106,6 +1112,7 @@ export class VisionTools {
     accessToken: string;
     refreshToken: string;
     tokenExpiresAt?: number;
+    siwcClientId?: string;
     model: string;
     prompt: string;
     base64: string;
@@ -1118,6 +1125,7 @@ export class VisionTools {
       openaiAccessToken: args.accessToken,
       openaiRefreshToken: args.refreshToken,
       openaiTokenExpiresAt: args.tokenExpiresAt,
+      openaiSiwcClientId: args.siwcClientId,
       openaiOAuthTokenUpdater: (tokens) => this.persistOpenAIOAuthTokens(tokens),
     });
 
@@ -1148,19 +1156,8 @@ export class VisionTools {
       .trim();
   }
 
-  private persistOpenAIOAuthTokens(tokens: OpenAIOAuthTokens): void {
-    const latestSettings = LLMProviderFactory.loadSettings();
-    latestSettings.openai = {
-      ...latestSettings.openai,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      tokenExpiresAt: tokens.expires_at,
-      accountId: tokens.accountId,
-      email: tokens.email,
-      authMethod: "oauth",
-    };
-    LLMProviderFactory.saveSettings(latestSettings);
-    LLMProviderFactory.clearCache();
+  private persistOpenAIOAuthTokens(tokens: OpenAIOAuthTokens & { id_token?: string }): void {
+    LLMProviderFactory.persistOpenAIOAuthTokens(tokens);
   }
 
   private async analyzeWithAzureOpenAI(args: {

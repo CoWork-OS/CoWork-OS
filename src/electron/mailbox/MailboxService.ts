@@ -1,3 +1,4 @@
+import { loadDocumentArchive } from "../security/document-archive";
 import { AgentRoleRepository } from "../agents/agent-repository-facades";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import { ChannelRepository } from "../database/repository-facades";
@@ -4099,6 +4100,7 @@ export class MailboxService {
       filename.endsWith(".docx")
     ) {
       const mammoth = await import("mammoth");
+      await loadDocumentArchive(bytes);
       const result = await mammoth.extractRawText({ buffer: bytes });
       return { text: result.value || "", mode: "mammoth-docx" };
     }
@@ -7404,45 +7406,45 @@ export class MailboxService {
       kind: "run",
       name: "upsertThread_3",
       params: [
-      thread.id,
-      thread.accountId,
-      thread.providerThreadId,
-      thread.provider,
-      thread.subject,
-      thread.snippet,
-      JSON.stringify(thread.participants),
-      JSON.stringify(thread.labels),
-      classificationValues?.category || thread.category,
-      classificationValues?.today_bucket || fallbackTodayBucket,
-      classificationValues?.domain_category || fallbackDomainCategory,
-      classificationValues?.classification_rationale || null,
-      classificationValues?.priority_score ?? thread.priorityScore,
-      classificationValues?.urgency_score ?? thread.urgencyScore,
-      classificationValues?.needs_reply ?? (thread.needsReply ? 1 : 0),
-      classificationValues?.stale_followup ?? (thread.staleFollowup ? 1 : 0),
-      classificationValues?.cleanup_candidate ?? (thread.cleanupCandidate ? 1 : 0),
-      nextHandled,
-      nextLocalInboxHidden,
-      nextUnreadCount,
-      thread.messages.length,
-      thread.lastMessageAt,
-      now,
-      nextClassificationState,
-      fingerprint,
-      classificationValues?.classification_model_key || null,
-      classificationValues?.classification_prompt_version || null,
-      classificationValues?.classification_confidence ?? 0,
-      classificationValues?.classification_updated_at || null,
-      classificationValues?.classification_error || null,
-      classificationValues?.classification_json || null,
-      JSON.stringify(sensitiveContent),
-      JSON.stringify({
-        priorityBand: priorityBandFromScore(
-          classificationValues?.priority_score ?? thread.priorityScore,
-        ),
-      }),
-      now,
-      now,
+        thread.id,
+        thread.accountId,
+        thread.providerThreadId,
+        thread.provider,
+        thread.subject,
+        thread.snippet,
+        JSON.stringify(thread.participants),
+        JSON.stringify(thread.labels),
+        classificationValues?.category || thread.category,
+        classificationValues?.today_bucket || fallbackTodayBucket,
+        classificationValues?.domain_category || fallbackDomainCategory,
+        classificationValues?.classification_rationale || null,
+        classificationValues?.priority_score ?? thread.priorityScore,
+        classificationValues?.urgency_score ?? thread.urgencyScore,
+        classificationValues?.needs_reply ?? (thread.needsReply ? 1 : 0),
+        classificationValues?.stale_followup ?? (thread.staleFollowup ? 1 : 0),
+        classificationValues?.cleanup_candidate ?? (thread.cleanupCandidate ? 1 : 0),
+        nextHandled,
+        nextLocalInboxHidden,
+        nextUnreadCount,
+        thread.messages.length,
+        thread.lastMessageAt,
+        now,
+        nextClassificationState,
+        fingerprint,
+        classificationValues?.classification_model_key || null,
+        classificationValues?.classification_prompt_version || null,
+        classificationValues?.classification_confidence ?? 0,
+        classificationValues?.classification_updated_at || null,
+        classificationValues?.classification_error || null,
+        classificationValues?.classification_json || null,
+        JSON.stringify(sensitiveContent),
+        JSON.stringify({
+          priorityBand: priorityBandFromScore(
+            classificationValues?.priority_score ?? thread.priorityScore,
+          ),
+        }),
+        now,
+        now,
       ],
     });
 
@@ -8683,13 +8685,10 @@ export class MailboxService {
     detail: MailboxThreadDetail,
     companyId?: string,
   ): Promise<MailboxOperatorRecommendation[]> {
-    const roles = (await this.agentRoleRepo
-      .findAll(false))
-      .filter(
-        (role) =>
-          role.isActive !== false &&
-          (!companyId || !role.companyId || role.companyId === companyId),
-      );
+    const roles = (await this.agentRoleRepo.findAll(false)).filter(
+      (role) =>
+        role.isActive !== false && (!companyId || !role.companyId || role.companyId === companyId),
+    );
     const text = [
       detail.subject,
       detail.summary?.summary,

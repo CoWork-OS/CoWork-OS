@@ -328,11 +328,20 @@ describe("evaluateToolAvailability exact MCP references", () => {
     recentlyUsedTools: undefined as Iterable<string> | undefined,
   };
 
-  it("allows only the currently evaluated MCP tool when its exact name is requested", () => {
+  it("makes connected MCP tools discoverable without restricting them to named tools", () => {
     expect(evaluateToolAvailability("mcp_qa_echo", baseCtx).decision).toBe("allow");
-    expect(evaluateToolAvailability("mcp_qa_admin_reset", baseCtx).decision).toBe("defer");
-    expect(evaluateToolAvailability("mcp_qa_echo_extra", baseCtx).decision).toBe("defer");
+    expect(evaluateToolAvailability("mcp_qa_admin_reset", baseCtx).decision).toBe("allow");
+    expect(evaluateToolAvailability("mcp_qa_echo_extra", baseCtx).decision).toBe("allow");
   });
+
+  it.each(["İşçinin ücret alacağı zamanaşımı hakkında karar bul.", "Find relevant case law.", ""])(
+    "exposes MCP tools for ordinary requests: %s",
+    (taskText) => {
+      expect(
+        evaluateToolAvailability("mcp_search_yargitay", { ...baseCtx, taskText }).decision,
+      ).toBe("allow");
+    },
+  );
 });
 
 describe("evaluateToolAvailability open_application", () => {

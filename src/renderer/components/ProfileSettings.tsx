@@ -103,21 +103,19 @@ export function ProfileSettings() {
   const activeProfile = profiles.find((profile) => profile.isActive) ?? null;
 
   return (
-    <div className="settings-section">
+    <div className="settings-section profile-settings">
       <p className="settings-description">
         Profiles keep CoWork data isolated by user data directory. Switching restarts the app into
         the selected profile.
       </p>
 
-      <div className="settings-card" style={{ marginBottom: 16 }}>
-        <div
-          style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}
-        >
+      <div className="settings-card profile-settings-group">
+        <div className="profile-settings-row">
           <div>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            <div className="profile-settings-title">
               Active profile: {activeProfile?.label || "default"}
             </div>
-            <div className="settings-description" style={{ marginBottom: 0 }}>
+            <div className="settings-description profile-settings-path">
               {activeProfile?.userDataDir || "Using the default data directory."}
             </div>
           </div>
@@ -125,70 +123,57 @@ export function ProfileSettings() {
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
+      <div className="profile-settings-grid">
         {profiles.map((profile) => (
           <div
             key={profile.id}
-            className={`settings-card ${profile.isActive ? "is-selected" : ""}`}
-            style={{ display: "flex", flexDirection: "column", gap: 12 }}
+            className={`settings-card settings-item-card profile-settings-card ${profile.isActive ? "is-selected" : ""}`}
           >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 8,
-                alignItems: "start",
-              }}
-            >
+            <div className="profile-settings-row">
               <div>
-                <div style={{ fontWeight: 600 }}>{profile.label}</div>
-                <div className="settings-description" style={{ marginBottom: 0 }}>
+                <div className="profile-settings-title">{profile.label}</div>
+                <div className="settings-description profile-settings-path">
                   {profile.userDataDir}
                 </div>
               </div>
               <span className="settings-badge">{profile.isDefault ? "Default" : profile.id}</span>
             </div>
-            <button
-              type="button"
-              className={profile.isActive ? "button-secondary" : "button-primary"}
-              onClick={() => void handleSwitch(profile.id)}
-              disabled={busy || profile.isActive}
-            >
-              {profile.isActive ? "Current Profile" : "Switch Profile"}
-            </button>
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={() => void handleExport(profile.id)}
-              disabled={busy}
-            >
-              Export
-            </button>
+            <div className="profile-settings-actions">
+              <button
+                type="button"
+                className={profile.isActive ? "button-secondary" : "button-primary"}
+                onClick={() => void handleSwitch(profile.id)}
+                disabled={busy || profile.isActive}
+              >
+                {profile.isActive ? "Current Profile" : "Switch Profile"}
+              </button>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => void handleExport(profile.id)}
+                disabled={busy}
+              >
+                Export
+              </button>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="settings-card">
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Create profile</div>
+      <div className="settings-card profile-settings-group">
+        <div className="profile-settings-title">Create profile</div>
         <p className="settings-description">
           Enter a label like `work`, `personal`, or a project/team name. The storage path is created
           automatically.
         </p>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div className="profile-settings-form">
           <input
             type="text"
+            className="settings-input"
             value={newProfileName}
             onChange={(event) => setNewProfileName(event.target.value)}
             placeholder="New profile name"
             disabled={busy}
-            style={{ flex: "1 1 240px" }}
           />
           <button
             type="button"
@@ -199,35 +184,28 @@ export function ProfileSettings() {
             Create
           </button>
         </div>
-        {status ? (
-          <p className="settings-description" style={{ marginTop: 12, marginBottom: 0 }}>
-            {status}
-          </p>
-        ) : null}
+        {status ? <p className="settings-description profile-settings-status">{status}</p> : null}
         {error ? (
-          <p
-            className="settings-description"
-            style={{ marginTop: 12, marginBottom: 0, color: "var(--color-danger)" }}
-          >
+          <p className="settings-description profile-settings-status profile-settings-error">
             {error}
           </p>
         ) : null}
       </div>
 
-      <div className="settings-card" style={{ marginTop: 16 }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Import profile</div>
+      <div className="settings-card profile-settings-group">
+        <div className="profile-settings-title">Import profile</div>
         <p className="settings-description">
           Pick a previously exported profile folder. Leave the name blank to reuse the imported
           profile label.
         </p>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div className="profile-settings-form">
           <input
             type="text"
+            className="settings-input"
             value={importProfileName}
             onChange={(event) => setImportProfileName(event.target.value)}
             placeholder="Optional profile name override"
             disabled={busy}
-            style={{ flex: "1 1 240px" }}
           />
           <button
             type="button"

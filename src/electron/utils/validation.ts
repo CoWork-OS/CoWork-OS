@@ -2837,6 +2837,10 @@ export const MCPServerConfigSchema = z.object({
   // Timeouts
   connectionTimeout: z.number().int().min(1000).max(120000).optional(),
   requestTimeout: z.number().int().min(1000).max(300000).optional(),
+  defaultToolsApprovalMode: z.enum(["auto", "prompt", "writes", "approve"]).optional(),
+  toolApprovals: z
+    .record(z.string().min(1).max(200), z.enum(["auto", "prompt", "writes", "approve"]))
+    .optional(),
 
   // Metadata
   version: z.string().max(100).optional(),
@@ -2846,9 +2850,11 @@ export const MCPServerConfigSchema = z.object({
   license: z.string().max(100).optional(),
 });
 
-export const MCPServerUpdateSchema = MCPServerConfigSchema.partial().omit({
-  id: true,
-});
+export const MCPServerUpdateSchema = MCPServerConfigSchema.partial()
+  .omit({ id: true })
+  // Create defaults must not silently re-enable a disabled server during an
+  // unrelated update (including approval-policy edits).
+  .extend({ enabled: z.boolean().optional() });
 
 export const MCPSettingsSchema = z.object({
   servers: z.array(MCPServerConfigSchema).max(50),

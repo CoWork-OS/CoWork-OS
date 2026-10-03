@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { promises as dns } from "dns";
 import { createServer, type Server } from "http";
 import { gzipSync } from "zlib";
-import { pinnedFetch } from "../pinned-fetch";
+import { loadPolicies } from "../../admin/policies";
+import { pinnedFetch, resolvePinnedAddresses } from "../pinned-fetch";
 import { readBoundedResponse } from "../bounded-response";
 
 let server: Server | undefined;
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   if (server) {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server!.close(() => resolve()));
@@ -62,6 +64,34 @@ describe("DNS validation bound to HTTP connections", () => {
     expect((await pinnedFetch(`http://127.0.0.1:${port}/empty`, {})).status).toBe(204);
     const head = await pinnedFetch(`http://127.0.0.1:${port}/empty`, { method: "HEAD" });
     expect(await head.text()).toBe("");
+  });
+  it("refuses environment proxy routing when a pinned destination is required", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:1");
+    vi.stubEnv("NO_PROXY", "");
+    vi.stubEnv("no_proxy", "");
+    await expect(pinnedFetch("https://proxy.example", {}, true)).rejects.toThrow(
+      "environment proxies",
+    );
+    await expect(resolvePinnedAddresses("https://proxy.example")).rejects.toThrow(
+      "environment proxies",
+    );
+  });
+  it("preserves an administrator's explicit internal-host exception without opening other hosts", async () => {
+    const policies = loadPolicies();
+    vi.spyOn(await import("../../admin/policies"), "loadPolicies").mockReturnValue({
+      ...policies,
+      runtime: {
+        ...policies.runtime,
+        network: { ...policies.runtime.network, allowedInternalHosts: ["named.corp.internal"] },
+      },
+    });
+    vi.spyOn(dns, "lookup").mockResolvedValue([{ address: "10.0.0.5", family: 4 }] as Any);
+    await expect(resolvePinnedAddresses("https://named.corp.internal")).resolves.toEqual([
+      { address: "10.0.0.5", family: 4 },
+    ]);
+    await expect(resolvePinnedAddresses("https://other.corp.internal")).rejects.toThrow(
+      "Internal destination",
+    );
   });
   it("honors cancellation while DNS is still pending", async () => {
     vi.spyOn(dns, "lookup").mockImplementation(() => new Promise(() => {}) as Any);

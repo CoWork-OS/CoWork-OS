@@ -4,6 +4,30 @@ import { TaskStrategyService } from "../TaskStrategyService";
 import { makeRoute } from "./task-strategy-test-fixtures";
 
 describe("TaskStrategyService execution-mode routing", () => {
+  it.each([
+    "Could you recommend an approach after you search the source records?",
+    "How should I approach this issue? Find supporting precedents in the source records.",
+    "Could you recommend a precedent from the connected records?",
+  ])("executes retrieval even when it accompanies advice: %s", (prompt) => {
+    const route = IntentRouter.route("", prompt);
+    expect(route.intent).toBe("mixed");
+    const strategy = TaskStrategyService.derive(route, undefined, { prompt });
+    expect(strategy.executionMode).toBe("execute");
+    expect(strategy.snapshot.directResponseMode).toBe("brief_status_then_execute");
+  });
+
+  it("preserves an explicit plan override for a retrieval request", () => {
+    const prompt = "Dayanak kayıtlarında emsal bir karar bulabilir misin?";
+    const route = IntentRouter.route("", prompt);
+    const strategy = TaskStrategyService.derive(
+      route,
+      { executionMode: "plan", executionModeSource: "user" },
+      { prompt },
+    );
+    expect(strategy.executionMode).toBe("plan");
+    expect(strategy.snapshot.directResponseMode).toBe("none");
+  });
+
   it("keeps report creation in execute mode when 'rather than guessing' is only a rationale", () => {
     const title = "Read orders.csv and create daily-orders-summary.md";
     const prompt =

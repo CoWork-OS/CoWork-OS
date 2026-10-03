@@ -1,4 +1,8 @@
 import * as path from "path";
+import {
+  createBrowserNetworkProxy,
+  type BrowserNetworkProxy,
+} from "../security/browser-network-proxy";
 import type { AccessDomainRule } from "../../shared/access-profiles";
 import { evaluateNetworkPolicy } from "../security/network-policy";
 import {
@@ -398,9 +402,9 @@ export class BrowserSessionManager {
 
   setAccessPolicy(taskId: string, policy: BrowserSessionAccessPolicy, sessionId?: unknown): void {
     this.accessPolicies.set(sessionKey(taskId, sessionId), {
-      networkEnabled: policy.networkEnabled === true,
-      accessNetworkMode: policy.accessNetworkMode,
-      profileDomainRules: policy.profileDomainRules ? [...policy.profileDomainRules] : undefined,
+      networkEnabled: policy?.networkEnabled === true,
+      accessNetworkMode: policy?.accessNetworkMode,
+      profileDomainRules: policy?.profileDomainRules ? [...policy.profileDomainRules] : undefined,
     });
   }
 
@@ -454,7 +458,9 @@ export class BrowserSessionManager {
     }
   }
 
-  registerElectronWorkbenchSession(registration: ElectronWorkbenchSessionRegistration): void {
+  async registerElectronWorkbenchSession(
+    registration: ElectronWorkbenchSessionRegistration,
+  ): Promise<void> {
     const sessionId = normalizeSessionId(registration.sessionId);
     const key = sessionKey(registration.taskId, sessionId);
     const existing = this.sessions.get(key);
@@ -482,6 +488,12 @@ export class BrowserSessionManager {
       lastDialog: existing?.lastDialog,
       traceActive: existing?.traceActive,
     });
+
+    await this.getWebContents(this.sessions.get(key));
+  }
+
+  async getGuardedWebContents(taskId: string, sessionId?: unknown): Promise<Any | null> {
+    return this.getWebContents(this.sessions.get(sessionKey(taskId, sessionId)));
   }
 
   unregisterSession(input: { taskId: string; sessionId?: string; webContentsId?: number }): void {
@@ -492,7 +504,6 @@ export class BrowserSessionManager {
       return;
     }
     this.sessions.delete(key);
-    this.accessPolicies.delete(key);
     const handlers = this.accessGuardHandlers.get(existing.webContentsId);
     if (handlers) {
       handlers.contents.removeListener?.("will-navigate", handlers.willNavigate);
@@ -1874,6 +1885,41 @@ export class BrowserSessionManager {
     return null;
   }
 
+  private networkProxies = new WeakMap<object, Promise<BrowserNetworkProxy>>();
+  private async prepareNetworkProxy(contents: Any): Promise<void> {
+    const electronSession = contents.session;
+    if (!electronSession || typeof electronSession.setProxy !== "function")
+      throw new Error("Pinned browser transport unavailable");
+    let setup = this.networkProxies.get(electronSession);
+    if (!setup) {
+      setup = (async () => {
+        const proxy = await createBrowserNetworkProxy((url) => {
+          const owners = Array.from(this.sessions.values()).filter(
+            (candidate) =>
+              this.accessGuardHandlers.get(candidate.webContentsId)?.contents.session ===
+              electronSession,
+          );
+          if (!owners.length || !owners.every((owner) => this.isUrlAllowed(owner, url)))
+            throw new Error("Browser network access denied");
+        });
+        try {
+          await electronSession.setProxy({
+            mode: "fixed_servers",
+            proxyRules: proxy.url,
+            proxyBypassRules: "<-loopback>",
+          });
+          await electronSession.closeAllConnections?.();
+        } catch (error) {
+          await proxy.close();
+          throw error;
+        }
+        return proxy;
+      })();
+      this.networkProxies.set(electronSession, setup);
+    }
+    await setup;
+  }
+
   private async getWebContents(
     session: BrowserSessionRecord | null | undefined,
   ): Promise<Any | null> {
@@ -1885,6 +1931,7 @@ export class BrowserSessionManager {
       return null;
     }
     this.attachAccessGuards(session, contents);
+    await this.prepareNetworkProxy(contents);
     this.assertCurrentUrlAllowed(session, contents.getURL?.() || session.url || "");
     return contents;
   }
@@ -1916,14 +1963,13 @@ export class BrowserSessionManager {
     }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
 
-    if (!policy) return true;
     return (
       evaluateNetworkPolicy({
         url,
         toolName: "browser_workbench_request",
-        networkEnabled: policy.networkEnabled,
-        accessNetworkMode: policy.accessNetworkMode,
-        profileDomainRules: policy.profileDomainRules,
+        networkEnabled: policy?.networkEnabled === true,
+        accessNetworkMode: policy?.accessNetworkMode,
+        profileDomainRules: policy?.profileDomainRules,
       }).action === "allow"
     );
   }
@@ -1956,17 +2002,29 @@ export class BrowserSessionManager {
       this.accessGuardHandlers.set(webContentsId, { contents, willNavigate, willRedirect });
     }
 
-    const webRequest = contents.session?.webRequest;
-    if (!webRequest || typeof webRequest.onBeforeRequest !== "function") return;
+    contents.setWebRTCIPHandlingPolicy?.("disable_non_proxied_udp");
+    this.prepareSessionNetworkGuards(contents.session);
+  }
+
+  /** Fail closed for workers and initial loads, even before the first guest registers. */
+  prepareSessionNetworkGuards(electronSession: Any): void {
+    const webRequest = electronSession?.webRequest;
+
+    if (!webRequest || typeof webRequest.onBeforeRequest !== "function")
+      throw new Error("Browser network guards unavailable");
     if (this.guardedWebRequestSessions.has(webRequest as object)) return;
     this.guardedWebRequestSessions.add(webRequest as object);
     webRequest.onBeforeRequest(
-      { urls: ["http://*/*", "https://*/*"] },
+      { urls: ["<all_urls>"] },
       (details: Any, callback: (response: { cancel?: boolean }) => void) => {
         const matchingSession = Array.from(this.sessions.values()).find(
           (candidate) => candidate.webContentsId === details.webContentsId,
         );
-        if (!matchingSession || this.isUrlAllowed(matchingSession, details.url)) {
+        if (
+          matchingSession &&
+          !/^wss?:/.test(details.url) &&
+          this.isUrlAllowed(matchingSession, details.url)
+        ) {
           callback({});
           return;
         }

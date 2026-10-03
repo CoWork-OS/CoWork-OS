@@ -1219,20 +1219,6 @@ export function ControlPlaneSettings() {
           margin: 0.5rem 0;
         }
 
-        .settings-input {
-          width: 100%;
-          padding: 0.5rem;
-          border: 1px solid var(--color-border);
-          border-radius: 4px;
-          background: var(--color-bg-primary);
-          color: var(--color-text-primary);
-        }
-
-        .settings-input:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
         .settings-row-group {
           display: flex;
           gap: 1rem;

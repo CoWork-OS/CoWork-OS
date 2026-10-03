@@ -43,6 +43,12 @@ describe("Canvas network enforcement", () => {
     expect(blocked("canvas://other-task/index.html")).toBe(true);
     expect(blocked("file:///etc/passwd")).toBe(true);
   });
+  it("blocks both WebSocket schemes even for allowed network domains", () => {
+    workspace!.permissions = { network: true, accessNetworkMode: "enabled" } as Any;
+    expect(blocked("ws://allowed.example/socket")).toBe(true);
+    expect(blocked("wss://allowed.example/socket")).toBe(true);
+    expect(blocked("https://allowed.example/page")).toBe(false);
+  });
   it("requires origin-bound consent for on-request networking", () => {
     workspace!.permissions = { network: true, accessNetworkMode: "on-request" } as Any;
     expect(blocked("https://allowed.example/export")).toBe(true);
@@ -71,7 +77,7 @@ describe("Canvas network enforcement", () => {
     } as Any;
     expect(blocked("https://allowed.example/image.png")).toBe(false);
     expect(blocked("https://denied.example/image.png")).toBe(true);
-    expect(blocked("wss://allowed.example/socket")).toBe(false);
+    expect(blocked("wss://allowed.example/socket")).toBe(true);
     expect(blocked("ws://denied.example/socket")).toBe(true);
     for (const name of ["will-navigate", "will-redirect"]) {
       const event = { preventDefault: vi.fn() };

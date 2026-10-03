@@ -10,6 +10,8 @@ import { DATABASE_COMMANDS, requiredTablesFor } from "../commands";
 import { DatabaseManager } from "../../schema";
 import { TaskEventRepository, TaskStore, WorkspaceStore } from "../../repositories";
 import { insertLlmCallRow } from "../../llm-call-events";
+import { WorkspaceRepository } from "../../repository-facades";
+import { setReportReaderClient, setStatementClient } from "../../statements/statement-route";
 import { prepareLlmCallSuccess } from "../../../agent/llm/usage-telemetry";
 import { UsageInsightsProjector } from "../../../reports/UsageInsightsProjector";
 import { setDeferredMigrationExecutor } from "../../deferred-event-migrations";
@@ -25,6 +27,16 @@ let testCommandsModule: string;
 
 const TEST_COMMANDS_SOURCE = `
 exports.commands = {
+  "test.holdWriter": {
+    kind: "write",
+    tables: [],
+    run(db, args) {
+      const gate = new Int32Array(args.gate);
+      Atomics.store(gate, 0, 1);
+      Atomics.wait(gate, 1, 0, 5000);
+      return null;
+    },
+  },
   "test.sleep": {
     kind: "read",
     tables: [],
@@ -135,6 +147,8 @@ describe("heavy reads and maintenance in the database worker", () => {
   });
 
   afterEach(async () => {
+    setReportReaderClient(null, null);
+    setStatementClient(null, null, null);
     await resetProjector();
     await Promise.all(clients.map((client) => client.close(2_000)));
     manager.close();
@@ -165,6 +179,78 @@ describe("heavy reads and maintenance in the database worker", () => {
     clients.push(client);
     return client;
   };
+
+  it("lists workspaces while the write worker is occupied, without losing committed updates", async () => {
+    const writer = await DatabaseClient.start({
+      dbPath: manager.getDatabasePath(),
+      requiredTables: requiredTablesFor(DATABASE_COMMANDS),
+      workerPath,
+      testCommandsModule,
+      readDeadlineMs: 50,
+    });
+    clients.push(writer);
+    const reader = await startReader();
+    const workspace = new WorkspaceStore(db).create("TEST DATA workspace", tempDir, {
+      read: true,
+      write: true,
+      delete: false,
+      network: false,
+      shell: false,
+    });
+    const expectedWorkspaces = new WorkspaceStore(db).findAll();
+    setStatementClient("storage", manager.getDatabasePath(), writer);
+    const repository = new WorkspaceRepository(db);
+
+    const holdWriter = async () => {
+      const gate = new Int32Array(new SharedArrayBuffer(8));
+      const done = writer.executeCommand("test.holdWriter", { gate: gate.buffer });
+      await waitFor(() => Atomics.load(gate, 0) === 1);
+      return {
+        done,
+        release: () => {
+          Atomics.store(gate, 1, 1);
+          Atomics.notify(gate, 1);
+        },
+      };
+    };
+
+    // Reproduce the original error: a fast workspace read expires behind other work.
+    const first = await holdWriter();
+    const expired = repository.findAll().catch((error: unknown) => error);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    } finally {
+      first.release();
+      await first.done;
+    }
+    expect(await expired).toMatchObject({ code: "deadline_exceeded" });
+    expect(((await expired) as Error).message).toContain(
+      "Deadline passed before statements.readUnit started",
+    );
+
+    setReportReaderClient(manager.getDatabasePath(), reader);
+    const second = await holdWriter();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const workspaces = await Promise.race([
+        repository.findAll(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("Workspace listing waited on the writer")),
+            1000,
+          );
+        }),
+      ]);
+      expect(workspaces).toEqual(expectedWorkspaces);
+    } finally {
+      clearTimeout(timeout);
+      second.release();
+      await second.done;
+    }
+
+    await repository.updatePath(workspace.id, `${tempDir}/updated`);
+    expect((await repository.findAll())[0].path).toBe(`${tempDir}/updated`);
+  });
 
   /** Tasks with legacy usage events, tool and skill events, and canonical usage rows. */
   const seedUsage = () => {

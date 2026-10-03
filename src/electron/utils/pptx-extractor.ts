@@ -1,6 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import JSZip from "jszip";
+import { loadDocumentArchive, readDocumentArchiveBuffer } from "../security/document-archive";
 
 type PptxRelationship = {
   type?: string;
@@ -97,8 +98,8 @@ export async function extractPptxStructuredContentFromFile(
     );
   }
 
-  const zipData = await fs.readFile(filePath);
-  const zip = await JSZip.loadAsync(zipData);
+  const zipData = await readDocumentArchiveBuffer(filePath);
+  const zip = await loadDocumentArchive(zipData);
   const metadata = await extractPptxMetadataFromZip(zip);
 
   const slideEntries = Object.keys(zip.files)
@@ -426,7 +427,10 @@ function extractPptxTableSpan(cellXml: string, spanType: "gridSpan" | "rowSpan")
   if (!valueText) return 1;
 
   const value = Number(valueText);
-  return Number.isFinite(value) && value > 1 ? value : 1;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 256) {
+    throw new Error("PPTX table span exceeds supported dimensions");
+  }
+  return value;
 }
 
 function expandPptxTableRows(
@@ -435,6 +439,8 @@ function expandPptxTableRows(
   const expandedRows: string[][] = [];
   const activeRowSpans: number[] = [];
   let maxColumns = 0;
+  let expandedCells = 0;
+  if (rows.length > 2048) throw new Error("PPTX table row limit exceeded");
 
   for (const row of rows) {
     const expandedRow: string[] = [];
@@ -450,6 +456,9 @@ function expandPptxTableRows(
 
       const colSpan = Math.max(1, Math.floor(cell.colSpan || 1));
       const rowSpan = Math.max(1, Math.floor(cell.rowSpan || 1));
+      if (columnIndex + colSpan > 256 || rowSpan > 2048 || (expandedCells += colSpan) > 65536) {
+        throw new Error("PPTX table cell limit exceeded");
+      }
 
       while (expandedRow.length < columnIndex + colSpan) {
         expandedRow.push("");
@@ -485,6 +494,7 @@ function expandPptxTableRows(
     }
   }
 
+  if (expandedRows.length * maxColumns > 65536) throw new Error("PPTX table exceeds cell limit");
   return expandedRows.map((row) => {
     const normalized = [...row];
     while (normalized.length < maxColumns) {

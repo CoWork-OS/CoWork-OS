@@ -47,6 +47,8 @@ export interface AppearanceSettings {
 }
 
 // Tray (Menu Bar) Settings
+export type DesktopNotificationStyle = "system" | "near-dock";
+
 export interface TraySettings {
   enabled: boolean;
   showDockIcon: boolean;
@@ -54,6 +56,7 @@ export interface TraySettings {
   closeToTray: boolean;
   showNotifications: boolean;
   showApprovalSavedNotifications: boolean;
+  notificationStyle?: DesktopNotificationStyle;
 }
 
 // Global memory feature toggles (applies across workspaces)
@@ -9157,6 +9160,7 @@ export const IPC_CHANNELS = {
   LLM_DISCOVER_ATOMIC_CHAT_MODELS: "llm:discoverAtomicChatModels",
   LLM_OPENAI_OAUTH_START: "llm:openaiOAuthStart",
   LLM_OPENAI_OAUTH_LOGOUT: "llm:openaiOAuthLogout",
+  LLM_OPENAI_SIWC_START: "llm:openaiSiwcStart",
   LLM_GET_BEDROCK_MODELS: "llm:getBedrockModels",
   LLM_GET_PROVIDER_MODELS: "llm:getProviderModels",
 
@@ -10147,6 +10151,20 @@ export interface LLMSettingsData {
     authMethod?: "api_key" | "oauth";
     /** ChatGPT plan from the sign-in token ("free", "go", "plus", ...), used for default models. */
     chatgptPlanType?: string;
+    /**
+     * Which ChatGPT sign-in produced the OAuth tokens: "siwc" is the official
+     * Sign in with ChatGPT flow (public Responses API); unset/"codex" is the legacy
+     * Codex-client flow (chatgpt.com backend).
+     */
+    oauthVariant?: "codex" | "siwc";
+    /** Stable opaque SIWC host identifier (`urn:uuid:...`); kept across sign-outs. */
+    siwcHostId?: string;
+    /** Issued SIWC client ID (`oaiapp_...`) bound to `siwcSubject`; kept across sign-outs. */
+    siwcClientId?: string;
+    /** Validated ID-token `sub` for the SIWC registration. */
+    siwcSubject?: string;
+    /** Last SIWC ID token, used only as `id_token_hint` on reauthorization. */
+    siwcIdToken?: string;
   } & Omit<ProviderRoutingSettings, "reasoningEffort">;
   azure?: {
     apiKey?: string;

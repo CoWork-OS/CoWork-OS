@@ -1,5 +1,24 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { CodeExecTools } from "../tools/code-exec-tools";
+import * as adminPolicies from "../../admin/policies";
+
+/** Administrator policy that lets subprocesses use the network. */
+function allowSubprocessNetwork(): void {
+  const policies = adminPolicies.loadPolicies();
+  vi.spyOn(adminPolicies, "loadPolicies").mockReturnValue({
+    ...policies,
+    runtime: {
+      ...policies.runtime,
+      network: {
+        ...policies.runtime.network,
+        allowShellNetwork: true,
+        defaultAction: "allow",
+        allowedDomains: [],
+        blockedDomains: [],
+      },
+    },
+  });
+}
 
 // Mock the sandbox factory so we don't need a real sandbox in tests
 vi.mock("../sandbox/sandbox-factory", () => ({
@@ -36,6 +55,10 @@ const fakeWorkspace = {
 };
 
 describe("CodeExecTools", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("executes shell code and returns stdout", async () => {
     const tools = new CodeExecTools(
       fakeWorkspace as unknown as import("../../../shared/types").Workspace,
@@ -69,9 +92,30 @@ describe("CodeExecTools", () => {
     const tools = new CodeExecTools(
       fakeWorkspace as unknown as import("../../../shared/types").Workspace,
     );
+    // Without a sandbox nothing can keep the code off the network.
     await expect(tools.executeCode({ language: "shell", code: "echo hello" })).rejects.toThrow(
-      /requires an OS-level sandbox/i,
+      /cannot enforce network restrictions without an OS-level sandbox/i,
     );
+  });
+
+  it("rejects networked execution without a sandbox unless the profile is unrestricted", async () => {
+    allowSubprocessNetwork();
+    const { createSandbox } = await import("../sandbox/sandbox-factory");
+    vi.mocked(createSandbox).mockResolvedValueOnce({
+      type: "none",
+      initialize: vi.fn().mockResolvedValue(undefined),
+      execute: vi.fn(),
+      executeCode: vi.fn(),
+      cleanup: vi.fn(),
+    } as never);
+
+    const tools = new CodeExecTools({
+      ...fakeWorkspace,
+      permissions: { ...fakeWorkspace.permissions, network: true },
+    } as unknown as import("../../../shared/types").Workspace);
+    await expect(
+      tools.executeCode({ language: "shell", code: "echo hello", allow_network: true }),
+    ).rejects.toThrow(/requires an OS-level sandbox/i);
   });
 
   it("honors an explicitly unrestricted profile when no sandbox is selected", async () => {
@@ -104,8 +148,14 @@ describe("CodeExecTools", () => {
         unrestrictedFileAccess: true,
       },
     } as unknown as import("../../../shared/types").Workspace;
+    allowSubprocessNetwork();
     const tools = new CodeExecTools(workspace);
-    const result = await tools.executeCode({ language: "shell", code: "echo hello" });
+    // Unsandboxed code always has the network, so it must ask for it.
+    const result = await tools.executeCode({
+      language: "shell",
+      code: "echo hello",
+      allow_network: true,
+    });
 
     expect(result.stdout).toBe("unrestricted");
     expect(createSandbox).toHaveBeenLastCalledWith(workspace, "none");

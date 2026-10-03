@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "security-scan-9f0ff63d",
-    "taskId": "security-scan-9f0ff63d"
+    "incident": "standard-a8cfb79b-20261002",
+    "taskId": "standard-a8cfb79b-20261002"
   },
   "categories": [
     {
@@ -71,6 +71,18 @@
         "expectedFindingFingerprint": "security-scan-9f0ff63d",
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true
+      }
+    },
+    {
+      "id": "standard-a8cfb79b-20261002-confirmed-fix",
+      "prompt": "Regression guard for Enforce browser connection and subprocess policy, revoke stale tunnel authority, and bound document and webhook processing: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "standard-a8cfb79b-20261002",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/security/__tests__/browser-network-proxy.test.ts"
       }
     }
   ],

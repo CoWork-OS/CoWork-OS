@@ -314,6 +314,14 @@ import {
   XAIOAuth,
 } from "../agent/llm";
 import {
+  clearOpenAIOAuthSession,
+  createSiwcHostId,
+  getOpenAISiwcClientId,
+  isSiwcHostId,
+  OpenAISiwcOAuth,
+  revokeStoredSiwcSession,
+} from "../agent/llm/openai-siwc-oauth";
+import {
   createConfiguredJevProvider,
   isJevActiveHarnessEnabled,
   testJevProvider,
@@ -479,6 +487,7 @@ import {
   NotificationOverlayManager,
   NativeNotificationCenter,
 } from "../notifications";
+import { showDesktopNotification } from "../notifications/desktop-delivery";
 import {
   notifyDetectedIntegrationAuthIssue,
   setIntegrationAuthNotificationServiceProvider,
@@ -7409,6 +7418,7 @@ export async function setupIpcHandlers(
     let openaiAccessToken: string | undefined;
     let openaiRefreshToken: string | undefined;
     let openaiTokenExpiresAt: number | undefined;
+    let openaiSiwcClientId: string | undefined;
     if (
       validatedConfig.providerType === "openai" &&
       validatedConfig.openai?.authMethod === "oauth"
@@ -7417,6 +7427,7 @@ export async function setupIpcHandlers(
       openaiAccessToken = settings.openai?.accessToken;
       openaiRefreshToken = settings.openai?.refreshToken;
       openaiTokenExpiresAt = settings.openai?.tokenExpiresAt;
+      openaiSiwcClientId = getOpenAISiwcClientId(settings);
     }
     let xaiAccessToken: string | undefined;
     let xaiRefreshToken: string | undefined;
@@ -7505,6 +7516,14 @@ export async function setupIpcHandlers(
       openaiAccessToken,
       openaiRefreshToken,
       openaiTokenExpiresAt,
+      openaiSiwcClientId,
+      ...(openaiSiwcClientId
+        ? {
+            openaiOAuthTokenUpdater: (
+              tokens: Parameters<NonNullable<LLMProviderConfig["openaiOAuthTokenUpdater"]>>[0],
+            ) => LLMProviderFactory.persistOpenAIOAuthTokens(tokens),
+          }
+        : {}),
       azureApiKey: validatedConfig.azure?.apiKey,
       azureEndpoint: validatedConfig.azure?.endpoint,
       azureDeployment: azureDeployment,
@@ -7952,6 +7971,7 @@ export async function setupIpcHandlers(
             accountId: tokens.accountId,
             email: tokens.email,
             authMethod: "oauth",
+            oauthVariant: "codex",
             chatgptPlanType: tokens.planType,
             // Clear API key when using OAuth
             apiKey: undefined,
@@ -7991,20 +8011,75 @@ export async function setupIpcHandlers(
     // Clear OAuth tokens from settings
     const settings = LLMProviderFactory.loadSettings();
     if (settings.openai) {
-      settings.openai = {
-        ...settings.openai,
-        accessToken: undefined,
-        refreshToken: undefined,
-        tokenExpiresAt: undefined,
-        accountId: undefined,
-        email: undefined,
-        authMethod: undefined,
-      };
-      settings.cachedOpenAIModels = undefined;
-      LLMProviderFactory.saveSettings(settings);
+      await revokeStoredSiwcSession(settings.openai);
+      const latestSettings = LLMProviderFactory.loadSettings();
+      latestSettings.openai = clearOpenAIOAuthSession(latestSettings.openai);
+      latestSettings.cachedOpenAIModels = undefined;
+      LLMProviderFactory.saveSettings(latestSettings);
+      LLMProviderFactory.clearCache();
     }
 
     return { success: true };
+  });
+
+  // Official Sign in with ChatGPT (open-source dynamic client registration).
+  ipcMain.handle(IPC_CHANNELS.LLM_OPENAI_SIWC_START, async () => {
+    checkRateLimit(IPC_CHANNELS.LLM_OPENAI_SIWC_START);
+    logger.info("[IPC] Starting Sign in with ChatGPT...");
+
+    try {
+      const settings = LLMProviderFactory.loadSettings();
+      let hostId = settings.openai?.siwcHostId;
+      if (!isSiwcHostId(hostId)) {
+        // SIWC requires the host ID to be chosen and persisted before first sign-in.
+        hostId = createSiwcHostId();
+        settings.openai = { ...settings.openai, siwcHostId: hostId };
+        LLMProviderFactory.saveSettings(settings);
+      }
+      const savedClientId = settings.openai?.siwcClientId?.trim();
+      const session = await new OpenAISiwcOAuth().authenticate({
+        hostId,
+        registration: savedClientId
+          ? {
+              clientId: savedClientId,
+              subject: settings.openai?.siwcSubject,
+              idToken: settings.openai?.siwcIdToken,
+            }
+          : undefined,
+      });
+
+      const latestSettings = LLMProviderFactory.loadSettings();
+      latestSettings.openai = {
+        ...latestSettings.openai,
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token,
+        tokenExpiresAt: session.expires_at,
+        accountId: undefined,
+        email: session.email,
+        authMethod: "oauth",
+        oauthVariant: "siwc",
+        chatgptPlanType: session.planType,
+        siwcHostId: hostId,
+        siwcClientId: session.clientId,
+        siwcSubject: session.subject,
+        siwcIdToken: session.id_token,
+        // Clear API key when using OAuth
+        apiKey: undefined,
+      };
+      latestSettings.cachedOpenAIModels = undefined;
+      LLMProviderFactory.saveSettings(latestSettings);
+      LLMProviderFactory.clearCache();
+
+      logger.info("[IPC] Sign in with ChatGPT successful");
+      return {
+        success: true,
+        email: session.email,
+        recommendedModel: recommendChatGPTModelForPlan(session.planType),
+      };
+    } catch (error: Any) {
+      logger.error("[IPC] Sign in with ChatGPT failed:", error?.message);
+      return { success: false, error: error?.message || "Sign in with ChatGPT failed" };
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.LLM_XAI_OAUTH_START, async () => {
@@ -11516,7 +11591,7 @@ function setupSecureMcpTunnelHandlers(): void {
       updates,
       "secure MCP tunnel update",
     );
-    const updated = SecureMcpTunnelSettingsManager.updateTunnel(validatedId, validatedUpdates);
+    const updated = await supervisor.updateTunnel(validatedId, validatedUpdates);
     if (!updated) {
       throw new Error("Secure MCP tunnel not found");
     }
@@ -12462,6 +12537,10 @@ function setupNotificationHandlers(): void {
 
   // Clicking a notification brings the main window to focus and opens the task.
   const handleNotificationClick = (_notificationId: string, taskId?: string) => {
+    overlayManager.dismiss(_notificationId);
+    void notificationService
+      ?.markRead(_notificationId)
+      .catch((error) => console.warn("[Notifications] Could not mark notification read:", error));
     const mainWin = getMainWindow();
     if (mainWin && !mainWin.isDestroyed()) {
       if (mainWin.isMinimized()) mainWin.restore();
@@ -12474,21 +12553,36 @@ function setupNotificationHandlers(): void {
   };
   nativeNotificationCenter.setOnClick(handleNotificationClick);
   overlayManager.setOnClick(handleNotificationClick);
+  overlayManager.setOnRead((id) => {
+    void notificationService
+      ?.markRead(id)
+      .catch((error) => console.warn("[Notifications] Could not mark notification read:", error));
+  });
 
-  const shouldShowDesktopNotifications = (): boolean => {
+  const getDesktopSettings = () => {
     try {
       // Import lazily to avoid a startup dependency cycle with tray initialization.
       // oxlint-disable-next-line typescript-eslint(no-require-imports)
       const { trayManager } = require("../tray");
-      return trayManager.getSettings().showNotifications;
+      return trayManager.getSettings();
     } catch {
-      return true;
+      return { showNotifications: true, notificationStyle: "system" as const };
     }
   };
 
   // Initialize notification service with event forwarding to main window
   notificationService = new NotificationService({
     onEvent: (event) => {
+      // Import lazily because tray initialization depends on the notification handlers.
+      // oxlint-disable-next-line typescript-eslint(no-require-imports)
+      const { trayManager } = require("../tray");
+      trayManager.setUnreadNotificationCount(notificationService?.getUnreadCount() ?? 0);
+      if (event.type === "updated" && event.notification?.read)
+        overlayManager.dismiss(event.notification.id);
+      if (event.type === "removed" && event.notification)
+        overlayManager.dismiss(event.notification.id);
+      if (event.type === "cleared" || (event.type === "updated" && event.notifications))
+        overlayManager.dismissAll();
       // Forward notification events to renderer
       // We need to import BrowserWindow from electron to send to all windows
       // oxlint-disable-next-line typescript-eslint(no-require-imports)
@@ -12500,29 +12594,28 @@ function setupNotificationHandlers(): void {
         }
       }
 
-      // Show a native OS notification so macOS can route it through Notification Center.
+      // Deliver exactly one alert through the selected desktop style.
       if (event.type === "added" && event.notification) {
-        if (!shouldShowDesktopNotifications()) {
+        const settings = getDesktopSettings();
+        if (!settings.showNotifications) {
           return;
         }
-        const shownNatively = nativeNotificationCenter.show({
-          id: event.notification.id,
-          title: event.notification.title,
-          message: event.notification.message,
-          type: event.notification.type,
-          taskId: event.notification.taskId,
-        });
-        if (!shownNatively) {
-          overlayManager.show({
+        showDesktopNotification(
+          {
             id: event.notification.id,
             title: event.notification.title,
             message: event.notification.message,
             type: event.notification.type,
             taskId: event.notification.taskId,
-          });
-        }
+          },
+          settings.notificationStyle,
+        );
       }
     },
+  });
+  // Seed the badge from persisted notifications before the first new event.
+  void import("../tray").then(({ trayManager }) => {
+    trayManager.setUnreadNotificationCount(notificationService?.getUnreadCount() ?? 0);
   });
   setIntegrationAuthNotificationServiceProvider(() => notificationService);
   setLogObserver((event) => {

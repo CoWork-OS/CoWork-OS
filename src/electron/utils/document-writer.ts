@@ -1,5 +1,5 @@
+import { loadDocumentArchive, readDocumentArchiveBuffer } from "../security/document-archive";
 import * as fs from "fs/promises";
-import JSZip from "jszip";
 import {
   AlignmentType,
   Document,
@@ -204,12 +204,13 @@ async function patchExistingDocxBlocks(
 
   let buffer: Buffer;
   try {
-    buffer = await fs.readFile(filePath);
-  } catch {
+    buffer = await readDocumentArchiveBuffer(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return false;
   }
 
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await loadDocumentArchive(buffer);
   const documentFile = zip.file("word/document.xml");
   if (!documentFile) {
     throw new Error("Invalid DOCX file: missing word/document.xml");

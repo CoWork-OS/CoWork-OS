@@ -1735,17 +1735,18 @@ export class BrowserTools {
             consentRequired: true,
           };
         }
-        await this.browserService.close();
-        this.browserService = new BrowserService(this.workspace, {
+        const candidate = new BrowserService(this.workspace, {
           headless: true,
           timeout: 90000,
           debuggerUrl: validatedDebuggerUrl,
         });
+        await candidate.init();
+        await this.browserService.close();
+        this.browserService = candidate;
         this.browserState = {
           ...this.browserState,
           debuggerUrl: validatedDebuggerUrl,
         };
-        await this.browserService.init();
         const url = this.browserService.getUrl();
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "attach",

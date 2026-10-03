@@ -40,7 +40,7 @@ vi.mock("../../../admin/policies", () => ({
         defaultAction: "allow",
         allowedDomains: [],
         blockedDomains: [],
-        allowShellNetwork: false,
+        allowShellNetwork: true,
       },
     },
   })),

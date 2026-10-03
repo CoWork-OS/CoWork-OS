@@ -139,7 +139,11 @@ export class TunnelClient extends EventEmitter {
         }
         ws.once("close", () => resolve());
         ws.close(1000, "stopped");
-        setTimeout(resolve, 1000);
+        const timer = setTimeout(() => {
+          ws.terminate();
+          resolve();
+        }, 1000);
+        ws.once("close", () => clearTimeout(timer));
       });
       this.ws = null;
     }
@@ -147,6 +151,7 @@ export class TunnelClient extends EventEmitter {
   }
 
   private async handleRawMessage(raw: string): Promise<void> {
+    if (this.intentionalStop) return;
     let message: TunnelRelayMessage;
     try {
       message = parseTunnelRelayMessage(raw);

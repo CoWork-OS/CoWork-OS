@@ -44,6 +44,39 @@ Its `never` approval policy does not open a consent dialog: an operation that
 needs missing authority is denied. Full access is not a promise that every
 native operation will be allowed.
 
+Connected MCP tools are available to the agent without mentioning MCP, a server
+name, or an exact tool name. Their approval policy is independent of blanket
+external-service consent. In **Settings → Integrations → MCP → Configure**,
+**Tool approvals** supports the same policy choices as Codex:
+
+- **Automatic** (`auto`, the default): annotated read-only calls run silently;
+  other calls run silently in Full access and ask in bounded interactive profiles.
+- **Ask before writes** (`writes`): tools with `annotations.readOnlyHint: true`
+  run silently; other tools ask.
+- **Ask before every call** (`prompt`): every call asks.
+- **Allow without asking** (`approve`): calls run within the remaining hard policy.
+
+Saved server configuration uses `defaultToolsApprovalMode`; `toolApprovals`
+maps raw MCP tool names to per-tool overrides. These settings come from trusted
+local configuration, never model arguments. Missing annotations are treated as
+potential writes, even when a tool name contains “search” or “read”. Disabled
+servers, task restrictions, explicit permission rules, administrator policy,
+network denials, endpoint domain restrictions, and read-only profile ceilings
+still apply. An explicit `prompt` or write approval requirement combined with
+`approval: "never"` denies the call. MCP payment tools retain their separate
+payment consent and limits.
+
+MCP calls execute through the configured server; the local subprocess sandbox
+does not sandbox that server's internals. Configuring a server establishes the
+MCP connection's authority. Network `on-request` does not add a second blanket
+prompt to an already-authorized MCP call, while disabled networking and explicit
+endpoint restrictions remain enforced.
+
+The OpenAI Responses adapter preserves optional MCP arguments by explicitly
+disabling implicit strict-schema normalization. MCP `isError` responses return
+to the model as failed tool results, allowing corrected arguments without
+disabling the tool. Transport failures still use normal failure handling.
+
 ## Ordinary work and exceptions
 
 The default **Ask for approval** profile authorizes file creation, editing, and

@@ -1076,17 +1076,13 @@ export function MemorySettings({
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <button
-                  className="settings-button"
-                  style={{ padding: "4px 10px" }}
+                  className="settings-button small"
                   onClick={handleCleanupRecurringHistory}
                   disabled={cleaningRecurringHistory}
                 >
                   {cleaningRecurringHistory ? "Cleaning..." : "Clean Old Recurring History"}
                 </button>
-                <button
-                  className="settings-button"
-                  style={{ padding: "4px 10px" }}
-                  onClick={() => loadData()}
+                <button className="settings-button small" onClick={() => loadData()}
                 >
                   Refresh
                 </button>
@@ -1436,12 +1432,7 @@ export function MemorySettings({
                     <button
                       className="memory-inline-btn"
                       onClick={() => loadImportedMemories(importedOffset)}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        marginTop: "8px",
-                        textAlign: "center",
-                      }}
+                      style={{ display: "block", marginTop: "8px" }}
                     >
                       Load more...
                     </button>
@@ -1456,7 +1447,6 @@ export function MemorySettings({
                     }
                     style={{
                       display: "block",
-                      width: "100%",
                       marginTop: "8px",
                       opacity: deletingImported ? 0.6 : 1,
                     }}

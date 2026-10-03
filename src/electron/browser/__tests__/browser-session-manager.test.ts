@@ -81,8 +81,14 @@ function refSetup(...body: Parameters<FakePage["mount"]>) {
   page.mount(...body);
   const contents = page.contents();
   const manager = new BrowserSessionManager();
-  manager.registerElectronWorkbenchSession({ taskId: "t", sessionId: "default", webContentsId: 7 });
+  // Install the fake first: registration resolves the session's webContents and
+  // unregisters the session when Electron has none for its id.
   (manager as Any).getWebContents = async () => contents;
+  void manager.registerElectronWorkbenchSession({
+    taskId: "t",
+    sessionId: "default",
+    webContentsId: 7,
+  });
   return { page, manager };
 }
 

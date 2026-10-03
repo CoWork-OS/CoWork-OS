@@ -7,12 +7,14 @@ import type {
   SecureMcpTunnelAuditEvent,
   SecureMcpTunnelConfig,
   SecureMcpTunnelStatus,
+  SecureMcpTunnelUpdateInput,
 } from "./types";
 
 const logger = createLogger("SecureMcpTunnelSupervisor");
 
 export class SecureMcpTunnelSupervisor extends EventEmitter {
   private static instance: SecureMcpTunnelSupervisor | null = null;
+  private lifecycle = new Map<string, Promise<unknown>>();
   private clients = new Map<string, TunnelClient>();
   private statuses = new Map<string, SecureMcpTunnelStatus>();
   private auditEvents: SecureMcpTunnelAuditEvent[] = [];
@@ -38,7 +40,23 @@ export class SecureMcpTunnelSupervisor extends EventEmitter {
     }
   }
 
+  private withTunnelLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.lifecycle.get(id) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(operation);
+    this.lifecycle.set(id, next);
+    void next
+      .finally(() => {
+        if (this.lifecycle.get(id) === next) this.lifecycle.delete(id);
+      })
+      .catch(() => undefined);
+    return next;
+  }
+
   async startTunnel(tunnelId: string): Promise<SecureMcpTunnelStatus> {
+    return this.withTunnelLock(tunnelId, () => this.startTunnelUnlocked(tunnelId));
+  }
+
+  private async startTunnelUnlocked(tunnelId: string): Promise<SecureMcpTunnelStatus> {
     const config = SecureMcpTunnelSettingsManager.getTunnel(tunnelId);
     if (!config) {
       throw new Error("Secure MCP tunnel not found");
@@ -60,6 +78,10 @@ export class SecureMcpTunnelSupervisor extends EventEmitter {
   }
 
   async stopTunnel(tunnelId: string): Promise<SecureMcpTunnelStatus | null> {
+    return this.withTunnelLock(tunnelId, () => this.stopTunnelUnlocked(tunnelId));
+  }
+
+  private async stopTunnelUnlocked(tunnelId: string): Promise<SecureMcpTunnelStatus | null> {
     const client = this.clients.get(tunnelId);
     if (!client) {
       return this.getStatus(tunnelId) || null;
@@ -72,9 +94,21 @@ export class SecureMcpTunnelSupervisor extends EventEmitter {
     return status;
   }
 
+  async updateTunnel(tunnelId: string, updates: SecureMcpTunnelUpdateInput) {
+    return this.withTunnelLock(tunnelId, () => this.updateTunnelUnlocked(tunnelId, updates));
+  }
+
+  private async updateTunnelUnlocked(tunnelId: string, updates: SecureMcpTunnelUpdateInput) {
+    const wasRunning = this.clients.has(tunnelId);
+    // Revoke the old connection before acknowledging or publishing new authority.
+    if (wasRunning) await this.stopTunnelUnlocked(tunnelId);
+    const updated = SecureMcpTunnelSettingsManager.updateTunnel(tunnelId, updates);
+    if (updated && wasRunning && updated.enabled) await this.startTunnelUnlocked(tunnelId);
+    return updated;
+  }
+
   async stopAll(): Promise<void> {
-    await Promise.all(Array.from(this.clients.values()).map((client) => client.stop()));
-    this.clients.clear();
+    await Promise.all(Array.from(this.clients.keys()).map((id) => this.stopTunnel(id)));
     this.emit("status", this.getStatuses());
   }
 

@@ -25,7 +25,7 @@ vi.mock("../../../admin/policies", () => ({
         defaultAction: "allow",
         allowedDomains: [],
         blockedDomains: [],
-        allowShellNetwork: false,
+        allowShellNetwork: true,
       },
     },
   })),
@@ -346,6 +346,7 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     taskIds.push(taskId);
     const workspace = createWorkspace();
     workspace.permissions.accessSandboxMode = "workspace-write";
+    workspace.permissions.network = false;
     const shellTools = new ShellTools(workspace, createDaemon() as unknown as AgentDaemon, taskId);
 
     const started = await shellTools.startBackgroundCommand("npm run dev", {

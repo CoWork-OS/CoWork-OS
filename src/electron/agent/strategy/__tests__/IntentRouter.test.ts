@@ -2,6 +2,48 @@ import { describe, expect, it } from "vitest";
 import { IntentRouter } from "../IntentRouter";
 
 describe("IntentRouter", () => {
+  it.each([
+    "Dayanak kayıtlarında işçinin ücret alacaklarına uygulanacak zamanaşımı süresine ilişkin emsal bir Yargıtay kararı bulabilir misin? Kararın dairesini, esas ve karar numarasını, karar tarihini belirt. İlgili paragrafı kaynak bağlantısıyla aktar ve alıntının kararla eşleştiğini kontrol et.",
+    "İşçinin ücret alacaklarının zamanaşımı konusunda Dayanak kayıtlarından emsal bir Yargıtay kararı araştır. Kararın dairesini, esas ve karar numarasını ve karar tarihini belirt. İlgili paragrafı kaynak bağlantısıyla aktar; esas/karar bilgisini ve alıntıyı karar metniyle karşılaştırarak doğrula.",
+    "Başka bir hizmetin kayıtlarında emsal kararı bulabilir misin?",
+    "Kayıtlarda ilgili kararı arayabilir misin?",
+    "İlgili kaynaklardan alıntıları getirir misin?",
+    "KAYNAKLARDAKİ KARARI BULABİLİR MİSİN?",
+    "Could you find a precedent in the connected records and verify its citation?",
+  ])("routes source retrieval to execution regardless of phrasing: %s", (prompt) => {
+    const route = IntentRouter.route("", prompt);
+    expect(route.intent).toBe("execution");
+    expect(route.domain).toBe("research");
+    expect(route.answerFirst).toBe(false);
+    expect(route.signals).toContain("source-backed-retrieval");
+  });
+
+  it.each([
+    "Podes consultar os registos desse serviço?",
+    "このサービスの記録を確認してもらえますか？",
+    "Bu konuyu açıklar mısın?",
+    "What is photosynthesis?",
+  ])("does not infer terminal advice from punctuation alone: %s", (prompt) => {
+    expect(IntentRouter.route("", prompt).intent).toBe("chat");
+    // Without the question mark a request may route to execution; it must
+    // still never become tool-less advice.
+    expect(IntentRouter.route("", prompt.replace(/[?？]/g, "")).intent).not.toBe("advice");
+  });
+
+  it.each([
+    "How should I find sources for a research project?",
+    "Explain how to search records; do not retrieve anything.",
+    "How should I approach this negotiation?",
+    "What do you recommend for managing my time?",
+    "What is the search_yargitay tool?",
+  ])("does not mark procedural explanations as source retrieval: %s", (prompt) => {
+    expect(IntentRouter.route("", prompt).signals).not.toContain("source-backed-retrieval");
+  });
+
+  it("preserves the direct advice path for an ordinary advice question", () => {
+    expect(IntentRouter.route("", "How should I approach this negotiation?").intent).toBe("advice");
+  });
+
   it("ignores AGENT_STRATEGY_CONTEXT blocks when scoring intent", () => {
     const rawPrompt = "hello";
     const decoratedPrompt = `${rawPrompt}

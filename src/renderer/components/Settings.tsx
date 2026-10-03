@@ -1634,6 +1634,8 @@ export function Settings({
   }, [openaiReasoningEffort, openaiReasoningEffortOptions]);
   const [openaiTextVerbosity, setOpenaiTextVerbosity] = useState<LLMTextVerbosity>("medium");
   const [openaiOAuthConnected, setOpenaiOAuthConnected] = useState(false);
+  const [openaiOAuthVariant, setOpenaiOAuthVariant] = useState<"codex" | "siwc">("codex");
+  const [openaiSiwcLoading, setOpenaiSiwcLoading] = useState(false);
   const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
   const [browserSignIn, setBrowserSignIn] = useState<BrowserProviderSignIn | null>(null);
   const [browserCallbackUrl, setBrowserCallbackUrl] = useState("");
@@ -2864,6 +2866,7 @@ export function Settings({
         setOpenaiAuthMethod(loadedSettings.openai.authMethod);
         // If authMethod is 'oauth', check if tokens are available
         if (loadedSettings.openai.authMethod === "oauth") {
+          setOpenaiOAuthVariant(loadedSettings.openai.oauthVariant === "siwc" ? "siwc" : "codex");
           if (!loadedSettings.openai.model) {
             setOpenaiModel(recommendChatGPTModelForPlan(loadedSettings.openai.chatgptPlanType));
           }
@@ -3585,6 +3588,7 @@ export function Settings({
       const result = await window.electronAPI.openaiOAuthStart();
       if (result.success) {
         setOpenaiOAuthConnected(true);
+        setOpenaiOAuthVariant("codex");
         setOpenaiAuthMethod("oauth");
         setOpenaiApiKey(""); // Clear API key when using OAuth
         if (!openaiModel || openaiModel === "gpt-4o-mini") {
@@ -3683,6 +3687,31 @@ export function Settings({
 
   const handleHfStopServer = () => handleLocalAIServerStop();
   const handleMlxStopServer = () => handleLocalAIServerStop();
+
+  const handleOpenAISiwcLogin = async () => {
+    try {
+      setOpenaiSiwcLoading(true);
+      setTestResult(null);
+      const result = await window.electronAPI.openaiSiwcStart();
+      if (result.success) {
+        setOpenaiOAuthConnected(true);
+        setOpenaiOAuthVariant("siwc");
+        setOpenaiAuthMethod("oauth");
+        setOpenaiApiKey(""); // Clear API key when using OAuth
+        if (!openaiModel || openaiModel === "gpt-4o-mini") {
+          setOpenaiModel(result.recommendedModel || "gpt-6-astra");
+        }
+        onSettingsChanged?.();
+        loadOpenAIModels();
+      } else {
+        setTestResult({ success: false, error: result.error || "Sign in with ChatGPT failed" });
+      }
+    } catch (error: Any) {
+      setTestResult({ success: false, error: error.message || "Sign in with ChatGPT failed" });
+    } finally {
+      setOpenaiSiwcLoading(false);
+    }
+  };
 
   const handleOpenAIOAuthLogout = async () => {
     try {
@@ -4771,7 +4800,7 @@ export function Settings({
               Clear saved TypeSafe key
             </button>
           )}
-          <label className="settings-label" style={{ marginTop: "10px" }}>
+          <label className="settings-label settings-label--spaced">
             TypeSafe base URL
           </label>
           <input
@@ -4780,7 +4809,7 @@ export function Settings({
             value={jevTypesafeBaseUrl}
             onChange={(event) => setJevTypesafeBaseUrl(event.target.value)}
           />
-          <label className="settings-label" style={{ marginTop: "10px" }}>
+          <label className="settings-label settings-label--spaced">
             Jev model
           </label>
           <input
@@ -4814,7 +4843,7 @@ export function Settings({
           <p className="settings-hint">
             Disable this only if you already have a separate legacy Jev key saved.
           </p>
-          <label className="settings-label" style={{ marginTop: "10px" }}>
+          <label className="settings-label settings-label--spaced">
             OpenRouter base URL
           </label>
           <input
@@ -4823,7 +4852,7 @@ export function Settings({
             value={jevOpenRouterBaseUrl}
             onChange={(event) => setJevOpenRouterBaseUrl(event.target.value)}
           />
-          <label className="settings-label" style={{ marginTop: "10px" }}>
+          <label className="settings-label settings-label--spaced">
             Jev model
           </label>
           <input
@@ -5054,7 +5083,7 @@ export function Settings({
 
   const renderImageTimeoutField = (value: string, onChange: (value: string) => void) => (
     <>
-      <label className="settings-label" style={{ marginTop: "8px" }}>
+      <label className="settings-label settings-label--spaced">
         Timeout before fallback (seconds)
       </label>
       <input
@@ -5204,7 +5233,7 @@ export function Settings({
               value={imageAzureApiKey}
               onChange={(e) => setImageAzureApiKey(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Endpoint (image-specific, optional)
             </label>
             <input
@@ -5214,7 +5243,7 @@ export function Settings({
               value={imageAzureEndpoint}
               onChange={(e) => setImageAzureEndpoint(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Image deployment name
             </label>
             <input
@@ -5231,7 +5260,7 @@ export function Settings({
                 );
               }}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               API version
             </label>
             <input
@@ -5290,7 +5319,7 @@ export function Settings({
               value={imageOpenRouterApiKey}
               onChange={(e) => setImageOpenRouterApiKey(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Base URL
             </label>
             <input
@@ -5395,7 +5424,7 @@ export function Settings({
           </select>
           {imageGenBackupProvider && (
             <>
-              <label className="settings-label" style={{ marginTop: "8px" }}>
+              <label className="settings-label settings-label--spaced">
                 Fallback model
               </label>
               <select
@@ -5462,7 +5491,7 @@ export function Settings({
               <option value="sora-2">sora-2</option>
               <option value="sora-2-pro">sora-2-pro</option>
             </select>
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default duration (seconds)
             </label>
             <input
@@ -5473,7 +5502,7 @@ export function Settings({
               value={videoOpenAIDuration}
               onChange={(e) => setVideoOpenAIDuration(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default aspect ratio
             </label>
             <select
@@ -5485,7 +5514,7 @@ export function Settings({
               <option value="9:16">9:16 (portrait)</option>
               <option value="1:1">1:1 (square)</option>
             </select>
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default resolution
             </label>
             <select
@@ -5515,7 +5544,7 @@ export function Settings({
               value={videoAzureApiKey}
               onChange={(e) => setVideoAzureApiKey(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Endpoint (video-specific, optional)
             </label>
             <input
@@ -5525,7 +5554,7 @@ export function Settings({
               value={videoAzureEndpoint}
               onChange={(e) => setVideoAzureEndpoint(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Sora deployment name
             </label>
             <input
@@ -5535,7 +5564,7 @@ export function Settings({
               value={videoAzureDeployment}
               onChange={(e) => setVideoAzureDeployment(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               API version
             </label>
             <input
@@ -5545,7 +5574,7 @@ export function Settings({
               value={videoAzureApiVersion}
               onChange={(e) => setVideoAzureApiVersion(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default duration (seconds)
             </label>
             <input
@@ -5556,7 +5585,7 @@ export function Settings({
               value={videoAzureDuration}
               onChange={(e) => setVideoAzureDuration(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default aspect ratio
             </label>
             <select
@@ -5592,7 +5621,7 @@ export function Settings({
               <option value="veo-3.1-fast-preview">Veo 3.1 Fast Preview</option>
               <option value="veo-3.0">Veo 3.0</option>
             </select>
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default duration (seconds)
             </label>
             <input
@@ -5603,7 +5632,7 @@ export function Settings({
               value={videoGeminiDuration}
               onChange={(e) => setVideoGeminiDuration(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default aspect ratio
             </label>
             <select
@@ -5634,7 +5663,7 @@ export function Settings({
               <option value="veo-3">Veo 3</option>
               <option value="veo-3.1">Veo 3.1</option>
             </select>
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               GCP Project ID
             </label>
             <input
@@ -5644,7 +5673,7 @@ export function Settings({
               value={videoVertexProjectId}
               onChange={(e) => setVideoVertexProjectId(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Location
             </label>
             <input
@@ -5654,7 +5683,7 @@ export function Settings({
               value={videoVertexLocation}
               onChange={(e) => setVideoVertexLocation(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Output GCS URI (optional)
             </label>
             <input
@@ -5664,7 +5693,7 @@ export function Settings({
               value={videoVertexOutputGcsUri}
               onChange={(e) => setVideoVertexOutputGcsUri(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Access Token
             </label>
             <p
@@ -5684,7 +5713,7 @@ export function Settings({
               value={videoVertexAccessToken}
               onChange={(e) => setVideoVertexAccessToken(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default duration (seconds)
             </label>
             <input
@@ -5695,7 +5724,7 @@ export function Settings({
               value={videoVertexDuration}
               onChange={(e) => setVideoVertexDuration(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default aspect ratio
             </label>
             <select
@@ -5724,7 +5753,7 @@ export function Settings({
               value={videoKlingApiKey}
               onChange={(e) => setVideoKlingApiKey(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Base URL
             </label>
             <input
@@ -5734,7 +5763,7 @@ export function Settings({
               value={videoKlingBaseUrl}
               onChange={(e) => setVideoKlingBaseUrl(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Model
             </label>
             <input
@@ -5744,7 +5773,7 @@ export function Settings({
               value={videoKlingModel}
               onChange={(e) => setVideoKlingModel(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default duration (seconds)
             </label>
             <input
@@ -5755,7 +5784,7 @@ export function Settings({
               value={videoKlingDuration}
               onChange={(e) => setVideoKlingDuration(e.target.value)}
             />
-            <label className="settings-label" style={{ marginTop: "8px" }}>
+            <label className="settings-label settings-label--spaced">
               Default aspect ratio
             </label>
             <select
@@ -5868,7 +5897,7 @@ export function Settings({
             )}
           </div>
         </div>
-        <label className="settings-label" style={{ marginTop: "10px" }}>
+        <label className="settings-label settings-label--spaced">
           Role instruction
         </label>
         <textarea
@@ -5990,8 +6019,7 @@ export function Settings({
           return (
             <button
               type="button"
-              className="button-small button-secondary"
-              style={{ alignSelf: "flex-start", marginTop: "8px" }}
+              className="button-small button-secondary llm-provider-more-button"
               onClick={() => setShowAllProviders((value) => !value)}
               aria-expanded={showAllProviders}
             >
@@ -6297,7 +6325,9 @@ export function Settings({
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
-                  Sign in with ChatGPT (unofficial)
+                  {hasHostMethods("openaiSiwcStart")
+                    ? "Sign in with ChatGPT"
+                    : "Sign in with ChatGPT (unofficial)"}
                 </button>
                 <button
                   className={`auth-method-tab ${openaiAuthMethod === "api_key" ? "active" : ""}`}
@@ -6337,14 +6367,29 @@ export function Settings({
                       </svg>
                       <span>Connected to ChatGPT</span>
                     </div>
-                    <p className="settings-description">
-                      Your ChatGPT account is connected. You can use Codex GPT models with your
-                      subscription.
-                    </p>
-                    <p className="settings-hint">
-                      Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it
-                      may stop working at any time. An OpenAI API key is the supported route.
-                    </p>
+                    {openaiOAuthVariant === "siwc" ? (
+                      <>
+                        <p className="settings-description">
+                          Connected with Sign in with ChatGPT. Requests use the usage included in
+                          your ChatGPT plan.
+                        </p>
+                        <p className="settings-hint">
+                          You can set a weekly CoWork OS usage cap or revoke access in ChatGPT
+                          settings. Image generation is not available with this sign-in.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="settings-description">
+                          Your ChatGPT account is connected. You can use Codex GPT models with your
+                          subscription.
+                        </p>
+                        <p className="settings-hint">
+                          Legacy Codex sign-in: this unofficial route may stop working at any time.
+                          Disconnect and use Sign in with ChatGPT instead.
+                        </p>
+                      </>
+                    )}
                     <button
                       className="button-small button-secondary"
                       onClick={handleOpenAIOAuthLogout}
@@ -6360,19 +6405,49 @@ export function Settings({
                   </div>
                 ) : (
                   <div className="oauth-login">
-                    <p className="settings-description">
-                      Sign in with your ChatGPT account to use Codex GPT models with your
-                      subscription.
-                    </p>
-                    <p className="settings-hint">
-                      Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it
-                      may stop working at any time. An OpenAI API key is the supported route.
-                    </p>
+                    {hasHostMethods("openaiSiwcStart") ? (
+                      <>
+                        <p className="settings-description">
+                          Sign in with your ChatGPT account to use the usage included in your
+                          ChatGPT Plus or Pro plan. No API key needed.
+                        </p>
+                        <button
+                          className="button-primary oauth-login-btn"
+                          onClick={handleOpenAISiwcLogin}
+                          disabled={openaiSiwcLoading || openaiOAuthLoading}
+                        >
+                          {openaiSiwcLoading
+                            ? "Waiting for ChatGPT sign-in..."
+                            : "Sign in with ChatGPT"}
+                        </button>
+                        <p className="settings-hint">
+                          Legacy option: the unofficial Codex sign-in below may stop working at any
+                          time.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="settings-description">
+                          Sign in with your ChatGPT account to use Codex GPT models with your
+                          subscription.
+                        </p>
+                        <p className="settings-hint">
+                          Unofficial: OpenAI does not support this ChatGPT sign-in in third-party
+                          apps, so it may stop working at any time. An OpenAI API key is the
+                          supported route.
+                        </p>
+                      </>
+                    )}
                     <button
-                      className="button-primary oauth-login-btn"
+                      className={
+                        hasHostMethods("openaiSiwcStart")
+                          ? "button-small button-secondary"
+                          : "button-primary oauth-login-btn"
+                      }
                       onClick={handleOpenAIOAuthLogin}
                       disabled={
                         openaiOAuthLoading ||
+                        openaiSiwcLoading ||
                         browserSignIn?.state === "pending" ||
                         (!browserAuthAvailable && !hasHostMethods("openaiOAuthStart"))
                       }
@@ -6411,7 +6486,9 @@ export function Settings({
                             <polyline points="10 17 15 12 10 7" />
                             <line x1="15" y1="12" x2="3" y2="12" />
                           </svg>
-                          Sign in with ChatGPT
+                          {hasHostMethods("openaiSiwcStart")
+                            ? "Use legacy Codex sign-in"
+                            : "Sign in with ChatGPT"}
                         </>
                       )}
                     </button>
@@ -6535,41 +6612,46 @@ export function Settings({
             <div className="settings-section">
               <h3>Model</h3>
               <p className="settings-description">
-                {openaiAuthMethod === "oauth" && openaiOAuthConnected
-                  ? "Select a GPT model to use with your ChatGPT subscription."
+                {openaiAuthMethod === "oauth"
+                  ? openaiOAuthConnected
+                    ? openaiOAuthVariant === "siwc"
+                      ? 'Select a model included with your ChatGPT plan. Click "Refresh Models" to reload the list from OpenAI.'
+                      : "Select a GPT model to use with your ChatGPT subscription."
+                    : "Sign in with ChatGPT above to load the models included in your plan."
                   : 'Select a GPT model. Enter your API key and click "Refresh Models" to load available models.'}
               </p>
-              {openaiModels.length > 0 ? (
-                <SearchableSelect
-                  options={openaiModels.map((model) => ({
-                    value: model.id,
-                    label: model.name,
-                    description: model.description,
-                  }))}
-                  value={openaiModel}
-                  onChange={setOpenaiModel}
-                  placeholder="Select a model..."
-                  allowCustomValue
-                />
-              ) : (
-                <input
-                  type="text"
-                  className="settings-input"
-                  placeholder="gpt-6-astra"
-                  value={openaiModel}
-                  onChange={(e) => setOpenaiModel(e.target.value)}
-                />
-              )}
-              {openaiAuthMethod === "oauth" && openaiOAuthConnected && (
-                <button
-                  className="button-small button-secondary"
-                  onClick={() => loadOpenAIModels()}
-                  disabled={loadingOpenAIModels}
-                  style={{ marginTop: "8px" }}
-                >
-                  {loadingOpenAIModels ? "Loading..." : "Refresh Models"}
-                </button>
-              )}
+              <div className="openai-model-picker">
+                {openaiModels.length > 0 ? (
+                  <SearchableSelect
+                    options={openaiModels.map((model) => ({
+                      value: model.id,
+                      label: model.name,
+                      description: model.description,
+                    }))}
+                    value={openaiModel}
+                    onChange={setOpenaiModel}
+                    placeholder="Select a model..."
+                    allowCustomValue
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="gpt-6-astra"
+                    value={openaiModel}
+                    onChange={(e) => setOpenaiModel(e.target.value)}
+                  />
+                )}
+                {openaiAuthMethod === "oauth" && openaiOAuthConnected && (
+                  <button
+                    className="button-small button-secondary"
+                    onClick={() => loadOpenAIModels()}
+                    disabled={loadingOpenAIModels}
+                  >
+                    {loadingOpenAIModels ? "Loading..." : "Refresh Models"}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="settings-section openai-request-controls">
@@ -7454,7 +7536,7 @@ export function Settings({
                   }
                 />
 
-                <label className="settings-label" style={{ marginTop: "10px" }}>
+                <label className="settings-label settings-label--spaced">
                   Description
                 </label>
                 <input
@@ -7930,7 +8012,7 @@ export function Settings({
                           via llama-server.{" "}
                           {hfStatus?.mlxInstalled === "ok" ? (
                             <>
-                              <span style={{ color: "#8b5cf6" }}>MLX</span> runs natively on Apple
+                              <span style={{ color: "var(--color-accent)" }}>MLX</span> runs natively on Apple
                               Silicon via mlx_lm — fastest on your M-series Mac.
                             </>
                           ) : hfStatus?.isAppleSilicon ? (
@@ -7963,8 +8045,8 @@ export function Settings({
                               marginBottom: "8px",
                               padding: "7px 10px",
                               borderRadius: "6px",
-                              background: "rgba(139,92,246,0.08)",
-                              border: "1px solid rgba(139,92,246,0.25)",
+                              background: "var(--color-accent-subtle)",
+                              border: "1px solid var(--color-border)",
                             }}
                           >
                             <span style={{ fontSize: "12px" }}>
@@ -8037,7 +8119,7 @@ export function Settings({
                                   background: m.hasGguf
                                     ? "var(--color-success, #16a34a)"
                                     : m.runtime === "MLX" && hfStatus?.mlxInstalled === "ok"
-                                      ? "#8b5cf6"
+                                      ? "var(--color-accent)"
                                       : "var(--color-text-muted, #888)",
                                   color: "#fff",
                                   flexShrink: 0,
@@ -8104,7 +8186,7 @@ export function Settings({
                                 style={{
                                   fontSize: "10px",
                                   fontWeight: 600,
-                                  color: "#8b5cf6",
+                                  color: "var(--color-accent)",
                                   marginRight: "6px",
                                 }}
                               >
@@ -8127,12 +8209,7 @@ export function Settings({
                                 <button
                                   key={spec}
                                   className="button-small button-secondary"
-                                  style={{
-                                    fontSize: "11px",
-                                    marginRight: "4px",
-                                    borderColor: "#8b5cf6",
-                                    color: "#8b5cf6",
-                                  }}
+                                  style={{ marginRight: "4px" }}
                                   onClick={() => {
                                     const input = document.getElementById(
                                       "hf-model-input",
@@ -8173,7 +8250,7 @@ export function Settings({
                               <button
                                 key={spec}
                                 className="button-small button-secondary"
-                                style={{ fontSize: "11px", marginRight: "4px" }}
+                                style={{ marginRight: "4px" }}
                                 onClick={() => {
                                   const input = document.getElementById(
                                     "hf-model-input",
@@ -8198,7 +8275,7 @@ export function Settings({
                       <input
                         id="hf-model-input"
                         className="settings-input"
-                        style={{ flex: 1, fontSize: "12px" }}
+                        style={{ flex: 1 }}
                         defaultValue={hfHardwareOutput.models[0] ?? ""}
                         placeholder="e.g. unsloth/Qwen3-4B-GGUF:Q4_K_M"
                       />
@@ -8362,13 +8439,8 @@ export function Settings({
                   <button
                     key={model}
                     type="button"
-                    className="button-small button-secondary"
-                    style={{
-                      borderColor: "#8b5cf6",
-                      color: "#8b5cf6",
-                      background:
-                        selectedCustomConfig.model === model ? "rgba(139,92,246,0.12)" : undefined,
-                    }}
+                    className={`button-small button-secondary ${selectedCustomConfig.model === model ? "is-selected" : ""}`}
+                    aria-pressed={selectedCustomConfig.model === model}
                     onClick={() => updateCustomProvider("mlx", { model })}
                   >
                     {label}

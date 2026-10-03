@@ -52,6 +52,7 @@ export class MCPClientManager extends EventEmitter {
   private toolServerMap: Map<string, string> = new Map(); // tool name -> server id
   private toolCatalogSnapshot: { version: number; tools: MCPTool[] } = { version: 0, tools: [] };
   private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
   private isInitializing = false; // Flag to batch operations during startup
   private rebuildToolMapDebounceTimer: NodeJS.Timeout | null = null;
   private desiredTriggerResourceSubscriptions: Map<string, Set<string>> = new Map();
@@ -88,7 +89,18 @@ export class MCPClientManager extends EventEmitter {
     if (this.initialized) {
       return;
     }
+    if (this.initializationPromise) return this.initializationPromise;
+    this.initializationPromise = this.initializeConnections();
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
+      this.isInitializing = false;
+      MCPSettingsManager.endBatch();
+    }
+  }
 
+  private async initializeConnections(): Promise<void> {
     logger.info("Initializing...");
     this.isInitializing = true;
 
@@ -157,9 +169,6 @@ export class MCPClientManager extends EventEmitter {
 
     // Rebuild tool map once after all connections are established
     this.rebuildToolMapImmediate();
-
-    // End batch mode - this will save settings once if any changes were made
-    MCPSettingsManager.endBatch();
 
     logger.info("Initialized");
   }

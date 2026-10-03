@@ -298,7 +298,7 @@ export class CanvasManager {
     };
     registerCanvasProtocol(electronSession.protocol, sessionId);
     electronSession.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) =>
-      callback({ cancel: !allowed(details.url) }),
+      callback({ cancel: /^wss?:/.test(details.url) || !allowed(details.url) }),
     );
     // Chromium's independent DNS lookup cannot be used after validation. Route all
     // HTTP(S) resources through the same pinned transport as the HTTP tools.
@@ -317,12 +317,16 @@ export class CanvasManager {
                   request.signal,
                 ),
               );
-          const response = await pinnedFetch(request.url, {
-            method: request.method,
-            headers: request.headers,
-            body,
-            signal: request.signal,
-          });
+          const response = await pinnedFetch(
+            request.url,
+            {
+              method: request.method,
+              headers: request.headers,
+              body,
+              signal: request.signal,
+            },
+            true,
+          );
           const location = response.headers.get("location");
           if (location && [301, 302, 303, 307, 308].includes(response.status)) {
             this.extendGrantForRedirect(sessionId, request.url, location);

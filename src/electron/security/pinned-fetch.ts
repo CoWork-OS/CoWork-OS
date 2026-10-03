@@ -3,6 +3,8 @@ import { Agent as HttpsAgent } from "https";
 import { promises as dns } from "dns";
 import { isIP } from "net";
 import { Readable } from "stream";
+import { loadPolicies } from "../admin/policies";
+import { domainMatches } from "./network-policy";
 import { fetch as nodeFetch } from "node-fetch/node";
 import {
   assertResolvedHostAllowed,
@@ -42,8 +44,7 @@ function getPinnedAgent(endpoint: URL, hostname: string, addresses: PinnedAddres
     keepAlive: true,
     // Return every validated address so Node can fall back between families.
     lookup: (_hostname, options, callback) => {
-      const family =
-        options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
+      const family = options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
       const matching = family ? addresses.filter((entry) => entry.family === family) : [];
       const candidates = matching.length ? matching : addresses;
       if (options.all) callback(null, candidates);
@@ -76,39 +77,47 @@ async function resolveAddresses(hostname: string, signal?: AbortSignal) {
 }
 
 /** Bind the DNS validation to the socket lookup, preserving Host and TLS SNI. */
-export async function pinnedFetch(url: string, init: RequestInit): Promise<Response> {
+export async function pinnedFetch(
+  url: string,
+  init: RequestInit,
+  requirePinnedDestination = false,
+): Promise<Response> {
   const endpoint = new URL(url);
   if (!["http:", "https:"].includes(endpoint.protocol))
     throw new Error("Only HTTP and HTTPS URLs are supported");
   const hostname = normalizeHostname(endpoint.hostname);
-  if (isBlockedInternalHost(hostname, true))
+  const explicitlyAllowedInternal = (
+    loadPolicies().runtime.network.allowedInternalHosts ?? []
+  ).some((pattern) => domainMatches(hostname, pattern));
+  if (!explicitlyAllowedInternal && isBlockedInternalHost(hostname, true))
     throw new Error(`Refusing to connect to internal host ${hostname}`);
   if (usesEnvProxy(endpoint)) {
+    if (requirePinnedDestination)
+      throw new Error(
+        "Browser requests require destination pinning; environment proxies are unsupported",
+      );
     // The proxy resolves and connects, so pinning a local lookup cannot apply.
     // Keep the global (EnvHttpProxyAgent) transport and its lenient DNS check.
     await assertResolvedHostAllowed(hostname);
     init.signal?.throwIfAborted();
     return fetch(url, { ...init, redirect: "manual" });
   }
-  const addresses: PinnedAddress[] = isIP(hostname)
-    ? [{ address: hostname, family: isIP(hostname) }]
-    : await resolveAddresses(hostname, init.signal || undefined);
-  init.signal?.throwIfAborted();
-  if (!addresses.length || addresses.some(({ address }) => isBlockedInternalHost(address, true))) {
-    throw new Error(
-      `Refusing to connect to ${hostname}: it resolves to an internal or missing address`,
-    );
-  }
+  const addresses = await resolvePinnedAddresses(url, init.signal || undefined);
   const agent = getPinnedAgent(endpoint, hostname, addresses);
   // The existing node-fetch alias's /node entry always uses the Node transport,
   // which supports a custom Agent. Native global fetch would ignore this option.
   const response = await nodeFetch(url, { ...init, redirect: "manual", agent } as RequestInit);
   const body = response.body as unknown as Readable | null;
-  const noBody =
-    init.method?.toUpperCase() === "HEAD" || [204, 205, 304].includes(response.status);
+  const noBody = init.method?.toUpperCase() === "HEAD" || [204, 205, 304].includes(response.status);
   if (noBody) body?.destroy();
   const headers = new Headers();
-  response.headers.forEach((value, key) => headers.append(key, value));
+  response.headers.forEach((value, key) => {
+    if (key.toLowerCase() !== "set-cookie") headers.append(key, value);
+  });
+  for (const cookie of (response.headers as unknown as { raw(): Record<string, string[]> }).raw()[
+    "set-cookie"
+  ] ?? [])
+    headers.append("set-cookie", cookie);
   return new Response(
     body && !noBody ? (Readable.toWeb(body) as ReadableStream<Uint8Array>) : null,
     {
@@ -117,4 +126,31 @@ export async function pinnedFetch(url: string, init: RequestInit): Promise<Respo
       headers,
     },
   );
+}
+
+/** Validate once and return only addresses the connection is allowed to use. */
+export async function resolvePinnedAddresses(
+  url: string,
+  signal?: AbortSignal,
+): Promise<PinnedAddress[]> {
+  const endpoint = new URL(url);
+  const hostname = normalizeHostname(endpoint.hostname);
+  const explicitlyAllowedInternal = (
+    loadPolicies().runtime.network.allowedInternalHosts ?? []
+  ).some((pattern) => domainMatches(hostname, pattern));
+  if (usesEnvProxy(endpoint))
+    throw new Error("Destination pinning is unavailable with environment proxies");
+  if (!explicitlyAllowedInternal && isBlockedInternalHost(hostname, true))
+    throw new Error("Internal destination refused");
+  const addresses: PinnedAddress[] = isIP(hostname)
+    ? [{ address: hostname, family: isIP(hostname) }]
+    : await resolveAddresses(hostname, signal);
+  signal?.throwIfAborted();
+  if (
+    !addresses.length ||
+    (!explicitlyAllowedInternal &&
+      addresses.some(({ address }) => isBlockedInternalHost(address, true)))
+  )
+    throw new Error("Destination resolves to an internal or missing address");
+  return addresses;
 }

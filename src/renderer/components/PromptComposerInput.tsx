@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -494,6 +495,24 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       const nextHeight = Math.min(root.scrollHeight, 200);
       root.style.height = `${Math.max(24, nextHeight)}px`;
     }, []);
+
+    // A resize pass that runs while the editor has no layout width (mounted
+    // hidden, mid view switch, before fonts settle) measures one line and the
+    // height sticks until the value changes again. Re-measure whenever the
+    // editor's width changes; height-only changes come from resize itself.
+    useEffect(() => {
+      const root = rootRef.current;
+      if (!root || typeof ResizeObserver === "undefined") return;
+      let lastWidth = root.clientWidth;
+      const observer = new ResizeObserver(() => {
+        const width = root.clientWidth;
+        if (width === lastWidth) return;
+        lastWidth = width;
+        resize();
+      });
+      observer.observe(root);
+      return () => observer.disconnect();
+    }, [resize]);
 
     const applySelection = useCallback(
       (start: number, end: number) => {

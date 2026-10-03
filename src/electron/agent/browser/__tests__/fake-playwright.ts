@@ -138,6 +138,13 @@ export class FakeContext extends EventEmitter {
   async route(_pattern: string, handler: FakeRouteHandler): Promise<void> {
     this.routes.push(handler);
   }
+  webSocketRoutes: unknown[] = [];
+  async routeWebSocket(_pattern: string, handler: unknown): Promise<void> {
+    this.webSocketRoutes.push(handler);
+  }
+  serviceWorkers(): unknown[] {
+    return [];
+  }
   async close(): Promise<void> {
     this.closed = true;
   }

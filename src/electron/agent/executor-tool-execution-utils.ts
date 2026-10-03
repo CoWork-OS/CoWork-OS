@@ -1193,6 +1193,13 @@ export function recordToolFailureOutcome(opts: {
   isHardFailure: boolean;
   failureCount: number;
 } {
+  if (opts.result?.source === "mcp" && opts.result?.isError === true) {
+    return {
+      shouldDisable: false,
+      isHardFailure: false,
+      failureCount: opts.persistentToolFailures.get(opts.toolName) || 0,
+    };
+  }
   const shouldDisable = opts.recordFailure(opts.toolName, opts.failureReason);
   const isHardFailure = opts.isHardToolFailure(opts.toolName, opts.result, opts.failureReason);
   const previousCount = opts.persistentToolFailures.get(opts.toolName) || 0;
@@ -1277,6 +1284,7 @@ export function getToolInputValidationError(toolName: string, input: Any): strin
 }
 
 export function isHardToolFailure(toolName: string, result: Any, failureReason = ""): boolean {
+  if (result?.source === "mcp" && result?.isError === true) return false;
   if (!result || result.success !== false) {
     return false;
   }

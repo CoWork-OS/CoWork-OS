@@ -57,9 +57,10 @@ describe("BrowserService headless tabs", () => {
       openerTabId: "tab-1",
     });
     expect(service.getUrl()).toBe("https://accounts.example.com/oauth");
-    const popup = context.pagesList[1];
-    expect(popup.routes).toHaveLength(1);
-    expect(await routeRequest(popup.routes[0], "https://blocked.example/")).toBe("aborted");
+    // The popup is covered by the context route; it needs no page route of its own.
+    expect(context.pagesList[1].routes).toHaveLength(0);
+    expect(context.routes).toHaveLength(1);
+    expect(await routeRequest(context.routes[0], "https://blocked.example/")).toBe("aborted");
 
     const tabs = await service.listTabs();
     expect(tabs.map((tab) => [tab.tabId, tab.active])).toEqual([

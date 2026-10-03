@@ -1,4 +1,4 @@
-import JSZip from "jszip";
+import { loadDocumentArchive } from "../security/document-archive";
 
 export type DocxBlockKind = "heading" | "paragraph" | "table";
 
@@ -118,7 +118,7 @@ export function parseDocxBlocksFromXml(xmlContent: string): ParsedDocxBlock[] {
 }
 
 export async function parseDocxBlocksFromBuffer(buffer: Buffer): Promise<ParsedDocxBlock[]> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await loadDocumentArchive(buffer);
   const documentXml = zip.file("word/document.xml");
   if (!documentXml) {
     throw new Error("Invalid DOCX file: missing word/document.xml");

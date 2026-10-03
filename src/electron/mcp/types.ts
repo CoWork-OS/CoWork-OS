@@ -8,6 +8,8 @@
 // Transport types supported by MCP
 export type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
 
+export type MCPToolApprovalMode = "auto" | "prompt" | "writes" | "approve";
+
 // Connection status for MCP servers
 export type MCPConnectionStatus =
   | "disconnected"
@@ -62,6 +64,10 @@ export interface MCPServerConfig {
   connectionTimeout?: number; // Default: 30000
   requestTimeout?: number; // Default: 60000
 
+  // User-configured approval policy, separate from server-provided annotations.
+  defaultToolsApprovalMode?: MCPToolApprovalMode;
+  toolApprovals?: Record<string, MCPToolApprovalMode>;
+
   // Metadata
   version?: string;
   author?: string;
@@ -82,6 +88,13 @@ export interface MCPServerConfig {
 export interface MCPTool {
   name: string;
   description?: string;
+  annotations?: {
+    title?: string;
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
   inputSchema: {
     type: "object";
     properties?: Record<string, MCPToolProperty>;

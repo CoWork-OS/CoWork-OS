@@ -7,6 +7,10 @@ import http from "http";
 import { URL } from "url";
 import crypto from "crypto";
 import type { CronRunResult } from "./types";
+import {
+  readLimitedBody,
+  WebhookBodyTooLargeError,
+} from "../gateway/channels/webhook-channel-utils";
 
 export interface WebhookServerConfig {
   port: number;
@@ -167,13 +171,6 @@ export class CronWebhookServer {
    * Handle trigger request
    */
   private async handleTrigger(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    // Parse body
-    const body = await this.parseJsonBody<WebhookTriggerPayload>(req);
-    if (!body) {
-      this.sendJsonResponse(res, 400, { success: false, error: "Invalid JSON body" });
-      return;
-    }
-
     // Fail closed: an unset secret previously skipped this check entirely,
     // which would make POST /trigger (i.e. running a cron job, i.e. an agent
     // task) reachable from any page the user visits. Header only — a secret in
@@ -191,6 +188,30 @@ export class CronWebhookServer {
         this.sendJsonResponse(res, 401, { success: false, error: "Invalid or missing secret" });
         return;
       }
+    }
+
+    let body: WebhookTriggerPayload;
+    try {
+      const parsed: unknown = JSON.parse((await readLimitedBody(req)).toString("utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Invalid JSON body");
+      }
+      body = parsed as WebhookTriggerPayload;
+      if (
+        (body.jobId !== undefined && typeof body.jobId !== "string") ||
+        (body.jobName !== undefined && typeof body.jobName !== "string") ||
+        (body.force !== undefined && typeof body.force !== "boolean")
+      )
+        throw new Error("Invalid trigger fields");
+    } catch (error) {
+      this.sendJsonResponse(res, error instanceof WebhookBodyTooLargeError ? 413 : 400, {
+        success: false,
+        error:
+          error instanceof WebhookBodyTooLargeError
+            ? "Request body too large"
+            : "Invalid JSON body",
+      });
+      return;
     }
 
     // Get job ID
@@ -285,27 +306,6 @@ export class CronWebhookServer {
   /**
    * Parse JSON body from request
    */
-  private parseJsonBody<T>(req: http.IncomingMessage): Promise<T | null> {
-    return new Promise((resolve) => {
-      let body = "";
-      req.on("data", (chunk) => {
-        body += chunk;
-        // Limit body size to 1MB
-        if (body.length > 1024 * 1024) {
-          resolve(null);
-        }
-      });
-      req.on("end", () => {
-        try {
-          resolve(JSON.parse(body) as T);
-        } catch {
-          resolve(null);
-        }
-      });
-      req.on("error", () => resolve(null));
-    });
-  }
-
   /**
    * Send JSON response
    */

@@ -156,12 +156,11 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div style={{ display: "flex", flexDirection: "column" }}>
       {/* Header */}
       <div
         style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--color-border)",
+          paddingBottom: 12,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -169,33 +168,21 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Sun size={16} style={{ color: "var(--color-accent)" }} />
-          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text)" }}>
             Daily Briefing
           </span>
         </div>
         <button
+          className="settings-button small primary"
           onClick={generateBriefing}
           disabled={loading || !effectiveWorkspaceId}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            padding: "4px 10px",
-            borderRadius: 4,
-            border: "1px solid var(--color-border)",
-            background: "var(--color-accent)",
-            color: "hsl(0 0% 10%)",
-            cursor: loading || !effectiveWorkspaceId ? "not-allowed" : "pointer",
-            fontSize: 12,
-            opacity: loading || !effectiveWorkspaceId ? 0.65 : 1,
-          }}
         >
           <RefreshCw size={12} className={loading ? "spinning" : ""} />
           {loading ? "Generating..." : "Generate Now"}
         </button>
       </div>
 
-      <div style={{ padding: "10px 16px 0", maxWidth: 320 }}>
+      <div style={{ paddingTop: 10, maxWidth: 320 }}>
         <label
           style={{
             display: "block",
@@ -214,13 +201,7 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
           <select
             value={effectiveWorkspaceId}
             onChange={(event) => setSelectedWorkspaceId(event.target.value)}
-            className="briefing-workspace-select"
-            style={{
-              width: "100%",
-              padding: "6px 8px",
-              borderRadius: 6,
-              fontSize: 12,
-            }}
+            className="settings-select briefing-workspace-select"
           >
             <option value={ALL_WORKSPACES_ID}>All Workspaces</option>
             {workspaces.map((workspace) => (
@@ -237,15 +218,15 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+      <div style={{ padding: "8px 0" }}>
         {error && (
           <div
             style={{
-              margin: "8px 16px",
+              margin: "8px 0",
               padding: "8px 12px",
               borderRadius: 6,
               background: "rgba(239, 68, 68, 0.1)",
-              color: "#ef4444",
+              color: "var(--color-error)",
               fontSize: 12,
             }}
           >
@@ -279,7 +260,7 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
           <>
             <div
               style={{
-                padding: "4px 16px 8px",
+                padding: "4px 0 8px",
                 fontSize: 11,
                 color: "var(--color-text-muted)",
               }}
@@ -299,7 +280,7 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
                       alignItems: "center",
                       gap: 6,
                       width: "100%",
-                      padding: "6px 16px",
+                      padding: "6px 0",
                       border: "none",
                       background: "none",
                       color: "var(--color-text)",
@@ -329,7 +310,7 @@ export const BriefingPanel: React.FC<{ workspaceId?: string }> = ({ workspaceId 
 
                   {/* Section items */}
                   {expandedSections.has(section.type) && (
-                    <div style={{ padding: "0 16px 8px 36px" }}>
+                    <div style={{ padding: "0 0 8px 20px" }}>
                       {section.items.length === 0 ? (
                         <div
                           style={{

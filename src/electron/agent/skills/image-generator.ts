@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import { Workspace } from "../../../shared/types";
 import { getOpenRouterAttributionHeaders } from "../llm/openrouter-attribution";
 import { OpenAIOAuth, OpenAIOAuthTokens } from "../llm/openai-oauth";
+import { getOpenAISiwcClientId } from "../llm/openai-siwc-oauth";
 import { loadPiAiModule } from "../llm/pi-ai-loader";
 import { LLMProviderFactory } from "../llm/provider-factory";
 import {
@@ -739,6 +740,9 @@ export function inferImageProviderFromText(text: string): ImageProvider | null {
 function hasOpenAIOAuthTokens(
   settings: ReturnType<typeof LLMProviderFactory.loadSettings>,
 ): boolean {
+  // Sign in with ChatGPT tokens are scoped to the public Responses API, which does
+  // not support image generation; they cannot call the ChatGPT image backend.
+  if (getOpenAISiwcClientId(settings)) return false;
   return Boolean(
     settings.openai?.accessToken?.trim() &&
     (settings.openai?.authMethod === "oauth" || settings.openai?.refreshToken?.trim()),
@@ -1001,6 +1005,11 @@ async function resolveOpenAICodexCredentials(
 
   if (!accessToken) {
     throw new Error("ChatGPT subscription sign-in is not configured");
+  }
+  if (getOpenAISiwcClientId(settings)) {
+    throw new Error(
+      "Image generation is not available with Sign in with ChatGPT. Add an OpenAI API key or another image provider.",
+    );
   }
 
   if (refreshToken) {

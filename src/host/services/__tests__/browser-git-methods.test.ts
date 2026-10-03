@@ -154,6 +154,23 @@ function invokeMutation(
 }
 
 describe("browser Git methods", () => {
+  it("disables repository fsmonitor for status and ordinary diff", async () => {
+    const { root, workspace } = await createRepository();
+    const marker = path.join(root, "fsmonitor-executed");
+    const hook = path.join(root, "monitor.sh");
+    await fs.writeFile(hook, `#!/bin/sh\ntouch '${marker}'\n`);
+    await fs.chmod(hook, 0o700);
+    await execFile("git", ["config", "core.fsmonitor", hook], { cwd: root });
+    await fs.writeFile(path.join(root, "tracked.txt"), "changed\n");
+    const methods = createMethods(workspace);
+    await invoke(methods, "git.status", { workspaceId: workspace.id });
+    const diff = await invoke(methods, "git.diff", {
+      workspaceId: workspace.id,
+      path: "tracked.txt",
+    });
+    expect(JSON.stringify(diff)).toContain("changed");
+    await expect(fs.access(marker)).rejects.toThrow();
+  });
   it("reads status before a repository has its first commit", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-browser-git-unborn-"));
     roots.push(root);

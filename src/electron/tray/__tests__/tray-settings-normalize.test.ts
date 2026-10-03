@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { normalizeTraySettings } from "../TrayManager";
 
 describe("normalizeTraySettings", () => {
+  it("preserves the Dock style and defaults missing or invalid styles to system", () => {
+    expect(normalizeTraySettings({ notificationStyle: "near-dock" }).notificationStyle).toBe(
+      "near-dock",
+    );
+    expect(normalizeTraySettings({}).notificationStyle).toBe("system");
+    expect(normalizeTraySettings({ notificationStyle: "invalid" as never }).notificationStyle).toBe(
+      "system",
+    );
+  });
   it("defaults enabled to true when stored value is null", () => {
     expect(
       normalizeTraySettings({

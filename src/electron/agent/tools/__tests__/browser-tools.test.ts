@@ -1087,6 +1087,29 @@ describe("BrowserTools headless browser capabilities", () => {
     expect(result.error).toContain("browser_handle_dialog");
   });
 
+  it("lists headless downloads saved into the workspace", async () => {
+    const entries = [
+      {
+        id: "download-1",
+        status: "saved",
+        suggestedFilename: "report.csv",
+        url: "https://example.com/export",
+        path: "downloads/report.csv",
+        size: 8,
+        timestamp: 1,
+      },
+    ];
+    const { tools } = makeHeadlessTools({ listDownloads: vi.fn().mockReturnValue(entries) });
+
+    const result = await tools.executeTool("browser_downloads", {});
+
+    expect(result).toMatchObject({ success: true, directory: "downloads", entries });
+    const definition = BrowserTools.getToolDefinitions().find(
+      (tool) => tool.name === "browser_downloads",
+    );
+    expect(definition?.description).toContain("downloads/");
+  });
+
   it("describes headless popup handling on the tab tools", () => {
     const definitions = BrowserTools.getToolDefinitions();
     const descriptionOf = (name: string) =>

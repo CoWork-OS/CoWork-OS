@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import {
+  BROWSER_DOWNLOADS_DIR,
   BrowserService,
   paginatePageText,
   type PageContentOptions,
@@ -75,6 +76,7 @@ const BROWSER_ACTION_EVENT_FIELDS = [
   "newTabs",
   "activeTabClosed",
   "dialogDecisionExpired",
+  "downloads",
 ] as const;
 
 /** Side effects a headless action reported (dialogs, popups, closed tabs), for batch steps. */
@@ -1436,7 +1438,11 @@ export class BrowserTools {
       },
       {
         name: "browser_downloads",
-        description: "Return recent downloads observed in the browser session",
+        description:
+          "List downloads from the browser session. Headless downloads are saved into the workspace " +
+          `${BROWSER_DOWNLOADS_DIR}/ folder as they start and listed with status, path, size and ` +
+          "suggestedFilename; a download the workspace file policy does not allow is rejected and " +
+          "not written. An action that starts a download also reports it in its result.",
         input_schema: {
           type: "object" as const,
           properties: {
@@ -2555,7 +2561,12 @@ export class BrowserTools {
           this.getSessionId(input),
         );
         if (result) return result;
-        return { success: true, entries: [] };
+        return {
+          success: true,
+          backend: "playwright-local",
+          directory: BROWSER_DOWNLOADS_DIR,
+          entries: this.browserService.listDownloads(),
+        };
       }
 
       case "browser_storage": {

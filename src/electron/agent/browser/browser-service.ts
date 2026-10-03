@@ -4,6 +4,7 @@ import {
   Page,
   BrowserContext,
   Dialog,
+  Download,
   Locator,
   ElementHandle,
   Route,
@@ -15,6 +16,8 @@ import { normalizeBrowserUrl, redactBrowserText } from "../../browser/browser-se
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 import {
   assertWorkspaceFilesystemAccess,
+  evaluateWorkspaceFilesystemAccess,
+  isAccessPathWithin,
   type WorkspaceFilesystemAccessOptions,
 } from "../../security/access-profile-paths";
 import { createLogger } from "../../utils/logger";
@@ -254,6 +257,54 @@ export interface BrowserActionEvents {
   dialogs?: BrowserDialogReport[];
   /** An accept/dismiss decision for the next dialog lapsed because no dialog opened */
   dialogDecisionExpired?: true;
+  /** Downloads the page started, saved into the workspace downloads folder or rejected */
+  downloads?: BrowserDownloadEntry[];
+}
+
+export interface BrowserDownloadEntry {
+  id: string;
+  /** pending: still downloading; rejected: the workspace file policy refused it */
+  status: "pending" | "saved" | "rejected" | "failed";
+  suggestedFilename: string;
+  url: string;
+  /** Workspace-relative path of the saved file */
+  path?: string;
+  size?: number;
+  error?: string;
+  tabId?: string;
+  timestamp: number;
+}
+
+/** Workspace folder (relative) that headless downloads are saved into. */
+export const BROWSER_DOWNLOADS_DIR = "downloads";
+const MAX_DOWNLOADS_PER_SESSION = 50;
+const MAX_DOWNLOAD_ENTRIES = 50;
+const MAX_DOWNLOAD_NAME_CHARS = 180;
+/** How long an action waits for a download it started before reporting it as pending. */
+const DOWNLOAD_REPORT_WAIT_MS = 5_000;
+/** Closing the context deletes unsaved downloads, so close waits this long for them. */
+const DOWNLOAD_CLOSE_WAIT_MS = 30_000;
+
+/** Thrown when the workspace file policy does not allow saving a download. */
+class DownloadRejectedError extends Error {}
+
+/** A site-suggested download name reduced to a single safe, visible file name. */
+function sanitizeDownloadFilename(raw: string): string {
+  const base =
+    String(raw ?? "")
+      .split(/[\\/]/)
+      .pop() ?? "";
+  let cleaned = Array.from(base)
+    .map((char) => (char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? "_" : char))
+    .join("")
+    .replace(/[<>:"|?*]/g, "_")
+    .replace(/^[.\s]+/, "")
+    .replace(/[.\s]+$/, "");
+  if (cleaned.length > MAX_DOWNLOAD_NAME_CHARS) {
+    const ext = path.extname(cleaned).slice(0, 16);
+    cleaned = cleaned.slice(0, MAX_DOWNLOAD_NAME_CHARS - ext.length) + ext;
+  }
+  return cleaned || "download";
 }
 
 export interface BrowserDialogReport {
@@ -291,7 +342,8 @@ interface BrowserTabRecord {
 type BrowserActionEventInput =
   | { kind: "tab_opened"; tabId: string }
   | { kind: "active_tab_closed"; closedTabId: string; activeTabId?: string }
-  | { kind: "dialog"; dialog: BrowserDialogReport };
+  | { kind: "dialog"; dialog: BrowserDialogReport }
+  | { kind: "download"; downloadId: string };
 
 type BrowserActionEventRecord = BrowserActionEventInput & { seq: number };
 
@@ -699,6 +751,11 @@ export class BrowserService {
   /** The agent's decision for the next dialog; lapses after one action */
   private nextDialogDecision: (BrowserDialogDecision & { actionsLeft: number }) | null = null;
   private lastDialog: BrowserDialogReport | null = null;
+  private downloads: BrowserDownloadEntry[] = [];
+  private pendingDownloads = new Map<string, Promise<void>>();
+  private reservedDownloadPaths = new Set<string>();
+  private downloadReservations: Promise<unknown> = Promise.resolve();
+  private downloadCount = 0;
 
   constructor(workspace: Workspace, options: BrowserOptions = {}) {
     this.workspace = workspace;
@@ -870,6 +927,7 @@ export class BrowserService {
     if (typeof (page as Any).on === "function") {
       page.on("close", () => this.handlePageClosed(tabId));
       page.on("dialog", (dialog: Dialog) => this.handleDialog(dialog, tabId));
+      page.on("download", (download: Download) => this.handleDownload(download, tabId));
     }
     if (openedBySite) {
       this.pushActionEvent({ kind: "tab_opened", tabId });
@@ -965,6 +1023,116 @@ export class BrowserService {
 
   getLastDialog(): BrowserDialogReport | null {
     return this.lastDialog;
+  }
+
+  /**
+   * Playwright keeps a download in a temporary folder that is deleted with the context, so
+   * each one is saved into the workspace downloads folder as soon as it starts.
+   */
+  private handleDownload(download: Download, tabId: string): void {
+    this.downloadCount += 1;
+    const entry: BrowserDownloadEntry = {
+      id: `download-${this.downloadCount}`,
+      status: "pending",
+      suggestedFilename: sanitizeDownloadFilename(download.suggestedFilename()),
+      url: redactBrowserText(download.url(), 1200),
+      tabId,
+      timestamp: Date.now(),
+    };
+    this.downloads.push(entry);
+    if (this.downloads.length > MAX_DOWNLOAD_ENTRIES) {
+      this.downloads = this.downloads.slice(-MAX_DOWNLOAD_ENTRIES);
+    }
+    const saving = this.saveDownload(download, entry, this.downloadCount).finally(() => {
+      this.pendingDownloads.delete(entry.id);
+    });
+    this.pendingDownloads.set(entry.id, saving);
+    this.pushActionEvent({ kind: "download", downloadId: entry.id });
+  }
+
+  private async saveDownload(
+    download: Download,
+    entry: BrowserDownloadEntry,
+    ordinal: number,
+  ): Promise<void> {
+    let target: string | undefined;
+    try {
+      if (ordinal > MAX_DOWNLOADS_PER_SESSION) {
+        throw new DownloadRejectedError(
+          `Download limit of ${MAX_DOWNLOADS_PER_SESSION} files per browser session reached`,
+        );
+      }
+      // Reserve names one download at a time, in the order the downloads started.
+      const reservation = this.downloadReservations.then(() =>
+        this.reserveDownloadPath(entry.suggestedFilename),
+      );
+      this.downloadReservations = reservation.catch(() => undefined);
+      target = await reservation;
+      await download.saveAs(target);
+      const stat = await fs.stat(target);
+      entry.path = path.relative(this.workspace.path, target);
+      entry.size = stat.size;
+      entry.status = "saved";
+      log.info(`Saved browser download ${entry.path} (${stat.size} bytes)`);
+    } catch (error) {
+      entry.status = error instanceof DownloadRejectedError ? "rejected" : "failed";
+      entry.error = (error as Error).message;
+      log.warn(`Browser download ${entry.suggestedFilename} ${entry.status}: ${entry.error}`);
+      await download.cancel().catch(() => {});
+      await download.delete().catch(() => {});
+    } finally {
+      if (target) this.reservedDownloadPaths.delete(target);
+    }
+  }
+
+  /**
+   * A free path for a download inside the workspace downloads folder. The write must be
+   * allowed by the workspace file policy (which also refuses protected paths), and downloads
+   * are untrusted page content, so the canonical path must stay inside the workspace even
+   * where the policy would allow writing elsewhere (unrestricted access, or a downloads
+   * folder that is a symlink out of the workspace).
+   */
+  private async reserveDownloadPath(fileName: string): Promise<string> {
+    const checkedPath = (relativePath: string, label: string): string => {
+      const access = evaluateWorkspaceFilesystemAccess(this.workspace, relativePath, "write");
+      if (access.decision !== "allow") {
+        throw new DownloadRejectedError(
+          `Access denied for ${label} "${relativePath}": ${access.reason}`,
+        );
+      }
+      if (!isAccessPathWithin(this.workspace.path, access.path)) {
+        throw new DownloadRejectedError(
+          `${label} "${relativePath}" resolves outside the workspace`,
+        );
+      }
+      return access.path;
+    };
+
+    const directory = checkedPath(BROWSER_DOWNLOADS_DIR, "browser download folder");
+    await fs.mkdir(directory, { recursive: true });
+    const { name, ext } = path.parse(fileName);
+    for (let attempt = 0; attempt < 1000; attempt += 1) {
+      const candidate = attempt === 0 ? fileName : `${name} (${attempt})${ext}`;
+      const target = checkedPath(
+        path.join(BROWSER_DOWNLOADS_DIR, candidate),
+        "browser download path",
+      );
+      if (this.reservedDownloadPaths.has(target)) continue;
+      // Reserve before the existence check so concurrent downloads never share a name.
+      this.reservedDownloadPaths.add(target);
+      const exists = await fs.lstat(target).then(
+        () => true,
+        () => false,
+      );
+      if (!exists) return target;
+      this.reservedDownloadPaths.delete(target);
+    }
+    throw new DownloadRejectedError(`No free file name for download "${fileName}"`);
+  }
+
+  /** Downloads seen in this browser session, oldest first. */
+  listDownloads(): BrowserDownloadEntry[] {
+    return this.downloads.map((entry) => ({ ...entry }));
   }
 
   private waitForTabOpened(timeoutMs: number): Promise<void> {
@@ -1068,6 +1236,22 @@ export class BrowserService {
     for (const event of events) {
       if (event.kind === "dialog") dialogs.push(event.dialog);
     }
+    const downloadIds = new Set<string>();
+    for (const event of events) {
+      if (event.kind === "download") downloadIds.add(event.downloadId);
+    }
+    if (downloadIds.size > 0) {
+      const pending = [...downloadIds]
+        .map((id) => this.pendingDownloads.get(id))
+        .filter((saving): saving is Promise<void> => Boolean(saving));
+      if (pending.length > 0) {
+        await settleWithin(Promise.allSettled(pending), DOWNLOAD_REPORT_WAIT_MS);
+      }
+      report.downloads = this.downloads
+        .filter((entry) => downloadIds.has(entry.id))
+        .map((entry) => ({ ...entry }));
+    }
+
     if (dialogs.length > 0) report.dialog = dialogs[0];
     if (dialogs.length > 1) report.dialogs = dialogs;
     if (this.nextDialogDecision) {
@@ -1387,6 +1571,7 @@ export class BrowserService {
           ...(channel ? { channel } : {}),
           ...(executablePath ? { executablePath } : {}),
           viewport: this.options.viewport,
+          acceptDownloads: true,
         });
         browser = context.browser();
       } else {
@@ -1398,6 +1583,7 @@ export class BrowserService {
 
         context = await browser.newContext({
           viewport: this.options.viewport,
+          acceptDownloads: true,
         });
       }
 
@@ -2092,6 +2278,12 @@ export class BrowserService {
   async close(): Promise<void> {
     this.closing = true;
     try {
+      if (this.pendingDownloads.size > 0) {
+        await settleWithin(
+          Promise.allSettled(this.pendingDownloads.values()),
+          DOWNLOAD_CLOSE_WAIT_MS,
+        );
+      }
       await this.closeBrowser();
     } finally {
       this.resetTabState();

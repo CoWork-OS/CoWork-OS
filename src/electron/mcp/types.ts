@@ -284,6 +284,24 @@ export interface JSONRPCNotification {
   params?: Record<string, Any>;
 }
 
+/** Approval-only form elicitation. Data collection and URL forms fail closed. */
+export interface MCPElicitationRequest {
+  computerUseApp?: { id: string; name: string };
+  message: string;
+  mode?: "form";
+  requestedSchema: { type: "object"; properties: Record<string, never> };
+}
+
+export interface MCPElicitationResult {
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, never>;
+}
+
+export interface MCPToolCallOptions {
+  onElicitation?: (request: MCPElicitationRequest) => Promise<MCPElicitationResult>;
+  signal?: AbortSignal;
+}
+
 // MCP Protocol Methods
 export const MCP_METHODS = {
   // Lifecycle
@@ -335,6 +353,8 @@ export interface MCPTransport {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   send(message: JSONRPCRequest | JSONRPCNotification): Promise<void>;
+  /** Present on transports that implement server-to-client approval requests. */
+  sendResponse?(message: JSONRPCResponse): Promise<void>;
   sendRequest(method: string, params?: Record<string, Any>): Promise<Any>;
   onMessage(handler: (message: JSONRPCResponse | JSONRPCNotification) => void): void;
   onClose(handler: (error?: Error) => void): void;

@@ -1,0 +1,228 @@
+import { describe, expect, it, vi } from "vitest";
+import { MCPServerConnection } from "../MCPServerConnection";
+import type { MCPToolCallOptions } from "../../types";
+
+const approval = {
+  message: 'Allow Computer Use to use "Calculator"?',
+  mode: "form",
+  requestedSchema: { type: "object", properties: {} },
+};
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+function fixture() {
+  const connection = new MCPServerConnection({
+    id: "test",
+    name: "codex-cu",
+    transport: "stdio",
+    enabled: true,
+  });
+  const toolResult = deferred<Any>();
+  const transport = {
+    sendRequest: vi.fn(() => toolResult.promise),
+    sendResponse: vi.fn(async () => {}),
+  };
+  Object.assign(connection, {
+    transport,
+    status: "connected",
+    tools: [{ name: "js" }],
+  });
+  const elicit = (params: Any = approval) =>
+    (connection as Any).handleServerRequest({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "elicitation/create",
+      params,
+    });
+  return { connection, transport, toolResult, elicit };
+}
+
+describe("MCP approval form elicitation", () => {
+  it("round-trips an approval through a real stdio server even when request IDs collide", async () => {
+    const script = `
+      const rl = require('node:readline').createInterface({ input: process.stdin });
+      const send = x => process.stdout.write(JSON.stringify(x) + '\\n');
+      let callId;
+      rl.on('line', line => {
+        const m = JSON.parse(line);
+        if (m.method === 'initialize') send({jsonrpc:'2.0',id:m.id,result:{
+          protocolVersion:'2025-06-18', serverInfo:{name:'fixture',version:'1'},
+          capabilities:{tools:{}}, receivedCapabilities:m.params.capabilities
+        }});
+        if (m.method === 'tools/list') send({jsonrpc:'2.0',id:m.id,result:{tools:[{name:'js',inputSchema:{type:'object'}}]}});
+        if (m.method === 'tools/call') {
+          callId = m.id;
+          send({jsonrpc:'2.0', id:m.id, method:'elicitation/create', params:${JSON.stringify(approval)}});
+        }
+        if (!m.method && m.id === callId) send({jsonrpc:'2.0',id:callId,result:{content:[{type:'text',text:JSON.stringify(m.result)}]}});
+      });`;
+    const connection = new MCPServerConnection({
+      id: "fixture",
+      name: "fixture",
+      enabled: true,
+      transport: "stdio",
+      command: process.execPath,
+      args: ["-e", script],
+      requestTimeout: 5000,
+    });
+    const onElicitation = vi.fn(async () => ({ action: "accept" as const, content: {} }));
+    try {
+      await connection.connect();
+      const result = await connection.callTool("js", {}, { onElicitation });
+      expect(result.content).toEqual([{ type: "text", text: '{"action":"accept","content":{}}' }]);
+      expect(onElicitation).toHaveBeenCalledWith(approval);
+    } finally {
+      await connection.disconnect();
+    }
+  });
+
+  it("advertises form elicitation only when the transport can reply to server requests", async () => {
+    const { connection, transport } = fixture();
+    transport.sendRequest.mockResolvedValue({ serverInfo: {}, capabilities: {} });
+    (transport as Any).send = vi.fn();
+    await (connection as Any).initialize();
+    expect(transport.sendRequest.mock.calls[0][1].capabilities).toEqual({
+      elicitation: { form: {} },
+    });
+    delete (transport as Any).sendResponse;
+    transport.sendRequest.mockClear();
+    await (connection as Any).initialize();
+    expect(transport.sendRequest.mock.calls[0][1].capabilities).toEqual({});
+  });
+
+  it.each([
+    { ...approval, mode: "url", url: "https://example.com" },
+    {
+      ...approval,
+      requestedSchema: { type: "object", properties: { password: { type: "string" } } },
+    },
+    { ...approval, requestedSchema: { type: "object", properties: {}, required: ["missing"] } },
+  ])("cancels unsupported forms without asking or accepting", async (params) => {
+    const { connection, transport, toolResult, elicit } = fixture();
+    const onElicitation = vi.fn();
+    const call = connection.callTool("js", {}, { onElicitation });
+    await vi.waitFor(() => expect(transport.sendRequest).toHaveBeenCalled());
+    await elicit(params);
+    expect(onElicitation).not.toHaveBeenCalled();
+    expect(transport.sendResponse).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { action: "cancel" },
+    });
+    toolResult.resolve({ content: [] });
+    await call;
+  });
+
+  it("cancels an unsolicited request when no task owns the call", async () => {
+    const { transport, elicit } = fixture();
+    await elicit();
+    expect(transport.sendResponse).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { action: "cancel" },
+    });
+  });
+
+  it.each(["decline", "cancel"] as const)("preserves a human %s decision", async (action) => {
+    const { connection, transport, toolResult, elicit } = fixture();
+    const call = connection.callTool("js", {}, { onElicitation: async () => ({ action }) });
+    await vi.waitFor(() => expect(transport.sendRequest).toHaveBeenCalled());
+    await elicit();
+    expect(transport.sendResponse).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { action },
+    });
+    toolResult.resolve({ content: [] });
+    await call;
+  });
+
+  it("never applies a late approval to a subsequent task", async () => {
+    const { connection, transport, toolResult, elicit } = fixture();
+    const answer = deferred<Any>();
+    const first = connection.callTool("js", {}, { onElicitation: () => answer.promise });
+    await vi.waitFor(() => expect(transport.sendRequest).toHaveBeenCalledTimes(1));
+    const elicitation = elicit();
+    const secondHandler = vi.fn(async () => ({ action: "decline" as const }));
+    const second = connection.callTool("js", {}, { onElicitation: secondHandler });
+    expect(transport.sendRequest).toHaveBeenCalledTimes(1);
+    toolResult.resolve({ content: [] });
+    await first;
+    await second;
+    answer.resolve({ action: "accept" });
+    await elicitation;
+    expect(transport.sendResponse).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { action: "cancel" },
+    });
+    expect(secondHandler).not.toHaveBeenCalled();
+  });
+
+  it("cancels an approval when tool execution is aborted", async () => {
+    const { connection, transport, toolResult, elicit } = fixture();
+    const controller = new AbortController();
+    const options: MCPToolCallOptions = {
+      signal: controller.signal,
+      onElicitation: async () => {
+        controller.abort();
+        return { action: "accept" };
+      },
+    };
+    const call = connection.callTool("js", {}, options);
+    await vi.waitFor(() => expect(transport.sendRequest).toHaveBeenCalled());
+    await elicit();
+    expect(transport.sendResponse).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { action: "cancel" },
+    });
+    toolResult.resolve({ content: [] });
+    await call;
+  });
+});
+
+it("recognizes app metadata only for the configured Codex driver, with a matching app consent message", async () => {
+  const { connection, elicit, toolResult } = fixture();
+  const onElicitation = vi.fn(async () => ({ action: "accept" as const }));
+  const params = {
+    ...approval,
+    _meta: {
+      connector_id: "computer-use",
+      codex_approval_kind: "mcp_tool_call",
+      tool_params: { app: "com.apple.calculator" },
+      tool_params_display: [{ name: "app", value: "Calculator" }],
+    },
+  };
+  let call = connection.callTool("js", {}, { onElicitation });
+  await Promise.resolve();
+  await elicit(params);
+  expect(onElicitation.mock.calls[0][0].computerUseApp).toBeUndefined();
+  toolResult.resolve({ content: [] });
+  await call;
+  const second = fixture();
+  Object.assign((second.connection as Any).config, {
+    args: ["/local/@oai/cua-repl/bin/cua-repl.mjs"],
+    env: { CUA_REPL_ENABLED_SURFACES: "computer" },
+  });
+  onElicitation.mockClear();
+  call = second.connection.callTool("js", {}, { onElicitation });
+  await Promise.resolve();
+  await second.elicit(params);
+  expect(onElicitation.mock.calls[0][0].computerUseApp).toEqual({
+    id: "com.apple.calculator",
+    name: "Calculator",
+  });
+  await second.elicit({ ...params, message: "Allow Computer Use to record computer audio?" });
+  expect(onElicitation.mock.calls.at(-1)![0].computerUseApp).toBeUndefined();
+  await second.elicit({ ...params, _meta: { ...params._meta, tool_params_display: "malformed" } });
+  expect(onElicitation.mock.calls.at(-1)![0].computerUseApp).toBeUndefined();
+  second.toolResult.resolve({ content: [] });
+  await call;
+});

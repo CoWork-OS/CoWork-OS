@@ -13,6 +13,7 @@ import {
   MCPTool,
   MCPCallResult,
   MCPClientEvent,
+  MCPToolCallOptions,
   MCPSettings as _MCPSettings,
 } from "../types";
 import { MCPSettingsManager } from "../settings";
@@ -396,7 +397,11 @@ export class MCPClientManager extends EventEmitter {
   /**
    * Call a tool by name
    */
-  async callTool(toolName: string, args: Record<string, Any> = {}): Promise<MCPCallResult> {
+  async callTool(
+    toolName: string,
+    args: Record<string, Any> = {},
+    options?: MCPToolCallOptions,
+  ): Promise<MCPCallResult> {
     const serverId = this.toolServerMap.get(toolName);
     if (!serverId) {
       throw new Error(`Tool ${toolName} not found`);
@@ -408,7 +413,7 @@ export class MCPClientManager extends EventEmitter {
     }
 
     try {
-      return await connection.callTool(toolName, args);
+      return await connection.callTool(toolName, args, options);
     } catch (error) {
       const config = MCPSettingsManager.getServer(serverId);
       await this.notifyConnectorAuthIssue(serverId, config, error);

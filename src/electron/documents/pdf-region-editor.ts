@@ -1,6 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { LOCAL_PDF_PARSE_LIMITS, extractPdfPageTextBounded } from "../utils/bounded-pdf-parser";
 
 type PdfRegionEditInput = {
   sourcePath: string;
@@ -60,11 +61,6 @@ function inferReplacementText(instruction: string, selectionText?: string): stri
   }
 
   return trimmedSelection;
-}
-
-async function loadPdfJs() {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  return pdfjs;
 }
 
 function groupTextLines(items: ExtractedTextItem[]): string {
@@ -158,59 +154,52 @@ function chooseFontSize(
   };
 }
 
+/**
+ * Text under the selection box. pdf.js reads the page in a bounded worker (deadline, heap and
+ * text limits); a PDF that hits a limit rejects with PdfParseLimitError.
+ */
 async function extractSelectionText(
   sourceBytes: Uint8Array,
   pageIndex: number,
   bbox: { x: number; y: number; w: number; h: number },
 ): Promise<string> {
-  const pdfjs = await loadPdfJs();
-  const loadingTask = pdfjs.getDocument({ data: sourceBytes });
-  const document = await loadingTask.promise;
-  try {
-    if (pageIndex < 0 || pageIndex >= document.numPages) {
-      return "";
-    }
-
-    const page = await document.getPage(pageIndex + 1);
-    const viewport = page.getViewport({ scale: 1 });
-    const textContent = await page.getTextContent();
-    const textItems = textContent.items as Array<{
-      str?: unknown;
-      transform: number[];
-      width?: number;
-      height?: number;
-    }>;
-    const selectionRect = {
-      x: bbox.x * viewport.width,
-      y: bbox.y * viewport.height,
-      w: bbox.w * viewport.width,
-      h: bbox.h * viewport.height,
-    };
-    const right = selectionRect.x + selectionRect.w;
-    const bottom = selectionRect.y + selectionRect.h;
-
-    const items: ExtractedTextItem[] = [];
-    for (const item of textItems) {
-      if (typeof item.str !== "string" || !item.str.trim()) continue;
-      const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-      const itemWidth = Math.max(0, Number(item.width || 0));
-      const itemHeight = Math.max(0, Number(item.height || 0));
-      const itemRight = x + itemWidth;
-      const itemBottom = y + itemHeight;
-      const intersects =
-        x <= right + 8 &&
-        itemRight >= selectionRect.x - 8 &&
-        y <= bottom + 8 &&
-        itemBottom >= selectionRect.y - 8;
-      if (intersects) {
-        items.push({ str: item.str, x, y });
-      }
-    }
-
-    return groupTextLines(items);
-  } finally {
-    await loadingTask.destroy();
+  const extracted = await extractPdfPageTextBounded(
+    sourceBytes,
+    { pageIndexes: [pageIndex] },
+    LOCAL_PDF_PARSE_LIMITS,
+  );
+  const page = extracted.pages.find((candidate) => candidate.pageIndex === pageIndex);
+  if (!page) {
+    return "";
   }
+
+  const selectionRect = {
+    x: bbox.x * page.width,
+    y: bbox.y * page.height,
+    w: bbox.w * page.width,
+    h: bbox.h * page.height,
+  };
+  const right = selectionRect.x + selectionRect.w;
+  const bottom = selectionRect.y + selectionRect.h;
+
+  const items: ExtractedTextItem[] = [];
+  for (const item of page.items) {
+    const { x, y } = item;
+    const itemWidth = Math.max(0, item.width);
+    const itemHeight = Math.max(0, item.height);
+    const itemRight = x + itemWidth;
+    const itemBottom = y + itemHeight;
+    const intersects =
+      x <= right + 8 &&
+      itemRight >= selectionRect.x - 8 &&
+      y <= bottom + 8 &&
+      itemBottom >= selectionRect.y - 8;
+    if (intersects) {
+      items.push({ str: item.str, x, y });
+    }
+  }
+
+  return groupTextLines(items);
 }
 
 export async function editPdfRegion(input: PdfRegionEditInput): Promise<void> {

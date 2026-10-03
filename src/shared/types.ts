@@ -11347,26 +11347,86 @@ export const DEFAULT_TRUSTED_COMMAND_PATTERNS = [
   "rustc --version",
 ];
 
-// Default dangerous command patterns (regex)
-export const DEFAULT_BLOCKED_COMMAND_PATTERNS = [
-  "sudo",
-  "rm\\s+-rf\\s+/",
-  "rm\\s+-rf\\s+~",
-  "rm\\s+-rf\\s+/\\*",
-  "rm\\s+-rf\\s+\\*",
-  "mkfs",
-  "dd\\s+if=",
-  ":\\(\\)\\{\\s*:\\|:\\&\\s*\\};:", // Fork bomb
-  "curl.*\\|.*bash",
-  "wget.*\\|.*bash",
-  "curl.*\\|.*sh",
-  "wget.*\\|.*sh",
-  "chmod\\s+777",
-  ">\\s*/dev/sd",
-  "mv\\s+/\\*",
-  "format\\s+c:",
-  "del\\s+/f\\s+/s\\s+/q",
+// Default dangerous command patterns (regex, matched case-insensitively).
+//
+// These are a hard deny that applies even under Full access, so they must not
+// fire on ordinary commands. Each one looks at a command word or a dangerous
+// target instead of a bare substring: the old `curl.*\|.*sh` matched
+// `| grep dashboard`, `rm\s+-rf\s+/` matched every absolute path, and `sudo`
+// matched `rg sudo`. Patterns are written to stay linear on long input.
+
+// Start of a simple command: string start or a shell separator, followed by
+// optional wrapper commands (`env`, `nohup`, `xargs -0`, ...) and assignments.
+const BLOCKED_SEGMENT_START =
+  "(?:^|[;&|(){}`\\n\\r!]|\\$\\()\\s*" +
+  "(?:(?:then|do|else|elif|time|exec|command|nohup|env|nice|timeout|stdbuf|xargs)" +
+  "(?:\\s+(?:-\\S+|\\d[\\w.]*))*\\s+|[A-Za-z_]\\w*=\\S*\\s+)*";
+// Pipe target that executes what it reads: a shell, optionally behind
+// sudo/env/a path. `||` is a logical or, not a pipe.
+const BLOCKED_PIPE_INTO =
+  "\\b(?:curl|wget)\\b.*(?<!\\|)\\|(?!\\|)\\s*" +
+  "(?:(?:[^\\s|;&]*/)?(?:sudo|doas|env|exec|command|nohup|time)(?:\\s+-\\S+)*\\s+|[A-Za-z_]\\w*=\\S*\\s+)*" +
+  "(?:[^\\s|;&]*/)?";
+const BLOCKED_SHELLS = "(?:ba|z|da|k|c|tc|fi|a)?sh";
+const BLOCKED_WORD_END = "(?=$|[\\s;&|)`])";
+// `rm` targets that wipe the machine or the home directory: /, /*, ~, $HOME,
+// a top-level system directory, or a whole home directory. Deeper paths such
+// as /tmp/build or /Users/me/proj/dist are ordinary cleanups.
+const BLOCKED_TOP_LEVEL_DIRS =
+  "Applications|Library|Network|System|Users|Volumes|bin|boot|cores|dev|etc|home|lib|lib64|opt|private|proc|root|sbin|srv|sys|usr|var";
+const BLOCKED_RM_TARGET =
+  "[\"']?(?:/\\*?|~/?\\*?|\\$\\{?HOME\\}?(?:/\\*?)?" +
+  `|/(?:${BLOCKED_TOP_LEVEL_DIRS})(?:/\\*?)?` +
+  "|/(?:Users|home)/[^/\\s;&|\"']+(?:/\\*?)?|\\*)[\"']?";
+
+export interface BlockedCommandRule {
+  /** Regex source, compiled with the `i` flag. */
+  pattern: string;
+  /** Plain-language description for the settings screen. */
+  label: string;
+}
+
+export const DEFAULT_BLOCKED_COMMAND_RULES: readonly BlockedCommandRule[] = [
+  {
+    label: "sudo / su / doas",
+    pattern: `${BLOCKED_SEGMENT_START}(?:\\S*/)?(?:sudo|su|doas)${BLOCKED_WORD_END}`,
+  },
+  {
+    label: "rm of /, ~, $HOME, *, or a system directory",
+    pattern: `(?<![\\w./-])rm(?:\\s[^;&|\\n\\r]*)?\\s${BLOCKED_RM_TARGET}${BLOCKED_WORD_END}`,
+  },
+  { label: "mkfs", pattern: "\\bmkfs\\b" },
+  { label: "dd if=", pattern: "\\bdd\\s+if=" },
+  { label: "dd of=/dev/...", pattern: "\\bdd\\b[^;&|\\n\\r]*\\bof=/dev/" },
+  {
+    label: "fork bomb",
+    pattern: ":\\s*\\(\\s*\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:",
+  },
+  {
+    label: "curl/wget piped into a shell",
+    pattern: `${BLOCKED_PIPE_INTO}${BLOCKED_SHELLS}${BLOCKED_WORD_END}`,
+  },
+  {
+    // Only when the interpreter runs stdin as code: `python3`, `node -`.
+    // `python3 -c "..."`, `python3 -m json.tool`, and `node script.js` read
+    // the download as data.
+    label: "curl/wget piped into python, perl, ruby, or node",
+    pattern: `${BLOCKED_PIPE_INTO}(?:python[\\d.]*|perl|ruby|node)(?:\\s+-{1,2}[\\w-]*(?:=\\S*)?)*\\s*(?=$|[;&|)])`,
+  },
+  {
+    label: "shell running a curl/wget download",
+    pattern: `\\b${BLOCKED_SHELLS}\\s+(?:-\\S+\\s+)*(?:<\\(|["']?\\$\\()\\s*(?:curl|wget)\\b`,
+  },
+  { label: "chmod 777", pattern: "\\bchmod\\s+(?:-\\S+\\s+)*0?777\\b" },
+  { label: "write to a raw disk device", pattern: ">\\s*/dev/(?:sd|disk|rdisk|nvme|hd)" },
+  { label: "mv /*", pattern: "\\bmv\\s+/\\*" },
+  { label: "format c:", pattern: "format\\s+c:" },
+  { label: "del /f /s /q", pattern: "del\\s+/f\\s+/s\\s+/q" },
 ];
+
+export const DEFAULT_BLOCKED_COMMAND_PATTERNS: string[] = DEFAULT_BLOCKED_COMMAND_RULES.map(
+  (rule) => rule.pattern,
+);
 
 // ============ Artifact Reputation Types ============
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   GuardrailSettings as GuardrailSettingsType,
-  DEFAULT_BLOCKED_COMMAND_PATTERNS,
+  DEFAULT_BLOCKED_COMMAND_RULES,
   DEFAULT_TRUSTED_COMMAND_PATTERNS,
 } from "../../shared/types";
 import { DEFAULT_GUARDRAIL_SETTINGS as DEFAULTS } from "../../shared/guardrail-defaults";
@@ -522,9 +522,9 @@ export function GuardrailSettings() {
         <div className="settings-subsection">
           <h4>Built-in Blocked Patterns</h4>
           <div className="pattern-list">
-            {DEFAULT_BLOCKED_COMMAND_PATTERNS.map((pattern, index) => (
-              <span key={index} className="pattern-tag builtin" title={pattern}>
-                {pattern.length > 30 ? pattern.slice(0, 27) + "..." : pattern}
+            {DEFAULT_BLOCKED_COMMAND_RULES.map((rule, index) => (
+              <span key={index} className="pattern-tag builtin" title={rule.pattern}>
+                {rule.label}
               </span>
             ))}
           </div>

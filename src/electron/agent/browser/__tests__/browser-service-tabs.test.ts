@@ -135,3 +135,22 @@ describe("BrowserService headless uploads", () => {
     expect(result.error).toContain('No element matches selector "#cv"');
   });
 });
+
+describe("BrowserService startup pages", () => {
+  it("does not report a page that appears while the browser starts as a popup", async () => {
+    const startupContext = new FakeContext();
+    const originalRoute = startupContext.route.bind(startupContext);
+    // A persistent profile can surface its first window while the context is being set up.
+    startupContext.route = async (pattern, handler) => {
+      startupContext.openPage("about:blank");
+      await originalRoute(pattern, handler);
+    };
+    vi.mocked(chromium.launch).mockResolvedValue(createFakeBrowser(startupContext) as Any);
+    const service = new BrowserService(workspace, { headless: true, popupGraceMs: 0 });
+
+    const result = await service.navigate("https://example.com/");
+
+    expect(result.switchedToTab).toBeUndefined();
+    expect(result.newTabs).toBeUndefined();
+  });
+});

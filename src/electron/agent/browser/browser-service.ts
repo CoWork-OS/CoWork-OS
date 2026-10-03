@@ -942,7 +942,9 @@ export class BrowserService {
   /** A page opened in the context: by the site (popup, target=_blank) or by createPage. */
   private adoptPage(page: Page): void {
     if (typeof (page as Any).setDefaultTimeout === "function") this.applyPageTimeouts(page);
-    this.registerPage(page, true, !this.creatingPage);
+    // Pages that appear while the browser starts (a persistent profile's first window) or
+    // that the service opens itself are not popups.
+    this.registerPage(page, true, !this.creatingPage && this.context !== null);
     void this.configurePage(page).catch(() => {
       // Navigation and current-page checks remain authoritative if request
       // interception cannot be installed on a newly opened page.

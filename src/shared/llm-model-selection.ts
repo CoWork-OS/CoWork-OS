@@ -1,3 +1,7 @@
+import {
+  getAnthropicDefaultReasoningEffort,
+  getAnthropicReasoningEffortOptions,
+} from "./anthropic-model-capabilities";
 import type { LLMModelInfo, LLMProviderType, LLMReasoningEffort } from "./types";
 
 export const LLM_REASONING_EFFORT_OPTIONS: Array<{
@@ -51,12 +55,21 @@ const GPT_6_SOL_LUNA_REASONING_EFFORTS: LLMReasoningEffort[] = [
 
 type OpenAIAuthMethod = "api_key" | "oauth";
 
+/** Providers that send Anthropic thinking/effort parameters (see anthropic-thinking.ts). */
+function isAnthropicThinkingProvider(providerType: LLMProviderType | string): boolean {
+  return providerType === "anthropic" || providerType === "azure-anthropic";
+}
+
 export function getLlmModelReasoningEfforts(
   providerType: LLMProviderType | string | undefined,
   modelKey: string | undefined,
   openaiAuthMethod?: OpenAIAuthMethod,
 ): LLMReasoningEffort[] {
   if (!providerType || !modelKey?.trim()) return [];
+
+  if (isAnthropicThinkingProvider(providerType)) {
+    return getAnthropicReasoningEffortOptions(modelKey);
+  }
 
   if (providerType === "azure") {
     if (modelKey === "gpt-6-sol" || modelKey === "gpt-6-luna") {
@@ -99,6 +112,21 @@ export function getLlmModelReasoningEfforts(
   }
 
   return [];
+}
+
+/**
+ * Effort to preselect when a model is chosen and the previous selection does not
+ * apply. Undefined means the caller's generic default.
+ */
+export function getLlmModelDefaultReasoningEffort(
+  providerType: LLMProviderType | string | undefined,
+  modelKey: string | undefined,
+): LLMReasoningEffort | undefined {
+  if (!providerType || !modelKey?.trim()) return undefined;
+  if (isAnthropicThinkingProvider(providerType)) {
+    return getAnthropicDefaultReasoningEffort(modelKey);
+  }
+  return undefined;
 }
 
 export function withLlmModelSelectionMetadata<T extends LLMModelInfo>(

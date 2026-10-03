@@ -6,6 +6,7 @@ import type {
   LLMReasoningEffort,
 } from "../../../shared/types";
 import {
+  getLlmModelDefaultReasoningEffort,
   getLlmModelReasoningEfforts,
   getLlmReasoningEffortOptions,
 } from "../../../shared/llm-model-selection";
@@ -299,12 +300,15 @@ export function ModelDropdown({
     const reasoningEfforts =
       modelInfo?.reasoningEfforts ||
       getLlmModelReasoningEfforts(providerType, modelKey, modelInfo?.openaiAuthMethod);
+    const modelDefaultEffort = getLlmModelDefaultReasoningEffort(providerType, modelKey);
     const reasoningEffort =
       selectedReasoningEffort && reasoningEfforts.includes(selectedReasoningEffort)
         ? selectedReasoningEffort
-        : reasoningEfforts.includes("medium")
-          ? "medium"
-          : reasoningEfforts[0];
+        : modelDefaultEffort && reasoningEfforts.includes(modelDefaultEffort)
+          ? modelDefaultEffort
+          : reasoningEfforts.includes("medium")
+            ? "medium"
+            : reasoningEfforts[0];
 
     onModelChange({
       providerType,

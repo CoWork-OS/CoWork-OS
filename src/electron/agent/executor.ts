@@ -531,6 +531,10 @@ import {
   recordToolFailureOutcome as recordToolFailureOutcomeUtil,
 } from "./executor-tool-execution-utils";
 import {
+  findUnresolvedTestCommandFailures,
+  type UnresolvedTestCommandFailures,
+} from "./unresolved-test-commands";
+import {
   CODING_WORKFLOW_PROMPT,
   SHARED_PROMPT_POLICY_CORE,
   buildModeDomainContract,
@@ -12358,6 +12362,34 @@ ${transcript}
       .join(" ");
   }
 
+  /**
+   * Test commands that failed and never passed again although a different test
+   * command passed later, e.g. `npm test` red and only a single file re-run.
+   */
+  private getUnresolvedTestCommandFailures(): UnresolvedTestCommandFailures | null {
+    return findUnresolvedTestCommandFailures(this.verificationCommandLedger?.runs || [], (segment) =>
+      this.isTestCommand(segment),
+    );
+  }
+
+  /** Completion note naming failing test commands that the final answer may gloss over. */
+  private buildUnresolvedTestCommandNote(): string {
+    const unresolved = this.getUnresolvedTestCommandFailures();
+    if (!unresolved) return "";
+    const listed = unresolved.failingCommands
+      .slice(0, 3)
+      .map((command) => `\`${command.slice(0, 120)}\``)
+      .join(", ");
+    const more =
+      unresolved.failingCommands.length > 3
+        ? ` and ${unresolved.failingCommands.length - 3} more`
+        : "";
+    return [
+      "Test notes:",
+      `- ${listed}${more} failed and did not pass in a later run; the passing run was \`${unresolved.passingCommand.slice(0, 120)}\`, which may not cover the same tests.`,
+    ].join("\n");
+  }
+
   private recordQAExecution(toolName: string, result: Any): void {
     if (toolName !== "qa_run") return;
     if (result && result.success === false) return;
@@ -15609,7 +15641,12 @@ ${transcript}
 
   /** The summary the user sees, with completion notes and the file-mutation footer. */
   private appendCompletionFooters(summary: string, completionNotes: string): string {
-    return [summary, completionNotes, this.fileMutationVerifier?.buildAdvisoryFooter()]
+    return [
+      summary,
+      completionNotes,
+      this.buildUnresolvedTestCommandNote(),
+      this.fileMutationVerifier?.buildAdvisoryFooter(),
+    ]
       .map((part) => String(part || "").trim())
       .filter(Boolean)
       .join("\n\n");
@@ -15643,8 +15680,21 @@ ${transcript}
       baseTerminalStatus,
       baseFailureClass,
     );
-    const terminalStatus: Task["terminalStatus"] = statusWithVerification.terminalStatus;
-    const failureClass: Task["failureClass"] = statusWithVerification.failureClass;
+    let terminalStatus: Task["terminalStatus"] = statusWithVerification.terminalStatus;
+    let failureClass: Task["failureClass"] = statusWithVerification.failureClass;
+    const unresolvedTestCommands = this.getUnresolvedTestCommandFailures();
+    if (unresolvedTestCommands) {
+      this.emitEvent("log", {
+        metric: "unresolved_test_command_failure",
+        failingCommands: unresolvedTestCommands.failingCommands,
+        passingCommand: unresolvedTestCommands.passingCommand,
+      });
+      // The task asked for tests and one of its test commands still fails.
+      if (this.requiresTestRun && terminalStatus === "ok") {
+        terminalStatus = "partial_success";
+        failureClass = "required_verification";
+      }
+    }
     const summaryCandidate = this.selectFinalTaskSummary(resultSummary);
     const summary = this.reconcileSummaryWithWorkspaceOutputs(summaryCandidate);
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();

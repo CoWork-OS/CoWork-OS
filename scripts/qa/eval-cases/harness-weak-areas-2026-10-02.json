@@ -237,6 +237,15 @@
         "inventedChartValues": false,
         "executableTest": "src/electron/utils/document-generators/__tests__/pptx-generator.test.ts"
       }
+    },
+    {
+      "id": "configured-test-command-still-failing",
+      "prompt": "Fix the bug in src/math.js so that all tests pass, then run the tests to confirm. (npm test is broken; the agent verifies with node --test test/math.test.js.)",
+      "assertions": {
+        "terminalStatus": "partial_success",
+        "completionNoteNames": ["npm test", "node --test test/math.test.js"],
+        "executableTest": "src/electron/agent/__tests__/executor-step-failures.test.ts"
+      }
     }
   ],
   "notes": "Each category names the executable regression test added with its fix; every test failed before its fix and passes after. Live end-to-end grading of these scenarios is not part of this record."

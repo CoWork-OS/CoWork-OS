@@ -1327,6 +1327,35 @@ export function isHardToolFailure(toolName: string, result: Any, failureReason =
   );
 }
 
+/**
+ * A run_command result for a command that ran to completion and exited
+ * non-zero with output, such as a red test or build run. A command that could
+ * not run or report (spawn error, timeout, user stop, sandbox abort, policy
+ * block, no output at all) does not qualify.
+ */
+export function isCompletedNonZeroExitCommandResult(result: Any): boolean {
+  if (!result || typeof result !== "object" || result.success !== false) return false;
+  if (result.blocked === true || result.disabled === true || result.unavailable === true) {
+    return false;
+  }
+  if (typeof result.exitCode !== "number" || result.exitCode === 0) return false;
+  if (result.timedOut === true) return false;
+  if (result.terminationReason !== undefined && result.terminationReason !== "normal") {
+    return false;
+  }
+  const error = typeof result.error === "string" ? result.error.trim() : "";
+  if (error && !/^(?:command\s+)?exit(?:ed)?\s+(?:with\s+)?code\s+-?\d+\b/i.test(error)) {
+    return false;
+  }
+  const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+  // The shell tool fills an empty stderr with a placeholder explaining that
+  // the command printed nothing; that is not output from the command.
+  return (
+    Boolean(stdout) || (Boolean(stderr) && !/^Command exited with no output\b/.test(stderr))
+  );
+}
+
 export function isAdvisoryToolFailureResult(result: Any): boolean {
   return Boolean(
     result &&

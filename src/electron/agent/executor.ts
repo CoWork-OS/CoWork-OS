@@ -517,6 +517,7 @@ import {
   getToolFailureReason as getToolFailureReasonUtil,
   inferAndNormalizeToolInput as inferAndNormalizeToolInputUtil,
   isAdvisoryToolFailureResult as isAdvisoryToolFailureResultUtil,
+  isCompletedNonZeroExitCommandResult as isCompletedNonZeroExitCommandResultUtil,
   isEffectivelyIdempotentToolCall as isEffectivelyIdempotentToolCallUtil,
   isHardToolFailure as isHardToolFailureUtil,
   buildDuplicateCallSuggestion as buildDuplicateCallSuggestionUtil,
@@ -12057,6 +12058,60 @@ ${transcript}
         unresolved.delete(failedKind);
       }
     }
+  }
+
+  /**
+   * A step that runs tests or a build to observe the current failures ("run
+   * the test suite to identify the failing behavior", "reproduce the bug"), or
+   * one that runs before a planned fix. A red run is the evidence such a step
+   * asked for, not a failure. Mutation, verification and recovery steps keep
+   * the stricter rules, and the task-level test-run requirement still needs a
+   * passing run at the end.
+   */
+  private isDiagnosticCommandRunStep(
+    step: PlanStep,
+    stepContract: StepExecutionContract,
+  ): boolean {
+    if (stepContract.requiresMutation || stepContract.mode !== "analysis_only") return false;
+    if (step.kind === "recovery" || this.isVerificationStepForCompletion(step)) return false;
+    const description = String(step.description || "");
+    // "Confirm the tests pass" or "check the bug is fixed" expects a green run.
+    const expectsGreenRun =
+      /\b(?:pass(?:es|ing)?|succeed(?:s|ed)?|green|zero exit|exit (?:code )?0|fixed|resolved|no longer)\b/i.test(
+        description,
+      );
+    if (expectsGreenRun) return false;
+    if (/\b(?:reproduc(?:e|es|ing)|repro|diagnos(?:e|es|ing)|baseline)\b/i.test(description)) {
+      return true;
+    }
+
+    const steps = this.plan?.steps || [];
+    const index = steps.findIndex((candidate) => candidate.id === step.id);
+    const isWorkStep = (candidate: PlanStep) =>
+      candidate.kind !== "recovery" &&
+      this.resolveStepExecutionContract(candidate).requiresMutation;
+    // After a change, "run the build and check for errors" is a check of that
+    // change; a red run there is a real failure.
+    const changeAlreadyMade =
+      this.getVerificationCommandLedger().lastMutationSeq > 0 ||
+      (index > 0 &&
+        steps
+          .slice(0, index)
+          .some((candidate) => candidate.status === "completed" && isWorkStep(candidate)));
+    if (changeAlreadyMade) return false;
+
+    const observesFailures =
+      /\b(?:identify|observe|capture|see|find|determine|inspect|investigate|understand|check|record|note|list|collect)\b[^.;\n]{0,80}\b(?:fail(?:s|ed|ing|ures?)?|errors?|bugs?|broken|regressions?|problems?|issues?)\b/i.test(
+        description,
+      ) ||
+      /\bcurrent(?:ly)?\s+(?:fail(?:s|ing|ures?)?|errors?|state|behaviou?r)\b/i.test(description);
+    if (observesFailures) return true;
+    // Structural cue: a later plan step makes the change, so this step runs
+    // before the fix and a failing run is the expected starting point.
+    if (index < 0) return false;
+    return steps
+      .slice(index + 1)
+      .some((candidate) => candidate.status === "pending" && isWorkStep(candidate));
   }
 
   private getVerificationCommandLedger(): {
@@ -32183,6 +32238,9 @@ Return ONLY a JSON object:
       // Test/build commands whose latest run failed, by kind (see
       // trackVerificationCommandOutcome). Enforced for mutation steps.
       const unresolvedVerificationCommandFailures = new Map<string, string>();
+      // A step that runs tests or a build to observe the current failures
+      // treats a red run as its evidence (see isDiagnosticCommandRunStep).
+      const diagnosticCommandRunStep = this.isDiagnosticCommandRunStep(step, stepContract);
       let verificationRerunNudgeInjected = false;
       // Nudges for turns that describe an action without making the tool call.
       let unexecutedActionNudgeCount = 0;
@@ -34850,9 +34908,21 @@ Return ONLY a JSON object:
                           simpleImageGenerationStopAfterTool = true;
                         }
 
-                        if (content.name === "run_command" && !toolSucceeded) {
+                        // A red test/build run in a diagnostic step is the output the
+                        // step asked for: it ran and reported, so it neither fails the
+                        // step nor counts against the tool.
+                        const diagnosticRedRun =
+                          !toolSucceeded &&
+                          diagnosticCommandRunStep &&
+                          this.isVerificationCommandCall(canonicalContentName, content.input) &&
+                          isCompletedNonZeroExitCommandResultUtil(result);
+                        if (
+                          content.name === "run_command" &&
+                          !toolSucceeded &&
+                          !diagnosticRedRun
+                        ) {
                           hadRunCommandFailure = true;
-                        } else if (hadRunCommandFailure && toolSucceeded) {
+                        } else if (hadRunCommandFailure && (toolSucceeded || diagnosticRedRun)) {
                           hadToolSuccessAfterRunCommandFailure = true;
                         }
                         if (canonicalContentName === "run_command") {
@@ -34937,6 +35007,16 @@ Return ONLY a JSON object:
                                 },
                                 effectiveCorrelation,
                               ),
+                            });
+                          } else if (diagnosticRedRun) {
+                            hadAnyToolSuccess = true;
+                            if (hadToolError) {
+                              hadToolSuccessAfterError = true;
+                            }
+                            this.emitEvent("log", {
+                              metric: "diagnostic_command_failure_recorded_as_evidence",
+                              stepId: step.id,
+                              exitCode: result?.exitCode,
                             });
                           } else {
                             hadToolError = true;

@@ -6884,6 +6884,154 @@ describe("TaskExecutor step loop control", () => {
       expect(step.status, String(step.error || "")).toBe("completed");
     });
 
+    describe("diagnostic test runs", () => {
+      const redTestRun = () => ({
+        success: false,
+        exitCode: 1,
+        terminationReason: "normal",
+        stdout: "1 passing\n1 failing\n  average() returned NaN for [2, 4]",
+        stderr: "npm ERR! Test failed.",
+      });
+
+      it("completes a step that runs the tests to identify the failing behavior", async () => {
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("read_file", { path: "src/math.js" }, "r1"),
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse(
+              "npm test exits 1: the average() test fails because average divides by a hard-coded 2 instead of the array length.",
+            ),
+          ],
+          { run_command: redTestRun },
+        );
+        const step: Any = {
+          id: "2",
+          description:
+            "Read src/math.js and the related tests, then run the configured test suite to identify the failing behavior.",
+          status: "pending",
+          kind: "primary",
+        };
+
+        await (executor as Any).executeStep(step);
+
+        expect(step.status, String(step.error || "")).toBe("completed");
+      });
+
+      it("completes a reproduce step whose test run is red", async () => {
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npx vitest run src/math.test.js" }, "c1"),
+            textResponse("Reproduced: the average test fails with NaN for [2, 4]."),
+          ],
+          { run_command: redTestRun },
+        );
+        const step: Any = {
+          id: "repro",
+          description: "Reproduce the bug by running the math tests",
+          status: "pending",
+        };
+
+        await (executor as Any).executeStep(step);
+
+        expect(step.status, String(step.error || "")).toBe("completed");
+      });
+
+      it("still fails a diagnostic step when the test command could not run", async () => {
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("The test run timed out."),
+          ],
+          {
+            run_command: () => ({
+              success: false,
+              exitCode: null,
+              terminationReason: "timeout",
+              stdout: "",
+              stderr: "",
+              error: "Command timed out",
+            }),
+          },
+        );
+        const step: Any = {
+          id: "2",
+          description: "Run the test suite to identify the failing behavior.",
+          status: "pending",
+        };
+
+        await (executor as Any).executeStep(step);
+
+        expect(step.status).toBe("failed");
+      });
+
+      it("still fails a verification step whose test run is red", async () => {
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("npm test still fails."),
+          ],
+          { run_command: redTestRun },
+        );
+        const step: Any = {
+          id: "4",
+          description:
+            "Verify: Run the complete configured test suite and confirm a zero exit code.",
+          status: "pending",
+          kind: "verification",
+        };
+
+        await (executor as Any).executeStep(step);
+
+        expect(step.status).toBe("failed");
+      });
+
+      it("completes a test run that precedes a planned fix", async () => {
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm test" }, "c1"),
+            textResponse("npm test exits 1 with one failing login test."),
+          ],
+          { run_command: redTestRun },
+        );
+        const runStep: Any = { id: "1", description: "Run the test suite", status: "pending" };
+        const fixStep: Any = {
+          id: "2",
+          description: "Fix the null check bug in src/auth/login.ts",
+          status: "pending",
+        };
+        (executor as Any).plan = { description: "Plan", steps: [runStep, fixStep] };
+
+        await (executor as Any).executeStep(runStep);
+
+        expect(runStep.status, String(runStep.error || "")).toBe("completed");
+      });
+
+      it("still fails a red check of errors that runs after the fix", async () => {
+        const executor = createCodeStepExecutor(
+          [
+            toolCall("run_command", { command: "npm run build" }, "c1"),
+            textResponse("The build reports a type error in login.ts."),
+          ],
+          { run_command: redTestRun },
+        );
+        const fixStep: Any = {
+          id: "1",
+          description: "Fix the null check bug in src/auth/login.ts",
+          status: "completed",
+        };
+        const checkStep: Any = {
+          id: "2",
+          description: "Run the build and check for errors",
+          status: "pending",
+        };
+        (executor as Any).plan = { description: "Plan", steps: [fixStep, checkStep] };
+
+        await (executor as Any).executeStep(checkStep);
+
+        expect(checkStep.status).toBe("failed");
+      });
+    });
+
     describe("failed verification resolved by a later passing run", () => {
       const red = {
         success: false,

@@ -105,9 +105,14 @@ describe("NativeNotificationCenter", () => {
     expect(mockState.instances[0]?.options).toMatchObject({
       title: "Task complete",
       body: "Report finished",
-      icon: expect.any(Object),
       timeoutType: "default",
     });
+    // macOS renders the app icon itself; an explicit icon would be duplicated on the right.
+    if (process.platform === "darwin") {
+      expect(mockState.instances[0]?.options).not.toHaveProperty("icon");
+    } else {
+      expect(mockState.instances[0]?.options).toHaveProperty("icon");
+    }
     expect(mockState.instances[0]?.show).toHaveBeenCalledOnce();
 
     mockState.instances[0]?.emit("click");

@@ -34,7 +34,9 @@ export class NativeNotificationCenter {
     }
 
     try {
-      const icon = getDesktopIconImage();
+      // macOS already shows the app icon on the left; passing `icon` there adds a
+      // duplicate content image on the right side of the banner.
+      const icon = process.platform === "darwin" ? null : getDesktopIconImage();
       const nativeNotification = new Notification({
         title: notification.title,
         body: notification.message,

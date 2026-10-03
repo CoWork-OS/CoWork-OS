@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OllamaProvider, getOllamaEffectiveContextWindow } from "../ollama-provider";
-import type { LLMRequest } from "../types";
+import {
+  getTextToolCallFallbackStats,
+  resetTextToolCallFallbackStatsForTests,
+} from "../text-tool-call-parser";
+import { clearNativeToolSupportCacheForTests } from "../text-tool-protocol";
+import type { LLMRequest, LLMTool } from "../types";
 
 function createRequest(): LLMRequest {
   return {
@@ -299,5 +304,202 @@ describe("OllamaProvider context window", () => {
 
     expect(response.content).toEqual([{ type: "text", text: "Done" }]);
     expect(JSON.parse(String(chatCalls(fetchMock as Any)[0][1].body)).options.num_ctx).toBe(32_768);
+  });
+});
+
+describe("OllamaProvider text tool-call fallback", () => {
+  const tools: LLMTool[] = [
+    {
+      name: "read_file",
+      description: "Read a file from the workspace. Large files are truncated.",
+      input_schema: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+    },
+  ];
+
+  function toolRequest(model: string, overrides: Partial<LLMRequest> = {}): LLMRequest {
+    return { ...createRequest(), model, tools, ...overrides };
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    clearNativeToolSupportCacheForTests();
+    resetTextToolCallFallbackStatsForTests();
+  });
+
+  it("turns a <tool_call> written as text into a tool_use block", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      routeOllamaFetch(
+        mockOllamaResponse({
+          role: "assistant",
+          content:
+            'I will read it.\n<tool_call>{"name": "read_file", "arguments": {"path": "README.md"}}</tool_call>',
+        }),
+      ),
+    );
+    const provider = new OllamaProvider({ type: "ollama", model: "qwen2.5:7b" });
+
+    const response = await provider.createMessage(toolRequest("qwen2.5:7b"));
+
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.content).toEqual([
+      { type: "text", text: "I will read it." },
+      expect.objectContaining({
+        type: "tool_use",
+        name: "read_file",
+        input: { path: "README.md" },
+      }),
+    ]);
+    expect(getTextToolCallFallbackStats().recoveredCalls).toBe(1);
+  });
+
+  it("leaves native tool calls and their text untouched", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const text = '<tool_call>{"name": "read_file", "arguments": {"path": "other.md"}}</tool_call>';
+    vi.stubGlobal(
+      "fetch",
+      routeOllamaFetch(
+        mockOllamaResponse({
+          role: "assistant",
+          content: text,
+          tool_calls: [{ function: { name: "read_file", arguments: { path: "a.md" } } }],
+        }),
+      ),
+    );
+    const provider = new OllamaProvider({ type: "ollama", model: "qwen2.5:7b" });
+
+    const response = await provider.createMessage(toolRequest("qwen2.5:7b"));
+
+    expect(response.content).toEqual([
+      { type: "text", text },
+      expect.objectContaining({ type: "tool_use", name: "read_file", input: { path: "a.md" } }),
+    ]);
+    expect(getTextToolCallFallbackStats().recoveredCalls).toBe(0);
+  });
+
+  it("does not parse text tool calls when the fallback is disabled", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      routeOllamaFetch(
+        mockOllamaResponse({
+          role: "assistant",
+          content: '<tool_call>{"name": "read_file", "arguments": {"path": "a"}}</tool_call>',
+        }),
+      ),
+    );
+    const provider = new OllamaProvider(
+      { type: "ollama", model: "qwen2.5:7b" },
+      { textToolCallFallback: false },
+    );
+
+    const response = await provider.createMessage(toolRequest("qwen2.5:7b"));
+
+    expect(response.stopReason).toBe("end_turn");
+    expect(response.content.some((block) => block.type === "tool_use")).toBe(false);
+  });
+
+  it("retries once with the text tool protocol when the model does not support tools", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = routeOllamaFetch([
+      {
+        ok: false,
+        status: 400,
+        text: vi
+          .fn()
+          .mockResolvedValue(
+            '{"error":"registry.ollama.ai/library/gemma2:2b does not support tools"}',
+          ),
+      } as unknown as Response,
+      mockOllamaResponse({
+        role: "assistant",
+        content: '<tool_call>{"name": "read_file", "arguments": {"path": "notes.md"}}</tool_call>',
+      }),
+      mockOllamaResponse({ role: "assistant", content: "The notes say hello." }),
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OllamaProvider({ type: "ollama", model: "gemma2:2b" });
+
+    const first = await provider.createMessage(toolRequest("gemma2:2b"));
+
+    expect(first.stopReason).toBe("tool_use");
+    const toolUse = first.content.find((block) => block.type === "tool_use");
+    expect(toolUse).toMatchObject({ name: "read_file", input: { path: "notes.md" } });
+
+    const [nativeAttempt, textAttempt] = chatCalls(fetchMock).map(([, init]) =>
+      JSON.parse(String(init.body)),
+    );
+    expect(nativeAttempt.tools).toHaveLength(1);
+    expect(textAttempt).not.toHaveProperty("tools");
+    expect(textAttempt.messages[0].role).toBe("system");
+    expect(textAttempt.messages[0].content).toContain("You are helpful.");
+    expect(textAttempt.messages[0].content).toContain(
+      '<tool_call>{"name": "<tool name>", "arguments": {<JSON object>}}</tool_call>',
+    );
+    expect(textAttempt.messages[0].content).toContain(
+      '- read_file: Read a file from the workspace. Arguments: {"path": string (required)}',
+    );
+    expect(getTextToolCallFallbackStats().textProtocolActivations).toBe(1);
+
+    // The model is remembered: the follow-up goes straight to the text protocol
+    // and replays the call and its result as plain text the model understands.
+    const second = await provider.createMessage(
+      toolRequest("gemma2:2b", {
+        messages: [
+          { role: "user", content: "Summarize notes.md" },
+          { role: "assistant", content: first.content },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: toolUse!.id, content: "hello" }],
+          },
+        ],
+      }),
+    );
+
+    expect(second.content).toEqual([{ type: "text", text: "The notes say hello." }]);
+    const calls = chatCalls(fetchMock);
+    expect(calls).toHaveLength(3);
+    const followUp = JSON.parse(String(calls[2][1].body));
+    expect(followUp).not.toHaveProperty("tools");
+    expect(followUp.messages.slice(1)).toEqual([
+      { role: "user", content: "Summarize notes.md" },
+      {
+        role: "assistant",
+        content: '<tool_call>{"name":"read_file","arguments":{"path":"notes.md"}}</tool_call>',
+      },
+      { role: "user", content: '<tool_response name="read_file">\nhello\n</tool_response>' },
+    ]);
+    expect(followUp.messages.some((message: { role: string }) => message.role === "tool")).toBe(
+      false,
+    );
+  });
+
+  it("surfaces the unsupported-tools error when the fallback is disabled", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = routeOllamaFetch([
+      {
+        ok: false,
+        status: 400,
+        text: vi.fn().mockResolvedValue('{"error":"gemma2:2b does not support tools"}'),
+      } as unknown as Response,
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OllamaProvider(
+      { type: "ollama", model: "gemma2:2b" },
+      { textToolCallFallback: false },
+    );
+
+    await expect(provider.createMessage(toolRequest("gemma2:2b"))).rejects.toThrow(
+      "does not support tools",
+    );
+    expect(chatCalls(fetchMock)).toHaveLength(1);
   });
 });

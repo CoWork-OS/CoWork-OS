@@ -9,6 +9,19 @@ import {
   LLMToolUse,
 } from "./types";
 import { parseOpenAICompatibleToolArguments } from "./openai-compatible";
+import {
+  applyTextToolCallFallback,
+  recordTextToolProtocolActivation,
+} from "./text-tool-call-parser";
+import {
+  areNativeToolsUnsupported,
+  isNativeToolsUnsupportedError,
+  isTextToolCallFallbackEnabledByDefault,
+  markNativeToolsUnsupported,
+  nativeToolSupportKey,
+  toTextToolProtocolMessages,
+  withTextToolProtocolInstructions,
+} from "./text-tool-protocol";
 
 function supportsOllamaThinkingControl(model: string): boolean {
   const normalized = String(model || "")
@@ -104,6 +117,15 @@ function isUnsupportedThinkingResponse(status: number, message: string): boolean
   );
 }
 
+export interface OllamaProviderOptions {
+  /**
+   * Recover tool calls the model writes as text, and fall back to a
+   * prompt-described tool protocol for models that reject native tools.
+   * Defaults to on (see isTextToolCallFallbackEnabledByDefault).
+   */
+  textToolCallFallback?: boolean;
+}
+
 /**
  * Ollama API provider implementation
  * Supports local and remote Ollama servers
@@ -114,10 +136,13 @@ export class OllamaProvider implements LLMProvider {
   private baseUrl: string;
   private apiKey?: string;
   private readonly contextWindowByModel = new Map<string, Promise<number>>();
+  private readonly textToolCallFallback: boolean;
 
-  constructor(config: LLMProviderConfig) {
+  constructor(config: LLMProviderConfig, options: OllamaProviderOptions = {}) {
     this.baseUrl = config.ollamaBaseUrl || "http://localhost:11434";
     this.apiKey = config.ollamaApiKey;
+    this.textToolCallFallback =
+      options.textToolCallFallback ?? isTextToolCallFallbackEnabledByDefault("ollama");
 
     // Remove trailing slash if present
     if (this.baseUrl.endsWith("/")) {
@@ -126,8 +151,20 @@ export class OllamaProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
-    const messages = this.convertMessages(request.messages, request.system);
-    const tools = request.tools ? this.convertTools(request.tools) : undefined;
+    const offeredTools = request.tools && request.tools.length > 0 ? request.tools : undefined;
+    const toolSupportKey = nativeToolSupportKey("ollama", this.baseUrl, request.model);
+    // Models that rejected native tools get the tools described in the system
+    // prompt and their tool history replayed as text.
+    let useTextProtocol = this.textToolCallFallback && areNativeToolsUnsupported(toolSupportKey);
+    const buildMessages = (textProtocol: boolean): OllamaMessage[] =>
+      textProtocol
+        ? this.convertMessages(
+            toTextToolProtocolMessages(request.messages),
+            withTextToolProtocolInstructions(request.system, offeredTools, request.toolChoice),
+          )
+        : this.convertMessages(request.messages, request.system);
+    const messages = buildMessages(useTextProtocol);
+    const tools = offeredTools && !useTextProtocol ? this.convertTools(offeredTools) : undefined;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -183,39 +220,57 @@ export class OllamaProvider implements LLMProvider {
         requestBody.think = false;
       }
 
-      let response = await fetch(chatUrl, {
-        method: "POST",
-        headers,
-        signal: timeoutController.signal,
-        body: JSON.stringify(requestBody),
-      });
+      const postChat = () =>
+        fetch(chatUrl, {
+          method: "POST",
+          headers,
+          signal: timeoutController.signal,
+          body: JSON.stringify(requestBody),
+        });
+      let response = await postChat();
+      let retriedWithoutThink = false;
+      let retriedWithTextProtocol = false;
 
-      if (!response.ok) {
+      // Each compatibility retry runs at most once; any other failure is final.
+      while (!response.ok) {
         const error = await response.text();
-        if (requestBody.think === false && isUnsupportedThinkingResponse(response.status, error)) {
-          const { think: _think, ...retryBody } = requestBody;
-          response = await fetch(chatUrl, {
-            method: "POST",
-            headers,
-            signal: timeoutController.signal,
-            body: JSON.stringify(retryBody),
-          });
+        if (
+          !retriedWithoutThink &&
+          requestBody.think === false &&
+          isUnsupportedThinkingResponse(response.status, error)
+        ) {
+          retriedWithoutThink = true;
+          delete requestBody.think;
+        } else if (
+          !retriedWithTextProtocol &&
+          this.textToolCallFallback &&
+          "tools" in requestBody &&
+          isNativeToolsUnsupportedError(response.status, error)
+        ) {
+          retriedWithTextProtocol = true;
+          useTextProtocol = true;
+          markNativeToolsUnsupported(toolSupportKey);
+          recordTextToolProtocolActivation("ollama", request.model);
+          delete requestBody.tools;
+          requestBody.messages = buildMessages(true);
         } else {
           throw new Error(`Ollama API error: ${response.status} - ${error}`);
         }
+        response = await postChat();
       }
 
       clearTimeout(timeoutId);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(`[Ollama] Response received in ${elapsed}s`);
 
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Ollama API error: ${response.status} - ${error}`);
-      }
-
       const data = (await response.json()) as OllamaChatResponse;
-      return this.convertResponse(data);
+      const converted = this.convertResponse(data);
+      if (!this.textToolCallFallback || !offeredTools) return converted;
+      return applyTextToolCallFallback(converted, request, {
+        providerType: "ollama",
+        model: request.model,
+        mode: useTextProtocol ? "text_protocol" : "native_tools",
+      });
     } catch (error: Any) {
       clearTimeout(timeoutId);
       console.error(`[Ollama] API error:`, {

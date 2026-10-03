@@ -215,11 +215,17 @@ Choose the sandbox implementation for the effective profile:
 If using Docker sandbox:
 
 ```
-Image: node:20-alpine (default)
-CPU Limit: 1 core (default)
-Memory Limit: 512m (default)
+Image: node:24-bookworm (default; includes git, python3, gcc/make)
+CPU Limit: 2 cores, or fewer if the host has fewer (default)
+Memory Limit: 4g (default)
 Network Mode: none (default) or bridge
 ```
+
+Commands run as your user with a read-only root filesystem. `/tmp` (1 GB) and a
+private `HOME` at `/home/cowork` (1 GB, holds npm/pip/git caches) are writable
+in-memory mounts that are discarded when the command ends. Set a workspace
+`dockerConfig` to use a different image (for example your devcontainer image) or
+different limits.
 
 **Prerequisites:**
 

@@ -4929,7 +4929,7 @@ export type SandboxType = "auto" | "macos" | "docker" | "none";
  * Docker sandbox configuration
  */
 export interface DockerSandboxConfig {
-  /** Docker image to use (default: node:20-alpine) */
+  /** Docker image to use (default: node:24-bookworm) */
   image?: string;
   /** CPU limit in cores (e.g., 0.5 = half a core) */
   cpuLimit?: number;

@@ -282,7 +282,7 @@ import {
   deriveReviewGateDecision,
   inferMutationFromSummary,
   resolveEntropySweepPolicy,
-  resolveReviewPolicy,
+  resolveEffectiveReviewPolicy,
   scoreTaskRisk,
 } from "../eval/risk";
 import { buildEntropySweepPrompt, collectBlastRadiusPaths } from "./post-task-entropy-sweep";
@@ -1661,24 +1661,10 @@ export class AgentDaemon extends EventEmitter {
       lastProgressScore: task.lastProgressScore,
       workspaceId: task.workspaceId,
     });
-    let nextAgentConfig = derived.agentConfig;
-    let agentConfigChanged = derived.agentConfigChanged;
-
-    // Reliability default: optionally auto-enable balanced review policy for code/operations tasks.
-    // This stays opt-in to preserve backward compatibility.
-    const autoReviewPolicyEnabled = parseBooleanEnv("COWORK_REVIEW_POLICY_ENABLE_AUTO", false);
-    if (autoReviewPolicyEnabled && !nextAgentConfig.reviewPolicy) {
-      if (derived.strategy.taskDomain === "code" || derived.strategy.taskDomain === "operations") {
-        const configured = (process.env.COWORK_REVIEW_POLICY_AUTO_DEFAULT || "balanced")
-          .trim()
-          .toLowerCase();
-        nextAgentConfig = {
-          ...nextAgentConfig,
-          reviewPolicy: configured === "strict" ? "strict" : "balanced",
-        };
-        agentConfigChanged = true;
-      }
-    }
+    const nextAgentConfig = derived.agentConfig;
+    const agentConfigChanged = derived.agentConfigChanged;
+    // The automatic review for high-risk code/operations tasks is resolved at
+    // completion (resolveEffectiveReviewPolicy), once the risk is known.
 
     if (task.strategyLock) {
       return {
@@ -14047,7 +14033,11 @@ export class AgentDaemon extends EventEmitter {
       historicalEvents,
       metadata?.outputSummary,
     );
-    const reviewPolicy = resolveReviewPolicy(existingTask.agentConfig?.reviewPolicy);
+    const { policy: reviewPolicy, source: reviewPolicySource } = resolveEffectiveReviewPolicy({
+      requestedPolicy: existingTask.agentConfig?.reviewPolicy,
+      taskDomain: existingTask.agentConfig?.taskDomain,
+      riskLevel: risk.level,
+    });
     const reviewDecision = deriveReviewGateDecision({
       policy: reviewPolicy,
       riskLevel: risk.level,
@@ -14430,9 +14420,10 @@ export class AgentDaemon extends EventEmitter {
       });
     }
 
+    // The automatic high-risk review adds a verifier, not a post-task sweep.
     const entropyPolicy = resolveEntropySweepPolicy(
       existingTask.agentConfig?.entropySweepPolicy,
-      reviewPolicy,
+      reviewPolicySource === "auto" ? "off" : reviewPolicy,
     );
     const entropyDecision = deriveEntropySweepDecision({
       policy: entropyPolicy,

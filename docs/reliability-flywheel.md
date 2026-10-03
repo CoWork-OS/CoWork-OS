@@ -106,7 +106,7 @@ Post-completion entropy sweep:
 - `off`: disabled
 - `balanced`: run for high-risk or clearly mutating tasks
 - `strict`: run for mutating tasks and non-low-risk tasks
-- Default resolution: explicit config, then `COWORK_ENTROPY_SWEEP_DEFAULT`, then `reviewPolicy`
+- Default resolution: explicit config, then `COWORK_ENTROPY_SWEEP_DEFAULT`, then an explicit or env-default `reviewPolicy` (the automatic high-risk review below does not start a sweep)
 
 ### Daemon Enforcement Path
 
@@ -118,10 +118,21 @@ Completion flow also passes verified-mode evidence bundles into the quality gate
 
 After completion, the daemon may launch a read-only entropy sweep for the task's blast radius to look for stale docs, contradictions, and dead-code hints. The sweep is non-blocking and only reports findings.
 
-Optional auto-policy defaults (for code/operations domains) can be enabled via env vars:
+Review policy resolution at completion (`resolveEffectiveReviewPolicy`):
 
-- `COWORK_REVIEW_POLICY_ENABLE_AUTO`
-- `COWORK_REVIEW_POLICY_AUTO_DEFAULT` (`balanced` or `strict`)
+1. The task's own `agentConfig.reviewPolicy`, when set.
+2. `COWORK_REVIEW_POLICY_DEFAULT` (`off`, `balanced` or `strict`), when set.
+3. Automatic review: a `code` or `operations` task that scored **high** risk gets `balanced` review
+   (strict completion contract, key-claim evidence check, and the independent verifier for
+   top-level tasks). This is on by default. Low- and medium-risk tasks and other domains are not
+   affected.
+4. Otherwise `off`.
+
+Environment variables for the automatic review (there is no Settings control for it yet):
+
+- `COWORK_REVIEW_POLICY_ENABLE_AUTO=false` turns the automatic review off (default: on)
+- `COWORK_REVIEW_POLICY_AUTO_DEFAULT=strict` makes the automatic review `strict` (default: `balanced`)
+- `COWORK_REVIEW_POLICY_DEFAULT=off` turns review off for every task without an explicit policy
 
 ## Required deterministic harness gate
 

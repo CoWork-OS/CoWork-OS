@@ -631,6 +631,68 @@ describe("AgentDaemon.completeTask", () => {
     );
   });
 
+  it("auto-applies balanced review to high-risk code tasks without a review policy", () => {
+    const highRiskEvents = [
+      { tool: "run_command", input: { command: "npm install" } },
+      ...["a", "b", "c", "d", "e", "f"].map((name) => ({ path: `${name}.ts` })),
+    ]
+      .map((entry, index) =>
+        "tool" in entry
+          ? { id: `c${index}`, type: "tool_call", payload: entry }
+          : { id: `f${index}`, type: "file_modified", payload: entry },
+      )
+      .concat(
+        [1, 2, 3].map((index) => ({
+          id: `err${index}`,
+          type: "tool_error",
+          payload: { tool: "run_command", error: "failed" },
+        })) as Any[],
+      )
+      .map((event) => ({ ...event, taskId: "task-1", timestamp: Date.now() }));
+    const run = (agentConfig: Record<string, unknown>, events: unknown[]) => {
+      const daemonLike = createDaemonLike();
+      daemonLike.taskRepo.findById.mockReturnValue({
+        id: "task-1",
+        title: "Implement feature",
+        prompt: "Implement feature and run tests before finishing",
+        status: "executing",
+        workspaceId: "workspace-1",
+        parentTaskId: "parent-task",
+        agentType: "sub",
+        agentConfig,
+      });
+      daemonLike.eventRepo.findByTaskId.mockReturnValue(events);
+      AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done");
+      const payload = (daemonLike.logEvent as Any).mock.calls.find(
+        (call: unknown[]) => call[1] === "task_completed",
+      )?.[2];
+      return { payload, daemonLike };
+    };
+
+    const prevAuto = process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO;
+    delete process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO;
+    try {
+      const high = run({ taskDomain: "code" }, highRiskEvents);
+      expect(high.payload.reviewPolicy).toBe("balanced");
+      expect(high.payload.reviewGate).toMatchObject({ tier: "high", runVerificationAgent: true });
+      // The auto policy is a reviewer, not a post-task entropy sweep.
+      expect(high.daemonLike.runPostTaskEntropySweep).not.toHaveBeenCalled();
+
+      const low = run({ taskDomain: "code" }, []);
+      expect(low.payload.reviewPolicy).toBe("off");
+      expect(low.daemonLike.runQuickQualityPass).not.toHaveBeenCalled();
+
+      const optedOut = run({ taskDomain: "code", reviewPolicy: "off" }, highRiskEvents);
+      expect(optedOut.payload.reviewPolicy).toBe("off");
+
+      process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO = "false";
+      expect(run({ taskDomain: "code" }, highRiskEvents).payload.reviewPolicy).toBe("off");
+    } finally {
+      if (prevAuto === undefined) delete process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO;
+      else process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO = prevAuto;
+    }
+  });
+
   it("emits key-claim evidence attachment event when evidence refs exist", () => {
     const daemonLike = createDaemonLike();
     daemonLike.hasEvidenceForKeyClaims.mockReturnValue({

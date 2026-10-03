@@ -11,8 +11,14 @@ interface FakeNode {
   attrs?: Record<string, string>;
   text?: string;
   hidden?: boolean;
+  /** Computed style read by in-page checks; unset properties take browser defaults. */
+  style?: { position?: string; display?: string; visibility?: string; opacity?: string };
+  /** Layout box in viewport coordinates; the fake viewport is 1280x720. */
+  rect?: { left: number; top: number; width: number; height: number };
   children?: FakeNode[];
 }
+
+const VIEWPORT = { width: 1280, height: 720 };
 
 function textOf(node: FakeNode): string {
   return [node.text || "", ...(node.children || []).map(textOf)].filter(Boolean).join(" ");
@@ -89,6 +95,34 @@ function isVisible(node: FakeNode, ancestors: Map<FakeNode, FakeNode | null>): b
   return true;
 }
 
+/** Just enough of an Element for functions run through ElementHandle.evaluate. */
+function fakeElement(node: FakeNode, parents: Map<FakeNode, FakeNode | null>): Any {
+  const view = {
+    innerWidth: VIEWPORT.width,
+    innerHeight: VIEWPORT.height,
+    getComputedStyle: (element: Any) => ({
+      position: "static",
+      display: "block",
+      visibility: "visible",
+      opacity: "1",
+      ...(element.node as FakeNode).style,
+    }),
+  };
+  const wrap = (current: FakeNode): Any => ({
+    node: current,
+    ownerDocument: { defaultView: view },
+    get parentElement() {
+      const parent = parents.get(current);
+      return parent ? wrap(parent) : null;
+    },
+    getBoundingClientRect: () => {
+      const { left, top, width, height } = current.rect || { left: 0, top: 0, width: 0, height: 0 };
+      return { left, top, width, height, right: left + width, bottom: top + height };
+    },
+  });
+  return wrap(node);
+}
+
 function createFakePage(bodyChildren: FakeNode[], url = "https://example.com/") {
   const body: FakeNode = { tag: "body", children: bodyChildren };
   const parents = new Map<FakeNode, FakeNode | null>([[body, null]]);
@@ -119,7 +153,10 @@ function createFakePage(bodyChildren: FakeNode[], url = "https://example.com/") 
       descendants(node)
         .filter((candidate) => matches(candidate, selector))
         .map(toHandle),
-    evaluate: async () => undefined,
+    evaluate: async (pageFunction: unknown, arg?: unknown) =>
+      typeof pageFunction === "function"
+        ? pageFunction(fakeElement(node, parents), arg)
+        : undefined,
   });
 
   const page: Any = {
@@ -171,6 +208,22 @@ const oneTrustBanner = (): FakeNode => ({
   ],
 });
 
+/** A cookie dialog laid out like a consent banner: pinned to the bottom of the viewport. */
+const cookieDialog = (
+  buttons: string[],
+  layout: Pick<FakeNode, "style" | "rect"> = {},
+): FakeNode => ({
+  tag: "div",
+  attrs: { role: "dialog", "aria-label": "Cookie consent" },
+  style: { position: "fixed" },
+  rect: { left: 0, top: 600, width: 1280, height: 120 },
+  ...layout,
+  children: [
+    { tag: "p", text: "This site uses cookies for analytics." },
+    ...buttons.map((text) => ({ tag: "button", text })),
+  ],
+});
+
 describe("BrowserService consent popup handling", () => {
   it("does not click links or ordinary buttons on a page without a consent manager", async () => {
     const { page, clicked } = createFakePage([
@@ -216,25 +269,88 @@ describe("BrowserService consent popup handling", () => {
     });
   });
 
-  it("falls back to accept only inside a cookie dialog that offers no reject choice", async () => {
+  it("still accepts inside a known consent manager that offers no reject choice", async () => {
+    const banner = oneTrustBanner();
+    banner.children = banner.children!.filter((child) => child.text !== "Reject All");
+    const { page, clicked } = createFakePage([banner]);
+    const service = createService(page);
+
+    const result = await service.navigate("https://example.com/");
+
+    expect(clicked).toEqual(["Accept All Cookies"]);
+    expect(result.consentDismissed).toMatchObject({
+      action: "clicked",
+      text: "Accept All Cookies",
+    });
+  });
+
+  it.each([
+    ["a banner pinned to the bottom edge", {}],
+    ["a centred modal", { rect: { left: 320, top: 180, width: 640, height: 360 } }],
+    [
+      "a card near a corner",
+      { rect: { left: 24, top: 476, width: 360, height: 220 }, style: { position: "sticky" } },
+    ],
+  ])("clicks the reject choice in a cookie dialog that is %s", async (_label, layout) => {
     const { page, clicked } = createFakePage([
       { tag: "main", text: "Docs" },
-      {
-        tag: "div",
-        attrs: { role: "dialog", "aria-label": "Cookie consent" },
-        children: [
-          { tag: "p", text: "This site uses cookies for analytics." },
-          { tag: "button", text: "Manage preferences" },
-          { tag: "button", text: "Accept all" },
-        ],
-      },
+      cookieDialog(["Accept all", "Reject all"], layout),
     ]);
     const service = createService(page);
 
     const result = await service.navigate("https://example.com/");
 
-    expect(clicked).toEqual(["Accept all"]);
-    expect(result.consentDismissed).toMatchObject({ action: "clicked", text: "Accept all" });
+    expect(clicked).toEqual(["Reject all"]);
+    expect(result.consentDismissed).toEqual({
+      action: "clicked",
+      text: "Reject all",
+      container: "cookie consent dialog",
+    });
+  });
+
+  it("clicks the reject choice in a cookie dialog pinned by an ancestor", async () => {
+    const dialog = cookieDialog(["Accept all", "Reject all"], { style: {} });
+    const { page, clicked } = createFakePage([
+      { tag: "div", style: { position: "fixed" }, children: [dialog] },
+    ]);
+    const service = createService(page);
+
+    await service.navigate("https://example.com/");
+
+    expect(clicked).toEqual(["Reject all"]);
+  });
+
+  it("never clicks accept-style choices in a cookie dialog of no known consent manager", async () => {
+    const { page, clicked } = createFakePage([
+      { tag: "main", text: "Docs" },
+      cookieDialog(["Manage preferences", "Accept all", "OK", "Got it"]),
+    ]);
+    const service = createService(page);
+
+    const result = await service.navigate("https://example.com/");
+
+    expect(clicked).toEqual([]);
+    expect(result.consentDismissed).toBeUndefined();
+  });
+
+  it.each([
+    ["inline page content", { style: { position: "static" } }],
+    ["scrolled out of the viewport", { rect: { left: 0, top: 2000, width: 1280, height: 120 } }],
+    ["transparent", { style: { position: "fixed", opacity: "0" } }],
+    ["not rendered", { style: { position: "fixed", display: "none" } }],
+    ["invisible", { style: { position: "fixed", visibility: "hidden" } }],
+    ["a small box floating mid-page", { rect: { left: 560, top: 330, width: 160, height: 60 } }],
+  ])("ignores a cookie dialog that is %s", async (_label, layout) => {
+    const { page, clicked } = createFakePage([
+      { tag: "main", text: "Docs" },
+      cookieDialog(["Continue without accepting", "Reject all"], layout),
+    ]);
+    const service = createService(page);
+
+    const result = await service.navigate("https://example.com/");
+
+    expect(clicked).toEqual([]);
+    expect(result.consentDismissed).toBeUndefined();
   });
 
   it("never clicks anchors, even inside a consent container", async () => {

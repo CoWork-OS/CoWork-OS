@@ -20,7 +20,8 @@ const log = createLogger("BrowserService");
 
 /**
  * Consent auto-dismissal only ever acts inside these consent-manager (CMP) containers, or inside
- * a dialog whose text is about cookies/consent. Anything else on the page is never clicked.
+ * a dialog whose text is about cookies/consent and that overlays the page like a consent banner.
+ * Anything else on the page is never clicked.
  */
 const CONSENT_MANAGER_CONTAINER_SELECTORS = [
   "#onetrust-banner-sdk",
@@ -116,6 +117,40 @@ function rankConsentButtonName(name: string): number {
   if (CONSENT_REJECT_BUTTON_NAMES.has(name)) return 0;
   if (CONSENT_ACCEPT_BUTTON_NAMES.has(name)) return 1;
   return -1;
+}
+
+/**
+ * Runs in the page (via ElementHandle.evaluate, so it must stay self-contained): whether a
+ * dialog is laid out like a consent banner rather than marked up as one. It, or an ancestor,
+ * must be position fixed or sticky; it must be rendered, visible and intersect the viewport;
+ * and it must cover a tenth of the viewport or sit within 48px of a viewport edge (top or
+ * bottom bars, corner cards). Role and aria attributes alone are page-supplied claims.
+ */
+function isConsentOverlayLayout(element: Element): boolean {
+  const view = element.ownerDocument.defaultView;
+  if (!view) return false;
+  if (["hidden", "collapse"].includes(view.getComputedStyle(element).visibility)) return false;
+  let pinned = false;
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    const style = view.getComputedStyle(node);
+    if (style.display === "none" || Number(style.opacity) === 0) return false;
+    if (style.position === "fixed" || style.position === "sticky") pinned = true;
+  }
+  if (!pinned) return false;
+  const rect = element.getBoundingClientRect();
+  const width = view.innerWidth;
+  const height = view.innerHeight;
+  const visibleWidth = Math.min(rect.right, width) - Math.max(rect.left, 0);
+  const visibleHeight = Math.min(rect.bottom, height) - Math.max(rect.top, 0);
+  if (visibleWidth <= 0 || visibleHeight <= 0) return false;
+  const edge = 48;
+  return (
+    (visibleWidth * visibleHeight) / (width * height) >= 0.1 ||
+    rect.top <= edge ||
+    rect.left <= edge ||
+    height - rect.bottom <= edge ||
+    width - rect.right <= edge
+  );
 }
 
 export interface BrowserOptions {
@@ -974,10 +1009,12 @@ export class BrowserService {
    * Dismiss a cookie-consent banner, if one is showing.
    *
    * Only acts inside a known consent-manager container or a dialog that is about cookies or
-   * consent, clicks only buttons whose accessible name exactly matches a known consent choice
-   * (never links), and prefers reject / necessary-only over accept-all. Skipped entirely for an
-   * attached real browser or a persistent profile, where the choice would be made on the user's
-   * behalf and outlive the task.
+   * consent and overlays the page like a banner, clicks only buttons whose accessible name
+   * exactly matches a known consent choice (never links), and prefers reject / necessary-only
+   * over accept-all. Any page can label a dialog, so in a dialog that is not a known consent
+   * manager only reject / necessary-only choices are clicked. Skipped entirely for an attached
+   * real browser or a persistent profile, where the choice would be made on the user's behalf
+   * and outlive the task.
    */
   private async dismissConsentPopups(): Promise<ConsentDismissal | null> {
     if (!this.page) return null;
@@ -993,7 +1030,10 @@ export class BrowserService {
       const dialogs = await page.$$(CONSENT_DIALOG_SELECTOR).catch(() => []);
       for (const dialog of dialogs.slice(0, MAX_CONSENT_DIALOGS)) {
         const text = (await dialog.textContent().catch(() => null)) || "";
-        if (CONSENT_DIALOG_TEXT_PATTERN.test(text)) {
+        if (
+          CONSENT_DIALOG_TEXT_PATTERN.test(text) &&
+          (await dialog.evaluate(isConsentOverlayLayout).catch(() => false)) === true
+        ) {
           containers.push({ handle: dialog, label: "cookie consent dialog", isCmp: false });
         }
       }
@@ -1015,7 +1055,7 @@ export class BrowserService {
             "";
           const name = normalizeConsentButtonName(rawName);
           const rank = rankConsentButtonName(name);
-          if (rank < 0 || (best && best.rank <= rank)) continue;
+          if (rank < 0 || (!container.isCmp && rank > 0) || (best && best.rank <= rank)) continue;
           best = {
             rank,
             button,

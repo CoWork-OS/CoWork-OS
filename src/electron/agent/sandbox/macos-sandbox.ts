@@ -705,9 +705,28 @@ ${tempWriteRules}
 
     // Allow network if permitted
     if (allowNetwork) {
+      // Network access is for the network. A Unix-domain socket reaches a
+      // local program instead, often with the user's full authority: the
+      // Docker daemon (a host-root container is one request away), an
+      // ssh-agent, database servers. Keep those out; DNS goes through
+      // mDNSResponder's socket, and sockets the command creates in its own
+      // workspace or private scratch keep working. (The shared host temp
+      // directory is not included: editors and agents keep IPC sockets there.)
+      const ownSockets = [
+        ...workspaceAliases,
+        ...this.getMacOSPathAliases(this.getRuntimeTempDir()),
+      ]
+        .map((alias) => `  (remote unix-socket (subpath "${escapeSandboxProfileString(alias)}"))`)
+        .join("\n");
       profile += `
 ; Allow network access
 (allow network*)
+; ...except other programs' local sockets
+(deny network-outbound (remote unix-socket))
+(allow network-outbound
+  (remote unix-socket (path-literal "/private/var/run/mDNSResponder"))
+${ownSockets}
+)
 `;
     } else {
       profile += `

@@ -387,6 +387,7 @@ import {
 import {
   appendAssistantResponseToConversation as appendAssistantResponseToConversationUtil,
   buildCommandFailureSignature as buildCommandFailureSignatureUtil,
+  buildLoopTurnLimitWarning as buildLoopTurnLimitWarningUtil,
   buildMaxTokensExhaustedNotice as buildMaxTokensExhaustedNoticeUtil,
   computeToolFailureDecision as computeToolFailureDecisionUtil,
   handleMaxTokensRecovery as handleMaxTokensRecoveryUtil,
@@ -6597,6 +6598,10 @@ ${transcript}
   private readonly guardrailPhaseBEnabled: boolean;
   private llmCallSequence: number = 0;
   private softDeadlineTriggered: boolean = false;
+  /** Set by executePlan when the running step passes its soft deadline. */
+  private stepSoftDeadlineReached = false;
+  /** Set by the step loop when it cut the step short for the soft deadline. */
+  private stepSoftDeadlineWrapUpUsed = false;
   private wrapUpRequested: boolean = false;
   private completionVerificationMetadata: VerificationCompletionMetadata | null = null;
   private stepStopReasons: Set<TaskStopReason> = new Set();
@@ -30705,16 +30710,20 @@ Return ONLY a JSON object:
         20_000,
         Math.min(stepTimeout - 10_000, Math.floor(stepTimeout * 0.9)),
       );
+      this.stepSoftDeadlineReached = false;
+      this.stepSoftDeadlineWrapUpUsed = false;
       const stepSoftTimeoutId = setTimeout(() => {
         stepSoftTimedOut = true;
         logger.info(
-          `${this.logTag} Step "${step.description}" reached soft deadline after ${Math.round(softStepTimeoutMs / 1000)}s - switching to best-effort mode`,
+          `${this.logTag} Step "${step.description}" reached soft deadline after ${Math.round(softStepTimeoutMs / 1000)}s - finishing the current turn, then summarizing`,
         );
         this.emitEvent("log", {
           message: `Step soft deadline reached (${Math.round(softStepTimeoutMs / 1000)}s): ${step.description}`,
         });
-        this.abortController.abort();
-        this.abortController = new AbortController();
+        // Not preemptive: the in-flight model call or tool finishes, then the
+        // step loop asks for a summary with tools disabled and stops. The hard
+        // timeout below still aborts a turn that runs past the step limit.
+        this.stepSoftDeadlineReached = true;
       }, softStepTimeoutMs);
       const stepTimeoutId = setTimeout(() => {
         logger.info(
@@ -30736,12 +30745,30 @@ Return ONLY a JSON object:
         await this.executeStep(step);
         clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
+        this.stepSoftDeadlineReached = false;
         // A user cancellation can arrive while a tool is unwinding. Do not
         // run post-step verification, recovery, or contract reconciliation
         // after that point; those follow-up paths turn a deliberate cancel
         // into a misleading generic step failure.
         if (this.cancelled && this.cancelReason !== "timeout") {
           return;
+        }
+        const unfinishedLaterSteps = this.plan.steps
+          .slice(index + 1)
+          .some((later) => later.status === "pending" || later.status === "in_progress");
+        if (
+          stepSoftTimedOut &&
+          (unfinishedLaterSteps ||
+            (step.status as PlanStep["status"]) !== "completed" ||
+            this.stepSoftDeadlineWrapUpUsed)
+        ) {
+          // The step summarized its progress at the soft deadline. Finalize
+          // best-effort from here; steps not started stay pending and are
+          // listed as not finished in the completion notes. A final step that
+          // finished on its own in the turn that was running completes normally.
+          this.softDeadlineTriggered = true;
+          index = this.plan.steps.length;
+          continue;
         }
         if (
           this.isTerminalImageGenerationTask() &&
@@ -30765,6 +30792,7 @@ Return ONLY a JSON object:
       } catch (error: Any) {
         clearTimeout(stepSoftTimeoutId);
         clearTimeout(stepTimeoutId);
+        this.stepSoftDeadlineReached = false;
 
         if (error instanceof AwaitingUserInputError) {
           this.waitingForUserInput = true;
@@ -32119,6 +32147,10 @@ Return ONLY a JSON object:
       let iterStartTime = stepStartTime;
       let stepKernelSkipped = false;
       let stepKernelRetried = false;
+      let stepLlmRequestCount = 0;
+      let stepTurnLimitWarningInjected = false;
+      // Iteration that asked for a summary after the soft deadline (0 = none).
+      let stepSoftDeadlineWrapUpIteration = 0;
 
       logger.info(
         `${this.logTag} ▶ Step "${step.description}" started | stepId=${step.id} | maxIter=${maxIterations} | ` +
@@ -32174,6 +32206,12 @@ Return ONLY a JSON object:
           }
           if (this.wrapUpRequested) {
             logger.info(`${this.logTag} Step loop wrap-up requested: finishing current step`);
+            return { stop: true, reason: "wrap_up_requested" };
+          }
+          if (
+            stepSoftDeadlineWrapUpIteration > 0 &&
+            state.iterationCount >= stepSoftDeadlineWrapUpIteration
+          ) {
             return { stop: true, reason: "wrap_up_requested" };
           }
 
@@ -32408,6 +32446,50 @@ Return ONLY a JSON object:
             );
           }
 
+          // Warn before the step's own turn cap so the model can land the
+          // current change and summarize instead of being cut off mid-edit.
+          const stepTurnsLeft = Math.min(
+            maxIterations - iterationCount + 1,
+            stepLoopBudget.maxLlmCalls - stepLlmRequestCount,
+          );
+          if (!stepTurnLimitWarningInjected && stepTurnsLeft <= 2) {
+            stepTurnLimitWarningInjected = true;
+            messages.push({
+              role: "user",
+              content: [
+                { type: "text", text: buildLoopTurnLimitWarningUtil(stepTurnsLeft, "step") },
+              ],
+            });
+            this.emitEvent("log", {
+              metric: "step_turn_limit_warning",
+              stepId: step.id,
+              iteration: iterationCount,
+              turnsLeft: stepTurnsLeft,
+            });
+          }
+          // Past the soft deadline the in-flight turn was allowed to finish; ask
+          // for a summary with tools disabled, then stop after this turn.
+          if (this.stepSoftDeadlineReached && stepSoftDeadlineWrapUpIteration === 0) {
+            stepSoftDeadlineWrapUpIteration = iterationCount;
+            this.stepSoftDeadlineWrapUpUsed = true;
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    "[STEP_TIME_LIMIT] This step has reached its time limit. Do not call any more tools. " +
+                    "Reply now with what is done and what remains unfinished.",
+                },
+              ],
+            });
+            this.emitEvent("log", {
+              metric: "step_soft_deadline_wrap_up",
+              stepId: step.id,
+              iteration: iterationCount,
+            });
+          }
+
           try {
             ({
               messages,
@@ -32456,11 +32538,12 @@ Return ONLY a JSON object:
               }
               startedProviderDispatchMessageIds.add(messageId);
             }
+            stepLlmRequestCount += 1;
             return await this.requestLLMResponseWithAdaptiveBudget({
               messages,
               retryLabel: `Step execution (iteration ${iterationCount})`,
               operation: "LLM execution step",
-              forceNoTools: localModelStepFinalizationForced,
+              forceNoTools: localModelStepFinalizationForced || stepSoftDeadlineWrapUpIteration > 0,
             });
           } catch (llmError: Any) {
             const recovery = await this.recoverFromContextCapacityOverflow({
@@ -32844,6 +32927,7 @@ Return ONLY a JSON object:
             !responseHasToolUse &&
             !assistantAskedQuestion &&
             !localModelStepFinalizationForced &&
+            stepSoftDeadlineWrapUpIteration === 0 &&
             availableToolNames.size > 0 &&
             unexecutedActionNudgeCount < 2
           ) {
@@ -32983,7 +33067,8 @@ Return ONLY a JSON object:
             (this.guardrailPhaseAEnabled &&
               responseHasToolUse &&
               remainingTurnsAfterResponse <= 0) ||
-            (localModelStepFinalizationForced && responseHasToolUse);
+            ((localModelStepFinalizationForced || stepSoftDeadlineWrapUpIteration > 0) &&
+              responseHasToolUse);
           let skippedToolCallsByPolicy = 0;
           let hasDisabledToolAttempt = false;
           let hasDuplicateToolAttempt = false;
@@ -37587,12 +37672,22 @@ Return ONLY a JSON object:
           lastFailureReason || "",
         );
         const userRequestedRecovery = !isRecoveryStep && isRecoverySignal;
-        const autoRecoveryRequested = this.shouldAutoPlanRecovery(step, lastFailureReason || "");
+        // A step that ran out of turns while still making progress (edits or
+        // successful tool results) is continued by a recovery step rather than
+        // left as a dead stop. Recovery steps themselves are not continued.
+        const budgetStopWithProgress =
+          Boolean(stepLoopBudgetStopReason) &&
+          (mutationSatisfied || hadAnyToolSuccess) &&
+          !isRecoveryStep &&
+          !isVerificationStepDescription(step.description) &&
+          this.planRevisionCount < this.maxPlanRevisions;
+        const autoRecoveryRequested =
+          budgetStopWithProgress || this.shouldAutoPlanRecovery(step, lastFailureReason || "");
         const runtime = this.getSessionRuntime();
         const recoveryState = runtime.getRecoveryState();
         const shouldHandleRecovery =
           !isNonBlockingVerificationFailure &&
-          !stepLoopBudgetStopReason &&
+          (!stepLoopBudgetStopReason || budgetStopWithProgress) &&
           (userRequestedRecovery || autoRecoveryRequested) &&
           recoveryClass !== "user_blocker" &&
           recoveryState.lastRecoveryFailureSignature !== recoverySignature;
@@ -37761,6 +37856,20 @@ Return ONLY a JSON object:
                               kind: "recovery",
                             },
                           ];
+            if (budgetStopWithProgress && !contractUnmetWriteRequired) {
+              const unfinishedStep = String(step.description || "")
+                .trim()
+                .replace(/[.!?]+$/, "");
+              recoveryTemplateId = "step_budget_continuation";
+              recoverySteps = [
+                {
+                  description:
+                    `Continue the unfinished step from where it stopped: ${unfinishedStep}. ` +
+                    "Keep the work already done, finish what remains, then summarize what is done and what is still missing.",
+                  kind: "recovery",
+                },
+              ];
+            }
             let allowRevision = true;
             const recoveryHookDecision = evaluateAgentPolicyHook({
               policy: this.agentPolicyConfig,

@@ -3,6 +3,7 @@ import type { LLMMessage } from "../llm";
 import {
   appendAssistantResponseToConversation,
   buildCommandFailureSignature,
+  buildLoopTurnLimitWarning,
   buildMaxTokensExhaustedNotice,
   computeToolFailureDecision,
   handleMaxTokensRecovery,
@@ -628,5 +629,14 @@ describe("ToolLoopProgressTracker", () => {
     const different = buildCommandFailureSignature({ exitCode: 1, stdout: "2 failed in 0.57s" });
     expect(first).toBe(second);
     expect(first).not.toBe(different);
+  });
+});
+
+describe("buildLoopTurnLimitWarning", () => {
+  it("tells the model how many turns are left and to land the current change", () => {
+    expect(buildLoopTurnLimitWarning(2, "step")).toBe(
+      "[TURN_LIMIT] You have 2 turns left in this step. Finish the current change, then summarize what is done and what remains.",
+    );
+    expect(buildLoopTurnLimitWarning(1, "follow-up")).toContain("You have 1 turn left in this follow-up.");
   });
 });

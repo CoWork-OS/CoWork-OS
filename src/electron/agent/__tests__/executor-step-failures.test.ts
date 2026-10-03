@@ -2,7 +2,7 @@
  * Tests for step failure/verification behavior in TaskExecutor.executeStep
  */
 
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -6149,6 +6149,164 @@ describe("TaskExecutor step loop control", () => {
       expect(step.status, String(step.error || "")).toBe("completed");
       expect((executor as Any).callLLMWithRetry).toHaveBeenCalledTimes(1);
       expect(actionNudges(executor)).toEqual([]);
+    });
+  });
+
+  describe("step turn limit", () => {
+    it("warns two turns before the step's turn limit and plans a continuation after progress", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 33 }, (_, index) =>
+        toolCall("read_file", { path: `src/module${index}.ts` }, `r${index}`),
+      );
+      const executor = createCodeStepExecutor(responses);
+      const step: Any = {
+        id: "long-step",
+        description: "Inspect the project modules and describe how they are organized",
+        status: "pending",
+      };
+      const nextStep: Any = { id: "next-step", description: "Write the summary", status: "pending" };
+      (executor as Any).plan = { description: "Plan", steps: [step, nextStep] };
+      (executor as Any).maxPlanRevisions = 5;
+      (executor as Any).planRevisionCount = 0;
+
+      await (executor as Any).executeStep(step);
+
+      const llmCalls = (executor as Any).callLLMWithRetry.mock.calls.length;
+      expect(llmCalls).toBe(32);
+      const warnings = userTexts(executor).filter((text) =>
+        text.includes("turns left in this step"),
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("You have 2 turns left in this step");
+      // The warning arrives before the last two model turns.
+      const history = (executor as Any).conversationHistory as Any[];
+      const warningIndex = history.findIndex(
+        (entry) =>
+          entry.role === "user" &&
+          JSON.stringify(entry.content).includes("turns left in this step"),
+      );
+      expect(history.slice(warningIndex).filter((entry) => entry.role === "assistant")).toHaveLength(
+        2,
+      );
+
+      expect(step.status).toBe("failed");
+      const planDescriptions = (executor as Any).plan.steps.map((entry: Any) => entry.description);
+      expect(
+        planDescriptions.some((description: string) =>
+          description.startsWith("Continue the unfinished step"),
+        ),
+      ).toBe(true);
+      expect(planDescriptions).toContain("Write the summary");
+    });
+
+    it("keeps a dead stop for a step that hit its turn limit without any progress", async () => {
+      const responses: LLMResponse[] = Array.from({ length: 33 }, (_, index) =>
+        toolCall("read_file", { path: `src/missing${index}.ts` }, `r${index}`),
+      );
+      const executor = createCodeStepExecutor(responses, {
+        read_file: (input: Any) => ({
+          success: false,
+          error: `ENOENT: no such file or directory, open '${input?.path}'`,
+        }),
+      });
+      const step: Any = {
+        id: "long-step-no-progress",
+        description: "Inspect the project modules and describe how they are organized",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+      (executor as Any).maxPlanRevisions = 5;
+      (executor as Any).planRevisionCount = 0;
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status).toBe("failed");
+      expect((executor as Any).plan.steps).toHaveLength(1);
+    });
+  });
+
+  describe("step soft deadline", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("lets the in-flight turn finish, then asks for a summary and leaves later steps unstarted", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const executor = createCodeStepExecutor([]);
+      const originalController: AbortController = (executor as Any).abortController;
+      const requests: Any[][] = [];
+      let call = 0;
+      (executor as Any).callLLMWithRetry = vi.fn(async (...args: Any[]) => {
+        requests.push(args);
+        call += 1;
+        if (call === 1) {
+          // A slow model turn that is still running when the soft deadline passes.
+          return await new Promise((resolve, reject) => {
+            const signal: AbortSignal = (executor as Any).abortController.signal;
+            signal.addEventListener("abort", () => reject(new Error("Request cancelled")));
+            setTimeout(
+              () => resolve(toolCall("read_file", { path: "src/auth/login.ts" }, "r1")),
+              14 * 60 * 1000,
+            );
+          });
+        }
+        return textResponse(
+          "Read src/auth/login.ts and found the unguarded user.name access; the fix itself is still to do.",
+        );
+      });
+      const step: Any = {
+        id: "slow-step",
+        description: "Inspect src/auth/login.ts and explain the null check problem",
+        status: "pending",
+      };
+      const laterStep: Any = { id: "later-step", description: "Write the report", status: "pending" };
+      (executor as Any).plan = { description: "Plan", steps: [step, laterStep] };
+
+      const run = (executor as Any).executePlan();
+      await vi.advanceTimersByTimeAsync(14 * 60 * 1000);
+      await run;
+
+      expect(originalController.signal.aborted).toBe(false);
+      expect(executor.toolRegistry.executeTool).toHaveBeenCalledWith("read_file", {
+        path: "src/auth/login.ts",
+      });
+      expect(userTexts(executor).some((text) => text.includes("[STEP_TIME_LIMIT]"))).toBe(true);
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect(laterStep.status).toBe("pending");
+      expect((executor as Any).softDeadlineTriggered).toBe(true);
+      expect(requests).toHaveLength(2);
+    });
+
+    it("completes normally when the final step finishes in the turn that was running", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const executor = createCodeStepExecutor([]);
+      (executor as Any).callLLMWithRetry = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve(
+                  textResponse(
+                    "login() reads user.name without checking that user exists, so a missing user throws.",
+                  ),
+                ),
+              14 * 60 * 1000,
+            );
+          }),
+      );
+      const step: Any = {
+        id: "slow-final-step",
+        description: "Inspect src/auth/login.ts and explain the null check problem",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+
+      const run = (executor as Any).executePlan();
+      await vi.advanceTimersByTimeAsync(14 * 60 * 1000);
+      await run;
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect((executor as Any).softDeadlineTriggered).toBe(false);
+      expect(userTexts(executor).some((text) => text.includes("[STEP_TIME_LIMIT]"))).toBe(false);
     });
   });
 

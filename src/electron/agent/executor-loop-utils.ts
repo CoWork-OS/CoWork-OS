@@ -814,6 +814,19 @@ export class ToolLoopProgressTracker {
   }
 }
 
+/**
+ * Warning shown a couple of turns before a step or follow-up reaches its own
+ * turn cap, so the model can land the current change and report what is left
+ * instead of being cut off mid-edit.
+ */
+export function buildLoopTurnLimitWarning(turnsLeft: number, scope: "step" | "follow-up"): string {
+  const turns = Math.max(1, Math.floor(turnsLeft));
+  return (
+    `[TURN_LIMIT] You have ${turns} turn${turns === 1 ? "" : "s"} left in this ${scope}. ` +
+    "Finish the current change, then summarize what is done and what remains."
+  );
+}
+
 export function shouldLockFollowUpToolCalls(opts: {
   stopReason: string | undefined;
   consecutiveToolUseStops: number;

@@ -51,9 +51,16 @@ export class MemoryWriteGate {
   private static db?: import("better-sqlite3").Database;
   private static initialized = false;
 
+  /**
+   * Idempotent: main, MemoryService and CuratedMemoryService all call this. A repeat call
+   * for the same database keeps the existing repository; a different database (a profile
+   * switch or a test) re-initializes.
+   */
   static initialize(dbManager: DatabaseManager): void {
-    this.db = dbManager.getDatabase();
-    this.pendingRepo = new PendingMemoryWriteRepository(this.db);
+    const db = dbManager.getDatabase();
+    if (this.initialized && this.db === db && this.pendingRepo) return;
+    this.db = db;
+    this.pendingRepo = new PendingMemoryWriteRepository(db);
     this.initialized = true;
   }
 

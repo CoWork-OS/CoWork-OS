@@ -27,6 +27,23 @@ The audit also ran read-only aggregate queries against the live desktop database
 
 File references are relative to `src/electron/` unless prefixed.
 
+### Phase 1 status (2026-10-03)
+
+The findings below describe `main` @ `069740faf`, before any fixes.
+
+| Status | Findings |
+|---|---|
+| Fixed in Phase 0 (merged, `28e423ff1`) | SEC-1..12 |
+| Fixed in Phase 1 (branch `cowork-os/memory-phase1`, in progress) | DATA-1, 2, 3, 9, 11, 12; LOOP-1..11; PROMPT-1..4, 6, 8, 9; RECALL-1, 3; LIFE-1..4; SEC-14, 15; §6 dead-code and dead-settings cleanup; §7 doc drift in the memory docs |
+| Remaining | Phase 2/3 items; SEC-13, 16, 17, 18; LIFE-5 (partial); PROMPT-5, 7, 10..12; RECALL-2, 4..9; DATA-4..8, 10, 13; LOOP-12..15 |
+
+Phase 0 deviations from the §9 plan:
+
+- **SEC-1:** checkpoints stay in the workspace rather than moving to `userData`. Phase 0 stopped restoring permission state from checkpoint files, ignored far-future checkpoints and protected `.cowork/memory/transcripts` from agent file writes. Phase 1 added HMAC signing with a key held in encrypted settings; unsigned or legacy `sha256` checkpoints are rejected.
+- **SEC-2:** mailbox-sourced relationship items are kept out of profile prompts (and injected text is escaped) rather than routed to a contact-scoped `third_party` lane.
+- **SEC-10:** spoofed `[Imported from` prefixes are neutralized and private imports stay in their workspace; there is no `is_imported` column.
+- **SEC-13** (background writers bypassing access profiles) was not addressed in Phase 0 or Phase 1.
+
 ---
 
 ## 1. Executive summary

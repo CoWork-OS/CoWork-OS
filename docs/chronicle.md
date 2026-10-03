@@ -8,13 +8,13 @@ Chronicle is CoWork OS's opt-in desktop screen-context feature for vague, on-scr
 - `sync the latest draft`
 - `use the same doc as before`
 
-It extends CoWork's existing runtime instead of creating a separate memory system. Chronicle keeps a short local recent-screen buffer in the desktop app, resolves ambiguous references through `screen_context_resolve`, and promotes only task-used observations into the existing recall, evidence, and memory surfaces.
+It extends CoWork's existing runtime instead of creating a separate memory system. Chronicle keeps a short local recent-screen buffer in the desktop app, resolves ambiguous references through `screen_context_resolve`, and promotes at most one confident, task-used observation per call into the existing recall, evidence, and memory surfaces.
 
 ## What shipped
 
 - **Screen-aware disambiguation**: resolves vague references like `this`, `that`, `the failing one`, `right side`, `same doc`, or `on screen`
 - **Missing-context recovery**: helps the runtime find the active app, window, visible text, and source reference for tasks such as `sync the latest draft`
-- **Background memory generation**: promoted observations can generate linked `screen_context` memory entries in the background when Chronicle and workspace memory settings allow it
+- **Background memory generation**: promoted observations can generate linked `screen_context` memory entries in the background when Chronicle and workspace memory settings allow it. These entries are always private: they stay local and are never mirrored to Supermemory
 - **Workflow/tool hints**: Chronicle-backed tasks can reinforce destination hints such as `google_doc`, `slack_dm`, `repo_file`, or `drive_folder`
 - **Per-task control**: new-task flows in the main composer and Devices panel can disable Chronicle for a specific task without turning the feature off globally
 - **Observation management**: promoted observations are visible and deletable from Memory settings
@@ -23,7 +23,7 @@ It extends CoWork's existing runtime instead of creating a separate memory syste
 
 - **Not a second memory lane**: raw passive frames are not indexed as a permanent memory database
 - **Not channel/headless support**: Chronicle is desktop-only and is unavailable in headless or channel runtimes
-- **Not automatic provider export**: passive frames stay local; Chronicle does not send screenshots to external providers by itself
+- **Not automatic provider export**: passive frames stay local; Chronicle does not send screenshots or OCR text to external providers by itself
 - **Not a replacement for direct sources**: if CoWork can read the actual file, URL, PR, or document, that remains the stronger source of truth
 
 ## How it works
@@ -38,7 +38,7 @@ Chronicle uses a hybrid capture model:
 - the runtime first searches the local recent-screen buffer
 - if the passive match is weak, `screen_context_resolve` can fall back to a fresh local screenshot
 
-Only observations that were actually used by a task are promoted into workspace state:
+`screen_context_resolve` returns up to 5 matches to the model, but at most one is promoted into workspace state: the top match, and only when its confidence is at least `0.5`, the task did not opt out with `<no-memory>`, and the task's access profile allows writing `.cowork/chronicle/`. Lower-confidence matches are returned but not stored:
 
 - promoted observations are stored under `.cowork/chronicle/observations/`
 - copied image assets for those promoted observations are stored under `.cowork/chronicle/assets/`
@@ -126,7 +126,9 @@ If OCR-backed matching is important, install local `tesseract`. The Chronicle se
 - raw frames are pruned by retention time and frame cap
 - passive capture does not call external model providers by itself
 - later image or vision analysis still follows the normal explicit screenshot / export approval path
-- only task-used observations are copied into workspace state
+- only the single top, confident (≥ `0.5`) match of a `screen_context_resolve` call is copied into workspace state, and never for a `<no-memory>` task
+- Chronicle-derived memories are private and are never mirrored to Supermemory
+- deleting an observation removes only its own screenshot inside `.cowork/chronicle/assets/`; deleting a task removes its observations, and **Clear All Memories** removes all of them
 - when **Respect workspace memory privacy and auto-capture settings** is on, durable Chronicle promotion follows workspace memory gates before writing observations
 - `screen_context_resolve` and Chronicle-backed promotion remain subject to the task's access profile and tool restrictions; a profile cannot grant Screen Recording or widen later file/image/export access
 - local Chronicle files can still be accessed by other software running as you on the same machine
@@ -137,6 +139,8 @@ Chronicle can observe whatever is visible on screen during its capture window. I
 
 - pause it from the Chronicle settings card or tray menu, or
 - turn it off entirely from **Settings > Memory Hub > Chronicle**
+
+Pausing (or disabling, or withdrawing consent) stops capture and deletes the raw recent-screen buffer, including fallback frames. While paused, `screen_context_resolve` returns no matches and takes no fallback screenshot, and no Chronicle memories are generated. Already-promoted observations in `.cowork/chronicle/` are kept until you delete them.
 
 ## Prompt injection risk
 

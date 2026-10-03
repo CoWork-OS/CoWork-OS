@@ -8,6 +8,8 @@ import { BOX_BRAIN_UNITS } from "./box-brain-units";
 import { MEMORY_OBSERVATION_UNITS } from "./memory-observation-units";
 import { DURABLE_CONTEXT_UNITS } from "./durable-context-units";
 import { MARKDOWN_INDEX_UNITS } from "./markdown-index-units";
+import { MEMORY_CLEANUP_UNITS } from "./memory-cleanup-units";
+import { TRANSCRIPT_UNITS } from "./transcript-units";
 
 /**
  * Transaction units of the memory domain (async SQLite migration plan, DB6): each runs
@@ -21,14 +23,18 @@ export interface PromotionPassResult {
   evicted: number;
 }
 
+/**
+ * Tier promotion only. There is no tier-based expiry (audit DATA-1): a hidden 7-day TTL
+ * on `short` rows used to override the workspace's `retention_days`. Retention and the
+ * storage cap (MemoryService.runCleanup) are now the only paths that remove rows, and
+ * they never remove imported, Playbook, explicitly saved or curated rows.
+ */
 const tierPromotionPass = defineUnit(
   (args: unknown) => {
     const input = record(args);
     return {
       shortToMediumAt: int(input.shortToMediumAt, "args.shortToMediumAt"),
       mediumToLongAt: int(input.mediumToLongAt, "args.mediumToLongAt"),
-      evictCreatedBefore: int(input.evictCreatedBefore, "args.evictCreatedBefore"),
-      evictBelowReferences: int(input.evictBelowReferences, "args.evictBelowReferences"),
     };
   },
   (db: Database.Database, args): PromotionPassResult => {
@@ -44,21 +50,7 @@ const tierPromotionPass = defineUnit(
          WHERE COALESCE(tier, 'short') = 'medium' AND COALESCE(reference_count, 0) >= ?`,
       )
       .run(args.mediumToLongAt).changes;
-    // Child rows first: memory_embeddings references memories.
-    db.prepare(
-      `DELETE FROM memory_embeddings
-       WHERE memory_id IN (
-         SELECT id FROM memories
-         WHERE COALESCE(tier, 'short') = 'short' AND created_at < ? AND COALESCE(reference_count, 0) < ?
-       )`,
-    ).run(args.evictCreatedBefore, args.evictBelowReferences);
-    const evicted = db
-      .prepare(
-        `DELETE FROM memories
-         WHERE COALESCE(tier, 'short') = 'short' AND created_at < ? AND COALESCE(reference_count, 0) < ?`,
-      )
-      .run(args.evictCreatedBefore, args.evictBelowReferences).changes;
-    return { promoted: promotedShort + promotedMedium, evicted };
+    return { promoted: promotedShort + promotedMedium, evicted: 0 };
   },
 );
 
@@ -70,5 +62,7 @@ export const MEMORY_UNITS = {
   ...MEMORY_OBSERVATION_UNITS,
   ...DURABLE_CONTEXT_UNITS,
   ...MARKDOWN_INDEX_UNITS,
+  ...MEMORY_CLEANUP_UNITS,
+  ...TRANSCRIPT_UNITS,
   tier_promotionPass: tierPromotionPass,
 } satisfies UnitCatalog;

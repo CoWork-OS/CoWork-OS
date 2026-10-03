@@ -108,6 +108,14 @@ function contentHash(content: string): string {
     .digest("hex");
 }
 
+/**
+ * The observation `content_hash` of a memory's content (whitespace-normalized, lowercase
+ * SHA-256). Capture dedupe looks memories up by it.
+ */
+export function observationContentHash(content: string): string {
+  return contentHash(content);
+}
+
 function sourceLabel(origin: string): string {
   switch (origin) {
     case "chronicle":

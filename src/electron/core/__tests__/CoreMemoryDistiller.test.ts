@@ -44,6 +44,8 @@ describe("CoreMemoryDistiller", () => {
       } as Any,
       {
         listForTrace: () => [candidate],
+        findAppliedDuplicate: () => undefined,
+        markLifecycle: vi.fn(),
       } as Any,
       {
         create: () => createdRun,

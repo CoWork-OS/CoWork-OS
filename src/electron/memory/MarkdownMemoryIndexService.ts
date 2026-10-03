@@ -49,6 +49,52 @@ const IGNORED_DIRS = new Set([
   "release",
 ]);
 
+/** The markdown memory index always covers `<workspace>/.cowork`. */
+const INDEX_ROOT_DIRNAME = ".cowork";
+
+/**
+ * Paths (relative to the index root) that hold generated or bulk artifacts, not
+ * memory: kit history snapshots, subconscious and chronicle artifacts, raw
+ * transcripts, generated topic packs, lock files, scratch files and scratchpads.
+ */
+const EXCLUDED_INDEX_PREFIXES = [
+  ".history/",
+  "subconscious/",
+  "chronicle/",
+  "memory/transcripts/",
+  "memory/topics/",
+  "memory/locks/",
+  "tmp/",
+] as const;
+const EXCLUDED_INDEX_BASENAME = /^scratchpad[-_.]/i;
+
+/**
+ * Resolve the index root for a workspace. Callers pass either the workspace root
+ * or `<workspace>/.cowork`; both map to `<workspace>/.cowork`, so mixed callers no
+ * longer re-root the index (and delete and rebuild it) on every switch.
+ */
+export function resolveMarkdownIndexRoot(workspacePath: string): string {
+  const resolved = path.resolve(workspacePath);
+  return path.basename(resolved) === INDEX_ROOT_DIRNAME
+    ? resolved
+    : path.join(resolved, INDEX_ROOT_DIRNAME);
+}
+
+/** Whether an index-root-relative path is excluded from the markdown index. */
+export function isExcludedMarkdownIndexPath(relPath: string): boolean {
+  const normalized = String(relPath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "");
+  if (!normalized) return true;
+  // Rows written when the index was rooted at the workspace root (or outside
+  // `.cowork`) are stale under the normalized root.
+  if (normalized.startsWith("../") || normalized.startsWith(`${INDEX_ROOT_DIRNAME}/`)) return true;
+  if (EXCLUDED_INDEX_PREFIXES.some((prefix) => normalized.startsWith(prefix))) return true;
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === ".history")) return true;
+  return EXCLUDED_INDEX_BASENAME.test(segments[segments.length - 1] || "");
+}
+
 /**
  * Optional task-scoped read boundary for markdown indexing and recall.
  * The index is shared across tasks, so callers must filter both new reads and
@@ -72,6 +118,7 @@ export class MarkdownMemoryIndexService {
   private readonly pendingSyncByWorkspace = new Map<string, Promise<void>>();
   private readonly scheduledSyncByWorkspace = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly syncGenerationByWorkspace = new Map<string, number>();
+  private readonly purgedWorkspaces = new Set<string>();
   private readonly store: AsyncStore<MarkdownIndexStore, MarkdownIndexMethod>;
 
   constructor(db: Database.Database) {
@@ -85,12 +132,13 @@ export class MarkdownMemoryIndexService {
 
   async search(
     workspaceId: string,
-    workspacePath: string,
+    workspacePathInput: string,
     query: string,
     limit = 10,
     readGuard?: MarkdownMemoryReadGuard,
   ): Promise<MemorySearchResult[]> {
     if (limit <= 0) return [];
+    const workspacePath = resolveMarkdownIndexRoot(workspacePathInput);
     const trimmed = query.trim();
     if (!trimmed) return [];
 
@@ -108,6 +156,7 @@ export class MarkdownMemoryIndexService {
     );
 
     return this.mergeAndRerank(trimmed, keyword, vector)
+      .filter((candidate) => !isExcludedMarkdownIndexPath(candidate.path))
       .filter((candidate) => this.isReadableIndexedPath(workspacePath, candidate.path, readGuard))
       .slice(0, limit)
       .map((candidate) => ({
@@ -125,11 +174,12 @@ export class MarkdownMemoryIndexService {
 
   async getRecentSnippets(
     workspaceId: string,
-    workspacePath: string,
+    workspacePathInput: string,
     limit = 3,
     readGuard?: MarkdownMemoryReadGuard,
   ): Promise<MemorySearchResult[]> {
     if (limit <= 0) return [];
+    const workspacePath = resolveMarkdownIndexRoot(workspacePathInput);
     if (!readGuard) {
       this.scheduleSync(workspaceId, workspacePath);
     }
@@ -137,6 +187,7 @@ export class MarkdownMemoryIndexService {
     const chunks = await this.store.recentFirstChunks(workspaceId, Math.max(limit * 8, limit + 16));
     const results: MemorySearchResult[] = [];
     for (const chunk of chunks) {
+      if (isExcludedMarkdownIndexPath(chunk.path)) continue;
       if (!this.isReadableIndexedPath(workspacePath, chunk.path, readGuard)) continue;
       results.push({
         id: `md:${chunk.id}`,
@@ -156,7 +207,7 @@ export class MarkdownMemoryIndexService {
 
   async syncWorkspace(
     workspaceId: string,
-    workspacePath: string,
+    workspacePathInput: string,
     force = false,
     generation?: number,
     readGuard?: MarkdownMemoryReadGuard,
@@ -164,7 +215,11 @@ export class MarkdownMemoryIndexService {
     if (generation !== undefined && generation !== this.getSyncGeneration(workspaceId)) {
       return;
     }
-    if (!workspacePath || !fs.existsSync(workspacePath)) {
+    if (!workspacePathInput) return;
+    const workspacePath = resolveMarkdownIndexRoot(workspacePathInput);
+    const rootExists = fs.existsSync(workspacePath);
+    await this.purgeExcludedRowsOnce(workspaceId, rootExists);
+    if (!rootExists) {
       return;
     }
 
@@ -263,8 +318,10 @@ export class MarkdownMemoryIndexService {
     await this.store.clearWorkspace(workspaceId);
   }
 
-  async cleanupMissingFiles(workspaceId: string, workspacePath: string): Promise<number> {
-    if (!workspacePath || !fs.existsSync(workspacePath)) {
+  async cleanupMissingFiles(workspaceId: string, workspacePathInput: string): Promise<number> {
+    if (!workspacePathInput) return 0;
+    const workspacePath = resolveMarkdownIndexRoot(workspacePathInput);
+    if (!fs.existsSync(workspacePath)) {
       return 0;
     }
 
@@ -339,11 +396,13 @@ export class MarkdownMemoryIndexService {
 
   scheduleSync(
     workspaceId: string,
-    workspacePath: string,
+    workspacePathInput: string,
     force = false,
     readGuard?: MarkdownMemoryReadGuard,
   ): void {
-    if (!workspacePath || !fs.existsSync(workspacePath)) {
+    if (!workspacePathInput) return;
+    const workspacePath = resolveMarkdownIndexRoot(workspacePathInput);
+    if (!fs.existsSync(workspacePath)) {
       return;
     }
 
@@ -372,6 +431,28 @@ export class MarkdownMemoryIndexService {
     this.scheduledSyncByWorkspace.set(workspaceId, timer);
   }
 
+  /**
+   * One-time (per workspace, per process) removal of rows the index no longer
+   * covers: excluded artifacts and rows written under the old workspace-root
+   * index root. One indexed-file listing plus deletes for the stale paths only.
+   */
+  private async purgeExcludedRowsOnce(workspaceId: string, rootExists: boolean): Promise<void> {
+    if (this.purgedWorkspaces.has(workspaceId)) return;
+    this.purgedWorkspaces.add(workspaceId);
+    try {
+      const existing = await this.store.listIndexedFiles(workspaceId);
+      // Without a `.cowork` directory every remaining row is from the old
+      // workspace-root index.
+      const stale = existing
+        .map((row) => row.path)
+        .filter((relPath) => !rootExists || isExcludedMarkdownIndexPath(relPath));
+      if (stale.length > 0) await this.store.deletePaths(workspaceId, stale);
+    } catch (error) {
+      this.purgedWorkspaces.delete(workspaceId);
+      console.warn("[MarkdownMemoryIndexService] Failed to purge excluded index rows:", error);
+    }
+  }
+
   isMarkdownMemoryId(memoryId: string): boolean {
     return this.normalizeMemoryId(memoryId) !== null;
   }
@@ -397,6 +478,8 @@ export class MarkdownMemoryIndexService {
 
         if (entry.isDirectory()) {
           if (IGNORED_DIRS.has(entry.name)) continue;
+          const relDir = `${path.relative(workspacePath, absPath).replace(/\\/g, "/")}/`;
+          if (isExcludedMarkdownIndexPath(relDir)) continue;
           if (readGuard && !this.isReadablePath(absPath, readGuard)) continue;
           stack.push(absPath);
           continue;
@@ -418,6 +501,7 @@ export class MarkdownMemoryIndexService {
 
         const relPath = path.relative(workspacePath, absPath).replace(/\\/g, "/");
         if (!relPath || relPath.startsWith("..")) continue;
+        if (isExcludedMarkdownIndexPath(relPath)) continue;
 
         entries.push({
           absPath,

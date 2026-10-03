@@ -66,6 +66,11 @@ export class HeartbeatPulseEngine {
       input.agent.heartbeatPolicy?.profile || input.agent.heartbeatProfile || "observer";
     const signalStrength = getSignalStrength(input.signals);
     const signalIds = input.signals.map((signal) => signal.id);
+    // Maintenance work (checklist, runbooks, cron hand-offs) is justified by its cadence and by
+    // maintenance-family signals only, so those decisions must not consume unrelated signals.
+    const maintenanceSignalIds = input.signals
+      .filter((signal) => signal.signalFamily === "maintenance")
+      .map((signal) => signal.id);
     const evidenceRefs = Array.from(
       new Set(input.signals.flatMap((signal) => signal.evidenceRefs || [])),
     );
@@ -154,8 +159,11 @@ export class HeartbeatPulseEngine {
       input.dueChecklistItems.length === 0 &&
       input.dueProactiveTasks.length === 0
     ) {
+      const strong = signalStrength >= 0.8;
       return {
-        kind: signalStrength >= 0.8 ? "suggestion" : "idle",
+        kind: strong ? "suggestion" : "idle",
+        // Without a dispatch kind the service treats the decision as idle and drops it.
+        dispatchKind: strong ? "suggestion" : undefined,
         reason:
           signalStrength >= 0.8
             ? `Observer noticed strong signals: ${topFamilies.join(", ")}`
@@ -195,7 +203,7 @@ export class HeartbeatPulseEngine {
         dispatchKind: "cron_handoff",
         reason: `${cronDue.length} heavyweight recurring checks should hand off to cron`,
         evidenceRefs,
-        signalIds,
+        signalIds: maintenanceSignalIds,
         signalCount: input.signals.length,
         compressedSignalCount,
         dueChecklistCount: input.dueChecklistItems.length,
@@ -215,7 +223,7 @@ export class HeartbeatPulseEngine {
         dispatchKind,
         reason: `Maintenance due (${input.dueChecklistItems.length} checklist, ${input.dueProactiveTasks.length} proactive)`,
         evidenceRefs,
-        signalIds,
+        signalIds: maintenanceSignalIds,
         signalCount: input.signals.length,
         compressedSignalCount,
         dueChecklistCount: input.dueChecklistItems.length,
@@ -249,7 +257,7 @@ export class HeartbeatPulseEngine {
         dispatchKind: "suggestion",
         reason: "Pulse found due low-cost maintenance work",
         evidenceRefs,
-        signalIds,
+        signalIds: maintenanceSignalIds,
         signalCount: input.signals.length,
         compressedSignalCount,
         dueChecklistCount: input.dueChecklistItems.length,

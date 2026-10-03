@@ -35,8 +35,11 @@ async function buildWorker(workspacePath: string): Promise<string> {
       contents: `
         import fs from "node:fs";
         import { TranscriptStore } from "./src/electron/memory/TranscriptStore";
+        import { setCheckpointSigningKeyForTests } from "./src/electron/memory/checkpoint-signing";
 
         TranscriptStore.setDatabaseForTests(null);
+        // Checkpoints are signed; the parent test shares its key with each writer.
+        setCheckpointSigningKeyForTests(process.env.COWORK_TEST_CHECKPOINT_SIGNING_KEY || null);
         const [mode, workspacePath, taskId, content, sourceTimestampText, barrierPath] =
           process.argv.slice(2);
         const sourceTimestamp = Number(sourceTimestampText);
@@ -110,12 +113,19 @@ async function buildWorker(workspacePath: string): Promise<string> {
             path: "database",
             namespace: "test-db",
           }));
+          builder.onResolve({ filter: /\/database\/SecureSettingsRepository$/ }, () => ({
+            path: "secure-settings",
+            namespace: "test-db",
+          }));
           builder.onResolve({ filter: /^better-sqlite3$/ }, () => ({
             path: require.resolve("better-sqlite3"),
             external: true,
           }));
-          builder.onLoad({ filter: /.*/, namespace: "test-db" }, () => ({
-            contents: "export const DatabaseManager = {};",
+          builder.onLoad({ filter: /.*/, namespace: "test-db" }, (args) => ({
+            contents:
+              args.path === "secure-settings"
+                ? "export const SecureSettingsRepository = { isInitialized: () => false };"
+                : "export const DatabaseManager = {};",
             loader: "js",
           }));
         },

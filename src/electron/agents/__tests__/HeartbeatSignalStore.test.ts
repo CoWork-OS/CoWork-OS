@@ -74,9 +74,10 @@ describe("HeartbeatSignalStore.submit", () => {
     expect(s.listAgentSignals("agent-1")[0].confidence).toBe(1);
   });
 
-  it("persists signals to disk and reloads them in a fresh instance", () => {
+  it("persists signals to disk and reloads them in a fresh instance", async () => {
     const s1 = store();
     s1.submit(makeInput({ reason: "persisted" }));
+    await s1.flush();
     const s2 = store();
     const signals = s2.listAgentSignals("agent-1");
     expect(signals).toHaveLength(1);
@@ -167,5 +168,34 @@ describe("HeartbeatSignalStore signal expiry", () => {
     s.submit(makeInput({ expiresAt: farFuture - 1_000_000_000 }));
     const signals = s.listAgentSignals("agent-1", farFuture);
     expect(signals).toHaveLength(0);
+  });
+});
+
+describe("HeartbeatSignalStore persistence", () => {
+  it("coalesces writes and persists them on flush", async () => {
+    const s = store();
+    const file = path.join(tmpDir, "heartbeat-signals-v3.json");
+    s.submit(makeInput({ fingerprint: "a" }));
+    s.submit(makeInput({ fingerprint: "b" }));
+    s.submit(makeInput({ fingerprint: "a" }));
+    // Nothing is written synchronously on the submit path.
+    expect(fs.existsSync(file)).toBe(false);
+
+    await s.flush();
+    const persisted = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      signals: Array<{ fingerprint: string; mergedCount: number }>;
+    };
+    expect(persisted.signals.map((signal) => [signal.fingerprint, signal.mergedCount])).toEqual([
+      ["a", 2],
+      ["b", 1],
+    ]);
+  });
+
+  it("keeps urgent signals for at least two hours", () => {
+    const s = store();
+    const before = Date.now();
+    s.submit(makeInput({ signalFamily: "urgent_interrupt" }));
+    const [signal] = s.listAgentSignals("agent-1");
+    expect(signal.expiresAt - before).toBeGreaterThanOrEqual(2 * 60 * 60 * 1000);
   });
 });

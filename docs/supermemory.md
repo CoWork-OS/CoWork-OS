@@ -40,7 +40,7 @@ It also adds two optional runtime behaviors:
 - **Prompt profile injection**: fetches a scoped Supermemory profile and appends it as soft context during chat, execution, and follow-up turns
 - **Memory mirroring**: mirrors non-private CoWork memory captures into Supermemory as indexed external documents
 
-Supermemory write paths also participate in Memory Write Governance. If Memory Hub is set to `external_only`, `background_only`, or `all`, external `remember` and mirror writes are staged for user review before they leave the local runtime.
+Supermemory write paths also participate in Memory Write Governance. If `COWORK_MEMORY_WRITE_APPROVAL_MODE` is set to `external_only`, `background_only`, or `all`, external `remember` and mirror writes are staged for review before they leave the local runtime. Memory Hub no longer has a review-mode select.
 
 ---
 
@@ -50,18 +50,19 @@ Supermemory write paths also participate in Memory Write Governance. If Memory H
 2. Find the **Supermemory** section.
 3. Enable **Supermemory**.
 4. Paste your Supermemory API key.
-5. Leave the default base URL unless you are self-hosting.
-6. Choose a container-tag template.
-7. Optionally choose a Memory Write review mode for a controlled run. The
-   normal no-prompt runtime leaves new writes on the immediate-commit path.
-8. Save settings.
-9. Click **Test Connection**.
+5. Choose a container-tag template.
+6. Save settings.
+7. Click **Test Connection**.
 
-The default base URL is:
+The normal no-prompt runtime commits new writes immediately. A controlled run can opt into the review queue with `COWORK_MEMORY_WRITE_APPROVAL_MODE`.
+
+The base URL is fixed:
 
 ```text
 https://api.supermemory.ai
 ```
+
+It is not editable, and any other configured value is replaced by this host. Self-hosted endpoints are not supported.
 
 The default container template is:
 
@@ -143,12 +144,18 @@ Current mirrored payload shape:
 Current exclusions:
 
 - private/strict-mode memory entries are not mirrored
+- Chronicle-derived (`screen_context`) memories are always captured as private, so screen text is never mirrored
 - redacted and suppressed structured observations are not mirrored
+- mirroring requires network access in the task's access profile
 - clipboard-only/private sensitive content remains local
 - sensitive external-memory payloads are blocked before being stored in the pending approval queue
 - this integration does not currently stream every chat turn into Supermemory conversations
 
 That last point matters: CoWork currently mirrors memory captures, not the full conversation transcript lifecycle.
+
+Automatic captures are salience-gated, so mirroring sends task outcomes, decisions and feedback, errors, corrections and explicit saves rather than raw tool calls and results.
+
+CoWork does not store the Supermemory id of a mirrored document. Deleting, suppressing or redacting a local memory, deleting a task, **Clear All Memories** and disabling Supermemory therefore do not remove mirrored copies. Use `supermemory_forget` or the Supermemory dashboard to remove them.
 
 For the local structured-memory model, see [Structured Memory Observations](memory-observations.md).
 
@@ -198,7 +205,8 @@ If an explicit Memory Write review mode covers external writes, the tool
 returns a pending approval id instead of creating the external memory
 immediately. Otherwise it commits the write directly. If the payload contains
 obvious secrets, CoWork blocks the write rather than persisting it to the
-approval queue.
+approval queue. A task that opted out with `<no-memory>` cannot use it, and plan, analyze
+and verifier modes treat it (and `supermemory_forget`) as a write.
 
 ### `supermemory_forget`
 
@@ -207,7 +215,7 @@ Forgets an external memory by:
 - exact memory ID, or
 - exact content text
 
-Use it when external memory is outdated or incorrect.
+Use it when external memory is outdated or incorrect. This is the only remote delete path; local deletes do not call it.
 
 ---
 
@@ -271,6 +279,7 @@ Important boundaries:
 - external writes can be approval-gated before leaving the device
 - obvious secrets in external-memory payloads are blocked before they are stored in the pending queue
 - private memory entries are not mirrored
+- mirrored copies are not removed by local deletes; there is no automatic remote forget
 - workspace kit files remain local and governed by CoWork's existing memory/runtime policies
 
 If you want fully local-only operation, leave Supermemory disabled.

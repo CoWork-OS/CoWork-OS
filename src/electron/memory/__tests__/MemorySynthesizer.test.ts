@@ -445,3 +445,79 @@ describe("MemorySynthesizer", () => {
     );
   });
 });
+
+describe("MemorySynthesizer prompt budget and routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("asks the kit for the .cowork slice only (project guidance has its own section)", async () => {
+    const { buildWorkspaceKitContext } = await import("../WorkspaceKitContext");
+    await MemorySynthesizer.synthesize("ws1", "/workspace", "task", { includeWorkspaceKit: true });
+
+    expect(vi.mocked(buildWorkspaceKitContext)).toHaveBeenCalledWith(
+      "/workspace",
+      "task",
+      expect.any(Date),
+      expect.objectContaining({ includeProjectGuidance: false }),
+    );
+  });
+
+  it("keeps the synthesized block within the requested budget with balanced tags", async () => {
+    const { buildWorkspaceKitContext } = await import("../WorkspaceKitContext");
+    vi.mocked(buildWorkspaceKitContext).mockReturnValueOnce(
+      Array.from({ length: 200 }, (_, index) => `- kit rule ${index} ${"k".repeat(40)}`).join("\n"),
+    );
+
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "task", {
+      includeWorkspaceKit: true,
+      tokenBudget: 400,
+    });
+
+    expect(result.totalTokens).toBeLessThanOrEqual(400);
+    for (const tag of ["cowork_hot_memory", "cowork_structured_memory"]) {
+      const opens = result.text.split(`<${tag}>`).length - 1;
+      const closes = result.text.split(`</${tag}>`).length - 1;
+      expect(opens).toBe(closes);
+    }
+  });
+
+  it("adds a short routing hint in the default path naming only visible tools", async () => {
+    const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API", {
+      visibleToolNames: ["search_memories", "search_quotes", "read_file"],
+    });
+
+    expect(result.text).toContain("<cowork_recall_hints>");
+    expect(result.text).toContain("`search_memories`");
+    expect(result.text).toContain("`search_quotes`");
+    expect(result.text).not.toContain("memory_search_index");
+    expect(result.text).not.toContain("search_sessions");
+  });
+
+  it("caps the routing hint at 120 tokens and omits it when no memory tool is visible", () => {
+    const all = MemorySynthesizer.buildMemoryRoutingHint([
+      "search_memories",
+      "memory_search_index",
+      "memory_timeline",
+      "memory_details",
+      "search_quotes",
+      "search_sessions",
+      "memory_curated_read",
+      "memory_topics_load",
+      "context_grep",
+    ]);
+    expect(Math.ceil(all.length / 4)).toBeLessThanOrEqual(120);
+    expect(all.trim().endsWith("</cowork_recall_hints>")).toBe(true);
+    expect(MemorySynthesizer.buildMemoryRoutingHint(["read_file"])).toBe("");
+  });
+
+  it("can leave profile facts out of hot memory", async () => {
+    const result = await MemorySynthesizer.buildHotMemoryContext("ws1", 900, {
+      includeUserProfile: false,
+    });
+
+    expect(result.text).toContain("Curated Hot Memory");
+    expect(result.text).not.toContain("Preferred name: Alice");
+    expect(result.sourceAttribution.user_profile).toBe(0);
+  });
+});

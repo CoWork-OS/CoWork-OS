@@ -922,8 +922,12 @@ export class BoxBrainService {
         content: boundedMaterial,
       }),
     );
-    const capture = this.deps.captureMemory || MemoryService.capture;
-    const replace = this.deps.replaceMemory || MemoryService.replaceMemory;
+    // MemoryService methods read static state through `this`, so the defaults must be
+    // called on the class rather than passed around as unbound function references.
+    const capture: typeof MemoryService.capture =
+      this.deps.captureMemory || ((...args) => MemoryService.capture(...args));
+    const replace: typeof MemoryService.replaceMemory =
+      this.deps.replaceMemory || ((...args) => MemoryService.replaceMemory(...args));
     const indexedAt = this.now();
     let memory = previous?.memoryId
       ? await replace(workspaceId, previous.memoryId, content, summary)
@@ -958,7 +962,8 @@ export class BoxBrainService {
   }
 
   private async deleteMemoryEntries(workspaceId: string, ids: string[]): Promise<void> {
-    const deleteEntries = this.deps.deleteMemoryEntries || MemoryService.deleteEntries;
+    const deleteEntries: typeof MemoryService.deleteEntries =
+      this.deps.deleteMemoryEntries || ((...args) => MemoryService.deleteEntries(...args));
     await deleteEntries(workspaceId, ids);
   }
 

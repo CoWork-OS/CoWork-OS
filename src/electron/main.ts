@@ -5,6 +5,7 @@ import {
   CoreHarnessExperimentRepository,
   CoreLearningsRepository,
   CoreMemoryCandidateRepository,
+  CoreMemoryCleanupRepository,
   CoreMemoryDistillRunRepository,
   CoreMemoryScopeStateRepository,
   CoreRegressionGateRepository,
@@ -77,6 +78,7 @@ import {
   HeartbeatServiceDeps,
   setHeartbeatService,
 } from "./agents/HeartbeatService";
+import { setHeartbeatSignalEmitter } from "./agents/heartbeat-signal-bus";
 
 import { ensureDefaultBotRoles, ensureDefaultBotTeam } from "./agents/bot-team";
 
@@ -127,7 +129,7 @@ import {
   IPC_CHANNELS,
   isTempWorkspaceId,
 } from "../shared/types";
-import type { Task } from "../shared/types";
+import type { Task, TaskStatus } from "../shared/types";
 import { isAutomatedTaskLike } from "../shared/automated-task-detection";
 import { shouldUseNativeWindowFrame } from "../shared/native-window-frame";
 import { GuardrailManager } from "./guardrails/guardrail-manager";
@@ -157,6 +159,7 @@ import {
 } from "./cron/workspace-context";
 import { MemoryService } from "./memory/MemoryService";
 import { BoxBrainService } from "./memory/BoxBrainService";
+import { MemoryRetentionService } from "./memory/MemoryRetentionService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
 import { DreamingRepository } from "./memory/DreamingRepository";
@@ -380,6 +383,7 @@ let coreLearningsService: CoreLearningsService | null = null;
 let coreLearningPipelineService: CoreLearningPipelineService | null = null;
 let detachTaskLifecycleSync: (() => void) | null = null;
 let tempWorkspacePruneTimer: NodeJS.Timeout | null = null;
+let memoryRetentionService: MemoryRetentionService | null = null;
 let tempSandboxProfilePruneTimer: NodeJS.Timeout | null = null;
 let coreMemoryDistillTimer: NodeJS.Timeout | null = null;
 const TEMP_WORKSPACE_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -655,6 +659,8 @@ const submitHeartbeatSignalForAll = async (input: {
   text?: string;
   mode?: "now" | "next-heartbeat";
   source?: "hook" | "cron" | "api" | "manual";
+  workspaceId?: string;
+  category?: string;
 }): Promise<void> => {
   await heartbeatService?.submitWakeForAll(input);
 };
@@ -2129,6 +2135,15 @@ if (isMacSafeStorageMigrationWorker) {
         // Box Brain is optional and must not block app startup.
       }
 
+      // Daily retention for background-loop history (LIFE-3). The first run is deferred
+      // well past startup; quiet mode starts no background jobs.
+      if (startupQuietMode) {
+        logger.info("Memory retention not started (quiet mode)");
+      } else {
+        memoryRetentionService = new MemoryRetentionService();
+        memoryRetentionService.start();
+      }
+
       try {
         const meetingArtifacts = MeetingArtifactsService.initialize(
           path.join(getUserDataDir(), "meeting-artifacts"),
@@ -2990,13 +3005,29 @@ if (isMacSafeStorageMigrationWorker) {
             taskRepo.update(taskId, updates);
           },
           getTasksForAgent: (agentRoleId, workspaceId) => {
+            // Every non-terminal TaskStatus counts as assigned work.
+            const activeStatuses: TaskStatus[] = [
+              "pending",
+              "queued",
+              "planning",
+              "executing",
+              "paused",
+              "blocked",
+            ];
             const tasks = workspaceId
-              ? taskRepo.findByWorkspace(workspaceId)
-              : taskRepo.findByStatus(["pending", "running"]);
+              ? taskRepo
+                  .findByWorkspace(workspaceId)
+                  .filter((task) => activeStatuses.includes(task.status))
+              : taskRepo.findByStatus(activeStatuses);
+            // Tasks Heartbeat dispatched itself are tracked by the in-flight
+            // dispatch guard; counting them as pending work would make the
+            // agent review its own output on every pulse.
             return tasks.filter(
-              (t: { assignedAgentRoleId?: string }) => t.assignedAgentRoleId === agentRoleId,
+              (t: { assignedAgentRoleId?: string; heartbeatRunId?: string }) =>
+                t.assignedAgentRoleId === agentRoleId && !t.heartbeatRunId,
             );
           },
+          getTaskStatus: (taskId) => taskRepo.findById(taskId)?.status,
           getDefaultWorkspaceId: () => {
             const fallbackTemp = workspaceRepo
               .findAll()
@@ -3113,6 +3144,7 @@ if (isMacSafeStorageMigrationWorker) {
               id: result.run.id,
               status: result.run.status,
               candidateCount: result.candidates.length,
+              skipped: result.skipped,
             };
           },
           addNotification: async (params) => {
@@ -3120,8 +3152,6 @@ if (isMacSafeStorageMigrationWorker) {
             await notificationService?.add(params);
           },
           recordAutomationOutcome: async (outcome) => automationOutcomeService?.record(outcome),
-          captureMemory: (workspaceId, taskId, type, content, isPrivate, options) =>
-            MemoryService.capture(workspaceId, taskId, type, content, isPrivate, options),
           automationProfileRepo: new AutomationProfileRepository(dbManager.getDatabase()),
           coreTraceService: coreTraceService || undefined,
           coreMemoryCandidateService: coreMemoryCandidateService || undefined,
@@ -3131,6 +3161,9 @@ if (isMacSafeStorageMigrationWorker) {
 
         heartbeatService = new HeartbeatService(heartbeatDeps);
         setHeartbeatService(heartbeatService);
+        setHeartbeatSignalEmitter(
+          async (input) => (await heartbeatService?.submitSignalForAll(input)) ?? [],
+        );
         if (startupQuietMode) {
           logger.info("HeartbeatService initialized (quiet mode; not started)");
         } else {
@@ -3278,22 +3311,45 @@ if (isMacSafeStorageMigrationWorker) {
       }
 
       try {
-        if (coreMemoryDistiller) {
-          const db = dbManager.getDatabase();
+        const db = dbManager.getDatabase();
+        // One-time duplicate cleanup (memory audit DATA-3/LOOP-10); marker-guarded, so later
+        // boots return immediately. It must finish before the first distill pass so that
+        // legacy accepted candidates are marked applied rather than written again.
+        let coreMemoryCleanupDone: Promise<void> | null = null;
+        const runCoreMemoryCleanup = (): Promise<void> => {
+          coreMemoryCleanupDone ??= (async () => {
+            try {
+              const result = await new CoreMemoryCleanupRepository(db).run(Date.now());
+              if (result.ran) logger.info("Core memory duplicate cleanup completed", result);
+            } catch (error) {
+              logger.warn("Core memory duplicate cleanup failed:", error);
+            }
+          })();
+          return coreMemoryCleanupDone;
+        };
+        if (coreMemoryDistiller && !startupQuietMode) {
           const automationProfileRepo = new AutomationProfileRepository(db);
+          let coreDistillRunning = false;
           const runCoreDistill = async () => {
-            for (const profile of await automationProfileRepo.listEnabled()) {
-              try {
-                await coreMemoryDistiller?.runOffline({ profileId: profile.id });
-              } catch (error) {
-                logger.warn("Core memory distillation failed for profile:", {
-                  profileId: profile.id,
-                  error: error instanceof Error ? error.message : String(error),
-                });
+            if (coreDistillRunning) return;
+            coreDistillRunning = true;
+            try {
+              await runCoreMemoryCleanup();
+              for (const profile of await automationProfileRepo.listEnabled()) {
+                try {
+                  await coreMemoryDistiller?.runOffline({ profileId: profile.id });
+                } catch (error) {
+                  logger.warn("Core memory distillation failed for profile:", {
+                    profileId: profile.id,
+                    error: error instanceof Error ? error.message : String(error),
+                  });
+                }
               }
+            } finally {
+              coreDistillRunning = false;
             }
           };
-          void runCoreDistill();
+          deferStartupTask("core-memory-distill", runCoreDistill);
           coreMemoryDistillTimer = setInterval(
             () => {
               void runCoreDistill();
@@ -3301,6 +3357,11 @@ if (isMacSafeStorageMigrationWorker) {
             6 * 60 * 60 * 1000,
           );
           coreMemoryDistillTimer.unref();
+        } else {
+          if (coreMemoryDistiller) {
+            logger.info("Core memory distillation not scheduled (quiet mode)");
+          }
+          deferStartupTask("core-memory-cleanup", runCoreMemoryCleanup);
         }
       } catch (error) {
         logger.error("Failed to schedule core memory distillation:", error);
@@ -3866,8 +3927,14 @@ if (isMacSafeStorageMigrationWorker) {
           emitTrigger: (event) => {
             void currentTriggerService.evaluateEvent(event);
           },
-          wakeHeartbeats: ({ text, mode }) => {
-            void submitHeartbeatSignalForAll({ text, mode, source: "hook" }).catch((error) => {
+          wakeHeartbeats: ({ text, mode, workspaceId, category }) => {
+            void submitHeartbeatSignalForAll({
+              text,
+              mode,
+              source: "hook",
+              workspaceId,
+              category,
+            }).catch((error) => {
               logger.warn("Failed to wake heartbeats:", error);
             });
           },
@@ -3909,13 +3976,17 @@ if (isMacSafeStorageMigrationWorker) {
             },
             // Async (DB4): searches in the FTS worker when it runs. A failure skips the
             // briefing section with a logged error instead of showing no memories.
+            // The briefing can reach a channel: only this workspace's non-private,
+            // non-suppressed rows (SEC-14).
             searchMemory: async (workspaceId, query, limit) =>
-              (await MemoryService.searchAsync(workspaceId, query, limit)).map((memory) => ({
-                summary: memory.snippet,
-                content: memory.snippet,
-                snippet: memory.snippet,
-                type: memory.type,
-              })),
+              (await MemoryService.searchForBriefingAsync(workspaceId, query, limit)).map(
+                (memory) => ({
+                  summary: memory.snippet,
+                  content: memory.snippet,
+                  snippet: memory.snippet,
+                  type: memory.type,
+                }),
+              ),
             refreshSuggestions: async (workspaceId) => {
               await ProactiveSuggestionsService.generateAll(workspaceId);
             },
@@ -4378,9 +4449,15 @@ if (isMacSafeStorageMigrationWorker) {
               clearInterval(tempWorkspacePruneTimer);
               tempWorkspacePruneTimer = null;
             }
+            memoryRetentionService?.stop();
+            memoryRetentionService = null;
             if (tempSandboxProfilePruneTimer) {
               clearInterval(tempSandboxProfilePruneTimer);
               tempSandboxProfilePruneTimer = null;
+            }
+            if (coreMemoryDistillTimer) {
+              clearInterval(coreMemoryDistillTimer);
+              coreMemoryDistillTimer = null;
             }
           },
         },
@@ -4477,6 +4554,7 @@ if (isMacSafeStorageMigrationWorker) {
         {
           name: "heartbeats",
           run: async () => {
+            setHeartbeatSignalEmitter(null);
             await heartbeatService?.stop();
             heartbeatService = null;
             setHeartbeatService(null);

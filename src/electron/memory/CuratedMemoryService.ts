@@ -11,6 +11,7 @@ import type {
   CuratedMemoryTarget,
 } from "../../shared/types";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
+import { bumpHotMemoryVersion } from "./hot-memory-version";
 
 const USER_BLOCK_START = "<!-- cowork:auto:curated-user:start -->";
 const USER_BLOCK_END = "<!-- cowork:auto:curated-user:end -->";
@@ -121,6 +122,32 @@ function renderWorkspaceBlock(entries: CuratedMemoryEntryRecord[]): string {
   return lines.join("\n");
 }
 
+/**
+ * Pick prompt entries from the user and workspace lanes: up to 60% of `limit`
+ * for the user lane and the rest for the workspace lane, with either lane
+ * filling slots the other leaves unused. Each lane keeps its own order
+ * (confidence, then recency); user entries are listed first.
+ */
+export function balanceCuratedPromptEntries<T>(
+  userEntries: T[],
+  workspaceEntries: T[],
+  limit: number,
+): T[] {
+  const max = Math.max(0, Math.floor(limit));
+  if (max === 0) return [];
+  const userQuota = Math.min(max, Math.ceil(max * 0.6));
+  const workspaceQuota = max - userQuota;
+  let userTake = Math.min(userEntries.length, userQuota);
+  let workspaceTake = Math.min(workspaceEntries.length, workspaceQuota);
+  const spare = max - userTake - workspaceTake;
+  if (spare > 0) {
+    const extraUser = Math.min(spare, userEntries.length - userTake);
+    userTake += extraUser;
+    workspaceTake += Math.min(spare - extraUser, workspaceEntries.length - workspaceTake);
+  }
+  return [...userEntries.slice(0, userTake), ...workspaceEntries.slice(0, workspaceTake)];
+}
+
 export class CuratedMemoryService {
   private static curatedRepo: CuratedMemoryRepository;
   private static workspaceRepo: WorkspaceRepository;
@@ -151,11 +178,15 @@ export class CuratedMemoryService {
 
   static async getPromptEntries(workspaceId: string, limit = 8): Promise<CuratedMemoryEntry[]> {
     this.ensureInitialized();
-    return this.curatedRepo.list({
-      workspaceId,
-      status: "active",
-      limit,
-    });
+    const max = Math.max(1, Math.floor(limit));
+    // The repository orders the user lane first, so one combined query starves
+    // workspace rules once there are `limit` user entries (PROMPT-6). Read each
+    // lane on its own and balance them.
+    const [userEntries, workspaceEntries] = await Promise.all([
+      this.curatedRepo.list({ workspaceId, target: "user", status: "active", limit: max }),
+      this.curatedRepo.list({ workspaceId, target: "workspace", status: "active", limit: max }),
+    ]);
+    return balanceCuratedPromptEntries(userEntries, workspaceEntries, max);
   }
 
   static async curate(params: {
@@ -327,6 +358,7 @@ export class CuratedMemoryService {
       }
     }
 
+    bumpHotMemoryVersion();
     await this.syncWorkspaceFiles(params.workspaceId, {
       readGuard: params.filesystemReadGuard,
       writeGuard: params.filesystemWriteGuard,
@@ -411,6 +443,7 @@ export class CuratedMemoryService {
           lastConfirmedAt: Date.now(),
         });
 
+    bumpHotMemoryVersion();
     await this.syncWorkspaceFiles(params.workspaceId, {
       readGuard: params.filesystemReadGuard,
       writeGuard: params.filesystemWriteGuard,

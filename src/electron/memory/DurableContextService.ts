@@ -108,8 +108,30 @@ function describeMessage(message: LLMMessage): HostDurableMessage | null {
  * routed there, one host transaction otherwise. Recording history and a compaction
  * summary are single transactions. The schema is created on the host before first use.
  */
+/** Sources whose callers pass the whole live history on every update. */
+const FULL_HISTORY_SOURCES = new Set(["runtime_history", "executor_history"]);
+const RECORDED_HISTORY_MAX_ENTRIES = 500;
+
+interface RecordedHistoryMark {
+  count: number;
+  firstHash: string;
+  lastHash: string;
+}
+
+function messageFingerprint(message: LLMMessage | undefined): string {
+  if (!message) return "";
+  return describeMessage(message)?.contentHash ?? "skipped";
+}
+
 export class DurableContextService {
   private static dbOverride: Database.Database | null | undefined;
+  /**
+   * How much of each task's full history has been recorded, so a growing history
+   * sends only its new tail instead of every message on every turn. A history that
+   * no longer extends the recorded prefix (compaction, rewrite) is sent whole and
+   * deduplicated by content hash in the store.
+   */
+  private static readonly recordedHistory = new Map<string, RecordedHistoryMark>();
   private static store: {
     db: Database.Database;
     facade: AsyncStore<DurableContextStore, DurableContextMethod>;
@@ -118,6 +140,7 @@ export class DurableContextService {
   static setDatabaseForTests(db: Database.Database | null): void {
     this.dbOverride = db;
     this.store = null;
+    this.recordedHistory.clear();
   }
 
   static isEnabled(): boolean {
@@ -138,17 +161,48 @@ export class DurableContextService {
     if (!this.isEnabled()) return;
     const store = this.getStore();
     if (!store) return;
+    const incremental = FULL_HISTORY_SOURCES.has(params.source);
+    const markKey = `${params.workspaceId}\u0000${params.taskId}\u0000${params.source}`;
+    let startIndex = 0;
+    if (incremental) {
+      const mark = this.recordedHistory.get(markKey);
+      if (
+        mark &&
+        params.messages.length >= mark.count &&
+        messageFingerprint(params.messages[0]) === mark.firstHash &&
+        messageFingerprint(params.messages[mark.count - 1]) === mark.lastHash
+      ) {
+        startIndex = mark.count;
+      }
+    }
     const messages = params.messages
+      .slice(startIndex)
       .map((message) => describeMessage(message))
       .filter((message): message is HostDurableMessage => Boolean(message));
-    await store.recordHistory({
-      workspaceId: params.workspaceId,
-      taskId: params.taskId,
-      messages,
-      source: params.source,
-      now: Date.now(),
-      largePayloadThreshold: durableSettings().largePayloadThreshold,
-    });
+    if (messages.length > 0) {
+      await store.recordHistory({
+        workspaceId: params.workspaceId,
+        taskId: params.taskId,
+        messages,
+        source: params.source,
+        now: Date.now(),
+        largePayloadThreshold: durableSettings().largePayloadThreshold,
+      });
+    }
+    if (incremental && params.messages.length > 0) {
+      // Recorded only after the write succeeded; a failed write is retried in full.
+      this.recordedHistory.delete(markKey);
+      this.recordedHistory.set(markKey, {
+        count: params.messages.length,
+        firstHash: messageFingerprint(params.messages[0]),
+        lastHash: messageFingerprint(params.messages[params.messages.length - 1]),
+      });
+      while (this.recordedHistory.size > RECORDED_HISTORY_MAX_ENTRIES) {
+        const oldest = this.recordedHistory.keys().next().value;
+        if (oldest === undefined) break;
+        this.recordedHistory.delete(oldest);
+      }
+    }
   }
 
   static async recordCompactionSummary(params: {
@@ -181,6 +235,9 @@ export class DurableContextService {
   }
 
   static async clearWorkspace(workspaceId: string): Promise<number> {
+    for (const key of this.recordedHistory.keys()) {
+      if (key.startsWith(`${workspaceId}\u0000`)) this.recordedHistory.delete(key);
+    }
     const store = this.getStore();
     return store ? await store.clearWorkspace(workspaceId) : 0;
   }

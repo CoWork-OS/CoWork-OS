@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AwarenessService } from "../AwarenessService";
 import { AutonomyEngine } from "../AutonomyEngine";
 import { RelationshipMemoryService } from "../../memory/RelationshipMemoryService";
@@ -8,6 +8,10 @@ describe("AutonomyEngine", () => {
     AwarenessService.initialize({
       getDefaultWorkspaceId: () => undefined,
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("derives a durable world model from awareness and commitments", async () => {
@@ -38,9 +42,20 @@ describe("AutonomyEngine", () => {
       },
       tags: ["focus"],
     });
-    RelationshipMemoryService.ingestUserMessage(
-      `remind me to review ${workspaceId} launch checklist tomorrow`,
-    );
+    const now = Date.now();
+    const commitment = {
+      id: `commitment-${workspaceId}`,
+      layer: "commitments" as const,
+      text: `remind me to review ${workspaceId} launch checklist tomorrow`,
+      confidence: 0.82,
+      source: "conversation" as const,
+      status: "open" as const,
+      dueAt: now + 24 * 60 * 60 * 1000,
+      createdAt: now,
+      updatedAt: now,
+    };
+    vi.spyOn(RelationshipMemoryService, "listDueSoonCommitments").mockReturnValue([commitment]);
+    vi.spyOn(RelationshipMemoryService, "listOpenCommitments").mockReturnValue([commitment]);
 
     const engine = new AutonomyEngine({
       getDefaultWorkspaceId: () => workspaceId,

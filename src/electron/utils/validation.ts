@@ -2384,6 +2384,9 @@ export const CoreMemoryCandidateStatusSchema = z.enum([
   "accepted",
   "rejected",
   "merged",
+  "applied",
+  "skipped",
+  "dismissed",
 ] as const satisfies readonly CoreMemoryCandidateStatus[]);
 export const CoreFailureCategorySchema = z.enum([
   "wake_timing",
@@ -2603,14 +2606,6 @@ export const SubconsciousSettingsSchema = z
       .max(24 * 30),
     autonomyMode: z.enum(["recommendation_first", "balanced_autopilot", "strong_autonomy"]),
     trustedTargetKeys: z.array(z.string().trim().min(1).max(1024)).max(1000),
-    phaseModels: z
-      .object({
-        collectingEvidence: z.string().max(200).optional(),
-        ideation: z.string().max(200).optional(),
-        critique: z.string().max(200).optional(),
-        synthesis: z.string().max(200).optional(),
-      })
-      .strict(),
     dispatchDefaults: z
       .object({
         autoDispatch: z.boolean(),

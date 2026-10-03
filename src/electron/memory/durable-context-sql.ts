@@ -72,6 +72,12 @@ interface PreparedDurableMessage {
   };
 }
 
+/**
+ * Largest large-payload body kept in `durable_context_large_payloads`. The byte
+ * length of the original is still recorded; `describe` previews at most 4,000 chars.
+ */
+export const LARGE_PAYLOAD_MAX_STORED_CHARS = 256 * 1024;
+
 export function hashText(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 24);
 }
@@ -329,7 +335,9 @@ export class DurableContextStore {
     let offset = 0;
     for (const message of args.messages) {
       const prepared = this.prepareMessage(conversationId, message, args.largePayloadThreshold);
-      insert.run(
+      // Messages are unique per conversation and content hash. A message already
+      // stored keeps its row, payload and FTS entry; only new messages are written.
+      const inserted = insert.run(
         prepared.id,
         conversationId,
         args.workspaceId,
@@ -342,7 +350,8 @@ export class DurableContextStore {
         prepared.tokenCount,
         args.source,
         args.now + offset,
-      );
+      ).changes;
+      if (inserted === 0) continue;
       if (prepared.payload) {
         insertPayload.run(
           prepared.payload.id,
@@ -364,7 +373,7 @@ export class DurableContextStore {
           args.now + offset,
         );
       }
-      this.upsertFtsRow({
+      this.insertFtsRow({
         id: prepared.id,
         kind: "message",
         workspaceId: args.workspaceId,
@@ -419,7 +428,7 @@ export class DurableContextStore {
         .map((summary) => summary.id)
         .join(",")}`,
     )}`;
-    db.prepare(`
+    const summaryInserted = db.prepare(`
       INSERT OR IGNORE INTO durable_context_summaries (
         id, conversation_id, workspace_id, task_id, depth, kind, summary_text,
         token_count, earliest_seq, latest_seq, earliest_at, latest_at,
@@ -442,7 +451,7 @@ export class DurableContextStore {
       args.contextLabel || "",
       args.proactive ? 1 : 0,
       now,
-    );
+    ).changes;
     const link = db.prepare(`
       INSERT OR IGNORE INTO durable_context_summary_messages (summary_id, message_id)
       VALUES (?, ?)
@@ -454,7 +463,8 @@ export class DurableContextStore {
       VALUES (?, ?)
     `);
     for (const parent of parentSummaries) linkParent.run(summaryId, parent.id);
-    this.upsertFtsRow({
+    if (summaryInserted === 0) return summaryId;
+    this.insertFtsRow({
       id: summaryId,
       kind: "summary",
       workspaceId: args.workspaceId,
@@ -692,6 +702,11 @@ export class DurableContextStore {
 
     const payloadId = `dcp_${hashText(`${conversationId}:${message.contentHash}`)}`;
     const summaryText = snippet(message.text, 1200);
+    const storedText =
+      message.text.length > LARGE_PAYLOAD_MAX_STORED_CHARS
+        ? `${message.text.slice(0, LARGE_PAYLOAD_MAX_STORED_CHARS)}\n` +
+          `[... large payload truncated at ${LARGE_PAYLOAD_MAX_STORED_CHARS} characters ...]`
+        : message.text;
     return {
       id,
       role: message.role,
@@ -709,7 +724,7 @@ export class DurableContextStore {
         contentHash: message.contentHash,
         byteLength: Buffer.byteLength(message.text, "utf8"),
         summaryText,
-        contentText: message.text,
+        contentText: storedText,
       },
     };
   }
@@ -739,7 +754,12 @@ export class DurableContextStore {
     }>;
   }
 
-  private upsertFtsRow(row: {
+  /**
+   * Index a newly inserted message or summary. Rows are immutable once stored, so
+   * there is no delete-then-insert: a delete filtering on the UNINDEXED `id` column
+   * scans the whole FTS table and made every recorded message cost O(table).
+   */
+  private insertFtsRow(row: {
     id: string;
     kind: "message" | "summary";
     workspaceId: string;
@@ -747,7 +767,6 @@ export class DurableContextStore {
     text: string;
   }): void {
     try {
-      this.db.prepare(`DELETE FROM durable_context_fts WHERE id = ?`).run(row.id);
       this.db
         .prepare(
           `INSERT INTO durable_context_fts (id, kind, workspace_id, task_id, text)

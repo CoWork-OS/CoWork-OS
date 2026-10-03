@@ -30,6 +30,35 @@ interface FinishHeartbeatRunInput {
   evidenceRefs?: string[];
 }
 
+/** Task statuses after which a heartbeat dispatch can no longer be in flight. */
+export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled", "interrupted"] as const;
+
+/** Default retention for agent pulse/dispatch history. */
+export const HEARTBEAT_RUN_RETENTION_DEFAULTS = {
+  retentionMs: 30 * 24 * 60 * 60 * 1000,
+  keepPerAgent: 200,
+} as const;
+
+export interface PruneHeartbeatRunsInput {
+  /** Runs older than this are eligible for deletion. */
+  retentionMs?: number;
+  /** Always keep this many of the newest runs per agent, regardless of age. */
+  keepPerAgent?: number;
+  now?: number;
+}
+
+export interface PruneHeartbeatRunsResult {
+  runsDeleted: number;
+  eventsDeleted: number;
+}
+
+export interface ReconcileStaleDispatchRunsInput {
+  /** Dispatch runs still `running` after this age are treated as abandoned. */
+  maxAgeMs: number;
+  message: string;
+  now?: number;
+}
+
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -181,10 +210,12 @@ export class HeartbeatRunStore {
     if (!this.db) {
       let updated = 0;
       for (const [runId, run] of this.memoryRuns.entries()) {
+        // Task dispatches outlive the pulse that created them; they are settled from the task's
+        // own state by reconcileStaleDispatchRuns instead.
         const isAgentHeartbeatRun =
           run.status === "running" &&
           Boolean(run.agentRoleId) &&
-          (run.runType === "pulse" || (run.runType === "dispatch" && !run.issueId));
+          (run.runType === "pulse" || (run.runType === "dispatch" && !run.issueId && !run.taskId));
         if (!isAgentHeartbeatRun) continue;
         this.memoryRuns.set(runId, {
           ...run,
@@ -207,7 +238,10 @@ export class HeartbeatRunStore {
              completed_at = ?
          WHERE status = 'running'
            AND agent_role_id IS NOT NULL
-           AND (run_type = 'pulse' OR (run_type = 'dispatch' AND issue_id IS NULL))`,
+           AND (
+             run_type = 'pulse' OR
+             (run_type = 'dispatch' AND issue_id IS NULL AND task_id IS NULL)
+           )`,
       )
       .run(errorMessage, now, now);
     return result.changes;
@@ -257,6 +291,164 @@ export class HeartbeatRunStore {
        WHERE active_run_id IN (${placeholders})`,
     ).run(now, ...staleRunIds);
     return staleRunIds.length;
+  }
+
+  /**
+   * Settle dispatch runs that are still `running` although nothing can be executing them: their
+   * task reached a terminal state or no longer exists, or they are older than `maxAgeMs`. Covers
+   * agent dispatches and issue-linked runs; issue pointers to settled runs are released. Returns
+   * how many runs were settled.
+   */
+  reconcileStaleDispatchRuns(input: ReconcileStaleDispatchRunsInput): number {
+    const now = input.now ?? Date.now();
+    const cutoff = now - Math.max(0, input.maxAgeMs);
+    if (!this.db) {
+      let updated = 0;
+      for (const [runId, run] of this.memoryRuns.entries()) {
+        if (run.runType !== "dispatch" || run.status !== "running") continue;
+        if ((run.startedAt || run.createdAt) >= cutoff) continue;
+        this.memoryRuns.set(runId, {
+          ...run,
+          status: "failed",
+          error: run.error || input.message,
+          updatedAt: now,
+          completedAt: now,
+        });
+        updated += 1;
+      }
+      return updated;
+    }
+    const db = this.db;
+    const terminal = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT r.id, t.status AS task_status
+         FROM heartbeat_runs r
+         LEFT JOIN tasks t ON t.id = r.task_id
+         WHERE r.status = 'running'
+           AND r.run_type = 'dispatch'
+           AND (
+             (r.task_id IS NOT NULL AND (t.id IS NULL OR t.status IN (${terminal}))) OR
+             COALESCE(r.started_at, r.created_at) < ?
+           )`,
+      )
+      .all(...TERMINAL_TASK_STATUSES, cutoff) as Array<{ id: string; task_status: string | null }>;
+    if (rows.length === 0) return 0;
+    const settle = db.transaction(() => {
+      const update = db.prepare(
+        `UPDATE heartbeat_runs
+         SET status = ?, error = CASE WHEN ? = 'failed' THEN COALESCE(error, ?) ELSE error END,
+             updated_at = ?, completed_at = COALESCE(completed_at, ?)
+         WHERE id = ? AND status = 'running'`,
+      );
+      const releaseIssue = db.prepare(
+        "UPDATE issues SET active_run_id = NULL, updated_at = ? WHERE active_run_id = ?",
+      );
+      for (const row of rows) {
+        const status = row.task_status === "completed" ? "completed" : "failed";
+        update.run(status, status, input.message, now, now, row.id);
+        try {
+          releaseIssue.run(now, row.id);
+        } catch {
+          // The issues table is optional in some deployments.
+        }
+      }
+    });
+    settle();
+    return rows.length;
+  }
+
+  /** Agent dispatch runs (not issue-linked) that are still marked running. */
+  listRunningDispatches(agentRoleId: string): HeartbeatRun[] {
+    if (!this.db) {
+      return Array.from(this.memoryRuns.values()).filter(
+        (run) =>
+          run.agentRoleId === agentRoleId &&
+          run.runType === "dispatch" &&
+          run.status === "running" &&
+          !run.issueId,
+      );
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM heartbeat_runs
+         WHERE agent_role_id = ? AND run_type = 'dispatch' AND status = 'running'
+           AND issue_id IS NULL
+         ORDER BY created_at ASC`,
+      )
+      .all(agentRoleId) as Any[];
+    return rows.map((row) => this.mapRun(row));
+  }
+
+  /**
+   * Delete finished agent pulse/dispatch history older than `retentionMs`, always keeping the
+   * newest `keepPerAgent` runs per agent. Running/queued runs and issue-linked runs are never
+   * deleted. Events of deleted runs (and orphaned events) are removed too.
+   */
+  pruneRuns(input: PruneHeartbeatRunsInput = {}): PruneHeartbeatRunsResult {
+    const now = input.now ?? Date.now();
+    const retentionMs = Math.max(
+      0,
+      input.retentionMs ?? HEARTBEAT_RUN_RETENTION_DEFAULTS.retentionMs,
+    );
+    const keepPerAgent = Math.max(
+      0,
+      Math.floor(input.keepPerAgent ?? HEARTBEAT_RUN_RETENTION_DEFAULTS.keepPerAgent),
+    );
+    const cutoff = now - retentionMs;
+    if (!this.db) {
+      const byAgent = new Map<string, HeartbeatRun[]>();
+      for (const run of this.memoryRuns.values()) {
+        const key = run.agentRoleId || "";
+        byAgent.set(key, [...(byAgent.get(key) || []), run]);
+      }
+      let runsDeleted = 0;
+      let eventsDeleted = 0;
+      for (const runs of byAgent.values()) {
+        runs.sort((a, b) => b.createdAt - a.createdAt);
+        runs.forEach((run, index) => {
+          if (index < keepPerAgent) return;
+          if (run.issueId || run.status === "running" || run.status === "queued") return;
+          if (run.createdAt >= cutoff) return;
+          this.memoryRuns.delete(run.id);
+          eventsDeleted += this.memoryEvents.get(run.id)?.length || 0;
+          this.memoryEvents.delete(run.id);
+          runsDeleted += 1;
+        });
+      }
+      return { runsDeleted, eventsDeleted };
+    }
+    const db = this.db;
+    const prune = db.transaction((): PruneHeartbeatRunsResult => {
+      db.exec("DROP TABLE IF EXISTS temp.heartbeat_runs_prune");
+      db.prepare(
+        `CREATE TEMP TABLE heartbeat_runs_prune AS
+         SELECT id FROM (
+           SELECT id, created_at, status, issue_id,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY COALESCE(agent_role_id, '') ORDER BY created_at DESC
+                  ) AS rn
+           FROM heartbeat_runs
+         )
+         WHERE rn > ?
+           AND created_at < ?
+           AND issue_id IS NULL
+           AND status NOT IN ('running', 'queued')`,
+      ).run(keepPerAgent, cutoff);
+      const eventsDeleted = db
+        .prepare(
+          `DELETE FROM heartbeat_run_events
+           WHERE run_id IN (SELECT id FROM temp.heartbeat_runs_prune)
+              OR run_id NOT IN (SELECT id FROM heartbeat_runs)`,
+        )
+        .run().changes;
+      const runsDeleted = db
+        .prepare("DELETE FROM heartbeat_runs WHERE id IN (SELECT id FROM temp.heartbeat_runs_prune)")
+        .run().changes;
+      db.exec("DROP TABLE IF EXISTS temp.heartbeat_runs_prune");
+      return { runsDeleted, eventsDeleted };
+    });
+    return prune();
   }
 
   get(runId: string): HeartbeatRun | undefined {
@@ -342,4 +534,15 @@ export class HeartbeatRunStore {
       completedAt: row.completed_at || undefined,
     };
   }
+}
+
+/**
+ * Prune heartbeat run history on a synchronous connection. Exported for retention services;
+ * see `HeartbeatRunStore.pruneRuns` for the rules.
+ */
+export function pruneHeartbeatRunHistory(
+  db: Database.Database,
+  input: PruneHeartbeatRunsInput = {},
+): PruneHeartbeatRunsResult {
+  return new HeartbeatRunStore(db).pruneRuns(input);
 }

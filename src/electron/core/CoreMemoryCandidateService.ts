@@ -3,6 +3,7 @@ import type { CoreMemoryCandidate, CoreMemoryCandidateType, CoreTrace } from "..
 import type { SubconsciousTargetRef } from "../../shared/subconscious";
 
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
+import { coreCandidateFingerprint, isRoutineCoreOutcome } from "./core-memory-hygiene";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -22,6 +23,9 @@ export class CoreMemoryCandidateService {
     const trace = await this.traceRepo.findById(traceId);
     if (!trace) return [];
     const events = await this.traceRepo.listEvents(traceId);
+    // Healthy "nothing to do" outcomes (idle, deferred, gated, cooldown, no fresh evidence)
+    // are runtime telemetry, not evidence about the user or workspace.
+    if (isRoutineCoreOutcome(trace, events)) return [];
     const candidates: Array<Omit<CoreMemoryCandidate, "id" | "createdAt">> = [];
 
     const normalized =
@@ -78,17 +82,6 @@ export class CoreMemoryCandidateService {
         0.78,
         0.58,
         0.7,
-      );
-    }
-
-    if (normalized.includes("outside active hours") || normalized.includes("cooldown")) {
-      pushCandidate(
-        "constraint",
-        "Operator should respect dispatch timing constraints",
-        trace.summary || "The runtime deferred work due to timing or cooldown gates.",
-        0.78,
-        0.51,
-        0.8,
       );
     }
 
@@ -157,11 +150,19 @@ export class CoreMemoryCandidateService {
       );
     }
 
-    if (!candidates.length && trace.status === "completed" && trace.summary) {
+    // A pulse summary is the scheduler's decision reason, which is telemetry rather than an
+    // open loop worth remembering.
+    if (
+      !candidates.length &&
+      trace.status === "completed" &&
+      trace.summary &&
+      trace.traceKind !== "pulse_cycle"
+    ) {
       pushCandidate("open_loop", trace.summary.slice(0, 140), trace.summary, 0.55, 0.31, 0.45);
     }
 
-    return this.candidateRepo.bulkCreate(this.dedupeCandidates(candidates));
+    if (!candidates.length) return [];
+    return this.candidateRepo.upsertByFingerprint(this.dedupeCandidates(candidates));
   }
 
   async autoAcceptHighSignalCandidates(traceId: string): Promise<CoreMemoryCandidate[]> {
@@ -186,13 +187,7 @@ export class CoreMemoryCandidateService {
     const seen = new Set<string>();
     const result: Array<Omit<CoreMemoryCandidate, "id" | "createdAt">> = [];
     for (const candidate of candidates) {
-      const key = [
-        candidate.profileId,
-        candidate.scopeKind,
-        candidate.scopeRef,
-        candidate.candidateType,
-        candidate.summary.toLowerCase(),
-      ].join("::");
+      const key = coreCandidateFingerprint(candidate);
       if (seen.has(key)) continue;
       seen.add(key);
       result.push(candidate);

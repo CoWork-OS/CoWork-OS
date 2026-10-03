@@ -348,4 +348,69 @@ describeWithNativeDb("DurableContextService", () => {
       }),
     ).toEqual([]);
   });
+
+  it("records a growing history incrementally and indexes each message once", async () => {
+    enableDurableContext();
+    const db = createDb();
+    const history: Array<{ role: "user" | "assistant"; content: string }> = [];
+    const ftsRows = () =>
+      (db.prepare(`SELECT COUNT(*) AS n FROM durable_context_fts`).get() as { n: number }).n;
+
+    for (let turn = 1; turn <= 6; turn += 1) {
+      history.push({ role: turn % 2 ? "user" : "assistant", content: `turn ${turn} note` });
+      await DurableContextService.recordHistory({
+        workspaceId: "ws-inc",
+        taskId: "task-inc",
+        source: "runtime_history",
+        messages: [...history],
+      });
+    }
+
+    const rows = db
+      .prepare(`SELECT seq, content_text FROM durable_context_messages ORDER BY seq`)
+      .all() as Array<{ seq: number; content_text: string }>;
+    expect(rows.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(ftsRows()).toBe(6);
+
+    const spy = vi.spyOn(db, "prepare");
+    await DurableContextService.recordHistory({
+      workspaceId: "ws-inc",
+      taskId: "task-inc",
+      source: "runtime_history",
+      messages: [...history],
+    });
+    // Nothing new: the unchanged history is not sent to the store at all.
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+
+    // A rewritten history (compaction) is sent whole but duplicates stay single.
+    await DurableContextService.recordHistory({
+      workspaceId: "ws-inc",
+      taskId: "task-inc",
+      source: "runtime_history",
+      messages: [{ role: "user", content: "summary of earlier turns" }, ...history.slice(-2)],
+    });
+    expect(ftsRows()).toBe(7);
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS n FROM durable_context_messages`).get() as { n: number }).n,
+    ).toBe(7);
+  });
+
+  it("caps the stored body of very large payloads", async () => {
+    enableDurableContext();
+    const db = createDb();
+    await DurableContextService.recordHistory({
+      workspaceId: "ws-big",
+      taskId: "task-big",
+      source: "test",
+      messages: [{ role: "assistant", content: `start ${"x ".repeat(400_000)}` }],
+    });
+    const payload = db
+      .prepare(
+        `SELECT byte_length, length(content_text) AS stored FROM durable_context_large_payloads`,
+      )
+      .get() as { byte_length: number; stored: number };
+    expect(payload.byte_length).toBeGreaterThan(700_000);
+    expect(payload.stored).toBeLessThan(300_000);
+  });
 });

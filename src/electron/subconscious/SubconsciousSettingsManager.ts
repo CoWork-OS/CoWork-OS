@@ -23,10 +23,6 @@ export class SubconsciousSettingsManager {
             ...stored,
             durableTargetKinds:
               stored.durableTargetKinds || DEFAULT_SUBCONSCIOUS_SETTINGS.durableTargetKinds,
-            phaseModels: {
-              ...DEFAULT_SUBCONSCIOUS_SETTINGS.phaseModels,
-              ...stored.phaseModels,
-            },
             dispatchDefaults: {
               ...DEFAULT_SUBCONSCIOUS_SETTINGS.dispatchDefaults,
               ...stored.dispatchDefaults,
@@ -110,24 +106,6 @@ export class SubconsciousSettingsManager {
             (value): value is string => typeof value === "string" && value.trim().length > 0,
           )
         : [],
-      phaseModels: {
-        collectingEvidence:
-          typeof input.phaseModels?.collectingEvidence === "string"
-            ? input.phaseModels.collectingEvidence.trim()
-            : undefined,
-        ideation:
-          typeof input.phaseModels?.ideation === "string"
-            ? input.phaseModels.ideation.trim()
-            : undefined,
-        critique:
-          typeof input.phaseModels?.critique === "string"
-            ? input.phaseModels.critique.trim()
-            : undefined,
-        synthesis:
-          typeof input.phaseModels?.synthesis === "string"
-            ? input.phaseModels.synthesis.trim()
-            : undefined,
-      },
       dispatchDefaults: {
         autoDispatch: input.dispatchDefaults?.autoDispatch === true,
         defaultKinds: {

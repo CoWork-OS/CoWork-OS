@@ -476,67 +476,162 @@ export function buildProjectInstructionsSection(
   return "";
 }
 
-export function buildWorkspaceKitContext(
-  workspacePath: string,
-  taskPrompt: string,
-  now: Date = new Date(),
-  opts?: { agentRoleId?: string | null; readGuard?: MarkdownMemoryReadGuard },
-): string {
-  const collectedSections: ExtractedSection[] = [];
-  const agentRoleId = typeof opts?.agentRoleId === "string" ? opts.agentRoleId : null;
-  const includeDesignSystem = isDesignSystemRelevantTask(taskPrompt);
+/**
+ * Kit files that carry durable memory and workspace rules. Within a token-limited
+ * slice they come before everything else, so `.cowork/USER.md` and `MEMORY.md`
+ * are not crowded out by long repo docs (PROMPT-2).
+ */
+const MEMORY_PRIORITY_KIT_FILES = [
+  "USER.md",
+  "MEMORY.md",
+  "RULES.md",
+  "AGENTS.md",
+  "IDENTITY.md",
+] as const;
 
-  collectedSections.push(...buildMapSections(workspacePath, opts?.readGuard));
+function memoryPriorityRank(section: ExtractedSection): number {
+  const rel = section.relPath.replace(/\\/g, "/");
+  if (!rel.startsWith(`${KIT_DIRNAME}/`)) return MEMORY_PRIORITY_KIT_FILES.length;
+  const file = rel.slice(KIT_DIRNAME.length + 1);
+  const index = (MEMORY_PRIORITY_KIT_FILES as readonly string[]).indexOf(file);
+  return index === -1 ? MEMORY_PRIORITY_KIT_FILES.length : index;
+}
 
-  const kitDir = safeResolveWithinWorkspace(workspacePath, KIT_DIRNAME);
-  if (kitDir) {
-    try {
-      if (
-        canReadPath(opts?.readGuard, kitDir) &&
-        fs.existsSync(kitDir) &&
-        fs.statSync(kitDir).isDirectory()
-      ) {
-        collectedSections.push(
-          ...buildScopedKitSections(
-            workspacePath,
-            ["task", "company-ops"],
-            false,
-            includeDesignSystem,
-            opts?.readGuard,
-          ),
-        );
-        collectedSections.push(
-          ...buildProjectContextSections(workspacePath, taskPrompt, agentRoleId, opts?.readGuard),
-        );
-        collectedSections.push(...buildDailyLogSection(workspacePath, now, opts?.readGuard));
-      }
-    } catch {
-      // ignore
-    }
-  }
+function prioritizeMemoryKitSections(sections: ExtractedSection[]): ExtractedSection[] {
+  return sections
+    .map((section, index) => ({ section, index, rank: memoryPriorityRank(section) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.section);
+}
 
-  const projectInstructions = buildProjectInstructionsSection(workspacePath, opts?.readGuard);
-  if (collectedSections.length === 0) return projectInstructions.trim();
+function renderSectionBlock(section: ExtractedSection): string {
+  const header = `### ${section.title} (${section.relPath})`;
+  const body = clampSection(section.content, section.maxChars ?? MAX_SECTION_CHARS);
+  return `${header}\n${body}\n`;
+}
 
-  const parts: string[] = projectInstructions ? [projectInstructions] : [];
+function renderSectionsWithinTotal(sections: ExtractedSection[], maxTotalChars: number): string[] {
+  const parts: string[] = [];
   let totalChars = 0;
-
-  for (const section of collectedSections) {
-    const header = `### ${section.title} (${section.relPath})`;
-    const body = clampSection(section.content, section.maxChars ?? MAX_SECTION_CHARS);
-    const block = `${header}\n${body}\n`;
-
-    if (totalChars + block.length > MAX_TOTAL_CHARS) {
-      const remaining = Math.max(0, MAX_TOTAL_CHARS - totalChars);
+  for (const section of sections) {
+    const block = renderSectionBlock(section);
+    if (totalChars + block.length > maxTotalChars) {
+      const remaining = Math.max(0, maxTotalChars - totalChars);
       if (remaining > 200) {
         parts.push(block.slice(0, remaining) + "\n[... truncated ...]");
       }
       break;
     }
-
     parts.push(block);
     totalChars += block.length;
   }
+  return parts;
+}
 
+function collectKitMemorySections(
+  workspacePath: string,
+  taskPrompt: string,
+  now: Date,
+  agentRoleId: string | null,
+  readGuard?: MarkdownMemoryReadGuard,
+): ExtractedSection[] {
+  const collected: ExtractedSection[] = [];
+  const includeDesignSystem = isDesignSystemRelevantTask(taskPrompt);
+  const kitDir = safeResolveWithinWorkspace(workspacePath, KIT_DIRNAME);
+  if (!kitDir) return collected;
+  try {
+    if (
+      canReadPath(readGuard, kitDir) &&
+      fs.existsSync(kitDir) &&
+      fs.statSync(kitDir).isDirectory()
+    ) {
+      collected.push(
+        ...prioritizeMemoryKitSections(
+          buildScopedKitSections(
+            workspacePath,
+            ["task", "company-ops"],
+            false,
+            includeDesignSystem,
+            readGuard,
+          ),
+        ),
+      );
+      collected.push(
+        ...buildProjectContextSections(workspacePath, taskPrompt, agentRoleId, readGuard),
+      );
+      collected.push(...buildDailyLogSection(workspacePath, now, readGuard));
+    }
+  } catch {
+    // ignore
+  }
+  return collected;
+}
+
+/**
+ * Repo-level project guidance: root AGENTS.md / CLAUDE.md and docs map files.
+ * The execution prompt gives this its own budgeted section, separate from the
+ * memory slice.
+ */
+export function buildProjectGuidanceContext(
+  workspacePath: string,
+  readGuard?: MarkdownMemoryReadGuard,
+): string {
+  const projectInstructions = buildProjectInstructionsSection(workspacePath, readGuard);
+  const maps = renderSectionsWithinTotal(
+    buildMapSections(workspacePath, readGuard),
+    MAX_TOTAL_CHARS,
+  );
+  return [projectInstructions, ...maps].filter(Boolean).join("\n").trim();
+}
+
+export function buildWorkspaceKitContext(
+  workspacePath: string,
+  taskPrompt: string,
+  now: Date = new Date(),
+  opts?: {
+    agentRoleId?: string | null;
+    readGuard?: MarkdownMemoryReadGuard;
+    /**
+     * Include repo-root project instructions and docs map files (default true).
+     * The step memory slice passes false: those files get their own prompt section.
+     */
+    includeProjectGuidance?: boolean;
+  },
+): string {
+  const agentRoleId = typeof opts?.agentRoleId === "string" ? opts.agentRoleId : null;
+  const includeProjectGuidance = opts?.includeProjectGuidance !== false;
+  const kitSections = collectKitMemorySections(
+    workspacePath,
+    taskPrompt,
+    now,
+    agentRoleId,
+    opts?.readGuard,
+  );
+  const mapSections = includeProjectGuidance
+    ? buildMapSections(workspacePath, opts?.readGuard)
+    : [];
+  const projectInstructions = includeProjectGuidance
+    ? buildProjectInstructionsSection(workspacePath, opts?.readGuard)
+    : "";
+
+  // Order: memory/rules kit files first, then the repo's own instructions (kept
+  // outside the total cap, as before), then the remaining kit context and the
+  // docs maps, which are the most expendable.
+  const prioritySections = kitSections.filter(
+    (section) => memoryPriorityRank(section) < MEMORY_PRIORITY_KIT_FILES.length,
+  );
+  const otherSections = kitSections.filter(
+    (section) => memoryPriorityRank(section) >= MEMORY_PRIORITY_KIT_FILES.length,
+  );
+  const collected = [...prioritySections, ...otherSections, ...mapSections];
+  if (collected.length === 0) return projectInstructions.trim();
+
+  const rendered = renderSectionsWithinTotal(collected, MAX_TOTAL_CHARS);
+  const priorityCount = Math.min(prioritySections.length, rendered.length);
+  const parts = [
+    ...rendered.slice(0, priorityCount),
+    ...(projectInstructions ? [projectInstructions] : []),
+    ...rendered.slice(priorityCount),
+  ];
   return parts.join("\n").trim();
 }

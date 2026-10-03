@@ -6,6 +6,31 @@ import { CuratedMemoryService } from "../../memory/CuratedMemoryService";
 import { MemoryWriteGate } from "../../memory/MemoryWriteGate";
 import type { MemoryType } from "../../database/repositories";
 import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
+import {
+  containsNoMemoryDirective,
+  taskDisablesMemoryCapture,
+} from "../../memory/no-memory-directive";
+
+export const NO_MEMORY_WRITE_ERROR =
+  "Memory writes are disabled for this task (<no-memory>). Nothing was saved.";
+
+/**
+ * Whether a task's `<no-memory>` directive (or one in the content itself) blocks explicit
+ * memory writes. `<no-memory>` covers every memory write of the task, not only automatic
+ * capture.
+ */
+export function explicitMemoryWriteBlocked(
+  daemon: Pick<AgentDaemon, "getTask"> | undefined,
+  taskId: string,
+  content?: unknown,
+): boolean {
+  if (containsNoMemoryDirective(content)) return true;
+  try {
+    return taskDisablesMemoryCapture(daemon?.getTask?.(taskId));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * MemoryTools provides explicit memory save operations for agents.
@@ -161,6 +186,16 @@ export class MemoryTools {
       contentLength: input.content.length,
     });
 
+    if (explicitMemoryWriteBlocked(this.daemon, this.taskId, input.content)) {
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "memory_save",
+        success: false,
+        blocked: true,
+        reason: "no_memory_directive",
+      });
+      return { success: false, error: NO_MEMORY_WRITE_ERROR };
+    }
+
     try {
       const gate = await MemoryWriteGate.evaluate({
         workspaceId: this.workspace.id,
@@ -172,6 +207,8 @@ export class MemoryTools {
         payload: {
           type: input.type,
           content: input.content,
+          // Replayed on approval: still an explicit save, not auto-capture.
+          options: { origin: "tool", forceCapture: true },
         },
         proposedValue: input.content,
       });
@@ -210,6 +247,8 @@ export class MemoryTools {
         {
           origin: "tool",
           skipMemoryWriteGate: true,
+          // An explicit save is not auto-capture: the autoCapture setting does not block it.
+          forceCapture: true,
           allowExternalMirror: this.isExternalMemoryMirrorAllowed(),
         },
       );
@@ -274,6 +313,20 @@ export class MemoryTools {
       target: input.target,
       kind: input.kind,
     });
+
+    // `<no-memory>` blocks adding or rewriting curated memory; removal stays allowed.
+    if (
+      input.action !== "remove" &&
+      explicitMemoryWriteBlocked(this.daemon, this.taskId, input.content)
+    ) {
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "memory_curate",
+        success: false,
+        blocked: true,
+        reason: "no_memory_directive",
+      });
+      return { success: false, error: NO_MEMORY_WRITE_ERROR };
+    }
 
     try {
       const filesystemReadGuard = (candidatePath: string): boolean =>

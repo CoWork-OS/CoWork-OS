@@ -165,6 +165,31 @@ describe("HeartbeatPulseEngine.evaluate", () => {
       }),
     );
     expect(decision.kind).toBe("suggestion");
+    // Without a dispatch kind the service would treat the suggestion as idle.
+    expect(decision.dispatchKind).toBe("suggestion");
+  });
+
+  it("runbook and cron decisions only claim maintenance-family signals", () => {
+    const signals = [
+      makeSignal({ id: "s-urgent", signalFamily: "urgent_interrupt", urgency: "low" }),
+      makeSignal({ id: "s-maint", signalFamily: "maintenance", urgency: "low" }),
+    ];
+    const runbook = engine.evaluate(
+      baseInput({ signals, dueChecklistItems: [{ id: "c1", title: "Check metrics" } as Any] }),
+    );
+    expect(runbook.dispatchKind).toBe("runbook");
+    expect(runbook.signalIds).toEqual(["s-maint"]);
+
+    const cron = engine.evaluate(
+      baseInput({
+        signals,
+        dueProactiveTasks: [
+          { id: "p1", name: "Nightly sweep", enabled: true, executionMode: "cron_handoff" } as Any,
+        ],
+      }),
+    );
+    expect(cron.dispatchKind).toBe("cron_handoff");
+    expect(cron.signalIds).toEqual(["s-maint"]);
   });
 
   it("dispatcher with pending mentions → dispatch_task", () => {

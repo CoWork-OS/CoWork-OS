@@ -74,6 +74,28 @@ const SIGNAL_THRESHOLD = 0.6; // Minimum accumulated signal strength to trigger
 const DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes between adaptation checks
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Style signals for the structured 👎 reasons the renderer sends
+ * (MainContent message feedback menu). Reasons that say nothing about style map
+ * to an empty list so free-text matching does not guess at them.
+ */
+const STRUCTURED_FEEDBACK_SIGNALS: Record<
+  string,
+  Array<Pick<StyleSignal, "dimension" | "direction" | "strength">>
+> = {
+  too_verbose: [{ dimension: "responseLength", direction: "decrease", strength: 0.9 }],
+  too_long: [{ dimension: "responseLength", direction: "decrease", strength: 0.9 }],
+  too_short: [{ dimension: "responseLength", direction: "increase", strength: 0.9 }],
+  not_detailed_enough: [{ dimension: "responseLength", direction: "increase", strength: 0.9 }],
+  too_technical: [{ dimension: "explanationDepth", direction: "increase", strength: 0.8 }],
+  too_basic: [{ dimension: "explanationDepth", direction: "decrease", strength: 0.8 }],
+  too_many_emojis: [{ dimension: "emojiUsage", direction: "decrease", strength: 0.9 }],
+  incorrect: [],
+  ignored_instructions: [],
+  wrong_tone: [],
+  unsafe: [],
+};
+
 /** Emoji regex pattern — covers common emoji ranges */
 const EMOJI_PATTERN =
   /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F900}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
@@ -189,13 +211,28 @@ export class AdaptiveStyleEngine {
   static observeFeedback(decision?: string, reason?: string): void {
     if (!this.isEnabled()) return;
 
-    const feedback = String(reason || "")
+    const rawReason = String(reason || "")
       .trim()
       .toLowerCase();
-    if (!feedback) return;
+    if (!rawReason) return;
 
     const state = this.loadState();
     this.resetWeekIfNeeded(state);
+
+    // Structured reasons from the message feedback menu map to explicit signals.
+    // A structured reason with no style meaning (for example `incorrect`) adds none.
+    const structured = STRUCTURED_FEEDBACK_SIGNALS[rawReason];
+    if (structured) {
+      for (const signal of structured) {
+        state.pendingSignals.push({ ...signal, source: "feedback", observedAt: Date.now() });
+      }
+      this.saveState(state);
+      if (structured.length > 0) this.maybeAdapt();
+      return;
+    }
+
+    // Free text: `_` and `-` separate words, so "too_verbose" reads as "too verbose".
+    const feedback = rawReason.replace(/[_-]+/g, " ");
 
     // Direct style signals from feedback
     if (/\b(concise|shorter|too long|brief|verbose|wordy)\b/.test(feedback)) {

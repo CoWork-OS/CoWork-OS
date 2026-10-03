@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import {
+  buildProjectGuidanceContext,
   buildWorkspaceDesignSystemContext,
   buildWorkspaceKitContext,
   isDesignSystemRelevantTask,
@@ -362,5 +363,56 @@ describe("WorkspaceKitContext", () => {
     expect(out).toContain("#### Next Actions");
     expect(out).toContain("do Z");
     expect(out).not.toContain("#### Work Log");
+  });
+
+  describe("memory slice ordering", () => {
+    function seedRepoAndKit(): void {
+      writeFile(path.join(tmpDir, "AGENTS.md"), "# Repo rules\n- ROOT_AGENTS_RULE\n");
+      writeFile(
+        path.join(tmpDir, "docs", "architecture.md"),
+        `# Architecture\n${"- ARCH_DETAIL line\n".repeat(300)}`,
+      );
+      writeFile(
+        path.join(tmpDir, ".cowork", "PRIORITIES.md"),
+        "# Priorities\n\n## Current\n- PRIORITY_ITEM\n",
+      );
+      writeFile(
+        path.join(tmpDir, ".cowork", "USER.md"),
+        "# User Profile\n\n- Name: USER_NAME_VALUE\n",
+      );
+      writeFile(
+        path.join(tmpDir, ".cowork", "MEMORY.md"),
+        "# Long-Term Memory\n\n## Rules\n- MEMORY_RULE_VALUE\n",
+      );
+    }
+
+    it("puts .cowork USER.md and MEMORY.md before repo instructions and doc maps", () => {
+      seedRepoAndKit();
+      const out = buildWorkspaceKitContext(tmpDir, "any");
+      const userAt = out.indexOf("USER_NAME_VALUE");
+      const memoryAt = out.indexOf("MEMORY_RULE_VALUE");
+      expect(userAt).toBeGreaterThanOrEqual(0);
+      expect(memoryAt).toBeGreaterThan(userAt);
+      expect(out.indexOf("ROOT_AGENTS_RULE")).toBeGreaterThan(memoryAt);
+      expect(out.indexOf("ARCH_DETAIL")).toBeGreaterThan(out.indexOf("PRIORITY_ITEM"));
+    });
+
+    it("leaves project guidance out of the memory slice when asked", () => {
+      seedRepoAndKit();
+      const out = buildWorkspaceKitContext(tmpDir, "any", new Date(), {
+        includeProjectGuidance: false,
+      });
+      expect(out).toContain("USER_NAME_VALUE");
+      expect(out).not.toContain("ROOT_AGENTS_RULE");
+      expect(out).not.toContain("ARCH_DETAIL");
+    });
+
+    it("renders project instructions before docs maps in the project guidance block", () => {
+      seedRepoAndKit();
+      const guidance = buildProjectGuidanceContext(tmpDir);
+      expect(guidance).toContain("Project Instructions (AGENTS.md)");
+      expect(guidance.indexOf("ROOT_AGENTS_RULE")).toBeLessThan(guidance.indexOf("ARCH_DETAIL"));
+      expect(guidance).not.toContain("USER_NAME_VALUE");
+    });
   });
 });

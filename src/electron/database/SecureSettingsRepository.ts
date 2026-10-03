@@ -155,6 +155,7 @@ export type SettingsCategory =
   | "pulse"
   | "plugin-packs"
   | "meeting-artifacts"
+  | "checkpoint-signing"
   | `plugin:${string}`;
 
 interface SecureSettingsRow {

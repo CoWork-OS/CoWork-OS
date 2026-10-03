@@ -1,4 +1,5 @@
 import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 import { createHash } from "crypto";
 import {
@@ -48,7 +49,8 @@ const URGENCY_ORDER: Record<HeartbeatSignalUrgency, number> = {
 };
 
 const SIGNAL_RETENTION_MS: Record<HeartbeatSignalFamily, number> = {
-  urgent_interrupt: 30 * 60 * 1000,
+  // Must outlive the slowest common pulse cadence so an urgent wake is seen before it expires.
+  urgent_interrupt: 2 * 60 * 60 * 1000,
   focus_state: 60 * 60 * 1000,
   open_loop_pressure: 6 * 60 * 60 * 1000,
   correction_learning: 24 * 60 * 60 * 1000,
@@ -61,9 +63,9 @@ const SIGNAL_RETENTION_MS: Record<HeartbeatSignalFamily, number> = {
   assigned_tasks: 2 * 60 * 60 * 1000,
 };
 
-// TODO: The load/save/prune methods use synchronous fs APIs which block the Electron
-// main thread. This is acceptable at current heartbeat cadences but should be migrated
-// to fs/promises when the pulse interval is tightened below ~5 minutes.
+/** Persisting is debounced: bursts of wakes coalesce into one asynchronous write. */
+export const SIGNAL_STORE_WRITE_DEBOUNCE_MS = 1_000;
+
 function stableHash(input: string): string {
   // SHA-256 truncated to 40 hex chars — same length as SHA-1 but future-safe.
   return createHash("sha256").update(input).digest("hex").slice(0, 40);
@@ -76,6 +78,9 @@ function makeDeferredKey(agentRoleId: string, workspaceId?: string): string {
 export class HeartbeatSignalStore {
   private loaded = false;
   private state: PersistedSignalStoreState = { version: 1, signals: [], deferred: {} };
+  private writeTimer: NodeJS.Timeout | null = null;
+  private dirty = false;
+  private writeChain: Promise<void> = Promise.resolve();
 
   private get filePath(): string {
     return path.join(getUserDataDir(), STATE_FILE);
@@ -98,16 +103,39 @@ export class HeartbeatSignalStore {
     }
   }
 
+  /** Mark state dirty and schedule one debounced asynchronous write. */
   private save(): void {
     this.load();
-    try {
-      fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-      const tmp = `${this.filePath}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(this.state, null, 2) + "\n", "utf8");
-      fs.renameSync(tmp, this.filePath);
-    } catch {
-      // Best effort only.
+    this.dirty = true;
+    if (this.writeTimer) return;
+    this.writeTimer = setTimeout(() => {
+      this.writeTimer = null;
+      void this.flush();
+    }, SIGNAL_STORE_WRITE_DEBOUNCE_MS);
+    this.writeTimer.unref?.();
+  }
+
+  /** Write pending state now. Writes are serialized; safe to call repeatedly (e.g. on stop). */
+  flush(): Promise<void> {
+    if (this.writeTimer) {
+      clearTimeout(this.writeTimer);
+      this.writeTimer = null;
     }
+    if (!this.dirty) return this.writeChain;
+    this.dirty = false;
+    const filePath = this.filePath;
+    const snapshot = JSON.stringify(this.state, null, 2) + "\n";
+    this.writeChain = this.writeChain.then(async () => {
+      try {
+        await fsp.mkdir(path.dirname(filePath), { recursive: true });
+        const tmp = `${filePath}.tmp`;
+        await fsp.writeFile(tmp, snapshot, "utf8");
+        await fsp.rename(tmp, filePath);
+      } catch {
+        // Best effort only.
+      }
+    });
+    return this.writeChain;
   }
 
   private prune(now = Date.now()): void {
@@ -233,7 +261,9 @@ export class HeartbeatSignalStore {
 
   clearDeferredState(agentRoleId: string, workspaceId?: string): void {
     this.load();
-    delete this.state.deferred[makeDeferredKey(agentRoleId, workspaceId)];
+    const key = makeDeferredKey(agentRoleId, workspaceId);
+    if (!(key in this.state.deferred)) return;
+    delete this.state.deferred[key];
     this.save();
   }
 }

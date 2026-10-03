@@ -17,7 +17,7 @@ export class CoreLearningPipelineService {
     const failures = await this.failureMining.mineTrace(traceId);
     for (const failure of failures) {
       const cluster = await this.clusterService.upsertClusterForRecord(failure);
-      await this.learnings.append({
+      await this.learnings.appendIfNovel({
         profileId: cluster.profileId,
         workspaceId: cluster.workspaceId,
         kind: "failure_cluster",
@@ -30,7 +30,7 @@ export class CoreLearningPipelineService {
         cluster.workspaceId,
       );
       if (evalCases.some((item) => item.clusterId === cluster.id)) {
-        await this.learnings.append({
+        await this.learnings.appendIfNovel({
           profileId: cluster.profileId,
           workspaceId: cluster.workspaceId,
           kind: "eval_case",

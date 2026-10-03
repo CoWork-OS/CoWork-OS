@@ -8,7 +8,6 @@ import { AutomationProfileRepository } from "../agents/agent-repository-facades"
 import { WorkspaceRepository } from "../database/repository-facades";
 
 import { MemoryService } from "../memory/MemoryService";
-import { LayeredMemoryIndexService } from "../memory/LayeredMemoryIndexService";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 
@@ -19,6 +18,13 @@ import type {
 } from "../../shared/types";
 
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
+import { coreCandidateFingerprint } from "./core-memory-hygiene";
+
+/** Outcome of writing a group of accepted candidates (duplicates of one fingerprint). */
+interface CandidateApplyResult {
+  written: boolean;
+  appliedIds: string[];
+}
 
 export class CoreMemoryDistiller {
   constructor(
@@ -65,21 +71,20 @@ export class CoreMemoryDistiller {
     });
     try {
       let written = 0;
-      for (const candidate of accepted) {
-        const stored = await this.writeCandidateMemory(candidate);
-        if (stored) {
-          written += 1;
-          await this.scopeStateRepo.touchDistill(
-            candidate.scopeKind,
-            candidate.scopeRef,
-            Date.now(),
-          );
-        }
+      const appliedCandidateIds: string[] = [];
+      for (const group of this.groupCandidates(accepted)) {
+        const result = await this.applyCandidateGroup(group);
+        if (result.written) written += 1;
+        appliedCandidateIds.push(...result.appliedIds);
       }
       return await this.distillRunRepo.update(run.id, {
         status: "completed",
         acceptedCount: written,
-        summary: { traceId, acceptedCandidateIds: accepted.map((item) => item.id) },
+        summary: {
+          traceId,
+          acceptedCandidateIds: accepted.map((item) => item.id),
+          appliedCandidateIds,
+        },
         completedAt: Date.now(),
       });
     } catch (error) {
@@ -119,29 +124,17 @@ export class CoreMemoryDistiller {
         status: "accepted",
         limit: 200,
       });
+      // Only `accepted` candidates are pending: once written they move to `applied`, so an
+      // offline pass never captures the same candidate twice.
       let acceptedCount = 0;
-      for (const candidate of this.mergeCandidates(candidates)) {
-        const stored = await this.writeCandidateMemory(candidate);
-        if (stored) {
-          acceptedCount += 1;
-          await this.scopeStateRepo.touchDistill(
-            candidate.scopeKind,
-            candidate.scopeRef,
-            Date.now(),
-          );
-        }
+      const appliedCandidateIds: string[] = [];
+      for (const group of this.groupCandidates(candidates)) {
+        const result = await this.applyCandidateGroup(group);
+        if (result.written) acceptedCount += 1;
+        appliedCandidateIds.push(...result.appliedIds);
       }
-
-      const workspacePath = request.workspaceId
-        ? (await this.workspaceRepo.findById(request.workspaceId))?.path
-        : undefined;
-      if (request.workspaceId && workspacePath) {
-        await LayeredMemoryIndexService.refreshIndex({
-          workspaceId: request.workspaceId,
-          workspacePath,
-          taskPrompt: `Core memory distillation for profile ${profile.id}`,
-        });
-      }
+      // No layered-index refresh here: the index is rebuilt by its own guarded paths, and a
+      // refresh from this background pass would run without workspace access checks.
       return (await this.distillRunRepo.update(run.id, {
         status: "completed",
         sourceTraceCount: traces.length,
@@ -150,6 +143,7 @@ export class CoreMemoryDistiller {
         summary: {
           traceIds: traces.map((trace) => trace.id),
           candidateIds: candidates.map((candidate) => candidate.id),
+          appliedCandidateIds,
         },
         completedAt: Date.now(),
       }))!;
@@ -166,28 +160,70 @@ export class CoreMemoryDistiller {
     return this.distillRunRepo.list({ profileId, workspaceId, limit });
   }
 
-  private mergeCandidates(candidates: CoreMemoryCandidate[]): CoreMemoryCandidate[] {
-    const byKey = new Map<string, CoreMemoryCandidate>();
+  /** Groups candidates by fingerprint; the highest-confidence one leads each group. */
+  private groupCandidates(candidates: CoreMemoryCandidate[]): CoreMemoryCandidate[][] {
+    const byKey = new Map<string, CoreMemoryCandidate[]>();
     for (const candidate of candidates) {
-      const key = [
-        candidate.scopeKind,
-        candidate.scopeRef,
-        candidate.candidateType,
-        candidate.summary.toLowerCase(),
-      ].join("::");
-      const existing = byKey.get(key);
-      if (!existing || candidate.confidence > existing.confidence) {
-        byKey.set(key, candidate);
-      }
+      const key = coreCandidateFingerprint(candidate);
+      const group = byKey.get(key);
+      if (group) group.push(candidate);
+      else byKey.set(key, [candidate]);
     }
-    return [...byKey.values()];
+    return [...byKey.values()].map((group) =>
+      [...group].sort((a, b) => b.confidence - a.confidence),
+    );
+  }
+
+  /**
+   * Writes the leading candidate of a duplicate group once and records the lifecycle: the
+   * leader becomes `applied`, the rest `merged`. Candidates without a workspace cannot be
+   * written and become `skipped`. When the capture is declined (for example memory capture is
+   * off) the group stays `accepted` so a later pass can retry.
+   */
+  private async applyCandidateGroup(group: CoreMemoryCandidate[]): Promise<CandidateApplyResult> {
+    const [leader, ...duplicates] = group;
+    if (!leader.workspaceId) {
+      await this.candidateRepo.markLifecycle(
+        group.map((candidate) => candidate.id),
+        "skipped",
+        "Not written to memory: candidate has no workspace.",
+      );
+      return { written: false, appliedIds: [] };
+    }
+    const alreadyApplied = await this.candidateRepo.findAppliedDuplicate(leader);
+    if (alreadyApplied) {
+      await this.candidateRepo.markLifecycle(
+        group.map((candidate) => candidate.id),
+        "merged",
+        `Merged into candidate ${alreadyApplied.id}, already written to memory.`,
+      );
+      return { written: false, appliedIds: [] };
+    }
+    const stored = await this.writeCandidateMemory(leader);
+    if (!stored) return { written: false, appliedIds: [] };
+    await this.candidateRepo.markLifecycle(
+      [leader.id],
+      "applied",
+      `Written to memory ${stored.id}.`,
+    );
+    if (duplicates.length) {
+      await this.candidateRepo.markLifecycle(
+        duplicates.map((candidate) => candidate.id),
+        "merged",
+        `Merged into candidate ${leader.id}.`,
+      );
+    }
+    await this.scopeStateRepo.touchDistill(leader.scopeKind, leader.scopeRef, Date.now());
+    return { written: true, appliedIds: [leader.id] };
   }
 
   private async writeCandidateMemory(candidate: CoreMemoryCandidate) {
     const workspaceId = candidate.workspaceId;
     if (!workspaceId) return null;
     const type = this.mapCandidateToMemoryType(candidate);
-    const content = `[core-trace:${candidate.traceId}] [scope:${candidate.scopeKind}:${candidate.scopeRef}] ${candidate.summary}${candidate.details ? `\n${candidate.details}` : ""}`;
+    // Provenance (trace, candidate, scope) travels in the capture options and is stored as
+    // observation metadata; keeping it out of the content lets identical memories dedupe.
+    const content = `${candidate.summary}${candidate.details ? `\n${candidate.details}` : ""}`;
     const archiveEntry = await MemoryService.captureCoreMemory(
       workspaceId,
       undefined,

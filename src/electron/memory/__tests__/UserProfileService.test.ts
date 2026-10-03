@@ -41,8 +41,6 @@ vi.mock("../../settings/personality-manager", () => ({
 vi.mock("../RelationshipMemoryService", () => ({
   RelationshipMemoryService: {
     buildPromptContext: vi.fn(() => ""),
-    ingestUserFeedback: vi.fn(),
-    ingestUserMessage: vi.fn(),
   },
 }));
 
@@ -124,46 +122,5 @@ describe("UserProfileService", () => {
 
     expect(updated?.value).toBe("Preferred name: Sam");
     expect(mocks.setUserName).toHaveBeenCalledWith("Sam");
-  });
-
-  it("learns operating, voice, and accountability preferences from user messages", () => {
-    UserProfileService.ingestUserMessage(
-      "Please push back on weak ideas, talk to me in private chat bluntly, and hold me accountable if I ignore open loops.",
-      "task-1",
-    );
-
-    const categories = mocks.storedProfile.facts.map((fact) => fact.category);
-    expect(categories).toContain("operating");
-    expect(categories).toContain("voice");
-    expect(categories).toContain("accountability");
-    expect(mocks.storedProfile.facts.map((fact) => fact.value)).toEqual(
-      expect.arrayContaining([
-        "Pushback: challenge weak ideas, unclear goals, and risky assumptions with evidence and a better move.",
-        "Private voice: direct, casual, and candid.",
-        "Accountability: notice repeated asks, ignored outputs, stale open loops, and push toward the next concrete action.",
-      ]),
-    );
-  });
-
-  it("does not treat quoted third-party preference text as the user's operating profile", () => {
-    UserProfileService.ingestUserMessage(
-      'This article says "push back on weak ideas" and "hold me accountable". Should we copy that?',
-      "task-1",
-    );
-
-    expect(mocks.storedProfile.facts).toHaveLength(0);
-  });
-
-  it("honors explicit requests not to push back", () => {
-    UserProfileService.ingestUserMessage(
-      "Please don't push back on small product ideas.",
-      "task-1",
-    );
-
-    expect(mocks.storedProfile.facts).toHaveLength(1);
-    expect(mocks.storedProfile.facts[0]?.category).toBe("operating");
-    expect(mocks.storedProfile.facts[0]?.value).toBe(
-      "Pushback: keep challenges low-friction unless the risk or waste is material.",
-    );
   });
 });

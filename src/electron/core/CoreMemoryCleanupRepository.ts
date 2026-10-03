@@ -1,0 +1,234 @@
+import type Database from "better-sqlite3";
+import type { CoreMemoryCandidateStatus } from "../../shared/types";
+import { coreCandidateFingerprint, normalizeCandidateSummary } from "./core-memory-hygiene";
+
+type Any = any;
+
+export const CORE_MEMORY_CLEANUP_MARKER = "core-memory-cleanup-v1";
+const STALE_OPEN_LOOP_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const DELETE_CHUNK_SIZE = 500;
+
+export interface CoreMemoryCleanupResult {
+  /** False when the marker was already present and nothing ran. */
+  ran: boolean;
+  duplicateCandidatesDeleted: number;
+  legacyAcceptedMarkedApplied: number;
+  workspacelessAcceptedMarkedSkipped: number;
+  staleOpenLoopsDismissed: number;
+  duplicateLearningsDeleted: number;
+  duplicateTraceMemoriesDeleted: number;
+}
+
+/** Which duplicate candidate survives: accepted/applied work beats unreviewed proposals. */
+const KEEP_RANK: Record<CoreMemoryCandidateStatus, number> = {
+  applied: 6,
+  accepted: 5,
+  rejected: 4,
+  merged: 3,
+  skipped: 2,
+  dismissed: 2,
+  proposed: 1,
+};
+
+/**
+ * One-time cleanup of the duplicates the old core distiller produced (memory audit DATA-3,
+ * LOOP-10). Idempotent: it records a marker row in the same transaction as the cleanup and
+ * does nothing once the marker exists.
+ */
+export class CoreMemoryCleanupStore {
+  constructor(private readonly db: Database.Database) {}
+
+  run(now: number): CoreMemoryCleanupResult {
+    const result: CoreMemoryCleanupResult = {
+      ran: false,
+      duplicateCandidatesDeleted: 0,
+      legacyAcceptedMarkedApplied: 0,
+      workspacelessAcceptedMarkedSkipped: 0,
+      staleOpenLoopsDismissed: 0,
+      duplicateLearningsDeleted: 0,
+      duplicateTraceMemoriesDeleted: 0,
+    };
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS core_maintenance_markers (
+         key TEXT PRIMARY KEY,
+         completed_at INTEGER NOT NULL,
+         details TEXT
+       )`,
+    );
+    const tx = this.db.transaction(() => {
+      const marker = this.db
+        .prepare("SELECT key FROM core_maintenance_markers WHERE key = ?")
+        .get(CORE_MEMORY_CLEANUP_MARKER);
+      if (marker) return;
+      result.ran = true;
+      if (this.hasTable("core_memory_candidates")) {
+        result.duplicateCandidatesDeleted = this.dedupeCandidates();
+        const legacy = this.settleLegacyAcceptedCandidates(now);
+        result.legacyAcceptedMarkedApplied = legacy.applied;
+        result.workspacelessAcceptedMarkedSkipped = legacy.skipped;
+        result.staleOpenLoopsDismissed = this.dismissStaleOpenLoops(now);
+      }
+      if (this.hasTable("core_learnings_log")) {
+        result.duplicateLearningsDeleted = this.dedupeLearnings();
+      }
+      if (this.hasTable("memories")) {
+        result.duplicateTraceMemoriesDeleted = this.dedupeTraceMemories();
+      }
+      this.db
+        .prepare(
+          "INSERT INTO core_maintenance_markers (key, completed_at, details) VALUES (?, ?, ?)",
+        )
+        .run(CORE_MEMORY_CLEANUP_MARKER, now, JSON.stringify(result));
+    });
+    tx();
+    return result;
+  }
+
+  private hasTable(name: string): boolean {
+    return Boolean(
+      this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name),
+    );
+  }
+
+  /** Keeps one candidate per fingerprint (most advanced status, then newest). */
+  private dedupeCandidates(): number {
+    const rows = this.db
+      .prepare(
+        `SELECT id, profile_id, scope_kind, scope_ref, candidate_type, summary, status, created_at
+         FROM core_memory_candidates`,
+      )
+      .all() as Any[];
+    const keepers = new Map<string, Any>();
+    const doomed: string[] = [];
+    for (const row of rows) {
+      const key = coreCandidateFingerprint({
+        profileId: String(row.profile_id),
+        scopeKind: row.scope_kind,
+        scopeRef: String(row.scope_ref),
+        candidateType: row.candidate_type,
+        summary: String(row.summary),
+      });
+      const current = keepers.get(key);
+      if (!current) {
+        keepers.set(key, row);
+        continue;
+      }
+      if (this.preferCandidate(row, current)) {
+        doomed.push(String(current.id));
+        keepers.set(key, row);
+      } else {
+        doomed.push(String(row.id));
+      }
+    }
+    return this.deleteIds("core_memory_candidates", "id", doomed);
+  }
+
+  private preferCandidate(row: Any, current: Any): boolean {
+    const rank = (value: Any) => KEEP_RANK[value.status as CoreMemoryCandidateStatus] ?? 0;
+    if (rank(row) !== rank(current)) return rank(row) > rank(current);
+    return Number(row.created_at) > Number(current.created_at);
+  }
+
+  /**
+   * The old distiller wrote every accepted candidate to memory (and re-wrote it every pass)
+   * without recording that, so accepted candidates are already in memory. Mark them applied
+   * so the new distiller does not write them once more; ones without a workspace were never
+   * writable and become skipped.
+   */
+  private settleLegacyAcceptedCandidates(now: number): { applied: number; skipped: number } {
+    const applied = this.db
+      .prepare(
+        `UPDATE core_memory_candidates
+         SET status = 'applied',
+             resolution = 'Already written to memory by the earlier distiller.',
+             resolved_at = COALESCE(resolved_at, ?)
+         WHERE status = 'accepted' AND workspace_id IS NOT NULL AND workspace_id != ''`,
+      )
+      .run(now).changes;
+    const skipped = this.db
+      .prepare(
+        `UPDATE core_memory_candidates
+         SET status = 'skipped',
+             resolution = 'Not written to memory: candidate has no workspace.',
+             resolved_at = COALESCE(resolved_at, ?)
+         WHERE status = 'accepted' AND (workspace_id IS NULL OR workspace_id = '')`,
+      )
+      .run(now).changes;
+    return { applied, skipped };
+  }
+
+  private dismissStaleOpenLoops(now: number): number {
+    return this.db
+      .prepare(
+        `UPDATE core_memory_candidates
+         SET status = 'dismissed',
+             resolution = 'Expired: unreviewed open loop older than 14 days.',
+             resolved_at = ?
+         WHERE status = 'proposed' AND candidate_type = 'open_loop' AND created_at < ?`,
+      )
+      .run(now, now - STALE_OPEN_LOOP_AGE_MS).changes;
+  }
+
+  /** Keeps the newest row of each identical learnings entry. */
+  private dedupeLearnings(): number {
+    return this.db
+      .prepare(
+        `DELETE FROM core_learnings_log
+         WHERE id IN (
+           SELECT id FROM (
+             SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY profile_id, COALESCE(workspace_id, ''), kind, summary,
+                 COALESCE(related_cluster_id, ''), COALESCE(related_experiment_id, '')
+               ORDER BY created_at DESC, id DESC
+             ) AS rn
+             FROM core_learnings_log
+           )
+           WHERE rn > 1
+         )`,
+      )
+      .run().changes;
+  }
+
+  /**
+   * The old distiller prefixed each memory with `[core-trace:<id>]`, so every pass stored a
+   * new copy. Keep the newest memory per workspace, type and candidate text, and delete the
+   * rest with their embeddings and observation metadata.
+   */
+  private dedupeTraceMemories(): number {
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id, type, content, created_at FROM memories
+         WHERE content LIKE '[core-trace:%'
+         ORDER BY created_at DESC, id DESC`,
+      )
+      .all() as Any[];
+    const seen = new Set<string>();
+    const doomed: string[] = [];
+    for (const row of rows) {
+      const firstLine = String(row.content).split("\n", 1)[0] || "";
+      const key = [row.workspace_id, row.type, normalizeCandidateSummary(firstLine)].join("::");
+      if (seen.has(key)) doomed.push(String(row.id));
+      else seen.add(key);
+    }
+    if (!doomed.length) return 0;
+    if (this.hasTable("memory_embeddings")) {
+      this.deleteIds("memory_embeddings", "memory_id", doomed);
+    }
+    if (this.hasTable("memory_observation_metadata")) {
+      this.deleteIds("memory_observation_metadata", "memory_id", doomed);
+    }
+    return this.deleteIds("memories", "id", doomed);
+  }
+
+  private deleteIds(table: string, column: string, ids: string[]): number {
+    let deleted = 0;
+    for (let index = 0; index < ids.length; index += DELETE_CHUNK_SIZE) {
+      const chunk = ids.slice(index, index + DELETE_CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      deleted += this.db
+        .prepare(`DELETE FROM ${table} WHERE ${column} IN (${placeholders})`)
+        .run(...chunk).changes;
+    }
+    return deleted;
+  }
+}

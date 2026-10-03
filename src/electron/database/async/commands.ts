@@ -15,7 +15,11 @@ import {
   sanitizeLargeTaskEventPayloadsRange,
   setMaintenanceStateValue,
 } from "../post-startup-maintenance";
-import { type CapturedMemoryWrite, insertCapturedMemory } from "../../memory/memory-capture-sql";
+import {
+  type CapturedMemoryResult,
+  type CapturedMemoryWrite,
+  insertCapturedMemory,
+} from "../../memory/memory-capture-sql";
 import {
   MAX_EMBEDDING_UPSERT_ROWS,
   type MemoryEmbeddingRow,
@@ -152,6 +156,13 @@ function requireCapturedMemory(raw: unknown): CapturedMemoryWrite {
       throw new InvalidCommandArgumentsError("observation.memoryId must match the memory");
     }
     result.observation = observation as unknown as CapturedMemoryWrite["observation"];
+  }
+  if (write.dedupe !== undefined) {
+    const dedupe = requireObject(write.dedupe);
+    result.dedupe = {
+      contentHash: requireText(dedupe.contentHash, "dedupe.contentHash", 128) as string,
+      since: requireFinite(dedupe.since, "dedupe.since"),
+    };
   }
   return result;
 }
@@ -315,10 +326,7 @@ export const DATABASE_COMMANDS = {
   "memory.capture": {
     kind: "write",
     tables: ["memories", "memory_embeddings", "memory_observation_metadata"],
-    run(
-      db: Database.Database,
-      rawArgs: { write: CapturedMemoryWrite },
-    ): { observationStored: boolean } {
+    run(db: Database.Database, rawArgs: { write: CapturedMemoryWrite }): CapturedMemoryResult {
       return insertCapturedMemory(db, requireCapturedMemory(requireObject(rawArgs).write));
     },
   },

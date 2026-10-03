@@ -16,9 +16,9 @@ It replaces the older queue-first heartbeat internals with a two-lane pipeline d
 
 The key design change is that not every wake is treated as potential task work anymore.
 
-Heartbeat owns the "when should we think?" decision. Reflection no longer runs its own independent interval loop for normal operation; Heartbeat triggers it when Pulse results or accumulated signals justify another evaluation.
+Heartbeat owns the "when should we think?" decision for Reflection and heartbeat-triggered Dreaming. Reflection no longer runs its own independent interval loop for normal operation; Heartbeat triggers it when Pulse results or accumulated signals justify another evaluation. Other background loops (for example AutonomyEngine, core memory distillation, Box Brain polling and task-completion Dreaming) still schedule themselves.
 
-Heartbeat can also trigger Dreaming when the signal ledger contains memory-specific pressure such as `memory_drift`, `correction_learning`, or `cross_workspace_patterns`. Dreaming runs as background memory curation and produces reviewable candidates instead of creating tasks or silently rewriting memory.
+Heartbeat can also trigger Dreaming when the signal ledger contains memory-specific signals such as `memory_drift`, `correction_learning`, or `cross_workspace_patterns`, or when hot-memory pressure changed since the last run. Dreaming runs as background memory curation and produces candidates instead of creating tasks or silently rewriting memory.
 
 ## Two-Lane Model
 
@@ -38,7 +38,9 @@ Heartbeat v3 separates cheap awareness from expensive action.
 - `dispatch_runbook`
 - `handoff_to_cron`
 
-`Dispatch` only runs when Pulse asks for escalation. Passive `next-heartbeat` wakes alone should not create tasks.
+`Dispatch` only runs when Pulse asks for escalation. Passive `next-heartbeat` wakes alone should not create tasks. A wake with `mode: "now"` requests an immediate pulse (or queues one if a pulse is already running).
+
+Pulses for one agent never overlap: the running slot is reserved before any asynchronous work, rescheduling always clears the previous timer, and manual triggers that arrive during a running pulse share one queued replay.
 
 ## Signals, Not Wake Queues
 
@@ -56,13 +58,15 @@ Each signal carries:
 - `expiresAt`
 - optional `evidenceRefs`
 
-Signals with the same fingerprint merge instead of accumulating. This is what keeps ambient file, git, and awareness activity cheap.
+Signals with the same fingerprint merge instead of accumulating. Wake fingerprints are normalized to source, family, category, workspace and a one-hour bucket; they do not include window titles, file paths or other wake text, so repeated ambient file, git, and awareness activity merges. Manual "now" wakes keep a unique fingerprint.
+
+The signal ledger (`heartbeat-signals-v3.json`) is written asynchronously with a 1-second debounce rather than on every wake. Urgent signals are kept for 2 hours.
 
 ## Defer And Compress
 
 Foreground manual work no longer causes wake buildup.
 
-If a user-facing task is already active for the same workspace, Pulse records a deferred state and compresses pending signals into a resumable summary. That gives v3 its steady-state behavior:
+If a user-facing task is already active for the same workspace, Pulse records a deferred state and compresses pending signals into a resumable summary. Active-hours and deferral checks run before a pulse run record is created and before Reflection or Dreaming, so out-of-hours and deferred pulses do no further work. That gives v3 its steady-state behavior:
 
 - no unbounded wake queue growth
 - no steady-state saturation behavior
@@ -90,9 +94,9 @@ Execution behavior is controlled by `heartbeatProfile`, not `autonomyLevel`.
 
 | Profile      | Behavior                                                                                                |
 | ------------ | ------------------------------------------------------------------------------------------------------- |
-| `observer`   | Awareness only. Does not execute checklist maintenance.                                                 |
+| `observer`   | Awareness only. Does not execute checklist maintenance. Strong signals surface as suggestions.          |
 | `operator`   | Awareness plus checklist and proactive review. Can surface suggestions and run light maintenance paths. |
-| `dispatcher` | Full escalation profile. Can create heartbeat tasks, runbooks, and cron handoffs.                       |
+| `dispatcher` | Full escalation profile. Can create heartbeat tasks; runbook and cron hand-offs are advisory only.      |
 
 This also controls whether `.cowork/HEARTBEAT.md` is actionable. The file is a recurring maintenance checklist input, not general task context.
 
@@ -115,20 +119,26 @@ Execution modes are:
 | `dispatch`     | Requires Dispatch before visible work happens                          |
 | `cron_handoff` | Should be handed off to an exact-time or heavyweight scheduler/runbook |
 
-`.cowork/HEARTBEAT.md` is parsed into structured checklist items and cached by workspace revision. Pulse evaluates the cached checklist state instead of reparsing the file on every run.
+`.cowork/HEARTBEAT.md` is read on each pulse; parsed checklist items are cached by a hash of the file content, so the file is only re-parsed when it changes.
+
+Runbook and `cron_handoff` decisions are advisory: they record a `dispatch.advisory` activity entry and do not execute a runbook or create a scheduled job yet. They do not create a dispatch run, spend dispatch budget or cooldown, or mark checklist items done, and they consume only `maintenance` signals. A reported item is not reported again for at least an hour (or its own cadence, if longer).
 
 ## Dispatch Guardrails
 
 Dispatch is intentionally narrow.
 
-- one in-flight dispatch per agent/workspace
+- one in-flight dispatch per agent/workspace: a dispatch that creates a task stays `running` until that task reaches a terminal status
 - cooldown after success
 - shorter retry after failure
 - daily dispatch budget via `maxDispatchesPerDay`
 - repeated identical low-value signals do not keep retriggering escalation
-- task creation requires evidence refs from Pulse
+- task creation requires evidence refs; a task decision without them is downgraded to a suggestion
 
-Every Pulse and every Dispatch gets a run record. If Dispatch creates a heartbeat task, that task carries a non-null `heartbeatRunId`.
+Every Pulse and every task-creating Dispatch gets a run record. If Dispatch creates a heartbeat task, that task carries a non-null `heartbeatRunId`. Each pulse settles in-flight dispatch runs from their task's status (or as failed when the task is gone or the run is older than 12 hours), and startup reconciles stale dispatch runs the same way.
+
+Heartbeat's view of assigned work includes tasks that are pending, queued, planning, executing, paused or blocked, and excludes Heartbeat's own dispatched tasks.
+
+Heartbeat run history older than 30 days is pruned daily, keeping the newest 200 runs per agent and never removing running, queued or issue-linked runs.
 
 ## Mission Control Semantics
 
@@ -164,9 +174,9 @@ File, git, and other ambient sources emit low-priority mergeable signals that Pu
 
 Dreaming is a side effect of memory-specific Heartbeat pressure, not a Dispatch lane.
 
-When Pulse or workflow reflection exposes memory drift, correction learning, or cross-workspace pattern signals, Heartbeat can ask Dreaming to run for the active workspace. That Dreaming run persists `dreaming_runs` and `dreaming_candidates`, then returns run metadata on the heartbeat result for traceability.
+When a non-deferred, in-hours pulse sees memory drift, correction learning, or cross-workspace pattern signals (or changed hot-memory pressure), Heartbeat can ask Dreaming to run for the active workspace. The daemon emits a low-urgency `correction_learning` signal when it detects a user correction; `memory_drift` comes from mailbox automation, and nothing emits `cross_workspace_patterns` today. Dreaming enforces a 6-hour per-workspace cooldown, and Heartbeat skips it when `heartbeatMaintenanceEnabled` is off. Handled memory signals are removed from the ledger after a run. That Dreaming run persists `dreaming_runs` and `dreaming_candidates`, then returns run metadata on the heartbeat result for traceability.
 
-Dreaming should not consume dispatch budget, create heartbeat tasks, or turn general activity signals into memory writes. Its output remains reviewable memory candidates. See [Dreaming](dreaming.md).
+Dreaming should not consume dispatch budget, create heartbeat tasks, or turn general activity signals into memory writes. Its output remains memory candidates; there is no review UI for them yet. See [Dreaming](dreaming.md).
 
 Before a memory-specific Dreaming run, Heartbeat resolves the workspace's [access profile](access-profiles.md)
 and builds a read guard for file-backed workspace-kit and transcript evidence. Profile resolution

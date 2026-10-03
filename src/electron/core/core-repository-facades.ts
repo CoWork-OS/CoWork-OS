@@ -10,6 +10,7 @@ import type { CoreFailureRecordStore } from "./CoreFailureRecordRepository";
 import type { CoreMemoryCandidateStore } from "./CoreMemoryCandidateRepository";
 import type { CoreTraceStore } from "./CoreTraceRepository";
 import type { CoreMemoryScopeStateStore } from "./CoreMemoryScopeStateRepository";
+import type { CoreMemoryCleanupStore } from "./CoreMemoryCleanupRepository";
 
 /**
  * Async facades for the Core learning stores (async SQLite migration plan, DB6). `new XRepository(db)`
@@ -72,7 +73,7 @@ export const CoreHarnessExperimentRepository = serviceRepositoryFacade<
   (typeof CORE_HARNESS_EXPERIMENT_METHODS)[number]
 >("coreHarnessExperiment_", CORE_HARNESS_EXPERIMENT_METHODS);
 
-const CORE_LEARNINGS_METHODS = ["append", "list"] as const;
+const CORE_LEARNINGS_METHODS = ["append", "appendIfNovel", "list"] as const;
 export type CoreLearningsRepository = AsyncStore<
   CoreLearningsStore,
   (typeof CORE_LEARNINGS_METHODS)[number]
@@ -121,6 +122,9 @@ export const CoreFailureRecordRepository = serviceRepositoryFacade<
 const CORE_MEMORY_CANDIDATE_METHODS = [
   "create",
   "bulkCreate",
+  "upsertByFingerprint",
+  "markLifecycle",
+  "findAppliedDuplicate",
   "findById",
   "list",
   "listForTrace",
@@ -166,3 +170,14 @@ export const CoreMemoryScopeStateRepository = serviceRepositoryFacade<
   CoreMemoryScopeStateStore,
   (typeof CORE_MEMORY_SCOPE_STATE_METHODS)[number]
 >("coreMemoryScopeState_", CORE_MEMORY_SCOPE_STATE_METHODS);
+
+const CORE_MEMORY_CLEANUP_METHODS = ["run"] as const;
+/** One-time duplicate cleanup for core memory candidates, learnings and trace memories. */
+export type CoreMemoryCleanupRepository = AsyncStore<
+  CoreMemoryCleanupStore,
+  (typeof CORE_MEMORY_CLEANUP_METHODS)[number]
+>;
+export const CoreMemoryCleanupRepository = serviceRepositoryFacade<
+  CoreMemoryCleanupStore,
+  (typeof CORE_MEMORY_CLEANUP_METHODS)[number]
+>("coreMemoryCleanup_", CORE_MEMORY_CLEANUP_METHODS);

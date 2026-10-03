@@ -158,6 +158,18 @@ describe("Playbook evidence capture", () => {
     expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
   });
 
+  it("recordUserCorrection invalidates the success in the ledger without writing a memory", async () => {
+    await success("task-1", "Reconcile invoices");
+    const memoriesBefore = (db.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number })
+      .n;
+    await PlaybookService.recordUserCorrection(WS, "task-1");
+    expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM memories").get()).toEqual({ n: memoriesBefore });
+    expect(
+      db.prepare("SELECT invalidation_reason AS r FROM playbook_success_evidence").get(),
+    ).toEqual({ r: "corrected_by_user" });
+  });
+
   it("a correction invalidates success even after a failed follow-up or an unwritten memory", async () => {
     await success("task-1", "Reconcile invoices");
     const fail = (message: string) =>

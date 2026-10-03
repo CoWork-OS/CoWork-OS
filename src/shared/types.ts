@@ -73,8 +73,6 @@ export interface MemoryFeaturesSettings {
   wakeUpLayersEnabled?: boolean;
   /** Track KG edge validity windows and time-aware historical recall. */
   temporalKnowledgeEnabled?: boolean;
-  /** Rebuild execution prompts from explicit prompt-stack layers. */
-  promptStackV2Enabled?: boolean;
   /** Serve memory via file-backed index/topic layers under `.cowork/memory/`. */
   layeredMemoryEnabled?: boolean;
   /** Persist append-only transcript spans and lightweight checkpoints. */
@@ -83,20 +81,12 @@ export interface MemoryFeaturesSettings {
   durableContextEnabled?: boolean;
   /** Rollout mode for durable context. */
   durableContextMode?: "off" | "experimental" | "on";
-  /** Fraction of model context that should trigger durable compaction. */
-  durableContextThreshold?: number;
-  /** Number of recent messages protected from durable compaction. */
-  durableContextFreshTailCount?: number;
   /** Token threshold above which large payloads should be stored by reference. */
   durableContextLargePayloadThreshold?: number;
-  /** Optional model override key for durable context summaries. */
-  durableContextSummaryModel?: string;
   /** Run background memory consolidation after meaningful task activity. */
   backgroundConsolidationEnabled?: boolean;
   /** Route execution turns through the extracted query orchestrator. */
   queryOrchestratorEnabled?: boolean;
-  /** Enable session lineage metadata and session forking flows. */
-  sessionLineageEnabled?: boolean;
   /** Keep a small curated hot-memory layer always available for prompt injection. */
   curatedMemoryEnabled?: boolean;
   /** Allow transcript/session recall as an explicit tool surface. */
@@ -5463,7 +5453,19 @@ export type CoreMemoryCandidateType =
   | "ignored_noise"
   | "invalidates_prior";
 
-export type CoreMemoryCandidateStatus = "proposed" | "accepted" | "rejected" | "merged";
+/**
+ * Candidate lifecycle. `applied` means the distiller wrote it to memory (exactly once);
+ * `skipped` means it could not be written (for example no workspace); `dismissed` means an
+ * unreviewed candidate expired.
+ */
+export type CoreMemoryCandidateStatus =
+  | "proposed"
+  | "accepted"
+  | "rejected"
+  | "merged"
+  | "applied"
+  | "skipped"
+  | "dismissed";
 
 export interface CoreTrace {
   id: string;
@@ -8343,7 +8345,6 @@ export interface EverydayRetentionSettings {
   receiptsDays: number;
   previewsDays: number;
   connectorCacheDays: number;
-  memoryCandidateDays: number;
   routineProvenanceDays: number;
 }
 
@@ -8631,7 +8632,6 @@ export const DEFAULT_EVERYDAY_AGENT_PROFILE: EverydayAgentProfile = {
     receiptsDays: 180,
     previewsDays: 30,
     connectorCacheDays: 30,
-    memoryCandidateDays: 90,
     routineProvenanceDays: 180,
   },
   browserProfilePolicy: {
@@ -9660,7 +9660,6 @@ export const IPC_CHANNELS = {
   MEMORY_GET_RECENT: "memory:getRecent",
   MEMORY_GET_STATS: "memory:getStats",
   MEMORY_CLEAR: "memory:clear",
-  MEMORY_EVENT: "memory:event",
   MEMORY_OBSERVATIONS_SEARCH: "memoryObservations:search",
   MEMORY_OBSERVATIONS_TIMELINE: "memoryObservations:timeline",
   MEMORY_OBSERVATIONS_DETAILS: "memoryObservations:details",

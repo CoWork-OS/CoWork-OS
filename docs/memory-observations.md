@@ -56,19 +56,16 @@ This separation keeps observation metadata descriptive and keeps memory curation
 `MemoryService.capture(...)` still creates the base archive row. When structured observations are
 enabled, it also asks `MemoryObservationService` to create metadata for the new memory.
 
-The runtime is intentionally selective. It should capture high-signal observations such as:
+Automatic capture from task events is salience-gated (`src/electron/memory/memory-capture-salience.ts`). The daemon archives only:
 
-- completed task outcomes
-- durable decisions
-- errors and verification failures
-- file create/modify evidence
-- tool failures that affected the task
-- accepted insights and curated promotions
-- Chronicle-promoted context
-- playbook outcomes
-- explicit `memory_save` calls
+- completed task outcomes (task title, request excerpt and result summary)
+- user feedback and decisions
+- tool errors, failed steps, task errors and verification failures (compact)
+- user corrections, captured once where they are detected
 
-It should not capture every tool call or every transient model thought.
+Other writers add accepted insights and curated promotions, Chronicle-derived context (always private), Playbook outcomes and explicit `memory_save` calls.
+
+Raw telemetry is not archived: tool calls and results, step progress, plan JSON, assistant and user messages, file create/modify events and passed verifications stay in the task timeline. Events from memory-recall tools (for example `search_memories`, `memory_search_index`, `search_quotes`, `supermemory_search`, `kg_search`) are never archived, so recalled memories are not re-captured. Secrets are redacted before storage.
 
 Dreaming does not change capture rules. It reviews already-captured observations and transcript
 evidence after the fact, then proposes maintenance when evidence suggests that memory is missing,
@@ -86,14 +83,17 @@ Observation privacy states are:
 - `normal`: searchable and recallable under normal memory rules.
 - `private`: local-only and excluded from external mirroring.
 - `redacted`: content was replaced and the row is excluded from prompt recall.
-- `suppressed`: hidden from prompt recall and default Memory Inspector search results.
+- `suppressed`: hidden from prompt recall, agent recall tools and default Memory Inspector search results.
 
 Prompt recall checks both old prompt-recall ignore markers and observation privacy state. That means
 suppressed and redacted observations are excluded from both search-based recall and recent-memory
-prompt recall.
+prompt recall, and agent read paths (`search_memories`, `memory_search_index`, `memory_timeline`,
+`memory_details`) filter them as well. Private rows are never injected into prompts. A model-supplied
+privacy filter cannot widen this, and Rebuild never loosens an existing privacy state.
 
 Supermemory mirroring remains additive and opt-in. Private, redacted, and suppressed local entries
-must not be mirrored. The normal no-prompt runtime commits eligible mirror attempts immediately
+are not mirrored. Mirrored copies have no stored remote id, so later suppression, redaction or deletion
+does not reach Supermemory. The normal no-prompt runtime commits eligible mirror attempts immediately
 after the same privacy and sensitive-payload checks. A controlled run can opt into the review queue
 with `COWORK_MEMORY_WRITE_APPROVAL_MODE=external_only` or `background_only`; sensitive
 external-memory payloads are blocked before they can be stored in that queue.
@@ -172,11 +172,14 @@ It supports:
 
 Delete from the inspector is a soft-delete operation. It marks the observation `suppressed`, keeps a
 minimal local metadata record, marks the underlying memory private, and excludes it from default
-search and prompt recall. It does not directly delete another workspace's memory row.
+search, prompt recall and agent recall tools. It does not directly delete another workspace's memory
+row. Hard deletion happens through task delete and **Clear All Memories** (see
+[Workspace Memory Flow](workspace-memory-flow.md#deleting-memory)) and through archive retention,
+which honours the workspace's `retention_days`.
 
 Dreaming candidates should eventually appear beside these inspector workflows rather than bypassing
-them. Accepting a Dreaming candidate should call the same owning memory service that a manual
-inspector action would use.
+them. There is no candidate review UI yet. When one exists, accepting a Dreaming candidate should call
+the same owning memory service that a manual inspector action would use.
 
 ## IPC And Security Boundary
 

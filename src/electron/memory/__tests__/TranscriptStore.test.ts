@@ -2,8 +2,9 @@ import { createRequire } from "module";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TranscriptStore } from "../TranscriptStore";
+import { setCheckpointSigningKeyForTests } from "../checkpoint-signing";
 import {
   killCheckpointWriterMidFilesystemWrite,
   runCheckpointWriter,
@@ -50,7 +51,22 @@ function checkpointLockRoot(): string {
   return root;
 }
 
+const TEST_SIGNING_KEY = "transcript-store-test-signing-key";
+const originalSigningKeyEnv = process.env.COWORK_TEST_CHECKPOINT_SIGNING_KEY;
+
+beforeEach(() => {
+  // Child-process writers read the shared key from the environment.
+  process.env.COWORK_TEST_CHECKPOINT_SIGNING_KEY = TEST_SIGNING_KEY;
+  setCheckpointSigningKeyForTests(TEST_SIGNING_KEY);
+});
+
 afterEach(async () => {
+  setCheckpointSigningKeyForTests(null);
+  if (originalSigningKeyEnv === undefined) {
+    delete process.env.COWORK_TEST_CHECKPOINT_SIGNING_KEY;
+  } else {
+    process.env.COWORK_TEST_CHECKPOINT_SIGNING_KEY = originalSigningKeyEnv;
+  }
   TranscriptStore.setDatabaseForTests(null);
   if (originalCheckpointLockRoot === undefined) {
     delete process.env.COWORK_CHECKPOINT_LOCK_ROOT;
@@ -129,7 +145,7 @@ describe("TranscriptStore", () => {
       await fs.readFile(path.join(checkpointDir, "task-generations.previous.json"), "utf8"),
     );
 
-    expect(current.checkpointIntegrity.algorithm).toBe("sha256");
+    expect(current.checkpointIntegrity.algorithm).toBe("hmac-sha256");
     expect(current.checkpointIntegrity.generation).toBe(2);
     expect(previous.conversationHistory).toEqual([{ role: "user", content: "first" }]);
     expect(previous.checkpointIntegrity.generation).toBe(1);

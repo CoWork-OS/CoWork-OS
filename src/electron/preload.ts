@@ -4203,11 +4203,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getMemoryStats: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_STATS, workspaceId),
   clearMemory: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_CLEAR, workspaceId),
-  onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => {
-    const subscription = (_: Electron.IpcRendererEvent, data: Any) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.MEMORY_EVENT, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_EVENT, subscription);
-  },
 
   // Imported Memory APIs
   getImportedMemoryStats: (workspaceId: string) =>
@@ -7804,8 +7799,13 @@ export interface ElectronAPI {
   getMemoryObservationBackfillStatus: () => Promise<MemoryObservationBackfillStatus>;
   getRecentMemories: (data: { workspaceId: string; limit?: number }) => Promise<Memory[]>;
   getMemoryStats: (workspaceId: string) => Promise<MemoryStats>;
-  clearMemory: (workspaceId: string) => Promise<{ success: boolean }>;
-  onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => () => void;
+  clearMemory: (workspaceId: string) => Promise<{
+    success: boolean;
+    /** Rows/files removed per memory store (see MemoryWorkspacePurgeService). */
+    counts?: Record<string, number>;
+    errors?: Record<string, string>;
+    notes?: string[];
+  }>;
 
   // Imported Memories
   getImportedMemoryStats: (workspaceId: string) => Promise<{ count: number; totalTokens: number }>;

@@ -109,18 +109,20 @@ describe("memory domain on the host and in the database worker", () => {
 
     const start = Date.now();
     const workspaceDir = path.join(dir, "workspace");
-    fs.mkdirSync(path.join(workspaceDir, "notes"), { recursive: true });
+    // The markdown memory index always covers `<workspace>/.cowork`.
+    const notesDir = path.join(workspaceDir, ".cowork", "notes");
+    fs.mkdirSync(notesDir, { recursive: true });
     fs.writeFileSync(
-      path.join(workspaceDir, "notes", "release.md"),
+      path.join(notesDir, "release.md"),
       "# Release plan\n\nShip the database worker after the parity suite passes.\n",
     );
     fs.writeFileSync(
-      path.join(workspaceDir, "notes", "budget.md"),
+      path.join(notesDir, "budget.md"),
       "# Budget\n\nQuarterly invoices are reconciled every Friday.\n",
     );
     // Distinct modification times, so "most recent" is the same on both runs.
-    fs.utimesSync(path.join(workspaceDir, "notes", "budget.md"), 1_700_000_000, 1_700_000_000);
-    fs.utimesSync(path.join(workspaceDir, "notes", "release.md"), 1_700_000_060, 1_700_000_060);
+    fs.utimesSync(path.join(notesDir, "budget.md"), 1_700_000_000, 1_700_000_000);
+    fs.utimesSync(path.join(notesDir, "release.md"), 1_700_000_060, 1_700_000_060);
     db.prepare(
       `INSERT INTO workspaces (id, name, path, created_at, permissions) VALUES ('ws', 'Parity', ?, ?, '{}')`,
     ).run(workspaceDir, start);
@@ -329,7 +331,8 @@ describe("memory domain on the host and in the database worker", () => {
     expect(worker.result).toEqual(host.result);
 
     const result = host.result as Record<string, Record<string, unknown>>;
-    expect(result.tiers).toEqual({ promoted: 1, evicted: 1 });
+    // Tiers never delete rows: retention_days governs removal (DATA-1).
+    expect(result.tiers).toEqual({ promoted: 1, evicted: 0 });
     expect(result.kg.sameEdge).toBe(true);
     expect(result.kg.selfLoop).toBe("Cannot create an edge from an entity to itself");
     expect(result.playbook).toEqual({

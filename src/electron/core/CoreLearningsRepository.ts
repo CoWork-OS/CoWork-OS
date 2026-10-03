@@ -32,6 +32,41 @@ export class CoreLearningsStore {
     return entry;
   }
 
+  /**
+   * Appends an entry unless an identical one (same profile, workspace, kind, summary and
+   * related cluster/experiment) was logged within `windowMs`; then the existing entry is
+   * returned and nothing is written.
+   */
+  appendIfNovel(
+    input: Omit<CoreLearningsEntry, "id"> & { id?: string },
+    windowMs: number,
+  ): CoreLearningsEntry {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM core_learnings_log
+         WHERE profile_id = ?
+           AND COALESCE(workspace_id, '') = ?
+           AND kind = ?
+           AND summary = ?
+           AND COALESCE(related_cluster_id, '') = ?
+           AND COALESCE(related_experiment_id, '') = ?
+           AND created_at >= ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+      )
+      .get(
+        input.profileId,
+        input.workspaceId || "",
+        input.kind,
+        input.summary,
+        input.relatedClusterId || "",
+        input.relatedExperimentId || "",
+        input.createdAt - Math.max(0, windowMs),
+      ) as Any;
+    if (row) return this.mapRow(row);
+    return this.append(input);
+  }
+
   list(request: ListCoreLearningsRequest = {}): CoreLearningsEntry[] {
     const conditions: string[] = [];
     const values: unknown[] = [];
@@ -56,7 +91,11 @@ export class CoreLearningsStore {
     const rows = this.db
       .prepare(`SELECT * FROM core_learnings_log ${where} ORDER BY created_at DESC LIMIT ?`)
       .all(...values, limit) as Any[];
-    return rows.map((row) => ({
+    return rows.map((row) => this.mapRow(row));
+  }
+
+  private mapRow(row: Any): CoreLearningsEntry {
+    return {
       id: String(row.id),
       profileId: String(row.profile_id),
       workspaceId: row.workspace_id || undefined,
@@ -66,6 +105,6 @@ export class CoreLearningsStore {
       relatedClusterId: row.related_cluster_id || undefined,
       relatedExperimentId: row.related_experiment_id || undefined,
       createdAt: Number(row.created_at),
-    }));
+    };
   }
 }

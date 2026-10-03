@@ -67,6 +67,10 @@ function createMailboxTriggerEvent(event: MailboxEvent): TriggerEvent {
   };
 }
 
+/**
+ * Fingerprints identify the thread (or account) and kind of change, never the event time, so
+ * repeated events about the same thread merge into one Heartbeat signal.
+ */
 function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
   const subject = event.subject || "";
   const summary = event.summary || "";
@@ -84,7 +88,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: "medium",
         confidence: 0.62,
         reason: `Mailbox sync completed (${Number(payload.threadCount || 0)} threads)`,
-        fingerprint: `mailbox:sync:${event.workspaceId}:${event.accountId || "all"}:${event.timestamp}`,
+        fingerprint: `mailbox:sync:${event.workspaceId}:${event.accountId || "all"}`,
       };
     case "thread_classified":
       return {
@@ -97,7 +101,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: staleFollowup || needsReply ? "high" : cleanupCandidate ? "medium" : "low",
         confidence: Number(payload.confidence || 0.66),
         reason: subject || summary || "Thread classified",
-        fingerprint: `mailbox:classified:${event.threadId}:${payload.classificationFingerprint || event.timestamp}`,
+        fingerprint: `mailbox:classified:${event.threadId}:${payload.classificationFingerprint || "latest"}`,
       };
     case "thread_summarized":
       return {
@@ -105,7 +109,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: "low",
         confidence: 0.55,
         reason: summary || subject || "Thread summarized",
-        fingerprint: `mailbox:summary:${event.threadId}:${event.timestamp}`,
+        fingerprint: `mailbox:summary:${event.threadId}`,
       };
     case "draft_created":
       return {
@@ -113,7 +117,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: "low",
         confidence: 0.58,
         reason: subject || "Draft created",
-        fingerprint: `mailbox:draft:${event.threadId}:${payload.draftId || event.timestamp}`,
+        fingerprint: `mailbox:draft:${event.threadId}`,
       };
     case "commitments_extracted":
       return {
@@ -121,7 +125,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: commitmentCount > 1 ? "high" : "medium",
         confidence: 0.72,
         reason: `${commitmentCount} commitment(s) extracted`,
-        fingerprint: `mailbox:commitments:${event.threadId}:${payload.commitmentFingerprint || event.timestamp}`,
+        fingerprint: `mailbox:commitments:${event.threadId}:${payload.commitmentFingerprint || "latest"}`,
       };
     case "commitment_updated":
       return {
@@ -132,7 +136,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: actionType === "done" || actionType === "dismissed" ? "low" : "medium",
         confidence: 0.7,
         reason: `Commitment ${actionType || "updated"}`,
-        fingerprint: `mailbox:commitment-update:${payload.commitmentId || event.threadId}:${event.timestamp}`,
+        fingerprint: `mailbox:commitment-update:${payload.commitmentId || event.threadId}:${actionType || "updated"}`,
       };
     case "action_applied":
       return {
@@ -140,7 +144,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: "low",
         confidence: 0.64,
         reason: actionType ? `Action applied: ${actionType}` : "Mailbox action applied",
-        fingerprint: `mailbox:action:${event.threadId}:${actionType || event.timestamp}`,
+        fingerprint: `mailbox:action:${event.threadId}:${actionType || "applied"}`,
       };
     case "contact_researched":
       return {
@@ -148,7 +152,7 @@ function buildSignalPlan(event: MailboxEvent): MailboxSignalPlan | null {
         urgency: "low",
         confidence: 0.52,
         reason: subject || "Contact researched",
-        fingerprint: `mailbox:research:${event.threadId}:${event.timestamp}`,
+        fingerprint: `mailbox:research:${event.threadId}`,
       };
     default:
       return null;

@@ -388,10 +388,8 @@ export class DatabaseManager {
 
   private repairLegacyHeartbeatRunReferences(): void {
     try {
-      const issuesSchema = this.db
-        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'issues'")
-        .get() as { sql?: string } | undefined;
-      if (!issuesSchema?.sql?.includes("heartbeat_runs_legacy")) return;
+      const issuesSql = this.schemaObjectSql("table", "issues");
+      if (!issuesSql?.includes("heartbeat_runs_legacy")) return;
 
       schemaLogger.info(
         "Fixing broken issues FK reference (heartbeat_runs_legacy -> active_run_id metadata)...",
@@ -399,7 +397,7 @@ export class DatabaseManager {
       const foreignKeysEnabled = this.db.pragma("foreign_keys", { simple: true }) as number;
       this.db.pragma("foreign_keys = OFF");
       try {
-        const fixedSql = issuesSchema.sql
+        const fixedSql = issuesSql
           .replace(
             /active_run_id\s+TEXT\s+REFERENCES\s+["'`]?heartbeat_runs_legacy["'`]?\(id\)\s+ON\s+DELETE\s+SET\s+NULL/i,
             "active_run_id TEXT",
@@ -1882,7 +1880,7 @@ export class DatabaseManager {
         completed_at INTEGER,
         created_at INTEGER NOT NULL,
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-        FOREIGN KEY (source_task_id) REFERENCES tasks(id)
+        FOREIGN KEY (source_task_id) REFERENCES tasks(id) ON DELETE SET NULL
       );
 
       CREATE TABLE IF NOT EXISTS dreaming_candidates (
@@ -1924,7 +1922,7 @@ export class DatabaseManager {
         reviewed_by TEXT,
         resolution TEXT,
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-        FOREIGN KEY (task_id) REFERENCES tasks(id)
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
       );
 
       -- Per-workspace memory settings
@@ -2724,6 +2722,7 @@ export class DatabaseManager {
     this.initializeMailboxSearchFTS();
     // Run migrations for task-retry tracking columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
+    this.upgradeTaskReferenceForeignKeysToSetNull();
     this.initializeKnowledgeGraphFTS();
     ensureEverydayAgentSchema(this.db);
 
@@ -2755,14 +2754,16 @@ export class DatabaseManager {
           VALUES('delete', OLD.rowid, OLD.content, OLD.summary);
         END;
 
-        -- Trigger to keep FTS in sync on UPDATE
-        CREATE TRIGGER IF NOT EXISTS memories_fts_update AFTER UPDATE ON memories BEGIN
+        -- Trigger to keep FTS in sync on UPDATE (indexed columns only, DATA-8)
+        CREATE TRIGGER IF NOT EXISTS memories_fts_update
+        AFTER UPDATE OF content, summary ON memories BEGIN
           INSERT INTO memories_fts(memories_fts, rowid, content, summary)
           VALUES('delete', OLD.rowid, OLD.content, OLD.summary);
           INSERT INTO memories_fts(rowid, content, summary)
           VALUES (NEW.rowid, NEW.content, NEW.summary);
         END;
       `);
+      this.upgradeMemoriesFtsUpdateTrigger();
     } catch (error) {
       // FTS5 might not be available in all SQLite builds
       schemaLogger.warn(
@@ -2770,6 +2771,7 @@ export class DatabaseManager {
         error,
       );
     }
+    this.ensureMemoryChildCleanupTrigger();
 
     try {
       this.db.exec(`
@@ -4653,11 +4655,8 @@ export class DatabaseManager {
     // PRAGMA legacy_alter_table = ON, the tasks table now has a broken FK to heartbeat_runs_legacy
     // (which was subsequently dropped), causing every INSERT INTO tasks to fail.
     try {
-      const tasksSchema = this.db
-        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'")
-        .get() as { sql?: string } | undefined;
-
-      if (tasksSchema?.sql?.includes("heartbeat_runs_legacy")) {
+      const tasksSql = this.schemaObjectSql("table", "tasks");
+      if (tasksSql?.includes("heartbeat_runs_legacy")) {
         schemaLogger.info(
           "Fixing broken tasks FK reference (heartbeat_runs_legacy -> heartbeat_runs)...",
         );
@@ -4665,7 +4664,7 @@ export class DatabaseManager {
         this.db.exec("PRAGMA foreign_keys = OFF");
         try {
           // writable_schema is blocked in this SQLite build — use standard table reconstruction instead.
-          const fixedSql = tasksSchema.sql
+          const fixedSql = tasksSql
             .replace(/heartbeat_runs_legacy/g, "heartbeat_runs")
             .replace(
               /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?tasks["'`]?/i,
@@ -6538,7 +6537,7 @@ export class DatabaseManager {
           reviewed_by TEXT,
           resolution TEXT,
           FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-          FOREIGN KEY (task_id) REFERENCES tasks(id)
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
         );
         CREATE INDEX IF NOT EXISTS idx_pending_memory_writes_workspace_status
           ON pending_memory_writes(workspace_id, status, created_at DESC);
@@ -8285,6 +8284,199 @@ export class DatabaseManager {
     this.db.close();
   }
 
+  /**
+   * LIFE-4: `dreaming_runs.source_task_id` and `pending_memory_writes.task_id` referenced
+   * tasks(id) without an ON DELETE action, so deleting a task failed the foreign key check
+   * whenever either row existed. Rebuild both tables with ON DELETE SET NULL (the SQLite
+   * table-rebuild procedure: copy, drop, rename) when an older definition is found.
+   */
+  private upgradeTaskReferenceForeignKeysToSetNull(): void {
+    const definitions: Array<{
+      table: string;
+      column: string;
+      createSql: (name: string) => string;
+      indexSql: string;
+    }> = [
+      {
+        table: "dreaming_runs",
+        column: "source_task_id",
+        createSql: (name) => `
+          CREATE TABLE ${name} (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            scope_kind TEXT NOT NULL,
+            scope_ref TEXT NOT NULL,
+            status TEXT NOT NULL,
+            trigger_source TEXT NOT NULL,
+            trigger_heartbeat_run_id TEXT,
+            source_task_id TEXT,
+            instructions TEXT,
+            summary TEXT,
+            evidence_count INTEGER NOT NULL DEFAULT 0,
+            candidate_count INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            started_at INTEGER NOT NULL,
+            completed_at INTEGER,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+            FOREIGN KEY (source_task_id) REFERENCES tasks(id) ON DELETE SET NULL
+          );`,
+        indexSql: `
+          CREATE INDEX IF NOT EXISTS idx_dreaming_runs_workspace
+            ON dreaming_runs(workspace_id, created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_dreaming_runs_scope
+            ON dreaming_runs(scope_kind, scope_ref, created_at DESC);`,
+      },
+      {
+        table: "pending_memory_writes",
+        column: "task_id",
+        createSql: (name) => `
+          CREATE TABLE ${name} (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            task_id TEXT,
+            target TEXT NOT NULL,
+            action TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            old_value TEXT,
+            proposed_value TEXT,
+            reason TEXT,
+            evidence_json TEXT NOT NULL DEFAULT '[]',
+            risk_score REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            reviewed_at INTEGER,
+            reviewed_by TEXT,
+            resolution TEXT,
+            FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+          );`,
+        indexSql: `
+          CREATE INDEX IF NOT EXISTS idx_pending_memory_writes_workspace_status
+            ON pending_memory_writes(workspace_id, status, created_at DESC);`,
+      },
+    ];
+
+    for (const definition of definitions) {
+      const rebuildName = `${definition.table}_fk_rebuild`;
+      try {
+        const foreignKeys = this.db.pragma(`foreign_key_list(${definition.table})`) as Array<{
+          table?: string;
+          from?: string;
+          on_delete?: string;
+        }>;
+        const taskForeignKey = foreignKeys.find(
+          (foreignKey) => foreignKey.table === "tasks" && foreignKey.from === definition.column,
+        );
+        if (
+          !taskForeignKey ||
+          String(taskForeignKey.on_delete || "").toUpperCase() === "SET NULL"
+        ) {
+          continue;
+        }
+        const existingColumns = new Set(
+          (this.db.pragma(`table_info(${definition.table})`) as Array<{ name: string }>).map(
+            (column) => column.name,
+          ),
+        );
+
+        const foreignKeysEnabled = this.db.pragma("foreign_keys", { simple: true }) as number;
+        try {
+          this.db.pragma("foreign_keys = OFF");
+          this.db.transaction(() => {
+            this.db.exec(`DROP TABLE IF EXISTS ${rebuildName}`);
+            this.db.exec(definition.createSql(rebuildName));
+            const rebuildColumns = (
+              this.db.pragma(`table_info(${rebuildName})`) as Array<{ name: string }>
+            )
+              .map((column) => column.name)
+              .filter((name) => existingColumns.has(name))
+              .map((name) => `"${name}"`)
+              .join(", ");
+            this.db.exec(
+              `INSERT INTO ${rebuildName} (${rebuildColumns}) SELECT ${rebuildColumns} FROM ${definition.table}`,
+            );
+            // Rows that already point at a deleted task would fail the next FK check.
+            this.db.exec(
+              `UPDATE ${rebuildName} SET ${definition.column} = NULL
+               WHERE ${definition.column} IS NOT NULL
+                 AND ${definition.column} NOT IN (SELECT id FROM tasks)`,
+            );
+            this.db.exec(`DROP TABLE ${definition.table}`);
+            this.db.exec(`ALTER TABLE ${rebuildName} RENAME TO ${definition.table}`);
+            this.db.exec(definition.indexSql);
+          })();
+          schemaLogger.info(
+            `[DatabaseManager] Upgraded ${definition.table}.${definition.column} to ON DELETE SET NULL`,
+          );
+        } finally {
+          this.db.pragma(`foreign_keys = ${foreignKeysEnabled ? "ON" : "OFF"}`);
+        }
+      } catch (error) {
+        try {
+          this.db.exec(`DROP TABLE IF EXISTS ${rebuildName}`);
+        } catch {
+          // Preserve the original table when cleanup fails.
+        }
+        schemaLogger.error(
+          `[DatabaseManager] Failed ${definition.table} task foreign key migration:`,
+          error,
+        );
+      }
+    }
+  }
+
+  /** The stored `CREATE` statement of a schema object, if it exists. */
+  private schemaObjectSql(type: "table" | "trigger", name: string): string | undefined {
+    const row = this.db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?")
+      .get(type, name) as { sql?: string | null } | undefined;
+    return row?.sql ?? undefined;
+  }
+
+  /**
+   * Older databases have `memories_fts_update` firing on any column change, so every
+   * reference-count bump rewrote the row's FTS entry (audit DATA-8). Recreate it to fire
+   * only when an indexed column (content, summary) changes. Idempotent.
+   */
+  private upgradeMemoriesFtsUpdateTrigger(): void {
+    const sql = this.schemaObjectSql("trigger", "memories_fts_update");
+    if (!sql || /AFTER\s+UPDATE\s+OF\s+content\s*,\s*summary\s+ON/i.test(sql)) return;
+    this.db.transaction(() => {
+      this.db.exec(`
+        DROP TRIGGER IF EXISTS memories_fts_update;
+        CREATE TRIGGER memories_fts_update
+        AFTER UPDATE OF content, summary ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content, summary)
+          VALUES('delete', OLD.rowid, OLD.content, OLD.summary);
+          INSERT INTO memories_fts(rowid, content, summary)
+          VALUES (NEW.rowid, NEW.content, NEW.summary);
+        END;
+      `);
+    })();
+    schemaLogger.info("[DatabaseManager] Narrowed memories_fts_update to content/summary changes");
+  }
+
+  /**
+   * Deleting a memory removes its embedding and observation on every delete path, also
+   * on connections where foreign keys (and so ON DELETE CASCADE) are off; orphaned
+   * embeddings used to accumulate that way.
+   */
+  private ensureMemoryChildCleanupTrigger(): void {
+    try {
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS memories_delete_children AFTER DELETE ON memories BEGIN
+          DELETE FROM memory_embeddings WHERE memory_id = OLD.id;
+          DELETE FROM memory_observation_metadata WHERE memory_id = OLD.id;
+        END;
+      `);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] Memory child cleanup trigger creation failed:", error);
+    }
+  }
+
   private upgradeMemoryEmbeddingsCascade(): void {
     try {
       const foreignKeys = this.db
@@ -8354,10 +8546,7 @@ export class DatabaseManager {
         name?: string;
       }>;
       const columns = new Set(tableInfo.map((column) => String(column.name || "")));
-      const tableSqlRow = this.db
-        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'kg_edges'")
-        .get() as { sql?: string } | undefined;
-      const tableSql = String(tableSqlRow?.sql || "");
+      const tableSql = String(this.schemaObjectSql("table", "kg_edges") || "");
       const hasLegacyUniqueConstraint =
         /UNIQUE\s*\(\s*workspace_id\s*,\s*source_entity_id\s*,\s*target_entity_id\s*,\s*edge_type\s*\)/i.test(
           tableSql,

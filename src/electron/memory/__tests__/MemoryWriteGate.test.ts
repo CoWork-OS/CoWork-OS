@@ -479,3 +479,22 @@ describe("MemoryWriteGate", () => {
     );
   });
 });
+
+describe("MemoryWriteGate.initialize", () => {
+  it("is idempotent for the same database and re-initializes for another", () => {
+    const state = MemoryWriteGate as unknown as { pendingRepo: unknown };
+    const dbA = {};
+    const dbB = {};
+    const managerFor = (db: object) =>
+      ({ getDatabase: () => db }) as unknown as Parameters<typeof MemoryWriteGate.initialize>[0];
+
+    MemoryWriteGate.initialize(managerFor(dbA));
+    const firstRepo = state.pendingRepo;
+    MemoryWriteGate.initialize(managerFor(dbA));
+    MemoryWriteGate.initialize(managerFor(dbA));
+    expect(state.pendingRepo).toBe(firstRepo);
+
+    MemoryWriteGate.initialize(managerFor(dbB));
+    expect(state.pendingRepo).not.toBe(firstRepo);
+  });
+});

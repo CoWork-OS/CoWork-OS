@@ -128,7 +128,7 @@ KNOWLEDGE GRAPH (known entities and relationships):
 - [service] auth-service: Authentication microservice (->connects_to PostgreSQL)
 ```
 
-This context is available for injection into the agent's system prompt alongside playbook and memory context. When temporal knowledge is enabled, task-context injection uses only currently valid edges by default.
+This context is capped at 5 entities and 1,500 characters. It is **not** injected into the default prompt: with wake-up layers on (the default, `wakeUpLayersEnabled`), memory synthesis excludes the knowledge graph. It is only used by the legacy synthesis path when wake-up layers are turned off. Agents reach the graph through the `kg_*` tools instead. When temporal knowledge is enabled, task-context building uses only currently valid edges by default.
 
 ## Agent Tools (10)
 
@@ -147,7 +147,7 @@ This context is available for injection into the agent's system prompt alongside
 
 ## Usage & Testing
 
-You can interact with the knowledge graph by giving the agent natural-language prompts. The agent has access to all 10 `kg_*` tools and will use them based on your request.
+You can interact with the knowledge graph by giving the agent natural-language prompts. The 10 `kg_*` tools are registered when the knowledge graph service is initialized. The read tools (`kg_search`, `kg_get_neighbors`, `kg_get_subgraph`) are in the memory lane and load on demand through tool search; the write tools are exposed conditionally. All `kg_*` tools are blocked in group and public channel contexts, and the write tools count as writes in plan, analyze and verifier modes.
 
 ### Creating Entities and Relationships
 
@@ -187,10 +187,10 @@ These auto-extracted entities appear with `confidence=0.85` and decay over time 
 
 ## Privacy & Isolation
 
-- All entities and relationships are workspace-scoped
+- All entities and relationships are workspace-scoped, and every tool operation (get, update, delete, edges, observations, search, neighbors, subgraph) is filtered by the active workspace; IDs from another workspace are not found
 - Entity types are per-workspace (built-in types are seeded per workspace)
-- Inherits workspace-level privacy and security settings
-- No cross-workspace data leakage
+- Result sizes are capped: `kg_search` returns at most 50 results, neighbor traversal at most 3 hops and 200 results, subgraphs at most 100 entities and 1,000 edges, observations at most 100
+- Deleting a task removes KG observations and edges it created (and entities left orphaned); **Clear All Memories** removes the workspace's graph
 
 ## Comparison with ClawHub Ontology
 
@@ -205,7 +205,7 @@ These auto-extracted entities appear with `confidence=0.85` and decay over time 
 | **Auto-extraction**    | None                | Regex-based extraction from task results    |
 | **Confidence scoring** | None                | 0-1 confidence with time-based decay        |
 | **Deduplication**      | None                | Upsert on (workspace, type, name)           |
-| **Context injection**  | Manual tool use     | Auto-injected into task system prompts      |
+| **Context injection**  | Manual tool use     | Tool-driven (`kg_*`); not in the default prompt |
 | **Multi-workspace**    | Single file         | Per-workspace isolation                     |
 | **Privacy**            | None                | Inherits workspace memory privacy settings  |
 | **Agent tools**        | ~3 basic            | 10 comprehensive tools                      |

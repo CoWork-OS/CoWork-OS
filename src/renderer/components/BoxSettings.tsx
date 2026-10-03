@@ -426,8 +426,8 @@ export function BoxSettings() {
             <h3>Box Brain</h3>
             <p className="settings-description">
               Keep a bounded, local company index from one Box folder. Changed files are synced
-              incrementally, cited with their Box URLs, and reviewed by the existing improvement
-              loop before anything becomes durable curated memory.
+              incrementally and cited with their Box URLs. Nothing is promoted to curated memory
+              automatically.
             </p>
           </div>
           <span className={`box-status-badge ${brainStatus?.enabled ? "connected" : "configured"}`}>
@@ -566,7 +566,7 @@ export function BoxSettings() {
         </div>
 
         <div className="settings-field">
-          <label>Run reviewable improvement pass</label>
+          <label>Run Dreaming review pass</label>
           <label className="settings-toggle">
             <input
               type="checkbox"
@@ -576,8 +576,9 @@ export function BoxSettings() {
             <span className="toggle-slider" />
           </label>
           <p className="settings-hint">
-            New or changed files can produce reviewable Dreaming candidates for facts, conflicts,
-            stale policies, workflows, and open loops. Candidates are not silently promoted.
+            After a sync, new or changed files can trigger a Dreaming run that records candidate
+            notes (conflicts, stale policies, workflows, open loops). There is no review screen for
+            these candidates yet, and they are never promoted to memory automatically.
           </p>
         </div>
 

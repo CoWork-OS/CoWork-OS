@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import {
   TranscriptStore,
+  type TranscriptCheckpointPayload,
   type TranscriptReadGuard,
   type TranscriptSearchResult,
 } from "./TranscriptStore";
@@ -26,6 +27,47 @@ function compareRecallResults(a: SessionRecallResult, b: SessionRecallResult): n
 
 function checkpointsDir(workspacePath: string): string {
   return path.join(workspacePath, ".cowork", "memory", "transcripts", "checkpoints");
+}
+
+const SAFE_TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+
+/** Checkpoints read per workspace-wide query, newest first. */
+export const MAX_CHECKPOINTS_PER_QUERY = 50;
+
+/**
+ * Task ids of the most recently written checkpoints. `.previous.json` generations
+ * and temp files are not separate tasks; `loadCheckpoint` considers the previous
+ * generation itself.
+ */
+async function listRecentCheckpointTaskIds(dir: string, cap: number): Promise<string[]> {
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  const entries: Array<{ taskId: string; mtimeMs: number }> = [];
+  for (const name of names) {
+    if (!name.endsWith(".json") || name.endsWith(".previous.json")) continue;
+    const taskId = name.slice(0, -".json".length);
+    if (!SAFE_TASK_ID.test(taskId)) continue;
+    const stat = await fs.lstat(path.join(dir, name)).catch(() => null);
+    if (!stat?.isFile()) continue;
+    entries.push({ taskId, mtimeMs: stat.mtimeMs });
+  }
+  return entries
+    .sort((a, b) => b.mtimeMs - a.mtimeMs || a.taskId.localeCompare(b.taskId))
+    .slice(0, cap)
+    .map((entry) => entry.taskId);
+}
+
+function checkpointSearchText(checkpoint: TranscriptCheckpointPayload): string {
+  try {
+    return JSON.stringify([
+      checkpoint.explicitChatSummaryBlock,
+      checkpoint.planSummary,
+      checkpoint.trackerState,
+      checkpoint.structuredSummary,
+      checkpoint.conversationHistory,
+    ]);
+  } catch {
+    return "";
+  }
 }
 
 function summarizePayload(payload: unknown): string {
@@ -102,42 +144,37 @@ export class SessionRecallService {
         return [];
       }
     }
-    if (params.taskId && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(params.taskId)) {
+    if (params.taskId && !SAFE_TASK_ID.test(params.taskId)) {
       return [];
     }
     const taskIds = params.taskId
-      ? [`${params.taskId}.json`]
-      : (await fs.readdir(dir).catch(() => [])).filter((name) => name.endsWith(".json"));
+      ? [params.taskId]
+      : await listRecentCheckpointTaskIds(dir, MAX_CHECKPOINTS_PER_QUERY);
 
     const results: SessionRecallResult[] = [];
-    for (const fileName of taskIds) {
-      const filePath = path.join(dir, fileName);
-      if (params.readGuard) {
-        try {
-          if (!params.readGuard(filePath)) continue;
-        } catch {
-          continue;
-        }
-      }
-      const raw = await fs.readFile(filePath, "utf8").catch(() => "");
-      if (!raw || !raw.toLowerCase().includes(query)) continue;
-      try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const snippet = summarizePayload(
-          parsed.explicitChatSummaryBlock ||
-            parsed.planSummary ||
-            parsed.trackerState ||
-            parsed.conversationHistory,
-        );
-        results.push({
-          taskId: fileName.replace(/\.json$/, ""),
-          timestamp: Number(parsed.timestamp || Date.now()),
-          type: "checkpoint",
-          snippet: snippet || raw.slice(0, 280),
-        });
-      } catch {
-        continue;
-      }
+    for (const taskId of taskIds) {
+      // loadCheckpoint applies the read guard to each generation, verifies the
+      // signature and picks the freshest valid one; unsigned files are ignored.
+      const checkpoint = await TranscriptStore.loadCheckpoint(
+        params.workspacePath,
+        taskId,
+        params.readGuard,
+      );
+      if (!checkpoint) continue;
+      const searchable = checkpointSearchText(checkpoint);
+      if (!searchable.toLowerCase().includes(query)) continue;
+      const snippet = summarizePayload(
+        checkpoint.explicitChatSummaryBlock ||
+          checkpoint.planSummary ||
+          checkpoint.trackerState ||
+          checkpoint.conversationHistory,
+      );
+      results.push({
+        taskId,
+        timestamp: Number(checkpoint.timestamp || 0),
+        type: "checkpoint",
+        snippet: snippet || searchable.slice(0, 280),
+      });
     }
     return results.sort(compareRecallResults).slice(0, params.limit);
   }

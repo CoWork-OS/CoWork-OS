@@ -7,7 +7,7 @@ It is part of Workflow Intelligence, but it has a narrower job than Reflection:
 - Reflection decides what recommendation or next action may be useful.
 - Dreaming reviews recent work and memory evidence to propose memory maintenance.
 
-Dreaming does not silently rewrite memory. It produces reviewable candidates that can later be accepted, applied, archived, or dismissed through the existing memory stack.
+Dreaming does not silently rewrite memory. It produces candidates that are meant to be accepted, applied, archived, or dismissed through the existing memory stack. Today nothing accepts or applies them: there is no review UI, so candidates stay `proposed`.
 
 ## Where It Fits
 
@@ -25,20 +25,27 @@ Dreaming keeps memory healthy between direct user actions. It is deliberately se
 
 ## Trigger Sources
 
-Dreaming can run from two paths:
+Dreaming can run from these paths:
 
-| Trigger           | When It Runs                                              | Scope                                                  |
-| ----------------- | --------------------------------------------------------- | ------------------------------------------------------ |
-| `task_completion` | After meaningful task completion and memory consolidation | The completed task's workspace and transcript evidence |
-| `heartbeat`       | When Heartbeat sees memory-specific pressure              | The heartbeat workspace and signal family evidence     |
+| Trigger           | When It Runs                                                                                     | Scope                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `task_completion` | After task completion and memory consolidation, only when `backgroundConsolidationEnabled` is on (default off) | The completed task's workspace and transcript evidence |
+| `heartbeat`       | When a non-deferred, in-hours Heartbeat pulse sees memory signals or changed hot-memory pressure | The heartbeat workspace and signal family evidence     |
+| `system`          | After a Box Brain sync                                                                           | The synced workspace                                   |
+| `manual`          | On explicit request                                                                              | The requested workspace                                |
 
-Heartbeat-triggered Dreaming is limited to memory-relevant signals such as:
+Heartbeat-triggered Dreaming is limited to memory-relevant signals and pressure:
 
-- `memory_drift`
-- `correction_learning`
-- `cross_workspace_patterns`
+- `correction_learning`: emitted by the daemon when it detects a user correction in a task message (no user text is carried in the signal)
+- `memory_drift`: emitted by mailbox automation
+- `cross_workspace_patterns`: accepted, but no producer emits it today
+- hot-memory pressure: triggers only when the pressure report changed since the last run that handled it
 
-Generic heartbeat awareness, checklist cadence, or dispatch pressure should not run Dreaming by itself.
+Generic heartbeat awareness, checklist cadence, or dispatch pressure does not run Dreaming by itself. Heartbeat skips Dreaming when `heartbeatMaintenanceEnabled` is off.
+
+### Cooldown and overlap
+
+Automatic runs (`task_completion`, `heartbeat`, `system`) are spaced at least **6 hours** apart per workspace: any non-failed run in the last 6 hours causes a new request to be skipped as `cooldown`. Manual runs bypass the cooldown. At most one run per workspace is in progress at a time; an overlapping request shares the running one and is reported as `in_flight`. A candidate already proposed, accepted or rejected for the same target and value is not proposed again.
 
 ## Evidence Sources
 
@@ -75,6 +82,8 @@ Dreaming writes two SQLite-backed records:
 
 The run record gives Mission Control and diagnostics a traceable background event. The candidate record keeps each proposed memory change reviewable and auditable before it mutates durable memory.
 
+The daily `MemoryRetentionService` job removes Dreaming runs and candidates older than 90 days; candidates still awaiting review are kept. Clear All Memories removes a workspace's Dreaming rows.
+
 ## Candidate Types
 
 Dreaming can propose:
@@ -101,7 +110,7 @@ Dreaming follows the same safety stance as Workflow Intelligence:
 - apply only through existing Memory, Curated Memory, topic-pack, or Core Harness paths
 - keep memory as the source of truth
 
-Accepted candidates can later be applied through the owning memory service. Dismissed or archived candidates remain useful as feedback about what not to learn.
+Once a review surface exists, accepted candidates will be applied through the owning memory service. Rejected candidates already block re-proposal of the same change.
 
 ## Current Implementation
 
@@ -115,7 +124,7 @@ The current implementation is backend-first:
 
 The current candidate generator is deterministic and heuristic-based. It is designed to be safe and explainable before adding any LLM-based synthesis.
 
-There is not yet a dedicated renderer review queue. Until that surface exists, Dreaming state is persisted for backend inspection, tests, and future Mission Control or Memory Hub integration.
+There is not yet a renderer review queue, and no UI or IPC handler calls `DreamingService`'s review method, so no candidate is accepted or applied. Until that surface exists, Dreaming state is persisted for backend inspection, tests, and future Mission Control or Memory Hub integration.
 
 ## Non-Goals
 

@@ -1,7 +1,6 @@
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import fs from "fs/promises";
 import path from "path";
-import { DailyLogService } from "./DailyLogService";
 import { DailyLogSummarizer } from "./DailyLogSummarizer";
 import { MemoryService } from "./MemoryService";
 import { CuratedMemoryService } from "./CuratedMemoryService";
@@ -205,11 +204,6 @@ export class LayeredMemoryIndexService {
       await fs.writeFile(topic.path, body, "utf8");
     }
 
-    const recentDays = await DailyLogService.listRecentDays(
-      params.workspacePath,
-      5,
-      params.readGuard,
-    );
     const recentSummaryCount = DailyLogSummarizer.countRecentSummaries(
       params.workspacePath,
       7,
@@ -228,7 +222,6 @@ export class LayeredMemoryIndexService {
       "",
       "## Index",
       `- Updated: ${new Date().toISOString()}`,
-      `- Recent daily logs: ${recentDays.length}`,
       `- Recent summaries: ${recentSummaryCount}`,
       `- Topic files available: ${topics.length}`,
       "",

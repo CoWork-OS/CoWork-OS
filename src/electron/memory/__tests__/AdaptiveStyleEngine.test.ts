@@ -128,6 +128,29 @@ describe("AdaptiveStyleEngine", () => {
       );
     });
 
+    it("maps the structured 'too_verbose' reason from the feedback menu to a shorter style", () => {
+      AdaptiveStyleEngine.observeFeedback("rejected", "too_verbose");
+
+      expect(setResponseStyleMock).toHaveBeenCalledWith(
+        expect.objectContaining({ responseLength: "terse" }),
+      );
+    });
+
+    it("adds no style signal for structured reasons without a style meaning", () => {
+      AdaptiveStyleEngine.observeFeedback("rejected", "incorrect");
+      AdaptiveStyleEngine.observeFeedback("rejected", "ignored_instructions");
+
+      expect(setResponseStyleMock).not.toHaveBeenCalled();
+    });
+
+    it("reads underscores in free-text reasons as word separators", () => {
+      AdaptiveStyleEngine.observeFeedback("rejected", "answer_was_verbose");
+
+      expect(setResponseStyleMock).toHaveBeenCalledWith(
+        expect.objectContaining({ responseLength: "terse" }),
+      );
+    });
+
     it("does nothing when disabled", () => {
       mockGuardrails.adaptiveStyleEnabled = false;
       AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose");

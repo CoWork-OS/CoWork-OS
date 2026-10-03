@@ -12,6 +12,7 @@ import type {
   Task,
 } from "../../../shared/types";
 import { HeartbeatService, type HeartbeatServiceDeps } from "../HeartbeatService";
+import { MemoryPressureService } from "../../memory/MemoryPressureService";
 
 vi.mock("electron", () => ({
   app: {
@@ -139,6 +140,7 @@ function createService(overrides?: Partial<HeartbeatServiceDeps>): HeartbeatServ
     },
     getTasksForAgent: (agentRoleId: string) =>
       Array.from(mockTasks.values()).filter((task) => task.assignedAgentRoleId === agentRoleId),
+    getTaskStatus: (taskId: string) => mockTasks.get(taskId)?.status,
     getDefaultWorkspaceId: () => "workspace-1",
     getDefaultWorkspacePath: () => workspacePaths.get("workspace-1"),
     getWorkspacePath: (workspaceId: string) => workspacePaths.get(workspaceId),
@@ -348,7 +350,8 @@ describe("HeartbeatService v3", () => {
           id: `task-${createdTasks.length + 1}`,
           title,
           prompt,
-          status: "pending",
+          // The first task finishes at once, so its dispatch is no longer in flight.
+          status: createTaskCalls === 1 ? "completed" : "pending",
           workspaceId,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -435,13 +438,20 @@ describe("HeartbeatService v3", () => {
     await vi.advanceTimersByTimeAsync(6_000);
 
     const status = await service.getStatus("agent-1");
-    expect(status?.checklistDueCount).toBe(1);
+    // Runbooks are only reported, not executed, so neither item is marked done.
+    expect(status?.checklistDueCount).toBe(2);
     expect(
       recordedActivities.some(
         (entry) =>
           entry.title === "Heartbeat runbook requested" && entry.workspaceId === "workspace-1",
       ),
     ).toBe(true);
+    expect(
+      recordedActivities.some(
+        (entry) =>
+          entry.title === "Heartbeat runbook requested" && entry.workspaceId === "workspace-2",
+      ),
+    ).toBe(false);
   });
 
   it("dispatch cooldown blocks duplicate task storms from repeated strong signals", async () => {
@@ -459,6 +469,7 @@ describe("HeartbeatService v3", () => {
       urgency: "critical",
       confidence: 1,
       reason: "Repeated urgent issue",
+      evidenceRefs: ["incident:1"],
     });
 
     await service.start();
@@ -473,6 +484,7 @@ describe("HeartbeatService v3", () => {
       urgency: "critical",
       confidence: 1,
       reason: "Repeated urgent issue",
+      evidenceRefs: ["incident:2"],
     });
 
     await vi.advanceTimersByTimeAsync(60_000);
@@ -761,9 +773,518 @@ describe("HeartbeatService v3", () => {
       fingerprint: "persisted",
       reason: "Persistent signal",
     });
+    await first.stop();
 
     const second = createService();
     const status = await second.getStatus("agent-1");
     expect((status?.compressedSignalCount || 0) >= 2).toBe(true);
+  });
+});
+
+describe("HeartbeatService pulse scheduling and dispatch guards", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-22T12:00:00Z"));
+    mockAgents = new Map();
+    mockMentions = new Map();
+    mockTasks = new Map();
+    createdTasks = [];
+    taskUpdates = [];
+    createdSuggestions = [];
+    recordedActivities = [];
+    heartbeatEvents = [];
+    automationOutcomes = [];
+    services = [];
+    MemoryPressureService.resetHandledPressure();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-heartbeat-guards-"));
+    process.env.COWORK_USER_DATA_DIR = path.join(tmpDir, "user-data");
+    workspacePaths = new Map([
+      ["workspace-1", path.join(tmpDir, "workspace-1")],
+      ["workspace-2", path.join(tmpDir, "workspace-2")],
+    ]);
+    for (const workspacePath of workspacePaths.values()) {
+      fs.mkdirSync(workspacePath, { recursive: true });
+    }
+  });
+
+  afterEach(async () => {
+    for (const service of services) {
+      await service.stop();
+    }
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    delete process.env.COWORK_USER_DATA_DIR;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function countingMentionRepo(gate?: Promise<void>) {
+    const getPendingForAgent = vi.fn(async (_agentId: string) => {
+      if (gate && getPendingForAgent.mock.calls.length === 1) await gate;
+      return [] as AgentMention[];
+    });
+    return {
+      getPendingForAgent,
+      mentionRepo: { getPendingForAgent } as unknown as HeartbeatServiceDeps["mentionRepo"],
+    };
+  }
+
+  function runRepoOf(service: HeartbeatService) {
+    return (service as unknown as {
+      runRepo: {
+        create: (input: Record<string, unknown>) => Promise<{ id: string }>;
+        attachTask: (runId: string, taskId: string) => Promise<void>;
+        finish: (runId: string, input: Record<string, unknown>) => Promise<unknown>;
+        get: (runId: string) => Promise<{ status?: string; error?: string } | undefined>;
+        getLatestRun: (agentId: string, type: string) => Promise<unknown>;
+        listRunningDispatches: (agentId: string) => Promise<Array<{ id: string; taskId?: string }>>;
+      };
+    }).runRepo;
+  }
+
+  function timersOf(service: HeartbeatService): Map<string, unknown> {
+    return (service as unknown as { timers: Map<string, unknown> }).timers;
+  }
+
+  it("keeps exactly one pulse timer per agent after manual pulses", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const { getPendingForAgent, mentionRepo } = countingMentionRepo();
+    const service = createService({ mentionRepo });
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(getPendingForAgent).toHaveBeenCalledTimes(1);
+
+    await service.triggerHeartbeat("agent-1");
+    await service.triggerHeartbeat("agent-1");
+    expect(timersOf(service).size).toBe(1);
+
+    getPendingForAgent.mockClear();
+    // Cadence is one minute: one chain yields two pulses in 170 s, a leaked chain more.
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(getPendingForAgent).toHaveBeenCalledTimes(2);
+    expect(timersOf(service).size).toBe(1);
+  });
+
+  it("reserves the running slot synchronously so concurrent pulses share one run", async () => {
+    const agent = createAgent("agent-1", { heartbeatProfile: "observer" });
+    const { getPendingForAgent, mentionRepo } = countingMentionRepo();
+    const service = createService({ mentionRepo });
+    const execute = (
+      service as unknown as {
+        executePulse: (agent: AgentRole, manual: boolean) => Promise<unknown>;
+      }
+    ).executePulse.bind(service);
+
+    const first = execute(agent, false);
+    const second = execute(agent, true);
+    expect(second).toBe(first);
+    await first;
+    expect(getPendingForAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs a queued manual replay exactly once for any number of manual triggers", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const createTask = vi.fn(async (workspaceId: string, prompt: string, title: string) => {
+      if (createTask.mock.calls.length === 1) await gate;
+      const task = {
+        id: `task-${createTask.mock.calls.length}`,
+        title,
+        prompt,
+        workspaceId,
+        status: "completed",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as Task;
+      mockTasks.set(task.id, task);
+      return task;
+    });
+    const service = createService({ createTask });
+
+    const first = service.triggerHeartbeat("agent-1");
+    await vi.waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
+    const queued = [
+      service.triggerHeartbeat("agent-1"),
+      service.triggerHeartbeat("agent-1"),
+      service.triggerHeartbeat("agent-1"),
+    ];
+    release();
+    await first;
+    const results = await Promise.all(queued);
+
+    expect(createTask).toHaveBeenCalledTimes(2);
+    expect(results[1]).toBe(results[0]);
+    expect(results[2]).toBe(results[0]);
+  });
+
+  it("reports runbooks without spending budget, marking items done, or eating signals", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    writeHeartbeatChecklist("workspace-1", "## Daily\n- Review flaky tests");
+    const service = createService();
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "open_loop_pressure",
+      source: "hook",
+      fingerprint: "open-loop",
+      urgency: "low",
+      confidence: 0.3,
+      reason: "Open loop",
+    });
+
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    const runbookReports = () =>
+      recordedActivities.filter((entry) => entry.title === "Heartbeat runbook requested");
+    expect(runbookReports()).toHaveLength(1);
+    let status = await service.getStatus("agent-1");
+    expect(status?.dispatchesToday).toBe(0);
+    expect(status?.checklistDueCount).toBe(1);
+    expect(status?.compressedSignalCount).toBe(1);
+
+    // The reported runbook is not re-reported on every pulse.
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(runbookReports()).toHaveLength(1);
+
+    // And it does not block evidence-backed work while the checklist stays due.
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "urgent_interrupt",
+      source: "hook",
+      fingerprint: "incident",
+      urgency: "critical",
+      confidence: 1,
+      reason: "Build broken",
+      evidenceRefs: ["incident:42"],
+    });
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(createdTasks).toHaveLength(1);
+    // The real task carries the due checklist in its prompt, so that dispatch marks it done.
+    expect(createdTasks[0]?.prompt).toContain("Review flaky tests");
+    status = await service.getStatus("agent-1");
+    expect(status?.checklistDueCount).toBe(0);
+  });
+
+  it("turns strong observer signals into a suggestion", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const service = createService();
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "open_loop_pressure",
+      source: "hook",
+      fingerprint: "strong",
+      urgency: "high",
+      confidence: 0.95,
+      reason: "Reply overdue",
+    });
+
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(createdSuggestions).toHaveLength(1);
+    expect(createdTasks).toHaveLength(0);
+    const completed = heartbeatEvents.find((event) => event.type === "pulse_completed");
+    expect(completed?.result?.dispatchKind).toBe("suggestion");
+  });
+
+  it("pulses immediately on a now-wake and queues it behind a running pulse", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { getPendingForAgent, mentionRepo } = countingMentionRepo(gate);
+    const service = createService({ mentionRepo });
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(getPendingForAgent).toHaveBeenCalledTimes(1);
+
+    await service.submitWakeRequest("agent-1", { mode: "now", source: "hook", text: "Prod down" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(getPendingForAgent).toHaveBeenCalledTimes(1);
+
+    release();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(getPendingForAgent).toHaveBeenCalledTimes(2);
+
+    await service.submitWakeRequest("agent-1", { mode: "now", source: "hook", text: "Again" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(getPendingForAgent).toHaveBeenCalledTimes(3);
+    expect(timersOf(service).size).toBe(1);
+  });
+
+  it("keeps urgent wakes alive longer than the pulse cadence", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer", pulseEveryMinutes: 90 });
+    const service = createService();
+    await service.submitWakeRequest("agent-1", { mode: "now", source: "hook", text: "Urgent" });
+    const signals = (
+      service as unknown as {
+        signalStore: { listAgentSignals: (id: string) => Array<{ expiresAt: number }> };
+      }
+    ).signalStore.listAgentSignals("agent-1");
+    expect(signals).toHaveLength(1);
+    expect(signals[0].expiresAt - Date.now()).toBeGreaterThanOrEqual(2 * 90 * 60 * 1000);
+  });
+
+  it("merges wakes by category and workspace instead of by text", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const service = createService();
+    const wake = (text: string, category: string) =>
+      service.submitWakeRequest("agent-1", {
+        mode: "next-heartbeat",
+        source: "hook",
+        text,
+        workspaceId: "workspace-1",
+        category,
+      });
+    await wake("file_modified src/a.ts", "file_change");
+    await wake("file_modified src/b.ts", "file_change");
+    await wake("Window: Inbox (3) - Mail", "file_change");
+    await wake("main | 4 changed file(s)", "git");
+
+    const status = await service.getStatus("agent-1");
+    expect(status?.compressedSignalCount).toBe(4);
+    const signals = (
+      service as unknown as {
+        signalStore: { listAgentSignals: (id: string) => Array<{ mergedCount: number }> };
+      }
+    ).signalStore.listAgentSignals("agent-1");
+    expect(signals.map((signal) => signal.mergedCount).sort()).toEqual([1, 3]);
+  });
+
+  it("keeps a task dispatch in flight until its task finishes", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    const service = createService();
+    const first = await service.triggerHeartbeat("agent-1");
+    expect(first.taskCreated).toBe("task-1");
+    const runRepo = runRepoOf(service);
+    expect(await runRepo.listRunningDispatches("agent-1")).toEqual([
+      expect.objectContaining({ taskId: "task-1" }),
+    ]);
+
+    const blocked = await service.triggerHeartbeat("agent-1");
+    expect(blocked.pulseOutcome).toBe("idle");
+    expect(blocked.triggerReason).toBe("Dispatch already in flight");
+    expect(createdTasks).toHaveLength(1);
+
+    mockTasks.set("task-1", { ...mockTasks.get("task-1")!, status: "completed" });
+    const next = await service.triggerHeartbeat("agent-1");
+    expect(next.taskCreated).toBe("task-2");
+    expect(await runRepo.listRunningDispatches("agent-1")).toEqual([
+      expect.objectContaining({ taskId: "task-2" }),
+    ]);
+  });
+
+  it("suggests instead of creating a task when a dispatch has no evidence refs", async () => {
+    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
+    const service = createService();
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "urgent_interrupt",
+      source: "hook",
+      fingerprint: "no-evidence",
+      urgency: "critical",
+      confidence: 1,
+      reason: "Something happened",
+    });
+
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(createdTasks).toHaveLength(0);
+    expect(createdSuggestions).toHaveLength(1);
+  });
+
+  it("fails task dispatch runs that stay in flight past the stale limit at startup", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const service = createService();
+    const runRepo = runRepoOf(service);
+    const run = await runRepo.create({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      runType: "dispatch",
+      status: "running",
+    });
+    await runRepo.attachTask(run.id, "task-live");
+    vi.setSystemTime(new Date("2026-03-23T01:00:00Z"));
+
+    await service.start();
+
+    expect((await runRepo.get(run.id))?.status).toBe("failed");
+  });
+
+  it("skips run rows, reflection and Dreaming for pulses outside active hours", async () => {
+    createAgent("agent-1", {
+      heartbeatProfile: "observer",
+      activeHours: { timezone: "UTC", startHour: 1, endHour: 2 },
+    });
+    const runWorkflowReflection = vi.fn(async () => ({ id: "r" }));
+    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
+    const service = createService({ runWorkflowReflection, runMemoryDreaming });
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "memory_drift",
+      source: "hook",
+      fingerprint: "drift",
+      urgency: "high",
+      confidence: 1,
+      reason: "Memory drift",
+    });
+
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(runWorkflowReflection).not.toHaveBeenCalled();
+    expect(runMemoryDreaming).not.toHaveBeenCalled();
+    expect(await runRepoOf(service).getLatestRun("agent-1", "pulse")).toBeUndefined();
+    expect(mockAgents.get("agent-1")?.lastPulseResult).toBe("idle");
+  });
+
+  it("defers before reflection and Dreaming during foreground work", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const runWorkflowReflection = vi.fn(async () => ({ id: "r" }));
+    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
+    const service = createService({
+      hasActiveForegroundTask: () => true,
+      runWorkflowReflection,
+      runMemoryDreaming,
+    });
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "memory_drift",
+      source: "hook",
+      fingerprint: "drift",
+      urgency: "high",
+      confidence: 1,
+      reason: "Memory drift",
+    });
+
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(heartbeatEvents.some((event) => event.type === "pulse_deferred")).toBe(true);
+    expect(runWorkflowReflection).not.toHaveBeenCalled();
+    expect(runMemoryDreaming).not.toHaveBeenCalled();
+    expect(await runRepoOf(service).getLatestRun("agent-1", "pulse")).toBeUndefined();
+  });
+
+  it("skips Dreaming when heartbeat memory maintenance is turned off", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
+    const service = createService({
+      runMemoryDreaming,
+      getMemoryFeaturesSettings: () =>
+        ({ heartbeatMaintenanceEnabled: false }) as ReturnType<
+          NonNullable<HeartbeatServiceDeps["getMemoryFeaturesSettings"]>
+        >,
+    });
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "memory_drift",
+      source: "hook",
+      fingerprint: "drift",
+      urgency: "low",
+      confidence: 0.4,
+      reason: "Memory drift",
+    });
+
+    await service.start();
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(runMemoryDreaming).not.toHaveBeenCalled();
+  });
+
+  it("triggers Dreaming for hot-memory pressure only when the pressure changes", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const memoryFile = path.join(workspacePaths.get("workspace-1")!, ".cowork", "MEMORY.md");
+    fs.mkdirSync(path.dirname(memoryFile), { recursive: true });
+    fs.writeFileSync(memoryFile, "- Use deterministic prompts\n- Use deterministic prompts\n");
+    const runMemoryDreaming = vi.fn(async () => ({ id: "d", status: "completed" }));
+    const service = createService({ runMemoryDreaming });
+    // Pressure analysis reads files for real, so wait for each pulse to complete.
+    const pulse = async (count: number, advanceMs: number) => {
+      await vi.advanceTimersByTimeAsync(advanceMs);
+      await vi.waitFor(() =>
+        expect(
+          heartbeatEvents.filter((event) => event.type === "pulse_completed").length,
+        ).toBeGreaterThanOrEqual(count),
+      );
+    };
+
+    await service.start();
+    await pulse(1, 6_000);
+    expect(runMemoryDreaming).toHaveBeenCalledTimes(1);
+
+    await pulse(2, 61_000);
+    expect(runMemoryDreaming).toHaveBeenCalledTimes(1);
+
+    fs.writeFileSync(
+      memoryFile,
+      "- Use deterministic prompts\n- Use deterministic prompts\n- Prefer pnpm for installs\n- Prefer pnpm for installs\n",
+    );
+    await pulse(3, 61_000);
+    expect(runMemoryDreaming).toHaveBeenCalledTimes(2);
+  });
+
+  it("consumes memory signals once Dreaming ran, and keeps them when it was skipped", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    let skipped: string | undefined = "cooldown";
+    const runMemoryDreaming = vi.fn(async () => ({ id: "d", status: "completed", skipped }));
+    const service = createService({ runMemoryDreaming });
+    await service.submitHeartbeatSignal({
+      agentRoleId: "agent-1",
+      workspaceId: "workspace-1",
+      signalFamily: "correction_learning",
+      source: "tasks",
+      fingerprint: "correction",
+      urgency: "low",
+      confidence: 0.6,
+      reason: "User corrected the agent",
+    });
+
+    const pulse = async (count: number, advanceMs: number) => {
+      await vi.advanceTimersByTimeAsync(advanceMs);
+      await vi.waitFor(() =>
+        expect(
+          heartbeatEvents.filter((event) => event.type === "pulse_completed").length,
+        ).toBeGreaterThanOrEqual(count),
+      );
+    };
+
+    await service.start();
+    await pulse(1, 6_000);
+    expect(runMemoryDreaming).toHaveBeenCalledTimes(1);
+    expect((await service.getStatus("agent-1"))?.compressedSignalCount).toBe(1);
+
+    skipped = undefined;
+    await pulse(2, 61_000);
+    expect(runMemoryDreaming).toHaveBeenCalledTimes(2);
+    expect((await service.getStatus("agent-1"))?.compressedSignalCount).toBe(0);
+  });
+
+  it("prunes old finished heartbeat runs while keeping the newest per agent", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const service = createService();
+    const runRepo = runRepoOf(service);
+    for (let index = 0; index < 3; index += 1) {
+      const run = await runRepo.create({ agentRoleId: "agent-1", runType: "pulse" });
+      await runRepo.finish(run.id, { status: "completed" });
+      vi.setSystemTime(Date.now() + 1_000);
+    }
+    vi.setSystemTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
+
+    const pruned = await service.pruneRunHistory({ keepPerAgent: 1 });
+
+    expect(pruned.runsDeleted).toBe(2);
+    expect(await runRepo.getLatestRun("agent-1", "pulse")).toBeTruthy();
   });
 });

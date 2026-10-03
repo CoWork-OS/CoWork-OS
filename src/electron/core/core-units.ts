@@ -11,6 +11,7 @@ import { CoreFailureRecordStore } from "./CoreFailureRecordRepository";
 import { CoreMemoryCandidateStore } from "./CoreMemoryCandidateRepository";
 import { CoreTraceStore } from "./CoreTraceRepository";
 import { CoreMemoryScopeStateStore } from "./CoreMemoryScopeStateRepository";
+import { CoreMemoryCleanupStore } from "./CoreMemoryCleanupRepository";
 
 /**
  * Core learning transaction units (async SQLite migration plan, DB6): one per public method of
@@ -156,6 +157,13 @@ export const CORE_UNITS = {
   coreLearnings_append: storeUnit((db: Database.Database) => new CoreLearningsStore(db), "append", {
     readonly: false,
   }),
+  coreLearnings_appendIfNovel: storeUnit(
+    (db: Database.Database) => new CoreLearningsStore(db),
+    "appendIfNovel",
+    {
+      readonly: false,
+    },
+  ),
   coreLearnings_list: storeUnit((db: Database.Database) => new CoreLearningsStore(db), "list", {
     readonly: true,
   }),
@@ -255,6 +263,30 @@ export const CORE_UNITS = {
     "bulkCreate",
     {
       readonly: false,
+    },
+  ),
+  coreMemoryCleanup_run: storeUnit((db: Database.Database) => new CoreMemoryCleanupStore(db), "run", {
+    readonly: false,
+  }),
+  coreMemoryCandidate_upsertByFingerprint: storeUnit(
+    (db: Database.Database) => new CoreMemoryCandidateStore(db),
+    "upsertByFingerprint",
+    {
+      readonly: false,
+    },
+  ),
+  coreMemoryCandidate_markLifecycle: storeUnit(
+    (db: Database.Database) => new CoreMemoryCandidateStore(db),
+    "markLifecycle",
+    {
+      readonly: false,
+    },
+  ),
+  coreMemoryCandidate_findAppliedDuplicate: storeUnit(
+    (db: Database.Database) => new CoreMemoryCandidateStore(db),
+    "findAppliedDuplicate",
+    {
+      readonly: true,
     },
   ),
   coreMemoryCandidate_findById: storeUnit(

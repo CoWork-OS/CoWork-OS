@@ -227,10 +227,14 @@ import { CitationTracker } from "./citation/CitationTracker";
 import { WorkflowDecomposer, workflowPhaseTypeToCapability } from "./strategy/WorkflowDecomposer";
 import { scorePlanStepIntentAlignment, scoreStepIntentOverlap } from "./step-intent-alignment";
 import {
+  buildProjectGuidanceContext,
   buildWorkspaceDesignSystemContext,
   buildWorkspaceKitContext,
   isDesignSystemRelevantTask,
 } from "../memory/WorkspaceKitContext";
+import { getHotMemoryVersion } from "../memory/hot-memory-version";
+import { COMPACT_HOT_MEMORY_TOKENS, MEMORY_CONTEXT_SECTION_TOKENS } from "./content/prompt-budgets";
+import { formatFlushBullets, parseFlushSectionBullets } from "./executor-memory-flush-utils";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { InputSanitizer, OutputFilter } from "./security";
 import { buildFreshBotHandoffPrompt } from "../../shared/bot-handoff";
@@ -535,11 +539,21 @@ export { AwaitingUserInputError } from "./executor-helpers";
 export type { CompletionContract } from "./executor-helpers";
 
 const KEEP_LATEST_IMAGE_MESSAGES = 8;
+/** Read-only memory recall tools every plan step may call. */
+const MEMORY_RECALL_READ_TOOLS = [
+  "search_memories",
+  "memory_search_index",
+  "memory_timeline",
+  "memory_details",
+  "search_quotes",
+  "search_sessions",
+  "memory_curated_read",
+  "memory_topics_load",
+] as const;
+// Memory synthesis slices (kit/memory/playbook) live in content/prompt-budgets.ts,
+// where the requested synthesizer budget and the memory_context cap share one constant.
 const DEFAULT_PROMPT_SECTION_BUDGETS = {
   roleContext: 420,
-  kitContext: 700,
-  memoryContext: 700,
-  playbookContext: 420,
   awarenessContext: 420,
   infraContext: 420,
   personalityPrompt: 700,
@@ -547,7 +561,11 @@ const DEFAULT_PROMPT_SECTION_BUDGETS = {
   toolDescriptions: 1400,
 } as const;
 
-const EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET = 6800;
+// 6,800 + 800: memory_context now gets the full 1,820-token synthesizer budget
+// (was capped at 1,200), and design-system context, project guidance and the
+// external profile have their own sections instead of sharing that cap.
+// Overflow still drops/shrinks optional sections by drop priority.
+const EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET = 7600;
 type BasePromptRoutingBlock = "cloud_storage" | "messaging" | "maps" | "pdf" | "rich_surfaces";
 // Same provider list the IntentRouter uses for its cloud-storage signals.
 const CLOUD_STORAGE_PROVIDER_MENTION_REGEX =
@@ -5290,18 +5308,36 @@ export class TaskExecutor {
       const settings = await MemoryService.getSettings(workspaceId);
       if (!settings.enabled) return "";
 
+      // Per-turn recall is query-driven (PROMPT-4): it injects search matches for
+      // the current query. The unconditional "recent" lane only runs when
+      // `defaultArchiveInjectionEnabled` is on, the same switch the synthesizer
+      // uses for archive injection. Both lanes skip memories captured by this
+      // task, which would otherwise echo the agent's own tool events back to it.
       const limit = 10;
       const recentLimit = 4;
       const maxLines = 14;
-      const recent = await MemoryService.getRecentForPromptRecall(workspaceId, recentLimit);
-      const search = await MemoryService.searchForPromptRecallFastAsync(
-        workspaceId,
-        trimmed,
-        limit,
-      );
+      let archiveInjectionEnabled = false;
+      try {
+        archiveInjectionEnabled =
+          MemoryFeaturesManager.loadSettings().defaultArchiveInjectionEnabled === true;
+      } catch {
+        archiveInjectionEnabled = false;
+      }
+      const currentTaskId = this.task.id;
+      const isFromCurrentTask = (memory: { taskId?: string }) =>
+        Boolean(currentTaskId) && memory.taskId === currentTaskId;
+      const recent = archiveInjectionEnabled
+        ? (await MemoryService.getRecentForPromptRecall(workspaceId, recentLimit * 3))
+            .filter((memory) => !isFromCurrentTask(memory))
+            .slice(0, recentLimit)
+        : [];
+      const search = (
+        await MemoryService.searchForPromptRecallFastAsync(workspaceId, trimmed, limit)
+      ).filter((result) => !isFromCurrentTask(result));
 
       const seen = new Set<string>();
       const lines: string[] = [];
+      const injectedMemoryIds: string[] = [];
 
       const formatSnippet = (raw: string, maxChars = 220) => {
         const sanitized = InputSanitizer.sanitizeMemoryContent(raw || "").trim();
@@ -5317,6 +5353,7 @@ export class TaskExecutor {
         const snippet = formatSnippet(raw, 200);
         if (!snippet) continue;
         lines.push(`- [recent:${mem.type}] (${date}) ${snippet}`);
+        injectedMemoryIds.push(mem.id);
         if (lines.length >= maxLines) break;
       }
 
@@ -5327,6 +5364,7 @@ export class TaskExecutor {
         const snippet = formatSnippet(result.snippet, 220);
         if (!snippet) continue;
         lines.push(`- [match:${result.type}] (${date}) ${snippet}`);
+        injectedMemoryIds.push(result.id);
         if (lines.length >= maxLines) break;
       }
 
@@ -5363,6 +5401,8 @@ export class TaskExecutor {
       }
 
       if (lines.length === 0) return "";
+      // Memories injected into the prompt count as referenced (batched, best-effort).
+      MemoryService.recordPromptInjection?.(injectedMemoryIds);
 
       return [
         TaskExecutor.PINNED_MEMORY_RECALL_TAG,
@@ -6440,36 +6480,9 @@ ${transcript}
       return;
     }
 
-    const parseBullets = (label: string): string[] => {
-      const lines = summary.split("\n");
-      const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const headerRe = new RegExp(`^\\s*${esc}\\s*:\\s*$`, "i");
-      const startIdx = lines.findIndex((l) => headerRe.test(l));
-      if (startIdx === -1) return [];
-
-      const out: string[] = [];
-      for (let i = startIdx + 1; i < lines.length; i++) {
-        const raw = lines[i];
-        const trimmed = raw.trim();
-        if (!trimmed) {
-          // Stop if we hit an empty line and already captured something.
-          if (out.length > 0) break;
-          continue;
-        }
-        // Stop at the next section label.
-        if (
-          /^(decisions|open loops|next actions|goals|key findings|key facts)\\s*:/i.test(trimmed)
-        ) {
-          break;
-        }
-        if (trimmed.startsWith("-")) out.push(trimmed);
-      }
-      return out;
-    };
-
     const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const prefixBullets = (bullets: string[]) =>
-      bullets.map((b) => `- [flush ${hhmm}] ${b.replace(/^[-\\s]+/, "").trim()}`).filter(Boolean);
+    const parseBullets = (label: string): string[] => parseFlushSectionBullets(summary, label);
+    const prefixBullets = (bullets: string[]) => formatFlushBullets(bullets, hhmm);
 
     const decisions = prefixBullets(parseBullets("Decisions"));
     const openLoops = prefixBullets(parseBullets("Open Loops"));
@@ -8645,6 +8658,70 @@ ${transcript}
     return this.isCompanionPrompt(prompt) ? "chat" : "task";
   }
 
+  /**
+   * The memory-injection gate used by every prompt surface: memory is retained for
+   * this task and the gateway is private (or a trusted shared context opted in).
+   */
+  private isMemoryInjectionAllowedForPrompt(): boolean {
+    const isSubAgentTask = (this.task.agentType ?? "main") === "sub" || !!this.task.parentTaskId;
+    const retainMemory = this.task.agentConfig?.retainMemory ?? !isSubAgentTask;
+    const gatewayContext = this.task.agentConfig?.gatewayContext ?? "private";
+    const allowTrustedSharedMemory =
+      this.task.agentConfig?.allowSharedContextMemory === true &&
+      (gatewayContext === "group" || gatewayContext === "public");
+    return retainMemory && (gatewayContext === "private" || allowTrustedSharedMemory);
+  }
+
+  private compactHotMemoryCache: { key: string; text: string } | null = null;
+
+  /**
+   * Compact L0 hot memory (curated entries + identity/profile + relationship items)
+   * for surfaces outside plan steps: follow-ups, chat and planning. Cached per task
+   * and rebuilt when curated memory, the profile or relationship items change.
+   */
+  private async buildCompactHotMemoryBlock(
+    allowMemoryInjection: boolean,
+    options: { includeUserProfile?: boolean } = {},
+  ): Promise<string> {
+    if (!allowMemoryInjection) return "";
+    try {
+      if (MemoryFeaturesManager.loadSettings().curatedMemoryEnabled === false) return "";
+    } catch {
+      // settings unavailable: fall through with defaults
+    }
+    const includeUserProfile = options.includeUserProfile !== false;
+    const key = `${this.workspace.id}:${getHotMemoryVersion()}:${includeUserProfile ? "profile" : "no-profile"}`;
+    if (this.compactHotMemoryCache?.key === key) return this.compactHotMemoryCache.text;
+    let text = "";
+    try {
+      text = (
+        await MemorySynthesizer.buildHotMemoryContext(
+          this.workspace.id,
+          COMPACT_HOT_MEMORY_TOKENS,
+          {
+            includeUserProfile,
+          },
+        )
+      ).text;
+    } catch {
+      text = "";
+    }
+    this.compactHotMemoryCache = { key, text };
+    return text;
+  }
+
+  /** Tool names offered without a tool_search round trip (registered and not deferred). */
+  private getVisibleMemoryToolNames(): string[] {
+    try {
+      return this.toolRegistry
+        .getTools()
+        .filter((tool) => !(tool.runtime?.deferLoad && !tool.runtime?.alwaysExpose))
+        .map((tool) => tool.name);
+    } catch {
+      return [];
+    }
+  }
+
   private buildUserProfileBlock(maxFacts = 10): string {
     const context = UserProfileService.buildPromptContext(maxFacts);
     if (!context) return "";
@@ -8871,9 +8948,14 @@ ${transcript}
       ? await this.buildSupermemoryProfileBlock(message)
       : "";
     const roleContext = this.getRoleContextPrompt();
-    // Personal profile facts follow the same gate as other memory injection.
+    // Personal profile facts follow the same gate as other memory injection. The
+    // compact L0 block adds curated hot memory; profile facts are already pinned.
+    const chatHotMemory = await this.buildCompactHotMemoryBlock(allowMemoryInjection, {
+      includeUserProfile: false,
+    });
     const profileContext = [
       allowMemoryInjection ? this.buildUserProfileBlock(10) : "",
+      chatHotMemory,
       externalProfileContext,
     ]
       .filter(Boolean)
@@ -17244,12 +17326,10 @@ ${transcript}
       return {
         contextPackInjectionEnabled: false,
         heartbeatMaintenanceEnabled: false,
-        promptStackV2Enabled: false,
         layeredMemoryEnabled: false,
         transcriptStoreEnabled: false,
         backgroundConsolidationEnabled: false,
         queryOrchestratorEnabled: false,
-        sessionLineageEnabled: false,
       };
     }
   }
@@ -18088,6 +18168,9 @@ ${transcript}
     identityPrompt: string;
     roleContext?: string;
     memoryContext?: string;
+    designSystemContext?: string;
+    projectGuidanceContext?: string;
+    externalMemoryContext?: string;
     awarenessSnapshot?: string;
     infraContext?: string;
     visualQAContext?: string;
@@ -18158,6 +18241,9 @@ ${transcript}
       completionGuidancePrompt: this.buildCompletionGuidancePrompt(),
       roleContext: params.roleContext,
       memoryContext: params.memoryContext,
+      designSystemContext: params.designSystemContext,
+      projectGuidanceContext: params.projectGuidanceContext,
+      externalMemoryContext: params.externalMemoryContext,
       awarenessSnapshot: params.awarenessSnapshot,
       infraContext: params.infraContext,
       infraStatusPrompt: params.infraContext ? this.getInfraWalletStatusPrompt() : undefined,
@@ -18457,6 +18543,9 @@ ${transcript}
       "grep",
       "read_file",
       "search_files",
+      // Read-only memory recall: any step may need prior decisions or context
+      // (RECALL-1). Writes (memory_save, memory_curate) stay step-scoped.
+      ...MEMORY_RECALL_READ_TOOLS,
     ]);
 
     const isBotConversation = this.task.agentConfig?.botConversation === true;
@@ -28236,8 +28325,17 @@ You are continuing a previous conversation. The context from the previous conver
       }
     }
     const roleContext = this.getRoleContextPrompt();
-    // Personal profile facts follow the same gate as other memory injection.
-    const profileContext = allowMemoryInjection ? this.buildUserProfileBlock(10) : "";
+    // Personal profile facts follow the same gate as other memory injection. The
+    // compact L0 block adds curated hot memory; profile facts are already pinned.
+    const chatHotMemory = await this.buildCompactHotMemoryBlock(allowMemoryInjection, {
+      includeUserProfile: false,
+    });
+    const profileContext = [
+      allowMemoryInjection ? this.buildUserProfileBlock(10) : "",
+      chatHotMemory,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     this.daemon.updateTaskStatus(this.task.id, "executing");
 
@@ -29732,10 +29830,15 @@ Return ONLY a JSON object:
       const memoryFeatureSettings = this.loadExecutionPromptMemoryFeatures();
       const effectivePlanningExecutionMode = this.getEffectiveExecutionMode();
       const effectivePlanningTaskDomain = this.getEffectiveTaskDomain();
+      // Planning gets the compact L0 hot memory so plans respect curated rules.
+      const planningHotMemory = await this.buildCompactHotMemoryBlock(
+        this.isMemoryInjectionAllowedForPrompt(),
+      );
       const builtPrompt = await this.buildExecutionSystemPrompt({
         taskPrompt: planTextPrompt,
         identityPrompt,
         roleContext,
+        memoryContext: planningHotMemory,
         infraContext,
         personalityPrompt: channelAdaptedPersonality,
         guidelinesPrompt,
@@ -31765,11 +31868,9 @@ Return ONLY a JSON object:
           this.workspace.path,
           this.getExecutionTaskPrompt(),
           {
-            tokenBudget:
-              DEFAULT_PROMPT_SECTION_BUDGETS.kitContext +
-              DEFAULT_PROMPT_SECTION_BUDGETS.memoryContext +
-              DEFAULT_PROMPT_SECTION_BUDGETS.playbookContext,
+            tokenBudget: MEMORY_CONTEXT_SECTION_TOKENS,
             includeWorkspaceKit,
+            visibleToolNames: this.getVisibleMemoryToolNames(),
             includeKnowledgeGraph: true,
             agentRoleId: this.task.assignedAgentRoleId || null,
             filesystemReadGuard: (candidatePath: string) =>
@@ -31861,13 +31962,29 @@ Return ONLY a JSON object:
     ]
       .filter(Boolean)
       .join("\n\n");
+    // Repo-root AGENTS.md / CLAUDE.md and docs maps: own section, same gate as the kit.
+    let projectGuidanceContext = "";
+    if (
+      gatewayContext === "private" &&
+      contextPackInjectionEnabled &&
+      this.workspace.permissions.read
+    ) {
+      try {
+        projectGuidanceContext = buildProjectGuidanceContext(this.workspace.path, (candidatePath) =>
+          this.canReadWorkspacePath(candidatePath),
+        );
+      } catch {
+        projectGuidanceContext = "";
+      }
+    }
     const builtPrompt = await this.buildExecutionSystemPrompt({
       taskPrompt: this.getExecutionTaskPrompt(),
       identityPrompt,
       roleContext,
-      memoryContext: [automaticDesignSystemContext, synthesizedMemoryBlock, externalProfileContext]
-        .filter(Boolean)
-        .join("\n\n"),
+      memoryContext: synthesizedMemoryBlock,
+      designSystemContext: automaticDesignSystemContext,
+      projectGuidanceContext,
+      externalMemoryContext: externalProfileContext,
       awarenessSnapshot: awarenessSnapshotBlock,
       infraContext,
       visualQAContext,
@@ -40730,11 +40847,14 @@ Return ONLY a JSON object:
     ]
       .filter(Boolean)
       .join("\n\n");
+    // Follow-ups get the compact L0 hot memory (curated + identity), cached per task.
+    const followUpHotMemory = await this.buildCompactHotMemoryBlock(allowMemoryInjection);
     const builtPrompt = await this.buildExecutionSystemPrompt({
       taskPrompt: executionMessage,
       identityPrompt,
       roleContext,
-      memoryContext: externalProfileContext,
+      memoryContext: followUpHotMemory,
+      externalMemoryContext: externalProfileContext,
       awarenessSnapshot: awarenessSnapshotBlock,
       infraContext,
       personalityPrompt: channelAdaptedPersonality,

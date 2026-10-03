@@ -33,7 +33,8 @@ const TOOL_GROUPS = [
   {
     id: "group:memory",
     name: "Memory Tools",
-    description: "Clipboard read/write access",
+    description:
+      "Memory save/recall, knowledge graph, session history and Supermemory tools, plus clipboard and chat-history access",
     defaultDeniedInGroup: true,
   },
   {

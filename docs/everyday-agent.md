@@ -16,7 +16,7 @@ Open **Everyday Agent** from the sidebar. The surface shows:
 - Active capability bundles and their compiled policy state.
 - Connected-app allowlists and scoped account state.
 - Recent receipts for previews, approvals, blocks, pauses, skips, and executed actions.
-- Workflow Intelligence suggestions and reviewable memory candidate count.
+- Workflow Intelligence suggestions and a count of proposed core memory candidates recorded under the Everyday Agent profile. Workflow Intelligence and Heartbeat record candidates under automation-profile ids, so this count is usually 0.
 - Pending action preview details with risk class, target binding, affected objects, rollback flag, approval requirement, and idempotency key.
 - Global and scoped pause controls for capability, connector, workspace, device, and channel.
 - Local clear-data controls for receipts, previews, cached connector summaries, and browser-profile metadata.

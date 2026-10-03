@@ -3,7 +3,6 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuratedMemoryService } from "../CuratedMemoryService";
-import { DailyLogService } from "../DailyLogService";
 import { DailyLogSummarizer } from "../DailyLogSummarizer";
 import { LayeredMemoryIndexService } from "../LayeredMemoryIndexService";
 import { MemoryService } from "../MemoryService";
@@ -61,7 +60,6 @@ describe("LayeredMemoryIndexService", () => {
         updatedAt: Date.now(),
       },
     ] as Any);
-    vi.spyOn(DailyLogService, "listRecentDays").mockResolvedValue(["2026-03-31"]);
     vi.spyOn(DailyLogSummarizer, "countRecentSummaries").mockReturnValue(2);
 
     const snapshot = await LayeredMemoryIndexService.refreshIndex({

@@ -4,6 +4,7 @@ import {
   DEFAULT_BLOCKED_COMMAND_PATTERNS,
   DEFAULT_TRUSTED_COMMAND_PATTERNS,
 } from "../../shared/types";
+import { DEFAULT_GUARDRAIL_SETTINGS as DEFAULTS } from "../../shared/guardrail-defaults";
 
 export function GuardrailSettings() {
   const [settings, setSettings] = useState<GuardrailSettingsType | null>(null);
@@ -177,7 +178,10 @@ export function GuardrailSettings() {
             className="settings-input settings-input-number"
             value={settings.maxTokensPerTask}
             onChange={(e) =>
-              setSettings({ ...settings, maxTokensPerTask: parseInt(e.target.value) || 100000 })
+              setSettings({
+                ...settings,
+                maxTokensPerTask: parseInt(e.target.value) || DEFAULTS.maxTokensPerTask,
+              })
             }
             min={1000}
             max={10000000}
@@ -216,7 +220,10 @@ export function GuardrailSettings() {
             className="settings-input settings-input-number"
             value={settings.maxCostPerTask}
             onChange={(e) =>
-              setSettings({ ...settings, maxCostPerTask: parseFloat(e.target.value) || 10.0 })
+              setSettings({
+                ...settings,
+                maxCostPerTask: parseFloat(e.target.value) || DEFAULTS.maxCostPerTask,
+              })
             }
             min={0.01}
             max={100}
@@ -255,7 +262,10 @@ export function GuardrailSettings() {
             className="settings-input settings-input-number"
             value={settings.maxIterationsPerTask}
             onChange={(e) =>
-              setSettings({ ...settings, maxIterationsPerTask: parseInt(e.target.value) || 50 })
+              setSettings({
+                ...settings,
+                maxIterationsPerTask: parseInt(e.target.value) || DEFAULTS.maxIterationsPerTask,
+              })
             }
             min={5}
             max={500}
@@ -264,7 +274,8 @@ export function GuardrailSettings() {
           />
         </div>
         <p className="settings-hint">
-          Each tool call and follow-up message counts as an iteration. Default: 50
+          Each tool call and follow-up message counts as an iteration. Default:{" "}
+          {DEFAULTS.maxIterationsPerTask}
         </p>
       </div>
 
@@ -364,7 +375,7 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                loopWarningThreshold: parseInt(e.target.value, 10) || 8,
+                loopWarningThreshold: parseInt(e.target.value, 10) || DEFAULTS.loopWarningThreshold,
               })
             }
             min={1}
@@ -382,7 +393,8 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                loopCriticalThreshold: parseInt(e.target.value, 10) || 14,
+                loopCriticalThreshold:
+                  parseInt(e.target.value, 10) || DEFAULTS.loopCriticalThreshold,
               })
             }
             min={1}
@@ -400,7 +412,8 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                globalNoProgressCircuitBreaker: parseInt(e.target.value, 10) || 20,
+                globalNoProgressCircuitBreaker:
+                  parseInt(e.target.value, 10) || DEFAULTS.globalNoProgressCircuitBreaker,
               })
             }
             min={1}
@@ -466,7 +479,7 @@ export function GuardrailSettings() {
             onChange={(e) =>
               setSettings({
                 ...settings,
-                defaultLifetimeTurnCap: parseInt(e.target.value) || 320,
+                defaultLifetimeTurnCap: parseInt(e.target.value) || DEFAULTS.defaultLifetimeTurnCap,
               })
             }
             min={20}
@@ -476,7 +489,9 @@ export function GuardrailSettings() {
           />
         </div>
         <p className="settings-hint">
-          Defaults: auto continuation on, max 3 windows, min score 0.25, lifetime cap 320 turns.
+          Defaults: auto continuation on, max {DEFAULTS.defaultMaxAutoContinuations} windows, min
+          score {DEFAULTS.defaultMinProgressScore}, lifetime cap {DEFAULTS.defaultLifetimeTurnCap}{" "}
+          turns.
         </p>
       </div>
 
@@ -668,7 +683,10 @@ export function GuardrailSettings() {
             className="settings-input settings-input-number"
             value={settings.maxFileSizeMB}
             onChange={(e) =>
-              setSettings({ ...settings, maxFileSizeMB: parseInt(e.target.value) || 50 })
+              setSettings({
+                ...settings,
+                maxFileSizeMB: parseInt(e.target.value) || DEFAULTS.maxFileSizeMB,
+              })
             }
             min={1}
             max={500}

@@ -22,6 +22,7 @@ import {
   TaskStatus,
 } from "../../shared/types";
 import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
+import { DEFAULT_GUARDRAIL_SETTINGS } from "../../shared/guardrail-defaults";
 import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
 
 // Common validation patterns
@@ -1268,62 +1269,148 @@ export const SharePointSettingsSchema = z.object({
 
 // ============ Guardrail Settings Schema ============
 
+// Defaults come from DEFAULT_GUARDRAIL_SETTINGS, the same object GuardrailManager
+// falls back to. GUARDRAIL_SAVE_SETTINGS stores the parsed result whole, so a
+// field the payload omits is saved with these defaults; a separate, stale copy
+// here silently tightened guardrails (e.g. 50 iterations, $1 cost) on partial saves.
+const GUARDRAIL_DEFAULTS = DEFAULT_GUARDRAIL_SETTINGS;
+
 export const GuardrailSettingsSchema = z.object({
   // Token budget
-  maxTokensPerTask: z.number().int().min(1000).max(10000000).default(100000),
-  tokenBudgetEnabled: z.boolean().default(true),
+  maxTokensPerTask: z
+    .number()
+    .int()
+    .min(1000)
+    .max(10000000)
+    .default(GUARDRAIL_DEFAULTS.maxTokensPerTask),
+  tokenBudgetEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.tokenBudgetEnabled),
 
   // Cost budget
-  maxCostPerTask: z.number().min(0.01).max(100).default(1.0),
-  costBudgetEnabled: z.boolean().default(false),
+  maxCostPerTask: z.number().min(0.01).max(100).default(GUARDRAIL_DEFAULTS.maxCostPerTask),
+  costBudgetEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.costBudgetEnabled),
 
   // Dangerous commands
-  blockDangerousCommands: z.boolean().default(true),
-  customBlockedPatterns: z.array(z.string().max(500)).max(50).default([]),
+  blockDangerousCommands: z.boolean().default(GUARDRAIL_DEFAULTS.blockDangerousCommands),
+  customBlockedPatterns: z
+    .array(z.string().max(500))
+    .max(50)
+    .default(() => [...GUARDRAIL_DEFAULTS.customBlockedPatterns]),
 
   // Auto-approve trusted commands
-  autoApproveTrustedCommands: z.boolean().default(false),
-  trustedCommandPatterns: z.array(z.string().max(500)).max(100).default([]),
+  autoApproveTrustedCommands: z.boolean().default(GUARDRAIL_DEFAULTS.autoApproveTrustedCommands),
+  trustedCommandPatterns: z
+    .array(z.string().max(500))
+    .max(100)
+    .default(() => [...GUARDRAIL_DEFAULTS.trustedCommandPatterns]),
 
   // File size
-  maxFileSizeMB: z.number().int().min(1).max(500).default(50),
-  fileSizeLimitEnabled: z.boolean().default(true),
+  maxFileSizeMB: z.number().int().min(1).max(500).default(GUARDRAIL_DEFAULTS.maxFileSizeMB),
+  fileSizeLimitEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.fileSizeLimitEnabled),
 
   // Network domains
-  enforceAllowedDomains: z.boolean().default(false),
-  allowedDomains: z.array(z.string().max(255)).max(100).default([]),
+  enforceAllowedDomains: z.boolean().default(GUARDRAIL_DEFAULTS.enforceAllowedDomains),
+  allowedDomains: z
+    .array(z.string().max(255))
+    .max(100)
+    .default(() => [...GUARDRAIL_DEFAULTS.allowedDomains]),
 
   // Web search policy
-  webSearchMode: z.enum(["disabled", "cached", "live"]).default("cached"),
-  webSearchMaxUsesPerTask: z.number().int().min(1).max(500).default(8),
-  webSearchMaxUsesPerStep: z.number().int().min(1).max(100).default(3),
-  webSearchAllowedDomains: z.array(z.string().max(255)).max(100).default([]),
-  webSearchBlockedDomains: z.array(z.string().max(255)).max(100).default([]),
+  webSearchMode: z.enum(["disabled", "cached", "live"]).default(GUARDRAIL_DEFAULTS.webSearchMode),
+  webSearchMaxUsesPerTask: z
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .default(GUARDRAIL_DEFAULTS.webSearchMaxUsesPerTask),
+  webSearchMaxUsesPerStep: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(GUARDRAIL_DEFAULTS.webSearchMaxUsesPerStep),
+  webSearchAllowedDomains: z
+    .array(z.string().max(255))
+    .max(100)
+    .default(() => [...GUARDRAIL_DEFAULTS.webSearchAllowedDomains]),
+  webSearchBlockedDomains: z
+    .array(z.string().max(255))
+    .max(100)
+    .default(() => [...GUARDRAIL_DEFAULTS.webSearchBlockedDomains]),
 
   // Iterations
-  maxIterationsPerTask: z.number().int().min(5).max(500).default(50),
-  iterationLimitEnabled: z.boolean().default(true),
+  maxIterationsPerTask: z
+    .number()
+    .int()
+    .min(5)
+    .max(500)
+    .default(GUARDRAIL_DEFAULTS.maxIterationsPerTask),
+  iterationLimitEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.iterationLimitEnabled),
 
   // Execution continuation
-  autoContinuationEnabled: z.boolean().default(true),
-  defaultMaxAutoContinuations: z.number().int().min(0).max(20).default(3),
-  defaultMinProgressScore: z.number().min(-1).max(1).default(0.25),
-  lifetimeTurnCapEnabled: z.boolean().default(true),
-  defaultLifetimeTurnCap: z.number().int().min(20).max(5000).default(320),
-  compactOnContinuation: z.boolean().default(true),
-  compactionThresholdRatio: z.number().min(0.5).max(0.95).default(0.9),
-  loopWarningThreshold: z.number().int().min(1).max(200).default(8),
-  loopCriticalThreshold: z.number().int().min(1).max(400).default(14),
-  globalNoProgressCircuitBreaker: z.number().int().min(1).max(1000).default(20),
-  sideChannelDuringExecution: z.enum(["paused", "limited", "enabled"]).default("paused"),
-  sideChannelMaxCallsPerWindow: z.number().int().min(0).max(100).default(2),
+  autoContinuationEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.autoContinuationEnabled),
+  defaultMaxAutoContinuations: z
+    .number()
+    .int()
+    .min(0)
+    .max(20)
+    .default(GUARDRAIL_DEFAULTS.defaultMaxAutoContinuations),
+  defaultMinProgressScore: z
+    .number()
+    .min(-1)
+    .max(1)
+    .default(GUARDRAIL_DEFAULTS.defaultMinProgressScore),
+  lifetimeTurnCapEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.lifetimeTurnCapEnabled),
+  defaultLifetimeTurnCap: z
+    .number()
+    .int()
+    .min(20)
+    .max(5000)
+    .default(GUARDRAIL_DEFAULTS.defaultLifetimeTurnCap),
+  compactOnContinuation: z.boolean().default(GUARDRAIL_DEFAULTS.compactOnContinuation),
+  compactionThresholdRatio: z
+    .number()
+    .min(0.5)
+    .max(0.95)
+    .default(GUARDRAIL_DEFAULTS.compactionThresholdRatio),
+  loopWarningThreshold: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .default(GUARDRAIL_DEFAULTS.loopWarningThreshold),
+  loopCriticalThreshold: z
+    .number()
+    .int()
+    .min(1)
+    .max(400)
+    .default(GUARDRAIL_DEFAULTS.loopCriticalThreshold),
+  globalNoProgressCircuitBreaker: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .default(GUARDRAIL_DEFAULTS.globalNoProgressCircuitBreaker),
+  sideChannelDuringExecution: z
+    .enum(["paused", "limited", "enabled"])
+    .default(GUARDRAIL_DEFAULTS.sideChannelDuringExecution),
+  sideChannelMaxCallsPerWindow: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .default(GUARDRAIL_DEFAULTS.sideChannelMaxCallsPerWindow),
 
   // Adaptive Style Engine
-  adaptiveStyleEnabled: z.boolean().default(false),
-  adaptiveStyleMaxDriftPerWeek: z.number().int().min(0).max(10).default(1),
+  adaptiveStyleEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.adaptiveStyleEnabled),
+  adaptiveStyleMaxDriftPerWeek: z
+    .number()
+    .int()
+    .min(0)
+    .max(10)
+    .default(GUARDRAIL_DEFAULTS.adaptiveStyleMaxDriftPerWeek),
 
   // Cross-Channel Persona Coherence
-  channelPersonaEnabled: z.boolean().default(false),
+  channelPersonaEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.channelPersonaEnabled),
 });
 
 // ============ Infrastructure Settings Schema ============

@@ -9,6 +9,7 @@ import type {
   WorkerRoleKind,
   WorkerRoleSpec,
 } from "../../../shared/types";
+import { MEMORY_WRITE_TOOL_NAMES } from "../../../shared/types";
 
 const VERIFIER_DENY_LIST = [
   "group:write",
@@ -18,6 +19,9 @@ const VERIFIER_DENY_LIST = [
   "group:destructive",
   "group:system",
   "group:memory",
+  // Explicit as well as via group:memory: memory writes are mutations and the
+  // verifier is read-only. (SEC-12)
+  ...MEMORY_WRITE_TOOL_NAMES,
   "group:meta",
   "spawn_agent",
   "orchestrate_agents",
@@ -106,6 +110,10 @@ export function getReadOnlyExecutionToolRestrictions(): string[] {
 const RESEARCHER_DENY_LIST = [
   "group:write",
   "delete_file",
+  // Researchers run in "verified" mode (mode gate allows mutations) with
+  // mutationAllowed=false; memory writes are not in group:write, so deny them
+  // explicitly. Verifier already denies them via group:memory. (SEC-12)
+  ...MEMORY_WRITE_TOOL_NAMES,
   "group:meta",
   "spawn_agent",
   "orchestrate_agents",

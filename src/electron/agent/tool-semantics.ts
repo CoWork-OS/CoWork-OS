@@ -1,4 +1,4 @@
-import { TOOL_GROUPS } from "../../shared/types";
+import { MEMORY_WRITE_TOOL_NAMES, TOOL_GROUPS } from "../../shared/types";
 
 export type ToolArtifactKind = "none" | "document" | "spreadsheet" | "presentation" | "file";
 
@@ -186,6 +186,19 @@ const CANONICAL_WRITE_TOOL_NAMES: Set<string> = new Set(
 
 export function isCanonicalWriteToolName(toolName: string): boolean {
   return CANONICAL_WRITE_TOOL_NAMES.has(canonicalizeToolName(toolName));
+}
+
+const MEMORY_WRITE_TOOL_NAME_SET: Set<string> = new Set(
+  MEMORY_WRITE_TOOL_NAMES.map((name) => canonicalizeToolName(name)),
+);
+
+/**
+ * Memory, Supermemory and knowledge-graph writes. Not workspace file writes, so
+ * kept out of isCanonicalWriteToolName (which feeds workspace-write checks), but
+ * read-only lanes must still treat them as mutations. (SEC-12)
+ */
+export function isMemoryWriteToolName(toolName: string): boolean {
+  return MEMORY_WRITE_TOOL_NAME_SET.has(canonicalizeToolName(toolName));
 }
 
 export function isFileMutationToolName(toolName: string): boolean {

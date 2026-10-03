@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { MemoryObservationMetadata } from "../../shared/types";
 import { upsertMemoryEmbeddingRows } from "../database/memory-embedding-sql";
+import { stricterPrivacyState } from "./memory-visibility";
 
 /**
  * The writes of one memory capture as SQL only (async SQLite migration plan, DB6): the
@@ -65,11 +66,31 @@ export function insertMemoryRow(
   );
 }
 
-/** Store a memory's structured observation; a near-identical recent capture is marked. */
+/**
+ * Store a memory's structured observation; a near-identical recent capture is marked.
+ *
+ * Regenerating an existing row (Rebuild Metadata, a source re-sync) never loosens its
+ * privacy: a suppressed (deleted), redacted or private row keeps that state. A
+ * migration rebuild also leaves manually edited rows (`generated_by = 'manual'`) alone.
+ */
 export function writeObservationMetadata(
   db: Database.Database,
   metadata: ObservationMetadataRow,
 ): { duplicate: boolean } {
+  const current = db
+    .prepare(
+      "SELECT privacy_state, generated_by FROM memory_observation_metadata WHERE memory_id = ?",
+    )
+    .get(metadata.memoryId) as { privacy_state?: string; generated_by?: string } | undefined;
+  if (current && current.generated_by === "manual" && metadata.generatedBy === "migration") {
+    return { duplicate: false };
+  }
+  if (current) {
+    metadata = {
+      ...metadata,
+      privacyState: stricterPrivacyState(current.privacy_state, metadata.privacyState),
+    };
+  }
   const existing = db
     .prepare(
       `SELECT memory_id FROM memory_observation_metadata

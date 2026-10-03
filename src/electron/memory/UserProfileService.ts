@@ -12,6 +12,7 @@ import {
   extractPreferredNameFromMessage,
   sanitizePreferredNameMemoryLine,
 } from "../utils/preferred-name";
+import { InputSanitizer } from "../agent/security/input-sanitizer";
 import { RelationshipMemoryService } from "./RelationshipMemoryService";
 
 const MAX_FACTS = 250;
@@ -234,6 +235,8 @@ export class UserProfileService {
 
   static buildPromptContext(maxFacts = 8): string {
     const profile = this.load();
+    // Third-party (mailbox) relationship items are excluded by default; this
+    // context becomes the pinned user-profile block.
     const relationshipContext = RelationshipMemoryService.buildPromptContext({
       maxPerLayer: 2,
       maxChars: 900,
@@ -253,7 +256,8 @@ export class UserProfileService {
 
     for (const fact of selected) {
       const label = this.categoryLabel(fact.category);
-      lines.push(`- ${label}: ${fact.value}`);
+      // Rendered inside the pinned <cowork_user_profile> block: one line, no tags.
+      lines.push(`- ${label}: ${InputSanitizer.sanitizeInlineMemoryLine(fact.value)}`);
     }
 
     if (relationshipContext) {

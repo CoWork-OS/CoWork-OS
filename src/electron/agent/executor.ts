@@ -8666,9 +8666,12 @@ ${transcript}
         query,
         allowExternalAccess: true,
       });
+      // External provider text is untrusted: neutralize tags so it cannot close
+      // the pinned block or forge sibling blocks.
       const context = results
         .map((result) => result.context)
         .filter(Boolean)
+        .map((text) => String(text).replace(/</g, "&lt;").replace(/>/g, "&gt;"))
         .join("\n\n");
       if (!context) return "";
       return [
@@ -8868,7 +8871,11 @@ ${transcript}
       ? await this.buildSupermemoryProfileBlock(message)
       : "";
     const roleContext = this.getRoleContextPrompt();
-    const profileContext = [this.buildUserProfileBlock(10), externalProfileContext]
+    // Personal profile facts follow the same gate as other memory injection.
+    const profileContext = [
+      allowMemoryInjection ? this.buildUserProfileBlock(10) : "",
+      externalProfileContext,
+    ]
       .filter(Boolean)
       .join("\n");
     const isExplicitChatMode = this.isExplicitChatExecutionMode();
@@ -28229,7 +28236,8 @@ You are continuing a previous conversation. The context from the previous conver
       }
     }
     const roleContext = this.getRoleContextPrompt();
-    const profileContext = this.buildUserProfileBlock(10);
+    // Personal profile facts follow the same gate as other memory injection.
+    const profileContext = allowMemoryInjection ? this.buildUserProfileBlock(10) : "";
 
     this.daemon.updateTaskStatus(this.task.id, "executing");
 

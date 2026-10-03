@@ -5,6 +5,7 @@ import { type PendingMemoryWrite, type MemoryType } from "../database/repositori
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { createLogger } from "../utils/logger";
+import { containsSecret, redactSecrets } from "./sensitive-content";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import type {
   CuratedMemoryKind,
@@ -571,7 +572,7 @@ export class MemoryWriteGate {
 
   private static redactText(value: string | undefined): string | undefined {
     if (!value) return value;
-    return value
+    const redacted = value
       .replace(/\b(api[_-]?key|secret|password|token|credential)\s*[:=]\s*\S+/gi, "$1=[redacted]")
       .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
       .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "sk-[redacted]")
@@ -580,6 +581,8 @@ export class MemoryWriteGate {
         /-----BEGIN [^-]+ PRIVATE KEY-----[\s\S]*?-----END [^-]+ PRIVATE KEY-----/g,
         "[redacted private key]",
       );
+    // Then the shared detector, for shapes the patterns above miss (JWTs, AWS, Slack…).
+    return redactSecrets(redacted).text;
   }
 
   private static isSensitiveKey(key: string): boolean {
@@ -593,7 +596,8 @@ export class MemoryWriteGate {
         /\bBearer\s+[A-Za-z0-9._~+/-]+=*/i.test(value) ||
         /\bsk-[A-Za-z0-9_-]{12,}\b/.test(value) ||
         /\bgh[pousr]_[A-Za-z0-9_]{12,}\b/.test(value) ||
-        /-----BEGIN [^-]+ PRIVATE KEY-----/.test(value)
+        /-----BEGIN [^-]+ PRIVATE KEY-----/.test(value) ||
+        containsSecret(value)
       );
     }
     if (Array.isArray(value))

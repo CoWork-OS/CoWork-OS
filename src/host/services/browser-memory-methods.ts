@@ -470,17 +470,32 @@ export function createBrowserMemoryDefinitions(options: {
       "read",
       (value) => MemoryService.searchAsync(value.workspaceId, value.query, value.limit ?? 30),
     ),
-    getMemoryDetails: action(ids, async (memoryIds) => {
-      const details = await MemoryService.getFullDetails(memoryIds);
-      for (const workspaceId of new Set(details.map((memory) => memory.workspaceId)))
-        await requireWorkspace(workspaceId);
-      return details;
-    }),
+    // Accepts the desktop shape `{ workspaceId, ids }` (SEC-11) and the older bare id list.
+    getMemoryDetails: action(
+      z.union([ids, z.object({ workspaceId: id, ids }).strict()]),
+      async (value) => {
+        const scope = Array.isArray(value) ? undefined : value.workspaceId;
+        const details = await MemoryService.getFullDetails(Array.isArray(value) ? value : value.ids);
+        const visible = scope
+          ? details.filter((memory) => memory.workspaceId === scope)
+          : details;
+        for (const workspaceId of new Set(visible.map((memory) => memory.workspaceId)))
+          await requireWorkspace(workspaceId);
+        return visible;
+      },
+    ),
     getMemoryTimeline: action(
-      z.object({ memoryId: id, windowSize: z.number().int().min(1).max(50).optional() }).strict(),
+      z
+        .object({
+          workspaceId: id.optional(),
+          memoryId: id,
+          windowSize: z.number().int().min(1).max(50).optional(),
+        })
+        .strict(),
       async (value) => {
         const [memory] = await MemoryService.getFullDetails([value.memoryId]);
         if (!memory) return [];
+        if (value.workspaceId && memory.workspaceId !== value.workspaceId) return [];
         await requireWorkspace(memory.workspaceId);
         return MemoryService.getTimelineContext(value.memoryId, value.windowSize);
       },

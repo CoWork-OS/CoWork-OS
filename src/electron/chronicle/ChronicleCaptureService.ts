@@ -110,13 +110,11 @@ export class ChronicleCaptureService {
   }
 
   async applySettings(next: ChronicleSettings): Promise<void> {
-    const previous = this.settings;
     this.settings = { ...next };
-    const shouldClearBuffer =
-      previous.enabled &&
-      (!next.enabled || !next.consentAcceptedAt || this.deps.getScreenCaptureStatus() === "denied");
     if (!this.canRun()) {
-      await this.stop({ clearRawBuffer: shouldClearBuffer });
+      // Disabled, paused, consent withdrawn or unsupported: drop the raw
+      // buffer so nothing captured before the stop stays queryable on disk.
+      await this.stop({ clearRawBuffer: true });
       return;
     }
     this.start();
@@ -124,6 +122,7 @@ export class ChronicleCaptureService {
 
   start(): void {
     if (!this.canRun()) return;
+    void this.pruneBuffer().catch(() => undefined);
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -197,10 +196,12 @@ export class ChronicleCaptureService {
   }
 
   async queryRecentContext(options: ChronicleQueryOptions): Promise<ChronicleResolvedContext[]> {
-    if (!this.settings.enabled || !this.settings.consentAcceptedAt) {
+    if (!this.settings.enabled || this.settings.paused || !this.settings.consentAcceptedAt) {
       return [];
     }
-    const frames = await this.loadFrames();
+    await this.pruneBuffer();
+    const cutoff = this.retentionCutoff();
+    const frames = (await this.loadFrames()).filter((frame) => frame.capturedAt >= cutoff);
     const recent = frames
       .sort((a, b) => b.capturedAt - a.capturedAt)
       .slice(0, this.settings.maxFrames);
@@ -234,6 +235,7 @@ export class ChronicleCaptureService {
   }
 
   private async captureFallbackFrame(): Promise<ChronicleBufferedFrame | null> {
+    if (!this.canRun()) return null;
     const frames = await this.captureFrames({ usedFallback: true });
     return frames[0] || null;
   }
@@ -358,6 +360,15 @@ export class ChronicleCaptureService {
           try {
             const raw = await fs.readFile(path.join(dir, entry), "utf8");
             const frame = JSON.parse(raw) as ChronicleBufferedFrame;
+            // Only trust image paths that live in this buffer directory; the
+            // path is later read (OCR, promotion) and deleted (pruning).
+            if (
+              typeof frame?.imagePath !== "string" ||
+              typeof frame.capturedAt !== "number" ||
+              path.dirname(path.resolve(frame.imagePath)) !== path.resolve(dir)
+            ) {
+              continue;
+            }
             if (await fileExists(frame.imagePath)) {
               frames.push(frame);
             }
@@ -372,8 +383,12 @@ export class ChronicleCaptureService {
     return frames;
   }
 
+  private retentionCutoff(): number {
+    return this.deps.now() - this.settings.retentionMinutes * 60_000;
+  }
+
   private async pruneBuffer(): Promise<void> {
-    const cutoff = this.deps.now() - this.settings.retentionMinutes * 60_000;
+    const cutoff = this.retentionCutoff();
     const frames = await this.loadFrames();
     const sorted = [...frames].sort((a, b) => b.capturedAt - a.capturedAt);
     const keepIds = new Set(

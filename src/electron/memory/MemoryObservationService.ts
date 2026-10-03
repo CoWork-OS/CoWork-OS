@@ -119,20 +119,48 @@ export class MemoryObservationService {
     return this.requireStore().details(...args);
   }
 
-  static update(
+  static async update(
     ...args: Parameters<MemoryObservationStore["update"]>
   ): Promise<ReturnType<MemoryObservationStore["update"]>> {
-    return this.requireStore().update(...args);
+    const result = await this.requireStore().update(...args);
+    this.notifyVisibilityChanged();
+    return result;
   }
 
-  static redact(
+  static async redact(
     ...args: Parameters<MemoryObservationStore["redact"]>
   ): Promise<ReturnType<MemoryObservationStore["redact"]>> {
-    return this.requireStore().redact(...args);
+    const result = await this.requireStore().redact(...args);
+    this.notifyVisibilityChanged();
+    return result;
   }
 
-  static delete(workspaceId: string, memoryId: string): Promise<boolean> {
-    return this.requireStore().delete(workspaceId, memoryId);
+  static async delete(workspaceId: string, memoryId: string): Promise<boolean> {
+    const result = await this.requireStore().delete(workspaceId, memoryId);
+    this.notifyVisibilityChanged();
+    return result;
+  }
+
+  private static visibilityListeners = new Set<() => void>();
+
+  /**
+   * Subscribe to edits that can change what prompts may show (update, redact, delete).
+   * MemoryService drops its prompt-recall cache here, so a deleted memory is not served
+   * from a cached recall.
+   */
+  static onVisibilityChanged(listener: () => void): () => void {
+    this.visibilityListeners.add(listener);
+    return () => this.visibilityListeners.delete(listener);
+  }
+
+  private static notifyVisibilityChanged(): void {
+    for (const listener of this.visibilityListeners) {
+      try {
+        listener();
+      } catch (error) {
+        logger.warn("[MemoryObservationService] Visibility listener failed:", error);
+      }
+    }
   }
 
   static async isPromptSuppressed(memoryId: string): Promise<boolean> {

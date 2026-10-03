@@ -5227,6 +5227,8 @@ export class MailboxService {
       maxChars: 420,
       contactIdentityId: resolution?.identity?.id,
       companyId: scopedCompanyId,
+      // Mailbox drafting already works on the sender's content.
+      includeThirdParty: true,
     });
     const latestIncoming =
       detail.messages.filter((message) => message.direction === "incoming").slice(-1)[0] ||

@@ -6,6 +6,7 @@
  */
 
 import { WorkspaceRepository } from "../database/repository-facades";
+import { isSafeExcludedPattern } from "./excluded-patterns";
 import { MemoryEmbeddingRepository, MemoryRepository } from "../database/repository-facades";
 import { MemorySettingsRepository, MemorySummaryRepository } from "../database/repository-facades";
 import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
@@ -42,28 +43,11 @@ import type { CoreMemoryScopeKind } from "../../shared/types";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { createLogger } from "../utils/logger";
 import { containsNoMemoryDirective } from "./no-memory-directive";
+import { redactSecrets } from "./sensitive-content";
+import { neutralizeReservedImportPrefix } from "./memory-visibility";
 
-// Privacy patterns to exclude - matches common sensitive data patterns
-const SENSITIVE_PATTERNS = [
-  /api[_-]?key/i,
-  /secret/i,
-  /password/i,
-  /passwd/i,
-  /token/i,
-  /credential/i,
-  /auth/i,
-  /bearer\s+[a-zA-Z0-9\-_]+/i,
-  /ssh[_-]?key/i,
-  /private[_-]?key/i,
-  /\.env/i,
-  /aws[_-]?access/i,
-  /aws[_-]?secret/i,
-  /-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----/i,
-  /ghp_[a-zA-Z0-9]+/i, // GitHub personal access token
-  /gho_[a-zA-Z0-9]+/i, // GitHub OAuth token
-  /sk-[a-zA-Z0-9]+/i, // OpenAI API key format
-  /xox[baprs]-[a-zA-Z0-9-]+/i, // Slack tokens
-];
+// Secret values are redacted before storage by `redactSecrets` (./sensitive-content);
+// merely mentioning auth, tokens or `.env` no longer hides a memory.
 
 // Events for reactive updates
 const memoryEvents = new EventEmitter();
@@ -238,6 +222,8 @@ export class MemoryService {
     this.settingsRepo = new MemorySettingsRepository(db);
     this.markdownIndex = new MarkdownMemoryIndexService(db);
     MemoryObservationService.initialize(db);
+    // Inspector edits (delete, redact, privacy changes) must not be served from cache.
+    MemoryObservationService.onVisibilityChanged(() => this.clearPromptRecallCache());
     this.initialized = true;
 
     // Start periodic cleanup
@@ -364,20 +350,22 @@ export class MemoryService {
       return null;
     }
 
+    const compressionOrigin = options?.origin ?? (taskId ? "task" : "unknown");
     const privacyPrepared = this.applyInlinePrivacy(content);
+    // Secret values never reach storage; the rest of the text is kept.
+    privacyPrepared.content = redactSecrets(privacyPrepared.content).text;
+    // Only importers may write rows that read as imported (those are global).
+    if (compressionOrigin !== "import") {
+      privacyPrepared.content = neutralizeReservedImportPrefix(privacyPrepared.content);
+    }
 
     // Check excluded patterns
     if (this.shouldExclude(privacyPrepared.content, settings)) {
       return null;
     }
 
-    // Check for sensitive content
-    const containsSensitive = this.containsSensitiveData(privacyPrepared.content);
     const finalIsPrivate =
-      isPrivate ||
-      privacyPrepared.hadPrivateBlock ||
-      containsSensitive ||
-      settings.privacyMode === "strict";
+      isPrivate || privacyPrepared.hadPrivateBlock || settings.privacyMode === "strict";
 
     // Estimate tokens
     const tokens = estimateTokens(privacyPrepared.content);
@@ -388,7 +376,6 @@ export class MemoryService {
         ? privacyPrepared.content.slice(0, 10000) + "\n[... truncated]"
         : privacyPrepared.content;
 
-    const compressionOrigin = options?.origin ?? (taskId ? "task" : "unknown");
     if (!options?.skipMemoryWriteGate) {
       const gate = await MemoryWriteGate.evaluate({
         workspaceId,
@@ -592,7 +579,9 @@ export class MemoryService {
     limit = 20,
   ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
-    const results = await this.searchInternal(workspaceId, query, limit);
+    const results = await this.withoutHiddenMemories(
+      await this.searchInternal(workspaceId, query, limit),
+    );
     if (this.sql && results.length > 0) {
       // Best-effort bookkeeping; it logs its own failures and never delays the search.
       void MemoryTierService.recordReferenceBatch(
@@ -659,9 +648,14 @@ export class MemoryService {
         importedEmbeddings: this.importedEmbeddings.entries(),
       });
       if ("results" in plan) return plan.results as MemorySearchResult[];
-      return plan.rank(
-        await this.memoryRepo.getFullDetails(plan.candidateIds),
-      ) as MemorySearchResult[];
+      // Semantic candidates come from embedding caches that do not track privacy: keep
+      // this workspace's rows and other workspaces' non-private imported rows only.
+      const details = (await this.memoryRepo.getFullDetails(plan.candidateIds)).filter(
+        (memory) =>
+          memory.workspaceId === workspaceId ||
+          (!memory.isPrivate && this.isImportedMemoryContent(memory.content)),
+      );
+      return plan.rank(details) as MemorySearchResult[];
     } catch {
       return this.mergeLexicalOnly(lexicalLocal, lexicalImportedGlobal, limit);
     }
@@ -1027,9 +1021,14 @@ export class MemoryService {
     return this.memoryRepo.getRecentForWorkspace(workspaceId, limit, true);
   }
 
+  /**
+   * Recent memories injected into prompts. Private rows are excluded (they are shown on
+   * request through search tools, not pushed into every turn), as are suppressed and
+   * redacted rows.
+   */
   static async getRecentForPromptRecall(workspaceId: string, limit = 20): Promise<Memory[]> {
     this.ensureInitialized();
-    const recent = await this.memoryRepo.getRecentForWorkspace(workspaceId, limit, true);
+    const recent = await this.memoryRepo.getRecentForWorkspace(workspaceId, limit, false);
     const suppressed = await MemoryObservationService.suppressedIds(recent.map((m) => m.id));
     return recent.filter(
       (memory) =>
@@ -1054,6 +1053,7 @@ export class MemoryService {
       details
         .filter(
           (memory) =>
+            memory.isPrivate ||
             this.isPromptRecallIgnoredContent(memory.content) ||
             isGeneratedPlaybookContent(memory.content) ||
             suppressed.has(memory.id),
@@ -1193,6 +1193,13 @@ export class MemoryService {
     this.promptRecallCache.clear();
   }
 
+  /** Drop results whose observation is suppressed (deleted) or redacted. */
+  private static async withoutHiddenMemories<T extends { id: string }>(results: T[]): Promise<T[]> {
+    if (results.length === 0) return results;
+    const hidden = await MemoryObservationService.suppressedIds(results.map((r) => r.id));
+    return hidden.size === 0 ? results : results.filter((r) => !hidden.has(r.id));
+  }
+
   static getPromptRecallDiagnostics(): PromptRecallDiagnostics {
     return { ...this.promptRecallDiagnostics };
   }
@@ -1257,6 +1264,7 @@ export class MemoryService {
         `Memory search is unavailable: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    results = await this.withoutHiddenMemories(results);
     if (results.length > 0 && this.sql) {
       await MemoryTierService.recordReferenceBatch(
         this.sql,
@@ -1499,6 +1507,7 @@ export class MemoryService {
     this.embeddingsLoadedForWorkspace.delete(workspaceId);
     this.embeddingCacheGeneration += 1;
     this.embeddingBackfillInProgress.delete(workspaceId);
+    this.promptRecallCache.clear();
     memoryEvents.emit("memoryChanged", { type: "importedEntryDeleted", workspaceId });
     return true;
   }
@@ -1533,6 +1542,7 @@ export class MemoryService {
     this.importedEmbeddings.delete(memoryId);
     const updated = await this.memoryRepo.findById(memoryId);
     if (updated) {
+      this.promptRecallCache.clear();
       memoryEvents.emit("memoryChanged", { type: "importedEntryUpdated", workspaceId });
       return updated;
     }
@@ -1561,6 +1571,7 @@ export class MemoryService {
     this.embeddingsLoadedForWorkspace.delete(workspaceId);
     this.embeddingCacheGeneration += 1;
     this.embeddingBackfillInProgress.delete(workspaceId);
+    this.promptRecallCache.clear();
     memoryEvents.emit("memoryChanged", { type: "importedDeleted", workspaceId });
     return deleted;
   }
@@ -1614,7 +1625,7 @@ export class MemoryService {
       seen.add(signature);
 
       try {
-        const sanitized = InputSanitizer.sanitizeMemoryContent(entry).trim();
+        const sanitized = redactSecrets(InputSanitizer.sanitizeMemoryContent(entry)).text.trim();
         if (!sanitized) {
           duplicatesSkipped += 1;
           continue;
@@ -1696,6 +1707,7 @@ export class MemoryService {
     this.embeddingCacheGeneration += 1;
     this.embeddingBackfillInProgress.delete(workspaceId);
     this.clearCompressionStateForWorkspace(workspaceId);
+    this.promptRecallCache.clear();
     memoryEvents.emit("memoryChanged", { type: "cleared", workspaceId });
   }
 
@@ -1713,6 +1725,7 @@ export class MemoryService {
       }
     }
     if (deleted > 0) {
+      this.promptRecallCache.clear();
       memoryEvents.emit("memoryChanged", { type: "deleted", workspaceId });
     }
     return deleted;
@@ -1739,8 +1752,12 @@ export class MemoryService {
 
     const current = await this.memoryRepo.findById(memoryId);
     if (!current || current.workspaceId !== workspaceId) return null;
+    // A memory the user deleted or redacted in the Inspector stays that way: a source
+    // re-sync must not restore its content (returning it also stops a fresh capture).
+    if ((await MemoryObservationService.suppressedIds([memoryId])).has(memoryId)) return current;
 
     const privacyPrepared = this.applyInlinePrivacy(content);
+    privacyPrepared.content = redactSecrets(privacyPrepared.content).text;
     if (this.shouldExclude(privacyPrepared.content, settings)) return null;
     const truncatedContent =
       privacyPrepared.content.length > 10000
@@ -2577,7 +2594,7 @@ export class MemoryService {
     summaryText: string,
     compressed: boolean,
   ): Promise<void> {
-    const summary = this.normalizeSummaryStorageText(summaryText);
+    const summary = neutralizeReservedImportPrefix(this.normalizeSummaryStorageText(summaryText));
     if (!summary) return;
 
     const taskId = this.extractSharedTaskId(memories);
@@ -2862,6 +2879,8 @@ export class MemoryService {
     }
 
     for (const pattern of settings.excludedPatterns) {
+      // Stored patterns may predate IPC validation; never run a ReDoS-prone one (SEC-11).
+      if (!isSafeExcludedPattern(pattern)) continue;
       try {
         const regex = new RegExp(pattern, "i");
         if (regex.test(content)) {
@@ -2872,18 +2891,6 @@ export class MemoryService {
       }
     }
 
-    return false;
-  }
-
-  /**
-   * Check if content contains sensitive data
-   */
-  private static containsSensitiveData(content: string): boolean {
-    for (const pattern of SENSITIVE_PATTERNS) {
-      if (pattern.test(content)) {
-        return true;
-      }
-    }
     return false;
   }
 

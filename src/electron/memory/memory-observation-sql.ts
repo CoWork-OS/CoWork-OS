@@ -3,6 +3,11 @@ import type Database from "better-sqlite3";
 import type { Memory, MemoryType } from "../database/repositories";
 import { createLogger } from "../utils/logger";
 import { type ObservationMetadataRow, writeObservationMetadata } from "./memory-capture-sql";
+import {
+  AGENT_HIDDEN_PRIVACY_STATES,
+  AGENT_VISIBLE_PRIVACY_STATES,
+  isAgentVisiblePrivacyState,
+} from "./memory-visibility";
 import type {
   MemoryObservationGeneratedBy,
   MemoryObservationMetadata,
@@ -372,17 +377,25 @@ export class MemoryObservationStore {
   }): MemoryObservationTimelineEntry[] {
     const db = this.db;
     const windowSize = Math.min(Math.max(input.windowSize || 5, 1), 20);
+    // Deleted (suppressed) and redacted memories are not part of any timeline.
     let anchor = input.memoryId
       ? this.getRow(input.memoryId, input.workspaceId)
-      : this.search({ workspaceId: input.workspaceId, query: input.query || "", limit: 1 })[0];
-    if (!anchor) return [];
+      : this.search({
+          workspaceId: input.workspaceId,
+          query: input.query || "",
+          limit: 1,
+          privacyStates: [...AGENT_VISIBLE_PRIVACY_STATES],
+        })[0];
+    if (!anchor || !isAgentVisiblePrivacyState(anchor.privacyState)) return [];
     const anchorTime = "memoryCreatedAt" in anchor ? anchor.memoryCreatedAt : anchor.createdAt;
+    const hidden = AGENT_HIDDEN_PRIVACY_STATES.map((state) => `'${state}'`).join(", ");
     const rows = db
       .prepare(`
       SELECT om.*, m.summary, m.content, m.tokens, m.created_at AS memory_created_at
       FROM memory_observation_metadata om
       JOIN memories m ON m.id = om.memory_id
       WHERE om.workspace_id = ?
+        AND om.privacy_state NOT IN (${hidden})
         AND m.created_at BETWEEN ? AND ?
       ORDER BY m.created_at ASC
       LIMIT ?
@@ -449,10 +462,12 @@ export class MemoryObservationStore {
       workspaceId,
       memoryId,
     );
-    if (next.privacyState === "private" || next.privacyState === "redacted") {
+    if (next.privacyState !== current.privacyState || next.privacyState !== "normal") {
+      // Keep `memories.is_private` in step with the observation: any non-normal state is
+      // private, and an explicit change back to normal clears it.
       db.prepare(
-        "UPDATE memories SET is_private = 1, updated_at = ? WHERE id = ? AND workspace_id = ?",
-      ).run(Date.now(), memoryId, workspaceId);
+        "UPDATE memories SET is_private = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+      ).run(next.privacyState === "normal" ? 0 : 1, Date.now(), memoryId, workspaceId);
     }
     return this.getRow(memoryId, workspaceId);
   }

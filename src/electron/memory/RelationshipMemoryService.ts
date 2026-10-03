@@ -1,13 +1,20 @@
 import { v4 as uuidv4 } from "uuid";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import type { Task } from "../../shared/types";
+import { InputSanitizer } from "../agent/security/input-sanitizer";
 import {
   extractPreferredNameFromMessage,
   sanitizePreferredNameMemoryLine,
 } from "../utils/preferred-name";
 
 type RelationshipLayer = "identity" | "preferences" | "context" | "history" | "commitments";
-type RelationshipSource = "conversation" | "feedback" | "task";
+/**
+ * Where an item came from. "mailbox" items are third-party text (email subjects,
+ * summaries, sender names, extracted commitments) and are not trusted as facts
+ * about the user: they stay available to mailbox features but are never rendered
+ * into the user-profile / relationship prompt context.
+ */
+type RelationshipSource = "conversation" | "feedback" | "task" | "mailbox";
 type TaskSource = NonNullable<Task["source"]>;
 
 export interface RelationshipMemoryItem {
@@ -45,6 +52,13 @@ interface BuildPromptContextOptions {
   includeDueSoon?: boolean;
   contactIdentityId?: string;
   companyId?: string;
+  /**
+   * Include third-party ("mailbox") items. Off by default: the result feeds the
+   * pinned user-profile block and task prompts, where sender-controlled text must
+   * not appear. Only mailbox features that already handle the sender's content
+   * should opt in.
+   */
+  includeThirdParty?: boolean;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -61,11 +75,14 @@ export class RelationshipMemoryService {
       limit?: number;
       contactIdentityId?: string;
       companyId?: string;
+      /** Drop third-party ("mailbox") items, for callers that render into prompts. */
+      excludeThirdParty?: boolean;
     } = {},
   ): RelationshipMemoryItem[] {
     const profile = this.load();
     const limit = Math.max(1, params.limit ?? 80);
     return this.sort(this.filterByScope(profile.items, params.contactIdentityId, params.companyId))
+      .filter((item) => !params.excludeThirdParty || !this.isThirdPartyItem(item))
       .filter((item) => !params.layer || item.layer === params.layer)
       .filter((item) => params.includeDone === true || item.status !== "done")
       .slice(0, limit);
@@ -301,7 +318,7 @@ export class RelationshipMemoryService {
         layer: "context",
         text,
         confidence: 0.7,
-        source: "task",
+        source: "mailbox",
         lastTaskId: params.taskId,
         contactIdentityId: params.contactIdentityId,
         companyId: params.companyId,
@@ -315,7 +332,7 @@ export class RelationshipMemoryService {
         layer: "commitments",
         text,
         confidence: 0.82,
-        source: "task",
+        source: "mailbox",
         lastTaskId: params.taskId,
         status: "open",
         dueAt: commitment.dueAt,
@@ -377,13 +394,17 @@ export class RelationshipMemoryService {
     const maxPerLayer = Math.max(1, options.maxPerLayer ?? 2);
     const maxChars = Math.max(300, options.maxChars ?? 1200);
     const includeDueSoon = options.includeDueSoon !== false;
+    const includeThirdParty = options.includeThirdParty === true;
     const profile = this.load();
     const scopedItems = this.filterByScope(
       profile.items,
       options.contactIdentityId,
       options.companyId,
-    );
+    ).filter((item) => includeThirdParty || !this.isThirdPartyItem(item));
     if (!scopedItems.length) return "";
+    // Stored text is rendered inside tagged prompt blocks; keep each item on one
+    // line and unable to close or open tags.
+    const render = (text: string) => InputSanitizer.sanitizeInlineMemoryLine(text);
 
     const lines: string[] = ["RELATIONSHIP MEMORY (continuity context, not hard constraints):"];
 
@@ -396,7 +417,7 @@ export class RelationshipMemoryService {
       if (!selected.length) return;
       lines.push(`${label}:`);
       for (const item of selected) {
-        lines.push(`- ${item.text}`);
+        lines.push(`- ${render(item.text)}`);
       }
     };
 
@@ -408,12 +429,14 @@ export class RelationshipMemoryService {
       const dueSoon = this.listDueSoonCommitments(72, Date.now(), {
         contactIdentityId: options.contactIdentityId,
         companyId: options.companyId,
-      }).slice(0, maxPerLayer);
+      })
+        .filter((item) => includeThirdParty || !this.isThirdPartyItem(item))
+        .slice(0, maxPerLayer);
       if (dueSoon.length > 0) {
         lines.push("Due soon reminders:");
         for (const item of dueSoon) {
           const dueText = item.dueAt ? new Date(item.dueAt).toISOString() : "soon";
-          lines.push(`- ${item.text} (due: ${dueText})`);
+          lines.push(`- ${render(item.text)} (due: ${dueText})`);
         }
       }
     }
@@ -424,6 +447,11 @@ export class RelationshipMemoryService {
       text = `${text.slice(0, maxChars - 16)}\n[... truncated]`;
     }
     return text;
+  }
+
+  /** True for items whose text came from a third party (e.g. an email sender). */
+  static isThirdPartyItem(item: Pick<RelationshipMemoryItem, "source">): boolean {
+    return item.source === "mailbox";
   }
 
   private static upsert(
@@ -445,7 +473,11 @@ export class RelationshipMemoryService {
     if (existing) {
       existing.updatedAt = now;
       existing.confidence = Math.max(existing.confidence, clamp(input.confidence, 0, 1));
-      existing.source = input.source;
+      // A mailbox write of the same text must not demote an item the user
+      // stated themselves; any other source re-labels as before.
+      if (!(input.source === "mailbox" && existing.source !== "mailbox")) {
+        existing.source = input.source;
+      }
       existing.lastTaskId = input.lastTaskId ?? existing.lastTaskId;
       existing.status = input.status ?? existing.status;
       existing.dueAt = typeof input.dueAt === "number" ? Math.floor(input.dueAt) : existing.dueAt;
@@ -651,14 +683,12 @@ export class RelationshipMemoryService {
                 layer: item.layer,
                 text: cleanedIdentityText,
                 confidence: clamp(Number(item.confidence ?? 0.65), 0, 1),
-                source:
-                  item.source === "feedback" || item.source === "task"
-                    ? item.source
-                    : "conversation",
+                source: this.normalizeSource(item),
                 createdAt: Number(item.createdAt || Date.now()),
                 updatedAt: Number(item.updatedAt || Date.now()),
               };
 
+              if (sanitizedItem.source !== item.source) profileWasSanitized = true;
               if (typeof item.lastTaskId === "string") {
                 sanitizedItem.lastTaskId = item.lastTaskId;
               }
@@ -688,6 +718,19 @@ export class RelationshipMemoryService {
     }
 
     return normalizedProfile;
+  }
+
+  /**
+   * Older builds stored mailbox insights with source "task". Only mailbox writes
+   * ever produced "task" items outside the history layer (task completion writes
+   * history only), so those are re-labelled "mailbox" on load.
+   */
+  private static normalizeSource(item: RelationshipMemoryItem): RelationshipSource {
+    if (item.source === "mailbox" || item.source === "feedback") return item.source;
+    if (item.source === "task") {
+      return item.layer === "context" || item.layer === "commitments" ? "mailbox" : "task";
+    }
+    return "conversation";
   }
 
   private static save(profile: RelationshipMemoryProfile): void {

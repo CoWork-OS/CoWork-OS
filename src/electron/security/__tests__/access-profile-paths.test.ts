@@ -425,6 +425,9 @@ describe("protected in-workspace paths", () => {
     [".git/hooks/pre-commit", "git hook"],
     [".git/config", "git config"],
     ["vendor/dep/.git/hooks/pre-commit", "nested repository hook"],
+    [".cowork/memory/transcripts/checkpoints/task-1.json", "task resume checkpoint"],
+    [".cowork/memory/transcripts/checkpoints/task-1.previous.json", "previous checkpoint"],
+    [".cowork/memory/transcripts/spans/task-1.jsonl", "transcript span log"],
   ] as const;
 
   for (const [relative, label] of protectedTargets) {
@@ -487,6 +490,52 @@ describe("protected in-workspace paths", () => {
     ).toMatchObject({ decision: "deny", reason: "protected_path" });
   });
 
+  it("lets only the internal runtime storage writer mutate transcript checkpoints", () => {
+    const workspace = makeWorkspace();
+    const checkpoint = path.join(
+      workspace.path,
+      ".cowork",
+      "memory",
+      "transcripts",
+      "checkpoints",
+      "task-1.json",
+    );
+
+    expect(
+      evaluateWorkspaceFilesystemAccess(workspace, checkpoint, "write", {
+        internalRuntimeStorageWrite: true,
+      }).decision,
+    ).toBe("allow");
+    // The internal flag never lifts the policy or git protections.
+    for (const relative of [".cowork/policy/permissions.json", ".git/hooks/pre-commit"]) {
+      expect(
+        evaluateWorkspaceFilesystemAccess(workspace, path.join(workspace.path, relative), "write", {
+          internalRuntimeStorageWrite: true,
+        }),
+      ).toMatchObject({ decision: "deny", reason: "protected_path" });
+    }
+    // Nor does it override a workspace with writes disabled.
+    const readOnly = makeWorkspace({
+      permissions: {
+        read: true,
+        write: false,
+        delete: false,
+        shell: false,
+        network: false,
+        unrestrictedFileAccess: false,
+        allowedPaths: [],
+      },
+    });
+    expect(
+      evaluateWorkspaceFilesystemAccess(
+        readOnly,
+        path.join(readOnly.path, ".cowork", "memory", "transcripts", "checkpoints", "t.json"),
+        "write",
+        { internalRuntimeStorageWrite: true },
+      ).decision,
+    ).toBe("deny");
+  });
+
   it("allows writing .git/info/exclude, which CoWork maintains itself", () => {
     const workspace = makeWorkspace();
     const target = path.join(workspace.path, ".git", "info", "exclude");
@@ -515,6 +564,8 @@ describe("protected in-workspace paths", () => {
     for (const relative of [
       ".cowork/tmp/scratch.txt",
       ".cowork/automated-outputs/report.md",
+      ".cowork/memory/MEMORY.md",
+      ".cowork/memory/topics/notes.md",
       ".github/workflows/ci.yml",
       "src/.gitignore",
       "gitignore-notes.md",

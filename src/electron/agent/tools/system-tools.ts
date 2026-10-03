@@ -18,6 +18,10 @@ import { assertResolvedHostAllowed } from "../../security/address-classes";
 import { LLMTool } from "../llm/types";
 import { MemoryService } from "../../memory/MemoryService";
 import { MemoryObservationService } from "../../memory/MemoryObservationService";
+import {
+  isAgentVisiblePrivacyState,
+  sanitizeAgentPrivacyStates,
+} from "../../memory/memory-visibility";
 import { SessionRecallService } from "../../memory/SessionRecallService";
 import { LayeredMemoryIndexService } from "../../memory/LayeredMemoryIndexService";
 import { QuoteRecallService } from "../../memory/QuoteRecallService";
@@ -1706,7 +1710,8 @@ export class SystemTools {
       query: input.query,
       limit: Math.min(input.limit || 20, 50),
       observationTypes: input.observationTypes,
-      privacyStates: input.privacyStates,
+      // The model may narrow to normal/private, never widen to deleted or redacted rows.
+      privacyStates: sanitizeAgentPrivacyStates(input.privacyStates),
     });
     const mapped = results.map((result) => ({
       id: result.memoryId,
@@ -1794,10 +1799,9 @@ export class SystemTools {
     if (!progressiveRecallEnabled()) {
       throw new Error("Progressive memory recall is disabled in Memory settings.");
     }
-    const details = await MemoryObservationService.details(
-      (input.ids || []).slice(0, 10),
-      this.workspace.id,
-    );
+    const details = (
+      await MemoryObservationService.details((input.ids || []).slice(0, 10), this.workspace.id)
+    ).filter((detail) => isAgentVisiblePrivacyState(detail.privacyState));
     const mapped = details.map((detail) => ({
       id: detail.memoryId,
       title: detail.title,
@@ -2312,8 +2316,9 @@ export class SystemTools {
                 },
                 privacyStates: {
                   type: "array",
-                  items: { type: "string", enum: ["normal", "private", "redacted", "suppressed"] },
-                  description: "Optional privacy-state filters",
+                  items: { type: "string", enum: ["normal", "private"] },
+                  description:
+                    "Optional privacy-state filters. Deleted and redacted memories are never returned.",
                 },
               },
               required: ["query"],

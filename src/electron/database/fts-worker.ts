@@ -13,6 +13,7 @@ import {
   MemoryEmbeddingCache,
 } from "../memory/memory-embedding-cache";
 import { type HybridCandidateRow, rankHybridMemories } from "../memory/memory-hybrid-rank";
+import { buildAgentVisibleMemorySql } from "../memory/memory-visibility";
 
 interface FtsRequest {
   method:
@@ -67,6 +68,7 @@ function search(
       FROM memories_fts f
       JOIN memories m ON f.rowid = m.rowid
       WHERE memories_fts MATCH ? AND m.workspace_id = ? ${privacyFilter}
+        AND ${buildAgentVisibleMemorySql("m.id")}
       ORDER BY score
       LIMIT ?
     `);
@@ -98,7 +100,10 @@ function searchImportedGlobal(query: string, limit: number, includePrivate: bool
   const ftsQuery = buildRelaxedTokenFtsQuery(tokens);
   if (!ftsQuery) return [];
 
-  const privacyFilter = includePrivate ? "" : "AND m.is_private = 0";
+  // Imported rows are searched across workspaces, so private ones never are: the
+  // owning workspace still finds them through its local lane. `includePrivate` is kept
+  // for the call signature only.
+  void includePrivate;
 
   try {
     const stmt = db.prepare(`
@@ -106,7 +111,8 @@ function searchImportedGlobal(query: string, limit: number, includePrivate: bool
              bm25(memories_fts) as score
       FROM memories_fts f
       JOIN memories m ON f.rowid = m.rowid
-      WHERE memories_fts MATCH ? AND ${buildImportedMemoryFilterSql("m.content")} ${privacyFilter}
+      WHERE memories_fts MATCH ? AND ${buildImportedMemoryFilterSql("m.content")}
+        AND m.is_private = 0 AND ${buildAgentVisibleMemorySql("m.id")}
       ORDER BY score
       LIMIT ?
     `);
@@ -146,6 +152,7 @@ function searchLocalForPromptRecall(workspaceId: string, query: string, limit: n
       FROM memories_fts f
       JOIN memories m ON f.rowid = m.rowid
       WHERE memories_fts MATCH ? AND m.workspace_id = ? AND m.is_private = 0
+        AND ${buildAgentVisibleMemorySql("m.id")}
       ORDER BY score
       LIMIT ?
     `);
@@ -215,14 +222,28 @@ function searchByContentMarker(workspaceId: string, marker: string, limit: numbe
 
 const embeddingCache = new MemoryEmbeddingCache(db);
 
-function loadMemoryRows(ids: string[]): HybridCandidateRow[] {
+/**
+ * Full rows for hybrid candidates that the agent may see: this workspace's rows (private
+ * only when asked) and other workspaces' non-private imported rows, never a suppressed
+ * or redacted one. Semantic candidates come from the embedding caches, which do not
+ * track privacy, so this is where it is enforced.
+ */
+function loadMemoryRows(
+  ids: string[],
+  workspaceId: string,
+  includePrivate: boolean,
+): HybridCandidateRow[] {
   if (ids.length === 0) return [];
   const rows = db
     .prepare(
       `SELECT id, summary, content, type, created_at, task_id
-       FROM memories WHERE id IN (${ids.map(() => "?").join(", ")})`,
+       FROM memories
+       WHERE id IN (${ids.map(() => "?").join(", ")})
+         AND ((workspace_id = ? ${includePrivate ? "" : "AND is_private = 0"})
+              OR (${buildImportedMemoryFilterSql("content")} AND is_private = 0))
+         AND ${buildAgentVisibleMemorySql("memories.id")}`,
     )
-    .all(...ids) as Array<Record<string, unknown>>;
+    .all(...ids, workspaceId) as Array<Record<string, unknown>>;
   return rows.map((row) => ({
     id: row.id as string,
     summary: (row.summary as string) || undefined,
@@ -258,7 +279,7 @@ function hybridSearch(
     lexicalImportedGlobal: lexicalImported,
     workspaceEmbeddings: embeddingCache.workspace(workspaceId).entries(),
     importedEmbeddings: embeddingCache.importedGlobal().entries(),
-    loadRows: loadMemoryRows,
+    loadRows: (ids) => loadMemoryRows(ids, workspaceId, includePrivate),
   });
 }
 

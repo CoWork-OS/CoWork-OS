@@ -32,6 +32,7 @@ import {
   isArtifactGenerationToolName,
   isCanonicalWriteToolName,
   isFileMutationToolName,
+  isMemoryWriteToolName,
 } from "../tool-semantics";
 import {
   extractDomainFromUrl,
@@ -1316,6 +1317,11 @@ export class PermissionEngine {
   private static isMutatingTool(toolName: string): boolean {
     const canonicalToolName = canonicalizeToolName(toolName);
     if (this.isWorkspaceWriteTool(canonicalToolName)) {
+      return true;
+    }
+    // Memory/KG/Supermemory writes persist state beyond the task; classify them
+    // as mutations so Plan mode denies them like other writes. (SEC-12)
+    if (isMemoryWriteToolName(canonicalToolName)) {
       return true;
     }
     if (canonicalToolName.startsWith("browser_")) {

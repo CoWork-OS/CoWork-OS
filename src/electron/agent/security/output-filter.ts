@@ -217,24 +217,35 @@ export class OutputFilter {
     "channel_fetch_discord_messages",
   ]);
 
-  // Instruction-like text addressed to an AI. Each pattern is tested against a single
-  // line of decoded text, so a match never spans unrelated content.
-  private static readonly LINE_INJECTION_PATTERNS: RegExp[] = [
+  // Instruction-like phrases addressed to an AI whose meaning does not depend on line breaks.
+  // Besides each line, they are tested against the whole text with whitespace collapsed (see
+  // findSplitPhrase), so splitting one across lines does not hide it.
+  private static readonly PHRASE_INJECTION_PATTERNS: RegExp[] = [
     // "Ignore all previous instructions", "disregard the prior prompt", ...
     /\b(?:ignore|disregard|forget|override)\s+(?:(?:all|any|the|your|my|these|those|of)\s+)*(?:previous|prior|above|earlier|preceding|original)\s+(?:instructions?|prompts?|directions?|rules|directives?|guidelines)\b/i,
     /\[(?:IGNORE|OVERRIDE|NEW)\s*(?:PREVIOUS|SYSTEM|INSTRUCTIONS?)\]/i,
+    // Hidden HTML comments addressed to an AI: "<!-- AI: ... -->".
+    /<!--\s*(?:AI|ASSISTANT|LLM|AGENT)\s*:/i,
+    // Chat-template control tokens smuggled into content.
+    /<\|im_start\|>\s*system|<\|system\|>|<<\s*SYS\s*>>/i,
+  ];
+
+  // Instruction-like text addressed to an AI. Each pattern is tested against a single
+  // line of decoded text, so a match never spans unrelated content. Labels and comments
+  // are line-shaped: across a line break ("...built with AI" / "NOTE: ...") they are not.
+  private static readonly LINE_INJECTION_PATTERNS: RegExp[] = [
+    ...OutputFilter.PHRASE_INJECTION_PATTERNS,
     // Upper-case directive labels: "SYSTEM INSTRUCTION:", "AI NOTE:". Identifiers such as
     // SYSTEM_INSTRUCTION or systemInstruction (SDK config keys) are deliberately not matched.
     /\b(?:AI|ASSISTANT|SYSTEM|LLM|AGENT)\s+(?:INSTRUCTIONS?|NOTE|COMMAND|DIRECTIVE|OVERRIDE)\s*:/,
     // The same labels written in prose at the start of a line: "System instruction: ...".
     /^\s*(?:(?:#+|\/\/+|\/\*+|\*|<!--|>|-)\s*)?(?:ai|assistant|system|llm|agent)\s+(?:instructions?|note|command|directive|override)\s*:/i,
-    // Hidden HTML comments addressed to an AI: "<!-- AI: ... -->".
-    /<!--\s*(?:AI|ASSISTANT|LLM|AGENT)\s*:/i,
     // Code comments addressed to an AI that carry a directive ("// AI: note" alone does not).
     /^\s*(?:\/\/+|#+|\/\*+|\*|--|;+)\s*(?:AI|ASSISTANT|LLM|AGENT)\s*:\s*(?:please\s+)?(?:ignore|disregard|forget|override|send|upload|post|e-?mail|forward|exfiltrat\w*|leak|reveal|print|output|run|execute|call|fetch|curl|wget|delete|remove|download|install|visit|navigate|tell|say|respond|reply|do\s+not|don'?t|never|always|you\s+(?:must|should|will|are))\b/i,
-    // Chat-template control tokens smuggled into content.
-    /<\|im_start\|>\s*system|<\|system\|>|<<\s*SYS\s*>>/i,
   ];
+
+  // How much of each string the collapsed-whitespace phrase scan reads.
+  private static readonly SPLIT_PHRASE_SCAN_CHARS = 200_000;
 
   // Exfiltration needs all three: framing addressed to an AI (on the line or the line
   // before), an imperative transfer verb, and a sensitive target. Ordinary docs such as
@@ -295,7 +306,7 @@ export class OutputFilter {
 
     let matchedLine: string | null = null;
     for (const text of texts) {
-      matchedLine = this.findInjectionLine(text);
+      matchedLine = this.findInjectionLine(text) ?? this.findSplitPhrase(text);
       if (matchedLine) break;
     }
     if (!matchedLine) {
@@ -357,6 +368,23 @@ export class OutputFilter {
       ) {
         return line.trim();
       }
+    }
+    return null;
+  }
+
+  /**
+   * A phrase pattern split across lines ("Ignore all previous" / "instructions ...") or by
+   * invisible format characters (zero-width spaces and joiners, soft hyphens, bidi marks):
+   * matched against the start of `text` with those characters removed and whitespace runs
+   * collapsed, and quoted from the match on. Text with neither is fully covered per line.
+   */
+  private static findSplitPhrase(text: string): string | null {
+    const head = text.slice(0, this.SPLIT_PHRASE_SCAN_CHARS);
+    if (!/[\r\n\p{Cf}]/u.test(head)) return null;
+    const collapsed = head.replace(/\p{Cf}+/gu, "").replace(/\s+/g, " ");
+    for (const pattern of this.PHRASE_INJECTION_PATTERNS) {
+      const match = pattern.exec(collapsed);
+      if (match) return collapsed.slice(match.index, match.index + 200).trim();
     }
     return null;
   }

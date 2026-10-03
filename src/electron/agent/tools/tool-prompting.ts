@@ -111,9 +111,9 @@ const TOOL_PROMPT_METADATA_BY_NAME: Record<string, LLMToolPromptMetadata> = {
   })),
   run_command: createPromptMetadata(() => ({
     appendDescription:
-      "Use for shell, test, build, packaging, git, and local CLI work instead of browser or web tools. Not for simple file writes (use write_file) or native GUI control (use computer-use tools). Runs non-interactively: pass -y/--yes, --no-input, or git commit -m; avoid editors, pagers, and watch modes; servers and watchers block until the timeout. If a test or build fails, read the output, fix the cause, and rerun.",
+      "Use for shell, test, build, packaging, git, and local CLI work instead of browser or web tools. Not for simple file writes (use write_file) or native GUI control (use computer-use tools). Runs non-interactively: pass -y/--yes, --no-input, or git commit -m; avoid editors and pagers. Start dev servers and watchers with background: true (they would otherwise block until the timeout), then use process_output and stop_process. If a test or build fails, read the output, fix the cause, and rerun.",
     compactDescription:
-      "Use for shell, test, build, git, and local CLI execution; runs non-interactively (pass -y/--yes, --no-input, git commit -m). For simple file writes, prefer write_file.",
+      "Use for shell, test, build, git, and local CLI execution; runs non-interactively (pass -y/--yes, --no-input, git commit -m). Servers and watchers: background: true. For simple file writes, prefer write_file.",
   })),
   write_file: createPromptMetadata(() => ({
     appendDescription:

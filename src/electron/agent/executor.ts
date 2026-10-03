@@ -17331,7 +17331,7 @@ ${transcript}
     return [
       "WEB PAGE PREVIEW GUIDANCE:",
       "- For HTML, React, Vite, Next.js, landing page, website, and frontend page design/edit/debug tasks, plan to render the page and inspect it in the visible in-app browser when practical.",
-      "- For React/Vite/Next.js projects, start the existing dev server with the repo's script or use qa_run with server_command when automated QA is more appropriate; use an available localhost port.",
+      "- For React/Vite/Next.js projects, start the existing dev server with the repo's script using run_command background: true (read its URL from startup_output or process_output, stop it with stop_process), or use qa_run with server_command when automated QA is more appropriate; use an available localhost port.",
       "- For standalone HTML, open the file or local preview URL in the browser instead of inventing a complex server.",
       "- Use browser_navigate, browser_snapshot, browser_screenshot, and browser_emulate for desktop/mobile checks, screenshots, layout overlap, interaction, console, and network issues.",
       "- Fix issues found in the rendered page, then re-check before finalizing. Skip browser checks only for pure design-token/component refactors where rendered-page evidence would not change the outcome.",
@@ -43089,6 +43089,16 @@ Return ONLY a JSON object:
     } catch (error) {
       this.emitEvent("log", {
         message: "Failed to stop the persistent shell session during cancellation.",
+        error: String((error as Any)?.message || error),
+      });
+    }
+    // Dev servers and watchers started with run_command background: true
+    // outlive a finished turn, but not a cancelled task.
+    try {
+      await this.toolRegistry.stopBackgroundProcesses(`task_cancelled:${reason}`);
+    } catch (error) {
+      this.emitEvent("log", {
+        message: "Failed to stop background processes during cancellation.",
         error: String((error as Any)?.message || error),
       });
     }

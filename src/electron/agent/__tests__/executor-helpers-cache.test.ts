@@ -257,6 +257,16 @@ describe("ToolCallDeduplicator only blocks genuine repeats", () => {
     stderr: "AssertionError: expected 200, got 302",
   });
 
+  it("lets the model keep polling a background process with the same call", () => {
+    const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
+    const input = { process_id: "bg-1a2b3c4d", wait_ms: 5_000 };
+
+    for (let i = 0; i < 8; i++) {
+      expect(dedupe.checkDuplicate("process_output", input)).toEqual({ isDuplicate: false });
+      dedupe.recordCall("process_output", input, `{"success":true,"output":"tick ${i}"}`);
+    }
+  });
+
   it("allows six distinct edits to different files in a row", () => {
     const dedupe = new ToolCallDeduplicator(3, 120_000, 4);
 

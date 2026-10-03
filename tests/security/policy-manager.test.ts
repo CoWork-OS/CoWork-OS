@@ -64,6 +64,14 @@ describe("SecurityPolicyManager", () => {
     expect(isToolAllowedQuick("execute_code", allowed)).toBe(true);
   });
 
+  it.each(["process_output", "stop_process"])("offers %s exactly where run_command is", (tool) => {
+    const denied = createMockWorkspace({ shell: false });
+    expect(isToolAllowedQuick(tool, denied)).toBe(false);
+    const allowed = createMockWorkspace({ shell: true });
+    expect(isToolAllowedQuick(tool, allowed)).toBe(isToolAllowedQuick("run_command", allowed));
+    expect(isToolAllowedQuick(tool, allowed)).toBe(true);
+  });
+
   describe("Constructor and Initialization", () => {
     it("should create a policy manager with workspace context", () => {
       const workspace = createMockWorkspace();

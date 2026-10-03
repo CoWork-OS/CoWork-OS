@@ -554,6 +554,11 @@ export function isToolAllowedQuick(
   if ((toolName === "run_command" || toolName === "execute_code") && !permissions.shell) {
     return false;
   }
+  // Background process tools only act on processes run_command started, so they
+  // are offered exactly where run_command is.
+  if (toolName === "process_output" || toolName === "stop_process") {
+    return isToolAllowedQuick("run_command", workspace, gatewayContext);
+  }
   if (
     SecurityPolicyManager.requiresNetworkPermission(toolName) &&
     (!permissions.network || permissions.accessNetworkMode === "disabled")

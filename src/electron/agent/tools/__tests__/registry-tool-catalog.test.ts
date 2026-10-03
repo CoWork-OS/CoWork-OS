@@ -697,7 +697,97 @@ describe("ToolRegistry tool catalog versioning", () => {
       expect(description).toMatch(/non-interactive/i);
       expect(description).toContain("--yes");
     }
-    expect(rendered.description).toContain("servers and watchers block until the timeout");
+    expect(rendered.description).toContain("dev servers and watchers with background: true");
+    expect(compact).toContain("background: true");
+  });
+
+  it("offers background process control exactly when run_command is offered", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-background");
+    const tools = registry.getTools();
+    const runCommand = tools.find((tool) => tool.name === "run_command")!;
+    const processOutput = tools.find((tool) => tool.name === "process_output")!;
+    const stopProcess = tools.find((tool) => tool.name === "stop_process")!;
+
+    expect(runCommand.input_schema.properties.background.type).toBe("boolean");
+    expect(runCommand.description).toMatch(/dev servers.*background: true/s);
+    expect(processOutput.description).toMatch(/^Read new output/);
+    expect(processOutput.description).toMatch(/Use it to wait for a dev server/);
+    expect(processOutput.input_schema.required).toBeUndefined();
+    expect(stopProcess.description).toMatch(/Use it when you no longer need/);
+    expect(stopProcess.input_schema.required).toEqual(["process_id"]);
+
+    const noShell = createWorkspace();
+    noShell.permissions.shell = false;
+    const names = new ToolRegistry(noShell, createDaemon(), "task-background-no-shell")
+      .getTools()
+      .map((tool) => tool.name);
+    expect(names).not.toContain("run_command");
+    expect(names).not.toContain("process_output");
+    expect(names).not.toContain("stop_process");
+  });
+
+  it("schedules process_output as a parallel read and stop_process exclusively, without approval", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-background-spec");
+
+    expect(registry.getSchedulerSpec("process_output", { process_id: "bg-1" })).toMatchObject({
+      concurrencyClass: "read_parallel",
+      readOnly: true,
+      idempotent: true,
+    });
+    expect(registry.getSchedulerSpec("stop_process", { process_id: "bg-1" })).toMatchObject({
+      concurrencyClass: "exclusive",
+      readOnly: false,
+      idempotent: false,
+    });
+    expect((registry as Any).getApprovalTypeForTool("process_output")).toBeNull();
+    expect((registry as Any).getApprovalTypeForTool("stop_process")).toBeNull();
+    expect(
+      (registry as Any).getApprovalTypeForTool("run_command", {
+        command: "npm run dev",
+        background: true,
+      }),
+    ).toBe("run_command");
+  });
+
+  it("routes background run_command calls and process tools to the shell tools", async () => {
+    const daemon = { ...createDaemon(), requestApproval: vi.fn().mockResolvedValue(true) };
+    const registry = new ToolRegistry(createWorkspace(), daemon as Any, "task-background-route");
+    const internals = registry as Any;
+    const startBackground = vi
+      .spyOn(internals.shellTools, "startBackgroundCommand")
+      .mockResolvedValue({ success: true, background: true, process_id: "bg-1" } as Any);
+    const runCommand = vi
+      .spyOn(internals.shellTools, "runCommand")
+      .mockResolvedValue({ success: true } as Any);
+    const output = vi
+      .spyOn(internals.shellTools, "getBackgroundProcessOutput")
+      .mockResolvedValue({ success: true } as Any);
+    const stop = vi
+      .spyOn(internals.shellTools, "stopBackgroundProcess")
+      .mockResolvedValue({ success: true } as Any);
+
+    await registry.executeTool("run_command", {
+      command: "npm run dev",
+      cwd: "web",
+      background: true,
+      startup_wait_ms: 8000,
+    });
+    await registry.executeTool("process_output", { process_id: "bg-1", tail_lines: 5 });
+    await registry.executeTool("stop_process", { process_id: "bg-1" });
+
+    expect(startBackground).toHaveBeenCalledWith("npm run dev", {
+      cwd: "web",
+      env: undefined,
+      signal: undefined,
+      startupWaitMs: 8000,
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(output).toHaveBeenCalledWith({ process_id: "bg-1", tail_lines: 5 }, undefined);
+    expect(stop).toHaveBeenCalledWith({ process_id: "bg-1" });
+    // The background start passes the same pre-dispatch shell approval as any
+    // run_command; reading or stopping the task's own process does not ask.
+    expect(daemon.requestApproval).toHaveBeenCalledTimes(1);
+    expect(daemon.requestApproval.mock.calls[0][1]).toBe("run_command");
   });
 
   it("prioritizes local channel history for message summarization", () => {

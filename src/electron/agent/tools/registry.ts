@@ -1228,6 +1228,30 @@ export class ToolRegistry {
     await this.shellTools.cancelPersistentShellSession();
   }
 
+  /** Stop every background process this task started with run_command background: true. */
+  async stopBackgroundProcesses(reason: string): Promise<number> {
+    return this.shellTools.stopAllBackgroundProcesses(reason);
+  }
+
+  private async runShellCommand(input: Any, runtime?: Record<string, unknown>): Promise<Any> {
+    const signal = runtime?.signal instanceof AbortSignal ? runtime.signal : undefined;
+    if (input?.background === true || input?.background === "true") {
+      return this.shellTools.startBackgroundCommand(input.command, {
+        cwd: input.cwd,
+        env: input.env,
+        signal,
+        startupWaitMs: input.startup_wait_ms,
+      });
+    }
+    return this.shellTools.runCommand(input.command, {
+      ...input,
+      // Kill the command within the executor's budget for this call (which
+      // infers longer budgets for builds and tests) rather than a fixed default.
+      timeout: resolveRunCommandTimeoutMs(input, runtime?.timeoutMs),
+      signal,
+    });
+  }
+
   private deriveChronicleDestinationHints(input: {
     appName?: string;
     windowTitle?: string;
@@ -2635,15 +2659,21 @@ export class ToolRegistry {
     register("voice_call", async ({ request }) => this.voiceCallTools.executeAction(request.input));
     register(
       "run_command",
+      async ({ request }) => this.runShellCommand(request.input, request.runtime),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "process_output",
       async ({ request }) =>
-        this.shellTools.runCommand(request.input.command, {
-          ...request.input,
-          // Kill the command within the executor's budget for this call (which
-          // infers longer budgets for builds and tests) rather than a fixed default.
-          timeout: resolveRunCommandTimeoutMs(request.input, request.runtime?.timeoutMs),
-          signal:
-            request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
-        }),
+        this.shellTools.getBackgroundProcessOutput(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "stop_process",
+      async ({ request }) => this.shellTools.stopBackgroundProcess(request.input),
       exclusiveSchedulerSpec,
     );
     register("git_status", async () => this.gitTools.gitStatus());
@@ -3990,7 +4020,9 @@ Web Search (for finding URLs, not reading them):
       descriptions += `
 
 Shell Commands:
-- run_command: Execute commands within the active access profile`;
+- run_command: Execute commands within the active access profile. Use background: true for dev servers and watchers.
+- process_output: Read output and status of a background process
+- stop_process: Stop a background process and everything it started`;
     }
 
     descriptions += `
@@ -4131,7 +4163,7 @@ If omitted, the runtime fills in a safe fallback so execution can continue.
 WEB APP BUILD + SHOW WORKFLOW:
 When you build any web app, do NOT stop at code generation. Always finish by running the app and showing it in canvas. Pick the approach that fits what you built:
 - Single HTML/CSS/JS file → canvas_create then canvas_push the HTML directly
-- Multi-file app with a dev script (React, Next.js, Vite, Vue, etc.) → install deps if needed, start the dev server on any free port, wait for it to be ready, then canvas_create + canvas_open_url("http://localhost:<port>")
+- Multi-file app with a dev script (React, Next.js, Vite, Vue, etc.) → install deps if needed, start the dev server with run_command background: true (bound to localhost on a free port), check its startup_output or poll process_output until it prints its URL, then canvas_create + canvas_open_url with that URL. Stop it with stop_process if you restart it
 - App that builds to a static dist/ → run the build, then canvas_push the built HTML or serve it and use canvas_open_url
 Use whichever workspace makes sense (the project folder or a temp dir). What matters is that the running app is visible in canvas before the task ends. Code generation alone is not a complete result.
 `
@@ -4557,12 +4589,13 @@ ${skillDescriptions}`;
     if (name === "voice_call") return await this.voiceCallTools.executeAction(input);
 
     // Shell tools
-    if (name === "run_command")
-      return await this.shellTools.runCommand(input.command, {
-        ...input,
-        timeout: resolveRunCommandTimeoutMs(input, _runtime?.timeoutMs),
-        signal: _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
-      });
+    if (name === "run_command") return await this.runShellCommand(input, _runtime);
+    if (name === "process_output")
+      return await this.shellTools.getBackgroundProcessOutput(
+        input,
+        _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
+      );
+    if (name === "stop_process") return await this.shellTools.stopBackgroundProcess(input);
 
     // Git tools
     if (name === "git_status") return await this.gitTools.gitStatus();
@@ -8969,7 +9002,7 @@ ${skillDescriptions}`;
       {
         name: "run_command",
         description:
-          "Execute a shell command in the workspace directory. IMPORTANT: Commands run within the active access profile. Additional authority is requested only when the operation requires it. If additional authority is needed, the request identifies that boundary. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Commands run non-interactively, with no terminal to answer prompts: pass flags such as -y/--yes, --no-input, or git commit -m, and avoid editors, pagers, and watch modes; long-running servers or watchers block until the timeout. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing.",
+          "Execute a shell command in the workspace directory. IMPORTANT: Commands run within the active access profile. Additional authority is requested only when the operation requires it. If additional authority is needed, the request identifies that boundary. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Commands run non-interactively, with no terminal to answer prompts: pass flags such as -y/--yes, --no-input, or git commit -m, and avoid editors and pagers. For anything that runs until stopped (dev servers such as npm run dev or vite, python -m http.server, file watchers, --watch modes), set background: true: the call returns after a short startup window with the process_id and startup output, and the process keeps running; then use process_output to read its output and stop_process to stop it. Without background, such commands block until the timeout and are killed. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing.",
         input_schema: {
           type: "object",
           properties: {
@@ -8986,10 +9019,68 @@ ${skillDescriptions}`;
             timeout: {
               type: "number",
               description:
-                "Timeout in milliseconds (optional, default: 120000; build/test/install commands may infer longer timeouts automatically; max: 300000)",
+                "Timeout in milliseconds (optional, default: 120000; build/test/install commands may infer longer timeouts automatically; max: 300000). Ignored with background: true.",
+            },
+            background: {
+              type: "boolean",
+              description:
+                "Start a long-running command (dev server, file server, watcher) and return once it is ready or after a short startup window, leaving it running. The result has process_id, pid, status, startup_output and any localhost urls it printed. At most 5 per task; they stop when the task is cancelled, after 30 minutes without process_output, or when the app quits.",
+            },
+            startup_wait_ms: {
+              type: "number",
+              description:
+                "With background: true, how long to wait for a ready line (for example 'Local: http://localhost:5173') or an early exit before returning (default 5000, max 30000).",
             },
           },
           required: ["command"],
+        },
+      },
+      {
+        name: "process_output",
+        description:
+          "Read new output and the status (running, exit code) of a background process started with run_command background: true. Use it to wait for a dev server to become ready, to find the URL or port it printed, or to check its logs after an action. Each call returns output since the previous call; pass since_offset (from next_offset) to page, since_offset: 0 to reread what is still buffered, or tail_lines for just the end. Call it without process_id to list this task's background processes.",
+        input_schema: {
+          type: "object",
+          properties: {
+            process_id: {
+              type: "string",
+              description:
+                "process_id returned by run_command background: true. Omit to list processes.",
+            },
+            since_offset: {
+              type: "number",
+              description: "Return output after this offset (next_offset of an earlier result).",
+            },
+            tail_lines: {
+              type: "number",
+              description: "Return only the last N lines of the selected output.",
+            },
+            wait_ms: {
+              type: "number",
+              description:
+                "If there is no new output yet, wait up to this long for some (max 15000) before returning.",
+            },
+            max_chars: {
+              type: "number",
+              description:
+                "Maximum characters of output to return (default 16000, max 64000). Longer output keeps its start and end.",
+            },
+          },
+        },
+      },
+      {
+        name: "stop_process",
+        description:
+          "Stop a background process started with run_command background: true, together with every process it started. Use it when you no longer need a dev server or watcher, before starting it again with different options, or to free a port. Returns the final status and the last lines of output.",
+        input_schema: {
+          type: "object",
+          properties: {
+            process_id: {
+              type: "string",
+              description: "process_id returned by run_command background: true.",
+            },
+          },
+          required: ["process_id"],
         },
       },
     ];

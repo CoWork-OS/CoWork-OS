@@ -953,6 +953,8 @@ export class ToolCallDeduplicator {
       "browser_get_text",
       "browser_evaluate",
       "canvas_push",
+      // Polls a running background process; the same call returns new output.
+      "process_output",
     ];
     if (statefulTools.includes(canonicalToolName)) {
       return { isDuplicate: false };

@@ -301,6 +301,7 @@ import {
   type ChatInlineFrame,
 } from "../../shared/mailbox";
 import { extractCanonicalTaskImpactMetrics } from "./canonical-task-impact";
+import { getBackgroundProcessManager } from "./tools/background-processes";
 
 export interface AgentDaemonOptions {
   startupRecovery?: boolean;
@@ -6195,6 +6196,14 @@ export class AgentDaemon extends EventEmitter {
     if (!existing) {
       throw new Error(`Task ${taskId} not found`);
     }
+    // Background processes (run_command background: true) outlive a finished
+    // turn so follow-ups can use them; cancelling or deleting the task, even a
+    // completed one whose executor is gone, stops them.
+    await getBackgroundProcessManager()
+      .stopAllForTask(taskId, "task_cancelled")
+      .catch((error) =>
+        log.error(`[cancel] Stopping background processes failed for ${taskId}:`, error),
+      );
     // Don't clobber terminal states.
     if (
       existing.status === "completed" ||
@@ -17375,6 +17384,14 @@ export class AgentDaemon extends EventEmitter {
       ]);
     } finally {
       if (cancellationTimer) clearTimeout(cancellationTimer);
+    }
+
+    // Background processes of tasks whose executor was already evicted have no
+    // executor to cancel; stop whatever is left.
+    try {
+      await getBackgroundProcessManager().stopAll("app_shutdown");
+    } catch (error) {
+      log.error("Failed to stop background processes on shutdown:", error);
     }
 
     // Commit rows the worker has not written, then project what the shutdown logged;

@@ -554,6 +554,35 @@ describe("AgentDaemon.completeTask", () => {
     expect(daemonLike.queueManager.onTaskFinished).toHaveBeenCalledWith("task-1");
   });
 
+  it("only sends persisted task fields when completing a user chat turn", async () => {
+    const { TaskStore } = await import("../../database/repositories");
+    const allowed = (TaskStore as unknown as { ALLOWED_UPDATE_FIELDS: Set<string> })
+      .ALLOWED_UPDATE_FIELDS;
+    const daemonLike = createDaemonLike();
+    daemonLike.taskRepo.findById.mockReturnValue({
+      id: "task-1",
+      title: "Task 1",
+      status: "executing",
+      workspaceId: "workspace-1",
+      createdAt: Date.now() - 1000,
+      agentConfig: {
+        executionMode: "chat",
+        executionModeSource: "user",
+        conversationMode: "chat",
+      },
+    });
+
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done");
+
+    const updates = (daemonLike.taskRepo.update as Any).mock.calls.map(
+      (call: Any[]) => call[1] as Record<string, unknown>,
+    );
+    expect(updates.length).toBeGreaterThan(0);
+    for (const update of updates) {
+      expect(Object.keys(update).filter((key) => !allowed.has(key))).toEqual([]);
+    }
+  });
+
   it("keeps outputSummary absent when metadata is not provided", () => {
     const daemonLike = createDaemonLike();
 

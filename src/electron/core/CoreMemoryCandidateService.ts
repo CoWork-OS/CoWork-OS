@@ -70,42 +70,10 @@ export class CoreMemoryCandidateService {
       );
     }
 
-    if (
-      normalized.includes("correct") ||
-      normalized.includes("rejected") ||
-      normalized.includes("invalidated")
-    ) {
-      pushCandidate(
-        "correction",
-        "Workflow intelligence should adjust a prior assumption",
-        trace.summary || "The run produced a correction or invalidated a previous path.",
-        0.78,
-        0.58,
-        0.7,
-      );
-    }
-
-    if (normalized.includes("worktree")) {
-      pushCandidate(
-        "pattern",
-        "Code-change automation prefers worktree-isolated execution",
-        trace.summary || "A code automation path referenced worktree requirements.",
-        0.83,
-        0.47,
-        0.84,
-      );
-    }
-
-    if (normalized.includes("notification") || normalized.includes("notify")) {
-      pushCandidate(
-        "preference",
-        "Operator favors notification-only outcomes when direct action is unnecessary",
-        trace.summary || "The runtime used a notification-oriented action path.",
-        0.68,
-        0.42,
-        0.66,
-      );
-    }
+    // Keyword matches on the runtime's own trace text ("notification", "worktree",
+    // "rejected") used to become generic operator "preferences", "patterns" and
+    // "corrections". They described the system, not the user, so they are no longer
+    // proposed; user corrections reach memory through the correction_learning signal.
 
     if (
       trace.traceKind === "subconscious_cycle" &&

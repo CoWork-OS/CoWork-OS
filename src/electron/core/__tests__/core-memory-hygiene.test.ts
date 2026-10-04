@@ -372,6 +372,41 @@ describeWithSqlite("core memory candidates, distillation and cleanup", () => {
       ).run(id);
     }
 
+    it("v2 dismisses retired-heuristic proposals once and keeps failure watch items", () => {
+      insertCandidate(
+        "p1",
+        "Operator favors notification-only outcomes when direct action is unnecessary",
+        "proposed",
+        now - 200 * DAY,
+        { type: "preference" },
+      );
+      insertCandidate("p2", "Core automation is tracking an active line of work", "proposed", now, {
+        type: "project_state",
+      });
+      insertCandidate("p3", "Foreground work active; deferred 61 merged signals", "proposed", now);
+      insertCandidate("w1", "Repeated autonomous failure path needs review", "proposed", now, {
+        type: "watch_item",
+      });
+      insertCandidate("k1", "User keeps release notes in docs/releases", "proposed", now, {
+        type: "project_state",
+      });
+
+      const cleanup = new CoreMemoryCleanupStore(db);
+      expect(cleanup.run(now).retiredProposalsDismissed).toBe(3);
+      const status = (id: string) =>
+        (db.prepare("SELECT status FROM core_memory_candidates WHERE id = ?").get(id) as {
+          status: string;
+        }).status;
+      expect(["p1", "p2", "p3"].map(status)).toEqual(["dismissed", "dismissed", "dismissed"]);
+      expect(status("w1")).toBe("proposed");
+      expect(status("k1")).toBe("proposed");
+
+      // Runs once: later proposals are left alone.
+      insertCandidate("p4", "Foreground work active; deferred 3 merged signals", "proposed", now);
+      expect(cleanup.run(now + DAY).retiredProposalsDismissed).toBe(0);
+      expect(status("p4")).toBe("proposed");
+    });
+
     it("removes duplicates, settles legacy rows and runs only once", () => {
       insertCandidate(
         "a1",
@@ -428,6 +463,8 @@ describeWithSqlite("core memory candidates, distillation and cleanup", () => {
         staleOpenLoopsDismissed: 1,
         duplicateLearningsDeleted: 4,
         duplicateTraceMemoriesDeleted: 1,
+        // v2 then dismisses the remaining unreviewed open loop.
+        retiredProposalsDismissed: 1,
       });
       const statuses = Object.fromEntries(
         (
@@ -437,7 +474,7 @@ describeWithSqlite("core memory candidates, distillation and cleanup", () => {
           }>
         ).map((row) => [row.id, row.status]),
       );
-      expect(statuses).toEqual({ a1: "applied", b1: "dismissed", c1: "proposed", d1: "skipped" });
+      expect(statuses).toEqual({ a1: "applied", b1: "dismissed", c1: "dismissed", d1: "skipped" });
       const memoryIds = (
         db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>
       ).map((row) => row.id);

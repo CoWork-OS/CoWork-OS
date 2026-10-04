@@ -3371,7 +3371,9 @@ if (isMacSafeStorageMigrationWorker) {
           coreMemoryCleanupDone ??= (async () => {
             try {
               const result = await new CoreMemoryCleanupRepository(db).run(Date.now());
-              if (result.ran) logger.info("Core memory duplicate cleanup completed", result);
+              if (result.ran || result.retiredProposalsDismissed > 0) {
+                logger.info("Core memory duplicate cleanup completed", result);
+              }
             } catch (error) {
               logger.warn("Core memory duplicate cleanup failed:", error);
             }

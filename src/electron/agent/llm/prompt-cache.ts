@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 
 import type { LLMProviderType, PromptCachingSettings } from "../../../shared/types";
 import { CUSTOM_PROVIDER_MAP } from "../../../shared/llm-provider-catalog";
+import { redactSecrets } from "../../memory/sensitive-content";
 import type {
   LLMContent,
   LLMMessage,
@@ -493,21 +494,86 @@ export function mapPromptCacheTtlToPiAiRetention(
   return promptCache?.ttl === "1h" ? "long" : "short";
 }
 
-export function buildOpenAIPromptCacheFields(
-  promptCache?: LLMPromptCacheConfig,
-  modelId?: string,
-): {
+/**
+ * How much of OpenAI's prompt-cache request surface to send:
+ * - `full`: `prompt_cache_key` plus `prompt_cache_options` / `prompt_cache_retention`
+ * - `key_only`: `prompt_cache_key` only (cache routing; implicit caching still applies)
+ * - `none`: no cache fields at all
+ */
+export type OpenAIPromptCacheTier = "full" | "key_only" | "none";
+
+export type OpenAIPromptCacheFields = {
   prompt_cache_key?: string;
   prompt_cache_retention?: "24h";
   prompt_cache_options?: { mode: "implicit"; ttl: "30m" };
-} {
-  if (!promptCache || promptCache.mode !== "openai_key") {
+};
+
+const OPENAI_PROMPT_CACHE_TIER_RANK: Record<OpenAIPromptCacheTier, number> = {
+  full: 2,
+  key_only: 1,
+  none: 0,
+};
+
+/** The lower (more conservative) of two prompt-cache tiers. */
+export function minOpenAIPromptCacheTier(
+  a: OpenAIPromptCacheTier,
+  b: OpenAIPromptCacheTier,
+): OpenAIPromptCacheTier {
+  return OPENAI_PROMPT_CACHE_TIER_RANK[a] <= OPENAI_PROMPT_CACHE_TIER_RANK[b] ? a : b;
+}
+
+/** Copy only the prompt-cache fields out of a request body. */
+export function pickOpenAIPromptCacheFields(
+  body: Record<string, unknown> | undefined,
+): OpenAIPromptCacheFields {
+  const picked: Record<string, unknown> = {};
+  for (const field of ["prompt_cache_key", "prompt_cache_retention", "prompt_cache_options"]) {
+    if (body?.[field] !== undefined) picked[field] = body[field];
+  }
+  return picked as OpenAIPromptCacheFields;
+}
+
+/**
+ * Pick the tier to retry with after the provider rejected `sentFields`. Steps down one
+ * tier: dropping the optional options/retention first keeps `prompt_cache_key` routing.
+ * Only when the key was the only cache field sent, or the provider names the key itself
+ * (and not the optional fields) as the problem, does it fall through to `none`.
+ */
+export function nextOpenAIPromptCacheTier(
+  sentFields: OpenAIPromptCacheFields,
+  rejectionMessage: string,
+): OpenAIPromptCacheTier {
+  const sentOptionalFields =
+    sentFields.prompt_cache_options !== undefined ||
+    sentFields.prompt_cache_retention !== undefined;
+  if (!sentOptionalFields) return "none";
+  const lower = String(rejectionMessage || "").toLowerCase();
+  const namesKey = /prompt_cache_key|session[_\s-]?id/.test(lower);
+  const namesOptionalField = /prompt_cache_options|prompt_cache_retention/.test(lower);
+  return namesKey && !namesOptionalField ? "none" : "key_only";
+}
+
+/** Redact and truncate a provider rejection message so it is safe to log. */
+export function summarizePromptCacheRejection(message: unknown, maxLength = 200): string {
+  const collapsed = redactSecrets(String(message || "")).text.replace(/\s+/g, " ").trim();
+  return collapsed.length > maxLength ? `${collapsed.slice(0, maxLength)}...` : collapsed;
+}
+
+export function buildOpenAIPromptCacheFields(
+  promptCache?: LLMPromptCacheConfig,
+  modelId?: string,
+  tier: OpenAIPromptCacheTier = "full",
+): OpenAIPromptCacheFields {
+  if (!promptCache || promptCache.mode !== "openai_key" || tier === "none") {
     return {};
   }
 
   const promptCacheKey = String(promptCache.cacheKey || "").trim();
   if (!promptCacheKey) {
     return {};
+  }
+  if (tier === "key_only") {
+    return { prompt_cache_key: promptCacheKey };
   }
 
   const normalizedModelId = (

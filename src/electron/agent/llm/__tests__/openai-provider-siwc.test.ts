@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LLMProviderConfig, LLMRequest } from "../types";
-import { OpenAIProvider } from "../openai-provider";
+import { OpenAIProvider, resetPromptCacheRejectionsForTests } from "../openai-provider";
 
 const responsesCreateMock = vi.fn();
 const openAIConstructorMock = vi.fn();
@@ -56,6 +56,7 @@ async function* streamOf(events: Any[]) {
 
 describe("OpenAIProvider Sign in with ChatGPT", () => {
   beforeEach(() => {
+    resetPromptCacheRejectionsForTests();
     vi.clearAllMocks();
     getAccessTokenMock.mockResolvedValue({ accessToken: "siwc-access" });
   });
@@ -190,7 +191,7 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
     expect(response.content).toEqual([{ type: "text", text: "Hello" }]);
   });
 
-  it("stops sending prompt-cache fields after the route rejects them once", async () => {
+  it("stops sending prompt-cache fields after the route rejects the key itself", async () => {
     responsesCreateMock
       .mockRejectedValueOnce(
         Object.assign(new Error("Unsupported parameter: prompt_cache_key"), { status: 400 }),
@@ -208,6 +209,92 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
 
     // One rejected attempt, then cache-free requests only.
     expect(responsesCreateMock).toHaveBeenCalledTimes(3);
+    expect(responsesCreateMock.mock.calls[1][0]).not.toHaveProperty("prompt_cache_key");
+    expect(responsesCreateMock.mock.calls[2][0]).not.toHaveProperty("prompt_cache_key");
+  });
+
+  it("keeps prompt_cache_key when only the modern cache options are rejected", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      responsesCreateMock
+        .mockRejectedValueOnce(
+          Object.assign(new Error("400 Unsupported parameter: 'prompt_cache_options'."), {
+            status: 400,
+          }),
+        )
+        .mockImplementation(async () =>
+          streamOf([
+            {
+              type: "response.completed",
+              response: {
+                output: [],
+                usage: {
+                  input_tokens: 9_000,
+                  output_tokens: 10,
+                  input_tokens_details: { cached_tokens: 8_192 },
+                },
+              },
+            },
+          ]),
+        );
+      const request = makeRequest({
+        model: "gpt-5.6-luna",
+        promptCache: { mode: "openai_key", cacheKey: "task-1", ttl: "5m" } as Any,
+      });
+
+      await new OpenAIProvider(makeConfig({ model: "gpt-5.6-luna" })).createMessage(request);
+      const response = await new OpenAIProvider(
+        makeConfig({ model: "gpt-5.6-luna" }),
+      ).createMessage(request);
+
+      expect(responsesCreateMock).toHaveBeenCalledTimes(3);
+      expect(responsesCreateMock.mock.calls[0][0]).toHaveProperty("prompt_cache_options");
+      for (const call of responsesCreateMock.mock.calls.slice(1)) {
+        expect(call[0].prompt_cache_key).toBe("task-1");
+        expect(call[0]).not.toHaveProperty("prompt_cache_options");
+      }
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("SIWC prompt cache controls rejected"),
+        expect.objectContaining({
+          model: "gpt-5.6-luna",
+          status: 400,
+          nextTier: "key_only",
+          providerMessage: expect.stringContaining("prompt_cache_options"),
+        }),
+      );
+      // Cached input tokens reach LLMResponse usage for cost accounting.
+      expect(response.usage).toMatchObject({ inputTokens: 9_000, cachedTokens: 8_192 });
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("remembers SIWC cache tiers per model", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      responsesCreateMock
+        .mockRejectedValueOnce(
+          Object.assign(new Error("Unsupported parameter: prompt_cache_options"), { status: 400 }),
+        )
+        .mockImplementation(async () =>
+          streamOf([{ type: "response.completed", response: { output: [] } }]),
+        );
+      const cache = { mode: "openai_key", cacheKey: "task-1", ttl: "5m" } as Any;
+
+      await new OpenAIProvider(makeConfig({ model: "gpt-5.6-luna" })).createMessage(
+        makeRequest({ model: "gpt-5.6-luna", promptCache: cache }),
+      );
+      await new OpenAIProvider(makeConfig()).createMessage(makeRequest({ promptCache: cache }));
+
+      // A rejection for gpt-5.6-luna does not downgrade gpt-6-astra.
+      expect(responsesCreateMock.mock.calls[2][0]).toMatchObject({
+        model: "gpt-6-astra",
+        prompt_cache_key: "task-1",
+        prompt_cache_options: { mode: "implicit", ttl: "30m" },
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("lists the plan catalog plus known-working unlisted models", async () => {

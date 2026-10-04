@@ -101,3 +101,29 @@ describe("provider output-cap errors", () => {
     });
   });
 });
+
+describe("detailed LLM call logging", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reports cached input tokens on the success line", async () => {
+    vi.spyOn(OpenAIProvider.prototype, "createMessage").mockResolvedValue({
+      ...okResponse,
+      usage: { inputTokens: 12_000, outputTokens: 40, cachedTokens: 11_264 },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const provider = LLMProviderFactory.createProviderFromConfig({
+      type: "openai",
+      model: "cache-telemetry-fixture",
+      openaiApiKey: "sk-fixture",
+    });
+
+    await provider.createMessage(request("cache-telemetry-fixture", 1_000));
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[LLM:openai\] #\d+ success in \d+ms$/),
+      expect.objectContaining({ inputTokens: 12_000, cachedTokens: 11_264, outputTokens: 40 }),
+    );
+  });
+});

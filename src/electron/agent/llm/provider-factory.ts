@@ -264,6 +264,9 @@ function summarizeLLMResponse(response: LLMResponse): Record<string, unknown> {
   const outputTokens = response?.usage?.outputTokens ?? null;
   const totalTokens =
     inputTokens != null && outputTokens != null ? inputTokens + outputTokens : null;
+  // Prompt-cache telemetry: input tokens served from the provider cache (part of inputTokens).
+  const cachedTokens = response?.usage ? (response.usage.cachedTokens ?? 0) : null;
+  const cacheWriteTokens = response?.usage?.cacheWriteTokens;
 
   return {
     stopReason: response?.stopReason,
@@ -272,6 +275,8 @@ function summarizeLLMResponse(response: LLMResponse): Record<string, unknown> {
     textChars,
     toolUseBlocks,
     inputTokens,
+    cachedTokens,
+    ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
     outputTokens,
     totalTokens,
   };

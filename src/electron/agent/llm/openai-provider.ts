@@ -41,6 +41,12 @@ import { resolveOutputTokenParamName, withReasoningOutputHeadroom } from "./outp
 import { classifyProviderError } from "./provider-error-classifier";
 import {
   buildOpenAIPromptCacheFields,
+  minOpenAIPromptCacheTier,
+  nextOpenAIPromptCacheTier,
+  type OpenAIPromptCacheFields,
+  type OpenAIPromptCacheTier,
+  pickOpenAIPromptCacheFields,
+  summarizePromptCacheRejection,
   extractOpenAICompatibleCacheUsage,
   extractPiAiUsage,
   isPromptCacheRequestUnsupportedError,
@@ -100,19 +106,42 @@ const SIWC_TOOL_NAMESPACE = "cowork";
 // Models confirmed to work through SIWC plan usage even though OpenAI's /models
 // catalog does not list them (verified 2026-10-02 with gpt-6.1-sol).
 const SIWC_UNLISTED_MODEL_IDS = ["gpt-6.1-sol"];
-// The SIWC route rejects prompt-cache fields for every request, and providers are
-// created per task, so remember the rejection for the whole app session.
-let siwcPromptCacheUnsupported = false;
-// The ChatGPT OAuth and API-key routes can reject prompt-cache fields per model. Providers
-// are created per task, so an instance flag would re-pay the failed request on every task;
-// remember rejections by route and model for the whole app session instead.
-const promptCacheRejectedModels = new Set<string>();
-const promptCacheRejectionKey = (route: "oauth" | "api_key", model: string | undefined) =>
+// Each OpenAI route can reject individual prompt-cache fields per model. A rejection steps
+// that route+model down one tier (full -> key_only -> none) so prompt_cache_key routing
+// survives when only the optional options/retention fields are refused. Providers are
+// created per task, so remember the tier for the whole app session instead of re-paying
+// the failed request on every task.
+type OpenAIPromptCacheRoute = "chat" | "responses" | "siwc" | "oauth";
+const promptCacheTiers = new Map<string, OpenAIPromptCacheTier>();
+const promptCacheTierKey = (route: OpenAIPromptCacheRoute, model: string | undefined) =>
   `${route}:${model || ""}`;
+function resolvePromptCacheTier(
+  route: OpenAIPromptCacheRoute,
+  model: string | undefined,
+  ceiling: OpenAIPromptCacheTier = "full",
+): OpenAIPromptCacheTier {
+  const remembered = promptCacheTiers.get(promptCacheTierKey(route, model));
+  return remembered ? minOpenAIPromptCacheTier(remembered, ceiling) : ceiling;
+}
+function rememberPromptCacheTier(
+  route: OpenAIPromptCacheRoute,
+  model: string | undefined,
+  tier: OpenAIPromptCacheTier,
+): void {
+  const key = promptCacheTierKey(route, model);
+  const remembered = promptCacheTiers.get(key);
+  promptCacheTiers.set(key, remembered ? minOpenAIPromptCacheTier(remembered, tier) : tier);
+}
+/**
+ * pi-ai's Codex transport already sends `prompt_cache_key` from `sessionId`, which is what
+ * the ChatGPT backend's own clients send. Nothing shows that backend accepting
+ * `prompt_cache_options` / `prompt_cache_retention` (live sessions rejected them), so the
+ * OAuth route never sends more than the key.
+ */
+const OAUTH_PROMPT_CACHE_TIER_CEILING: OpenAIPromptCacheTier = "key_only";
 /** Test hook: forget remembered prompt-cache rejections. */
 export function resetPromptCacheRejectionsForTests(): void {
-  siwcPromptCacheUnsupported = false;
-  promptCacheRejectedModels.clear();
+  promptCacheTiers.clear();
 }
 const SIWC_NON_RETRYABLE_ERROR_CODES = new Set([
   "subscription_sharing_user_not_eligible",
@@ -299,7 +328,10 @@ export class OpenAIProvider implements LLMProvider {
   /**
    * Create message using API key (standard OpenAI SDK)
    */
-  private async createMessageWithApiKey(request: LLMRequest): Promise<LLMResponse> {
+  private async createMessageWithApiKey(
+    request: LLMRequest,
+    cacheTier: OpenAIPromptCacheTier = resolvePromptCacheTier("chat", request.model),
+  ): Promise<LLMResponse> {
     if (!this.client) {
       throw new Error("OpenAI client not initialized");
     }
@@ -309,6 +341,7 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     const model = this.normalizeCodexModelId(request.model || this.model || DEFAULT_CODEX_MODEL);
+    let sentCacheFields: OpenAIPromptCacheFields = {};
     const messages = this.convertMessages(request.messages, request.system, request.systemBlocks);
     const tools = request.tools ? this.convertTools(request.tools) : undefined;
 
@@ -330,8 +363,9 @@ export class OpenAIProvider implements LLMProvider {
               tool_choice: request.toolChoice || "auto",
             }
           : {}),
-        ...buildOpenAIPromptCacheFields(request.promptCache, model),
+        ...buildOpenAIPromptCacheFields(request.promptCache, model, cacheTier),
       };
+      sentCacheFields = pickOpenAIPromptCacheFields(body);
       const response = await this.client.chat.completions.create(
         body,
         request.signal ? { signal: request.signal } : undefined,
@@ -345,15 +379,16 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error("Request cancelled");
       }
 
-      if (
-        request.promptCache &&
-        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
-      ) {
-        logger.warn("Prompt cache controls rejected; retrying without cache controls", {
-          model,
-          status: error?.status,
-        });
-        return this.createMessageWithApiKey({ ...request, promptCache: undefined });
+      const nextCacheTier = this.stepDownPromptCacheTier({
+        route: "chat",
+        label: "Chat Completions",
+        model: request.model,
+        loggedModel: model,
+        sentFields: sentCacheFields,
+        error,
+      });
+      if (nextCacheTier) {
+        return this.createMessageWithApiKey(request, nextCacheTier);
       }
 
       logger.error("API error:", {
@@ -523,7 +558,10 @@ export class OpenAIProvider implements LLMProvider {
     return result;
   }
 
-  private buildResponsesBody(request: LLMRequest): Record<string, Any> {
+  private buildResponsesBody(
+    request: LLMRequest,
+    cacheTier: OpenAIPromptCacheTier = "full",
+  ): Record<string, Any> {
     const { stableText } = splitSystemBlocksForOpenAIPrefix(
       request.system || "",
       request.systemBlocks,
@@ -563,20 +601,58 @@ export class OpenAIProvider implements LLMProvider {
       ...buildOpenAIPromptCacheFields(
         request.promptCache,
         request.model || this.model || DEFAULT_CODEX_MODEL,
+        cacheTier,
       ),
     };
   }
 
-  private async createResponsesMessageWithApiKey(request: LLMRequest): Promise<LLMResponse> {
-    if (
-      request.promptCache &&
-      promptCacheRejectedModels.has(promptCacheRejectionKey("api_key", request.model))
-    ) {
-      return this.createResponsesMessageWithApiKey({ ...request, promptCache: undefined });
-    }
+  /**
+   * Handle a provider rejection of the prompt-cache fields that were sent. Returns the tier
+   * to retry with (remembered for the route+model for the app session), or null when the
+   * error is not a cache rejection or no cache fields were sent.
+   */
+  private stepDownPromptCacheTier(params: {
+    route: OpenAIPromptCacheRoute;
+    label: string;
+    model: string | undefined;
+    loggedModel?: string;
+    sentFields: OpenAIPromptCacheFields;
+    error: Any;
+  }): OpenAIPromptCacheTier | null {
+    const { route, label, model, sentFields, error } = params;
+    if (Object.keys(sentFields).length === 0) return null;
+    const bodyMessage = error?.error?.message || error?.error?.detail;
+    const message = String(error?.message || bodyMessage || "");
+    const status = error?.status;
+    if (!isPromptCacheRequestUnsupportedError(status, message)) return null;
+    const nextTier = nextOpenAIPromptCacheTier(sentFields, message);
+    rememberPromptCacheTier(route, model, nextTier);
+    logger.warn(
+      `${label} prompt cache controls rejected; retrying with ${
+        nextTier === "none" ? "no cache controls" : "prompt_cache_key only"
+      }`,
+      {
+        model: params.loggedModel || model,
+        status,
+        rejectedFields: Object.keys(sentFields),
+        nextTier,
+        providerMessage: summarizePromptCacheRejection(
+          bodyMessage && bodyMessage !== message ? `${message} | ${bodyMessage}` : message,
+        ),
+      },
+    );
+    return nextTier;
+  }
+
+  private async createResponsesMessageWithApiKey(
+    request: LLMRequest,
+    cacheTier: OpenAIPromptCacheTier = resolvePromptCacheTier("responses", request.model),
+  ): Promise<LLMResponse> {
+    let sentCacheFields: OpenAIPromptCacheFields = {};
     try {
       logger.debug(`Calling Responses API with model: ${request.model}`);
-      const body = this.buildResponsesBody(request);
+      const body = this.buildResponsesBody(request, cacheTier);
+      sentCacheFields = pickOpenAIPromptCacheFields(body);
       const response = await (this.client as Any).responses.create(
         body,
         request.signal ? { signal: request.signal } : undefined,
@@ -588,16 +664,15 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error("Request cancelled");
       }
 
-      if (
-        request.promptCache &&
-        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
-      ) {
-        promptCacheRejectedModels.add(promptCacheRejectionKey("api_key", request.model));
-        logger.warn("Responses prompt cache controls rejected; retrying without cache controls", {
-          model: request.model,
-          status: error?.status,
-        });
-        return this.createResponsesMessageWithApiKey({ ...request, promptCache: undefined });
+      const nextCacheTier = this.stepDownPromptCacheTier({
+        route: "responses",
+        label: "Responses",
+        model: request.model,
+        sentFields: sentCacheFields,
+        error,
+      });
+      if (nextCacheTier) {
+        return this.createResponsesMessageWithApiKey(request, nextCacheTier);
       }
 
       logger.error("Responses API error:", {
@@ -699,9 +774,12 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   /** Builds a Responses body that satisfies the SIWC plan-usage preview route. */
-  buildSiwcResponsesBody(request: LLMRequest): Record<string, Any> {
+  buildSiwcResponsesBody(
+    request: LLMRequest,
+    cacheTier: OpenAIPromptCacheTier = "full",
+  ): Record<string, Any> {
     const model = this.mapToCodexModel(request.model || this.model || DEFAULT_CODEX_MODEL);
-    const body: Record<string, Any> = this.buildResponsesBody({ ...request, model });
+    const body: Record<string, Any> = this.buildResponsesBody({ ...request, model }, cacheTier);
     for (const field of SIWC_UNSUPPORTED_RESPONSES_FIELDS) delete body[field];
     body.model = model;
     body.store = false;
@@ -778,11 +856,11 @@ export class OpenAIProvider implements LLMProvider {
    * Create message using Sign in with ChatGPT plan usage (public Responses API,
    * streamed; success only on `response.completed`).
    */
-  private async createMessageWithSiwc(request: LLMRequest): Promise<LLMResponse> {
-    if (request.promptCache && siwcPromptCacheUnsupported) {
-      return this.createMessageWithSiwc({ ...request, promptCache: undefined });
-    }
-    const body = this.buildSiwcResponsesBody(request);
+  private async createMessageWithSiwc(
+    request: LLMRequest,
+    cacheTier: OpenAIPromptCacheTier = resolvePromptCacheTier("siwc", request.model),
+  ): Promise<LLMResponse> {
+    const body = this.buildSiwcResponsesBody(request, cacheTier);
     try {
       const accessToken = await this.getSiwcAccessToken();
       // Retries are owned by the executor so usage-limit errors are not replayed.
@@ -843,16 +921,16 @@ export class OpenAIProvider implements LLMProvider {
         logger.info("Request aborted");
         throw new Error("Request cancelled");
       }
-      if (
-        request.promptCache &&
-        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
-      ) {
-        siwcPromptCacheUnsupported = true;
-        logger.warn("SIWC prompt cache controls rejected; retrying without cache controls", {
-          model: body.model,
-          status: error?.status,
-        });
-        return this.createMessageWithSiwc({ ...request, promptCache: undefined });
+      const nextCacheTier = this.stepDownPromptCacheTier({
+        route: "siwc",
+        label: "SIWC",
+        model: request.model,
+        loggedModel: body.model,
+        sentFields: pickOpenAIPromptCacheFields(body),
+        error,
+      });
+      if (nextCacheTier) {
+        return this.createMessageWithSiwc(request, nextCacheTier);
       }
       logger.error("Sign in with ChatGPT API error:", {
         status: error?.status,
@@ -924,17 +1002,25 @@ export class OpenAIProvider implements LLMProvider {
   /**
    * Create message using OAuth (pi-ai SDK with ChatGPT backend)
    */
-  private async createMessageWithOAuth(request: LLMRequest): Promise<LLMResponse> {
+  private async createMessageWithOAuth(
+    originalRequest: LLMRequest,
+    cacheTier: OpenAIPromptCacheTier = resolvePromptCacheTier(
+      "oauth",
+      originalRequest.model,
+      OAUTH_PROMPT_CACHE_TIER_CEILING,
+    ),
+  ): Promise<LLMResponse> {
     if (!this.oauthTokens) {
       throw new Error("OAuth tokens not available");
     }
 
-    if (
-      request.promptCache &&
-      promptCacheRejectedModels.has(promptCacheRejectionKey("oauth", request.model))
-    ) {
-      return this.createMessageWithOAuth({ ...request, promptCache: undefined });
-    }
+    // Without cache controls, also drop prefix splitting so the instructions keep their
+    // original block order (matches a request that never had cache controls).
+    const request =
+      cacheTier === "none" && originalRequest.promptCache
+        ? { ...originalRequest, promptCache: undefined }
+        : originalRequest;
+    let sentCacheFields: OpenAIPromptCacheFields = {};
 
     try {
       const { getModels, complete: piAiComplete } = await loadPiAiModule();
@@ -1000,15 +1086,12 @@ export class OpenAIProvider implements LLMProvider {
       };
 
       // Make the API call using pi-ai SDK
+      // pi-ai's Codex transport turns sessionId into prompt_cache_key (plus session
+      // routing headers); no extra cache fields are injected into the payload.
       const cacheRetention = mapPromptCacheTtlToPiAiRetention(request.promptCache);
       const sessionId =
         cacheRetention === "none" ? undefined : request.promptCache?.cacheKey || undefined;
-      const cacheFields = buildOpenAIPromptCacheFields(
-        request.promptCache && request.promptCache.mode !== "disabled"
-          ? { ...request.promptCache, mode: "openai_key" }
-          : undefined,
-        codexModelId,
-      );
+      sentCacheFields = sessionId ? { prompt_cache_key: sessionId } : {};
       const configuredReasoningEffort = this.getOpenAIReasoningEffort(request);
       const piAiReasoningEffort =
         configuredReasoningEffort === "none" ? "medium" : configuredReasoningEffort;
@@ -1018,14 +1101,6 @@ export class OpenAIProvider implements LLMProvider {
         signal: request.signal,
         cacheRetention,
         ...(sessionId ? { sessionId } : {}),
-        ...(Object.keys(cacheFields).length > 0
-          ? {
-              onPayload: (payload: unknown) => ({
-                ...((payload || {}) as Record<string, Any>),
-                ...cacheFields,
-              }),
-            }
-          : {}),
         reasoningEffort: piAiReasoningEffort,
         textVerbosity: this.getOpenAITextVerbosity(request),
       });
@@ -1051,16 +1126,15 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error("Request cancelled");
       }
 
-      if (
-        request.promptCache &&
-        isPromptCacheRequestUnsupportedError(error?.status, error?.message || "")
-      ) {
-        promptCacheRejectedModels.add(promptCacheRejectionKey("oauth", request.model));
-        logger.warn("ChatGPT prompt cache controls rejected; retrying without cache controls", {
-          model: request.model,
-          status: error?.status,
-        });
-        return this.createMessageWithOAuth({ ...request, promptCache: undefined });
+      const nextCacheTier = this.stepDownPromptCacheTier({
+        route: "oauth",
+        label: "ChatGPT",
+        model: originalRequest.model,
+        sentFields: sentCacheFields,
+        error,
+      });
+      if (nextCacheTier) {
+        return this.createMessageWithOAuth(originalRequest, nextCacheTier);
       }
 
       logger.error("ChatGPT API error:", {

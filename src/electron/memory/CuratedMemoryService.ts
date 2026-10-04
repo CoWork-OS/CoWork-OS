@@ -1,21 +1,27 @@
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { WorkspaceRepository } from "../database/repository-facades";
-import { CuratedMemoryRepository } from "../database/repository-facades";
 import { createHash, randomUUID } from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import type { DatabaseManager } from "../database/schema";
-import { type CuratedMemoryEntryRecord } from "../database/repositories";
 import type {
   CuratedMemoryEntry,
   CuratedMemoryKind,
   CuratedMemoryTarget,
 } from "../../shared/types";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
-import { bumpHotMemoryVersion } from "./hot-memory-version";
 import { MemoryWriter } from "./MemoryWriter";
 import { KIT_FILE_STORE, MemoryItemsHubService } from "./MemoryItemsHubService";
-import { MEMORY_LANE_STORES, curatedEntryCandidate } from "./memory-items-lanes";
+import {
+  memoryWriteSkipMessage,
+  primarySourceRef,
+  reviseMemoryItem,
+} from "./memory-item-revise";
+import {
+  MEMORY_LANE_STORES,
+  curatedEntryCandidate,
+  memoryKindForCuratedKind,
+} from "./memory-items-lanes";
 import type { KitRenderState, MemoryItem, MemoryItemKind } from "./memory-items-types";
 
 const USER_BLOCK_START = "<!-- cowork:auto:curated-user:start -->";
@@ -334,8 +340,81 @@ export function balanceCuratedPromptEntries<T>(
   return [...userEntries.slice(0, userTake), ...workspaceEntries.slice(0, workspaceTake)];
 }
 
+/** Curated kind of a workspace memory item: recorded at write, else derived from its kind. */
+export function curatedKindOf(item: Pick<MemoryItem, "kind" | "sourceRef">): CuratedMemoryKind {
+  const recorded = item.sourceRef.curatedKind;
+  if (typeof recorded === "string" && CURATED_KIND_LABELS.has(recorded as CuratedMemoryKind)) {
+    return recorded as CuratedMemoryKind;
+  }
+  switch (item.kind) {
+    case "identity":
+      return "identity";
+    case "preference":
+      return "preference";
+    case "rule":
+      return "constraint";
+    case "commitment":
+      return "active_commitment";
+    default:
+      return "project_fact";
+  }
+}
+
+/** Kit lane of a workspace item, as `listForView` splits USER.md and MEMORY.md. */
+export function curatedTargetOf(item: Pick<MemoryItem, "kind" | "sourceRef">): CuratedMemoryTarget {
+  if (item.sourceRef.target === "user") return "user";
+  return item.kind === "identity" || item.kind === "preference" ? "user" : "workspace";
+}
+
+const CURATED_KIND_LABELS: ReadonlySet<CuratedMemoryKind> = new Set([
+  "identity",
+  "preference",
+  "constraint",
+  "workflow_rule",
+  "project_fact",
+  "active_commitment",
+]);
+
+/** A workspace memory item in the curated-entry shape of the curate API and tool. */
+export function toCuratedEntry(item: MemoryItem): CuratedMemoryEntry {
+  const source: CuratedMemoryEntry["source"] =
+    item.source === "user_stated" || item.source === "user_confirmed"
+      ? "user_edit"
+      : item.source === "inferred"
+        ? "distill"
+        : item.source === "import"
+          ? "migration"
+          : "agent_tool";
+  return {
+    id: item.id,
+    workspaceId: item.workspaceId ?? "",
+    ...(item.taskId ? { taskId: item.taskId } : {}),
+    target: curatedTargetOf(item),
+    kind: curatedKindOf(item),
+    content: item.content,
+    normalizedKey: normalizeMemoryKey(item.content),
+    source,
+    confidence: item.confidence,
+    status: item.status === "active" ? "active" : "archived",
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    lastConfirmedAt: item.updatedAt,
+  };
+}
+
+/** Items the user stated or confirmed are changed in the Memory Hub, not by the agent. */
+function isUserOwned(item: Pick<MemoryItem, "source">): boolean {
+  return item.source === "user_stated" || item.source === "user_confirmed";
+}
+
+/**
+ * Curated memory: the workspace's facts in `memory_items` (workspace scope), and the
+ * generated `.cowork/USER.md` / `MEMORY.md` blocks that render them (docs/memory-engine.md
+ * §5, "Generated kit views"). The `curated_memory_entries` table is retired; `curate`,
+ * `list` and `getPromptEntries` keep their shapes over memory items (an entry id is a
+ * memory item id).
+ */
 export class CuratedMemoryService {
-  private static curatedRepo: CuratedMemoryRepository;
   private static workspaceRepo: WorkspaceRepository;
   private static initialized = false;
   private static syncQueueByWorkspace = new Map<string, Promise<void>>();
@@ -344,11 +423,11 @@ export class CuratedMemoryService {
     if (this.initialized) return;
     const db = dbManager.getDatabase();
     MemoryWriteGate.initialize(dbManager);
-    this.curatedRepo = new CuratedMemoryRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
     this.initialized = true;
   }
 
+  /** The workspace's memory items as curated entries (private items included). */
   static async list(
     workspaceId: string,
     params: {
@@ -359,20 +438,45 @@ export class CuratedMemoryService {
     } = {},
   ): Promise<CuratedMemoryEntry[]> {
     this.ensureInitialized();
-    return this.curatedRepo.list({ workspaceId, ...params });
+    const repository = MemoryWriter.get()?.repository;
+    if (!repository) return [];
+    const items = await repository.list({
+      workspaceId,
+      scope: "workspace",
+      statuses: [params.status ?? "active"],
+      includePrivate: true,
+      limit: 1000,
+    });
+    return items
+      .map(toCuratedEntry)
+      .filter((entry) => !params.target || entry.target === params.target)
+      .filter((entry) => !params.kind || entry.kind === params.kind)
+      .slice(0, Math.max(1, Math.floor(params.limit ?? 100)));
   }
 
+  /**
+   * Prompt entries from the user and workspace lanes (non-private items only, as in the
+   * kit files), balanced so neither lane starves the other (PROMPT-6).
+   */
   static async getPromptEntries(workspaceId: string, limit = 8): Promise<CuratedMemoryEntry[]> {
     this.ensureInitialized();
     const max = Math.max(1, Math.floor(limit));
-    // The repository orders the user lane first, so one combined query starves
-    // workspace rules once there are `limit` user entries (PROMPT-6). Read each
-    // lane on its own and balance them.
-    const [userEntries, workspaceEntries] = await Promise.all([
-      this.curatedRepo.list({ workspaceId, target: "user", status: "active", limit: max }),
-      this.curatedRepo.list({ workspaceId, target: "workspace", status: "active", limit: max }),
-    ]);
-    return balanceCuratedPromptEntries(userEntries, workspaceEntries, max);
+    const repository = MemoryWriter.get()?.repository;
+    if (!repository) return [];
+    const entries = (
+      await repository.list({
+        workspaceId,
+        scope: "workspace",
+        statuses: ["active"],
+        includePrivate: false,
+        limit: 400,
+      })
+    ).map(toCuratedEntry);
+    return balanceCuratedPromptEntries(
+      entries.filter((entry) => entry.target === "user"),
+      entries.filter((entry) => entry.target === "workspace"),
+      max,
+    );
   }
 
   static async curate(params: {
@@ -402,7 +506,7 @@ export class CuratedMemoryService {
     const targetFile = params.target === "user" ? ".cowork/USER.md" : ".cowork/MEMORY.md";
     const trimmedContent = normalizeCuratedContent(params.content || "");
     const trimmedMatch = normalizeMatch(params.match || "");
-    const defaultKind = params.target === "user" ? "preference" : "project_fact";
+    const defaultKind: CuratedMemoryKind = params.target === "user" ? "preference" : "project_fact";
 
     if (params.action === "add" && !trimmedContent) {
       return { success: false, error: "content is required for add" };
@@ -414,6 +518,8 @@ export class CuratedMemoryService {
     if (params.action === "remove" && !trimmedMatch && !hasStableId) {
       return { success: false, error: "remove requires either id or match" };
     }
+    const writer = MemoryWriter.get();
+    if (!writer) return { success: false, error: "Memory is not available yet." };
 
     const syncAccessError = await this.validateSyncAccess(
       params.workspaceId,
@@ -424,47 +530,60 @@ export class CuratedMemoryService {
       return { success: false, error: syncAccessError };
     }
 
-    let entry: CuratedMemoryEntryRecord | undefined;
-    const existingById = hasStableId
-      ? await this.curatedRepo.findById(params.id!.trim())
-      : undefined;
-    if (
-      existingById &&
-      (existingById.workspaceId !== params.workspaceId || existingById.target !== params.target)
-    ) {
-      return {
-        success: false,
-        error: "Curated memory id does not belong to this workspace/target",
-      };
-    }
-    const resolvedMatch =
-      params.action === "add"
-        ? undefined
-        : existingById
-          ? { entry: existingById }
-          : await this.findMatchCandidate(
-              params.workspaceId,
-              params.target,
-              trimmedMatch,
-              params.kind,
-            );
-    if (resolvedMatch?.error) {
-      return {
-        success: false,
-        error: resolvedMatch.error,
-      };
-    }
-    if (params.action !== "add" && !resolvedMatch?.entry) {
-      return {
-        success: false,
-        error: hasStableId
-          ? `No curated memory found for id "${params.id}"`
-          : `No curated memory matched "${trimmedMatch}"`,
-      };
+    let existing: MemoryItem | undefined;
+    if (params.action !== "add") {
+      if (hasStableId) {
+        const byId = await writer.repository.findById(params.id!.trim());
+        if (byId && (byId.workspaceId !== params.workspaceId || byId.scope !== "workspace")) {
+          return {
+            success: false,
+            error: "Curated memory id does not belong to this workspace/target",
+          };
+        }
+        if (byId && curatedTargetOf(byId) !== params.target) {
+          return {
+            success: false,
+            error: "Curated memory id does not belong to this workspace/target",
+          };
+        }
+        // An id from before a replace names a superseded revision: follow the record
+        // (same source ref) to its active revision.
+        const ref = byId && byId.status === "superseded" ? primarySourceRef(byId) : null;
+        const current = ref
+          ? (await writer.repository.findBySourceRef(ref.store, ref.id, ["active"])).find(
+              (item) => item.workspaceId === params.workspaceId && item.scope === "workspace",
+            )
+          : byId;
+        existing = current?.status === "active" ? current : undefined;
+      } else {
+        const resolved = await this.findMatchCandidate(
+          writer,
+          params.workspaceId,
+          params.target,
+          trimmedMatch,
+          params.kind,
+        );
+        if (resolved.error) return { success: false, error: resolved.error };
+        existing = resolved.item;
+      }
+      if (!existing) {
+        return {
+          success: false,
+          error: hasStableId
+            ? `No curated memory found for id "${params.id}"`
+            : `No curated memory matched "${trimmedMatch}"`,
+        };
+      }
+      if (isUserOwned(existing)) {
+        return {
+          success: false,
+          error:
+            "That memory was stated by the user; it can only be changed in the Memory Hub (What CoWork knows).",
+        };
+      }
     }
 
     if (!params.skipMemoryWriteGate) {
-      const oldValue = params.action === "add" ? undefined : resolvedMatch?.entry?.content;
       const gate = await MemoryWriteGate.evaluate({
         workspaceId: params.workspaceId,
         taskId: params.taskId,
@@ -481,7 +600,7 @@ export class CuratedMemoryService {
           match: trimmedMatch || undefined,
           reason: params.reason,
         },
-        oldValue,
+        oldValue: existing?.content,
         proposedValue: trimmedContent || params.match,
         reason: params.reason,
       });
@@ -502,52 +621,48 @@ export class CuratedMemoryService {
       }
     }
 
+    let entry: CuratedMemoryEntry | undefined;
+    let error: string | undefined;
     if (params.action === "add") {
-      const normalizedKey = normalizeMemoryKey(trimmedContent);
-      const existing = await this.curatedRepo.findByNormalizedKey(
-        params.workspaceId,
-        params.target,
-        params.kind || defaultKind,
-        normalizedKey,
-      );
-      if (existing) {
-        entry = await this.curatedRepo.update(existing.id, {
-          confidence: Math.max(existing.confidence, 0.85),
-          lastConfirmedAt: Date.now(),
-        });
-      } else {
-        entry = await this.curatedRepo.create({
+      const result = await writer.ingest({
+        ...curatedEntryCandidate({
+          id: randomUUID(),
           workspaceId: params.workspaceId,
-          taskId: params.taskId,
+          taskId: params.taskId ?? null,
           target: params.target,
           kind: params.kind || defaultKind,
           content: trimmedContent,
-          normalizedKey,
           source: "agent_tool",
           confidence: 0.85,
-          status: "active",
-          lastConfirmedAt: Date.now(),
-        });
-      }
-    } else {
-      const existing = resolvedMatch!.entry!;
-      if (params.action === "replace") {
-        entry = await this.curatedRepo.update(existing.id, {
-          kind: params.kind || existing.kind,
+        }),
+        originText: trimmedContent,
+      });
+      if (result.status === "written") entry = toCuratedEntry(result.item);
+      else error = memoryWriteSkipMessage(result);
+    } else if (params.action === "replace") {
+      const item = existing!;
+      const kind = params.kind || curatedKindOf(item);
+      const result = await reviseMemoryItem(
+        writer,
+        item,
+        {
           content: trimmedContent,
-          normalizedKey: normalizeMemoryKey(trimmedContent),
-          confidence: Math.max(existing.confidence, 0.85),
-          lastConfirmedAt: Date.now(),
-        });
-      } else {
-        entry = await this.curatedRepo.archive(existing.id);
-      }
+          kind: memoryKindForCuratedKind(kind),
+          source: "curated",
+          confidence: Math.max(item.confidence, 0.85),
+          sourceRefPatch: { target: params.target, curatedKind: kind },
+        },
+        MEMORY_LANE_STORES.curated,
+      );
+      if (result.status === "written") entry = toCuratedEntry(result.item);
+      else error = memoryWriteSkipMessage(result);
+    } else {
+      const item = existing!;
+      await writer.setStatus(item.id, "archived");
+      const archived = await writer.repository.findById(item.id);
+      entry = toCuratedEntry(archived ?? { ...item, status: "archived" });
     }
 
-    if (entry) {
-      await this.mirrorToMemoryItems(entry, params.action === "remove" ? "archived" : "active");
-    }
-    bumpHotMemoryVersion();
     await this.syncWorkspaceFiles(params.workspaceId, {
       readGuard: params.filesystemReadGuard,
       writeGuard: params.filesystemWriteGuard,
@@ -556,10 +671,14 @@ export class CuratedMemoryService {
       success: !!entry,
       entry,
       updatedFile: targetFile,
-      ...(entry ? {} : { error: "Curated memory mutation failed" }),
+      ...(entry ? {} : { error: error ?? "Curated memory mutation failed" }),
     };
   }
 
+  /**
+   * A distilled (core memory) promotion: an inferred workspace item, or a curated one when
+   * `source` says it was curated. A repeat reinforces the active item.
+   */
   static async upsertDistilledEntry(params: {
     workspaceId: string;
     taskId?: string;
@@ -575,6 +694,8 @@ export class CuratedMemoryService {
     this.ensureInitialized();
     const content = normalizeCuratedContent(params.content || "");
     if (!content) return null;
+    const writer = MemoryWriter.get();
+    if (!writer) return null;
 
     if (
       await this.validateSyncAccess(
@@ -586,7 +707,6 @@ export class CuratedMemoryService {
       return null;
     }
 
-    const normalizedKey = normalizeMemoryKey(content);
     if (!params.skipMemoryWriteGate) {
       const gate = await MemoryWriteGate.evaluate({
         workspaceId: params.workspaceId,
@@ -607,38 +727,24 @@ export class CuratedMemoryService {
       if (!gate.allowed) return null;
     }
 
-    const existing = await this.curatedRepo.findByNormalizedKey(
-      params.workspaceId,
-      params.target,
-      params.kind,
-      normalizedKey,
-    );
-
-    const entry = existing
-      ? await this.curatedRepo.update(existing.id, {
-          confidence: Math.max(existing.confidence, params.confidence),
-          lastConfirmedAt: Date.now(),
-        })
-      : await this.curatedRepo.create({
-          workspaceId: params.workspaceId,
-          taskId: params.taskId,
-          target: params.target,
-          kind: params.kind,
-          content,
-          normalizedKey,
-          source: params.source || "distill",
-          confidence: params.confidence,
-          status: "active",
-          lastConfirmedAt: Date.now(),
-        });
-
-    if (entry) await this.mirrorToMemoryItems(entry, "active");
-    bumpHotMemoryVersion();
+    const result = await writer.ingest({
+      ...curatedEntryCandidate({
+        id: randomUUID(),
+        workspaceId: params.workspaceId,
+        taskId: params.taskId ?? null,
+        target: params.target,
+        kind: params.kind,
+        content,
+        source: params.source || "distill",
+        confidence: params.confidence,
+      }),
+      originText: content,
+    });
     await this.syncWorkspaceFiles(params.workspaceId, {
       readGuard: params.filesystemReadGuard,
       writeGuard: params.filesystemWriteGuard,
     });
-    return entry || null;
+    return result.status === "written" ? toCuratedEntry(result.item) : null;
   }
 
   static async syncWorkspaceFiles(
@@ -646,6 +752,9 @@ export class CuratedMemoryService {
     options: SyncWorkspaceFilesOptions = {},
   ): Promise<void> {
     this.ensureInitialized();
+    // The blocks are views of memory_items; without the memory engine there is nothing
+    // to render (and no render state to sync edits back against).
+    if (!MemoryWriter.get()) return;
     const previous = this.syncQueueByWorkspace.get(workspaceId) || Promise.resolve();
     const next = previous
       .catch(() => undefined)
@@ -697,102 +806,21 @@ export class CuratedMemoryService {
     await next;
   }
 
-  /**
-   * Dual write (memory engine Phase 2): curated entries stay the system of record for
-   * reads this wave, and every change is mirrored into `memory_items` through MemoryWriter.
-   * Awaited so the kit files rendered next see it; a failure is logged and never fails
-   * the curated write.
-   */
-  private static async mirrorToMemoryItems(
-    entry: CuratedMemoryEntry,
-    status: "active" | "archived",
-  ): Promise<void> {
-    const writer = MemoryWriter.get();
-    if (!writer) return;
-    try {
-      if (status === "archived") {
-        await writer.setStatusBySourceRef(MEMORY_LANE_STORES.curated, entry.id, "archived");
-      } else {
-        await writer.ingest(curatedEntryCandidate(entry));
-      }
-    } catch (error) {
-      console.warn("[CuratedMemoryService] Memory item dual write failed:", error);
-    }
-  }
-
-  /**
-   * Entries for the generated USER.md / MEMORY.md blocks. Once the legacy lanes have been
-   * copied into `memory_items`, the blocks are a view of the workspace's memory items;
-   * before that (and without a writer) they render from the curated table as before.
-   */
+  /** Entries for the generated USER.md / MEMORY.md blocks: the workspace's memory items. */
   private static async listKitBlockEntries(
     workspaceId: string,
     view: KitView,
   ): Promise<{ entries: KitBlockEntry[]; source: KitRenderState["source"] }> {
     const writer = MemoryWriter.get();
-    if (writer) {
-      try {
-        if (await writer.repository.isLaneMigrationComplete()) {
-          const items: MemoryItem[] = await writer.repository.listForView(workspaceId, view, 200);
-          return { entries: items, source: "memory_items" };
-        }
-      } catch (error) {
-        console.warn(
-          "[CuratedMemoryService] Falling back to curated entries for kit files:",
-          error,
-        );
-      }
-    }
-    const entries = await this.curatedRepo.list({
-      workspaceId,
-      target: view,
-      status: "active",
-      limit: 200,
-    });
-    return { entries, source: "curated" };
+    const items: MemoryItem[] = writer
+      ? await writer.repository.listForView(workspaceId, view, 200)
+      : [];
+    return { entries: items, source: "memory_items" };
   }
 
-  /**
-   * Apply a Memory Hub or kit edit to the curated entry a memory item mirrors, without a
-   * kit sync (the caller renders the files). No dual write: `memory_items` already has it.
-   */
-  static async applyMirroredEdit(entryId: string, content: string): Promise<void> {
-    this.ensureInitialized();
-    const entry = await this.curatedRepo.findById(entryId);
-    const trimmed = normalizeCuratedContent(content);
-    if (!entry || entry.status !== "active" || !trimmed) return;
-    await this.curatedRepo.update(entry.id, {
-      content: trimmed,
-      normalizedKey: normalizeMemoryKey(trimmed),
-      lastConfirmedAt: Date.now(),
-    });
-    bumpHotMemoryVersion();
-  }
-
-  /** Archive the curated entry a forgotten or removed memory item mirrors (no kit sync). */
-  static async archiveMirroredEntry(entryId: string): Promise<void> {
-    this.ensureInitialized();
-    const entry = await this.curatedRepo.findById(entryId);
-    if (!entry || entry.status !== "active") return;
-    await this.curatedRepo.archive(entry.id);
-    bumpHotMemoryVersion();
-  }
-
-  /** Kit back-sync writes through the Hub operations, with the curated lane mirrored. */
+  /** Kit back-sync writes through the Hub operations. */
   private static kitEditor(): MemoryItemsHubService {
-    return new MemoryItemsHubService({
-      getWriter: () => MemoryWriter.get(),
-      legacy: {
-        edit: async (ref, content) => {
-          if (ref.store === MEMORY_LANE_STORES.curated) {
-            await this.applyMirroredEdit(ref.id, content);
-          }
-        },
-        remove: async (ref) => {
-          if (ref.store === MEMORY_LANE_STORES.curated) await this.archiveMirroredEntry(ref.id);
-        },
-      },
-    });
+    return new MemoryItemsHubService({ getWriter: () => MemoryWriter.get() });
   }
 
   private static kitStateKey(params: SyncFileParams): string {
@@ -893,12 +921,13 @@ export class CuratedMemoryService {
   }
 
   private static async findMatchCandidate(
+    writer: MemoryWriter,
     workspaceId: string,
     target: CuratedMemoryTarget,
     match: string,
     kind?: CuratedMemoryKind,
   ): Promise<{
-    entry?: CuratedMemoryEntryRecord;
+    item?: MemoryItem;
     error?: string;
   }> {
     const normalizedMatch = normalizeMemoryKey(match);
@@ -906,37 +935,41 @@ export class CuratedMemoryService {
       return { error: "match is required" };
     }
 
-    const entries = await this.curatedRepo.list({
-      workspaceId,
-      target,
-      kind,
-      status: "active",
-      limit: 200,
-    });
+    const items = (
+      await writer.repository.list({
+        workspaceId,
+        scope: "workspace",
+        statuses: ["active"],
+        includePrivate: true,
+        limit: 1000,
+      })
+    ).filter(
+      (item) => curatedTargetOf(item) === target && (!kind || curatedKindOf(item) === kind),
+    );
 
-    const exactMatches = entries.filter(
-      (entry) => normalizeMemoryKey(entry.content) === normalizedMatch,
+    const exactMatches = items.filter(
+      (item) => normalizeMemoryKey(item.content) === normalizedMatch,
     );
     if (exactMatches.length === 1) {
-      return { entry: exactMatches[0] };
+      return { item: exactMatches[0] };
     }
     if (exactMatches.length > 1) {
       return {
         error:
-          "Multiple curated memories matched exactly. Use memory_curated_read to get the stable id and retry.",
+          "Multiple memories matched exactly. Use memory_recall to get the stable id and retry.",
       };
     }
 
-    const partialMatches = entries.filter((entry) =>
-      normalizeMemoryKey(entry.content).includes(normalizedMatch),
+    const partialMatches = items.filter((item) =>
+      normalizeMemoryKey(item.content).includes(normalizedMatch),
     );
     if (partialMatches.length === 1) {
-      return { entry: partialMatches[0] };
+      return { item: partialMatches[0] };
     }
     if (partialMatches.length > 1) {
       return {
         error:
-          "Multiple curated memories matched. Use memory_curated_read to get the stable id or provide a more specific match.",
+          "Multiple memories matched. Use memory_recall to get the stable id or provide a more specific match.",
       };
     }
 

@@ -14,13 +14,12 @@ import {
   AwarenessSummary,
   AwarenessSummaryItem,
   AwarenessWakeReason,
-  AddUserFactRequest,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { loadNotificationStoreSync } from "../notifications/store";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
-import { UserProfileService } from "../memory/UserProfileService";
-import { beliefSubjectKey } from "../memory/memory-items-lanes";
+import { MemoryWriter } from "../memory/MemoryWriter";
+import { beliefCandidate } from "../memory/memory-items-lanes";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
 
 const execFileAsync = promisify(execFile);
@@ -375,7 +374,7 @@ export class AwarenessService {
     const whatMattersNow = whatChanged
       .filter((item) => item.score >= 0.65 || item.tags.includes("focus"))
       .slice(0, 5);
-    // RelationshipMemoryItem has no workspaceId; show all due-soon (we cannot filter by workspace)
+    // Commitments (global and contact memory items) belong to no workspace; show all due-soon.
     const dueSoonCommitments = RelationshipMemoryService.listDueSoonCommitments(72)
       .slice(0, 5)
       .map((item) => ({
@@ -831,7 +830,7 @@ export class AwarenessService {
       ).slice(-8);
       existing.promotionStatus =
         existing.promotionStatus === "confirmed" ? "confirmed" : input.promotionStatus;
-      this.applyLegacyMemorySideEffects(existing);
+      this.recordBeliefAsMemoryItem(existing);
       this.save();
       return;
     }
@@ -866,38 +865,18 @@ export class AwarenessService {
     }
     this.state.beliefs.push(belief);
     this.state.beliefs = this.state.beliefs.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 250);
-    this.applyLegacyMemorySideEffects(belief);
+    this.recordBeliefAsMemoryItem(belief);
     this.save();
   }
 
-  private applyLegacyMemorySideEffects(belief: AwarenessBelief): void {
-    try {
-      if (
-        belief.beliefType === "user_fact" ||
-        belief.beliefType === "user_preference" ||
-        belief.beliefType === "user_goal"
-      ) {
-        const request: AddUserFactRequest = {
-          category:
-            belief.beliefType === "user_goal"
-              ? "goal"
-              : belief.beliefType === "user_preference"
-                ? "preference"
-                : "identity",
-          value: belief.value,
-          confidence: belief.confidence,
-          source: belief.source === "feedback" ? "feedback" : "conversation",
-        };
-        // The profile mirrors the fact into memory_items; a single-valued belief subject
-        // (preferred_name, response_length) lets a newer belief supersede the older one.
-        UserProfileService.addFact(request, {
-          memorySubjectKey: beliefSubjectKey(belief.subject),
-          memoryOriginWorkspaceId: belief.workspaceId ?? null,
-        });
-      }
-    } catch {
-      // best-effort compatibility bridge
-    }
+  /**
+   * Beliefs about the user (facts, preferences, goals) are written to `memory_items` as
+   * global facts (docs/memory-engine.md §5). The belief's id is the record id, so a belief
+   * whose value changes supersedes its previous revision, and a single-valued belief
+   * subject (preferred_name, response_length) lets a newer belief supersede an older one.
+   */
+  private recordBeliefAsMemoryItem(belief: AwarenessBelief): void {
+    MemoryWriter.writeInBackground(beliefCandidate(belief), "awareness belief");
   }
 
   private async pollDeviceContext(): Promise<void> {

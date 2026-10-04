@@ -220,17 +220,17 @@ async function writeManagedKitDoc(
 }
 
 export class OnboardingProfileService {
-  static applyGlobalProfile(data: OnboardingProfileData): void {
+  static async applyGlobalProfile(data: OnboardingProfileData): Promise<void> {
     const existingFacts = UserProfileService.getProfile().facts;
     for (const fact of existingFacts) {
       if (fact.lastTaskId === ONBOARDING_FACT_TASK_ID || isLegacyOnboardingFact(fact)) {
-        UserProfileService.deleteFact(fact.id);
+        await UserProfileService.deleteFact(fact.id);
       }
     }
 
     for (const fact of buildOnboardingProfileFacts(data)) {
       try {
-        UserProfileService.addFact({
+        await UserProfileService.addFact({
           ...fact,
           taskId: ONBOARDING_FACT_TASK_ID,
         });

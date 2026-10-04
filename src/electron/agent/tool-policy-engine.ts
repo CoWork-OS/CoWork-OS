@@ -1,7 +1,6 @@
 import {
   ConversationMode,
   ExecutionMode,
-  LEGACY_MEMORY_TOOL_ALIASES,
   TaskDomain,
   ToolDecision,
   type HumanInputPolicy,
@@ -164,8 +163,7 @@ const CONDITIONAL_SYSTEM_TOOLS = new Set([
 ]);
 
 /**
- * The memory lane (audit §8.3): the four memory tools, their deprecated aliases (hidden
- * but still executable) and the knowledge-graph tools. All of them are "always" exposure:
+ * The memory lane (audit §8.3): the four memory tools and the knowledge-graph tools. All of them are "always" exposure:
  * memory used to fall through to the conditional system lane and was shown only for
  * clipboard/application/screenshot wording (RECALL-1). The knowledge-graph tools are also
  * deferred-load (runtime-tool-definition.ts), so tool_search surfaces them on demand.
@@ -175,7 +173,6 @@ const MEMORY_LANE_TOOLS = new Set([
   "memory_remember",
   "memory_forget",
   "context_recall",
-  ...Object.keys(LEGACY_MEMORY_TOOL_ALIASES),
   "kg_search",
   "kg_get_neighbors",
   "kg_get_subgraph",

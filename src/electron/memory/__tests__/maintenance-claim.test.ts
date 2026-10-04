@@ -152,7 +152,8 @@ describeWithSqlite("maintenance claims", () => {
       }),
     ).immediate();
 
-    await runMemoryItemsLaneMigrationNow(writer, port);
+    // Startup waits for the other process's marker, then continues without it.
+    await runMemoryItemsLaneMigrationNow(writer, port, { waitMs: 30, pollMs: 5 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM memory_items").get()).toEqual({ n: 0 });
 
     releaseMaintenanceRun(db, {

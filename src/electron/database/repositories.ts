@@ -62,9 +62,6 @@ import {
   ComparisonSession,
   ComparisonSessionStatus,
   ComparisonResult,
-  CuratedMemoryEntry,
-  CuratedMemoryKind,
-  CuratedMemoryTarget,
   ChannelSpecialization,
   CreateChannelSpecializationRequest,
   UpdateChannelSpecializationRequest,
@@ -1598,11 +1595,6 @@ export class TaskStore {
         "UPDATE memories SET task_id = NULL WHERE task_id = ?",
       );
       clearMemoryTaskId.run(taskId);
-
-      const clearCuratedMemoryTaskId = this.db.prepare(
-        "UPDATE curated_memory_entries SET task_id = NULL WHERE task_id = ?",
-      );
-      clearCuratedMemoryTaskId.run(taskId);
 
       const clearMemoryObservationTaskId = this.db.prepare(
         "UPDATE memory_observation_metadata SET task_id = NULL WHERE task_id = ?",
@@ -6553,7 +6545,6 @@ export type MemoryType =
   | "workflow_pattern"
   | "correction_rule";
 export type PrivacyMode = "normal" | "strict" | "disabled";
-export type TimePeriod = "hourly" | "daily" | "weekly";
 
 export interface Memory {
   id: string;
@@ -6567,20 +6558,6 @@ export interface Memory {
   isPrivate: boolean;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface CuratedMemoryEntryRecord extends CuratedMemoryEntry {}
-
-export interface MemorySummary {
-  id: string;
-  workspaceId: string;
-  timePeriod: TimePeriod;
-  periodStart: number;
-  periodEnd: number;
-  summary: string;
-  memoryIds: string[];
-  tokens: number;
-  createdAt: number;
 }
 
 export interface MemorySettings {
@@ -7533,201 +7510,6 @@ export class MemoryStore {
   }
 }
 
-export class CuratedMemoryStore {
-  constructor(private db: Database.Database) {}
-
-  create(
-    input: Omit<CuratedMemoryEntryRecord, "id" | "createdAt" | "updatedAt"> & {
-      id?: string;
-      createdAt?: number;
-      updatedAt?: number;
-    },
-  ): CuratedMemoryEntryRecord {
-    const now = Date.now();
-    const entry: CuratedMemoryEntryRecord = {
-      ...input,
-      id: input.id || uuidv4(),
-      createdAt: input.createdAt ?? now,
-      updatedAt: input.updatedAt ?? now,
-    };
-
-    this.db
-      .prepare(
-        `INSERT INTO curated_memory_entries (
-          id, workspace_id, task_id, target, kind, content, normalized_key, source,
-          confidence, status, created_at, updated_at, last_confirmed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        entry.id,
-        entry.workspaceId,
-        entry.taskId || null,
-        entry.target,
-        entry.kind,
-        entry.content,
-        entry.normalizedKey,
-        entry.source,
-        entry.confidence,
-        entry.status,
-        entry.createdAt,
-        entry.updatedAt,
-        entry.lastConfirmedAt ?? null,
-      );
-
-    return entry;
-  }
-
-  update(
-    id: string,
-    updates: Partial<
-      Pick<
-        CuratedMemoryEntryRecord,
-        "kind" | "content" | "normalizedKey" | "confidence" | "status" | "lastConfirmedAt"
-      >
-    >,
-  ): CuratedMemoryEntryRecord | undefined {
-    const fields: string[] = [];
-    const values: unknown[] = [];
-
-    if (updates.kind !== undefined) {
-      fields.push("kind = ?");
-      values.push(updates.kind);
-    }
-    if (updates.content !== undefined) {
-      fields.push("content = ?");
-      values.push(updates.content);
-    }
-    if (updates.normalizedKey !== undefined) {
-      fields.push("normalized_key = ?");
-      values.push(updates.normalizedKey);
-    }
-    if (updates.confidence !== undefined) {
-      fields.push("confidence = ?");
-      values.push(updates.confidence);
-    }
-    if (updates.status !== undefined) {
-      fields.push("status = ?");
-      values.push(updates.status);
-    }
-    if (updates.lastConfirmedAt !== undefined) {
-      fields.push("last_confirmed_at = ?");
-      values.push(updates.lastConfirmedAt ?? null);
-    }
-    if (fields.length === 0) return this.findById(id);
-
-    fields.push("updated_at = ?");
-    values.push(Date.now(), id);
-
-    this.db
-      .prepare(`UPDATE curated_memory_entries SET ${fields.join(", ")} WHERE id = ?`)
-      .run(...values);
-
-    return this.findById(id);
-  }
-
-  findById(id: string): CuratedMemoryEntryRecord | undefined {
-    const row = this.db.prepare("SELECT * FROM curated_memory_entries WHERE id = ?").get(id) as
-      | Record<string, unknown>
-      | undefined;
-    return row ? this.mapRow(row) : undefined;
-  }
-
-  findByNormalizedKey(
-    workspaceId: string,
-    target: CuratedMemoryTarget,
-    kind: CuratedMemoryKind,
-    normalizedKey: string,
-  ): CuratedMemoryEntryRecord | undefined {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM curated_memory_entries
-         WHERE workspace_id = ?
-           AND target = ?
-           AND kind = ?
-           AND normalized_key = ?
-           AND status = 'active'
-         ORDER BY updated_at DESC
-         LIMIT 1`,
-      )
-      .get(workspaceId, target, kind, normalizedKey) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(row) : undefined;
-  }
-
-  findFirstMatching(workspaceId: string, target: CuratedMemoryTarget, match: string) {
-    const token = `%${match}%`;
-    const row = this.db
-      .prepare(
-        `SELECT * FROM curated_memory_entries
-         WHERE workspace_id = ?
-           AND target = ?
-           AND status = 'active'
-           AND content LIKE ?
-         ORDER BY updated_at DESC
-         LIMIT 1`,
-      )
-      .get(workspaceId, target, token) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(row) : undefined;
-  }
-
-  list(params: {
-    workspaceId: string;
-    target?: CuratedMemoryTarget;
-    kind?: CuratedMemoryKind;
-    status?: "active" | "archived";
-    limit?: number;
-  }): CuratedMemoryEntryRecord[] {
-    const clauses = ["workspace_id = ?"];
-    const values: unknown[] = [params.workspaceId];
-    if (params.target) {
-      clauses.push("target = ?");
-      values.push(params.target);
-    }
-    if (params.kind) {
-      clauses.push("kind = ?");
-      values.push(params.kind);
-    }
-    if (params.status) {
-      clauses.push("status = ?");
-      values.push(params.status);
-    }
-    values.push(Math.max(1, params.limit ?? 100));
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM curated_memory_entries
-         WHERE ${clauses.join(" AND ")}
-         ORDER BY
-           CASE target WHEN 'user' THEN 0 ELSE 1 END,
-           confidence DESC,
-           updated_at DESC
-         LIMIT ?`,
-      )
-      .all(...values) as Record<string, unknown>[];
-    return rows.map((row) => this.mapRow(row));
-  }
-
-  archive(id: string): CuratedMemoryEntryRecord | undefined {
-    return this.update(id, { status: "archived" });
-  }
-
-  private mapRow(row: Record<string, unknown>): CuratedMemoryEntryRecord {
-    return {
-      id: row.id as string,
-      workspaceId: row.workspace_id as string,
-      taskId: (row.task_id as string) || undefined,
-      target: row.target as CuratedMemoryTarget,
-      kind: row.kind as CuratedMemoryKind,
-      content: row.content as string,
-      normalizedKey: row.normalized_key as string,
-      source: row.source as CuratedMemoryEntryRecord["source"],
-      confidence: Number(row.confidence || 0),
-      status: row.status as CuratedMemoryEntryRecord["status"],
-      createdAt: Number(row.created_at || 0),
-      updatedAt: Number(row.updated_at || 0),
-      lastConfirmedAt: row.last_confirmed_at ? Number(row.last_confirmed_at) : undefined,
-    };
-  }
-}
-
 /**
  * A change to persisted memory embeddings, reported after the statement ran so a cache
  * on another connection (the FTS worker's, DB4) can reload the affected rows.
@@ -7949,83 +7731,6 @@ export class MemoryEmbeddingStore {
     const result = stmt.run(workspaceId, workspaceId);
     notifyMemoryEmbeddingChange({ kind: "workspace", workspaceId });
     return result.changes;
-  }
-}
-
-export class MemorySummaryStore {
-  constructor(private db: Database.Database) {}
-
-  create(summary: Omit<MemorySummary, "id" | "createdAt">): MemorySummary {
-    const newSummary: MemorySummary = {
-      ...summary,
-      id: uuidv4(),
-      createdAt: Date.now(),
-    };
-
-    const stmt = this.db.prepare(`
-      INSERT INTO memory_summaries (id, workspace_id, time_period, period_start, period_end, summary, memory_ids, tokens, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      newSummary.id,
-      newSummary.workspaceId,
-      newSummary.timePeriod,
-      newSummary.periodStart,
-      newSummary.periodEnd,
-      newSummary.summary,
-      JSON.stringify(newSummary.memoryIds),
-      newSummary.tokens,
-      newSummary.createdAt,
-    );
-
-    return newSummary;
-  }
-
-  findByWorkspaceAndPeriod(
-    workspaceId: string,
-    timePeriod: TimePeriod,
-    limit = 10,
-  ): MemorySummary[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM memory_summaries
-      WHERE workspace_id = ? AND time_period = ?
-      ORDER BY period_start DESC
-      LIMIT ?
-    `);
-    const rows = stmt.all(workspaceId, timePeriod, limit) as Record<string, unknown>[];
-    return rows.map((row) => this.mapRowToSummary(row));
-  }
-
-  findByWorkspace(workspaceId: string, limit = 50): MemorySummary[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM memory_summaries
-      WHERE workspace_id = ?
-      ORDER BY period_start DESC
-      LIMIT ?
-    `);
-    const rows = stmt.all(workspaceId, limit) as Record<string, unknown>[];
-    return rows.map((row) => this.mapRowToSummary(row));
-  }
-
-  deleteByWorkspace(workspaceId: string): number {
-    const stmt = this.db.prepare("DELETE FROM memory_summaries WHERE workspace_id = ?");
-    const result = stmt.run(workspaceId);
-    return result.changes;
-  }
-
-  private mapRowToSummary(row: Record<string, unknown>): MemorySummary {
-    return {
-      id: row.id as string,
-      workspaceId: row.workspace_id as string,
-      timePeriod: row.time_period as TimePeriod,
-      periodStart: row.period_start as number,
-      periodEnd: row.period_end as number,
-      summary: row.summary as string,
-      memoryIds: safeJsonParse(row.memory_ids as string, [] as string[], "memorySummary.memoryIds"),
-      tokens: row.tokens as number,
-      createdAt: row.created_at as number,
-    };
   }
 }
 

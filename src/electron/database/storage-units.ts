@@ -13,14 +13,12 @@ import {
   ChannelStore,
   ChannelUserStore,
   ComparisonSessionStore,
-  CuratedMemoryStore,
   DeliveryTrackingStore,
   InputRequestStore,
   LLMModelStore,
   MemoryEmbeddingStore,
   MemorySettingsStore,
   MemoryStore,
-  MemorySummaryStore,
   MessageQueueStore,
   PendingMemoryWriteStore,
   RateLimitStore,
@@ -481,53 +479,6 @@ export const STORAGE_UNITS = {
   auditLog_deleteOld: storeUnit((db: Database.Database) => new AuditLogStore(db), "deleteOld", {
     readonly: false,
   }),
-  curatedMemory_create: storeUnit((db: Database.Database) => new CuratedMemoryStore(db), "create", {
-    readonly: false,
-  }),
-  curatedMemory_update: storeUnit((db: Database.Database) => new CuratedMemoryStore(db), "update", {
-    readonly: false,
-  }),
-  curatedMemory_findById: storeUnit(
-    (db: Database.Database) => new CuratedMemoryStore(db),
-    "findById",
-    { readonly: true },
-  ),
-  curatedMemory_findByNormalizedKey: storeUnit(
-    (db: Database.Database) => new CuratedMemoryStore(db),
-    "findByNormalizedKey",
-    { readonly: true },
-  ),
-  curatedMemory_findFirstMatching: storeUnit(
-    (db: Database.Database) => new CuratedMemoryStore(db),
-    "findFirstMatching",
-    { readonly: true },
-  ),
-  curatedMemory_list: storeUnit((db: Database.Database) => new CuratedMemoryStore(db), "list", {
-    readonly: true,
-  }),
-  curatedMemory_archive: storeUnit(
-    (db: Database.Database) => new CuratedMemoryStore(db),
-    "archive",
-    { readonly: false },
-  ),
-  memorySummary_create: storeUnit((db: Database.Database) => new MemorySummaryStore(db), "create", {
-    readonly: false,
-  }),
-  memorySummary_findByWorkspaceAndPeriod: storeUnit(
-    (db: Database.Database) => new MemorySummaryStore(db),
-    "findByWorkspaceAndPeriod",
-    { readonly: true },
-  ),
-  memorySummary_findByWorkspace: storeUnit(
-    (db: Database.Database) => new MemorySummaryStore(db),
-    "findByWorkspace",
-    { readonly: true },
-  ),
-  memorySummary_deleteByWorkspace: storeUnit(
-    (db: Database.Database) => new MemorySummaryStore(db),
-    "deleteByWorkspace",
-    { readonly: false },
-  ),
   memorySettings_getOrCreate: storeUnit(
     (db: Database.Database) => new MemorySettingsStore(db),
     "getOrCreate",

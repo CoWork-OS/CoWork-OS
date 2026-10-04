@@ -4,7 +4,6 @@ import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { validateInput } from "../../utils/validation";
 import {
-  AddUserFactRequestSchema,
   CommitmentsGetRequestSchema,
   isMemoryVisibleInWorkspace,
   KitOpenFileRequestSchema,
@@ -110,18 +109,6 @@ describe("memory IPC schemas (SEC-11)", () => {
         workspaceId: WS,
         settings: { privacyMode: "off" },
       }),
-    ).toThrow();
-  });
-
-  it("forces user facts added from the renderer to a manual source", () => {
-    const fact = validateInput(AddUserFactRequestSchema, {
-      category: "preference",
-      value: "Prefers tea",
-      source: "conversation",
-    });
-    expect(fact.source).toBe("manual");
-    expect(() =>
-      validateInput(AddUserFactRequestSchema, { category: "nope", value: "x" }),
     ).toThrow();
   });
 

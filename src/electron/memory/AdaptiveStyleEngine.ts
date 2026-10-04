@@ -1,9 +1,13 @@
 /**
  * AdaptiveStyleEngine — Learns user communication preferences from observed patterns
  *
- * Observes user messages and feedback signals over time, then gradually adjusts
- * the PersonalityManager's ResponseStylePreferences to match. All changes are
- * rate-limited (max N shifts per week), auditable, and admin-disableable via
+ * Observes user messages and feedback signals over time, then gradually adjusts the
+ * user's response style to match. The style is a fact in `memory_items` (the single
+ * `response_style` subject, docs/memory-engine.md §4a): an adaptation writes it as
+ * `inferred` (outranked by a style the user chose), and PersonalityManager's live style
+ * mirrors the active item (memory-read-side.ts). This engine keeps only its own
+ * bookkeeping in settings (observations, rate limits, adaptation history). All changes
+ * are rate-limited (max N shifts per week), auditable, and admin-disableable via
  * GuardrailSettings.adaptiveStyleEnabled.
  *
  * Signals observed:
@@ -302,6 +306,8 @@ export class AdaptiveStyleEngine {
    */
   static maybeAdapt(): void {
     if (!this.isEnabled()) return;
+    // Without the memory engine there is no store for the style fact (CLI, early startup).
+    if (!MemoryWriter.get()) return;
 
     const state = this.loadState();
     this.resetWeekIfNeeded(state);
@@ -379,10 +385,10 @@ export class AdaptiveStyleEngine {
       state.adaptationHistory = state.adaptationHistory.slice(-50);
     }
 
-    PersonalityManager.setResponseStyle(styleUpdate);
-    // Mirror the adapted style into memory_items as the single `response_style` subject.
-    // It is inferred, so a style the user stated explicitly is not overridden there.
-    MemoryWriter.dualWrite(
+    // The adapted style is the `response_style` fact in memory_items; the read side applies
+    // it to PersonalityManager once written. It is inferred, so a style the user stated
+    // explicitly is not overridden.
+    MemoryWriter.writeInBackground(
       responseStyleCandidate(
         { ...currentStyle, ...styleUpdate },
         {

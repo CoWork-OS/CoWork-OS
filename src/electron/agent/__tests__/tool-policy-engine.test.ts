@@ -24,10 +24,6 @@ describe("tool-policy-engine memory writes (SEC-12)", () => {
   const MEMORY_WRITES = [
     "memory_remember",
     "memory_forget",
-    "memory_save",
-    "memory_curate",
-    "supermemory_remember",
-    "supermemory_forget",
     "kg_create_entity",
     "kg_update_entity",
     "kg_delete_entity",
@@ -43,21 +39,13 @@ describe("tool-policy-engine memory writes (SEC-12)", () => {
     expect(evaluateToolPolicy(tool, { executionMode: "execute" }).decision).toBe("allow");
   });
 
-  it.each([
-    "memory_recall",
-    "context_recall",
-    "search_memories",
-    "search_quotes",
-    "memory_search_index",
-    "memory_details",
-    "memory_curated_read",
-    "supermemory_search",
-    "kg_search",
-    "kg_get_neighbors",
-  ])("keeps memory read %s allowed in plan and analyze modes", (tool) => {
-    expect(evaluateToolPolicy(tool, { executionMode: "plan" }).decision).toBe("allow");
-    expect(evaluateToolPolicy(tool, { executionMode: "analyze" }).decision).toBe("allow");
-  });
+  it.each(["memory_recall", "context_recall", "kg_search", "kg_get_neighbors"])(
+    "keeps memory read %s allowed in plan and analyze modes",
+    (tool) => {
+      expect(evaluateToolPolicy(tool, { executionMode: "plan" }).decision).toBe("allow");
+      expect(evaluateToolPolicy(tool, { executionMode: "analyze" }).decision).toBe("allow");
+    },
+  );
 });
 
 describe("tool-policy-engine memory lane (audit §8.3)", () => {
@@ -70,10 +58,17 @@ describe("tool-policy-engine memory lane (audit §8.3)", () => {
     },
   );
 
-  it.each(["kg_search", "kg_create_entity", "search_memories", "memory_save"])(
+  it.each(["kg_search", "kg_create_entity"])(
     "keeps %s in the memory lane instead of the conditional system lane",
     (tool) => {
       expect(evaluateToolAvailability(tool, { taskText: "" }).metadata.lane).toBe("memory");
+    },
+  );
+
+  it.each(["search_memories", "memory_save", "context_grep", "supermemory_search"])(
+    "no longer puts the retired %s in the memory lane",
+    (tool) => {
+      expect(evaluateToolAvailability(tool, { taskText: "" }).metadata.lane).not.toBe("memory");
     },
   );
 
@@ -548,7 +543,7 @@ describe("Messages app intent", () => {
 });
 
 describe("tool-policy-engine memory recall lane", () => {
-  it.each(["memory_search_index", "memory_timeline", "memory_details"])(
+  it.each(["memory_recall", "context_recall"])(
     "exposes %s in the memory lane without system wording",
     (tool) => {
       const result = evaluateToolAvailability(tool, {

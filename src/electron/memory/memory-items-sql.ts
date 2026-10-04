@@ -453,9 +453,11 @@ export class MemoryItemsStore {
     }
 
     const upgrade = write.trust > existing.trust;
-    const sourceRef = mergeSourceRefs(existing.sourceRef, write.sourceRef, upgrade);
     // An edit of the same record sets confidence and pin as given; a repeat reinforces.
     const isEditOfSelf = editTarget?.id === existing.id;
+    // An edit of the same record also updates its provenance fields (a commitment's
+    // `dueAt`, for example), even when the text is unchanged.
+    const sourceRef = mergeSourceRefs(existing.sourceRef, write.sourceRef, upgrade || isEditOfSelf);
     this.db
       .prepare(
         `UPDATE memory_items SET

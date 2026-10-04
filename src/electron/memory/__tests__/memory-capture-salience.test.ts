@@ -77,16 +77,6 @@ describe("salience-gated task event capture", () => {
       "memory_remember",
       "memory_forget",
       "context_recall",
-      "memory_search_index",
-      "memory_timeline",
-      "memory_details",
-      "search_memories",
-      "search_quotes",
-      "search_sessions",
-      "context_grep",
-      "context_describe",
-      "memory_curated_read",
-      "supermemory_search",
       "kg_search",
     ]) {
       expect(isMemoryRecallTool(tool)).toBe(true);

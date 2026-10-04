@@ -97,7 +97,7 @@ function toFtsQuery(query: string): string | null {
 }
 
 /**
- * Ids `context_recall` (and the deprecated context_grep / context_describe) return: durable
+ * Ids `context_recall` returns: durable
  * messages and summaries, and conversation-index events (`dce_`, its fallback lane).
  */
 function isContextRecallId(id: string): boolean {

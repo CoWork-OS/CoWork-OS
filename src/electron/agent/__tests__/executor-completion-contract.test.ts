@@ -283,7 +283,7 @@ describe("TaskExecutor completion contract integration", () => {
             "write_file",
             "create_document",
             "scratchpad_read",
-            "search_memories",
+            "memory_recall",
             "task_list_list",
             "spawn_agent",
             "canvas_push",

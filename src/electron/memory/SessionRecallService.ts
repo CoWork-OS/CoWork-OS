@@ -105,7 +105,7 @@ function matchesAllTerms(text: string, terms: string[]): boolean {
 }
 
 /**
- * `search_sessions` and the recovery prompt's "earlier session evidence": hits from the
+ * Session recall and the recovery prompt's "earlier session evidence": hits from the
  * conversation index (every task of the workspace, ranked by relevance), optionally
  * filled with matching resume checkpoints.
  */

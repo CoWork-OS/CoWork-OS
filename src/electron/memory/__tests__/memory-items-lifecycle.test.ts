@@ -92,48 +92,13 @@ describeWithSqlite("memory items lifecycle", () => {
     });
   });
 
-  describe("curated dual write and kit view", () => {
+  describe("curated memory and kit view", () => {
     let workspacePath: string;
-    const entries: Array<Record<string, unknown>> = [];
 
     beforeEach(async () => {
       workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-memory-items-kit-"));
-      entries.length = 0;
       MemoryWriter.setInstance(writer);
-      const curatedRepo = {
-        findByNormalizedKey: () => undefined,
-        findById: (id: string) => entries.find((entry) => entry.id === id),
-        create(input: Record<string, unknown>) {
-          const entry = {
-            ...input,
-            id: `curated-${entries.length + 1}`,
-            createdAt: 1,
-            updatedAt: 1,
-          };
-          entries.push(entry);
-          return entry;
-        },
-        update(id: string, patch: Record<string, unknown>) {
-          const entry = entries.find((item) => item.id === id);
-          if (entry) Object.assign(entry, patch);
-          return entry;
-        },
-        archive(id: string) {
-          const entry = entries.find((item) => item.id === id);
-          if (entry) entry.status = "archived";
-          return entry;
-        },
-        list(params: Record<string, unknown>) {
-          return entries.filter(
-            (entry) =>
-              entry.workspaceId === params.workspaceId &&
-              (!params.target || entry.target === params.target) &&
-              (!params.status || entry.status === params.status),
-          );
-        },
-      };
       const internals = CuratedMemoryService as unknown as Record<string, unknown>;
-      internals.curatedRepo = curatedRepo;
       internals.workspaceRepo = { findById: () => ({ id: "ws-1", path: workspacePath }) };
       internals.initialized = true;
     });
@@ -146,7 +111,7 @@ describeWithSqlite("memory items lifecycle", () => {
     const userMd = () => fs.readFile(path.join(workspacePath, ".cowork", "USER.md"), "utf8");
     const memoryMd = () => fs.readFile(path.join(workspacePath, ".cowork", "MEMORY.md"), "utf8");
 
-    it("mirrors add, replace and remove into memory_items", async () => {
+    it("writes add, replace and remove to memory_items (a stale id follows the record)", async () => {
       const added = await CuratedMemoryService.curate({
         workspaceId: "ws-1",
         action: "add",
@@ -182,7 +147,14 @@ describeWithSqlite("memory items lifecycle", () => {
       expect(rowsOf(db, "status = 'archived'")).toHaveLength(1);
     });
 
-    it("renders the kit blocks from memory_items once the lane migration is recorded", async () => {
+    it("renders the kit blocks from memory_items only", async () => {
+      // A row left in the retired table is never rendered.
+      db.prepare(
+        `INSERT INTO curated_memory_entries (id, workspace_id, target, kind, content,
+           normalized_key, source, created_at, updated_at)
+         VALUES ('legacy-1', 'ws-1', 'workspace', 'project_fact', 'Legacy table fact',
+           'legacy table fact', 'agent_tool', 1, 1)`,
+      ).run();
       await CuratedMemoryService.curate({
         workspaceId: "ws-1",
         action: "add",
@@ -190,10 +162,6 @@ describeWithSqlite("memory items lifecycle", () => {
         kind: "workflow_rule",
         content: "Run the linter before commits",
       });
-      // Before the marker: the legacy curated table drives the files.
-      expect(await memoryMd()).toContain("Workflow Rule: Run the linter before commits");
-
-      await new MemoryItemsRepository(db).recordLaneMigration({});
       await write({ content: "Decided to keep SQLite", kind: "decision" });
       await write({ content: "Private plan", kind: "project_fact", privacy: "private" });
       await write({ content: "Calls the user Sam", kind: "identity" });
@@ -203,6 +171,7 @@ describeWithSqlite("memory items lifecycle", () => {
       expect(memory).toContain("Rule: Run the linter before commits");
       expect(memory).toContain("Decision: Decided to keep SQLite");
       expect(memory).not.toContain("Private plan");
+      expect(memory).not.toContain("Legacy table fact");
       expect(await userMd()).toContain("identity: Calls the user Sam");
     });
   });

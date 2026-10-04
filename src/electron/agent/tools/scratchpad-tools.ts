@@ -8,7 +8,7 @@ import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile
 /**
  * ScratchpadTools provides session-scoped note-taking for agents during long-running tasks.
  *
- * Unlike memory_save (which persists to the workspace database for long-term recall),
+ * Unlike memory_remember (which persists to the workspace database for long-term recall),
  * scratchpad is primarily ephemeral and lives for the duration of the task execution.
  * When a workspace path is provided, notes are checkpointed to disk so they can
  * survive crashes and be restored on task resume.

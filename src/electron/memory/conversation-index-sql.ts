@@ -61,7 +61,9 @@ export const CONVERSATION_EVENT_TYPES = new Set([
 const RECALL_TOOL_NAMES = new Set([
   "memory_recall",
   "context_recall",
-  // Deprecated aliases of the two above (audit §8.3).
+  "task_history",
+  // Retired recall tools (audit §8.3, RETIRED_MEMORY_TOOL_NAMES): no longer registered,
+  // but the one-time backfill reads recorded task events that still carry their output.
   "memory_topics_load",
   "memory_curated_read",
   "supermemory_profile",
@@ -74,7 +76,6 @@ const RECALL_TOOL_NAMES = new Set([
   "memory_search_index",
   "memory_timeline",
   "memory_details",
-  "task_history",
 ]);
 
 const SKIPPED_PAYLOAD_KEYS = new Set([

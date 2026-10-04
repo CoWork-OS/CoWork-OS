@@ -4236,24 +4236,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ignored: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_SET_IMPORTED_RECALL_IGNORED, data),
   getUserProfile: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_USER_PROFILE),
-  addUserFact: (data: {
-    category: UserFactCategory;
-    value: string;
-    confidence?: number;
-    source?: "conversation" | "feedback" | "manual";
-    pinned?: boolean;
-    taskId?: string;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ADD_USER_FACT, data),
-  updateUserFact: (data: {
-    id: string;
-    category?: UserFactCategory;
-    value?: string;
-    confidence?: number;
-    pinned?: boolean;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_UPDATE_USER_FACT, data),
-  deleteUserFact: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_DELETE_USER_FACT, id),
   listRelationshipMemory: (data?: {
-    layer?: "identity" | "preferences" | "context" | "history" | "commitments";
+    layer?: "identity" | "preferences" | "context" | "commitments";
     includeDone?: boolean;
     limit?: number;
   }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RELATIONSHIP_LIST, data || {}),
@@ -4266,8 +4250,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE, data),
   deleteRelationshipMemory: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RELATIONSHIP_DELETE, id),
-  cleanupRecurringRelationshipHistory: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RELATIONSHIP_CLEANUP_RECURRING),
   getOpenCommitments: (limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_COMMITMENTS_GET, { limit }),
   getDueSoonCommitments: (windowHours?: number) =>
@@ -7887,24 +7869,8 @@ export interface ElectronAPI {
     ignored: boolean;
   }) => Promise<{ success: boolean; memory: Memory | null }>;
   getUserProfile: () => Promise<UserProfile>;
-  addUserFact: (data: {
-    category: UserFactCategory;
-    value: string;
-    confidence?: number;
-    source?: "conversation" | "feedback" | "manual";
-    pinned?: boolean;
-    taskId?: string;
-  }) => Promise<UserFact>;
-  updateUserFact: (data: {
-    id: string;
-    category?: UserFactCategory;
-    value?: string;
-    confidence?: number;
-    pinned?: boolean;
-  }) => Promise<UserFact | null>;
-  deleteUserFact: (id: string) => Promise<{ success: boolean }>;
   listRelationshipMemory: (data?: {
-    layer?: "identity" | "preferences" | "context" | "history" | "commitments";
+    layer?: "identity" | "preferences" | "context" | "commitments";
     includeDone?: boolean;
     limit?: number;
   }) => Promise<Any[]>;
@@ -7916,11 +7882,6 @@ export interface ElectronAPI {
     dueAt?: number | null;
   }) => Promise<Any | null>;
   deleteRelationshipMemory: (id: string) => Promise<{ success: boolean }>;
-  cleanupRecurringRelationshipHistory: () => Promise<{
-    success: boolean;
-    collapsed: number;
-    groupsCollapsed: number;
-  }>;
   getOpenCommitments: (limit?: number) => Promise<Any[]>;
   getDueSoonCommitments: (windowHours?: number) => Promise<{ items: Any[]; reminderText: string }>;
   listMemoryItems: (data: MemoryHubListRequest) => Promise<MemoryHubListResult>;
@@ -7949,7 +7910,7 @@ export interface ElectronAPI {
   clearGlobalMemoryItems: (data: {
     workspaceId: string;
     confirm: true;
-  }) => Promise<{ success: boolean; deleted: number; legacyRecords: number }>;
+  }) => Promise<{ success: boolean; deleted: number }>;
   getMemoryReview: (data: { workspaceId: string }) => Promise<MemoryReviewState>;
   getMemoryReviewCount: (data: { workspaceId: string }) => Promise<number>;
   acceptMemoryProposal: (data: {

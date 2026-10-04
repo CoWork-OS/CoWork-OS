@@ -69,7 +69,7 @@ const READ_PARALLEL_TOOLS = new Set([
   "git_refs",
   "task_history",
   "task_list_list",
-  // Memory reads; deprecated aliases canonicalize to these.
+  // Memory reads.
   "memory_recall",
   "context_recall",
   "scratchpad_read",
@@ -118,7 +118,7 @@ const IDEMPOTENT_TOOLS = new Set([
   "git_refs",
   "task_history",
   "task_list_list",
-  // Memory reads; deprecated aliases canonicalize to these.
+  // Memory reads.
   "memory_recall",
   "context_recall",
   "scratchpad_read",

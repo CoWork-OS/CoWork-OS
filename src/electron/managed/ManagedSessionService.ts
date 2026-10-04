@@ -59,7 +59,6 @@ import type {
   OperationalAutonomyPolicy,
   Workspace,
 } from "../../shared/types";
-import { LEGACY_MEMORY_TOOL_ALIASES } from "../../shared/types";
 import type {
   ManagedAgent,
   ManagedAgentVersion,
@@ -195,13 +194,12 @@ function toMemoryToolRestrictions(
   if (memoryConfig?.mode !== "disabled") return undefined;
   return {
     deniedTools: [
-      // "Memory disabled" covers every recall and memory-write lane: the memory tools,
-      // their deprecated aliases (still executable) and the knowledge graph. (SEC-4)
+      // "Memory disabled" covers every recall and memory-write lane: the memory tools
+      // and the knowledge graph. (SEC-4)
       "memory_recall",
       "memory_remember",
       "memory_forget",
       "context_recall",
-      ...Object.keys(LEGACY_MEMORY_TOOL_ALIASES),
       "kg_search",
       "kg_get_neighbors",
       "kg_get_subgraph",
@@ -534,7 +532,6 @@ function deriveManagedToolFamily(tool: LLMTool): ManagedAgentToolFamily | undefi
     toolName.startsWith("memory_") ||
     toolName === "context_recall" ||
     toolName.startsWith("kg_") ||
-    Object.prototype.hasOwnProperty.call(LEGACY_MEMORY_TOOL_ALIASES, toolName) ||
     capabilityTags.includes("memory")
   ) {
     return "memory";

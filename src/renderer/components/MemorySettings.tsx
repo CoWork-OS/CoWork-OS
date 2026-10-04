@@ -30,7 +30,7 @@ interface ImportedStats {
   totalTokens: number;
 }
 
-type RelationshipLayer = "identity" | "preferences" | "context" | "history" | "commitments";
+type RelationshipLayer = "identity" | "preferences" | "context" | "commitments";
 
 interface RelationshipMemoryItem {
   id: string;
@@ -209,8 +209,6 @@ export function MemorySettings({
   const [relationshipItems, setRelationshipItems] = useState<RelationshipMemoryItem[]>([]);
   const [dueSoonItems, setDueSoonItems] = useState<RelationshipMemoryItem[]>([]);
   const [dueSoonReminder, setDueSoonReminder] = useState("");
-  const [cleaningRecurringHistory, setCleaningRecurringHistory] = useState(false);
-  const [recurringCleanupMessage, setRecurringCleanupMessage] = useState("");
   const [recentMemories, setRecentMemories] = useState<MemoryItem[]>([]);
   const [chronicleObservations, setChronicleObservations] = useState<ChronicleObservationItem[]>(
     [],
@@ -261,7 +259,11 @@ export function MemorySettings({
         window.electronAPI.getMemorySettings(workspaceId),
         window.electronAPI.getMemoryStats(workspaceId),
         window.electronAPI.getImportedMemoryStats(workspaceId),
-        window.electronAPI.listRelationshipMemory({ limit: 80, includeDone: false }),
+        window.electronAPI.listRelationshipMemory({
+          layer: "commitments",
+          limit: 80,
+          includeDone: false,
+        }),
         window.electronAPI.getDueSoonCommitments(72),
         window.electronAPI.getRecentMemories({ workspaceId, limit: 20 }),
         window.electronAPI.listChronicleObservations({ workspaceId, limit: 50 }),
@@ -549,7 +551,7 @@ export function MemorySettings({
   };
 
   const handleEditRelationship = async (item: RelationshipMemoryItem) => {
-    const nextText = prompt("Edit memory item", item.text);
+    const nextText = prompt("Edit commitment", item.text);
     if (nextText == null) return;
     const trimmed = nextText.trim();
     if (!trimmed) return;
@@ -563,31 +565,6 @@ export function MemorySettings({
       setDueSoonItems((prev) => prev.map((entry) => (entry.id === item.id ? updated : entry)));
     } catch (error) {
       reportError(error);
-    }
-  };
-
-  const handleCleanupRecurringHistory = async () => {
-    if (
-      !confirm(
-        "Collapse duplicate recurring completed-task history entries and keep only the latest per task title?",
-      )
-    ) {
-      return;
-    }
-    try {
-      setCleaningRecurringHistory(true);
-      const result = await window.electronAPI.cleanupRecurringRelationshipHistory();
-      setRecurringCleanupMessage(
-        result.collapsed > 0
-          ? `Cleaned ${result.collapsed} duplicate entries across ${result.groupsCollapsed} recurring task title(s).`
-          : "No duplicate recurring history entries found.",
-      );
-      await loadData();
-    } catch (error) {
-      reportError(error);
-      setRecurringCleanupMessage("Failed to clean recurring history. Please try again.");
-    } finally {
-      setCleaningRecurringHistory(false);
     }
   };
 
@@ -896,7 +873,7 @@ export function MemorySettings({
             )}
           </div>
 
-          {/* Relationship Memory */}
+          {/* Commitments: memory_items of kind commitment (open = active, done = archived). */}
           <div className="settings-form-group memory-section">
             <div
               style={{
@@ -907,37 +884,18 @@ export function MemorySettings({
               }}
             >
               <div style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>
-                Relationship Memory
+                Commitments
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <button
-                  className="settings-button small"
-                  onClick={handleCleanupRecurringHistory}
-                  disabled={cleaningRecurringHistory}
-                >
-                  {cleaningRecurringHistory ? "Cleaning..." : "Clean Old Recurring History"}
-                </button>
-                <button className="settings-button small" onClick={() => loadData()}
-                >
+                <button className="settings-button small" onClick={() => loadData()}>
                   Refresh
                 </button>
               </div>
             </div>
             <p className="settings-form-hint" style={{ marginTop: 0 }}>
-              Continuity memory across identity, preferences, context, history, and commitments.
+              Open commitments CoWork keeps track of, including ones taken from mail. Other facts
+              about you are in What CoWork knows.
             </p>
-            {recurringCleanupMessage && (
-              <div
-                style={{
-                  marginBottom: "8px",
-                  fontSize: "12px",
-                  color: "var(--color-text-secondary)",
-                }}
-              >
-                {recurringCleanupMessage}
-              </div>
-            )}
-
             <div
               style={{
                 marginBottom: "8px",
@@ -950,7 +908,7 @@ export function MemorySettings({
 
             <div className="memory-list">
               {relationshipItems.length === 0 && (
-                <div className="settings-empty">No relationship memory items stored yet.</div>
+                <div className="settings-empty">No open commitments.</div>
               )}
               {relationshipItems.map((item) => (
                 <div

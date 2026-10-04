@@ -107,18 +107,15 @@ describe("TaskExecutor tool allow-list semantics", () => {
         "code",
         "Update the config loader",
       ) as Set<string>;
-      for (const tool of [
-        "memory_recall",
-        "context_recall",
-        // Deprecated names routed to memory_recall / context_recall.
-        "search_memories",
-        "search_sessions",
-        "context_grep",
-      ]) {
+      for (const tool of ["memory_recall", "context_recall"]) {
         expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(true);
       }
+      // Retired memory tool names are not allowlisted.
+      for (const tool of ["search_memories", "search_sessions", "context_grep"]) {
+        expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(false);
+      }
       // Memory writes stay step-scoped.
-      for (const tool of ["memory_remember", "memory_forget", "memory_save", "memory_curate"]) {
+      for (const tool of ["memory_remember", "memory_forget"]) {
         expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(false);
       }
     }

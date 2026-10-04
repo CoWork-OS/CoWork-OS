@@ -33,11 +33,13 @@ When enabled, Supermemory becomes one lane of the consolidated memory tools:
 - `memory_recall` with `scopes: ["external"]` searches the workspace container (the
   `external` lane is only used when the workspace allows network access and Supermemory is
   configured)
-- `memory_forget` with an `external:<id>` id deletes a Supermemory document
+- `memory_remember` with `scope: "external"` stores a memory only in Supermemory (the
+  workspace container)
+- `memory_forget` with an `external:<id>` id deletes a Supermemory document; with
+  `scope: "external"` and `match` text, Supermemory forgets the memory with that text
 
 The earlier `supermemory_profile`, `supermemory_search`, `supermemory_remember` and
-`supermemory_forget` tools are deprecated, hidden aliases for one release: they still run
-when a saved prompt or skill calls them, but they are no longer offered to the model (see
+`supermemory_forget` tools were hidden aliases for one release and are now removed (see
 [Memory Engine](memory-engine.md#4b-recall-and-the-agent-tool-surface-implemented)).
 
 It also adds two optional runtime behaviors:
@@ -103,7 +105,7 @@ CoWork treats Supermemory results as **soft context**:
 - lower priority than the current user message
 - separate from the local workspace kit and local archive memory
 
-Write behavior is governed separately from read behavior. `memory_recall` (scope `external`) reads from the external lane when enabled. Mirror writes and the deprecated `supermemory_remember` alias can be:
+Write behavior is governed separately from read behavior. `memory_recall` (scope `external`) reads from the external lane when enabled. Mirror writes and `memory_remember` with scope `external` can be:
 
 - committed immediately in the normal no-prompt runtime
 - staged in `pending_memory_writes` only when an explicit review mode is enabled
@@ -160,7 +162,7 @@ That last point matters: CoWork currently mirrors memory captures, not the full 
 
 Automatic captures are salience-gated, so mirroring sends task outcomes, decisions and feedback, errors, corrections and explicit saves rather than raw tool calls and results.
 
-CoWork does not store the Supermemory id of a mirrored document. Deleting, suppressing or redacting a local memory, deleting a task, **Clear All Memories** and disabling Supermemory therefore do not remove mirrored copies. Use `memory_forget` with an `external:<id>` id, the deprecated `supermemory_forget` alias (which also accepts exact content text), or the Supermemory dashboard to remove them.
+CoWork does not store the Supermemory id of a mirrored document. Deleting, suppressing or redacting a local memory, deleting a task, **Clear All Memories** and disabling Supermemory therefore do not remove mirrored copies. Use `memory_forget` with an `external:<id>` id (or `scope: "external"` with the exact text), or the Supermemory dashboard to remove them.
 
 For the local structured-memory model, see [Structured Memory Observations](memory-observations.md).
 
@@ -179,19 +181,19 @@ network and Supermemory is configured; otherwise the tool reports the lane as un
 Deletes one Supermemory document by id (an id returned by `memory_recall`). It needs network
 access. This is the only remote delete path; local deletes do not call it.
 
-### Deprecated aliases
+### External writes
 
-- `supermemory_profile` and `supermemory_search` run `memory_recall` with scope `external`
-  (query and limit only; `containerTag`, `threshold`, `rerank` and `searchMode` are ignored).
-- `supermemory_remember` keeps its own implementation: it creates an external memory
-  directly. If an explicit Memory Write review mode covers external writes, it returns a
-  pending approval id instead. If the payload contains obvious secrets, CoWork blocks the
-  write rather than persisting it to the approval queue. A task that opted out with
-  `<no-memory>` cannot use it, and plan, analyze and verifier modes treat it as a write.
-- `supermemory_forget` with `memoryId` runs `memory_forget`; with exact content text it uses
-  the earlier implementation.
+- `memory_remember` with `scope: "external"` creates an external memory directly in the
+  workspace container. If an explicit Memory Write review mode covers external writes, it
+  returns a pending approval id instead. If the payload contains obvious secrets, CoWork
+  blocks the write rather than persisting it to the approval queue. A task that opted out
+  with `<no-memory>` cannot use it, a task started by a third-party channel sender is
+  refused, and plan, analyze and verifier modes treat it as a write.
+- `memory_forget` with `scope: "external"` and `match` sends the text to Supermemory, which
+  forgets the matching memory.
 
-Each alias result carries a `deprecated` notice naming the replacement.
+The removed `supermemory_*` tools accepted a `containerTag` override, `threshold`, `rerank`
+and `searchMode`; the memory tools always use the workspace's resolved container.
 
 ---
 
@@ -210,7 +212,7 @@ Custom container entries can also be stored in the UI as named namespaces. Today
 
 - configuration metadata
 - useful for human/operator reference
-- usable with explicit `containerTag` overrides on the deprecated `supermemory_remember` alias
+- not selectable from the agent tools, which always use the workspace container
 
 What CoWork does **not** do yet:
 

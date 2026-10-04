@@ -152,6 +152,18 @@ describe("buildActionBlockSummary", () => {
     expect(summary.activityPhrase).toBe("Worked");
   });
 
+  it("summarizes recorded calls of retired memory tools with the generic tool label", () => {
+    // Old task history keeps tool names that are no longer registered (RETIRED_MEMORY_TOOL_NAMES).
+    for (const tool of ["search_memories", "context_grep", "supermemory_remember"]) {
+      const summary = buildActionBlockSummary([
+        toolEvent(`${tool}-call`, tool, 1000),
+        toolOutcomeEvent(`${tool}-result`, "tool_result", tool, 1100),
+      ]);
+      expect(summary.toolCallCount).toBe(1);
+      expect(summary.summary).toContain(tool.replace(/_/g, " "));
+    }
+  });
+
   it("uses a search icon for mixed file exploration and code searches", () => {
     const summary = buildActionBlockSummary([
       toolEvent("read-1", "read_file", 1000),

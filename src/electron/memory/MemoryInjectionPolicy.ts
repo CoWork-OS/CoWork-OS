@@ -77,7 +77,7 @@ export interface MemoryLayerDecision {
   reasons: Partial<Record<MemoryLayer, MemoryInjectionDecision["reason"]>>;
   /** Private items (strict privacy mode, private notes) may be injected. */
   allowPrivateItems: boolean;
-  /** Items curated through `memory_curate` / kit files may be injected. */
+  /** Curated items (Memory Hub, kit files, distilled promotions) may be injected. */
   allowCuratedItems: boolean;
   gatewayContext: GatewayContextType;
 }

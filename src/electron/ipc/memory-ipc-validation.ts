@@ -136,7 +136,7 @@ export const CommitmentsGetRequestSchema = z
 
 export const RelationshipListRequestSchema = z
   .object({
-    layer: z.enum(["identity", "preferences", "context", "history", "commitments"]).optional(),
+    layer: z.enum(["identity", "preferences", "context", "commitments"]).optional(),
     includeDone: z.boolean().optional(),
     limit: cappedLimit(500).optional(),
   })
@@ -150,46 +150,6 @@ export const RelationshipUpdateRequestSchema = z
     confidence: ConfidenceSchema.optional(),
     status: z.enum(["open", "done"]).optional(),
     dueAt: TimestampSchema.nullable().optional(),
-  })
-  .strict();
-
-const UserFactCategorySchema = z.enum([
-  "identity",
-  "preference",
-  "bio",
-  "work",
-  "goal",
-  "operating",
-  "voice",
-  "accountability",
-  "constraint",
-  "other",
-]);
-
-/**
- * A fact added from the UI is always a manual fact. `source` is accepted for
- * compatibility but overwritten, so the renderer cannot label its own input as
- * conversation- or feedback-derived.
- */
-export const AddUserFactRequestSchema = z
-  .object({
-    category: UserFactCategorySchema,
-    value: z.string().trim().min(1).max(MAX_FACT_LENGTH),
-    confidence: ConfidenceSchema.optional(),
-    source: z.enum(["conversation", "feedback", "manual"]).optional(),
-    pinned: z.boolean().optional(),
-    taskId: StringIdSchema.optional(),
-  })
-  .strict()
-  .transform((request) => ({ ...request, source: "manual" as const }));
-
-export const UpdateUserFactRequestSchema = z
-  .object({
-    id: StringIdSchema,
-    category: UserFactCategorySchema.optional(),
-    value: z.string().trim().min(1).max(MAX_FACT_LENGTH).optional(),
-    confidence: ConfidenceSchema.optional(),
-    pinned: z.boolean().optional(),
   })
   .strict();
 

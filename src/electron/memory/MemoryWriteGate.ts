@@ -6,6 +6,7 @@ import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { createLogger } from "../utils/logger";
 import { containsSecret, redactSecrets } from "./sensitive-content";
+import { MEMORY_ITEM_KINDS, MEMORY_ITEM_SCOPES, MEMORY_ITEM_SOURCES } from "./memory-items-types";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import type {
   CuratedMemoryKind,
@@ -357,6 +358,10 @@ export class MemoryWriteGate {
       effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId)),
     );
     const action = this.asString(payload.action);
+    if (action === "remember") {
+      await this.replayRemember(pending, filesystemGuards);
+      return;
+    }
     const target = this.asCuratedTarget(payload.target);
     if (action === "upsert") {
       const kind = this.asCuratedKind(payload.kind);
@@ -409,6 +414,62 @@ export class MemoryWriteGate {
     });
     if (!result.success) {
       throw new Error(result.error || "Approved curated memory write failed.");
+    }
+  }
+
+  /**
+   * An approved `memory_remember` fact: the staged memory_items candidate, written through
+   * MemoryWriter with its own kind, scope and source (no curated-lane conversion).
+   */
+  private static async replayRemember(
+    pending: PendingMemoryWrite,
+    filesystemGuards: ReturnType<typeof MemoryWriteGate.getCuratedFilesystemGuards>,
+  ): Promise<void> {
+    const [{ MemoryWriter }, { CuratedMemoryService }] = await Promise.all([
+      import("./MemoryWriter"),
+      import("./CuratedMemoryService"),
+    ]);
+    const writer = MemoryWriter.get();
+    if (!writer) throw new Error("Memory is not available yet.");
+    const payload = pending.payload;
+    const content = this.asString(payload.content);
+    const kind = MEMORY_ITEM_KINDS.find((value) => value === payload.kind);
+    const scope = MEMORY_ITEM_SCOPES.find((value) => value === payload.scope);
+    const source = MEMORY_ITEM_SOURCES.find((value) => value === payload.source);
+    if (!content || !kind || !scope || !source) {
+      throw new Error("Pending memory fact payload is missing content, kind, scope or source.");
+    }
+    const scopeRef = this.asString(payload.scopeRef) || null;
+    const result = await writer.ingest({
+      content,
+      kind,
+      scope,
+      // Only the pending write's own workspace (or none, for global and contact items).
+      workspaceId: scope === "global" ? null : pending.workspaceId,
+      scopeRef: scope === "task" ? (pending.taskId ?? scopeRef) : scopeRef,
+      subjectKey: this.asString(payload.subjectKey) || null,
+      source,
+      sourceRef: {
+        store: "agent_tool",
+        id: this.asString(payload.recordId) || pending.id,
+        ...(pending.taskId ? { taskId: pending.taskId } : {}),
+        approvedFrom: pending.id,
+      },
+      confidence: typeof payload.confidence === "number" ? payload.confidence : 0.7,
+      pinned: payload.pinned === true,
+      privacy: payload.privacy === "private" ? "private" : undefined,
+      taskId: pending.taskId ?? null,
+      originWorkspaceId: pending.workspaceId,
+      originText: content,
+    });
+    if (result.status === "skipped") {
+      throw new Error(`Approved memory fact was not saved (${result.reason}).`);
+    }
+    if (result.item.scope === "workspace" && result.item.workspaceId) {
+      await CuratedMemoryService.syncWorkspaceFiles(result.item.workspaceId, {
+        readGuard: filesystemGuards.filesystemReadGuard,
+        writeGuard: filesystemGuards.filesystemWriteGuard,
+      });
     }
   }
 

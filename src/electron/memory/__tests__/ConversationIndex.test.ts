@@ -88,6 +88,10 @@ describe("extractConversationEventText", () => {
     expect(extractConversationEventText("conversation_snapshot", { message: "x" })).toBeNull();
     expect(extractConversationEventText("llm_usage", { message: "x" })).toBeNull();
     expect(
+      extractConversationEventText("tool_result", { tool: "memory_recall", result: "old hit" }),
+    ).toBeNull();
+    // Recorded events of retired recall tools are still skipped by the backfill.
+    expect(
       extractConversationEventText("tool_result", { tool: "search_sessions", result: "old hit" }),
     ).toBeNull();
     expect(
@@ -116,7 +120,7 @@ describeWithNativeDb("conversation index", () => {
     expect(hits.map((hit) => hit.type).sort()).toEqual(["assistant_message", "user_message"]);
     expect(hits[0]).toMatchObject({ kind: "event", workspaceId: "ws-1", taskId: "task-1" });
     expect(hits.every((hit) => !hit.snippet.includes("{"))).toBe(true);
-    // The compaction-recovery store stays off: context_grep sees nothing.
+    // The compaction-recovery store stays off: context_recall sees nothing.
     expect(
       await DurableContextService.search({ workspaceId: "ws-1", query: "rollout checklist" }),
     ).toEqual([]);

@@ -251,6 +251,26 @@ describeWithSqlite("TaskRepository.delete", () => {
       now,
     );
 
+    // An older profile that still has the retired curated table.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS curated_memory_entries (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        task_id TEXT,
+        target TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        content TEXT NOT NULL,
+        normalized_key TEXT NOT NULL,
+        source TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.7,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_confirmed_at INTEGER,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id)
+      )
+    `);
     db.prepare(
       `
         INSERT INTO curated_memory_entries (

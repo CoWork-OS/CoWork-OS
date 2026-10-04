@@ -2121,12 +2121,13 @@ if (isMacSafeStorageMigrationWorker) {
         }
         MemoryService.initialize(dbManager);
         CuratedMemoryService.initialize(dbManager);
-        // Memory engine write side: legacy stores dual-write into memory_items, and the
-        // legacy lanes are copied in once, well after startup (docs/memory-engine.md).
+        // Memory engine (docs/memory-engine.md): memory_items is the only store of facts
+        // about the user. The retired legacy lanes are copied in once, awaited here, before
+        // queue recovery and IPC can read memory.
         const memoryStatements = MemoryService.getStatements();
         if (memoryStatements) {
           // Stopped (and its queued writes flushed) by the "memory engine" shutdown step.
-          stopMemoryEngine = startMemoryEngine(memoryStatements, {
+          stopMemoryEngine = await startMemoryEngine(memoryStatements, {
             getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
           });
         }

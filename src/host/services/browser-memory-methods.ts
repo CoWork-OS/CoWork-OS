@@ -24,7 +24,6 @@ import { MemoryWriteGate } from "../../electron/memory/MemoryWriteGate";
 import { MemoryService } from "../../electron/memory/MemoryService";
 import { MemoryWorkspacePurgeService } from "../../electron/memory/MemoryWorkspacePurgeService";
 import { MemoryObservationService } from "../../electron/memory/MemoryObservationService";
-import { UserProfileService } from "../../electron/memory/UserProfileService";
 import { RelationshipMemoryService } from "../../electron/memory/RelationshipMemoryService";
 import { MemoryFeaturesManager } from "../../electron/settings/memory-features-manager";
 import { ChronicleObservationRepository } from "../../electron/chronicle/ChronicleObservationRepository";
@@ -33,7 +32,6 @@ import type { BrowserDesktopDefinition, BrowserDesktopDefinitions } from "./brow
 import { WebApplicationError } from "../web/WebApplication";
 import { MemoryHubError, MemoryItemsHubService } from "../../electron/memory/MemoryItemsHubService";
 import { MemoryWriter } from "../../electron/memory/MemoryWriter";
-import { createLegacyMemoryMirror } from "../../electron/memory/memory-items-legacy-mirror";
 import type Database from "better-sqlite3";
 import {
   MemoryReviewError,
@@ -62,18 +60,6 @@ const scope = z.object({ workspaceId: id });
 const page = scope.extend({ limit: z.number().int().min(1).max(200).optional() }).strict();
 const ids = z.array(id).max(100);
 const confidence = z.number().finite().min(0).max(1);
-const category = z.enum([
-  "identity",
-  "preference",
-  "bio",
-  "work",
-  "goal",
-  "operating",
-  "voice",
-  "accountability",
-  "constraint",
-  "other",
-]);
 const settingsPatch = z
   .object({
     enabled: z.boolean().optional(),
@@ -83,14 +69,6 @@ const settingsPatch = z
     maxStorageMb: z.number().int().min(10).max(5000).optional(),
     privacyMode: z.enum(["normal", "strict", "disabled"]).optional(),
     excludedPatterns: z.array(z.string().max(500)).max(100).optional(),
-  })
-  .strict();
-const fact = z
-  .object({
-    category,
-    value: z.string().trim().min(1).max(240),
-    confidence: confidence.optional(),
-    pinned: z.boolean().optional(),
   })
   .strict();
 const featureBooleanKeys = [
@@ -300,7 +278,6 @@ export function createBrowserMemoryDefinitions(options: {
     options.memoryItems ??
     new MemoryItemsHubService({
       getWriter: () => MemoryWriter.get(),
-      legacy: createLegacyMemoryMirror(),
       getTask: async (taskId) => (await options.getTask?.(taskId)) ?? undefined,
       syncKitFiles: async (workspaceId) => {
         const workspace = await options.resolveWorkspace(workspaceId);
@@ -684,27 +661,12 @@ export function createBrowserMemoryDefinitions(options: {
         }),
       );
     }),
-    addUserFact: action(
-      fact.extend({ source: z.literal("manual").optional() }).strict(),
-      (value) => UserProfileService.addFact({ ...value, source: "manual" }),
-      true,
-    ),
-    updateUserFact: action(
-      fact.partial().extend({ id }).strict(),
-      (value) => UserProfileService.updateFact(value),
-      true,
-    ),
-    deleteUserFact: action(
-      id,
-      (factId) => ({ success: UserProfileService.deleteFact(factId) }),
-      true,
-    ),
     listRelationshipMemory: {
       ...action(
         z
           .object({
             layer: z
-              .enum(["identity", "preferences", "context", "history", "commitments"])
+              .enum(["identity", "preferences", "context", "commitments"])
               .optional(),
             includeDone: z.boolean().optional(),
             limit: z.number().int().min(1).max(200).optional(),
@@ -730,11 +692,7 @@ export function createBrowserMemoryDefinitions(options: {
     ),
     deleteRelationshipMemory: action(
       id,
-      (itemId) => ({ success: RelationshipMemoryService.deleteItem(itemId) }),
-      true,
-    ),
-    cleanupRecurringRelationshipHistory: noArgs(
-      () => ({ success: true, ...RelationshipMemoryService.cleanupRecurringTaskHistory() }),
+      async (itemId) => ({ success: await RelationshipMemoryService.deleteItem(itemId) }),
       true,
     ),
     getDueSoonCommitments: {

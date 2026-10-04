@@ -56,7 +56,7 @@ export const MEMORY_ITEM_TRUST: Readonly<Record<MemoryItemSource, number>> = {
 };
 
 /**
- * Where an item came from, for provenance, idempotent migration and dual-write edits.
+ * Where an item came from, for provenance, idempotent migration and edits of a record.
  * `store` + `id` name the record in a legacy store (curated entry, profile fact,
  * relationship item, awareness belief) or the producer; other fields are informational.
  */

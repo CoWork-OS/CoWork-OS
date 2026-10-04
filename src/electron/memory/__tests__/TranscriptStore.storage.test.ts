@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TranscriptStore } from "../TranscriptStore";
 import { DurableContextService } from "../DurableContextService";
 import { setCheckpointSigningKeyForTests } from "../checkpoint-signing";
-import { ensureTranscriptSchema } from "../transcript-sql";
 
 const require = createRequire(import.meta.url);
 const BetterSqlite3 = (() => {
@@ -49,26 +48,14 @@ function openDb(): import("better-sqlite3").Database {
 }
 
 /** A legacy span row (written by older clients) plus its JSONL file. */
+/** A legacy JSONL span file (the `transcript_spans` table is retired and dropped). */
 async function writeLegacySpan(
-  db: import("better-sqlite3").Database,
+  _db: import("better-sqlite3").Database,
   workspacePath: string,
   taskId: string,
   message: string,
 ): Promise<void> {
-  ensureTranscriptSchema(db);
   const payload = JSON.stringify({ message });
-  db.prepare(
-    `INSERT INTO transcript_spans (id, workspace_path, task_id, timestamp, type, payload_json,
-       event_id, seq, raw_line, search_text, created_at)
-     VALUES (?, ?, ?, 1000, 'assistant_message', ?, ?, 1, '', ?, 0)`,
-  ).run(
-    `${workspacePath}:${taskId}`,
-    path.resolve(workspacePath),
-    taskId,
-    payload,
-    `${taskId}-legacy`,
-    `assistant_message ${payload}`,
-  );
   await fs.mkdir(path.dirname(spanFile(workspacePath, taskId)), { recursive: true });
   await fs.writeFile(spanFile(workspacePath, taskId), `${JSON.stringify({ taskId, payload })}\n`);
 }
@@ -197,7 +184,7 @@ describeWithNativeDb("TranscriptStore deletion and retention", () => {
     expect(table).toBeUndefined();
   });
 
-  it("deletes a task's index rows, legacy rows, span file, checkpoints and lock file", async () => {
+  it("deletes a task's index rows, span file, checkpoints and lock file", async () => {
     const db = openDb();
     const workspacePath = await createWorkspace();
     await indexMessage("w1", "task-del", "delete me");
@@ -215,7 +202,6 @@ describeWithNativeDb("TranscriptStore deletion and retention", () => {
     const result = await TranscriptStore.deleteTask("task-del", { workspacePath });
 
     expect(result.indexRows).toBe(1);
-    expect(result.spanRows).toBe(1);
     expect(result.spanFiles).toBe(1);
     expect(result.checkpointFiles).toBe(2);
     expect(result.lockFiles).toBe(1);
@@ -223,32 +209,29 @@ describeWithNativeDb("TranscriptStore deletion and retention", () => {
     expect(await fs.readdir(checkpointDir(workspacePath))).toEqual([]);
     expect(await exists(spanFile(workspacePath, "task-keep"))).toBe(true);
     expect(indexedTasks(db)).toEqual(["task-keep"]);
-    expect(db.prepare(`SELECT task_id FROM transcript_spans`).all()).toEqual([
-      { task_id: "task-keep" },
-    ]);
     expect(
       await DurableContextService.searchConversation({ workspaceId: "w1", query: "delete" }),
     ).toEqual([]);
   });
 
-  it("deletes by task id alone across workspaces and whole workspaces", async () => {
+  it("deletes by task id alone (index rows only) and whole workspaces", async () => {
     const db = openDb();
     const first = await createWorkspace();
     const second = await createWorkspace();
     await writeLegacySpan(db, first, "task-x", "a");
     await writeLegacySpan(db, second, "task-y", "b");
     await writeLegacySpan(db, second, "task-z", "c");
+    await indexMessage("w1", "task-x", "a");
     await indexMessage("w2", "task-y", "b");
 
     const byId = await TranscriptStore.deleteTask("task-x");
-    expect(byId.spanRows).toBe(1);
-    expect(await exists(spanFile(first, "task-x"))).toBe(false);
+    expect(byId.indexRows).toBe(1);
+    // Without a workspace path no files are touched.
+    expect(await exists(spanFile(first, "task-x"))).toBe(true);
 
     const workspace = await TranscriptStore.deleteWorkspace(second, { workspaceId: "w2" });
-    expect(workspace.spanRows).toBe(2);
     expect(workspace.spanFiles).toBe(2);
     expect(workspace.indexRows).toBeGreaterThanOrEqual(1);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM transcript_spans`).get()).toEqual({ n: 0 });
     expect(indexedTasks(db)).toEqual([]);
   });
 
@@ -280,14 +263,11 @@ describeWithNativeDb("TranscriptStore deletion and retention", () => {
     const result = await TranscriptStore.pruneRetention({ retentionDays: 90, now });
 
     expect(indexedTasks(db)).toEqual(["old-running", "recent-done"]);
-    const remaining = (
-      db.prepare(`SELECT task_id FROM transcript_spans ORDER BY task_id`).all() as Array<{
-        task_id: string;
-      }>
-    ).map((row) => row.task_id);
-    expect(remaining).toEqual(["old-running", "recent-done"]);
     expect(await exists(spanFile(workspacePath, "old-done"))).toBe(false);
-    expect(await exists(spanFile(workspacePath, "deleted-task"))).toBe(false);
+    expect(await exists(spanFile(workspacePath, "old-running"))).toBe(true);
+    expect(await exists(spanFile(workspacePath, "recent-done"))).toBe(true);
+    // A recent file of a task this database no longer knows waits until it is old.
+    expect(await exists(spanFile(workspacePath, "deleted-task"))).toBe(true);
     expect(await exists(spanFile(workspacePath, "foreign-task"))).toBe(true);
     expect(await exists(staleLock)).toBe(false);
     expect(result.indexRows).toBe(2);

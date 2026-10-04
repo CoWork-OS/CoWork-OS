@@ -96,13 +96,7 @@ function inferBatchFamilyLabel(toolNames: string[]): string {
     "parse_document",
     "read_pdf_visual",
   ]);
-  const historyTools = new Set([
-    "task_history",
-    "task_events",
-    "search_sessions",
-    "context_recall",
-    "task_list_list",
-  ]);
+  const historyTools = new Set(["task_history", "task_events", "context_recall", "task_list_list"]);
   const webResearchTools = new Set([
     "web_fetch",
     "web_search",
@@ -133,9 +127,7 @@ function inferBatchFamilyLabel(toolNames: string[]): string {
 }
 
 function shouldForceFamilyLabel(toolName: string): boolean {
-  return new Set(["task_history", "task_events", "search_sessions", "task_list_list"]).has(
-    normalizeToolKey(toolName),
-  );
+  return new Set(["task_history", "task_events", "task_list_list"]).has(normalizeToolKey(toolName));
 }
 
 function describeToolInput(toolInput: unknown): string {

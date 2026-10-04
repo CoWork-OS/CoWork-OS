@@ -63,8 +63,8 @@ Approving a pending write first atomically claims the row as `applying`, replays
 The approval gate sits in front of all durable memory write surfaces:
 
 - `memory_remember` (facts go through `MemoryWriter`; `outcome`/`error`/`note` go to the archive) and automatic `MemoryService.capture(...)` archive writes
-- Dreaming accepted candidates and Core Memory Distiller promotions (and the deprecated `memory_curate` alias)
-- the deprecated `supermemory_remember` alias and optional Supermemory mirroring
+- Dreaming accepted candidates and Core Memory Distiller promotions
+- `memory_remember` with scope `external` (target `external`) and optional Supermemory mirroring
 - external provider mirror hooks through `ExternalMemoryProvider`
 
 Read-only recall tools are not staged. Search, profile fetch, inspector views, and prompt synthesis read from the current committed memory layers.
@@ -134,13 +134,13 @@ The agent sees four memory tools (audit §8.3), always exposed in the memory lan
 | Tool | Does | Policy |
 |---|---|---|
 | `memory_recall` | One query over `memory_items`, the archive, the conversation index (other tasks), knowledge (KG entities, `.cowork` markdown, topic packs) and, when asked for and allowed, Supermemory. Lists are fused by weighted reciprocal rank; results are an index (`id`, lane, snippet, provenance, relevance, token estimate) until `detail: "full"` with `ids`. | Read. Allowed in plan/analyze modes and every plan step. `external` scope needs network access and the `external_service` approval. |
-| `memory_remember` | Facts (`preference`, `identity`, `rule`, `project_fact`, `decision`, `commitment`, `correction`, `insight`) through `MemoryWriter`; `outcome`, `error`, `note` to the archive. `user_stated` only when the model sets `user_asked` and the user's latest message really asks to remember (otherwise `inferred`). | Memory write: denied in plan/analyze modes and to verifier/researcher workers; staged when memory-write approval is on; blocked by `<no-memory>`. |
-| `memory_forget` | Real delete of a memory item visible to this workspace (and the legacy record it mirrors), of this workspace's archive row, or of a Supermemory entry. `match` must identify exactly one memory. | Memory write. |
-| `context_recall` | The active task's earlier conversation: durable compaction context when enabled, then the conversation index. | Read. |
+| `memory_remember` | Facts (`preference`, `identity`, `rule`, `project_fact`, `decision`, `commitment`, `correction`, `insight`) through `MemoryWriter`; `outcome`, `error`, `note` to the archive; scope `external` stores the memory only in Supermemory. `user_stated` only when the model sets `user_asked` and the user's latest message really asks to remember (otherwise `inferred`). | Memory write: denied in plan/analyze modes and to verifier/researcher workers; staged when memory-write approval is on; blocked by `<no-memory>`. |
+| `memory_forget` | Real delete of a memory item visible to this workspace (and the legacy record it mirrors), of this workspace's archive row, or of a Supermemory entry (an `external:<id>` id, or `scope: "external"` with `match` text that Supermemory matches). Otherwise `match` must identify exactly one memory. | Memory write. |
+| `context_recall` | The active task's earlier conversation (never another task's): durable compaction context when enabled, then the conversation index. | Read. |
 
 All of them are in `group:memory`, so group and public gateway contexts cannot use them, and a managed agent with memory disabled has them denied. Recall output is never re-captured into the archive or the conversation index.
 
-The 16 tools they replace (`search_memories`, `memory_search_index`, `memory_timeline`, `memory_details`, `search_quotes`, `search_sessions`, `memory_topics_load`, `memory_curated_read`, `supermemory_profile`, `supermemory_search`, `memory_save`, `memory_curate`, `supermemory_remember`, `supermemory_forget`, `context_grep`, `context_describe`) are hidden for one release: still executable through the same policies (`LEGACY_MEMORY_TOOL_ALIASES`, tool-semantics aliases), answered by the new implementation with a `deprecated` notice, but never offered to the model or returned by `tool_search`. `kg_*` stays for explicit graph editing, deferred and discoverable through `tool_search`.
+The 16 tools they replace (`search_memories`, `memory_search_index`, `memory_timeline`, `memory_details`, `search_quotes`, `search_sessions`, `memory_topics_load`, `memory_curated_read`, `supermemory_profile`, `supermemory_search`, `memory_save`, `memory_curate`, `supermemory_remember`, `supermemory_forget`, `context_grep`, `context_describe`) were hidden aliases for one release and are now removed: they are no longer registered, resolved as aliases or listed in any policy group, allowlist or deny list, and a call to one fails as an unknown tool. Skills and prompts must use the four tools above. Recorded calls in old task history still render in the timeline (generic tool label), and the conversation index backfill still skips their recorded recall output (`RETIRED_MEMORY_TOOL_NAMES`). `kg_*` stays for explicit graph editing, deferred and discoverable through `tool_search`.
 
 ---
 
@@ -161,7 +161,7 @@ This lane is for the small set of durable facts that should stay front-and-cente
 
 ### How entries arrive
 
-- explicit user actions (Memory Hub) and the deprecated `memory_curate` tool alias; the agent's `memory_remember` writes facts to `memory_items` through `MemoryWriter`, which render into the same kit blocks once the lane migration has run
+- explicit user actions (Memory Hub); the agent's `memory_remember` writes facts to `memory_items` through `MemoryWriter`, which render into the same kit blocks once the lane migration has run
 - accepted stable promotions from `CoreMemoryDistiller`
 - future human edits that are synced back through governed workflows
 
@@ -196,7 +196,7 @@ This is the broad searchable archive:
 - decisions and user feedback
 - errors that affected a task (tool errors, failed steps, verification failures)
 - user corrections and insights
-- explicit `memory_remember` entries of kind `outcome`, `error` or `note` (and the deprecated `memory_save` alias)
+- explicit `memory_remember` entries of kind `outcome`, `error` or `note`
 - imported ChatGPT history
 - compressed summaries
 
@@ -302,7 +302,8 @@ What it does not replace:
 
 - `memory_recall` with scope `external` searches Supermemory for the workspace's resolved `containerTag`. The lane runs only when Supermemory is configured, the workspace allows network access and the model asked for the scope; the call then needs the `external_service` approval
 - `memory_forget` with an `external:<id>` from `memory_recall` removes that external memory
-- the deprecated `supermemory_profile` / `supermemory_search` names route to `memory_recall`; `supermemory_remember` and `supermemory_forget` (by content) keep their own implementation for one release
+- `memory_remember` with scope `external` stores a memory only in Supermemory (through the memory write gate, `external_service` approval); `memory_forget` with `scope: "external"` and `match` text forgets the Supermemory memory with that text
+- the earlier `supermemory_*` tools are removed
 
 ### Prompt behavior
 
@@ -368,7 +369,7 @@ Dreaming reads session recall as one of its main evidence sources after task com
 
 ### Verbatim recall
 
-Exact wording comes from `memory_recall` too: conversation hits are clean excerpts of the indexed events, and `detail: "full"` returns the stored text (events, archive rows, `.cowork` markdown line ranges). The deprecated `search_quotes` name routes to `memory_recall` over conversations, memory and knowledge.
+Exact wording comes from `memory_recall` too: conversation hits are clean excerpts of the indexed events, and `detail: "full"` returns the stored text (events, archive rows, `.cowork` markdown line ranges).
 
 ---
 

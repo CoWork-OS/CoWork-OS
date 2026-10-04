@@ -4,7 +4,6 @@ import { MemorySynthesizer } from "../../../electron/memory/MemorySynthesizer";
 import { MemoryWriteGate } from "../../../electron/memory/MemoryWriteGate";
 import { MemoryService } from "../../../electron/memory/MemoryService";
 import { MemoryObservationService } from "../../../electron/memory/MemoryObservationService";
-import { UserProfileService } from "../../../electron/memory/UserProfileService";
 import { ChronicleObservationRepository } from "../../../electron/chronicle/ChronicleObservationRepository";
 import type { Workspace } from "../../../shared/types";
 import { createBrowserMemoryDefinitions } from "../browser-memory-methods";
@@ -138,25 +137,16 @@ describe("browser memory services", () => {
     expect(result).toEqual([expect.objectContaining({ id: "observation", appName: "QA" })]);
   });
 
-  it("allows manual profile edits and rejects forged task/source attribution", async () => {
-    const add = vi
-      .spyOn(UserProfileService, "addFact")
-      .mockReturnValue({ id: "fact-one" } as never);
-    const { call } = setup();
-    await call("addUserFact", [
-      { category: "preference", value: "Disposable QA preference", source: "manual" },
-    ]);
-    expect(add).toHaveBeenCalledWith({
-      category: "preference",
-      value: "Disposable QA preference",
-      source: "manual",
-    });
-    await expect(
-      call("addUserFact", [
-        { category: "preference", value: "QA", source: "conversation", taskId: "other-task" },
-      ]),
-    ).rejects.toThrow();
-    expect(add).toHaveBeenCalledTimes(1);
+  it("no longer exposes profile fact editors (facts are edited in the Memory Hub)", () => {
+    const { definitions } = setup();
+    for (const name of [
+      "addUserFact",
+      "updateUserFact",
+      "deleteUserFact",
+      "cleanupRecurringRelationshipHistory",
+    ]) {
+      expect(definitions[name]).toBeUndefined();
+    }
   });
   it("authorizes approval records using their stored workspace and returns only display DTOs", async () => {
     const pending = {
@@ -340,7 +330,7 @@ describe("browser memory items (What CoWork knows)", () => {
       list: vi.fn(async () => ({ items: [], total: 0, offset: 0, hasMore: false })),
       delete: vi.fn(async () => ({ success: true, item: null })),
       add: vi.fn(async () => ({ success: true, item: null })),
-      clearGlobal: vi.fn(async () => ({ success: true, deleted: 0, legacyRecords: 0 })),
+      clearGlobal: vi.fn(async () => ({ success: true, deleted: 0 })),
     };
     const definitions = createBrowserMemoryDefinitions({
       resolveWorkspace: async () =>

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AdaptiveStyleEngine } from "../AdaptiveStyleEngine";
+import { MemoryWriter, type MemoryCandidate } from "../MemoryWriter";
 import { setExplicitResponseStyleState } from "../memory-read-side";
 
 // ── Mocks ─────────────────────────────────────────────────────────────
@@ -48,6 +49,17 @@ vi.mock("../../settings/personality-manager", () => ({
   },
 }));
 
+/**
+ * The adapted style is written to memory_items as the `response_style` item, and the read
+ * side mirrors it into PersonalityManager. This fake writer does both at once: it records
+ * the candidate and applies its structured style (`source_ref.style`) the way the read
+ * side does, so `setResponseStyleMock` sees what the engine wrote.
+ */
+const ingestMock = vi.fn(async (candidate: MemoryCandidate) => {
+  setResponseStyleMock(candidate.sourceRef?.style as Record<string, string>);
+  return { status: "skipped" as const, reason: "empty" as const };
+});
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 describe("AdaptiveStyleEngine", () => {
@@ -66,6 +78,38 @@ describe("AdaptiveStyleEngine", () => {
     };
     AdaptiveStyleEngine.reset();
     setExplicitResponseStyleState(false);
+    ingestMock.mockClear();
+    MemoryWriter.setInstance({ ingest: ingestMock } as unknown as MemoryWriter);
+  });
+
+  afterEach(() => {
+    MemoryWriter.setInstance(null);
+  });
+
+  describe("memory_items response_style", () => {
+    it("writes the adapted style as an inferred response_style item", () => {
+      AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
+      expect(ingestMock).toHaveBeenCalledTimes(1);
+      const candidate = ingestMock.mock.calls[0][0];
+      expect(candidate).toMatchObject({
+        kind: "preference",
+        scope: "global",
+        subjectKey: "response_style",
+        source: "inferred",
+        sourceRef: {
+          store: "adaptive_style",
+          id: "response_style",
+          style: expect.objectContaining({ responseLength: "terse" }),
+        },
+      });
+    });
+
+    it("does not adapt without the memory engine (no store for the style)", () => {
+      MemoryWriter.setInstance(null);
+      AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
+      expect(setResponseStyleMock).not.toHaveBeenCalled();
+      expect(AdaptiveStyleEngine.getAdaptationHistory()).toEqual([]);
+    });
   });
 
   describe("explicit response style", () => {

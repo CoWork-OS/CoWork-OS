@@ -237,7 +237,8 @@ describe.skipIf(!sqliteLoads)("qa memory-health script", () => {
         ]),
       ),
     ).toEqual({ ".cowork/.history/": 2, ".cowork/memory/": 1, "notes/": 1, "(files)": 1 });
-    expect(report.curated.status).toBe("ok");
+    // curated_memory_entries is retired (LegacyMemoryRetirement.ts): a fresh schema lacks it.
+    expect(report.curated.status).toBe("missing");
     expect(report.maintenance.markers.map((m: { key: string }) => m.key)).toContain(
       "memory_items_lane_migration_v1",
     );

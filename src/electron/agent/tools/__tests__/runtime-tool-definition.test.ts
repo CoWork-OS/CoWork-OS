@@ -47,7 +47,7 @@ describe("runtime tool definition metadata", () => {
     },
   );
 
-  it.each(["memory_recall", "context_recall", "search_memories", "context_grep"])(
+  it.each(["memory_recall", "context_recall"])(
     "runs memory read %s in parallel with other reads",
     (tool) => {
       const metadata = getDefaultRuntimeToolMetadata(tool);
@@ -56,7 +56,7 @@ describe("runtime tool definition metadata", () => {
     },
   );
 
-  it.each(["memory_remember", "memory_forget", "memory_save"])(
+  it.each(["memory_remember", "memory_forget"])(
     "does not treat memory write %s as read-only",
     (tool) => {
       expect(getDefaultRuntimeToolMetadata(tool).readOnly).toBe(false);

@@ -76,9 +76,10 @@ export interface SynthesizeOptions {
    */
   visibleToolNames?: Iterable<string>;
   /**
-   * Include the legacy hot-memory block (curated + profile + relationship). Prompt
-   * surfaces pass false: MemoryContextBuilder renders L0 from memory_items once (the
-   * pinned profile block), so hot memory here would repeat it (PROMPT-5).
+   * Include the hot-memory block (curated workspace items, profile facts, open
+   * commitments; all from memory_items). Prompt surfaces pass false: MemoryContextBuilder
+   * renders L0 once (the pinned profile block), so hot memory here would repeat it
+   * (PROMPT-5).
    */
   includeHotMemory?: boolean;
   /** MemoryContextBuilder's L1 block (memory_items recall), rendered in the L0/L1 slot. */
@@ -269,23 +270,22 @@ function extractUserProfileFragments(): MemoryFragment[] {
   }
 }
 
+/** The user's own open commitments (not third-party ones from mail). */
 function extractRelationshipFragments(): MemoryFragment[] {
   try {
-    return RelationshipMemoryService.listItems({
-      includeDone: false,
-      limit: 16,
+    return RelationshipMemoryService.listOpenCommitments(16)
       // Mailbox-sourced items are sender-controlled text, not facts about the user.
-      excludeThirdParty: true,
-    }).map((item) => ({
-      key: fingerprint(`relationship:${item.layer}:${item.text}`),
-      source: "relationship" as const,
-      text: `[${item.layer}] ${item.text}`,
-      relevance: item.layer === "commitments" ? 0.88 : item.layer === "preferences" ? 0.8 : 0.62,
-      confidence: item.confidence,
-      updatedAt: item.updatedAt,
-      estimatedTokens: estimateTokens(item.text) + 3,
-      category: item.layer,
-    }));
+      .filter((item) => !RelationshipMemoryService.isThirdPartyItem(item))
+      .map((item) => ({
+        key: fingerprint(`relationship:${item.layer}:${item.text}`),
+        source: "relationship" as const,
+        text: `[${item.layer}] ${item.text}`,
+        relevance: 0.88,
+        confidence: item.confidence,
+        updatedAt: item.updatedAt,
+        estimatedTokens: estimateTokens(item.text) + 3,
+        category: item.layer,
+      }));
   } catch {
     return [];
   }
@@ -763,8 +763,8 @@ export class MemorySynthesizer {
    * Memory Hub preview: what a private task in this workspace would receive, built the way
    * the executor builds a plan step. MemoryInjectionPolicy decides the layers (private
    * gateway, this workspace's memory settings); MemoryContextBuilder renders L0 (the pinned
-   * profile block) and L1 (memory_items recall for the prompt) from memory_items, or from
-   * the legacy stores until the lane migration has run; the synthesizer adds the kit slice,
+   * profile block) and L1 (memory_items recall for the prompt) from memory_items; the
+   * synthesizer adds the kit slice,
    * playbook and summaries around L1, as in the `memory_context` section.
    */
   static async buildLayerPreview(
@@ -849,9 +849,7 @@ export class MemorySynthesizer {
     }
 
     const sourceNote =
-      layers.source === "legacy"
-        ? " Read from the legacy stores until the memory_items migration has run."
-        : "";
+      layers.source === "none" ? " Memory is not available yet (the memory engine is not running)." : "";
     const recallHints = this.buildRecallHintsContext();
     const l2Description =
       settings.topicMemoryEnabled !== false

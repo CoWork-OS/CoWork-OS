@@ -5,7 +5,7 @@
  * One row per remote record:
  * - `local_ref` names the local record: `archive:<memories.id>` for a mirrored archive row,
  *   `memory:<memory_items.id>` for a mirrored fact, `external:<remote id>` for a write that
- *   exists only remotely (the deprecated `supermemory_remember`).
+ *   exists only remotely (`memory_remember` with scope `external`).
  * - `remote_kind` is `document` (`/v3/documents`, the mirror path) or `memory`
  *   (`/v4/memories`, explicit remembers); each is deleted through its own endpoint.
  * - `container_tag` is the container the write went to, so the delete addresses the same one

@@ -211,7 +211,7 @@ Compaction behavior is controlled by constants in `src/electron/agent/executor-h
 | `src/shared/context-compaction.ts`                                 | Provider-neutral lifecycle payloads, policy defaults, and preview validation                                                 |
 | `src/electron/agent/executor-helpers.ts`                           | Tunable constants                                                                                                            |
 | `src/electron/memory/DurableContextService.ts`                     | Optional task-scoped durable message/summarization index with source links, large-payload refs, and summary DAG parent links |
-| `src/electron/agent/tools/memory-tools.ts`                         | `context_recall` tool definition (and the deprecated `context_grep` / `context_describe` aliases) and active-task scope       |
+| `src/electron/agent/tools/memory-tools.ts`                         | `context_recall` tool definition and active-task scope       |
 | `src/renderer/components/MainContent/timeline-event-rendering.tsx` | Compaction event rendering with lifecycle details and typed/legacy payload support                                           |
 | `src/renderer/utils/task-event-visibility.ts`                      | Legacy summary-event deduplication                                                                                           |
 | `src/renderer/styles/index.css`                                    | Summary section styling                                                                                                      |

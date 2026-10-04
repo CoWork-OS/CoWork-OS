@@ -1143,7 +1143,7 @@ export class AgentDaemon extends EventEmitter {
       if (pruned.tasks > 0 || pruned.lockFiles > 0) {
         log.info(
           `DB maintenance: pruned transcripts of ${pruned.tasks} task(s) ` +
-            `(${pruned.indexRows} conversation index rows, ${pruned.spanRows} span rows, ` +
+            `(${pruned.indexRows} conversation index rows, ` +
             `${pruned.spanFiles} span files, ` +
             `${pruned.checkpointFiles} checkpoint files, ${pruned.lockFiles} lock files, ` +
             `${Math.round(pruned.bytesFreed / 1048576)} MB of files)`,
@@ -9282,7 +9282,7 @@ export class AgentDaemon extends EventEmitter {
 
   /**
    * Feed the conversation index, the one search index over task conversations
-   * (search_sessions, search_quotes, query orchestrator, Dreaming, Mission Control
+   * (memory_recall, query orchestrator, Dreaming, Mission Control
    * recall). Runs for every task whatever the memory settings, except tasks whose prompt
    * carries a `<no-memory>` directive. Writes are batched by the service.
    */
@@ -14714,12 +14714,15 @@ export class AgentDaemon extends EventEmitter {
           gatewayContext === "private" ||
           existingTask.agentConfig?.allowSharedContextMemory === true;
         if (canCaptureRelationshipMemory) {
-          RelationshipMemoryService.recordTaskCompletion(
+          // Closes open commitments the result reports as done (memory_items).
+          void RelationshipMemoryService.recordTaskCompletion(
             existingTask.title,
             typeof updates.resultSummary === "string" ? updates.resultSummary : undefined,
             taskId,
             existingTask.source ?? "manual",
-          );
+          ).catch((error) => {
+            log.warn("Closing completed commitments failed:", error);
+          });
         }
         getAwarenessService().captureTaskCompletion(
           existingTask.workspaceId,

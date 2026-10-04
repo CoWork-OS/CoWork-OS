@@ -1,13 +1,11 @@
 /**
- * `<no-memory>` blocks every explicit memory write of a task (memory_remember and its
- * deprecated aliases memory_save, memory_curate add/replace, supermemory_remember), and an
- * explicit save is not blocked by the auto-capture setting.
+ * `<no-memory>` blocks every explicit memory write of a task (memory_remember, including
+ * its external scope), and an explicit save is not blocked by the auto-capture setting.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   capture: vi.fn(),
-  curate: vi.fn(),
   evaluate: vi.fn(),
   remember: vi.fn(),
   ingest: vi.fn(),
@@ -18,7 +16,6 @@ vi.mock("../../../memory/MemoryService", () => ({
 }));
 vi.mock("../../../memory/CuratedMemoryService", () => ({
   CuratedMemoryService: {
-    curate: mocks.curate,
     list: vi.fn(async () => []),
     syncWorkspaceFiles: vi.fn(async () => undefined),
   },
@@ -37,7 +34,6 @@ vi.mock("../../../security/access-profile-paths", () => ({
 }));
 
 import { MemoryTools } from "../memory-tools";
-import { SupermemoryTools } from "../supermemory-tools";
 
 const workspace = {
   id: "ws-1",
@@ -60,7 +56,6 @@ describe("explicit memory writes and <no-memory>", () => {
     vi.clearAllMocks();
     mocks.evaluate.mockResolvedValue({ allowed: true });
     mocks.capture.mockResolvedValue({ id: "mem-1" });
-    mocks.curate.mockResolvedValue({ success: true, entry: { id: "cur-1" } });
     mocks.remember.mockResolvedValue({ containerTag: "tag", memoryIds: ["s-1"] });
     mocks.ingest.mockResolvedValue({
       status: "written",
@@ -83,32 +78,14 @@ describe("explicit memory writes and <no-memory>", () => {
     expect(mocks.ingest).not.toHaveBeenCalled();
   });
 
-  it("blocks the deprecated memory_save alias for a <no-memory> task", async () => {
-    const tools = new MemoryTools(workspace, daemonFor("<no-memory> fix the bug"), "task-1");
-    const result = (await tools.executeLegacyAlias("memory_save", {
-      content: "a fact",
-      type: "insight",
-    })) as Record<string, unknown>;
-    expect(result.success).toBe(false);
-    expect(result.deprecated).toContain("memory_remember");
-    expect(mocks.ingest).not.toHaveBeenCalled();
-  });
-
-  it("blocks memory_curate add and replace but allows remove for a <no-memory> task", async () => {
-    const tools = new MemoryTools(workspace, daemonFor("<no-memory/> tidy up"), "task-1");
-    for (const action of ["add", "replace"] as const) {
-      const result = await tools.curate({ action, target: "user", content: "x", match: "y" });
-      expect(result.success).toBe(false);
-    }
-    expect(mocks.curate).not.toHaveBeenCalled();
-    const removed = await tools.curate({ action: "remove", target: "user", id: "cur-1" });
-    expect(removed.success).toBe(true);
-    expect(mocks.curate).toHaveBeenCalledTimes(1);
-  });
-
-  it("blocks supermemory_remember for a <no-memory> task", async () => {
-    const tools = new SupermemoryTools(workspace, daemonFor("<no-memory> research"), "task-1");
-    const result = await tools.remember({ content: "remember this" });
+  it("blocks memory_remember with scope external for a <no-memory> task", async () => {
+    const networked = { ...workspace, permissions: { ...workspace.permissions, network: true } };
+    const tools = new MemoryTools(networked, daemonFor("<no-memory> research"), "task-1");
+    const result = await tools.remember({
+      content: "remember this",
+      kind: "insight",
+      scope: "external",
+    });
     expect(result.success).toBe(false);
     expect(result.blocked).toBe(true);
     expect(mocks.remember).not.toHaveBeenCalled();

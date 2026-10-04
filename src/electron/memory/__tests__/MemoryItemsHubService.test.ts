@@ -1,11 +1,7 @@
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryItemsRepository } from "../MemoryItemsRepository";
-import {
-  MemoryHubError,
-  MemoryItemsHubService,
-  type MemoryItemsLegacyMirror,
-} from "../MemoryItemsHubService";
+import { MemoryHubError, MemoryItemsHubService } from "../MemoryItemsHubService";
 import { MemoryWriter } from "../MemoryWriter";
 import { createMemoryItemsTestDb, nativeSqliteAvailable, rowsOf } from "./memory-items-test-db";
 
@@ -16,11 +12,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
   let writer: MemoryWriter;
   let clock: number;
   let bumps: number;
-  let legacy: {
-    edit: ReturnType<typeof vi.fn>;
-    remove: ReturnType<typeof vi.fn>;
-    setPinned: ReturnType<typeof vi.fn>;
-  };
   let syncKitFiles: ReturnType<typeof vi.fn>;
   let hub: MemoryItemsHubService;
 
@@ -35,15 +26,9 @@ describeWithSqlite("MemoryItemsHubService", () => {
         bumps += 1;
       },
     });
-    legacy = {
-      edit: vi.fn(async () => undefined),
-      remove: vi.fn(async () => undefined),
-      setPinned: vi.fn(async () => undefined),
-    };
     syncKitFiles = vi.fn(async () => undefined);
     hub = new MemoryItemsHubService({
       getWriter: () => writer,
-      legacy: legacy as unknown as MemoryItemsLegacyMirror,
       syncKitFiles,
       getTask: async (taskId) =>
         taskId === "task-1"
@@ -202,11 +187,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
       kind: "project_fact",
     });
     expect(rowsOf(db, "id = ?", localId)[0].status).toBe("superseded");
-    expect(legacy.edit).toHaveBeenCalledWith(
-      { store: "curated", id: "entry-1" },
-      "The API uses PostgreSQL 17",
-      expect.objectContaining({ id: localId }),
-    );
     expect(syncKitFiles).toHaveBeenCalledWith("ws-1");
 
     const detail = await hub.get("ws-1", result.item.id);
@@ -221,18 +201,17 @@ describeWithSqlite("MemoryItemsHubService", () => {
     });
   });
 
-  it("pins, mirrors the pin to the profile fact and bumps the hot-memory version", async () => {
+  it("pins and bumps the hot-memory version", async () => {
     const { globalId } = await seed();
     const before = bumps;
     const result = await hub.setPinned({ workspaceId: "ws-1", id: globalId, pinned: true });
     expect(result).toMatchObject({ success: true, item: { pinned: true } });
     expect(bumps).toBeGreaterThan(before);
-    expect(legacy.setPinned).toHaveBeenCalledWith({ store: "user_profile", id: "fact-1" }, true);
     await hub.setPinned({ workspaceId: "ws-1", id: globalId, pinned: false });
     expect(rowsOf(db, "id = ?", globalId)[0].pinned).toBe(0);
   });
 
-  it("delete scrubs every revision, cascades to the legacy record and re-renders kit files", async () => {
+  it("delete scrubs every revision and re-renders kit files", async () => {
     const { localId } = await seed();
     const edited = await hub.update({
       workspaceId: "ws-1",
@@ -253,11 +232,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
       ["deleted", ""],
     ]);
     expect(bumps).toBeGreaterThan(before);
-    expect(legacy.remove).toHaveBeenCalledWith(
-      { store: "curated", id: "entry-1" },
-      "deleted",
-      expect.objectContaining({ id: edited.item.id }),
-    );
     expect(syncKitFiles).toHaveBeenCalledWith("ws-1");
     expect((await hub.list({ workspaceId: "ws-1" })).items.some((i) => i.id === localId)).toBe(
       false,
@@ -279,17 +253,12 @@ describeWithSqlite("MemoryItemsHubService", () => {
     expect(global.task).toEqual({ id: "task-2", title: null, available: false });
   });
 
-  it("clears global items only, with their legacy records", async () => {
+  it("clears global items only", async () => {
     const { globalId, localId, contactId } = await seed();
     const result = await hub.clearGlobal();
-    expect(result).toMatchObject({ success: true, deleted: 1, legacyRecords: 1 });
+    expect(result).toEqual({ success: true, deleted: 1 });
     expect(rowsOf(db, "id = ?", globalId)).toHaveLength(0);
     expect(rowsOf(db, "id IN (?, ?)", localId, contactId)).toHaveLength(2);
-    expect(legacy.remove).toHaveBeenCalledWith(
-      { store: "user_profile", id: "fact-1" },
-      "deleted",
-      expect.objectContaining({ id: globalId }),
-    );
   });
 
   it("reports the engine as unavailable before the writer starts", async () => {

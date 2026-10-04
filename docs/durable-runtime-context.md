@@ -46,10 +46,10 @@ Search returns durable-context hits first (summaries and messages, when this fea
 then fills up from the conversation index. Expanding a durable summary includes its linked
 source messages (at most `25`).
 
-The earlier `context_grep` (search) and `context_describe` (expand) tools are deprecated,
-hidden aliases of `context_recall` for one release. They keep their own inputs: `taskId` with
-`explicitUserRequest: true` to look at another task, and `sourceLimit` (default `8`, capped
-at `25`) on `context_describe`.
+The earlier `context_grep` (search) and `context_describe` (expand) tools were hidden aliases
+of `context_recall` for one release and are now removed, together with their cross-task
+`taskId` / `explicitUserRequest` inputs: `context_recall` only reads the active task, and
+earlier tasks are recalled through `memory_recall` (scope `conversations`).
 
 ## Scope And Privacy Rules
 
@@ -80,7 +80,8 @@ Skipped injected blocks include:
 - `<cowork_user_profile>`
 - `<cowork_structured_memory>`
 - `<cowork_recall_hints>`
-- serialized `context_recall` (and `context_grep` / `context_describe`) tool results
+- serialized `context_recall` tool results (and recorded results of the removed
+  `context_grep` / `context_describe`)
 
 ## Storage Model
 

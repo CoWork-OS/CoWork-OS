@@ -99,6 +99,7 @@ vi.mock("../MemoryService", () => ({
 
 vi.mock("../CuratedMemoryService", () => ({
   CuratedMemoryService: {
+    syncWorkspaceFiles: vi.fn(async () => undefined),
     curate: serviceMocks.curate,
     upsertDistilledEntry: serviceMocks.upsertDistilledEntry,
   },
@@ -112,6 +113,7 @@ vi.mock("../SupermemoryService", () => ({
 }));
 
 import { MemoryWriteGate } from "../MemoryWriteGate";
+import { MemoryWriter } from "../MemoryWriter";
 
 const baseRequest = {
   workspaceId: "ws-1",
@@ -343,6 +345,55 @@ describe("MemoryWriteGate", () => {
       false,
       expect.objectContaining({ skipMemoryWriteGate: true }),
     );
+  });
+
+  it("replays an approved memory_remember fact through MemoryWriter, kind and scope intact", async () => {
+    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryWriteApprovalMode: "curated_only",
+    });
+    const ingest = vi.fn(async (candidate: Any) => ({
+      status: "written",
+      action: "inserted",
+      item: { id: "item-1", scope: candidate.scope, workspaceId: candidate.workspaceId },
+      supersededIds: [],
+      redactions: 0,
+    }));
+    MemoryWriter.setInstance({ ingest } as unknown as MemoryWriter);
+    try {
+      const decision = await MemoryWriteGate.evaluate({
+        ...baseRequest,
+        target: "curated",
+        action: "remember",
+        payload: {
+          action: "remember",
+          kind: "decision",
+          scope: "workspace",
+          source: "inferred",
+          confidence: 0.7,
+          pinned: false,
+          recordId: "rec-1",
+          content: "We decided to keep SQLite",
+        },
+      });
+      if (decision.allowed || !("staged" in decision)) throw new Error("Expected staged decision");
+      await MemoryWriteGate.applyPending(decision.pendingId, { workspaceId: "ws-1" });
+      expect(ingest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "We decided to keep SQLite",
+          kind: "decision",
+          scope: "workspace",
+          workspaceId: "ws-1",
+          source: "inferred",
+          sourceRef: expect.objectContaining({ store: "agent_tool", id: "rec-1" }),
+          taskId: "task-1",
+        }),
+      );
+      expect(serviceMocks.curate).not.toHaveBeenCalled();
+    } finally {
+      MemoryWriter.setInstance(null);
+    }
   });
 
   it("rejects pending writes without replaying the payload", async () => {

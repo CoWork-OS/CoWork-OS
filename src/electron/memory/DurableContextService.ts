@@ -161,12 +161,12 @@ function messageFingerprint(message: LLMMessage | undefined): string {
  *
  * - The conversation index (`indexEvent`, `searchConversation`, `recentConversation`)
  *   is the one search index over task conversations. It is fed from the task event
- *   pipeline for every task, whatever the memory settings, and is what `search_sessions`,
- *   `search_quotes`, the query orchestrator, Dreaming and Mission Control recall query.
+ *   pipeline for every task, whatever the memory settings, and is what `memory_recall`
+ *   (conversations scope), the query orchestrator, Dreaming and Mission Control recall query.
  * - `durableContextEnabled` / `durableContextMode` only control the compaction-recovery
  *   layer: recording the full LLM message history and compaction summaries
- *   (`recordHistory`, `recordCompactionSummary`) and the `context_grep` /
- *   `context_describe` tools over it (`search`, `describe`).
+ *   (`recordHistory`, `recordCompactionSummary`) and the `context_recall` tool over it
+ *   (`search`, `describe`).
  */
 export class DurableContextService {
   private static dbOverride: Database.Database | null | undefined;

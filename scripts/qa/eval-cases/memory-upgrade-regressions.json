@@ -10,7 +10,7 @@
       "id": "exact-quote-lookup",
       "prompt": "What exact words did we use about never mutating the production DB directly?",
       "assertions": {
-        "requiredTool": "search_quotes",
+        "requiredTool": "memory_recall",
         "expectedSourceType": "transcript_span"
       }
     },
@@ -26,7 +26,7 @@
       "id": "assistant-said-recall",
       "prompt": "What did the assistant actually say after the compaction warning?",
       "assertions": {
-        "requiredTool": "search_quotes",
+        "requiredTool": "memory_recall",
         "expectedSpeaker": "assistant"
       }
     },
@@ -51,14 +51,14 @@
       "id": "topic-follow-up-after-compaction",
       "prompt": "After compaction, continue the memory upgrade task without losing the checkpoint design details.",
       "assertions": {
-        "requiredTool": "memory_topics_load",
+        "requiredTool": "context_recall",
         "requiresCheckpointRecovery": true
       }
     }
   ],
   "metrics": [
-    "search_quotes_recall_at_k",
-    "search_memories_recall_at_k",
+    "memory_recall_quote_recall_at_k",
+    "memory_recall_recall_at_k",
     "answerability_after_compaction",
     "stale_temporal_fact_false_positive_rate"
   ],

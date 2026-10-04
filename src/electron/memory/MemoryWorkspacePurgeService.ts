@@ -138,7 +138,7 @@ async function removeConfinedFiles(
 
 /** Files and index rows removed by a TranscriptStore deletion. */
 function transcriptDeletionCount(result: TranscriptDeletionResult): number {
-  return result.indexRows + result.spanRows + result.spanFiles + result.checkpointFiles;
+  return result.indexRows + result.spanFiles + result.checkpointFiles;
 }
 
 function errorMessage(error: unknown): string {
@@ -170,7 +170,7 @@ export class MemoryWorkspacePurgeService {
     if (!workspacePath || !SAFE_TASK_ID.test(params.taskId)) return result;
 
     try {
-      // Span rows, the JSONL file, both checkpoint generations and the lock file.
+      // The JSONL file, both checkpoint generations and the lock file.
       result.transcripts = transcriptDeletionCount(
         await TranscriptStore.deleteTask(params.taskId, { workspacePath }),
       );

@@ -26,13 +26,6 @@ import {
 } from "../../shared/types";
 import { GuardrailSettings } from "../../shared/types";
 
-const NETWORK_PERMISSION_ONLY_TOOLS = new Set([
-  "supermemory_profile",
-  "supermemory_search",
-  "supermemory_remember",
-  "supermemory_forget",
-]);
-
 /**
  * Result of a policy check
  */
@@ -226,10 +219,7 @@ export class SecurityPolicyManager {
   }
 
   static requiresNetworkPermission(toolName: string): boolean {
-    return (
-      SecurityPolicyManager.isToolInGroup(toolName, "group:network") ||
-      NETWORK_PERMISSION_ONLY_TOOLS.has(toolName)
-    );
+    return SecurityPolicyManager.isToolInGroup(toolName, "group:network");
   }
 
   // Private methods

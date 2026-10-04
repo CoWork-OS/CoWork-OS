@@ -2,7 +2,9 @@
 
 **Status.** Phase 2 foundation, 2026-10-03, with the Phase 3 additions noted inline. The write
 side described here is implemented: the `memory_items` store, `MemoryWriter`, the one-time lane
-migration, dual writes from the legacy stores, and purge/retention. On the read side,
+migration and purge/retention. `memory_items` is the only store of facts about the user: the
+legacy lanes are retired as stores (§5: no dual writes, no mirror, no legacy read paths), and
+their data is exported and dropped by the data retirement migration (§5, "Data retirement"). On the read side,
 `MemoryRecall` and the consolidated agent memory tools are implemented (§4b); see §4a for the
 prompt read path.
 
@@ -20,10 +22,10 @@ this file as the contract. File references are relative to `src/electron/memory/
 | Knowledge | Store | Notes |
 |---|---|---|
 | Semantic facts about the user, workspace and contacts: preferences, identity, rules, project facts, decisions, commitments, corrections, insights | **`memory_items`** (this document) | One row per fact revision. Written only through `MemoryWriter`. |
-| Episodic history: task outcomes, resolved errors, feedback, explicit `memory_save` notes | `memories` (the archive) + `memory_observation_metadata` + FTS | Unchanged in Phase 2. See §6. |
+| Episodic history: task outcomes, resolved errors, feedback, explicit `memory_remember` notes (`outcome`, `error`, `note`) | `memories` (the archive) + `memory_observation_metadata` + FTS | Unchanged in Phase 2. See §6. |
 | Raw conversation | `task_events` + the conversation index | Owned by the conversation-index consolidation, not this engine. |
 | Playbook entries, proactive suggestions | Their own tables (`playbook_entries`, `suggestions`) | Moved out of `memories` by a parallel Phase 2 change. |
-| Legacy lanes: `curated_memory_entries`, SecureSettings `user-profile`, `relationship-memory`, `awareness-state` beliefs, `adaptive-style-engine` | Unchanged and still read by their consumers | Mirrored into `memory_items` (§5) until consumers switch. |
+| Retired lanes: `curated_memory_entries`, SecureSettings `user-profile`, `relationship-memory`; awareness beliefs and the adaptive style as fact sources | Read only by the one-time lane migration, then exported and dropped by the data retirement | Their services are views of `memory_items` (§5). Awareness keeps its belief state (`awareness-state`) as signals; the adaptive style engine keeps its own bookkeeping (`adaptive-style-engine`). |
 
 ## 2. `memory_items`
 
@@ -85,7 +87,7 @@ Indexes and invariants:
 `MemoryWriter.ts`. One pipeline for every producer. The host runs steps 1–3; steps 4–6 are one
 memory-domain transaction unit (`memoryItems_ingest` → `MemoryItemsStore.ingest`), in the
 database worker when memory is routed there and one host transaction otherwise. Writes from one
-writer are serialized, so fire-and-forget dual writes land in call order.
+writer are serialized, so fire-and-forget writes (`writeInBackground`) land in call order.
 
 ```ts
 interface MemoryCandidate {
@@ -135,8 +137,8 @@ type MemoryWriteResult =
      [channels.md](channels.md#your-account-on-a-channel-memory)). For any other
      channel task, user messages and feedback do not feed awareness beliefs or the adaptive
      style, `memory_remember` writes a private `contact`-scope `third_party` item
-     (`scope_ref = gateway:<channel>:<user id>`), and `memory_curate`, `set_user_name` and
-     `set_response_style` are refused.
+     (`scope_ref = gateway:<channel>:<user id>`), `memory_remember` with scope `external` is
+     refused, and `set_user_name` and `set_response_style` are refused.
    - Workspace memory settings of `originWorkspaceId ?? workspaceId` (live writes only): memory
      off (`enabled = false` or privacy mode `disabled`) blocks `inferred`, `third_party`,
      `import` and `system` writes, while explicit acts (`user_stated`, `user_confirmed`, `curated`)
@@ -230,8 +232,7 @@ surface-level contract on top of it. Playbook capture uses the same task gate.
   curated or user-stated, or preferences that are named subjects or trusted at least as
   `curated`. Cached until the hot-memory version changes. `preferred_name` and
   `response_style` are left out because the identity and personality prompts render them.
-  Until the lane migration has run, or without a writer (CLI), L0 comes from the
-  legacy stores through the same lane mappers.
+  `memory_items` is the only source; without a writer (CLI) there is no memory layer.
 - **L1:** `memory_items_fts` match for the request (`memoryItems_contextSearch`,
   `memory-context-sql.ts`; the shared Unicode query builder; LIKE without FTS5), minus what L0
   carries.
@@ -275,12 +276,19 @@ it used. The browser host serves the same attribution as `getMemoryUsedForTask`
 (`host/services/browser-memory-methods.ts`, workspace read authority, task bound to the
 workspace).
 
-**Read-side syncs (`memory-read-side.ts`)**, active once the lane migration has finished:
+**Read-side syncs (`memory-read-side.ts`)**, installed by `startMemoryEngine` after the startup
+lane migration. PersonalityManager's user name and response style are mirrors of `memory_items`:
 
 - PersonalityManager's user name follows the active `preferred_name` item: `set_user_name`
   (`user_stated`) wins over inferred names, and a newer statement supersedes. A deleted item
   clears the name. After the migration, the live PersonalityManager name is adopted once as
   `user_stated`, so the migration never reverts it.
+- The active `response_style` item carries its structured style in `source_ref.style`; the
+  read side applies it to PersonalityManager's live style after every write (an adaptation, a
+  style set in Settings, `set_response_style`). An item without `source_ref.style` (copied from
+  the retired adaptive-style lane) changes nothing. `AdaptiveStyleEngine` only writes the item
+  (`inferred`); it keeps its observations, rate limits and history in its own settings, and
+  does not adapt without a MemoryWriter.
 - `AdaptiveStyleEngine` does not adapt while a `user_stated` / `user_confirmed`
   `response_style` item exists. Feedback received meanwhile is dropped. A response style
   changed in Settings is written as that item (`withSettingsResponseStyleMirror`); a save
@@ -342,13 +350,33 @@ approval messages leave the memory text out) — prompted in the default and dan
 modes, allowed by bypass modes or a saved rule — except for
 an item this task's agent inferred itself and that no other record merged into; Supermemory
 ids keep the pipeline's `external_service` approval),
-`context_recall` (active task). The 16 earlier tools are hidden aliases for one release
-(`LEGACY_MEMORY_TOOL_ALIASES` in `shared/types.ts`). Routing guidance is one generated hint of
-about 90 tokens naming only visible tools (`memory-tool-routing.ts`).
+`context_recall` (the active task only; earlier tasks are recalled through `memory_recall`).
+Supermemory is reached through the same tools: `memory_recall` scope `external`,
+`memory_remember` scope `external` (a memory stored only in Supermemory, through the memory
+write gate's `external` target; refused for third-party channel senders), and `memory_forget`
+with an `external:<id>` id or with `scope: "external"` and `match` text (Supermemory matches
+the text). All three take the `external_service` approval and need workspace network access.
+Routing guidance is one generated hint of about 90 tokens naming only visible tools
+(`memory-tool-routing.ts`).
+
+**Removed tools.** The 16 earlier tools (`search_memories`, `memory_search_index`,
+`memory_timeline`, `memory_details`, `search_quotes`, `search_sessions`, `memory_topics_load`,
+`memory_curated_read`, `supermemory_profile`, `supermemory_search`, `memory_save`,
+`memory_curate`, `supermemory_remember`, `supermemory_forget`, `context_grep`,
+`context_describe`) were hidden aliases for one release and are now removed: they are not
+registered, not tool-semantics aliases and not listed in any policy group, allowlist or deny
+list, so a call to one fails as an unknown tool. `SupermemoryTools` and the agent's curated
+`memory_curate` path are gone; the old `containerTag` override of `supermemory_remember` has
+no replacement (writes use the workspace's container). `RETIRED_MEMORY_TOOL_NAMES` in
+`shared/types.ts` lists the names for code that reads recorded task history: the conversation
+index backfill still skips their recorded output, and the timeline shows old calls with the
+generic tool label.
 
 ## 5. Legacy lanes
 
-Mapping lives in `memory-items-lanes.ts` and is shared by the migration and the dual writes.
+Mapping lives in `memory-items-lanes.ts`. The lane migration uses it to copy the retired
+lanes; the services that now write `memory_items` directly (profile facts, awareness beliefs,
+response style, user name) use the same mappers, so a fact maps the same way on every path.
 
 | Lane | Kind | Scope | Source | Notes |
 |---|---|---|---|---|
@@ -362,9 +390,14 @@ Mapping lives in `memory-items-lanes.ts` and is shared by the migration and the 
 
 ### Lane migration
 
-`MemoryItemsLaneMigration.ts`, scheduled by `memory-engine-bootstrap.ts` (`startMemoryEngine`,
-called from `main.ts` and from the node daemon's `src/daemon/main.ts` after
-`MemoryService.initialize`) **120 s after startup**, off the hot path.
+`MemoryItemsLaneMigration.ts`, run by `memory-engine-bootstrap.ts` (`startMemoryEngine`, awaited
+from `main.ts` and from the node daemon's `src/daemon/main.ts` after `MemoryService.initialize`)
+**at startup, before queue recovery, IPC and any service read memory**: there is no legacy
+read fallback, so nothing may read a half-migrated store. When the other process (desktop app
+or node daemon on the same profile) holds the claim, startup waits up to 60 s for its marker.
+The migration is the only runtime reader of the retired lanes: it reads the SecureSettings
+blobs directly (`loadLegacyLaneSources`, with the normalization the retired services applied)
+and the curated table through `memoryItems_listCuratedForMigration` (absent table: no rows).
 
 - Runs once per profile; the marker is `maintenance_state.memory_items_lane_migration_v1` with a
   JSON summary of per-lane written/skipped counts.
@@ -386,33 +419,59 @@ called from `main.ts` and from the node daemon's `src/daemon/main.ts` after
   counts as failed; the other lanes are still copied, the marker is **not** written, and the
   run is retried on the next start. Settings are read with `loadWithStatus`, so an unreadable
   blob is never mistaken for an empty one.
-- The legacy stores are not modified.
+- The legacy stores are not modified here. The data retirement (`LegacyMemoryRetirement.ts`,
+  scheduled by `startMemoryEngine` after startup) exports and drops them only once this
+  migration's marker exists.
 
-### Dual writes (this wave)
+### Retired lanes: services over `memory_items`
 
-Legacy stores remain the system of record for reads; every write path also goes through
-`MemoryWriter`. Synchronous services use `MemoryWriter.dualWrite` / `dualWriteStatus`
-(fire-and-forget, serialized, failures logged, no-op before initialization).
+No dual writes remain: `MemoryWriter.dualWrite` / `dualWriteStatus` and the legacy mirror
+(`memory-items-legacy-mirror.ts`) are gone. Synchronous producers use
+`MemoryWriter.writeInBackground` (fire-and-forget, serialized). Synchronous readers use
+`MemoryFactsSnapshot` (`memory-facts-snapshot.ts`): a cache of the active global items and
+active commitments, loaded at startup, refreshed after every writer change and, when older than
+30 s, on the next read (changes made by the other process on the profile). Services that write
+await a refresh before they return, so callers read their own writes.
 
-| Write path | memory_items effect |
+| Service / producer | Now |
 |---|---|
-| `CuratedMemoryService.curate` add/replace, `upsertDistilledEntry` | `ingest` (awaited, before the kit files sync); replace is an edit of the same record → supersede |
-| `CuratedMemoryService.curate` remove | active revision → `archived` |
-| `UserProfileService.addFact` / `updateFact` | `ingest` (update = edit → supersede when the value changes) |
-| `UserProfileService.deleteFact` | every revision → `deleted` |
-| `RelationshipMemoryService` upsert (mailbox insights, task completion) / `updateItem` | `ingest`; done → `archived`; history not mirrored |
-| `RelationshipMemoryService.deleteItem` | every revision → `deleted` |
-| Awareness belief → profile bridge | through `UserProfileService.addFact(request, { memorySubjectKey, memoryOriginWorkspaceId })`, so `response_length`/`preferred_name` supersede and the belief's workspace settings apply |
-| `AdaptiveStyleEngine.maybeAdapt` | `response_style`, `inferred` (outranked by a user-stated style) |
-| `set_user_name` tool | `preferred_name`, `user_stated` |
-| `set_response_style` tool | `response_style`, `user_stated` |
-| Response style changed in Settings (personality save/import IPC, browser host) | `response_style`, `user_stated` (`withSettingsResponseStyleMirror`, only when the save changed the style) |
+| `UserProfileService` | `getProfile()` (sync): active, non-private global items except commitments, as `UserFact` (id = item id; category from `source_ref.category`, a goal belief, or the kind). `addFact` (async) writes `userFactCandidate`; `deleteFact` (async) tombstones the item and its revisions. No update API: facts are edited in the Memory Hub. |
+| `RelationshipMemoryService` | Commitments are `commitment` items: open = `active`, done = `archived`, due date = `source_ref.dueAt`. `listOpenCommitments` / `listDueSoonCommitments` (sync, snapshot) feed Awareness, AutonomyEngine, the briefing and suggestions; `listItems`, `updateItem` (text, confidence, done/reopen, due date; a new revision of the same record) and `deleteItem` are async. Mailbox insights are private contact-scope `third_party` items (`store: "mailbox"`, record id derived from contact and text, so a repeat updates the due date). `recordTaskCompletion` only closes commitments the summary reports as done; task history is not stored. |
+| Mailbox reply drafts | `buildContactMemoryContext` (`contact-memory-context.ts`): the contact's (then its company's) active contact-scope items, sanitized, under a header that marks them as the contact's words. |
+| `CuratedMemoryService` | The workspace scope of `memory_items`. `list` / `getPromptEntries` map items to `CuratedMemoryEntry` (id = item id; lane from `source_ref.target` or the kind; prompt entries skip private items). `curate` add → `curated` item; replace → a new revision of the same record (a superseded id follows its record to the active revision); remove → `archived`. Items the user stated or confirmed are refused (Memory Hub only). `upsertDistilledEntry` → `inferred` item. Without a writer it reports memory as unavailable. |
+| Awareness beliefs | `beliefCandidate`, written by `AwarenessService` directly (`user_confirmed` when confirmed or learned from feedback; `preferred_name` / `response_length` single-valued). |
+| `AdaptiveStyleEngine` | `response_style`, `inferred`, with `source_ref.style`; PersonalityManager mirrors it (§4a). |
+| `set_user_name` / `set_response_style` tools, a style set in Settings | `preferred_name` / `response_style`, `user_stated` (`writeInBackground`). |
+| Approval-gated `memory_remember` | Staged with `MemoryWriteGate` (target `curated`, action `remember`) as the candidate itself (kind, scope, source, subject, record id) and replayed through `MemoryWriter` after approval, without a curated-lane conversion. |
+
+The store also updates the provenance fields of an edited record whose text is unchanged (an
+edit of the same `{store, id}`), so a new due date is kept.
+
+**IPC.** `memory:getUserProfile`, `memory:commitmentsGet` and `memory:commitmentsDueSoon` read
+these views. `memory:relationshipList` / `Update` / `Delete` back the Commitments section of
+Settings > Memory (status, due date, text, forget). `memory:addUserFact`,
+`memory:updateUserFact`, `memory:deleteUserFact` and `memory:relationshipCleanupRecurring` are
+removed, with their preload and browser-host methods: facts are edited in "What CoWork knows".
+
+**Guard.** `__tests__/legacy-memory-stores-retired.test.ts` fails when runtime code outside the
+migrations (lane migration, data retirement, the pre-retirement privacy purge) names the
+curated table or the `user-profile` / `relationship-memory` settings blobs.
+
+### Data retirement
+
+`LegacyMemoryRetirement.ts` (scheduled by `startMemoryEngine` after startup, claimed like the
+other one-time jobs, marker `legacy_memory_retirement_v1`) runs only after the lane migration
+marker exists. It writes an encrypted safety export (`<userData>/backups/legacy-memory-*.json.enc`,
+OS keychain; without OS encryption a plaintext export leaves the settings blobs out), verifies
+that every exported record has a `memory_items` row (re-ingesting missing ones in migration
+mode, aborting and retrying on the next start otherwise), then deletes the `user-profile` and
+`relationship-memory` blobs (only if unchanged since the export) and drops the retired tables.
+`adaptive-style-engine` (engine bookkeeping) and `awareness-state` (belief signals) are kept.
 
 ### Generated kit views
 
 `CuratedMemoryService.syncWorkspaceFiles` renders the `USER.md` / `MEMORY.md` auto-blocks from
-`memory_items` **once the lane migration marker exists** (before that, and without a writer, it
-renders from `curated_memory_entries` as before):
+`memory_items` only (without a writer it does nothing):
 
 - `USER.md` block: active, non-private workspace items of kind `identity`/`preference`, plus any
   item curated into the user lane (`source_ref.target = 'user'`).
@@ -434,8 +493,7 @@ private items, contact items and global items are never rendered into either fil
   lines are kept, a new line similar to a vanished one is an **edit** of that item (a new
   `curated` revision superseding it, with `editedVia: "kit_file"`; a changed label changes
   the kind), other new lines are **adds** (`curated`, `source_ref.store = "kit_file"`), and
-  other vanished lines **archive** their item. Curated entries the items mirror are updated or
-  archived too. Items the user stated or confirmed (`user_stated`, `user_confirmed`) are never
+  other vanished lines **archive** their item. Items the user stated or confirmed (`user_stated`, `user_confirmed`) are never
   edited or archived from the file; that has to happen in the Memory Hub.
 - Only blocks rendered from `memory_items` are synced back. Without a recorded block (first
   sync, a file that arrived with a cloned repository) nothing is imported. A block that was
@@ -467,10 +525,8 @@ read/write/delete checks).
 - **Add** writes `user_stated` (`source_ref.store = "memory_hub"`), global or workspace. **Edit**
   writes a new `user_stated` revision with the item's `{store, id}`, so MemoryWriter supersedes
   the old one. **Pin** sets `pinned` and bumps the hot-memory version. **Delete** tombstones the
-  item and every older revision. Edits, pins and deletes are also applied to the legacy record
-  the item mirrors (profile fact, relationship item, curated entry); workspace changes re-render
-  the kit files.
-- **Clear global memories** hard-deletes global items and their profile/relationship records;
+  item and every older revision. Workspace changes re-render the kit files.
+- **Clear global memories** hard-deletes global items (`{ success, deleted }`);
   workspace items are cleared by Clear All Memories, whose per-store counts the Hub now shows.
 - Items from other people (contact scope or `third_party`) are listed in a separate, collapsed
   "From other people" section.
@@ -480,8 +536,7 @@ read/write/delete checks).
   workspace would receive, built like a plan step. `resolveMemoryInjection` decides the layers
   (private gateway, the workspace's memory settings, no external provider); L0 is the
   builder's pinned profile block and L1 the plan step's memory section (the builder's L1
-  recall for the most recent task prompt, the kit slice, playbook and summaries). Before the
-  lane migration both come from the legacy stores, as in a task.
+  recall for the most recent task prompt, the kit slice, playbook and summaries).
 
 ## 5b. Dreaming: the curator of `memory_items` (Phase 3)
 
@@ -550,7 +605,7 @@ by the schema setup (`memory-curation-log-sql.ts`).
 ## 6. The archive (`memories`) and its future
 
 - **Now (Phase 2):** `memories` stays the episodic store: task outcomes, resolved errors,
-  feedback, corrections as events, explicit `memory_save` notes, Chronicle and imports. It keeps
+  feedback, corrections as events, explicit `memory_remember` notes, Chronicle and imports. It keeps
   its own capture salience gate, retention (`retention_days`), privacy states and FTS.
   `memory_items` is the semantic fact store. The two do not reference each other yet; a fact
   learned from an archived event should carry the archive row id in `source_ref` (`{ store:
@@ -570,8 +625,7 @@ by the schema setup (`memory-curation-log-sql.ts`).
   confirmed and curated items survive with `task_id` cleared.
 - **Clear All Memories** (`purgeWorkspaceMemoryRows`, `MemoryWorkspacePurgeService`): every item
   with the workspace's `workspace_id` (workspace, task and workspace-bound contact scopes);
-  reported as `memoryItems`. Global items are not workspace-owned and are not cleared, matching
-  the legacy profile stores. Deleting a workspace row cascades to its items (on connections with
+  reported as `memoryItems`. Global items are not workspace-owned and are not cleared. Deleting a workspace row cascades to its items (on connections with
   foreign keys on).
 - **Retention** (`MemoryRetentionService`, step `memoryItems`, `MEMORY_ITEM_RETENTION_RULES`):
   daily, drops `deleted` tombstones and items whose `expires_at` has passed. Step
@@ -604,9 +658,8 @@ by the schema setup (`memory-curation-log-sql.ts`).
 
 ## 8. Gaps and next steps
 
-1. Done for prompts (§4a) and the Memory Hub layer preview (§5a). Open: the mailbox prompt
-   (`RelationshipMemoryService.buildPromptContext`), then retire the legacy stores and their dual
-   writes. The node daemon now starts the same engine as the desktop app (`startMemoryEngine`:
+1. Done for prompts (§4a), the Memory Hub layer preview (§5a) and the mailbox prompt
+   (contact-scope items, §5). The node daemon now starts the same engine as the desktop app (`startMemoryEngine`:
    `MemoryWriter`, read-side syncs, the claimed lane migration), `MemoryRetentionService`, the
    knowledge graph and Lore, and flushes queued `memory_items` writes and the conversation
    index at shutdown, so its prompts use `memory_items` once the migration has run. The desktop
@@ -614,19 +667,21 @@ by the schema setup (`memory-curation-log-sql.ts`).
 2. Done: kit-file edits and Memory Hub edits go through `MemoryWriter` (§5, §5a); kit edits
    carry `curated` trust because agent and user writes to the files cannot be told apart.
    Open: trigger back-sync without waiting for the next kit sync.
-3. Done: "Clear global memories" in the Memory Hub. It does not reset the awareness beliefs,
-   adaptive style or the personality user name that global items were copied from.
+3. Done: "Clear global memories" in the Memory Hub. It does not reset awareness's belief
+   state (signals) or the adaptive style engine's bookkeeping; PersonalityManager's name and
+   style keep their last mirrored values.
 4. Done: `AdaptiveStyleEngine` defers to an explicit `response_style` (§4a), including a style
    set in Settings.
 5. Superseded revisions are kept indefinitely; add an age-based retention rule once the Memory
    Hub shows history.
 6. `findBySourceRef` matches aliases with `json_each`, which cannot use an index; fine for the
    expected size (hundreds to low thousands of rows), revisit if the table grows.
-7. Producers not yet routed through `MemoryWriter`: the deprecated `memory_curate` alias
-   (still the curated dual-write path), core memory candidates, Chronicle, imports,
-   Supermemory. Agent fact writes go through `MemoryWriter` (`memory_remember`, §4b).
-8. Retire the legacy stores and their dual writes (curated memory, user profile facts,
-   relationship memory; §5 "Dual writes") after one release on `memory_items`, together with
-   the 16 hidden tool aliases.
+7. Producers not yet routed through `MemoryWriter`: core memory candidates, Chronicle,
+   imports, Supermemory. Agent fact writes go through `MemoryWriter` (`memory_remember`, §4b).
+8. Done: the legacy stores are retired (§5): the 16 hidden tool aliases are removed (§4b), the
+   dual writes and the legacy mirror are removed, the services are views of `memory_items`, and
+   the data retirement exports and drops the old stores. Open: a commitment edited from an
+   item without a `{store, id}` source ref keeps its old provenance fields when its text is
+   unchanged (only items written before source refs existed).
 9. Real local embeddings are out of scope (decision above). Revisit only if the memory evals
    show a recall gap that lexical recall and fusion tuning cannot close.

@@ -1,8 +1,8 @@
 /**
  * Which archive memories the agent may see, and which rows may claim to be imported.
  *
- * One policy for every agent read path (search_memories, memory_search_index,
- * memory_timeline, memory_details, search_quotes, prompt recall) and for the FTS worker.
+ * One policy for every agent read path (memory_recall's archive lane, prompt recall) and
+ * for the FTS worker.
  * Deliberately free of runtime imports so the database worker can load it.
  */
 

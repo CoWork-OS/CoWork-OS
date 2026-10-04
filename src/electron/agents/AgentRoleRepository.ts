@@ -404,8 +404,9 @@ export class AgentRoleStore {
    */
   /**
    * Detach persona-template and twin roles from core automation: mark them templates,
-   * turn their heartbeats and automation profiles off, and drop their heartbeat policies
-   * and subconscious state. A startup repair; repeat runs change nothing.
+   * turn their heartbeats and automation profiles off, and drop their subconscious state.
+   * (The retired `heartbeat_policies` table is no longer touched: a legacy row of a role
+   * marked `persona_template` is never copied into `automation_profiles`.) A startup repair; repeat runs change nothing.
    */
   detachTemplatedRolesFromCoreAutomation(now: number): { roleCount: number; changes: number } {
     const templatedRoles = this.db
@@ -459,7 +460,6 @@ export class AgentRoleStore {
         now,
         ...roleIds,
       );
-      run(`DELETE FROM heartbeat_policies WHERE agent_role_id IN (${placeholders})`, ...roleIds);
       for (const table of [
         "subconscious_dispatch_records",
         "subconscious_backlog_items",

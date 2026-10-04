@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LLMProviderConfig, LLMRequest } from "../types";
 import { OpenAIProvider, resetPromptCacheRejectionsForTests } from "../openai-provider";
 
@@ -611,22 +611,11 @@ describe("OpenAIProvider structured errors", () => {
     });
   });
 
-  it("retries a Responses request without cache controls when the endpoint rejects them", async () => {
-    responsesCreateMock
-      .mockRejectedValueOnce(
-        Object.assign(new Error("Unknown parameter: prompt_cache_options"), { status: 400 }),
-      )
-      .mockResolvedValueOnce({
-        output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
-      });
-
-    const provider = new OpenAIProvider({
-      type: "openai",
-      model: "gpt-5.6-sol",
-      openaiApiKey: "sk-test",
-    });
-
-    await provider.createMessage({
+  describe("tiered prompt-cache fallback on the Responses API route", () => {
+    const okResponse = {
+      output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+    };
+    const cachedRequest: LLMRequest = {
       model: "gpt-5.6-sol",
       maxTokens: 64,
       system: "system",
@@ -637,11 +626,116 @@ describe("OpenAIProvider structured errors", () => {
         cacheKey: "stable-prefix",
       },
       messages: [{ role: "user", content: "hello" }],
+    };
+    const apiKeyConfig: LLMProviderConfig = {
+      type: "openai",
+      model: "gpt-5.6-sol",
+      openaiApiKey: "sk-test",
+    };
+    let consoleSpies: Array<{ mockRestore: () => void }> = [];
+    beforeEach(() => {
+      consoleSpies = [
+        vi.spyOn(console, "warn").mockImplementation(() => {}),
+        vi.spyOn(console, "error").mockImplementation(() => {}),
+      ];
+    });
+    afterEach(() => {
+      for (const spy of consoleSpies) spy.mockRestore();
     });
 
-    expect(responsesCreateMock).toHaveBeenCalledTimes(2);
-    expect(responsesCreateMock.mock.calls[0][0]).toHaveProperty("prompt_cache_key");
-    expect(responsesCreateMock.mock.calls[1][0]).not.toHaveProperty("prompt_cache_key");
+    it("retries with prompt_cache_key only when the optional cache options are rejected", async () => {
+      responsesCreateMock
+        .mockRejectedValueOnce(
+          Object.assign(new Error("400 Unknown parameter: 'prompt_cache_options'."), {
+            status: 400,
+          }),
+        )
+        .mockResolvedValue(okResponse);
+
+      await new OpenAIProvider(apiKeyConfig).createMessage(cachedRequest);
+
+      expect(responsesCreateMock).toHaveBeenCalledTimes(2);
+      expect(responsesCreateMock.mock.calls[0][0]).toMatchObject({
+        prompt_cache_key: "stable-prefix",
+        prompt_cache_options: { mode: "implicit", ttl: "30m" },
+      });
+      const retryBody = responsesCreateMock.mock.calls[1][0];
+      expect(retryBody.prompt_cache_key).toBe("stable-prefix");
+      expect(retryBody).not.toHaveProperty("prompt_cache_options");
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining("retrying with prompt_cache_key only"),
+        expect.objectContaining({
+          model: "gpt-5.6-sol",
+          status: 400,
+          nextTier: "key_only",
+          providerMessage: expect.stringContaining("prompt_cache_options"),
+        }),
+      );
+    });
+
+    it("remembers the key-only tier across provider instances", async () => {
+      responsesCreateMock
+        .mockRejectedValueOnce(
+          Object.assign(new Error("Unknown parameter: prompt_cache_options"), { status: 400 }),
+        )
+        .mockResolvedValue(okResponse);
+
+      await new OpenAIProvider(apiKeyConfig).createMessage(cachedRequest);
+      await new OpenAIProvider(apiKeyConfig).createMessage(cachedRequest);
+
+      // One rejected attempt, then key-only requests without a repeat rejection.
+      expect(responsesCreateMock).toHaveBeenCalledTimes(3);
+      const nextTaskBody = responsesCreateMock.mock.calls[2][0];
+      expect(nextTaskBody.prompt_cache_key).toBe("stable-prefix");
+      expect(nextTaskBody).not.toHaveProperty("prompt_cache_options");
+    });
+
+    it("drops every cache field only when the key-only retry is rejected too", async () => {
+      responsesCreateMock
+        .mockRejectedValueOnce(
+          Object.assign(new Error("Unknown parameter: prompt_cache_options"), { status: 400 }),
+        )
+        .mockRejectedValueOnce(
+          Object.assign(new Error("Unsupported prompt cache request"), { status: 400 }),
+        )
+        .mockResolvedValue(okResponse);
+
+      await new OpenAIProvider(apiKeyConfig).createMessage(cachedRequest);
+      await new OpenAIProvider(apiKeyConfig).createMessage(cachedRequest);
+
+      expect(responsesCreateMock).toHaveBeenCalledTimes(4);
+      expect(responsesCreateMock.mock.calls[1][0].prompt_cache_key).toBe("stable-prefix");
+      expect(responsesCreateMock.mock.calls[2][0]).not.toHaveProperty("prompt_cache_key");
+      expect(responsesCreateMock.mock.calls[3][0]).not.toHaveProperty("prompt_cache_key");
+    });
+
+    it("does not retry when the rejection is unrelated to prompt caching", async () => {
+      responsesCreateMock.mockRejectedValueOnce(
+        Object.assign(new Error("Invalid API key"), { status: 401 }),
+      );
+
+      await expect(new OpenAIProvider(apiKeyConfig).createMessage(cachedRequest)).rejects.toThrow();
+      expect(responsesCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("surfaces cached input tokens from Responses usage", async () => {
+      responsesCreateMock.mockResolvedValue({
+        ...okResponse,
+        usage: {
+          input_tokens: 12_000,
+          output_tokens: 40,
+          input_tokens_details: { cached_tokens: 11_264 },
+        },
+      });
+
+      const response = await new OpenAIProvider(apiKeyConfig).createMessage(cachedRequest);
+
+      expect(response.usage).toMatchObject({
+        inputTokens: 12_000,
+        outputTokens: 40,
+        cachedTokens: 11_264,
+      });
+    });
   });
 
   it("strips provider and profile routing suffixes before an Astra API request", async () => {
@@ -1178,7 +1272,7 @@ describe("OpenAIProvider structured errors", () => {
     expect(JSON.stringify(context.messages).match(/Current turn context/g)).toHaveLength(1);
   });
 
-  it("injects modern cache-write options into the subscription transport payload", async () => {
+  it("sends only the session prompt_cache_key on the subscription transport", async () => {
     completeMock.mockResolvedValue({
       stopReason: "stop",
       content: [{ type: "text", text: "ok" }],
@@ -1200,11 +1294,53 @@ describe("OpenAIProvider structured errors", () => {
 
     const options = completeMock.mock.calls.at(-1)?.[2] as Any;
     expect(options.cacheRetention).toBe("long");
+    // pi-ai's Codex transport sends sessionId as prompt_cache_key and session routing.
     expect(options.sessionId).toBe("codex-session");
-    expect(options.onPayload({ prompt_cache_key: "codex-session" })).toEqual({
-      prompt_cache_key: "codex-session",
-      prompt_cache_options: { mode: "implicit", ttl: "30m" },
-    });
+    // The ChatGPT backend rejects prompt_cache_options/retention: never inject them.
+    expect(options.onPayload).toBeUndefined();
+    expect(JSON.stringify(options)).not.toContain("prompt_cache_options");
+  });
+
+  it("drops the OAuth session cache key after a key rejection and keeps it dropped", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    completeMock
+      .mockResolvedValueOnce({
+        stopReason: "error",
+        errorMessage: "Unsupported parameter: prompt_cache_key",
+      })
+      .mockResolvedValue({
+        stopReason: "stop",
+        content: [{ type: "text", text: "ok" }],
+        usage: { input: 100, output: 1, cacheRead: 0, cacheWrite: 0 },
+      });
+    getModelsMock.mockReturnValue([{ id: "gpt-6-luna" }]);
+    const cachedRequest: LLMRequest = {
+      ...makeRequest(),
+      model: "gpt-6-luna",
+      promptCache: {
+        mode: "openai_key",
+        ttl: "5m",
+        explicitRecentMessages: 3,
+        cacheKey: "luna-session",
+      },
+    };
+
+    await new OpenAIProvider({ ...makeConfig(), model: "gpt-6-luna" }).createMessage(
+      cachedRequest,
+    );
+
+    expect((completeMock.mock.calls[0][2] as Any).sessionId).toBe("luna-session");
+    expect((completeMock.mock.calls[0][2] as Any).onPayload).toBeUndefined();
+    expect((completeMock.mock.calls[1][2] as Any).sessionId).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("ChatGPT prompt cache controls rejected"),
+      expect.objectContaining({
+        model: "gpt-6-luna",
+        nextTier: "none",
+        providerMessage: "Unsupported parameter: prompt_cache_key",
+      }),
+    );
+    warnSpy.mockRestore();
   });
 
   it("forwards GPT-6 Astra Ultra reasoning and response verbosity to the ChatGPT backend", async () => {

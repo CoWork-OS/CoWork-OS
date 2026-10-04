@@ -13,10 +13,13 @@ import {
   buildOpenAIPromptCacheFields,
   mapPromptCacheTtlToOpenAIRetention,
   mapPromptCacheTtlToPiAiRetention,
+  minOpenAIPromptCacheTier,
+  nextOpenAIPromptCacheTier,
   normalizePromptCachingSettings,
   normalizeSystemBlocks,
   prependVolatileSystemContextToMessages,
   resolvePromptCacheProviderFamily,
+  summarizePromptCacheRejection,
 } from "../prompt-cache";
 
 const basePromptParams = {
@@ -451,6 +454,60 @@ describe("prompt-cache stable prefix hashing", () => {
       cacheWriteTokens: 500,
     });
     expect(extractPiAiUsage(undefined)).toBeUndefined();
+  });
+
+  it("builds OpenAI cache fields per fallback tier", () => {
+    const promptCache = {
+      mode: "openai_key" as const,
+      ttl: "1h" as const,
+      explicitRecentMessages: 3,
+      cacheKey: "stable-prefix",
+      retention: "24h" as const,
+    };
+    expect(buildOpenAIPromptCacheFields(promptCache, "gpt-6-luna", "full")).toEqual({
+      prompt_cache_key: "stable-prefix",
+      prompt_cache_options: { mode: "implicit", ttl: "30m" },
+    });
+    expect(buildOpenAIPromptCacheFields(promptCache, "gpt-6-luna", "key_only")).toEqual({
+      prompt_cache_key: "stable-prefix",
+    });
+    expect(buildOpenAIPromptCacheFields(promptCache, "gpt-5.4", "key_only")).toEqual({
+      prompt_cache_key: "stable-prefix",
+    });
+    expect(buildOpenAIPromptCacheFields(promptCache, "gpt-6-luna", "none")).toEqual({});
+  });
+
+  it("steps OpenAI cache tiers down one field group at a time", () => {
+    const full = {
+      prompt_cache_key: "k",
+      prompt_cache_options: { mode: "implicit" as const, ttl: "30m" as const },
+    };
+    expect(nextOpenAIPromptCacheTier(full, "Unsupported parameter: prompt_cache_options")).toBe(
+      "key_only",
+    );
+    // A generic rejection keeps the key and drops only the optional fields first.
+    expect(nextOpenAIPromptCacheTier(full, "400 invalid prompt cache request")).toBe("key_only");
+    // The provider names the key itself, so a key-only retry would fail the same way.
+    expect(nextOpenAIPromptCacheTier(full, "Unsupported parameter: prompt_cache_key")).toBe(
+      "none",
+    );
+    expect(
+      nextOpenAIPromptCacheTier(
+        { prompt_cache_key: "k" },
+        "Unsupported parameter: prompt_cache_options",
+      ),
+    ).toBe("none");
+    expect(minOpenAIPromptCacheTier("full", "key_only")).toBe("key_only");
+    expect(minOpenAIPromptCacheTier("none", "full")).toBe("none");
+  });
+
+  it("redacts and truncates provider cache rejection messages for logs", () => {
+    const summary = summarizePromptCacheRejection(
+      `Unsupported parameter:\n prompt_cache_options. key sk-proj-${"a".repeat(40)} ${"x".repeat(400)}`,
+    );
+    expect(summary.startsWith("Unsupported parameter: prompt_cache_options.")).toBe(true);
+    expect(summary).not.toContain("sk-proj-aaaa");
+    expect(summary.length).toBeLessThanOrEqual(203);
   });
 
   it("only disables caching for errors that identify cache request incompatibility", () => {

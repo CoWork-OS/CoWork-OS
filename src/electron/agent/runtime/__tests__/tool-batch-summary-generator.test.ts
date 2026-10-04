@@ -80,7 +80,7 @@ describe("ToolBatchSummaryGenerator", () => {
 
     const result = await generator.generateSummary({
       phase: "verification",
-      callReports: [makeReport("search_sessions", "1")],
+      callReports: [makeReport("task_history", "1")],
       assistantIntent: "exit status is `0`",
     });
 

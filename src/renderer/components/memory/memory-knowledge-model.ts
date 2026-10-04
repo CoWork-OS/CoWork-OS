@@ -37,7 +37,7 @@ export type MemoryKnowledgeApi = {
   clearGlobalMemoryItems: (data: {
     workspaceId: string;
     confirm: true;
-  }) => Promise<{ success: boolean; deleted: number; legacyRecords: number }>;
+  }) => Promise<{ success: boolean; deleted: number }>;
 };
 
 export const MEMORY_KNOWLEDGE_PAGE_SIZE = 100;
@@ -256,7 +256,7 @@ export async function clearGlobalKnowledge(
   const count = items.filter((item) => item.scope === "global").length;
   if (
     !confirm(
-      `Clear all global memories${count ? ` (${count} shown)` : ""}? Facts CoWork knows about you in every workspace are erased, including the profile facts they came from. This cannot be undone.`,
+      `Clear all global memories${count ? ` (${count} shown)` : ""}? Facts CoWork knows about you in every workspace are erased. This cannot be undone.`,
     )
   ) {
     return { items, cancelled: true };

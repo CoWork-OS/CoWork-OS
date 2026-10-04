@@ -17,6 +17,7 @@ import { MEMORY_CONTEXT_UNITS } from "./memory-context-sql";
 import { SUPERMEMORY_REMOTE_REF_UNITS } from "./supermemory-remote-refs-units";
 import { MEMORY_CURATION_UNITS } from "./memory-curation-units";
 import { MAINTENANCE_CLAIM_UNITS } from "./maintenance-claim-sql";
+import { LEGACY_MEMORY_RETIREMENT_UNITS } from "./legacy-memory-retirement-sql";
 
 /**
  * Transaction units of the memory domain (async SQLite migration plan, DB6): each runs
@@ -78,5 +79,6 @@ export const MEMORY_UNITS = {
   ...SUPERMEMORY_REMOTE_REF_UNITS,
   ...MEMORY_CURATION_UNITS,
   ...MAINTENANCE_CLAIM_UNITS,
+  ...LEGACY_MEMORY_RETIREMENT_UNITS,
   tier_promotionPass: tierPromotionPass,
 } satisfies UnitCatalog;

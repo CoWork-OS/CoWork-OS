@@ -1797,23 +1797,8 @@ export class DatabaseManager {
         FOREIGN KEY (task_id) REFERENCES tasks(id)
       );
 
-      CREATE TABLE IF NOT EXISTS curated_memory_entries (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        task_id TEXT,
-        target TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        content TEXT NOT NULL,
-        normalized_key TEXT NOT NULL,
-        source TEXT NOT NULL,
-        confidence REAL NOT NULL DEFAULT 0.7,
-        status TEXT NOT NULL DEFAULT 'active',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        last_confirmed_at INTEGER,
-        FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-        FOREIGN KEY (task_id) REFERENCES tasks(id)
-      );
+      -- curated_memory_entries and memory_summaries are retired (LegacyMemoryRetirement.ts)
+      -- and no longer created.
 
       -- Local semantic embeddings for hybrid memory retrieval (offline)
       CREATE TABLE IF NOT EXISTS memory_embeddings (
@@ -1823,20 +1808,6 @@ export class DatabaseManager {
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
         FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-      );
-
-      -- Aggregated semantic summaries
-      CREATE TABLE IF NOT EXISTS memory_summaries (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        time_period TEXT NOT NULL,
-        period_start INTEGER NOT NULL,
-        period_end INTEGER NOT NULL,
-        summary TEXT NOT NULL,
-        memory_ids TEXT NOT NULL,
-        tokens INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
       );
 
       CREATE TABLE IF NOT EXISTS memory_observation_metadata (
@@ -2025,15 +1996,7 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_memories_compressed ON memories(is_compressed);
       CREATE INDEX IF NOT EXISTS idx_memories_workspace_private
         ON memories(workspace_id, is_private, created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_curated_memory_workspace_target
-        ON curated_memory_entries(workspace_id, target, status, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_curated_memory_workspace_kind
-        ON curated_memory_entries(workspace_id, kind, status, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_curated_memory_normalized_key
-        ON curated_memory_entries(workspace_id, target, kind, normalized_key, status);
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_workspace ON memory_embeddings(workspace_id);
-      CREATE INDEX IF NOT EXISTS idx_memory_summaries_workspace ON memory_summaries(workspace_id);
-      CREATE INDEX IF NOT EXISTS idx_memory_summaries_period ON memory_summaries(time_period, period_start);
       CREATE INDEX IF NOT EXISTS idx_memory_observation_workspace_created
         ON memory_observation_metadata(workspace_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_memory_observation_type
@@ -4419,58 +4382,18 @@ export class DatabaseManager {
       // Index already exists, ignore
     }
 
+    // Role metadata (kind and template provenance from the soul JSON), every start. Roles
+    // used to be staged in `heartbeat_policies` here before the step below copied them into
+    // `automation_profiles`; that table is retired (LegacyMemoryRetirement.ts drops it), so
+    // the step below reads the role columns directly.
+    const templatedRoleIds = new Set<string>();
     try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS heartbeat_policies (
-          id TEXT PRIMARY KEY,
-          agent_role_id TEXT NOT NULL UNIQUE REFERENCES agent_roles(id) ON DELETE CASCADE,
-          enabled INTEGER NOT NULL DEFAULT 0,
-          cadence_minutes INTEGER NOT NULL DEFAULT 15,
-          stagger_offset_minutes INTEGER NOT NULL DEFAULT 0,
-          dispatch_cooldown_minutes INTEGER NOT NULL DEFAULT 120,
-          max_dispatches_per_day INTEGER NOT NULL DEFAULT 6,
-          profile TEXT NOT NULL DEFAULT 'observer',
-          active_hours TEXT,
-          primary_categories TEXT,
-          proactive_tasks TEXT,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_heartbeat_policies_enabled ON heartbeat_policies(enabled, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_heartbeat_policies_agent_role ON heartbeat_policies(agent_role_id);
-      `);
-    } catch {
-      // Table already exists, ignore
-    }
-
-    try {
-      const existingPolicyRoleIds = new Set(
-        (
-          this.db.prepare("SELECT agent_role_id FROM heartbeat_policies").all() as Array<{
-            agent_role_id?: string;
-          }>
-        )
-          .map((row) => (typeof row.agent_role_id === "string" ? row.agent_role_id : ""))
-          .filter(Boolean),
-      );
       const roles = this.db
         .prepare(
-          `SELECT id, name, role_kind, source_template_id, source_template_version, soul,
-                heartbeat_enabled, heartbeat_interval_minutes, heartbeat_stagger_offset,
-                heartbeat_pulse_every_minutes, heartbeat_dispatch_cooldown_minutes,
-                heartbeat_max_dispatches_per_day, heartbeat_profile, heartbeat_active_hours,
-                created_at, updated_at
+          `SELECT id, name, role_kind, source_template_id, soul
          FROM agent_roles`,
         )
         .all() as Array<Record<string, unknown>>;
-      const insertPolicy = this.db.prepare(
-        `INSERT INTO heartbeat_policies (
-          id, agent_role_id, enabled, cadence_minutes, stagger_offset_minutes,
-          dispatch_cooldown_minutes, max_dispatches_per_day, profile, active_hours,
-          primary_categories, proactive_tasks, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
       const updateRoleMetadata = this.db.prepare(
         `UPDATE agent_roles
          SET role_kind = COALESCE(role_kind, ?),
@@ -4483,24 +4406,12 @@ export class DatabaseManager {
         const roleId = typeof role.id === "string" ? role.id : "";
         if (!roleId) continue;
 
-        let primaryCategories: unknown[] = [];
-        let proactiveTasks: unknown[] = [];
         let sourceTemplateId: string | null = null;
         let sourceTemplateVersion: string | null = null;
 
         if (typeof role.soul === "string" && role.soul.trim().length > 0) {
           try {
             const parsed = JSON.parse(role.soul) as Record<string, unknown>;
-            const cognitiveOffload =
-              parsed.cognitiveOffload && typeof parsed.cognitiveOffload === "object"
-                ? (parsed.cognitiveOffload as Record<string, unknown>)
-                : null;
-            primaryCategories = Array.isArray(cognitiveOffload?.primaryCategories)
-              ? (cognitiveOffload?.primaryCategories as unknown[])
-              : [];
-            proactiveTasks = Array.isArray(cognitiveOffload?.proactiveTasks)
-              ? (cognitiveOffload?.proactiveTasks as unknown[])
-              : [];
             sourceTemplateId =
               typeof parsed.sourceTemplateId === "string" ? parsed.sourceTemplateId : null;
             sourceTemplateVersion =
@@ -4518,34 +4429,18 @@ export class DatabaseManager {
             : "custom";
         updateRoleMetadata.run(derivedRoleKind, sourceTemplateId, sourceTemplateVersion, roleId);
 
-        // Templated roles never own heartbeat policies; startup detaches them from core
+        // Templated roles never own automation; startup detaches them from core
         // automation, so backfilling one here would be recreated and deleted every launch.
-        const isTemplatedRole =
+        if (
           role.role_kind === "persona_template" ||
           derivedRoleKind === "persona_template" ||
-          (typeof role.source_template_id === "string" && role.source_template_id !== "");
-        if (!isTemplatedRole && !existingPolicyRoleIds.has(roleId)) {
-          insertPolicy.run(
-            typeof crypto?.randomUUID === "function"
-              ? crypto.randomUUID()
-              : `${roleId}-heartbeat-policy`,
-            roleId,
-            role.heartbeat_enabled === 1 ? 1 : 0,
-            Number(role.heartbeat_pulse_every_minutes || role.heartbeat_interval_minutes || 15),
-            Number(role.heartbeat_stagger_offset || 0),
-            Number(role.heartbeat_dispatch_cooldown_minutes || 120),
-            Number(role.heartbeat_max_dispatches_per_day || 6),
-            typeof role.heartbeat_profile === "string" ? role.heartbeat_profile : "observer",
-            typeof role.heartbeat_active_hours === "string" ? role.heartbeat_active_hours : null,
-            JSON.stringify(primaryCategories),
-            JSON.stringify(proactiveTasks),
-            Number(role.created_at || Date.now()),
-            Number(role.updated_at || Date.now()),
-          );
+          (typeof role.source_template_id === "string" && role.source_template_id !== "")
+        ) {
+          templatedRoleIds.add(roleId);
         }
       }
     } catch (error) {
-      schemaLogger.error("Failed to migrate heartbeat policies:", error);
+      schemaLogger.error("Failed to migrate agent role metadata:", error);
     }
 
     try {
@@ -4589,16 +4484,52 @@ export class DatabaseManager {
           .map((row) => (typeof row.agent_role_id === "string" ? row.agent_role_id : ""))
           .filter(Boolean),
       );
-      const policies = this.db
-        .prepare(
-          `SELECT hp.*, ar.role_kind, ar.name,
-                ar.last_heartbeat_at, ar.last_pulse_at, ar.last_dispatch_at,
-                ar.heartbeat_status, ar.heartbeat_last_pulse_result, ar.heartbeat_last_dispatch_kind,
-                ar.created_at AS role_created_at, ar.updated_at AS role_updated_at
-         FROM heartbeat_policies hp
-         JOIN agent_roles ar ON ar.id = hp.agent_role_id`,
+      // A legacy `heartbeat_policies` row (older profiles, until it is dropped) keeps the
+      // values it was created with; other roles take their own heartbeat columns.
+      const legacyPolicies = new Map<string, Record<string, unknown>>();
+      if (this.schemaObjectSql("table", "heartbeat_policies")) {
+        for (const row of this.db.prepare("SELECT * FROM heartbeat_policies").all() as Array<
+          Record<string, unknown>
+        >) {
+          if (typeof row.agent_role_id === "string") legacyPolicies.set(row.agent_role_id, row);
+        }
+      }
+      const policies = (
+        this.db
+          .prepare(
+            `SELECT id AS agent_role_id, role_kind, name, heartbeat_enabled,
+                  heartbeat_interval_minutes, heartbeat_pulse_every_minutes,
+                  heartbeat_stagger_offset, heartbeat_dispatch_cooldown_minutes,
+                  heartbeat_max_dispatches_per_day, heartbeat_profile, heartbeat_active_hours,
+                  last_heartbeat_at, last_pulse_at, last_dispatch_at,
+                  heartbeat_status, heartbeat_last_pulse_result, heartbeat_last_dispatch_kind,
+                  created_at AS role_created_at, updated_at AS role_updated_at
+           FROM agent_roles`,
+          )
+          .all() as Array<Record<string, unknown>>
+      )
+        .filter(
+          (role) =>
+            typeof role.agent_role_id === "string" &&
+            (legacyPolicies.has(role.agent_role_id) || !templatedRoleIds.has(role.agent_role_id)),
         )
-        .all() as Array<Record<string, unknown>>;
+        .map((role): Record<string, unknown> => {
+          const legacy = legacyPolicies.get(role.agent_role_id as string);
+          if (legacy) return { ...legacy, ...role };
+          return {
+            ...role,
+            enabled: role.heartbeat_enabled === 1 ? 1 : 0,
+            cadence_minutes: Number(
+              role.heartbeat_pulse_every_minutes || role.heartbeat_interval_minutes || 15,
+            ),
+            stagger_offset_minutes: Number(role.heartbeat_stagger_offset || 0),
+            dispatch_cooldown_minutes: Number(role.heartbeat_dispatch_cooldown_minutes || 120),
+            max_dispatches_per_day: Number(role.heartbeat_max_dispatches_per_day || 6),
+            profile: typeof role.heartbeat_profile === "string" ? role.heartbeat_profile : "observer",
+            active_hours:
+              typeof role.heartbeat_active_hours === "string" ? role.heartbeat_active_hours : null,
+          };
+        });
       const insertAutomationProfile = this.db.prepare(
         `INSERT INTO automation_profiles (
           id, agent_role_id, enabled, cadence_minutes, stagger_offset_minutes,
@@ -5486,157 +5417,11 @@ export class DatabaseManager {
       // Table already exists
     }
 
+    // The improvement_* tables of the retired self-improvement loop are no longer created;
+    // SubconsciousMigrationService copies what an older profile holds, and
+    // LegacyMemoryRetirement.ts drops them afterwards.
     try {
       this.db.exec(`
-        CREATE TABLE IF NOT EXISTS improvement_candidates (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL,
-          fingerprint TEXT NOT NULL,
-          source TEXT NOT NULL,
-          status TEXT NOT NULL,
-          readiness TEXT,
-          readiness_reason TEXT,
-          title TEXT NOT NULL,
-          summary TEXT NOT NULL,
-          severity REAL NOT NULL DEFAULT 0,
-          recurrence_count INTEGER NOT NULL DEFAULT 1,
-          fixability_score REAL NOT NULL DEFAULT 0,
-          priority_score REAL NOT NULL DEFAULT 0,
-          evidence TEXT NOT NULL,
-          last_task_id TEXT,
-          last_event_type TEXT,
-          first_seen_at INTEGER NOT NULL,
-          last_seen_at INTEGER NOT NULL,
-          last_experiment_at INTEGER,
-          failure_streak INTEGER NOT NULL DEFAULT 0,
-          cooldown_until INTEGER,
-          park_reason TEXT,
-          parked_at INTEGER,
-          last_skip_reason TEXT,
-          last_skip_at INTEGER,
-          last_attempt_fingerprint TEXT,
-          last_failure_class TEXT,
-          resolved_at INTEGER
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_improvement_candidates_fingerprint
-          ON improvement_candidates(workspace_id, fingerprint);
-        CREATE INDEX IF NOT EXISTS idx_improvement_candidates_status
-          ON improvement_candidates(status, priority_score DESC, last_seen_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_improvement_candidates_workspace
-          ON improvement_candidates(workspace_id, status, priority_score DESC);
-
-        CREATE TABLE IF NOT EXISTS improvement_runs (
-          id TEXT PRIMARY KEY,
-          candidate_id TEXT NOT NULL,
-          workspace_id TEXT NOT NULL,
-          status TEXT NOT NULL,
-          review_status TEXT NOT NULL,
-          promotion_status TEXT DEFAULT 'idle',
-          task_id TEXT,
-          branch_name TEXT,
-          merge_result TEXT,
-          pull_request TEXT,
-          promotion_error TEXT,
-          baseline_metrics TEXT,
-          outcome_metrics TEXT,
-          verdict_summary TEXT,
-          evaluation_notes TEXT,
-          created_at INTEGER NOT NULL,
-          started_at INTEGER,
-          completed_at INTEGER,
-          promoted_at INTEGER,
-          FOREIGN KEY (candidate_id) REFERENCES improvement_candidates(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_improvement_runs_candidate
-          ON improvement_runs(candidate_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_improvement_runs_status
-          ON improvement_runs(status, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_improvement_runs_review
-          ON improvement_runs(review_status, created_at DESC);
-
-        CREATE TABLE IF NOT EXISTS improvement_campaigns (
-          id TEXT PRIMARY KEY,
-          candidate_id TEXT NOT NULL,
-          workspace_id TEXT NOT NULL,
-          execution_workspace_id TEXT,
-          root_task_id TEXT,
-          status TEXT NOT NULL,
-          stage TEXT,
-          review_status TEXT NOT NULL,
-          promotion_status TEXT DEFAULT 'idle',
-          stop_reason TEXT,
-          provider_health_snapshot TEXT,
-          stage_budget TEXT,
-          verification_commands TEXT,
-          observability TEXT,
-          pr_required INTEGER NOT NULL DEFAULT 1,
-          winner_variant_id TEXT,
-          promoted_task_id TEXT,
-          promoted_branch_name TEXT,
-          merge_result TEXT,
-          pull_request TEXT,
-          promotion_error TEXT,
-          baseline_metrics TEXT,
-          outcome_metrics TEXT,
-          verdict_summary TEXT,
-          evaluation_notes TEXT,
-          training_evidence TEXT NOT NULL,
-          holdout_evidence TEXT NOT NULL,
-          replay_cases TEXT NOT NULL,
-          created_at INTEGER NOT NULL,
-          started_at INTEGER,
-          completed_at INTEGER,
-          promoted_at INTEGER,
-          FOREIGN KEY (candidate_id) REFERENCES improvement_candidates(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_improvement_campaigns_candidate
-          ON improvement_campaigns(candidate_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_improvement_campaigns_status
-          ON improvement_campaigns(status, created_at DESC);
-
-        CREATE TABLE IF NOT EXISTS improvement_variant_runs (
-          id TEXT PRIMARY KEY,
-          campaign_id TEXT NOT NULL,
-          candidate_id TEXT NOT NULL,
-          workspace_id TEXT NOT NULL,
-          execution_workspace_id TEXT,
-          lane TEXT NOT NULL,
-          status TEXT NOT NULL,
-          task_id TEXT,
-          branch_name TEXT,
-          baseline_metrics TEXT,
-          outcome_metrics TEXT,
-          verdict_summary TEXT,
-          evaluation_notes TEXT,
-          observability TEXT,
-          created_at INTEGER NOT NULL,
-          started_at INTEGER,
-          completed_at INTEGER,
-          FOREIGN KEY (campaign_id) REFERENCES improvement_campaigns(id) ON DELETE CASCADE,
-          FOREIGN KEY (candidate_id) REFERENCES improvement_candidates(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_improvement_variant_runs_campaign
-          ON improvement_variant_runs(campaign_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_improvement_variant_runs_task
-          ON improvement_variant_runs(task_id);
-
-        CREATE TABLE IF NOT EXISTS improvement_judge_verdicts (
-          id TEXT PRIMARY KEY,
-          campaign_id TEXT NOT NULL UNIQUE,
-          winner_variant_id TEXT,
-          status TEXT NOT NULL,
-          summary TEXT NOT NULL,
-          notes TEXT NOT NULL,
-          variant_rankings TEXT NOT NULL,
-          replay_cases TEXT NOT NULL,
-          compared_at INTEGER NOT NULL,
-          FOREIGN KEY (campaign_id) REFERENCES improvement_campaigns(id) ON DELETE CASCADE
-        );
-
         CREATE TABLE IF NOT EXISTS subconscious_targets (
           target_key TEXT PRIMARY KEY,
           kind TEXT NOT NULL,
@@ -6256,30 +6041,6 @@ export class DatabaseManager {
       "ALTER TABLE subconscious_runs ADD COLUMN evidence_freshness REAL",
       "ALTER TABLE subconscious_runs ADD COLUMN permission_decision TEXT",
       "ALTER TABLE subconscious_runs ADD COLUMN notification_intent TEXT",
-      "ALTER TABLE improvement_runs ADD COLUMN promotion_status TEXT DEFAULT 'idle'",
-      "ALTER TABLE improvement_runs ADD COLUMN merge_result TEXT",
-      "ALTER TABLE improvement_runs ADD COLUMN pull_request TEXT",
-      "ALTER TABLE improvement_runs ADD COLUMN promotion_error TEXT",
-      "ALTER TABLE improvement_runs ADD COLUMN promoted_at INTEGER",
-      "ALTER TABLE improvement_campaigns ADD COLUMN root_task_id TEXT",
-      "ALTER TABLE improvement_candidates ADD COLUMN failure_streak INTEGER NOT NULL DEFAULT 0",
-      "ALTER TABLE improvement_candidates ADD COLUMN cooldown_until INTEGER",
-      "ALTER TABLE improvement_candidates ADD COLUMN park_reason TEXT",
-      "ALTER TABLE improvement_candidates ADD COLUMN parked_at INTEGER",
-      "ALTER TABLE improvement_candidates ADD COLUMN readiness TEXT",
-      "ALTER TABLE improvement_candidates ADD COLUMN readiness_reason TEXT",
-      "ALTER TABLE improvement_candidates ADD COLUMN last_skip_reason TEXT",
-      "ALTER TABLE improvement_candidates ADD COLUMN last_skip_at INTEGER",
-      "ALTER TABLE improvement_candidates ADD COLUMN last_attempt_fingerprint TEXT",
-      "ALTER TABLE improvement_candidates ADD COLUMN last_failure_class TEXT",
-      "ALTER TABLE improvement_campaigns ADD COLUMN stage TEXT",
-      "ALTER TABLE improvement_campaigns ADD COLUMN stop_reason TEXT",
-      "ALTER TABLE improvement_campaigns ADD COLUMN provider_health_snapshot TEXT",
-      "ALTER TABLE improvement_campaigns ADD COLUMN stage_budget TEXT",
-      "ALTER TABLE improvement_campaigns ADD COLUMN verification_commands TEXT",
-      "ALTER TABLE improvement_campaigns ADD COLUMN observability TEXT",
-      "ALTER TABLE improvement_campaigns ADD COLUMN pr_required INTEGER NOT NULL DEFAULT 1",
-      "ALTER TABLE improvement_variant_runs ADD COLUMN observability TEXT",
     ]) {
       try {
         this.db.exec(statement);
@@ -6489,37 +6250,6 @@ export class DatabaseManager {
       `);
     } catch {
       // Index already exists
-    }
-
-    try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS curated_memory_entries (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL,
-          task_id TEXT,
-          target TEXT NOT NULL,
-          kind TEXT NOT NULL,
-          content TEXT NOT NULL,
-          normalized_key TEXT NOT NULL,
-          source TEXT NOT NULL,
-          confidence REAL NOT NULL DEFAULT 0.7,
-          status TEXT NOT NULL DEFAULT 'active',
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          last_confirmed_at INTEGER,
-          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-          FOREIGN KEY (task_id) REFERENCES tasks(id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_curated_memory_workspace_target
-          ON curated_memory_entries(workspace_id, target, status, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_curated_memory_workspace_kind
-          ON curated_memory_entries(workspace_id, kind, status, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_curated_memory_normalized_key
-          ON curated_memory_entries(workspace_id, target, kind, normalized_key, status);
-      `);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      schemaLogger.error("[DatabaseManager] Curated memory migration failed:", msg);
     }
 
     try {

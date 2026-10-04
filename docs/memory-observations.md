@@ -152,10 +152,8 @@ enabled) and then the active task's conversation index, and expands one result b
 works on the active task.
 
 The earlier tools (`search_memories`, `memory_search_index`, `memory_timeline`, `memory_details`,
-`context_grep`, `context_describe`) are hidden deprecated aliases for one release: still executable,
-routed to `memory_recall` / `context_recall`, and answered with a `deprecated` notice. A
-`context_grep` / `context_describe` call keeps the old contract: a supplied `taskId` is ignored unless
-the call also sets `explicitUserRequest: true`.
+`context_grep`, `context_describe`) were hidden aliases for one release and are now removed; use
+`memory_recall` and `context_recall`.
 
 ## Memory Hub Inspector
 

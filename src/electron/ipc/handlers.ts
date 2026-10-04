@@ -61,7 +61,6 @@ import * as path from "path";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import {
-  AddUserFactRequestSchema,
   CommitmentsGetRequestSchema,
   isMemoryVisibleInWorkspace,
   KitOpenFileRequestSchema,
@@ -78,7 +77,6 @@ import {
   RelationshipListRequestSchema,
   RelationshipUpdateRequestSchema,
   resolveKitOpenPath,
-  UpdateUserFactRequestSchema,
 } from "./memory-ipc-validation";
 import { createPendingWriteTracker } from "./pending-writes";
 import { execFile, spawn as spawnProcess } from "child_process";
@@ -285,8 +283,6 @@ import {
   WorkspaceKitStatus,
   WorkspaceKitInitRequest,
   WorkspaceKitProjectCreateRequest,
-  AddUserFactRequest,
-  UpdateUserFactRequest,
   isTempWorkspaceId,
   AgentConfig,
   LLMReasoningEffort,
@@ -541,7 +537,6 @@ import { MemoryService } from "../memory/MemoryService";
 import { MemoryWorkspacePurgeService } from "../memory/MemoryWorkspacePurgeService";
 import { MemoryItemsHubService } from "../memory/MemoryItemsHubService";
 import { MemoryWriter } from "../memory/MemoryWriter";
-import { createLegacyMemoryMirror } from "../memory/memory-items-legacy-mirror";
 import { setupMemoryItemsHandlers } from "./memory-items-handlers";
 import {
   MEMORY_USED_EVENT_TYPES,
@@ -1212,19 +1207,12 @@ rateLimiter.configure(IPC_CHANNELS.KIT_PROJECT_CREATE, RATE_LIMIT_CONFIGS.limite
 rateLimiter.configure(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_RESET_ADAPTIVE_STYLE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
-rateLimiter.configure(IPC_CHANNELS.MEMORY_ADD_USER_FACT, RATE_LIMIT_CONFIGS.limited);
-rateLimiter.configure(IPC_CHANNELS.MEMORY_UPDATE_USER_FACT, RATE_LIMIT_CONFIGS.limited);
-rateLimiter.configure(IPC_CHANNELS.MEMORY_DELETE_USER_FACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_DELETE_IMPORTED_ENTRY, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_SET_IMPORTED_RECALL_IGNORED, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.MEMORY_RELATIONSHIP_DELETE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOX_BRAIN_GET_STATUS, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.BOX_BRAIN_SYNC_NOW, RATE_LIMIT_CONFIGS.expensive);
-rateLimiter.configure(
-  IPC_CHANNELS.MEMORY_RELATIONSHIP_CLEANUP_RECURRING,
-  RATE_LIMIT_CONFIGS.limited,
-);
 rateLimiter.configure(IPC_CHANNELS.SUPERVISOR_EXCHANGE_RESOLVE, RATE_LIMIT_CONFIGS.limited);
 
 // Helper function to get the main window (avoids overlay/utility windows)
@@ -11569,7 +11557,6 @@ export async function setupIpcHandlers(
   setupMemoryItemsHandlers({
     service: new MemoryItemsHubService({
       getWriter: () => MemoryWriter.get(),
-      legacy: createLegacyMemoryMirror(),
       getTask: async (taskId) => {
         const task = await taskRepo.findById(taskId);
         return task ? { id: task.id, title: task.title, workspaceId: task.workspaceId } : undefined;
@@ -13451,7 +13438,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
         throw new Error("Onboarding profile data is required");
       }
 
-      OnboardingProfileService.applyGlobalProfile(request.data);
+      await OnboardingProfileService.applyGlobalProfile(request.data);
 
       if (!request.workspaceId) {
         return { success: true };
@@ -14144,50 +14131,6 @@ function setupMemoryHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_ADD_USER_FACT, async (_, rawRequest: unknown) => {
-    checkRateLimit(IPC_CHANNELS.MEMORY_ADD_USER_FACT, RATE_LIMIT_CONFIGS.limited);
-    try {
-      // `source` is forced to "manual": the renderer cannot claim conversation/feedback provenance.
-      const request: AddUserFactRequest = validateInput(
-        AddUserFactRequestSchema,
-        rawRequest,
-        "user fact",
-      );
-      return UserProfileService.addFact(request);
-    } catch (error) {
-      logger.error("[Memory] Failed to add user fact:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_UPDATE_USER_FACT,
-    async (_, rawRequest: unknown) => {
-      checkRateLimit(IPC_CHANNELS.MEMORY_UPDATE_USER_FACT, RATE_LIMIT_CONFIGS.limited);
-      try {
-        const request: UpdateUserFactRequest = validateInput(
-          UpdateUserFactRequestSchema,
-          rawRequest,
-          "user fact update",
-        );
-        return UserProfileService.updateFact(request);
-      } catch (error) {
-        logger.error("[Memory] Failed to update user fact:", error);
-        throw error;
-      }
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE_USER_FACT, async (_, id: string) => {
-    checkRateLimit(IPC_CHANNELS.MEMORY_DELETE_USER_FACT, RATE_LIMIT_CONFIGS.limited);
-    try {
-      return { success: UserProfileService.deleteFact(id) };
-    } catch (error) {
-      logger.error("[Memory] Failed to delete user fact:", error);
-      throw error;
-    }
-  });
-
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_RELATIONSHIP_LIST,
     async (_, rawData?: unknown) => {
@@ -14197,7 +14140,7 @@ function setupMemoryHandlers(): void {
           rawData,
           "relationship memory list",
         );
-        return RelationshipMemoryService.listItems({
+        return await RelationshipMemoryService.listItems({
           layer: data?.layer,
           includeDone: data?.includeDone,
           limit: data?.limit,
@@ -14219,7 +14162,7 @@ function setupMemoryHandlers(): void {
           rawData,
           "relationship memory update",
         );
-        return RelationshipMemoryService.updateItem(data.id, {
+        return await RelationshipMemoryService.updateItem(data.id, {
           text: data.text,
           confidence: data.confidence,
           status: data.status,
@@ -14238,20 +14181,9 @@ function setupMemoryHandlers(): void {
       if (!id || typeof id !== "string") {
         throw new Error("id is required");
       }
-      return { success: RelationshipMemoryService.deleteItem(id) };
+      return { success: await RelationshipMemoryService.deleteItem(id) };
     } catch (error) {
       logger.error("[Memory] Failed to delete relationship memory item:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.MEMORY_RELATIONSHIP_CLEANUP_RECURRING, async () => {
-    checkRateLimit(IPC_CHANNELS.MEMORY_RELATIONSHIP_CLEANUP_RECURRING, RATE_LIMIT_CONFIGS.limited);
-    try {
-      const result = RelationshipMemoryService.cleanupRecurringTaskHistory();
-      return { success: true, ...result };
-    } catch (error) {
-      logger.error("[Memory] Failed to cleanup recurring relationship history:", error);
       throw error;
     }
   });

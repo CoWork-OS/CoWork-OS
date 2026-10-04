@@ -13,7 +13,7 @@ import { purgeTaskMemoryItems, purgeWorkspaceMemoryItems } from "./memory-items-
 
 /**
  * Observation origins whose task-attributed memories survive a task delete. These are
- * explicit user saves (`tool` = memory_save) and imports; the user asked for them to be
+ * explicit saves (`tool` = memory_remember) and imports; the user asked for them to be
  * kept independently of the conversation, so only their task link is cleared.
  */
 const TASK_DELETE_KEPT_ORIGINS = ["import", "tool"] as const;
@@ -145,6 +145,12 @@ export function purgeTaskDerivedRows(
 
   if (tableExists(db, "transcript_spans")) {
     counts.transcriptSpans = run(db, "DELETE FROM transcript_spans WHERE task_id = ?", taskId);
+  }
+
+  // Legacy curated entries (retired by LegacyMemoryRetirement.ts) are kept, only unlinked,
+  // so their task foreign key cannot block the delete.
+  if (tableExists(db, "curated_memory_entries")) {
+    run(db, "UPDATE curated_memory_entries SET task_id = NULL WHERE task_id = ?", taskId);
   }
 
   if (purgeDerivedMemory && tableExists(db, "kg_entities")) {

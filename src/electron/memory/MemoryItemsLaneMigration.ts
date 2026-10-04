@@ -10,7 +10,12 @@
  * is already present is skipped. A partial run is therefore safe to repeat; the marker in
  * `maintenance_state` is written only after every lane has been read.
  *
- * The legacy stores are left untouched and stay readable until their consumers switch.
+ * The legacy stores are left untouched. This module is the only runtime reader of the
+ * retired lanes (SecureSettings `user-profile` and `relationship-memory`, the
+ * `curated_memory_entries` table, stored awareness beliefs and the adaptive style): it runs
+ * once per profile, awaited at startup before any service reads `memory_items`
+ * (`memory-engine-bootstrap.ts`). The retirement migration exports and drops the legacy
+ * stores only after this migration's marker exists.
  */
 import type {
   AwarenessBelief,
@@ -25,18 +30,18 @@ import {
   MEMORY_LANE_STORES,
   beliefCandidate,
   curatedEntryCandidate,
+  type LegacyRelationshipItem,
   preferredNameCandidate,
   relationshipItemCandidate,
   responseStyleCandidate,
   userFactCandidate,
 } from "./memory-items-lanes";
-import type { RelationshipMemoryItem } from "./RelationshipMemoryService";
 
 const logger = createLogger("MemoryItemsLaneMigration");
 
 export interface LegacyLaneSources {
   userProfileFacts: () => UserFact[];
-  relationshipItems: () => RelationshipMemoryItem[];
+  relationshipItems: () => LegacyRelationshipItem[];
   awarenessBeliefs: () => AwarenessBelief[];
   /** The current style when AdaptiveStyleEngine has adapted it at least once, else null. */
   adaptiveResponseStyle: () => { style: Partial<ResponseStylePreferences>; reason?: string } | null;
@@ -80,18 +85,82 @@ function emptyLanes(): Record<LaneName, LaneCounts> {
 }
 
 /**
- * Default sources: the legacy services, loaded lazily so this module stays cheap to import
- * and testable with fakes.
+ * Older builds stored mailbox insights with source "task". Only mailbox writes ever
+ * produced "task" items outside the history layer (task completion wrote history only),
+ * so those are mailbox items.
+ */
+function legacyRelationshipSource(
+  item: Partial<LegacyRelationshipItem>,
+): LegacyRelationshipItem["source"] {
+  if (item.source === "mailbox" || item.source === "feedback") return item.source;
+  if (item.source === "task") {
+    return item.layer === "context" || item.layer === "commitments" ? "mailbox" : "task";
+  }
+  return "conversation";
+}
+
+const RELATIONSHIP_LAYERS = new Set(["identity", "preferences", "context", "history", "commitments"]);
+
+/** The stored relationship items, normalized the way the retired service loaded them. */
+export function normalizeLegacyRelationshipItems(raw: unknown): LegacyRelationshipItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: LegacyRelationshipItem[] = [];
+  for (const entry of raw as Array<Partial<LegacyRelationshipItem> | null>) {
+    if (!entry || typeof entry.id !== "string" || typeof entry.text !== "string") continue;
+    if (!RELATIONSHIP_LAYERS.has(String(entry.layer))) continue;
+    const confidence = Number(entry.confidence ?? 0.65);
+    items.push({
+      id: entry.id,
+      layer: entry.layer as LegacyRelationshipItem["layer"],
+      text: entry.text.trim().replace(/\s+/g, " "),
+      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.65,
+      source: legacyRelationshipSource(entry),
+      createdAt: Number(entry.createdAt || Date.now()),
+      updatedAt: Number(entry.updatedAt || entry.createdAt || Date.now()),
+      ...(typeof entry.lastTaskId === "string" ? { lastTaskId: entry.lastTaskId } : {}),
+      ...(entry.status === "open" || entry.status === "done" ? { status: entry.status } : {}),
+      ...(typeof entry.dueAt === "number" && Number.isFinite(entry.dueAt)
+        ? { dueAt: Math.floor(entry.dueAt) }
+        : {}),
+      ...(typeof entry.contactIdentityId === "string"
+        ? { contactIdentityId: entry.contactIdentityId }
+        : {}),
+      ...(typeof entry.companyId === "string" ? { companyId: entry.companyId } : {}),
+    });
+  }
+  return items;
+}
+
+/** The stored profile facts, normalized (identity values are sanitized by the lane mapper). */
+export function normalizeLegacyUserFacts(raw: unknown): UserFact[] {
+  if (!Array.isArray(raw)) return [];
+  const facts: UserFact[] = [];
+  for (const entry of raw as Array<Partial<UserFact> | null>) {
+    if (!entry || typeof entry.id !== "string" || typeof entry.value !== "string") continue;
+    const value = entry.value.trim().replace(/\s+/g, " ").slice(0, 240);
+    if (!value) continue;
+    const confidence = Number(entry.confidence);
+    facts.push({
+      ...(entry as UserFact),
+      category: entry.category || "other",
+      value,
+      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.7,
+      source:
+        entry.source === "manual" || entry.source === "feedback" ? entry.source : "conversation",
+      firstSeenAt: Number(entry.firstSeenAt || entry.lastUpdatedAt || Date.now()),
+      lastUpdatedAt: Number(entry.lastUpdatedAt || entry.firstSeenAt || Date.now()),
+    });
+  }
+  return facts;
+}
+
+/**
+ * Default sources: the retired SecureSettings blobs, read directly (their services are
+ * views of `memory_items` now). Loaded lazily so this module stays cheap to import and
+ * testable with fakes.
  */
 export async function loadLegacyLaneSources(): Promise<LegacyLaneSources> {
-  const [
-    { UserProfileService },
-    { RelationshipMemoryService },
-    { SecureSettingsRepository },
-    { PersonalityManager },
-  ] = await Promise.all([
-    import("./UserProfileService"),
-    import("./RelationshipMemoryService"),
+  const [{ SecureSettingsRepository }, { PersonalityManager }] = await Promise.all([
     import("../database/SecureSettingsRepository"),
     import("../settings/personality-manager"),
   ]);
@@ -112,16 +181,12 @@ export async function loadLegacyLaneSources(): Promise<LegacyLaneSources> {
     throw new Error(`Settings ${key} could not be read (${result.status})`);
   };
   return {
-    // The services normalize what they load (identity sanitizing, legacy mailbox labels);
-    // the status check first makes an unreadable blob fail the lane instead of reading empty.
-    userProfileFacts: () => {
-      loadSetting("user-profile");
-      return UserProfileService.getProfile().facts;
-    },
-    relationshipItems: () => {
-      loadSetting("relationship-memory");
-      return RelationshipMemoryService.listItems({ includeDone: true, limit: 10_000 });
-    },
+    userProfileFacts: () =>
+      normalizeLegacyUserFacts(loadSetting<{ facts?: unknown }>("user-profile")?.facts),
+    relationshipItems: () =>
+      normalizeLegacyRelationshipItems(
+        loadSetting<{ items?: unknown }>("relationship-memory")?.items,
+      ),
     // Read the persisted state directly: constructing AwarenessService here would start
     // its pollers.
     awarenessBeliefs: () => {

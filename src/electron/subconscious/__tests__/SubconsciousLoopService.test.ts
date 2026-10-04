@@ -572,8 +572,15 @@ describeWithSqlite("SubconsciousLoopService", () => {
         (db.prepare("SELECT COUNT(*) as count FROM subconscious_dispatch_records").get() as Any)
           .count,
       ),
-      legacyCampaigns: Number(
-        (db.prepare("SELECT COUNT(*) as count FROM improvement_campaigns").get() as Any).count,
+      // The retired improvement tables are no longer created on a fresh profile.
+      legacyTables: Number(
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) as count FROM sqlite_master WHERE type = 'table' AND name LIKE 'improvement\\_%' ESCAPE '\\'",
+            )
+            .get() as Any
+        ).count,
       ),
     };
 
@@ -583,7 +590,7 @@ describeWithSqlite("SubconsciousLoopService", () => {
     expect(counts.decisions).toBeGreaterThan(0);
     expect(counts.backlog).toBeGreaterThan(0);
     expect(counts.dispatches).toBeGreaterThan(0);
-    expect(counts.legacyCampaigns).toBe(0);
+    expect(counts.legacyTables).toBe(0);
 
     await service.stop();
   });

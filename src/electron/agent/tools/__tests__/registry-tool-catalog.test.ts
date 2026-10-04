@@ -10,7 +10,12 @@ import {
   resolveEffectiveAccessProfile,
 } from "../../../security/access-profile-resolver";
 import type { AccessProfileDefinition } from "../../../../shared/access-profiles";
-import type { PermissionSettingsData } from "../../../../shared/types";
+import {
+  MEMORY_WRITE_TOOL_NAMES,
+  RETIRED_MEMORY_TOOL_NAMES,
+  TOOL_GROUPS,
+  type PermissionSettingsData,
+} from "../../../../shared/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import mermaid from "mermaid";
 
@@ -630,7 +635,7 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(registry.getTools().map((tool) => tool.name)).toContain("x_search");
   });
 
-  it("offers the four memory tools and keeps the deprecated names hidden but executable", () => {
+  it("offers the four memory tools and no longer registers the retired names", async () => {
     supermemoryIsConfiguredMock.mockReturnValue(true);
     const registry = new ToolRegistry(
       createWorkspace(),
@@ -642,24 +647,36 @@ describe("ToolRegistry tool catalog versioning", () => {
     for (const name of ["memory_recall", "memory_remember", "memory_forget", "context_recall"]) {
       expect(toolNames).toContain(name);
     }
-    // Supermemory is reached through memory_recall (scope external), not its own tools.
-    for (const legacy of [
-      "supermemory_profile",
-      "supermemory_search",
-      "supermemory_remember",
-      "supermemory_forget",
-      "search_memories",
-      "memory_save",
-      "memory_curate",
-      "context_grep",
-    ]) {
-      expect(toolNames).not.toContain(legacy);
-      expect((registry as Any).handlerRegistry.has(legacy)).toBe(true);
+    // Supermemory is reached through the memory tools' external scope, not its own tools.
+    expect(RETIRED_MEMORY_TOOL_NAMES).toHaveLength(16);
+    for (const retired of RETIRED_MEMORY_TOOL_NAMES) {
+      expect(toolNames).not.toContain(retired);
+      expect((registry as Any).handlerRegistry.has(retired)).toBe(false);
+      await expect((registry as Any).executeTool(retired, { query: "x" })).rejects.toThrow(
+        /Unknown tool/,
+      );
     }
-    // The aliases are not tool_search results either.
-    expect(registry.searchDeferredTools("supermemory search memories").matches).toEqual(
-      expect.not.arrayContaining([expect.objectContaining({ name: "supermemory_search" })]),
-    );
+    expect(
+      registry
+        .searchDeferredTools("supermemory search memories")
+        .matches.map((match: { name: string }) => match.name),
+    ).toEqual(expect.not.arrayContaining([...RETIRED_MEMORY_TOOL_NAMES]));
+  });
+
+  it("keeps no dangling names in the memory policy lists", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-memory-lists");
+    const handlers = (registry as Any).handlerRegistry;
+    for (const name of [...TOOL_GROUPS["group:memory"], ...MEMORY_WRITE_TOOL_NAMES]) {
+      expect({ name, registered: name.startsWith("kg_") || handlers.has(name) }).toEqual({
+        name,
+        registered: true,
+      });
+    }
+    const allGroupNames = Object.values(TOOL_GROUPS).flat() as string[];
+    for (const retired of RETIRED_MEMORY_TOOL_NAMES) {
+      expect(allGroupNames).not.toContain(retired);
+      expect(MEMORY_WRITE_TOOL_NAMES).not.toContain(retired);
+    }
   });
 
   it("asks for external-service approval when memory tools reach Supermemory", () => {
@@ -672,10 +689,12 @@ describe("ToolRegistry tool catalog versioning", () => {
     );
     expect(approval("memory_forget", { id: "memory:1" })).toBeNull();
     expect(approval("memory_forget", { id: "external:abc" })).toBe("external_service");
-    // Deprecated aliases keep their own boundary although they canonicalize to memory tools.
-    expect(approval("supermemory_search", { query: "x" })).toBe("external_service");
-    expect(approval("supermemory_remember", { content: "x" })).toBe("external_service");
+    expect(approval("memory_forget", { match: "x", scope: "external" })).toBe("external_service");
+    expect(approval("memory_forget", { match: "x" })).toBeNull();
     expect(approval("memory_remember", { content: "x", kind: "rule" })).toBeNull();
+    expect(approval("memory_remember", { content: "x", kind: "rule", scope: "external" })).toBe(
+      "external_service",
+    );
   });
 
   it("does not classify Skill as an external-service approval type", () => {
@@ -762,7 +781,6 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect((registry as Any).getApprovalTypeForTool("read_pdf_visual")).toBe("data_export");
     expect((registry as Any).getApprovalTypeForTool("mcp_fetch_issue")).toBe("external_service");
     expect((registry as Any).getApprovalTypeForTool("notion_action")).toBe("external_service");
-    expect((registry as Any).getApprovalTypeForTool("supermemory_search")).toBe("external_service");
     expect((registry as Any).getApprovalTypeForTool("channel_fetch_discord_messages")).toBe(
       "external_service",
     );

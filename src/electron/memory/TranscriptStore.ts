@@ -17,9 +17,9 @@ import { DurableContextService } from "./DurableContextService";
  * everything stored about a task's conversation.
  *
  * Conversation search is the conversation index (`DurableContextService`). Transcript
- * spans (the `transcript_spans` table and the JSONL files under `spans/`) are no longer
- * written; existing rows are moved into the index by a one-time migration, and existing
- * JSONL files are removed by task deletion, workspace purge and retention.
+ * spans are no longer written: the `transcript_spans` rows were moved into the index by a
+ * one-time migration (the table is dropped by the legacy data retirement), and existing
+ * JSONL files under `spans/` are removed by task deletion, workspace purge and retention.
  */
 
 type TranscriptDatabase = Pick<import("better-sqlite3").Database, "exec" | "prepare">;
@@ -425,8 +425,6 @@ export interface TranscriptDeletionResult {
   tasks: number;
   /** Conversation index and durable history rows removed. */
   indexRows: number;
-  /** Legacy `transcript_spans` rows removed (only before the one-time migration ran). */
-  spanRows: number;
   spanFiles: number;
   checkpointFiles: number;
   lockFiles: number;
@@ -441,7 +439,6 @@ function emptyDeletionResult(): TranscriptDeletionResult {
   return {
     tasks: 0,
     indexRows: 0,
-    spanRows: 0,
     spanFiles: 0,
     checkpointFiles: 0,
     lockFiles: 0,
@@ -455,7 +452,6 @@ function mergeDeletionResult(
 ): void {
   target.tasks += source.tasks;
   target.indexRows += source.indexRows;
-  target.spanRows += source.spanRows;
   target.spanFiles += source.spanFiles;
   target.checkpointFiles += source.checkpointFiles;
   target.lockFiles += source.lockFiles;
@@ -846,12 +842,12 @@ export class TranscriptStore {
 
   /**
    * Delete everything stored for one task's conversation: its conversation index rows,
-   * legacy span rows, the legacy JSONL span file, both checkpoint generations, leftover
-   * temp files and the checkpoint lock file. Safe to call for tasks that never wrote
-   * transcripts.
+   * the legacy JSONL span file, both checkpoint generations, leftover temp files and the
+   * checkpoint lock file. Safe to call for tasks that never wrote transcripts.
    *
-   * `workspacePath` names the workspace whose files are removed. Without it, files are
-   * removed in every workspace that held legacy spans for the task.
+   * `workspacePath` names the workspace whose files are removed; without it only the
+   * index rows are removed. (The legacy `transcript_spans` table is dropped by the data
+   * retirement.)
    */
   static async deleteTask(
     taskId: string,
@@ -864,43 +860,17 @@ export class TranscriptStore {
     } catch {
       // Files below are still removed when the index is unavailable.
     }
-    const sql = this.getStatements();
-    const workspacePaths = new Set<string>();
-    if (options.workspacePath) workspacePaths.add(normalizeWorkspacePath(options.workspacePath));
-    if (sql) {
-      try {
-        if (options.workspacePath) {
-          result.spanRows += (
-            await sql.run("transcript_deleteTaskSpans", [
-              normalizeWorkspacePath(options.workspacePath),
-              taskId,
-            ])
-          ).changes;
-        } else {
-          const rows = await sql.all<{ workspace_path?: string }>("transcript_taskWorkspaces", [
-            taskId,
-          ]);
-          for (const row of rows) {
-            if (typeof row.workspace_path === "string" && row.workspace_path) {
-              workspacePaths.add(row.workspace_path);
-            }
-          }
-          result.spanRows += (await sql.run("transcript_deleteTaskSpansAnyWorkspace", [taskId]))
-            .changes;
-        }
-      } catch {
-        // The files below are still removed when the index is unavailable.
-      }
-    }
-    for (const workspacePath of workspacePaths) {
-      mergeDeletionResult(result, await deleteTaskFiles(workspacePath, taskId));
+    if (options.workspacePath) {
+      mergeDeletionResult(
+        result,
+        await deleteTaskFiles(normalizeWorkspacePath(options.workspacePath), taskId),
+      );
     }
     return result;
   }
 
   /**
-   * Delete all transcript data of a workspace: legacy span rows, the transcripts
-   * directory (spans and checkpoints) and the checkpoint lock files of its tasks. With
+   * Delete all transcript data of a workspace: the transcripts directory (spans and checkpoints) and the checkpoint lock files of its tasks. With
    * `workspaceId`, the workspace's conversation index and durable history go too (the
    * memory purge clears those itself through `DurableContextService.clearWorkspace`).
    */
@@ -914,25 +884,11 @@ export class TranscriptStore {
       try {
         result.indexRows += await DurableContextService.clearWorkspace(options.workspaceId);
       } catch {
-        // Continue with the legacy rows and files.
+        // Continue with the files.
       }
     }
     const normalized = normalizeWorkspacePath(workspacePath);
     const taskIds = new Set<string>(await listTranscriptFileTaskIds(normalized));
-    const sql = this.getStatements();
-    if (sql) {
-      try {
-        const rows = await sql.all<{ task_id?: string }>("transcript_workspaceTaskIds", [
-          normalized,
-        ]);
-        for (const row of rows) {
-          if (typeof row.task_id === "string") taskIds.add(row.task_id);
-        }
-        result.spanRows += (await sql.run("transcript_deleteWorkspaceSpans", [normalized])).changes;
-      } catch {
-        // Continue with file cleanup.
-      }
-    }
     for (const taskId of taskIds) {
       if (isSafeTaskId(taskId)) {
         mergeDeletionResult(result, await deleteTaskFiles(normalized, taskId));
@@ -943,9 +899,9 @@ export class TranscriptStore {
 
   /**
    * Retention for one workspace, aligned with task-event pruning: transcripts of
-   * terminal tasks created before the cutoff are deleted, as are rows whose task no
-   * longer exists. Files whose task is unknown to this database are deleted only
-   * when they are older than the cutoff (another profile may own them).
+   * terminal tasks created before the cutoff are deleted. Files whose task is unknown to
+   * this database are deleted only when they are older than the cutoff (another profile
+   * may own them).
    */
   static async pruneWorkspace(
     workspacePath: string,
@@ -956,25 +912,11 @@ export class TranscriptStore {
     const normalized = normalizeWorkspacePath(workspacePath);
     const cutoff = retentionCutoff(options);
     const sql = this.getStatements();
-    const rowTaskIds = new Set<string>();
-    if (sql) {
-      try {
-        const rows = await sql.all<{ task_id?: string }>("transcript_workspaceTaskIds", [
-          normalized,
-        ]);
-        for (const row of rows) {
-          if (typeof row.task_id === "string") rowTaskIds.add(row.task_id);
-        }
-      } catch {
-        // Fall through to file-based pruning.
-      }
-    }
-    const fileTaskIds = await listTranscriptFileTaskIds(normalized);
-    const candidates = new Set<string>([...rowTaskIds, ...fileTaskIds]);
+    const candidates = new Set<string>(await listTranscriptFileTaskIds(normalized));
     for (const taskId of candidates) {
       const verdict = await this.retentionVerdict(sql, taskId, cutoff);
       if (verdict === "keep") continue;
-      if (verdict === "missing" && !rowTaskIds.has(taskId)) {
+      if (verdict === "missing") {
         // Only files exist and the task is unknown here: require them to be old.
         if (!(await taskFilesOlderThan(normalized, taskId, cutoff))) continue;
       }
@@ -986,8 +928,7 @@ export class TranscriptStore {
 
   /**
    * Retention with the task-event retention window: the conversation index and durable
-   * history of expired and deleted tasks, then every workspace's transcript files (and
-   * legacy span rows), followed by a sweep of stale checkpoint lock files. Call it after
+   * history of expired and deleted tasks, then every workspace's transcript files, followed by a sweep of stale checkpoint lock files. Call it after
    * task-event pruning with the same retention window.
    */
   static async pruneRetention(
@@ -1014,18 +955,6 @@ export class TranscriptStore {
         }
       } catch {
         // No workspaces table (tests or a partial schema).
-      }
-      try {
-        for (const row of await sql.all<{ workspace_path?: string }>(
-          "transcript_spanWorkspacePaths",
-          [],
-        )) {
-          if (typeof row.workspace_path === "string" && row.workspace_path) {
-            workspacePaths.add(row.workspace_path);
-          }
-        }
-      } catch {
-        // Index unavailable.
       }
     }
     for (const workspacePath of workspacePaths) {
@@ -1064,10 +993,7 @@ export class TranscriptStore {
     }
   }
 
-  /**
-   * The memory statement port for the current database. The legacy span table is not
-   * created: its statements fail (and are skipped) on databases that never had spans.
-   */
+  /** The memory statement port for the current database (task and workspace lookups). */
   private static getStatements(): MemoryStatementPort | null {
     const db = this.getDatabase();
     if (!db) return null;

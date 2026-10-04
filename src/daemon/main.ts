@@ -353,13 +353,13 @@ async function main(): Promise<void> {
   try {
     MemoryService.initialize(dbManager);
     CuratedMemoryService.initialize(dbManager);
-    // Memory engine, as on desktop (docs/memory-engine.md): the MemoryWriter (dual writes
-    // into memory_items, memory_remember), the read-side syncs and the deferred one-time
-    // lane migration. The migration is claimed in the database, so a desktop app on the
+    // Memory engine, as on desktop (docs/memory-engine.md): the MemoryWriter, the one-time
+    // lane migration (awaited before anything reads memory), the read-side syncs and the
+    // facts snapshot. The migration is claimed in the database, so a desktop app on the
     // same profile never runs it at the same time.
     const memoryStatements = MemoryService.getStatements();
     if (memoryStatements) {
-      stopMemoryEngine = startMemoryEngine(memoryStatements, {
+      stopMemoryEngine = await startMemoryEngine(memoryStatements, {
         getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
       });
     }

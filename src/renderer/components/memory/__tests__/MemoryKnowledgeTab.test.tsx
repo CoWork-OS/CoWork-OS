@@ -321,7 +321,7 @@ describe("What CoWork knows flows", () => {
 
   it("clearing global memories needs confirmation and keeps workspace items", async () => {
     const api = mockApi({
-      clearGlobalMemoryItems: vi.fn(async () => ({ success: true, deleted: 3, legacyRecords: 2 })),
+      clearGlobalMemoryItems: vi.fn(async () => ({ success: true, deleted: 3 })),
     });
     expect((await clearGlobalKnowledge(api, WS, ITEMS, () => false)).cancelled).toBe(true);
     expect(api.clearGlobalMemoryItems).not.toHaveBeenCalled();

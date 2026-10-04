@@ -100,13 +100,6 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/improvement/ImprovementRepositories\\.ts$",
-      "domain": "shared SQL",
-      "access": "Improvement loop stores (candidates, runs, campaigns, variant runs, judge verdicts, history): services-domain units behind async facades. Merging a duplicate candidate, resetting history and reading recent signals are single units.",
-      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
-      "owner": "database platform"
-    },
-    {
       "pattern": "^src/electron/utils/temp-workspace-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Temp workspace pruning's SQL (temp rows, active references, deleting a workspace with its dependent rows): services-domain units. The reference check and the delete share one unit; directory removal stays on the host.",

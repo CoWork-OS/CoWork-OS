@@ -24,7 +24,6 @@ import {
   Task,
   TaskEvent,
   TOOL_GROUPS,
-  LEGACY_MEMORY_TOOL_ALIASES,
   ToolGroupName,
   RuntimeToolApprovalKind,
   RuntimeToolSideEffectLevel,
@@ -83,7 +82,6 @@ import { ChannelTools } from "./channel-tools";
 import { EmailImapTools } from "./email-imap-tools";
 import { GitTools } from "./git-tools";
 import { MemoryTools } from "./memory-tools";
-import { SupermemoryTools } from "./supermemory-tools";
 import { readFilesByPatterns } from "./read-files";
 import type { LLMTool, LLMToolPromptRenderContext } from "../llm/types";
 import { SearchProviderFactory } from "../search";
@@ -247,10 +245,6 @@ const MCP_PAYMENT_AMOUNT_PATHS = [
 const MCP_PAYMENT_MAX_AMOUNT_USD = 100;
 const QA_NETWORK_TOOLS = new Set(["qa_run", "qa_navigate", "qa_interact", "qa_check"]);
 const EXTERNAL_SERVICE_BOUNDARY_TOOLS = new Set([
-  "supermemory_profile",
-  "supermemory_search",
-  "supermemory_remember",
-  "supermemory_forget",
   "channel_fetch_discord_messages",
   "channel_download_discord_attachment",
   "email_imap_unread",
@@ -623,7 +617,6 @@ export class ToolRegistry {
   private knowledgeGraphTools: KnowledgeGraphTools;
   private scrapingTools: ScrapingTools;
   private memoryTools: MemoryTools;
-  private supermemoryTools: SupermemoryTools;
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
   private qaTools: QATools;
@@ -706,7 +699,6 @@ export class ToolRegistry {
     this.knowledgeGraphTools = new KnowledgeGraphTools(workspace, daemon, taskId);
     this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
     this.memoryTools = new MemoryTools(workspace, daemon, taskId);
-    this.supermemoryTools = new SupermemoryTools(workspace, daemon, taskId);
     this.documentTools = new DocumentTools(
       workspace,
       taskId,
@@ -793,7 +785,6 @@ export class ToolRegistry {
       dropbox: DropboxTools.isEnabled(),
       sharePoint: SharePointTools.isEnabled(),
       scraping: ScrapingTools.isEnabled(),
-      supermemory: SupermemoryTools.isEnabled(),
       voiceCall: VoiceCallTools.isEnabled(),
       imageGen: ImageTools.isAvailable(),
       videoGen: VideoTools.isAvailable(),
@@ -1196,7 +1187,6 @@ export class ToolRegistry {
     this.knowledgeGraphTools.setWorkspace(workspace);
     this.scrapingTools.setWorkspace(workspace);
     this.memoryTools.setWorkspace(workspace);
-    this.supermemoryTools.setWorkspace(workspace);
     this.documentTools.setWorkspace(workspace);
     this.scratchpadTools.setWorkspace(workspace);
     this._codeExecTools = undefined;
@@ -1503,8 +1493,7 @@ export class ToolRegistry {
     }
 
     // Memory tools: memory_recall, memory_remember, memory_forget, context_recall (audit
-    // §8.3). The tools they replaced stay executable as hidden aliases (registered below,
-    // LEGACY_MEMORY_TOOL_ALIASES) but are not offered to the model.
+    // §8.3). The tools they replaced are retired (RETIRED_MEMORY_TOOL_NAMES).
     allTools.push(...MemoryTools.getToolDefinitions());
 
     // Scraping tools (Scrapling integration - JS rendering, structured extraction)
@@ -1949,21 +1938,18 @@ export class ToolRegistry {
       return "network_access";
     }
     if (canonicalToolName.startsWith("mcp_")) return "external_service";
-    // Raw name too: the deprecated supermemory_* aliases canonicalize to memory tools.
-    if (
-      EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(canonicalToolName) ||
-      EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(toolName)
-    ) {
+    if (EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(canonicalToolName)) {
       return "external_service";
     }
-    // memory_recall / memory_forget reach Supermemory only when asked to (scope or id).
+    // The memory tools reach Supermemory only when asked to (scope or id).
     if (
       (canonicalToolName === "memory_recall" &&
         Array.isArray(input?.scopes) &&
         input.scopes.includes("external")) ||
+      (canonicalToolName === "memory_remember" && input?.scope === "external") ||
       (canonicalToolName === "memory_forget" &&
-        typeof input?.id === "string" &&
-        input.id.trim().startsWith("external:"))
+        ((typeof input?.id === "string" && input.id.trim().startsWith("external:")) ||
+          (!input?.id && input?.scope === "external")))
     ) {
       return "external_service";
     }
@@ -2078,25 +2064,6 @@ export class ToolRegistry {
       query,
       matches: searchService.search(query, limit),
     };
-  }
-
-  /**
-   * A deprecated memory tool name (LEGACY_MEMORY_TOOL_ALIASES), routed to the tool that
-   * replaced it. Supermemory writes keep their legacy implementation, which needs the
-   * external integration to be configured.
-   */
-  private executeLegacyMemoryAlias(name: string, input: Any): Promise<unknown> {
-    const supermemory = SupermemoryTools.isEnabled() ? this.supermemoryTools : null;
-    return this.memoryTools.executeLegacyAlias(
-      name,
-      input ?? {},
-      supermemory
-        ? {
-            supermemoryRemember: (value: Any) => supermemory.remember(value),
-            supermemoryForget: (value: Any) => supermemory.forget(value),
-          }
-        : {},
-    );
   }
 
   private buildBrowserUseApprovalDetails(toolName: string, input: Any) {
@@ -2854,16 +2821,6 @@ export class ToolRegistry {
       async ({ request }) => this.memoryTools.contextRecall(request.input),
       readParallelSchedulerSpec,
     );
-    // Deprecated memory tool names: hidden, routed to the tool that replaced them.
-    for (const [aliasName, replacement] of Object.entries(LEGACY_MEMORY_TOOL_ALIASES)) {
-      register(
-        aliasName,
-        async ({ request }) => this.executeLegacyMemoryAlias(request.name, request.input),
-        replacement === "memory_recall" || replacement === "context_recall"
-          ? readParallelSchedulerSpec
-          : exclusiveSchedulerSpec,
-      );
-    }
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
     register("read_clipboard", async () => this.systemTools.readClipboard());
@@ -4784,9 +4741,6 @@ ${skillDescriptions}`;
     if (name === "memory_remember") return await this.memoryTools.remember(input);
     if (name === "memory_forget") return await this.memoryTools.forget(input);
     if (name === "context_recall") return await this.memoryTools.contextRecall(input);
-    if (Object.prototype.hasOwnProperty.call(LEGACY_MEMORY_TOOL_ALIASES, name)) {
-      return await this.executeLegacyMemoryAlias(name, input);
-    }
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
@@ -10259,9 +10213,9 @@ ${skillDescriptions}`;
 
     // Save the user's name
     PersonalityManager.setUserName(userName);
-    // Also the user-stated `preferred_name` memory item (memory engine dual write).
+    // The user-stated `preferred_name` memory item (PersonalityManager mirrors it).
     const nameCandidate = preferredNameCandidate(userName, { source: "user_stated" });
-    MemoryWriter.dualWrite(
+    MemoryWriter.writeInBackground(
       nameCandidate && {
         ...nameCandidate,
         taskId: this.taskId,
@@ -10373,14 +10327,14 @@ ${skillDescriptions}`;
     PersonalityManager.setResponseStyle(style);
     console.log(`[ToolRegistry] Response style updated:`, changes);
     // The user asked for this style: a user-stated `response_style` memory item, which
-    // inferred style adaptations do not override (memory engine dual write).
+    // inferred style adaptations do not override.
     let fullStyle = style;
     try {
       fullStyle = { ...PersonalityManager.loadSettings().responseStyle, ...style };
     } catch {
       // Settings unavailable; record the dimensions that were set.
     }
-    MemoryWriter.dualWrite(
+    MemoryWriter.writeInBackground(
       responseStyleCandidate(fullStyle, {
         source: "user_stated",
         store: MEMORY_LANE_STORES.personality,

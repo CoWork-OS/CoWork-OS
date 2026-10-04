@@ -459,7 +459,7 @@ The native SQLite test file can skip locally when `better-sqlite3` is unavailabl
 
 ## Durable Runtime Context QA
 
-Run focused durable-context checks when touching active-task recall, compaction-summary persistence, Memory Hub durable-context settings, `context_recall` (and its deprecated `context_grep` / `context_describe` aliases), or memory clearing:
+Run focused durable-context checks when touching active-task recall, compaction-summary persistence, Memory Hub durable-context settings, `context_recall`, or memory clearing:
 
 ```bash
 npx vitest run src/electron/agent/tools/__tests__/memory-tools.test.ts src/electron/settings/__tests__/memory-features-manager.test.ts src/electron/agent/__tests__/executor-chat-mode.test.ts

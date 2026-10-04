@@ -641,14 +641,6 @@ export interface AddUserFactRequest {
   taskId?: string;
 }
 
-export interface UpdateUserFactRequest {
-  id: string;
-  category?: UserFactCategory;
-  value?: string;
-  confidence?: number;
-  pinned?: boolean;
-}
-
 // Workspace Kit (.cowork) helpers (workspace-scoped, file-based context)
 export interface WorkspaceKitIssue {
   level: "error" | "warning";
@@ -1627,19 +1619,6 @@ export type ToolType =
   | "memory_remember"
   | "memory_forget"
   | "context_recall"
-  // Deprecated memory tool aliases (LEGACY_MEMORY_TOOL_ALIASES)
-  | "memory_save"
-  | "memory_curate"
-  | "memory_curated_read"
-  | "memory_search_index"
-  | "memory_timeline"
-  | "memory_details"
-  | "supermemory_profile"
-  | "supermemory_search"
-  | "supermemory_remember"
-  | "supermemory_forget"
-  | "search_sessions"
-  | "memory_topics_load"
   // Scratchpad tools (session-scoped agent notes)
   | "scratchpad_write"
   | "scratchpad_read"
@@ -1747,9 +1726,8 @@ export const TOOL_GROUPS = {
     "skill_duplicate",
     "skill_update",
     "skill_delete",
-    // Memory writes (memory_remember and its deprecated memory_curate alias) are not
-    // listed here: they are classified through MEMORY_WRITE_TOOL_NAMES, and memory_curate
-    // canonicalizes to memory_remember (LEGACY_MEMORY_TOOL_ALIASES).
+    // Memory writes (memory_remember, memory_forget) are not listed here: they are
+    // classified through MEMORY_WRITE_TOOL_NAMES.
     // Monty transform library can write transformed outputs
     "monty_transform_file",
     // Session scratchpad (write)
@@ -1849,11 +1827,9 @@ export const TOOL_GROUPS = {
     "browser_save_pdf",
     "browser_close",
     "open_url",
-    // External memory and messaging integrations
-    "supermemory_profile",
-    "supermemory_search",
-    "supermemory_remember",
-    "supermemory_forget",
+    // External messaging integrations. Supermemory is reached through memory_recall /
+    // memory_remember / memory_forget with the external scope, which check the
+    // workspace's network permission themselves.
     "channel_fetch_discord_messages",
     "channel_download_discord_attachment",
     "email_imap_unread",
@@ -1895,28 +1871,10 @@ export const TOOL_GROUPS = {
     "memory_remember",
     "memory_forget",
     "context_recall",
-    // Deprecated aliases of the tools above (hidden, still executable for one release).
-    // Agent-initiated memory save
-    "memory_save",
-    "memory_curate",
-    "memory_curated_read",
-    "memory_search_index",
-    "memory_timeline",
-    "memory_details",
-    "supermemory_profile",
-    "supermemory_search",
-    "supermemory_remember",
-    "supermemory_forget",
-    "search_sessions",
-    "memory_topics_load",
     "email_imap_unread",
-    // Recall over the archive, verbatim task messages, durable context and the
-    // knowledge graph. These were missing here, which let group/public gateway
-    // chats search private (and imported cross-workspace) memory. (SEC-4)
-    "search_memories",
-    "search_quotes",
-    "context_grep",
-    "context_describe",
+    // Knowledge-graph recall. Recall tools were once missing here, which let
+    // group/public gateway chats search private (and imported cross-workspace)
+    // memory. (SEC-4)
     "kg_search",
     "kg_get_neighbors",
     "kg_get_subgraph",
@@ -1948,12 +1906,6 @@ export type ToolGroupName = keyof typeof TOOL_GROUPS;
 export const MEMORY_WRITE_TOOL_NAMES: readonly string[] = [
   "memory_remember",
   "memory_forget",
-  // Deprecated aliases (hidden; route to memory_remember / memory_forget or their
-  // legacy implementation for one release).
-  "memory_save",
-  "memory_curate",
-  "supermemory_remember",
-  "supermemory_forget",
   "kg_create_entity",
   "kg_update_entity",
   "kg_delete_entity",
@@ -1964,31 +1916,30 @@ export const MEMORY_WRITE_TOOL_NAMES: readonly string[] = [
 ];
 
 /**
- * Memory tools consolidated into four (audit §8.3). The old names are no longer offered
- * to the model but stay executable for one release, so saved prompts and skills keep
- * working: each maps to the tool that replaces it (tool-semantics aliases), and the
- * registry routes the call to the new implementation.
+ * Memory tool names retired with the consolidation into four tools (audit §8.3): they
+ * were hidden aliases for one release and are no longer registered, offered or allowed
+ * by any policy. Recorded task events still carry them, so code reading task history
+ * (conversation index backfill, timeline summaries) may need to recognise them. Never
+ * add these to a tool registration, group or allowlist.
  */
-export const LEGACY_MEMORY_TOOL_ALIASES: Readonly<
-  Record<string, "memory_recall" | "memory_remember" | "memory_forget" | "context_recall">
-> = {
-  search_memories: "memory_recall",
-  memory_search_index: "memory_recall",
-  memory_timeline: "memory_recall",
-  memory_details: "memory_recall",
-  search_quotes: "memory_recall",
-  search_sessions: "memory_recall",
-  memory_topics_load: "memory_recall",
-  memory_curated_read: "memory_recall",
-  supermemory_profile: "memory_recall",
-  supermemory_search: "memory_recall",
-  memory_save: "memory_remember",
-  memory_curate: "memory_remember",
-  supermemory_remember: "memory_remember",
-  supermemory_forget: "memory_forget",
-  context_grep: "context_recall",
-  context_describe: "context_recall",
-};
+export const RETIRED_MEMORY_TOOL_NAMES: readonly string[] = [
+  "search_memories",
+  "memory_search_index",
+  "memory_timeline",
+  "memory_details",
+  "search_quotes",
+  "search_sessions",
+  "memory_topics_load",
+  "memory_curated_read",
+  "supermemory_profile",
+  "supermemory_search",
+  "memory_save",
+  "memory_curate",
+  "supermemory_remember",
+  "supermemory_forget",
+  "context_grep",
+  "context_describe",
+];
 
 /**
  * Maps each tool to its risk level
@@ -2120,18 +2071,6 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   memory_remember: "write",
   memory_forget: "write",
   context_recall: "read",
-  memory_save: "write",
-  memory_curate: "write",
-  memory_curated_read: "read",
-  memory_search_index: "read",
-  memory_timeline: "read",
-  memory_details: "read",
-  supermemory_profile: "network",
-  supermemory_search: "network",
-  supermemory_remember: "network",
-  supermemory_forget: "network",
-  search_sessions: "read",
-  memory_topics_load: "read",
   // Scratchpad
   scratchpad_write: "write",
   scratchpad_read: "read",
@@ -9796,14 +9735,12 @@ export const IPC_CHANNELS = {
   MEMORY_DELETE_IMPORTED: "memory:deleteImported",
   MEMORY_DELETE_IMPORTED_ENTRY: "memory:deleteImportedEntry",
   MEMORY_SET_IMPORTED_RECALL_IGNORED: "memory:setImportedRecallIgnored",
+  // Read views of memory_items: the user's global facts and their commitments. Facts are
+  // edited in the Memory Hub (MEMORY_ITEMS_*); commitments keep a status/due-date editor.
   MEMORY_GET_USER_PROFILE: "memory:getUserProfile",
-  MEMORY_ADD_USER_FACT: "memory:addUserFact",
-  MEMORY_UPDATE_USER_FACT: "memory:updateUserFact",
-  MEMORY_DELETE_USER_FACT: "memory:deleteUserFact",
   MEMORY_RELATIONSHIP_LIST: "memory:relationshipList",
   MEMORY_RELATIONSHIP_UPDATE: "memory:relationshipUpdate",
   MEMORY_RELATIONSHIP_DELETE: "memory:relationshipDelete",
-  MEMORY_RELATIONSHIP_CLEANUP_RECURRING: "memory:relationshipCleanupRecurring",
   MEMORY_COMMITMENTS_GET: "memory:commitmentsGet",
   MEMORY_COMMITMENTS_DUE_SOON: "memory:commitmentsDueSoon",
 

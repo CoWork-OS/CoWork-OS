@@ -333,19 +333,39 @@ describeWithSqlite("MemoryWriter", () => {
     unsubscribe();
   });
 
-  it("serializes fire-and-forget dual writes in call order", async () => {
+  it("serializes background writes in call order", async () => {
     MemoryWriter.setInstance(writer);
     const ref = { store: "user_profile", id: "fact-2" };
-    MemoryWriter.dualWrite(candidate({ sourceRef: ref, content: "Prefers tea" }), "test");
-    MemoryWriter.dualWrite(candidate({ sourceRef: ref, content: "Prefers coffee" }), "test");
-    MemoryWriter.dualWriteStatus("user_profile", "fact-2", "deleted", "test");
+    MemoryWriter.writeInBackground(candidate({ sourceRef: ref, content: "Prefers tea" }), "test");
+    MemoryWriter.writeInBackground(
+      candidate({ sourceRef: ref, content: "Prefers coffee" }),
+      "test",
+    );
     await writer.flush();
-    expect(rowsOf(db).map((row) => row.status)).toEqual(["deleted", "deleted"]);
+    expect(rowsOf(db).map((row) => [row.content, row.status])).toEqual([
+      ["Prefers tea", "superseded"],
+      ["Prefers coffee", "active"],
+    ]);
   });
 
-  it("is a no-op for dual writes before initialization", () => {
+  it("updates the provenance fields of an edited record whose text is unchanged", async () => {
+    const ref = { store: "relationship", id: "c-1" };
+    await writer.ingest(
+      candidate({ kind: "commitment", content: "Send the deck", sourceRef: { ...ref, dueAt: 1 } }),
+    );
+    const result = await writer.ingest(
+      candidate({ kind: "commitment", content: "Send the deck", sourceRef: { ...ref, dueAt: 2 } }),
+    );
+    expect(result).toMatchObject({ status: "written", action: "updated" });
+    const rows = rowsOf(db);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(String(rows[0].source_ref))).toMatchObject({ dueAt: 2 });
+    expect(rows[0].reinforced_count).toBe(0);
+  });
+
+  it("is a no-op for background writes before initialization", () => {
     MemoryWriter.setInstance(null);
-    expect(() => MemoryWriter.dualWrite(candidate(), "test")).not.toThrow();
+    expect(() => MemoryWriter.writeInBackground(candidate(), "test")).not.toThrow();
     expect(rowsOf(db)).toHaveLength(0);
   });
 });

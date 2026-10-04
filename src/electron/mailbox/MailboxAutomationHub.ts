@@ -209,7 +209,7 @@ export class MailboxAutomationHub {
     }
 
     try {
-      RelationshipMemoryService.rememberMailboxInsights({
+      await RelationshipMemoryService.rememberMailboxInsights({
         facts: buildMailboxFacts(event),
         commitments: buildMailboxCommitments(event),
       });

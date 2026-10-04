@@ -8,7 +8,7 @@
 import { WorkspaceRepository } from "../database/repository-facades";
 import { isSafeExcludedPattern } from "./excluded-patterns";
 import { MemoryEmbeddingRepository, MemoryRepository } from "../database/repository-facades";
-import { MemorySettingsRepository, MemorySummaryRepository } from "../database/repository-facades";
+import { MemorySettingsRepository } from "../database/repository-facades";
 import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
 import { randomUUID } from "crypto";
 import type { DatabaseManager } from "../database/schema";
@@ -101,7 +101,7 @@ export interface MemoryCaptureOptions {
   skipMemoryWriteGate?: boolean;
   /**
    * Allow an explicit write to proceed when auto-capture is off: a user-enabled source
-   * sync, or an explicit agent save (`memory_save`). Auto-capture only governs automatic
+   * sync, or an explicit agent save (`memory_remember`). Auto-capture only governs automatic
    * archiving of task activity.
    */
   forceCapture?: boolean;
@@ -142,7 +142,6 @@ export interface PromptRecallDiagnostics {
 export class MemoryService {
   private static memoryRepo: MemoryRepository;
   private static embeddingRepo: MemoryEmbeddingRepository;
-  private static summaryRepo: MemorySummaryRepository;
   private static settingsRepo: MemorySettingsRepository;
   private static markdownIndex: MarkdownMemoryIndexService | null = null;
   private static memoryEmbeddingsByWorkspace = new Map<
@@ -220,7 +219,6 @@ export class MemoryService {
     this.workspaceRepo = new WorkspaceRepository(db);
     this.memoryRepo = new MemoryRepository(db);
     this.embeddingRepo = new MemoryEmbeddingRepository(db);
-    this.summaryRepo = new MemorySummaryRepository(db);
     this.settingsRepo = new MemorySettingsRepository(db);
     this.markdownIndex = new MarkdownMemoryIndexService(db);
     MemoryObservationService.initialize(db);
@@ -1773,7 +1771,6 @@ export class MemoryService {
   static async clearWorkspace(workspaceId: string): Promise<void> {
     this.ensureInitialized();
     await this.memoryRepo.deleteByWorkspace(workspaceId);
-    await this.summaryRepo.deleteByWorkspace(workspaceId);
     try {
       await this.embeddingRepo.deleteByWorkspace(workspaceId);
     } catch {

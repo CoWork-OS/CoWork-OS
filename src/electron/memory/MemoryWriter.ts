@@ -12,8 +12,8 @@
  *   7. bump the hot-memory version, so cached L0 prompt blocks are rebuilt;
  *   8. notify change listeners.
  *
- * Writes are serialized per writer, so a fire-and-forget dual write from a synchronous
- * legacy service lands in call order.
+ * Writes are serialized per writer, so a fire-and-forget write from a synchronous
+ * producer (`writeInBackground`) lands in call order.
  */
 import type Database from "better-sqlite3";
 import { createLogger } from "../utils/logger";
@@ -242,28 +242,16 @@ export class MemoryWriter {
   }
 
   /**
-   * Fire-and-forget write for legacy services that are still the system of record and
-   * have a synchronous API. No-op before initialization; failures are logged only.
+   * Fire-and-forget write for synchronous producers (adaptive style, a style saved in
+   * Settings, the `set_user_name` / `set_response_style` tools). No-op before
+   * initialization; failures are logged only. Writes stay serialized with every other
+   * write of this writer, so they land in call order.
    */
-  static dualWrite(candidate: MemoryCandidate | null | undefined, label: string): void {
+  static writeInBackground(candidate: MemoryCandidate | null | undefined, label: string): void {
     const writer = this.instance;
     if (!writer || !candidate) return;
     writer.ingest(candidate).catch((error) => {
-      logger.warn(`Memory item dual write (${label}) failed:`, error);
-    });
-  }
-
-  /** Fire-and-forget status change by legacy source ref (delete, archive). */
-  static dualWriteStatus(
-    store: string,
-    sourceId: string,
-    status: Exclude<MemoryItemStatus, "active">,
-    label: string,
-  ): void {
-    const writer = this.instance;
-    if (!writer) return;
-    writer.setStatusBySourceRef(store, sourceId, status).catch((error) => {
-      logger.warn(`Memory item dual write (${label}) failed:`, error);
+      logger.warn(`Memory item write (${label}) failed:`, error);
     });
   }
 

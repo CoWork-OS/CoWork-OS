@@ -37,6 +37,7 @@ import { getSafeStorage, type SafeStorageLike } from "../utils/safe-storage";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { notifyDetectedIntegrationAuthIssue } from "../notifications/integration-auth";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
+import { buildContactMemoryContext } from "../memory/contact-memory-context";
 import { PlaybookService } from "../memory/PlaybookService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { getHeartbeatService } from "../agents/HeartbeatService";
@@ -5222,14 +5223,14 @@ export class MailboxService {
         : null;
     const resolution = await this.resolveContactIdentity(threadId);
     const scopedCompanyId = (await this.getPrimaryContactMemory(threadId))?.company;
-    const relationshipContext = RelationshipMemoryService.buildPromptContext({
-      maxPerLayer: 1,
+    // Contact-scoped memory_items of this sender (third-party, private): drafting a reply
+    // to the contact already works on their content.
+    const relationshipContext = await buildContactMemoryContext({
+      maxPerSection: 1,
       maxChars: 420,
       contactIdentityId: resolution?.identity?.id,
       companyId: scopedCompanyId,
-      // Mailbox drafting already works on the sender's content.
-      includeThirdParty: true,
-    });
+    }).catch(() => "");
     const latestIncoming =
       detail.messages.filter((message) => message.direction === "incoming").slice(-1)[0] ||
       detail.messages[detail.messages.length - 1];
@@ -5425,7 +5426,7 @@ export class MailboxService {
         now,
         now,
       ]);
-      RelationshipMemoryService.rememberMailboxInsights({
+      await RelationshipMemoryService.rememberMailboxInsights({
         commitments: [
           {
             text: candidate.title,
@@ -5533,7 +5534,7 @@ export class MailboxService {
             text.toLowerCase().includes(item.text.toLowerCase()) ||
             item.text.toLowerCase().includes(text.toLowerCase())
           ) {
-            RelationshipMemoryService.updateItem(item.id, { status: "done" });
+            await RelationshipMemoryService.updateItem(item.id, { status: "done" });
           }
         }
       }
@@ -5909,7 +5910,7 @@ export class MailboxService {
         : [];
     const scopedRelationshipItems =
       identity?.id || contactMemory?.company
-        ? RelationshipMemoryService.listItems({
+        ? await RelationshipMemoryService.listItems({
             includeDone: false,
             limit: 8,
             contactIdentityId: identity?.id,
@@ -7505,7 +7506,7 @@ export class MailboxService {
     await this.sql.unit("mailbox_applyThreadWrites", [writes]);
 
     await this.upsertPrimaryContact(thread);
-    RelationshipMemoryService.rememberMailboxInsights({
+    await RelationshipMemoryService.rememberMailboxInsights({
       facts: thread.participants
         .slice(0, 1)
         .map((participant) => `Recent email contact: ${participant.name || participant.email}`),

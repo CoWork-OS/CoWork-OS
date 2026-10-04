@@ -11,11 +11,6 @@ import { setStatementClient } from "../statements/statement-route";
 import { TaskRepository } from "../repository-facades";
 import { CouncilConfigRepository } from "../../council/council-repository-facades";
 import { EventTriggerService } from "../../triggers/EventTriggerService";
-import {
-  ImprovementCandidateRepository,
-  clearImprovementHistoryData,
-  mergeImprovementCandidates,
-} from "../../improvement/improvement-repository-facades";
 import { HookSessionRepository } from "../../hooks/hook-session-repository-facades";
 import { ensureFirstTaskTables } from "../../first-task/attempt-schema";
 import { FirstTaskRepository } from "../../first-task/first-task-repository-facades";
@@ -173,29 +168,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
     ).map((row: { name: string }) => row.name);
     const removed = await triggers.removeTrigger(trigger.id);
 
-    // Improvement candidates: create, merge a duplicate, reset.
-    const candidates = new ImprovementCandidateRepository(db);
-    const candidateInput = (fingerprint: string, recurrenceCount: number) =>
-      ({
-        workspaceId: "ws-1",
-        fingerprint,
-        source: "task_failure",
-        status: "open",
-        readiness: "ready",
-        title: "Fix the flaky verifier",
-        summary: "Verifier fails intermittently.",
-        severity: 0.6,
-        recurrenceCount,
-        fixabilityScore: 0.7,
-        priorityScore: 0.5,
-        evidence: [],
-      }) as never;
-    const survivor = await candidates.create(candidateInput("fp-survivor", 1));
-    const duplicate = await candidates.create(candidateInput("fp-duplicate", 2));
-    await mergeImprovementCandidates(db, duplicate.id, survivor.id, { recurrenceCount: 3 });
-    const merged = await candidates.list({ workspaceId: "ws-1" } as never);
-    const cleared = await clearImprovementHistoryData(db);
-
     // Hook sessions: idempotent creation and a single lock holder.
     const hooks = new HookSessionRepository(db);
     const hookCreated = [
@@ -231,8 +203,8 @@ describe("DB6 close-out services on the host and in the database worker", () => 
     // Context policies: the group default restricts memory tools; DMs do not.
     const policies = new ContextPolicyManager(db);
     const toolChecks = [
-      await policies.isToolAllowed("channel-1", "group", "memory_save", ["group:memory"]),
-      await policies.isToolAllowed("channel-1", "dm", "memory_save", ["group:memory"]),
+      await policies.isToolAllowed("channel-1", "group", "memory_remember", ["group:memory"]),
+      await policies.isToolAllowed("channel-1", "dm", "memory_remember", ["group:memory"]),
     ];
     const channelPolicies = (await policies.getPoliciesForChannel("channel-1")).map(
       (policy) => policy.contextType,
@@ -356,10 +328,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
       {
         council: { name: council.name, ids: councilIds.length },
         triggers: { storedTriggers, removed },
-        improvement: {
-          merged: merged.map((candidate) => [candidate.fingerprint, candidate.recurrenceCount]),
-          cleared,
-        },
         hooks: { hookCreated, taskId: hookSession?.taskId, locks, relocked },
         firstTask: {
           choice: setup?.choice,
@@ -395,7 +363,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
     expect(worker.result).toEqual(host.result);
     const result = host.result as Record<string, Any>;
     expect(result.triggers).toEqual({ storedTriggers: ["Invoices (renamed)"], removed: true });
-    expect(result.improvement.merged).toEqual([["fp-survivor", 3]]);
     expect(result.hooks).toEqual({
       hookCreated: [true, false],
       taskId: "task-a",

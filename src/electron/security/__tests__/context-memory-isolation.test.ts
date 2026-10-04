@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONTEXT_TOOL_RESTRICTIONS,
-  LEGACY_MEMORY_TOOL_ALIASES,
+  RETIRED_MEMORY_TOOL_NAMES,
   TOOL_GROUPS,
   type Workspace,
 } from "../../../shared/types";
@@ -24,23 +24,16 @@ const workspace = {
 // SEC-4: group/public gateway chats must not reach private memory recall or
 // the knowledge graph.
 const MEMORY_RECALL_TOOLS = [
-  // The consolidated memory tools (audit §8.3) …
+  // The consolidated memory tools (audit §8.3).
   "memory_recall",
   "memory_remember",
   "memory_forget",
   "context_recall",
-  // … and the deprecated names, which stay executable for one release.
-  "search_memories",
-  "search_quotes",
-  "search_sessions",
-  "context_grep",
-  "context_describe",
   "kg_search",
   "kg_get_neighbors",
   "kg_get_subgraph",
   "kg_create_entity",
   "kg_add_observation",
-  "memory_save",
   "task_history",
 ];
 
@@ -64,7 +57,7 @@ describe("gateway context memory isolation", () => {
   });
 
   it("still allows memory recall in private context", () => {
-    for (const tool of ["memory_recall", "context_recall", "search_memories", "kg_search"]) {
+    for (const tool of ["memory_recall", "context_recall", "kg_search"]) {
       expect(isToolAllowedQuick(tool, workspace, "private")).toBe(true);
     }
   });
@@ -87,10 +80,10 @@ describe("gateway context memory isolation", () => {
     }
   });
 
-  it("lists every deprecated memory tool alias in group:memory", () => {
-    const memoryGroup = new Set<string>(TOOL_GROUPS["group:memory"]);
-    for (const alias of Object.keys(LEGACY_MEMORY_TOOL_ALIASES)) {
-      expect({ alias, listed: memoryGroup.has(alias) }).toEqual({ alias, listed: true });
+  it("lists no retired memory tool name in any tool group", () => {
+    const grouped = new Set<string>(Object.values(TOOL_GROUPS).flat() as string[]);
+    for (const retired of RETIRED_MEMORY_TOOL_NAMES) {
+      expect({ retired, listed: grouped.has(retired) }).toEqual({ retired, listed: false });
     }
   });
 });

@@ -33,12 +33,6 @@ export const MEMORY_STATEMENTS = {
                )
              LIMIT 100000`,
   // TranscriptStore: legacy span rows, removed with their task until the migration ran
-  transcript_deleteTaskSpans: `DELETE FROM transcript_spans WHERE workspace_path = ? AND task_id = ?`,
-  transcript_deleteTaskSpansAnyWorkspace: `DELETE FROM transcript_spans WHERE task_id = ?`,
-  transcript_taskWorkspaces: `SELECT DISTINCT workspace_path FROM transcript_spans WHERE task_id = ?`,
-  transcript_deleteWorkspaceSpans: `DELETE FROM transcript_spans WHERE workspace_path = ?`,
-  transcript_workspaceTaskIds: `SELECT DISTINCT task_id FROM transcript_spans WHERE workspace_path = ?`,
-  transcript_spanWorkspacePaths: `SELECT DISTINCT workspace_path FROM transcript_spans`,
   transcript_workspacePaths: `SELECT path FROM workspaces`,
   transcript_taskRetention: `SELECT status, created_at FROM tasks WHERE id = ?`,
 } satisfies StatementCatalog;

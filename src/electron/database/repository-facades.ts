@@ -16,14 +16,12 @@ import type {
   ChannelStore,
   ChannelUserStore,
   ComparisonSessionStore,
-  CuratedMemoryStore,
   DeliveryTrackingStore,
   InputRequestStore,
   LLMModelStore,
   MemoryEmbeddingStore,
   MemorySettingsStore,
   MemoryStore,
-  MemorySummaryStore,
   MessageQueueStore,
   PendingMemoryWriteStore,
   RateLimitStore,
@@ -353,39 +351,6 @@ export const AuditLogRepository = repositoryFacade<
   AuditLogStore,
   (typeof AUDITLOG_METHODS)[number]
 >("auditLog_", AUDITLOG_METHODS);
-
-const CURATEDMEMORY_METHODS = [
-  "create",
-  "update",
-  "findById",
-  "findByNormalizedKey",
-  "findFirstMatching",
-  "list",
-  "archive",
-] as const;
-export type CuratedMemoryRepository = AsyncStore<
-  CuratedMemoryStore,
-  (typeof CURATEDMEMORY_METHODS)[number]
->;
-export const CuratedMemoryRepository = repositoryFacade<
-  CuratedMemoryStore,
-  (typeof CURATEDMEMORY_METHODS)[number]
->("curatedMemory_", CURATEDMEMORY_METHODS);
-
-const MEMORYSUMMARY_METHODS = [
-  "create",
-  "findByWorkspaceAndPeriod",
-  "findByWorkspace",
-  "deleteByWorkspace",
-] as const;
-export type MemorySummaryRepository = AsyncStore<
-  MemorySummaryStore,
-  (typeof MEMORYSUMMARY_METHODS)[number]
->;
-export const MemorySummaryRepository = repositoryFacade<
-  MemorySummaryStore,
-  (typeof MEMORYSUMMARY_METHODS)[number]
->("memorySummary_", MEMORYSUMMARY_METHODS);
 
 const MEMORYSETTINGS_METHODS = ["getOrCreate", "update", "delete"] as const;
 export type MemorySettingsRepository = AsyncStore<

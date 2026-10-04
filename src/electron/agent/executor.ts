@@ -35,7 +35,6 @@ import {
   PromptCacheSurface,
   WebSearchMode,
   LLM_PROVIDER_TYPES,
-  LEGACY_MEMORY_TOOL_ALIASES,
   type LLMProviderType,
   type LLMRoutingRuntimeState,
   type LLMRoutingReason,
@@ -566,17 +565,10 @@ export type { CompletionContract } from "./executor-helpers";
 
 const KEEP_LATEST_IMAGE_MESSAGES = 8;
 /**
- * Read-only memory recall tools every plan step may call (audit §8.3), plus the hidden
- * deprecated names that route to them. Writes (memory_remember, memory_forget) stay
- * step-scoped.
+ * Read-only memory recall tools every plan step may call (audit §8.3). Writes
+ * (memory_remember, memory_forget) stay step-scoped.
  */
-const MEMORY_RECALL_READ_TOOLS: readonly string[] = [
-  "memory_recall",
-  "context_recall",
-  ...Object.entries(LEGACY_MEMORY_TOOL_ALIASES)
-    .filter(([, replacement]) => replacement === "memory_recall" || replacement === "context_recall")
-    .map(([alias]) => alias),
-];
+const MEMORY_RECALL_READ_TOOLS: readonly string[] = ["memory_recall", "context_recall"];
 // Memory synthesis slices (kit/memory/playbook) live in content/prompt-budgets.ts,
 // where the requested synthesizer budget and the memory_context cap share one constant.
 const DEFAULT_PROMPT_SECTION_BUDGETS = {

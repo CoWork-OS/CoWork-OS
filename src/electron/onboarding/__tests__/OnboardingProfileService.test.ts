@@ -63,7 +63,7 @@ describe("OnboardingProfileService", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("replaces onboarding-managed profile facts instead of accumulating them", () => {
+  it("replaces onboarding-managed profile facts instead of accumulating them", async () => {
     userProfileServiceMock.getProfile.mockReturnValue({
       updatedAt: Date.now(),
       facts: [
@@ -100,7 +100,7 @@ describe("OnboardingProfileService", () => {
       ],
     });
 
-    OnboardingProfileService.applyGlobalProfile(buildProfile());
+    await OnboardingProfileService.applyGlobalProfile(buildProfile());
 
     expect(userProfileServiceMock.deleteFact).toHaveBeenCalledWith("legacy-context");
     expect(userProfileServiceMock.deleteFact).toHaveBeenCalledWith("managed-style");

@@ -1,6 +1,6 @@
 /**
  * The consolidated memory tools (audit §8.3): memory_recall, memory_remember,
- * memory_forget, context_recall, and the deprecated names that route to them. Memory
+ * memory_forget and context_recall. Memory
  * items live in a real in-memory SQLite database written through MemoryWriter; the
  * archive, conversation index and integrations are mocked.
  */
@@ -13,15 +13,14 @@ const mocks = vi.hoisted(() => ({
   deleteEntries: vi.fn(),
   evaluate: vi.fn(),
   syncWorkspaceFiles: vi.fn(),
-  curate: vi.fn(),
   durableEnabled: false,
   durableSearch: vi.fn(),
   durableDescribe: vi.fn(),
   describeConversationHit: vi.fn(),
   searchConversation: vi.fn(),
   supermemoryForget: vi.fn(),
+  supermemoryRemember: vi.fn(),
   supermemoryConfigured: false,
-  legacyRemove: vi.fn(),
 }));
 
 vi.mock("../../../memory/MemoryService", () => ({
@@ -32,7 +31,7 @@ vi.mock("../../../memory/MemoryService", () => ({
   },
 }));
 vi.mock("../../../memory/CuratedMemoryService", () => ({
-  CuratedMemoryService: { curate: mocks.curate, syncWorkspaceFiles: mocks.syncWorkspaceFiles },
+  CuratedMemoryService: { syncWorkspaceFiles: mocks.syncWorkspaceFiles },
 }));
 vi.mock("../../../memory/MemoryWriteGate", () => ({
   MemoryWriteGate: { evaluate: mocks.evaluate },
@@ -50,10 +49,8 @@ vi.mock("../../../memory/SupermemoryService", () => ({
   SupermemoryService: {
     isConfigured: () => mocks.supermemoryConfigured,
     forget: mocks.supermemoryForget,
+    remember: mocks.supermemoryRemember,
   },
-}));
-vi.mock("../../../memory/memory-items-legacy-mirror", () => ({
-  createLegacyMemoryMirror: () => ({ edit: vi.fn(), remove: mocks.legacyRemove }),
 }));
 vi.mock("../../../security/access-profile-paths", () => ({
   evaluateWorkspaceFilesystemAccess: () => ({ decision: "allow" }),
@@ -64,7 +61,6 @@ import { MemoryWriter } from "../../../memory/MemoryWriter";
 import { MemoryItemsRepository } from "../../../memory/MemoryItemsRepository";
 import { MemoryRecallService, type MemoryRecallDeps } from "../../../memory/MemoryRecall";
 import { MemoryRecallStore } from "../../../memory/memory-recall-sql";
-import { LEGACY_MEMORY_TOOL_ALIASES } from "../../../../shared/types";
 import {
   createMemoryItemsTestDb,
   nativeSqliteAvailable,
@@ -302,15 +298,15 @@ describeWithSqlite("memory tools", () => {
       });
       expect(rowsOf(db, "scope = 'global'")).toHaveLength(0);
 
-      // Curated (profile kit) writes are refused for them.
-      const curate = await tools.executeLegacyAlias("memory_curate", {
-        action: "add",
-        target: "user",
-        kind: "identity",
-        content: "Name is Bob",
-      });
-      expect((curate as Any).success).toBe(false);
-      expect(mocks.curate).not.toHaveBeenCalled();
+      // Nor do they reach the owner's external memory.
+      mocks.supermemoryConfigured = true;
+      const external = await new MemoryTools(
+        { ...workspace, permissions: { ...workspace.permissions, network: true } },
+        daemon,
+        "task-1",
+      ).remember({ content: "Name is Bob", kind: "identity", scope: "external" });
+      expect(external.success).toBe(false);
+      expect(mocks.supermemoryRemember).not.toHaveBeenCalled();
     });
 
     it("stores a fact as inferred unless the user explicitly asked", async () => {
@@ -416,10 +412,11 @@ describeWithSqlite("memory tools", () => {
       const result = await tools.remember({ content: "Never deploy on Fridays", kind: "rule" });
       expect(result).toMatchObject({ success: true, staged: true, pendingId: "p-1" });
       expect(rowsOf(db)).toHaveLength(0);
-      // The approval replays through the curated lane.
+      // The approval replays the memory_items candidate itself through MemoryWriter.
       expect(mocks.evaluate.mock.calls[0][0]).toMatchObject({
         target: "curated",
-        payload: { action: "add", target: "workspace", kind: "constraint" },
+        action: "remember",
+        payload: { action: "remember", kind: "rule", scope: "workspace", source: "inferred" },
       });
     });
 
@@ -432,7 +429,7 @@ describeWithSqlite("memory tools", () => {
   });
 
   describe("memory_forget", () => {
-    it("deletes an item by id, scrubs it and removes the legacy record it mirrors", async () => {
+    it("deletes an item by id and scrubs it", async () => {
       const item = await seed("Old staging URL is old.example.com", {
         sourceRef: { store: "curated", id: "cur-9" },
       });
@@ -442,11 +439,6 @@ describeWithSqlite("memory tools", () => {
         forgotten: `memory:${item.id}`,
       });
       expect(rowsOf(db, "id = ?", item.id)[0]).toMatchObject({ status: "deleted", content: "" });
-      expect(mocks.legacyRemove).toHaveBeenCalledWith(
-        { store: "curated", id: "cur-9" },
-        "deleted",
-        expect.anything(),
-      );
     });
 
     it("refuses another workspace's item and another workspace's archive row", async () => {
@@ -618,99 +610,108 @@ describeWithSqlite("memory tools", () => {
     });
   });
 
-  describe("deprecated aliases", () => {
-    it("routes every old name to a working implementation with a deprecation notice", async () => {
-      await seed("Deploys go through staging");
-      mocks.getFullDetails.mockResolvedValue([]);
-      const tools = new MemoryTools(workspace, makeDaemon(), "task-1");
-      const inputs: Record<string, Record<string, unknown>> = {
-        search_memories: { query: "deploys" },
-        memory_search_index: { query: "deploys" },
-        memory_timeline: { query: "deploys" },
-        memory_details: { ids: ["memory:none"] },
-        search_quotes: { query: "deploys" },
-        search_sessions: { query: "deploys" },
-        memory_topics_load: { query: "deploys" },
-        memory_curated_read: {},
-        supermemory_profile: { query: "deploys" },
-        supermemory_search: { query: "deploys" },
-        memory_save: { content: "Shipped 2.1", type: "observation" },
-        memory_curate: { action: "add", target: "workspace", content: "x" },
-        supermemory_remember: { content: "x" },
-        supermemory_forget: { memoryId: "sm-1" },
-        context_grep: { query: "deploys" },
-        context_describe: { id: "dce_1" },
-      };
-      mocks.curate.mockResolvedValue({ success: true, entry: { id: "cur-1" } });
-      for (const name of Object.keys(LEGACY_MEMORY_TOOL_ALIASES)) {
-        const result = (await tools.executeLegacyAlias(name, inputs[name] as Any)) as Record<
-          string,
-          unknown
-        >;
-        expect({ name, deprecated: String(result.deprecated) }).toEqual({
-          name,
-          deprecated: expect.stringContaining(LEGACY_MEMORY_TOOL_ALIASES[name]),
-        });
-      }
+  describe("external scope (Supermemory)", () => {
+    const networked = { ...workspace, permissions: { ...workspace.permissions, network: true } };
+
+    it("remembers into Supermemory only with network access and a connection", async () => {
+      const offline = new MemoryTools(workspace, makeDaemon(), "task-1");
+      mocks.supermemoryConfigured = true;
+      expect(
+        (await offline.remember({ content: "Uses tabs", kind: "preference", scope: "external" }))
+          .success,
+      ).toBe(false);
+      mocks.supermemoryConfigured = false;
+      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
+      expect(
+        (await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }))
+          .success,
+      ).toBe(false);
+      expect(mocks.supermemoryRemember).not.toHaveBeenCalled();
+
+      mocks.supermemoryConfigured = true;
+      mocks.supermemoryRemember.mockResolvedValue({ containerTag: "tag", memoryIds: ["sm-7"] });
+      const result = await tools.remember({
+        content: "Uses tabs",
+        kind: "preference",
+        scope: "external",
+      });
+      expect(result).toEqual({ success: true, id: "external:sm-7", stored: "external" });
+      expect(mocks.supermemoryRemember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspace: { id: "ws-1", name: "Workspace One" },
+          content: "Uses tabs",
+          origin: "agent_tool",
+          taskId: "task-1",
+        }),
+      );
+      // Nothing is written locally.
+      expect(rowsOf(db)).toHaveLength(0);
+      expect(mocks.capture).not.toHaveBeenCalled();
     });
 
-    it("keeps the old inputs meaningful", async () => {
-      const item = await seed("Deploys go through staging");
-      const tools = new MemoryTools(workspace, makeDaemon(), "task-1");
-      const found = (await tools.executeLegacyAlias("search_memories", {
-        query: "deploys staging",
-        lane: "archive",
-      })) as Record<string, unknown>;
-      expect((found.results as Array<{ id: string }>)[0].id).toBe(`memory:${item.id}`);
+    it("reports a staged external write", async () => {
+      mocks.supermemoryConfigured = true;
+      mocks.supermemoryRemember.mockResolvedValue({
+        containerTag: "tag",
+        memoryIds: [],
+        staged: true,
+        pendingId: "p-1",
+      });
+      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
+      expect(
+        await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }),
+      ).toMatchObject({ success: true, staged: true, pendingId: "p-1" });
+    });
 
-      const details = (await tools.executeLegacyAlias("memory_details", {
-        ids: [item.id],
-      })) as Record<string, unknown>;
-      expect((details.results as Array<{ content: string }>)[0].content).toBe(
-        "Deploys go through staging",
+    it("forgets a Supermemory memory by id or by its text", async () => {
+      mocks.supermemoryConfigured = true;
+      mocks.supermemoryForget.mockResolvedValue({
+        containerTag: "tag",
+        id: "sm-1",
+        forgotten: true,
+      });
+      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
+      expect(await tools.forget({ id: "external:sm-1" })).toEqual({
+        success: true,
+        forgotten: "external:sm-1",
+      });
+      expect(await tools.forget({ match: "Uses tabs", scope: "external" })).toEqual({
+        success: true,
+        forgotten: "external:sm-1",
+      });
+      expect(mocks.supermemoryForget).toHaveBeenLastCalledWith(
+        expect.objectContaining({ content: "Uses tabs" }),
       );
+      mocks.supermemoryForget.mockResolvedValue({ containerTag: "tag", forgotten: false });
+      expect((await tools.forget({ match: "nothing", scope: "external" })).success).toBe(false);
 
-      await tools.executeLegacyAlias("search_sessions", { query: "deploy", taskId: "task-0" });
-      expect(recallDeps.searchConversation).toHaveBeenCalledWith(
-        expect.objectContaining({ taskId: "task-0" }),
-      );
+      const offline = new MemoryTools(workspace, makeDaemon(), "task-1");
+      mocks.supermemoryForget.mockClear();
+      expect((await offline.forget({ match: "Uses tabs", scope: "external" })).success).toBe(false);
+      expect(mocks.supermemoryForget).not.toHaveBeenCalled();
+    });
+  });
 
+  describe("retired memory tools", () => {
+    it("has no entry point for the retired names", () => {
+      const tools = new MemoryTools(workspace, makeDaemon(), "task-1") as Any;
+      expect(tools.executeLegacyAlias).toBeUndefined();
+      expect(tools.curate).toBeUndefined();
+    });
+
+    it("keeps context_recall on the active task, whatever task id is passed", async () => {
       mocks.durableEnabled = true;
-      await tools.executeLegacyAlias("context_grep", { query: "x", taskId: "other" });
-      await tools.executeLegacyAlias("context_grep", {
+      mocks.durableSearch.mockResolvedValue([]);
+      mocks.searchConversation.mockResolvedValue([]);
+      const tools = new MemoryTools(workspace, makeDaemon(), "task-1");
+      await tools.contextRecall({
         query: "x",
         taskId: "other",
         explicitUserRequest: true,
-      });
-      expect(mocks.durableSearch).toHaveBeenNthCalledWith(
-        1,
+      } as Any);
+      expect(mocks.durableSearch).toHaveBeenCalledWith(
         expect.objectContaining({ taskId: "task-1" }),
       );
-      expect(mocks.durableSearch).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({ taskId: "other" }),
-      );
-
-      const saved = (await tools.executeLegacyAlias("memory_save", {
-        content: "Chose Postgres for the queue",
-        type: "decision",
-      })) as Record<string, unknown>;
-      expect(saved).toMatchObject({ success: true, kind: "decision" });
-    });
-
-    it("refuses memory_curate in a read-only workspace", async () => {
-      const tools = new MemoryTools(
-        { ...workspace, permissions: { ...workspace.permissions, write: false } },
-        makeDaemon(),
-        "task-1",
-      );
-      const result = (await tools.executeLegacyAlias("memory_curate", {
-        action: "add",
-        target: "workspace",
-        content: "x",
-      })) as Record<string, unknown>;
-      expect(result.success).toBe(false);
-      expect(mocks.curate).not.toHaveBeenCalled();
     });
   });
 });

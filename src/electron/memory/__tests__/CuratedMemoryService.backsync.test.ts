@@ -51,7 +51,6 @@ describeWithSqlite("CuratedMemoryService kit back-sync", () => {
   let db: Database.Database;
   let writer: MemoryWriter;
   let workspacePath: string;
-  let curated: Array<Record<string, unknown>>;
   let memoryPath: string;
   let userPath: string;
 
@@ -63,32 +62,7 @@ describeWithSqlite("CuratedMemoryService kit back-sync", () => {
     workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-kit-backsync-"));
     memoryPath = path.join(workspacePath, ".cowork", "MEMORY.md");
     userPath = path.join(workspacePath, ".cowork", "USER.md");
-    curated = [
-      {
-        id: "entry-1",
-        workspaceId: "ws-1",
-        target: "workspace",
-        kind: "project_fact",
-        content: "The API uses PostgreSQL 16",
-        status: "active",
-        confidence: 0.85,
-      },
-    ];
     const service = CuratedMemoryService as unknown as Record<string, unknown>;
-    service.curatedRepo = {
-      findById: async (id: string) => curated.find((entry) => entry.id === id),
-      update: async (id: string, patch: Record<string, unknown>) => {
-        const entry = curated.find((item) => item.id === id);
-        if (entry) Object.assign(entry, patch);
-        return entry;
-      },
-      archive: async (id: string) => {
-        const entry = curated.find((item) => item.id === id);
-        if (entry) entry.status = "archived";
-        return entry;
-      },
-      list: async () => [],
-    };
     service.workspaceRepo = { findById: async () => ({ id: "ws-1", path: workspacePath }) };
     service.initialized = true;
 
@@ -168,8 +142,6 @@ describeWithSqlite("CuratedMemoryService kit back-sync", () => {
       store: "kit_file",
       file: ".cowork/MEMORY.md",
     });
-    // The curated lane the item mirrors follows the edit.
-    expect(curated[0].content).toBe("The API uses PostgreSQL 17");
 
     const final = await fs.readFile(memoryPath, "utf8");
     expect(final.startsWith("# My notes above the block\n")).toBe(true);

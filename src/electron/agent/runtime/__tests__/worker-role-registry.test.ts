@@ -44,14 +44,7 @@ describe("worker-role-registry", () => {
   it("denies memory writes to the verifier and researcher roles (SEC-12)", () => {
     const verifier = resolveWorkerRoleAgentConfig("verifier", {});
     const researcherSpec = getWorkerRoleSpec("researcher");
-    for (const tool of [
-      "memory_remember",
-      "memory_forget",
-      "memory_save",
-      "memory_curate",
-      "supermemory_remember",
-      "kg_create_entity",
-    ]) {
+    for (const tool of ["memory_remember", "memory_forget", "kg_create_entity"]) {
       expect(verifier.toolRestrictions).toContain(tool);
       expect(researcherSpec.toolRestrictions).toContain(tool);
     }

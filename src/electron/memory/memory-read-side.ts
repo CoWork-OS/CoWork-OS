@@ -1,16 +1,19 @@
 /**
  * Read-side wiring of the memory engine: keeps the synchronous consumers that cannot read
- * `memory_items` on their hot path consistent with it.
+ * `memory_items` on their hot path consistent with it. PersonalityManager's user name and
+ * response style are mirrors of `memory_items`, never a source of facts.
  *
  * - **Preferred name (PROMPT-7).** `preferred_name` is one subject in `memory_items`;
  *   `set_user_name` writes it as `user_stated`, which outranks inferred names, and a later
  *   statement of equal trust supersedes. PersonalityManager's `userName` (read by the
  *   identity prompt and greetings) is set from the active item after every write, so a new
  *   profile fact can no longer revert the name to the onboarding value.
- * - **Explicit response style.** AdaptiveStyleEngine must not change the live style when
- *   the user chose one (`response_style` held by a `user_stated` / `user_confirmed` item).
- *   The engine is synchronous, so the answer is cached here and refreshed after writes.
- *   A style chosen in Settings is recorded the same way (`mirrorSettingsResponseStyle`).
+ * - **Response style.** The `response_style` item is the style fact; its structured value
+ *   (`source_ref.style`) is applied to PersonalityManager's live style after every write,
+ *   whether AdaptiveStyleEngine inferred it, the user set it in Settings or with
+ *   `set_response_style`. AdaptiveStyleEngine must not adapt when the user chose a style
+ *   (an item held as `user_stated` / `user_confirmed`); the engine is synchronous, so that
+ *   answer is cached here and refreshed after writes.
  */
 import { PersonalityManager } from "../settings/personality-manager";
 import { sanitizeStoredPreferredName } from "../utils/preferred-name";
@@ -34,6 +37,8 @@ export interface MemoryReadSidePort {
 export interface MemoryReadSideDeps {
   getUserName?: () => string | undefined;
   setUserName?: (name: string) => void;
+  getResponseStyle?: () => Partial<ResponseStylePreferences> | undefined;
+  setResponseStyle?: (style: Partial<ResponseStylePreferences>) => void;
 }
 
 const EXPLICIT_STYLE_SOURCES = new Set(["user_stated", "user_confirmed"]);
@@ -42,9 +47,8 @@ let explicitResponseStyle = false;
 let readSideActive = false;
 
 /**
- * True once the read side runs (writer installed and lane migration finished): from then
- * on PersonalityManager's user name follows `memory_items`, and legacy services must not
- * set it themselves.
+ * True while the read side runs (installed by the memory engine after the startup lane
+ * migration): PersonalityManager's user name and style follow `memory_items`.
  */
 export function isMemoryReadSideActive(): boolean {
   return readSideActive;
@@ -201,7 +205,7 @@ export function withSettingsResponseStyleMirror<T>(
   ) {
     return result;
   }
-  MemoryWriter.dualWrite(
+  MemoryWriter.writeInBackground(
     responseStyleCandidate(after, {
       source: "user_stated",
       store: MEMORY_LANE_STORES.personality,
@@ -210,6 +214,46 @@ export function withSettingsResponseStyleMirror<T>(
     "settings_response_style",
   );
   return result;
+}
+
+const STYLE_VALUES: Record<(typeof RESPONSE_STYLE_DIMENSIONS)[number], ReadonlySet<string>> = {
+  responseLength: new Set(["terse", "balanced", "detailed"]),
+  explanationDepth: new Set(["expert", "balanced", "teaching"]),
+  emojiUsage: new Set(["none", "minimal", "moderate", "expressive"]),
+  codeCommentStyle: new Set(["minimal", "moderate", "verbose"]),
+};
+
+/** The structured style of a `response_style` item (`source_ref.style`), valid values only. */
+export function responseStyleFromItem(
+  item: Pick<MemoryItem, "sourceRef">,
+): Partial<ResponseStylePreferences> | null {
+  const raw = item.sourceRef.style;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const style: Record<string, string> = {};
+  for (const key of RESPONSE_STYLE_DIMENSIONS) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (typeof value === "string" && STYLE_VALUES[key].has(value)) style[key] = value;
+  }
+  return Object.keys(style).length > 0 ? (style as Partial<ResponseStylePreferences>) : null;
+}
+
+/**
+ * Apply the active `response_style` item to PersonalityManager. Items without a
+ * structured style (copied from the retired adaptive-style lane) leave the style alone.
+ */
+export async function syncResponseStyleFromMemory(
+  port: MemoryReadSidePort,
+  deps: MemoryReadSideDeps = {},
+): Promise<Partial<ResponseStylePreferences> | null> {
+  const item = await activeGlobalSubject(port, "response_style");
+  const style = item ? responseStyleFromItem(item) : null;
+  if (!style) return null;
+  const current = (deps.getResponseStyle ?? currentResponseStyle)();
+  const merged = { ...current, ...style };
+  if (!sameResponseStyle(current, merged)) {
+    (deps.setResponseStyle ?? ((next) => PersonalityManager.setResponseStyle(next)))(style);
+  }
+  return style;
 }
 
 /** The name in a `preferred_name` item (`Preferred name: Alice` → `Alice`). */
@@ -281,10 +325,10 @@ export interface MemoryReadSideHandle {
 }
 
 /**
- * Subscribe the read-side syncs to MemoryWriter changes and run them once now. Nothing
- * runs before the lane migration has finished (its writes would otherwise drive the
- * syncs from a half-copied store). Refreshes are coalesced: a change during a pass
- * schedules one more pass.
+ * Subscribe the read-side syncs to MemoryWriter changes and run them once now. The memory
+ * engine installs it after the startup lane migration (`memory-engine-bootstrap.ts`), so
+ * the syncs never run from a half-copied store. Refreshes are coalesced: a change during
+ * a pass schedules one more pass.
  */
 export function installMemoryReadSide(
   writer: MemoryWriter,
@@ -294,19 +338,8 @@ export function installMemoryReadSide(
   let running: Promise<void> | null = null;
   let pendingCleared: string[] = [];
   let dirty = false;
-  let migrated = false;
   let reconciled = false;
-
-  const migrationDone = async (): Promise<boolean> => {
-    if (migrated) return true;
-    try {
-      migrated = await writer.repository.isLaneMigrationComplete();
-    } catch {
-      migrated = false;
-    }
-    if (migrated) readSideActive = true;
-    return migrated;
-  };
+  readSideActive = true;
 
   const run = (): Promise<void> => {
     if (running) {
@@ -316,10 +349,6 @@ export function installMemoryReadSide(
     running = (async () => {
       do {
         dirty = false;
-        if (!(await migrationDone())) {
-          pendingCleared = [];
-          break;
-        }
         const cleared = pendingCleared;
         pendingCleared = [];
         try {
@@ -329,6 +358,7 @@ export function installMemoryReadSide(
             await reconcilePreferredName(writer, port, deps);
           }
           await refreshExplicitResponseStyle(port);
+          await syncResponseStyleFromMemory(port, deps);
           await syncPreferredNameFromMemory(port, deps, cleared);
         } catch (error) {
           logger.warn("Memory read-side sync failed:", error);

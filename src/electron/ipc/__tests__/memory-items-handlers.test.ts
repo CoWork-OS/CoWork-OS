@@ -23,7 +23,7 @@ function setup(options: { exists?: (id: string) => boolean } = {}) {
     update: vi.fn(async () => ({ success: true, item: null })),
     setPinned: vi.fn(async () => ({ success: true, item: null })),
     delete: vi.fn(async () => ({ success: true, item: null })),
-    clearGlobal: vi.fn(async () => ({ success: true, deleted: 0, legacyRecords: 0 })),
+    clearGlobal: vi.fn(async () => ({ success: true, deleted: 0 })),
   };
   const workspaceExists = vi.fn(async (id: string) => (options.exists ?? ((v) => v === WS))(id));
   const checkRateLimit = vi.fn();

@@ -4,30 +4,25 @@
  *  - `memory_recall`   one recall over facts, the archive, earlier conversations, notes,
  *                      the knowledge graph and (when allowed) Supermemory (MemoryRecall);
  *  - `memory_remember` durable facts through MemoryWriter (`memory_items`); episodic
- *                      kinds (`outcome`, `error`, `note`) go to the archive;
- *  - `memory_forget`   a real delete of a memory item (and the legacy record it mirrors)
- *                      or of an archive row of this workspace;
+ *                      kinds (`outcome`, `error`, `note`) go to the archive; scope
+ *                      `external` saves to Supermemory only;
+ *  - `memory_forget`   a real delete of a memory item, an archive row of this workspace
+ *                      or (scope `external` / `external:` ids) a Supermemory memory;
  *  - `context_recall`  the active task's earlier conversation after compaction.
  *
- * The 16 tools these replace stay executable as hidden aliases for one release
- * (`executeLegacyAlias`, LEGACY_MEMORY_TOOL_ALIASES), so saved prompts and skills keep
- * working, but they are no longer offered to the model.
+ * The 16 tools these replaced were hidden aliases for one release and have been retired
+ * (RETIRED_MEMORY_TOOL_NAMES); they are no longer registered.
  */
 import { randomUUID } from "crypto";
 import * as path from "path";
 import type { LLMTool } from "../llm/types";
-import {
-  LEGACY_MEMORY_TOOL_ALIASES,
-  type CuratedMemoryKind,
-  type Workspace,
-} from "../../../shared/types";
+import type { Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import { MemoryService } from "../../memory/MemoryService";
 import { CuratedMemoryService } from "../../memory/CuratedMemoryService";
 import { MemoryWriteGate } from "../../memory/MemoryWriteGate";
 import { MemoryWriter, type MemoryWriteResult } from "../../memory/MemoryWriter";
 import { MemoryItemsHubService } from "../../memory/MemoryItemsHubService";
-import { createLegacyMemoryMirror } from "../../memory/memory-items-legacy-mirror";
 import { DurableContextService } from "../../memory/DurableContextService";
 import { SupermemoryService } from "../../memory/SupermemoryService";
 import {
@@ -136,28 +131,6 @@ const ARCHIVE_FALLBACK_TYPES: Readonly<Record<MemoryItemKind, MemoryType>> = {
 /** Facts about the user hold everywhere by default; the rest belongs to the workspace. */
 const GLOBAL_BY_DEFAULT: ReadonlySet<string> = new Set(["identity", "preference", "correction"]);
 
-/** Curated lane used when an approval-gated fact write is replayed after approval. */
-const CURATED_REPLAY_KIND: Readonly<Record<MemoryItemKind, CuratedMemoryKind>> = {
-  preference: "preference",
-  identity: "identity",
-  rule: "constraint",
-  project_fact: "project_fact",
-  decision: "project_fact",
-  commitment: "active_commitment",
-  correction: "constraint",
-  insight: "project_fact",
-  outcome: "project_fact",
-};
-
-const CURATED_TO_ITEM_KINDS: Readonly<Record<string, MemoryItemKind[]>> = {
-  identity: ["identity"],
-  preference: ["preference"],
-  constraint: ["rule"],
-  workflow_rule: ["rule"],
-  project_fact: ["project_fact"],
-  active_commitment: ["commitment"],
-};
-
 /**
  * An explicit request to remember, in the user's own message. `user_asked` from the model
  * is only honoured with one of these, so a page or file the agent read cannot make an
@@ -249,6 +222,8 @@ export interface MemoryRememberToolInput {
 export interface MemoryForgetToolInput {
   id?: string;
   match?: string;
+  /** `external`: forget the Supermemory memory whose text is `match`. */
+  scope?: string;
   reason?: string;
 }
 
@@ -256,20 +231,9 @@ export interface ContextRecallToolInput {
   query?: string;
   id?: string;
   limit?: number;
-  /** Alias-only (context_grep / context_describe): inspect another task on request. */
-  taskId?: string;
-  explicitUserRequest?: boolean;
-  sourceLimit?: number;
 }
 
-interface RecallRouting {
-  /** Tool name for logging (a deprecated alias logs under its own name). */
-  tool?: string;
-  /** Restrict the conversation lane to one task (search_sessions / search_quotes). */
-  conversationTaskId?: string;
-  /** Include the active task in the conversation lane. */
-  includeActiveTask?: boolean;
-}
+const SUPERMEMORY_UNAVAILABLE = "Supermemory is not connected or network access is off.";
 
 export class MemoryTools {
   constructor(
@@ -343,9 +307,9 @@ export class MemoryTools {
             },
             scope: {
               type: "string",
-              enum: ["workspace", "global", "task"],
+              enum: ["workspace", "global", "task", "external"],
               description:
-                "global: about the user everywhere (default for identity, preference, correction); workspace: this project (default otherwise); task: this task only.",
+                "global: about the user everywhere (default for identity, preference, correction); workspace: this project (default otherwise); task: this task only; external: Supermemory only, when connected.",
             },
             subject: {
               type: "string",
@@ -375,6 +339,11 @@ export class MemoryTools {
               description: "Id from memory_recall (memory:, archive:, external:).",
             },
             match: { type: "string", description: "Text of the memory, when you have no id." },
+            scope: {
+              type: "string",
+              enum: ["external"],
+              description: "external: forget the Supermemory memory with this match text.",
+            },
             reason: { type: "string", description: "Why it should be forgotten." },
           },
           required: [],
@@ -402,11 +371,8 @@ export class MemoryTools {
   // memory_recall
   // ---------------------------------------------------------------------------
 
-  async recall(
-    input: MemoryRecallToolInput,
-    routing: RecallRouting = {},
-  ): Promise<Record<string, unknown>> {
-    const tool = routing.tool ?? MEMORY_RECALL_TOOL;
+  async recall(input: MemoryRecallToolInput): Promise<Record<string, unknown>> {
+    const tool = MEMORY_RECALL_TOOL;
     const query = asString(input?.query, MAX_QUERY_CHARS);
     const ids = asStringList(input?.ids, MAX_IDS);
     const requestedScopes = pickEnum(input?.scopes, MEMORY_RECALL_SCOPES);
@@ -446,8 +412,7 @@ export class MemoryTools {
           readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
           allowExternal: externalAllowed,
           workspaceName: this.workspace.name,
-          excludeActiveTaskConversation: routing.includeActiveTask !== true,
-          ...(routing.conversationTaskId ? { conversationTaskId: routing.conversationTaskId } : {}),
+          excludeActiveTaskConversation: true,
         },
       });
     } catch (error) {
@@ -519,11 +484,8 @@ export class MemoryTools {
   // memory_remember
   // ---------------------------------------------------------------------------
 
-  async remember(
-    input: MemoryRememberToolInput,
-    routing: { tool?: string } = {},
-  ): Promise<Record<string, unknown>> {
-    const tool = routing.tool ?? MEMORY_REMEMBER_TOOL;
+  async remember(input: MemoryRememberToolInput): Promise<Record<string, unknown>> {
+    const tool = MEMORY_REMEMBER_TOOL;
     const content = asString(input?.content, MAX_CONTENT_CHARS);
     const kind = MEMORY_REMEMBER_KINDS.includes(input?.kind as MemoryRememberKind)
       ? (input.kind as MemoryRememberKind)
@@ -543,6 +505,7 @@ export class MemoryTools {
     if (explicitMemoryWriteBlocked(this.daemon, this.taskId, content)) {
       return fail(NO_MEMORY_WRITE_ERROR, { blocked: true, reason: "no_memory_directive" });
     }
+    if (input?.scope === "external") return this.rememberExternal(content, kind);
 
     const archiveType = ARCHIVE_KINDS[kind];
     if (archiveType) return this.saveToArchive(tool, content, archiveType);
@@ -572,19 +535,29 @@ export class MemoryTools {
         ? "user_stated"
         : "inferred";
     const pin = input?.pin === true;
+    const subjectKey = asString(input?.subject, 120);
+    const recordId = randomUUID();
 
     try {
+      // An approval-gated write is staged as the memory_items candidate itself and replayed
+      // through MemoryWriter after approval (MemoryWriteGate `remember`), kind and scope intact.
       const gate = await MemoryWriteGate.evaluate({
         workspaceId: this.workspace.id,
         taskId: this.taskId,
         target: "curated",
-        action: "add",
+        action: "remember",
         origin: "agent_tool",
         summary: `Remember ${itemKind}`,
         payload: {
-          action: "add",
-          target: itemKind === "identity" || itemKind === "preference" ? "user" : "workspace",
-          kind: CURATED_REPLAY_KIND[itemKind],
+          action: "remember",
+          kind: itemKind,
+          scope,
+          scopeRef: thirdPartySender ?? (scope === "task" ? this.taskId : null),
+          ...(subjectKey ? { subjectKey } : {}),
+          source,
+          confidence: source === "user_stated" ? 1 : 0.7,
+          pinned: pin && !thirdPartySender,
+          recordId,
           content,
         },
         proposedValue: content,
@@ -611,9 +584,9 @@ export class MemoryTools {
         scope,
         workspaceId: scope === "global" ? null : this.workspace.id,
         scopeRef: thirdPartySender ?? (scope === "task" ? this.taskId : null),
-        ...(asString(input?.subject, 120) ? { subjectKey: asString(input?.subject, 120) } : {}),
+        ...(subjectKey ? { subjectKey } : {}),
         source,
-        sourceRef: { store: "agent_tool", id: randomUUID(), taskId: this.taskId },
+        sourceRef: { store: "agent_tool", id: recordId, taskId: this.taskId },
         confidence: source === "user_stated" ? 1 : 0.7,
         pinned: pin && !thirdPartySender,
         taskId: this.taskId,
@@ -645,6 +618,78 @@ export class MemoryTools {
           ? { replaced: result.supersededIds.map((id) => `memory:${id}`) }
           : {}),
         ...(result.redactions > 0 ? { redactions: result.redactions } : {}),
+      };
+    } catch (error) {
+      return fail(String(error instanceof Error ? error.message : error));
+    }
+  }
+
+  /**
+   * `memory_remember` with scope `external`: a memory that lives only in Supermemory (the
+   * retired `supermemory_remember`). The write goes through the memory write gate
+   * (target `external`), and its remote id is recorded so purges reach it.
+   */
+  private async rememberExternal(
+    content: string,
+    kind: MemoryRememberKind,
+  ): Promise<Record<string, unknown>> {
+    const tool = MEMORY_REMEMBER_TOOL;
+    const fail = (error: string, extra: Record<string, unknown> = {}) => {
+      this.daemon.logEvent(this.taskId, "tool_result", { tool, success: false, error, ...extra });
+      return { success: false, error, ...extra };
+    };
+    // SEC-16: a channel sender other than the workspace owner never writes to the owner's
+    // external memory.
+    if (this.thirdPartyGatewaySender()) {
+      return fail(
+        "This task came from someone other than the workspace owner; external memory is not changed for them.",
+      );
+    }
+    if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
+      return fail(SUPERMEMORY_UNAVAILABLE);
+    }
+    try {
+      const result = await SupermemoryService.remember({
+        workspace: { id: this.workspace.id, name: this.workspace.name },
+        content,
+        metadata: {
+          source: "cowork_tool",
+          kind,
+          taskId: this.taskId,
+          workspaceId: this.workspace.id,
+        },
+        taskId: this.taskId,
+        origin: "agent_tool",
+      });
+      if (result.blocked) {
+        return fail(result.error || "The external memory write was blocked.", { blocked: true });
+      }
+      if (result.staged) {
+        this.daemon.logEvent(this.taskId, "tool_result", {
+          tool,
+          success: true,
+          staged: true,
+          pendingId: result.pendingId,
+        });
+        return {
+          success: true,
+          staged: true,
+          pendingId: result.pendingId,
+          message: "External memory write is pending user approval.",
+        };
+      }
+      const ids = result.memoryIds.map((id) => `external:${id}`);
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool,
+        success: true,
+        stored: "external",
+        memoryIds: result.memoryIds,
+      });
+      return {
+        success: true,
+        ...(ids[0] ? { id: ids[0] } : {}),
+        ...(ids.length > 1 ? { ids } : {}),
+        stored: "external",
       };
     } catch (error) {
       return fail(String(error instanceof Error ? error.message : error));
@@ -731,11 +776,8 @@ export class MemoryTools {
   // memory_forget
   // ---------------------------------------------------------------------------
 
-  async forget(
-    input: MemoryForgetToolInput,
-    routing: { tool?: string } = {},
-  ): Promise<Record<string, unknown>> {
-    const tool = routing.tool ?? MEMORY_FORGET_TOOL;
+  async forget(input: MemoryForgetToolInput): Promise<Record<string, unknown>> {
+    const tool = MEMORY_FORGET_TOOL;
     const id = asString(input?.id, 600);
     const match = asString(input?.match, 1000);
     this.daemon.logEvent(this.taskId, "tool_call", {
@@ -792,7 +834,7 @@ export class MemoryTools {
           }
           case "external": {
             if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
-              return fail("Supermemory is not connected or network access is off.");
+              return fail(SUPERMEMORY_UNAVAILABLE);
             }
             const result = await SupermemoryService.forget({
               workspace: { id: this.workspace.id, name: this.workspace.name },
@@ -808,6 +850,21 @@ export class MemoryTools {
           default:
             return fail("Conversation history and files cannot be forgotten with memory_forget.");
         }
+      }
+
+      if (input?.scope === "external") {
+        // Supermemory matches the text itself (the retired text-matched supermemory_forget).
+        if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
+          return fail(SUPERMEMORY_UNAVAILABLE);
+        }
+        const result = await SupermemoryService.forget({
+          workspace: { id: this.workspace.id, name: this.workspace.name },
+          content: match,
+          ...(input?.reason ? { reason: asString(input.reason, 300) } : {}),
+        });
+        return result.forgotten
+          ? done(result.id ? `external:${result.id}` : "external")
+          : fail("Supermemory found no memory with that text.");
       }
 
       const candidates = await this.forgetCandidates(match);
@@ -896,11 +953,10 @@ export class MemoryTools {
     };
   }
 
-  /** Delete a memory item (and the legacy record it mirrors), as the Memory Hub does. */
+  /** Delete a memory item, as the Memory Hub does. */
   private async deleteItem(id: string): Promise<void> {
     const hub = new MemoryItemsHubService({
       getWriter: () => MemoryWriter.get(),
-      legacy: createLegacyMemoryMirror(),
       syncKitFiles: (workspaceId) => this.syncKitFiles(workspaceId),
     });
     await hub.delete({ workspaceId: this.workspace.id, id });
@@ -955,22 +1011,13 @@ export class MemoryTools {
   // context_recall
   // ---------------------------------------------------------------------------
 
-  async contextRecall(
-    input: ContextRecallToolInput,
-    routing: { tool?: string } = {},
-  ): Promise<Record<string, unknown>> {
-    const tool = routing.tool ?? CONTEXT_RECALL_TOOL;
+  async contextRecall(input: ContextRecallToolInput): Promise<Record<string, unknown>> {
+    const tool = CONTEXT_RECALL_TOOL;
     const query = asString(input?.query, MAX_QUERY_CHARS);
     const id = asString(input?.id, 300);
-    // Another task only when the user explicitly asked (deprecated context_grep contract).
-    const taskId =
-      input?.taskId && input?.explicitUserRequest === true ? String(input.taskId) : this.taskId;
-    this.daemon.logEvent(this.taskId, "tool_call", {
-      tool,
-      query,
-      id,
-      effectiveTaskId: taskId,
-    });
+    // Always the active task: other tasks are recalled through memory_recall.
+    const taskId = this.taskId;
+    this.daemon.logEvent(this.taskId, "tool_call", { tool, query, id });
     const fail = (error: string) => {
       this.daemon.logEvent(this.taskId, "tool_result", { tool, success: false, error });
       return { success: false, error };
@@ -984,7 +1031,6 @@ export class MemoryTools {
               workspaceId: this.workspace.id,
               taskId,
               id,
-              sourceLimit: input?.sourceLimit,
             })
           : await DurableContextService.describeConversationHit({
               workspaceId: this.workspace.id,
@@ -1067,239 +1113,6 @@ export class MemoryTools {
       return fail(
         recallFailureMessage(tool, String(error instanceof Error ? error.message : error)),
       );
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Deprecated aliases
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Run a deprecated memory tool name through the tool that replaced it. Supermemory
-   * writes and `memory_curate` keep their own implementation (`legacy`), since they reach
-   * stores the new tools do not write.
-   */
-  async executeLegacyAlias(
-    name: string,
-    input: Record<string, Any>,
-    legacy: {
-      supermemoryRemember?: (input: Any) => Promise<unknown>;
-      supermemoryForget?: (input: Any) => Promise<unknown>;
-    } = {},
-  ): Promise<unknown> {
-    const notice = {
-      deprecated: `${name} is deprecated; use ${LEGACY_MEMORY_TOOL_ALIASES[name] ?? MEMORY_RECALL_TOOL}.`,
-    };
-    const withNotice = (value: unknown) =>
-      value && typeof value === "object" && !Array.isArray(value)
-        ? { ...(value as Record<string, unknown>), ...notice }
-        : value;
-    const routing = { tool: name };
-    const query = typeof input?.query === "string" ? input.query : "";
-    switch (name) {
-      case "search_memories": {
-        const lane = input?.lane;
-        const scopes: MemoryRecallScope[] =
-          lane === "kit"
-            ? ["knowledge"]
-            : lane === "archive"
-              ? ["memory"]
-              : ["memory", "knowledge"];
-        return withNotice(
-          await this.recall({ query, limit: input?.limit, scopes, kinds: input?.types }, routing),
-        );
-      }
-      case "memory_search_index":
-        return withNotice(
-          await this.recall({ query, limit: input?.limit, scopes: ["memory"] }, routing),
-        );
-      case "memory_timeline":
-        return withNotice(
-          typeof input?.memoryId === "string" && input.memoryId.trim()
-            ? await this.recall({ ids: [input.memoryId], scopes: ["memory"] }, routing)
-            : await this.recall({ query, scopes: ["memory"] }, routing),
-        );
-      case "memory_details":
-        return withNotice(
-          await this.recall({ ids: input?.ids, detail: "full", scopes: ["memory"] }, routing),
-        );
-      case "search_quotes":
-      case "search_sessions":
-        return withNotice(
-          await this.recall(
-            {
-              query,
-              limit: input?.limit,
-              scopes:
-                name === "search_sessions"
-                  ? ["conversations"]
-                  : ["conversations", "memory", "knowledge"],
-            },
-            {
-              ...routing,
-              ...(typeof input?.taskId === "string" && input.taskId.trim()
-                ? { conversationTaskId: input.taskId.trim(), includeActiveTask: true }
-                : {}),
-            },
-          ),
-        );
-      case "memory_topics_load":
-        return withNotice(
-          await this.recall({ query, limit: input?.limit, scopes: ["knowledge"] }, routing),
-        );
-      case "memory_curated_read":
-        return withNotice(
-          await this.recall(
-            {
-              limit: input?.limit ?? 20,
-              scopes: ["memory"],
-              kinds:
-                typeof input?.kind === "string" ? CURATED_TO_ITEM_KINDS[input.kind] : undefined,
-            },
-            routing,
-          ),
-        );
-      case "supermemory_profile":
-      case "supermemory_search":
-        return withNotice(
-          await this.recall({ query, limit: input?.limit, scopes: ["external"] }, routing),
-        );
-      case "memory_save": {
-        const type = String(input?.type || "");
-        const kind: MemoryRememberKind =
-          type === "decision" || type === "insight" || type === "error"
-            ? (type as MemoryRememberKind)
-            : "note";
-        return withNotice(await this.remember({ content: input?.content, kind }, routing));
-      }
-      case "memory_curate":
-        if (this.thirdPartyGatewaySender()) {
-          // SEC-16: curated entries feed the user's profile kit (USER.md / MEMORY.md).
-          return withNotice({
-            success: false,
-            error:
-              "This task came from someone other than the workspace owner; curated memory is not changed for them. Use memory_remember.",
-          });
-        }
-        if (this.workspace.permissions?.write === false) {
-          return withNotice({
-            success: false,
-            error: "memory_curate writes .cowork kit files, and this workspace is read-only.",
-          });
-        }
-        return withNotice(await this.curate(input as Parameters<MemoryTools["curate"]>[0]));
-      case "supermemory_remember":
-        if (!legacy.supermemoryRemember) {
-          return withNotice({ success: false, error: "Supermemory is not connected." });
-        }
-        return withNotice(await legacy.supermemoryRemember(input));
-      case "supermemory_forget":
-        if (typeof input?.memoryId === "string" && input.memoryId.trim()) {
-          return withNotice(
-            await this.forget(
-              { id: `external:${input.memoryId.trim()}`, reason: input?.reason },
-              routing,
-            ),
-          );
-        }
-        if (!legacy.supermemoryForget) {
-          return withNotice({ success: false, error: "Supermemory is not connected." });
-        }
-        return withNotice(await legacy.supermemoryForget(input));
-      case "context_grep":
-        return withNotice(
-          await this.contextRecall(
-            {
-              query,
-              limit: input?.limit,
-              taskId: input?.taskId,
-              explicitUserRequest: input?.explicitUserRequest,
-            },
-            routing,
-          ),
-        );
-      case "context_describe":
-        return withNotice(
-          await this.contextRecall(
-            {
-              id: input?.id,
-              taskId: input?.taskId,
-              explicitUserRequest: input?.explicitUserRequest,
-              sourceLimit: input?.sourceLimit,
-            },
-            routing,
-          ),
-        );
-      default:
-        throw new Error(`Unknown memory tool: ${name}`);
-    }
-  }
-
-  /**
-   * Curated hot-memory edit (deprecated `memory_curate`): the curated table is still a
-   * system of record for prompts, and every change is mirrored into `memory_items`.
-   */
-  async curate(input: {
-    action: "add" | "replace" | "remove";
-    target: "user" | "workspace";
-    id?: string;
-    kind?: CuratedMemoryKind;
-    content?: string;
-    match?: string;
-    reason?: string;
-  }): Promise<Record<string, unknown>> {
-    this.daemon.logEvent(this.taskId, "tool_call", {
-      tool: "memory_curate",
-      action: input?.action,
-      target: input?.target,
-      kind: input?.kind,
-    });
-    // `<no-memory>` blocks adding or rewriting curated memory; removal stays allowed.
-    if (
-      input?.action !== "remove" &&
-      explicitMemoryWriteBlocked(this.daemon, this.taskId, input?.content)
-    ) {
-      this.daemon.logEvent(this.taskId, "tool_result", {
-        tool: "memory_curate",
-        success: false,
-        blocked: true,
-        reason: "no_memory_directive",
-      });
-      return { success: false, error: NO_MEMORY_WRITE_ERROR };
-    }
-    try {
-      const result = await CuratedMemoryService.curate({
-        workspaceId: this.workspace.id,
-        taskId: this.taskId,
-        origin: "agent_tool",
-        ...input,
-        filesystemReadGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
-        filesystemWriteGuard: (candidatePath) => this.canWriteWorkspacePath(candidatePath),
-      });
-      this.daemon.logEvent(this.taskId, "tool_result", {
-        tool: "memory_curate",
-        success: result.success,
-        entryId: result.entry?.id,
-        staged: result.staged,
-        error: result.error,
-      });
-      return {
-        success: result.success,
-        ...(result.entry?.id ? { entryId: result.entry.id } : {}),
-        ...(result.updatedFile ? { updatedFile: result.updatedFile } : {}),
-        ...(result.staged
-          ? { staged: true, message: "Memory write is pending user approval." }
-          : {}),
-        ...(result.pendingId ? { pendingId: result.pendingId } : {}),
-        ...(result.error ? { error: result.error } : {}),
-      };
-    } catch (error) {
-      this.daemon.logEvent(this.taskId, "tool_result", {
-        tool: "memory_curate",
-        success: false,
-        error: String(error),
-      });
-      return { success: false, error: String(error) };
     }
   }
 

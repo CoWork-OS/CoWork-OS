@@ -1,11 +1,12 @@
 /**
  * How each legacy memory lane maps onto memory items (docs/memory-engine.md, "Legacy
- * lanes"). Shared by the one-time lane migration and by the dual writes in the legacy
- * services, so a record maps the same way on both paths.
+ * lanes"). Used by the one-time lane migration, and by the services that now write
+ * `memory_items` directly in the same shape (profile facts, awareness beliefs, response
+ * style, user name), so a fact maps the same way whichever path wrote it.
  *
- * Every candidate carries `sourceRef: { store, id }` naming the legacy record: the
- * migration uses it to stay idempotent, and live edits use it to supersede the previous
- * revision of the same record.
+ * Every candidate carries `sourceRef: { store, id }` naming the record: the migration uses
+ * it to stay idempotent, and live edits use it to supersede the previous revision of the
+ * same record.
  */
 import type {
   AwarenessBelief,
@@ -20,7 +21,25 @@ import {
 } from "../utils/preferred-name";
 import type { MemoryCandidate } from "./MemoryWriter";
 import type { MemoryItemKind, MemoryItemSource } from "./memory-items-types";
-import type { RelationshipMemoryItem } from "./RelationshipMemoryService";
+
+/**
+ * One item of the retired SecureSettings `relationship-memory` blob, as the lane migration
+ * reads it (`MemoryItemsLaneMigration.ts`).
+ */
+export interface LegacyRelationshipItem {
+  id: string;
+  layer: "identity" | "preferences" | "context" | "history" | "commitments";
+  text: string;
+  confidence: number;
+  source: "conversation" | "feedback" | "task" | "mailbox";
+  createdAt: number;
+  updatedAt: number;
+  lastTaskId?: string;
+  status?: "open" | "done";
+  dueAt?: number;
+  contactIdentityId?: string;
+  companyId?: string;
+}
 
 export const MEMORY_LANE_STORES = {
   curated: "curated",
@@ -42,7 +61,12 @@ const CURATED_KINDS: Record<CuratedMemoryEntry["kind"], MemoryItemKind> = {
   active_commitment: "commitment",
 };
 
-/** Curated entries (`memory_curate`, kit edits, distilled promotions): workspace scope. */
+/** The memory kind of a curated kind (`constraint` and `workflow_rule` are rules). */
+export function memoryKindForCuratedKind(kind: CuratedMemoryEntry["kind"]): MemoryItemKind {
+  return CURATED_KINDS[kind] ?? "project_fact";
+}
+
+/** Curated entries (Memory Hub, kit edits, distilled promotions): workspace scope. */
 export function curatedEntryCandidate(
   entry: Pick<
     CuratedMemoryEntry,
@@ -116,7 +140,7 @@ export function userFactCandidate(
   };
 }
 
-const RELATIONSHIP_KINDS: Record<RelationshipMemoryItem["layer"], MemoryItemKind | null> = {
+const RELATIONSHIP_KINDS: Record<LegacyRelationshipItem["layer"], MemoryItemKind | null> = {
   identity: "identity",
   preferences: "preference",
   context: "insight",
@@ -125,7 +149,7 @@ const RELATIONSHIP_KINDS: Record<RelationshipMemoryItem["layer"], MemoryItemKind
   history: null,
 };
 
-const RELATIONSHIP_SOURCES: Record<RelationshipMemoryItem["source"], MemoryItemSource> = {
+const RELATIONSHIP_SOURCES: Record<LegacyRelationshipItem["source"], MemoryItemSource> = {
   conversation: "inferred",
   feedback: "user_confirmed",
   task: "system",
@@ -138,7 +162,7 @@ const RELATIONSHIP_SOURCES: Record<RelationshipMemoryItem["source"], MemoryItemS
  * Done commitments are recorded as archived. History items return null.
  */
 export function relationshipItemCandidate(
-  item: RelationshipMemoryItem,
+  item: LegacyRelationshipItem,
   mode: Mode = "live",
 ): MemoryCandidate | null {
   const kind = RELATIONSHIP_KINDS[item.layer];
@@ -192,8 +216,9 @@ export function beliefSubjectKey(subject: string): string | null {
 
 /**
  * Awareness beliefs about the user: inferred (user-confirmed once the user confirmed
- * them), global. Other belief types (device context, habits, open loops) are signals,
- * not facts, and return null.
+ * them, or when they came from the user's feedback), global. AwarenessService writes
+ * them live through this mapping; the lane migration copied the stored ones. Other belief
+ * types (device context, habits, open loops) are signals, not facts, and return null.
  */
 export function beliefCandidate(
   belief: AwarenessBelief,
@@ -208,7 +233,11 @@ export function beliefCandidate(
     kind,
     scope: "global",
     subjectKey: beliefSubjectKey(belief.subject),
-    source: belief.promotionStatus === "confirmed" ? "user_confirmed" : "inferred",
+    // Confirmed by the user, or learned from their explicit feedback.
+    source:
+      belief.promotionStatus === "confirmed" || belief.source === "feedback"
+        ? "user_confirmed"
+        : "inferred",
     sourceRef: {
       store: MEMORY_LANE_STORES.awareness,
       id: belief.id,
@@ -227,6 +256,25 @@ const LENGTH_LABEL: Record<string, string> = {
   balanced: "balanced",
   detailed: "detailed",
 };
+
+const RESPONSE_STYLE_KEYS = [
+  "responseLength",
+  "explanationDepth",
+  "emojiUsage",
+  "codeCommentStyle",
+] as const;
+
+/** The style dimensions that are set, as plain strings (stored in `source_ref.style`). */
+export function pickResponseStyle(
+  style: Partial<ResponseStylePreferences>,
+): Partial<Record<(typeof RESPONSE_STYLE_KEYS)[number], string>> {
+  const picked: Partial<Record<(typeof RESPONSE_STYLE_KEYS)[number], string>> = {};
+  for (const key of RESPONSE_STYLE_KEYS) {
+    const value = style[key];
+    if (typeof value === "string" && value) picked[key] = value;
+  }
+  return picked;
+}
 
 /** One line describing the full response style, the value of the `response_style` subject. */
 export function renderResponseStyle(style: Partial<ResponseStylePreferences>): string {
@@ -261,6 +309,8 @@ export function responseStyleCandidate(
       store: origin.store,
       id: "response_style",
       ...(origin.reason ? { reason: origin.reason.slice(0, 200) } : {}),
+      // The structured style: PersonalityManager mirrors it (memory-read-side.ts).
+      style: pickResponseStyle(style),
     },
     confidence: origin.source === "inferred" ? 0.6 : 0.95,
     mode: origin.mode ?? "live",

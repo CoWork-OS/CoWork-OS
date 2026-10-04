@@ -78,7 +78,7 @@ Default runtime behavior:
 
 - Curated entry content is capped at **320 characters**
 - `match` strings for replace/remove are capped at **120 characters**
-- the deprecated `memory_curate` alias supports stable `id` values so replace/remove operations can be deterministic; new writes use `memory_remember`
+- the agent writes facts with `memory_remember` (the earlier `memory_curate` tool is removed); curated entries keep stable `id` values so Memory Hub replace/remove operations are deterministic
 - Curated file sync into `.cowork/USER.md` and `.cowork/MEMORY.md` is serialized per workspace and retried on file-change races; once the lane migration has run, the generated blocks are rendered from `memory_items` and hand edits are synced back
 
 ### Dreaming curation

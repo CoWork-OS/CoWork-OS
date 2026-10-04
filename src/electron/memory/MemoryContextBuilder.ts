@@ -14,16 +14,13 @@
  *   trust-tagged when it was not stated by the user; every block lists its refs for
  *   "memory used" attribution.
  *
- * Until the one-time lane migration has run (first two minutes of the first start) or when
- * no MemoryWriter exists (CLI), L0 falls back to the legacy stores through the
- * same lane mappers, so rendering, dedupe and budgets are identical.
+ * `memory_items` is the only source: the legacy lanes are retired, and the one-time lane
+ * migration runs (awaited) at startup before any prompt is built. Without a MemoryWriter
+ * (CLI) there is no memory layer.
  */
 import { InputSanitizer } from "../agent/security/input-sanitizer";
 import { MEMORY_L0_TOKENS, MEMORY_L1_ITEMS_TOKENS } from "../agent/content/prompt-budgets";
-import { CuratedMemoryService } from "./CuratedMemoryService";
-import { MemoryWriter, type MemoryCandidate } from "./MemoryWriter";
-import { RelationshipMemoryService } from "./RelationshipMemoryService";
-import { UserProfileService } from "./UserProfileService";
+import { MemoryWriter } from "./MemoryWriter";
 import { getHotMemoryVersion } from "./hot-memory-version";
 import { resolveMemoryInjection, memoryItemAllowed } from "./MemoryInjectionPolicy";
 import type { MemoryLayerDecision } from "./MemoryInjectionPolicy";
@@ -36,19 +33,11 @@ import type {
 import {
   MEMORY_ITEM_TRUST,
   SINGLE_VALUED_SUBJECTS,
-  hashMemoryItemContent,
-  normalizeMemoryItemContent,
   type ListMemoryItemsRequest,
   type MemoryItem,
   type MemoryItemKind,
   type MemoryItemSource,
 } from "./memory-items-types";
-import {
-  curatedEntryCandidate,
-  relationshipItemCandidate,
-  userFactCandidate,
-} from "./memory-items-lanes";
-import { redactSecrets } from "./sensitive-content";
 
 const CHARS_PER_TOKEN = 4;
 const L0_LIST_LIMIT = 400;
@@ -72,12 +61,11 @@ export interface MemoryContextItemsPort {
   list(request: ListMemoryItemsRequest): Promise<MemoryItem[]>;
   searchForContext?(request: MemoryItemContextSearchRequest): Promise<MemoryItem[]>;
   markUsed?(ids: string[], now?: number): Promise<number>;
-  isLaneMigrationComplete?(): Promise<boolean>;
 }
 
-/** One fact ready to render, from memory_items or a legacy store. */
+/** One fact ready to render, from memory_items. */
 export interface MemoryContextEntry {
-  /** Attribution ref: `memory:<id>` or `<legacy store>:<id>`. */
+  /** Attribution ref: `memory:<id>`. */
   ref: string;
   itemId?: string;
   kind: MemoryItemKind;
@@ -109,15 +97,13 @@ export interface MemoryContextLayersRequest {
 export interface MemoryContextLayers {
   l0: MemoryContextBlock | null;
   l1: MemoryContextBlock | null;
-  /** Where L0 came from this time. */
-  source: "memory_items" | "legacy" | "none";
+  /** Where L0 came from this time (`none`: no layer requested, or no memory engine). */
+  source: "memory_items" | "none";
 }
 
 export interface MemoryContextBuilderDeps {
   /** memory_items access; default: the process-wide MemoryWriter's repository. */
   getItemsPort?: () => MemoryContextItemsPort | null;
-  /** Legacy L0 entries (profile, relationship, curated); default reads the legacy stores. */
-  loadLegacyEntries?: (workspaceId: string | null) => Promise<MemoryContextEntry[]>;
   getHotMemoryVersion?: () => number;
   now?: () => number;
 }
@@ -129,8 +115,6 @@ function estimateTokens(text: string): number {
 function isSingleValued(subject: string | null | undefined): boolean {
   return !!subject && (SINGLE_VALUED_SUBJECTS as readonly string[]).includes(subject);
 }
-
-const PREFERRED_NAME_LINE = /^preferred name\s*:/i;
 
 /** Entry for a memory_items row. */
 export function entryFromItem(item: MemoryItem): MemoryContextEntry {
@@ -149,76 +133,6 @@ export function entryFromItem(item: MemoryItem): MemoryContextEntry {
     updatedAt: item.updatedAt,
     ...(dueAt ? { dueAt } : {}),
   };
-}
-
-/** Entry for a legacy record mapped through the shared lane mapper (same kinds/sources). */
-export function entryFromCandidate(
-  candidate: MemoryCandidate | null,
-  updatedAt: number,
-): MemoryContextEntry | null {
-  if (!candidate || candidate.status === "archived") return null;
-  if (candidate.source === "third_party" || candidate.scope === "contact") return null;
-  const redacted = redactSecrets(normalizeMemoryItemContent(candidate.content)).text;
-  const content = normalizeMemoryItemContent(redacted);
-  if (!content) return null;
-  const store = String(candidate.sourceRef?.store ?? "legacy");
-  const id = String(candidate.sourceRef?.id ?? hashMemoryItemContent(content).slice(0, 12));
-  const subjectKey =
-    candidate.subjectKey ?? (PREFERRED_NAME_LINE.test(content) ? "preferred_name" : null);
-  const dueAt =
-    typeof candidate.sourceRef?.dueAt === "number" ? candidate.sourceRef.dueAt : undefined;
-  return {
-    ref: `${store}:${id}`,
-    kind: candidate.kind,
-    subjectKey,
-    contentHash: hashMemoryItemContent(content),
-    content,
-    source: candidate.source,
-    trust: MEMORY_ITEM_TRUST[candidate.source] ?? 0.5,
-    pinned: candidate.pinned === true,
-    confidence: typeof candidate.confidence === "number" ? candidate.confidence : 0.7,
-    updatedAt,
-    ...(dueAt ? { dueAt } : {}),
-  };
-}
-
-/** Legacy L0 entries: profile facts, non-mailbox relationship items, curated entries. */
-export async function loadLegacyL0Entries(
-  workspaceId: string | null,
-): Promise<MemoryContextEntry[]> {
-  const entries: MemoryContextEntry[] = [];
-  try {
-    for (const fact of UserProfileService.getProfile().facts) {
-      const entry = entryFromCandidate(userFactCandidate(fact), fact.lastUpdatedAt);
-      if (entry) entries.push(entry);
-    }
-  } catch {
-    // profile unavailable
-  }
-  try {
-    const items = RelationshipMemoryService.listItems({
-      includeDone: false,
-      limit: 24,
-      excludeThirdParty: true,
-    });
-    for (const item of items) {
-      const entry = entryFromCandidate(relationshipItemCandidate(item), item.updatedAt);
-      if (entry) entries.push(entry);
-    }
-  } catch {
-    // relationship memory unavailable
-  }
-  if (workspaceId) {
-    try {
-      for (const curated of await CuratedMemoryService.getPromptEntries(workspaceId, 10)) {
-        const entry = entryFromCandidate(curatedEntryCandidate(curated), curated.updatedAt);
-        if (entry) entries.push(entry);
-      }
-    } catch {
-      // curated memory unavailable
-    }
-  }
-  return entries;
 }
 
 /** L0 eligibility: what is worth carrying on every turn. */
@@ -389,12 +303,11 @@ interface L0CacheEntry {
 
 /**
  * One builder per session (task executor): L0 is cached here and rebuilt when the
- * hot-memory version (bumped by every MemoryWriter write and legacy store edit) changes.
+ * hot-memory version (bumped by every MemoryWriter write) changes.
  */
 export class MemoryContextBuilderService implements MemoryContextBuilder {
   private l0Cache: L0CacheEntry | null = null;
   private l1Cache: { key: string; block: MemoryContextBlock | null } | null = null;
-  private migrationComplete = false;
 
   constructor(private readonly deps: MemoryContextBuilderDeps = {}) {}
 
@@ -410,8 +323,8 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
     if (!wantL0 && !wantL1) return { l0: null, l1: null, source: "none" };
 
     const port = (this.deps.getItemsPort ?? defaultItemsPort)();
-    const useItems = port ? await this.isMigrationComplete(port) : false;
-    const source: MemoryContextLayers["source"] = useItems ? "memory_items" : "legacy";
+    if (!port) return { l0: null, l1: null, source: "none" };
+    const source: MemoryContextLayers["source"] = "memory_items";
     const omit = new Set(request.omitSubjects ?? DEFAULT_EXTERNALLY_RENDERED_SUBJECTS);
     const l0Budget = Math.max(0, request.budgets?.l0Tokens ?? MEMORY_L0_TOKENS);
     const version = (this.deps.getHotMemoryVersion ?? getHotMemoryVersion)();
@@ -428,10 +341,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
     // L0 is computed even when only L1 is requested: L1 must not repeat L0 facts.
     let l0State = this.l0Cache?.key === l0Key ? this.l0Cache : null;
     if (!l0State) {
-      const candidates =
-        source === "memory_items" && port
-          ? await this.loadItemEntries(port, request)
-          : await this.loadLegacy(request);
+      const candidates = await this.loadItemEntries(port, request);
       const eligible = candidates.filter(
         (entry) => isL0Entry(entry) && !(entry.subjectKey && omit.has(entry.subjectKey)),
       );
@@ -446,7 +356,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
     const focus = String(request.focus ?? "")
       .trim()
       .slice(0, L1_QUERY_MAX_CHARS);
-    if (wantL1 && focus && source === "memory_items" && port?.searchForContext) {
+    if (wantL1 && focus && port.searchForContext) {
       const l1Budget = Math.max(0, request.budgets?.l1Tokens ?? MEMORY_L1_ITEMS_TOKENS);
       const l1Key = `${l0Key}|${l1Budget}|${focus}`;
       if (this.l1Cache?.key === l1Key) {
@@ -500,20 +410,6 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
     }
   }
 
-  private async isMigrationComplete(port: MemoryContextItemsPort): Promise<boolean> {
-    if (this.migrationComplete) return true;
-    if (!port.isLaneMigrationComplete) {
-      this.migrationComplete = true;
-      return true;
-    }
-    try {
-      this.migrationComplete = await port.isLaneMigrationComplete();
-    } catch {
-      this.migrationComplete = false;
-    }
-    return this.migrationComplete;
-  }
-
   private async loadItemEntries(
     port: MemoryContextItemsPort,
     request: MemoryContextLayersRequest,
@@ -547,13 +443,6 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
           }).allowed,
       )
       .map(entryFromItem);
-  }
-
-  private async loadLegacy(request: MemoryContextLayersRequest): Promise<MemoryContextEntry[]> {
-    const entries = await (this.deps.loadLegacyEntries ?? loadLegacyL0Entries)(request.workspaceId);
-    return entries.filter(
-      (entry) => request.decision.allowCuratedItems || entry.source !== "curated",
-    );
   }
 
   private async buildL1(

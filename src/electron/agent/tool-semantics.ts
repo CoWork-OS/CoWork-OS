@@ -1,4 +1,4 @@
-import { LEGACY_MEMORY_TOOL_ALIASES, MEMORY_WRITE_TOOL_NAMES, TOOL_GROUPS } from "../../shared/types";
+import { MEMORY_WRITE_TOOL_NAMES, TOOL_GROUPS } from "../../shared/types";
 
 export type ToolArtifactKind = "none" | "document" | "spreadsheet" | "presentation" | "file";
 
@@ -121,20 +121,15 @@ const TOOL_SEMANTICS_TABLE: ToolSemantics[] = [
 ];
 
 /**
- * The consolidated memory tools and their deprecated names (audit §8.3). An old name
- * resolves to the tool that replaced it, so it counts as available whenever the new tool
- * is, and read-only lanes classify it like the new tool.
+ * The consolidated memory tools (audit §8.3). The names they replaced were retired
+ * (RETIRED_MEMORY_TOOL_NAMES) and are deliberately not aliases: they no longer resolve to
+ * any tool.
  */
 const MEMORY_TOOL_SEMANTICS: ToolSemantics[] = (
   ["memory_recall", "memory_remember", "memory_forget", "context_recall"] as const
 ).map((canonicalName) => ({
   canonicalName,
-  aliases: [
-    canonicalName,
-    ...Object.entries(LEGACY_MEMORY_TOOL_ALIASES)
-      .filter(([, target]) => target === canonicalName)
-      .map(([alias]) => alias),
-  ],
+  aliases: [canonicalName],
   mutatesFile: false,
   artifactKind: "none",
   dedupeClass: canonicalName,

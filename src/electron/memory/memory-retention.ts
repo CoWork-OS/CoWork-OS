@@ -5,7 +5,7 @@
  * never removed by retention or the storage cap, because deleting them loses something the
  * user cannot cheaply get back:
  *   - imported rows (a re-import pays the LLM again),
- *   - explicit saves (`memory_save` / tool origin),
+ *   - explicit saves (`memory_remember` / tool origin),
  *   - curated promotions (core-memory distiller rows, `system` origin).
  *
  * Playbook outcomes are no longer archive rows (they live in `playbook_entries`, audit

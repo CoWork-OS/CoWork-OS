@@ -4,10 +4,8 @@
  *
  * Every write goes through MemoryWriter. Callers pass the workspace the Hub is showing;
  * an item is visible and editable only when it belongs to that workspace or is not bound
- * to any workspace (global items, workspace-less contact items).
- *
- * Legacy lanes are still read by some prompt paths this wave, so edits, pins and deletes
- * are also applied to the legacy record an item mirrors (best effort, `legacy` port), and
+ * to any workspace (global items, workspace-less contact items). `memory_items` is the
+ * only store of these facts (the legacy lanes are retired), so nothing is mirrored;
  * workspace changes re-render the `.cowork/USER.md` / `MEMORY.md` views (`syncKitFiles`).
  */
 import { randomUUID } from "crypto";
@@ -20,6 +18,7 @@ import type {
   MemoryHubWhy,
 } from "../../shared/memory-hub-types";
 import { createLogger } from "../utils/logger";
+import { memoryWriteSkipMessage } from "./memory-item-revise";
 import type { MemoryWriter, MemoryWriteResult } from "./MemoryWriter";
 import {
   hashMemoryItemContent,
@@ -52,24 +51,9 @@ const VOCABULARIES_MATCH: [
 ] = [true, true, true, true];
 void VOCABULARIES_MATCH;
 
-/**
- * The legacy record an item mirrors (profile fact, relationship item, curated entry).
- * Implementations apply the change to that store without re-rendering kit files.
- */
-export interface MemoryItemsLegacyMirror {
-  edit(ref: { store: string; id: string }, content: string, item: MemoryItem): Promise<void>;
-  remove(
-    ref: { store: string; id: string },
-    mode: "deleted" | "archived",
-    item: MemoryItem,
-  ): Promise<void>;
-  setPinned?(ref: { store: string; id: string }, pinned: boolean): Promise<void>;
-}
-
 export interface MemoryItemsHubDeps {
   /** The process-wide writer (null before the memory engine starts). */
   getWriter: () => MemoryWriter | null;
-  legacy?: MemoryItemsLegacyMirror;
   /** Task title for the "why" link; the title is shown only for the Hub's workspace. */
   getTask?: (
     taskId: string,
@@ -124,22 +108,6 @@ function primaryRef(ref: MemorySourceRef): { store: string; id: string } | null 
   return typeof ref.store === "string" && ref.store && typeof ref.id === "string" && ref.id
     ? { store: ref.store, id: ref.id }
     : null;
-}
-
-/** Primary ref plus the `store:id` aliases of records merged into the item by dedupe. */
-function legacyRefs(ref: MemorySourceRef): Array<{ store: string; id: string }> {
-  const refs: Array<{ store: string; id: string }> = [];
-  const primary = primaryRef(ref);
-  if (primary) refs.push(primary);
-  if (Array.isArray(ref.aliases)) {
-    for (const alias of ref.aliases) {
-      if (typeof alias !== "string") continue;
-      const split = alias.indexOf(":");
-      if (split <= 0 || split === alias.length - 1) continue;
-      refs.push({ store: alias.slice(0, split), id: alias.slice(split + 1) });
-    }
-  }
-  return refs;
 }
 
 const WHY_DETAIL_KEYS = [
@@ -198,24 +166,6 @@ function whySummary(item: MemoryItem): string {
     system: "Recorded by CoWork.",
   };
   return bySource[item.source];
-}
-
-function skipMessage(result: Extract<MemoryWriteResult, { status: "skipped" }>): string {
-  switch (result.reason) {
-    case "empty":
-    case "low_salience":
-      return "That text is too short or has no words to remember.";
-    case "secret_only":
-      return "That text looks like a secret; secrets are not stored in memory.";
-    case "no_memory":
-      return "The text asks not to be remembered.";
-    case "memory_disabled":
-      return "Memory is turned off for this workspace.";
-    case "outranked":
-      return "A higher-trust memory already holds this subject.";
-    default:
-      return "The memory was not saved.";
-  }
 }
 
 export class MemoryItemsHubService {
@@ -336,7 +286,7 @@ export class MemoryItemsHubService {
       originText: request.content,
     });
     if (result.status === "skipped") {
-      return { success: false, error: skipMessage(result), reason: result.reason };
+      return { success: false, error: memoryWriteSkipMessage(result), reason: result.reason };
     }
     if (result.item.workspaceId) await this.syncKit(result.item.workspaceId);
     return { success: true, item: toMemoryHubItem(result.item), action: result.action };
@@ -344,7 +294,7 @@ export class MemoryItemsHubService {
 
   /**
    * Edit an item's text: a new `user_stated` revision supersedes it (same kind, scope and
-   * named subject), and the legacy record it mirrors is updated too.
+   * named subject).
    */
   async update(request: {
     workspaceId: string;
@@ -357,7 +307,7 @@ export class MemoryItemsHubService {
     }
     const result = await this.editItem(item, request.content, MEMORY_HUB_STORE);
     if (result.status === "skipped") {
-      return { success: false, error: skipMessage(result), reason: result.reason };
+      return { success: false, error: memoryWriteSkipMessage(result), reason: result.reason };
     }
     if (item.workspaceId) await this.syncKit(item.workspaceId);
     return { success: true, item: toMemoryHubItem(result.item), action: result.action };
@@ -411,15 +361,8 @@ export class MemoryItemsHubService {
     });
     if (result.status === "skipped") return result;
     if (!ref && result.item.id !== item.id) {
-      // No legacy ref to match on: close the old revision explicitly.
+      // No source ref to match on: close the old revision explicitly.
       await writer.setStatus(item.id, "superseded");
-    }
-    if (ref && this.deps.legacy) {
-      try {
-        await this.deps.legacy.edit(ref, result.item.content, item);
-      } catch (error) {
-        logger.warn("Legacy mirror edit failed:", error);
-      }
     }
     return result;
   }
@@ -434,22 +377,14 @@ export class MemoryItemsHubService {
       return { success: false, error: "Only current memories can be pinned.", reason: "status" };
     }
     await this.writer().setPinned(item.id, request.pinned);
-    const ref = primaryRef(item.sourceRef);
-    if (ref && this.deps.legacy?.setPinned) {
-      try {
-        await this.deps.legacy.setPinned(ref, request.pinned);
-      } catch (error) {
-        logger.warn("Legacy mirror pin failed:", error);
-      }
-    }
     const updated = await this.writer().repository.findById(item.id);
     return { success: true, item: updated ? toMemoryHubItem(updated) : null };
   }
 
   /**
    * A real forget: the item and its older revisions become tombstones with their text
-   * scrubbed (retention drops them), the legacy records it mirrors are deleted, the
-   * hot-memory version is bumped (by the writer) and kit views are re-rendered.
+   * scrubbed (retention drops them), the hot-memory version is bumped (by the writer) and
+   * kit views are re-rendered.
    */
   async delete(request: { workspaceId: string; id: string }): Promise<MemoryHubMutationResult> {
     const item = await this.owned(request.workspaceId, request.id);
@@ -469,48 +404,15 @@ export class MemoryItemsHubService {
     } else {
       await writer.setStatus(item.id, "archived");
     }
-    if (!this.deps.legacy) return;
-    for (const ref of legacyRefs(item.sourceRef)) {
-      try {
-        await this.deps.legacy.remove(ref, mode, item);
-      } catch (error) {
-        logger.warn("Legacy mirror remove failed:", error);
-      }
-    }
   }
 
   /**
-   * Hard-delete every global item (facts about the user that apply everywhere), and the
-   * profile and relationship records they mirror. Workspace items are untouched.
+   * Hard-delete every global item (facts about the user that apply everywhere). Workspace
+   * items are untouched.
    */
-  async clearGlobal(): Promise<{ success: true; deleted: number; legacyRecords: number }> {
-    const writer = this.writer();
-    const globalItems = await writer.repository.list({
-      workspaceId: null,
-      scope: "global",
-      statuses: ["active", "superseded", "archived", "deleted"],
-      includePrivate: true,
-      limit: 5000,
-    });
-    const deleted = await writer.purgeGlobal();
-    let legacyRecords = 0;
-    if (this.deps.legacy) {
-      const seen = new Set<string>();
-      for (const item of globalItems) {
-        for (const ref of legacyRefs(item.sourceRef)) {
-          const key = `${ref.store}:${ref.id}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          try {
-            await this.deps.legacy.remove(ref, "deleted", item);
-            legacyRecords += 1;
-          } catch (error) {
-            logger.warn("Legacy mirror clear failed:", error);
-          }
-        }
-      }
-    }
-    return { success: true, deleted, legacyRecords };
+  async clearGlobal(): Promise<{ success: true; deleted: number }> {
+    const deleted = await this.writer().purgeGlobal();
+    return { success: true, deleted };
   }
 
   private async syncKit(workspaceId: string): Promise<void> {

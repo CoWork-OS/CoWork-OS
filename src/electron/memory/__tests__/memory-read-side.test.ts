@@ -67,12 +67,57 @@ describeWithSqlite("memory read side", () => {
     db.close();
   });
 
-  it("does nothing until the lane migration has finished", async () => {
+  it("runs from installation (the engine installs it after the startup migration)", async () => {
+    expect(isMemoryReadSideActive()).toBe(false);
     handle = installMemoryReadSide(writer, deps);
+    expect(isMemoryReadSideActive()).toBe(true);
     await writer.ingest(preferredNameCandidate("Alice", { source: "user_stated" })!);
     await settle();
-    expect(deps.setUserName).not.toHaveBeenCalled();
+    expect(userName).toBe("Alice");
+    handle.dispose();
+    handle = null;
     expect(isMemoryReadSideActive()).toBe(false);
+  });
+
+  it("mirrors the response_style item into PersonalityManager's live style", async () => {
+    personalityStyle.current = { responseLength: "balanced", emojiUsage: "minimal" };
+    handle = installMemoryReadSide(writer, deps);
+    await writer.ingest(
+      responseStyleCandidate(
+        { responseLength: "terse", emojiUsage: "minimal" },
+        { source: "inferred", store: "adaptive_style", reason: "feedback" },
+      )!,
+    );
+    await settle();
+    expect(personalityStyle.current).toMatchObject({ responseLength: "terse" });
+
+    // A user-stated style outranks later inferences, so they never reach the live style.
+    await writer.ingest(
+      responseStyleCandidate(
+        { responseLength: "detailed", emojiUsage: "none" },
+        { source: "user_stated", store: "personality", reason: "settings" },
+      )!,
+    );
+    await writer.ingest(
+      responseStyleCandidate(
+        { responseLength: "terse", emojiUsage: "minimal" },
+        { source: "inferred", store: "adaptive_style" },
+      )!,
+    );
+    await settle();
+    expect(personalityStyle.current).toMatchObject({ responseLength: "detailed", emojiUsage: "none" });
+
+    // An item without a structured style (copied from the retired lane) changes nothing.
+    await writer.ingest({
+      content: "Response style: short answers.",
+      kind: "preference",
+      scope: "global",
+      subjectKey: "response_style",
+      source: "user_stated",
+      sourceRef: { store: "adaptive_style", id: "legacy" },
+    });
+    await settle();
+    expect(personalityStyle.current).toMatchObject({ responseLength: "detailed" });
   });
 
   it("keeps PersonalityManager on the user-stated name (PROMPT-7)", async () => {

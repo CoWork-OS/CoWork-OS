@@ -5,7 +5,6 @@ import { MemoryWriter, type MemoryCandidate } from "../MemoryWriter";
 import {
   MemoryContextBuilderService,
   dedupeEntries,
-  entryFromCandidate,
   type MemoryContextEntry,
 } from "../MemoryContextBuilder";
 import { resolveMemoryInjection } from "../MemoryInjectionPolicy";
@@ -208,26 +207,35 @@ describeWithSqlite("MemoryContextBuilder over memory_items", () => {
     expect(rowsOf(db, "id = ?", item.id)[0].last_used_at).toEqual(expect.any(Number));
   });
 
-  it("falls back to the legacy stores before the lane migration has run", async () => {
+  it("reads memory_items even before the lane migration marker exists, never a legacy store", async () => {
     const fresh = await createMemoryItemsTestDb(["ws-1"]);
     try {
-      const legacyEntries = vi.fn(async () => [
-        entryFromCandidate(
-          { content: "Legacy rule", kind: "rule", scope: "global", source: "user_stated" },
-          1,
-        ) as MemoryContextEntry,
-      ]);
-      const legacyBuilder = new MemoryContextBuilderService({
+      fresh
+        .prepare(
+          `INSERT INTO curated_memory_entries (id, workspace_id, target, kind, content,
+             normalized_key, source, created_at, updated_at)
+           VALUES ('c1', 'ws-1', 'workspace', 'constraint', 'Legacy rule', 'legacy rule',
+             'agent_tool', 1, 1)`,
+        )
+        .run();
+      const freshBuilder = new MemoryContextBuilderService({
         getItemsPort: () => new MemoryItemsRepository(fresh),
-        loadLegacyEntries: legacyEntries,
       });
-      const layers = await legacyBuilder.buildLayers({ workspaceId: "ws-1", decision: PRIVATE });
-      expect(layers.source).toBe("legacy");
-      expect(layers.l0?.text).toContain("Legacy rule");
-      expect(layers.l1).toBeNull();
+      const layers = await freshBuilder.buildLayers({ workspaceId: "ws-1", decision: PRIVATE });
+      expect(layers.source).toBe("memory_items");
+      expect(layers.l0).toBeNull();
     } finally {
       fresh.close();
     }
+  });
+
+  it("has no memory layer without the memory engine", async () => {
+    const noEngine = new MemoryContextBuilderService({ getItemsPort: () => null });
+    expect(await noEngine.buildLayers({ workspaceId: "ws-1", decision: PRIVATE })).toEqual({
+      l0: null,
+      l1: null,
+      source: "none",
+    });
   });
 
   it("returns nothing when the policy denies both layers", async () => {

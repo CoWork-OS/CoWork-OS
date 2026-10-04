@@ -13703,10 +13703,9 @@ export class AgentDaemon extends EventEmitter {
         resultSummary: undefined,
         bestKnownOutcome: undefined,
         budgetUsage: metadata?.budgetUsage,
-        coreOutcome: undefined,
-        dependencyOutcome: undefined,
-        failureDomains: undefined,
-        stopReasons: undefined,
+        // Reliability outcomes (coreOutcome, dependencyOutcome, failureDomains,
+        // stopReasons) live only on the in-memory task; they have no columns, so they
+        // are not part of this update.
       });
       this.clearRetryState(taskId);
       this.clearTimelineTaskState(taskId);

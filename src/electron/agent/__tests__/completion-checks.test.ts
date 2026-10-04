@@ -203,6 +203,76 @@ describe("evaluateDomainCompletion", () => {
   });
 
   // ── Research quality gate without tool success ────────────────────────
+  it("accepts a one-word answer when the user asked for one word", () => {
+    const result = evaluateDomainCompletion({
+      domain: "general",
+      isLastStep: true,
+      assistantText: "Four",
+      hadAnyToolSuccess: false,
+      taskIntent: "what is 2+2? answer in one word\nwhat is 2+2? answer in one word",
+      stepDescription: "Calculate 2 + 2 and provide the result as one word.",
+    });
+    expect(result.failed).toBe(false);
+  });
+
+  it("accepts a one-sentence answer when the user asked for one short sentence", () => {
+    const result = evaluateDomainCompletion({
+      domain: "general",
+      isLastStep: true,
+      assistantText: "3 + 3 = 6.",
+      hadAnyToolSuccess: false,
+      taskIntent: "Simple Arithmetic\nwhat is 3+3? answer in one short sentence",
+      stepDescription: "Calculate 3 + 3 and provide the result in one short sentence.",
+    });
+    expect(result.failed).toBe(false);
+  });
+
+  it("accepts a short factual answer to a short question", () => {
+    const result = evaluateDomainCompletion({
+      domain: "auto",
+      isLastStep: true,
+      assistantText: "Paris.",
+      hadAnyToolSuccess: false,
+      taskIntent: "Capital of France\nwhat is the capital of France?",
+      stepDescription: "Answer the question.",
+    });
+    expect(result.failed).toBe(false);
+  });
+
+  it("accepts brevity requested in Turkish", () => {
+    const result = evaluateDomainCompletion({
+      domain: "general",
+      isLastStep: true,
+      assistantText: "Dört.",
+      hadAnyToolSuccess: false,
+      taskIntent: "İki artı iki kaç eder, tek kelimeyle cevap ver",
+    });
+    expect(result.failed).toBe(false);
+  });
+
+  it("still rejects a bare acknowledgement to a short question", () => {
+    const result = evaluateDomainCompletion({
+      domain: "general",
+      isLastStep: true,
+      assistantText: "Sure.",
+      hadAnyToolSuccess: false,
+      taskIntent: "can you summarize the quarterly report?",
+    });
+    expect(result.failed).toBe(true);
+  });
+
+  it("still rejects a too-short answer to a request that did not ask for brevity", () => {
+    const result = evaluateDomainCompletion({
+      domain: "general",
+      isLastStep: true,
+      assistantText: "Looks fine.",
+      hadAnyToolSuccess: false,
+      taskIntent: "Plan the migration of our billing service to the new provider.",
+      stepDescription: "Draft a migration plan with milestones.",
+    });
+    expect(result.failed).toBe(true);
+  });
+
   it("accepts a requested direct comparison without requiring research keywords", () => {
     expect(
       evaluateDomainCompletion({

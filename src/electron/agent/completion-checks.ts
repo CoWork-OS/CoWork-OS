@@ -99,6 +99,57 @@ const DIRECT_RESULT_INTENT_PATTERNS = [
   /\becho\b/i,
 ];
 
+// The user asked for a brief answer, so a short reply is the deliverable rather than a
+// sign of an unfinished step ("answer in one word", "one short sentence", "yes or no").
+const BRIEF_ANSWER_INTENT_PATTERNS = [
+  /\b(?:in|with|using)\s+(?:a\s+)?(?:one|single|1|two|three|few|2|3)\s+(?:short\s+)?(?:words?|sentences?|lines?)\b/i,
+  /\b(?:one|single)[-\s](?:word|sentence|line)\b/i,
+  /\b(?:just|only)\s+(?:the\s+)?(?:number|answer|result|value|name|word)\b/i,
+  /\b(?:yes\s+or\s+no|true\s+or\s+false)\b/i,
+  /\b(?:briefly|concisely|short answer|keep it short|tl;?dr)\b/i,
+  // JS \b is ASCII-only, so Turkish suffixes ("tek kelimeyle") need an explicit boundary.
+  /(?:^|\s)tek\s+(?:kelime|cümle|satır)/i,
+  /\bkısaca\b/i,
+  /\bin\s+(?:einem|einem kurzen)\s+(?:wort|satz)\b/i,
+];
+
+// A short standalone question ("what is 2+2?") is answered by a short fact.
+const SHORT_FACTUAL_QUESTION_MAX_CHARS = 160;
+
+function contextRequestsBriefAnswer(input: DomainCompletionInput): boolean {
+  const context = `${input.stepDescription || ""}\n${input.taskIntent || ""}`.trim();
+  if (!context) return false;
+  if (BRIEF_ANSWER_INTENT_PATTERNS.some((pattern) => pattern.test(context))) return true;
+  // taskIntent is usually "title\nprompt". A short request whose prompt is a single
+  // question ("what is 2+2?") is answered by a short fact.
+  const intent = String(input.taskIntent || "").trim();
+  if (!intent || intent.length > SHORT_FACTUAL_QUESTION_MAX_CHARS * 2) return false;
+  const lines = intent
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.some(
+    (line) => line.length <= SHORT_FACTUAL_QUESTION_MAX_CHARS && /\?$/.test(line),
+  );
+}
+
+// Bare acknowledgements answer nothing, even for a short question.
+const ACKNOWLEDGEMENT_ONLY_RESPONSES = new Set([
+  "sure",
+  "sure.",
+  "sure!",
+  "okay",
+  "okay.",
+  "will do",
+  "will do.",
+  "on it",
+  "on it.",
+  "got it",
+  "got it.",
+  "noted",
+  "noted.",
+]);
+
 function extractExpectedLiteralFromContext(input: DomainCompletionInput): string | null {
   const context = `${input.stepDescription || ""}\n${input.taskIntent || ""}`.trim();
   if (!context) return null;
@@ -141,7 +192,8 @@ function shouldAllowConciseDirectResult(input: DomainCompletionInput, normalized
     return true;
   }
 
-  return contextIndicatesDirectResult(input);
+  if (contextIndicatesDirectResult(input)) return true;
+  return !ACKNOWLEDGEMENT_ONLY_RESPONSES.has(normalized) && contextRequestsBriefAnswer(input);
 }
 
 export function evaluateDomainCompletion(input: DomainCompletionInput): DomainCompletionResult {

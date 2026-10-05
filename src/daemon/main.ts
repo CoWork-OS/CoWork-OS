@@ -55,9 +55,9 @@ import { MemoryWriter } from "../electron/memory/MemoryWriter";
 import { MemoryRetentionService } from "../electron/memory/MemoryRetentionService";
 import { startMemoryEngine } from "../electron/memory/memory-engine-bootstrap";
 import { KnowledgeGraphService } from "../electron/knowledge-graph/KnowledgeGraphService";
-import { LoreService } from "../electron/agents/LoreService";
-import { CrossSignalService } from "../electron/agents/CrossSignalService";
-import { FeedbackService } from "../electron/agents/FeedbackService";
+import { createKitWriterOwnership } from "../electron/agents/kit-writers";
+import { EverydayAgentService } from "../electron/everyday-agent/everyday-agent-repository-facades";
+import type { KitWriterOwnership } from "../electron/agents/kit-writer-ownership";
 import { attachAgentDaemonTaskBridge, registerControlPlaneMethods } from "./control-plane-methods";
 import { initializeXMentionBridgeService, XMentionBridgeService } from "../electron/x-mentions";
 import {
@@ -404,37 +404,25 @@ async function main(): Promise<void> {
 
   await maybeBootstrapWorkspace(agentDaemon);
 
-  // Optional cross-agent helpers (best-effort). Kept so shutdown can flush their debounced
-  // kit writes, as on desktop.
-  let crossSignalService: CrossSignalService | null = null;
+  // Workspace kit writers (cross-agent signals, feedback, lore; best-effort), as on desktop.
+  // They run only while this process owns the profile's kit-writer lease; a desktop app on
+  // the same profile takes it over, and the daemon takes it back when the desktop quits.
+  let kitWriterOwnership: KitWriterOwnership | null = null;
   try {
-    crossSignalService = new CrossSignalService(memoryHostDb);
-    await crossSignalService.start(agentDaemon);
-    console.log("[Daemon] CrossSignalService initialized");
+    kitWriterOwnership = createKitWriterOwnership({
+      db: memoryHostDb,
+      agentDaemon,
+      runtime: "node",
+    });
+    const owned = await kitWriterOwnership.start();
+    console.log(
+      owned
+        ? "[Daemon] Kit writers started"
+        : "[Daemon] Kit writers waiting for the kit-writer lease (another process owns it)",
+    );
   } catch (error) {
-    crossSignalService = null;
-    console.error("[Daemon] Failed to initialize CrossSignalService:", error);
-  }
-
-  let feedbackService: FeedbackService | null = null;
-  try {
-    feedbackService = new FeedbackService(memoryHostDb);
-    await feedbackService.start(agentDaemon);
-    console.log("[Daemon] FeedbackService initialized");
-  } catch (error) {
-    feedbackService = null;
-    console.error("[Daemon] Failed to initialize FeedbackService:", error);
-  }
-
-  // Workspace lore (.cowork/LORE.md) from task completions, as on desktop.
-  let loreService: LoreService | null = null;
-  try {
-    loreService = new LoreService(memoryHostDb);
-    await loreService.start(agentDaemon);
-    console.log("[Daemon] LoreService initialized");
-  } catch (error) {
-    loreService = null;
-    console.error("[Daemon] Failed to initialize LoreService:", error);
+    kitWriterOwnership = null;
+    console.error("[Daemon] Failed to start the kit writers:", error);
   }
 
   // Initialize MCP client manager (best-effort).
@@ -754,8 +742,9 @@ async function main(): Promise<void> {
           runtime: "node",
           appVersion,
         });
+        const browserDb = dbManager.getDatabase();
         const browserApp = createBrowserHostApplication({
-          db: dbManager.getDatabase(),
+          db: browserDb,
           webDirectory: path.resolve(__dirname, "../../web"),
           deployment: webDeploymentFromEnv(),
           identity,
@@ -763,6 +752,8 @@ async function main(): Promise<void> {
           agentDaemon,
           channelGateway,
           notificationService,
+          // The daemon's only Everyday Agent service (it has no IPC handlers).
+          everydayAgentService: new EverydayAgentService(browserDb),
         });
         await startedControlPlane.server.setWebApplication(browserApp);
         startedControlPlane.server.registerMethod("web.pair", async (client) => {
@@ -840,25 +831,12 @@ async function main(): Promise<void> {
           requiresQuiescence: true,
           run: () => NumbatService.getInstance()?.shutdown(),
         },
+        // Lore, cross signals, feedback: flush and release the kit-writer lease.
         {
-          name: "lore",
+          name: "kit writers",
           run: async () => {
-            await loreService?.stop();
-            loreService = null;
-          },
-        },
-        {
-          name: "cross signals",
-          run: async () => {
-            await crossSignalService?.stop();
-            crossSignalService = null;
-          },
-        },
-        {
-          name: "feedback",
-          run: async () => {
-            await feedbackService?.stop();
-            feedbackService = null;
+            await kitWriterOwnership?.stop();
+            kitWriterOwnership = null;
           },
         },
         {
@@ -887,7 +865,11 @@ async function main(): Promise<void> {
         {
           name: "memory",
           requiresQuiescence: true,
-          run: () => MemoryService.shutdown(),
+          // Let a running compression batch, markdown sync or cleanup finish first.
+          run: async () => {
+            await MemoryService.drain();
+            MemoryService.shutdown();
+          },
         },
         // Settle in-flight Pulse requests so no late callback writes to a closed database.
         { name: "pulse", run: () => pulseService?.shutdown() },

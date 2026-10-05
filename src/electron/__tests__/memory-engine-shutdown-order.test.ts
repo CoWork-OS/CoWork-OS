@@ -27,4 +27,37 @@ describe.each([["src/electron/main.ts"], ["src/daemon/main.ts"]])("%s shutdown",
     expect(step).toContain("stopMemoryEngine?.()");
     expect(step).toContain("await MemoryWriter.get()?.flush()");
   });
+
+  it("drains the memory service before shutting it down (LOOP-14)", () => {
+    const memory = stepIndex(source, "memory");
+    expect(memory).toBeLessThan(stepIndex(source, "database"));
+    const step = source.slice(memory, memory + 400);
+    expect(step).toContain("await MemoryService.drain()");
+    expect(step.indexOf("MemoryService.drain()")).toBeLessThan(
+      step.indexOf("MemoryService.shutdown()"),
+    );
+  });
+
+  it("stops the kit writers and releases their lease while the database is open", () => {
+    const kit = stepIndex(source, "kit writers");
+    expect(kit).toBeLessThan(stepIndex(source, "database worker"));
+    expect(kit).toBeLessThan(stepIndex(source, "database"));
+    expect(source.slice(kit, kit + 300)).toContain("await kitWriterOwnership?.stop()");
+    // The writers are only started through the lease, never directly.
+    expect(source).not.toMatch(/new (CrossSignalService|FeedbackService|LoreService)\(/);
+  });
+});
+
+describe("desktop quiet mode (LOOP-14)", () => {
+  const source = readFileSync(path.join(ROOT, "src/electron/main.ts"), "utf8");
+
+  it("starts no memory cleanup jobs and no kit writers", () => {
+    expect(source).toContain(
+      "MemoryService.initialize(dbManager, { backgroundJobs: !startupQuietMode })",
+    );
+    const kit = source.indexOf("kitWriterOwnership = createKitWriterOwnership(");
+    expect(kit).toBeGreaterThan(-1);
+    const guard = source.lastIndexOf("if (startupQuietMode) {", kit);
+    expect(source.slice(guard, kit)).toContain("Kit writers not started (quiet mode)");
+  });
 });

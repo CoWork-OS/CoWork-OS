@@ -96,7 +96,7 @@ import {
 } from "./fleet-manager";
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
-import { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
+import type { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
@@ -128,12 +128,13 @@ export interface ControlPlaneMethodDeps {
   dbManager: DatabaseManager;
   channelGateway?: ChannelGateway;
   getRoutineService?: () => RoutineService | null;
+  /** The process's one EverydayAgentService (LIFE-5); the everydayAgent.* methods need it. */
+  everydayAgentService?: EverydayAgentService;
 }
 
 let controlPlaneDeps: ControlPlaneMethodDeps | null = null;
 let detachAgentDaemonBridge: (() => void) | null = null;
 let managedSessionService: ManagedSessionService | null = null;
-let everydayAgentService: EverydayAgentService | null = null;
 
 function getManagedSessionService(deps: ControlPlaneMethodDeps): ManagedSessionService {
   if (!managedSessionService) {
@@ -148,11 +149,12 @@ function getManagedSessionService(deps: ControlPlaneMethodDeps): ManagedSessionS
   return managedSessionService;
 }
 
-function getEverydayAgentService(deps: ControlPlaneMethodDeps): EverydayAgentService {
-  if (!everydayAgentService) {
-    everydayAgentService = new EverydayAgentService(deps.dbManager.getDatabase());
-  }
-  return everydayAgentService;
+/** The injected service, resolved per call; no instance of its own (LIFE-5). */
+function getEverydayAgentService(deps: ControlPlaneMethodDeps): () => EverydayAgentService {
+  return () => {
+    if (!deps.everydayAgentService) throw new Error("Everyday Agent is unavailable");
+    return deps.everydayAgentService;
+  };
 }
 
 function isLoopbackHost(host: string): boolean {
@@ -3057,24 +3059,24 @@ export function registerTaskAndWorkspaceMethods(
 
   server.registerMethod(Methods.EVERYDAY_AGENT_GET_PROFILE, async (client) => {
     requireScope(client, "read");
-    return everydayAgent.getProfile();
+    return everydayAgent().getProfile();
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_UPDATE_PROFILE, async (client, params) => {
     requireScope(client, "admin");
-    return everydayAgent.updateProfile((params || {}) as EverydayAgentUpdateProfileRequest);
+    return everydayAgent().updateProfile((params || {}) as EverydayAgentUpdateProfileRequest);
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_ACCEPT_CONSENT, async (client, params) => {
     requireScope(client, "admin");
-    return everydayAgent.acceptConsent(
+    return everydayAgent().acceptConsent(
       (params || {}) as { enabled?: boolean; workspaceId?: string; accepted?: boolean },
     );
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_PAUSE, async (client, params) => {
     requireScope(client, "admin");
-    return everydayAgent.pause((params || { kind: "global" }) as Partial<EverydayPauseScope>);
+    return everydayAgent().pause((params || { kind: "global" }) as Partial<EverydayPauseScope>);
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_REVOKE_CAPABILITY, async (client, params) => {
@@ -3083,13 +3085,13 @@ export function registerTaskAndWorkspaceMethods(
     if (!p.capability) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: "capability is required" };
     }
-    return everydayAgent.revokeCapability(p.capability as EverydayCapabilityBundle);
+    return everydayAgent().revokeCapability(p.capability as EverydayCapabilityBundle);
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_LIST_RECEIPTS, async (client, params) => {
     requireEverydayAgentReceiptAccess(client);
     return {
-      receipts: await everydayAgent.listReceipts(
+      receipts: await everydayAgent().listReceipts(
         (params || {}) as EverydayAgentListReceiptsRequest,
       ),
     };
@@ -3097,18 +3099,18 @@ export function registerTaskAndWorkspaceMethods(
 
   server.registerMethod(Methods.EVERYDAY_AGENT_CLEAR_DATA, async (client, params) => {
     requireScope(client, "admin");
-    return everydayAgent.clearData((params || {}) as EverydayAgentClearDataRequest);
+    return everydayAgent().clearData((params || {}) as EverydayAgentClearDataRequest);
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_PREVIEW_ACTION, async (client, params) => {
     requireScope(client, "admin");
-    return { preview: await everydayAgent.previewAction(params as EverydayActionPreviewInput) };
+    return { preview: await everydayAgent().previewAction(params as EverydayActionPreviewInput) };
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_APPROVE_ACTION, async (client, params) => {
     requireScope(client, "admin");
     return {
-      receipt: await everydayAgent.approveAction(params as EverydayAgentApproveActionRequest),
+      receipt: await everydayAgent().approveAction(params as EverydayAgentApproveActionRequest),
     };
   });
 

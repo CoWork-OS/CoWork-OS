@@ -22,6 +22,15 @@ The Node daemon (`coworkd-node`) wires up:
 - optional channel gateway (Telegram/Discord/Slack/etc)
 - optional MCP + cron (best-effort)
 - access-profile resolution and fail-closed enforcement shared with the desktop runtime
+- the memory engine and the workspace kit writers (`.cowork/CROSS_SIGNALS.md`, `MISTAKES.md`,
+  `LORE.md`). The kit writers run only while the daemon owns the profile's kit-writer lease: when
+  the desktop app runs on the same profile it takes the lease over and the daemon stops writing
+  kit files until the desktop quits (see [Architecture](architecture.md#workspace-kit))
+
+At shutdown the daemon cancels scheduled memory consolidations, waits up to 3 s for running
+consolidation, Dreaming and playbook learning, flushes and releases the kit writers, and lets a
+running memory compression batch or markdown index sync finish (up to 5 s) before the database
+closes.
 
 ## Recommended Install (Packaged Server Release)
 

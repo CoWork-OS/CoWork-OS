@@ -7,7 +7,7 @@
   ],
   "totals": {
     "prepare": 1669,
-    "getDatabase": 133,
+    "getDatabase": 131,
     "runtimeImport": 49
   },
   "files": {
@@ -121,7 +121,7 @@
       "prepare": 71
     },
     "src/electron/control-plane/handlers.ts": {
-      "getDatabase": 15
+      "getDatabase": 14
     },
     "src/electron/core/CoreEvalCaseRepository.ts": {
       "prepare": 6,
@@ -287,7 +287,7 @@
       "prepare": 1
     },
     "src/electron/main.ts": {
-      "getDatabase": 37
+      "getDatabase": 36
     },
     "src/electron/managed/managed-sql.ts": {
       "prepare": 15

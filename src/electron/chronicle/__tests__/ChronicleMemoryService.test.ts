@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const captureMock = vi.hoisted(() => vi.fn());
 
@@ -15,7 +15,75 @@ vi.mock("../ChronicleObservationRepository", () => ({
 import { ChronicleMemoryService } from "../ChronicleMemoryService";
 import type { ChroniclePersistedObservation } from "../types";
 
+function makeService(): ChronicleMemoryService {
+  const service = new (ChronicleMemoryService as unknown as new () => ChronicleMemoryService)();
+  service.applySettings({
+    enabled: true,
+    mode: "hybrid",
+    paused: false,
+    captureIntervalSeconds: 10,
+    retentionMinutes: 5,
+    maxFrames: 60,
+    captureScope: "frontmost_display",
+    backgroundGenerationEnabled: true,
+    respectWorkspaceMemory: true,
+    consentAcceptedAt: 1,
+  });
+  return service;
+}
+
+function makeObservation(id = "chronicle-task-1-frame-1"): ChroniclePersistedObservation {
+  return {
+    id,
+    promotedAt: Date.now(),
+    workspaceId: "ws-1",
+    taskId: "task-1",
+    query: "draft",
+    destinationHints: [],
+    observationId: "frame-1",
+    capturedAt: Date.now(),
+    displayId: "1",
+    appName: "Editor",
+    windowTitle: "Draft",
+    imagePath: "/tmp/x.png",
+    localTextSnippet: "secret text",
+    confidence: 0.9,
+    usedFallback: false,
+    provenance: "untrusted_screen_text",
+    sourceRef: null,
+    width: 10,
+    height: 10,
+  };
+}
+
 describe("ChronicleMemoryService", () => {
+  beforeEach(() => {
+    captureMock.mockReset();
+  });
+
+  it("routes through the archive capture as private, unmirrored screen context", async () => {
+    captureMock.mockResolvedValue({ id: "memory-1" });
+    const memory = await makeService().notePromotedObservation("/tmp/ws", makeObservation());
+    expect(memory).toEqual({ id: "memory-1" });
+    expect(captureMock.mock.calls[0]?.[5]).toMatchObject({
+      origin: "chronicle",
+      allowExternalMirror: false,
+    });
+  });
+
+  it("writes nothing for a task that opted out with <no-memory>", async () => {
+    const memory = await makeService().notePromotedObservation("/tmp/ws", makeObservation(), {
+      noMemory: true,
+    });
+    expect(memory).toBeNull();
+    expect(captureMock).not.toHaveBeenCalled();
+  });
+
+  it("does not link a memory the capture declined (settings, dedupe miss, salience)", async () => {
+    captureMock.mockResolvedValue(null);
+    expect(await makeService().notePromotedObservation("/tmp/ws", makeObservation())).toBeNull();
+  });
+
   it("captures screen-context memories as private (never mirrored)", async () => {
     captureMock.mockResolvedValue({ id: "memory-1" });
     const service = new (ChronicleMemoryService as unknown as new () => ChronicleMemoryService)();

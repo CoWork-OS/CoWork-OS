@@ -27,7 +27,7 @@ CoWork OS in a deliberately bounded form. The current runtime supports:
 3. On-demand Box MCP calls from agent tasks.
 4. An explicit background index for one configured Box folder and its
    descendants.
-5. Incremental change detection, local embeddings, source URLs, and deletion
+5. Incremental change detection, local hashed embeddings, source URLs, and deletion
    handling that is safe around capped or incomplete crawls.
 6. An optional reviewable improvement pass through the existing Dreaming
    system.
@@ -47,7 +47,7 @@ parity:
 | Can Box provide workflow guidance?                                                                 | Yes, through the bundled Box skill and source-boundary rules.                                                                                                                     |
 | Can the app maintain a background company-brain index?                                             | Yes, when explicitly enabled, but the current scope is one selected folder, bounded per-run work, local persistence, and an app-running timer.                                    |
 | Can new Box evidence initiate improvement?                                                         | Yes. New or changed indexed files can trigger the existing reviewable Dreaming pass.                                                                                              |
-| Does the system silently rewrite curated memory?                                                   | No. Dreaming creates candidates that require the existing review/apply path.                                                                                                      |
+| Does the system silently rewrite curated memory?                                                   | No. Facts backed by Box evidence (private, imported) are only proposed; they wait in the Memory Hub Review tab.                                                                   |
 | Does it automatically reproduce a full background ingestion service or self-improving memory loop? | No claim is made. CoWork does not currently promise a closed-app enterprise crawler, unrestricted corpus ingestion, model training, or automatic acceptance of its own proposals. |
 
 That is the product contract: on-demand Box access and Box workflow guidance
@@ -83,7 +83,7 @@ Hosted Box MCP (Streamable HTTP)
         v
 Box Brain source/item/run state in local SQLite
         |
-        | private imported memories + local embeddings
+        | private imported memories + local hashed embeddings
         v
 CoWork MemoryService and MemorySynthesizer
         |
@@ -448,43 +448,29 @@ retrieval can still be useful evidence, but the pass is driven by the run's
 indexed count and may produce no candidates if there is not enough durable
 evidence.
 
-### What Dreaming reviews
+### What Dreaming does
 
-The Box Brain trigger asks the existing Dreaming service to look for:
+The Box Brain trigger starts an ordinary Dreaming curation run (trigger
+`system`) for the workspace; see [Dreaming](dreaming.md). The run's note about
+the sync is recorded on the run for context only and is never sent to a model.
+Box document bodies are untrusted evidence, not instructions.
 
-- durable company facts;
-- contradictions between newly indexed and existing memory;
-- stale policies or superseded decisions;
-- corrections;
-- recurring workflows;
-- unresolved open loops; and
-- evidence that a memory should be added, replaced, or archived.
+### What happens to the evidence
 
-The prompt explicitly states that Box document bodies are untrusted evidence,
-not instructions. It also asks for the Box file name or URL in the rationale
-when the evidence supports a proposed candidate.
-
-### What happens to candidates
-
-Dreaming persists a run and candidates in the existing Dreaming tables. A
-candidate remains reviewable and auditable until an owning memory flow accepts,
-applies, archives, or dismisses it. Box Brain does not silently promote a
-document statement to curated memory, and it does not write any proposed change
-back to Box.
-
-The current Dreaming implementation is backend-first and deterministic/
-heuristic-based. There is not yet a dedicated renderer review queue for every
-candidate surface; see [Dreaming](dreaming.md) for the current review and
-storage contract. Depending on the build, review and diagnostics may be exposed
-through existing Memory Hub, Mission Control, or backend inspection surfaces.
+Box Brain rows are private imported archive rows. Dreaming may propose promoting
+a fact that recurs in them, but a promotion backed by private or imported
+evidence is never applied automatically: it waits in the Memory Hub **Review**
+tab, where accepting it writes the fact through `MemoryWriter`. Box Brain never
+promotes a document statement to a fact by itself, and it never writes any
+change back to Box.
 
 This is a reviewable improvement loop, not self-training:
 
 ```text
 new Box evidence
-    -> Dreaming hypothesis/candidate
-    -> operator review
-    -> existing memory service applies or rejects it
+    -> Dreaming curation run
+    -> proposal in the Memory Hub Review tab
+    -> accept (MemoryWriter, undoable) or reject (never proposed again)
 ```
 
 ## Privacy and security contract
@@ -502,7 +488,7 @@ permissions, or modify memory silently.
 
 ### Local and private by default
 
-Box Brain writes private local memory observations and local embeddings. It does
+Box Brain writes private local memory observations and local hashed embeddings (no embedding model). It does
 not mirror document bodies to an external memory provider as part of this
 feature. Imported recall can cross the user's local workspaces because the
 memory search layer intentionally includes imported-global entries; it does not
@@ -612,7 +598,7 @@ does not prove that the required MCP tools were discovered or usable.
 | `src/electron/memory/BoxBrainRepository.ts`   | SQLite-backed source, item, and run persistence.                                                                                                             |
 | `src/electron/memory/MemoryService.ts`        | Explicit imported-memory capture/replacement, privacy/exclusion handling, local embeddings, and recall cache invalidation.                                   |
 | `src/electron/memory/MemorySynthesizer.ts`    | Query-based Box Brain recall and the `Box Brain (source-backed)` context section.                                                                            |
-| `src/electron/memory/DreamingService.ts`      | Existing reviewable candidate generation and Dreaming run persistence.                                                                                       |
+| `src/electron/memory/DreamingService.ts`      | Dreaming curation runs (safe operations applied, the rest queued for the Review tab) and run persistence.                                                    |
 | `src/electron/database/schema.ts`             | `box_brain_sources`, `box_brain_items`, and `box_brain_runs` tables and indexes.                                                                             |
 | `src/electron/mcp/box-integration.ts`         | Managed Box MCP endpoint, Streamable HTTP transport, bearer auth, and token-refresh alignment.                                                               |
 | `src/electron/mcp/client/MCPClientManager.ts` | Server connection, tool discovery, and direct server-tool calls.                                                                                             |

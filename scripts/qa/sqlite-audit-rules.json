@@ -30,7 +30,7 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/(memory/([a-z-]+-sql|memory-units|PlaybookEvidenceStore)|knowledge-graph/knowledge-graph-sql)\\.ts$",
+      "pattern": "^src/electron/(memory/([a-z-]+-sql|memory-units|PlaybookEvidenceStore)|knowledge-graph/knowledge-graph(-maintenance)?-sql)\\.ts$",
       "domain": "shared SQL",
       "access": "Memory-domain stores and transaction units: each operation is one unit, run in the database worker when memory is routed there (COWORK_DB_WORKER_MEMORY) and in one host transaction otherwise.",
       "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",

@@ -8,7 +8,16 @@ import { ChronicleSettingsManager } from "./ChronicleSettingsManager";
 import type { ChroniclePersistedObservation, ChronicleSettings } from "./types";
 
 const logger = createLogger("ChronicleMemoryService");
-/** Chronicle memories are always local-only (see docs/chronicle.md). */
+/**
+ * Chronicle memories are always local-only (see docs/chronicle.md).
+ *
+ * Chronicle is archive-only: a promoted observation becomes one private `screen_context`
+ * archive row through `MemoryService.capture`, the shared archive hygiene (`<no-memory>`,
+ * salience, workspace memory settings incl. auto-capture, secret redaction, excluded
+ * patterns, content-hash dedupe). Screen text is third-party content, so it never becomes
+ * a `memory_items` fact about the user; Dreaming does not auto-promote screen-captured
+ * evidence either.
+ */
 export const CHRONICLE_MEMORIES_PRIVATE = true;
 
 export class ChronicleMemoryService {
@@ -35,8 +44,9 @@ export class ChronicleMemoryService {
   async notePromotedObservation(
     workspacePath: string,
     observation: ChroniclePersistedObservation,
+    options: { noMemory?: boolean } = {},
   ): Promise<Memory | null> {
-    if (observation.memoryId) {
+    if (observation.memoryId || options.noMemory) {
       return null;
     }
     if (!this.shouldGenerate(observation.id)) {
@@ -64,6 +74,8 @@ export class ChronicleMemoryService {
         origin: "chronicle",
         signalFamily: "chronicle",
         priority: "normal",
+        // Screen text stays on the device (also enforced by `isPrivate`).
+        allowExternalMirror: false,
       },
     );
     if (!memory) {

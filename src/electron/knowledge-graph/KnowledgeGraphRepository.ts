@@ -12,6 +12,7 @@ import type {
   KGSubgraph,
 } from "../../shared/knowledge-graph-types";
 import type { MemoryStatementPort } from "../memory/memory-statement-port";
+import type { KGWritePolicy } from "./knowledge-graph-sql";
 
 type Source = "manual" | "auto" | "agent";
 
@@ -46,8 +47,9 @@ export class KnowledgeGraphRepository {
     workspaceId: string,
     entityId: string,
     patch: { description?: string; properties?: Record<string, unknown>; confidence?: number },
+    source?: Source,
   ): Promise<KGEntity | undefined> {
-    return this.sql.unit("kg_updateEntity", [workspaceId, entityId, patch]);
+    return this.sql.unit("kg_updateEntity", [workspaceId, entityId, patch, source]);
   }
 
   deleteEntity(workspaceId: string, entityId: string): Promise<boolean> {
@@ -129,8 +131,14 @@ export class KnowledgeGraphRepository {
     workspaceId: string,
     decayRate?: number,
     floorConfidence?: number,
+    now?: number,
   ): Promise<number> {
-    return this.sql.unit("kg_applyConfidenceDecay", [workspaceId, decayRate, floorConfidence]);
+    return this.sql.unit("kg_applyConfidenceDecay", [workspaceId, decayRate, floorConfidence, now]);
+  }
+
+  /** The workspace's memory switches that gate automatic graph writes. */
+  getWritePolicy(workspaceId: string): Promise<KGWritePolicy> {
+    return this.sql.unit("kg_getWritePolicy", [workspaceId]);
   }
 
   getStats(workspaceId: string): Promise<KGStats> {

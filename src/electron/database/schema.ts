@@ -9,6 +9,7 @@ import { runMemoryPayloadMigration } from "../memory/memory-payload-migration-sq
 import { ensureMemoryItemsSchema } from "../memory/memory-items-sql";
 import { ensureSupermemoryRemoteRefsSchema } from "../memory/supermemory-remote-refs-sql";
 import { ensureMemoryCurationSchema } from "../memory/memory-curation-log-sql";
+import { ensureKnowledgeGraphQualitySchema } from "../knowledge-graph/knowledge-graph-maintenance-sql";
 import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
 import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
@@ -2691,6 +2692,7 @@ export class DatabaseManager {
     this.runMigrations();
     this.upgradeTaskReferenceForeignKeysToSetNull();
     this.initializeKnowledgeGraphFTS();
+    this.upgradeKnowledgeGraphQuality();
     ensureEverydayAgentSchema(this.db);
     this.migrateMemoryPayloadTables();
     this.initializeMemoryItems();
@@ -6998,6 +7000,21 @@ export class DatabaseManager {
       `);
     } catch (error) {
       schemaLogger.warn("[DatabaseManager] Knowledge Graph FTS5 initialization failed:", error);
+    }
+  }
+
+  /**
+   * Audit DATA-10: case-insensitive entity names (`normalized_name`, merged duplicates and
+   * a unique index), description source, reinforcement time and observation fingerprints.
+   */
+  private upgradeKnowledgeGraphQuality(): void {
+    try {
+      const merged = ensureKnowledgeGraphQualitySchema(this.db);
+      if (merged > 0) {
+        schemaLogger.info(`[DatabaseManager] Merged ${merged} case-duplicate KG entities`);
+      }
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] Knowledge graph quality migration failed:", error);
     }
   }
 

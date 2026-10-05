@@ -15,6 +15,7 @@
  * facts snapshot, which every write here refreshes before it returns.
  */
 import { createHash } from "crypto";
+import { collapseWhitespace } from "../database/fts-query";
 import { createLogger } from "../utils/logger";
 import { MemoryFactsSnapshot } from "./memory-facts-snapshot";
 import { reviseMemoryItem } from "./memory-item-revise";
@@ -72,10 +73,7 @@ const KIND_LAYERS: Partial<Record<MemoryItemKind, RelationshipLayer>> = {
 };
 
 function normalizeText(value: string): string {
-  return String(value || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .slice(0, MAX_TEXT_LENGTH);
+  return collapseWhitespace(value || "", MAX_TEXT_LENGTH);
 }
 
 function contactScopeRef(scope: { contactIdentityId?: string; companyId?: string }): string {

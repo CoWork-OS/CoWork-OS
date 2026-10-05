@@ -244,6 +244,7 @@ import {
   buildWorkspaceKitContext,
   isDesignSystemRelevantTask,
 } from "../memory/WorkspaceKitContext";
+import { KitFileWatcher } from "../memory/KitFileWatcher";
 import {
   MEMORY_CONTEXT_SECTION_TOKENS,
   MEMORY_L1_COMPACT_TOKENS,
@@ -29942,6 +29943,8 @@ You are continuing a previous conversation. The context from the previous conver
     try {
       const readGuard = (candidatePath: string) => this.canReadWorkspacePath(candidatePath);
       if (planningMemoryDecision.layers.workspaceKit) {
+        // Hand edits of the kit's generated blocks sync back on save from now on.
+        KitFileWatcher.watchWorkspace(this.workspace);
         kitContext = buildWorkspaceKitContext(
           this.workspace.path,
           this.getContractPrompt(),

@@ -4,6 +4,8 @@ import { MemoryService } from "../../memory/MemoryService";
 import { KnowledgeGraphService } from "../../knowledge-graph/KnowledgeGraphService";
 import { ChronicleObservationRepository } from "../../chronicle";
 import { DurableContextService } from "../../memory/DurableContextService";
+import { MemoryRecallService } from "../../memory/MemoryRecall";
+import { SupermemoryService } from "../../memory/SupermemoryService";
 
 describe("RuntimeVisibilityService learning + recall", () => {
   afterEach(() => {
@@ -56,7 +58,47 @@ describe("RuntimeVisibilityService learning + recall", () => {
     expect(progress.steps[4]?.status).toBe("pending");
   });
 
-  function mockSources(): { searchWorkspaceMarkdown: ReturnType<typeof vi.spyOn> } {
+  function mockSources(): {
+    searchWorkspaceMarkdown: ReturnType<typeof vi.spyOn>;
+    recall: ReturnType<typeof vi.fn>;
+  } {
+    const recall = vi.fn(async (request: { lanes?: string[] }) => ({
+      lanes: request.lanes ?? [],
+      laneErrors: {},
+      missing: [],
+      hits: request.lanes?.includes("external")
+        ? [
+            {
+              lane: "external",
+              ref: "external:sm-1",
+              title: "Alpha in Supermemory",
+              snippet: "alpha rollout remote note",
+              score: 0.5,
+              laneRanks: { external: 1 },
+              source: "document",
+              createdAt: 100,
+              relevance: 1,
+            },
+          ]
+        : [
+            {
+              lane: "memory",
+              ref: "memory:item-1",
+              title: "Alpha rollout is staged",
+              snippet: "Alpha rollout is staged by region",
+              score: 0.9,
+              laneRanks: { memory: 1 },
+              source: "user_stated",
+              kind: "project_fact",
+              createdAt: 100,
+              relevance: 1,
+            },
+          ],
+    }));
+    vi.spyOn(MemoryRecallService, "getDefault").mockReturnValue({
+      recall,
+    } as unknown as MemoryRecallService);
+    vi.spyOn(SupermemoryService, "isConfigured").mockReturnValue(true);
     vi.spyOn(MemoryService, "searchForBriefingAsync").mockResolvedValue([
       {
         id: "memory-1",
@@ -150,12 +192,12 @@ describe("RuntimeVisibilityService learning + recall", () => {
         score: 0.01,
       },
     ]);
-    return { searchWorkspaceMarkdown };
+    return { searchWorkspaceMarkdown, recall };
   }
 
   const deps = {
     taskRepo: {
-      findByCreatedAtRange: async () => [
+      searchByTerms: async () => [
         {
           id: "task-1",
           workspaceId: "workspace-1",
@@ -189,7 +231,7 @@ describe("RuntimeVisibilityService learning + recall", () => {
       ],
     } as Any,
     activityRepo: {
-      list: async () => [
+      search: async () => [
         {
           id: "activity-1",
           taskId: "task-1",
@@ -198,6 +240,7 @@ describe("RuntimeVisibilityService learning + recall", () => {
           createdAt: 100,
           activityType: "info",
           actorType: "system",
+          workspaceId: "workspace-1",
         },
       ],
     } as Any,
@@ -217,6 +260,9 @@ describe("RuntimeVisibilityService learning + recall", () => {
     });
 
     const sources = response.results.map((result) => result.sourceType);
+    // Memory items come from the engine's recall; Supermemory needs network access.
+    expect(response.results.some((result) => result.objectId === "memory:item-1")).toBe(true);
+    expect(sources).not.toContain("supermemory");
     expect(sources).toEqual(
       expect.arrayContaining([
         "task",
@@ -246,12 +292,19 @@ describe("RuntimeVisibilityService learning + recall", () => {
     // Browsing records no memory references, and notes come from the `.cowork` kit.
     expect(searchForPromptRecall).not.toHaveBeenCalled();
     expect(search).not.toHaveBeenCalled();
+    // Notes are read through a read guard (no background index sync from a browse),
+    // which refuses anything outside the kit.
     expect(searchWorkspaceMarkdown).toHaveBeenCalledWith(
       "workspace-1",
       "/workspace/.cowork",
       "alpha rollout",
       expect.any(Number),
+      expect.any(Function),
     );
+    const guard = searchWorkspaceMarkdown.mock.calls[0]![4] as (candidate: string) => boolean;
+    expect(guard("/workspace/.cowork/notes.md")).toBe(true);
+    expect(guard("/workspace/.cowork/../secrets.md")).toBe(false);
+    expect(guard("/etc/passwd")).toBe(false);
     expect(DurableContextService.searchConversation).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "workspace-1" }),
     );
@@ -276,5 +329,91 @@ describe("RuntimeVisibilityService learning + recall", () => {
       query: "alpha",
     });
     expect(noWorkspace.results).toEqual([]);
+  });
+
+  it("searches every task and activity of the workspace, not a recent window", async () => {
+    mockSources();
+    const old = Date.now() - 400 * 24 * 60 * 60 * 1000;
+    const searchByTerms = vi.fn(async () => [
+      {
+        id: "task-old",
+        workspaceId: "workspace-1",
+        title: "Postgres migration plan",
+        prompt: "plan the postgres 16 migration",
+        status: "completed",
+        createdAt: old,
+        updatedAt: old,
+      },
+    ]);
+    const search = vi.fn(async () => [
+      {
+        id: "activity-old",
+        workspaceId: "workspace-1",
+        title: "Postgres migration finished",
+        description: "",
+        createdAt: old,
+        activityType: "info",
+        actorType: "system",
+      },
+    ]);
+    const response = await RuntimeVisibilityService.collectUnifiedRecall(
+      {
+        ...deps,
+        taskRepo: { searchByTerms } as Any,
+        activityRepo: { search } as Any,
+      },
+      {
+        workspaceId: "workspace-1",
+        workspacePath: "/workspace",
+        query: "postgres migration",
+        sourceTypes: ["task", "message"],
+      },
+    );
+    expect(searchByTerms).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        terms: ["postgres", "migration"],
+        minMatched: 1,
+      }),
+    );
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace-1", terms: ["postgres", "migration"] }),
+    );
+    expect(response.results.map((result) => result.objectId)).toEqual(
+      expect.arrayContaining(["task-old", "activity-old"]),
+    );
+  });
+
+  it("adds a Supermemory lane only when connected and the workspace allows network access", async () => {
+    const { recall } = mockSources();
+    const workspace = {
+      id: "workspace-1",
+      name: "Alpha",
+      path: "/workspace",
+      permissions: { read: true, write: true, delete: false, network: true, shell: false },
+    };
+    const response = await RuntimeVisibilityService.collectUnifiedRecall(deps, {
+      workspaceId: "workspace-1",
+      workspace: workspace as Any,
+      query: "alpha rollout",
+      sourceTypes: ["supermemory"],
+    });
+    expect(response.results.map((result) => result.sourceType)).toEqual(["supermemory"]);
+    expect(recall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lanes: ["external"],
+        policy: expect.objectContaining({ allowExternal: true, workspaceName: "Alpha" }),
+      }),
+    );
+
+    recall.mockClear();
+    const offline = await RuntimeVisibilityService.collectUnifiedRecall(deps, {
+      workspaceId: "workspace-1",
+      workspace: { ...workspace, permissions: { ...workspace.permissions, network: false } } as Any,
+      query: "alpha rollout",
+      sourceTypes: ["supermemory"],
+    });
+    expect(offline.results).toEqual([]);
+    expect(recall).not.toHaveBeenCalled();
   });
 });

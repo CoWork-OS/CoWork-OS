@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import type Database from "better-sqlite3";
 import { buildYouTubeWatchUrl } from "./url";
+import { extractFtsTerms, foldForMatch, quoteFtsTerm } from "../database/fts-query";
 import type { YouTubeSearchHit, YouTubeTranscriptSegment, YouTubeVideoMetadata } from "./types";
 
 function hashText(text: string): string {
@@ -41,12 +42,13 @@ const SEARCH_STOP_WORDS = new Set([
   "would",
 ]);
 
+/** Any-term query over the shared FTS term extraction and quoting (`database/fts-query.ts`). */
 export function buildYouTubeTranscriptFtsQuery(query: string): string {
-  const tokens = query.toLocaleLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) || [];
-  const keywords = Array.from(new Set(tokens.filter((token) => !SEARCH_STOP_WORDS.has(token))));
-  return keywords
+  return extractFtsTerms(query, { maxTerms: 48, minTermLength: 2, dropStopwords: true })
+    .map((term) => term.toLocaleLowerCase())
+    .filter((term) => !SEARCH_STOP_WORDS.has(foldForMatch(term)))
     .slice(0, 12)
-    .map((token) => `"${token}"`)
+    .map((term) => quoteFtsTerm(term))
     .join(" OR ");
 }
 

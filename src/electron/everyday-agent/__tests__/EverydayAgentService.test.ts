@@ -49,6 +49,10 @@ vi.mock("../../admin/policies", () => ({
 }));
 
 import { EverydayAgentService } from "../everyday-agent-repository-facades";
+import { parseEverydayAgentClearDataRequest } from "../clear-data-request";
+
+const WORKSPACE_A = "8f6c1c2e-1b2a-4c3d-9e8f-0a1b2c3d4e5f";
+const WORKSPACE_B = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 
 type Row = Record<string, unknown>;
 
@@ -408,21 +412,18 @@ class FakeDb {
     if (normalized.includes("delete from everyday_agent_routine_provenance where profile_id = ?")) {
       return this.deleteRows(this.routineProvenance, (row) => row.profile_id === args[0]);
     }
-    const inAutomationProfiles = (row: Row) =>
-      this.automationProfiles.some((profile) => profile.id === row.profile_id);
     if (
       normalized.includes(
-        "delete from core_memory_candidates where profile_id in (select id from automation_profiles)",
+        "delete from core_memory_candidates where workspace_id = ? and status = 'proposed'",
       )
     ) {
-      return this.deleteRows(this.coreMemoryCandidates, inAutomationProfiles);
+      return this.deleteRows(
+        this.coreMemoryCandidates,
+        (row) => row.workspace_id === args[0] && row.status === "proposed",
+      );
     }
-    if (
-      normalized.includes(
-        "delete from core_memory_distill_runs where profile_id in (select id from automation_profiles)",
-      )
-    ) {
-      return this.deleteRows(this.coreMemoryDistillRuns, inAutomationProfiles);
+    if (normalized.includes("delete from core_memory_distill_runs")) {
+      return this.deleteRows(this.coreMemoryDistillRuns, () => true);
     }
     if (normalized.includes("delete from routine_runs where routine_id = ?")) {
       return this.deleteRows(this.routineRuns, (row) => row.routine_id === args[0]);
@@ -630,7 +631,12 @@ describe("EverydayAgentService", () => {
     db.browserProfileMetadata.push({ profile_id: profileId, browser_profile_id: "visible" });
     // Core memory candidates belong to automation profiles, not to the Everyday Agent profile.
     db.automationProfiles.push({ id: "automation-profile-1" });
-    db.coreMemoryCandidates.push({ profile_id: "automation-profile-1", id: "candidate-1" });
+    db.coreMemoryCandidates.push({
+      profile_id: "automation-profile-1",
+      id: "candidate-1",
+      workspace_id: WORKSPACE_A,
+      status: "proposed",
+    });
     db.coreMemoryDistillRuns.push({ profile_id: "automation-profile-1", id: "distill-1" });
     db.routineProvenance.push({ profile_id: profileId, routine_id: "routine-1" });
     db.routines.push({
@@ -647,10 +653,47 @@ describe("EverydayAgentService", () => {
     expect(db.taskLinks).toHaveLength(0);
     expect(db.connectorSummaries).toHaveLength(0);
     expect(db.browserProfileMetadata).toHaveLength(0);
-    expect(db.coreMemoryCandidates).toHaveLength(0);
-    expect(db.coreMemoryDistillRuns).toHaveLength(0);
+    // Without a workspace no memory candidate is cleared, and distill history always stays.
+    expect(db.coreMemoryCandidates).toHaveLength(1);
+    expect(db.coreMemoryDistillRuns).toHaveLength(1);
     expect(db.routineProvenance).toHaveLength(0);
     expect(db.routines).toHaveLength(0);
     expect(db.routineRuns).toHaveLength(0);
+  });
+
+  it("clears only the proposed memory candidates of the panel's workspace", async () => {
+    db.automationProfiles.push({ id: "automation-profile-1" });
+    db.coreMemoryCandidates.push(
+      { id: "a-proposed", workspace_id: WORKSPACE_A, status: "proposed" },
+      { id: "a-applied", workspace_id: WORKSPACE_A, status: "applied" },
+      { id: "a-dismissed", workspace_id: WORKSPACE_A, status: "dismissed" },
+      { id: "b-proposed", workspace_id: WORKSPACE_B, status: "proposed" },
+    );
+    db.coreMemoryDistillRuns.push({ profile_id: "automation-profile-1", id: "distill-1" });
+
+    await service.clearData({ memoryCandidates: true, workspaceId: WORKSPACE_A });
+
+    expect(db.coreMemoryCandidates.map((row) => row.id)).toEqual([
+      "a-applied",
+      "a-dismissed",
+      "b-proposed",
+    ]);
+    expect(db.coreMemoryDistillRuns).toHaveLength(1);
+    // The flag alone (no workspace) clears no candidate.
+    await service.clearData({ memoryCandidates: true });
+    expect(db.coreMemoryCandidates).toHaveLength(3);
+  });
+
+  it("validates clear-data requests from IPC", () => {
+    expect(parseEverydayAgentClearDataRequest(undefined)).toBeUndefined();
+    expect(
+      parseEverydayAgentClearDataRequest({ memoryCandidates: true, workspaceId: WORKSPACE_A }),
+    ).toEqual({ memoryCandidates: true, workspaceId: WORKSPACE_A });
+    expect(() =>
+      parseEverydayAgentClearDataRequest({ memoryCandidates: true, workspaceId: "../x" }),
+    ).toThrow();
+    expect(() => parseEverydayAgentClearDataRequest({ memoryCandidates: "yes" })).toThrow();
+    expect(() => parseEverydayAgentClearDataRequest({ everything: true })).toThrow();
+    expect(() => parseEverydayAgentClearDataRequest("all")).toThrow();
   });
 });

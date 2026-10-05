@@ -86,7 +86,9 @@ export function insertMemoryRow(
 }
 
 /**
- * Store a memory's structured observation; a near-identical recent capture is marked.
+ * Store a memory's structured observation; a near-identical capture of the last five
+ * minutes is marked with capture reason `duplicate_memory_capture`. (Exact repeats never
+ * get here: `writeCapturedMemory` dedupes them over the retention window first.)
  *
  * Regenerating an existing row (Rebuild Metadata, a source re-sync) never loosens its
  * privacy: a suppressed (deleted), redacted or private row keeps that state. A
@@ -95,14 +97,14 @@ export function insertMemoryRow(
 export function writeObservationMetadata(
   db: Database.Database,
   metadata: ObservationMetadataRow,
-): { duplicate: boolean } {
+): void {
   const current = db
     .prepare(
       "SELECT privacy_state, generated_by FROM memory_observation_metadata WHERE memory_id = ?",
     )
     .get(metadata.memoryId) as { privacy_state?: string; generated_by?: string } | undefined;
   if (current && current.generated_by === "manual" && metadata.generatedBy === "migration") {
-    return { duplicate: false };
+    return;
   }
   if (current) {
     metadata = {
@@ -175,7 +177,6 @@ export function writeObservationMetadata(
     metadata.createdAt,
     metadata.updatedAt,
   );
-  return { duplicate: Boolean(existing?.memory_id) };
 }
 
 /**

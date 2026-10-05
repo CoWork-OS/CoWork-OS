@@ -26,6 +26,7 @@ const UNIFIED_RECALL_SOURCES: Array<{ value: UnifiedRecallSourceType; label: str
   { value: "memory", label: "Memory" },
   { value: "screen_context", label: "Screen context" },
   { value: "knowledge_graph", label: "Knowledge graph" },
+  { value: "supermemory", label: "Supermemory" },
 ];
 
 const ESTIMATE_OPTIONS = [

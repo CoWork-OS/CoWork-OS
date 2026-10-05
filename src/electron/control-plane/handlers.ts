@@ -46,7 +46,6 @@ import type {
   Task,
   EverydayActionPreviewInput,
   EverydayAgentApproveActionRequest,
-  EverydayAgentClearDataRequest,
   EverydayAgentListReceiptsRequest,
   EverydayAgentUpdateProfileRequest,
   EverydayCapabilityBundle,
@@ -97,6 +96,7 @@ import {
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
 import type { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
+import { parseEverydayAgentClearDataRequest } from "../everyday-agent/clear-data-request";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
@@ -3099,7 +3099,7 @@ export function registerTaskAndWorkspaceMethods(
 
   server.registerMethod(Methods.EVERYDAY_AGENT_CLEAR_DATA, async (client, params) => {
     requireScope(client, "admin");
-    return everydayAgent().clearData((params || {}) as EverydayAgentClearDataRequest);
+    return everydayAgent().clearData(parseEverydayAgentClearDataRequest(params));
   });
 
   server.registerMethod(Methods.EVERYDAY_AGENT_PREVIEW_ACTION, async (client, params) => {

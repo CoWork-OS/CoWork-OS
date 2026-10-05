@@ -459,7 +459,7 @@ Workspace kit context is still injected separately and placed before the memory 
 **Service:** `src/electron/memory/WorkspaceKitContext.ts`  
 **Location:** `.cowork/*.md`
 
-The workspace kit remains a governed durable context layer with its own contracts, freshness windows, and prompt budgets. `USER.md` and `MEMORY.md` contain auto-managed blocks rendered from `memory_items` in addition to human-authored content; hand edits inside a block are synced back on the next kit sync ([memory-engine.md §5](memory-engine.md#generated-kit-views)).
+The workspace kit remains a governed durable context layer with its own contracts, freshness windows, and prompt budgets. `USER.md` and `MEMORY.md` contain auto-managed blocks rendered from `memory_items` in addition to human-authored content; hand edits inside a block are synced back shortly after the file is saved, and on every kit sync ([memory-engine.md §5](memory-engine.md#generated-kit-views)).
 
 From **Settings → Memory Hub → Per Workspace**, the "Open USER.md" and "Open MEMORY.md" buttons open (or create if missing) these files directly in the system editor via `kit:openFile` IPC.
 

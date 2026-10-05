@@ -43,9 +43,9 @@ low-level writers (`insertCapturedMemory`, the `memory.capture` worker command,
 | Producer | Route | Notes |
 |---|---|---|
 | `memory_remember`, Memory Hub, kit back-sync, awareness, adaptive style, `set_user_name` / `set_response_style`, mailbox, Dreaming promotions | `MemoryWriter` | §3, §4b, §5, §5b. |
-| Core memory candidates (`CoreMemoryDistiller`) | Facts → `MemoryWriter` as `inferred`; events → `MemoryService.capture` | Fact types: preference → `preference`, correction → `correction`, project_state → `project_fact`, pattern → `insight`, constraint → `rule`. An inferred `rule` is L0 on every turn, so a constraint is a fact only when the user accepted the candidate (not the hot-path auto-accept) or `autoPromoteToCuratedMemoryEnabled` is on; otherwise it is an archive event. Scope: `global` for a global core scope, else `workspace` (the candidate's workspace governs policy). `source_ref = { store: "core_candidate", id: <candidate id>, traceId, profileId, candidateType, scopeKind, scopeRef }`. Open loops, watch items and recurring-workflow hints are archive events (capture dedupe). `ignored_noise` is a runtime signal: never written. Lifecycle: written or reinforced → `applied`; dropped for good (no workspace, low salience, secret only, `<no-memory>`, outranked, runtime signal) → `skipped` with the reason; refused by settings (memory or capture off) → stays `accepted` and is retried. Without a running writer (CLI) facts fall back to the archive. The former curated promotion (`upsertDistilledEntry`) is no longer used by the distiller. |
+| Core memory candidates (`CoreMemoryDistiller`) | Facts → `MemoryWriter` as `inferred`; events → `MemoryService.capture` | Fact types: preference → `preference`, correction → `correction`, project_state → `project_fact`, pattern → `insight`, constraint → `rule`. An inferred `rule` is L0 on every turn, so a constraint is a fact only when the user accepted the candidate (not the hot-path auto-accept) or `autoPromoteToCuratedMemoryEnabled` is on; otherwise it is an archive event. Scope: `global` for a global core scope, else `workspace` (the candidate's workspace governs policy). `source_ref = { store: "core_candidate", id: <candidate id>, traceId, profileId, candidateType, scopeKind, scopeRef }`. Open loops, watch items and recurring-workflow hints are archive events (capture dedupe); their provenance is the candidate, marked `applied` with the archive row id (capture options carry no trace or candidate ids). `ignored_noise` is a runtime signal: never written. Lifecycle: written or reinforced → `applied`; dropped for good (no workspace, low salience, secret only, `<no-memory>`, outranked, runtime signal) → `skipped` with the reason; refused by settings (memory or capture off) → stays `accepted` and is retried. Without a running writer (CLI) facts fall back to the archive. The former curated promotion (`upsertDistilledEntry`) is no longer used by the distiller. |
 | Chronicle (`ChronicleMemoryService`) | `MemoryService.capture`, archive only | One private `screen_context` row per promoted observation (`allowExternalMirror: false`), the task's `<no-memory>` passed as `noMemory`. Screen text is third-party content and never becomes a `memory_items` fact; Dreaming does not auto-promote screen-captured evidence. |
-| Imports: ChatGPT export, pasted memory exports (`importFromText`) | `MemoryService.openImportSession` | One session per import. Opening it refuses when memory is off or privacy mode is `disabled`; strict privacy or `forcePrivate` make the rows private (private imports stay in their workspace). Auto-capture does not apply (an explicit act). Per entry: `<no-memory>`, input sanitization, inline `<private>`, redaction (secret-only entries dropped), salience, excluded patterns, then dedupe against every imported row visible in the workspace (own rows and non-private imports of any workspace, so a re-import or an import into a second workspace adds nothing) and the capture's content-hash dedupe; the row is written with its embedding (also into the cross-workspace imported-embedding cache) and observation sidecar (`origin: import`) in one capture; `finish` applies the storage cap. Imports are never mirrored to Supermemory. ChatGPT `observation` entries (facts about the user) are also written as `import` items (trust 0.6, never `user_stated`) in the workspace scope with `source_ref = { store: "import", id: <archive row id>, importer, conversationId }`; deleting the row (Inspector delete, delete imported entry, Delete imported, Clear All Memories) deletes the fact, and ignoring the row for prompt recall archives it (un-ignoring writes it again). A fact another source also holds (alias only) is left alone. ChatGPT conversations already imported and visible in the workspace are skipped before the LLM call; a failed distillation counts as an error, not as processed. |
+| Imports: ChatGPT export, pasted memory exports (`importFromText`) | `MemoryService.openImportSession` | One session per import. Opening it refuses when memory is off or privacy mode is `disabled`; strict privacy or `forcePrivate` make the rows private (private imports stay in their workspace). Auto-capture does not apply (an explicit act). Per entry: `<no-memory>`, input sanitization, inline `<private>`, redaction (secret-only entries dropped), salience, excluded patterns, then dedupe against every imported row visible in the workspace (own rows and non-private imports of any workspace, so a re-import or an import into a second workspace adds nothing) and the capture's content-hash dedupe; the row is written with its embedding (also into the cross-workspace imported-embedding cache) and observation sidecar (`origin: import`) in one capture; `finish` applies the storage cap. Imports are never mirrored to Supermemory. ChatGPT `observation` entries (facts about the user) are also written as `import` items (trust 0.6, never `user_stated`) in the workspace scope with `source_ref = { store: "import", id: <archive row id>, importer, conversationId }`; deleting the row (Inspector delete, delete imported entry, Delete imported, Clear All Memories) deletes the fact, and ignoring the row for prompt recall archives it (un-ignoring writes it again). A fact another source also holds (alias only) is left alone. ChatGPT conversations already imported and visible in the workspace are skipped before the LLM call; a conversation imported only into another workspace (privately there) is imported again from its stored entries (type and distilled text, rows whose observation is suppressed or redacted excluded) without a new LLM call, through the same session; a failed distillation counts as an error, not as processed. |
 | Supermemory (`SupermemoryService`) | Remote only | Explicit remember (`memory_remember` scope `external`): `<no-memory>` refused, secrets redacted (secret-only refused), refused when workspace memory is off or privacy mode is `disabled` / `strict`; mirror writes copy archive rows that already passed `capture` and are non-private. Profile and search results are only cached per task for the prompt (third-party tag) and never stored locally, so a remote fact is never `user_stated` here. |
 | Box Brain | `MemoryService.capture` / `replaceMemory` | Private source rows (`origin: import`, `forceCapture`). |
 | Task outcomes, corrections, feedback, errors (daemon, executor), `memory_remember` kinds `outcome` / `error` / `note`, approved archive writes | `MemoryService.capture` | Salience-gated upstream (`memory-capture-salience.ts`) and at capture. |
@@ -335,6 +335,14 @@ lane migration. PersonalityManager's user name and response style are mirrors of
   packs, read-only), `external` (Supermemory; only when `policy.allowExternal` and configured).
 - **One FTS builder.** The memory lane uses `database/fts-query.ts` (Unicode, prefix-aware,
   operator-safe: all terms, then any term), with a term-match fallback when FTS5 is missing.
+  The markdown index, mailbox search and YouTube transcripts use its term extraction,
+  folding (`foldSearchText`: case and Latin accents) and quoting too (RECALL-9): their
+  earlier ASCII-only dialects dropped every non-Latin word, so a Cyrillic, Greek, Turkish or
+  CJK query found nothing. The markdown tokenizer keeps ASCII text exactly as before (stored
+  local embeddings stay comparable) and keeps a single CJK character as a word; a CJK word
+  inside a longer run of characters (which `unicode61` indexes as one token) is found by the
+  `LIKE` fallback when FTS returns nothing. Shared text helpers (`trimmedText`,
+  `collapseWhitespace`) replace the copies of `normalizeText` in the recall paths.
   Any-term (OR) queries drop function words of a small English, German, Turkish, French and
   Spanish stopword list, unless the query has nothing else; all-terms (AND) queries keep every
   term. Without this, "when do we ship the postgres 16 migration" matched every row containing
@@ -367,6 +375,24 @@ lane migration. PersonalityManager's user name and response style are mirrors of
   records an archive reference — the tools call it only for results returned in full.
 - **Failures.** `recall()` reports per-lane errors; `query()` throws when every lane failed, so
   a broken index is never mistaken for "nothing remembered" (RECALL-3).
+
+**Mission Control recall** (`RuntimeVisibilityService.collectUnifiedRecall`, RECALL-4) is
+the user's search over one workspace in task detail. Lanes: memory items (this recall's
+`memory` lane: no private, task-scope, contact or third-party items), archive memories
+(`searchForBriefingAsync`), workspace notes (the `.cowork` markdown index), the knowledge
+graph, Chronicle `screen_context`, the conversation index (user and assistant messages
+verbatim, which replaces the retired quotes lane, plus tool output and summaries), tasks,
+files those tasks touched, the activity feed and Supermemory (source `supermemory`, only
+when connected and the workspace has network access on; the query leaves the device,
+nothing is stored). Tasks and activity have no FTS index: they are term-searched in SQL
+over every row of the workspace (`TaskStore.searchByTerms`, `ActivityStore.search`: at
+least half the query terms, most matching terms first, then newest; 200 rows), then ranked
+by term coverage, so a matching task from last year is found as well as one from today.
+Lanes are fused by weighted reciprocal rank. A search records no memory use, and notes are
+read through a read guard (inside `.cowork`, the workspace's access profile), which also
+keeps a search from scheduling a markdown index sync: the index is as fresh as the last
+sync by a task or a kit write. The IPC handler passes only the query, limit, source types
+and the stored workspace.
 
 Agent tools (`agent/tools/memory-tools.ts`, audit §8.3): `memory_recall`, `memory_remember`
 (facts through `MemoryWriter` as `user_stated` only when the model sets `user_asked` and the
@@ -536,8 +562,17 @@ private items, contact items and global items are never rendered into either fil
   content changes, so a sync after a sync does nothing (no write loop). If the file's mtime
   changes between reading the edits and applying them, nothing is applied and the read is
   retried; a file that changes after edits were applied is left for the next sync.
-- Back-sync runs on the next kit sync (a curated write, a Memory Hub change, Clear All
-  Memories); there is no file watcher.
+- Back-sync runs on every kit sync (a curated write, a Memory Hub change, Clear All
+  Memories) and on a file edit: `KitFileWatcher` (installed by `startMemoryEngine`, closed
+  with it) watches the `.cowork` directory of each workspace whose kit was synced or used by
+  a task (at most 32, least recently used dropped first) and, 1.5 s after the last change to
+  `USER.md` or `MEMORY.md`, runs the kit sync with `fromFileEdit`. That sync re-reads the
+  workspace and needs its access profile to allow reading and writing the kit files, and it
+  refuses a `.cowork` directory or kit file that is a symlink or resolves outside the
+  workspace. One sync runs at a time per workspace (an edit during it runs one more); the
+  write a sync makes leads to one more sync that changes nothing. The desktop app and the
+  node daemon each watch on their own; the database's unique indexes keep a concurrent
+  back-sync from duplicating items.
 - An agent can write `.cowork/USER.md` like any workspace file, so kit edits cannot be
   attributed to the user: they carry `curated` trust (0.85) and never outrank or overwrite
   what the user stated.
@@ -759,6 +794,12 @@ reindexes summary changes. The marker stores `scanned`, `summariesRewritten`,
   foreign keys on).
 - **Retention** (`MemoryRetentionService`, step `memoryItems`, `MEMORY_ITEM_RETENTION_RULES`):
   daily, drops `deleted` tombstones and items whose `expires_at` has passed. Step
+  `memoryItemRevisions` (`MEMORY_ITEM_REVISION_RETENTION_RULES`) drops `superseded`
+  revisions superseded more than 180 days ago (`supersededRevisionRetentionDays`), except
+  the newest 5 revisions of each item's chain (`SUPERSEDED_REVISIONS_KEPT`, walking
+  `supersedes_id` from the current row, so the Memory Hub history keeps its latest steps)
+  and any revision a curation-log entry that can still be undone touched or created (Undo
+  restores rows by id). A dropped revision only shortens the tail of a chain. Step
   `pendingWrites` drops memory-write approvals that are `applied`, `rejected` or `failed` and
   were reviewed (or created, if never reviewed) more than 30 days ago; `pending` and
   `applying` rows stay.
@@ -824,14 +865,14 @@ reindexes summary changes. The marker stores `scanned`, `summariesRewritten`,
    app flushes the same way (§7).
 2. Done: kit-file edits and Memory Hub edits go through `MemoryWriter` (§5, §5a); kit edits
    carry `curated` trust because agent and user writes to the files cannot be told apart.
-   Open: trigger back-sync without waiting for the next kit sync.
+   Done: back-sync also runs on a kit file edit (`KitFileWatcher`, §5).
 3. Done: "Clear global memories" in the Memory Hub. It does not reset awareness's belief
    state (signals) or the adaptive style engine's bookkeeping; PersonalityManager's name and
    style keep their last mirrored values.
 4. Done: `AdaptiveStyleEngine` defers to an explicit `response_style` (§4a), including a style
    set in Settings.
-5. Superseded revisions are kept indefinitely; add an age-based retention rule once the Memory
-   Hub shows history.
+5. Done: superseded revisions older than 180 days are dropped, keeping the newest 5 per
+   item and those an undoable curation change needs (§7).
 6. `findBySourceRef` matches aliases with `json_each`, which cannot use an index; fine for the
    expected size (hundreds to low thousands of rows), revisit if the table grows.
 7. Done: every producer goes through the same hygiene (§1, "Producers and their write

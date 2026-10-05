@@ -15,6 +15,8 @@
  *     older than 90 days
  *   - Playbook entries older than 180 days that no longer back active success evidence
  *   - memory items that were forgotten (deleted tombstones) or are past their `expires_at`
+ *   - superseded memory item revisions superseded more than 180 days ago, except the
+ *     newest 5 of each item and revisions an undoable curation change still needs
  *   - settled memory-write approvals (applied, rejected, failed) older than 30 days
  *   - once per profile (marker in `maintenance_state`): markdown index rows of excluded
  *     paths in every workspace, including workspaces whose index never syncs again
@@ -43,6 +45,7 @@ import {
   CORE_RETENTION_RULES,
   DREAMING_RETENTION_RULES,
   MEMORY_ITEM_RETENTION_RULES,
+  MEMORY_ITEM_REVISION_RETENTION_RULES,
   PENDING_MEMORY_WRITE_RETENTION_RULES,
   PLAYBOOK_RETENTION_RULES,
   SUBCONSCIOUS_RETENTION_RULES,
@@ -75,6 +78,8 @@ export const MEMORY_RETENTION_DEFAULTS = {
   suggestionFeedbackRetentionDays: 90,
   playbookRetentionDays: 180,
   pendingWriteRetentionDays: 30,
+  /** Superseded memory item revisions (beyond the newest few per item). */
+  supersededRevisionRetentionDays: 180,
   /** Indexed paths checked per page of the one-time markdown index purge. */
   markdownPurgePageSize: 500,
   /** Delay before the first run, so startup work is not slowed down. */
@@ -99,6 +104,7 @@ export type MemoryRetentionStep =
   | "suggestions"
   | "playbookEntries"
   | "memoryItems"
+  | "memoryItemRevisions"
   | "pendingWrites"
   | "markdownIndexPurge";
 
@@ -318,6 +324,13 @@ export class MemoryRetentionService {
       ),
     );
     await step("memoryItems", () => this.pruneRows(db, MEMORY_ITEM_RETENTION_RULES, startedAt));
+    await step("memoryItemRevisions", () =>
+      this.pruneRows(
+        db,
+        MEMORY_ITEM_REVISION_RETENTION_RULES,
+        startedAt - MEMORY_RETENTION_DEFAULTS.supersededRevisionRetentionDays * DAY_MS,
+      ),
+    );
     await step("pendingWrites", () =>
       this.pruneRows(
         db,

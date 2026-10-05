@@ -166,6 +166,52 @@ describeWithSqlite("CuratedMemoryService kit back-sync", () => {
     expect(await fs.readFile(memoryPath, "utf8")).toContain("Never push to main");
   });
 
+  it("syncs a file edit under the workspace's access profile", async () => {
+    const service = CuratedMemoryService as unknown as Record<string, unknown>;
+    const permissions = { read: true, write: true, delete: false, network: false, shell: false };
+    service.workspaceRepo = {
+      findById: async () => ({ id: "ws-1", path: workspacePath, permissions }),
+    };
+    await CuratedMemoryService.syncWorkspaceFiles("ws-1");
+    const rendered = await fs.readFile(memoryPath, "utf8");
+    await fs.writeFile(memoryPath, rendered.replace("PostgreSQL 16", "PostgreSQL 18"), "utf8");
+
+    await CuratedMemoryService.syncWorkspaceFiles("ws-1", { fromFileEdit: true });
+    expect(active()).toContain("project_fact|curated|The API uses PostgreSQL 18");
+
+    // A profile without write access refuses the sync (and so the back-sync).
+    service.workspaceRepo = {
+      findById: async () => ({
+        id: "ws-1",
+        path: workspacePath,
+        permissions: { ...permissions, write: false },
+      }),
+    };
+    const again = await fs.readFile(memoryPath, "utf8");
+    await fs.writeFile(memoryPath, again.replace("PostgreSQL 18", "PostgreSQL 19"), "utf8");
+    await expect(
+      CuratedMemoryService.syncWorkspaceFiles("ws-1", { fromFileEdit: true }),
+    ).rejects.toThrow(/Access denied/);
+    expect(active()).toContain("project_fact|curated|The API uses PostgreSQL 18");
+  });
+
+  it("refuses a file-edit sync when a kit file is a symlink", async () => {
+    await CuratedMemoryService.syncWorkspaceFiles("ws-1");
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-kit-outside-"));
+    const target = path.join(outside, "MEMORY.md");
+    await fs.writeFile(target, (await fs.readFile(memoryPath, "utf8")).replace("16", "20"));
+    await fs.rm(memoryPath);
+    await fs.symlink(target, memoryPath);
+    try {
+      await expect(
+        CuratedMemoryService.syncWorkspaceFiles("ws-1", { fromFileEdit: true }),
+      ).rejects.toThrow(/outside the workspace/);
+      expect(active()).toContain("project_fact|curated|The API uses PostgreSQL 16");
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("does not loop: a sync after a sync writes nothing and changes no items", async () => {
     await CuratedMemoryService.syncWorkspaceFiles("ws-1");
     const ingest = vi.spyOn(writer, "ingest");

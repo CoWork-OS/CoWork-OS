@@ -1,6 +1,12 @@
 import crypto from "crypto";
 import type Database from "better-sqlite3";
-import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "../database/fts-query";
+import {
+  LIKE_ESCAPE_CLAUSE,
+  foldSearchText,
+  likeContainsPattern,
+  quoteFtsTerm,
+  splitSearchTokens,
+} from "../database/fts-query";
 
 /**
  * The markdown memory index as synchronous SQL: the store the memory domain's transaction
@@ -173,19 +179,29 @@ type ParsedChunkRow = {
   updatedAt: number;
 };
 
+const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/**
+ * Search tokens in any script (RECALL-9): lower-cased, Latin accents folded, split on
+ * anything but letters, digits, marks, `_` and `-`. ASCII text tokenizes exactly as the
+ * earlier ASCII-only dialect did, so stored local embeddings stay comparable; non-Latin
+ * words are kept instead of being stripped. A one-character token is kept only for
+ * Chinese, Japanese and Korean, where one character can be a word.
+ */
 export function tokenizeForMemorySearch(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9_\s-]/g, " ")
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 1 && !STOP_WORDS.has(token));
+  return splitSearchTokens(foldSearchText(text), 1).filter(
+    (token) => (token.length > 1 || CJK_CHARACTER.test(token)) && !STOP_WORDS.has(token),
+  );
 }
 
+/**
+ * All query tokens (at most 8), each quoted with the shared FTS quoting, joined by AND.
+ * The index's `unicode61` tokenizer folds case and diacritics, so folded tokens match.
+ */
 export function buildMarkdownFtsQuery(raw: string): string | null {
   const tokens = tokenizeForMemorySearch(raw).slice(0, 8);
   if (tokens.length === 0) return null;
-  return tokens.map((token) => `"${token.replace(/"/g, "")}"`).join(" AND ");
+  return tokens.map((token) => quoteFtsTerm(token)).join(" AND ");
 }
 
 export function chunkMarkdownForIndex(
@@ -707,7 +723,7 @@ export class MarkdownIndexStore {
         rank: number;
       }>;
 
-      return rows.map((row, index) => ({
+      const mapped = rows.map((row, index) => ({
         id: row.id,
         path: row.path,
         startLine: row.start_line,
@@ -717,6 +733,12 @@ export class MarkdownIndexStore {
         textScore: normalizeBm25Rank(index),
         createdAt: row.mtime,
       }));
+      // `unicode61` keeps a run of CJK characters as one token, so a word inside it only
+      // matches by substring: try the LIKE fallback when FTS finds nothing for such text.
+      if (mapped.length === 0 && /[^\p{Script=Latin}\p{N}\p{P}\s]/u.test(query)) {
+        return this.searchKeywordFallback(workspaceId, query, limit);
+      }
+      return mapped;
     } catch {
       return this.searchKeywordFallback(workspaceId, query, limit);
     }

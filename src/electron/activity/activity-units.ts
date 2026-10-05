@@ -26,6 +26,7 @@ export const ACTIVITY_UNITS = {
   activity_insertIfAbsent: contextStoreUnit(activityStore, "insertIfAbsent", write),
   activity_findById: contextStoreUnit(activityStore, "findById", read),
   activity_list: contextStoreUnit(activityStore, "list", read),
+  activity_search: contextStoreUnit(activityStore, "search", read),
   activity_getUnreadCount: contextStoreUnit(activityStore, "getUnreadCount", read),
   activity_markRead: contextStoreUnit(activityStore, "markRead", write),
   activity_markAllRead: contextStoreUnit(activityStore, "markAllRead", write),

@@ -10,6 +10,7 @@ import {
 } from "../../memory/MemoryInjectionPolicy";
 import { ExternalMemoryProviderRegistry } from "../../memory/ExternalMemoryProvider";
 import { buildSalientTaskEventCapture } from "../../memory/memory-capture-salience";
+import { MemoryRepoContext } from "../../memory/repo/MemoryRepoContext";
 
 function createExecutor(): Any {
   const executor = Object.create(TaskExecutor.prototype) as Any;
@@ -113,7 +114,7 @@ describe("memory layers for prompt surfaces", () => {
       { surface: "chat", focus: "hello", l0: true, l1Tokens: 200 },
     );
 
-    expect(result).toEqual({ l0: "", l1: "" });
+    expect(result).toEqual({ l0: "", l1: "", repo: "" });
     expect(build).not.toHaveBeenCalled();
   });
 
@@ -149,6 +150,61 @@ describe("memory layers for prompt surfaces", () => {
     });
     expect(markUsed).toHaveBeenCalledTimes(1);
     expect(markUsed).toHaveBeenCalledWith(["memory:a", "memory:b"]);
+  });
+
+  it("adds the memory folder block next to L0 and has L0/L1 skip its facts", async () => {
+    const executor = createExecutor();
+    executor.emitEvent = vi.fn();
+    const repoBuild = vi.spyOn(MemoryRepoContext.prototype, "build").mockResolvedValue({
+      text: "<cowork_memory_repo>\n- Prefers tea\n</cowork_memory_repo>",
+      refs: ["repo:MEMORY.md#L3"],
+      hashes: ["h-tea"],
+      version: "v1",
+      tokens: 10,
+    });
+    const build = vi.spyOn(MemoryContextBuilderService.prototype, "buildLayers").mockResolvedValue({
+      l0: { layer: "l0", text: "MEMORY\n- rule", refs: ["memory:a"], tokens: 4, truncated: false },
+      l1: null,
+      source: "memory_items",
+    });
+    vi.spyOn(MemoryContextBuilderService.prototype, "markUsed").mockResolvedValue(undefined);
+    const decision = resolveMemoryInjection({ memoryRepoEnabled: true });
+
+    const chat = await executor.buildMemoryLayersForPrompt(decision, {
+      surface: "chat",
+      focus: "tea",
+      l0: true,
+      l1Tokens: 200,
+    });
+    expect(repoBuild).toHaveBeenCalledWith({ workspaceId: "ws-1" });
+    expect(chat.repo).toMatch(/^<cowork_memory_repo>/);
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ excludeHashes: ["h-tea"] }));
+    expect(executor.emitEvent).toHaveBeenCalledWith("memory_used", {
+      surface: "memory_repo",
+      refs: ["repo:MEMORY.md#L3"],
+      source: "memory_repo",
+    });
+
+    // Step turns pin the block instead: no repo text, but L1 still skips its facts.
+    const step = await executor.buildMemoryLayersForPrompt(decision, {
+      surface: "step",
+      focus: "tea",
+      l0: false,
+      l1Tokens: 200,
+    });
+    expect(step.repo).toBe("");
+    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ excludeHashes: ["h-tea"] }));
+
+    // Without the layer the folder is never read.
+    repoBuild.mockClear();
+    const off = await executor.buildMemoryLayersForPrompt(allowAll(), {
+      surface: "chat",
+      focus: "tea",
+      l0: true,
+      l1Tokens: 200,
+    });
+    expect(off.repo).toBe("");
+    expect(repoBuild).not.toHaveBeenCalled();
   });
 
   it("reports the same refs again in a new turn, so each reply can show what it used", async () => {

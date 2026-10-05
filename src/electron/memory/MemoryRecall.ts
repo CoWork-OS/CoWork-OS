@@ -4,6 +4,8 @@
  *
  * Lanes:
  *  - `memory`        memory_items (facts, preferences, rules, decisions …), FTS + trust;
+ *  - `repo`          the memory repo's markdown entries (docs/memory-repo-phase1-design.md
+ *                    §6.3), searched in process; `inbox.md` hits are tagged unreviewed;
  *  - `archive`       the episodic `memories` archive (task outcomes, errors, saved notes,
  *                    imports), the existing hybrid search with the Phase 0 visibility filter;
  *  - `conversations` the unified conversation index of earlier tasks;
@@ -23,6 +25,7 @@
  * `query` has no side effects. A use is counted with `markUsed`, which callers invoke for
  * hits they actually return in full or inject, never for a listing.
  */
+import { isMemoryRepoReadAllowed } from "../security/memory-repo-access";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { createLogger } from "../utils/logger";
@@ -36,6 +39,16 @@ import type {
   MemoryRecallQuery,
 } from "./memory-engine-contracts";
 import type { MemoryItemRecallRequest, MemoryItemRecallRow } from "./memory-recall-sql";
+import { redactSensitiveMarkdownContent } from "./markdown-index-sql";
+import { MemoryRepoService } from "./repo/MemoryRepoService";
+import {
+  MEMORY_REPO_INBOX_FILE,
+  memoryRepoRef,
+  parseMemoryRepoEntries,
+  parseMemoryRepoRef,
+  splitLines,
+  type MemoryRepoEntry,
+} from "./repo/memory-repo-format";
 import { MEMORY_ITEM_TRUST, type MemoryItem, type MemoryItemSource } from "./memory-items-types";
 import { hasReservedImportPrefix } from "./memory-visibility";
 import { MemoryService } from "./MemoryService";
@@ -73,6 +86,7 @@ const RRF_K = 60;
  */
 export const MEMORY_RECALL_LANE_WEIGHTS: Readonly<Record<MemoryRecallLane, number>> = {
   memory: 1,
+  repo: 1,
   archive: 0.8,
   conversations: 0.7,
   knowledge: 0.6,
@@ -80,6 +94,9 @@ export const MEMORY_RECALL_LANE_WEIGHTS: Readonly<Record<MemoryRecallLane, numbe
 };
 const IMPORTED_ARCHIVE_FACTOR = 0.5;
 const TOPIC_PACK_FACTOR = 0.6;
+/** Lines of a memory repo file returned around an entry by `detail: "full"`. */
+export const MEMORY_REPO_FULL_LINES = 80;
+const UNREVIEWED_PREFIX = "[unreviewed] ";
 
 /** Lowest trust admitted by default: everything but `third_party`. */
 const DEFAULT_MIN_TRUST = MEMORY_ITEM_TRUST.inferred;
@@ -116,7 +133,7 @@ export function lanesForScopes(scopes: Iterable<string> | undefined): MemoryReca
     for (const scope of DEFAULT_MEMORY_RECALL_SCOPES) requested.add(scope);
   }
   const lanes: MemoryRecallLane[] = [];
-  if (requested.has("memory")) lanes.push("memory", "archive");
+  if (requested.has("memory")) lanes.push("memory", "repo", "archive");
   if (requested.has("conversations")) lanes.push("conversations");
   if (requested.has("knowledge")) lanes.push("knowledge");
   if (requested.has("external")) lanes.push("external");
@@ -149,6 +166,19 @@ export interface ExternalRecallHit {
   text: string;
   similarity?: number;
   updatedAt?: string;
+}
+
+/**
+ * Read access to the memory repo for the `repo` lane: the running `MemoryRepoService` in
+ * production (only while it is ready), a fake in tests.
+ */
+export interface MemoryRepoRecallSource {
+  /** Root-relative markdown paths (`.git` and hidden entries skipped, capped). */
+  listFiles(): Promise<string[]>;
+  /** A file's text, or null when missing or unsafe. */
+  readFile(relPath: string): Promise<string | null>;
+  /** Changes when the file changes (mtime and size), so parsed entries can be cached. */
+  stamp(relPath: string): Promise<string | null>;
 }
 
 export interface TopicPackHit {
@@ -203,6 +233,8 @@ export interface MemoryRecallDeps {
     limit: number;
   }): Promise<ExternalRecallHit[]>;
   externalConfigured(): boolean;
+  /** The memory repo, or null when it is off or not ready (the `repo` lane is skipped). */
+  memoryRepo?(): MemoryRepoRecallSource | null;
   /** Feature toggles from Memory settings; a lane switched off is skipped. */
   laneEnabled(lane: MemoryRecallLane | "topics"): boolean;
   now(): number;
@@ -306,6 +338,12 @@ export function parseRecallRef(
       return rest ? { lane: "knowledge", kind: "topic", id: rest } : null;
     case "external":
       return rest ? { lane: "external", kind: "external", id: rest } : null;
+    case "repo": {
+      const repoRef = parseMemoryRepoRef(ref);
+      return repoRef
+        ? { lane: "repo", kind: "repo", id: `${repoRef.path}#L${repoRef.line}` }
+        : null;
+    }
     default:
       if (/^dc[es]_[A-Za-z0-9_-]+$/.test(ref))
         return { lane: "conversations", kind: "event", id: ref };
@@ -319,6 +357,8 @@ export function parseRecallRef(
 
 export class MemoryRecallService implements MemoryRecall {
   private static defaultInstance: MemoryRecallService | null = null;
+  /** Parsed memory repo files by path, reused while the file stamp is unchanged. */
+  private readonly repoFileCache = new Map<string, { stamp: string; entries: MemoryRepoEntry[] }>();
 
   constructor(private readonly deps: MemoryRecallDeps) {}
 
@@ -411,6 +451,9 @@ export class MemoryRecallService implements MemoryRecall {
     if (lane === "external") {
       return policy?.allowExternal === true && this.deps.externalConfigured();
     }
+    if (lane === "repo") {
+      return Boolean(this.deps.memoryRepo?.()) && this.deps.laneEnabled(lane);
+    }
     return this.deps.laneEnabled(lane);
   }
 
@@ -423,6 +466,8 @@ export class MemoryRecallService implements MemoryRecall {
     switch (lane) {
       case "memory":
         return this.memoryLane(request, text, limit);
+      case "repo":
+        return text ? this.repoLane(text, limit) : [];
       case "archive":
         return text && request.workspaceId
           ? this.archiveLane(request.workspaceId, text, limit)
@@ -507,6 +552,83 @@ export class MemoryRecallService implements MemoryRecall {
           ? { subject: item.subjectKey }
           : {}),
         ...(typeof item.sourceRef.store === "string" ? { store: item.sourceRef.store } : {}),
+      },
+    };
+  }
+
+  /**
+   * Entries of the memory repo ranked by how many of the query's terms they contain
+   * (stopwords dropped as in the fusion damping), then shorter entries, then newest first. Files are parsed once per change.
+   */
+  private async repoLane(text: string, limit: number): Promise<LaneCandidate[]> {
+    const repo = this.deps.memoryRepo?.();
+    if (!repo) return [];
+    const terms = extractFtsTerms(text, { maxTerms: 12, dropStopwords: true });
+    if (terms.length === 0) return [];
+    const files = await repo.listFiles();
+    const live = new Set(files);
+    for (const cached of this.repoFileCache.keys()) {
+      if (!live.has(cached)) this.repoFileCache.delete(cached);
+    }
+    const scored: Array<{ candidate: LaneCandidate; coverage: number; density: number }> = [];
+    for (const file of files) {
+      for (const entry of await this.repoEntries(repo, file)) {
+        const coverage = termCoverage(entry.text, terms);
+        if (coverage === 0) continue;
+        scored.push({
+          candidate: this.repoCandidate(file, entry, entry.text),
+          coverage,
+          // Shorter entries carry less unrelated text per matched term.
+          density: 1 / Math.max(1, entry.text.length),
+        });
+      }
+    }
+    return scored
+      .sort(
+        (a, b) =>
+          b.coverage - a.coverage ||
+          b.density - a.density ||
+          b.candidate.createdAt - a.candidate.createdAt,
+      )
+      .slice(0, limit)
+      .map((entry) => entry.candidate);
+  }
+
+  private async repoEntries(
+    repo: MemoryRepoRecallSource,
+    file: string,
+  ): Promise<MemoryRepoEntry[]> {
+    const stamp = await repo.stamp(file).catch(() => null);
+    const cached = stamp ? this.repoFileCache.get(file) : undefined;
+    if (cached && cached.stamp === stamp) return cached.entries;
+    const entries = parseMemoryRepoEntries((await repo.readFile(file)) ?? "");
+    if (stamp) this.repoFileCache.set(file, { stamp, entries });
+    else this.repoFileCache.delete(file);
+    return entries;
+  }
+
+  private repoCandidate(file: string, entry: MemoryRepoEntry, content: string): LaneCandidate {
+    const unreviewed = file === MEMORY_REPO_INBOX_FILE;
+    const added = entry.metadata.added ? Date.parse(entry.metadata.added) : NaN;
+    // Hand-written secrets are not redacted on disk (the user's file); recall never shows them.
+    const text = `${unreviewed ? UNREVIEWED_PREFIX : ""}${redactSensitiveMarkdownContent(content)}`;
+    return {
+      lane: "repo",
+      ref: memoryRepoRef(file, entry.line),
+      title: titleOf(text),
+      content: text,
+      source: entry.by === "user" ? "user_stated" : "inferred",
+      createdAt: Number.isFinite(added) ? added : 0,
+      ...(entry.kind ? { kind: entry.kind } : {}),
+      provenance: {
+        store: "memory_repo",
+        file,
+        line: entry.line,
+        by: entry.by,
+        ...(entry.metadata.source ? { source: entry.metadata.source } : {}),
+        ...(entry.metadata.added ? { added: entry.metadata.added } : {}),
+        ...(entry.metadata.workspace ? { workspace: entry.metadata.workspace } : {}),
+        ...(unreviewed ? { unreviewed: true } : {}),
       },
     };
   }
@@ -890,6 +1012,8 @@ export class MemoryRecallService implements MemoryRecall {
         return this.expandDocument(request.policy, parsed.id);
       case "topic":
         return this.expandTopic(request.policy, parsed.id);
+      case "repo":
+        return this.expandRepo(parsed.id);
       default:
         // External hits carry their text in the listing; there is no fetch by id.
         return null;
@@ -919,6 +1043,27 @@ export class MemoryRecallService implements MemoryRecall {
       memory.createdAt,
       memory.taskId,
     );
+  }
+
+  /** The entry plus the file lines around it (at most `MEMORY_REPO_FULL_LINES`). */
+  private async expandRepo(id: string): Promise<LaneCandidate | null> {
+    const ref = parseMemoryRepoRef(`repo:${id}`);
+    const repo = this.deps.memoryRepo?.();
+    if (!ref || !repo) return null;
+    const raw = await repo.readFile(ref.path);
+    if (raw === null) return null;
+    const entry = parseMemoryRepoEntries(raw).find((candidate) => candidate.line === ref.line);
+    if (!entry) return null;
+    const lines = splitLines(raw);
+    const start = Math.max(1, ref.line - Math.floor(MEMORY_REPO_FULL_LINES / 2));
+    const end = Math.min(lines.length, start + MEMORY_REPO_FULL_LINES - 1);
+    const section = lines.slice(start - 1, end).join("\n");
+    const candidate = this.repoCandidate(ref.path, entry, section);
+    return {
+      ...candidate,
+      title: titleOf(entry.text),
+      provenance: { ...candidate.provenance, startLine: start, endLine: end },
+    };
   }
 
   private async expandDocument(
@@ -1111,6 +1256,24 @@ export function defaultMemoryRecallDeps(): MemoryRecallDeps {
       } catch {
         return false;
       }
+    },
+    memoryRepo() {
+      const service = MemoryRepoService.get();
+      // Only for a task whose memoryRepo layer is on (private, not a sub-agent, memory on):
+      // the tool call runs inside that task's memory-repo access scope.
+      if (!service?.isReady() || !isMemoryRepoReadAllowed()) return null;
+      return {
+        listFiles: () => service.listFiles(),
+        readFile: (relPath) => service.readFile(relPath),
+        async stamp(relPath) {
+          try {
+            const stat = await fs.stat(path.join(service.root, relPath));
+            return `${service.root}:${stat.mtimeMs}:${stat.size}`;
+          } catch {
+            return null;
+          }
+        },
+      };
     },
     laneEnabled(lane) {
       const settings = featureSettings();

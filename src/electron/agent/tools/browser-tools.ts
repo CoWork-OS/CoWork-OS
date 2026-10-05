@@ -26,6 +26,7 @@ import {
 } from "../../browser/browser-workbench-service";
 import { normalizeBrowserUrl } from "../../browser/browser-session-manager";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 import { assertResolvedHostAllowed } from "../../security/address-classes";
 import {
   assertWorkspaceFilesystemAccess,
@@ -126,6 +127,17 @@ interface BrowserUseCloudSessionState {
   allowResizing?: boolean;
   enableRecording?: boolean;
 }
+
+/** Browser tools whose result carries page content (text, DOM, script output, pixels). */
+const BROWSER_PAGE_READ_TOOLS = new Set([
+  "browser_navigate",
+  "browser_snapshot",
+  "browser_get_content",
+  "browser_get_text",
+  "browser_evaluate",
+  "browser_screenshot",
+  "browser_act_batch",
+]);
 
 /**
  * BrowserTools provides browser automation capabilities to the agent
@@ -1703,6 +1715,16 @@ export class BrowserTools {
    * Execute a browser tool
    */
   async executeTool(toolName: string, input: Any): Promise<Any> {
+    const result = await this.executeBrowserTool(toolName, input);
+    if (BROWSER_PAGE_READ_TOOLS.has(toolName) && result && result.success !== false) {
+      // Page text is untrusted: a later agent memory write goes to the inbox (design §7.3).
+      const url = typeof result.url === "string" && result.url ? result.url : "browser://page";
+      recordUntrustedContentRead(this.daemon, this.taskId, "browser", url, toolName);
+    }
+    return result;
+  }
+
+  private async executeBrowserTool(toolName: string, input: Any): Promise<Any> {
     this.syncVisibleAccessPolicy(input);
     switch (toolName) {
       case "browser_attach": {

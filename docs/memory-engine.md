@@ -859,6 +859,15 @@ reindexes summary changes. The marker stores `scanned`, `summariesRewritten`,
   toward the circuit breaker. Copies sent before the table existed have no remote id and stay
   remote.
 
+## 7a. The memory repo (Phase 1, opt-in)
+
+With **Settings > Memory > Memory folder** (`memoryRepoEnabled`) on, facts the agent or the
+user saves with `memory_remember` go to a local git repo of markdown files in the Agent
+Memory Repo format instead of `memory_items`, and `MEMORY.md` plus the workspace's file are
+in every private prompt as `<cowork_memory_repo>`. Contact, task, private and strict-privacy
+facts stay in `memory_items`, as do the other producers. See
+[memory-repo-phase1-design.md](memory-repo-phase1-design.md).
+
 ## 8. Gaps and next steps
 
 1. Done for prompts (§4a), the Memory Hub layer preview (§5a) and the mailbox prompt

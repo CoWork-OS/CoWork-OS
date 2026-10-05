@@ -7,6 +7,7 @@ import { LLMTool } from "../llm/types";
 import { EmailClient } from "../../gateway/channels/email-client";
 import { LoomEmailClient } from "../../gateway/channels/loom-client";
 import { assertSafeLoomMailboxFolder } from "../../utils/loom";
+import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 
 function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -93,6 +94,18 @@ export class EmailImapTools {
     ];
   }
 
+  /** Mail text is third-party content: a later agent memory write goes to the inbox. */
+  private recordMailRead(count: number, mailbox: string): void {
+    if (count === 0) return;
+    recordUntrustedContentRead(
+      this.daemon,
+      this.taskId,
+      "mailbox",
+      `mailbox://imap/${mailbox}`,
+      "email_imap_unread",
+    );
+  }
+
   async listUnread(input: {
     limit?: unknown;
     mailbox?: unknown;
@@ -161,6 +174,7 @@ export class EmailImapTools {
       });
 
       const messages = await client.fetchUnreadEmails(limit);
+      this.recordMailRead(messages.length, mailbox);
 
       return {
         success: true,
@@ -224,6 +238,7 @@ export class EmailImapTools {
     });
 
     const messages = await client.fetchUnreadEmails(limit);
+    this.recordMailRead(messages.length, mailbox);
 
     return {
       success: true,

@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { MailboxService } from "../../mailbox/MailboxService";
+import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 import type {
   MailboxComposeDraftInput,
   MailboxComposeMode,
@@ -99,6 +100,20 @@ function providerForAccount(
 ): MailboxProvider {
   return accounts.find((account) => account.id === accountId)?.provider || "gmail";
 }
+
+/** Actions whose result carries message text (subjects, bodies, summaries) to the model. */
+const MAILBOX_CONTENT_ACTIONS = new Set<string>([
+  "list_threads",
+  "get_thread",
+  "summarize_thread",
+  "generate_draft",
+  "extract_commitments",
+  "propose_cleanup",
+  "propose_followups",
+  "schedule_reply",
+  "research_contact",
+  "review_bulk_action",
+]);
 
 export class MailboxTools {
   private mailboxService: MailboxService;
@@ -247,6 +262,17 @@ export class MailboxTools {
         break;
       default:
         throw new Error(`Unsupported action: ${action}`);
+    }
+
+    if (MAILBOX_CONTENT_ACTIONS.has(action)) {
+      // Mail text is third-party content: a later agent memory write goes to the inbox.
+      recordUntrustedContentRead(
+        this.daemon,
+        this.taskId,
+        "mailbox",
+        input.thread_id ? `mailbox://threads/${input.thread_id}` : `mailbox://${action}`,
+        "mailbox_action",
+      );
     }
 
     this.daemon.logEvent(this.taskId, "tool_result", {

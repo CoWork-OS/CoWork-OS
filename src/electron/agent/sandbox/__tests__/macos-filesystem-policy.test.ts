@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Workspace } from "../../../../shared/types";
 import { MacOSSandbox } from "../macos-sandbox";
 import { SandboxRunner } from "../runner";
+import { setMemoryRepoRoot } from "../../../security/memory-repo-access";
 
 // Exercise the real kernel boundary; a generated string assertion cannot show
 // whether Seatbelt permits rename, replacement, or a broad grant over a deny.
@@ -342,4 +343,38 @@ describe.skipIf(process.platform !== "darwin")("macOS filesystem policy executio
     const denied = await execute(`require('fs').unlinkSync(${JSON.stringify(input)})`);
     expect(denied.exitCode, denied.stderr).not.toBe(0);
   });
+
+  it.each([false, true])(
+    "keeps run_command out of the memory repo, even inside a home-like workspace (legacy=%s)",
+    async (legacy) => {
+      const outside = path.join(base, "memory");
+      const inside = path.join(workspace.path, ".cowork-memory");
+      for (const root of [outside, inside]) {
+        fs.mkdirSync(root, { recursive: true });
+        fs.writeFileSync(path.join(root, "MEMORY.md"), "- secret fact");
+      }
+      workspace.permissions.allowedPaths = [base];
+      try {
+        for (const root of [outside, inside]) {
+          setMemoryRepoRoot(root);
+          const file = path.join(root, "MEMORY.md");
+          const read = await execute(
+            `process.stdout.write(require('fs').readFileSync(${JSON.stringify(file)}, 'utf8'))`,
+            legacy,
+          );
+          expect(read.exitCode).not.toBe(0);
+          expect(read.stdout).not.toContain("secret fact");
+          const written = await write(file, legacy);
+          expect(written.exitCode).not.toBe(0);
+          expect((await write(path.join(root, "new.md"), legacy)).exitCode).not.toBe(0);
+          expect(fs.readFileSync(file, "utf8")).toBe("- secret fact");
+          expect(fs.existsSync(path.join(root, "new.md"))).toBe(false);
+        }
+        const ordinary = await write(path.join(workspace.path, "output.txt"), legacy);
+        expect(ordinary.exitCode, ordinary.stderr).toBe(0);
+      } finally {
+        setMemoryRepoRoot(null);
+      }
+    },
+  );
 });

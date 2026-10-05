@@ -115,6 +115,43 @@ describe("MemoryUsedView", () => {
 });
 
 describe("resolveMemoryUsedEntries", () => {
+  it("resolves memory folder lines in one batch and falls back to the file and line", async () => {
+    const api = {
+      getMemoryItem: vi.fn(),
+      readMemoryRepoLines: vi.fn(async (refs: string[]) =>
+        refs
+          .filter((ref) => ref !== "repo:me.md#L9")
+          .map((ref) => ({
+            ref,
+            text: ref === "repo:MEMORY.md#L3" ? "Prefers concise answers" : "Uses pnpm",
+            path: ref.slice(5, ref.indexOf("#")),
+            by: ref === "repo:MEMORY.md#L3" ? ("user" as const) : ("agent" as const),
+          })),
+      ),
+    };
+    const entries = await resolveMemoryUsedEntries(
+      ["repo:MEMORY.md#L3", "repo:workspaces/cowork.md#L5", "repo:me.md#L9"],
+      "ws-1",
+      api,
+    );
+    expect(api.readMemoryRepoLines).toHaveBeenCalledTimes(1);
+    expect(entries.map((entry) => [entry.lane, entry.badge.label, entry.text])).toEqual([
+      ["repo", "Memory folder", "Prefers concise answers"],
+      ["repo", "Memory folder", "Uses pnpm (saved by the agent)"],
+      ["repo", "Memory folder", "me.md, line 9 in your memory folder."],
+    ]);
+  });
+
+  it("shows repo refs without the readLines bridge", async () => {
+    const entries = await resolveMemoryUsedEntries(["repo:MEMORY.md#L3"], "ws-1", {
+      getMemoryItem: vi.fn(),
+    });
+    expect(entries[0]).toMatchObject({
+      lane: "repo",
+      text: "MEMORY.md, line 3 in your memory folder.",
+    });
+  });
+
   it("resolves facts through the Memory Hub get and history notes in one batch", async () => {
     const api = {
       getMemoryItem: vi.fn(async ({ id }: { id: string }) => {

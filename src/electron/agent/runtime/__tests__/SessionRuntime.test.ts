@@ -3393,3 +3393,51 @@ describe("SessionRuntime pinned user profile gating", () => {
     );
   });
 });
+
+describe("SessionRuntime pinned memory folder block", () => {
+  const prepare = (runtime: Any, messages: LLMMessage[], allowMemoryRepoInjection: boolean) =>
+    runtime.prepareMessagesForTurnIteration({
+      messages,
+      phase: "step",
+      systemPromptTokens: 0,
+      allowSharedContextInjection: false,
+      allowMemoryInjection: true,
+      allowMemoryRepoInjection,
+      memoryQuery: "",
+      contextLabel: "step:memory-repo-gate",
+      lastTurnMemoryRecallQuery: "",
+      lastTurnMemoryRecallBlock: "",
+      lastSharedContextKey: "",
+      lastSharedContextBlock: "",
+    });
+
+  it("pins the block after the profile block only when its layer is allowed", async () => {
+    const harness = createHarness();
+    const runtime = harness.runtime as Any;
+    const buildMemoryRepoBlock = vi
+      .fn()
+      .mockResolvedValue("<cowork_memory_repo>\n- Prefers tea\n</cowork_memory_repo>");
+    const upsertPinnedUserBlock = vi.fn();
+    const removePinnedUserBlock = vi.fn();
+    runtime.deps.buildUserProfileBlock = () =>
+      "<cowork_user_profile>\nfacts\n</cowork_user_profile>";
+    runtime.deps.buildMemoryRepoBlock = buildMemoryRepoBlock;
+    runtime.deps.upsertPinnedUserBlock = upsertPinnedUserBlock;
+    runtime.deps.removePinnedUserBlock = removePinnedUserBlock;
+    const repoTag = PINNED_CONTEXT_TAGS.memoryRepo.open;
+
+    await prepare(runtime, [{ role: "user", content: "hi" }], false);
+    expect(buildMemoryRepoBlock).not.toHaveBeenCalled();
+    expect(removePinnedUserBlock).toHaveBeenCalledWith(expect.anything(), repoTag);
+
+    await prepare(runtime, [{ role: "user", content: "hi" }], true);
+    expect(buildMemoryRepoBlock).toHaveBeenCalledTimes(1);
+    expect(upsertPinnedUserBlock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        tag: repoTag,
+        insertAfterTag: PINNED_CONTEXT_TAGS.userProfile.open,
+      }),
+    );
+  });
+});

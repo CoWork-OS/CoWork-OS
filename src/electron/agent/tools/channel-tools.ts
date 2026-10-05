@@ -7,6 +7,7 @@ import { LLMTool } from "../llm/types";
 import { CHANNEL_TYPES, ChannelType } from "../../gateway/channels/types";
 import { getChannelLiveFetchProvider } from "../../gateway/channel-live-fetch";
 import { FileProvenanceRegistry } from "../../security/file-provenance-registry";
+import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 
 type ChannelHistoryDirection = "incoming" | "outgoing" | "both";
 
@@ -411,6 +412,17 @@ export class ChannelTools {
         : {}),
     };
 
+    if (messages.some((message) => message.direction === "incoming")) {
+      // Other senders' messages are untrusted: a later agent memory write goes to the inbox.
+      recordUntrustedContentRead(
+        this.daemon,
+        this.taskId,
+        "channel",
+        `channel://${channelType}/${chatId}`,
+        "channel_history",
+      );
+    }
+
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "channel_history",
       success: true,
@@ -458,6 +470,16 @@ export class ChannelTools {
         const attSuffix = attCount > 0 ? ` +${attCount}att` : "";
         return `[${m.id}] ${m.author.name}: ${m.content || "(no text)"}${attSuffix}`;
       });
+
+      if (messages.length > 0) {
+        recordUntrustedContentRead(
+          this.daemon,
+          this.taskId,
+          "channel",
+          `channel://discord/${chatId}`,
+          "channel_fetch_discord_messages",
+        );
+      }
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "channel_fetch_discord_messages",

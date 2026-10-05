@@ -3,6 +3,7 @@ import * as nodeOs from "node:os";
 import * as nodePath from "node:path";
 import type { AccessFilesystemRule } from "../../shared/access-profiles";
 import type { Workspace } from "../../shared/types";
+import { getMemoryRepoRoot, isMemoryRepoReadAllowed } from "./memory-repo-access";
 
 export type AccessFilesystemOperation = "read" | "write" | "delete";
 export type AccessFilesystemDecision = "allow" | "deny" | "unmatched";
@@ -475,6 +476,37 @@ export function isProtectedWorkspacePath(
   return false;
 }
 
+/**
+ * Where a path sits relative to the memory repo root (design §6.4): outside, inside, or
+ * inside its `.git`. Both the lexical and the canonical path are compared against both the
+ * lexical and the canonical root, so neither a symlink into the repo nor `..` segments nor
+ * the macOS /var alias can hide a path that is in it.
+ */
+function classifyMemoryRepoPath(
+  lexicalPath: string,
+  canonicalPath: string,
+): "outside" | "repo" | "repo_git" {
+  const root = getMemoryRepoRoot();
+  if (!root) return "outside";
+  const roots = new Set<string>([nodePath.resolve(root)]);
+  try {
+    roots.add(canonicalizeAccessPath(root));
+  } catch {
+    // The root may be missing; the lexical root still applies.
+  }
+  let inside = false;
+  for (const base of roots) {
+    for (const target of [nodePath.resolve(lexicalPath), canonicalPath]) {
+      const relative = nodePath.relative(base, target);
+      if (relative.startsWith("..") || nodePath.isAbsolute(relative)) continue;
+      const first = relative.split(/[\\/]/)[0]?.toLowerCase();
+      if (first === ".git") return "repo_git";
+      inside = true;
+    }
+  }
+  return inside ? "repo" : "outside";
+}
+
 function resolveWorkspacePolicyPath(workspacePath: string, value: string): string {
   value = expandHomeShortcutPath(value);
   return canonicalizeAccessPath(
@@ -566,6 +598,25 @@ export function evaluateWorkspaceFilesystemAccess(
     path: resolveWorkspacePolicyPath(workspace.path, rule.path),
   }));
   const ruleDecision = evaluateAccessFilesystemRules(rules, resolvedPath, operation);
+
+  // The memory repo is app-owned and independent of the workspace and the profile (design
+  // §6.4). Only MemoryRepoService writes it, so every mutation is a hard `protected_path`
+  // boundary, even when the workspace (say, the home folder) contains it or a profile rule
+  // grants writes. Its `.git` keeps forgotten lines in history and is never read either.
+  // A read needs the task's memory repo layer; a profile deny rule still wins.
+  const memoryRepoPlace = classifyMemoryRepoPath(requestedPath, resolvedPath);
+  if (memoryRepoPlace !== "outside") {
+    if (operation !== "read" || memoryRepoPlace === "repo_git") {
+      return { decision: "deny", path: operationPath, reason: "protected_path" };
+    }
+    if (ruleDecision === "deny") {
+      return { decision: "deny", path: operationPath, reason: "profile_filesystem_denied" };
+    }
+    return isMemoryRepoReadAllowed()
+      ? { decision: "allow", path: operationPath, reason: "memory_repo_read" }
+      : { decision: "deny", path: operationPath, reason: "memory_repo_unavailable" };
+  }
+
   if (ruleDecision === "deny") {
     return { decision: "deny", path: operationPath, reason: "profile_filesystem_denied" };
   }

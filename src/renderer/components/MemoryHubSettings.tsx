@@ -29,6 +29,7 @@ import { peekMemoryHubFocusWorkspace } from "./memory/memory-hub-focus";
 import { MemoryReviewTab } from "./memory/MemoryReviewTab";
 import { MemorySourcesTab } from "./memory/MemorySourcesTab";
 import { MemoryHealthTab } from "./memory/MemoryHealthTab";
+import { MemoryRepoCard } from "./memory/MemoryRepoCard";
 import type { MemoryHubSource } from "../../shared/memory-hub-types";
 import { SupermemoryDisconnectPurge } from "./memory/SupermemoryDisconnectPurge";
 import "./memory/memory-knowledge.css";
@@ -1320,6 +1321,13 @@ export function MemoryHubSettings(props?: {
           </div>
         </div>
       </div>
+
+      {hasHostMethods("getMemoryRepoStatus", "compactMemoryRepoHistory") && (
+        <div className="settings-subsection">
+          <h3>Memory Folder</h3>
+          <MemoryRepoCard features={features} onFeaturesSaved={setFeatures} />
+        </div>
+      )}
 
       <div
         className="settings-subsection"

@@ -205,12 +205,18 @@ import {
 import { getCustomSkillLoader } from "./custom-skill-loader";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
+import { runWithMemoryRepoAccess } from "../security/memory-repo-access";
 import { DurableContextService } from "../memory/DurableContextService";
 import { PlaybookService, type PlaybookCaptureResult } from "../memory/PlaybookService";
 import { SessionRecallService } from "../memory/SessionRecallService";
 import { RuntimeVisibilityService } from "./RuntimeVisibilityService";
 import { ExternalMemoryProviderRegistry } from "../memory/ExternalMemoryProvider";
 import { MemoryContextBuilderService } from "../memory/MemoryContextBuilder";
+import { MemoryRepoService } from "../memory/repo/MemoryRepoService";
+import {
+  getMemoryRepoContext,
+  type MemoryRepoContextBlock,
+} from "../memory/repo/MemoryRepoContext";
 import {
   memoryPolicyInputForTask,
   resolveMemoryInjection,
@@ -5097,6 +5103,7 @@ export class TaskExecutor {
     systemPromptTokens: number;
     allowSharedContextInjection: boolean;
     allowMemoryInjection: boolean;
+    allowMemoryRepoInjection?: boolean;
     memoryQuery: string;
     contextLabel: string;
     lastTurnMemoryRecallQuery: string;
@@ -7081,6 +7088,7 @@ ${transcript}
         this.maybeInjectTurnBudgetSoftLanding(messages, phase as Any),
       checkBudgets: () => this.checkBudgets(),
       buildUserProfileBlock: () => this.buildUserProfileBlock(),
+      buildMemoryRepoBlock: () => this.buildMemoryRepoPinnedBlock(),
       upsertPinnedUserBlock: (messages: LLMMessage[], opts: Any) =>
         this.upsertPinnedUserBlock(messages, opts),
       removePinnedUserBlock: (messages: LLMMessage[], tag: string) =>
@@ -8736,6 +8744,7 @@ ${transcript}
     const features = this.loadExecutionPromptMemoryFeatures() as {
       curatedMemoryEnabled?: boolean;
       contextPackInjectionEnabled?: boolean;
+      memoryRepoEnabled?: boolean;
     };
     return resolveMemoryInjection(
       memoryPolicyInputForTask(this.task, {
@@ -8746,8 +8755,35 @@ ${transcript}
         workspaceCanRead: !!this.workspace?.permissions?.read,
         externalNetworkAllowed:
           !!this.workspace?.permissions && this.isExternalMemoryAccessAllowed(),
+        memoryRepoEnabled:
+          features.memoryRepoEnabled === true && MemoryRepoService.get()?.isReady() === true,
       }),
     );
+  }
+
+  /**
+   * The memory folder's `<cowork_memory_repo>` block (design §6.1) under the `memoryRepo`
+   * layer: MEMORY.md plus this workspace's file, cached by repo version and workspace.
+   */
+  private async loadMemoryRepoBlock(
+    decision: MemoryLayerDecision,
+  ): Promise<MemoryRepoContextBlock | null> {
+    if (!decision.layers.memoryRepo) return null;
+    try {
+      return await getMemoryRepoContext().build({ workspaceId: this.workspace?.id ?? null });
+    } catch (error) {
+      logger.warn("[Executor] Memory repo block build failed:", (error as Error)?.message ?? error);
+      return null;
+    }
+  }
+
+  /** The pinned `<cowork_memory_repo>` block for step and follow-up turns (SessionRuntime). */
+  private async buildMemoryRepoPinnedBlock(): Promise<string> {
+    const decision = await this.resolveMemoryInjectionForPrompt(this.lastUserMessage);
+    const block = await this.loadMemoryRepoBlock(decision);
+    if (!block) return "";
+    this.recordMemoryUsed("memory_repo", block.refs, { source: "memory_repo" });
+    return block.text;
   }
 
   /**
@@ -8771,8 +8807,17 @@ ${transcript}
   private async buildMemoryLayersForPrompt(
     decision: MemoryLayerDecision,
     options: { surface: string; focus: string; l0: boolean; l1Tokens: number },
-  ): Promise<{ l0: string; l1: string }> {
-    if (!decision.memory) return { l0: "", l1: "" };
+  ): Promise<{ l0: string; l1: string; repo: string }> {
+    if (!decision.memory) return { l0: "", l1: "", repo: "" };
+    // The memory folder block sits next to L0 where L0 is in the prompt (chat, companion,
+    // planning); on step and follow-up turns it is pinned by SessionRuntime. Either way L0/L1
+    // skip memory_items facts the block already shows (both stores run in Phase 1).
+    const repoBlock = await this.loadMemoryRepoBlock(decision);
+    let repo = "";
+    if (repoBlock && options.l0) {
+      repo = repoBlock.text;
+      this.recordMemoryUsed("memory_repo", repoBlock.refs, { source: "memory_repo" });
+    }
     try {
       const layers = await this.getMemoryContextBuilder().buildLayers({
         workspaceId: this.workspace?.id ?? null,
@@ -8781,6 +8826,7 @@ ${transcript}
         focus: options.focus,
         include: { l0: options.l0, l1: true },
         budgets: { l1Tokens: options.l1Tokens },
+        ...(repoBlock ? { excludeHashes: repoBlock.hashes } : {}),
       });
       const refs = [...(layers.l0?.refs ?? []), ...(layers.l1?.refs ?? [])];
       this.recordMemoryUsed(options.surface, refs, { source: layers.source });
@@ -8789,10 +8835,11 @@ ${transcript}
         l1: layers.l1
           ? `<cowork_relevant_memory>\n${layers.l1.text}\n</cowork_relevant_memory>`
           : "",
+        repo,
       };
     } catch (error) {
       logger.warn("[Executor] Memory context build failed:", (error as Error)?.message ?? error);
-      return { l0: "", l1: "" };
+      return { l0: "", l1: "", repo };
     }
   }
 
@@ -8867,11 +8914,14 @@ ${transcript}
     const decision = await this.resolveMemoryInjectionForPrompt(this.lastUserMessage);
     if (!decision.layers.l0) return "";
     try {
+      // Facts the pinned memory folder block shows are not repeated here.
+      const repoBlock = await this.loadMemoryRepoBlock(decision);
       const layers = await this.getMemoryContextBuilder().buildLayers({
         workspaceId: this.workspace?.id ?? null,
         taskId: this.task?.id,
         decision,
         include: { l0: true, l1: false },
+        ...(repoBlock ? { excludeHashes: repoBlock.hashes } : {}),
       });
       if (!layers.l0) return "";
       this.recordMemoryUsed("pinned_profile", layers.l0.refs, { source: layers.source });
@@ -9124,7 +9174,7 @@ ${transcript}
       l0: true,
       l1Tokens: MEMORY_L1_COMPACT_TOKENS,
     });
-    const profileContext = [chatMemory.l0, chatMemory.l1, externalProfileContext]
+    const profileContext = [chatMemory.l0, chatMemory.repo, chatMemory.l1, externalProfileContext]
       .filter(Boolean)
       .join("\n");
     const isExplicitChatMode = this.isExplicitChatExecutionMode();
@@ -11312,35 +11362,44 @@ ${transcript}
       parentSignal.addEventListener("abort", onParentAbort, { once: true });
     }
 
+    // File tools read the memory repo only under this task's memoryRepo layer (design §6.4).
+    const memoryRepoReadAllowed =
+      MemoryRepoService.get()?.isReady() === true &&
+      (await this.resolveMemoryInjectionForPrompt(this.lastUserMessage)
+        .then((decision) => decision.layers.memoryRepo === true)
+        .catch(() => false));
+
     try {
       const coordinated = await withTimeout(
-        this.toolExecutionCoordinator.executeTool(
-          toolName,
-          input as Any,
-          {
-            taskId: this.task.id,
-            stepId: this.currentStepId || undefined,
-            phase: "step",
-            targetPaths: undefined,
-            followUp: false,
-            toolPolicyContext: this.getToolPolicyContext(),
-            signal: toolAbort.signal,
-            emitEvent: (type, payload) => this.emitEvent(type, payload),
-            beginHeartbeat: (name, timeoutMs, rawInput) =>
-              this.beginToolExecutionHeartbeat(name, timeoutMs, rawInput) || undefined,
-            timeoutMsResolver: () => toolTimeoutMs,
-            workspaceRecovery: async (args) =>
-              this.tryWorkspaceBoundaryRecovery({
-                toolName: args.toolName,
-                input: args.input,
-                errorMessage: args.errorMessage,
-                toolTimeoutMs: args.toolTimeoutMs,
-                ...(args.stepId ? { stepId: args.stepId } : {}),
-                ...(args.targetPaths ? { targetPaths: args.targetPaths } : {}),
-                ...(args.followUp ? { followUp: args.followUp } : {}),
-              }),
-          },
-          `${toolName}:${Date.now()}`,
+        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed }, () =>
+          this.toolExecutionCoordinator.executeTool(
+            toolName,
+            input as Any,
+            {
+              taskId: this.task.id,
+              stepId: this.currentStepId || undefined,
+              phase: "step",
+              targetPaths: undefined,
+              followUp: false,
+              toolPolicyContext: this.getToolPolicyContext(),
+              signal: toolAbort.signal,
+              emitEvent: (type, payload) => this.emitEvent(type, payload),
+              beginHeartbeat: (name, timeoutMs, rawInput) =>
+                this.beginToolExecutionHeartbeat(name, timeoutMs, rawInput) || undefined,
+              timeoutMsResolver: () => toolTimeoutMs,
+              workspaceRecovery: async (args) =>
+                this.tryWorkspaceBoundaryRecovery({
+                  toolName: args.toolName,
+                  input: args.input,
+                  errorMessage: args.errorMessage,
+                  toolTimeoutMs: args.toolTimeoutMs,
+                  ...(args.stepId ? { stepId: args.stepId } : {}),
+                  ...(args.targetPaths ? { targetPaths: args.targetPaths } : {}),
+                  ...(args.followUp ? { followUp: args.followUp } : {}),
+                }),
+            },
+            `${toolName}:${Date.now()}`,
+          ),
         ),
         this.getOuterToolTimeoutMs(toolName, toolTimeoutMs),
         `Tool ${toolName}`,
@@ -28581,7 +28640,9 @@ You are continuing a previous conversation. The context from the previous conver
       l0: true,
       l1Tokens: MEMORY_L1_COMPACT_TOKENS,
     });
-    const profileContext = [chatMemory.l0, chatMemory.l1].filter(Boolean).join("\n");
+    const profileContext = [chatMemory.l0, chatMemory.repo, chatMemory.l1]
+      .filter(Boolean)
+      .join("\n");
 
     this.daemon.updateTaskStatus(this.task.id, "executing");
 
@@ -30098,7 +30159,9 @@ Return ONLY a JSON object:
         taskPrompt: planTextPrompt,
         identityPrompt,
         roleContext,
-        memoryContext: [planningMemory.l0, planningMemory.l1].filter(Boolean).join("\n\n"),
+        memoryContext: [planningMemory.l0, planningMemory.repo, planningMemory.l1]
+          .filter(Boolean)
+          .join("\n\n"),
         infraContext,
         personalityPrompt: channelAdaptedPersonality,
         guidelinesPrompt,
@@ -33116,6 +33179,7 @@ Return ONLY a JSON object:
               systemPromptTokens,
               allowSharedContextInjection,
               allowMemoryInjection,
+              allowMemoryRepoInjection: memoryDecision.layers.memoryRepo,
               memoryQuery: `${this.task.title}\n${this.getMemoryQueryPrompt()}\nStep: ${step.description}`,
               contextLabel: `step:${step.id} ${step.description}`,
               lastTurnMemoryRecallQuery,
@@ -41436,6 +41500,7 @@ Return ONLY a JSON object:
               systemPromptTokens,
               allowSharedContextInjection,
               allowMemoryInjection,
+              allowMemoryRepoInjection: memoryDecision.layers.memoryRepo,
               memoryQuery: `${this.task.title}\n${message}\n${this.getMemoryQueryPrompt()}`,
               contextLabel: "follow-up message",
               lastTurnMemoryRecallQuery,

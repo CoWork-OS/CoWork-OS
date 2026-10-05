@@ -5,6 +5,10 @@ import {
   type MemoryUsedLane,
   type MemoryUsedReply,
 } from "../../../shared/memory-used";
+import {
+  MEMORY_REPO_READ_LINES_MAX,
+  type MemoryRepoLine,
+} from "../../../shared/memory-repo-types";
 import { SOURCE_LABELS, sourceTone, type SourceTone } from "./memory-knowledge-model";
 import { requestMemoryHubFocus } from "./memory-hub-focus";
 import { getMemoryUsedStore, type MemoryUsedStore } from "./memory-used-store";
@@ -28,13 +32,22 @@ export interface MemoryUsedApi {
     workspaceId: string;
     ids: string[];
   }) => Promise<Array<{ id: string; content?: string; summary?: string }>>;
+  /** Memory folder line text for `repo:` refs (`memoryRepo:readLines`). */
+  readMemoryRepoLines?: (refs: string[]) => Promise<MemoryRepoLine[]>;
 }
 
 const LANE_BADGES: Record<Exclude<MemoryUsedLane, "memory">, { label: string; tone: SourceTone }> =
   {
     archive: { label: "Task history", tone: "neutral" },
     external: { label: "Supermemory", tone: "warning" },
+    repo: { label: "Memory folder", tone: "success" },
   };
+
+/** `repo:workspaces/x.md#L4` → `workspaces/x.md, line 4` (when the line text is unavailable). */
+function repoRefLabel(id: string): string {
+  const match = /^(.*)#L(\d+)$/.exec(id);
+  return match ? `${match[1]}, line ${match[2]}` : id;
+}
 
 function snippet(text: string, max = 280): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -62,6 +75,18 @@ export async function resolveMemoryUsedEntries(
       }
     } catch {
       // Shown as unavailable below.
+    }
+  }
+  const repoRefs = parsed.filter((ref) => ref.lane === "repo").map((ref) => ref.ref);
+  const repoLines = new Map<string, MemoryRepoLine>();
+  if (repoRefs.length > 0 && typeof api.readMemoryRepoLines === "function") {
+    try {
+      const rows = await api.readMemoryRepoLines(repoRefs.slice(0, MEMORY_REPO_READ_LINES_MAX));
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row && typeof row.ref === "string") repoLines.set(row.ref, row);
+      }
+    } catch {
+      // Falls back to the file and line below.
     }
   }
   return Promise.all(
@@ -98,6 +123,18 @@ export async function resolveMemoryUsedEntries(
           text: text ? snippet(text) : "An earlier task note that is no longer available.",
           badge: LANE_BADGES.archive,
           ...(text ? {} : { unavailable: true }),
+        };
+      }
+      if (ref.lane === "repo") {
+        const line = repoLines.get(ref.ref);
+        const text = line?.text ? snippet(line.text) : "";
+        return {
+          ref: ref.ref,
+          lane: "repo",
+          text: text
+            ? `${text}${line?.by === "agent" ? " (saved by the agent)" : ""}`
+            : `${repoRefLabel(ref.id)} in your memory folder.`,
+          badge: LANE_BADGES.repo,
         };
       }
       return {

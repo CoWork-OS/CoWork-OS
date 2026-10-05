@@ -487,6 +487,11 @@ export interface SessionRuntimeDeps {
   checkBudgets: () => void;
   /** MemoryContextBuilder L0 for the pinned profile block (gated again by the policy). */
   buildUserProfileBlock: () => string | Promise<string>;
+  /**
+   * The memory folder's `<cowork_memory_repo>` block (docs/memory-repo-phase1-design.md §6.1),
+   * gated again by the policy's `memoryRepo` layer.
+   */
+  buildMemoryRepoBlock?: () => string | Promise<string>;
   upsertPinnedUserBlock: (messages: LLMMessage[], opts: Any) => void;
   removePinnedUserBlock: (messages: LLMMessage[], tag: string) => void;
   computeSharedContextKey: () => string;
@@ -2097,6 +2102,8 @@ export class SessionRuntime {
     systemPromptTokens: number;
     allowSharedContextInjection: boolean;
     allowMemoryInjection: boolean;
+    /** The policy's `memoryRepo` layer: personal, private gateway only, never sub-agents. */
+    allowMemoryRepoInjection?: boolean;
     memoryQuery: string;
     contextLabel: string;
     lastTurnMemoryRecallQuery: string;
@@ -2153,6 +2160,22 @@ export class SessionRuntime {
       this.deps.removePinnedUserBlock(messages, tags.userProfile.open);
     }
 
+    // The memory folder block sits right after the profile block. It is its own block (not
+    // lines inside L0) so it stays byte-stable while L0 changes.
+    const memoryRepoBlock =
+      opts.allowMemoryRepoInjection && this.deps.buildMemoryRepoBlock
+        ? await this.deps.buildMemoryRepoBlock()
+        : "";
+    if (memoryRepoBlock) {
+      this.deps.upsertPinnedUserBlock(messages, {
+        tag: tags.memoryRepo.open,
+        content: memoryRepoBlock,
+        insertAfterTag: userProfileBlock ? tags.userProfile.open : tags.compactionSummary.open,
+      });
+    } else {
+      this.deps.removePinnedUserBlock(messages, tags.memoryRepo.open);
+    }
+
     if (opts.allowSharedContextInjection) {
       const key = this.deps.computeSharedContextKey();
       if (key !== lastSharedContextKey) {
@@ -2164,7 +2187,7 @@ export class SessionRuntime {
         this.deps.upsertPinnedUserBlock(messages, {
           tag: tags.sharedContext.open,
           content: lastSharedContextBlock,
-          insertAfterTag: tags.userProfile.open,
+          insertAfterTag: memoryRepoBlock ? tags.memoryRepo.open : tags.userProfile.open,
         });
       } else {
         this.deps.removePinnedUserBlock(messages, tags.sharedContext.open);

@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   dreamingLlmEnabled: false,
   dreamingLlmDailyTokenBudget: 20000,
   memoryCompressionDailyTokenBudget: 20000,
+  memoryRepoEnabled: false,
+  memoryRepoPath: "",
 };
 
 function isEnabled(value: boolean | undefined): boolean {
@@ -94,6 +96,9 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
       1_000_000,
       Math.floor(normalizePositiveNumber(settings.memoryCompressionDailyTokenBudget, 20000)),
     ),
+    memoryRepoEnabled: isEnabled(settings.memoryRepoEnabled),
+    memoryRepoPath:
+      typeof settings.memoryRepoPath === "string" ? settings.memoryRepoPath.trim().slice(0, 1024) : "",
   };
 }
 
@@ -111,8 +116,17 @@ function normalizeMemoryWriteApprovalMode(
   }
 }
 
+type MemoryFeaturesListener = (settings: MemoryFeaturesSettings) => void;
+
 export class MemoryFeaturesManager {
   private static cachedSettings: MemoryFeaturesSettings | null = null;
+  private static listeners = new Set<MemoryFeaturesListener>();
+
+  /** Called after every save (the memory repo restarts when its settings change). */
+  static onSaved(listener: MemoryFeaturesListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   static initialize(): void {
     // No migration required currently; kept for parity with other managers.
@@ -159,6 +173,13 @@ export class MemoryFeaturesManager {
     repository.save("memory", normalized);
     this.cachedSettings = normalized;
     console.log("[MemoryFeaturesManager] Settings saved");
+    for (const listener of this.listeners) {
+      try {
+        listener(normalized);
+      } catch (error) {
+        console.error("[MemoryFeaturesManager] Settings listener failed:", error);
+      }
+    }
   }
 
   static clearCache(): void {

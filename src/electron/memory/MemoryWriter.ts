@@ -84,6 +84,46 @@ const EXPLICIT_SOURCES: ReadonlySet<MemoryItemSource> = new Set([
   "curated",
 ]);
 
+/**
+ * Steps 1–2 of the write path (salience, redaction), shared with the memory repo writer
+ * (memory/repo/MemoryRepoService.ts): the normalized, redacted text cut at `maxChars`, or
+ * why it is not worth keeping.
+ */
+export function screenMemoryText(
+  text: string,
+  maxChars: number = MEMORY_ITEM_MAX_CHARS,
+):
+  | { ok: true; content: string; redactions: number }
+  | { ok: false; reason: "empty" | "low_salience" | "secret_only" } {
+  const salience = memoryTextSalience(text);
+  if (salience) return { ok: false, reason: salience };
+  const redaction = redactSecrets(normalizeMemoryItemContent(text));
+  const content = truncateAtWord(normalizeMemoryItemContent(redaction.text), maxChars);
+  if (redaction.count > 0) {
+    const remainder = content
+      .split(REDACTED_SECRET)
+      .join(" ")
+      .replace(/[^\p{L}\p{N}]+/gu, "");
+    if (remainder.length < MIN_SALIENT_CHARS) return { ok: false, reason: "secret_only" };
+  }
+  return { ok: true, content, redactions: redaction.count };
+}
+
+/**
+ * The workspace memory settings rule of step 3, shared with the memory repo writer: memory
+ * off (or privacy mode `disabled`) blocks everything but explicit user acts; strict privacy
+ * makes the write private.
+ */
+export function workspaceMemoryPolicyDecision(
+  policy: MemoryWorkspacePolicy | null,
+  source: MemoryItemSource,
+): { allowed: false } | { allowed: true; private: boolean } {
+  if (!policy) return { allowed: true, private: false };
+  const disabled = !policy.enabled || policy.privacyMode === "disabled";
+  if (disabled && !EXPLICIT_SOURCES.has(source)) return { allowed: false };
+  return { allowed: true, private: policy.privacyMode === "strict" };
+}
+
 export interface MemoryCandidate {
   content: string;
   kind: MemoryItemKind;
@@ -438,21 +478,11 @@ export class MemoryWriter {
   > {
     const skip = (reason: MemoryWriteSkipReason) =>
       ({ ok: false, result: { status: "skipped", reason } }) as const;
-    // 1. Salience.
-    const salience = memoryTextSalience(candidate.content);
-    if (salience) return skip(salience);
-    let content = normalizeMemoryItemContent(candidate.content);
-
-    // 2. Redaction.
-    const redaction = redactSecrets(content);
-    content = truncateAtWord(normalizeMemoryItemContent(redaction.text), MEMORY_ITEM_MAX_CHARS);
-    if (redaction.count > 0) {
-      const remainder = content
-        .split(REDACTED_SECRET)
-        .join(" ")
-        .replace(/[^\p{L}\p{N}]+/gu, "");
-      if (remainder.length < MIN_SALIENT_CHARS) return skip("secret_only");
-    }
+    // 1–2. Salience and redaction.
+    const screened = screenMemoryText(candidate.content);
+    if (!screened.ok) return skip(screened.reason);
+    const content = screened.content;
+    const redaction = { count: screened.redactions };
 
     // 3. Policy.
     const scope = this.resolveScope(candidate);
@@ -469,14 +499,12 @@ export class MemoryWriter {
       candidate.privacy ?? (candidate.source === "third_party" ? "private" : "normal");
     const governingWorkspace = nonEmpty(candidate.originWorkspaceId) ?? scope.workspaceId;
     if (governingWorkspace && mode === "live") {
-      const policy = await this.workspacePolicy(governingWorkspace);
-      if (policy) {
-        const disabled = !policy.enabled || policy.privacyMode === "disabled";
-        if (disabled && !EXPLICIT_SOURCES.has(candidate.source)) {
-          return skip("memory_disabled");
-        }
-        if (policy.privacyMode === "strict") privacy = "private";
-      }
+      const decision = workspaceMemoryPolicyDecision(
+        await this.workspacePolicy(governingWorkspace),
+        candidate.source,
+      );
+      if (!decision.allowed) return skip("memory_disabled");
+      if (decision.private) privacy = "private";
     }
 
     // The write for steps 4–6 (dedupe, supersede, persist), which run atomically in the store.

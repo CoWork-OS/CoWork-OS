@@ -8,7 +8,11 @@ import {
   MEMORY_HEALTH_STUCK_AFTER_MS,
   MEMORY_HEALTH_THRESHOLDS,
 } from "../../../shared/memory-health-types";
-import { MemoryHealthService, evaluateMemoryHealth } from "../MemoryHealthService";
+import {
+  MemoryHealthService,
+  evaluateMemoryHealth,
+  evaluateMemoryRepoHealth,
+} from "../MemoryHealthService";
 import { createMemoryStatementPort } from "../memory-statement-port";
 import type { MemoryHealthCounts } from "../memory-health-sql";
 import { nativeSqliteAvailable } from "./memory-items-test-db";
@@ -325,5 +329,99 @@ describe.skipIf(!nativeSqliteAvailable)("MemoryHealthService", () => {
     expect(byId.migration_markers.status).not.toBe("skip");
     expect(report.ok).toBe(false);
     expect(report.generatedAt).toBe(NOW);
+  });
+});
+
+describe("memory folder health (service-only; not in qa:memory-health)", () => {
+  const ready = {
+    enabled: true,
+    root: "/Users/sam/CoWork Memory",
+    ready: true,
+    writable: true,
+    gitAvailable: true,
+    clean: true,
+    entryFileBytes: 900,
+    inboxEntries: 0,
+    lastWriteError: null,
+  };
+  const byId = (checks: ReturnType<typeof evaluateMemoryRepoHealth>) =>
+    Object.fromEntries(checks.map((check) => [check.id, check]));
+
+  it("skips when the folder is off and passes when it is ready and clean", () => {
+    expect(evaluateMemoryRepoHealth({ ...ready, enabled: false })).toEqual([
+      expect.objectContaining({ id: "memory_repo", status: "skip" }),
+    ]);
+    const checks = byId(evaluateMemoryRepoHealth(ready));
+    expect(checks.memory_repo.status).toBe("pass");
+    expect(checks.memory_repo_entry_file).toMatchObject({
+      status: "pass",
+      value: 900,
+      threshold: 4096,
+      unit: "bytes",
+    });
+    expect(checks.memory_repo_inbox).toMatchObject({ status: "info", value: 0 });
+  });
+
+  it("warns when the folder is not ready or its status cannot be read", () => {
+    const [check] = evaluateMemoryRepoHealth({
+      ...ready,
+      ready: false,
+      problem: "the folder is not a memory repo (no MEMORY.md)",
+    });
+    expect(check).toMatchObject({ id: "memory_repo", status: "warn" });
+    expect(check.detail).toContain("no MEMORY.md");
+    expect(evaluateMemoryRepoHealth(null)).toEqual([
+      expect.objectContaining({ id: "memory_repo", status: "warn" }),
+    ]);
+  });
+
+  it("warns for missing git, uncommitted edits, a failed write and an oversized MEMORY.md", () => {
+    expect(byId(evaluateMemoryRepoHealth({ ...ready, gitAvailable: false })).memory_repo).toMatchObject({
+      status: "warn",
+      detail: expect.stringContaining("git not found"),
+    });
+    expect(byId(evaluateMemoryRepoHealth({ ...ready, clean: false })).memory_repo.status).toBe("warn");
+    expect(
+      byId(evaluateMemoryRepoHealth({ ...ready, lastWriteError: "busy" })).memory_repo.detail,
+    ).toContain("last write failed: busy");
+    expect(
+      byId(evaluateMemoryRepoHealth({ ...ready, entryFileBytes: 5000 })).memory_repo_entry_file.status,
+    ).toBe("warn");
+    expect(byId(evaluateMemoryRepoHealth({ ...ready, inboxEntries: 3 })).memory_repo_inbox).toMatchObject({
+      status: "info",
+      value: 3,
+      detail: expect.stringContaining("3 entries"),
+    });
+  });
+
+  it("adds the folder checks to the health report and lets them fail the report", async () => {
+    const counts: MemoryHealthCounts = {
+      archive: null,
+      memoryItems: null,
+      heartbeat: null,
+      dreaming: null,
+      embeddings: null,
+      pendingWrites: null,
+      database: { totalBytes: 4096, freelistBytes: 0 },
+      markers: null,
+    };
+    const build = (status: () => Promise<typeof ready>) =>
+      new MemoryHealthService({
+        port: { unit: (async () => counts) as never },
+        getSettings: () => ({}),
+        getSupermemoryStatus: () => ({ enabled: false, connected: false }),
+        getChronicleEnabled: () => false,
+        getMemoryRepoStatus: status,
+        now: () => NOW,
+      });
+    const ok = await build(async () => ready).health();
+    expect(ok.checks.map((check) => check.id)).toContain("memory_repo_inbox");
+    expect(ok.ok).toBe(true);
+    const failing = await build(async () => ({ ...ready, gitAvailable: false })).health();
+    expect(failing.ok).toBe(false);
+    const unreadable = await build(async () => {
+      throw new Error("boom");
+    }).health();
+    expect(unreadable.checks.find((check) => check.id === "memory_repo")?.status).toBe("warn");
   });
 });

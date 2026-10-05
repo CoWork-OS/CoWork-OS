@@ -112,7 +112,10 @@ export class GlobTools {
 
       const baseAccess = evaluateWorkspaceFilesystemAccess(this.workspace, basePath, "read");
       if (baseAccess.decision !== "allow") {
-        throw new Error("Search path must be within workspace");
+        if (baseAccess.reason === "memory_repo_unavailable") {
+          throw new Error("The memory folder is not readable in this task");
+        }
+        throw new Error("Search path must be within workspace (or the memory folder)");
       }
       const checkedBasePath = baseAccess.path;
       const isInsideWorkspace = this.isWithinWorkspace(checkedBasePath, normalizedWorkspace);

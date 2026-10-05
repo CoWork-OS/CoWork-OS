@@ -178,7 +178,10 @@ export class GrepTools {
         if (baseAccess.reason === "profile_filesystem_denied") {
           throw new Error(`Path is denied by the active access profile: ${basePath}`);
         }
-        throw new Error("Search path must be within workspace");
+        if (baseAccess.reason === "memory_repo_unavailable") {
+          throw new Error("The memory folder is not readable in this task");
+        }
+        throw new Error("Search path must be within workspace (or the memory folder)");
       }
       const checkedBasePath = baseAccess.path;
 
@@ -272,7 +275,10 @@ export class GrepTools {
         try {
           const content = fs.readFileSync(file, "utf-8");
           const lines = content.split("\n");
-          const relativePath = path.relative(this.workspace.path, file);
+          // Files outside the workspace (the memory folder) are reported by absolute path.
+          const fromWorkspace = path.relative(this.workspace.path, file);
+          const relativePath =
+            fromWorkspace.startsWith("..") || path.isAbsolute(fromWorkspace) ? file : fromWorkspace;
 
           if (outputMode === "count") {
             // Count matches in file

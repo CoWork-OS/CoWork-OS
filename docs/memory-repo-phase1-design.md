@@ -1,8 +1,9 @@
 # Memory Repo — Phase 1 design
 
-**Status.** Proposed (2026-10-05). Nothing here is implemented yet. Step 0 (the agent can
-call `memory_remember` in every plan step; its own facts stay out of L0) is the only part
-that has shipped; see [memory-engine.md](memory-engine.md) §4a and §4b.
+**Status.** Implemented behind `memoryRepoEnabled` (off by default), 2026-10-05. Step 0 (the
+agent can call `memory_remember` in every plan step; its own facts stay out of L0) shipped
+first; see [memory-engine.md](memory-engine.md) §4a and §4b. Deviations from this design are
+listed in §14.
 
 **Decision this implements.** Move CoWork's long-term knowledge (facts about the user,
 workspace facts, lessons) to a local git repository of markdown files that follows the
@@ -448,3 +449,34 @@ Open:
 
 1. Interop: offer to point Claude Code and other agents at the same repo (their skill reads
    `MEMORY.md`), and how to keep their writes compatible with the `by` key.
+
+## 14. As built (deviations and notes)
+
+- **Code.** `src/electron/memory/repo/`: `MemoryRepoService` (writer), `memory-repo-format`,
+  `memory-repo-git`, `memory-repo-lock`, `memory-repo-paths`, `memory-repo-bootstrap`,
+  `MemoryRepoExport`, `MemoryRepoContext` (prompt block), `memory-repo-read` (line lookup for
+  "Memory used"). Access: `security/memory-repo-access.ts`. IPC: `ipc/memory-repo-handlers.ts`.
+  UI: `renderer/components/memory/MemoryRepoCard.tsx`.
+- **Path rule.** A workspace that is the home folder (or above it) does not count as a
+  project workspace when the repo path is checked; the access layer still denies every write
+  under the memory root, also inside such a workspace.
+- **Read access scope.** File tools have no per-task access context, so the executor runs each
+  tool call inside an AsyncLocalStorage scope (`runWithMemoryRepoAccess`) carrying the task's
+  `memoryRepo` layer. File reads under the root, the `repo` recall lane and repo writes from
+  `memory_remember` all require it. Anything under the root's `.git` is denied, reads included.
+- **Export.** One commit per exported fact (not one commit), through the normal write path.
+  The export marker is `.git/cowork-export-v1` inside the repo, so a repo at a new path gets
+  its own export.
+- **Context block.** Cached by repo version, workspace and the two files' mtime and size, so
+  hand edits show up before the next commit. L0 and L1 skip `memory_items` facts whose text
+  the block already shows (`excludeHashes`).
+- **Untrusted-content taint.** Recorded by `web_fetch`, `http_request` (non-empty body), the
+  browser page-reading tools, mailbox content actions, Gmail and IMAP reads and channel
+  history (`agent/security/untrusted-content-source.ts`).
+- **Shell.** The macOS seatbelt profile denies reads and writes of the memory root. The
+  Docker sandbox does not (not in scope); unsandboxed shells are not restricted (§7.4).
+- **Known gaps.** A sub-agent started inside the parent's `spawn_agent` call inherits the
+  parent's access scope for the few registry calls it makes directly (its own tool calls get
+  its own scope). The Health rows for the memory folder are service-only (the
+  `qa:memory-health` script reads only the database).
+

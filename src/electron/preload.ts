@@ -47,6 +47,11 @@ import type {
 } from "../shared/memory-review-types";
 import type { MemoryHealthReport, MemorySourcesReport } from "../shared/memory-health-types";
 import type {
+  MemoryRepoCompactResult,
+  MemoryRepoLine,
+  MemoryRepoStatusReport,
+} from "../shared/memory-repo-types";
+import type {
   SpreadsheetApplyPatchesResult,
   SpreadsheetOpenWorkbookResult,
   SpreadsheetPatch,
@@ -4301,6 +4306,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_SOURCES, data),
   getMemoryHealth: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_HEALTH, data),
+  // Memory folder (beta): the folder is resolved in main, never sent from here
+  getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
+  openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
+  compactMemoryRepoHistory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY),
+  readMemoryRepoLines: (refs: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_READ_LINES, { refs }),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -7940,6 +7951,10 @@ export interface ElectronAPI {
   }) => Promise<MemoryReviewMutationResult>;
   getMemorySources: (data: { workspaceId: string }) => Promise<MemorySourcesReport>;
   getMemoryHealth: (data: { workspaceId: string }) => Promise<MemoryHealthReport>;
+  getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
+  openMemoryRepoFolder: () => Promise<{ success: true }>;
+  compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
+  readMemoryRepoLines: (refs: string[]) => Promise<MemoryRepoLine[]>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

@@ -13,10 +13,12 @@ import {
   type MemorySourcesReport,
 } from "../../shared/memory-health-types";
 import type { MemoryHubSource } from "../../shared/memory-hub-types";
+import type { MemoryRepoStatusReport } from "../../shared/memory-repo-types";
 import type { MemoryFeaturesSettings } from "../../shared/types";
 import { CURATION_LLM_DEFAULT_DAILY_BUDGET } from "./memory-curation-llm";
 import type { MemoryHealthCounts } from "./memory-health-sql";
 import type { MemoryStatementPort } from "./memory-statement-port";
+import { MEMORY_REPO_LIMITS } from "./repo/memory-repo-format";
 
 const MIB = 1024 * 1024;
 
@@ -26,6 +28,11 @@ export interface MemoryHealthDeps {
   /** Supermemory switch and whether it has credentials (never the credentials). */
   getSupermemoryStatus: () => { enabled: boolean; connected: boolean };
   getChronicleEnabled: () => boolean;
+  /**
+   * The memory folder's status (memory repo, design §9). Service-only: the repo lives on
+   * disk, not in the database `qa:memory-health` reads, so the script has no such check.
+   */
+  getMemoryRepoStatus?: () => Promise<MemoryRepoStatusReport>;
   now?: () => number;
 }
 
@@ -229,6 +236,72 @@ export function evaluateMemoryHealth(
   return checks;
 }
 
+/**
+ * The memory folder checks: SKIP when it is off; WARN when it is not ready, git is missing,
+ * the work tree has uncommitted changes, MEMORY.md is over its size limit, or the last write
+ * failed; the inbox count as INFO. A null status (it could not be read) is a WARN. Not part
+ * of `qa:memory-health` (no database counts).
+ */
+export function evaluateMemoryRepoHealth(status: MemoryRepoStatusReport | null): MemoryHealthCheck[] {
+  const base = { id: "memory_repo", label: "Memory folder", value: null };
+  if (!status) {
+    return [{ ...base, status: "warn", detail: "The memory folder status could not be read." }];
+  }
+  if (!status.enabled) {
+    return [{ ...base, status: "skip", detail: "The memory folder (beta) is off." }];
+  }
+  if (!status.ready) {
+    return [
+      {
+        ...base,
+        status: "warn",
+        detail: `Not ready at ${status.root}: ${status.problem ?? "the folder could not be opened"}.`,
+      },
+    ];
+  }
+  const problems: string[] = [];
+  if (!status.gitAvailable) problems.push("git not found: memory has no history");
+  else if (status.clean === false) {
+    problems.push("the folder has changes CoWork has not committed yet (they are committed before the next write)");
+  }
+  if (status.lastWriteError) problems.push(`the last write failed: ${status.lastWriteError}`);
+  const checks: MemoryHealthCheck[] = [
+    {
+      ...base,
+      status: problems.length ? "warn" : "pass",
+      detail: problems.length
+        ? `${problems.join("; ")}.`
+        : `Ready at ${status.root}; every change is committed.`,
+    },
+  ];
+  checks.push(
+    thresholdCheck(
+      {
+        id: "memory_repo_entry_file",
+        label: "MEMORY.md size",
+        unit: "bytes",
+        detail: "MEMORY.md is in every prompt; the writer refuses entries past this size.",
+      },
+      typeof status.entryFileBytes === "number" ? status.entryFileBytes : null,
+      "<=",
+      MEMORY_REPO_LIMITS.entryFileBytes,
+      "MEMORY.md could not be read.",
+    ),
+  );
+  const inbox = status.inboxEntries ?? 0;
+  checks.push({
+    id: "memory_repo_inbox",
+    label: "Memory inbox",
+    status: "info",
+    value: inbox,
+    unit: "count",
+    detail: inbox
+      ? `${inbox} ${inbox === 1 ? "entry" : "entries"} in inbox.md from tasks that read untrusted content, waiting for review.`
+      : "inbox.md is empty.",
+  });
+  return checks;
+}
+
 export class MemoryHealthService {
   constructor(private readonly deps: MemoryHealthDeps) {}
 
@@ -281,6 +354,10 @@ export class MemoryHealthService {
       llmEnabled: settings.dreamingLlmEnabled === true,
       llmDailyBudget: settings.dreamingLlmDailyTokenBudget ?? CURATION_LLM_DEFAULT_DAILY_BUDGET,
     });
+    if (this.deps.getMemoryRepoStatus) {
+      const repo = await this.deps.getMemoryRepoStatus().catch(() => null);
+      checks.push(...evaluateMemoryRepoHealth(repo));
+    }
     return {
       generatedAt: now,
       checks,

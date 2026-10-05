@@ -110,6 +110,8 @@ function formatNumber(value: number, unit: MemoryHealthCheck["unit"]): string {
       return `${value.toLocaleString()} MiB`;
     case "tokens":
       return `${value.toLocaleString()} tokens`;
+    case "bytes":
+      return value >= 1024 ? `${(value / 1024).toFixed(1)} KB` : `${value.toLocaleString()} B`;
     default:
       return value.toLocaleString();
   }

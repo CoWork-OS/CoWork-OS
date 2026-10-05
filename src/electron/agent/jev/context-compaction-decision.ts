@@ -73,7 +73,9 @@ function isPinned(message: LLMMessage): boolean {
   return (
     text.startsWith("<cowork_memory_recall>") ||
     text.startsWith("<cowork_compaction_summary>") ||
-    text.startsWith("<cowork_shared_context>")
+    text.startsWith("<cowork_shared_context>") ||
+    text.startsWith("<cowork_user_profile>") ||
+    text.startsWith("<cowork_memory_repo>")
   );
 }
 

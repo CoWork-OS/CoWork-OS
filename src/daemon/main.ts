@@ -44,6 +44,7 @@ import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
 import { CronService, setCronService, getCronStorePath } from "../electron/cron";
 import { resolveTaskResultText } from "../electron/cron/result-text";
 import { TaskEventRepository } from "../electron/database/repositories";
+import { WorkspaceRepository } from "../electron/database/repository-facades";
 import {
   formatChatTranscriptForPrompt,
   prefetchTranscriptUsers,
@@ -54,6 +55,7 @@ import { DurableContextService } from "../electron/memory/DurableContextService"
 import { MemoryWriter } from "../electron/memory/MemoryWriter";
 import { MemoryRetentionService } from "../electron/memory/MemoryRetentionService";
 import { startMemoryEngine } from "../electron/memory/memory-engine-bootstrap";
+import { startMemoryRepo, stopMemoryRepo } from "../electron/memory/repo/memory-repo-bootstrap";
 import { KnowledgeGraphService } from "../electron/knowledge-graph/KnowledgeGraphService";
 import { createKitWriterOwnership } from "../electron/agents/kit-writers";
 import { EverydayAgentService } from "../electron/everyday-agent/everyday-agent-repository-facades";
@@ -363,6 +365,14 @@ async function main(): Promise<void> {
         getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
       });
     }
+    // Memory repo, as on desktop: off unless enabled; stopped by the "memory repo" step.
+    const memoryRepoWorkspaces = new WorkspaceRepository(memoryHostDb);
+    void startMemoryRepo({
+      runtime: "node",
+      getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
+      listWorkspacePaths: async () => (await memoryRepoWorkspaces.findAll()).map((w) => w.path),
+      workspaceName: async (id) => (await memoryRepoWorkspaces.findById(id))?.name ?? null,
+    });
     console.log("[Daemon] Memory Service initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Memory Service:", error);
@@ -838,6 +848,12 @@ async function main(): Promise<void> {
             await kitWriterOwnership?.stop();
             kitWriterOwnership = null;
           },
+        },
+        // Finish the memory repo write in progress (bounded) and stop its writer.
+        {
+          name: "memory repo",
+          requiresQuiescence: true,
+          run: () => stopMemoryRepo(),
         },
         {
           name: "MCP servers",

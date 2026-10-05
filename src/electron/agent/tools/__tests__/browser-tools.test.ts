@@ -30,6 +30,7 @@ describe("BrowserTools browser_navigate", () => {
       logEvent: vi.fn(),
       registerArtifact: vi.fn(),
       requestApproval: vi.fn(),
+      recordSensitiveSourceRead: vi.fn(),
     } as Any;
 
     return {
@@ -968,12 +969,17 @@ describe("BrowserTools browser_navigate", () => {
         forms: [],
       }),
     };
-    const { tools } = makeTools(browserWorkbenchService);
+    const { tools, daemon } = makeTools(browserWorkbenchService);
 
     const result = await tools.executeTool("browser_get_content", {
       offset: 4_000,
       max_chars: 5_000,
     });
+    // Page text taints the task, so a later agent memory write goes to the inbox.
+    expect(daemon.recordSensitiveSourceRead).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ path: "https://example.com/long", trustLevel: "untrusted" }),
+    );
 
     expect(result).toMatchObject({
       success: true,

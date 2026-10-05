@@ -110,6 +110,13 @@ export interface MemoryFeaturesSettings {
    * The on/off switch is the per-workspace `compressionEnabled` memory setting.
    */
   memoryCompressionDailyTokenBudget?: number;
+  /**
+   * Keep long-term memory in a local git repo of markdown files (Agent Memory Repo format;
+   * docs/memory-repo-phase1-design.md). Off by default during Phase 1.
+   */
+  memoryRepoEnabled?: boolean;
+  /** Folder of the memory repo; empty means the default (`~/CoWork Memory`). */
+  memoryRepoPath?: string;
 }
 
 export type MemoryWriteApprovalStatus = "pending" | "applying" | "applied" | "rejected" | "failed";
@@ -9777,6 +9784,12 @@ export const IPC_CHANNELS = {
   // Memory Hub "Sources" and "Health": aggregate counts and qa:memory-health checks
   MEMORY_HUB_SOURCES: "memoryHub:sources",
   MEMORY_HUB_HEALTH: "memoryHub:health",
+
+  // Memory folder (beta): the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
+  MEMORY_REPO_STATUS: "memoryRepo:status",
+  MEMORY_REPO_OPEN_FOLDER: "memoryRepo:openFolder",
+  MEMORY_REPO_COMPACT_HISTORY: "memoryRepo:compactHistory",
+  MEMORY_REPO_READ_LINES: "memoryRepo:readLines",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",

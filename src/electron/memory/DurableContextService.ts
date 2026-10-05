@@ -92,6 +92,7 @@ function shouldSkipInjectedMessage(message: LLMMessage): boolean {
     text.startsWith("<cowork_compaction_summary>") ||
     text.startsWith("<cowork_shared_context>") ||
     text.startsWith("<cowork_user_profile>") ||
+    text.startsWith("<cowork_memory_repo>") ||
     text.startsWith("<cowork_structured_memory>") ||
     text.startsWith("<cowork_recall_hints>")
   );

@@ -1,3 +1,11 @@
+import {
+  memoryRepoPathSettingProblem,
+  memoryRepoStatus,
+} from "../../electron/memory/repo/memory-repo-bootstrap";
+import { MemoryRepoService } from "../../electron/memory/repo/MemoryRepoService";
+import { readMemoryRepoLines } from "../../electron/memory/repo/memory-repo-read";
+import { MemoryRepoRefsSchema } from "../../electron/ipc/memory-repo-ipc-validation";
+import type { MemoryRepoCompactResult } from "../../shared/memory-repo-types";
 import path from "node:path";
 import { statSync, existsSync } from "node:fs";
 import {
@@ -95,6 +103,7 @@ const featureBooleanKeys = [
   "structuredObservationsEnabled",
   "memoryInspectorEnabled",
   "dreamingLlmEnabled",
+  "memoryRepoEnabled",
 ] as const;
 const featureSettings = z
   .object({
@@ -103,6 +112,7 @@ const featureSettings = z
     durableContextLargePayloadThreshold: z.number().int().min(1).max(1_000_000).optional(),
     dreamingLlmDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryCompressionDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
+    memoryRepoPath: z.string().trim().max(1024).optional(),
     memoryWriteApprovalMode: z
       .enum(["off", "curated_only", "external_only", "background_only", "all"])
       .optional(),
@@ -730,7 +740,9 @@ export function createBrowserMemoryDefinitions(options: {
     getMemoryFeaturesSettings: noArgs(() => MemoryFeaturesManager.loadSettings()),
     saveMemoryFeaturesSettings: action(
       featureSettings,
-      (value) => {
+      async (value) => {
+        const repoPathProblem = await memoryRepoPathSettingProblem(value.memoryRepoPath);
+        if (repoPathProblem) throw new Error(repoPathProblem);
         MemoryFeaturesManager.saveSettings({
           ...MemoryFeaturesManager.loadSettings(),
           ...value,
@@ -847,6 +859,15 @@ export function createBrowserMemoryDefinitions(options: {
     getMemoryHealth: workspaceAction(MemoryHubWorkspaceRequestSchema, "read", () =>
       healthCall((service) => service.health()),
     ),
+    // Memory folder (beta): same contract as the desktop IPC (memoryRepo:*). Opening the
+    // folder is desktop-only; the browser host has no local file manager to open it in.
+    getMemoryRepoStatus: noArgs(() => memoryRepoStatus()),
+    compactMemoryRepoHistory: noArgs(async (): Promise<MemoryRepoCompactResult> => {
+      const service = MemoryRepoService.get();
+      if (!service) return { compacted: false, error: "The memory folder is off." };
+      return service.compactHistory();
+    }, true),
+    readMemoryRepoLines: action(MemoryRepoRefsSchema, (refs) => readMemoryRepoLines(refs)),
     getMemoryObservationBackfillStatus: noArgs(() => MemoryObservationService.getBackfillStatus()),
     rebuildMemoryObservationMetadata: {
       ...action(

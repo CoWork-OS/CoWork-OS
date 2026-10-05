@@ -503,3 +503,24 @@ describe("browser memory hub sources and health", () => {
     });
   });
 });
+
+describe("browser memory folder methods", () => {
+  it("mirrors the desktop memoryRepo methods except opening the folder", async () => {
+    const { MemoryRepoService } = await import("../../../electron/memory/repo/MemoryRepoService");
+    MemoryRepoService.setInstance(null);
+    const { call, definitions } = setup();
+    expect(definitions.getMemoryRepoStatus.mutation).toBe(false);
+    expect(definitions.compactMemoryRepoHistory.mutation).toBe(true);
+    expect(definitions.readMemoryRepoLines.mutation).toBe(false);
+    expect(definitions.openMemoryRepoFolder).toBeUndefined();
+
+    await expect(call("compactMemoryRepoHistory")).resolves.toEqual({
+      compacted: false,
+      error: "The memory folder is off.",
+    });
+    await expect(call("readMemoryRepoLines", [["repo:me.md#L1"]])).resolves.toEqual([]);
+    for (const refs of [[], ["repo:../x.md#L1"], ["repo:.git/config#L1"], "repo:me.md#L1"]) {
+      await expect(call("readMemoryRepoLines", [refs])).rejects.toThrow();
+    }
+  });
+});

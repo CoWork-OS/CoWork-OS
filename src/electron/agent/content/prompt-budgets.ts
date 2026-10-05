@@ -48,3 +48,11 @@ export const MEMORY_L0_TOKENS = 600;
 export const MEMORY_L1_ITEMS_TOKENS = 400;
 /** L1 on compact surfaces (planning, chat, follow-up system prompt). */
 export const MEMORY_L1_COMPACT_TOKENS = 250;
+
+/**
+ * The `<cowork_memory_repo>` block (docs/memory-repo-phase1-design.md §6.1): the memory
+ * folder's MEMORY.md (500) plus the current workspace's file (300).
+ */
+export const MEMORY_REPO_ENTRY_FILE_TOKENS = 500;
+export const MEMORY_REPO_WORKSPACE_FILE_TOKENS = 300;
+export const MEMORY_REPO_TOKENS = MEMORY_REPO_ENTRY_FILE_TOKENS + MEMORY_REPO_WORKSPACE_FILE_TOKENS;

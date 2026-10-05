@@ -137,6 +137,40 @@ test("nonempty corrupt, malformed XML, broken slide targets, and wrong-content P
   assert.equal(result.error, "pptx_title_or_run_id_missing");
 });
 
+test("PPTX graders reject recoverable XML warnings and errors", async (t) => {
+  const directory = temporaryDirectory(t);
+  const runId = "fixture-run-pptx-xml-errors";
+  const valid = await createFixture(directory, "valid.pptx", { kind: "pptx", runId });
+  assert.equal((await verifyArtifact("pptx", valid, runId)).ok, true);
+
+  const cases = [
+    {
+      name: "unquoted-attribute",
+      mutate: (source) => source.replace("<p:sld ", "<p:sld qa=unquoted "),
+      message: /attribute "unquoted" missed quot/,
+    },
+    {
+      name: "unknown-entity",
+      mutate: (source) => source.replace("</a:t>", "&unknown;</a:t>"),
+      message: /entity not found:&unknown;/,
+    },
+  ];
+  for (const { name, mutate, message } of cases) {
+    const malformed = path.join(directory, name + ".pptx");
+    await mutatePptx(valid, malformed, async (zip) => {
+      const source = await zip.file("ppt/slides/slide1.xml").async("string");
+      const rewritten = mutate(source);
+      assert.notEqual(rewritten, source, "fixture should contain the mutated XML construct");
+      zip.file("ppt/slides/slide1.xml", rewritten);
+    });
+    const result = await verifyArtifact("pptx", malformed, runId);
+    assert.equal(result.ok, false, name);
+    assert.equal(result.error, "pptx_parse_failed", name);
+    assert.match(result.detail, /Malformed XML in ppt\/slides\/slide1\.xml:/, name);
+    assert.match(result.detail, message, name);
+  }
+});
+
 test("valid XLSX with wrong cached formula result fails", async (t) => {
   const directory = temporaryDirectory(t);
   const correct = await createFixture(directory, "correct.xlsx", { kind: "xlsx" });
@@ -306,7 +340,10 @@ test("live tool evidence accepts canonical timeline transport only with paired s
   );
   assert.equal(
     verifyToolEvidenceFromEvents(
-      [searchCall, withSearchResult({ success: true, query: searchRequirement.query, results: [] })],
+      [
+        searchCall,
+        withSearchResult({ success: true, query: searchRequirement.query, results: [] }),
+      ],
       searchRequirement,
     ).ok,
     false,
@@ -413,7 +450,10 @@ test("follow-up wait accepts timeline-v2 rows carrying legacyType follow_up_comp
   assert.equal(legacy.ok, true);
 
   const prior = await waitForFollowUp(
-    clientFor([v2Row, { id: "x", type: "unrelated", payload: { legacyType: "follow_up_completed" } }]),
+    clientFor([
+      v2Row,
+      { id: "x", type: "unrelated", payload: { legacyType: "follow_up_completed" } },
+    ]),
     "task-1",
     new Set(["fu-1"]),
     Date.now() + 50,

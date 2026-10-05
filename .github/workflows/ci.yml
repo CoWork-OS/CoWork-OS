@@ -153,6 +153,9 @@ jobs:
       - name: Install Electron binary
         run: node node_modules/electron/install.js
 
+      - name: Install Chromium for browser integration tests
+        run: npx playwright install --with-deps chromium
+
       - name: Prepare native test dependencies and Numbat fixtures
         run: |
           npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund

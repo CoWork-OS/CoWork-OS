@@ -38,6 +38,7 @@ import { MemoryTierService } from "./MemoryTierService";
 import { SupermemoryService } from "./SupermemoryService";
 import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository";
 import { MemoryWriter, memoryTextSalience } from "./MemoryWriter";
+import { InFlightWork } from "../utils/in-flight-work";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
 import type { CoreMemoryScopeKind } from "../../shared/types";
@@ -232,6 +233,15 @@ export class MemoryService {
   private static sideChannelCallsRemaining: number | null = null;
   private static sideChannelPolicyPaused = false;
   private static cleanupIntervalHandle?: ReturnType<typeof setInterval>;
+  /**
+   * Async work that writes to the database: compression batches, markdown index syncs,
+   * cleanup runs and the archive migration. `drain()` waits for it before shutdown.
+   */
+  private static inFlight = new InFlightWork();
+  /** Set by `drain()`: no new compression batch, markdown sync or cleanup starts. */
+  private static draining = false;
+  /** Bound for `drain()` at shutdown. */
+  static readonly DRAIN_TIMEOUT_MS = 5_000;
   private static db?: import("better-sqlite3").Database;
   /** The memory domain's statement port (DB6). */
   private static sql?: MemoryStatementPort;
@@ -262,10 +272,15 @@ export class MemoryService {
   };
 
   /**
-   * Initialize the memory service
+   * Initialize the memory service. `backgroundJobs: false` (desktop quiet mode) skips the
+   * periodic cleanup and the deferred one-time archive cleanup.
    */
-  static initialize(dbManager: DatabaseManager): void {
+  static initialize(
+    dbManager: DatabaseManager,
+    options: { backgroundJobs?: boolean } = {},
+  ): void {
     if (this.initialized) return;
+    this.draining = false;
 
     const db = dbManager.getDatabase();
     this.db = db;
@@ -292,10 +307,16 @@ export class MemoryService {
     });
     this.initialized = true;
 
+    if (options.backgroundJobs === false) {
+      logger.info("[MemoryService] Initialized (background cleanup not started)");
+      return;
+    }
+
     // Start periodic cleanup
     // runCleanup handles and logs its own errors.
     this.cleanupIntervalHandle = setInterval(() => {
-      void this.runCleanup();
+      if (this.draining) return;
+      void this.inFlight.track(this.runCleanup());
     }, CLEANUP_INTERVAL_MS);
 
     this.scheduleArchiveCleanupMigration();
@@ -314,7 +335,8 @@ export class MemoryService {
     if (this.archiveCleanupTimer) return;
     this.archiveCleanupTimer = setTimeout(() => {
       this.archiveCleanupTimer = undefined;
-      void this.runArchiveCleanupMigration();
+      if (this.draining) return;
+      void this.inFlight.track(this.runArchiveCleanupMigration());
     }, MemoryService.ARCHIVE_CLEANUP_DELAY_MS);
     this.archiveCleanupTimer.unref?.();
   }
@@ -380,8 +402,10 @@ export class MemoryService {
     readGuard?: MarkdownMemoryReadGuard,
   ): Promise<void> {
     this.ensureInitialized();
-    if (!this.markdownIndex) return;
-    await this.markdownIndex.syncWorkspace(workspaceId, workspacePath, force, undefined, readGuard);
+    if (!this.markdownIndex || this.draining) return;
+    await this.inFlight.track(
+      this.markdownIndex.syncWorkspace(workspaceId, workspacePath, force, undefined, readGuard),
+    );
   }
 
   /**
@@ -396,9 +420,12 @@ export class MemoryService {
     readGuard?: MarkdownMemoryReadGuard,
   ): Promise<MemorySearchResult[]> {
     this.ensureInitialized();
-    if (!this.markdownIndex) return [];
+    if (!this.markdownIndex || this.draining) return [];
     try {
-      return await this.markdownIndex.search(workspaceId, workspacePath, query, limit, readGuard);
+      // A search syncs the index first, so it is tracked like a sync.
+      return await this.inFlight.track(
+        this.markdownIndex.search(workspaceId, workspacePath, query, limit, readGuard),
+      );
     } catch {
       return [];
     }
@@ -2307,7 +2334,8 @@ export class MemoryService {
   }
 
   private static isCompressionPaused(): boolean {
-    return this.compressionPauseCount > 0;
+    // While draining, a running batch stops at the next group and keeps the rest queued.
+    return this.compressionPauseCount > 0 || this.draining;
   }
 
   static applyExecutionSideChannelPolicy(
@@ -2591,9 +2619,13 @@ export class MemoryService {
   }
 
   /**
-   * Process compression queue asynchronously
+   * Process compression queue asynchronously (tracked, so shutdown can wait for a batch).
    */
-  private static async processCompressionQueue(): Promise<void> {
+  private static processCompressionQueue(): Promise<void> {
+    return this.inFlight.track(this.runCompressionQueue());
+  }
+
+  private static async runCompressionQueue(): Promise<void> {
     if (
       !this.initialized ||
       this.compressionInProgress ||
@@ -3319,7 +3351,37 @@ export class MemoryService {
   }
 
   /**
-   * Shutdown the service
+   * Stop starting new work (cleanup, archive migration, compression batches, markdown
+   * syncs) and wait, at most `timeoutMs`, for what is running. Shutdown awaits this before
+   * `shutdown()` and before the database closes. Returns true when nothing is left running.
+   */
+  static async drain(timeoutMs = MemoryService.DRAIN_TIMEOUT_MS): Promise<boolean> {
+    this.draining = true;
+    if (this.cleanupIntervalHandle) {
+      clearInterval(this.cleanupIntervalHandle);
+      this.cleanupIntervalHandle = undefined;
+    }
+    if (this.compressionDrainTimer) {
+      clearTimeout(this.compressionDrainTimer);
+      this.compressionDrainTimer = undefined;
+    }
+    for (const timer of this.compressionRetryTimers) clearTimeout(timer);
+    this.compressionRetryTimers.clear();
+    if (this.archiveCleanupTimer) {
+      clearTimeout(this.archiveCleanupTimer);
+      this.archiveCleanupTimer = undefined;
+    }
+    const drained = await this.inFlight.drain(timeoutMs);
+    if (!drained) {
+      logger.warn(
+        `[MemoryService] ${this.inFlight.size} memory job(s) still running after ${timeoutMs}ms; shutting down anyway`,
+      );
+    }
+    return drained;
+  }
+
+  /**
+   * Shutdown the service. Call `drain()` first to let running work finish.
    */
   static shutdown(): void {
     if (this.cleanupIntervalHandle) {
@@ -3359,6 +3421,8 @@ export class MemoryService {
     this.unsubscribeMemoryItemChanges?.();
     this.unsubscribeMemoryItemChanges = undefined;
     SupermemoryRemoteRefRepository.setInstance(null);
+    // Work that outlived drain() is abandoned; a later initialize starts with a fresh registry.
+    this.inFlight = new InFlightWork();
     this.initialized = false;
     logger.info("[MemoryService] Shutdown complete");
   }

@@ -85,9 +85,9 @@ import { ensureDefaultBotRoles, ensureDefaultBotTeam } from "./agents/bot-team";
 
 import { ActivityRepository } from "./activity/activity-repository-facades";
 
-import { CrossSignalService } from "./agents/CrossSignalService";
-import { FeedbackService } from "./agents/FeedbackService";
-import { LoreService } from "./agents/LoreService";
+import type { KitWriterOwnership } from "./agents/kit-writer-ownership";
+import { createKitWriterOwnership } from "./agents/kit-writers";
+import { EverydayAgentService } from "./everyday-agent/everyday-agent-repository-facades";
 
 import { AutomationRunOutcomeRepository } from "./automation/automation-outcome-repository-facades";
 import { AutomationOutcomeService } from "./automation/AutomationOutcomeService";
@@ -338,6 +338,7 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
         getRoutineService: () => routineService,
         getEventTriggerService: () => eventTriggerService,
         getHeartbeatService: () => heartbeatService,
+        everydayAgentService: getEverydayAgentService(),
       });
     }
 
@@ -370,9 +371,14 @@ let heartbeatService: HeartbeatService | null = null;
 let awarenessService: AwarenessService | null = null;
 let autonomyEngine: AutonomyEngine | null = null;
 let subconsciousLoopService: SubconsciousLoopService | null = null;
-let crossSignalService: CrossSignalService | null = null;
-let feedbackService: FeedbackService | null = null;
-let loreService: LoreService | null = null;
+// CrossSignal, Feedback and Lore: run only while this process owns the kit-writer lease.
+let kitWriterOwnership: KitWriterOwnership | null = null;
+// One Everyday Agent service for IPC, the control plane and the browser host (LIFE-5).
+let everydayAgentService: EverydayAgentService | null = null;
+function getEverydayAgentService(): EverydayAgentService {
+  everydayAgentService ??= new EverydayAgentService(dbManager.getDatabase());
+  return everydayAgentService;
+}
 let xMentionBridgeService: XMentionBridgeService | null = null;
 let strategicPlannerService: StrategicPlannerService | null = null;
 let automationOutcomeService: AutomationOutcomeService | null = null;
@@ -2119,7 +2125,8 @@ if (isMacSafeStorageMigrationWorker) {
             logger.info(`Cleared ${rejected} stale pending memory write(s) during startup.`);
           }
         }
-        MemoryService.initialize(dbManager);
+        // Quiet mode starts no background jobs: no periodic cleanup or deferred archive cleanup.
+        MemoryService.initialize(dbManager, { backgroundJobs: !startupQuietMode });
         CuratedMemoryService.initialize(dbManager);
         // Memory engine (docs/memory-engine.md): memory_items is the only store of facts
         // about the user. The retired legacy lanes are copied in once, awaited here, before
@@ -2235,31 +2242,28 @@ if (isMacSafeStorageMigrationWorker) {
         logger.warn("Failed to bootstrap workspace:", error);
       }
 
-      // Initialize cross-agent signal tracker (best-effort; do not block app startup)
-      try {
-        crossSignalService = new CrossSignalService(dbManager.getDatabase());
-        await crossSignalService.start(agentDaemon);
-        logger.info("CrossSignalService initialized");
-      } catch (error) {
-        logger.error("Failed to initialize CrossSignalService:", error);
-      }
-
-      // Initialize feedback logger (best-effort; persists approve/reject/edit/next into workspace kit files)
-      try {
-        feedbackService = new FeedbackService(dbManager.getDatabase());
-        await feedbackService.start(agentDaemon);
-        logger.info("FeedbackService initialized");
-      } catch (error) {
-        logger.error("Failed to initialize FeedbackService:", error);
-      }
-
-      // Initialize lore service (best-effort; auto-records workspace history from task completions)
-      try {
-        loreService = new LoreService(dbManager.getDatabase());
-        await loreService.start(agentDaemon);
-        logger.info("LoreService initialized");
-      } catch (error) {
-        logger.error("Failed to initialize LoreService:", error);
+      // Workspace kit writers (cross-agent signals, feedback, lore; best-effort). Only the
+      // process that owns the profile's kit-writer lease runs them; the desktop app takes
+      // the lease over from a node daemon on the same profile. Quiet mode starts no
+      // background writers: the next normal start rebuilds the files from the database.
+      if (startupQuietMode) {
+        logger.info("Kit writers not started (quiet mode)");
+      } else {
+        try {
+          kitWriterOwnership = createKitWriterOwnership({
+            db: dbManager.getDatabase(),
+            agentDaemon,
+            runtime: "desktop",
+          });
+          const owned = await kitWriterOwnership.start();
+          logger.info(
+            owned
+              ? "Kit writers started"
+              : "Kit writers waiting for the kit-writer lease (another process owns it)",
+          );
+        } catch (error) {
+          logger.error("Failed to start the kit writers:", error);
+        }
       }
 
       try {
@@ -2943,6 +2947,8 @@ if (isMacSafeStorageMigrationWorker) {
         getMainWindow: () => mainWindow,
         getRoutineService: () => routineService,
         getPulseService: () => pulseService,
+        getDailyBriefingService: () => dailyBriefingService,
+        everydayAgentService: getEverydayAgentService(),
       });
       if (subconsciousLoopService) {
         setupSubconsciousHandlers(subconsciousLoopService);
@@ -3520,7 +3526,13 @@ if (isMacSafeStorageMigrationWorker) {
 
         // Start Control Plane if enabled (or force-enabled via flag/env)
         const cp = await startControlPlaneFromSettings({
-          deps: { agentDaemon, dbManager, channelGateway, getRoutineService: () => routineService },
+          deps: {
+            agentDaemon,
+            dbManager,
+            channelGateway,
+            getRoutineService: () => routineService,
+            everydayAgentService: getEverydayAgentService(),
+          },
           forceEnable: FORCE_ENABLE_CONTROL_PLANE,
           onEvent: (event) => {
             try {
@@ -3619,10 +3631,17 @@ if (isMacSafeStorageMigrationWorker) {
           dbManager,
           channelGateway,
           getRoutineService: () => routineService,
+          everydayAgentService: getEverydayAgentService(),
         });
         // Auto-start control plane if enabled (and register methods/bridge)
         await startControlPlaneFromSettings({
-          deps: { agentDaemon, dbManager, channelGateway, getRoutineService: () => routineService },
+          deps: {
+            agentDaemon,
+            dbManager,
+            channelGateway,
+            getRoutineService: () => routineService,
+            everydayAgentService: getEverydayAgentService(),
+          },
           forceEnable: FORCE_ENABLE_CONTROL_PLANE || shouldAutoEnableDesktopControlPlane(),
         });
 
@@ -4635,25 +4654,12 @@ if (isMacSafeStorageMigrationWorker) {
           requiresQuiescence: true,
           run: () => UsageInsightsProjector.shutdown(),
         },
+        // Lore, cross signals, feedback: flush and release the kit-writer lease.
         {
-          name: "lore",
+          name: "kit writers",
           run: async () => {
-            await loreService?.stop();
-            loreService = null;
-          },
-        },
-        {
-          name: "cross signals",
-          run: async () => {
-            await crossSignalService?.stop();
-            crossSignalService = null;
-          },
-        },
-        {
-          name: "feedback",
-          run: async () => {
-            await feedbackService?.stop();
-            feedbackService = null;
+            await kitWriterOwnership?.stop();
+            kitWriterOwnership = null;
           },
         },
         {
@@ -4680,7 +4686,15 @@ if (isMacSafeStorageMigrationWorker) {
           requiresQuiescence: true,
           run: () => DurableContextService.flushIndexQueue(),
         },
-        { name: "memory", requiresQuiescence: true, run: () => MemoryService.shutdown() },
+        // Let a running compression batch, markdown sync or cleanup finish first.
+        {
+          name: "memory",
+          requiresQuiescence: true,
+          run: async () => {
+            await MemoryService.drain();
+            MemoryService.shutdown();
+          },
+        },
         {
           name: "pulse",
           run: async () => {

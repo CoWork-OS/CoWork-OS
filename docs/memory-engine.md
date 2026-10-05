@@ -708,7 +708,35 @@ by the schema setup (`memory-curation-log-sql.ts`).
   runs when a workspace's index syncs.
 - **Shutdown.** The desktop app and the node daemon stop retention and the engine's deferred
   jobs and flush queued `MemoryWriter` writes (shutdown step "memory engine") before the
-  conversation index, the memory service and the database close.
+  conversation index, the memory service and the database close. Earlier steps settle the
+  untracked async work that used to write after the database closed:
+  - The agent daemon cancels consolidations that are still waiting on their 1 s delay and
+    waits up to 3 s (`AgentDaemon.BACKGROUND_WORK_DRAIN_MS`) for running consolidation and
+    Dreaming and for executor playbook learning, which the executor registers through
+    `trackBackgroundWork` (`utils/in-flight-work.ts`). Work still running after the bound is
+    abandoned; its late writes fail and are dropped.
+  - The kit writers stop (flushing their debounced writes) and release the kit-writer lease
+    (step "kit writers").
+  - Step "memory" awaits `MemoryService.drain()` before `shutdown()`: it stops the cleanup
+    interval, the deferred archive cleanup, compression drain and retry timers, starts no new
+    compression batch, markdown sync or cleanup, and waits up to 5 s for a running compression
+    batch (which stops at its next group and keeps the rest queued), markdown index sync or
+    search, cleanup run or archive migration.
+- **Quiet mode.** With desktop startup quiet mode (`COWORK_STARTUP_QUIET`,
+  `COWORK_PROFILE_QUIET`, `COWORK_BACKGROUND_AUTOSTART=0`; [development](development.md#startup-quiet-mode)),
+  `MemoryService.initialize(..., { backgroundJobs: false })` starts neither the periodic cleanup
+  nor the deferred archive cleanup, and the kit writers are not started; distill and retention
+  were already off.
+- **Kit-writer ownership.** `CROSS_SIGNALS.md`, `MISTAKES.md` and `LORE.md` are written only by
+  the process that owns the profile's kit-writer lease (`kit-writer-lease-sql.ts`,
+  `agents/kit-writer-ownership.ts`): one `maintenance_state` row (`kit_writer_lease`) with the
+  owner, its runtime and an expiry, acquired and renewed in one IMMEDIATE transaction. The lease
+  lasts 60 s and is renewed every 15 s; a crashed owner's lease expires and the next process
+  to ask takes over. A desktop app that finds a daemon holding it records a hand-off request;
+  the daemon yields on its next renewal (stops and flushes its writers) and its release passes
+  the lease to the desktop, which therefore wins whenever both run. Between processes of the
+  same runtime the first one keeps it. Each new owner's writers rebuild from the database, so
+  tasks the non-owner ran reach the files when ownership changes, not live.
 - **Supermemory copies (SEC-17).** `supermemory_remote_refs` (`supermemory-remote-refs-sql.ts`)
   maps each remote copy to its local record: `archive:<id>` for a mirrored archive row
   (`/v3/documents`, document id), `external:<id>` for an explicit remote remember
@@ -759,3 +787,11 @@ by the schema setup (`memory-curation-log-sql.ts`).
    unchanged (only items written before source refs existed).
 9. Real local embeddings are out of scope (decision above). Revisit only if the memory evals
    show a recall gap that lexical recall and fusion tuning cannot close.
+10. Done: shutdown waits (bounded) for consolidation, executor learning, compression batches and
+    markdown syncs; quiet mode starts no memory cleanup and no kit writers; one kit-writer owner
+    per profile between the desktop app and the node daemon (§7). One `DailyBriefingService`
+    (the on-demand IPC briefing passes its data sources per call) and one
+    `EverydayAgentService` per process, injected into IPC, the control plane and the browser
+    host. Open: a non-owner's live kit updates reach the files only when ownership changes or
+    on the owner's next restart; the lease does not cover `USER.md`/`MEMORY.md`, which are
+    rendered from `memory_items` on request and written only when their content changes.

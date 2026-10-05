@@ -5,6 +5,7 @@
  * Can be scheduled via CronService or triggered on-demand.
  */
 
+import { AsyncLocalStorage } from "async_hooks";
 import { serviceStatements } from "../database/service-statements";
 import { randomUUID } from "crypto";
 import { hasReservedImportPrefix, isAgentVisiblePrivacyState } from "../memory/memory-visibility";
@@ -23,7 +24,9 @@ import type { MailboxDigestSnapshot } from "../../shared/mailbox";
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 export class DailyBriefingService {
-  private deps: DailyBriefingServiceDeps;
+  private readonly baseDeps: DailyBriefingServiceDeps;
+  /** Per-call data sources (`generateBriefing(..., { deps })`), scoped to that call. */
+  private readonly callDeps = new AsyncLocalStorage<DailyBriefingServiceDeps>();
   private configs: Map<string, BriefingConfig> = new Map();
   private latestBriefings: Map<string, Briefing> = new Map();
   private db: Any;
@@ -64,14 +67,36 @@ export class DailyBriefingService {
   ];
 
   constructor(deps: DailyBriefingServiceDeps, db?: Any) {
-    this.deps = deps;
+    this.baseDeps = deps;
     this.db = db;
     this.ensureSchema();
   }
 
+  private get deps(): DailyBriefingServiceDeps {
+    return this.callDeps.getStore() ?? this.baseDeps;
+  }
+
   // ── Main generation ─────────────────────────────────────────────
 
+  /**
+   * Generate a briefing. `options.deps` replaces the service's data sources for this call
+   * only (the on-demand IPC briefing composes several workspaces); configs, the latest
+   * briefings and storage stay this instance's.
+   */
   async generateBriefing(
+    workspaceId: string,
+    configOverride?: Partial<BriefingConfig>,
+    options: { deps?: DailyBriefingServiceDeps } = {},
+  ): Promise<Briefing> {
+    if (options.deps) {
+      return this.callDeps.run(options.deps, () =>
+        this.generateBriefingWithDeps(workspaceId, configOverride),
+      );
+    }
+    return this.generateBriefingWithDeps(workspaceId, configOverride);
+  }
+
+  private async generateBriefingWithDeps(
     workspaceId: string,
     configOverride?: Partial<BriefingConfig>,
   ): Promise<Briefing> {

@@ -530,3 +530,44 @@ describe("DailyBriefingService", () => {
     }
   });
 });
+
+describe("DailyBriefingService per-call data sources (LIFE-5)", () => {
+  it("uses the call's deps for that call only, concurrently with base calls", async () => {
+    const baseDeliver = vi.fn(async () => undefined);
+    const base = makeDeps({
+      getPriorities: () => "- Base priority",
+      deliverToChannel: baseDeliver,
+    });
+    const service = new DailyBriefingService(base);
+    let releaseCall!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseCall = resolve));
+    const callDeps = makeDeps({
+      getPriorities: async () => {
+        await gate;
+        return "- [Work] Call priority";
+      },
+    });
+
+    const scoped = service.generateBriefing(
+      "__all__",
+      { deliveryChannelType: "slack", deliveryChannelId: "c1" },
+      { deps: callDeps },
+    );
+    // A base call while the scoped one is still running keeps the base sources.
+    const plain = await service.generateBriefing("ws-1");
+    releaseCall();
+    const all = await scoped;
+
+    const labels = (briefing: typeof plain) =>
+      briefing.sections
+        .find((section) => section.type === "priority_review")
+        ?.items.map((item) => item.label);
+    expect(labels(plain)).toEqual(["Base priority"]);
+    expect(labels(all)).toEqual(["[Work] Call priority"]);
+    // The call's deps have no channel delivery, so the configured channel is not used.
+    expect(baseDeliver).not.toHaveBeenCalled();
+    expect(all.delivered).toBe(false);
+    // State stays on the one instance.
+    expect((await service.getLatestBriefing("__all__"))?.id).toBe(all.id);
+  });
+});

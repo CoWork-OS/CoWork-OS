@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
+import { MemoryConsolidator } from "../../memory/MemoryConsolidator";
+import { InFlightWork } from "../../utils/in-flight-work";
 
 vi.mock("electron", () => ({ app: { getPath: vi.fn().mockReturnValue("/tmp") } }));
 
@@ -180,5 +182,84 @@ describe("daemon shutdown persistence", () => {
     await shutdown;
     expect(daemon.activeTasks.size).toBe(0);
     expect(daemon.finishQueueSlot).toHaveBeenCalledWith("delayed");
+  });
+});
+
+describe("daemon shutdown and background memory work (LOOP-14)", () => {
+  function idleDaemon(extra: Record<string, unknown> = {}) {
+    return Object.assign(Object.create(AgentDaemon.prototype), {
+      orchestrationGraphEngine: { stop: vi.fn() },
+      workSessionProtocolService: { getReliabilityService: () => ({ stop: vi.fn() }) },
+      pendingApprovals: new Map(),
+      pendingDurableApprovalGrants: new Map(),
+      pendingInputRequests: new Map(),
+      pendingRetries: new Map(),
+      pendingTaskImages: new Map(),
+      activeTasks: new Map(),
+      pendingMemoryConsolidations: new Set<string>(),
+      memoryConsolidationTimers: new Set(),
+      backgroundMemoryWork: new InFlightWork(),
+      taskRepo: { findById: () => null, update: vi.fn() },
+      logEvent: vi.fn(),
+      removeAllListeners: vi.fn(),
+      ...extra,
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("cancels a scheduled consolidation that has not started", async () => {
+    vi.useFakeTimers();
+    const run = vi.spyOn(MemoryConsolidator, "run");
+    const daemon = idleDaemon({
+      workspaceRepo: { findById: () => ({ id: "ws", path: "/tmp/ws" }) },
+      applyTaskWorkspaceOverrides: (_task: unknown, workspace: unknown) => workspace,
+    });
+    daemon.scheduleMemoryConsolidation({ id: "task", workspaceId: "ws", prompt: "p" });
+    expect(daemon.memoryConsolidationTimers.size).toBe(1);
+
+    await daemon.shutdown();
+    expect(daemon.memoryConsolidationTimers.size).toBe(0);
+    expect(daemon.pendingMemoryConsolidations.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(run).not.toHaveBeenCalled();
+    // A completion after the fence schedules nothing.
+    daemon.scheduleMemoryConsolidation({ id: "late", workspaceId: "ws", prompt: "p" });
+    expect(daemon.memoryConsolidationTimers.size).toBe(0);
+  });
+
+  it("waits for in-flight learning before shutdown completes", async () => {
+    vi.useFakeTimers();
+    const daemon = idleDaemon();
+    let finishLearning!: () => void;
+    const learning = new Promise<void>((resolve) => (finishLearning = resolve));
+    void daemon.trackBackgroundWork(learning);
+
+    let done = false;
+    const shutdown = daemon.shutdown().then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(done).toBe(false);
+    expect(daemon.removeAllListeners).not.toHaveBeenCalled();
+
+    finishLearning();
+    await vi.advanceTimersByTimeAsync(0);
+    await shutdown;
+    expect(done).toBe(true);
+  });
+
+  it("bounds the wait so stuck background work cannot hold shutdown", async () => {
+    vi.useFakeTimers();
+    const daemon = idleDaemon();
+    void daemon.trackBackgroundWork(new Promise<void>(() => undefined));
+    let done = false;
+    const shutdown = daemon.shutdown().then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(AgentDaemon.BACKGROUND_WORK_DRAIN_MS - 1);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await shutdown;
+    expect(done).toBe(true);
   });
 });

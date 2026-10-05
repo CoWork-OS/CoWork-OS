@@ -17,6 +17,7 @@ import { MEMORY_CONTEXT_UNITS } from "./memory-context-sql";
 import { SUPERMEMORY_REMOTE_REF_UNITS } from "./supermemory-remote-refs-units";
 import { MEMORY_CURATION_UNITS } from "./memory-curation-units";
 import { MAINTENANCE_CLAIM_UNITS } from "./maintenance-claim-sql";
+import { KIT_WRITER_LEASE_UNITS } from "./kit-writer-lease-sql";
 import { LEGACY_MEMORY_RETIREMENT_UNITS } from "./legacy-memory-retirement-sql";
 import { MEMORY_HEALTH_UNITS } from "./memory-health-sql";
 
@@ -80,6 +81,7 @@ export const MEMORY_UNITS = {
   ...SUPERMEMORY_REMOTE_REF_UNITS,
   ...MEMORY_CURATION_UNITS,
   ...MAINTENANCE_CLAIM_UNITS,
+  ...KIT_WRITER_LEASE_UNITS,
   ...LEGACY_MEMORY_RETIREMENT_UNITS,
   ...MEMORY_HEALTH_UNITS,
   tier_promotionPass: tierPromotionPass,

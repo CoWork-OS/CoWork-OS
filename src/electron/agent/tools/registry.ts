@@ -4196,7 +4196,7 @@ ${
     ? `
 Memory Tools:
 - memory_recall: Search saved facts, earlier tasks, workspace notes and the knowledge graph; index first, then ids with detail "full"
-- memory_remember: Save a durable fact (preference, rule, project fact, decision, commitment) for later tasks
+- memory_remember: As you work, save what later tasks need (preference, correction, decision, project fact, lesson); one fact per call
 - memory_forget: Delete a wrong or unwanted memory by id or exact match
 - context_recall: Recover this task's earlier details after context compaction`
     : ""

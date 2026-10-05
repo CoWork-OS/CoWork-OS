@@ -737,10 +737,18 @@ export function MemoryHubSettings(props?: {
   };
 
   const saveFeatures = async (updates: Partial<MemoryFeaturesSettings>) => {
-    const next: MemoryFeaturesSettings = { ...(features || DEFAULT_FEATURES), ...updates };
     try {
       setSaving(true);
       setActionError(null);
+      // Merge into the stored settings, not this tab's copy: Memory settings saves other
+      // fields of the same object (the compression and Dreaming budgets), which a stale
+      // copy would overwrite.
+      const stored = await window.electronAPI.getMemoryFeaturesSettings().catch(() => null);
+      const next: MemoryFeaturesSettings = {
+        ...DEFAULT_FEATURES,
+        ...(stored || features),
+        ...updates,
+      };
       await window.electronAPI.saveMemoryFeaturesSettings(next);
       setFeatures(await window.electronAPI.getMemoryFeaturesSettings());
     } catch (error) {

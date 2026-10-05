@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Memory Hub Sources and Health tabs**: **Sources** shows where CoWork's memory comes from (you, the agent, Dreaming, imports, other people, Chronicle, Supermemory, the knowledge graph) and opens the matching facts; **Health** runs the memory health checks with PASS/WARN results and a Refresh button.
+- **AI memory compression is on by default**: long memories get a one-line summary from your configured model and related ones are grouped into digests. It costs tokens: up to 20,000 a day across all workspaces (adjustable in **Settings > Memory**). Turn it off per workspace with **AI memory compression**. Private memories are never sent.
+- **Wider Mission Control recall**: recall also searches your memory items and, when connected and network access is on, Supermemory; older tasks and activity are found too.
 - **One memory store and the Memory Hub**: facts about you and your workspaces live in one local store, managed in **Settings > Memory > What CoWork knows** (where each fact came from, add, edit, pin, delete, clear global memories). A **Review** tab lists Dreaming's proposals and recent changes with **Undo**, and each chat reply can show the memories it used (**Memory used**). See [Memory Engine](docs/memory-engine.md).
 - **Dreaming memory curator**: merges duplicate facts, flags conflicts, promotes outcomes that recur across tasks, retires unused inferences and closes finished commitments. Safe changes to inferred facts are applied and can be undone; anything you stated or confirmed is only changed after you accept it. Runs on memory signals and once a day; an optional AI pass is off by default and has a daily token budget. See [Dreaming](docs/dreaming.md).
 - **Memory health and evals**: `npm run qa:memory-evals` (also run by `qa:harness`) checks recall quality, write hygiene, injection and privacy leaks; `npm run qa:memory-health` prints read-only aggregate counts for a profile. See [Harness Eval Battery](docs/harness-eval-battery.md#memory-evals).
@@ -19,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Kit files and memory stay in step**: hand edits to `.cowork/USER.md` and `MEMORY.md` sync back into memory shortly after you save. The desktop app and the node daemon no longer both rewrite workspace kit files (`CROSS_SIGNALS.md`, `MISTAKES.md`, `LORE.md`): one process owns them and the desktop app takes over when it starts.
+- **Memory housekeeping**: old superseded memory revisions are pruned after 180 days (the newest five per fact and anything still undoable are kept); shutdown waits briefly for memory work in progress; startup quiet mode no longer starts memory cleanup or kit writers.
 - **Four memory tools**: `memory_recall`, `memory_remember`, `memory_forget` and `context_recall` replace the 16 earlier memory tools (`search_memories`, `memory_save`, `memory_curate`, `supermemory_*`, `context_grep` and others), which are removed; skills or prompts that name them must switch. `memory_forget` asks before deleting a memory.
 - **Every memory source follows the same rules**: ChatGPT and pasted imports, core memory candidates, Chronicle and Supermemory writes pass the same redaction, `<no-memory>`, privacy-mode and duplicate checks; re-importing adds nothing, and screen text never becomes a fact about you.
 - **Legacy memory data retired**: after the one-time migration, the old curated, profile and relationship stores are exported to an encrypted backup (`backups/legacy-memory-*.json.enc` in the app data folder, OS keychain) and removed.
@@ -29,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Memory summaries and search**: summaries, search results and the Inspector no longer show the same first line for screen-context, compaction and imported memories; existing memories are re-indexed once in the background, and the storage cap now counts search data and metadata. Searches in any language (Cyrillic, Greek, Turkish, CJK) match notes, mail and YouTube transcripts.
+- **Everyday Agent "Delete local data"**: clears only the memory candidates the panel shows, in that workspace, and keeps the distill history.
 - **Knowledge graph quality**: technology extraction no longer turns words like "go", "rest" or "react" in prose into entities; names are case-insensitive (`Go`/`go` merged); free-mail and relay domains are no longer organizations; organizations are named after their registrable domain; automated senders are no longer people; manual and agent edits outrank automatic ones; automatic writes respect workspace memory settings and `<no-memory>`. A one-time cleanup removes the existing noise. See [Knowledge Graph](docs/knowledge-graph.md).
 - **Memory search and ranking**: memory searches treat `%` and `_` as literal characters instead of wildcards; matches imported from other workspaces rank below this workspace's own; one- and two-word searches score on the same scale as longer ones; updated observations no longer leave stale entries in the memory search index (rebuilt once on upgrade).
 - **Memory review modes and shutdown**: with a memory-write review mode set (`COWORK_MEMORY_WRITE_APPROVAL_MODE`), facts learned from core memory candidates wait for review like other background writes; memory compression retries and the daemon's cross-signal and feedback writers stop cleanly at shutdown.

@@ -91,6 +91,8 @@ No threshold applies unless one is passed. `--ci` applies the audit §9 targets:
 | 1 | A threshold was breached; the failed checks are named |
 | 2 | The database is missing, cannot be opened, or a flag is invalid |
 
+The Memory Hub **Health** tab shows the same checks in the app with PASS/WARN ([memory-engine.md](memory-engine.md) §5a). The `--ci` preset, the Hub's warning thresholds, the default `--stuck-after` age and the migration marker keys are shared in `src/shared/memory-health-thresholds.json`.
+
 `tests/qa-memory-health.test.ts` builds fixture databases with the real schema and checks the numbers and the exit codes. It also checks that every run leaves the database byte-for-byte unchanged.
 
 ## CI and legacy configuration

@@ -447,3 +447,59 @@ describe("browser memory items (What CoWork knows)", () => {
     expect(memoryItems.add).not.toHaveBeenCalled();
   });
 });
+
+describe("browser memory hub sources and health", () => {
+  const WS = "7b0f8e4c-3a52-4d8e-9b1a-2f6c1d9e0a11";
+  function setupHealth(permissions: Partial<Workspace["permissions"]>, withService = true) {
+    const memoryHealth = {
+      sources: vi.fn(async (workspaceId: string) => ({ workspaceId })),
+      health: vi.fn(async () => ({ generatedAt: 1, checks: [], ok: true })),
+    };
+    const definitions = createBrowserMemoryDefinitions({
+      resolveWorkspace: async () =>
+        ({
+          ...workspace,
+          id: WS,
+          permissions: { ...workspace.permissions, ...permissions },
+        }) as Workspace,
+      memoryItems: {} as never,
+      ...(withService ? { memoryHealth: memoryHealth as never } : {}),
+    });
+    const call = async (name: string, args: unknown[]) => {
+      const method = definitions[name];
+      return method.handler(method.validate?.(args) ?? args, {} as never);
+    };
+    return { memoryHealth, call, definitions };
+  }
+
+  it("exposes the desktop methods as reads behind workspace read authority", async () => {
+    const { call, definitions, memoryHealth } = setupHealth({ write: false, delete: false });
+    expect(definitions.getMemorySources.mutation).toBe(false);
+    expect(definitions.getMemoryHealth.mutation).toBe(false);
+    await expect(call("getMemorySources", [{ workspaceId: WS }])).resolves.toEqual({
+      workspaceId: WS,
+    });
+    await expect(call("getMemoryHealth", [{ workspaceId: WS }])).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(memoryHealth.sources).toHaveBeenCalledWith(WS);
+
+    const denied = setupHealth({ read: false });
+    await expect(denied.call("getMemoryHealth", [{ workspaceId: WS }])).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(denied.memoryHealth.health).not.toHaveBeenCalled();
+  });
+
+  it("validates payloads with the desktop schema and reports a missing database", async () => {
+    const { call, memoryHealth } = setupHealth({});
+    await expect(call("getMemorySources", [{ workspaceId: WS, extra: 1 }])).rejects.toThrow();
+    await expect(call("getMemorySources", [{ workspaceId: "../x" }])).rejects.toThrow();
+    expect(memoryHealth.sources).not.toHaveBeenCalled();
+
+    const unavailable = setupHealth({}, false);
+    await expect(unavailable.call("getMemoryHealth", [{ workspaceId: WS }])).rejects.toMatchObject({
+      code: "HOST_UNAVAILABLE",
+    });
+  });
+});

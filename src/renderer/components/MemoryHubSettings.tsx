@@ -27,6 +27,9 @@ import { MemorySettings } from "./MemorySettings";
 import { MemoryKnowledgeTab } from "./memory/MemoryKnowledgeTab";
 import { peekMemoryHubFocusWorkspace } from "./memory/memory-hub-focus";
 import { MemoryReviewTab } from "./memory/MemoryReviewTab";
+import { MemorySourcesTab } from "./memory/MemorySourcesTab";
+import { MemoryHealthTab } from "./memory/MemoryHealthTab";
+import type { MemoryHubSource } from "../../shared/memory-hub-types";
 import { SupermemoryDisconnectPurge } from "./memory/SupermemoryDisconnectPurge";
 import "./memory/memory-knowledge.css";
 import { ChronicleSettingsCard } from "./ChronicleSettings";
@@ -89,7 +92,11 @@ export function MemoryHubSettings(props?: {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
   // "What CoWork knows" is the primary view; everything else is under Settings.
-  const [hubTab, setHubTab] = useState<"knowledge" | "review" | "settings">("knowledge");
+  const [hubTab, setHubTab] = useState<"knowledge" | "review" | "sources" | "health" | "settings">(
+    "knowledge",
+  );
+  // "Show" in the Sources tab opens "What CoWork knows" filtered to that source.
+  const [knowledgeSourceFilter, setKnowledgeSourceFilter] = useState<MemoryHubSource | "">("");
   // Pending Dreaming proposals of the selected workspace (Review tab badge).
   const [reviewCount, setReviewCount] = useState(0);
   useEffect(() => {
@@ -967,7 +974,10 @@ export function MemoryHubSettings(props?: {
           role="tab"
           aria-selected={hubTab === "knowledge"}
           className={`settings-tab ${hubTab === "knowledge" ? "active" : ""}`}
-          onClick={() => setHubTab("knowledge")}
+          onClick={() => {
+            setKnowledgeSourceFilter("");
+            setHubTab("knowledge");
+          }}
         >
           What CoWork knows
         </button>
@@ -988,11 +998,29 @@ export function MemoryHubSettings(props?: {
         <button
           type="button"
           role="tab"
+          aria-selected={hubTab === "sources"}
+          className={`settings-tab ${hubTab === "sources" ? "active" : ""}`}
+          onClick={() => setHubTab("sources")}
+        >
+          Sources
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={hubTab === "health"}
+          className={`settings-tab ${hubTab === "health" ? "active" : ""}`}
+          onClick={() => setHubTab("health")}
+        >
+          Health
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={hubTab === "settings"}
           className={`settings-tab ${hubTab === "settings" ? "active" : ""}`}
           onClick={() => setHubTab("settings")}
         >
-          Settings and sources
+          Settings
         </button>
       </div>
     </>
@@ -1014,16 +1042,46 @@ export function MemoryHubSettings(props?: {
     );
   }
 
+  if (hubTab === "sources") {
+    return (
+      <div className="settings-section">
+        {hubHeader}
+        {selectedWorkspaceId ? (
+          <MemorySourcesTab
+            key={selectedWorkspaceId}
+            workspaceId={selectedWorkspaceId}
+            onShowSource={(source) => {
+              setKnowledgeSourceFilter(source);
+              setHubTab("knowledge");
+            }}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (hubTab === "health") {
+    return (
+      <div className="settings-section">
+        {hubHeader}
+        {selectedWorkspaceId ? (
+          <MemoryHealthTab key={selectedWorkspaceId} workspaceId={selectedWorkspaceId} />
+        ) : null}
+      </div>
+    );
+  }
+
   if (hubTab === "knowledge") {
     return (
       <div className="settings-section">
         {hubHeader}
         {selectedWorkspaceId ? (
           <MemoryKnowledgeTab
-            key={selectedWorkspaceId}
+            key={`${selectedWorkspaceId}:${knowledgeSourceFilter}`}
             workspaceId={selectedWorkspaceId}
             canWrite={canWriteWorkspace}
             canDelete={canDeleteWorkspace}
+            initialSourceFilter={knowledgeSourceFilter}
           />
         ) : null}
       </div>

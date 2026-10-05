@@ -1,14 +1,19 @@
 /**
  * Default wiring of the memory curator for the desktop app: the Memory Hub Review service
- * (IPC and browser host) and the Dreaming service used by every trigger.
+ * (IPC and browser host) and the Dreaming service used by every trigger; also the Hub's
+ * Sources and Health service.
  */
 import type Database from "better-sqlite3";
+import { ChronicleSettingsManager } from "../chronicle/ChronicleSettingsManager";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { DreamingRepository } from "./DreamingRepository";
 import { DreamingService, type DreamingServiceDeps } from "./DreamingService";
 import { MemoryCurationRepository } from "./MemoryCurationRepository";
+import { MemoryHealthService } from "./MemoryHealthService";
 import { MemoryReviewService } from "./MemoryReviewService";
 import { MemoryWriter } from "./MemoryWriter";
+import { SupermemoryService } from "./SupermemoryService";
+import { createMemoryStatementPort } from "./memory-statement-port";
 
 /** Dreaming over the profile database, reading the curator settings from Memory features. */
 export function createDreamingService(
@@ -52,5 +57,18 @@ export function createMemoryReviewService(
       });
     },
     syncKitFiles: options.syncKitFiles,
+  });
+}
+
+/** Memory Hub "Sources" and "Health": aggregate counts over the profile database. */
+export function createMemoryHealthService(db: Database.Database): MemoryHealthService {
+  return new MemoryHealthService({
+    port: createMemoryStatementPort(db),
+    getSettings: () => MemoryFeaturesManager.loadSettings(),
+    getSupermemoryStatus: () => {
+      const status = SupermemoryService.getConfigStatus();
+      return { enabled: status.enabled, connected: status.isConfigured };
+    },
+    getChronicleEnabled: () => ChronicleSettingsManager.loadSettings().enabled === true,
   });
 }

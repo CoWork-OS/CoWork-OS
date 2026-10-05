@@ -542,8 +542,9 @@ private items, contact items and global items are never rendered into either fil
   attributed to the user: they carry `curated` trust (0.85) and never outrank or overwrite
   what the user stated.
 
-## 5a. Memory Hub: "What CoWork knows"
+## 5a. Memory Hub: "What CoWork knows", Sources and Health
 
+The Memory Hub's tabs are What CoWork knows, Review (§5b), Sources, Health and Settings.
 The first tab of Settings > Memory (audit §8.4) is a view of `memory_items`, through
 `MemoryItemsHubService` and the `memoryItems:*` IPC channels (zod-validated in main,
 `memory-ipc-validation.ts`; the browser host exposes the same methods with workspace
@@ -570,6 +571,36 @@ read/write/delete checks).
   (private gateway, the workspace's memory settings, no external provider); L0 is the
   builder's pinned profile block and L1 the plan step's memory section (the builder's L1
   recall for the most recent task prompt, the kit slice, playbook and summaries).
+
+**Sources and Health tabs** (audit §8.4). `MemoryHealthService` behind the `memoryHub:sources`
+and `memoryHub:health` IPC channels (`memory-health-ipc-validation.ts`, zod in main; the
+browser host exposes `getMemorySources` / `getMemoryHealth` behind workspace read access).
+Both are read units of the memory domain (`memory-health-sql.ts`), so they run in the database
+worker when memory is routed there. They return counts, ratios and timestamps only, never memory
+content or credentials.
+
+- **Sources** (the selected workspace): active facts by `source` and by `source_ref.store`
+  (the producer: `memory_hub`, `kit_file`, `agent_tool`, `core_candidate`, `dreaming`,
+  `import`, `mailbox`, `awareness`, `adaptive_style`, `personality` and the migrated lanes),
+  each split into this workspace, global and workspace-less contact items, with a plain-language
+  explanation. "Show" opens "What CoWork knows" filtered to that source. Also the workspace's
+  archive rows by type and by capture origin (private count), imports (archive rows and
+  `import` facts), Chronicle (on or off, `screen_context` rows), Supermemory (on, connected or
+  not, copies sent from the workspace) and knowledge graph entities, relationships,
+  observations and entity types.
+- **Health** (the whole profile database, every workspace; the workspace only gates access):
+  the checks of `npm run qa:memory-health` with PASS / WARN / SKIP (a missing table) / INFO and
+  their thresholds. Archive telemetry ratio ≤ 5 %, archive and `memory_items` duplicate rate
+  ≤ 1 %, no heartbeat or Dreaming run still `running` after an hour, no failed Dreaming run in
+  7 days, Dreaming's last run (info), AI synthesis tokens of the last 24 hours ≤ the daily
+  budget (info while synthesis is off), no orphan embeddings, ≤ 25 memory writes waiting for
+  approval, database ≤ 1024 MiB, and every one-time memory migration marker present.
+  A Refresh button reruns the checks (`memoryHub:health` allows 10 calls a minute).
+- The thresholds, the stuck-run age and the migration marker keys live in
+  `src/shared/memory-health-thresholds.json`, read by both the service and the script (`ci` is
+  the script's `--ci` preset; `hub` is when the tab shows WARN). The service repeats the
+  script's SQL; `__tests__/MemoryHealthService.test.ts` checks both give the same numbers on the
+  same database.
 
 ## 5b. Dreaming: the curator of `memory_items` (Phase 3)
 

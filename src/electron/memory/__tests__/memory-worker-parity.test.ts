@@ -13,6 +13,7 @@ import { createBoxBrainRepository } from "../BoxBrainRepository";
 import { DreamingRepository } from "../DreamingRepository";
 import { DurableContextService } from "../DurableContextService";
 import { MarkdownMemoryIndexService } from "../MarkdownMemoryIndexService";
+import { MemoryHealthService } from "../MemoryHealthService";
 import { MemoryObservationService } from "../MemoryObservationService";
 import { MemoryTierService } from "../MemoryTierService";
 import { createMemoryStatementPort } from "../memory-statement-port";
@@ -377,6 +378,18 @@ describe("memory domain on the host and in the database worker", () => {
       recent: await markdown.getRecentSnippets("ws", workspaceDir, 5, () => true),
     };
     markdown.shutdown();
+
+    // Memory Hub Sources and Health (read units). The file size can differ by backend.
+    const hubHealth = new MemoryHealthService({
+      port: sql,
+      getSettings: () => ({}) as ReturnType<typeof MemoryFeaturesManager.loadSettings>,
+      getSupermemoryStatus: () => ({ enabled: false, connected: false }),
+      getChronicleEnabled: () => false,
+    });
+    result.memoryHub = {
+      sources: await hubHealth.sources("ws"),
+      health: (await hubHealth.health()).checks.filter((check) => check.id !== "database_size"),
+    };
 
     return { unitCalls, result: stable(result, start) };
   }

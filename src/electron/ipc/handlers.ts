@@ -543,8 +543,12 @@ import {
   MEMORY_USED_MAX_EVENTS,
   toMemoryUsedTimelineEvent,
 } from "../../shared/memory-used";
-import { createMemoryReviewService } from "../memory/memory-review-wiring";
+import {
+  createMemoryHealthService,
+  createMemoryReviewService,
+} from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
+import { setupMemoryHealthHandlers } from "./memory-health-handlers";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
@@ -11583,6 +11587,12 @@ export async function setupIpcHandlers(
       },
       syncKitFiles: (workspaceId) => CuratedMemoryService.syncWorkspaceFiles(workspaceId),
     }),
+    workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+  });
+
+  // Memory Hub "Sources" and "Health": aggregate counts and the qa:memory-health checks.
+  setupMemoryHealthHandlers({
+    service: createMemoryHealthService(db),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 }

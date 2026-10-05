@@ -27,7 +27,7 @@ import {
   type MemoryKnowledgeApi,
 } from "./memory-knowledge-model";
 
-const SOURCE_FILTERS: Array<{ value: MemoryHubSource | ""; label: string }> = [
+export const SOURCE_FILTERS: Array<{ value: MemoryHubSource | ""; label: string }> = [
   { value: "", label: "Any source" },
   { value: "user_stated", label: "You said" },
   { value: "user_confirmed", label: "You confirmed" },
@@ -468,10 +468,13 @@ export function MemoryKnowledgeTab({
   canDelete = true,
   api = knowledgeApi,
   confirm = (message: string) => window.confirm(message),
+  initialSourceFilter = "",
 }: {
   workspaceId: string;
   canWrite?: boolean;
   canDelete?: boolean;
+  /** Source filter to start with ("Show" in the Sources tab). */
+  initialSourceFilter?: MemoryHubSource | "";
   api?: () => MemoryKnowledgeApi;
   confirm?: (message: string) => boolean;
 }) {
@@ -484,7 +487,7 @@ export function MemoryKnowledgeTab({
   // "Open in Memory Hub" (per-reply Memory used) starts the tab filtered to that item.
   const [query, setQuery] = useState(() => takeMemoryHubFocus(workspaceId)?.query ?? "");
   const [kindFilter, setKindFilter] = useState<MemoryHubKind | "">("");
-  const [sourceFilter, setSourceFilter] = useState<MemoryHubSource | "">("");
+  const [sourceFilter, setSourceFilter] = useState<MemoryHubSource | "">(initialSourceFilter);
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
   const [why, setWhy] = useState<KnowledgeWhyState | null>(null);

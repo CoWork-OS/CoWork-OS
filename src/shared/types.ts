@@ -9764,6 +9764,10 @@ export const IPC_CHANNELS = {
   MEMORY_REVIEW_RUN_NOW: "memoryReview:runNow",
   MEMORY_REVIEW_SET_LLM: "memoryReview:setLlmEnabled",
 
+  // Memory Hub "Sources" and "Health": aggregate counts and qa:memory-health checks
+  MEMORY_HUB_SOURCES: "memoryHub:sources",
+  MEMORY_HUB_HEALTH: "memoryHub:health",
+
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",
   AWARENESS_LIST_BELIEFS: "awareness:listBeliefs",

@@ -29,19 +29,14 @@ const require = createRequire(import.meta.url);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DATABASE_FILE_NAME = "cowork-os.db";
 
+// Shared with the Memory Hub Health tab (src/electron/memory/MemoryHealthService.ts).
+const SHARED = require("../../src/shared/memory-health-thresholds.json");
+
 /** Audit §9 success-metric targets, applied by --ci unless a flag overrides them. */
-export const CI_THRESHOLDS = {
-  maxTelemetryRatio: 0.05,
-  maxDuplicateRate: 0.01,
-  maxStuckHeartbeat: 0,
-};
+export const CI_THRESHOLDS = { ...SHARED.ci };
 
 /** `maintenance_state` keys written by the memory migrations (values are never printed). */
-export const MEMORY_MAINTENANCE_KEYS = [
-  "memory_items_lane_migration_v1",
-  "memory_cleanup_migration_v1",
-  "memory_payload_tables_migration_v1",
-];
+export const MEMORY_MAINTENANCE_KEYS = [...SHARED.maintenanceKeys];
 const KIT_RENDER_STATE_PREFIX = "kit_render_state:";
 
 const THRESHOLD_FLAGS = {
@@ -132,7 +127,7 @@ export function parseArgs(argv) {
     profile: undefined,
     top: 15,
     dbstat: true,
-    stuckAfterMs: 60 * 60 * 1000,
+    stuckAfterMs: SHARED.stuckAfterMs,
     snapshotLimitMb: 1024,
     thresholds: {},
   };

@@ -18,6 +18,8 @@ export interface RetentionRule {
   /** SQL predicate; `?` placeholders are bound to `params(cutoff)`. */
   where: string;
   params: (cutoff: number) => unknown[];
+  /** Other tables the predicate reads; the rule is skipped while one is absent. */
+  requires?: readonly string[];
 }
 
 /** Core clusters still being worked on; their failure records and traces are kept. */
@@ -194,6 +196,48 @@ export const MEMORY_ITEM_RETENTION_RULES: RetentionRule[] = [
   },
 ];
 
+/** Superseded revisions kept per item however old they are (the newest ones). */
+export const SUPERSEDED_REVISIONS_KEPT = 5;
+
+/**
+ * Superseded `memory_items` revisions (the history behind an edit or a replaced subject)
+ * that were superseded before the cutoff (180 days), except:
+ * - the newest `SUPERSEDED_REVISIONS_KEPT` revisions of each item's chain (walking
+ *   `supersedes_id` from the current row: active, archived or a tombstone), so the Memory
+ *   Hub's history keeps its latest steps;
+ * - revisions that a curation-log entry that can still be undone touched or created
+ *   (`memory_curation_log.undone_at IS NULL`): Undo restores those rows by id.
+ * A dropped revision only shortens the tail of a chain (`supersedes_id` has no FK, and
+ * `revisions()` stops at a missing row). Revisions no current row reaches (their head was
+ * dropped as a tombstone) age out alone.
+ */
+export const MEMORY_ITEM_REVISION_RETENTION_RULES: RetentionRule[] = [
+  {
+    name: "memory_items_superseded",
+    table: "memory_items",
+    requires: ["memory_curation_log"],
+    where: `status = 'superseded' AND updated_at < ?
+      AND id NOT IN (
+        WITH RECURSIVE revision_chain(id, supersedes_id, depth) AS (
+          SELECT id, supersedes_id, 0 FROM memory_items WHERE status != 'superseded'
+          UNION ALL
+          SELECT m.id, m.supersedes_id, revision_chain.depth + 1
+          FROM memory_items m
+          JOIN revision_chain ON m.id = revision_chain.supersedes_id
+          WHERE m.status = 'superseded' AND revision_chain.depth < ?
+        )
+        SELECT id FROM revision_chain WHERE depth >= 1
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM memory_curation_log log
+        WHERE log.undone_at IS NULL
+          AND (instr(log.item_ids, '"' || memory_items.id || '"') > 0
+            OR instr(log.created_ids, '"' || memory_items.id || '"') > 0)
+      )`,
+    params: (cutoff) => [cutoff, SUPERSEDED_REVISIONS_KEPT],
+  },
+];
+
 /**
  * Memory-write approvals (`pending_memory_writes`) that are settled: applied, rejected or
  * failed, older than the cutoff (30 days) by review time (creation time when never
@@ -226,6 +270,7 @@ export function deleteRetentionBatch(
   limit: number,
 ): number {
   if (!tableExists(db, rule.table)) return 0;
+  if (rule.requires?.some((table) => !tableExists(db, table))) return 0;
   return db
     .prepare(
       `DELETE FROM ${rule.table} WHERE rowid IN (

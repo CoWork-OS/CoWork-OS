@@ -4790,8 +4790,14 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
   );
   definitions.everydayAgentClearData = definition(
     memory,
-    ([request]) =>
-      everyday.clearData(
+    async ([request]) => {
+      const workspaceId =
+        request && typeof request === "object" && !Array.isArray(request)
+          ? (request as RecordLike).workspaceId
+          : undefined;
+      // Clearing a workspace's memory candidates needs the right to run agents there.
+      if (typeof workspaceId === "string") await permission(workspaceId, "canRunAgents");
+      return everyday.clearData(
         request === undefined
           ? undefined
           : (boundedJson(
@@ -4806,9 +4812,11 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
                 "routineProvenance",
                 "cachedConnectorSummaries",
                 "browserProfileMetadata",
+                "workspaceId",
               ]),
             ) as EverydayAgentClearDataRequest),
-      ),
+      );
+    },
     {
       mutation: true,
       maxArgs: 1,
@@ -4825,9 +4833,15 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
           "routineProvenance",
           "cachedConnectorSummaries",
           "browserProfileMetadata",
+          "workspaceId",
         ]);
-        if (Object.values(input).some((value) => typeof value !== "boolean"))
+        if (
+          Object.entries(input).some(([key, value]) =>
+            key === "workspaceId" ? typeof value !== "string" : typeof value !== "boolean",
+          )
+        )
           return invalidRequest();
+        if (input.workspaceId !== undefined) stringArg(input.workspaceId);
         return [input];
       },
     },

@@ -3,13 +3,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildFtsMatchQuery,
   buildFtsPhraseQuery,
+  collapseWhitespace,
   escapeLikePattern,
   extractFtsTerms,
   extractKeywords,
   foldForMatch,
+  foldSearchText,
   likeContainsPattern,
   LIKE_ESCAPE_CLAUSE,
+  splitSearchTokens,
   termCoverage,
+  trimmedText,
 } from "../fts-query";
 
 const require = createRequire(import.meta.url);
@@ -235,5 +239,30 @@ describeWithNativeDb("buildFtsMatchQuery against SQLite FTS5", () => {
     ]) {
       expect(() => match(hostile)).not.toThrow();
     }
+  });
+});
+
+describe("shared search text helpers", () => {
+  it("folds Latin accents but keeps other scripts intact", () => {
+    expect(foldSearchText("Ödeme ÇİZELGESİ")).toBe("odeme cizelgesi");
+    expect(foldSearchText("한국어 がぎ")).toBe("한국어 がぎ");
+    expect(foldSearchText("Привет")).toBe("привет");
+  });
+
+  it("splits tokens in any script", () => {
+    expect(splitSearchTokens("релиз, 計画; foo_bar-baz x")).toEqual([
+      "релиз",
+      "計画",
+      "foo_bar-baz",
+    ]);
+    expect(splitSearchTokens("a b", 1)).toEqual(["a", "b"]);
+  });
+
+  it("normalizes text values", () => {
+    expect(trimmedText("  x  ")).toBe("x");
+    expect(trimmedText(42)).toBe("");
+    expect(collapseWhitespace("  a \n\t b  ")).toBe("a b");
+    expect(collapseWhitespace("abcdef", 3)).toBe("abc");
+    expect(collapseWhitespace(undefined)).toBe("");
   });
 });

@@ -343,8 +343,8 @@ export class CoreMemoryDistiller {
       return { status: "skipped", reason: result.reason.replace(/_/g, " ") };
     }
 
-    // Provenance (trace, candidate, scope) travels in the capture options and is stored as
-    // observation metadata; keeping it out of the content lets identical memories dedupe.
+    // Provenance stays on the candidate (marked applied with "Written to memory <id>"),
+    // not in the content, so identical memories dedupe.
     const archiveEntry = await MemoryService.captureCoreMemory(
       workspaceId,
       undefined,
@@ -356,11 +356,6 @@ export class CoreMemoryDistiller {
         batchKey: `core-memory:${candidate.scopeKind}:${candidate.scopeRef}`,
         priority: "high",
         batchable: false,
-        profileId: candidate.profileId,
-        coreTraceId: candidate.traceId,
-        candidateId: candidate.id,
-        scopeKind: candidate.scopeKind,
-        scopeRef: candidate.scopeRef,
       },
     );
     // Declined (memory or auto-capture off, an excluded pattern, `<no-memory>`): retried by

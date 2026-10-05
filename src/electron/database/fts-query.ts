@@ -155,6 +155,32 @@ export function extractFtsTerms(text: string, options: FtsQueryOptions = {}): st
   return operators.slice(0, 1);
 }
 
+/**
+ * Lower-case `text` and strip combining accents of Latin letters (`ö` → `o`, `é` → `e`),
+ * recomposing everything else (Hangul, kana with voicing marks stay intact). The key used
+ * by search lanes that fold accents themselves before matching (mailbox, markdown index).
+ */
+export function foldSearchText(text: string): string {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFC");
+}
+
+/**
+ * Word tokens of (already folded) text in any script: runs of letters, digits and marks,
+ * with `_` and `-` kept inside a token, at least `minLength` code points. Replaces the
+ * ASCII-only `[^a-z0-9]` splits that turned non-Latin queries into nothing.
+ */
+export function splitSearchTokens(text: string, minLength = 2): string[] {
+  const tokens: string[] = [];
+  for (const match of String(text || "").matchAll(/[\p{L}\p{N}\p{M}_-]+/gu)) {
+    if (codePointLength(match[0]) >= minLength) tokens.push(match[0]);
+  }
+  return tokens;
+}
+
 /** Quote one term as an FTS5 string literal (terms never contain `"`, but stay safe). */
 export function quoteFtsTerm(term: string, prefix = false): string {
   const literal = `"${String(term).replace(/"/g, '""')}"`;
@@ -194,6 +220,23 @@ export function buildFtsPhraseQuery(
 }
 
 // ---------------------------------------------------------------------------
+// Text normalization shared by the search lanes
+// ---------------------------------------------------------------------------
+
+/** A string value trimmed, or `""` for anything that is not a string. */
+export function trimmedText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** Whitespace runs collapsed to one space and trimmed, optionally cut to `maxLength`. */
+export function collapseWhitespace(value: unknown, maxLength?: number): string {
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return maxLength !== undefined && text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+// ---------------------------------------------------------------------------
 // LIKE helpers
 // ---------------------------------------------------------------------------
 
@@ -208,6 +251,30 @@ export function escapeLikePattern(text: string): string {
 /** `%text%` with the text escaped; use with `LIKE_ESCAPE_CLAUSE`. */
 export function likeContainsPattern(text: string): string {
   return `%${escapeLikePattern(String(text || "").trim())}%`;
+}
+
+/**
+ * SQL expression counting how many of `terms` occur in any of `columns` (case-insensitive
+ * `LIKE` with the terms escaped), plus its parameters in order. For tables without a
+ * full-text index, so a term search can rank and filter every row in SQL instead of
+ * term-filtering a recent window in JS. `columns` are trusted SQL (column names), never
+ * user input. SQLite folds case for ASCII only; callers re-check with `termCoverage`.
+ */
+export function likeTermHitsSql(
+  columns: readonly string[],
+  terms: readonly string[],
+): { sql: string; params: string[] } {
+  const params: string[] = [];
+  const parts: string[] = [];
+  for (const term of terms) {
+    const pattern = likeContainsPattern(term);
+    if (pattern === "%%") continue;
+    parts.push(
+      `(CASE WHEN (${columns.map((column) => `${column} LIKE ? ${LIKE_ESCAPE_CLAUSE}`).join(" OR ")}) THEN 1 ELSE 0 END)`,
+    );
+    for (let index = 0; index < columns.length; index += 1) params.push(pattern);
+  }
+  return { sql: parts.length > 0 ? parts.join(" + ") : "0", params };
 }
 
 // ---------------------------------------------------------------------------

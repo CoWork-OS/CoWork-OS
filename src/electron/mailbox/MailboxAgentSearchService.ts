@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import type { MailboxStatementPort } from "./mailbox-statement-port";
 import { createHash } from "crypto";
 import { cosineSimilarity, createLocalEmbedding } from "../memory/local-embedding";
+import { foldSearchText, quoteFtsTerm, splitSearchTokens } from "../database/fts-query";
 import type {
   MailboxAskResult,
   MailboxAttachmentRecord,
@@ -741,11 +742,11 @@ function buildEmbeddingText(row: {
 
 function buildFtsQuery(tokens: string[]): string | undefined {
   const safeTokens = tokens
-    .map((token) => token.replace(/["']/g, "").trim())
+    .map((token) => token.trim())
     .filter((token) => token.length >= 2)
     .slice(0, 24);
   if (!safeTokens.length) return undefined;
-  return safeTokens.map((token) => `"${token}"`).join(" OR ");
+  return safeTokens.map((token) => quoteFtsTerm(token)).join(" OR ");
 }
 
 function buildProviderQueries(
@@ -797,21 +798,16 @@ function extractEntities(query: string, tokens: string[]): string[] {
 }
 
 function tokenize(value: string): string[] {
+  // Unicode tokens (RECALL-9): an ASCII-only split dropped every non-Latin word.
   return Array.from(
     new Set(
-      value
-        .split(/[^a-z0-9]+/)
-        .map((token) => token.trim())
-        .filter((token) => token.length >= 2 && !STOP_WORDS.has(token)),
+      splitSearchTokens(value.replace(/[_-]+/g, " ")).filter((token) => !STOP_WORDS.has(token)),
     ),
   ).slice(0, 18);
 }
 
 function normalizeSearchText(value: string): string {
-  return (value || "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "");
+  return foldSearchText(value || "");
 }
 
 function normalizeWhitespace(value: string, maxLength = 1000): string {

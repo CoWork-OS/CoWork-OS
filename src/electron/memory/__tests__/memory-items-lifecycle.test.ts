@@ -7,7 +7,13 @@ import { CuratedMemoryService } from "../CuratedMemoryService";
 import { MemoryItemsRepository } from "../MemoryItemsRepository";
 import { MemoryWriter, type MemoryCandidate } from "../MemoryWriter";
 import { purgeTaskDerivedRows, purgeWorkspaceMemoryRows } from "../memory-purge-sql";
-import { MEMORY_ITEM_RETENTION_RULES, deleteRetentionBatch } from "../memory-retention-sql";
+import {
+  MEMORY_ITEM_RETENTION_RULES,
+  MEMORY_ITEM_REVISION_RETENTION_RULES,
+  SUPERSEDED_REVISIONS_KEPT,
+  deleteRetentionBatch,
+} from "../memory-retention-sql";
+import { ensureMemoryCurationSchema } from "../memory-curation-log-sql";
 import { createMemoryItemsTestDb, nativeSqliteAvailable, rowsOf } from "./memory-items-test-db";
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
@@ -89,6 +95,76 @@ describeWithSqlite("memory items lifecycle", () => {
       }
       expect(deleted).toBe(2);
       expect(rowsOf(db).map((row) => row.content)).toEqual(["Not yet", "Forever"]);
+    });
+
+    const DAY = 24 * 60 * 60 * 1000;
+    const pruneRevisions = (cutoff: number) => {
+      let deleted = 0;
+      for (const rule of MEMORY_ITEM_REVISION_RETENTION_RULES) {
+        deleted += deleteRetentionBatch(db, rule, cutoff, 100);
+      }
+      return deleted;
+    };
+    /** `count` revisions of one named subject, one day apart; returns the contents. */
+    const writeRevisions = async (count: number, prefix = "Style") => {
+      const contents: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const content = `${prefix} revision ${index + 1}`;
+        await write({ content, kind: "preference", subjectKey: `response_style_${prefix}` });
+        contents.push(content);
+        clock += DAY;
+      }
+      return contents;
+    };
+
+    it("drops old superseded revisions but keeps the newest of each item", async () => {
+      ensureMemoryCurationSchema(db, clock);
+      const contents = await writeRevisions(SUPERSEDED_REVISIONS_KEPT + 4);
+      // A second item with a short history: nothing of it goes.
+      const short = await writeRevisions(3, "Tone");
+      clock += 400 * DAY;
+
+      // Not old enough yet: nothing is dropped.
+      expect(pruneRevisions(clock - 1000 * DAY)).toBe(0);
+
+      // Nine rows: the active one and eight superseded revisions, five of them kept.
+      const deleted = pruneRevisions(clock - 180 * DAY);
+      expect(deleted).toBe(3);
+      const remaining = rowsOf(db).map((row) => row.content);
+      // The active row and the newest SUPERSEDED_REVISIONS_KEPT revisions stay.
+      expect(remaining).toEqual([...contents.slice(3), ...short]);
+      expect(rowsOf(db, "status = 'active'")).toHaveLength(2);
+      // A second run has nothing left to do.
+      expect(pruneRevisions(clock - 180 * DAY)).toBe(0);
+    });
+
+    it("keeps revisions an undoable curation change still needs", async () => {
+      ensureMemoryCurationSchema(db, clock);
+      const contents = await writeRevisions(SUPERSEDED_REVISIONS_KEPT + 4);
+      clock += 400 * DAY;
+      const idOf = (content: string) => rowsOf(db, "content = ?", content)[0]?.id as string;
+      const insertLog = (id: string, itemIds: string[], undoneAt: number | null) =>
+        db
+          .prepare(
+            `INSERT INTO memory_curation_log
+               (id, workspace_id, op, origin, fingerprint, item_ids, summary, applied_at, undone_at)
+             VALUES (?, 'ws-1', 'merge', 'heuristic', ?, ?, 'merged', ?, ?)`,
+          )
+          .run(id, id, JSON.stringify(itemIds), clock, undoneAt);
+      insertLog("log-open", [idOf(contents[0]!)], null);
+      insertLog("log-undone", [idOf(contents[1]!)], clock);
+
+      expect(pruneRevisions(clock - 180 * DAY)).toBe(2);
+      const remaining = rowsOf(db).map((row) => row.content);
+      expect(remaining).toContain(contents[0]);
+      expect(remaining).not.toContain(contents[1]);
+      expect(remaining).not.toContain(contents[2]);
+    });
+
+    it("skips revision retention until the curation log exists", async () => {
+      await writeRevisions(SUPERSEDED_REVISIONS_KEPT + 3);
+      clock += 400 * DAY;
+      expect(pruneRevisions(clock - 180 * DAY)).toBe(0);
     });
   });
 

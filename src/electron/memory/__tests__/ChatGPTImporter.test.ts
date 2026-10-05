@@ -12,7 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   openImportSession: vi.fn(),
   createMessage: vi.fn(),
-  importedRows: [] as Array<{ content: string }>,
+  importedRows: [] as Array<{
+    content: string;
+    workspace_id?: string;
+    type?: string;
+    is_private?: number;
+  }>,
 }));
 
 vi.mock("../../agent/llm", () => ({
@@ -128,11 +133,64 @@ describe("ChatGPTImporter", () => {
   });
 
   it("skips conversations already imported and visible in the workspace", async () => {
-    mocks.importedRows = [{ content: '[Imported from ChatGPT — "Stack" (conv:c-1)]\nUses TS' }];
+    mocks.importedRows = [
+      {
+        workspace_id: "ws-1",
+        type: "insight",
+        is_private: 1,
+        content: '[Imported from ChatGPT — "Stack" (conv:c-1)]\nUses TS',
+      },
+      {
+        // A non-private import of another workspace is visible here too.
+        workspace_id: "ws-2",
+        type: "insight",
+        is_private: 0,
+        content: '[Imported from ChatGPT — "Later" (conv:c-2)]\nLater note',
+      },
+    ];
     mocks.createMessage.mockResolvedValue({ content: [{ type: "text", text: "[]" }] });
     const result = await ChatGPTImporter.import({ workspaceId: "ws-1", filePath });
-    expect(result.skipped).toBe(1);
+    expect(result.skipped).toBe(2);
+    expect(mocks.createMessage).not.toHaveBeenCalled();
+    expect(added).toEqual([]);
+  });
+
+  it("re-uses a private import of another workspace without a new LLM call", async () => {
+    mocks.importedRows = [
+      {
+        workspace_id: "ws-2",
+        type: "observation",
+        is_private: 1,
+        content:
+          '[cowork:prompt_recall=ignore]\n[Imported from ChatGPT — "Stack" (conv:c-1)]\nUses TypeScript daily',
+      },
+      {
+        workspace_id: "ws-2",
+        type: "decision",
+        is_private: 1,
+        content: '[Imported from ChatGPT — "Stack" (conv:c-1)]\nChose Vitest',
+      },
+    ];
+    mocks.createMessage.mockResolvedValue({ content: [{ type: "text", text: "[]" }] });
+
+    const result = await ChatGPTImporter.import({ workspaceId: "ws-1", filePath });
+
+    // Only "Later" (c-2) is distilled; c-1 comes from the stored entries.
     expect(mocks.createMessage).toHaveBeenCalledOnce();
+    expect(added).toEqual([
+      {
+        type: "observation",
+        body: "Uses TypeScript daily",
+        header: '[Imported from ChatGPT — "Stack" (conv:c-1)]',
+        fact: { kind: "preference", importer: "chatgpt", conversationId: "c-1" },
+      },
+      {
+        type: "decision",
+        body: "Chose Vitest",
+        header: '[Imported from ChatGPT — "Stack" (conv:c-1)]',
+      },
+    ]);
+    expect(result).toMatchObject({ memoriesCreated: 2, conversationsProcessed: 2, skipped: 0 });
   });
 
   it("fails without writing when the import session is refused", async () => {

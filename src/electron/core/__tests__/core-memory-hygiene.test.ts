@@ -296,7 +296,9 @@ describeWithSqlite("core memory candidates, distillation and cleanup", () => {
       const [, , , content, , options] = capture.mock.calls[0];
       expect(content).not.toContain("core-trace");
       expect(content).not.toContain("[scope:");
-      expect(options).toMatchObject({ coreTraceId: "trace-1", candidateId: "c-1" });
+      // Provenance is the candidate's applied note, not capture options nobody stores.
+      expect(options).not.toHaveProperty("coreTraceId");
+      expect(options).not.toHaveProperty("candidateId");
       expect(store.findById("c-1")?.status).toBe("applied");
       expect(store.findById("c-2")?.status).toBe("merged");
     });

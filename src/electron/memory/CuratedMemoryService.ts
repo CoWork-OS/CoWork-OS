@@ -11,6 +11,8 @@ import type {
 } from "../../shared/types";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
 import { MemoryWriter } from "./MemoryWriter";
+import { KitFileWatcher, kitFilesInsideWorkspace } from "./KitFileWatcher";
+import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import { KIT_FILE_STORE, MemoryItemsHubService } from "./MemoryItemsHubService";
 import {
   memoryWriteSkipMessage,
@@ -55,6 +57,12 @@ export type CuratedMemoryFilesystemGuard = (candidatePath: string) => boolean;
 interface SyncWorkspaceFilesOptions {
   readGuard?: CuratedMemoryFilesystemGuard;
   writeGuard?: CuratedMemoryFilesystemGuard;
+  /**
+   * Triggered by an edit of a kit file (KitFileWatcher): the workspace's own access
+   * profile guards the read and the write, and kit files that are symlinks or resolve
+   * outside the workspace are refused.
+   */
+  fromFileEdit?: boolean;
 }
 
 function normalizeMemoryKey(value: string): string {
@@ -765,10 +773,25 @@ export class CuratedMemoryService {
         const root = path.join(workspace.path, ".cowork");
         const userPath = path.join(root, "USER.md");
         const memoryPath = path.join(root, "MEMORY.md");
+        const profileAllows = (candidatePath: string, operation: "read" | "write"): boolean => {
+          try {
+            return (
+              evaluateWorkspaceFilesystemAccess(workspace, candidatePath, operation).decision ===
+              "allow"
+            );
+          } catch {
+            return false;
+          }
+        };
+        if (options.fromFileEdit && !(await kitFilesInsideWorkspace(workspace.path))) {
+          throw new Error("Kit files resolve outside the workspace; they are not synced.");
+        }
         const canRead = (candidatePath: string): boolean =>
-          !options.readGuard || options.readGuard(candidatePath) === true;
+          (!options.readGuard || options.readGuard(candidatePath) === true) &&
+          (!options.fromFileEdit || profileAllows(candidatePath, "read"));
         const canWrite = (candidatePath: string): boolean =>
-          !options.writeGuard || options.writeGuard(candidatePath) === true;
+          (!options.writeGuard || options.writeGuard(candidatePath) === true) &&
+          (!options.fromFileEdit || profileAllows(candidatePath, "write"));
         if (!canRead(root) || !canRead(userPath) || !canRead(memoryPath)) {
           throw new Error("Access denied while reading curated memory files.");
         }
@@ -796,6 +819,8 @@ export class CuratedMemoryService {
           startMarker: WORKSPACE_BLOCK_START,
           endMarker: WORKSPACE_BLOCK_END,
         });
+        // The kit is in use: later hand edits sync back without waiting for a kit sync.
+        KitFileWatcher.watchWorkspace(workspace);
       })
       .finally(() => {
         if (this.syncQueueByWorkspace.get(workspaceId) === next) {

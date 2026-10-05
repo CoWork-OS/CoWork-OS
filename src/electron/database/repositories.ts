@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
-import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "./fts-query";
+import { LIKE_ESCAPE_CLAUSE, likeContainsPattern, likeTermHitsSql } from "./fts-query";
 import { buildAgentVisibleMemorySql } from "../memory/memory-visibility";
 import {
   buildMemoryLastActivitySql,
@@ -1525,15 +1525,55 @@ export class TaskStore {
 
     args.push(limit);
 
-    const stmt = this.db.prepare(`
+    return this.selectTasks(
+      `
       SELECT * FROM tasks
       WHERE ${where.join(" AND ")}
       ORDER BY created_at DESC
       LIMIT ?
-    `);
+    `,
+      args,
+    );
+  }
 
-    const rows = stmt.all(...args) as Any[];
+  /** Run one task SELECT (`SELECT * FROM tasks ...` shape) and map its rows. */
+  private selectTasks(sql: string, args: unknown[]): Task[] {
+    const rows = this.db.prepare(sql).all(...args) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
+  }
+
+  /**
+   * Tasks of one workspace whose title, prompt or result contain at least `minMatched` of
+   * `terms` (case-insensitive `LIKE`), most matching terms first, then most recent. Not
+   * limited to a time window, so old tasks are found too (Mission Control recall).
+   */
+  searchByTerms(params: {
+    workspaceId: string;
+    terms: string[];
+    minMatched?: number;
+    limit?: number;
+  }): Task[] {
+    const workspaceId = typeof params.workspaceId === "string" ? params.workspaceId.trim() : "";
+    const terms = (Array.isArray(params.terms) ? params.terms : [])
+      .filter((term): term is string => typeof term === "string" && term.trim().length > 0)
+      .slice(0, 24)
+      .map((term) => term.trim().slice(0, 64));
+    if (!workspaceId || terms.length === 0) return [];
+    const limit = Math.min(Math.max(Math.floor(Number(params.limit) || 50), 1), 200);
+    const minMatched = Math.min(
+      Math.max(Math.floor(Number(params.minMatched) || 1), 1),
+      terms.length,
+    );
+    const hits = likeTermHitsSql(["title", "prompt", "COALESCE(result_summary, '')"], terms);
+    return this.selectTasks(
+      `SELECT * FROM (
+         SELECT *, (${hits.sql}) AS term_hits FROM tasks WHERE workspace_id = ?
+       )
+       WHERE term_hits >= ?
+       ORDER BY term_hits DESC, COALESCE(updated_at, created_at) DESC, id DESC
+       LIMIT ?`,
+      [...hits.params, workspaceId, minMatched, limit],
+    );
   }
 
   /**

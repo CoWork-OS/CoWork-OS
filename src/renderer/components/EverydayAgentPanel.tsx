@@ -832,7 +832,9 @@ export function EverydayAgentPanel({
         trustPatterns: true,
         consentHistory: true,
         pauseScopes: true,
-        memoryCandidates: true,
+        // The proposed candidates of this workspace: the count the panel shows.
+        memoryCandidates: isEverydayAgentUuid(workspace?.id),
+        ...(isEverydayAgentUuid(workspace?.id) ? { workspaceId: workspace.id } : {}),
         routineProvenance: true,
         cachedConnectorSummaries: true,
         browserProfileMetadata: true,

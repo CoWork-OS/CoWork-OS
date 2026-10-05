@@ -508,7 +508,8 @@ export class EverydayAgentStore {
   clearData(
     request?: EverydayAgentClearDataRequest & { profile?: boolean },
   ): EverydayAgentProfileResult {
-    const shouldClearAll = !request || Object.keys(request).length === 0;
+    const shouldClearAll =
+      !request || Object.keys(request).filter((key) => key !== "workspaceId").length === 0;
     const profile = this.ensureProfile();
     const deleted: Record<string, number> = {};
     const deleteRequired = (key: string, sql: string, ...args: unknown[]): void => {
@@ -554,7 +555,7 @@ export class EverydayAgentStore {
       }
       if (shouldClearAll || request?.memoryCandidates) {
         deleted.memoryCandidates =
-          (deleted.memoryCandidates || 0) + this.clearMemoryCandidateData();
+          (deleted.memoryCandidates || 0) + this.clearMemoryCandidateData(request?.workspaceId);
       }
       if (shouldClearAll || request?.routineProvenance) {
         deleted.routineProvenance =
@@ -1512,18 +1513,21 @@ export class EverydayAgentStore {
   }
 
   /**
-   * Core memory candidates and distill runs belong to automation profiles
-   * (`automation_profiles.id`), not to the Everyday Agent profile ("default"), so filtering by
-   * the Everyday Agent profile id never matched a row. Clear the candidates of every automation
-   * profile: that is the set the panel counts as "memory candidates need review".
+   * Clear exactly what the panel counts as "memory candidates need review" (LOOP-15): the
+   * `proposed` core memory candidates of the panel's workspace. Candidates belong to
+   * automation profiles, not to the Everyday Agent profile ("default"), so they are scoped
+   * by workspace. Reviewed candidates (accepted, applied, dismissed) and the distill history
+   * stay: they are the record of what was learned, and a deleted reviewed candidate could be
+   * proposed again. Without a workspace nothing is cleared.
    */
-  private clearMemoryCandidateData(): number {
-    if (!this.tableExists("automation_profiles")) return 0;
-    const automationProfiles = "profile_id IN (SELECT id FROM automation_profiles)";
-    let deleted = 0;
-    deleted += this.deleteRowsIfTableExists("core_memory_candidates", automationProfiles);
-    deleted += this.deleteRowsIfTableExists("core_memory_distill_runs", automationProfiles);
-    return deleted;
+  private clearMemoryCandidateData(workspaceId: string | undefined): number {
+    const scopedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : "";
+    if (!scopedWorkspaceId) return 0;
+    return this.deleteRowsIfTableExists(
+      "core_memory_candidates",
+      "workspace_id = ? AND status = 'proposed'",
+      scopedWorkspaceId,
+    );
   }
 
   private clearRoutineProvenance(profile: EverydayAgentProfile): number {

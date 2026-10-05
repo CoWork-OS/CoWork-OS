@@ -5,8 +5,11 @@ import path from "path";
 import { MemoryService } from "../memory/MemoryService";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { DurableContextService } from "../memory/DurableContextService";
-import { extractFtsTerms, termCoverage } from "../database/fts-query";
+import { extractFtsTerms, termCoverage, trimmedText } from "../database/fts-query";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
+import { MemoryRecallService } from "../memory/MemoryRecall";
+import { SupermemoryService } from "../memory/SupermemoryService";
+import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import { ChronicleObservationRepository } from "../chronicle";
 import { LLMProviderFactory, type LLMSettings } from "./llm/provider-factory";
 import type {
@@ -19,6 +22,7 @@ import type {
   UnifiedRecallResponse,
   UnifiedRecallResult,
   UnifiedRecallSourceType,
+  Workspace,
 } from "../../shared/types";
 
 type RecallRepositories = {
@@ -27,10 +31,6 @@ type RecallRepositories = {
   activityRepo: ActivityRepository;
   workspaceRepo: WorkspaceRepository;
 };
-
-function normalizeText(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function truncate(text: string, max = 240): string {
   const cleaned = text.replace(/\s+/g, " ").trim();
@@ -48,7 +48,7 @@ function getTaskSnippet(task: Task): string {
 
 function getMessageText(payload: unknown): string {
   const obj = asObject(payload);
-  return normalizeText(obj.message) || normalizeText(obj.content);
+  return trimmedText(obj.message) || trimmedText(obj.content);
 }
 
 function sourceWeight(sourceType: UnifiedRecallSourceType): number {
@@ -69,6 +69,8 @@ function sourceWeight(sourceType: UnifiedRecallSourceType): number {
       return 0.79;
     case "knowledge_graph":
       return 0.78;
+    case "supermemory":
+      return 0.6;
     default:
       return 0.7;
   }
@@ -78,6 +80,8 @@ function sourceWeight(sourceType: UnifiedRecallSourceType): number {
 const RRF_K = 60;
 /** Lanes that are not full-text indexes must match at least this share of query terms. */
 const MIN_TERM_COVERAGE = 0.5;
+/** Rows a term-searched table (tasks, activity) contributes before coverage ranking. */
+const TERM_SEARCH_ROWS = 200;
 const KNOWN_SOURCES = new Set<UnifiedRecallSourceType>([
   "task",
   "message",
@@ -87,6 +91,7 @@ const KNOWN_SOURCES = new Set<UnifiedRecallSourceType>([
   "memory",
   "screen_context",
   "knowledge_graph",
+  "supermemory",
 ]);
 
 type RecallCandidate = Omit<UnifiedRecallResult, "rank">;
@@ -252,19 +257,22 @@ export class RuntimeVisibilityService {
   }
 
   /**
-   * Mission Control recall (RECALL-4): one ranked list across the workspace's memory,
-   * notes, knowledge graph, screen context, conversation index, tasks, files and
-   * activity. Full-text lanes are trusted as returned (no whole-query substring filter
-   * on top of FTS); lanes without an index are filtered by query-term coverage. Lanes are
-   * fused by reciprocal rank. Browsing records no memory references, and everything is
-   * scoped to the workspace: without one, nothing is returned.
+   * Mission Control recall (RECALL-4): one ranked list across the workspace's memory
+   * items, memory archive, notes, knowledge graph, screen context, conversation index
+   * (verbatim messages: the former quotes lane), tasks, files, activity and, when
+   * connected and the workspace allows network access, Supermemory. Full-text lanes are
+   * trusted as returned (no whole-query substring filter on top of FTS); tasks and
+   * activity are term-searched in SQL over all rows (not a recent window) and ranked by
+   * query-term coverage. Lanes are fused by reciprocal rank. Browsing records no memory
+   * references and schedules no index sync (notes are read through the workspace's read
+   * guard), and everything is scoped to the workspace: without one, nothing is returned.
    */
   static async collectUnifiedRecall(
     deps: RecallRepositories,
-    query: UnifiedRecallQuery & { workspacePath?: string },
+    query: UnifiedRecallQuery & { workspacePath?: string; workspace?: Workspace },
   ): Promise<UnifiedRecallResponse> {
-    const workspaceId = normalizeText(query.workspaceId) || undefined;
-    const normalizedQuery = normalizeText(query.query).slice(0, 2000);
+    const workspaceId = trimmedText(query.workspaceId) || undefined;
+    const normalizedQuery = trimmedText(query.query).slice(0, 2000);
     const limit = Math.min(Math.max(Math.floor(Number(query.limit) || 20), 1), 100);
     const wantedSources = new Set<UnifiedRecallSourceType>(
       (Array.isArray(query.sourceTypes) ? query.sourceTypes : []).filter((source) =>
@@ -283,6 +291,9 @@ export class RuntimeVisibilityService {
 
     const terms = extractFtsTerms(normalizedQuery, { maxTerms: 24 });
     if (!workspaceId || terms.length === 0) return response([]);
+    const workspace = query.workspace?.id === workspaceId ? query.workspace : undefined;
+    const workspacePath = workspace?.path || trimmedText(query.workspacePath) || undefined;
+    const minMatchedTerms = Math.max(1, Math.ceil(terms.length * MIN_TERM_COVERAGE));
     const covers = (text: string): number => termCoverage(text, terms);
     const candidateLimit = Math.min(limit * 2, 100);
     const lanes: RecallCandidate[][] = [];
@@ -332,7 +343,7 @@ export class RuntimeVisibilityService {
             taskId: mem.taskId,
             timestamp: mem.createdAt,
             snippet: truncate(mem.snippet || "", 260),
-            title: observation?.title || normalizeText(mem.type) || "Memory",
+            title: observation?.title || trimmedText(mem.type) || "Memory",
             sourceLabel: "Memory",
             metadata: {
               type: mem.type,
@@ -349,15 +360,58 @@ export class RuntimeVisibilityService {
       }),
     );
 
-    // Workspace notes: the `.cowork` kit, the same root the agent tools index.
+    // Memory items (`memory_items`): the fact store, through the engine's recall with its
+    // visibility rules (no private items, no task or contact scope, no third-party text).
     lanes.push(
-      await lane(Boolean(query.workspacePath) && sourceAllowed("workspace_note"), async () =>
+      await lane(sourceAllowed("memory"), async () => {
+        const result = await MemoryRecallService.getDefault().recall({
+          text: normalizedQuery,
+          workspaceId,
+          lanes: ["memory"],
+          surface: "memory_hub",
+          detail: "index",
+          limit: Math.min(candidateLimit, 30),
+        });
+        return result.hits.map((hit) => ({
+          sourceType: "memory" as const,
+          objectId: hit.ref,
+          workspaceId,
+          timestamp: hit.createdAt,
+          snippet: truncate(hit.snippet || hit.title, 260),
+          title: hit.title || "Memory",
+          sourceLabel: "Memory item",
+          metadata: {
+            kind: hit.kind,
+            source: hit.source,
+            relevanceScore: hit.relevance,
+            ...(hit.provenance ? { provenance: hit.provenance } : {}),
+          },
+        }));
+      }),
+    );
+
+    // Workspace notes: the `.cowork` kit, the same root the agent tools index. Read through
+    // the workspace's read guard, which also keeps a browse from scheduling an index sync.
+    const kitRoot = workspacePath ? path.resolve(workspacePath, ".cowork") : "";
+    const notesReadGuard = (absolutePath: string): boolean => {
+      const resolved = path.resolve(absolutePath);
+      if (resolved !== kitRoot && !resolved.startsWith(`${kitRoot}${path.sep}`)) return false;
+      if (!workspace) return true;
+      try {
+        return evaluateWorkspaceFilesystemAccess(workspace, resolved, "read").decision === "allow";
+      } catch {
+        return false;
+      }
+    };
+    lanes.push(
+      await lane(Boolean(workspacePath) && sourceAllowed("workspace_note"), async () =>
         (
           await MemoryService.searchWorkspaceMarkdown(
             workspaceId,
-            path.join(query.workspacePath as string, ".cowork"),
+            kitRoot,
             normalizedQuery,
             candidateLimit,
+            notesReadGuard,
           )
         ).map((note) => ({
           sourceType: "workspace_note" as const,
@@ -365,7 +419,7 @@ export class RuntimeVisibilityService {
           workspaceId,
           timestamp: note.createdAt,
           snippet: truncate(note.snippet || "", 260),
-          title: normalizeText(note.type) || "Workspace note",
+          title: trimmedText(note.type) || "Workspace note",
           sourceLabel: "Workspace note",
           metadata: {
             relevanceScore: note.relevanceScore,
@@ -400,9 +454,9 @@ export class RuntimeVisibilityService {
 
     // Screen context is scored, not indexed: keep observations that match the query.
     lanes.push(
-      await lane(Boolean(query.workspacePath) && sourceAllowed("screen_context"), async () =>
+      await lane(Boolean(workspacePath) && sourceAllowed("screen_context"), async () =>
         ChronicleObservationRepository.searchSync(
-          query.workspacePath as string,
+          workspacePath as string,
           normalizedQuery,
           candidateLimit,
         )
@@ -485,17 +539,18 @@ export class RuntimeVisibilityService {
       ),
     );
 
-    // Tasks of this workspace (title, prompt, result), ranked by query-term coverage.
+    // Tasks of this workspace (title, prompt, result), term-searched over every task of
+    // the workspace and ranked by query-term coverage.
     let taskMatches: Task[] = [];
     if (sourceAllowed("task") || sourceAllowed("file")) {
       try {
-        const recent = await deps.taskRepo.findByCreatedAtRange({
-          startMs: Date.now() - 90 * 24 * 60 * 60 * 1000,
-          endMs: Date.now() + 1,
-          limit: 200,
+        const matching = await deps.taskRepo.searchByTerms({
           workspaceId,
+          terms,
+          minMatched: minMatchedTerms,
+          limit: TERM_SEARCH_ROWS,
         });
-        taskMatches = recent
+        taskMatches = matching
           .filter((task) => task.workspaceId === workspaceId)
           .map((task) => ({
             task,
@@ -539,7 +594,7 @@ export class RuntimeVisibilityService {
           const task = byTask.get(event.taskId);
           if (!task) continue;
           const payload = asObject(event.payload);
-          const filePath = normalizeText(payload.path || payload.filePath || payload.outputPath);
+          const filePath = trimmedText(payload.path || payload.filePath || payload.outputPath);
           if (!filePath) continue;
           const message = getMessageText(payload);
           const coverage = Math.max(covers(filePath), covers(message));
@@ -563,10 +618,18 @@ export class RuntimeVisibilityService {
       }),
     );
 
-    // Activity feed entries; shown as messages, filtered by query-term coverage.
+    // Activity feed entries, term-searched over the whole feed; shown as messages.
     lanes.push(
       await lane(sourceAllowed("message"), async () =>
-        (await deps.activityRepo.list({ workspaceId, limit: candidateLimit }))
+        (
+          await deps.activityRepo.search({
+            workspaceId,
+            terms,
+            minMatched: minMatchedTerms,
+            limit: TERM_SEARCH_ROWS,
+          })
+        )
+          .filter((activity) => activity.workspaceId === workspaceId)
           .map((activity) => ({
             activity,
             text: `${activity.title}\n${activity.description || ""}`,
@@ -574,6 +637,7 @@ export class RuntimeVisibilityService {
           .map((entry) => ({ ...entry, coverage: covers(entry.text) }))
           .filter((entry) => entry.coverage >= MIN_TERM_COVERAGE)
           .sort((a, b) => b.coverage - a.coverage || b.activity.createdAt - a.activity.createdAt)
+          .slice(0, candidateLimit)
           .map(({ activity, text }) => ({
             sourceType: "message" as const,
             objectId: activity.id,
@@ -585,6 +649,40 @@ export class RuntimeVisibilityService {
             sourceLabel: "Activity",
             metadata: { activityType: activity.activityType, actorType: activity.actorType },
           })),
+      ),
+    );
+
+    // Supermemory: only when connected and the workspace allows network access. The query
+    // leaves the device; nothing is stored locally.
+    const permissions = workspace?.permissions;
+    const externalAllowed =
+      permissions?.network === true &&
+      permissions.accessNetworkMode !== "disabled" &&
+      permissions.accessProfileUnavailable !== true;
+    lanes.push(
+      await lane(
+        externalAllowed && sourceAllowed("supermemory") && SupermemoryService.isConfigured(),
+        async () => {
+          const result = await MemoryRecallService.getDefault().recall({
+            text: normalizedQuery,
+            workspaceId,
+            lanes: ["external"],
+            surface: "memory_hub",
+            detail: "index",
+            limit: Math.min(candidateLimit, 25),
+            policy: { allowExternal: true, workspaceName: workspace?.name },
+          });
+          return result.hits.map((hit) => ({
+            sourceType: "supermemory" as const,
+            objectId: hit.ref,
+            workspaceId,
+            timestamp: hit.createdAt,
+            snippet: truncate(hit.snippet || hit.title, 260),
+            title: hit.title || "Supermemory",
+            sourceLabel: "Supermemory",
+            metadata: { relevanceScore: hit.relevance, ...hit.provenance },
+          }));
+        },
       ),
     );
 

@@ -1,3 +1,4 @@
+import { trimmedText } from "./fts-query";
 import type {
   ListTaskTraceRunsRequest,
   Task,
@@ -19,7 +20,7 @@ function toFiniteNumber(value: unknown): number {
 }
 
 function normalizeText(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
+  return trimmedText(value).toLowerCase();
 }
 
 function getEffectiveEventType(event: TaskEvent): string {

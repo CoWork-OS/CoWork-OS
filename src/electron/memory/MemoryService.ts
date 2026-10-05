@@ -40,7 +40,6 @@ import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository
 import { MemoryWriter, memoryTextSalience } from "./MemoryWriter";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
-import type { CoreMemoryScopeKind } from "../../shared/types";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { createLogger } from "../utils/logger";
 import { containsNoMemoryDirective } from "./no-memory-directive";
@@ -94,11 +93,6 @@ export interface MemoryCaptureOptions {
   priority?: MemoryCompressionPriority;
   signalFamily?: string;
   batchable?: boolean;
-  profileId?: string;
-  coreTraceId?: string;
-  candidateId?: string;
-  scopeKind?: CoreMemoryScopeKind;
-  scopeRef?: string;
   skipMemoryWriteGate?: boolean;
   /**
    * Allow an explicit write to proceed when auto-capture is off: a user-enabled source
@@ -812,11 +806,6 @@ export class MemoryService {
       batchKey: options.batchKey,
       priority: options.priority,
       signalFamily: options.signalFamily,
-      profileId: options.profileId,
-      coreTraceId: options.coreTraceId,
-      candidateId: options.candidateId,
-      scopeKind: options.scopeKind,
-      scopeRef: options.scopeRef,
       forceCapture: options.forceCapture,
     };
   }

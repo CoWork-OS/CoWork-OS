@@ -4328,7 +4328,9 @@ export type UnifiedRecallSourceType =
   | "screen_context"
   | "knowledge_graph"
   /** Conversation index hits other than user/assistant messages (tool output, summaries). */
-  | "conversation";
+  | "conversation"
+  /** Supermemory, when connected and the workspace allows network access. */
+  | "supermemory";
 
 export type ChronicleCaptureScope = "frontmost_display" | "all_displays";
 export type ChronicleTaskMode = "inherit" | "enabled" | "disabled";
@@ -8627,10 +8629,13 @@ export interface EverydayAgentClearDataRequest {
   trustPatterns?: boolean;
   consentHistory?: boolean;
   pauseScopes?: boolean;
+  /** Clear the proposed core memory candidates of `workspaceId` (what the panel counts). */
   memoryCandidates?: boolean;
   routineProvenance?: boolean;
   cachedConnectorSummaries?: boolean;
   browserProfileMetadata?: boolean;
+  /** Workspace whose memory candidates `memoryCandidates` clears; without it none are. */
+  workspaceId?: string;
 }
 
 export interface EverydayAgentApproveActionRequest {

@@ -1,4 +1,5 @@
 import type { StatementCatalog } from "../database/statements/statement-catalog";
+import { buildAgentVisibleMemorySql } from "./memory-visibility";
 
 /**
  * Every SQL statement of the memory domain (async SQLite migration plan, DB6): memory
@@ -23,15 +24,17 @@ export const MEMORY_STATEMENTS = {
                AND COALESCE(tier, 'short') = ?
              ORDER BY reference_count DESC, created_at DESC
              LIMIT ?`,
-  // ChatGPTImporter: conversations already imported and visible in a workspace (its own
-  // rows, and non-private imports of any workspace, which every workspace sees)
-  chatgpt_importedContents: `SELECT content
+  // ChatGPTImporter: ChatGPT conversations already imported in any workspace (rows whose
+  // observation is suppressed or redacted are left out). Rows visible in the importing
+  // workspace (its own, and non-private imports) are skipped; the others are re-used
+  // without a new LLM call.
+  chatgpt_importedContents: `SELECT workspace_id, type, content, is_private
              FROM memories
-             WHERE (workspace_id = ? OR is_private = 0)
-               AND (
+             WHERE (
                  content LIKE '[Imported from ChatGPT %'
                  OR content LIKE '[cowork:prompt_recall=ignore]%[Imported from ChatGPT %'
                )
+               AND ${buildAgentVisibleMemorySql("memories.id")}
              LIMIT 100000`,
   // MemoryService import sessions: imported rows visible in a workspace, for dedupe across
   // re-imports and workspaces (non-private imports are visible everywhere)

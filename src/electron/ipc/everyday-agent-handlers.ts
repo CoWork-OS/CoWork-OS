@@ -10,6 +10,7 @@ import {
   type EverydayPauseScope,
 } from "../../shared/types";
 import { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
+import { parseEverydayAgentClearDataRequest } from "../everyday-agent/clear-data-request";
 
 export function setupEverydayAgentHandlers(service: EverydayAgentService): void {
   ipcMain.handle(IPC_CHANNELS.EVERYDAY_AGENT_GET_PROFILE, async () => {
@@ -54,7 +55,7 @@ export function setupEverydayAgentHandlers(service: EverydayAgentService): void 
   ipcMain.handle(
     IPC_CHANNELS.EVERYDAY_AGENT_CLEAR_DATA,
     async (_, request?: EverydayAgentClearDataRequest) => {
-      return service.clearData(request);
+      return service.clearData(parseEverydayAgentClearDataRequest(request));
     },
   );
 

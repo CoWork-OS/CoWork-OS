@@ -6210,9 +6210,7 @@ export async function setupIpcHandlers(
         typeof query?.workspaceId === "string" && query.workspaceId.trim().length > 0
           ? query.workspaceId.trim()
           : undefined;
-      const workspacePath = workspaceId
-        ? (await workspaceRepo.findById(workspaceId))?.path
-        : undefined;
+      const workspace = workspaceId ? await workspaceRepo.findById(workspaceId) : undefined;
       return RuntimeVisibilityService.collectUnifiedRecall(
         {
           taskRepo,
@@ -6221,9 +6219,12 @@ export async function setupIpcHandlers(
           workspaceRepo,
         },
         {
-          ...query,
+          query: typeof query?.query === "string" ? query.query : "",
+          limit: typeof query?.limit === "number" ? query.limit : undefined,
+          sourceTypes: Array.isArray(query?.sourceTypes) ? query.sourceTypes : undefined,
           workspaceId,
-          workspacePath,
+          workspacePath: workspace?.path,
+          workspace: workspace ?? undefined,
         },
       );
     },

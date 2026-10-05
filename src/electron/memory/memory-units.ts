@@ -18,6 +18,8 @@ import { SUPERMEMORY_REMOTE_REF_UNITS } from "./supermemory-remote-refs-units";
 import { MEMORY_CURATION_UNITS } from "./memory-curation-units";
 import { MAINTENANCE_CLAIM_UNITS } from "./maintenance-claim-sql";
 import { LEGACY_MEMORY_RETIREMENT_UNITS } from "./legacy-memory-retirement-sql";
+import { MEMORY_COMPRESSION_USAGE_UNITS } from "./memory-compression-usage-sql";
+import { MEMORY_SUMMARY_REINDEX_UNITS } from "./memory-summary-reindex-sql";
 
 /**
  * Transaction units of the memory domain (async SQLite migration plan, DB6): each runs
@@ -80,5 +82,7 @@ export const MEMORY_UNITS = {
   ...MEMORY_CURATION_UNITS,
   ...MAINTENANCE_CLAIM_UNITS,
   ...LEGACY_MEMORY_RETIREMENT_UNITS,
+  ...MEMORY_COMPRESSION_USAGE_UNITS,
+  ...MEMORY_SUMMARY_REINDEX_UNITS,
   tier_promotionPass: tierPromotionPass,
 } satisfies UnitCatalog;

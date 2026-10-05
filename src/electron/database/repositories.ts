@@ -6642,7 +6642,16 @@ export interface MemoryStats {
   totalTokens: number;
   compressedCount: number;
   compressionRatio: number;
+  /** Tokens the AI compression used in the last 24 hours, across workspaces. */
+  compressionTokensLast24h?: number;
+  /** The AI compression's daily token budget. */
+  compressionDailyTokenBudget?: number;
 }
+
+/** Bytes of one observation sidecar row's text columns (storage cap, DATA-7). */
+const MEMORY_OBSERVATION_BYTES_SQL = `(length(title) + COALESCE(length(subtitle), 0)
+  + length(narrative) + COALESCE(length(facts), 0) + COALESCE(length(concepts), 0)
+  + COALESCE(length(files_read), 0) + COALESCE(length(files_modified), 0))`;
 
 export class MemoryStore {
   constructor(private db: Database.Database) {}
@@ -7267,15 +7276,22 @@ export class MemoryStore {
   }
 
   /**
-   * Approximate storage in bytes (UTF-8 length proxy via SQLite length()).
+   * Approximate storage in bytes (UTF-8 length proxy via SQLite length()): content and
+   * summary, the stored embedding JSON (~2-5 KB per row) and the observation sidecar's
+   * text columns (audit DATA-7). FTS index rows are not counted.
    */
   getApproxStorageBytes(workspaceId: string): number {
     const stmt = this.db.prepare(`
-      SELECT COALESCE(SUM(length(content) + COALESCE(length(summary), 0)), 0) as total_bytes
-      FROM memories
-      WHERE workspace_id = ?
+      SELECT
+        (SELECT COALESCE(SUM(length(content) + COALESCE(length(summary), 0)), 0)
+           FROM memories WHERE workspace_id = @workspaceId)
+        + (SELECT COALESCE(SUM(length(embedding)), 0)
+           FROM memory_embeddings WHERE workspace_id = @workspaceId)
+        + (SELECT COALESCE(SUM(${MEMORY_OBSERVATION_BYTES_SQL}), 0)
+           FROM memory_observation_metadata WHERE workspace_id = @workspaceId)
+        AS total_bytes
     `);
-    const row = stmt.get(workspaceId) as { total_bytes?: number } | undefined;
+    const row = stmt.get({ workspaceId }) as { total_bytes?: number } | undefined;
     const total = Number(row?.total_bytes || 0);
     return Number.isFinite(total) ? total : 0;
   }
@@ -7289,8 +7305,14 @@ export class MemoryStore {
   ): Array<{ id: string; createdAt: number; approxBytes: number }> {
     // Imports, Playbook rows, explicit saves and curated promotions are never pruned
     // for space; least recently useful rows go first.
+    // Row bytes as `getApproxStorageBytes` counts them: with the embedding and observation.
     const stmt = this.db.prepare(`
-      SELECT id, created_at, (length(content) + COALESCE(length(summary), 0)) as approx_bytes
+      SELECT id, created_at,
+        (length(content) + COALESCE(length(summary), 0)
+          + COALESCE((SELECT length(e.embedding) FROM memory_embeddings e
+                      WHERE e.memory_id = memories.id), 0)
+          + COALESCE((SELECT ${MEMORY_OBSERVATION_BYTES_SQL} FROM memory_observation_metadata
+                      WHERE memory_id = memories.id), 0)) as approx_bytes
       FROM memories
       WHERE workspace_id = ? AND NOT ${buildRetentionProtectedMemorySql("memories.id", "memories.content")}
       ORDER BY ${buildMemoryLastActivitySql()} ASC

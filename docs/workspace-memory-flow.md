@@ -202,7 +202,9 @@ This is the broad searchable archive:
 - explicit `memory_remember` entries of kind `outcome`, `error` or `note`
 - imported ChatGPT history and pasted memory exports (through the gated import session)
 - accepted core memory candidates that are events (open loops, watch items, recurring-workflow hints)
-- compressed summaries
+- compressed summaries (AI compression digests, stored through `capture` with their own observation)
+
+Each row's summary is its first informative line (constant preambles such as the Chronicle provenance line, the compaction preamble, `[Imported from …]` headers and section labels are skipped), and its local embedding and observation text are built from the content, not the summary alone. AI memory compression (on by default per workspace, a daily budget of 20,000 tokens across workspaces) replaces long rows' summaries with a model-written line and groups related rows into digests; it uses the configured provider and costs tokens, and never sends private rows. See [Memory Engine §6a](memory-engine.md#6a-archive-capture-summaries-and-compression).
 
 Every producer uses the same hygiene: `MemoryService.capture` checks `<no-memory>` (in the text, or the caller's `noMemory`), the shared salience gate, workspace memory settings (memory, auto-capture, privacy mode), redacts secret values, applies excluded patterns and inline `<private>` blocks, and dedupes by content hash. Imports go through the gated import API, `MemoryService.openImportSession`: the same checks except auto-capture (an import is an explicit act), dedupe against every imported row visible in the workspace (re-imports, and non-private imports of other workspaces), the observation sidecar and embedding, and the storage cap. Imported facts about the user (ChatGPT `observation` entries) are also written to `memory_items` as `import` items in the workspace scope; deleting, clearing or ignoring the imported row deletes or archives that fact. A source guard test (`memory-writers-sanctioned.test.ts`) keeps every other module from inserting into `memories` or `memory_items`.
 
@@ -233,7 +235,7 @@ Destructive inspector actions are workspace-scoped. Delete is implemented as con
 
 ### Retention
 
-Archive rows are removed only by the workspace's `retention_days` setting (default 90) and storage cap, measured from the later of creation and last reference. There is no separate short-tier expiry. Imported rows, Playbook rows, explicit saves and curated promotions are never removed by retention.
+Archive rows are removed only by the workspace's `retention_days` setting (default 90) and storage cap, measured from the later of creation and last reference. The storage cap counts content, summary, the stored embedding and the observation sidecar's text. There is no separate short-tier expiry. Imported rows, Playbook rows, explicit saves and curated promotions are never removed by retention.
 
 ### Privacy path
 

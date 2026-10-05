@@ -23,6 +23,19 @@ interface MemoryStats {
   totalTokens: number;
   compressedCount: number;
   compressionRatio: number;
+  compressionTokensLast24h?: number;
+  compressionDailyTokenBudget?: number;
+}
+
+const DEFAULT_COMPRESSION_DAILY_TOKEN_BUDGET = 20000;
+
+/** The cost notice shown next to the AI memory compression switch. */
+export function compressionCostNotice(dailyTokenBudget: number | null): string {
+  const budget =
+    typeof dailyTokenBudget === "number" && dailyTokenBudget > 0
+      ? dailyTokenBudget
+      : DEFAULT_COMPRESSION_DAILY_TOKEN_BUDGET;
+  return `AI memory compression uses your model provider and costs tokens (up to ${budget.toLocaleString("en-US")} tokens/day across all workspaces). Private memories are never sent. Turn it off to keep only local summaries.`;
 }
 
 interface ImportedStats {
@@ -186,6 +199,9 @@ export function MemorySettings({
       setActionError(error instanceof Error ? error.message : "The memory action failed.");
   };
   const [saving, setSaving] = useState(false);
+  // The AI compression's daily token budget (a global memory feature setting).
+  const [compressionBudget, setCompressionBudget] = useState<number | null>(null);
+  const [savingBudget, setSavingBudget] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState(false);
   const [showPromptImportWizard, setShowPromptImportWizard] = useState(false);
@@ -447,6 +463,45 @@ export function MemorySettings({
       reportError(error);
     } finally {
       setUpdatingImportedEntryId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!hasHostMethod("getMemoryFeaturesSettings")) return;
+    let cancelled = false;
+    window.electronAPI
+      .getMemoryFeaturesSettings()
+      .then((features) => {
+        if (cancelled) return;
+        setCompressionBudget(
+          features.memoryCompressionDailyTokenBudget ?? DEFAULT_COMPRESSION_DAILY_TOKEN_BUDGET,
+        );
+      })
+      .catch(() => {
+        // The notice falls back to the budget reported with the stats.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveCompressionBudget = async () => {
+    if (compressionBudget === null || !hasHostMethod("saveMemoryFeaturesSettings")) return;
+    const budget = Math.max(1000, Math.min(1_000_000, Math.floor(compressionBudget) || 0));
+    try {
+      setSavingBudget(true);
+      const current = await window.electronAPI.getMemoryFeaturesSettings();
+      if (current.memoryCompressionDailyTokenBudget !== budget) {
+        await window.electronAPI.saveMemoryFeaturesSettings({
+          ...current,
+          memoryCompressionDailyTokenBudget: budget,
+        });
+      }
+      setCompressionBudget(budget);
+    } catch (error) {
+      reportError(error);
+    } finally {
+      setSavingBudget(false);
     }
   };
 
@@ -1310,14 +1365,45 @@ export function MemorySettings({
                 </p>
               </div>
 
-              {/* Compression Toggle */}
+              {/* AI compression: on by default; the notice says it costs tokens. */}
               <ToggleRow
-                title="Enable compression"
-                description="Uses LLM to summarize memories, reducing token usage by ~10x."
+                title="AI memory compression"
+                description="Summarizes long memories and groups related ones into digests with your configured model, so recalled memories stay short and specific."
                 checked={settings.compressionEnabled}
                 onChange={(checked) => handleSave({ compressionEnabled: checked })}
                 disabled={saving}
               />
+              <div className="settings-form-group">
+                <p className="settings-form-hint">
+                  {compressionCostNotice(
+                    compressionBudget ?? stats?.compressionDailyTokenBudget ?? null,
+                  )}
+                </p>
+                {typeof stats?.compressionTokensLast24h === "number" && (
+                  <p className="settings-form-hint">
+                    Used in the last 24 hours: {stats.compressionTokensLast24h.toLocaleString()}{" "}
+                    tokens.
+                  </p>
+                )}
+                {compressionBudget !== null && (
+                  <>
+                    <label className="settings-label">Daily token budget (all workspaces)</label>
+                    <input
+                      type="number"
+                      min={1000}
+                      max={1_000_000}
+                      step={1000}
+                      value={compressionBudget}
+                      onChange={(e) =>
+                        setCompressionBudget(parseInt(e.target.value || "0", 10) || 0)
+                      }
+                      onBlur={() => void saveCompressionBudget()}
+                      disabled={savingBudget}
+                      className="settings-input"
+                    />
+                  </>
+                )}
+              </div>
 
               {/* Privacy Mode */}
               <div className="settings-form-group">
@@ -1377,7 +1463,8 @@ export function MemorySettings({
                   className="settings-input"
                 />
                 <p className="settings-form-hint">
-                  Oldest memories are pruned automatically when this limit is exceeded.
+                  Counts memory text, summaries, search embeddings and observation metadata. Oldest
+                  memories are pruned automatically when this limit is exceeded.
                 </p>
               </div>
 

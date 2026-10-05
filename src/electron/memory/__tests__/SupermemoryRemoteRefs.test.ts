@@ -206,6 +206,34 @@ describeWithSqlite("Supermemory remote ids (SEC-17)", () => {
     expect(refs()).toEqual([]);
   });
 
+  it("redacts secrets and honours <no-memory> before an explicit remember leaves the device", async () => {
+    const token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
+    await SupermemoryService.remember({
+      workspace,
+      content: `Deploys use the bot account with ${token}`,
+      skipMemoryWriteGate: true,
+    });
+    const sent = calls.find((call) => call.url.endsWith("/v4/memories"));
+    const memories = sent?.body?.memories as Array<{ content: string }>;
+    expect(memories[0].content).not.toContain(token);
+    expect(memories[0].content).toContain("[REDACTED_SECRET]");
+
+    calls = [];
+    const optedOut = await SupermemoryService.remember({
+      workspace,
+      content: "Prefers tea <no-memory>",
+      skipMemoryWriteGate: true,
+    });
+    expect(optedOut).toMatchObject({ blocked: true, memoryIds: [] });
+    const secretOnly = await SupermemoryService.remember({
+      workspace,
+      content: token,
+      skipMemoryWriteGate: true,
+    });
+    expect(secretOnly).toMatchObject({ blocked: true, memoryIds: [] });
+    expect(calls).toEqual([]);
+  });
+
   it("does not sweep while Supermemory is disconnected", async () => {
     await mirror("m-1");
     db.prepare("DELETE FROM memories").run();

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import type Database from "better-sqlite3";
+import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "../database/fts-query";
 
 /**
  * The markdown memory index as synchronous SQL: the store the memory domain's transaction
@@ -736,14 +737,14 @@ export class MarkdownIndexStore {
     const params: unknown[] = [workspaceId];
 
     if (tokens.length > 0) {
-      const tokenClauses = tokens.map(() => "text LIKE ?").join(" OR ");
+      const tokenClauses = tokens.map(() => `text LIKE ? ${LIKE_ESCAPE_CLAUSE}`).join(" OR ");
       clauses.push(`(${tokenClauses})`);
       for (const token of tokens) {
-        params.push(`%${token}%`);
+        params.push(likeContainsPattern(token));
       }
     } else {
-      clauses.push("text LIKE ?");
-      params.push(`%${raw}%`);
+      clauses.push(`text LIKE ? ${LIKE_ESCAPE_CLAUSE}`);
+      params.push(likeContainsPattern(raw));
     }
 
     params.push(limit * 4);

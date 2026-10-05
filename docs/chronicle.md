@@ -128,6 +128,8 @@ If OCR-backed matching is important, install local `tesseract`. The Chronicle se
 - later image or vision analysis still follows the normal explicit screenshot / export approval path
 - only the single top, confident (≥ `0.5`) match of a `screen_context_resolve` call is copied into workspace state, and never for a `<no-memory>` task
 - Chronicle-derived memories are private and are never mirrored to Supermemory
+- Chronicle is archive-only: a derived memory is one `screen_context` archive row written through `MemoryService.capture`, the hygiene every memory producer shares (`<no-memory>` in the text or for the task, the salience gate, workspace memory, auto-capture and privacy settings, secret redaction, excluded patterns, content-hash dedupe). Screen text is third-party content, so it never becomes a `memory_items` fact about the user, and Dreaming does not auto-promote screen-captured evidence
+- with **Respect workspace memory privacy and auto-capture settings** off, an observation can still be promoted into `.cowork/chronicle/`, but its derived memory row still follows the workspace memory settings
 - deleting an observation removes only its own screenshot inside `.cowork/chronicle/assets/`; deleting a task removes its observations, and **Clear All Memories** removes all of them
 - when **Respect workspace memory privacy and auto-capture settings** is on, durable Chronicle promotion follows workspace memory gates before writing observations
 - `screen_context_resolve` and Chronicle-backed promotion remain subject to the task's access profile and tool restrictions; a profile cannot grant Screen Recording or widen later file/image/export access

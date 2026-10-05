@@ -450,9 +450,11 @@ export class MemoryWriteGate {
       subjectKey: this.asString(payload.subjectKey) || null,
       source,
       sourceRef: {
-        store: "agent_tool",
-        id: this.asString(payload.recordId) || pending.id,
-        ...(pending.taskId ? { taskId: pending.taskId } : {}),
+        ...(this.stagedCoreCandidateRef(payload.sourceRef) ?? {
+          store: "agent_tool",
+          id: this.asString(payload.recordId) || pending.id,
+          ...(pending.taskId ? { taskId: pending.taskId } : {}),
+        }),
         approvedFrom: pending.id,
       },
       confidence: typeof payload.confidence === "number" ? payload.confidence : 0.7,
@@ -471,6 +473,21 @@ export class MemoryWriteGate {
         writeGuard: filesystemGuards.filesystemWriteGuard,
       });
     }
+  }
+
+  /**
+   * The source ref of a staged core-memory candidate fact (CoreMemoryDistiller), kept so the
+   * approved item stays linked to its candidate. Any other staged ref is ignored: an agent
+   * write is always recorded as `agent_tool`.
+   */
+  private static stagedCoreCandidateRef(value: unknown): Record<string, unknown> | undefined {
+    const ref = this.asPlainObject(value);
+    if (!ref || ref.store !== "core_candidate" || !this.asString(ref.id)) return undefined;
+    const kept: Record<string, unknown> = { store: "core_candidate", id: ref.id };
+    for (const key of ["traceId", "profileId", "candidateType", "scopeKind", "scopeRef"]) {
+      if (typeof ref[key] === "string") kept[key] = ref[key];
+    }
+    return kept;
   }
 
   private static async replayExternal(

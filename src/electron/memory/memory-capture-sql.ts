@@ -122,12 +122,36 @@ export function writeObservationMetadata(
       metadata.createdAt - 5 * 60 * 1000,
       metadata.createdAt + 5 * 60 * 1000,
     ) as { memory_id?: string } | undefined;
+  // An upsert, not INSERT OR REPLACE: REPLACE deletes the old row without firing the FTS
+  // delete trigger and leaves a stale index entry (audit DATA-8); the update trigger keeps
+  // memory_observation_metadata_fts in step.
   db.prepare(`
-    INSERT OR REPLACE INTO memory_observation_metadata (
+    INSERT INTO memory_observation_metadata (
       memory_id, workspace_id, task_id, origin, observation_type, title, subtitle, narrative,
       facts, concepts, files_read, files_modified, tools, source_event_ids, content_hash,
       capture_reason, privacy_state, generated_by, migration_status, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(memory_id) DO UPDATE SET
+      workspace_id = excluded.workspace_id,
+      task_id = excluded.task_id,
+      origin = excluded.origin,
+      observation_type = excluded.observation_type,
+      title = excluded.title,
+      subtitle = excluded.subtitle,
+      narrative = excluded.narrative,
+      facts = excluded.facts,
+      concepts = excluded.concepts,
+      files_read = excluded.files_read,
+      files_modified = excluded.files_modified,
+      tools = excluded.tools,
+      source_event_ids = excluded.source_event_ids,
+      content_hash = excluded.content_hash,
+      capture_reason = excluded.capture_reason,
+      privacy_state = excluded.privacy_state,
+      generated_by = excluded.generated_by,
+      migration_status = excluded.migration_status,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at
   `).run(
     metadata.memoryId,
     metadata.workspaceId,

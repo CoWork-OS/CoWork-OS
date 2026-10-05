@@ -7,6 +7,8 @@ import type {
 import type { Workspace } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
+import { containsNoMemoryDirective } from "./no-memory-directive";
+import { REDACTED_SECRET, redactSecrets } from "./sensitive-content";
 import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository";
 import type { SupermemoryRemoteRef } from "./supermemory-remote-refs-sql";
 
@@ -382,6 +384,29 @@ export class SupermemoryService {
     error?: string;
   }> {
     const containerTag = this.resolveContainerTag(args.workspace, args.containerTag);
+    // The shared hygiene before anything leaves the device: `<no-memory>` refuses the write
+    // and secret values are redacted (text that was only a secret is refused).
+    if (containsNoMemoryDirective(args.content)) {
+      return {
+        containerTag,
+        memoryIds: [],
+        blocked: true,
+        error: "The content opts out of memory (<no-memory>); nothing was saved externally.",
+      };
+    }
+    const redaction = redactSecrets(args.content);
+    if (
+      redaction.count > 0 &&
+      !/[\p{L}\p{N}]{3,}/u.test(redaction.text.split(REDACTED_SECRET).join(" "))
+    ) {
+      return {
+        containerTag,
+        memoryIds: [],
+        blocked: true,
+        error: "External memory write contained only a secret and was blocked.",
+      };
+    }
+    args = { ...args, content: redaction.text };
     if (!args.skipMemoryWriteGate) {
       const gate = await MemoryWriteGate.evaluate({
         workspaceId: args.workspace.id,

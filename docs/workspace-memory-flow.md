@@ -1,18 +1,18 @@
 # Workspace Memory Flow
 
-This document describes how CoWork OS stores, curates, retrieves, and injects workspace memory after the layered-memory upgrade.
+This document describes how CoWork OS stores, curates, retrieves, and injects workspace memory. The fact store, write path, recall and curation contracts are specified in [Memory Engine](memory-engine.md); this page is the workspace-level overview.
 
-The foundation is still the hybrid memory system, but the runtime now makes it explicit as a four-layer wake-up model built on top of those storage lanes:
+The runtime is a four-layer wake-up model built on top of these storage lanes:
 
-- **Curated hot memory**: small, prompt-visible, explicitly edited or promoted
-- **Recall archive**: larger searchable memory/history, not injected by default
+- **Facts (`memory_items`)**: small, prompt-visible facts about the user and workspace, written only through `MemoryWriter`, edited in the Memory Hub and mirrored into the `.cowork/USER.md` / `.cowork/MEMORY.md` auto-blocks
+- **Recall archive**: larger searchable episodic memory/history, not injected by default
 - **Structured observations**: inspectable sidecar metadata for archive memories
 - **Session recall**: recent transcript/checkpoint history for “what happened in that run?”
 - **Topic packs**: focused `.cowork/memory/topics/*.md` files loaded explicitly for topical work
 
 An optional external provider lane can also sit beside that local stack. Today that provider is Supermemory, and it is additive rather than authoritative.
 
-Dreaming sits above these lanes as a memory-curation process. It reviews recent transcript evidence, structured observations, and curated hot memory, then writes reviewable `dreaming_candidates` instead of directly changing memory.
+[Dreaming](dreaming.md) is the curator of `memory_items`: it merges, resolves, promotes, decays and expires facts, applies safe operations on inferred facts automatically (each one undoable) and queues the rest for the Memory Hub **Review** tab.
 
 ## Access Profile Boundary
 
@@ -26,12 +26,12 @@ write governance.
 
 Those lanes map into runtime layers as:
 
-- **L0 Identity**: curated user/workspace memory + `USER.md` essentials
-- **L1 Essential Story**: playbook patterns, daily activity summaries, active commitments
+- **L0 Identity**: pinned, identity, rule, commitment and user-stated `memory_items` + `USER.md` essentials
+- **L1 Essential Story**: `memory_items` recall for the request, playbook patterns, daily activity summaries
 - **L2 Topic Packs**: focused topic files loaded on demand
 - **L3 Deep Recall**: unified recall and verbatim quote search across tasks/messages/files/memory/KG
 
-Chronicle fits this model as a **screen-context evidence source**, not as a fifth memory lane. Raw passive frames stay ephemeral in app-local storage. When a task uses `screen_context_resolve`, only the single top match is promoted into workspace state, and only if its confidence is at least `0.5`, the task did not opt out with `<no-memory>`, and the access profile allows writing the Chronicle directory. Promoted observations become searchable through unified recall as `screen_context`. When enabled, they can also create linked `screen_context` memory entries through the normal memory service; those entries are always private, so they stay local and are never mirrored to Supermemory.
+Chronicle fits this model as a **screen-context evidence source**, not as a fifth memory lane. Raw passive frames stay ephemeral in app-local storage. When a task uses `screen_context_resolve`, only the single top match is promoted into workspace state, and only if its confidence is at least `0.5`, the task did not opt out with `<no-memory>`, and the access profile allows writing the Chronicle directory. Promoted observations become searchable through unified recall as `screen_context`. When enabled, they can also create linked `screen_context` archive rows through `MemoryService.capture`; those rows are always private, so they stay local and are never mirrored to Supermemory. Screen text never becomes a `memory_items` fact.
 
 ---
 
@@ -46,9 +46,9 @@ no-prompt policy is active. Memory Hub no longer offers a review-mode select.
 To exercise the review queue deliberately in a headless or controlled run, set
 `COWORK_MEMORY_WRITE_APPROVAL_MODE`:
 
-- `curated_only`: stage writes to the hot `.cowork/USER.md` / `.cowork/MEMORY.md` layer.
+- `curated_only`: stage fact writes (`memory_remember` facts and core memory candidate facts, target `curated`).
 - `external_only`: stage writes before anything is saved or mirrored to Supermemory.
-- `background_only`: stage background, distillation, Dreaming, and mirror writes while allowing explicit agent tool saves.
+- `background_only`: stage background, distillation (including core memory candidate facts) and mirror writes while allowing explicit agent tool saves.
 - `all`: stage every durable archive, curated, and external memory write.
 
 The queue is therefore an opt-in compatibility path. It is separate from the
@@ -63,9 +63,11 @@ Approving a pending write first atomically claims the row as `applying`, replays
 The approval gate sits in front of all durable memory write surfaces:
 
 - `memory_remember` (facts go through `MemoryWriter`; `outcome`/`error`/`note` go to the archive) and automatic `MemoryService.capture(...)` archive writes
-- Dreaming accepted candidates and Core Memory Distiller promotions
+- Box Brain source writes
 - `memory_remember` with scope `external` (target `external`) and optional Supermemory mirroring
 - external provider mirror hooks through `ExternalMemoryProvider`
+
+Not staged: Dreaming curation (it has its own Review tab and undo) and core memory candidate facts, which `CoreMemoryDistiller` writes directly through `MemoryWriter` (an open item in the [audit](memory-system-audit-2026-10-03.md#status)).
 
 Read-only recall tools are not staged. Search, profile fetch, inspector views, and prompt synthesis read from the current committed memory layers.
 
@@ -74,12 +76,12 @@ Read-only recall tools are not staged. Search, profile fetch, inspector views, a
 ## Overview
 
 ```text
-User corrections / salient task events / accepted distill candidates
+memory_remember facts / Memory Hub / kit back-sync / core candidate facts / awareness / imports
         │
-        ├─→ CuratedMemoryService
-        │     ├─→ curated_memory_entries (SQLite)
-        │     ├─→ .cowork/USER.md (auto block)
-        │     └─→ .cowork/MEMORY.md (auto block)
+        ├─→ MemoryWriter (salience, redaction, policy, dedupe, supersession)
+        │     ├─→ memory_items (SQLite, the only fact store)
+        │     ├─→ .cowork/USER.md (auto block, rendered)
+        │     └─→ .cowork/MEMORY.md (auto block, rendered)
         │
         ├─→ MemoryService
         │     ├─→ memories + embeddings (archive lane)
@@ -93,9 +95,9 @@ User corrections / salient task events / accepted distill candidates
         ├─→ TranscriptStore
         │     └─→ .cowork/memory/transcripts/*
         │
-        ├─→ DreamingService
-        │     ├─→ dreaming_runs
-        │     └─→ dreaming_candidates (reviewable memory maintenance proposals)
+        ├─→ DreamingService (curator of memory_items)
+        │     ├─→ MemoryWriter.applyCuration (safe ops, logged in memory_curation_log, undoable)
+        │     └─→ dreaming_candidates (proposals for the Memory Hub Review tab)
         │
         └─→ MemoryConsolidator / DailyLogSummarizer
               └─→ .cowork/memory/summaries (one line per task per day)
@@ -104,7 +106,7 @@ MemorySynthesizer.synthesize()
         │
         ├─→ L0 Identity
         │     ├─→ workspace kit essentials
-        │     └─→ hot curated memory
+        │     └─→ memory_items L0 (MemoryContextBuilder)
         └─→ L1 Essential Story
               └─→ playbook / daily summaries / Box Brain hits
 
@@ -112,7 +114,7 @@ Agent memory tools (audit §8.3)
         ├─→ memory_recall    MemoryRecall: memory_items + archive + conversations
         │                    + knowledge (KG, .cowork markdown, topic packs) + Supermemory
         ├─→ memory_remember  MemoryWriter (facts) or the archive (outcome/error/note)
-        ├─→ memory_forget    real delete of an item (and its legacy record) or own archive row
+        ├─→ memory_forget    real delete of an item or own archive row (asks first)
         ├─→ context_recall   the active task's earlier conversation after compaction
         └─→ kg_*             explicit graph editing (deferred; found through tool_search)
 
@@ -135,7 +137,7 @@ The agent sees four memory tools (audit §8.3), always exposed in the memory lan
 |---|---|---|
 | `memory_recall` | One query over `memory_items`, the archive, the conversation index (other tasks), knowledge (KG entities, `.cowork` markdown, topic packs) and, when asked for and allowed, Supermemory. Lists are fused by weighted reciprocal rank; results are an index (`id`, lane, snippet, provenance, relevance, token estimate) until `detail: "full"` with `ids`. | Read. Allowed in plan/analyze modes and every plan step. `external` scope needs network access and the `external_service` approval. |
 | `memory_remember` | Facts (`preference`, `identity`, `rule`, `project_fact`, `decision`, `commitment`, `correction`, `insight`) through `MemoryWriter`; `outcome`, `error`, `note` to the archive; scope `external` stores the memory only in Supermemory. `user_stated` only when the model sets `user_asked` and the user's latest message really asks to remember (otherwise `inferred`). | Memory write: denied in plan/analyze modes and to verifier/researcher workers; staged when memory-write approval is on; blocked by `<no-memory>`. |
-| `memory_forget` | Real delete of a memory item visible to this workspace (and the legacy record it mirrors), of this workspace's archive row, or of a Supermemory entry (an `external:<id>` id, or `scope: "external"` with `match` text that Supermemory matches). Otherwise `match` must identify exactly one memory. | Memory write. |
+| `memory_forget` | Real delete of a memory item visible to this workspace (with its older revisions), of this workspace's archive row, or of a Supermemory entry (an `external:<id>` id, or `scope: "external"` with `match` text that Supermemory matches). Otherwise `match` must identify exactly one memory. | Memory write. Asks the user first (`memory_delete` approval, "Forget a memory") unless the item was inferred by this task's agent itself; Supermemory ids take the `external_service` approval. |
 | `context_recall` | The active task's earlier conversation (never another task's): durable compaction context when enabled, then the conversation index. | Read. |
 
 All of them are in `group:memory`, so group and public gateway contexts cannot use them, and a managed agent with memory disabled has them denied. Recall output is never re-captured into the archive or the conversation index.
@@ -144,11 +146,12 @@ The 16 tools they replace (`search_memories`, `memory_search_index`, `memory_tim
 
 ---
 
-## Lane 1 — Curated Hot Memory
+## Lane 1 — Facts (`memory_items`)
 
-**Service:** `src/electron/memory/CuratedMemoryService.ts`  
-**Storage:** `curated_memory_entries` table  
-**Mirrors:** `.cowork/USER.md`, `.cowork/MEMORY.md`
+**Writer:** `src/electron/memory/MemoryWriter.ts`  
+**Storage:** `memory_items` table (the old `curated_memory_entries` table was migrated into it and dropped by the legacy data retirement)  
+**Views:** `CuratedMemoryService` (workspace scope), Memory Hub "What CoWork knows"  
+**Rendered into:** `.cowork/USER.md`, `.cowork/MEMORY.md` auto-blocks
 
 This lane is for the small set of durable facts that should stay front-and-center in prompts:
 
@@ -161,26 +164,26 @@ This lane is for the small set of durable facts that should stay front-and-cente
 
 ### How entries arrive
 
-- explicit user actions (Memory Hub); the agent's `memory_remember` writes facts to `memory_items` through `MemoryWriter`, which render into the same kit blocks once the lane migration has run
-- accepted stable promotions from `CoreMemoryDistiller`
-- future human edits that are synced back through governed workflows
+- explicit user actions (Memory Hub add/edit, `user_stated`) and hand edits inside the kit auto-blocks (back-synced as `curated`)
+- the agent's `memory_remember` (`user_stated` only when the user asked to remember, else `inferred`)
+- accepted core memory candidates of a fact type (preference, correction, project state, workflow pattern; a constraint only when the user accepted it or auto-promotion is on): `CoreMemoryDistiller` writes them through `MemoryWriter` as `inferred` items with `source_ref.store = "core_candidate"` ([memory-engine.md](memory-engine.md) §1)
+- Dreaming promotions of recurring outcomes, imported facts (`import`), awareness beliefs and the adaptive response style (`inferred`)
 
 ### Guardrails
 
-- curated content is normalized before storage
-- stored curated content is capped at **320 characters**
-- `match` strings used for replace/remove are capped at **120 characters**
-- writes mirror into auto-managed blocks inside `.cowork/USER.md` and `.cowork/MEMORY.md`
+- every write passes the salience gate, secret redaction, `<no-memory>` and workspace memory settings, then dedupe by content hash and supersession by subject (a lower-trust source never overrides what the user said)
+- fact content is capped at **1000 characters**; the `CuratedMemoryService` view caps curated content at **320 characters** and replace/remove `match` strings at **120 characters**
+- workspace items render into auto-managed blocks inside `.cowork/USER.md` and `.cowork/MEMORY.md` (private items never)
 - file sync is serialized per workspace to reduce last-writer-wins races
 - replace/remove prefers stable `id` values for deterministic updates; the agent forgets an item with `memory_forget` and an id from `memory_recall`
 
 ### Prompt behavior
 
-Curated hot memory is injected by default through `<cowork_hot_memory>`.
+L0 facts are injected by default (the pinned `<cowork_user_profile>` block on plan steps and follow-ups, `<cowork_hot_memory>` on planning and chat); L1 recall of `memory_items` for the current request is added per step. Budgets and surfaces are in [memory-engine.md §4a](memory-engine.md#4a-prompt-read-path-implemented).
 
 ### Dreaming interaction
 
-Dreaming can propose curated-memory additions, replacements, or archives when recent evidence shows a correction, contradiction, duplicate entry, open loop, recurring cadence, or durable constraint. Those proposals remain `dreaming_candidates`; there is no review UI yet, so no candidate is currently accepted or applied. Once accepted, a change must go through `CuratedMemoryService`; Dreaming is not allowed to bypass the curated-memory write path.
+Dreaming curates this lane: it merges duplicates, flags conflicts, promotes recurring archive outcomes, decays unused inferences and closes finished commitments. Safe operations on inferred facts are applied through `MemoryWriter.applyCuration` and can be undone; everything else, and anything touching what the user stated or confirmed, waits in the Memory Hub Review tab. See [Dreaming](dreaming.md).
 
 ---
 
@@ -197,14 +200,17 @@ This is the broad searchable archive:
 - errors that affected a task (tool errors, failed steps, verification failures)
 - user corrections and insights
 - explicit `memory_remember` entries of kind `outcome`, `error` or `note`
-- imported ChatGPT history
+- imported ChatGPT history and pasted memory exports (through the gated import session)
+- accepted core memory candidates that are events (open loops, watch items, recurring-workflow hints)
 - compressed summaries
+
+Every producer uses the same hygiene: `MemoryService.capture` checks `<no-memory>` (in the text, or the caller's `noMemory`), the shared salience gate, workspace memory settings (memory, auto-capture, privacy mode), redacts secret values, applies excluded patterns and inline `<private>` blocks, and dedupes by content hash. Imports go through the gated import API, `MemoryService.openImportSession`: the same checks except auto-capture (an import is an explicit act), dedupe against every imported row visible in the workspace (re-imports, and non-private imports of other workspaces), the observation sidecar and embedding, and the storage cap. Imported facts about the user (ChatGPT `observation` entries) are also written to `memory_items` as `import` items in the workspace scope; deleting, clearing or ignoring the imported row deletes or archives that fact. A source guard test (`memory-writers-sanctioned.test.ts`) keeps every other module from inserting into `memories` or `memory_items`.
 
 Capture is salience-gated (`src/electron/memory/memory-capture-salience.ts`). The daemon no longer archives raw telemetry such as tool calls and results, step progress, plan JSON, assistant messages or file events; the task timeline keeps those. Events from memory-recall tools are never archived, so recalled memories are not re-captured as new ones. A user correction is captured once, where it is detected.
 
 Chronicle-promoted observations remain provenance-rich `screen_context` records so unified recall can surface them separately from ordinary memory text. When background Chronicle memory generation is enabled, the runtime can also create linked `screen_context` memory rows derived from those observations. Those derived rows are summaries with provenance warnings, not raw frame dumps.
 
-This lane still uses hybrid lexical + local semantic retrieval, but it is **not injected by default**. The feature flag `defaultArchiveInjectionEnabled` now defaults to `false`.
+This lane uses hybrid lexical retrieval plus hashed local term vectors (no embedding model; real local embeddings were skipped by decision), but it is **not injected by default**. The feature flag `defaultArchiveInjectionEnabled` now defaults to `false`.
 
 The per-turn recall block (`<cowork_memory_recall>`) is query-driven: each turn it injects archive and `.cowork` note matches for the current query. The unconditional "recent memories" lane in that block runs only when `defaultArchiveInjectionEnabled` is on. Both lanes skip memories captured by the current task, so the agent does not see its own tool events echoed back.
 
@@ -239,9 +245,7 @@ Archive rows are removed only by the workspace's `retention_days` setting (defau
 
 ### Dreaming interaction
 
-Dreaming uses structured observations as compact evidence for memory maintenance. It can detect likely stale archive facts, contradictions, and repeated patterns, but it records proposals in `dreaming_candidates` rather than editing `memories` or `memory_observation_metadata` directly.
-
-Dreaming candidates keep evidence refs so a future Memory Hub review surface can show why a proposal exists before any archive, replacement, or topic-pack update is applied. That surface does not exist yet.
+Dreaming reads archive outcomes of the last 30 days as evidence: an outcome that recurs in at least two tasks can be promoted into an `inferred` fact (listing its archive rows in `source_ref.aliases`), and a done signal can close an overdue commitment. It never edits `memories` or `memory_observation_metadata`. Proposals show their evidence in the Memory Hub Review tab.
 
 ## Screen Context Evidence — Chronicle Promotions
 
@@ -286,13 +290,13 @@ Supermemory is an optional external memory provider that runs alongside CoWork's
 What it adds:
 
 - scoped profile fetches for prompt construction
-- explicit external recall and write tools
+- external recall and writes through the memory tools (`memory_recall` / `memory_remember` / `memory_forget` with scope `external`)
 - optional mirroring of non-private local memory captures
 - workspace-scoped container tags derived from a template such as `cowork:{workspaceId}`
 
 What it does not replace:
 
-- curated hot memory
+- `memory_items` facts
 - archive memory
 - transcript/session recall
 - workspace kit files
@@ -302,7 +306,7 @@ What it does not replace:
 
 - `memory_recall` with scope `external` searches Supermemory for the workspace's resolved `containerTag`. The lane runs only when Supermemory is configured, the workspace allows network access and the model asked for the scope; the call then needs the `external_service` approval
 - `memory_forget` with an `external:<id>` from `memory_recall` removes that external memory
-- `memory_remember` with scope `external` stores a memory only in Supermemory (through the memory write gate, `external_service` approval); `memory_forget` with `scope: "external"` and `match` text forgets the Supermemory memory with that text
+- `memory_remember` with scope `external` stores a memory only in Supermemory (through the memory write gate, `external_service` approval); `memory_forget` with `scope: "external"` and `match` text forgets the Supermemory memory with that text. The write is refused for `<no-memory>`, when workspace memory is off, and in privacy modes `disabled` and `strict`; secret values are redacted before the request (text that is only a secret is refused)
 - the earlier `supermemory_*` tools are removed
 
 ### Prompt behavior
@@ -318,7 +322,8 @@ Current boundary:
 - private or strict-mode entries are not mirrored (this includes all Chronicle-derived memories)
 - workspace kit files remain local
 - full conversation turn-by-turn sync is not implemented yet
-- remote ids are not stored, so deleting, suppressing or clearing local memory does not remove the mirrored copy from Supermemory
+- remote ids are stored (`supermemory_remote_refs`), so deleting, suppressing or clearing local memory forgets the mirrored copy; copies sent before remote ids were kept cannot be addressed
+- Supermemory profile and search results are only held in a per-task cache for the prompt; they are never stored locally as memory
 
 ### Failure handling
 
@@ -382,7 +387,7 @@ Topic packs are query-scoped, focused memory slices generated from:
 
 - relevant archive recall
 - relevant indexed markdown
-- curated hot memory summary lines
+- L0 fact summary lines
 - recent daily summaries
 
 ### Retrieval path
@@ -413,8 +418,8 @@ Recent summaries (last 7 days) are injected as `daily_summary` fragments in `L1 
 
 Prompt synthesis now builds separate sections instead of one monolithic synthesized-memory block:
 
-- `<cowork_hot_memory>` — `L0 Identity`: curated hot memory + user/profile + active relationship items
-- `<cowork_structured_memory>` — `L1 Essential Story`: playbook, daily summaries and active commitments. The knowledge graph is not injected in the default wake-up path; agents reach it through the `kg_*` tools.
+- `L0 Identity`: `memory_items` L0 built by `MemoryContextBuilder` (pinned, identity, rule, commitment, curated and user-stated items, named preferences); `memory_items` is the only source
+- `<cowork_structured_memory>` — `L1 Essential Story`: playbook, daily summaries and Box Brain hits; on plan steps the builder's `memory_items` recall takes the former hot-memory slot. The knowledge graph is not injected in the default wake-up path; agents reach it through `memory_recall` (scope `knowledge`) and the `kg_*` tools.
 - optional Supermemory profile block — external profile/search context appended only when enabled
 
 `L2 Topic Packs` and `L3 Deep Recall` are not injected into the live prompt by default. They stay explicit and tool-driven.
@@ -434,7 +439,7 @@ Workspace kit context is still injected separately and placed before the memory 
 - design-system context (`design_system`, 1200 tokens), the external memory profile (`external_memory`, 400) and transcript hits (`transcript_context`, 400) also have their own sections
 - remaining budget is split between hot memory and structured memory; a short memory-tool routing hint (about 90 tokens, at most 100, naming only the memory tools the model can call: `memory_recall`, `memory_remember`, `memory_forget`, `context_recall`) is included in that budget
 - truncation always happens on fragment boundaries and closes any wrapper tag it left open; when the whole prompt is over budget, memory, design-system and project-guidance sections shrink before they are dropped
-- follow-ups, chat and planning get a compact L0 block (curated memory plus identity, 450 tokens), cached per task and rebuilt after curated, profile or relationship writes
+- `memory_items` text has one budget owner, `MemoryContextBuilder`: L0 600 tokens (`MEMORY_L0_TOKENS`), L1 400 on plan steps and 250 on planning, chat and follow-ups; L0 is cached per session and rebuilt when the hot-memory version changes
 
 ### Default injection behavior
 
@@ -452,7 +457,7 @@ Workspace kit context is still injected separately and placed before the memory 
 **Service:** `src/electron/memory/WorkspaceKitContext.ts`  
 **Location:** `.cowork/*.md`
 
-The workspace kit remains a governed durable context layer with its own contracts, freshness windows, and prompt budgets. `USER.md` and `MEMORY.md` now contain auto-managed curated-memory blocks in addition to human-authored content.
+The workspace kit remains a governed durable context layer with its own contracts, freshness windows, and prompt budgets. `USER.md` and `MEMORY.md` contain auto-managed blocks rendered from `memory_items` in addition to human-authored content; hand edits inside a block are synced back on the next kit sync ([memory-engine.md §5](memory-engine.md#generated-kit-views)).
 
 From **Settings → Memory Hub → Per Workspace**, the "Open USER.md" and "Open MEMORY.md" buttons open (or create if missing) these files directly in the system editor via `kit:openFile` IPC.
 
@@ -464,9 +469,9 @@ Memory Hub also shows a preview of the current `L0/L1` payload plus the `L2/L3` 
 
 **Service:** `src/electron/memory/MemoryWorkspacePurgeService.ts`
 
-- **Task delete:** in the same transaction as the task row, durable context (including the task's conversation index rows), legacy transcript span rows, and the archive memories (except imported rows and explicit saves), KG facts and Playbook evidence derived from the task are removed, and task foreign keys in `dreaming_runs` and `pending_memory_writes` are cleared. The task's transcript files (JSONL spans, checkpoints, lock file) and its Chronicle observations are removed afterwards.
-- **Clear All Memories** (per workspace, from Memory settings): archive memories and observations, durable context, curated entries (and the auto-managed blocks in `.cowork/USER.md` / `.cowork/MEMORY.md`), knowledge graph, Dreaming runs and candidates, core memory candidates, Playbook evidence, pending memory writes, transcripts, topic packs and `.cowork/memory/MEMORY.md`, daily summaries and Chronicle observations. Each store is cleared separately and the result reports per-store counts and failures.
-- **Not covered:** copies already mirrored to Supermemory. The local runtime does not keep remote ids, so it cannot delete them; remove them in Supermemory directly.
+- **Task delete:** in the same transaction as the task row, durable context (including the task's conversation index rows), legacy transcript span rows, and the archive memories (except imported rows and explicit saves), KG facts and Playbook evidence derived from the task are removed, and task foreign keys in `dreaming_runs` and `pending_memory_writes` are cleared. Task-scoped `memory_items` are deleted, and with `purgeDerivedMemory` so are inferred, third-party and system items learned in the task. The task's transcript files (leftover JSONL spans, checkpoints, lock file) and its Chronicle observations are removed afterwards, and Supermemory copies of its rows are forgotten.
+- **Clear All Memories** (per workspace, from Memory settings): archive memories and observations, durable context, the workspace's `memory_items` (and the auto-managed blocks in `.cowork/USER.md` / `.cowork/MEMORY.md`), knowledge graph, Dreaming runs and candidates, core memory candidates, Playbook evidence, pending memory writes, transcripts, topic packs and `.cowork/memory/MEMORY.md`, daily summaries, Chronicle observations and every Supermemory copy recorded for the workspace. Each store is cleared separately and the result reports per-store counts and failures. Global items are cleared with "Clear global memories" in the Memory Hub.
+- **Not covered:** Supermemory copies sent before remote ids were recorded (`supermemory_remote_refs`); remove them with `memory_forget` (scope `external`) or in Supermemory directly.
 
 ---
 
@@ -499,6 +504,8 @@ Feedback reason values: `incorrect`, `too_verbose`, `ignored_instructions`, `wro
 - [Execution Runtime Model](execution-runtime-model.md)
 - [Features](features.md)
 - [Integration Setup, Skill Proposals, and Bootstrap Lifecycle](integration-skill-bootstrap-lifecycle.md)
+- [Memory Engine](memory-engine.md)
+- [Dreaming](dreaming.md)
 - [Durable Runtime Context](durable-runtime-context.md)
 - [Structured Memory Observations](memory-observations.md)
 - [Supermemory Integration](supermemory.md)

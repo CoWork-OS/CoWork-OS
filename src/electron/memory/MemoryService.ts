@@ -37,14 +37,15 @@ import {
 import { MemoryTierService } from "./MemoryTierService";
 import { SupermemoryService } from "./SupermemoryService";
 import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository";
-import { MemoryWriter } from "./MemoryWriter";
+import { MemoryWriter, memoryTextSalience } from "./MemoryWriter";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
 import type { CoreMemoryScopeKind } from "../../shared/types";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { createLogger } from "../utils/logger";
 import { containsNoMemoryDirective } from "./no-memory-directive";
-import { redactSecrets } from "./sensitive-content";
+import { REDACTED_SECRET, redactSecrets } from "./sensitive-content";
+import type { MemoryItemKind } from "./memory-items-types";
 import { neutralizeReservedImportPrefix } from "./memory-visibility";
 
 // Secret values are redacted before storage by `redactSecrets` (./sensitive-content);
@@ -107,6 +108,8 @@ export interface MemoryCaptureOptions {
   forceCapture?: boolean;
   /** Permit the optional external-memory mirror for this capture. */
   allowExternalMirror?: boolean;
+  /** The caller knows the task or message opted out with `<no-memory>`: store nothing. */
+  noMemory?: boolean;
 }
 
 interface CompressionQueueEntry {
@@ -139,6 +142,56 @@ export interface PromptRecallDiagnostics {
   lastFailureMessage: string | null;
 }
 
+/** `source_ref.store` of facts written by the import API; `id` is the archive row. */
+export const IMPORT_FACT_STORE = "import";
+
+const IMPORT_HEADER_PREFIX = "[Imported from ";
+
+/** The text of an imported archive row without its `[Imported from …]` header line. */
+function importedBody(content: string): string {
+  const trimmed = String(content || "").trimStart();
+  if (!trimmed.startsWith(IMPORT_HEADER_PREFIX)) return trimmed.trim();
+  const newline = trimmed.indexOf("\n");
+  return newline === -1 ? "" : trimmed.slice(newline + 1).trim();
+}
+
+/** One line, starting with the reserved import prefix (only importers may write it). */
+function normalizeImportHeader(header: string): string {
+  const line = String(header || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 400);
+  if (line.startsWith(IMPORT_HEADER_PREFIX)) return line;
+  return `${IMPORT_HEADER_PREFIX}${line.replace(/^\[|\]$/g, "") || "an import"}]`;
+}
+
+export interface MemoryImportEntry {
+  type: "observation" | "decision" | "insight";
+  /** The imported text; sanitized, redacted and deduplicated by the session. */
+  body: string;
+  /** Provenance line, `[Imported from <source> — "<title>"]`. */
+  header: string;
+  /** A fact about the user: also written to `memory_items` as an `import` item. */
+  fact?: { kind: MemoryItemKind; importer: string; conversationId?: string };
+}
+
+export type MemoryImportOutcome =
+  | { status: "created"; memory: Memory; factItemId?: string }
+  | { status: "duplicate" }
+  | {
+      status: "filtered";
+      reason: "no_memory" | "empty" | "low_salience" | "secret_only" | "excluded";
+    };
+
+export interface MemoryImportSession {
+  readonly workspaceId: string;
+  /** Rows of this session are private (forced, or strict privacy mode). */
+  readonly isPrivate: boolean;
+  add(entry: MemoryImportEntry): Promise<MemoryImportOutcome>;
+  /** Apply the storage cap; call once after the last entry. */
+  finish(): Promise<{ created: number }>;
+}
+
 export class MemoryService {
   private static memoryRepo: MemoryRepository;
   private static embeddingRepo: MemoryEmbeddingRepository;
@@ -169,6 +222,8 @@ export class MemoryService {
   private static compressionInProgress = false;
   private static compressionPauseCount = 0;
   private static compressionDrainTimer?: ReturnType<typeof setTimeout>;
+  /** Pending compression retries; cleared at shutdown so none fires against a closed DB. */
+  private static compressionRetryTimers = new Set<ReturnType<typeof setTimeout>>();
   private static compressionBudgetByWorkspace = new Map<string, number[]>();
   private static compressionDiagnosticsByWorkspace = new Map<string, CompressionDiagnostics>();
   private static sideChannelPolicyDepth = 0;
@@ -362,7 +417,13 @@ export class MemoryService {
   ): Promise<Memory | null> {
     this.ensureInitialized();
 
-    if (containsNoMemoryDirective(content)) {
+    // The shared hygiene of every memory producer (docs/memory-engine.md §1): `<no-memory>`
+    // (in the text or known by the caller), the salience gate, then settings, redaction,
+    // privacy and content-hash dedupe below.
+    if (options?.noMemory || containsNoMemoryDirective(content)) {
+      return null;
+    }
+    if (memoryTextSalience(content)) {
       return null;
     }
 
@@ -1579,6 +1640,7 @@ export class MemoryService {
 
     const deleted = await this.memoryRepo.deleteByIds(workspaceId, [memoryId]);
     if (deleted <= 0) return false;
+    await this.closeImportedFacts([memoryId], "deleted");
     SupermemoryService.scheduleOrphanSweep();
 
     this.importedEmbeddings.delete(memoryId);
@@ -1620,6 +1682,9 @@ export class MemoryService {
     this.importedEmbeddings.delete(memoryId);
     const updated = await this.memoryRepo.findById(memoryId);
     if (updated) {
+      // An ignored import is not recalled as a fact either; un-ignoring writes it again.
+      if (ignored) await this.closeImportedFacts([memoryId], "archived");
+      else await this.restoreImportedFact(updated);
       this.promptRecallCache.clear();
       return updated;
     }
@@ -1631,6 +1696,7 @@ export class MemoryService {
    */
   static async deleteImported(workspaceId: string): Promise<number> {
     this.ensureInitialized();
+    await this.deleteImportedFactsOfWorkspace(workspaceId);
     // Remove embeddings first (embeddings table references memories by id).
     try {
       await this.embeddingRepo.deleteImported(workspaceId);
@@ -1653,6 +1719,288 @@ export class MemoryService {
     return deleted;
   }
 
+  /**
+   * The one gated import API (docs/memory-engine.md §1): every importer (ChatGPT export,
+   * pasted memories) writes through a session. Opening one checks the workspace memory
+   * settings (memory off or privacy mode `disabled` refuse the import; strict privacy or
+   * `forcePrivate` make the rows private, which keeps them in their workspace). Each entry
+   * then passes `<no-memory>`, the salience gate, input sanitization, inline `<private>`
+   * blocks, secret redaction, excluded patterns and dedupe (against every imported row
+   * visible in the workspace, so a re-import or the same history imported in another
+   * workspace adds nothing), and is stored with its embedding and observation sidecar in one
+   * capture. Entries marked as facts about the user are also written to `memory_items` as
+   * `import` items through `MemoryWriter`. `finish` applies the storage cap. Imports are
+   * explicit user acts: auto-capture does not apply, and nothing is mirrored externally.
+   */
+  static async openImportSession(options: {
+    workspaceId: string;
+    forcePrivate?: boolean;
+  }): Promise<MemoryImportSession> {
+    this.ensureInitialized();
+    const workspaceId = options.workspaceId;
+    const settings = await this.settingsRepo.getOrCreate(workspaceId);
+    if (!settings.enabled) {
+      throw new Error("Memory system is disabled for this workspace. Enable it in settings first.");
+    }
+    if (settings.privacyMode === "disabled") {
+      throw new Error(
+        "Memory privacy mode is set to disabled for this workspace. Change it in settings first.",
+      );
+    }
+    const isPrivate = options.forcePrivate === true || settings.privacyMode === "strict";
+    const seen = new Set<string>();
+    try {
+      const rows = this.sql
+        ? await this.sql.all<{ content: string }>("import_visibleImportedContents", [workspaceId])
+        : [];
+      for (const row of rows) {
+        const body = importedBody(this.stripPromptRecallIgnoreMarker(row.content));
+        if (body) seen.add(observationContentHash(body));
+      }
+    } catch (error) {
+      // Within-session dedupe and the capture's own dedupe still apply.
+      logger.warn("[MemoryService] Could not load imported rows for dedupe:", error);
+    }
+
+    let created = 0;
+    const add = async (entry: MemoryImportEntry): Promise<MemoryImportOutcome> => {
+      if (containsNoMemoryDirective(entry.body)) return { status: "filtered", reason: "no_memory" };
+      const privacyPrepared = this.applyInlinePrivacy(
+        InputSanitizer.sanitizeMemoryContent(entry.body),
+      );
+      const redaction = redactSecrets(privacyPrepared.content);
+      const text = redaction.text.trim();
+      const salience = memoryTextSalience(text);
+      if (salience) return { status: "filtered", reason: salience };
+      if (
+        redaction.count > 0 &&
+        memoryTextSalience(text.split(REDACTED_SECRET).join(" ")) !== null
+      ) {
+        return { status: "filtered", reason: "secret_only" };
+      }
+      if (this.shouldExclude(text, settings)) return { status: "filtered", reason: "excluded" };
+      const bounded =
+        text.length > MAX_TEXT_IMPORT_ENTRY_CHARS
+          ? `${text.slice(0, MAX_TEXT_IMPORT_ENTRY_CHARS)}\n[... truncated]`
+          : text;
+      const bodyHash = observationContentHash(bounded);
+      if (seen.has(bodyHash)) return { status: "duplicate" };
+      seen.add(bodyHash);
+
+      const header = normalizeImportHeader(entry.header);
+      const content = `${header}\n${bounded}`;
+      const rowIsPrivate = isPrivate || privacyPrepared.hadPrivateBlock;
+      const createdAt = Date.now();
+      const summary = this.buildDeterministicSummary(bounded);
+      const memory: Memory = {
+        id: randomUUID(),
+        workspaceId,
+        type: entry.type,
+        content,
+        summary: summary || undefined,
+        tokens: estimateTokens(summary || content),
+        isCompressed: Boolean(summary),
+        isPrivate: rowIsPrivate,
+        createdAt,
+        updatedAt: createdAt,
+      };
+      let embedding: { values: number[]; updatedAt: number } | undefined;
+      try {
+        embedding = {
+          values: createLocalEmbedding(this.normalizeForEmbedding(summary, bounded)),
+          updatedAt: createdAt,
+        };
+      } catch {
+        // The imported-embedding backfill computes it later.
+      }
+      let observation: ReturnType<typeof MemoryObservationService.buildMetadataFor> | undefined;
+      if (MemoryFeaturesManager.loadSettings().structuredObservationsEnabled !== false) {
+        try {
+          observation = MemoryObservationService.buildMetadataFor(memory, {
+            origin: "import",
+            captureReason: "memory_import",
+            privacyState: rowIsPrivate
+              ? privacyPrepared.hadPrivateBlock
+                ? "redacted"
+                : "private"
+              : "normal",
+          });
+        } catch {
+          // Auxiliary index; the import still succeeds.
+        }
+      }
+      const result = await this.writeCapture({
+        memory: {
+          id: memory.id,
+          workspaceId,
+          taskId: null,
+          type: entry.type,
+          content,
+          summary: memory.summary ?? null,
+          tokens: memory.tokens,
+          isCompressed: memory.isCompressed,
+          isPrivate: rowIsPrivate,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        ...(embedding ? { embedding } : {}),
+        ...(observation ? { observation } : {}),
+        // The same imported row already in this workspace, at any age.
+        dedupe: { contentHash: observationContentHash(content), since: 0 },
+      });
+      if (result?.duplicateOf) return { status: "duplicate" };
+      if (embedding) {
+        this.cacheEmbedding(workspaceId, memory.id, embedding.values, embedding.updatedAt);
+        if (this.importedEmbeddingsLoaded) {
+          this.importedEmbeddings.set(memory.id, {
+            updatedAt: embedding.updatedAt,
+            embedding: Float32Array.from(embedding.values),
+            workspaceId,
+          });
+        }
+      }
+      created += 1;
+      const factItemId = entry.fact
+        ? await this.writeImportedFact(workspaceId, memory.id, bounded, rowIsPrivate, entry.fact)
+        : undefined;
+      return { status: "created", memory, ...(factItemId ? { factItemId } : {}) };
+    };
+
+    return {
+      workspaceId,
+      isPrivate,
+      add,
+      finish: async () => {
+        if (created > 0) {
+          this.promptRecallCache.clear();
+          await this.enforceStorageLimit(workspaceId, settings.maxStorageMb, { force: true });
+        }
+        return { created };
+      },
+    };
+  }
+
+  /**
+   * An imported fact about the user as a `memory_items` item: source `import` (never
+   * `user_stated`), workspace scope (the import's workspace; Clear All Memories removes
+   * it), private when the imported row is. `source_ref` names the archive row
+   * (`{ store: "import", id }`), so deleting or ignoring the imported row forgets it.
+   */
+  private static async writeImportedFact(
+    workspaceId: string,
+    archiveId: string,
+    content: string,
+    isPrivate: boolean,
+    fact: NonNullable<MemoryImportEntry["fact"]>,
+  ): Promise<string | undefined> {
+    const writer = MemoryWriter.get();
+    if (!writer) return undefined;
+    try {
+      const result = await writer.ingest({
+        content,
+        kind: fact.kind,
+        scope: "workspace",
+        workspaceId,
+        source: "import",
+        sourceRef: {
+          store: IMPORT_FACT_STORE,
+          id: archiveId,
+          importer: fact.importer,
+          ...(fact.conversationId ? { conversationId: fact.conversationId } : {}),
+        },
+        confidence: 0.6,
+        ...(isPrivate ? { privacy: "private" as const } : {}),
+        originWorkspaceId: workspaceId,
+        originText: content,
+      });
+      return result.status === "written" ? result.item.id : undefined;
+    } catch (error) {
+      logger.warn("[MemoryService] Imported fact was not written:", error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Close the `memory_items` facts that were imported with these archive rows (their
+   * primary source ref; a fact another source also holds is left alone).
+   */
+  private static async closeImportedFacts(
+    archiveIds: string[],
+    status: "deleted" | "archived",
+  ): Promise<void> {
+    const writer = MemoryWriter.get();
+    if (!writer || archiveIds.length === 0) return;
+    for (const archiveId of archiveIds) {
+      try {
+        const items = await writer.repository.findBySourceRef(
+          IMPORT_FACT_STORE,
+          archiveId,
+          status === "deleted" ? ["active", "archived", "superseded"] : ["active"],
+        );
+        for (const item of items) {
+          if (item.source !== "import" || item.sourceRef?.store !== IMPORT_FACT_STORE) continue;
+          if (item.sourceRef?.id !== archiveId) continue;
+          await writer.setStatus(item.id, status);
+        }
+      } catch (error) {
+        logger.warn("[MemoryService] Could not close imported facts:", error);
+      }
+    }
+  }
+
+  /** Write an un-ignored imported row's fact again (reactivation goes through ingest). */
+  private static async restoreImportedFact(memory: Memory): Promise<void> {
+    const writer = MemoryWriter.get();
+    if (!writer) return;
+    try {
+      const items = await writer.repository.findBySourceRef(IMPORT_FACT_STORE, memory.id, [
+        "archived",
+      ]);
+      const item = items.find(
+        (candidate) => candidate.source === "import" && candidate.sourceRef?.id === memory.id,
+      );
+      if (!item) return;
+      const body = importedBody(memory.content);
+      if (!body) return;
+      await this.writeImportedFact(memory.workspaceId, memory.id, body, memory.isPrivate, {
+        kind: item.kind,
+        importer: String(item.sourceRef?.importer || "import"),
+        ...(typeof item.sourceRef?.conversationId === "string"
+          ? { conversationId: item.sourceRef.conversationId }
+          : {}),
+      });
+    } catch (error) {
+      logger.warn("[MemoryService] Could not restore imported fact:", error);
+    }
+  }
+
+  /** Every fact the import API wrote for the workspace's imported rows. */
+  private static async deleteImportedFactsOfWorkspace(workspaceId: string): Promise<void> {
+    const writer = MemoryWriter.get();
+    if (!writer) return;
+    try {
+      // Pages of up to 5000; deleted items drop out of the next page.
+      for (let page = 0; page < 100; page += 1) {
+        const items = await writer.repository.list({
+          workspaceId,
+          scope: "workspace",
+          sourceStore: IMPORT_FACT_STORE,
+          statuses: ["active", "archived", "superseded"],
+          includePrivate: true,
+          limit: 5000,
+        });
+        let deleted = 0;
+        for (const item of items) {
+          if (item.source !== "import") continue;
+          deleted += (await writer.setStatus(item.id, "deleted")).length;
+        }
+        if (deleted === 0) break;
+      }
+    } catch (error) {
+      logger.warn("[MemoryService] Could not delete imported facts:", error);
+    }
+  }
+
   static async importFromText(options: {
     workspaceId: string;
     provider: string;
@@ -1668,17 +2016,23 @@ export class MemoryService {
   }> {
     this.ensureInitialized();
 
-    const settings = await this.settingsRepo.getOrCreate(options.workspaceId);
-    if (!settings.enabled) {
-      throw new Error("Memory system is disabled for this workspace. Enable it in settings first.");
-    }
-
-    const providerLabel = options.provider.trim().replace(/\s+/g, " ").slice(0, 80) || "Other AI";
+    const providerLabel =
+      InputSanitizer.sanitizeMemoryContent(options.provider)
+        .trim()
+        .replace(/\s+/g, " ")
+        .replace(/[[\]]/g, "")
+        .slice(0, 80) || "Other AI";
     const parsedEntries = this.extractTextImportEntries(options.pastedText);
 
     if (parsedEntries.length === 0) {
       throw new Error("No memory entries found. Paste the exported memories and try again.");
     }
+
+    // Pasted memories are private unless the caller says otherwise.
+    const session = await this.openImportSession({
+      workspaceId: options.workspaceId,
+      forcePrivate: options.forcePrivate ?? true,
+    });
 
     const entries = parsedEntries.slice(0, MAX_TEXT_IMPORT_ENTRIES);
     const truncated = Math.max(0, parsedEntries.length - entries.length);
@@ -1686,74 +2040,21 @@ export class MemoryService {
     let memoriesCreated = 0;
     let duplicatesSkipped = 0;
     const errors: string[] = [];
-    const seen = new Set<string>();
-    const markPrivate = options.forcePrivate ?? true;
 
     for (const entry of entries) {
-      const signature = entry.replace(/\s+/g, " ").trim().toLowerCase();
-      if (!signature) {
-        duplicatesSkipped += 1;
-        continue;
-      }
-      if (seen.has(signature)) {
-        duplicatesSkipped += 1;
-        continue;
-      }
-      seen.add(signature);
-
       try {
-        const sanitized = redactSecrets(InputSanitizer.sanitizeMemoryContent(entry)).text.trim();
-        if (!sanitized) {
-          duplicatesSkipped += 1;
-          continue;
-        }
-
-        const bounded =
-          sanitized.length > MAX_TEXT_IMPORT_ENTRY_CHARS
-            ? `${sanitized.slice(0, MAX_TEXT_IMPORT_ENTRY_CHARS)}\n[... truncated]`
-            : sanitized;
-
-        const content = `[Imported from ${providerLabel} — "Memory export (pasted)"]\n${bounded}`;
-
-        const memory = await this.memoryRepo.create({
-          workspaceId: options.workspaceId,
-          taskId: undefined,
+        const outcome = await session.add({
           type: "insight",
-          content,
-          tokens: estimateTokens(content),
-          isCompressed: false,
-          isPrivate: markPrivate,
+          body: entry,
+          header: `[Imported from ${providerLabel} — "Memory export (pasted)"]`,
         });
-
-        // Best-effort: keep hybrid search quality high for imported memories.
-        try {
-          const embedText = this.normalizeForEmbedding(memory.summary, memory.content);
-          const embedding = createLocalEmbedding(embedText);
-          await this.embeddingRepo.upsert(
-            options.workspaceId,
-            memory.id,
-            embedding,
-            memory.updatedAt,
-          );
-          this.cacheEmbedding(options.workspaceId, memory.id, embedding, memory.updatedAt);
-        } catch {
-          // ignore
-        }
-
-        const importedSummary = this.buildDeterministicSummary(bounded);
-        if (importedSummary) {
-          await this.updateMemorySummary(memory, options.workspaceId, importedSummary, true);
-        }
-
-        memoriesCreated += 1;
+        if (outcome.status === "created") memoriesCreated += 1;
+        else duplicatesSkipped += 1;
       } catch (error) {
         errors.push(error instanceof Error ? error.message : String(error));
       }
     }
-
-    if (memoriesCreated > 0) {
-      await this.enforceStorageLimit(options.workspaceId, settings.maxStorageMb, { force: true });
-    }
+    await session.finish();
 
     return {
       success: errors.length === 0,
@@ -1800,6 +2101,8 @@ export class MemoryService {
       }
     }
     if (deleted > 0) {
+      // Facts imported with these rows go with them.
+      await this.closeImportedFacts(uniqueIds, "deleted");
       this.promptRecallCache.clear();
       // Their Supermemory copies go too (SEC-17).
       SupermemoryService.scheduleOrphanSweep();
@@ -2244,6 +2547,7 @@ export class MemoryService {
   }
 
   private static scheduleCompressionDrain(delayMs = COMPRESSION_DRAIN_DELAY_MS): void {
+    if (!this.initialized) return;
     if (this.compressionDrainTimer) {
       if (delayMs === 0) {
         clearTimeout(this.compressionDrainTimer);
@@ -2291,6 +2595,7 @@ export class MemoryService {
    */
   private static async processCompressionQueue(): Promise<void> {
     if (
+      !this.initialized ||
       this.compressionInProgress ||
       this.compressionQueue.length === 0 ||
       this.isCompressionPaused()
@@ -2657,7 +2962,11 @@ export class MemoryService {
     summaryText: string,
     compressed: boolean,
   ): Promise<void> {
-    const summary = neutralizeReservedImportPrefix(this.normalizeSummaryStorageText(summaryText));
+    // A digest of rows that already passed capture; an LLM-written digest is redacted again
+    // so it can never reintroduce a secret value.
+    const summary = neutralizeReservedImportPrefix(
+      redactSecrets(this.normalizeSummaryStorageText(summaryText)).text,
+    );
     if (!summary) return;
 
     const taskId = this.extractSharedTaskId(memories);
@@ -2723,7 +3032,9 @@ export class MemoryService {
 
     this.compressionRetryCounts.set(group.batchKey, attempts);
     const retryDelayMs = Math.max(delayMs, COMPRESSION_RETRY_BASE_DELAY_MS * 2 ** (attempts - 1));
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this.compressionRetryTimers.delete(timer);
+      if (!this.initialized) return;
       for (const memoryId of group.memoryIds) {
         if (!this.compressionQueue.includes(memoryId)) {
           this.compressionQueue.push(memoryId);
@@ -2731,6 +3042,8 @@ export class MemoryService {
       }
       this.scheduleCompressionDrain(0);
     }, retryDelayMs);
+    timer.unref?.();
+    this.compressionRetryTimers.add(timer);
   }
 
   /**
@@ -3017,6 +3330,8 @@ export class MemoryService {
       clearTimeout(this.compressionDrainTimer);
       this.compressionDrainTimer = undefined;
     }
+    for (const timer of this.compressionRetryTimers) clearTimeout(timer);
+    this.compressionRetryTimers.clear();
     if (this.archiveCleanupTimer) {
       clearTimeout(this.archiveCleanupTimer);
       this.archiveCleanupTimer = undefined;

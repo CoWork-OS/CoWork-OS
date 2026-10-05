@@ -5,6 +5,9 @@ import type { SubconsciousTargetRef } from "../../shared/subconscious";
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
 import { coreCandidateFingerprint, isRoutineCoreOutcome } from "./core-memory-hygiene";
 
+/** Resolution of a candidate accepted by the hot-path threshold rather than by the user. */
+export const AUTO_ACCEPT_RESOLUTION = "Auto-accepted by hot-path learning threshold.";
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -142,7 +145,7 @@ export class CoreMemoryCandidateService {
       const reviewed = await this.candidateRepo.review({
         id: candidate.id,
         status: "accepted",
-        resolution: "Auto-accepted by hot-path learning threshold.",
+        resolution: AUTO_ACCEPT_RESOLUTION,
       });
       if (reviewed) accepted.push(reviewed);
     }

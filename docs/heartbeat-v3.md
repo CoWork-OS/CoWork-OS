@@ -5,7 +5,7 @@ Heartbeat v3 is the scheduling and signal-readiness layer inside Workflow Intell
 - `Memory` is the source of truth.
 - `Heartbeat` decides when enough fresh signal exists.
 - `Reflection` evaluates evidence internally.
-- `Dreaming` curates memory evidence when drift signals justify it.
+- `Dreaming` curates the `memory_items` fact store when memory signals justify it, and once a day for recently active workspaces.
 - `Suggestions` are the default user-facing output.
 
 It replaces the older queue-first heartbeat internals with a two-lane pipeline designed around three goals, in order:
@@ -20,7 +20,7 @@ Heartbeat owns the "when should we think?" decision for Reflection, the chief-of
 
 Awareness is a signal producer only. It keeps its 20-second device poll, but its Heartbeat wakes are debounced to one per category (focus, calendar, workflow) and workspace every 5 minutes, carry that category and workspace so they merge, and no longer trigger an AutonomyEngine evaluation per event.
 
-Heartbeat can also trigger Dreaming when the signal ledger contains memory-specific signals such as `memory_drift`, `correction_learning`, or `cross_workspace_patterns`, or when hot-memory pressure changed since the last run. Dreaming runs as background memory curation and produces candidates instead of creating tasks or silently rewriting memory.
+Heartbeat can also trigger Dreaming when the signal ledger contains memory-specific signals such as `memory_drift`, `correction_learning`, or `cross_workspace_patterns`, or when hot-memory pressure changed since the last run, and runs a once-daily idle curation when no other trigger fires. Dreaming runs as background memory curation: it applies safe, undoable operations to inferred facts and queues the rest for the Memory Hub Review tab; it never creates tasks.
 
 ## Two-Lane Model
 
@@ -186,15 +186,15 @@ File, git, and other ambient sources emit low-priority mergeable signals that Pu
 
 Dreaming is a side effect of memory-specific Heartbeat pressure, not a Dispatch lane.
 
-When a non-deferred, in-hours pulse sees memory drift, correction learning, or cross-workspace pattern signals (or changed hot-memory pressure), Heartbeat can ask Dreaming to run for the active workspace. The daemon emits a low-urgency `correction_learning` signal when it detects a user correction; `memory_drift` comes from mailbox automation, and nothing emits `cross_workspace_patterns` today. Dreaming enforces a 6-hour per-workspace cooldown, and Heartbeat skips it when `heartbeatMaintenanceEnabled` is off. Handled memory signals are removed from the ledger after a run. That Dreaming run persists `dreaming_runs` and `dreaming_candidates`, then returns run metadata on the heartbeat result for traceability.
+When a non-deferred, in-hours pulse sees memory drift, correction learning, or cross-workspace pattern signals (or changed hot-memory pressure), Heartbeat can ask Dreaming to run for the active workspace. The daemon emits a low-urgency `correction_learning` signal when it detects a user correction; `memory_drift` comes from mailbox automation, and nothing emits `cross_workspace_patterns` today. Dreaming enforces a 6-hour per-workspace cooldown, and Heartbeat skips it when `heartbeatMaintenanceEnabled` is off. Handled memory signals are removed from the ledger after a run. A pulse with no other Dreaming trigger and no foreground task also runs the once-daily idle curation for the next recently active workspace not curated in the last 24 hours. A Dreaming run applies safe curation operations to `memory_items` (undoable), queues the rest for the Memory Hub Review tab, records `dreaming_runs`, then returns run metadata on the heartbeat result for traceability.
 
-Dreaming should not consume dispatch budget, create heartbeat tasks, or turn general activity signals into memory writes. Its output remains memory candidates; there is no review UI for them yet. See [Dreaming](dreaming.md).
+Dreaming should not consume dispatch budget, create heartbeat tasks, or turn general activity signals into memory writes. Its only output is curation of `memory_items` (safe operations applied, the rest queued for review). See [Dreaming](dreaming.md).
 
 Before a memory-specific Dreaming run, Heartbeat resolves the workspace's [access profile](access-profiles.md)
 and builds a read guard for file-backed workspace-kit and transcript evidence. Profile resolution
 errors, unavailable profiles, and denied candidate paths fail closed: pressure analysis and Dreaming
-are skipped rather than performed with a broader filesystem boundary. Candidate review/application
-still follows the normal memory-write governance path.
+are skipped rather than performed with a broader filesystem boundary. Every curation change goes
+through `MemoryWriter`.
 
 ## Default Configuration
 

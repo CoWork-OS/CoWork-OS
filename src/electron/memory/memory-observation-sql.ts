@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import type Database from "better-sqlite3";
 import type { Memory, MemoryType } from "../database/repositories";
+import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "../database/fts-query";
 import { createLogger } from "../utils/logger";
 import { type ObservationMetadataRow, writeObservationMetadata } from "./memory-capture-sql";
 import {
@@ -359,9 +360,18 @@ export class MemoryObservationStore {
     const likeParams = [...params];
     let likeWhere = where;
     if (rawQuery) {
-      const like = `%${rawQuery}%`;
-      likeWhere +=
-        " AND (om.title LIKE ? OR om.subtitle LIKE ? OR om.narrative LIKE ? OR om.facts LIKE ? OR om.concepts LIKE ? OR om.files_read LIKE ? OR om.files_modified LIKE ? OR om.tools LIKE ?)";
+      const like = likeContainsPattern(rawQuery);
+      const columns = [
+        "om.title",
+        "om.subtitle",
+        "om.narrative",
+        "om.facts",
+        "om.concepts",
+        "om.files_read",
+        "om.files_modified",
+        "om.tools",
+      ];
+      likeWhere += ` AND (${columns.map((column) => `${column} LIKE ? ${LIKE_ESCAPE_CLAUSE}`).join(" OR ")})`;
       likeParams.push(like, like, like, like, like, like, like, like);
     }
     const rows = db

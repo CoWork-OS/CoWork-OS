@@ -404,20 +404,25 @@ async function main(): Promise<void> {
 
   await maybeBootstrapWorkspace(agentDaemon);
 
-  // Optional cross-agent helpers (best-effort).
+  // Optional cross-agent helpers (best-effort). Kept so shutdown can flush their debounced
+  // kit writes, as on desktop.
+  let crossSignalService: CrossSignalService | null = null;
   try {
-    const crossSignalService = new CrossSignalService(memoryHostDb);
+    crossSignalService = new CrossSignalService(memoryHostDb);
     await crossSignalService.start(agentDaemon);
     console.log("[Daemon] CrossSignalService initialized");
   } catch (error) {
+    crossSignalService = null;
     console.error("[Daemon] Failed to initialize CrossSignalService:", error);
   }
 
+  let feedbackService: FeedbackService | null = null;
   try {
-    const feedbackService = new FeedbackService(memoryHostDb);
+    feedbackService = new FeedbackService(memoryHostDb);
     await feedbackService.start(agentDaemon);
     console.log("[Daemon] FeedbackService initialized");
   } catch (error) {
+    feedbackService = null;
     console.error("[Daemon] Failed to initialize FeedbackService:", error);
   }
 
@@ -840,6 +845,20 @@ async function main(): Promise<void> {
           run: async () => {
             await loreService?.stop();
             loreService = null;
+          },
+        },
+        {
+          name: "cross signals",
+          run: async () => {
+            await crossSignalService?.stop();
+            crossSignalService = null;
+          },
+        },
+        {
+          name: "feedback",
+          run: async () => {
+            await feedbackService?.stop();
+            feedbackService = null;
           },
         },
         {

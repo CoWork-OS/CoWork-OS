@@ -53,6 +53,10 @@ export interface KGEntity {
   sourceTaskId?: string;
   createdAt: number;
   updatedAt: number;
+  /** Who wrote the current description (manual > agent > auto precedence). */
+  descriptionSource?: "manual" | "auto" | "agent";
+  /** Last reinforcement (re-extracted, re-ingested, updated or observed); decay keys on it. */
+  lastSeenAt?: number;
 }
 
 export interface KGEdge {
@@ -125,6 +129,8 @@ export interface CreateEdgeInput {
 export interface AddObservationInput {
   entityId: string;
   content: string;
+  /** Dedupe key (e.g. a mailbox event's); defaults to a hash of the content. */
+  fingerprint?: string;
 }
 
 export interface KGStats {

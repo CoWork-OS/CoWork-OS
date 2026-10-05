@@ -1,6 +1,10 @@
 import type Database from "better-sqlite3";
 import { KnowledgeGraphRepository } from "./KnowledgeGraphRepository";
-import { createMemoryStatementPort } from "../memory/memory-statement-port";
+import {
+  createMemoryStatementPort,
+  type MemoryStatementPort,
+} from "../memory/memory-statement-port";
+import { containsNoMemoryDirective } from "../memory/no-memory-directive";
 import type { MailboxEvent } from "../../shared/mailbox";
 import type {
   KGEntity,
@@ -16,10 +20,21 @@ import type {
   AddObservationInput,
 } from "../../shared/knowledge-graph-types";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
+import { createLogger } from "../utils/logger";
+import {
+  domainOrganizationLabel,
+  extractTechnologyMentions,
+  isAutomatedSenderAddress,
+  isFreeMailDomain,
+} from "./kg-extraction";
+
+const logger = createLogger("KnowledgeGraph");
 
 const MAX_CONTEXT_ENTITIES = 5;
 const MAX_CONTEXT_CHARS = 1500;
 const DECAY_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+/** The one-time data-quality cleanup runs this long after startup (off the hot path). */
+const CLEANUP_DELAY_MS = 120_000;
 
 function asString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -46,13 +61,58 @@ function normalizeEdgeTime(value: number | undefined, fallback: number): number 
 
 export class KnowledgeGraphService {
   private static repo: KnowledgeGraphRepository | null = null;
+  private static port: MemoryStatementPort | null = null;
   private static initialized = false;
   private static lastDecayRun = new Map<string, number>();
+  private static cleanupTimer?: ReturnType<typeof setTimeout>;
 
-  static initialize(db: Database.Database): void {
+  static initialize(db: Database.Database, options: { scheduleCleanup?: boolean } = {}): void {
     if (this.initialized) return;
-    this.repo = new KnowledgeGraphRepository(createMemoryStatementPort(db));
+    this.port = createMemoryStatementPort(db);
+    this.repo = new KnowledgeGraphRepository(this.port);
     this.initialized = true;
+    if (options.scheduleCleanup !== false) this.scheduleCleanup();
+  }
+
+  /** Schedule the one-time data-quality cleanup (KnowledgeGraphCleanup.ts) after startup. */
+  private static scheduleCleanup(): void {
+    if (this.cleanupTimer) return;
+    this.cleanupTimer = setTimeout(() => {
+      this.cleanupTimer = undefined;
+      void this.runCleanupNow();
+    }, CLEANUP_DELAY_MS);
+    this.cleanupTimer.unref?.();
+  }
+
+  /** Run the one-time cleanup now (idempotent; a no-op once its marker exists). */
+  static async runCleanupNow(): Promise<void> {
+    const port = this.port;
+    if (!this.initialized || !port) return;
+    try {
+      const { runKnowledgeGraphCleanup } = await import("./KnowledgeGraphCleanup");
+      await runKnowledgeGraphCleanup(port, {
+        pause: () => new Promise((resolve) => setImmediate(resolve)),
+      });
+    } catch (error) {
+      logger.warn("Knowledge graph cleanup failed; it will be retried on the next start:", error);
+    }
+  }
+
+  /**
+   * Whether automatic writes (task extraction, mailbox ingest) may add to this
+   * workspace's graph: not when its memory is disabled (off or privacy mode "disabled")
+   * or the source text opts out with `<no-memory>`. Explicit `kg_*` tool writes are
+   * gated by the tool layer instead (they honor `<no-memory>` only).
+   */
+  static async automaticWritesAllowed(workspaceId: string, ...texts: unknown[]): Promise<boolean> {
+    if (texts.some(containsNoMemoryDirective)) return false;
+    try {
+      const policy = await this.getRepo().getWritePolicy(workspaceId);
+      return policy.enabled && policy.privacyMode !== "disabled";
+    } catch {
+      // Fail closed: without the settings, automatic writes wait.
+      return false;
+    }
   }
 
   static isInitialized(): boolean {
@@ -80,16 +140,26 @@ export class KnowledgeGraphService {
 
   // By-id operations are scoped to the caller's workspace (SEC-9): an id that belongs
   // to another workspace is treated as not found.
+  /**
+   * Update an entity. A description written by a higher-precedence source (manual >
+   * agent > auto) is kept; the rest of the patch applies.
+   */
   static updateEntity(
     workspaceId: string,
     input: UpdateEntityInput,
+    source: "manual" | "auto" | "agent" = "agent",
   ): Promise<KGEntity | undefined> {
     const repo = this.getRepo();
-    return repo.updateEntity(workspaceId, input.entityId, {
-      description: input.description,
-      properties: input.properties,
-      confidence: input.confidence,
-    });
+    return repo.updateEntity(
+      workspaceId,
+      input.entityId,
+      {
+        description: input.description,
+        properties: input.properties,
+        confidence: input.confidence,
+      },
+      source,
+    );
   }
 
   static deleteEntity(workspaceId: string, entityId: string): Promise<boolean> {
@@ -171,10 +241,29 @@ export class KnowledgeGraphService {
     return this.getRepo().getObservations(workspaceId, entityId, limit);
   }
 
+  /**
+   * Enrich the graph from a mailbox event: the contact (person), their organization, a
+   * project hint, and one observation per entity. Skipped when the workspace's memory is
+   * disabled or the event text carries `<no-memory>`. Free-mail and relay domains
+   * (gmail.com, outlook.com, privaterelay.appleid.com, ...) never become organizations or
+   * `works_at` edges, the organization is named after the registrable domain
+   * (`news.acme.com` → "Acme"), automated senders (noreply, notifications) are not
+   * people, and re-ingesting an event adds no observation twice.
+   */
   static async ingestMailboxEvent(workspaceId: string, event: MailboxEvent): Promise<void> {
     if (!this.initialized) return;
     try {
       const payload = event.payload || {};
+      if (
+        !(await this.automaticWritesAllowed(
+          workspaceId,
+          event.subject,
+          event.summary,
+          payload.summary,
+        ))
+      ) {
+        return;
+      }
       const primaryEmail =
         asString(payload.primaryContactEmail) ||
         asString(payload.contactEmail) ||
@@ -183,10 +272,15 @@ export class KnowledgeGraphService {
         asString(payload.primaryContactName) ||
         asString(payload.contactName) ||
         asString(payload.senderName);
+      const emailDomain = primaryEmail?.includes("@")
+        ? primaryEmail.split("@")[1]?.trim().toLowerCase()
+        : undefined;
+      const freeMail = isFreeMailDomain(emailDomain);
+      const automatedSender = isAutomatedSenderAddress(primaryEmail);
+      const explicitCompany = asString(payload.company) || asString(payload.organization);
       const company =
-        asString(payload.company) ||
-        asString(payload.organization) ||
-        (primaryEmail?.includes("@") ? primaryEmail.split("@")[1]?.split(".")[0] : undefined);
+        explicitCompany ||
+        (emailDomain && !freeMail ? domainOrganizationLabel(emailDomain) : undefined);
       const projectHints = [
         asString(payload.projectHint),
         ...asStringArray(payload.projectHints),
@@ -202,7 +296,7 @@ export class KnowledgeGraphService {
       );
 
       const person =
-        primaryEmail || primaryName
+        !automatedSender && (primaryEmail || primaryName)
           ? await this.createEntity(
               workspaceId,
               {
@@ -227,11 +321,13 @@ export class KnowledgeGraphService {
               workspaceId,
               {
                 entityType: "organization",
-                name: company.charAt(0).toUpperCase() + company.slice(1),
+                name: explicitCompany
+                  ? company
+                  : company.charAt(0).toUpperCase() + company.slice(1),
                 description: `Mailbox contact organization ${company}`,
                 properties: {
                   source: "mailbox",
-                  domain: primaryEmail?.split("@")[1],
+                  ...(emailDomain && !freeMail ? { domain: emailDomain } : {}),
                 },
                 confidence: 0.72,
               },
@@ -310,36 +406,15 @@ export class KnowledgeGraphService {
           .join(" · "),
         500,
       );
+      // One observation per event and entity, however often the event is delivered.
+      const eventKey = asString(event.fingerprint) || asString(event.id);
+      const fingerprint = eventKey ? `mailbox:${event.type}:${eventKey}` : undefined;
 
-      if (person && observationContent) {
+      for (const entity of [person, org, project]) {
+        if (!entity || !observationContent) continue;
         await this.addObservation(
           workspaceId,
-          {
-            entityId: person.id,
-            content: observationContent,
-          },
-          "auto",
-          event.threadId,
-        );
-      }
-      if (org && observationContent) {
-        await this.addObservation(
-          workspaceId,
-          {
-            entityId: org.id,
-            content: observationContent,
-          },
-          "auto",
-          event.threadId,
-        );
-      }
-      if (project && observationContent) {
-        await this.addObservation(
-          workspaceId,
-          {
-            entityId: project.id,
-            content: observationContent,
-          },
+          { entityId: entity.id, content: observationContent, fingerprint },
           "auto",
           event.threadId,
         );
@@ -410,9 +485,10 @@ export class KnowledgeGraphService {
   // ─── Auto-Extraction ──────────────────────────────────────────────
 
   /**
-   * Extract entities and relationships from task results using simple
-   * pattern matching. This is a best-effort extraction that runs after
-   * task completion. No LLM calls — uses regex-based heuristics.
+   * Extract entities from task results using pattern matching (no LLM calls), after task
+   * completion. Technology names follow the precision rules in kg-extraction.ts (English
+   * words such as "go" or "rest" only in a code-ish context). Skipped when the
+   * workspace's memory is disabled or the task opted out with `<no-memory>`.
    */
   static async extractEntitiesFromTaskResult(
     workspaceId: string,
@@ -423,14 +499,10 @@ export class KnowledgeGraphService {
     if (!this.initialized || !resultSummary) return;
 
     try {
+      if (!(await this.automaticWritesAllowed(workspaceId, taskPrompt, resultSummary))) return;
       const text = `${taskPrompt}\n${resultSummary}`;
 
-      // Extract technology mentions (common framework/language names)
-      const techPatterns =
-        /\b(React|Vue|Angular|Next\.js|Node\.js|TypeScript|JavaScript|Python|Rust|Go|Docker|Kubernetes|PostgreSQL|MongoDB|Redis|GraphQL|REST|Tailwind|Vite|Webpack|Express|FastAPI|Django|Flask|Electron|SQLite)\b/gi;
-      const techMatches = [...new Set(Array.from(text.matchAll(techPatterns), (m) => m[1]))];
-
-      for (const tech of techMatches.slice(0, 5)) {
+      for (const tech of extractTechnologyMentions(text).slice(0, 5)) {
         try {
           await this.createEntity(
             workspaceId,
@@ -461,8 +533,8 @@ export class KnowledgeGraphService {
         }
       }
 
-      // Extract API endpoints
-      const apiPatterns = /(?:GET|POST|PUT|DELETE|PATCH)\s+(\/[\w/:.-]+)/gi;
+      // Extract API endpoints (upper-case HTTP verbs only: "get /path" is prose)
+      const apiPatterns = /\b(?:GET|POST|PUT|DELETE|PATCH)\s+(\/[\w/:.-]+)/g;
       const apiMatches = [...new Set(Array.from(text.matchAll(apiPatterns), (m) => m[1]))];
 
       for (const endpoint of apiMatches.slice(0, 3)) {

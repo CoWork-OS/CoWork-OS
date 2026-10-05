@@ -12,7 +12,7 @@ SQLite sidecar rather than a new external memory store.
 
 CoWork memory now has four complementary shapes:
 
-- **Curated hot memory**: short, prompt-visible facts and rules managed through curated memory.
+- **Facts (`memory_items`)**: short, prompt-visible facts and rules, written only through `MemoryWriter` (see [Memory Engine](memory-engine.md)).
 - **Archive memory**: durable local memory rows stored in `memories`.
 - **Structured observations**: metadata rows keyed by `memory_id` that describe archive memories with title, narrative, facts, concepts, provenance, files, tools, source events, privacy state, and migration status.
 - **Durable runtime context**: optional task-scoped message and compaction-summary rows used only for active-task recall through `context_recall`.
@@ -24,9 +24,9 @@ Durable runtime context is not a replacement for structured observations. It is 
 lane for long active tasks, especially after context compaction. See
 [Durable Runtime Context](durable-runtime-context.md).
 
-Dreaming uses that index as evidence for memory curation. It can propose stale-memory archives,
-corrections, open loops, recurring tasks, constraints, ignored-noise patterns, or curated-memory
-updates, but those proposals are stored separately as reviewable Dreaming candidates.
+Dreaming uses recent archive outcomes as evidence for curating `memory_items`: an outcome that
+recurs in at least two tasks can be promoted into an inferred fact that lists its archive rows as
+evidence. It never edits archive rows or observation metadata. See [Dreaming](dreaming.md).
 
 ## Data Model
 
@@ -166,7 +166,7 @@ It supports:
 - compact result rows with source labels and token estimates
 - a detail drawer for title, narrative, facts, provenance, and timeline context
 - metadata editing
-- promotion to curated memory
+- promotion to a workspace fact (`memory_items`, curated trust; staged when a memory-write approval mode is on)
 - marking private
 - suppressing prompt recall
 - redaction
@@ -180,9 +180,8 @@ row. Hard deletion happens through task delete and **Clear All Memories** (see
 [Workspace Memory Flow](workspace-memory-flow.md#deleting-memory)) and through archive retention,
 which honours the workspace's `retention_days`.
 
-Dreaming candidates should eventually appear beside these inspector workflows rather than bypassing
-them. There is no candidate review UI yet. When one exists, accepting a Dreaming candidate should call
-the same owning memory service that a manual inspector action would use.
+Dreaming proposals are reviewed in the Memory Hub **Review** tab, which shows the archive evidence
+behind each proposal; accepted proposals are applied through `MemoryWriter` and can be undone.
 
 ## IPC And Security Boundary
 
@@ -218,7 +217,7 @@ Structured observation changes should include tests for:
 - progressive recall tool behavior
 - durable runtime context enablement, active-task scoping, clear-memory deletion, durable-result echo filtering, direct-fact ranking, large-payload references, and summary-DAG parent links
 - Memory Hub Inspector loading, editing, redaction, promotion, suppression, and rebuild flows
-- Dreaming evidence use, candidate review state, and accepted-candidate application through owning memory services
+- Dreaming evidence use, Review tab accept/reject, and undo of applied curation operations
 
 The native SQLite suite may be skipped on machines where `better-sqlite3` cannot load. Keep mock-level
 tests for service behavior that must remain covered without native SQLite, especially startup

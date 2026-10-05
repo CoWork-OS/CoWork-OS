@@ -116,7 +116,7 @@ In CoWork OS, context learning includes:
 
 - memory candidates extracted from traces
 - hot-path memory capture
-- Dreaming candidates proposed from recent sessions, structured observations, corrections, and memory drift
+- Dreaming curation of the fact store (merges, conflict flags, promotion of recurring outcomes and corrections, decay), with safe changes applied and undoable and the rest reviewed in the Memory Hub
 - offline memory distillation
 - scoped memory by workspace/profile/target
 - workflow-intelligence journals and reflection artifacts
@@ -139,7 +139,7 @@ A trace is not just a final answer. It is the execution path:
 - what signals arrived
 - what Heartbeat noticed
 - what Reflection evaluated
-- what Dreaming proposed for memory curation
+- what Dreaming changed or proposed for memory curation
 - what was dispatched
 - what suggestion the user acted on, edited, snoozed, dismissed, or ignored
 - what succeeded or failed
@@ -178,7 +178,10 @@ This shows up concretely in the core runtime:
 - `CoreMemoryDistiller.runHotPath(traceId)` handles immediate trace-based memory promotion
 - `CoreMemoryDistiller.runOffline(...)` merges accepted candidates and writes durable memory later
 
-The offline pass also refreshes the layered memory index so future retrieval gets better, not just larger.
+Both passes write through the same memory hygiene as every other producer: fact candidates
+(preferences, corrections, project state, patterns) become `inferred` items through
+`MemoryWriter`, events such as open loops go to the archive through `MemoryService.capture`
+(see [memory-engine.md](memory-engine.md) §1).
 
 This matters because not every insight should be written immediately, and not every useful pattern appears in a single run.
 

@@ -9,6 +9,7 @@ import { runMemoryPayloadMigration } from "../memory/memory-payload-migration-sq
 import { ensureMemoryItemsSchema } from "../memory/memory-items-sql";
 import { ensureSupermemoryRemoteRefsSchema } from "../memory/supermemory-remote-refs-sql";
 import { ensureMemoryCurationSchema } from "../memory/memory-curation-log-sql";
+import { ensureKnowledgeGraphQualitySchema } from "../knowledge-graph/knowledge-graph-maintenance-sql";
 import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
 import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
@@ -46,6 +47,9 @@ const TASK_EVENT_PAYLOAD_SANITIZER_STATE_KEY = "task_event_payload_sanitizer_v1_
 const RUN_DURATION_BACKFILL_CHUNK = 100;
 const PAYLOAD_SANITIZER_RANGE = 5_000;
 const ORPHAN_EVENT_DELETE_CHUNK = 1_000;
+/** The columns `memory_observation_metadata_fts` indexes, in index order. */
+const OBSERVATION_FTS_COLUMNS =
+  "title, subtitle, narrative, facts, concepts, files_read, files_modified, tools";
 type MaintenanceChunkCommand =
   | "maintenance.backfillRunDurationsChunk"
   | "maintenance.sanitizePayloadsRange"
@@ -2691,6 +2695,7 @@ export class DatabaseManager {
     this.runMigrations();
     this.upgradeTaskReferenceForeignKeysToSetNull();
     this.initializeKnowledgeGraphFTS();
+    this.upgradeKnowledgeGraphQuality();
     ensureEverydayAgentSchema(this.db);
     this.migrateMemoryPayloadTables();
     this.initializeMemoryItems();
@@ -2781,7 +2786,7 @@ export class DatabaseManager {
         END;
 
         CREATE TRIGGER IF NOT EXISTS memory_observation_metadata_fts_update
-        AFTER UPDATE ON memory_observation_metadata BEGIN
+        AFTER UPDATE OF ${OBSERVATION_FTS_COLUMNS} ON memory_observation_metadata BEGIN
           INSERT INTO memory_observation_metadata_fts(
             memory_observation_metadata_fts, rowid, title, subtitle, narrative, facts, concepts, files_read, files_modified, tools
           )
@@ -2798,6 +2803,7 @@ export class DatabaseManager {
           );
         END;
       `);
+      this.upgradeObservationFtsUpdateTrigger();
     } catch (error) {
       schemaLogger.warn(
         "[DatabaseManager] Observation metadata FTS5 initialization failed:",
@@ -7001,6 +7007,21 @@ export class DatabaseManager {
     }
   }
 
+  /**
+   * Audit DATA-10: case-insensitive entity names (`normalized_name`, merged duplicates and
+   * a unique index), description source, reinforcement time and observation fingerprints.
+   */
+  private upgradeKnowledgeGraphQuality(): void {
+    try {
+      const merged = ensureKnowledgeGraphQualitySchema(this.db);
+      if (merged > 0) {
+        schemaLogger.info(`[DatabaseManager] Merged ${merged} case-duplicate KG entities`);
+      }
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] Knowledge graph quality migration failed:", error);
+    }
+  }
+
   private seedKnowledgeGraphTypes() {
     try {
       const workspaces = this.db.prepare("SELECT id FROM workspaces").all() as Array<{
@@ -8214,6 +8235,43 @@ export class DatabaseManager {
       .prepare("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?")
       .get(type, name) as { sql?: string | null } | undefined;
     return row?.sql ?? undefined;
+  }
+
+  /**
+   * Older databases have `memory_observation_metadata_fts_update` firing on any column
+   * change, and observations used to be written with `INSERT OR REPLACE`, which deletes the
+   * old row without firing the delete trigger (no `recursive_triggers`) and so left stale
+   * FTS entries (audit DATA-8). Recreate the trigger to fire only when an indexed column
+   * changes and rebuild the index once from its content table. Idempotent.
+   */
+  private upgradeObservationFtsUpdateTrigger(): void {
+    const sql = this.schemaObjectSql("trigger", "memory_observation_metadata_fts_update");
+    if (!sql || /AFTER\s+UPDATE\s+OF\s/i.test(sql)) return;
+    this.db.transaction(() => {
+      this.db.exec(`
+        DROP TRIGGER IF EXISTS memory_observation_metadata_fts_update;
+        CREATE TRIGGER memory_observation_metadata_fts_update
+        AFTER UPDATE OF ${OBSERVATION_FTS_COLUMNS} ON memory_observation_metadata BEGIN
+          INSERT INTO memory_observation_metadata_fts(
+            memory_observation_metadata_fts, rowid, ${OBSERVATION_FTS_COLUMNS}
+          )
+          VALUES (
+            'delete', OLD.rowid, OLD.title, OLD.subtitle, OLD.narrative, OLD.facts, OLD.concepts,
+            OLD.files_read, OLD.files_modified, OLD.tools
+          );
+          INSERT INTO memory_observation_metadata_fts(rowid, ${OBSERVATION_FTS_COLUMNS})
+          VALUES (
+            NEW.rowid, NEW.title, NEW.subtitle, NEW.narrative, NEW.facts, NEW.concepts,
+            NEW.files_read, NEW.files_modified, NEW.tools
+          );
+        END;
+        INSERT INTO memory_observation_metadata_fts(memory_observation_metadata_fts)
+        VALUES ('rebuild');
+      `);
+    })();
+    schemaLogger.info(
+      "[DatabaseManager] Narrowed the observation FTS update trigger and rebuilt its index",
+    );
   }
 
   /**

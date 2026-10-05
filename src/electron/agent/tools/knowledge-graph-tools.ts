@@ -2,6 +2,15 @@ import type { LLMTool } from "../llm/types";
 import type { Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import { KnowledgeGraphService } from "../../knowledge-graph/KnowledgeGraphService";
+import { NO_MEMORY_WRITE_ERROR, explicitMemoryWriteBlocked } from "./memory-tools";
+
+/** Tools that add to the graph; a task's `<no-memory>` directive blocks them. */
+const KG_WRITE_TOOLS = new Set([
+  "kg_create_entity",
+  "kg_update_entity",
+  "kg_create_edge",
+  "kg_add_observation",
+]);
 
 export class KnowledgeGraphTools {
   constructor(
@@ -260,6 +269,18 @@ export class KnowledgeGraphTools {
     if (!KnowledgeGraphService.isInitialized()) {
       return { error: "Knowledge graph not initialized" };
     }
+    // Explicit graph writes may proceed with workspace memory off, but never in a task
+    // (or with content) that opted out with <no-memory>.
+    if (
+      KG_WRITE_TOOLS.has(name) &&
+      explicitMemoryWriteBlocked(
+        this.daemon,
+        this.taskId,
+        [input?.name, input?.description, input?.content].filter(Boolean).join("\n"),
+      )
+    ) {
+      return { error: NO_MEMORY_WRITE_ERROR };
+    }
 
     switch (name) {
       case "kg_create_entity":
@@ -321,8 +342,13 @@ export class KnowledgeGraphTools {
     if (!entity) {
       return { error: `Entity not found: ${input.entity_id}` };
     }
+    const descriptionKept =
+      typeof input.description === "string" && entity.description !== input.description;
     return {
       success: true,
+      ...(descriptionKept
+        ? { note: "The description was set by the user and was kept; other fields were updated." }
+        : {}),
       entity: {
         id: entity.id,
         name: entity.name,

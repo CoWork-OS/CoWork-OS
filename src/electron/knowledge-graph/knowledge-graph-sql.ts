@@ -21,6 +21,24 @@ import {
   likeContainsPattern,
   termCoverage,
 } from "../database/fts-query";
+import {
+  ensureKnowledgeGraphQualitySchema,
+  observationFingerprint,
+} from "./knowledge-graph-maintenance-sql";
+import {
+  kgSourceRank,
+  normalizeEntityName,
+  normalizeKgSource,
+  strongerKgSource,
+} from "./kg-extraction";
+
+type KGSource = "manual" | "auto" | "agent";
+
+/** A workspace's memory switches that gate automatic graph writes (DATA-10). */
+export interface KGWritePolicy {
+  enabled: boolean;
+  privacyMode: string;
+}
 
 function safeJsonParse<T>(jsonString: string | null | undefined, defaultValue: T): T {
   if (!jsonString) return defaultValue;
@@ -91,6 +109,28 @@ function intervalsOverlap(
 export class KnowledgeGraphStore {
   constructor(private db: Database.Database) {}
 
+  /** Data-quality columns and the case-insensitive name index (once per connection). */
+  private ensureQualitySchema(): void {
+    ensureKnowledgeGraphQualitySchema(this.db);
+  }
+
+  /**
+   * The workspace's memory switches (`memory_settings`): automatic extraction and mailbox
+   * ingest skip workspaces whose memory is disabled. A workspace without a row has the
+   * defaults (enabled, normal).
+   */
+  getWritePolicy(workspaceId: string): KGWritePolicy {
+    const hasTable = this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memory_settings'")
+      .get();
+    if (!hasTable) return { enabled: true, privacyMode: "normal" };
+    const row = this.db
+      .prepare("SELECT enabled, privacy_mode FROM memory_settings WHERE workspace_id = ?")
+      .get(workspaceId) as { enabled?: number; privacy_mode?: string } | undefined;
+    if (!row) return { enabled: true, privacyMode: "normal" };
+    return { enabled: row.enabled !== 0, privacyMode: String(row.privacy_mode || "normal") };
+  }
+
   // ─── Entity Type CRUD ─────────────────────────────────────────────
 
   getEntityTypes(workspaceId: string): KGEntityType[] {
@@ -145,25 +185,29 @@ export class KnowledgeGraphStore {
     source: "manual" | "auto" | "agent" = "manual",
     sourceTaskId?: string,
   ): KGEntity {
+    this.ensureQualitySchema();
     const id = uuidv4();
     const now = Date.now();
     const propsJson = JSON.stringify(properties || {});
 
     this.db
       .prepare(
-        `INSERT INTO kg_entities (id, workspace_id, entity_type_id, name, description, properties, confidence, source, source_task_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO kg_entities (id, workspace_id, entity_type_id, name, normalized_name, description, description_source, properties, confidence, source, source_task_id, created_at, updated_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         workspaceId,
         entityTypeId,
         name.trim(),
+        normalizeEntityName(name),
         description || null,
+        description ? source : null,
         propsJson,
         clamp(confidence, 0, 1),
         source,
         sourceTaskId || null,
+        now,
         now,
         now,
       );
@@ -180,6 +224,8 @@ export class KnowledgeGraphStore {
       sourceTaskId,
       createdAt: now,
       updatedAt: now,
+      ...(description ? { descriptionSource: source } : {}),
+      lastSeenAt: now,
     };
   }
 
@@ -194,17 +240,26 @@ export class KnowledgeGraphStore {
     return row ? this.mapEntity(row) : undefined;
   }
 
+  /** The entity of this type whose name matches case-insensitively (`Go` = `go`). */
   getEntityByName(workspaceId: string, entityTypeId: string, name: string): KGEntity | undefined {
+    this.ensureQualitySchema();
     const stmt = this.db.prepare(`
       SELECT e.*, t.name as entity_type_name
       FROM kg_entities e
       LEFT JOIN kg_entity_types t ON e.entity_type_id = t.id
-      WHERE e.workspace_id = ? AND e.entity_type_id = ? AND e.name = ?
+      WHERE e.workspace_id = ? AND e.entity_type_id = ? AND e.normalized_name = ?
+      LIMIT 1
     `);
-    const row = stmt.get(workspaceId, entityTypeId, name.trim()) as Any;
+    const row = stmt.get(workspaceId, entityTypeId, normalizeEntityName(name)) as Any;
     return row ? this.mapEntity(row) : undefined;
   }
 
+  /**
+   * Update an entity by id. Source precedence (manual > agent > auto): a description set
+   * by a higher-precedence source is never overwritten by a lower one (the rest of the
+   * patch still applies). An explicit update reinforces the entity and raises its source
+   * to the writer's when that is higher.
+   */
   updateEntity(
     workspaceId: string,
     entityId: string,
@@ -213,17 +268,47 @@ export class KnowledgeGraphStore {
       properties?: Record<string, unknown>;
       confidence?: number;
     },
+    source: KGSource = "agent",
   ): KGEntity | undefined {
+    this.ensureQualitySchema();
     const entity = this.getEntity(workspaceId, entityId);
     if (!entity) return undefined;
+    const descriptionRank = kgSourceRank(entity.descriptionSource ?? entity.source);
+    const allowed =
+      patch.description === undefined ||
+      !entity.description ||
+      kgSourceRank(source) >= descriptionRank;
+    return this.applyEntityPatch(workspaceId, entity, {
+      ...patch,
+      description: allowed ? patch.description : undefined,
+      descriptionSource: allowed && patch.description !== undefined ? source : undefined,
+      source: strongerKgSource(entity.source, source),
+    });
+  }
 
+  private applyEntityPatch(
+    workspaceId: string,
+    entity: KGEntity,
+    patch: {
+      description?: string;
+      descriptionSource?: KGSource;
+      properties?: Record<string, unknown>;
+      confidence?: number;
+      source?: KGSource;
+    },
+  ): KGEntity | undefined {
+    const entityId = entity.id;
     const now = Date.now();
-    const updates: string[] = ["updated_at = ?"];
-    const params: Any[] = [now];
+    const updates: string[] = ["updated_at = ?", "last_seen_at = ?"];
+    const params: Any[] = [now, now];
 
     if (patch.description !== undefined) {
-      updates.push("description = ?");
-      params.push(patch.description);
+      updates.push("description = ?", "description_source = ?");
+      params.push(patch.description, patch.descriptionSource ?? null);
+    }
+    if (patch.source !== undefined && patch.source !== entity.source) {
+      updates.push("source = ?");
+      params.push(patch.source);
     }
     if (patch.properties !== undefined) {
       updates.push("properties = ?");
@@ -425,21 +510,50 @@ export class KnowledgeGraphStore {
 
   // ─── Observation CRUD ─────────────────────────────────────────────
 
+  /**
+   * Add an observation, or return the existing one with the same fingerprint (a mailbox
+   * event's) or the same text: re-ingesting an event or repeating a note adds nothing.
+   * A new observation reinforces its entity (`last_seen_at`).
+   */
   addObservation(
     entityId: string,
     content: string,
     source: "manual" | "auto" | "agent" = "manual",
     sourceTaskId?: string,
+    fingerprint?: string,
   ): KGObservation {
+    this.ensureQualitySchema();
+    const trimmed = content.trim();
+    const key = observationFingerprint(trimmed, fingerprint);
+    const contentKey = observationFingerprint(trimmed);
+    const existing = this.db
+      .prepare(
+        `SELECT * FROM kg_observations
+         WHERE entity_id = ? AND (fingerprint = ? OR fingerprint = ? OR content = ?)
+         ORDER BY created_at ASC LIMIT 1`,
+      )
+      .get(entityId, key, contentKey, trimmed) as Any;
+    if (existing) {
+      // A higher-precedence writer adopts an automatic observation instead of repeating it.
+      if (kgSourceRank(source) > kgSourceRank(existing.source)) {
+        this.db
+          .prepare("UPDATE kg_observations SET source = ? WHERE id = ?")
+          .run(source, existing.id);
+        existing.source = source;
+      }
+      return this.mapObservation(existing);
+    }
+
     const id = uuidv4();
     const now = Date.now();
 
     this.db
       .prepare(
-        `INSERT INTO kg_observations (id, entity_id, content, source, source_task_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO kg_observations (id, entity_id, content, source, source_task_id, created_at, fingerprint)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(id, entityId, content.trim(), source, sourceTaskId || null, now);
+      .run(id, entityId, trimmed, source, sourceTaskId || null, now, key);
+    this.db.prepare("UPDATE kg_entities SET last_seen_at = ? WHERE id = ?").run(now, entityId);
 
     return {
       id,
@@ -712,21 +826,31 @@ export class KnowledgeGraphStore {
 
   // ─── Confidence Decay ─────────────────────────────────────────────
 
-  applyConfidenceDecay(workspaceId: string, decayRate = 0.95, floorConfidence = 0.3): number {
+  /**
+   * Decay automatic entities not reinforced (re-extracted, re-ingested or given an
+   * observation) for 30 days. Keys on `last_seen_at`, not creation, and leaves
+   * `updated_at` alone: decay is not an edit.
+   */
+  applyConfidenceDecay(
+    workspaceId: string,
+    decayRate = 0.95,
+    floorConfidence = 0.3,
+    now = Date.now(),
+  ): number {
+    this.ensureQualitySchema();
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-    const cutoff = Date.now() - thirtyDaysMs;
+    const cutoff = now - thirtyDaysMs;
 
     const result = this.db
       .prepare(
         `UPDATE kg_entities
-       SET confidence = MAX(?, confidence * ?),
-           updated_at = ?
+       SET confidence = MAX(?, confidence * ?)
        WHERE workspace_id = ?
          AND source = 'auto'
          AND confidence > ?
-         AND created_at < ?`,
+         AND COALESCE(last_seen_at, created_at) < ?`,
       )
-      .run(floorConfidence, decayRate, Date.now(), workspaceId, floorConfidence, cutoff);
+      .run(floorConfidence, decayRate, workspaceId, floorConfidence, cutoff);
 
     return result.changes;
   }
@@ -794,21 +918,35 @@ export class KnowledgeGraphStore {
     const entityType = this.getOrCreateEntityType(workspaceId, input.entityType);
     const existing = this.getEntityByName(workspaceId, entityType.id, input.name.trim());
     if (existing) {
-      // Merge: update description if provided, boost confidence
+      // Merge by source precedence (manual > agent > auto): a lower-precedence writer
+      // never replaces a description or property set by a higher one.
+      const rank = kgSourceRank(source);
       const patch: {
         description?: string;
+        descriptionSource?: KGSource;
         properties?: Record<string, unknown>;
         confidence?: number;
+        source?: KGSource;
       } = {};
-      if (input.description && input.description !== existing.description) {
+      if (
+        input.description &&
+        input.description !== existing.description &&
+        (!existing.description ||
+          rank >= kgSourceRank(existing.descriptionSource ?? existing.source))
+      ) {
         patch.description = input.description;
+        patch.descriptionSource = source;
       }
       if (input.properties && Object.keys(input.properties).length > 0) {
-        patch.properties = { ...existing.properties, ...input.properties };
+        patch.properties =
+          rank >= kgSourceRank(existing.source)
+            ? { ...existing.properties, ...input.properties }
+            : { ...input.properties, ...existing.properties };
       }
-      // Boost confidence on repeated creation (max 1.0)
+      // Reinforcement: boost confidence on repeated creation (max 1.0).
       patch.confidence = Math.min(1.0, (existing.confidence || 0.5) + 0.1);
-      return this.updateEntity(workspaceId, existing.id, patch) || existing;
+      patch.source = strongerKgSource(existing.source, source);
+      return this.applyEntityPatch(workspaceId, existing, patch) || existing;
     }
     return this.createEntity(
       workspaceId,
@@ -896,7 +1034,13 @@ export class KnowledgeGraphStore {
     if (!this.getEntity(workspaceId, input.entityId)) {
       throw new Error(`Entity not found: ${input.entityId}`);
     }
-    return this.addObservation(input.entityId, input.content, source, sourceTaskId);
+    return this.addObservation(
+      input.entityId,
+      input.content,
+      source,
+      sourceTaskId,
+      input.fingerprint,
+    );
   }
 
   /** Entities matching a task prompt, each with up to three immediate relationships. */
@@ -937,10 +1081,14 @@ export class KnowledgeGraphStore {
       description: row.description || undefined,
       properties: safeJsonParse(row.properties, {}),
       confidence: typeof row.confidence === "number" ? row.confidence : 1.0,
-      source: row.source === "auto" || row.source === "agent" ? row.source : "manual",
+      source: normalizeKgSource(row.source),
       sourceTaskId: row.source_task_id || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      ...(row.description_source
+        ? { descriptionSource: normalizeKgSource(row.description_source) }
+        : {}),
+      ...(typeof row.last_seen_at === "number" ? { lastSeenAt: row.last_seen_at } : {}),
     };
   }
 

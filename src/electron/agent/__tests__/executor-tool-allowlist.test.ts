@@ -94,7 +94,7 @@ describe("TaskExecutor tool allow-list semantics", () => {
     expect(allowlist.size).toBeGreaterThan(0);
   });
 
-  it("keeps read-only memory recall tools in every plan-step allowlist", () => {
+  it("keeps memory recall and memory_remember in every plan-step allowlist", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: {} };
     executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
@@ -107,17 +107,15 @@ describe("TaskExecutor tool allow-list semantics", () => {
         "code",
         "Update the config loader",
       ) as Set<string>;
-      for (const tool of ["memory_recall", "context_recall"]) {
+      for (const tool of ["memory_recall", "context_recall", "memory_remember"]) {
         expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(true);
       }
       // Retired memory tool names are not allowlisted.
       for (const tool of ["search_memories", "search_sessions", "context_grep"]) {
         expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(false);
       }
-      // Memory writes stay step-scoped.
-      for (const tool of ["memory_remember", "memory_forget"]) {
-        expect(allowlist.has(tool), `${stepKind}: ${tool}`).toBe(false);
-      }
+      // memory_forget deletes (and asks first), so it stays step-scoped.
+      expect(allowlist.has("memory_forget"), `${stepKind}: memory_forget`).toBe(false);
     }
   });
 

@@ -201,6 +201,40 @@ describeWithSqlite("MemoryContextBuilder over memory_items", () => {
     expect(l1?.text).toContain("[project fact]");
   });
 
+  it("recalls a rule the agent saved on its own in L1 only, until the user pins it", async () => {
+    const item = await write({
+      content: "Run the electron build before declaring a change done",
+      kind: "rule",
+      scope: "workspace",
+      workspaceId: "ws-1",
+      source: "inferred",
+      sourceRef: { store: "agent_tool", id: "rec-1", taskId: "task-1" },
+    });
+    // The same kind from another producer (an accepted core-memory candidate) stays L0.
+    await write({
+      content: "Never deploy on Fridays",
+      kind: "rule",
+      scope: "workspace",
+      workspaceId: "ws-1",
+      source: "inferred",
+      sourceRef: { store: "core_candidate", id: "cand-1" },
+    });
+
+    const before = await builder.buildLayers({
+      workspaceId: "ws-1",
+      decision: PRIVATE,
+      focus: "finish the electron build change",
+    });
+    expect(before.l0?.text).toContain("Never deploy on Fridays");
+    expect(before.l0?.text).not.toContain("electron build");
+    expect(before.l1?.text).toContain("electron build before declaring");
+
+    await repository.setPinned(item.id, true);
+    bumpHotMemoryVersion();
+    const after = await builder.buildLayers({ workspaceId: "ws-1", decision: PRIVATE });
+    expect(after.l0?.text).toContain("electron build before declaring");
+  });
+
   it("counts uses for injected memory refs", async () => {
     const item = await write({ content: "Likes green tea" });
     await builder.markUsed([`memory:${item.id}`, "archive:42"]);

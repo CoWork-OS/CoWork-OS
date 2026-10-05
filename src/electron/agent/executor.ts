@@ -566,10 +566,11 @@ export type { CompletionContract } from "./executor-helpers";
 
 const KEEP_LATEST_IMAGE_MESSAGES = 8;
 /**
- * Read-only memory recall tools every plan step may call (audit §8.3). Writes
- * (memory_remember, memory_forget) stay step-scoped.
+ * Memory tools every plan step may call (audit §8.3): recall, and memory_remember so the
+ * agent can save what it learns while it works rather than only in a step planned for it.
+ * memory_forget deletes and asks the user first, so it stays step-scoped.
  */
-const MEMORY_RECALL_READ_TOOLS: readonly string[] = ["memory_recall", "context_recall"];
+const MEMORY_STEP_TOOLS: readonly string[] = ["memory_recall", "context_recall", "memory_remember"];
 // Memory synthesis slices (kit/memory/playbook) live in content/prompt-budgets.ts,
 // where the requested synthesizer budget and the memory_context cap share one constant.
 const DEFAULT_PROMPT_SECTION_BUDGETS = {
@@ -18776,9 +18777,9 @@ ${transcript}
       "grep",
       "read_file",
       "search_files",
-      // Read-only memory recall: any step may need prior decisions or context
-      // (RECALL-1). Writes (memory_remember, memory_forget) stay step-scoped.
-      ...MEMORY_RECALL_READ_TOOLS,
+      // Any step may need prior decisions or context (RECALL-1), or learn something a
+      // later task needs. memory_forget stays step-scoped.
+      ...MEMORY_STEP_TOOLS,
     ]);
 
     const isBotConversation = this.task.agentConfig?.botConversation === true;

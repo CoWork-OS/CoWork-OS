@@ -78,6 +78,8 @@ export interface MemoryContextEntry {
   confidence: number;
   updatedAt: number;
   dueAt?: number;
+  /** Inferred by the agent itself through memory_remember, without the user asking. */
+  agentInferred?: boolean;
 }
 
 export interface MemoryContextLayersRequest {
@@ -132,12 +134,19 @@ export function entryFromItem(item: MemoryItem): MemoryContextEntry {
     confidence: item.confidence,
     updatedAt: item.updatedAt,
     ...(dueAt ? { dueAt } : {}),
+    ...(item.source === "inferred" && item.sourceRef?.store === "agent_tool"
+      ? { agentInferred: true }
+      : {}),
   };
 }
 
 /** L0 eligibility: what is worth carrying on every turn. */
 export function isL0Entry(entry: MemoryContextEntry): boolean {
   if (entry.pinned) return true;
+  // What the agent saved on its own is recalled when relevant (L1), not carried on every
+  // turn: one page it read could otherwise plant a standing "rule". Pinning it in the
+  // Memory Hub, or the user stating or confirming it, makes it L0.
+  if (entry.agentInferred) return false;
   if (entry.kind === "identity" || entry.kind === "rule" || entry.kind === "commitment") {
     return true;
   }

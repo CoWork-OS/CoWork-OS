@@ -326,6 +326,19 @@ describeWithSqlite("memory tools", () => {
       expect(mocks.syncWorkspaceFiles).toHaveBeenCalledWith("ws-1", expect.any(Object));
     });
 
+    it("does not pin a fact the agent saved on its own", async () => {
+      const tools = new MemoryTools(workspace, makeDaemon("fix the deploy script"), "task-1");
+      const result = await tools.remember({
+        content: "Deploys need the VPN connected",
+        kind: "rule",
+        pin: true,
+      });
+      expect(result).toMatchObject({ success: true, source: "inferred" });
+      expect(result).not.toHaveProperty("pinned");
+      expect(result.note).toMatch(/only when the user asks/);
+      expect(rowsOf(db)[0]).toMatchObject({ pinned: 0 });
+    });
+
     it("stores a user-stated, global preference when the user asked to remember it", async () => {
       const tools = new MemoryTools(
         workspace,

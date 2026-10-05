@@ -309,9 +309,10 @@ export class MemoryTools {
       {
         name: MEMORY_REMEMBER_TOOL,
         description:
-          "Save a durable memory for later tasks: a user preference or identity detail, a rule, project fact, decision, commitment, correction or lesson. " +
-          "Use it when the user asks you to remember something or you learn something stable that later tasks need. " +
-          "Not for notes about the current task (use scratchpad_write).",
+          "Save a durable memory for later tasks. " +
+          "Use it when the user asks you to remember something, and on your own as you work when you learn what a later task would need and the user would otherwise repeat: a preference, correction, decision, project fact or hard-won lesson (command, setup step, pitfall). " +
+          "One self-contained fact per call; when a saved fact changes, save the new value under the same subject. " +
+          "Skip what is cheap to rediscover or only matters now (use scratchpad_write). Never secrets.",
         input_schema: {
           type: "object",
           properties: {
@@ -328,14 +329,14 @@ export class MemoryTools {
               type: "string",
               enum: ["workspace", "global", "task", "external"],
               description:
-                "global: about the user everywhere (default for identity, preference, correction); workspace: this project (default otherwise); task: this task only; external: Supermemory only, when connected.",
+                "global: about the user, everywhere (default: identity, preference, correction); workspace: this project (default); task: this task; external: Supermemory only.",
             },
             subject: {
               type: "string",
               description:
                 "Key of a single-valued fact (e.g. preferred_name, timezone): a new value replaces the old.",
             },
-            pin: { type: "boolean", description: "Keep it in every prompt." },
+            pin: { type: "boolean", description: "Keep it in every prompt; only when the user asks." },
             user_asked: {
               type: "boolean",
               description: "true only if the user explicitly asked you to remember this.",
@@ -553,7 +554,10 @@ export class MemoryTools {
       : input?.user_asked === true && isExplicitRememberRequest(userText)
         ? "user_stated"
         : "inferred";
-    const pin = input?.pin === true;
+    // Pinning puts a fact in every prompt: the user's call. An inference the agent makes on
+    // its own (perhaps steered by a page it read) is recalled when relevant instead.
+    const pinRequested = input?.pin === true;
+    const pin = pinRequested && source === "user_stated";
     const subjectKey = asString(input?.subject, 120);
     const recordId = randomUUID();
 
@@ -575,7 +579,7 @@ export class MemoryTools {
           ...(subjectKey ? { subjectKey } : {}),
           source,
           confidence: source === "user_stated" ? 1 : 0.7,
-          pinned: pin && !thirdPartySender,
+          pinned: pin,
           recordId,
           content,
         },
@@ -607,7 +611,7 @@ export class MemoryTools {
         source,
         sourceRef: { store: "agent_tool", id: recordId, taskId: this.taskId },
         confidence: source === "user_stated" ? 1 : 0.7,
-        pinned: pin && !thirdPartySender,
+        pinned: pin,
         taskId: this.taskId,
         originWorkspaceId: this.workspace.id,
         originText: userText,
@@ -633,6 +637,9 @@ export class MemoryTools {
         scope: result.item.scope,
         source,
         ...(result.item.pinned ? { pinned: true } : {}),
+        ...(pinRequested && !pin
+          ? { note: "Not pinned: pin only when the user asks to keep it in every prompt." }
+          : {}),
         ...(result.supersededIds.length > 0
           ? { replaced: result.supersededIds.map((id) => `memory:${id}`) }
           : {}),

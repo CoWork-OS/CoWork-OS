@@ -15,7 +15,7 @@ export const MEMORY_TOOL_ROUTES: ReadonlyArray<readonly [tool: string, use: stri
     MEMORY_RECALL_TOOL,
     'past facts, decisions, earlier tasks, notes; index, then detail:"full" + ids',
   ],
-  [MEMORY_REMEMBER_TOOL, "save a durable fact for later tasks"],
+  [MEMORY_REMEMBER_TOOL, "save what later tasks need, as you learn it"],
   [MEMORY_FORGET_TOOL, "delete a wrong or unwanted memory"],
   [CONTEXT_RECALL_TOOL, "this task's details lost to compaction"],
 ];

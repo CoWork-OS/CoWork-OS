@@ -31,6 +31,7 @@ jobs:
         with:
           node-version: "24"
       - run: node --test scripts/qa/validate-doc-versions.test.mjs
+      - run: npm run test:release-surfaces
       - run: npm run qa:docs-versions
 
   secret-scan:
@@ -152,6 +153,9 @@ jobs:
 
       - name: Install Electron binary
         run: node node_modules/electron/install.js
+
+      - name: Install Chromium for browser integration tests
+        run: npx playwright install --with-deps chromium
 
       - name: Prepare native test dependencies and Numbat fixtures
         run: |

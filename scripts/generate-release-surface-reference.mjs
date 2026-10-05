@@ -137,7 +137,7 @@ export function main(args = process.argv.slice(2)) {
 
   const output = renderReleaseSurfaceReference(manifests);
   if (args.includes("--check")) {
-    if (readFileSync(outputPath, "utf8") !== output) {
+    if (readFileSync(outputPath, "utf8").replace(/\r\n/g, "\n") !== output) {
       console.error(
         "docs/release-surface-reference.md is stale; run npm run docs:surfaces:generate.",
       );

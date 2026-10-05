@@ -44,7 +44,10 @@ import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
 import { CronService, setCronService, getCronStorePath } from "../electron/cron";
 import { resolveTaskResultText } from "../electron/cron/result-text";
 import { TaskEventRepository } from "../electron/database/repositories";
-import { WorkspaceRepository } from "../electron/database/repository-facades";
+import {
+  TaskEventReplayRepository,
+  WorkspaceRepository,
+} from "../electron/database/repository-facades";
 import {
   formatChatTranscriptForPrompt,
   prefetchTranscriptUsers,
@@ -367,11 +370,16 @@ async function main(): Promise<void> {
     }
     // Memory repo, as on desktop: off unless enabled; stopped by the "memory repo" step.
     const memoryRepoWorkspaces = new WorkspaceRepository(memoryHostDb);
+    const memoryRepoTasks = new TaskRepository(memoryHostDb);
+    const memoryRepoTaskEvents = new TaskEventReplayRepository(memoryHostDb);
     void startMemoryRepo({
       runtime: "node",
       getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
       listWorkspacePaths: async () => (await memoryRepoWorkspaces.findAll()).map((w) => w.path),
       workspaceName: async (id) => (await memoryRepoWorkspaces.findById(id))?.name ?? null,
+      findTasksCreatedBetween: (params) => memoryRepoTasks.findByCreatedAtRange(params),
+      findTaskEvents: (taskId, types, maxEvents) =>
+        memoryRepoTaskEvents.findByTaskIdAndTypes(taskId, types, maxEvents),
     });
     console.log("[Daemon] Memory Service initialized");
   } catch (error) {

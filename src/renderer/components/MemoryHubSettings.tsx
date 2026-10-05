@@ -114,6 +114,24 @@ export function MemoryHubSettings(props?: {
       cancelled = true;
     };
   }, [selectedWorkspaceId]);
+  // Memory folder dreams waiting for review (profile-wide; added to the Review tab badge).
+  const [dreamReviewCount, setDreamReviewCount] = useState(0);
+  const memoryRepoOn = features?.memoryRepoEnabled === true;
+  useEffect(() => {
+    setDreamReviewCount(0);
+    if (!memoryRepoOn || !hasHostMethod("getMemoryRepoDreams")) return;
+    let cancelled = false;
+    window.electronAPI
+      .getMemoryRepoDreams()
+      .then((report) => {
+        if (!cancelled) setDreamReviewCount(report.pendingReviews);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [memoryRepoOn]);
+  const reviewBadgeCount = reviewCount + dreamReviewCount;
   const activeWorkspace = useRef(selectedWorkspaceId);
   activeWorkspace.current = selectedWorkspaceId;
   const observationSearchGeneration = useRef(0);
@@ -998,9 +1016,9 @@ export function MemoryHubSettings(props?: {
           onClick={() => setHubTab("review")}
         >
           Review
-          {reviewCount > 0 && (
-            <span className="memory-review-badge" aria-label={`${reviewCount} pending`}>
-              {reviewCount}
+          {reviewBadgeCount > 0 && (
+            <span className="memory-review-badge" aria-label={`${reviewBadgeCount} pending`}>
+              {reviewBadgeCount}
             </span>
           )}
         </button>
@@ -1045,6 +1063,7 @@ export function MemoryHubSettings(props?: {
             workspaceId={selectedWorkspaceId}
             canWrite={canWriteWorkspace}
             onCountChange={setReviewCount}
+            onDreamCountChange={setDreamReviewCount}
           />
         ) : null}
       </div>

@@ -64,6 +64,9 @@ import {
   classifyHeartbeatDispatchOutcome,
   classifyHeartbeatErrorOutcome,
 } from "../automation/automation-outcome-classifier";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger("HeartbeatService");
 
 type HeartbeatWakeMode = "now" | "next-heartbeat";
 type HeartbeatWakeSource = "hook" | "cron" | "api" | "manual";
@@ -222,6 +225,11 @@ export interface HeartbeatServiceDeps {
   findMemoryCurationWorkspace?: (
     preferredWorkspaceId?: string,
   ) => Promise<{ workspaceId: string; workspacePath: string } | null>;
+  /**
+   * The daily dream over the memory folder (docs/memory-repo-phase2-design.md §6). Offered
+   * once per idle pulse; the dreamer enforces its own interval, budget and settings.
+   */
+  runMemoryRepoDream?: () => Promise<unknown>;
   automationProfileRepo?: AutomationProfileRepository;
   coreTraceService?: CoreTraceService;
   coreMemoryCandidateService?: CoreMemoryCandidateService;
@@ -980,6 +988,7 @@ export class HeartbeatService extends EventEmitter {
         signals: pulseSignals,
         heartbeatRunId: pulseRun.id,
       });
+      this.offerMemoryRepoDream();
       if (dreamingRun) {
         result = {
           ...result,
@@ -1742,6 +1751,24 @@ export class HeartbeatService extends EventEmitter {
     } catch (error) {
       console.warn("[HeartbeatService] Daily memory curation failed:", error);
       return null;
+    }
+  }
+
+  /**
+   * Offer the memory folder its daily dream: once per pulse, only when no task is in the
+   * foreground and heartbeat maintenance is on. Fire-and-forget; failures are logged.
+   */
+  private offerMemoryRepoDream(): void {
+    const runMemoryRepoDream = this.deps.runMemoryRepoDream;
+    if (!runMemoryRepoDream) return;
+    try {
+      if (this.isHeartbeatMaintenanceDisabled()) return;
+      if (this.deps.hasActiveForegroundTask?.()) return;
+      void Promise.resolve()
+        .then(() => runMemoryRepoDream())
+        .catch((error) => logger.warn("Memory folder dream failed:", error));
+    } catch (error) {
+      logger.warn("Memory folder dream could not start:", error);
     }
   }
 

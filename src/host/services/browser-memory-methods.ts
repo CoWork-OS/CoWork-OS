@@ -4,7 +4,19 @@ import {
 } from "../../electron/memory/repo/memory-repo-bootstrap";
 import { MemoryRepoService } from "../../electron/memory/repo/MemoryRepoService";
 import { readMemoryRepoLines } from "../../electron/memory/repo/memory-repo-read";
-import { MemoryRepoRefsSchema } from "../../electron/ipc/memory-repo-ipc-validation";
+import {
+  MemoryRepoDreamIdSchema,
+  MemoryRepoDreamPartSchema,
+  MemoryRepoRefsSchema,
+} from "../../electron/ipc/memory-repo-ipc-validation";
+import { getMemoryRepoDreamer } from "../../electron/memory/repo/MemoryRepoDreamer";
+import {
+  buildMemoryRepoDreamsReport,
+  loadMemoryRepoDreamSettings,
+  memoryRepoDreamDiffText,
+  runMemoryRepoDreamAction,
+  toMemoryRepoDreamNowResult,
+} from "../../electron/memory/repo/memory-repo-dream-report";
 import type { MemoryRepoCompactResult } from "../../shared/memory-repo-types";
 import path from "node:path";
 import { statSync, existsSync } from "node:fs";
@@ -104,6 +116,7 @@ const featureBooleanKeys = [
   "memoryInspectorEnabled",
   "dreamingLlmEnabled",
   "memoryRepoEnabled",
+  "memoryRepoDreamingEnabled",
 ] as const;
 const featureSettings = z
   .object({
@@ -113,6 +126,7 @@ const featureSettings = z
     dreamingLlmDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryCompressionDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryRepoPath: z.string().trim().max(1024).optional(),
+    memoryRepoDreamDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryWriteApprovalMode: z
       .enum(["off", "curated_only", "external_only", "background_only", "all"])
       .optional(),
@@ -868,6 +882,49 @@ export function createBrowserMemoryDefinitions(options: {
       return service.compactHistory();
     }, true),
     readMemoryRepoLines: action(MemoryRepoRefsSchema, (refs) => readMemoryRepoLines(refs)),
+    // Dreams over the memory folder (docs/memory-repo-phase2-design.md §5-§7).
+    getMemoryRepoDreams: noArgs(() =>
+      buildMemoryRepoDreamsReport({
+        service: MemoryRepoService.get(),
+        settings: loadMemoryRepoDreamSettings(),
+      }),
+    ),
+    getMemoryRepoDreamDiff: {
+      capability: "memory.manage",
+      mutation: false,
+      minArgs: 2,
+      maxArgs: 2,
+      validate: (args) => [
+        MemoryRepoDreamIdSchema.parse(args[0]),
+        MemoryRepoDreamPartSchema.parse(args[1]),
+      ],
+      handler: ([dreamId, part]) =>
+        memoryRepoDreamDiffText(
+          MemoryRepoService.get(),
+          dreamId as string,
+          part as "review" | "auto",
+        ),
+    },
+    acceptMemoryRepoDream: action(
+      MemoryRepoDreamIdSchema,
+      (dreamId) => runMemoryRepoDreamAction(MemoryRepoService.get(), "accept", dreamId),
+      true,
+    ),
+    rejectMemoryRepoDream: action(
+      MemoryRepoDreamIdSchema,
+      (dreamId) => runMemoryRepoDreamAction(MemoryRepoService.get(), "reject", dreamId),
+      true,
+    ),
+    undoMemoryRepoDream: action(
+      MemoryRepoDreamIdSchema,
+      (dreamId) => runMemoryRepoDreamAction(MemoryRepoService.get(), "undo", dreamId),
+      true,
+    ),
+    // Shares a running dream; the daily token budget bounds what repeated calls can spend.
+    dreamMemoryRepoNow: noArgs(async () => {
+      const dreamer = getMemoryRepoDreamer();
+      return toMemoryRepoDreamNowResult(dreamer ? await dreamer.run("manual") : null);
+    }, true),
     getMemoryObservationBackfillStatus: noArgs(() => MemoryObservationService.getBackfillStatus()),
     rebuildMemoryObservationMetadata: {
       ...action(

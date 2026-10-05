@@ -6,14 +6,50 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("electron", () => ({ ipcMain: { handle: vi.fn() } }));
 
 import { IPC_CHANNELS } from "../../../shared/types";
+import { MEMORY_REPO_DREAM_DIFF_MAX } from "../../../shared/memory-repo-types";
+import type { MemoryRepoDreamRecord } from "../../memory/repo/MemoryRepoService";
 import { createMemoryRepoIpcHandlers } from "../memory-repo-handlers";
+
+const NOW = Date.now();
+
+function dreamRecord(overrides: Partial<MemoryRepoDreamRecord> = {}): MemoryRepoDreamRecord {
+  return {
+    id: "20261005-abcd1234",
+    trigger: "daily",
+    status: "completed",
+    startedAt: NOW - 60_000,
+    finishedAt: NOW - 50_000,
+    summary: "Merged two duplicates.",
+    tokens: 1200,
+    autoCommit: "0123456789abcdef0123456789abcdef01234567",
+    autoCount: 2,
+    reviewBranch: "dream/20261005-abcd1234",
+    reviewBase: "fedcba9876543210fedcba9876543210fedcba98",
+    reviewCount: 1,
+    reviewStatus: "pending",
+    rejected: 0,
+    skipped: 0,
+    operations: [
+      { decision: "auto", description: "remove me.md L3", reason: "duplicate" },
+      {
+        decision: "review",
+        description: "update MEMORY.md L2",
+        reason: "stale",
+        why: "in MEMORY.md",
+      },
+    ],
+    taskIds: ["t1"],
+    lastTaskCreatedAt: NOW - 100_000,
+    ...overrides,
+  };
+}
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(options: { ready?: boolean; root?: string | null } = {}) {
+function setup(options: { ready?: boolean; root?: string | null; noDreamer?: boolean } = {}) {
   let root = options.root;
   if (root === undefined) {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "memory-repo-ipc-"));
@@ -26,6 +62,23 @@ function setup(options: { ready?: boolean; root?: string | null } = {}) {
           root,
           isReady: vi.fn(() => options.ready !== false),
           compactHistory: vi.fn(async () => ({ compacted: true })),
+          listDreams: vi.fn(async (_limit?: number) => [
+            dreamRecord(),
+            dreamRecord({
+              id: "old",
+              startedAt: NOW - 3 * 86_400_000,
+              finishedAt: NOW - 3 * 86_400_000,
+              tokens: 9000,
+              reviewStatus: "accepted",
+            }),
+          ]),
+          dreamDiff: vi.fn(async (_id: string, _part: "review" | "auto") => "+added\n-removed\n"),
+          acceptDream: vi.fn(async (_id: string) => ({ accepted: true })),
+          rejectDream: vi.fn(async (_id: string) => ({
+            rejected: false,
+            error: "Nothing waiting",
+          })),
+          undoDream: vi.fn(async (_id: string) => ({ undone: true })),
         };
   const status = vi.fn(async () => ({
     enabled: true,
@@ -39,14 +92,20 @@ function setup(options: { ready?: boolean; root?: string | null } = {}) {
   );
   const openPath = vi.fn(async () => "");
   const checkRateLimit = vi.fn();
+  const run = vi.fn(async (_trigger: "daily" | "manual") => ({
+    ran: true as const,
+    record: dreamRecord({ id: "fresh" }),
+  }));
   const handlers = createMemoryRepoIpcHandlers({
     status,
-    getService: () => service,
+    getService: () => service as never,
     readLines,
     openPath,
     checkRateLimit,
+    getDreamer: () => (options.noDreamer ? null : { run }),
+    dreamSettings: () => ({ enabled: true, dailyTokenBudget: 50_000 }),
   });
-  return { handlers, service, status, readLines, openPath, checkRateLimit };
+  return { handlers, service, status, readLines, openPath, checkRateLimit, run };
 }
 
 describe("memory folder IPC", () => {
@@ -56,7 +115,7 @@ describe("memory folder IPC", () => {
       channel.startsWith("memoryRepo:"),
     );
     expect(Object.keys(handlers).sort()).toEqual([...channels].sort());
-    expect(channels).toHaveLength(4);
+    expect(channels).toHaveLength(10);
   });
 
   it("returns the status and rate-limits every channel", async () => {
@@ -68,6 +127,12 @@ describe("memory folder IPC", () => {
     await handlers[IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY](undefined);
     await handlers[IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER](undefined);
     await handlers[IPC_CHANNELS.MEMORY_REPO_READ_LINES]({ refs: ["repo:me.md#L3"] });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_DREAMS](undefined);
+    await handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_DIFF]({ id: "abc", part: "review" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_ACCEPT_DREAM]({ id: "abc" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_REJECT_DREAM]({ id: "abc" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM]({ id: "abc" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW](undefined);
     for (const channel of Object.keys(handlers)) {
       expect(checkRateLimit).toHaveBeenCalledWith(channel);
     }
@@ -155,5 +220,139 @@ describe("memory folder IPC", () => {
       );
     }
     expect(readLines).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("memory folder dream IPC", () => {
+  it("lists dreams without branch names or full shas", async () => {
+    const { handlers } = setup();
+    const report = (await handlers[IPC_CHANNELS.MEMORY_REPO_DREAMS](undefined)) as Record<
+      string,
+      unknown
+    >;
+    expect(report).toMatchObject({
+      folderReady: true,
+      dreamingEnabled: true,
+      dailyBudget: 50_000,
+      pendingReviews: 1,
+      tokensUsedToday: 1200,
+    });
+    const [first] = report.dreams as Array<Record<string, unknown>>;
+    expect(first).toMatchObject({
+      id: "20261005-abcd1234",
+      autoCount: 2,
+      canUndo: true,
+      undone: false,
+      reviewStatus: "pending",
+      autoCommitShort: "01234567",
+    });
+    const text = JSON.stringify(report);
+    expect(text).not.toContain("dream/");
+    expect(text).not.toContain("0123456789abcdef0123456789abcdef01234567");
+    expect(text).not.toContain("fedcba98");
+  });
+
+  it("reports an empty list while the folder is off", async () => {
+    const { handlers } = setup({ root: null });
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_DREAMS](undefined)).resolves.toMatchObject({
+      folderReady: false,
+      dreams: [],
+      pendingReviews: 0,
+    });
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_ACCEPT_DREAM]({ id: "abc" })).resolves.toEqual({
+      ok: false,
+      error: "The memory folder is off.",
+    });
+  });
+
+  it("validates dream ids and the diff part", async () => {
+    const { handlers, service } = setup();
+    const badIds: unknown[] = [
+      undefined,
+      null,
+      "abc",
+      {},
+      { id: "" },
+      { id: "../x" },
+      { id: "a/b" },
+      { id: "x".repeat(65) },
+      { id: 42 },
+      { id: "abc", extra: 1 },
+    ];
+    for (const channel of [
+      IPC_CHANNELS.MEMORY_REPO_ACCEPT_DREAM,
+      IPC_CHANNELS.MEMORY_REPO_REJECT_DREAM,
+      IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM,
+    ]) {
+      for (const payload of badIds) {
+        await expect(handlers[channel](payload)).rejects.toThrow(/Invalid/);
+      }
+    }
+    for (const payload of [
+      { id: "abc" },
+      { id: "abc", part: "branch" },
+      { id: "../x", part: "review" },
+      { id: "abc", part: "auto", extra: true },
+    ]) {
+      await expect(handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_DIFF](payload)).rejects.toThrow(
+        /Invalid/,
+      );
+    }
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_DREAMS]({ limit: 5 })).rejects.toThrow(
+      /Invalid/,
+    );
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW]({ force: true })).rejects.toThrow(
+      /Invalid/,
+    );
+    expect(service!.acceptDream).not.toHaveBeenCalled();
+    expect(service!.dreamDiff).not.toHaveBeenCalled();
+  });
+
+  it("maps accept, reject and undo to ok or an error", async () => {
+    const { handlers, service } = setup();
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_ACCEPT_DREAM]({ id: "d-1" })).resolves.toEqual({
+      ok: true,
+    });
+    expect(service!.acceptDream).toHaveBeenCalledWith("d-1");
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_REJECT_DREAM]({ id: "d-1" })).resolves.toEqual({
+      ok: false,
+      error: "Nothing waiting",
+    });
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM]({ id: "d_2" })).resolves.toEqual({
+      ok: true,
+    });
+    expect(service!.undoDream).toHaveBeenCalledWith("d_2");
+  });
+
+  it("returns the diff, capped", async () => {
+    const { handlers, service } = setup();
+    await expect(
+      handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_DIFF]({ id: "d-1", part: "auto" }),
+    ).resolves.toBe("+added\n-removed\n");
+    expect(service!.dreamDiff).toHaveBeenCalledWith("d-1", "auto");
+    service!.dreamDiff.mockResolvedValueOnce("+".repeat(MEMORY_REPO_DREAM_DIFF_MAX + 500));
+    const capped = (await handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_DIFF]({
+      id: "d-1",
+      part: "review",
+    })) as string;
+    expect(capped.length).toBeLessThan(MEMORY_REPO_DREAM_DIFF_MAX + 100);
+    expect(capped).toContain("diff truncated");
+  });
+
+  it("dreams now through the dreamer and maps the outcome", async () => {
+    const { handlers, run } = setup();
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW](undefined)).resolves.toMatchObject({
+      ran: true,
+      dream: { id: "fresh", autoCount: 2 },
+    });
+    expect(run).toHaveBeenCalledWith("manual");
+    run.mockResolvedValueOnce({ ran: false, reason: "budget" } as never);
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW](undefined)).resolves.toEqual({
+      ran: false,
+      reason: "budget",
+    });
+    await expect(
+      setup({ noDreamer: true }).handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW](undefined),
+    ).resolves.toEqual({ ran: false, reason: "unavailable" });
   });
 });

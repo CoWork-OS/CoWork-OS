@@ -156,7 +156,27 @@ describe("MemoryFeaturesManager", () => {
       memoryCompressionDailyTokenBudget: 20000,
       memoryRepoEnabled: false,
       memoryRepoPath: "",
+      memoryRepoDreamingEnabled: true,
+      memoryRepoDreamDailyTokenBudget: 50000,
     });
+  });
+
+  it("keeps memory folder dreaming on by default with a bounded budget", () => {
+    MemoryFeaturesManager.saveSettings({ memoryRepoDreamDailyTokenBudget: 5_000_000 });
+    expect(mocks.storedSettings).toMatchObject({
+      memoryRepoDreamingEnabled: true,
+      memoryRepoDreamDailyTokenBudget: 1_000_000,
+    });
+    MemoryFeaturesManager.saveSettings({
+      memoryRepoDreamingEnabled: false,
+      memoryRepoDreamDailyTokenBudget: 0,
+    });
+    expect(mocks.storedSettings).toMatchObject({
+      memoryRepoDreamingEnabled: false,
+      memoryRepoDreamDailyTokenBudget: 50000,
+    });
+    MemoryFeaturesManager.saveSettings({ memoryRepoDreamDailyTokenBudget: 1234.9 });
+    expect(mocks.storedSettings).toMatchObject({ memoryRepoDreamDailyTokenBudget: 1234 });
   });
 
   it("keeps the memory repo off by default and tells listeners about saves", () => {

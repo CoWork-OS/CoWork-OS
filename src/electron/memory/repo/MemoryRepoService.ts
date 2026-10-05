@@ -59,6 +59,11 @@ import {
   type GitRunner,
 } from "./memory-repo-git";
 import { MemoryRepoBusyError, withMemoryRepoLock } from "./memory-repo-lock";
+import {
+  applyDreamOperations,
+  describeDreamOperation,
+  type ClassifiedDreamOperation,
+} from "./memory-repo-dream-plan";
 
 const logger = createLogger("MemoryRepo");
 
@@ -72,7 +77,7 @@ const ABOUT_USER_KINDS: ReadonlySet<MemoryItemKind> = new Set([
   "correction",
 ]);
 
-export type MemoryRepoOrigin = "agent_tool" | "memory_hub" | "export" | "hand_edit";
+export type MemoryRepoOrigin = "agent_tool" | "memory_hub" | "export" | "hand_edit" | "dream";
 
 export interface MemoryRepoRememberInput {
   text: string;
@@ -511,6 +516,8 @@ export class MemoryRepoService {
       return await this.serialized(() =>
         this.locked(async () => {
           await this.commitHandEdits();
+          // Dream branches would keep the old history (and forgotten text) reachable.
+          await this.dropDreamBranches("history compacted");
           const temp = `compact-${this.now().toString(36)}`;
           await this.runGit(["checkout", "-q", "--orphan", temp]);
           await this.commit("Compact memory history", { origin: "memory_hub" }, true);
@@ -526,6 +533,309 @@ export class MemoryRepoService {
     } catch (error) {
       return { compacted: false, error: this.describeError(error) };
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dreaming (docs/memory-repo-phase2-design.md §5)
+  // ---------------------------------------------------------------------------
+
+  /** Every markdown file's text, inbox included. */
+  async readAllFiles(): Promise<Map<string, string>> {
+    const files = new Map<string, string>();
+    for (const file of await this.listFiles()) {
+      const text = await this.readFile(file);
+      if (text !== null) files.set(file, text);
+    }
+    return files;
+  }
+
+  /**
+   * Apply a dream: the automatic operations as one commit on main, the review operations as
+   * one commit on branch `dream/<id>` (built in a temporary worktree outside the folder).
+   * Operations are re-resolved against the files as they are now, under the lock.
+   */
+  async applyDream(params: {
+    id: string;
+    trigger: MemoryRepoDreamTrigger;
+    startedAt: number;
+    summary: string;
+    operations: ClassifiedDreamOperation[];
+    rejected: number;
+    tokens: number;
+    taskIds: string[];
+    lastTaskCreatedAt: number | null;
+  }): Promise<MemoryRepoDreamRecord> {
+    if (!this.isWritable()) throw new Error("The memory repo is not available.");
+    if (!this.hasGit) throw new Error("Dreaming needs git.");
+    return this.serialized(() =>
+      this.locked(async () => {
+        await this.commitHandEdits();
+        const now = this.now();
+        const files = await this.readAllFiles();
+        const autoOps = params.operations.filter((op) => op.decision === "auto");
+        const reviewOps = params.operations.filter((op) => op.decision === "review");
+        const auto = applyDreamOperations({ files, operations: autoOps, by: "agent", now });
+        let autoCommit: string | null = null;
+        if (auto.files.size > 0) {
+          for (const [file, text] of auto.files) await this.writeFileAtomic(file, text);
+          this.workspaceFiles = null;
+          this.writeCount += 1;
+          await this.runGit(["add", "-A", "--", ...auto.files.keys()]);
+          await this.commit(
+            `Dream ${isoDay(now)}: ${auto.applied.length} change${auto.applied.length === 1 ? "" : "s"}`,
+            { origin: "dream", dreamId: params.id, details: auto.applied.map(describeDreamOperation) },
+          );
+          autoCommit = this.head;
+          this.notify([...auto.files.keys()]);
+        }
+        const merged = new Map(files);
+        for (const [file, text] of auto.files) merged.set(file, text);
+        const review = applyDreamOperations({ files: merged, operations: reviewOps, by: "user", now });
+        let reviewBranch: string | null = null;
+        let reviewBase: string | null = null;
+        if (review.files.size > 0) {
+          reviewBase = this.head;
+          reviewBranch = `dream/${params.id}`;
+          await this.commitOnBranch(reviewBranch, review.files, {
+            message: `Dream ${isoDay(now)} (for review): ${review.applied.length} change${review.applied.length === 1 ? "" : "s"}`,
+            details: review.applied.map(describeDreamOperation),
+            dreamId: params.id,
+          });
+        }
+        const describe = (op: ClassifiedDreamOperation, decision: string, why?: string) => ({
+          decision,
+          description: describeDreamOperation(op),
+          ...(op.op.reason ? { reason: op.op.reason } : {}),
+          ...(why ? { why } : {}),
+        });
+        const record: MemoryRepoDreamRecord = {
+          id: params.id,
+          trigger: params.trigger,
+          status: "completed",
+          startedAt: params.startedAt,
+          finishedAt: now,
+          summary: params.summary,
+          tokens: params.tokens,
+          autoCommit,
+          autoCount: auto.applied.length,
+          reviewBranch,
+          reviewBase,
+          reviewCount: review.applied.length,
+          reviewStatus: reviewBranch ? "pending" : null,
+          rejected: params.rejected + params.operations.filter((op) => op.decision === "rejected").length,
+          skipped: auto.skipped.length + review.skipped.length,
+          operations: [
+            ...auto.applied.map((op) => describe(op, "auto")),
+            ...review.applied.map((op) => describe(op, "review", op.why)),
+            ...params.operations
+              .filter((op) => op.decision === "rejected")
+              .map((op) => describe(op, "rejected", op.why)),
+            ...[...auto.skipped, ...review.skipped].map((entry) => describe(entry.op, "skipped", entry.why)),
+          ],
+          taskIds: params.taskIds,
+          lastTaskCreatedAt: params.lastTaskCreatedAt,
+        };
+        await this.writeDreamRecord(record);
+        return record;
+      }),
+    );
+  }
+
+  /** Record a dream that did not apply anything (skipped or failed). */
+  async recordDream(record: MemoryRepoDreamRecord): Promise<void> {
+    if (!this.ready) return;
+    await this.writeDreamRecord(record);
+  }
+
+  /** Dream records, newest first. */
+  async listDreams(limit = 30): Promise<MemoryRepoDreamRecord[]> {
+    const dir = this.dreamsDir();
+    const names = await fs.readdir(dir).catch(() => [] as string[]);
+    const records: MemoryRepoDreamRecord[] = [];
+    for (const name of names) {
+      if (!/^[A-Za-z0-9_-]+\.json$/.test(name)) continue;
+      try {
+        records.push(JSON.parse(await fs.readFile(path.join(dir, name), "utf8")) as MemoryRepoDreamRecord);
+      } catch {
+        // A half-written record is skipped.
+      }
+    }
+    return records.sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+  }
+
+  async getDream(id: string): Promise<MemoryRepoDreamRecord | null> {
+    if (!DREAM_ID.test(id)) return null;
+    try {
+      return JSON.parse(await fs.readFile(path.join(this.dreamsDir(), `${id}.json`), "utf8")) as MemoryRepoDreamRecord;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The diff of a dream: its review branch against its base, or its automatic commit. */
+  async dreamDiff(id: string, part: "review" | "auto"): Promise<string> {
+    const record = await this.getDream(id);
+    if (!record || !this.hasGit) return "";
+    try {
+      if (part === "review" && record.reviewBranch && record.reviewBase && record.reviewStatus === "pending") {
+        return await this.runGit(["diff", "--no-color", "--no-ext-diff", `${record.reviewBase}..${record.reviewBranch}`]);
+      }
+      if (part === "auto" && record.autoCommit) {
+        return await this.runGit(["show", "--no-color", "--no-ext-diff", "--format=", record.autoCommit]);
+      }
+    } catch {
+      // The commit is gone (history compacted).
+    }
+    return "";
+  }
+
+  /** Merge a dream's review branch into main. A conflict leaves main unchanged (stale). */
+  async acceptDream(id: string): Promise<{ accepted: boolean; error?: string }> {
+    const record = await this.getDream(id);
+    if (!record?.reviewBranch || record.reviewStatus !== "pending") {
+      return { accepted: false, error: "Nothing waiting for review in this dream." };
+    }
+    if (!this.isWritable()) return { accepted: false, error: "The memory repo is not available." };
+    const branch = record.reviewBranch;
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          try {
+            await this.runGit(["merge", "--no-ff", "--no-edit", "-m", `Accept dream ${record.id}`, branch]);
+          } catch (error) {
+            await this.runGit(["merge", "--abort"]).catch(() => undefined);
+            await this.writeDreamRecord({ ...record, reviewStatus: "stale" });
+            await this.runGit(["branch", "-D", branch]).catch(() => undefined);
+            return {
+              accepted: false,
+              error: `The memory folder changed since this dream; it was not applied (${this.describeError(error)}).`,
+            };
+          }
+          this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
+          await this.runGit(["branch", "-D", branch]).catch(() => undefined);
+          this.writeCount += 1;
+          this.workspaceFiles = null;
+          await this.writeDreamRecord({ ...record, reviewStatus: "accepted", reviewMergeCommit: this.head });
+          this.notify([]);
+          return { accepted: true };
+        }),
+      );
+    } catch (error) {
+      return { accepted: false, error: this.describeError(error) };
+    }
+  }
+
+  async rejectDream(id: string): Promise<{ rejected: boolean; error?: string }> {
+    const record = await this.getDream(id);
+    if (!record?.reviewBranch || record.reviewStatus !== "pending") {
+      return { rejected: false, error: "Nothing waiting for review in this dream." };
+    }
+    const branch = record.reviewBranch;
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.runGit(["branch", "-D", branch]).catch(() => undefined);
+          await this.writeDreamRecord({ ...record, reviewStatus: "rejected" });
+          return { rejected: true };
+        }),
+      );
+    } catch (error) {
+      return { rejected: false, error: this.describeError(error) };
+    }
+  }
+
+  /** Undo a dream's automatic commit with `git revert`. A conflict leaves main unchanged. */
+  async undoDream(id: string): Promise<{ undone: boolean; error?: string }> {
+    const record = await this.getDream(id);
+    if (!record?.autoCommit || record.undoneAt) {
+      return { undone: false, error: "This dream has no automatic changes to undo." };
+    }
+    if (!this.isWritable()) return { undone: false, error: "The memory repo is not available." };
+    const commit = record.autoCommit;
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          try {
+            await this.runGit(["revert", "--no-edit", commit]);
+          } catch (error) {
+            await this.runGit(["revert", "--abort"]).catch(() => undefined);
+            return {
+              undone: false,
+              error: `Later changes touch the same lines; undo it by hand (${this.describeError(error)}).`,
+            };
+          }
+          this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
+          this.writeCount += 1;
+          this.workspaceFiles = null;
+          await this.writeDreamRecord({ ...record, undoneAt: this.now() });
+          this.notify([]);
+          return { undone: true };
+        }),
+      );
+    } catch (error) {
+      return { undone: false, error: this.describeError(error) };
+    }
+  }
+
+  private dreamsDir(): string {
+    return path.join(this.root, ".git", "cowork-dreams");
+  }
+
+  private async writeDreamRecord(record: MemoryRepoDreamRecord): Promise<void> {
+    if (!DREAM_ID.test(record.id)) throw new Error("invalid dream id");
+    const dir = this.dreamsDir();
+    await fs.mkdir(dir, { recursive: true });
+    const target = path.join(dir, `${record.id}.json`);
+    const temp = `${target}.${process.pid}.tmp`;
+    await fs.writeFile(temp, JSON.stringify(record, null, 2), { mode: 0o600 });
+    await fs.rename(temp, target);
+  }
+
+  /** Delete every `dream/*` branch and mark pending reviews stale (before compaction). */
+  private async dropDreamBranches(reason: string): Promise<void> {
+    const branches = (await this.runGit(["for-each-ref", "--format=%(refname:short)", "refs/heads/dream/"]).catch(() => ""))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (const branch of branches) await this.runGit(["branch", "-D", branch]).catch(() => undefined);
+    for (const record of await this.listDreams(1000)) {
+      if (record.reviewStatus === "pending" || (record.autoCommit && !record.undoneAt)) {
+        await this.writeDreamRecord({
+          ...record,
+          ...(record.reviewStatus === "pending" ? { reviewStatus: "stale" as const } : {}),
+          ...(record.autoCommit ? { autoCommit: null, historyNote: reason } : {}),
+        });
+      }
+    }
+  }
+
+  /** One commit on a new branch from HEAD, built in a temporary worktree outside the folder. */
+  private async commitOnBranch(
+    branch: string,
+    files: Map<string, string>,
+    meta: { message: string; details: string[]; dreamId: string },
+  ): Promise<void> {
+    const worktree = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-dream-"));
+    await fs.rm(worktree, { recursive: true, force: true });
+    await this.runGit(["worktree", "add", "-q", "-b", branch, worktree, "HEAD"]);
+    try {
+      for (const [file, text] of files) {
+        if (!isSafeRepoPath(file)) throw new Error(`unsafe memory path: ${file}`);
+        const absolute = path.join(worktree, file);
+        await fs.mkdir(path.dirname(absolute), { recursive: true });
+        await fs.writeFile(absolute, text.endsWith("\n") ? text : `${text}\n`, { mode: 0o600 });
+      }
+      await this.git(worktree, ["add", "-A", "--", ...files.keys()]);
+      await this.git(worktree, ["commit", "-q", "--no-verify", "-m", this.commitBody(meta.message, { origin: "dream", dreamId: meta.dreamId, details: meta.details })]);
+    } catch (error) {
+      await this.runGit(["worktree", "remove", "--force", worktree]).catch(() => undefined);
+      await this.runGit(["branch", "-D", branch]).catch(() => undefined);
+      throw error;
+    }
+    await this.runGit(["worktree", "remove", "--force", worktree]).catch(() => undefined);
+    await this.runGit(["worktree", "prune"]).catch(() => undefined);
   }
 
   // ---------------------------------------------------------------------------
@@ -761,17 +1071,19 @@ export class MemoryRepoService {
     this.notify(paths);
   }
 
-  private async commit(
-    message: string,
-    meta: { origin: MemoryRepoOrigin; taskId?: string | null },
-    allowEmpty = false,
-  ): Promise<void> {
-    const body = [
+  private commitBody(message: string, meta: CommitMeta): string {
+    return [
       message.slice(0, 200),
+      ...(meta.details?.length ? ["", ...meta.details.slice(0, 50).map((line) => `- ${line}`)] : []),
       "",
       `Origin: ${meta.origin}`,
       ...(meta.taskId ? [`Task: ${meta.taskId}`] : []),
+      ...(meta.dreamId ? [`Dream: ${meta.dreamId}`] : []),
     ].join("\n");
+  }
+
+  private async commit(message: string, meta: CommitMeta, allowEmpty = false): Promise<void> {
+    const body = this.commitBody(message, meta);
     await this.runGit(["commit", "-q", "--no-verify", ...(allowEmpty ? ["--allow-empty"] : []), "-m", body]);
     this.head = (await this.runGit(["rev-parse", "HEAD"]).catch(() => "")).trim() || null;
   }
@@ -831,6 +1143,44 @@ export class MemoryRepoService {
     if (error instanceof SkipWrite) return error.detail ?? error.reason;
     return error instanceof Error ? error.message : String(error);
   }
+}
+
+interface CommitMeta {
+  origin: MemoryRepoOrigin;
+  taskId?: string | null;
+  dreamId?: string;
+  details?: string[];
+}
+
+const DREAM_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export type MemoryRepoDreamTrigger = "daily" | "manual";
+
+/** One dream run as recorded in `.git/cowork-dreams/<id>.json` (design §5). */
+export interface MemoryRepoDreamRecord {
+  id: string;
+  trigger: MemoryRepoDreamTrigger;
+  status: "completed" | "skipped" | "failed";
+  startedAt: number;
+  finishedAt: number;
+  summary: string;
+  skipReason?: string;
+  error?: string;
+  tokens: number;
+  autoCommit: string | null;
+  autoCount: number;
+  undoneAt?: number;
+  reviewBranch: string | null;
+  reviewBase: string | null;
+  reviewCount: number;
+  reviewStatus: "pending" | "accepted" | "rejected" | "stale" | null;
+  reviewMergeCommit?: string | null;
+  rejected: number;
+  skipped: number;
+  operations: Array<{ decision: string; description: string; reason?: string; why?: string }>;
+  taskIds: string[];
+  lastTaskCreatedAt: number | null;
+  historyNote?: string;
 }
 
 export function taskSourceLink(taskId: string): string {

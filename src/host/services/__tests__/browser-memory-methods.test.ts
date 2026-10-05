@@ -523,4 +523,38 @@ describe("browser memory folder methods", () => {
       await expect(call("readMemoryRepoLines", [refs])).rejects.toThrow();
     }
   });
+
+  it("mirrors the desktop dream methods with the same validation", async () => {
+    const { MemoryRepoService } = await import("../../../electron/memory/repo/MemoryRepoService");
+    MemoryRepoService.setInstance(null);
+    const { call, definitions } = setup();
+    expect(definitions.getMemoryRepoDreams.mutation).toBe(false);
+    expect(definitions.getMemoryRepoDreamDiff.mutation).toBe(false);
+    for (const name of [
+      "acceptMemoryRepoDream",
+      "rejectMemoryRepoDream",
+      "undoMemoryRepoDream",
+      "dreamMemoryRepoNow",
+    ]) {
+      expect(definitions[name].mutation).toBe(true);
+    }
+    await expect(call("getMemoryRepoDreams")).resolves.toMatchObject({
+      folderReady: false,
+      dreams: [],
+      pendingReviews: 0,
+    });
+    await expect(call("getMemoryRepoDreamDiff", ["d-1", "review"])).resolves.toBe("");
+    await expect(call("acceptMemoryRepoDream", ["d-1"])).resolves.toEqual({
+      ok: false,
+      error: "The memory folder is off.",
+    });
+    await expect(call("dreamMemoryRepoNow")).resolves.toEqual({
+      ran: false,
+      reason: "unavailable",
+    });
+    for (const id of ["", "../x", "a/b", "x".repeat(65), 7]) {
+      await expect(call("undoMemoryRepoDream", [id])).rejects.toThrow();
+    }
+    await expect(call("getMemoryRepoDreamDiff", ["d-1", "branch"])).rejects.toThrow();
+  });
 });

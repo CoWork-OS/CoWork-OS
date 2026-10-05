@@ -866,7 +866,10 @@ user saves with `memory_remember` go to a local git repo of markdown files in th
 Memory Repo format instead of `memory_items`, and `MEMORY.md` plus the workspace's file are
 in every private prompt as `<cowork_memory_repo>`. Contact, task, private and strict-privacy
 facts stay in `memory_items`, as do the other producers. See
-[memory-repo-phase1-design.md](memory-repo-phase1-design.md).
+[memory-repo-phase1-design.md](memory-repo-phase1-design.md). The folder has its own dreaming
+(an AI pass over the folder and recent tasks; safe changes as an undoable commit, the rest on
+a review branch): [memory-repo-phase2-design.md](memory-repo-phase2-design.md). The heuristic
+curator in §5b keeps curating `memory_items`.
 
 ## 8. Gaps and next steps
 

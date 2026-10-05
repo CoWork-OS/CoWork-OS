@@ -48,6 +48,10 @@ import type {
 import type { MemoryHealthReport, MemorySourcesReport } from "../shared/memory-health-types";
 import type {
   MemoryRepoCompactResult,
+  MemoryRepoDreamActionResult,
+  MemoryRepoDreamNowResult,
+  MemoryRepoDreamPart,
+  MemoryRepoDreamsReport,
   MemoryRepoLine,
   MemoryRepoStatusReport,
 } from "../shared/memory-repo-types";
@@ -4312,6 +4316,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
   compactMemoryRepoHistory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY),
   readMemoryRepoLines: (refs: string[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_READ_LINES, { refs }),
+  // Dreams over the memory folder: review, undo and "Dream now"
+  getMemoryRepoDreams: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_DREAMS),
+  getMemoryRepoDreamDiff: (id: string, part: MemoryRepoDreamPart) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_DREAM_DIFF, { id, part }),
+  acceptMemoryRepoDream: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_ACCEPT_DREAM, { id }),
+  rejectMemoryRepoDream: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_REJECT_DREAM, { id }),
+  undoMemoryRepoDream: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM, { id }),
+  dreamMemoryRepoNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_DREAM_NOW),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -7955,6 +7970,12 @@ export interface ElectronAPI {
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
   readMemoryRepoLines: (refs: string[]) => Promise<MemoryRepoLine[]>;
+  getMemoryRepoDreams: () => Promise<MemoryRepoDreamsReport>;
+  getMemoryRepoDreamDiff: (id: string, part: MemoryRepoDreamPart) => Promise<string>;
+  acceptMemoryRepoDream: (id: string) => Promise<MemoryRepoDreamActionResult>;
+  rejectMemoryRepoDream: (id: string) => Promise<MemoryRepoDreamActionResult>;
+  undoMemoryRepoDream: (id: string) => Promise<MemoryRepoDreamActionResult>;
+  dreamMemoryRepoNow: () => Promise<MemoryRepoDreamNowResult>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

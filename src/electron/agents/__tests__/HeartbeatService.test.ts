@@ -759,6 +759,48 @@ describe("HeartbeatService v3", () => {
     expect(runMemoryDreaming).not.toHaveBeenCalled();
   });
 
+  it("offers the memory folder its daily dream once per pulse, without awaiting it", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const runMemoryRepoDream = vi.fn(() => new Promise<unknown>(() => undefined));
+    const service = createService({ runMemoryRepoDream });
+    const result = await service.triggerHeartbeat("agent-1");
+    await Promise.resolve();
+    expect(result.status).not.toBe("error");
+    expect(runMemoryRepoDream).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a failing memory folder dream from failing the pulse", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const runMemoryRepoDream = vi.fn(async () => {
+      throw new Error("provider down");
+    });
+    const service = createService({ runMemoryRepoDream });
+    const result = await service.triggerHeartbeat("agent-1");
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(result.status).not.toBe("error");
+    expect(runMemoryRepoDream).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer the memory folder dream with a foreground task or maintenance off", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
+    const busyDream = vi.fn(async () => null);
+    await createService({
+      runMemoryRepoDream: busyDream,
+      hasActiveForegroundTask: () => true,
+    }).triggerHeartbeat("agent-1");
+    const offDream = vi.fn(async () => null);
+    await createService({
+      runMemoryRepoDream: offDream,
+      getMemoryFeaturesSettings: () =>
+        ({ heartbeatMaintenanceEnabled: false }) as ReturnType<
+          NonNullable<HeartbeatServiceDeps["getMemoryFeaturesSettings"]>
+        >,
+    }).triggerHeartbeat("agent-1");
+    await Promise.resolve();
+    expect(busyDream).not.toHaveBeenCalled();
+    expect(offDream).not.toHaveBeenCalled();
+  });
+
   it("reconciles stale agent heartbeat runs on service start without touching issue-linked runs", async () => {
     createAgent("agent-1");
     const service = createService();

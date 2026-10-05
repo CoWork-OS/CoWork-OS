@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   MemoryRepoCompactResult,
+  MemoryRepoDreamNowResult,
+  MemoryRepoDreamsReport,
   MemoryRepoStatusReport,
 } from "../../../shared/memory-repo-types";
 import type { MemoryFeaturesSettings } from "../../../shared/types";
 import { hasHostMethod } from "../../host/browser-capabilities";
 import { formatRelative } from "./memory-knowledge-model";
+import {
+  dreamCostNotice,
+  dreamLastLine,
+  dreamNowMessage,
+  dreamTokensLine,
+} from "./memory-repo-dreams-model";
+
+/** `memoryRepoDreamDailyTokenBudget` when unset (the settings manager's default). */
+export const MEMORY_REPO_DREAM_DEFAULT_BUDGET = 50_000;
 
 /** The preload methods the card uses (injected in tests). */
 export type MemoryRepoApi = {
@@ -14,7 +25,82 @@ export type MemoryRepoApi = {
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder?: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
+  getMemoryRepoDreams?: () => Promise<MemoryRepoDreamsReport>;
+  dreamMemoryRepoNow?: () => Promise<MemoryRepoDreamNowResult>;
 };
+
+export interface MemoryRepoDreamingViewProps {
+  dreamingEnabled: boolean;
+  dailyBudget: number;
+  report: MemoryRepoDreamsReport | null;
+  /** The folder is on and ready. */
+  ready: boolean;
+  canDreamNow: boolean;
+  /** Another action of the card runs. */
+  disabled: boolean;
+  dreaming: boolean;
+  message: { tone: "success" | "error"; text: string } | null;
+  onToggle: (enabled: boolean) => void;
+  onDreamNow: () => void;
+}
+
+/** The card's "Dreaming" subsection (docs/memory-repo-phase2-design.md §6-§7). */
+export function MemoryRepoDreamingView(props: MemoryRepoDreamingViewProps) {
+  return (
+    <div className="settings-form-group memory-hub-top-gap" data-testid="memory-repo-dreaming">
+      <div className="memory-hub-toggle-row">
+        <div className="memory-hub-grow">
+          <div className="memory-hub-primary-label">Dreaming</div>
+          <p className="settings-form-hint memory-hub-hint-tight">
+            A daily pass keeps the folder accurate and small and saves what tasks taught. Safe
+            changes are committed (undo them in the Review tab); the rest waits there for you.
+          </p>
+          <p className="settings-form-hint memory-hub-hint-tight">
+            {dreamCostNotice(props.dailyBudget)}
+          </p>
+        </div>
+        <label className="settings-toggle memory-hub-toggle">
+          <input
+            type="checkbox"
+            aria-label="Dreaming"
+            checked={props.dreamingEnabled}
+            onChange={(e) => props.onToggle(e.target.checked)}
+            disabled={props.disabled || props.dreaming}
+          />
+          <span className="toggle-slider" />
+        </label>
+      </div>
+      {props.ready && (
+        <>
+          <p className="settings-form-hint" role="status">
+            {dreamLastLine(props.report)}
+            {props.report ? ` ${dreamTokensLine(props.report)}` : ""}
+          </p>
+          {props.canDreamNow && (
+            <div className="memory-hub-row-wrap-center">
+              <button
+                type="button"
+                className="settings-button"
+                disabled={props.disabled || props.dreaming || !props.dreamingEnabled}
+                onClick={props.onDreamNow}
+              >
+                {props.dreaming ? "Dreaming..." : "Dream now"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {props.message && (
+        <div
+          role={props.message.tone === "error" ? "alert" : "status"}
+          className={`settings-feedback ${props.message.tone} memory-hub-top-gap`}
+        >
+          {props.message.text}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const COMPACT_HISTORY_CONFIRM =
   "Compact the memory folder's history?\n\nRemoves old versions so deleted memories are really gone. This can't be undone.";
@@ -84,14 +170,33 @@ export function MemoryRepoCard({
   const canOpen = hasHostMethod("openMemoryRepoFolder");
   const enabled = features.memoryRepoEnabled === true;
   const savedPath = features.memoryRepoPath ?? "";
+  const canListDreams = hasHostMethod("getMemoryRepoDreams");
+  const canDreamNow = hasHostMethod("dreamMemoryRepoNow");
+  const [dreams, setDreams] = useState<MemoryRepoDreamsReport | null>(null);
+  const [dreaming, setDreaming] = useState(false);
+  const [dreamMessage, setDreamMessage] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
 
   useEffect(() => setPathDraft(features.memoryRepoPath ?? ""), [features.memoryRepoPath]);
+
+  const loadDreams = useCallback(async () => {
+    const list = api().getMemoryRepoDreams;
+    if (!canListDreams || !list) return;
+    try {
+      setDreams(await list());
+    } catch {
+      // The dream line stays as it was; the status line reports folder problems.
+    }
+  }, [api, canListDreams]);
 
   const loadStatus = useCallback(async () => {
     const current = ++generation.current;
     try {
       const next = await api().getMemoryRepoStatus();
       if (current === generation.current) setStatus(next);
+      if (current === generation.current && next.enabled && next.ready) void loadDreams();
     } catch (error) {
       if (current !== generation.current) return;
       setMessage({
@@ -168,6 +273,21 @@ export function MemoryRepoCard({
       });
     } finally {
       setBusy(null);
+    }
+  };
+
+  const dreamNow = async () => {
+    const run = api().dreamMemoryRepoNow;
+    if (!run) return;
+    setDreaming(true);
+    setDreamMessage(null);
+    try {
+      setDreamMessage(dreamNowMessage(await run()));
+    } catch (error) {
+      setDreamMessage({ tone: "error", text: memoryRepoErrorMessage(error, "The dream failed.") });
+    } finally {
+      setDreaming(false);
+      await loadDreams();
     }
   };
 
@@ -268,6 +388,23 @@ export function MemoryRepoCard({
         >
           {message.text}
         </div>
+      )}
+
+      {enabled && canListDreams && (
+        <MemoryRepoDreamingView
+          dreamingEnabled={features.memoryRepoDreamingEnabled !== false}
+          dailyBudget={features.memoryRepoDreamDailyTokenBudget ?? MEMORY_REPO_DREAM_DEFAULT_BUDGET}
+          report={dreams}
+          ready={Boolean(ready) && status?.gitAvailable === true}
+          canDreamNow={canDreamNow}
+          disabled={busy !== null}
+          dreaming={dreaming}
+          message={dreamMessage}
+          onToggle={(on) =>
+            void save({ memoryRepoDreamingEnabled: on }, on ? "Dreaming on." : "Dreaming off.")
+          }
+          onDreamNow={() => void dreamNow()}
+        />
       )}
     </div>
   );

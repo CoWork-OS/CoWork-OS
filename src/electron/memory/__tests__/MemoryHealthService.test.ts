@@ -11,8 +11,13 @@ import {
 import {
   MemoryHealthService,
   evaluateMemoryHealth,
+  evaluateMemoryRepoDreamHealth,
   evaluateMemoryRepoHealth,
 } from "../MemoryHealthService";
+import type {
+  MemoryRepoDreamSummary,
+  MemoryRepoDreamsReport,
+} from "../../../shared/memory-repo-types";
 import { createMemoryStatementPort } from "../memory-statement-port";
 import type { MemoryHealthCounts } from "../memory-health-sql";
 import { nativeSqliteAvailable } from "./memory-items-test-db";
@@ -376,18 +381,25 @@ describe("memory folder health (service-only; not in qa:memory-health)", () => {
   });
 
   it("warns for missing git, uncommitted edits, a failed write and an oversized MEMORY.md", () => {
-    expect(byId(evaluateMemoryRepoHealth({ ...ready, gitAvailable: false })).memory_repo).toMatchObject({
+    expect(
+      byId(evaluateMemoryRepoHealth({ ...ready, gitAvailable: false })).memory_repo,
+    ).toMatchObject({
       status: "warn",
       detail: expect.stringContaining("git not found"),
     });
-    expect(byId(evaluateMemoryRepoHealth({ ...ready, clean: false })).memory_repo.status).toBe("warn");
+    expect(byId(evaluateMemoryRepoHealth({ ...ready, clean: false })).memory_repo.status).toBe(
+      "warn",
+    );
     expect(
       byId(evaluateMemoryRepoHealth({ ...ready, lastWriteError: "busy" })).memory_repo.detail,
     ).toContain("last write failed: busy");
     expect(
-      byId(evaluateMemoryRepoHealth({ ...ready, entryFileBytes: 5000 })).memory_repo_entry_file.status,
+      byId(evaluateMemoryRepoHealth({ ...ready, entryFileBytes: 5000 })).memory_repo_entry_file
+        .status,
     ).toBe("warn");
-    expect(byId(evaluateMemoryRepoHealth({ ...ready, inboxEntries: 3 })).memory_repo_inbox).toMatchObject({
+    expect(
+      byId(evaluateMemoryRepoHealth({ ...ready, inboxEntries: 3 })).memory_repo_inbox,
+    ).toMatchObject({
       status: "info",
       value: 3,
       detail: expect.stringContaining("3 entries"),
@@ -423,5 +435,149 @@ describe("memory folder health (service-only; not in qa:memory-health)", () => {
       throw new Error("boom");
     }).health();
     expect(unreadable.checks.find((check) => check.id === "memory_repo")?.status).toBe("warn");
+  });
+});
+
+describe("memory folder dreaming health (service-only)", () => {
+  const ready = {
+    enabled: true,
+    root: "/Users/sam/CoWork Memory",
+    ready: true,
+    writable: true,
+    gitAvailable: true,
+  };
+  const dream = (overrides: Partial<MemoryRepoDreamSummary> = {}): MemoryRepoDreamSummary => ({
+    id: "d1",
+    trigger: "daily",
+    status: "completed",
+    startedAt: NOW - 2 * HOUR,
+    finishedAt: NOW - 2 * HOUR,
+    summary: "",
+    tokens: 1000,
+    autoCount: 2,
+    undone: false,
+    canUndo: true,
+    reviewCount: 0,
+    reviewStatus: null,
+    rejected: 0,
+    operations: [],
+    ...overrides,
+  });
+  const report = (
+    dreams: MemoryRepoDreamSummary[],
+    extra: Partial<MemoryRepoDreamsReport> = {},
+  ) => ({
+    dreams,
+    tokensUsedToday: 1000,
+    dailyBudget: 50_000,
+    dreamingEnabled: true,
+    folderReady: true,
+    pendingReviews: dreams.filter((entry) => entry.reviewStatus === "pending").length,
+    ...extra,
+  });
+
+  it("skips while the folder or dreaming is off", () => {
+    expect(evaluateMemoryRepoDreamHealth({ ...ready, enabled: false }, null, NOW).status).toBe(
+      "skip",
+    );
+    expect(evaluateMemoryRepoDreamHealth({ ...ready, ready: false }, null, NOW).status).toBe(
+      "skip",
+    );
+    expect(
+      evaluateMemoryRepoDreamHealth(ready, report([], { dreamingEnabled: false }), NOW),
+    ).toMatchObject({
+      id: "memory_repo_dreaming",
+      label: "Memory folder dreaming",
+      status: "skip",
+    });
+  });
+
+  it("shows the last run as info", () => {
+    expect(evaluateMemoryRepoDreamHealth(ready, report([]), NOW)).toMatchObject({
+      status: "info",
+      detail: expect.stringContaining("No dream yet"),
+    });
+    const check = evaluateMemoryRepoDreamHealth(ready, report([dream()]), NOW);
+    expect(check.status).toBe("info");
+    expect(check.detail).toContain("Last dream 2026-10-05 10:00 UTC");
+    expect(check.detail).toContain("1,000 of 50,000 tokens");
+  });
+
+  it("warns on a failed dream in the last 7 days or a review waiting more than 7 days", () => {
+    expect(
+      evaluateMemoryRepoDreamHealth(
+        ready,
+        report([dream({ status: "failed", error: "provider down" })]),
+        NOW,
+      ),
+    ).toMatchObject({ status: "warn", detail: expect.stringContaining("provider down") });
+    expect(
+      evaluateMemoryRepoDreamHealth(
+        ready,
+        report([dream({ status: "failed", startedAt: NOW - 8 * DAY, finishedAt: NOW - 8 * DAY })]),
+        NOW,
+      ).status,
+    ).toBe("info");
+    expect(
+      evaluateMemoryRepoDreamHealth(
+        ready,
+        report([
+          dream({
+            reviewStatus: "pending",
+            reviewCount: 2,
+            finishedAt: NOW - 8 * DAY,
+            startedAt: NOW - 8 * DAY,
+          }),
+        ]),
+        NOW,
+      ),
+    ).toMatchObject({
+      status: "warn",
+      value: 1,
+      detail: expect.stringContaining("more than 7 days"),
+    });
+    expect(
+      evaluateMemoryRepoDreamHealth(
+        ready,
+        report([dream({ reviewStatus: "pending", reviewCount: 1 })]),
+        NOW,
+      ),
+    ).toMatchObject({ status: "info", detail: expect.stringContaining("1 waiting for review") });
+    expect(evaluateMemoryRepoDreamHealth(ready, null, NOW).status).toBe("warn");
+  });
+
+  it("is added to the report only when the folder is ready", async () => {
+    const counts: MemoryHealthCounts = {
+      archive: null,
+      memoryItems: null,
+      heartbeat: null,
+      dreaming: null,
+      embeddings: null,
+      pendingWrites: null,
+      database: { totalBytes: 4096, freelistBytes: 0 },
+      markers: null,
+    };
+    let dreamsCalls = 0;
+    const build = (status: typeof ready) =>
+      new MemoryHealthService({
+        port: { unit: (async () => counts) as never },
+        getSettings: () => ({}),
+        getSupermemoryStatus: () => ({ enabled: false, connected: false }),
+        getChronicleEnabled: () => false,
+        getMemoryRepoStatus: async () => status,
+        getMemoryRepoDreams: async () => {
+          dreamsCalls += 1;
+          return report([dream({ status: "failed", error: "boom" })]);
+        },
+        now: () => NOW,
+      });
+    const failing = await build(ready).health();
+    expect(failing.checks.find((check) => check.id === "memory_repo_dreaming")?.status).toBe(
+      "warn",
+    );
+    expect(failing.ok).toBe(false);
+    const off = await build({ ...ready, enabled: false }).health();
+    expect(off.checks.find((check) => check.id === "memory_repo_dreaming")?.status).toBe("skip");
+    expect(dreamsCalls).toBe(1);
   });
 });

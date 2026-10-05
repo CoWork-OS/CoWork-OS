@@ -11,6 +11,15 @@ import { createLogger } from "../../utils/logger";
 import { MemoryWriter, type MemoryWorkspacePolicy } from "../MemoryWriter";
 import { MemoryRepoService, type MemoryRepoStatus } from "./MemoryRepoService";
 import { runMemoryRepoExport } from "./MemoryRepoExport";
+import {
+  DREAM_DEFAULT_DAILY_TOKEN_BUDGET,
+  MemoryRepoDreamer,
+  getMemoryRepoDreamer,
+  setMemoryRepoDreamer,
+  type DreamModelClient,
+} from "./MemoryRepoDreamer";
+import { createProviderDreamModelClient } from "./memory-repo-dream-client";
+import { createDreamTaskLister, type DreamTaskSourceDeps } from "./memory-repo-dream-tasks";
 import { memoryRepoPathProblem, resolveMemoryRepoPath } from "./memory-repo-paths";
 
 const logger = createLogger("MemoryRepo");
@@ -25,6 +34,11 @@ export interface MemoryRepoBootstrapOptions {
   ownerName?: () => string | null | undefined;
   /** Run the one-time export of `memory_items` (default: when writable). */
   runExport?: boolean;
+  /** Recent tasks for dreaming (Phase 2); without them a dream reads only the folder. */
+  findTasksCreatedBetween?: DreamTaskSourceDeps["findTasksCreatedBetween"];
+  findTaskEvents?: DreamTaskSourceDeps["findTaskEvents"];
+  /** The dream's model client (default: the configured provider). */
+  dreamModelClient?: DreamModelClient;
 }
 
 let options: MemoryRepoBootstrapOptions | null = null;
@@ -108,6 +122,7 @@ export function reconfigureMemoryRepo(): Promise<MemoryRepoStatus | null> {
       MemoryRepoService.setInstance(service);
       // File tools may never write the repo and read it only per task (design §6.4).
       setMemoryRepoRoot(service.root);
+      if (status.ready && !options.readOnly) startDreamer(service, options);
       if (status.ready && !options.readOnly && options.runExport !== false) {
         const writer = MemoryWriter.get();
         const workspaceName = options.workspaceName;
@@ -127,7 +142,37 @@ export function reconfigureMemoryRepo(): Promise<MemoryRepoStatus | null> {
   });
 }
 
+/** The dreamer of a writable repo (docs/memory-repo-phase2-design.md §6). */
+function startDreamer(service: MemoryRepoService, bootOptions: MemoryRepoBootstrapOptions): void {
+  const { findTasksCreatedBetween, findTaskEvents } = bootOptions;
+  const listRecentTasks =
+    findTasksCreatedBetween && findTaskEvents
+      ? createDreamTaskLister({
+          findTasksCreatedBetween,
+          findTaskEvents,
+          workspaceName: bootOptions.workspaceName,
+          getWorkspacePolicy: bootOptions.getWorkspacePolicy,
+        })
+      : async () => [];
+  setMemoryRepoDreamer(
+    new MemoryRepoDreamer({
+      getService: () => (MemoryRepoService.get() === service ? service : null),
+      client: bootOptions.dreamModelClient ?? createProviderDreamModelClient(),
+      listRecentTasks,
+      settings: () => {
+        const settings = MemoryFeaturesManager.loadSettings();
+        return {
+          enabled: settings.memoryRepoDreamingEnabled !== false,
+          dailyTokenBudget:
+            settings.memoryRepoDreamDailyTokenBudget ?? DREAM_DEFAULT_DAILY_TOKEN_BUDGET,
+        };
+      },
+    }),
+  );
+}
+
 async function stopCurrent(): Promise<void> {
+  if (getMemoryRepoDreamer()) setMemoryRepoDreamer(null);
   if (!current) return;
   const { service } = current;
   current = null;

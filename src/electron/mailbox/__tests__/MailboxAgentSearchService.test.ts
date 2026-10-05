@@ -38,3 +38,17 @@ describe("MailboxAgentSearchService query planner", () => {
     expect(plan.providerQueries[0]).toContain("find people");
   });
 });
+
+describe("MailboxAgentSearchService non-Latin queries", () => {
+  it("keeps Cyrillic and CJK terms in the FTS query (RECALL-9)", () => {
+    const plan = planMailboxSearchQuery("счет за август 請求書");
+    expect(plan.tokens).toEqual(expect.arrayContaining(["счет", "август", "請求書"]));
+    expect(plan.ftsQuery).toContain('"счет"');
+    expect(plan.ftsQuery).toContain('"請求書"');
+  });
+
+  it("still folds Turkish accents to the indexed form", () => {
+    const plan = planMailboxSearchQuery("ödeme tarihi");
+    expect(plan.tokens).toContain("odeme");
+  });
+});

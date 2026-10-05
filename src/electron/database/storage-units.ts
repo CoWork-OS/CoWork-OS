@@ -1031,6 +1031,9 @@ export const STORAGE_UNITS = {
     "findByCreatedAtRange",
     { readonly: true },
   ),
+  task_searchByTerms: storeUnit((db: Database.Database) => new TaskStore(db), "searchByTerms", {
+    readonly: true,
+  }),
   task_delete: storeUnit((db: Database.Database) => new TaskStore(db), "delete", {
     readonly: false,
   }),

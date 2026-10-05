@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
-import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "./fts-query";
+import { LIKE_ESCAPE_CLAUSE, likeContainsPattern, likeTermHitsSql } from "./fts-query";
 import { buildAgentVisibleMemorySql } from "../memory/memory-visibility";
 import {
   buildMemoryLastActivitySql,
@@ -1525,15 +1525,55 @@ export class TaskStore {
 
     args.push(limit);
 
-    const stmt = this.db.prepare(`
+    return this.selectTasks(
+      `
       SELECT * FROM tasks
       WHERE ${where.join(" AND ")}
       ORDER BY created_at DESC
       LIMIT ?
-    `);
+    `,
+      args,
+    );
+  }
 
-    const rows = stmt.all(...args) as Any[];
+  /** Run one task SELECT (`SELECT * FROM tasks ...` shape) and map its rows. */
+  private selectTasks(sql: string, args: unknown[]): Task[] {
+    const rows = this.db.prepare(sql).all(...args) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
+  }
+
+  /**
+   * Tasks of one workspace whose title, prompt or result contain at least `minMatched` of
+   * `terms` (case-insensitive `LIKE`), most matching terms first, then most recent. Not
+   * limited to a time window, so old tasks are found too (Mission Control recall).
+   */
+  searchByTerms(params: {
+    workspaceId: string;
+    terms: string[];
+    minMatched?: number;
+    limit?: number;
+  }): Task[] {
+    const workspaceId = typeof params.workspaceId === "string" ? params.workspaceId.trim() : "";
+    const terms = (Array.isArray(params.terms) ? params.terms : [])
+      .filter((term): term is string => typeof term === "string" && term.trim().length > 0)
+      .slice(0, 24)
+      .map((term) => term.trim().slice(0, 64));
+    if (!workspaceId || terms.length === 0) return [];
+    const limit = Math.min(Math.max(Math.floor(Number(params.limit) || 50), 1), 200);
+    const minMatched = Math.min(
+      Math.max(Math.floor(Number(params.minMatched) || 1), 1),
+      terms.length,
+    );
+    const hits = likeTermHitsSql(["title", "prompt", "COALESCE(result_summary, '')"], terms);
+    return this.selectTasks(
+      `SELECT * FROM (
+         SELECT *, (${hits.sql}) AS term_hits FROM tasks WHERE workspace_id = ?
+       )
+       WHERE term_hits >= ?
+       ORDER BY term_hits DESC, COALESCE(updated_at, created_at) DESC, id DESC
+       LIMIT ?`,
+      [...hits.params, workspaceId, minMatched, limit],
+    );
   }
 
   /**
@@ -6642,7 +6682,16 @@ export interface MemoryStats {
   totalTokens: number;
   compressedCount: number;
   compressionRatio: number;
+  /** Tokens the AI compression used in the last 24 hours, across workspaces. */
+  compressionTokensLast24h?: number;
+  /** The AI compression's daily token budget. */
+  compressionDailyTokenBudget?: number;
 }
+
+/** Bytes of one observation sidecar row's text columns (storage cap, DATA-7). */
+const MEMORY_OBSERVATION_BYTES_SQL = `(length(title) + COALESCE(length(subtitle), 0)
+  + length(narrative) + COALESCE(length(facts), 0) + COALESCE(length(concepts), 0)
+  + COALESCE(length(files_read), 0) + COALESCE(length(files_modified), 0))`;
 
 export class MemoryStore {
   constructor(private db: Database.Database) {}
@@ -7267,15 +7316,22 @@ export class MemoryStore {
   }
 
   /**
-   * Approximate storage in bytes (UTF-8 length proxy via SQLite length()).
+   * Approximate storage in bytes (UTF-8 length proxy via SQLite length()): content and
+   * summary, the stored embedding JSON (~2-5 KB per row) and the observation sidecar's
+   * text columns (audit DATA-7). FTS index rows are not counted.
    */
   getApproxStorageBytes(workspaceId: string): number {
     const stmt = this.db.prepare(`
-      SELECT COALESCE(SUM(length(content) + COALESCE(length(summary), 0)), 0) as total_bytes
-      FROM memories
-      WHERE workspace_id = ?
+      SELECT
+        (SELECT COALESCE(SUM(length(content) + COALESCE(length(summary), 0)), 0)
+           FROM memories WHERE workspace_id = @workspaceId)
+        + (SELECT COALESCE(SUM(length(embedding)), 0)
+           FROM memory_embeddings WHERE workspace_id = @workspaceId)
+        + (SELECT COALESCE(SUM(${MEMORY_OBSERVATION_BYTES_SQL}), 0)
+           FROM memory_observation_metadata WHERE workspace_id = @workspaceId)
+        AS total_bytes
     `);
-    const row = stmt.get(workspaceId) as { total_bytes?: number } | undefined;
+    const row = stmt.get({ workspaceId }) as { total_bytes?: number } | undefined;
     const total = Number(row?.total_bytes || 0);
     return Number.isFinite(total) ? total : 0;
   }
@@ -7289,8 +7345,14 @@ export class MemoryStore {
   ): Array<{ id: string; createdAt: number; approxBytes: number }> {
     // Imports, Playbook rows, explicit saves and curated promotions are never pruned
     // for space; least recently useful rows go first.
+    // Row bytes as `getApproxStorageBytes` counts them: with the embedding and observation.
     const stmt = this.db.prepare(`
-      SELECT id, created_at, (length(content) + COALESCE(length(summary), 0)) as approx_bytes
+      SELECT id, created_at,
+        (length(content) + COALESCE(length(summary), 0)
+          + COALESCE((SELECT length(e.embedding) FROM memory_embeddings e
+                      WHERE e.memory_id = memories.id), 0)
+          + COALESCE((SELECT ${MEMORY_OBSERVATION_BYTES_SQL} FROM memory_observation_metadata
+                      WHERE memory_id = memories.id), 0)) as approx_bytes
       FROM memories
       WHERE workspace_id = ? AND NOT ${buildRetentionProtectedMemorySql("memories.id", "memories.content")}
       ORDER BY ${buildMemoryLastActivitySql()} ASC

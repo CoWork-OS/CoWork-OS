@@ -134,6 +134,16 @@ Force log capture regardless of Settings:
 npm run dev:log
 ```
 
+### Startup quiet mode
+
+`COWORK_STARTUP_QUIET=1`, `COWORK_PROFILE_QUIET=1` or `COWORK_BACKGROUND_AUTOSTART=0` start the
+desktop app without background work, for profiling and QA runs (`scripts/qa/profile_electron_task_switch.mjs`
+sets all three). In quiet mode the app does not start MCP auto-connect, InfraManager, the
+subconscious loop, core memory distillation, memory retention, the memory service's periodic
+cleanup and deferred archive cleanup, or the workspace kit writers (cross signals, feedback, lore).
+The kit files catch up on the next normal start, when each writer rebuilds from its recent
+history in the database.
+
 ## Available Commands
 
 | Command                               | Description                                                                               |

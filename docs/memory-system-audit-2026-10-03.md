@@ -42,24 +42,21 @@ current design is in [memory-engine.md](memory-engine.md).
 | Related fixes | Merged | Prompt caching tiers and cached-token logging (#303, #304); short-answer completion gate; core-candidate keyword heuristics removed and their leftover proposals dismissed |
 | Memory producers | Merged, PR #308 | Every producer through the same hygiene ([memory-engine.md](memory-engine.md) §1): core-candidate facts → `MemoryWriter` (`inferred`); Chronicle archive-only and private; one gated import session for ChatGPT and pasted imports (imported user facts become `import` items); Supermemory explicit writes redacted and gated, remote reads never stored; a source guard on writes to `memories` / `memory_items`. DATA-13 import parts |
 | Knowledge graph data quality | Merged, PR #308 | DATA-10: precise technology extraction, case-insensitive names with merge, free-mail denylist, registrable-domain organization names, automated-sender filtering, source precedence, `last_seen_at` decay, memory-settings gating, one-time `kg_quality_cleanup_v1` ([knowledge-graph.md](knowledge-graph.md)) |
-| Phase 4 — leftovers | Pending PR (`cowork-os/memory-phase-4`) | Re-verified against current code: RECALL-5, RECALL-6, LOOP-12, LOOP-13 and the AutonomyEngine part of SEC-18 were already closed by the earlier phases. Fixed here: approval-gated write modes stage core-candidate facts (replayed with their `core_candidate` source ref); RECALL-8 (rank-based lexical-only scores, imports at half weight in the hybrid stage, semantic scores for every lexical candidate); RECALL-9 memory `LIKE` fallbacks escaped (archive, observations, markdown index); DATA-8 observation upsert instead of `INSERT OR REPLACE`, narrowed FTS update trigger and a one-time index rebuild; LOOP-14 compression retries cancelled at shutdown and the daemon stops CrossSignal and Feedback; LOOP-15 improvement review status validated over IPC; LIFE-5 Box Brain runs Dreaming with the curator settings |
+| Phase 4 — leftovers | Merged, PR #309 | Re-verified against current code: RECALL-5, RECALL-6, LOOP-12, LOOP-13 and the AutonomyEngine part of SEC-18 were already closed by the earlier phases. Fixed here: approval-gated write modes stage core-candidate facts (replayed with their `core_candidate` source ref); RECALL-8 (rank-based lexical-only scores, imports at half weight in the hybrid stage, semantic scores for every lexical candidate); RECALL-9 memory `LIKE` fallbacks escaped (archive, observations, markdown index); DATA-8 observation upsert instead of `INSERT OR REPLACE`, narrowed FTS update trigger and a one-time index rebuild; LOOP-14 compression retries cancelled at shutdown and the daemon stops CrossSignal and Feedback; LOOP-15 improvement review status validated over IPC; LIFE-5 Box Brain runs Dreaming with the curator settings |
+| Phase 5 — backlog | Pending PR (`cowork-os/memory-phase-5`) | Memory Hub **Sources** and **Health** tabs (`MemoryHealthService`, thresholds shared with `qa:memory-health`); DATA-5 (summaries skip constant preambles, embeddings and observations from content, one-time `memory_summary_reindex_v1`); DATA-7 (AI compression runs, on by default within a 20,000 tokens/day budget with an inline cost notice; digests through `capture`; the storage cap counts embeddings and observations); kit-writer lease between the desktop app and the node daemon; LOOP-14 (bounded shutdown drain for consolidation, learning, compression and markdown syncs; quiet mode); LIFE-5 (one `DailyBriefingService` and one `EverydayAgentService`); RECALL-4 (memory-items and Supermemory lanes, full task and activity search); RECALL-9 (Unicode markdown, mailbox and YouTube queries; shared text helpers); DATA-13; LOOP-15; kit back-sync on file edit (`KitFileWatcher`); superseded-revision retention (180 days, newest five and undoable revisions kept) |
 | Decided | — | Real local embeddings (DATA-6) skipped: recall stays lexical FTS plus reciprocal-rank fusion, gated by the memory evals |
+| Decided | — | SEC-18 accepted: heartbeat dispatch and Workflow Intelligence tasks keep auto-approving `run_command` so background agents do not stop to wait; dangerous commands still need explicit consent and autonomous task creation stays opt-in |
 
 **Remaining.**
 
-- Memory Hub **Sources** and **Health** tabs (§8.4); the Review tab shipped.
-- Kit back-sync runs only on the next kit sync; no trigger on file edit.
-- Superseded `memory_items` revisions are kept indefinitely; add age-based retention once the Hub shows history.
+All findings are closed or decided. Known limits, documented where they apply:
+
 - Supermemory copies sent before remote ids were recorded cannot be addressed (forget them by text or in Supermemory).
-- SEC-18: heartbeat dispatch and Workflow Intelligence tasks still auto-approve `run_command` (dangerous commands still need explicit consent); a permission-engine decision, not a memory one.
-- RECALL-4: Mission Control recall has no Supermemory or quotes lane, and its task and activity lanes scan only recent rows.
-- RECALL-9: the markdown index keeps an ASCII-only FTS dialect; mailbox and YouTube have their own query builders; several `normalizeText` copies remain.
-- DATA-5: summaries, embeddings and observations still come from the first line of a memory.
-- DATA-7: the single-item LLM compression path cannot run, batch digests skip the observation sidecar, and the storage cap counts only content and summary.
-- DATA-13: unused capture options (`profileId`, `coreTraceId`, `candidateId`, `scope*`); the ChatGPT import resume set is per workspace.
-- LOOP-14: memory consolidation and executor learning are untracked async work at shutdown; quiet mode still starts the archive cleanup timer and the kit writers.
-- LOOP-15: Everyday Agent "clear memory candidates" clears every workspace and the distill history, more than its count shows.
-- LIFE-5: `DailyBriefingService` per IPC call and three `EverydayAgentService` instances; no lock between the desktop app and the node daemon for kit-file writers.
+- The storage cap prunes the least recently useful rows first regardless of their value, and FTS index bytes are not counted; a model-written single-row summary does not refresh the observation title ([memory-engine.md](memory-engine.md) §8).
+- A non-owner process's live kit updates reach the files only when kit-writer ownership changes; `USER.md` and `MEMORY.md` are rendered on request and are not covered by the lease.
+- The desktop app and the node daemon each watch kit files for back-sync; unique indexes keep the resulting items from duplicating.
+- Quiet mode applies to the desktop app only (the node daemon has none).
+- `findBySourceRef` alias matching cannot use an index; fine at the expected table size.
 
 Deviations from the §9 plan: checkpoints stay in the workspace but are HMAC-signed and never
 restore permission state (SEC-1); spoofed `[Imported from` prefixes are neutralized instead of

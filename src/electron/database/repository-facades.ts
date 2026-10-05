@@ -661,6 +661,7 @@ const TASK_METHODS = [
   "findBySessionId",
   "countByWorkspace",
   "findByCreatedAtRange",
+  "searchByTerms",
   "delete",
   "findByTargetNodeId",
   "findByTargetNodeIds",

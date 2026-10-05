@@ -1,0 +1,25 @@
+{
+  "description": "Memory health thresholds shared by scripts/qa/memory-health.mjs (ci: the --ci preset, audit §9 targets) and the Memory Hub Health tab (hub: when a check shows WARN; src/electron/memory/MemoryHealthService.ts).",
+  "stuckAfterMs": 3600000,
+  "maintenanceKeys": [
+    "memory_items_lane_migration_v1",
+    "memory_cleanup_migration_v1",
+    "memory_payload_tables_migration_v1"
+  ],
+  "ci": {
+    "maxTelemetryRatio": 0.05,
+    "maxDuplicateRate": 0.01,
+    "maxStuckHeartbeat": 0
+  },
+  "hub": {
+    "maxTelemetryRatio": 0.05,
+    "maxDuplicateRate": 0.01,
+    "maxStuckHeartbeat": 0,
+    "maxStuckDreaming": 0,
+    "maxDreamingFailures7d": 0,
+    "maxOrphanEmbeddings": 0,
+    "maxPendingWrites": 25,
+    "maxDbMb": 1024,
+    "maxLlmBudgetRatio": 1
+  }
+}

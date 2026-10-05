@@ -244,6 +244,7 @@ import {
   buildWorkspaceKitContext,
   isDesignSystemRelevantTask,
 } from "../memory/WorkspaceKitContext";
+import { KitFileWatcher } from "../memory/KitFileWatcher";
 import {
   MEMORY_CONTEXT_SECTION_TOKENS,
   MEMORY_L1_COMPACT_TOKENS,
@@ -15924,7 +15925,7 @@ ${transcript}
     ).catch((error: unknown) => logger.error("Failed to complete task:", error));
     this.emitRunSummary("completed", terminalStatus);
     if (terminalStatus === "ok") {
-      void Promise.resolve(this.capturePlaybookOutcome("success")).catch(() => {
+      void this.trackLearning(this.capturePlaybookOutcome("success")).catch(() => {
         // Best-effort playbook learning.
       });
     }
@@ -16276,6 +16277,19 @@ ${transcript}
       // Report generation is best-effort — log and move on
       logger.warn(`${this.logTag} Auto-report generation failed:`, err);
     }
+  }
+
+  /**
+   * Hand fire-and-forget learning to the daemon's background-work registry, so shutdown
+   * waits for it (bounded) before the database closes.
+   */
+  private trackLearning<T>(work: Promise<T> | T): Promise<T> {
+    const promise = Promise.resolve(work);
+    // Test doubles of the daemon may not implement the registry.
+    const daemon = this.daemon as Partial<Pick<AgentDaemon, "trackBackgroundWork">> | undefined;
+    return typeof daemon?.trackBackgroundWork === "function"
+      ? daemon.trackBackgroundWork(promise)
+      : promise;
   }
 
   /**
@@ -29765,7 +29779,7 @@ You are continuing a previous conversation. The context from the previous conver
       logger.error(`Task execution failed:`, error);
       // Save conversation snapshot even on failure for potential recovery
       this.saveConversationSnapshot();
-      void Promise.resolve(
+      void this.trackLearning(
         this.capturePlaybookOutcome("failure", error?.message || String(error)),
       ).catch(() => {
         // Best-effort playbook learning.
@@ -29929,6 +29943,8 @@ You are continuing a previous conversation. The context from the previous conver
     try {
       const readGuard = (candidatePath: string) => this.canReadWorkspacePath(candidatePath);
       if (planningMemoryDecision.layers.workspaceKit) {
+        // Hand edits of the kit's generated blocks sync back on save from now on.
+        KitFileWatcher.watchWorkspace(this.workspace);
         kitContext = buildWorkspaceKitContext(
           this.workspace.path,
           this.getContractPrompt(),
@@ -43606,7 +43622,7 @@ Return ONLY a JSON object:
 
       logger.error("sendMessage failed:", error);
       if (resumeAttempted) {
-        void Promise.resolve(
+        void this.trackLearning(
           this.capturePlaybookOutcome("failure", error?.message || String(error)),
         ).catch(() => {
           // Best-effort playbook learning.

@@ -312,6 +312,7 @@ import {
 import { extractCanonicalTaskImpactMetrics } from "./canonical-task-impact";
 import { getBackgroundProcessManager } from "./tools/background-processes";
 import { emitCorrectionLearningSignal } from "../agents/heartbeat-signal-bus";
+import { InFlightWork } from "../utils/in-flight-work";
 
 export interface AgentDaemonOptions {
   startupRecovery?: boolean;
@@ -792,6 +793,15 @@ export class AgentDaemon extends EventEmitter {
    */
   private pendingContinuationTaskIds: Set<string> = new Set();
   private pendingMemoryConsolidations: Set<string> = new Set();
+  /** Delay timers of scheduled consolidations; cancelled at shutdown. */
+  private memoryConsolidationTimers = new Set<ReturnType<typeof setTimeout>>();
+  /**
+   * Background memory work (consolidation and Dreaming, executor playbook learning) that
+   * writes to the database after a task ends. Shutdown waits for it, bounded.
+   */
+  private readonly backgroundMemoryWork = new InFlightWork();
+  /** Shutdown's bound for background memory work (inside the 10 s shutdown step). */
+  static readonly BACKGROUND_WORK_DRAIN_MS = 3_000;
   /** Tasks whose terminalization is waiting for an independent verifier. */
   private pendingCompletionVerifications: Set<string> = new Set();
   /** Git worktree manager for task isolation. */
@@ -9847,8 +9857,16 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
+  /**
+   * Track fire-and-forget memory work (executor learning) so shutdown waits for it before
+   * the database closes. Returns `work` unchanged.
+   */
+  trackBackgroundWork<T>(work: Promise<T>): Promise<T> {
+    return this.backgroundMemoryWork ? this.backgroundMemoryWork.track(work) : work;
+  }
+
   private scheduleMemoryConsolidation(task: Task): void {
-    if (this.pendingMemoryConsolidations.has(task.workspaceId)) {
+    if (this.shutdownRequested || this.pendingMemoryConsolidations.has(task.workspaceId)) {
       return;
     }
     const workspace = this.workspaceRepo.findById(task.workspaceId);
@@ -9863,8 +9881,13 @@ export class AgentDaemon extends EventEmitter {
       evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "write").decision ===
       "allow";
     this.pendingMemoryConsolidations.add(task.workspaceId);
-    setTimeout(() => {
-      void (async () => {
+    const timer = setTimeout(() => {
+      this.memoryConsolidationTimers?.delete(timer);
+      if (this.shutdownRequested) {
+        this.pendingMemoryConsolidations.delete(task.workspaceId);
+        return;
+      }
+      const run = (async () => {
         const consolidation = await MemoryConsolidator.run({
           workspaceId: task.workspaceId,
           workspacePath: workspace.path,
@@ -9915,7 +9938,9 @@ export class AgentDaemon extends EventEmitter {
         .finally(() => {
           this.pendingMemoryConsolidations.delete(task.workspaceId);
         });
+      void this.trackBackgroundWork(run);
     }, 1000);
+    this.memoryConsolidationTimers?.add(timer);
   }
 
   private normalizeArtifactEventPayload(
@@ -17593,6 +17618,21 @@ export class AgentDaemon extends EventEmitter {
       ]);
     } finally {
       if (cancellationTimer) clearTimeout(cancellationTimer);
+    }
+
+    // Consolidations that have not started are dropped (the next task completion schedules
+    // one again); running consolidation, Dreaming and executor learning get a bounded wait
+    // so they do not write after the database closes. Work still running after the bound
+    // is abandoned: its late writes fail and are dropped.
+    // (Optional chaining: partially constructed daemons in tests lack these fields.)
+    this.memoryConsolidationTimers?.forEach((timer) => clearTimeout(timer));
+    this.memoryConsolidationTimers?.clear();
+    this.pendingMemoryConsolidations?.clear();
+    const backgroundWork = this.backgroundMemoryWork;
+    if (backgroundWork && !(await backgroundWork.drain(AgentDaemon.BACKGROUND_WORK_DRAIN_MS))) {
+      log.warn(
+        `${backgroundWork.size} background memory job(s) still running after ${AgentDaemon.BACKGROUND_WORK_DRAIN_MS}ms; shutting down anyway`,
+      );
     }
 
     // Background processes of tasks whose executor was already evicted have no

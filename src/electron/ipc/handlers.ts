@@ -122,7 +122,7 @@ import { ManagedSessionRequirementCorrectionRequestSchema } from "../../shared/m
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
-import { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
+import type { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
 import { setupEverydayAgentHandlers } from "./everyday-agent-handlers";
 import { setupVoiceActionHandlers } from "./voice-handlers";
 import { rendererPerfLogLevel, stringifyRendererPerfPayload } from "./renderer-perf-log";
@@ -543,8 +543,12 @@ import {
   MEMORY_USED_MAX_EVENTS,
   toMemoryUsedTimelineEvent,
 } from "../../shared/memory-used";
-import { createMemoryReviewService } from "../memory/memory-review-wiring";
+import {
+  createMemoryHealthService,
+  createMemoryReviewService,
+} from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
+import { setupMemoryHealthHandlers } from "./memory-health-handlers";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
@@ -1547,6 +1551,10 @@ export async function setupIpcHandlers(
     getMainWindow?: () => BrowserWindow | null;
     getRoutineService?: () => RoutineService | null;
     getPulseService?: () => import("../telemetry/pulse-service").PulseService | null;
+    /** The app's DailyBriefingService; created after the IPC handlers. */
+    getDailyBriefingService?: () => import("../briefing/DailyBriefingService").DailyBriefingService | null;
+    /** The app's one EverydayAgentService (shared with the control plane and browser host). */
+    everydayAgentService?: EverydayAgentService;
   },
 ) {
   if (options?.getMainWindow) mainWindowGetter = options.getMainWindow;
@@ -1664,7 +1672,11 @@ export async function setupIpcHandlers(
     getRoutineService,
     workContextService,
   });
-  setupEverydayAgentHandlers(new EverydayAgentService(db));
+  if (options?.everydayAgentService) {
+    setupEverydayAgentHandlers(options.everydayAgentService);
+  } else {
+    logger.warn("Everyday Agent handlers not registered: no EverydayAgentService was provided");
+  }
   const agentTemplateService = new AgentTemplateService();
   const agentBuilderService = new AgentBuilderService();
   const imageGenProfileService = new ImageGenProfileService();
@@ -6210,9 +6222,7 @@ export async function setupIpcHandlers(
         typeof query?.workspaceId === "string" && query.workspaceId.trim().length > 0
           ? query.workspaceId.trim()
           : undefined;
-      const workspacePath = workspaceId
-        ? (await workspaceRepo.findById(workspaceId))?.path
-        : undefined;
+      const workspace = workspaceId ? await workspaceRepo.findById(workspaceId) : undefined;
       return RuntimeVisibilityService.collectUnifiedRecall(
         {
           taskRepo,
@@ -6221,9 +6231,12 @@ export async function setupIpcHandlers(
           workspaceRepo,
         },
         {
-          ...query,
+          query: typeof query?.query === "string" ? query.query : "",
+          limit: typeof query?.limit === "number" ? query.limit : undefined,
+          sourceTypes: Array.isArray(query?.sourceTypes) ? query.sourceTypes : undefined,
           workspaceId,
-          workspacePath,
+          workspacePath: workspace?.path,
+          workspace: workspace ?? undefined,
         },
       );
     },
@@ -10785,7 +10798,6 @@ export async function setupIpcHandlers(
   // Daily Briefing
   ipcMain.handle(IPC_CHANNELS.DAILY_BRIEFING_GENERATE, async (_, workspaceId: string) => {
     checkRateLimit(IPC_CHANNELS.DAILY_BRIEFING_GENERATE);
-    const { DailyBriefingService } = await import("../briefing/DailyBriefingService");
     const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
     const { readWorkspacePriorities, readWorkspaceOpenLoops } =
       await import("../briefing/workspace-briefing-context");
@@ -10806,8 +10818,12 @@ export async function setupIpcHandlers(
       (await workspaceRepo.findAll()).map((workspace) => [workspace.id, workspace] as const),
     );
     const labelForWorkspace = (id: string) => workspaceById.get(id)?.name || id;
-    const service = new DailyBriefingService(
-      {
+    // The app's one briefing service (LIFE-5); this call brings its own data sources, which
+    // compose several workspaces in "all workspaces" mode and never deliver to a channel.
+    const service = options?.getDailyBriefingService?.();
+    if (!service) throw new Error("Daily briefing is not available yet.");
+    return service.generateBriefing(normalizedWorkspaceId, undefined, {
+      deps: {
         getRecentTasks: async (_workspaceId, sinceMs) => {
           const perWorkspace = await Promise.all(
             briefingWorkspaceIds.map(async (id) =>
@@ -11050,9 +11066,7 @@ export async function setupIpcHandlers(
         },
         log: (...args: unknown[]) => logger.info("[Briefing]", ...args),
       },
-      db,
-    );
-    return service.generateBriefing(normalizedWorkspaceId);
+    });
   });
 
   // Proactive Suggestions
@@ -11583,6 +11597,12 @@ export async function setupIpcHandlers(
       },
       syncKitFiles: (workspaceId) => CuratedMemoryService.syncWorkspaceFiles(workspaceId),
     }),
+    workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+  });
+
+  // Memory Hub "Sources" and "Health": aggregate counts and the qa:memory-health checks.
+  setupMemoryHealthHandlers({
+    service: createMemoryHealthService(db),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 }

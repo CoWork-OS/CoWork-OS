@@ -7,6 +7,7 @@ import {
   ActivityActorType,
   ActivityType,
 } from "../../shared/types";
+import { likeTermHitsSql, termCoverage } from "../database/fts-query";
 
 /**
  * Safely parse JSON with error handling
@@ -203,6 +204,57 @@ export class ActivityStore {
       (a, b) => b.createdAt - a.createdAt,
     );
     return query.limit ? merged.slice(offset, offset + query.limit) : merged.slice(offset);
+  }
+
+  /**
+   * Activities of one workspace whose title or description contain at least `minMatched`
+   * of `terms` (case-insensitive), most matching terms first, then newest. Covers the
+   * whole feed, not a recent window (Mission Control recall).
+   */
+  search(query: {
+    workspaceId: string;
+    terms: string[];
+    minMatched?: number;
+    limit?: number;
+  }): Activity[] {
+    const workspaceId = typeof query.workspaceId === "string" ? query.workspaceId.trim() : "";
+    const terms = (Array.isArray(query.terms) ? query.terms : [])
+      .filter((term): term is string => typeof term === "string" && term.trim().length > 0)
+      .slice(0, 24)
+      .map((term) => term.trim().slice(0, 64));
+    if (!workspaceId || terms.length === 0) return [];
+    const limit = Math.min(Math.max(Math.floor(Number(query.limit) || 50), 1), 200);
+    const minMatched = Math.min(
+      Math.max(Math.floor(Number(query.minMatched) || 1), 1),
+      terms.length,
+    );
+    const hits = likeTermHitsSql(["title", "COALESCE(description, '')"], terms);
+    const rows = (
+      this.db
+        .prepare(
+          `SELECT * FROM (
+             SELECT *, (${hits.sql}) AS term_hits FROM activity_feed WHERE workspace_id = ?
+           )
+           WHERE term_hits >= ?
+           ORDER BY term_hits DESC, created_at DESC
+           LIMIT ?`,
+        )
+        .all(...hits.params, workspaceId, minMatched, limit) as Any[]
+    ).map((row) => ({ activity: this.mapRowToActivity(row), hits: Number(row.term_hits) || 0 }));
+    const ids = new Set(rows.map((row) => row.activity.id));
+    const pending = this.pendingMatching({ workspaceId })
+      .filter((activity) => !ids.has(activity.id))
+      .map((activity) => ({
+        activity,
+        hits: Math.round(
+          termCoverage(`${activity.title}\n${activity.description || ""}`, terms) * terms.length,
+        ),
+      }))
+      .filter((entry) => entry.hits >= minMatched);
+    return [...rows, ...pending]
+      .sort((a, b) => b.hits - a.hits || b.activity.createdAt - a.activity.createdAt)
+      .slice(0, limit)
+      .map((entry) => entry.activity);
   }
 
   /**

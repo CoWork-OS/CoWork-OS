@@ -16,10 +16,10 @@ Open **Everyday Agent** from the sidebar. The surface shows:
 - Active capability bundles and their compiled policy state.
 - Connected-app allowlists and scoped account state.
 - Recent receipts for previews, approvals, blocks, pauses, skips, and executed actions.
-- Workflow Intelligence suggestions and a count of proposed core memory candidates recorded under the Everyday Agent profile. Workflow Intelligence and Heartbeat record candidates under automation-profile ids, so this count is usually 0.
+- Workflow Intelligence suggestions and a count of the proposed core memory candidates of the current workspace (candidates belong to automation profiles, so they are counted per workspace, not per Everyday Agent profile).
 - Pending action preview details with risk class, target binding, affected objects, rollback flag, approval requirement, and idempotency key.
 - Global and scoped pause controls for capability, connector, workspace, device, and channel.
-- Local clear-data controls for receipts, previews, cached connector summaries, and browser-profile metadata.
+- Local clear-data controls for receipts, previews, cached connector summaries, and browser-profile metadata. "Delete local Everyday Agent data" also clears exactly the memory candidates the panel counts: the proposed core memory candidates of the current workspace. Reviewed candidates (accepted, applied, dismissed) and the distill history are kept, and without a workspace no candidate is cleared.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-7.webp" alt="Everyday Agent plan" width="700">
@@ -40,7 +40,7 @@ The Spark-style onboarding modal is CoWork-specific:
 - Reviewable memory by default.
 - Scoped connector allowlists instead of global connector access.
 - Explicit approval boundaries for sensitive actions.
-- Data deletion through `everydayAgent.clearData`.
+- Data deletion through `everydayAgent.clearData`. The request is validated in the main process (known flags only, `workspaceId` a UUID); an unknown field is refused rather than read as "clear everything".
 
 Declining consent leaves the profile disabled. Enabling consent creates or reuses the default Managed Agent preset named **Everyday Agent**.
 

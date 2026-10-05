@@ -39,6 +39,16 @@ export class ActivityRepository {
     return this.sql.unit("activity_list", [this.pending(), query]);
   }
 
+  /** Term search over the whole feed of a workspace (`ActivityStore.search`). */
+  search(query: {
+    workspaceId: string;
+    terms: string[];
+    minMatched?: number;
+    limit?: number;
+  }): Promise<Activity[]> {
+    return this.sql.unit("activity_search", [this.pending(), query]);
+  }
+
   getUnreadCount(workspaceId: string): Promise<number> {
     return this.sql.unit("activity_getUnreadCount", [this.pending(), workspaceId]);
   }

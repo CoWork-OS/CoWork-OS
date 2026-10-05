@@ -37,7 +37,12 @@ import {
   MemoryReviewError,
   type MemoryReviewService,
 } from "../../electron/memory/MemoryReviewService";
-import { createMemoryReviewService } from "../../electron/memory/memory-review-wiring";
+import {
+  createMemoryHealthService,
+  createMemoryReviewService,
+} from "../../electron/memory/memory-review-wiring";
+import type { MemoryHealthService } from "../../electron/memory/MemoryHealthService";
+import { MemoryHubWorkspaceRequestSchema } from "../../electron/ipc/memory-health-ipc-validation";
 import {
   MemoryReviewProposalRequestSchema,
   MemoryReviewSetLlmRequestSchema,
@@ -97,6 +102,7 @@ const featureSettings = z
     durableContextMode: z.enum(["off", "experimental", "on"]).optional(),
     durableContextLargePayloadThreshold: z.number().int().min(1).max(1_000_000).optional(),
     dreamingLlmDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
+    memoryCompressionDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryWriteApprovalMode: z
       .enum(["off", "curated_only", "external_only", "background_only", "all"])
       .optional(),
@@ -133,6 +139,8 @@ export function createBrowserMemoryDefinitions(options: {
   db?: Database.Database;
   /** Memory Hub Review service override (tests). */
   memoryReview?: MemoryReviewService;
+  /** Memory Hub Sources and Health service override (tests). */
+  memoryHealth?: Pick<MemoryHealthService, "sources" | "health">;
   /**
    * The task's `memory_used`, reply and user-message events (oldest first), or null when
    * the task is not in the workspace. Same contract as the desktop IPC
@@ -307,6 +315,18 @@ export function createBrowserMemoryDefinitions(options: {
           },
         })
       : null);
+  // Memory Hub "Sources" and "Health": same service and schema as the desktop IPC
+  // (memoryHub:*). Health is profile-wide aggregate counts; the workspace gates access.
+  const memoryHealth =
+    options.memoryHealth ?? (options.db ? createMemoryHealthService(options.db) : null);
+  const healthCall = async <T>(
+    run: (service: Pick<MemoryHealthService, "sources" | "health">) => Promise<T>,
+  ): Promise<T> => {
+    if (!memoryHealth) {
+      throw new WebApplicationError("HOST_UNAVAILABLE", "Memory health is unavailable.", 503);
+    }
+    return run(memoryHealth);
+  };
   const reviewCall = async <T>(
     run: (service: MemoryReviewService) => Promise<T> | T,
   ): Promise<T> => {
@@ -820,6 +840,12 @@ export function createBrowserMemoryDefinitions(options: {
       MemoryReviewSetLlmRequestSchema,
       "write",
       (value) => reviewCall((service) => service.setLlmEnabled(value.enabled)),
+    ),
+    getMemorySources: workspaceAction(MemoryHubWorkspaceRequestSchema, "read", (value) =>
+      healthCall((service) => service.sources(value.workspaceId)),
+    ),
+    getMemoryHealth: workspaceAction(MemoryHubWorkspaceRequestSchema, "read", () =>
+      healthCall((service) => service.health()),
     ),
     getMemoryObservationBackfillStatus: noArgs(() => MemoryObservationService.getBackfillStatus()),
     rebuildMemoryObservationMetadata: {

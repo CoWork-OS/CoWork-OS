@@ -45,6 +45,7 @@ import type {
   MemoryReviewRunResult,
   MemoryReviewState,
 } from "../shared/memory-review-types";
+import type { MemoryHealthReport, MemorySourcesReport } from "../shared/memory-health-types";
 import type {
   SpreadsheetApplyPatchesResult,
   SpreadsheetOpenWorkbookResult,
@@ -1174,6 +1175,8 @@ interface MemoryStats {
   totalTokens: number;
   compressedCount: number;
   compressionRatio: number;
+  compressionTokensLast24h?: number;
+  compressionDailyTokenBudget?: number;
 }
 
 // ChatGPT Import types (inlined for sandboxed preload)
@@ -4293,6 +4296,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_RUN_NOW, data),
   setMemoryCurationLlmEnabled: (data: { workspaceId: string; enabled: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_SET_LLM, data),
+  // Memory Hub "Sources" and "Health" (aggregate counts only)
+  getMemorySources: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_SOURCES, data),
+  getMemoryHealth: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_HEALTH, data),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -7930,6 +7938,8 @@ export interface ElectronAPI {
     workspaceId: string;
     enabled: boolean;
   }) => Promise<MemoryReviewMutationResult>;
+  getMemorySources: (data: { workspaceId: string }) => Promise<MemorySourcesReport>;
+  getMemoryHealth: (data: { workspaceId: string }) => Promise<MemoryHealthReport>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

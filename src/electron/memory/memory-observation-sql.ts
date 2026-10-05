@@ -4,6 +4,7 @@ import type { Memory, MemoryType } from "../database/repositories";
 import { LIKE_ESCAPE_CLAUSE, likeContainsPattern } from "../database/fts-query";
 import { createLogger } from "../utils/logger";
 import { type ObservationMetadataRow, writeObservationMetadata } from "./memory-capture-sql";
+import { buildDeterministicSummary, informativeMemoryText } from "./memory-summary";
 import {
   AGENT_HIDDEN_PRIVACY_STATES,
   AGENT_VISIBLE_PRIVACY_STATES,
@@ -177,8 +178,11 @@ function extractFiles(text: string): { read: string[]; modified: string[] } {
   };
 }
 
+// Title, narrative and facts come from the content's informative lines (audit DATA-5):
+// constant preambles, tags and section labels are skipped, so rows of one producer no
+// longer share a title and narrative. The summary only leads the title.
 function deriveTitle(type: MemoryType | string, content: string, summary?: string): string {
-  const source = normalizeWhitespace(summary || content);
+  const source = normalizeWhitespace(summary || buildDeterministicSummary(content) || content);
   const firstSentence = source.split(/(?<=[.!?])\s+/)[0] || source;
   const title = truncate(firstSentence.replace(/^\[[^\]]+\]\s*/, ""), 96);
   if (title) return title;
@@ -186,12 +190,37 @@ function deriveTitle(type: MemoryType | string, content: string, summary?: strin
 }
 
 function deriveFacts(content: string, summary?: string): string[] {
-  const combined = normalizeWhitespace(summary || content);
-  const sentences = combined
-    .split(/(?<=[.!?])\s+|\n+/)
+  const informative = informativeMemoryText(content);
+  const sentences = (informative || summary || content)
+    .split(/\n+/)
+    .flatMap((line) => normalizeWhitespace(line).split(/(?<=[.!?])\s+/))
     .map((line) => truncate(line, 180))
     .filter((line) => line.length > 12);
   return sentences.slice(0, 4);
+}
+
+/** The text fields of a memory's observation, derived from its content and summary. */
+export function deriveObservationText(memory: {
+  type: MemoryType | string;
+  content: string;
+  summary?: string;
+}): Pick<
+  MemoryObservationMetadata,
+  "title" | "narrative" | "facts" | "concepts" | "filesRead" | "filesModified"
+> {
+  const content = memory.content || "";
+  const summary = memory.summary;
+  const informative = informativeMemoryText(content);
+  const files = extractFiles(content);
+  const title = deriveTitle(memory.type, content, summary);
+  return {
+    title,
+    narrative: truncate(informative || summary || content, 900),
+    facts: deriveFacts(content, summary),
+    concepts: extractConcepts(`${title} ${informative || summary || content}`),
+    filesRead: files.read,
+    filesModified: files.modified,
+  };
 }
 
 function buildMetadata(
@@ -201,22 +230,20 @@ function buildMetadata(
   const content = memory.content || "";
   const summary = memory.summary;
   const origin = options.origin || "unknown";
-  const files = extractFiles(content);
-  const facts = deriveFacts(content, summary);
-  const title = deriveTitle(memory.type, content, summary);
+  const text = deriveObservationText(memory);
   return {
     memoryId: memory.id,
     workspaceId: memory.workspaceId,
     taskId: memory.taskId,
     origin,
     observationType: memory.type,
-    title,
+    title: text.title,
     subtitle: memory.taskId ? `Task ${memory.taskId}` : sourceLabel(origin),
-    narrative: truncate(summary || content, 900),
-    facts,
-    concepts: extractConcepts(`${title} ${summary || ""} ${content}`),
-    filesRead: files.read,
-    filesModified: files.modified,
+    narrative: text.narrative,
+    facts: text.facts,
+    concepts: text.concepts,
+    filesRead: text.filesRead,
+    filesModified: text.filesModified,
     tools: options.tools || [],
     sourceEventIds: options.sourceEventIds || [],
     contentHash: contentHash(content),

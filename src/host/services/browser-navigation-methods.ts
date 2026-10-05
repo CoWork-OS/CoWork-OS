@@ -11,7 +11,7 @@ import {
 } from "../../electron/agents/agent-repository-facades";
 import type { HeartbeatService } from "../../electron/agents/HeartbeatService";
 import { AgentDaemon } from "../../electron/agent/daemon";
-import { EverydayAgentService } from "../../electron/everyday-agent/everyday-agent-repository-facades";
+import type { EverydayAgentService } from "../../electron/everyday-agent/everyday-agent-repository-facades";
 import { CronService, getCronService } from "../../electron/cron";
 import type { CronJob, CronJobCreate, CronJobPatch, CronSchedule } from "../../electron/cron/types";
 import { CHANNEL_TYPES, type ChannelType } from "../../electron/gateway/channels/types";
@@ -111,7 +111,8 @@ export interface BrowserNavigationOptions {
   getHeartbeatService?: () => HeartbeatStatusSource | null;
   resolveWorkspace?: (workspaceId: string) => Promise<Workspace | null>;
   managedSessionService?: ManagedSessionService;
-  everydayAgentService?: EverydayAgentService;
+  /** Required: the host process shares one instance with IPC and the control plane (LIFE-5). */
+  everydayAgentService: EverydayAgentService;
   agentBuilderService?: AgentBuilderService;
   imageGenProfileService?: ImageGenProfileService;
   /** Read-only discovery sources; injectable so browser DTOs can be tested without network access. */
@@ -2418,7 +2419,8 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       getRoutineService: () => currentRoutineService(),
       workContextService: new WorkContextService(db),
     });
-  const everyday = options.everydayAgentService || new EverydayAgentService(db);
+  // The host's one EverydayAgentService (LIFE-5), shared with IPC and the control plane.
+  const everyday = options.everydayAgentService;
   const templates = new AgentTemplateService();
   const agentBuilder = options.agentBuilderService || new AgentBuilderService();
   const imageProfiles = options.imageGenProfileService || new ImageGenProfileService();
@@ -4790,8 +4792,14 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
   );
   definitions.everydayAgentClearData = definition(
     memory,
-    ([request]) =>
-      everyday.clearData(
+    async ([request]) => {
+      const workspaceId =
+        request && typeof request === "object" && !Array.isArray(request)
+          ? (request as RecordLike).workspaceId
+          : undefined;
+      // Clearing a workspace's memory candidates needs the right to run agents there.
+      if (typeof workspaceId === "string") await permission(workspaceId, "canRunAgents");
+      return everyday.clearData(
         request === undefined
           ? undefined
           : (boundedJson(
@@ -4806,9 +4814,11 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
                 "routineProvenance",
                 "cachedConnectorSummaries",
                 "browserProfileMetadata",
+                "workspaceId",
               ]),
             ) as EverydayAgentClearDataRequest),
-      ),
+      );
+    },
     {
       mutation: true,
       maxArgs: 1,
@@ -4825,9 +4835,15 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
           "routineProvenance",
           "cachedConnectorSummaries",
           "browserProfileMetadata",
+          "workspaceId",
         ]);
-        if (Object.values(input).some((value) => typeof value !== "boolean"))
+        if (
+          Object.entries(input).some(([key, value]) =>
+            key === "workspaceId" ? typeof value !== "string" : typeof value !== "boolean",
+          )
+        )
           return invalidRequest();
+        if (input.workspaceId !== undefined) stringArg(input.workspaceId);
         return [input];
       },
     },

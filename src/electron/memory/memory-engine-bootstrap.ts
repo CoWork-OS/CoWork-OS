@@ -2,7 +2,7 @@
  * Startup wiring of the memory engine (docs/memory-engine.md): create the process-wide
  * MemoryWriter, copy the retired legacy lanes into `memory_items` once (awaited, so no
  * service reads a half-migrated store), then start the read side (PersonalityManager name
- * and style mirrors) and the synchronous facts snapshot.
+ * and style mirrors), the synchronous facts snapshot and the kit file watcher.
  */
 import type Database from "better-sqlite3";
 import { createLogger } from "../utils/logger";
@@ -13,6 +13,7 @@ import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-st
 import { withMaintenanceClaim } from "./maintenance-claim-sql";
 import { MEMORY_ITEMS_LANE_MIGRATION_KEY } from "./memory-items-sql";
 import { scheduleLegacyMemoryRetirement } from "./LegacyMemoryRetirement";
+import { KitFileWatcher } from "./KitFileWatcher";
 
 const logger = createLogger("MemoryEngine");
 
@@ -93,7 +94,10 @@ export async function startMemoryEngine(
   await Promise.all([MemoryFactsSnapshot.refresh(), readSide.refresh()]);
   // One-time legacy data retirement, deferred off the startup path.
   const cancelRetirement = scheduleLegacyMemoryRetirement(writer, port);
+  // Kit back-sync on file edit: workspaces are watched once their kit is synced or used.
+  const stopKitWatcher = KitFileWatcher.install();
   return () => {
+    stopKitWatcher();
     cancelRetirement();
     stopSnapshot();
     readSide.dispose();

@@ -105,6 +105,11 @@ export interface MemoryFeaturesSettings {
   dreamingLlmEnabled?: boolean;
   /** Daily token budget of Dreaming's LLM synthesis, across workspaces. */
   dreamingLlmDailyTokenBudget?: number;
+  /**
+   * Daily token budget (rolling 24 hours, across workspaces) of the AI memory compression.
+   * The on/off switch is the per-workspace `compressionEnabled` memory setting.
+   */
+  memoryCompressionDailyTokenBudget?: number;
 }
 
 export type MemoryWriteApprovalStatus = "pending" | "applying" | "applied" | "rejected" | "failed";
@@ -4328,7 +4333,9 @@ export type UnifiedRecallSourceType =
   | "screen_context"
   | "knowledge_graph"
   /** Conversation index hits other than user/assistant messages (tool output, summaries). */
-  | "conversation";
+  | "conversation"
+  /** Supermemory, when connected and the workspace allows network access. */
+  | "supermemory";
 
 export type ChronicleCaptureScope = "frontmost_display" | "all_displays";
 export type ChronicleTaskMode = "inherit" | "enabled" | "disabled";
@@ -8627,10 +8634,13 @@ export interface EverydayAgentClearDataRequest {
   trustPatterns?: boolean;
   consentHistory?: boolean;
   pauseScopes?: boolean;
+  /** Clear the proposed core memory candidates of `workspaceId` (what the panel counts). */
   memoryCandidates?: boolean;
   routineProvenance?: boolean;
   cachedConnectorSummaries?: boolean;
   browserProfileMetadata?: boolean;
+  /** Workspace whose memory candidates `memoryCandidates` clears; without it none are. */
+  workspaceId?: string;
 }
 
 export interface EverydayAgentApproveActionRequest {
@@ -9763,6 +9773,10 @@ export const IPC_CHANNELS = {
   MEMORY_REVIEW_UNDO: "memoryReview:undo",
   MEMORY_REVIEW_RUN_NOW: "memoryReview:runNow",
   MEMORY_REVIEW_SET_LLM: "memoryReview:setLlmEnabled",
+
+  // Memory Hub "Sources" and "Health": aggregate counts and qa:memory-health checks
+  MEMORY_HUB_SOURCES: "memoryHub:sources",
+  MEMORY_HUB_HEALTH: "memoryHub:health",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",

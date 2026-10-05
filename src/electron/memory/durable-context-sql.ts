@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "crypto";
 import type Database from "better-sqlite3";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
-import { buildFtsMatchQuery, likeContainsPattern } from "../database/fts-query";
+import {
+  buildFtsMatchQuery,
+  collapseWhitespace,
+  likeContainsPattern,
+} from "../database/fts-query";
 import { ConversationIndexStore, ensureConversationIndexSchema } from "./conversation-index-sql";
 
 /**
@@ -85,7 +89,7 @@ export function hashText(text: string): string {
 }
 
 export function normalizeText(text: string): string {
-  return InputSanitizer.sanitizeMemoryContent(text).replace(/\s+/g, " ").trim();
+  return collapseWhitespace(InputSanitizer.sanitizeMemoryContent(text));
 }
 
 /**

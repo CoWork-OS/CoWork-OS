@@ -139,7 +139,7 @@ Workflow Intelligence appears in:
 - **Settings > Automations > Workflow Intelligence**: policy, target, run, and diagnostic controls
 - **Suggestions panel**: review, act, snooze, and dismiss active suggestions
 - **Mission Control**: heartbeat state, traces, core harness learning, and dispatched work
-- **Memory Hub**: "What CoWork knows" (facts), the **Review** tab for Dreaming proposals and undo, and pending memory writes.
+- **Memory Hub**: "What CoWork knows" (facts), the **Review** tab for Dreaming proposals and undo, the **Sources** and **Health** tabs (where memory comes from; the memory health checks), and pending memory writes.
 
 Reflection internals remain inspectable for power users, but suggestions are the primary user-facing output.
 

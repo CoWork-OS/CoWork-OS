@@ -2,6 +2,7 @@ import { loadDocumentArchive } from "../security/document-archive";
 import { AgentRoleRepository } from "../agents/agent-repository-facades";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import { ChannelRepository } from "../database/repository-facades";
+import { foldSearchText, quoteFtsTerm, splitSearchTokens } from "../database/fts-query";
 import {
   bindStatementContext,
   detachedStatementContext,
@@ -1128,18 +1129,15 @@ const MAILBOX_QUERY_STOP_WORDS = new Set([
 ]);
 
 function normalizeMailboxSearchText(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "");
+  return foldSearchText(value);
 }
 
 function tokenizeMailboxQuery(query: string): string[] {
   const normalized = normalizeMailboxSearchText(query);
-  const tokens = normalized
-    .split(/[^a-z0-9]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 2 && !MAILBOX_QUERY_STOP_WORDS.has(token));
+  // Unicode tokens (RECALL-9): an ASCII-only split dropped every non-Latin word.
+  const tokens = splitSearchTokens(normalized.replace(/[_-]+/g, " ")).filter(
+    (token) => !MAILBOX_QUERY_STOP_WORDS.has(token),
+  );
   return Array.from(new Set(tokens)).slice(0, 10);
 }
 
@@ -1608,8 +1606,7 @@ function clampConfidence(value: number): number {
 
 function buildMailboxFtsQuery(query: string): string {
   return tokenizeMailboxQuery(query)
-    .map((token) => token.replace(/["']/g, "").trim())
-    .map((token) => `"${token}"`)
+    .map((token) => quoteFtsTerm(token))
     .join(" OR ");
 }
 

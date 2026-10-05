@@ -105,6 +105,11 @@ export interface MemoryFeaturesSettings {
   dreamingLlmEnabled?: boolean;
   /** Daily token budget of Dreaming's LLM synthesis, across workspaces. */
   dreamingLlmDailyTokenBudget?: number;
+  /**
+   * Daily token budget (rolling 24 hours, across workspaces) of the AI memory compression.
+   * The on/off switch is the per-workspace `compressionEnabled` memory setting.
+   */
+  memoryCompressionDailyTokenBudget?: number;
 }
 
 export type MemoryWriteApprovalStatus = "pending" | "applying" | "applied" | "rejected" | "failed";

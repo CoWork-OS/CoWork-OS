@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   memoryInspectorEnabled: true,
   dreamingLlmEnabled: false,
   dreamingLlmDailyTokenBudget: 20000,
+  memoryCompressionDailyTokenBudget: 20000,
 };
 
 function isEnabled(value: boolean | undefined): boolean {
@@ -88,6 +89,10 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     dreamingLlmDailyTokenBudget: Math.min(
       1_000_000,
       Math.floor(normalizePositiveNumber(settings.dreamingLlmDailyTokenBudget, 20000)),
+    ),
+    memoryCompressionDailyTokenBudget: Math.min(
+      1_000_000,
+      Math.floor(normalizePositiveNumber(settings.memoryCompressionDailyTokenBudget, 20000)),
     ),
   };
 }

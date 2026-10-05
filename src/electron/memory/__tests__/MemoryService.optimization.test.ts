@@ -24,6 +24,11 @@ const mockLLMProviderFactory = {
     bedrock: {},
   })),
   getModelId: vi.fn(() => "mock-batch-model"),
+  resolveTaskModelSelection: vi.fn(() => ({
+    providerType: "openai",
+    modelKey: "mock-model",
+    modelId: "mock-batch-model",
+  })),
 };
 
 vi.mock("../../agent/llm", () => ({
@@ -73,19 +78,23 @@ function createMockRepos() {
         updatedAt: Date.now(),
       });
     },
-    insertCaptured: (write: {
-      memory: Omit<Memory, "summary" | "taskId"> & {
-        summary: string | null;
-        taskId: string | null;
-      };
-    }) => {
-      mockMemories.set(write.memory.id, {
-        ...write.memory,
-        summary: write.memory.summary ?? undefined,
-        taskId: write.memory.taskId ?? undefined,
-      } as Memory);
-      return { observationStored: false };
-    },
+    insertCaptured: vi.fn(
+      (write: {
+        memory: Omit<Memory, "summary" | "taskId"> & {
+          summary: string | null;
+          taskId: string | null;
+        };
+        observation?: unknown;
+        embedding?: unknown;
+      }) => {
+        mockMemories.set(write.memory.id, {
+          ...write.memory,
+          summary: write.memory.summary ?? undefined,
+          taskId: write.memory.taskId ?? undefined,
+        } as Memory);
+        return { observationStored: Boolean(write.observation) };
+      },
+    ),
     findById: (id: string): Memory | undefined => mockMemories.get(id),
     findByIds: (ids: string[]): Memory[] =>
       ids.map((id) => mockMemories.get(id)).filter(Boolean) as Memory[],
@@ -226,6 +235,7 @@ describe("MemoryService compression optimization", () => {
     MemoryService = module.MemoryService;
     MemoryService.shutdown();
     setMemoryServiceState();
+    (await import("../MemoryCompressionBudget")).MemoryCompressionBudget.resetLocalLedger();
   });
 
   afterEach(() => {
@@ -390,6 +400,143 @@ describe("MemoryService compression optimization", () => {
       const repo = (MemoryService as Any).memoryRepo;
       expect(repo.search).toHaveBeenCalledWith(workspaceId, "release notes", 5, true);
       expect(repo.searchImportedGlobal).toHaveBeenCalledWith("release notes", 5, true);
+    });
+  });
+
+  describe("AI compression (DATA-7)", () => {
+    const longDecision = () =>
+      [
+        "Chronicle observation from the user's local screen context.",
+        `Chose the queue-based exporter for invoices ${"because retries are cheap ".repeat(30)}`,
+      ].join("\n");
+    const drain = async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+      await Promise.resolve();
+    };
+    const budget = async () => (await import("../MemoryCompressionBudget")).MemoryCompressionBudget;
+
+    it("stores the content's token estimate, not the summary's", async () => {
+      const content = longDecision();
+      const memory = await MemoryService.capture(workspaceId, "task-t", "decision", content);
+      expect(memory?.tokens).toBe(Math.ceil(content.length / 4));
+      expect(memory?.summary).toMatch(/^Chose the queue-based exporter/);
+    });
+
+    it("compresses a single long memory with the model, from its content", async () => {
+      const memory = await MemoryService.capture(workspaceId, "task-1", "decision", longDecision());
+      await drain();
+
+      expect(mockProvider.createMessage).toHaveBeenCalledTimes(1);
+      const request = (mockProvider.createMessage.mock.calls[0] as unknown[])[0] as {
+        model: string;
+        messages: Array<{ content: string }>;
+      };
+      expect(request.model).toBe("mock-batch-model");
+      expect(request.messages[0].content).toContain("because retries are cheap");
+      expect(request.messages[0].content).not.toContain("Chronicle observation from");
+      expect(mockMemories.get(memory!.id)?.summary).toBe("LLM batch digest");
+      expect(MemoryService.getCompressionDiagnostics(workspaceId).llmCalls).toBe(1);
+      expect(await (await budget()).tokensUsed(undefined)).toBeGreaterThan(0);
+    });
+
+    it("keeps the deterministic summary when the daily token budget is used up", async () => {
+      await (await budget()).record(undefined, workspaceId, 20_000);
+      const memory = await MemoryService.capture(workspaceId, "task-2", "decision", longDecision());
+      await drain();
+
+      expect(mockProvider.createMessage).not.toHaveBeenCalled();
+      expect(mockMemories.get(memory!.id)?.summary).toMatch(/^Chose the queue-based exporter/);
+      expect(MemoryService.getCompressionDiagnostics(workspaceId).dropped).toBeGreaterThan(0);
+    });
+
+    it("never sends a row that became private before the queue drained", async () => {
+      const memory = await MemoryService.capture(workspaceId, "task-3", "decision", longDecision());
+      mockMemories.set(memory!.id, { ...mockMemories.get(memory!.id)!, isPrivate: true });
+      await drain();
+      expect(mockProvider.createMessage).not.toHaveBeenCalled();
+    });
+
+    it("makes no model call when AI compression was turned off before the drain", async () => {
+      await MemoryService.capture(workspaceId, "task-4", "decision", longDecision());
+      mockSettings.set(workspaceId, {
+        ...createDefaultSettings(workspaceId),
+        compressionEnabled: false,
+      });
+      await drain();
+      expect(mockProvider.createMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not queue anything in strict privacy mode", async () => {
+      mockSettings.set(workspaceId, {
+        ...createDefaultSettings(workspaceId),
+        privacyMode: "strict",
+      });
+      await MemoryService.capture(workspaceId, "task-5", "decision", longDecision());
+      await drain();
+      expect(mockProvider.createMessage).not.toHaveBeenCalled();
+    });
+
+    it("stores batch digests through capture, with an embedding and an observation", async () => {
+      const repo = (MemoryService as Any).memoryRepo;
+      const createSpy = vi.spyOn(repo, "create");
+      await MemoryService.capture(workspaceId, "task-6", "decision", `A ${"alpha ".repeat(80)}`);
+      await MemoryService.capture(workspaceId, "task-6", "decision", `B ${"beta ".repeat(80)}`);
+      await drain();
+
+      expect(createSpy).not.toHaveBeenCalled();
+      const digestWrite = repo.insertCaptured.mock.calls
+        .map((call: unknown[]) => call[0] as Record<string, Any>)
+        .find((write: Record<string, Any>) => write.memory.type === "summary");
+      expect(digestWrite).toBeDefined();
+      expect(digestWrite.memory.taskId).toBe("task-6");
+      expect(digestWrite.memory.content).toBe("LLM batch digest");
+      expect(digestWrite.embedding?.values?.length).toBeGreaterThan(0);
+      expect(digestWrite.observation).toMatchObject({
+        observationType: "summary",
+        captureReason: "compression_digest",
+      });
+    });
+
+    it("stores a local digest whose summary is its first item, not the header", async () => {
+      // Budget used up: the digest is the deterministic one.
+      await (await budget()).record(undefined, workspaceId, 20_000);
+      const repo = (MemoryService as Any).memoryRepo;
+      await MemoryService.capture(workspaceId, "task-7", "decision", `A ${"alpha ".repeat(80)}`);
+      await MemoryService.capture(workspaceId, "task-7", "decision", `B ${"beta ".repeat(80)}`);
+      await drain();
+
+      const digestWrite = repo.insertCaptured.mock.calls
+        .map((call: unknown[]) => call[0] as Record<string, Any>)
+        .find((write: Record<string, Any>) => write.memory.type === "summary");
+      expect(digestWrite.memory.content).toMatch(/^\[task digest: task:task-7\]\n- \[decision\] A/);
+      expect(digestWrite.memory.summary).toMatch(/^- \[decision\] A alpha/);
+    });
+
+    it("counts embedding and observation bytes toward the storage estimate", () => {
+      const bytes = (MemoryService as Any).captureBytes(
+        "content",
+        "summary",
+        { values: [0.5, 0.25] },
+        {
+          title: "Title",
+          subtitle: "Sub",
+          narrative: "Narrative",
+          facts: ["a fact"],
+          concepts: [],
+          filesRead: [],
+          filesModified: [],
+        },
+      );
+      expect(bytes).toBe(
+        "content".length +
+          "summary".length +
+          "[0.5,0.25]".length +
+          "Title".length +
+          "Sub".length +
+          "Narrative".length +
+          '["a fact"]'.length +
+          3 * "[]".length,
+      );
     });
   });
 

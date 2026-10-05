@@ -153,7 +153,23 @@ describe("MemoryFeaturesManager", () => {
       memoryInspectorEnabled: true,
       dreamingLlmEnabled: false,
       dreamingLlmDailyTokenBudget: 20000,
+      memoryCompressionDailyTokenBudget: 20000,
     });
+  });
+
+  it("keeps the AI compression budget positive and bounded", () => {
+    MemoryFeaturesManager.saveSettings({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryCompressionDailyTokenBudget: 5_000_000,
+    });
+    expect(mocks.storedSettings).toMatchObject({ memoryCompressionDailyTokenBudget: 1_000_000 });
+    MemoryFeaturesManager.saveSettings({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryCompressionDailyTokenBudget: -4,
+    });
+    expect(mocks.storedSettings).toMatchObject({ memoryCompressionDailyTokenBudget: 20000 });
   });
 
   it("enabling durable context enables checkpoint capture but not span writing", () => {

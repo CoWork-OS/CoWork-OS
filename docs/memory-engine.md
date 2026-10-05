@@ -1,7 +1,7 @@
 # Memory Engine — design and Phase 2 foundation
 
-**Status.** Implemented (updated 2026-10-04): the Phase 2 foundation with the Phase 3 additions, the legacy
-retirement and the producer routing noted inline. The write
+**Status.** Implemented (updated 2026-10-05): the Phase 2 foundation with the Phase 3 additions, the legacy
+retirement, the producer routing and the archive summary and compression fixes (§6a) noted inline. The write
 side described here is implemented: the `memory_items` store, `MemoryWriter`, the one-time lane
 migration and purge/retention. `memory_items` is the only store of facts about the user: the
 legacy lanes are retired as stores (§5: no dual writes, no mirror, no legacy read paths), and
@@ -49,7 +49,7 @@ low-level writers (`insertCapturedMemory`, the `memory.capture` worker command,
 | Supermemory (`SupermemoryService`) | Remote only | Explicit remember (`memory_remember` scope `external`): `<no-memory>` refused, secrets redacted (secret-only refused), refused when workspace memory is off or privacy mode is `disabled` / `strict`; mirror writes copy archive rows that already passed `capture` and are non-private. Profile and search results are only cached per task for the prompt (third-party tag) and never stored locally, so a remote fact is never `user_stated` here. |
 | Box Brain | `MemoryService.capture` / `replaceMemory` | Private source rows (`origin: import`, `forceCapture`). |
 | Task outcomes, corrections, feedback, errors (daemon, executor), `memory_remember` kinds `outcome` / `error` / `note`, approved archive writes | `MemoryService.capture` | Salience-gated upstream (`memory-capture-salience.ts`) and at capture. |
-| Compression batch digests | `MemoryService` internal | Digest of rows that passed capture; redacted again before storage. |
+| Compression batch digests | `MemoryService.capture` (§6a) | Digest of rows that passed capture, stored through `capture` (redaction, settings, dedupe, embedding, observation sidecar with capture reason `compression_digest`, storage cap). The write gate is skipped: every source row already passed it. Never mirrored to Supermemory. |
 
 ## 2. `memory_items`
 
@@ -684,6 +684,69 @@ by the schema setup (`memory-curation-log-sql.ts`).
   with `kind = outcome`, or the archive is kept as an evidence log behind the facts. That choice
   is deferred until recall telemetry shows how often episodic rows are recalled directly.
 
+## 6a. Archive capture, summaries and compression
+
+Audit DATA-5 and DATA-7. Code: `memory-summary.ts` (pure), `MemoryService.capture`, the
+compression queue in `MemoryService`, `MemoryCompressionBudget.ts`,
+`memory-compression-usage-sql.ts`, `memory-summary-reindex-sql.ts` and
+`MemorySummaryReindex.ts`.
+
+**Deterministic summary.** Every row gets a local summary at capture: the first
+informative line, at most 220 characters. Skipped lines: code fences (prose wins over
+code), the prompt-recall ignore marker, tag-only lines (`[Imported from …]`,
+`[core-trace:…]`, `[scope:…]`, a digest header), the Chronicle provenance and
+"treat screen-derived text as untrusted" lines, the compaction preamble, the
+"Pre-compaction memory flush" header, "Tool result for X:" and "Tool called:" labels,
+short label-only lines ("Highlights:") and generic section headings ("## Summary",
+"Current State"). A generic label in front of text is dropped ("1. **Current State**: X"
+→ "X"). A `Key: value` first line is joined with the field lines after it, so Chronicle rows
+read "App: Slack · Window: #releases · …". When every line is skipped, the first line
+is kept.
+
+**Embedding and observation.** The local embedding is built from the summary followed by
+the informative content (12 000 characters at most), not the summary alone. The
+observation sidecar's narrative, facts and concepts come from the informative content;
+the title from the summary (or the content when there is none). `tokens` is the
+content's estimate.
+
+**AI compression.** On by default per workspace (`compressionEnabled`, Memory settings →
+"AI memory compression"; a workspace whose saved setting is off stays off, because only the
+user's own save can write it off). Captures worth it (decisions, errors and preferences of
+≥ 100 content tokens, observations, insights and screen context of ≥ 300; not low-priority,
+structured or `summary` rows) are queued and drained in the background, paused while a task
+runs with the side-channel policy. One row gets a one-line model summary of its content
+(`summary` replaced, redacted again); several rows of one task or window get a digest stored
+as a new `summary` row through `capture`. At drain time the workspace settings are read
+again: memory off or privacy `disabled` drops the queue, AI compression off or privacy
+`strict` keeps it local; private, `<no-memory>`, deleted and redacted rows never reach the
+model or a digest. The call uses the configured provider (no task override) with its cheap
+profile, 160 output tokens, and the prompt carries content excerpts (4 000 characters for one
+row, 600 per row for a digest). Calls are rate-limited (3 per workspace per 15 minutes) and
+bounded by `memoryCompressionDailyTokenBudget` (default 20 000 tokens, rolling 24 hours,
+across workspaces), counted in `memory_compression_usage` (a ledger without memory text,
+pruned after 7 days; a failed call is charged its estimated input). Without budget, the
+deterministic summary or digest is kept. Memory settings show the notice "AI memory
+compression uses your model provider and costs tokens (up to N tokens/day …)", the budget
+and the last 24 hours' use (`MemoryService.getStats`).
+
+**Storage cap.** `maxStorageMb` counts content, summary, the stored embedding JSON and the
+observation sidecar's text columns, per workspace and per row when pruning (FTS index
+rows are not counted).
+
+**One-time re-index** (`memory_summary_reindex_v1`). Runs after the archive cleanup
+migration, about 90 seconds after start, claimed like the other one-time jobs. Chunks of
+100 rows (by rowid, rows created before the run started), each one memory-domain unit in
+the database worker, with a 50 ms pause between chunks; progress (last rowid and counts) is
+stored with each chunk under `memory_summary_reindex_v1:progress`, so a run stopped by
+shutdown resumes. Per row: Inspector-deleted or redacted rows and hand-edited observations
+are skipped; a deterministic summary (empty or equal to the old first-line rule) is
+recomputed and `tokens` set to the content's estimate, any other summary (model-written,
+source sync) is kept; the embedding is rebuilt; an existing observation's title,
+narrative, facts, concepts and file lists are derived again (privacy state and provenance
+unchanged; none created). `updated_at` is not changed. The `memories_fts_update` trigger
+reindexes summary changes. The marker stores `scanned`, `summariesRewritten`,
+`embeddingsRewritten`, `observationsRewritten`, `skippedEdited` and `keptCustomSummary`.
+
 ## 7. Purge and retention
 
 - **Task delete** (`memory-purge-sql.ts` `purgeTaskDerivedRows`, inside `TaskStore.delete`'s
@@ -795,3 +858,10 @@ by the schema setup (`memory-curation-log-sql.ts`).
     host. Open: a non-owner's live kit updates reach the files only when ownership changes or
     on the owner's next restart; the lease does not cover `USER.md`/`MEMORY.md`, which are
     rendered from `memory_items` on request and written only when their content changes.
+11. Done (DATA-5, DATA-7; §6a): summaries skip constant preambles, embeddings and observation
+    text come from the content, a one-time re-index rewrote existing rows; AI compression runs
+    (single rows and digests), is on by default within a daily token budget, and digests go
+    through `capture`; the storage cap counts embeddings and observations. Open: the storage cap
+    still prunes the least recently useful rows first regardless of their value, and FTS index
+    bytes are not counted; a model-written single-row summary does not refresh the observation
+    title.

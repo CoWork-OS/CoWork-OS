@@ -102,6 +102,7 @@ const featureSettings = z
     durableContextMode: z.enum(["off", "experimental", "on"]).optional(),
     durableContextLargePayloadThreshold: z.number().int().min(1).max(1_000_000).optional(),
     dreamingLlmDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
+    memoryCompressionDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryWriteApprovalMode: z
       .enum(["off", "curated_only", "external_only", "background_only", "all"])
       .optional(),

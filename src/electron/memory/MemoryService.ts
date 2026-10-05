@@ -48,6 +48,13 @@ import { containsNoMemoryDirective } from "./no-memory-directive";
 import { REDACTED_SECRET, redactSecrets } from "./sensitive-content";
 import type { MemoryItemKind } from "./memory-items-types";
 import { neutralizeReservedImportPrefix } from "./memory-visibility";
+import {
+  PROMPT_RECALL_IGNORE_MARKER,
+  buildDeterministicSummary,
+  informativeMemoryText,
+  memoryEmbeddingText,
+} from "./memory-summary";
+import { MemoryCompressionBudget } from "./MemoryCompressionBudget";
 
 // Secret values are redacted before storage by `redactSecrets` (./sensitive-content);
 // merely mentioning auth, tokens or `.env` no longer hides a memory.
@@ -72,9 +79,12 @@ const COMPRESSION_RETRY_BASE_DELAY_MS = 5_000;
 const MAX_COMPRESSION_RETRIES = 3;
 const MAX_TEXT_IMPORT_ENTRIES = 3000;
 const MAX_TEXT_IMPORT_ENTRY_CHARS = 12000;
-const PROMPT_RECALL_IGNORE_MARKER = "[cowork:prompt_recall=ignore]";
 const COMPRESSION_BATCH_WINDOW_MS = 5 * 60 * 1000;
-const LOCAL_SUMMARY_MAX_CHARS = 220;
+// Output cap of one AI compression call: a one-line summary or a short digest.
+const COMPRESSION_MAX_OUTPUT_TOKENS = 160;
+// Content excerpt the model sees: one memory, or each memory of a batch.
+const COMPRESSION_SINGLE_EXCERPT_CHARS = 4000;
+const COMPRESSION_BATCH_EXCERPT_CHARS = 600;
 const logger = createLogger("MemoryService");
 
 type MemoryCaptureOrigin =
@@ -118,6 +128,16 @@ interface CompressionQueueEntry {
   batchKey: string;
   origin: MemoryCaptureOrigin;
   priority: MemoryCompressionPriority;
+  requestedAt: number;
+}
+
+/** Queued rows compressed together (one task, or one origin in a time window). */
+interface CompressionGroup {
+  workspaceId: string;
+  batchKey: string;
+  origin: MemoryCaptureOrigin;
+  priority: MemoryCompressionPriority;
+  memoryIds: string[];
   requestedAt: number;
 }
 
@@ -336,7 +356,13 @@ export class MemoryService {
     this.archiveCleanupTimer = setTimeout(() => {
       this.archiveCleanupTimer = undefined;
       if (this.draining) return;
-      void this.inFlight.track(this.runArchiveCleanupMigration());
+      // The summary re-index follows the cleanup, so it never re-indexes rows the
+      // cleanup deletes or redacts.
+      void this.inFlight.track(
+        this.runArchiveCleanupMigration().then(() => {
+          if (!this.draining) return this.runSummaryReindex();
+        }),
+      );
     }, MemoryService.ARCHIVE_CLEANUP_DELAY_MS);
     this.archiveCleanupTimer.unref?.();
   }
@@ -366,6 +392,49 @@ export class MemoryService {
       this.promptRecallCache.clear();
     } catch (error) {
       logger.warn("[MemoryService] Archive cleanup migration failed:", error);
+    }
+  }
+
+  private static readonly SUMMARY_REINDEX_PAUSE_MS = 50;
+
+  /**
+   * Run the one-time summary re-index now (DATA-5; idempotent, claimed and resumable,
+   * MemorySummaryReindex.ts): chunks of rows in the database worker with a pause between
+   * them; stops at shutdown and resumes on the next start. Exposed for tests and tooling.
+   */
+  static async runSummaryReindex(): Promise<void> {
+    const sql = this.sql;
+    if (!this.initialized || !sql) return;
+    // The FTS worker's cache is told per chunk; the host caches are dropped once at the
+    // end (until then they only hold the old vectors), so searches during the run do not
+    // reload them after every chunk.
+    const changedWorkspaces = new Set<string>();
+    try {
+      const { runMemorySummaryReindex } = await import("./MemorySummaryReindex");
+      const result = await runMemorySummaryReindex(sql, {
+        pause: () => new Promise((resolve) => setTimeout(resolve, this.SUMMARY_REINDEX_PAUSE_MS)),
+        shouldStop: () => !this.initialized || this.draining,
+        onChunk: (chunk) => {
+          if (chunk.memoryIds.length === 0) return;
+          this.ftsWorker?.invalidateEmbeddings({ kind: "memories", memoryIds: chunk.memoryIds });
+          for (const workspaceId of chunk.workspaceIds) changedWorkspaces.add(workspaceId);
+        },
+      });
+      if (result.ran) logger.info("[MemoryService] Summary re-index completed", result.counts);
+    } catch (error) {
+      logger.warn("[MemoryService] Summary re-index failed:", error);
+    } finally {
+      if (changedWorkspaces.size > 0 && this.initialized) {
+        for (const workspaceId of changedWorkspaces) {
+          this.memoryEmbeddingsByWorkspace.delete(workspaceId);
+          this.embeddingsLoadedForWorkspace.delete(workspaceId);
+          this.storageEstimateByWorkspace.delete(workspaceId);
+        }
+        this.importedEmbeddings.clear();
+        this.importedEmbeddingsLoaded = false;
+        this.embeddingCacheGeneration += 1;
+        this.promptRecallCache.clear();
+      }
     }
   }
 
@@ -548,21 +617,21 @@ export class MemoryService {
 
     // Best-effort: keep a concise local summary immediately so retrieval and prompts
     // do not need to consume the full raw payload for low-value entries.
+    // `tokens` stays the content's estimate: the compression gates compare it (DATA-7).
     const localSummary = this.buildDeterministicSummary(truncatedContent);
     let embedding: { values: number[]; updatedAt: number } | undefined;
-    const finalSummary = localSummary ? this.buildDeterministicSummary(localSummary) : "";
-    if (finalSummary) {
-      memory.summary = finalSummary;
-      memory.tokens = estimateTokens(finalSummary);
+    if (localSummary) {
+      memory.summary = localSummary;
       memory.isCompressed = true;
-      try {
-        embedding = {
-          values: createLocalEmbedding(this.normalizeForEmbedding(finalSummary, finalSummary)),
-          updatedAt: memory.updatedAt,
-        };
-      } catch {
-        // The embedding backfill computes it later.
-      }
+    }
+    try {
+      // Built from the content with the summary, not the summary alone (DATA-5).
+      embedding = {
+        values: createLocalEmbedding(this.normalizeForEmbedding(localSummary, truncatedContent)),
+        updatedAt: memory.updatedAt,
+      };
+    } catch {
+      // The embedding backfill computes it later.
     }
 
     let observation: ReturnType<typeof MemoryObservationService.buildMetadataFor> | undefined;
@@ -671,10 +740,35 @@ export class MemoryService {
 
     // Enforce per-workspace storage cap (best-effort).
     await this.enforceStorageLimit(workspaceId, settings.maxStorageMb, {
-      addedBytes: truncatedContent.length + (memory.summary?.length ?? 0),
+      addedBytes: this.captureBytes(truncatedContent, memory.summary, embedding, observation),
     });
 
     return memory;
+  }
+
+  /**
+   * Bytes a capture adds, counted the way `getApproxStorageBytes` measures them: content,
+   * summary, the embedding's stored JSON and the observation's text columns (DATA-7).
+   */
+  private static captureBytes(
+    content: string,
+    summary: string | undefined,
+    embedding: { values: number[] } | undefined,
+    observation: ReturnType<typeof MemoryObservationService.buildMetadataFor> | undefined,
+  ): number {
+    let bytes = content.length + (summary?.length ?? 0);
+    if (embedding) bytes += JSON.stringify(embedding.values).length;
+    if (observation) {
+      bytes +=
+        observation.title.length +
+        (observation.subtitle?.length ?? 0) +
+        observation.narrative.length +
+        JSON.stringify(observation.facts).length +
+        JSON.stringify(observation.concepts).length +
+        JSON.stringify(observation.filesRead).length +
+        JSON.stringify(observation.filesModified).length;
+    }
+    return bytes;
   }
 
   /**
@@ -1006,13 +1100,13 @@ export class MemoryService {
     return result;
   }
 
+  /**
+   * The local embedding's input: the summary and the informative content, with import
+   * tags and constant preambles stripped and a bounded length (DATA-5). It used to be
+   * the summary alone, so rows sharing a first line shared a vector.
+   */
   private static normalizeForEmbedding(summary: string | undefined, content: string): string {
-    let text = (summary || content || "").trim();
-    // Strip import tags to reduce noise in semantic space.
-    text = text.replace(/^\[Imported from [^\]]+\]\s*/i, "");
-    // Keep a bounded prefix for speed and to avoid pathological inputs.
-    if (text.length > 12000) text = text.slice(0, 12000);
-    return text;
+    return memoryEmbeddingText(summary, content);
   }
 
   private static extractFirstCodeBlock(text: string): string | null {
@@ -1631,7 +1725,18 @@ export class MemoryService {
    */
   static async getStats(workspaceId: string): Promise<MemoryStats> {
     this.ensureInitialized();
-    return this.memoryRepo.getStats(workspaceId);
+    const stats = await this.memoryRepo.getStats(workspaceId);
+    // The AI compression's token use for the Memory settings notice (all workspaces).
+    try {
+      const usage = await MemoryCompressionBudget.usage(this.sql);
+      return {
+        ...stats,
+        compressionTokensLast24h: usage.tokensLast24h,
+        compressionDailyTokenBudget: usage.dailyTokenBudget,
+      };
+    } catch {
+      return stats;
+    }
   }
 
   /**
@@ -1825,7 +1930,7 @@ export class MemoryService {
         type: entry.type,
         content,
         summary: summary || undefined,
-        tokens: estimateTokens(summary || content),
+        tokens: estimateTokens(content),
         isCompressed: Boolean(summary),
         isPrivate: rowIsPrivate,
         createdAt,
@@ -2511,20 +2616,9 @@ export class MemoryService {
     return false;
   }
 
+  /** The first informative line, at most 220 characters (memory-summary.ts, DATA-5). */
   private static buildDeterministicSummary(content: string): string {
-    const trimmed = this.stripPromptRecallIgnoreMarker(content).trim();
-    if (!trimmed) return "";
-
-    const lines = trimmed
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    let summary = lines.find((line) => !line.startsWith("```")) || lines[0] || trimmed;
-    summary = summary.replace(/\s+/g, " ").trim();
-    if (summary.length > LOCAL_SUMMARY_MAX_CHARS) {
-      summary = `${summary.slice(0, LOCAL_SUMMARY_MAX_CHARS - 3)}...`;
-    }
-    return summary;
+    return buildDeterministicSummary(content);
   }
 
   private static normalizeSummaryStorageText(content: string, maxChars = 1200): string {
@@ -2541,23 +2635,24 @@ export class MemoryService {
     summary: string,
     compressed: boolean,
   ): Promise<void> {
-    const finalSummary = this.buildDeterministicSummary(summary);
+    // A model-written summary is redacted again so it can never reintroduce a secret.
+    const finalSummary = this.buildDeterministicSummary(
+      neutralizeReservedImportPrefix(redactSecrets(summary).text),
+    );
     if (!finalSummary) return;
 
-    const summaryTokens = estimateTokens(finalSummary);
+    // `tokens` keeps the content's estimate (DATA-7); only the summary changes.
     const updatedAt = Date.now();
     await this.memoryRepo.update(memory.id, {
       summary: finalSummary,
-      tokens: summaryTokens,
       isCompressed: compressed,
     });
     memory.summary = finalSummary;
-    memory.tokens = summaryTokens;
     memory.isCompressed = compressed;
     memory.updatedAt = updatedAt;
 
     try {
-      const embedText = this.normalizeForEmbedding(finalSummary, finalSummary);
+      const embedText = this.normalizeForEmbedding(finalSummary, memory.content);
       const embedding = createLocalEmbedding(embedText);
       await this.embeddingRepo.upsert(workspaceId, memory.id, embedding, updatedAt);
       this.cacheEmbedding(workspaceId, memory.id, embedding, updatedAt);
@@ -2678,9 +2773,11 @@ export class MemoryService {
           continue;
         }
 
-        const memories = (
-          await Promise.all(group.memoryIds.map((memoryId) => this.memoryRepo.findById(memoryId)))
-        ).filter((memory): memory is Memory => Boolean(memory));
+        // Settings and privacy are checked again at drain time: they may have changed since
+        // the capture queued the rows.
+        const policy = await this.compressionPolicyFor(group.workspaceId);
+        const memories =
+          policy === "drop" ? [] : await this.loadCompressibleMemories(group.memoryIds);
 
         if (memories.length === 0) {
           for (const memoryId of group.memoryIds) {
@@ -2690,7 +2787,8 @@ export class MemoryService {
         }
 
         const budget = this.canSpendCompressionBudget(group.workspaceId);
-        const shouldUseLlm = this.shouldUseLlmForCompressionBatch(group, memories);
+        const shouldUseLlm =
+          policy === "llm" && this.shouldUseLlmForCompressionBatch(group, memories);
 
         if (!shouldUseLlm) {
           await this.finalizeCompressionBatchLocally(group, memories);
@@ -2707,8 +2805,8 @@ export class MemoryService {
           this.scheduleCompressionRetry(group, COMPRESSION_RETRY_DELAY_MS);
           continue;
         } else {
-          await this.compressMemoryBatch(group, memories);
-          this.recordCompressionBudgetUse(group.workspaceId);
+          const { calledModel } = await this.compressMemoryBatch(group, memories);
+          if (calledModel) this.recordCompressionBudgetUse(group.workspaceId);
         }
 
         for (const memoryId of group.memoryIds) {
@@ -2749,10 +2847,53 @@ export class MemoryService {
     if (!memory) return false;
     if (memory.type === "summary" || memory.type === "correction_rule") return false;
     if (this.isStructuredLowValueContent(memory.content)) return false;
+    // The content's estimate, not `memory.tokens`: rows written before DATA-7 stored the
+    // summary's estimate (≤ 55 tokens), so this path could never run.
+    const tokens = estimateTokens(memory.content);
     if (this.isHighSignalMemoryType(memory.type)) {
-      return memory.tokens >= MIN_TOKENS_FOR_COMPRESSION;
+      return tokens >= MIN_TOKENS_FOR_COMPRESSION;
     }
-    return memory.tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION;
+    return tokens >= MIN_TOKENS_FOR_OBSERVATION_COMPRESSION;
+  }
+
+  /**
+   * What the compression may do for a workspace now: `drop` when memory is off or its
+   * privacy mode is `disabled`; `local` (deterministic only, no model call) when AI
+   * compression is off or privacy mode is `strict`; else `llm`.
+   */
+  private static async compressionPolicyFor(
+    workspaceId: string,
+  ): Promise<"drop" | "local" | "llm"> {
+    try {
+      const settings = await this.settingsRepo.getOrCreate(workspaceId);
+      if (!settings.enabled || settings.privacyMode === "disabled") return "drop";
+      if (!settings.compressionEnabled || settings.privacyMode === "strict") return "local";
+      return "llm";
+    } catch {
+      return "drop";
+    }
+  }
+
+  /**
+   * The queued rows that may still be compressed: present, not private, without a
+   * `<no-memory>` directive, and not deleted or redacted in the Inspector. Private rows
+   * never reach the model and never feed a digest.
+   */
+  private static async loadCompressibleMemories(memoryIds: string[]): Promise<Memory[]> {
+    const loaded = (
+      await Promise.all(memoryIds.map((memoryId) => this.memoryRepo.findById(memoryId)))
+    ).filter(
+      (memory): memory is Memory =>
+        memory != null && !memory.isPrivate && !containsNoMemoryDirective(memory.content),
+    );
+    if (loaded.length === 0) return [];
+    let hidden = new Set<string>();
+    try {
+      hidden = await MemoryObservationService.suppressedIds(loaded.map((memory) => memory.id));
+    } catch {
+      return [];
+    }
+    return loaded.filter((memory) => !hidden.has(memory.id));
   }
 
   private static async finalizeCompressionBatchLocally(
@@ -2779,7 +2920,7 @@ export class MemoryService {
 
     if (memories.length > 1) {
       const digest = this.buildBatchDigest(group, memories);
-      await this.createBatchSummaryMemory(group, memories, digest, false);
+      await this.createBatchSummaryMemory(group, memories, digest);
     }
 
     for (const memoryId of group.memoryIds) {
@@ -2808,35 +2949,57 @@ export class MemoryService {
       return `- [${memory.type}] ${summary}`;
     });
     const extraCount = memories.length - lines.length;
-    const header = `[${group.origin} digest] ${group.batchKey}`;
+    // A tag-only header line, so the digest's summary is its first item (DATA-5).
+    const header = `[${group.origin} digest: ${group.batchKey}]`;
     const suffix = extraCount > 0 ? `- ... ${extraCount} more` : "";
     return [header, ...lines, suffix].filter(Boolean).join("\n");
   }
 
+  /** A bounded excerpt of a memory for the compression prompt (preambles skipped). */
+  private static compressionExcerpt(content: string, maxChars: number): string {
+    const text = (informativeMemoryText(content) || content).trim();
+    return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
+  }
+
+  /**
+   * The compression prompt. One memory: a one-line summary of its content. Several: a
+   * short digest of their content excerpts. The model sees content, not only the
+   * first-line summaries (DATA-7).
+   */
   private static buildBatchSummaryPrompt(
-    group: {
-      workspaceId: string;
-      batchKey: string;
-      origin: MemoryCaptureOrigin;
-      priority: MemoryCompressionPriority;
-      memoryIds: string[];
-      requestedAt: number;
-    },
+    group: CompressionGroup,
     memories: Memory[],
   ): { system: string; user: string } {
+    if (memories.length === 1) {
+      const memory = memories[0];
+      return {
+        system:
+          "You write one-line summaries of an agent's memory entries. Be factual and specific, keep names, files and decisions, and avoid filler.",
+        user: [
+          `Memory type: ${memory.type}`,
+          "",
+          "Memory:",
+          this.compressionExcerpt(memory.content, COMPRESSION_SINGLE_EXCERPT_CHARS),
+          "",
+          "Write one factual sentence of at most 200 characters that says what this memory is about. Output only the sentence.",
+        ].join("\n"),
+      };
+    }
+
     const lines = memories.slice(0, 12).map((memory) => {
-      const summary = this.buildDeterministicSummary(memory.summary || memory.content);
-      return `- [${memory.type}] ${summary}`;
+      const excerpt = this.compressionExcerpt(memory.content, COMPRESSION_BATCH_EXCERPT_CHARS)
+        .replace(/\s+/g, " ")
+        .trim();
+      return `- [${memory.type}] ${excerpt}`;
     });
     const truncatedCount = Math.max(0, memories.length - lines.length);
     const user = [
-      `Workspace: ${group.workspaceId}`,
       `Batch key: ${group.batchKey}`,
       `Origin: ${group.origin}`,
       `Items: ${memories.length}`,
       truncatedCount > 0 ? `Additional items omitted: ${truncatedCount}` : "",
       "",
-      "Summaries:",
+      "Entries:",
       ...lines,
       "",
       "Write a concise durable memory digest with:",
@@ -2858,31 +3021,15 @@ export class MemoryService {
   }
 
   private static async compressMemoryBatch(
-    group: {
-      workspaceId: string;
-      batchKey: string;
-      origin: MemoryCaptureOrigin;
-      priority: MemoryCompressionPriority;
-      memoryIds: string[];
-      requestedAt: number;
-    },
+    group: CompressionGroup,
     memories: Memory[],
-  ): Promise<void> {
-    const { summaryText, usedLlm } = await this.generateBatchSummaryText(group, memories);
-    const storageSummary = this.normalizeSummaryStorageText(summaryText);
+  ): Promise<{ calledModel: boolean }> {
+    const { text, usedLlm, calledModel } = await this.generateCompressionText(group, memories);
     if (memories.length === 1) {
-      await this.updateMemorySummary(memories[0], group.workspaceId, storageSummary, true);
-      this.recordCompressionDiagnostic(group.workspaceId, group.origin, "batchSummaries");
-      if (usedLlm) {
-        this.recordCompressionDiagnostic(group.workspaceId, group.origin, "llmCalls");
-      }
-      for (const memoryId of group.memoryIds) {
-        this.compressionQueueEntries.delete(memoryId);
-      }
-      return;
+      await this.updateMemorySummary(memories[0], group.workspaceId, text, true);
+    } else {
+      await this.createBatchSummaryMemory(group, memories, text);
     }
-
-    await this.createBatchSummaryMemory(group, memories, storageSummary, true);
     for (const memoryId of group.memoryIds) {
       this.compressionQueueEntries.delete(memoryId);
     }
@@ -2893,57 +3040,55 @@ export class MemoryService {
     logger.info(
       `[MemoryService] Compression batch workspace=${group.workspaceId} origin=${group.origin} batchKey=${group.batchKey} items=${memories.length} mode=${usedLlm ? "llm" : "deterministic"}`,
     );
+    return { calledModel };
   }
 
-  private static async generateBatchSummaryText(
-    group: {
-      workspaceId: string;
-      batchKey: string;
-      origin: MemoryCaptureOrigin;
-      priority: MemoryCompressionPriority;
-      memoryIds: string[];
-      requestedAt: number;
-    },
+  /**
+   * One AI compression call on the configured provider (cheap profile), within the daily
+   * token budget (`memoryCompressionDailyTokenBudget`, rolling 24 hours across
+   * workspaces). Without budget, or when the call fails, the deterministic summary or
+   * digest is used. A failed call is charged its estimated input, so a failing provider
+   * cannot spend calls without limit.
+   */
+  private static async generateCompressionText(
+    group: CompressionGroup,
     memories: Memory[],
-  ): Promise<{ summaryText: string; usedLlm: boolean }> {
+  ): Promise<{ text: string; usedLlm: boolean; calledModel: boolean }> {
+    const fallback =
+      memories.length === 1
+        ? this.buildDeterministicSummary(memories[0].content)
+        : this.buildBatchDigest(group, memories);
     const { system, user } = this.buildBatchSummaryPrompt(group, memories);
-    let providerType = "";
-    let modelId = "";
-
-    try {
-      const provider = LLMProviderFactory.createProvider();
-      providerType = provider.type;
-      const settings = LLMProviderFactory.getSettings();
-      const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
-      const azureAnthropicDeployment =
-        settings.azureAnthropic?.deployment || settings.azureAnthropic?.deployments?.[0];
-      modelId = LLMProviderFactory.getModelId(
-        settings.modelKey,
-        settings.providerType,
-        settings.ollama?.model,
-        settings.gemini?.model,
-        settings.openrouter?.model,
-        settings.deepseek?.model,
-        settings.openai?.model,
-        azureDeployment,
-        azureAnthropicDeployment,
-        settings.groq?.model,
-        settings.xai?.model,
-        settings.kimi?.model,
-        settings.customProviders,
-        settings.bedrock?.model,
+    const estimatedInputTokens = estimateTokens(system) + estimateTokens(user);
+    const remaining = await MemoryCompressionBudget.remaining(this.sql);
+    if (remaining < estimatedInputTokens + COMPRESSION_MAX_OUTPUT_TOKENS) {
+      this.recordCompressionDiagnostic(group.workspaceId, group.origin, "dropped");
+      logger.info(
+        `[MemoryService] Compression budget exhausted; batch ${group.batchKey} kept local (remaining=${remaining})`,
       );
+      return { text: fallback, usedLlm: false, calledModel: false };
+    }
 
+    let providerType = "";
+    let modelKey = "";
+    let modelId = "";
+    let calledModel = false;
+    try {
+      // The configured provider only (no task override); the cheap profile's model.
+      const selection = LLMProviderFactory.resolveTaskModelSelection(undefined, {
+        forceProfile: "cheap",
+        allowProfileRouting: true,
+      });
+      providerType = selection.providerType;
+      modelKey = selection.modelKey;
+      modelId = selection.modelId;
+      const provider = LLMProviderFactory.createProvider();
+      calledModel = true;
       const response = await provider.createMessage({
         model: modelId,
-        maxTokens: 160,
+        maxTokens: COMPRESSION_MAX_OUTPUT_TOKENS,
         system,
-        messages: [
-          {
-            role: "user",
-            content: user,
-          },
-        ],
+        messages: [{ role: "user", content: user }],
       });
       recordLlmCallSuccess(
         {
@@ -2951,18 +3096,27 @@ export class MemoryService {
           sourceKind: "memory_batch_summary",
           sourceId: group.batchKey,
           providerType,
-          modelKey: modelId,
+          modelKey,
           modelId,
         },
         response.usage,
       );
 
-      let summary = "";
+      let output = "";
       for (const content of response.content) {
-        if (content.type === "text") summary += content.text;
+        if (content.type === "text") output += content.text;
       }
-      summary = this.buildDeterministicSummary(summary);
-      if (summary) return { summaryText: summary, usedLlm: true };
+      const usedTokens =
+        Math.max(0, Math.floor(response.usage?.inputTokens || 0)) +
+          Math.max(0, Math.floor(response.usage?.outputTokens || 0)) ||
+        estimatedInputTokens + estimateTokens(output);
+      await MemoryCompressionBudget.record(this.sql, group.workspaceId, usedTokens);
+
+      const text =
+        memories.length === 1
+          ? this.buildDeterministicSummary(output)
+          : this.normalizeSummaryStorageText(output);
+      if (text) return { text, usedLlm: true, calledModel };
     } catch (error) {
       recordLlmCallError(
         {
@@ -2970,50 +3124,47 @@ export class MemoryService {
           sourceKind: "memory_batch_summary",
           sourceId: group.batchKey,
           providerType,
-          modelKey: modelId,
+          modelKey,
           modelId,
         },
         error,
       );
+      if (calledModel) {
+        await MemoryCompressionBudget.record(this.sql, group.workspaceId, estimatedInputTokens);
+      }
       logger.warn("[MemoryService] Batch compression failed:", group.batchKey, error);
     }
 
-    return { summaryText: this.buildBatchDigest(group, memories), usedLlm: false };
+    return { text: fallback, usedLlm: false, calledModel };
   }
 
+  /**
+   * Store a batch digest through the normal capture path (DATA-7), so it gets the same
+   * settings checks, redaction, dedupe, embedding, observation sidecar and storage cap as
+   * every other archive row.
+   */
   private static async createBatchSummaryMemory(
-    group: {
-      workspaceId: string;
-      batchKey: string;
-      origin: MemoryCaptureOrigin;
-      priority: MemoryCompressionPriority;
-      memoryIds: string[];
-      requestedAt: number;
-    },
+    group: CompressionGroup,
     memories: Memory[],
     summaryText: string,
-    compressed: boolean,
   ): Promise<void> {
-    // A digest of rows that already passed capture; an LLM-written digest is redacted again
-    // so it can never reintroduce a secret value.
-    const summary = neutralizeReservedImportPrefix(
-      redactSecrets(this.normalizeSummaryStorageText(summaryText)).text,
-    );
-    if (!summary) return;
+    const content = this.normalizeSummaryStorageText(summaryText);
+    if (!content) return;
 
     const taskId = this.extractSharedTaskId(memories);
-    const batchMemory = await this.memoryRepo.create({
-      workspaceId: group.workspaceId,
-      taskId,
-      type: "summary",
-      content: summary,
-      summary,
-      tokens: estimateTokens(summary),
-      isCompressed: compressed,
-      isPrivate: false,
+    await this.capture(group.workspaceId, taskId, "summary", content, false, {
+      origin: group.origin,
+      batchKey: group.batchKey,
+      batchable: false,
+      priority: "low",
+      signalFamily: "compression_digest",
+      // The write gate is skipped on purpose: every source row already passed the gate
+      // (or the user's approval) when it was captured, and the digest only restates those
+      // rows. Staging it again would ask the user to approve a summary of approved rows.
+      skipMemoryWriteGate: true,
+      // Some source rows may have been captured without the external mirror.
+      allowExternalMirror: false,
     });
-
-    await this.updateEmbeddingForMemory(batchMemory, group.workspaceId, summary);
   }
 
   private static extractSharedTaskId(memories: Memory[]): string | undefined {
@@ -3024,21 +3175,6 @@ export class MemoryService {
       if (memory.taskId !== firstTaskId) return undefined;
     }
     return firstTaskId;
-  }
-
-  private static async updateEmbeddingForMemory(
-    memory: Memory,
-    workspaceId: string,
-    summary: string,
-  ): Promise<void> {
-    try {
-      const embedText = this.normalizeForEmbedding(summary, summary);
-      const embedding = createLocalEmbedding(embedText);
-      await this.embeddingRepo.upsert(workspaceId, memory.id, embedding, memory.updatedAt);
-      this.cacheEmbedding(workspaceId, memory.id, embedding, memory.updatedAt);
-    } catch {
-      // ignore
-    }
   }
 
   private static scheduleCompressionRetry(

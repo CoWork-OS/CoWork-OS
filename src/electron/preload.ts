@@ -1175,6 +1175,8 @@ interface MemoryStats {
   totalTokens: number;
   compressedCount: number;
   compressionRatio: number;
+  compressionTokensLast24h?: number;
+  compressionDailyTokenBudget?: number;
 }
 
 // ChatGPT Import types (inlined for sandboxed preload)

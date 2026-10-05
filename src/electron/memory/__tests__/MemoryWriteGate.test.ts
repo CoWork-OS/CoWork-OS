@@ -396,6 +396,73 @@ describe("MemoryWriteGate", () => {
     }
   });
 
+  it("keeps a staged core-candidate fact linked to its candidate and ignores other refs", async () => {
+    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryWriteApprovalMode: "background_only",
+    });
+    const ingest = vi.fn(async (candidate: Any) => ({
+      status: "written",
+      action: "inserted",
+      item: { id: "item-1", scope: candidate.scope, workspaceId: candidate.workspaceId },
+      supersededIds: [],
+      redactions: 0,
+    }));
+    MemoryWriter.setInstance({ ingest } as unknown as MemoryWriter);
+    const stage = async (sourceRef: Record<string, unknown>) => {
+      const decision = await MemoryWriteGate.evaluate({
+        ...baseRequest,
+        target: "curated",
+        action: "remember",
+        origin: "distill",
+        payload: {
+          action: "remember",
+          kind: "preference",
+          scope: "workspace",
+          source: "inferred",
+          confidence: 0.9,
+          recordId: "candidate-1",
+          sourceRef,
+          content: "Prefer deterministic prompts",
+        },
+      });
+      if (decision.allowed || !("staged" in decision)) throw new Error("Expected staged decision");
+      await MemoryWriteGate.applyPending(decision.pendingId, { workspaceId: "ws-1" });
+      return decision.pendingId;
+    };
+    try {
+      const pendingId = await stage({
+        store: "core_candidate",
+        id: "candidate-1",
+        traceId: "trace-1",
+        candidateType: "preference",
+        injected: { nested: true },
+      });
+      expect(ingest).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          source: "inferred",
+          sourceRef: {
+            store: "core_candidate",
+            id: "candidate-1",
+            traceId: "trace-1",
+            candidateType: "preference",
+            approvedFrom: pendingId,
+          },
+        }),
+      );
+
+      await stage({ store: "user_edit", id: "spoofed" });
+      expect(ingest).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sourceRef: expect.objectContaining({ store: "agent_tool", id: "candidate-1" }),
+        }),
+      );
+    } finally {
+      MemoryWriter.setInstance(null);
+    }
+  });
+
   it("rejects pending writes without replaying the payload", async () => {
     vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
       contextPackInjectionEnabled: true,

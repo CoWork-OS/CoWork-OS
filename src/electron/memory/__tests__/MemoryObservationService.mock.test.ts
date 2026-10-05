@@ -91,7 +91,7 @@ describe("MemoryObservationService without native sqlite", () => {
 
     expect(preparedSql.some((sql) => sql.includes("SELECT m.*"))).toBe(false);
     expect(
-      preparedSql.some((sql) => sql.includes("INSERT OR REPLACE INTO memory_observation_metadata")),
+      preparedSql.some((sql) => sql.includes("INSERT INTO memory_observation_metadata")),
     ).toBe(false);
     expect(status).toMatchObject({
       total: 3,
@@ -125,7 +125,7 @@ describe("MemoryObservationService without native sqlite", () => {
       if (sql.includes("SELECT memory_id FROM memory_observation_metadata")) {
         return { get: () => undefined };
       }
-      if (sql.includes("INSERT OR REPLACE INTO memory_observation_metadata")) {
+      if (sql.includes("INSERT INTO memory_observation_metadata")) {
         return {
           run: () => {
             throw new Error("insert failed");

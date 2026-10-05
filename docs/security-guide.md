@@ -541,9 +541,9 @@ controlled runs and can stage durable memory writes before commit. Set
 `COWORK_MEMORY_WRITE_APPROVAL_MODE` to opt into it:
 
 - `off`: writes commit immediately
-- `curated_only`: curated hot-memory edits wait for review
+- `curated_only`: fact writes (`memory_remember`, core memory candidate facts) wait for review
 - `external_only`: Supermemory/external-provider writes wait for review
-- `background_only`: automatic capture, Dreaming, distillation, and external mirroring wait for review
+- `background_only`: automatic capture, Dreaming, distillation (including core memory candidate facts), and external mirroring wait for review
 - `all`: every durable memory write waits for review
 
 Pending rows live in `pending_memory_writes` inside the normal SQLite database.

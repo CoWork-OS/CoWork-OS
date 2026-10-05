@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CORE_CANDIDATE_STORE, CoreMemoryDistiller } from "../CoreMemoryDistiller";
 import { AUTO_ACCEPT_RESOLUTION } from "../CoreMemoryCandidateService";
 import { MemoryService } from "../../memory/MemoryService";
+import { MemoryWriteGate } from "../../memory/MemoryWriteGate";
 import { MemoryWriter, type MemoryWorkspacePolicy } from "../../memory/MemoryWriter";
 import { MemoryItemsRepository } from "../../memory/MemoryItemsRepository";
 import { MemoryFeaturesManager } from "../../settings/memory-features-manager";
@@ -124,6 +125,45 @@ describeWithSqlite("CoreMemoryDistiller", () => {
       },
     ]);
     expect(run).toMatchObject({ status: "completed", acceptedCount: 1 });
+  });
+
+  it("stages a fact for review when a memory-write approval mode applies", async () => {
+    const evaluate = vi.spyOn(MemoryWriteGate, "evaluate").mockResolvedValue({
+      allowed: false,
+      staged: true,
+      pendingId: "pending-1",
+      summary: "Remember preference",
+    });
+    const lifecycle: Lifecycle[] = [];
+    await createDistiller(
+      [candidate(), candidate({ id: "candidate-2", confidence: 0.8 })],
+      lifecycle,
+    ).runHotPath("trace-1");
+
+    expect(rowsOf(db)).toHaveLength(0);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "ws-1",
+        target: "curated",
+        action: "remember",
+        origin: "distill",
+        payload: expect.objectContaining({
+          kind: "preference",
+          scope: "workspace",
+          source: "inferred",
+          sourceRef: expect.objectContaining({ store: CORE_CANDIDATE_STORE, id: "candidate-1" }),
+        }),
+      }),
+    );
+    expect(lifecycle).toEqual([
+      {
+        ids: ["candidate-1"],
+        status: "applied",
+        resolution: "Staged for review as pending memory write pending-1.",
+      },
+      { ids: ["candidate-2"], status: "merged", resolution: "Merged into candidate candidate-1." },
+    ]);
   });
 
   it("maps fact types to kinds and global scope to global items", async () => {

@@ -8,6 +8,7 @@ import { AutomationProfileRepository } from "../agents/agent-repository-facades"
 import { WorkspaceRepository } from "../database/repository-facades";
 
 import { MemoryService } from "../memory/MemoryService";
+import { MemoryWriteGate } from "../memory/MemoryWriteGate";
 import { MemoryWriter, type MemoryWriteSkipReason } from "../memory/MemoryWriter";
 import type { MemoryItemKind } from "../memory/memory-items-types";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
@@ -45,6 +46,7 @@ const RETRYABLE_SKIPS = new Set<MemoryWriteSkipReason>(["memory_disabled"]);
 
 type CandidateWrite =
   | { status: "written"; ref: string }
+  | { status: "staged"; pendingId: string }
   | { status: "retry" }
   | { status: "skipped"; reason: string };
 
@@ -231,6 +233,23 @@ export class CoreMemoryDistiller {
     }
     const write = await this.writeCandidateMemory(leader);
     if (write.status === "retry") return { written: false, appliedIds: [] };
+    if (write.status === "staged") {
+      // The pending write now owns the fact: approving it writes the memory item, rejecting
+      // it drops it. The group is settled so later passes do not stage it again.
+      await this.candidateRepo.markLifecycle(
+        [leader.id],
+        "applied",
+        `Staged for review as pending memory write ${write.pendingId}.`,
+      );
+      if (duplicates.length) {
+        await this.candidateRepo.markLifecycle(
+          duplicates.map((candidate) => candidate.id),
+          "merged",
+          `Merged into candidate ${leader.id}.`,
+        );
+      }
+      return { written: false, appliedIds: [] };
+    }
     if (write.status === "skipped") {
       await this.candidateRepo.markLifecycle(
         group.map((candidate) => candidate.id),
@@ -270,23 +289,50 @@ export class CoreMemoryDistiller {
     const kind = this.factKindFor(candidate);
     const writer = MemoryWriter.get();
     if (kind && writer) {
+      // A global-scope candidate is about the user everywhere; every other core scope
+      // (workspace, automation profile, code workspace, pull request) lives in its workspace.
+      const scope = candidate.scopeKind === "global" ? "global" : "workspace";
+      const sourceRef = {
+        store: CORE_CANDIDATE_STORE,
+        id: candidate.id,
+        traceId: candidate.traceId,
+        profileId: candidate.profileId,
+        candidateType: candidate.candidateType,
+        scopeKind: candidate.scopeKind,
+        scopeRef: candidate.scopeRef,
+      };
+      // Approval-gated write modes (`background_only`, `curated_only`, `all`) stage the fact
+      // as a `remember` write; the gate replays it through MemoryWriter once approved.
+      const gate = await MemoryWriteGate.evaluate({
+        workspaceId,
+        target: "curated",
+        action: "remember",
+        origin: "distill",
+        summary: `Remember ${kind}`,
+        payload: {
+          action: "remember",
+          kind,
+          scope,
+          scopeRef: null,
+          source: "inferred",
+          confidence: candidate.confidence,
+          recordId: candidate.id,
+          sourceRef,
+          content,
+        },
+        proposedValue: content,
+      });
+      if (!gate.allowed) {
+        if ("staged" in gate) return { status: "staged", pendingId: gate.pendingId };
+        return { status: "skipped", reason: gate.error };
+      }
       const result = await writer.ingest({
         content,
         kind,
-        // A global-scope candidate is about the user everywhere; every other core scope
-        // (workspace, automation profile, code workspace, pull request) lives in its workspace.
-        scope: candidate.scopeKind === "global" ? "global" : "workspace",
-        workspaceId: candidate.scopeKind === "global" ? null : workspaceId,
+        scope,
+        workspaceId: scope === "global" ? null : workspaceId,
         source: "inferred",
-        sourceRef: {
-          store: CORE_CANDIDATE_STORE,
-          id: candidate.id,
-          traceId: candidate.traceId,
-          profileId: candidate.profileId,
-          candidateType: candidate.candidateType,
-          scopeKind: candidate.scopeKind,
-          scopeRef: candidate.scopeRef,
-        },
+        sourceRef,
         confidence: candidate.confidence,
         originWorkspaceId: workspaceId,
         originText: content,

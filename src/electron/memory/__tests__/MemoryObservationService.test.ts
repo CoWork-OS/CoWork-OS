@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryObservationService } from "../MemoryObservationService";
+import { writeObservationMetadata } from "../memory-capture-sql";
 
 const require = createRequire(import.meta.url);
 const BetterSqlite3Module = (() => {
@@ -185,6 +186,50 @@ describeWithNativeDb("MemoryObservationService", () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.memoryId).toBe("mem-2");
     expect(results[0]?.estimatedDetailTokens).toBeGreaterThan(0);
+  });
+
+  it("rewrites an observation without leaving a stale search entry", () => {
+    const db = createDb();
+    const memory = {
+      id: "mem-4",
+      workspaceId: "ws-1",
+      taskId: "task-4",
+      type: "insight",
+      content: "Zebrafish fixtures belong in the integration suite.",
+      tokens: 12,
+      isCompressed: false,
+      isPrivate: false,
+      createdAt: 400,
+      updatedAt: 400,
+    } as Any;
+    writeObservationMetadata(db, MemoryObservationService.buildMetadataFor(memory));
+    writeObservationMetadata(
+      db,
+      MemoryObservationService.buildMetadataFor({
+        ...memory,
+        content: "Platypus fixtures belong in the unit suite.",
+        updatedAt: 500,
+      }),
+    );
+
+    const matches = (term: string) =>
+      db
+        .prepare(
+          "SELECT rowid FROM memory_observation_metadata_fts WHERE memory_observation_metadata_fts MATCH ?",
+        )
+        .all(term).length;
+    expect(db.prepare("SELECT COUNT(*) AS n FROM memory_observation_metadata").get()).toEqual({
+      n: 1,
+    });
+    expect(matches("zebrafish")).toBe(0);
+    expect(matches("platypus")).toBe(1);
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO memory_observation_metadata_fts(memory_observation_metadata_fts, rank) VALUES ('integrity-check', 1)",
+        )
+        .run(),
+    ).not.toThrow();
   });
 
   it("marks redacted observations private and suppressible", async () => {

@@ -46,9 +46,9 @@ no-prompt policy is active. Memory Hub no longer offers a review-mode select.
 To exercise the review queue deliberately in a headless or controlled run, set
 `COWORK_MEMORY_WRITE_APPROVAL_MODE`:
 
-- `curated_only`: stage agent fact writes (`memory_remember` facts, target `curated`).
+- `curated_only`: stage fact writes (`memory_remember` facts and core memory candidate facts, target `curated`).
 - `external_only`: stage writes before anything is saved or mirrored to Supermemory.
-- `background_only`: stage background and mirror writes while allowing explicit agent tool saves.
+- `background_only`: stage background, distillation (including core memory candidate facts) and mirror writes while allowing explicit agent tool saves.
 - `all`: stage every durable archive, curated, and external memory write.
 
 The queue is therefore an opt-in compatibility path. It is separate from the

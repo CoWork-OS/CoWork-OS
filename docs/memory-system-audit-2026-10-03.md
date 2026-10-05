@@ -29,7 +29,7 @@ File references are relative to `src/electron/` unless prefixed.
 
 ### Status
 
-Updated 2026-10-04. The findings below describe `main` @ `069740faf`, before any fixes. The
+Updated 2026-10-05. The findings below describe `main` @ `069740faf`, before any fixes. The
 current design is in [memory-engine.md](memory-engine.md).
 
 | Work | State | Findings closed and main changes |
@@ -40,8 +40,9 @@ current design is in [memory-engine.md](memory-engine.md).
 | Phase 3 — make it great | Merged, PR #301 | Dreaming as the curator with the Review tab, undo and an optional budgeted LLM pass; per-reply "Memory used" (desktop and browser host); `memory_delete` approval for `memory_forget`; Supermemory remote ids, forget and "Disconnect & purge" (SEC-17); channel owner accounts (SEC-16); SEC-13; daemon parity; lexical recall quality; `qa:memory-evals` and `qa:memory-health`; retention of settled approvals; markdown index purge; flush at shutdown |
 | Legacy retirement | Merged, PR #306 | The 16 tool aliases removed; dual writes, legacy mirror and legacy reads removed; profile, relationship and curated services are views of `memory_items`; one-time data retirement with an encrypted export, then the old blobs and tables are dropped |
 | Related fixes | Merged | Prompt caching tiers and cached-token logging (#303, #304); short-answer completion gate; core-candidate keyword heuristics removed and their leftover proposals dismissed |
-| Memory producers | Pending PR (`cowork-os/memory-producers-kg-cleanup`) | Every producer through the same hygiene ([memory-engine.md](memory-engine.md) §1): core-candidate facts → `MemoryWriter` (`inferred`); Chronicle archive-only and private; one gated import session for ChatGPT and pasted imports (imported user facts become `import` items); Supermemory explicit writes redacted and gated, remote reads never stored; a source guard on writes to `memories` / `memory_items`. DATA-13 import parts |
-| Knowledge graph data quality | Pending PR (same branch) | DATA-10: precise technology extraction, case-insensitive names with merge, free-mail denylist, registrable-domain organization names, automated-sender filtering, source precedence, `last_seen_at` decay, memory-settings gating, one-time `kg_quality_cleanup_v1` ([knowledge-graph.md](knowledge-graph.md)) |
+| Memory producers | Merged, PR #308 | Every producer through the same hygiene ([memory-engine.md](memory-engine.md) §1): core-candidate facts → `MemoryWriter` (`inferred`); Chronicle archive-only and private; one gated import session for ChatGPT and pasted imports (imported user facts become `import` items); Supermemory explicit writes redacted and gated, remote reads never stored; a source guard on writes to `memories` / `memory_items`. DATA-13 import parts |
+| Knowledge graph data quality | Merged, PR #308 | DATA-10: precise technology extraction, case-insensitive names with merge, free-mail denylist, registrable-domain organization names, automated-sender filtering, source precedence, `last_seen_at` decay, memory-settings gating, one-time `kg_quality_cleanup_v1` ([knowledge-graph.md](knowledge-graph.md)) |
+| Phase 4 — leftovers | Pending PR (`cowork-os/memory-phase-4`) | Re-verified against current code: RECALL-5, RECALL-6, LOOP-12, LOOP-13 and the AutonomyEngine part of SEC-18 were already closed by the earlier phases. Fixed here: approval-gated write modes stage core-candidate facts (replayed with their `core_candidate` source ref); RECALL-8 (rank-based lexical-only scores, imports at half weight in the hybrid stage, semantic scores for every lexical candidate); RECALL-9 memory `LIKE` fallbacks escaped (archive, observations, markdown index); DATA-8 observation upsert instead of `INSERT OR REPLACE`, narrowed FTS update trigger and a one-time index rebuild; LOOP-14 compression retries cancelled at shutdown and the daemon stops CrossSignal and Feedback; LOOP-15 improvement review status validated over IPC; LIFE-5 Box Brain runs Dreaming with the curator settings |
 | Decided | — | Real local embeddings (DATA-6) skipped: recall stays lexical FTS plus reciprocal-rank fusion, gated by the memory evals |
 
 **Remaining.**
@@ -49,10 +50,16 @@ current design is in [memory-engine.md](memory-engine.md).
 - Memory Hub **Sources** and **Health** tabs (§8.4); the Review tab shipped.
 - Kit back-sync runs only on the next kit sync; no trigger on file edit.
 - Superseded `memory_items` revisions are kept indefinitely; add age-based retention once the Hub shows history.
-- Approval-gated memory-write modes (`COWORK_MEMORY_WRITE_APPROVAL_MODE`) do not stage core-candidate fact writes.
 - Supermemory copies sent before remote ids were recorded cannot be addressed (forget them by text or in Supermemory).
-- SEC-18 (autonomous task creation without approval) and LIFE-5 (instance sprawl): partially addressed.
-- RECALL-4, 5, 6, 8, 9 (RECALL-9 partly: one FTS builder for memory recall); DATA-4, 5, 7, 8, 13 (non-import parts); LOOP-12..15.
+- SEC-18: heartbeat dispatch and Workflow Intelligence tasks still auto-approve `run_command` (dangerous commands still need explicit consent); a permission-engine decision, not a memory one.
+- RECALL-4: Mission Control recall has no Supermemory or quotes lane, and its task and activity lanes scan only recent rows.
+- RECALL-9: the markdown index keeps an ASCII-only FTS dialect; mailbox and YouTube have their own query builders; several `normalizeText` copies remain.
+- DATA-5: summaries, embeddings and observations still come from the first line of a memory.
+- DATA-7: the single-item LLM compression path cannot run, batch digests skip the observation sidecar, and the storage cap counts only content and summary.
+- DATA-13: unused capture options (`profileId`, `coreTraceId`, `candidateId`, `scope*`); the ChatGPT import resume set is per workspace.
+- LOOP-14: memory consolidation and executor learning are untracked async work at shutdown; quiet mode still starts the archive cleanup timer and the kit writers.
+- LOOP-15: Everyday Agent "clear memory candidates" clears every workspace and the distill history, more than its count shows.
+- LIFE-5: `DailyBriefingService` per IPC call and three `EverydayAgentService` instances; no lock between the desktop app and the node daemon for kit-file writers.
 
 Deviations from the §9 plan: checkpoints stay in the workspace but are HMAC-signed and never
 restore permission state (SEC-1); spoofed `[Imported from` prefixes are neutralized instead of

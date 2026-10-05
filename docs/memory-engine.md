@@ -717,10 +717,10 @@ by the schema setup (`memory-curation-log-sql.ts`).
    Chronicle (archive only, through `capture`), imports (the gated import API, imported facts
    as `import` items) and Supermemory (explicit remembers redacted and policy-checked; reads
    never stored locally). A source guard keeps new code from inserting into `memories` or
-   `memory_items` outside the sanctioned modules. Open: approval-gated memory-write modes
-   (`COWORK_MEMORY_WRITE_APPROVAL_MODE`) do not stage core-candidate fact writes (the
-   distiller writes facts directly; the curated promotion it replaced was staged in
-   `background_only` / `curated_only` modes).
+   `memory_items` outside the sanctioned modules. The approval-gated memory-write modes
+   (`COWORK_MEMORY_WRITE_APPROVAL_MODE` `curated_only`, `background_only`, `all`) stage
+   core-candidate facts as `remember` writes; an approved write keeps its `core_candidate`
+   source ref.
 8. Done: the legacy stores are retired (§5): the 16 hidden tool aliases are removed (§4b), the
    dual writes and the legacy mirror are removed, the services are views of `memory_items`, and
    the data retirement exports and drops the old stores. Open: a commitment edited from an

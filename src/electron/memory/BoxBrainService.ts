@@ -18,8 +18,8 @@ import { getBoxAccessToken } from "../utils/box-api";
 import { getBoxMcpServer, syncBoxMcpServerSettings } from "../mcp/box-integration";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { MemoryService } from "./MemoryService";
-import { DreamingRepository } from "./DreamingRepository";
-import { DreamingService, type RunDreamingRequest } from "./DreamingService";
+import type { RunDreamingRequest } from "./DreamingService";
+import { createDreamingService } from "./memory-review-wiring";
 import {
   createBoxBrainRepository,
   type BoxBrainRepository,
@@ -1006,7 +1006,7 @@ export class BoxBrainService {
     };
     const result = this.deps.runDreaming
       ? await this.deps.runDreaming(request)
-      : await new DreamingService(new DreamingRepository(this.db)).run(request);
+      : await createDreamingService(this.db).run(request);
     await this.repo.updateSource(source.id, { lastImprovementRunAt: now });
     return result.run.id;
   }

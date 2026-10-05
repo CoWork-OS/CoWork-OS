@@ -119,5 +119,11 @@ export interface MemoryHubWhy {
 }
 
 export type MemoryHubMutationResult =
-  | { success: true; item: MemoryHubItem | null; action?: string }
+  | {
+      success: true;
+      item: MemoryHubItem | null;
+      action?: string;
+      /** The memory folder line written (`repo:<path>#L<n>`) when the fact went there. */
+      ref?: string;
+    }
   | { success: false; error: string; reason?: string };

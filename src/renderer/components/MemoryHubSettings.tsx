@@ -83,6 +83,8 @@ function formatConfidence(confidence?: number): string {
 export function MemoryHubSettings(props?: {
   initialWorkspaceId?: string;
   onSettingsChanged?: () => void;
+  /** Open a task (the source task of a memory folder entry). */
+  onOpenTask?: (taskId: string) => void;
 }) {
   const [features, setFeatures] = useState<MemoryFeaturesSettings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -98,23 +100,7 @@ export function MemoryHubSettings(props?: {
   );
   // "Show" in the Sources tab opens "What CoWork knows" filtered to that source.
   const [knowledgeSourceFilter, setKnowledgeSourceFilter] = useState<MemoryHubSource | "">("");
-  // Pending Dreaming proposals of the selected workspace (Review tab badge).
-  const [reviewCount, setReviewCount] = useState(0);
-  useEffect(() => {
-    setReviewCount(0);
-    if (!selectedWorkspaceId || !hasHostMethod("getMemoryReviewCount")) return;
-    let cancelled = false;
-    window.electronAPI
-      .getMemoryReviewCount({ workspaceId: selectedWorkspaceId })
-      .then((count) => {
-        if (!cancelled) setReviewCount(count);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedWorkspaceId]);
-  // Memory folder dreams waiting for review (profile-wide; added to the Review tab badge).
+  // Memory folder dreams waiting for review (profile-wide; the Review tab badge).
   const [dreamReviewCount, setDreamReviewCount] = useState(0);
   const memoryRepoOn = features?.memoryRepoEnabled === true;
   useEffect(() => {
@@ -131,7 +117,7 @@ export function MemoryHubSettings(props?: {
       cancelled = true;
     };
   }, [memoryRepoOn]);
-  const reviewBadgeCount = reviewCount + dreamReviewCount;
+  const reviewBadgeCount = dreamReviewCount;
   const activeWorkspace = useRef(selectedWorkspaceId);
   activeWorkspace.current = selectedWorkspaceId;
   const observationSearchGeneration = useRef(0);
@@ -1062,7 +1048,6 @@ export function MemoryHubSettings(props?: {
             key={selectedWorkspaceId}
             workspaceId={selectedWorkspaceId}
             canWrite={canWriteWorkspace}
-            onCountChange={setReviewCount}
             onDreamCountChange={setDreamReviewCount}
           />
         ) : null}
@@ -1110,6 +1095,7 @@ export function MemoryHubSettings(props?: {
             canWrite={canWriteWorkspace}
             canDelete={canDeleteWorkspace}
             initialSourceFilter={knowledgeSourceFilter}
+            onOpenTask={props?.onOpenTask}
           />
         ) : null}
       </div>
@@ -1230,7 +1216,7 @@ export function MemoryHubSettings(props?: {
               <div className="memory-hub-primary-label">Enable Wake-Up Layers</div>
               <p className="settings-form-hint memory-hub-hint-tight">
                 Makes prompt-visible memory explicit: inject only L0 Identity and L1 Essential Story
-                by default, while keeping L2 Topic Packs and L3 Deep Recall tool-driven.
+                by default, while keeping L3 Deep Recall tool-driven.
               </p>
             </div>
             <label className="settings-toggle memory-hub-toggle">

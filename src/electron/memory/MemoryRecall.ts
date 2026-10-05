@@ -9,7 +9,7 @@
  *  - `archive`       the episodic `memories` archive (task outcomes, errors, saved notes,
  *                    imports), the existing hybrid search with the Phase 0 visibility filter;
  *  - `conversations` the unified conversation index of earlier tasks;
- *  - `knowledge`     knowledge-graph entities, the `.cowork/` markdown index, topic packs;
+ *  - `knowledge`     knowledge-graph entities and the `.cowork/` markdown index;
  *  - `external`      Supermemory, only when the caller's policy allows it.
  *
  * Every lane returns its own ranked list; lists are fused with weighted reciprocal-rank
@@ -20,7 +20,7 @@
  * from this workspace, global scope, the active task and (when given) the handled contact,
  * never `private` items unless the policy asks; archive rows only when agent-visible
  * (never suppressed or redacted) and from this workspace or a non-private import;
- * conversations, entities, files and topic packs of this workspace only.
+ * conversations, entities and files of this workspace only.
  *
  * `query` has no side effects. A use is counted with `markUsed`, which callers invoke for
  * hits they actually return in full or inject, never for a listing.
@@ -54,7 +54,6 @@ import { hasReservedImportPrefix } from "./memory-visibility";
 import { MemoryService } from "./MemoryService";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { DurableContextService } from "./DurableContextService";
-import { LayeredMemoryIndexService } from "./LayeredMemoryIndexService";
 import { SupermemoryService } from "./SupermemoryService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
@@ -93,7 +92,6 @@ export const MEMORY_RECALL_LANE_WEIGHTS: Readonly<Record<MemoryRecallLane, numbe
   external: 0.5,
 };
 const IMPORTED_ARCHIVE_FACTOR = 0.5;
-const TOPIC_PACK_FACTOR = 0.6;
 /** Lines of a memory repo file returned around an entry by `detail: "full"`. */
 export const MEMORY_REPO_FULL_LINES = 80;
 const UNREVIEWED_PREFIX = "[unreviewed] ";
@@ -181,13 +179,6 @@ export interface MemoryRepoRecallSource {
   stamp(relPath: string): Promise<string | null>;
 }
 
-export interface TopicPackHit {
-  id: string;
-  title: string;
-  path: string;
-  content: string;
-}
-
 /** Backends of the lanes. Production wiring is `defaultMemoryRecallDeps`; tests inject fakes. */
 export interface MemoryRecallDeps {
   searchItems(request: MemoryItemRecallRequest): Promise<MemoryItemRecallRow[]>;
@@ -219,13 +210,6 @@ export interface MemoryRecallDeps {
     limit: number,
     readGuard?: (absolutePath: string) => boolean,
   ): Promise<MemorySearchResult[]>;
-  loadTopics(args: {
-    workspaceId: string;
-    workspacePath: string;
-    query: string;
-    limit: number;
-    readGuard?: (absolutePath: string) => boolean;
-  }): Promise<TopicPackHit[]>;
   readTextFile(absolutePath: string): Promise<string>;
   searchExternal(args: {
     workspace: { id: string; name: string };
@@ -236,7 +220,7 @@ export interface MemoryRecallDeps {
   /** The memory repo, or null when it is off or not ready (the `repo` lane is skipped). */
   memoryRepo?(): MemoryRepoRecallSource | null;
   /** Feature toggles from Memory settings; a lane switched off is skipped. */
-  laneEnabled(lane: MemoryRecallLane | "topics"): boolean;
+  laneEnabled(lane: MemoryRecallLane): boolean;
   now(): number;
 }
 
@@ -260,7 +244,7 @@ interface LaneCandidate {
   kind?: string;
   provenance: Record<string, unknown>;
   item?: MemoryItem;
-  /** Multiplier of the lane weight for this candidate (imports, topic packs). */
+  /** Multiplier of the lane weight for this candidate (imports). */
   weightFactor?: number;
 }
 
@@ -334,8 +318,6 @@ export function parseRecallRef(
       return rest ? { lane: "knowledge", kind: "kg", id: rest } : null;
     case "doc":
       return rest ? { lane: "knowledge", kind: "doc", id: rest } : null;
-    case "topic":
-      return rest ? { lane: "knowledge", kind: "topic", id: rest } : null;
     case "external":
       return rest ? { lane: "external", kind: "external", id: rest } : null;
     case "repo": {
@@ -717,7 +699,7 @@ export class MemoryRecallService implements MemoryRecall {
     const workspaceId = request.workspaceId as string;
     const policy = request.policy;
     const workspacePath = policy?.workspacePath;
-    const [entities, documents, topics] = await Promise.all([
+    const [entities, documents] = await Promise.all([
       this.deps.searchKnowledgeGraph(workspaceId, text, limit).catch((error) => {
         logger.debug?.("Knowledge graph recall failed:", error);
         return [] as KnowledgeEntityHit[];
@@ -731,17 +713,6 @@ export class MemoryRecallService implements MemoryRecall {
             policy?.readGuard,
           )
         : Promise.resolve([] as MemorySearchResult[]),
-      workspacePath && this.deps.laneEnabled("topics")
-        ? this.deps
-            .loadTopics({
-              workspaceId,
-              workspacePath,
-              query: text,
-              limit: Math.min(4, limit),
-              readGuard: policy?.readGuard,
-            })
-            .catch(() => [] as TopicPackHit[])
-        : Promise.resolve([] as TopicPackHit[]),
     ]);
     const entityCandidates = entities.map((entity) => this.entityCandidate(entity, false));
     const documentCandidates = documents
@@ -759,20 +730,9 @@ export class MemoryRecallService implements MemoryRecall {
         kind: "document",
         provenance: { path: `.cowork/${doc.path}`, startLine: doc.startLine, endLine: doc.endLine },
       }));
-    const topicCandidates = topics.map((topic) => ({
-      lane: "knowledge" as const,
-      ref: `topic:${path.basename(topic.path)}`,
-      title: topic.title,
-      content: topic.content,
-      source: "document" as const,
-      createdAt: 0,
-      kind: "topic_pack",
-      provenance: { path: workspacePath ? path.relative(workspacePath, topic.path) : topic.path },
-      weightFactor: TOPIC_PACK_FACTOR,
-    }));
-    // Interleave the three sources so one of them cannot crowd out the others.
+    // Interleave the sources so one of them cannot crowd out the other.
     const merged: LaneCandidate[] = [];
-    const sources = [entityCandidates, documentCandidates, topicCandidates];
+    const sources = [entityCandidates, documentCandidates];
     for (let index = 0; merged.length < limit; index += 1) {
       let added = false;
       for (const list of sources) {
@@ -1010,8 +970,6 @@ export class MemoryRecallService implements MemoryRecall {
       }
       case "doc":
         return this.expandDocument(request.policy, parsed.id);
-      case "topic":
-        return this.expandTopic(request.policy, parsed.id);
       case "repo":
         return this.expandRepo(parsed.id);
       default:
@@ -1092,27 +1050,6 @@ export class MemoryRecallService implements MemoryRecall {
       createdAt: 0,
       kind: "document",
       provenance: { path: `.cowork/${relative}`, startLine: start, endLine: end },
-    };
-  }
-
-  private async expandTopic(
-    policy: MemoryRecallPolicy | undefined,
-    id: string,
-  ): Promise<LaneCandidate | null> {
-    if (!policy?.workspacePath || !/^[A-Za-z0-9._-]+\.md$/.test(id)) return null;
-    const absolute = path.join(policy.workspacePath, ".cowork", "memory", "topics", id);
-    if (policy.readGuard && policy.readGuard(absolute) !== true) return null;
-    const raw = await this.deps.readTextFile(absolute).catch(() => "");
-    if (!raw) return null;
-    return {
-      lane: "knowledge",
-      ref: `topic:${id}`,
-      title: titleOf(raw),
-      content: raw,
-      source: "document",
-      createdAt: 0,
-      kind: "topic_pack",
-      provenance: { path: `.cowork/memory/topics/${id}` },
     };
   }
 }
@@ -1220,23 +1157,6 @@ export function defaultMemoryRecallDeps(): MemoryRecallDeps {
     },
     searchMarkdown: (workspaceId, kitRoot, query, limit, readGuard) =>
       MemoryService.searchWorkspaceMarkdown(workspaceId, kitRoot, query, limit, readGuard),
-    async loadTopics(args) {
-      const topics = await LayeredMemoryIndexService.loadRelevantTopicSnippets({
-        workspaceId: args.workspaceId,
-        workspacePath: args.workspacePath,
-        query: args.query,
-        limit: args.limit,
-        readGuard: args.readGuard,
-        // Recall only reads: never create the topic directories (RECALL-7).
-        writeGuard: () => false,
-      });
-      return topics.map((topic) => ({
-        id: topic.id,
-        title: topic.title,
-        path: topic.path,
-        content: topic.content,
-      }));
-    },
     async readTextFile(absolutePath) {
       const stat = await fs.stat(absolutePath);
       if (!stat.isFile() || stat.size > 2_000_000) return "";
@@ -1279,7 +1199,6 @@ export function defaultMemoryRecallDeps(): MemoryRecallDeps {
       const settings = featureSettings();
       if (!settings) return true;
       if (lane === "conversations") return settings.sessionRecallEnabled !== false;
-      if (lane === "topics") return settings.topicMemoryEnabled !== false;
       return true;
     },
     now: () => Date.now(),

@@ -14,13 +14,17 @@ const mocks = vi.hoisted(() => ({
   evaluate: vi.fn(),
   getSettings: vi.fn(),
   capture: vi.fn(),
+  setUserName: vi.fn(),
 }));
 
 vi.mock("../../../memory/MemoryService", () => ({
   MemoryService: { capture: mocks.capture, getSettings: mocks.getSettings },
 }));
 vi.mock("../../../memory/CuratedMemoryService", () => ({
-  CuratedMemoryService: { syncWorkspaceFiles: vi.fn() },
+  CuratedMemoryService: {},
+}));
+vi.mock("../../../settings/personality-manager", () => ({
+  PersonalityManager: { setUserName: mocks.setUserName },
 }));
 vi.mock("../../../memory/MemoryWriteGate", () => ({
   MemoryWriteGate: { evaluate: mocks.evaluate },
@@ -147,6 +151,29 @@ describeWithGit("memory tools with the memory repo", () => {
     });
     expect(ingest).toHaveBeenCalled();
   });
+
+  it("sets the preferred name from a stated name and mirrors it into me.md", () => inScope(async () => {
+    const tools = new MemoryTools(workspace, makeDaemon("Remember: call me Sam"), "task-1");
+    const result = await tools.remember({
+      content: "Preferred name: Sam",
+      kind: "identity",
+      subject: "preferred_name",
+      user_asked: true,
+    });
+    expect(mocks.setUserName).toHaveBeenCalledWith("Sam");
+    expect(result).toMatchObject({ success: true, file: "me.md" });
+    expect(read("me.md")).toContain("Preferred name: Sam [by: user; kind: identity; subject: preferred_name");
+  }));
+
+  it("keeps commitments in memory_items", () => inScope(async () => {
+    const ingest = vi.fn(async () => ({ status: "skipped", reason: "memory_disabled" }));
+    MemoryWriter.setInstance({ ingest, repository: {} } as Any);
+    await new MemoryTools(workspace, makeDaemon(), "task-1").remember({
+      content: "Send the invoice to Bob by Friday",
+      kind: "commitment",
+    });
+    expect(ingest).toHaveBeenCalledWith(expect.objectContaining({ kind: "commitment" }));
+  }));
 
   it("keeps strict-privacy facts in memory_items", () => inScope(async () => {
     mocks.getSettings.mockResolvedValue({ enabled: true, privacyMode: "strict" });

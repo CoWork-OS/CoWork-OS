@@ -194,3 +194,16 @@
 .supermemory-purge-hint {
   margin-left: 8px;
 }
+
+.memory-knowledge-file-path {
+  margin: 0 8px;
+  font-weight: 400;
+  font-size: 0.85em;
+  color: var(--color-text-tertiary);
+}
+
+.memory-folder-knowledge {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

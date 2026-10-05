@@ -1,7 +1,6 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import {
-  type KitRenderState,
   type ListMemoryItemsRequest,
   type MemoryItem,
   type MemoryItemIngestOutcome,
@@ -33,7 +32,11 @@ import {
 
 export const MEMORY_ITEMS_LANE_MIGRATION_KEY = "memory_items_lane_migration_v1";
 
-/** `maintenance_state` key prefix of the last rendered kit auto-block per workspace file. */
+/**
+ * `maintenance_state` key prefix of the last rendered kit auto-block per workspace file.
+ * The blocks are retired; leftover keys are deleted by the one-time kit strip and with the
+ * workspace's items.
+ */
 export const KIT_RENDER_STATE_PREFIX = "kit_render_state:";
 
 /**
@@ -668,7 +671,7 @@ export class MemoryItemsStore {
       .run(MEMORY_ITEMS_LANE_MIGRATION_KEY, JSON.stringify(summary), now);
   }
 
-  // ---- Memory Hub ("What CoWork knows") and kit back-sync ----
+  // ---- Memory Hub ("What CoWork knows") ----
 
   /**
    * One page of a workspace's items plus global items and workspace-less contact items,
@@ -753,38 +756,6 @@ export class MemoryItemsStore {
       .prepare("DELETE FROM memory_items WHERE workspace_id IS NULL AND scope = 'global'")
       .run().changes;
   }
-
-  getKitRenderState(key: string): KitRenderState | null {
-    if (!tableExists(this.db, "maintenance_state")) return null;
-    const row = this.db
-      .prepare("SELECT value FROM maintenance_state WHERE key = ?")
-      .get(`${KIT_RENDER_STATE_PREFIX}${key}`) as { value?: string } | undefined;
-    if (!row?.value) return null;
-    try {
-      const parsed = JSON.parse(row.value) as KitRenderState;
-      return parsed && typeof parsed.hash === "string" && Array.isArray(parsed.entries)
-        ? parsed
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  setKitRenderState(key: string, state: KitRenderState, now: number): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS maintenance_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      )
-    `);
-    this.db
-      .prepare(
-        `INSERT INTO maintenance_state (key, value, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      )
-      .run(`${KIT_RENDER_STATE_PREFIX}${key}`, JSON.stringify(state), now);
-  }
 }
 
 /**
@@ -822,15 +793,23 @@ export function purgeTaskMemoryItems(
   return deleted;
 }
 
+/**
+ * Delete the workspace's leftover kit render-state keys (retired generated kit blocks);
+ * they quote item text. Returns the number of keys removed.
+ */
+export function deleteKitRenderState(db: Database.Database, workspaceId: string): number {
+  if (!tableExists(db, "maintenance_state")) return 0;
+  return db
+    .prepare("DELETE FROM maintenance_state WHERE key IN (?, ?)")
+    .run(
+      `${KIT_RENDER_STATE_PREFIX}${workspaceId}:user`,
+      `${KIT_RENDER_STATE_PREFIX}${workspaceId}:workspace`,
+    ).changes;
+}
+
 /** "Clear All Memories" (memory-purge-sql.ts `purgeWorkspaceMemoryRows`). */
 export function purgeWorkspaceMemoryItems(db: Database.Database, workspaceId: string): number {
   if (!tableExists(db, "memory_items")) return 0;
-  if (tableExists(db, "maintenance_state")) {
-    // The last rendered kit blocks quote item text; they go with the items.
-    db.prepare("DELETE FROM maintenance_state WHERE key IN (?, ?)").run(
-      `${KIT_RENDER_STATE_PREFIX}${workspaceId}:user`,
-      `${KIT_RENDER_STATE_PREFIX}${workspaceId}:workspace`,
-    );
-  }
+  deleteKitRenderState(db, workspaceId);
   return new MemoryItemsStore(db).purgeWorkspace(workspaceId);
 }

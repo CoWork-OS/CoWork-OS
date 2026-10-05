@@ -13,14 +13,6 @@ export const MemoryReviewWorkspaceRequestSchema = z
   .object({ workspaceId: WorkspaceIdSchema })
   .strict();
 
-export const MemoryReviewProposalRequestSchema = z
-  .object({ workspaceId: WorkspaceIdSchema, id: ReviewIdSchema })
-  .strict();
-
 export const MemoryReviewUndoRequestSchema = z
   .object({ workspaceId: WorkspaceIdSchema, id: ReviewIdSchema })
-  .strict();
-
-export const MemoryReviewSetLlmRequestSchema = z
-  .object({ workspaceId: WorkspaceIdSchema, enabled: z.boolean() })
   .strict();

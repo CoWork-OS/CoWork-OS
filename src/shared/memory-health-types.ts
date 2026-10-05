@@ -8,7 +8,7 @@ import thresholds from "./memory-health-thresholds.json";
 
 /** When a Health check shows WARN. Shared with scripts/qa/memory-health.mjs. */
 export const MEMORY_HEALTH_THRESHOLDS: Readonly<typeof thresholds.hub> = thresholds.hub;
-/** Age after which a `running` heartbeat or Dreaming run counts as stuck. */
+/** Age after which a `running` heartbeat run counts as stuck. */
 export const MEMORY_HEALTH_STUCK_AFTER_MS: number = thresholds.stuckAfterMs;
 /** `maintenance_state` markers of the one-time memory migrations. */
 export const MEMORY_HEALTH_MAINTENANCE_KEYS: readonly string[] = thresholds.maintenanceKeys;

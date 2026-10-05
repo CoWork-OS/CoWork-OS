@@ -242,7 +242,7 @@ describe("browser memory services", () => {
     ).rejects.toThrow("Unavailable approval storage");
     expect(list).toHaveBeenCalledWith(workspace.id, 50);
   });
-  it("promotes only an observation in the authorized workspace with filesystem policy guards", async () => {
+  it("promotes only an observation in the authorized workspace", async () => {
     const details = vi
       .spyOn(MemoryObservationService, "details")
       .mockResolvedValue([
@@ -260,8 +260,6 @@ describe("browser memory services", () => {
         content: "Disposable promoted fact",
         target: "workspace",
         action: "add",
-        filesystemReadGuard: expect.any(Function),
-        filesystemWriteGuard: expect.any(Function),
       }),
     );
     details.mockResolvedValue([
@@ -522,6 +520,26 @@ describe("browser memory folder methods", () => {
     for (const refs of [[], ["repo:../x.md#L1"], ["repo:.git/config#L1"], "repo:me.md#L1"]) {
       await expect(call("readMemoryRepoLines", [refs])).rejects.toThrow();
     }
+  });
+
+  it("mirrors the Memory Hub folder entry methods except opening a file", async () => {
+    const { MemoryRepoService } = await import("../../../electron/memory/repo/MemoryRepoService");
+    MemoryRepoService.setInstance(null);
+    const { definitions } = setup();
+    expect(definitions.getMemoryRepoEntries.mutation).toBe(false);
+    expect(definitions.updateMemoryRepoEntry.mutation).toBe(true);
+    expect(definitions.removeMemoryRepoEntry.mutation).toBe(true);
+    expect(definitions.pinMemoryRepoEntry.mutation).toBe(true);
+    expect(definitions.openMemoryRepoFile).toBeUndefined();
+    const validate = (method: string, value: unknown) => () =>
+      definitions[method].validate?.([value]);
+    const workspaceId = "7b0f8e4c-3a52-4d8e-9b1a-2f6c1d9e0a11";
+    const ref = { workspaceId, ref: "repo:me.md#L1", hash: "a".repeat(64) };
+    expect(validate("getMemoryRepoEntries", { workspaceId })).not.toThrow();
+    expect(validate("pinMemoryRepoEntry", ref)).not.toThrow();
+    expect(validate("removeMemoryRepoEntry", { ...ref, ref: "repo:../x.md#L1" })).toThrow();
+    expect(validate("updateMemoryRepoEntry", { ...ref, text: "" })).toThrow();
+    expect(validate("updateMemoryRepoEntry", { ...ref, hash: "nope", text: "Prefers tea" })).toThrow();
   });
 
   it("mirrors the desktop dream methods with the same validation", async () => {

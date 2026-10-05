@@ -102,7 +102,6 @@ describeWithSqlite("MemoryRecall", () => {
       searchKnowledgeGraph: vi.fn(async () => []),
       getKnowledgeEntity: vi.fn(async () => null),
       searchMarkdown: vi.fn(async () => []),
-      loadTopics: vi.fn(async () => []),
       readTextFile: vi.fn(async () => ""),
       searchExternal: vi.fn(async () => []),
       externalConfigured: () => true,
@@ -535,6 +534,8 @@ describe("MemoryRecall helpers", () => {
       id: "workspaces/app.md#L7",
     });
     expect(parseRecallRef("repo:../etc/passwd.md#L1")).toBeNull();
+    // Topic packs are retired: their refs are unknown.
+    expect(parseRecallRef("topic:deploy.md")).toBeNull();
     expect(parseRecallRef("repo:.git/config.md#L1")).toBeNull();
     expect(parseRecallRef("")).toBeNull();
     expect(parseRecallRef("weird")).toBeNull();
@@ -588,7 +589,6 @@ describe("MemoryRecall repo lane", () => {
       searchKnowledgeGraph: vi.fn(async () => []),
       getKnowledgeEntity: vi.fn(async () => null),
       searchMarkdown: vi.fn(async () => []),
-      loadTopics: vi.fn(async () => []),
       readTextFile: vi.fn(async () => ""),
       searchExternal: vi.fn(async () => []),
       externalConfigured: () => false,

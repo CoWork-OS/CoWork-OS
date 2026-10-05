@@ -1,19 +1,18 @@
 /**
  * Startup wiring of the memory engine (docs/memory-engine.md): create the process-wide
  * MemoryWriter, copy the retired legacy lanes into `memory_items` once (awaited, so no
- * service reads a half-migrated store), then start the read side (PersonalityManager name
- * and style mirrors), the synchronous facts snapshot and the kit file watcher.
+ * service reads a half-migrated store), then start the synchronous facts snapshot and the
+ * profile's read model over the memory folder.
  */
 import type Database from "better-sqlite3";
 import { createLogger } from "../utils/logger";
 import { MemoryWriter, type MemoryWriterDeps } from "./MemoryWriter";
 import { MemoryFactsSnapshot } from "./memory-facts-snapshot";
-import { installMemoryReadSide } from "./memory-read-side";
+import { UserProfileFolderModel } from "./user-profile-folder";
 import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
 import { withMaintenanceClaim } from "./maintenance-claim-sql";
 import { MEMORY_ITEMS_LANE_MIGRATION_KEY } from "./memory-items-sql";
 import { scheduleLegacyMemoryRetirement } from "./LegacyMemoryRetirement";
-import { KitFileWatcher } from "./KitFileWatcher";
 
 const logger = createLogger("MemoryEngine");
 
@@ -77,8 +76,8 @@ export async function runMemoryItemsLaneMigrationNow(
 }
 
 /**
- * Initialize the writer, run the lane migration (awaited), and start the read side and
- * the facts snapshot. Returns a function that stops them (call it on quit).
+ * Initialize the writer, run the lane migration (awaited), and start the facts snapshot
+ * and the profile read model. Returns a function that stops them (call it on quit).
  */
 export async function startMemoryEngine(
   source: Database.Database | MemoryStatementPort,
@@ -88,18 +87,15 @@ export async function startMemoryEngine(
   const writer = MemoryWriter.initialize(source, deps);
   const port = isStatementPort(source) ? source : createMemoryStatementPort(source);
   await runMemoryItemsLaneMigrationNow(writer, port, { waitMs: migrationWaitMs });
-  // Read side: preferred-name and response-style mirrors follow memory_items writes.
-  const readSide = installMemoryReadSide(writer);
   const stopSnapshot = MemoryFactsSnapshot.install();
-  await Promise.all([MemoryFactsSnapshot.refresh(), readSide.refresh()]);
+  // The user profile reads the memory folder once it runs (UserProfileService).
+  const stopProfileModel = UserProfileFolderModel.install();
+  await MemoryFactsSnapshot.refresh();
   // One-time legacy data retirement, deferred off the startup path.
   const cancelRetirement = scheduleLegacyMemoryRetirement(writer, port);
-  // Kit back-sync on file edit: workspaces are watched once their kit is synced or used.
-  const stopKitWatcher = KitFileWatcher.install();
   return () => {
-    stopKitWatcher();
     cancelRetirement();
     stopSnapshot();
-    readSide.dispose();
+    stopProfileModel();
   };
 }

@@ -115,7 +115,7 @@ describe("memory folder IPC", () => {
       channel.startsWith("memoryRepo:"),
     );
     expect(Object.keys(handlers).sort()).toEqual([...channels].sort());
-    expect(channels).toHaveLength(10);
+    expect(channels).toHaveLength(15);
   });
 
   it("returns the status and rate-limits every channel", async () => {
@@ -133,6 +133,16 @@ describe("memory folder IPC", () => {
     await handlers[IPC_CHANNELS.MEMORY_REPO_REJECT_DREAM]({ id: "abc" });
     await handlers[IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM]({ id: "abc" });
     await handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW](undefined);
+    // The Memory Hub entry channels (no folder service here: nothing to act on).
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const ref = { workspaceId, ref: "repo:me.md#L3", hash: "a".repeat(64) };
+    await handlers[IPC_CHANNELS.MEMORY_REPO_ENTRIES]({ workspaceId });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY]({ ...ref, text: "Prefers tea" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY](ref);
+    await handlers[IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY](ref);
+    await expect(
+      handlers[IPC_CHANNELS.MEMORY_REPO_OPEN_FILE]({ workspaceId, path: "me.md" }),
+    ).rejects.toThrow(/not available/);
     for (const channel of Object.keys(handlers)) {
       expect(checkRateLimit).toHaveBeenCalledWith(channel);
     }

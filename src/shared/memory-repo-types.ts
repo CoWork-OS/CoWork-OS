@@ -124,3 +124,61 @@ export interface MemoryRepoDreamNowResult {
 export const MEMORY_REPO_DREAM_DIFF_MAX = 200_000;
 /** Dreams listed by `memoryRepo:dreams`. */
 export const MEMORY_REPO_DREAMS_LIMIT = 30;
+
+// ---------------------------------------------------------------------------
+// Memory Hub "What CoWork knows" over the memory folder (docs/memory-repo-phase3-design.md §5)
+// ---------------------------------------------------------------------------
+
+/** One entry of a memory folder file as the Memory Hub shows it. */
+export interface MemoryRepoHubEntry {
+  /** `repo:<path>#L<n>`. */
+  ref: string;
+  path: string;
+  line: number;
+  /** The entry text (redacted for display). */
+  text: string;
+  by: "user" | "agent";
+  kind: string | null;
+  /** `added` day (`YYYY-MM-DD`), when the line has one. */
+  added: string | null;
+  /** The task it was learned in (`source: cowork://tasks/<id>`), when there is one. */
+  taskId: string | null;
+  /** Hash of the entry text: sent back with edits so a shifted line is never changed. */
+  hash: string;
+  /** Other source (`import`), when the line names one that is not a task. */
+  source: string | null;
+}
+
+export type MemoryRepoHubFileRole = "entry" | "me" | "lessons" | "workspace" | "topic" | "inbox";
+
+export interface MemoryRepoHubFile {
+  path: string;
+  /** The file's `# ` heading, or its name. */
+  title: string;
+  role: MemoryRepoHubFileRole;
+  entries: MemoryRepoHubEntry[];
+  /** More entries than the Hub lists. */
+  truncated?: boolean;
+}
+
+/** `memoryRepo:entries`: the folder as seen from one workspace. */
+export interface MemoryRepoEntriesReport {
+  /** The folder is on and ready (otherwise the Hub shows `memory_items` facts). */
+  available: boolean;
+  writable: boolean;
+  /** `MEMORY.md`, `me.md`, `lessons.md`, global topic files, then this workspace's file. */
+  files: MemoryRepoHubFile[];
+  /** `inbox.md`: saved after reading untrusted content, not used until reviewed. */
+  inbox: MemoryRepoHubFile | null;
+}
+
+/** Result of Edit, Delete and Pin on a memory folder entry. */
+export interface MemoryRepoEntryActionResult {
+  ok: boolean;
+  error?: string;
+  /** The entry's ref after the change (Edit, Pin). */
+  ref?: string;
+}
+
+/** Entries listed per file by `memoryRepo:entries`. */
+export const MEMORY_REPO_HUB_ENTRIES_PER_FILE = 500;

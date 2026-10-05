@@ -71,8 +71,6 @@ export interface MemoryFeaturesSettings {
   wakeUpLayersEnabled?: boolean;
   /** Track KG edge validity windows and time-aware historical recall. */
   temporalKnowledgeEnabled?: boolean;
-  /** Serve memory via file-backed index/topic layers under `.cowork/memory/`. */
-  layeredMemoryEnabled?: boolean;
   /** Persist append-only transcript spans and lightweight checkpoints. */
   transcriptStoreEnabled?: boolean;
   /** Persist compacted runtime context in a source-linked durable context store. */
@@ -81,16 +79,12 @@ export interface MemoryFeaturesSettings {
   durableContextMode?: "off" | "experimental" | "on";
   /** Token threshold above which large payloads should be stored by reference. */
   durableContextLargePayloadThreshold?: number;
-  /** Run background memory consolidation after meaningful task activity. */
-  backgroundConsolidationEnabled?: boolean;
   /** Route execution turns through the extracted query orchestrator. */
   queryOrchestratorEnabled?: boolean;
   /** Keep a small curated hot-memory layer always available for prompt injection. */
   curatedMemoryEnabled?: boolean;
   /** Allow transcript/session recall as an explicit tool surface. */
   sessionRecallEnabled?: boolean;
-  /** Allow explicit topic-pack loading from `.cowork/memory/topics`. */
-  topicMemoryEnabled?: boolean;
   /** Keep legacy archive memory out of default prompt injection. */
   defaultArchiveInjectionEnabled?: boolean;
   /** Optional review mode for durable memory writes; normal no-prompt runs commit immediately. */
@@ -101,10 +95,6 @@ export interface MemoryFeaturesSettings {
   structuredObservationsEnabled?: boolean;
   /** Show the Memory Hub observation inspector. */
   memoryInspectorEnabled?: boolean;
-  /** Let Dreaming add LLM-synthesized curation proposals (always queued for review). */
-  dreamingLlmEnabled?: boolean;
-  /** Daily token budget of Dreaming's LLM synthesis, across workspaces. */
-  dreamingLlmDailyTokenBudget?: number;
   /**
    * Daily token budget (rolling 24 hours, across workspaces) of the AI memory compression.
    * The on/off switch is the per-workspace `compressionEnabled` memory setting.
@@ -117,6 +107,8 @@ export interface MemoryFeaturesSettings {
   memoryRepoEnabled?: boolean;
   /** Folder of the memory repo; empty means the default (`~/CoWork Memory`). */
   memoryRepoPath?: string;
+  /** Set once the Phase 3 default-on migration has applied (docs/memory-repo-phase3-design.md §2). */
+  memoryRepoDefaultOnApplied?: boolean;
   /**
    * Let a periodic AI pass ("dream") tidy the memory folder and save what recent tasks taught
    * (docs/memory-repo-phase2-design.md). Default on; it only matters while the folder is on.
@@ -5616,125 +5608,6 @@ export interface ListCoreMemoryDistillRunsRequest {
   limit?: number;
 }
 
-export type DreamingScopeKind = "workspace" | "agent_role" | "topic" | "recent_sessions";
-
-export type DreamingTriggerSource = "heartbeat" | "task_completion" | "manual" | "system";
-
-export type DreamingRunStatus = "running" | "completed" | "failed" | "skipped";
-
-export type DreamingCandidateAction =
-  | "curated_add"
-  | "curated_replace"
-  | "curated_archive"
-  | "archive_mark_stale"
-  | "topic_pack_update"
-  | "ignored_noise_pattern"
-  | "open_loop"
-  | "recurring_task"
-  | "constraint"
-  | "correction"
-  // Memory curator (Phase 3): one action per curation operation over memory_items.
-  | "memory_merge"
-  | "memory_resolve_conflict"
-  | "memory_promote"
-  | "memory_decay"
-  | "memory_expire_commitment";
-
-export type DreamingCandidateTarget =
-  | "curated_memory"
-  | "archive_memory"
-  | "topic_pack"
-  | "core_memory"
-  | "suggestion_policy"
-  | "memory_items";
-
-/** `dismissed`: closed without review (a retired legacy proposal, or its items are gone). */
-export type DreamingCandidateStatus =
-  | "proposed"
-  | "accepted"
-  | "rejected"
-  | "applied"
-  | "merged"
-  | "dismissed";
-
-export interface DreamingRun {
-  id: string;
-  workspaceId: string;
-  scopeKind: DreamingScopeKind;
-  scopeRef: string;
-  status: DreamingRunStatus;
-  triggerSource: DreamingTriggerSource;
-  triggerHeartbeatRunId?: string;
-  sourceTaskId?: string;
-  instructions?: string;
-  summary?: string;
-  evidenceCount: number;
-  candidateCount: number;
-  /** Curation operations applied automatically by this run. */
-  appliedCount?: number;
-  /** Curation proposals queued for review by this run. */
-  queuedCount?: number;
-  /** Tokens spent on LLM synthesis (input + output). */
-  llmTokens?: number;
-  llmCalls?: number;
-  /** Per-operation counts and skip reasons (JSON object). */
-  stats?: Record<string, number>;
-  error?: string;
-  startedAt: number;
-  completedAt?: number;
-  createdAt: number;
-}
-
-export interface DreamingCandidate {
-  id: string;
-  runId: string;
-  workspaceId: string;
-  action: DreamingCandidateAction;
-  target: DreamingCandidateTarget;
-  currentValue?: string;
-  proposedValue: string;
-  rationale: string;
-  confidence: number;
-  evidenceRefs: EvidenceRef[];
-  status: DreamingCandidateStatus;
-  createdAt: number;
-  reviewedAt?: number;
-  resolution?: string;
-  /** Curation operation of a memory-curator proposal (JSON; see memory-review-types.ts). */
-  operation?: Record<string, unknown>;
-  /** Why the proposal was queued for review rather than applied. */
-  reviewReason?: string;
-  /** `heuristic` or `llm`. */
-  origin?: string;
-  /** Identity across runs, so a rejected or undone change is not proposed again. */
-  fingerprint?: string;
-}
-
-export interface ListDreamingRunsRequest {
-  workspaceId?: string;
-  scopeKind?: DreamingScopeKind;
-  status?: DreamingRunStatus;
-  limit?: number;
-}
-
-export interface ListDreamingCandidatesRequest {
-  workspaceId?: string;
-  runId?: string;
-  action?: DreamingCandidateAction;
-  target?: DreamingCandidateTarget;
-  status?: DreamingCandidateStatus;
-  limit?: number;
-}
-
-export interface ReviewDreamingCandidateRequest {
-  id: string;
-  status: Extract<
-    DreamingCandidateStatus,
-    "accepted" | "rejected" | "merged" | "applied" | "dismissed"
-  >;
-  resolution?: string;
-}
-
 export interface RunCoreMemoryDistillNowRequest {
   profileId: string;
   workspaceId?: string;
@@ -7658,8 +7531,8 @@ export interface HeartbeatResult {
   checklistDueCount?: number;
   reflectionRunId?: string;
   reflectionOutcome?: string;
-  dreamingRunId?: string;
-  dreamingCandidateCount?: number;
+  /** Past-due commitments the pulse's commitment sweep closed. */
+  commitmentsExpired?: number;
   cooldownUntil?: number;
   dispatchesToday?: number;
   maxDispatchesPerDay?: number;
@@ -9779,20 +9652,15 @@ export const IPC_CHANNELS = {
   MEMORY_ITEMS_CLEAR_GLOBAL: "memoryItems:clearGlobal",
   MEMORY_ITEMS_USED_FOR_TASK: "memoryItems:usedForTask",
 
-  // Memory Hub "Review": Dreaming's curation proposals and applied changes (Phase 3)
+  // Memory Hub "Review": automatic commitment expiries with undo
   MEMORY_REVIEW_GET: "memoryReview:get",
-  MEMORY_REVIEW_COUNT: "memoryReview:count",
-  MEMORY_REVIEW_ACCEPT: "memoryReview:accept",
-  MEMORY_REVIEW_REJECT: "memoryReview:reject",
   MEMORY_REVIEW_UNDO: "memoryReview:undo",
-  MEMORY_REVIEW_RUN_NOW: "memoryReview:runNow",
-  MEMORY_REVIEW_SET_LLM: "memoryReview:setLlmEnabled",
 
   // Memory Hub "Sources" and "Health": aggregate counts and qa:memory-health checks
   MEMORY_HUB_SOURCES: "memoryHub:sources",
   MEMORY_HUB_HEALTH: "memoryHub:health",
 
-  // Memory folder (beta): the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
+  // Memory folder: the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
   MEMORY_REPO_STATUS: "memoryRepo:status",
   MEMORY_REPO_OPEN_FOLDER: "memoryRepo:openFolder",
   MEMORY_REPO_COMPACT_HISTORY: "memoryRepo:compactHistory",
@@ -9804,6 +9672,12 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_REJECT_DREAM: "memoryRepo:rejectDream",
   MEMORY_REPO_UNDO_DREAM: "memoryRepo:undoDream",
   MEMORY_REPO_DREAM_NOW: "memoryRepo:dreamNow",
+  // Memory Hub "What CoWork knows" over the folder (docs/memory-repo-phase3-design.md §5)
+  MEMORY_REPO_ENTRIES: "memoryRepo:entries",
+  MEMORY_REPO_UPDATE_ENTRY: "memoryRepo:updateEntry",
+  MEMORY_REPO_REMOVE_ENTRY: "memoryRepo:removeEntry",
+  MEMORY_REPO_PIN_ENTRY: "memoryRepo:pinEntry",
+  MEMORY_REPO_OPEN_FILE: "memoryRepo:openFile",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",
@@ -12990,6 +12864,11 @@ export interface PersonalitySettings {
   activePersona?: PersonaId;
   /** Response style preferences */
   responseStyle?: ResponseStylePreferences;
+  /**
+   * The user chose the response style (Settings, `set_response_style`); style adaptation
+   * leaves it alone. Set by the main process only.
+   */
+  responseStyleExplicit?: boolean;
   /** Personality quirks */
   quirks?: PersonalityQuirks;
   /** Relationship and history data */
@@ -13522,6 +13401,11 @@ export interface PersonalityConfigV2 {
   rules: BehavioralRule[];
   /** Extended communication style */
   style: CommunicationStyle;
+  /**
+   * The user chose the response style (Settings, `set_response_style`); style adaptation
+   * leaves it alone. Set by the main process only; saves from the renderer keep it.
+   */
+  responseStyleExplicit?: boolean;
   /** Knowledge/expertise areas */
   expertise: ExpertiseArea[];
   /** Few-shot conversation examples */

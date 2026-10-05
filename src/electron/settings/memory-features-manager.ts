@@ -13,25 +13,22 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   checkpointCaptureEnabled: true,
   wakeUpLayersEnabled: true,
   temporalKnowledgeEnabled: true,
-  layeredMemoryEnabled: false,
   transcriptStoreEnabled: false,
   durableContextEnabled: false,
   durableContextMode: "off",
   durableContextLargePayloadThreshold: 25000,
-  backgroundConsolidationEnabled: false,
   queryOrchestratorEnabled: false,
   curatedMemoryEnabled: true,
   sessionRecallEnabled: true,
-  topicMemoryEnabled: true,
   defaultArchiveInjectionEnabled: false,
   memoryWriteApprovalMode: "off",
   autoPromoteToCuratedMemoryEnabled: false,
   structuredObservationsEnabled: true,
   memoryInspectorEnabled: true,
-  dreamingLlmEnabled: false,
-  dreamingLlmDailyTokenBudget: 20000,
   memoryCompressionDailyTokenBudget: 20000,
-  memoryRepoEnabled: false,
+  memoryRepoEnabled: true,
+  // `memoryRepoDefaultOnApplied` is deliberately absent: a stored blob without it gets the
+  // one-time default-on migration in normalizeSettings.
   memoryRepoPath: "",
   memoryRepoDreamingEnabled: true,
   memoryRepoDreamDailyTokenBudget: 50000,
@@ -53,7 +50,8 @@ function normalizePositiveNumber(value: unknown, fallback: number): number {
 }
 
 // Builds the settings from known keys only, so retired keys still present in a stored blob
-// (`verbatimRecallEnabled`, `progressiveRecallToolsEnabled`) are dropped on load and save.
+// (`verbatimRecallEnabled`, `progressiveRecallToolsEnabled`, `layeredMemoryEnabled`,
+// `topicMemoryEnabled`) are dropped on load and save.
 function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSettings {
   const durableContextMode = normalizeDurableContextMode(settings.durableContextMode);
   const durableContextEnabled =
@@ -67,7 +65,6 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     checkpointCaptureEnabled: durableContextEnabled || settings.checkpointCaptureEnabled !== false,
     wakeUpLayersEnabled: settings.wakeUpLayersEnabled !== false,
     temporalKnowledgeEnabled: settings.temporalKnowledgeEnabled !== false,
-    layeredMemoryEnabled: isEnabled(settings.layeredMemoryEnabled),
     // No longer writes transcript spans (the conversation index is always fed from task
     // events). It now only turns on the query orchestrator's `transcript_context` prompt
     // section and the checkpoint resume label.
@@ -79,26 +76,23 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     durableContextLargePayloadThreshold: Math.floor(
       normalizePositiveNumber(settings.durableContextLargePayloadThreshold, 25000),
     ),
-    backgroundConsolidationEnabled: isEnabled(settings.backgroundConsolidationEnabled),
     queryOrchestratorEnabled: isEnabled(settings.queryOrchestratorEnabled),
     curatedMemoryEnabled: settings.curatedMemoryEnabled !== false,
     sessionRecallEnabled: settings.sessionRecallEnabled !== false,
-    topicMemoryEnabled: settings.topicMemoryEnabled !== false,
     defaultArchiveInjectionEnabled: isEnabled(settings.defaultArchiveInjectionEnabled),
     memoryWriteApprovalMode: normalizeMemoryWriteApprovalMode(settings.memoryWriteApprovalMode),
     autoPromoteToCuratedMemoryEnabled: isEnabled(settings.autoPromoteToCuratedMemoryEnabled),
     structuredObservationsEnabled: settings.structuredObservationsEnabled !== false,
     memoryInspectorEnabled: settings.memoryInspectorEnabled !== false,
-    dreamingLlmEnabled: isEnabled(settings.dreamingLlmEnabled),
-    dreamingLlmDailyTokenBudget: Math.min(
-      1_000_000,
-      Math.floor(normalizePositiveNumber(settings.dreamingLlmDailyTokenBudget, 20000)),
-    ),
     memoryCompressionDailyTokenBudget: Math.min(
       1_000_000,
       Math.floor(normalizePositiveNumber(settings.memoryCompressionDailyTokenBudget, 20000)),
     ),
-    memoryRepoEnabled: isEnabled(settings.memoryRepoEnabled),
+    // Phase 3 turned the memory folder on for everyone once; a stored `false` from before
+    // was usually the saved default, not a choice. After that, the user's choice holds.
+    memoryRepoEnabled:
+      settings.memoryRepoDefaultOnApplied === true ? isEnabled(settings.memoryRepoEnabled) : true,
+    memoryRepoDefaultOnApplied: true,
     memoryRepoPath:
       typeof settings.memoryRepoPath === "string" ? settings.memoryRepoPath.trim().slice(0, 1024) : "",
     memoryRepoDreamingEnabled: settings.memoryRepoDreamingEnabled !== false,

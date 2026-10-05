@@ -198,10 +198,6 @@ describeWithSqlite("BoxBrainService", () => {
     const captureMemory = vi.fn(async () => memory);
     const replaceMemory = vi.fn(async () => memory);
     const deleteMemoryEntries = vi.fn();
-    const runDreaming = vi.fn(async () => ({
-      run: { id: "dream-run-1" },
-      candidates: [],
-    }));
 
     const service = new BoxBrainService(db, {
       getSettings: () => settings,
@@ -211,7 +207,6 @@ describeWithSqlite("BoxBrainService", () => {
       captureMemory,
       replaceMemory,
       deleteMemoryEntries,
-      runDreaming,
       now: () => now,
       wait: async () => undefined,
     });
@@ -224,10 +219,9 @@ describeWithSqlite("BoxBrainService", () => {
       indexedCount: 1,
       unchangedCount: 0,
       deletedCount: 0,
-      improvementRunId: "dream-run-1",
     });
     expect(captureMemory).toHaveBeenCalledTimes(1);
-    expect(runDreaming).toHaveBeenCalledTimes(1);
+    expect(first.improvementRunId).toBeUndefined();
     expect(callServerTool).toHaveBeenCalledWith("box-server", "get_file_content", {
       file_id: "file-1",
     });

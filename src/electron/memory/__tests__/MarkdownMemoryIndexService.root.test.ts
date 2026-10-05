@@ -60,13 +60,14 @@ describe("markdown memory index root and exclusions", () => {
     expect(resolveMarkdownIndexRoot("/w/.cowork")).toBe(path.resolve("/w/.cowork"));
   });
 
-  it("excludes history, subconscious, chronicle, transcripts, topics and scratchpads", () => {
+  it("excludes history, subconscious, chronicle, transcripts, topics, summaries and scratchpads", () => {
     for (const excluded of [
       ".history/USER.md.1.md",
       "subconscious/dream.md",
       "chronicle/frame.md",
       "memory/transcripts/t.md",
       "memory/topics/memory-1.md",
+      "memory/summaries/2026-10-03.md",
       "scratchpad-task.md",
       "projects/a/.history/x.md",
       ".cowork/USER.md",

@@ -7,7 +7,6 @@ import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { createLogger } from "../utils/logger";
 import { containsSecret, redactSecrets } from "./sensitive-content";
 import { MEMORY_ITEM_KINDS, MEMORY_ITEM_SCOPES, MEMORY_ITEM_SOURCES } from "./memory-items-types";
-import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import type {
   CuratedMemoryKind,
   CuratedMemoryTarget,
@@ -308,7 +307,7 @@ export class MemoryWriteGate {
       return;
     }
     if (pending.target === "curated") {
-      await this.replayCurated(pending, effectiveWorkspace);
+      await this.replayCurated(pending);
       return;
     }
     if (pending.target === "external") {
@@ -348,18 +347,12 @@ export class MemoryWriteGate {
     }
   }
 
-  private static async replayCurated(
-    pending: PendingMemoryWrite,
-    effectiveWorkspace?: Workspace,
-  ): Promise<void> {
+  private static async replayCurated(pending: PendingMemoryWrite): Promise<void> {
     const { CuratedMemoryService } = await import("./CuratedMemoryService");
     const payload = pending.payload;
-    const filesystemGuards = this.getCuratedFilesystemGuards(
-      effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId)),
-    );
     const action = this.asString(payload.action);
     if (action === "remember") {
-      await this.replayRemember(pending, filesystemGuards);
+      await this.replayRemember(pending);
       return;
     }
     const target = this.asCuratedTarget(payload.target);
@@ -385,7 +378,6 @@ export class MemoryWriteGate {
         confidence: typeof payload.confidence === "number" ? payload.confidence : 0.8,
         source,
         skipMemoryWriteGate: true,
-        ...filesystemGuards,
       });
       if (!entry) {
         throw new Error("Approved curated upsert did not produce an entry.");
@@ -410,7 +402,6 @@ export class MemoryWriteGate {
       match: this.asString(payload.match),
       reason: this.asString(payload.reason) || pending.reason,
       skipMemoryWriteGate: true,
-      ...filesystemGuards,
     });
     if (!result.success) {
       throw new Error(result.error || "Approved curated memory write failed.");
@@ -421,14 +412,8 @@ export class MemoryWriteGate {
    * An approved `memory_remember` fact: the staged memory_items candidate, written through
    * MemoryWriter with its own kind, scope and source (no curated-lane conversion).
    */
-  private static async replayRemember(
-    pending: PendingMemoryWrite,
-    filesystemGuards: ReturnType<typeof MemoryWriteGate.getCuratedFilesystemGuards>,
-  ): Promise<void> {
-    const [{ MemoryWriter }, { CuratedMemoryService }] = await Promise.all([
-      import("./MemoryWriter"),
-      import("./CuratedMemoryService"),
-    ]);
+  private static async replayRemember(pending: PendingMemoryWrite): Promise<void> {
+    const { MemoryWriter } = await import("./MemoryWriter");
     const writer = MemoryWriter.get();
     if (!writer) throw new Error("Memory is not available yet.");
     const payload = pending.payload;
@@ -466,12 +451,6 @@ export class MemoryWriteGate {
     });
     if (result.status === "skipped") {
       throw new Error(`Approved memory fact was not saved (${result.reason}).`);
-    }
-    if (result.item.scope === "workspace" && result.item.workspaceId) {
-      await CuratedMemoryService.syncWorkspaceFiles(result.item.workspaceId, {
-        readGuard: filesystemGuards.filesystemReadGuard,
-        writeGuard: filesystemGuards.filesystemWriteGuard,
-      });
     }
   }
 
@@ -564,19 +543,6 @@ export class MemoryWriteGate {
     } catch {
       return undefined;
     }
-  }
-
-  private static getCuratedFilesystemGuards(workspace: Workspace | undefined): {
-    filesystemReadGuard?: (candidatePath: string) => boolean;
-    filesystemWriteGuard?: (candidatePath: string) => boolean;
-  } {
-    if (!workspace?.path) return {};
-    return {
-      filesystemReadGuard: (candidatePath) =>
-        evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "read").decision === "allow",
-      filesystemWriteGuard: (candidatePath) =>
-        evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "write").decision === "allow",
-    };
   }
 
   private static isExternalMemoryReplayAllowed(workspace: Workspace | undefined): boolean {

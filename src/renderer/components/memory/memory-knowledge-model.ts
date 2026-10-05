@@ -237,7 +237,14 @@ export async function addKnowledgeItem(
     const result = await api.addMemoryItem({ workspaceId, ...draft, content });
     if (!result.success) return { items, error: result.error };
     const added = result.item;
-    if (!added) return { items };
+    if (!added) {
+      // Saved as a line in the memory folder (the tab reloads the folder).
+      if (!result.ref) return { items };
+      return {
+        items,
+        notice: result.action === "reinforced" ? "CoWork already knew that." : "Memory added.",
+      };
+    }
     return {
       items: [added, ...items.filter((item) => item.id !== added.id)],
       notice: result.action === "reinforced" ? "CoWork already knew that." : "Memory added.",

@@ -179,17 +179,6 @@ export interface MemoryItemsPage {
   total: number;
 }
 
-/** Last generated USER.md / MEMORY.md auto-block, for kit back-sync (CuratedMemoryService). */
-export interface KitRenderState {
-  /** sha256 of the rendered block body. */
-  hash: string;
-  /** Where the block was rendered from; only `memory_items` blocks are synced back. */
-  source: "memory_items" | "curated";
-  /** One entry per rendered bullet line, in order. */
-  entries: Array<{ id: string; line: string }>;
-  renderedAt: number;
-}
-
 const WHITESPACE = /\s+/g;
 
 /** Collapse whitespace; the stored form of item content. */

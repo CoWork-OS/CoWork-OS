@@ -38,7 +38,7 @@ describe("Memory folder card", () => {
         api={api as never}
       />,
     );
-    expect(html).toContain("Memory folder (beta)");
+    expect(html).toContain("Memory folder");
     expect(html).toContain("plain notes in a folder you can open and edit");
     expect(html).toContain('value="/Users/sam/Notes/Memory"');
     expect(html).toContain("Open memory folder");

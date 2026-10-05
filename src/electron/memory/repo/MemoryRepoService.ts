@@ -77,7 +77,23 @@ const ABOUT_USER_KINDS: ReadonlySet<MemoryItemKind> = new Set([
   "correction",
 ]);
 
-export type MemoryRepoOrigin = "agent_tool" | "memory_hub" | "export" | "hand_edit" | "dream";
+export type MemoryRepoOrigin =
+  | "agent_tool"
+  | "memory_hub"
+  | "export"
+  | "hand_edit"
+  | "dream"
+  | "onboarding"
+  | "import";
+
+/** Metadata keys `remember` sets itself; `metadata` cannot override them. */
+const RESERVED_METADATA_KEYS: ReadonlySet<string> = new Set([
+  "by",
+  "kind",
+  "subject",
+  "workspace",
+  "added",
+]);
 
 export interface MemoryRepoRememberInput {
   text: string;
@@ -100,6 +116,12 @@ export interface MemoryRepoRememberInput {
   addedAt?: number;
   /** Skip the workspace memory settings (an explicit user act, an export). */
   skipWorkspacePolicy?: boolean;
+  /**
+   * Extra metadata on the line (`origin: onboarding`, `source: import`). Lower-case keys;
+   * `by`, `kind`, `subject`, `workspace` and `added` are ignored, and `source` only applies
+   * when there is no `taskId`.
+   */
+  metadata?: Record<string, string>;
 }
 
 export type MemoryRepoSkipReason =
@@ -168,8 +190,25 @@ export class MemoryRepoService {
     return this.instance;
   }
 
+  private static readonly instanceListeners = new Set<(service: MemoryRepoService | null) => void>();
+
   static setInstance(service: MemoryRepoService | null): void {
+    const changed = this.instance !== service;
     this.instance = service;
+    if (!changed) return;
+    for (const listener of this.instanceListeners) {
+      try {
+        listener(service);
+      } catch (error) {
+        logger.warn("Memory repo instance listener failed:", error);
+      }
+    }
+  }
+
+  /** Called whenever the running service changes (started, restarted at a new path, off). */
+  static onInstanceChange(listener: (service: MemoryRepoService | null) => void): () => void {
+    this.instanceListeners.add(listener);
+    return () => this.instanceListeners.delete(listener);
   }
 
   readonly root: string;
@@ -418,7 +457,13 @@ export class MemoryRepoService {
   async forget(
     relPath: string,
     line: number,
-    options: { expectHash?: string; reason?: string; taskId?: string | null } = {},
+    options: {
+      expectHash?: string;
+      reason?: string;
+      taskId?: string | null;
+      /** Commit origin (default `agent_tool`). */
+      origin?: MemoryRepoOrigin;
+    } = {},
   ): Promise<{ removed: MemoryRepoEntry | null; error?: string }> {
     if (!this.isWritable()) return { removed: null, error: "The memory repo is not available." };
     if (!isSafeRepoPath(relPath)) return { removed: null, error: "Not a memory repo file." };
@@ -435,7 +480,7 @@ export class MemoryRepoService {
           }
           await this.writeFileAtomic(relPath, replaceLine(text, line, null));
           await this.commitPaths([relPath], `Forget: ${preview(entry.text)}`, {
-            origin: "agent_tool",
+            origin: options.origin ?? "agent_tool",
             taskId: options.taskId ?? null,
           });
           return { removed: entry };
@@ -451,6 +496,169 @@ export class MemoryRepoService {
     const text = await this.readFile(relPath);
     if (text === null) return null;
     return parseMemoryRepoLine(splitLines(text)[line - 1] ?? "", line);
+  }
+
+  /**
+   * Replace the text of the entry at a line, keeping its metadata (`by` may be set: an
+   * edit in the Memory Hub makes the line the user's). The text is screened like
+   * `remember`. When another entry of the file already says the same, the edited line is
+   * removed instead and that entry is returned.
+   */
+  async updateEntry(
+    relPath: string,
+    line: number,
+    text: string,
+    options: { expectHash?: string; by?: MemoryRepoAuthor; origin?: MemoryRepoOrigin } = {},
+  ): Promise<{ entry: MemoryRepoEntry | null; unchanged?: boolean; error?: string }> {
+    if (!this.isWritable()) return { entry: null, error: "The memory repo is not available." };
+    if (!isSafeRepoPath(relPath)) return { entry: null, error: "Not a memory repo file." };
+    const screened = screenMemoryText(text, MEMORY_REPO_LIMITS.entryChars);
+    if (!screened.ok) return { entry: null, error: screenErrorMessage(screened.reason) };
+    if (containsNoMemoryDirective(text)) {
+      return { entry: null, error: "The text asks not to be remembered." };
+    }
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          const file = await this.readFile(relPath);
+          if (file === null) return { entry: null, error: "No such memory file." };
+          const raw = splitLines(file)[line - 1] ?? "";
+          const entry = parseMemoryRepoLine(raw, line);
+          const problem = editableEntryProblem(entry, options.expectHash);
+          if (problem || !entry) return { entry: null, error: problem ?? "That line is not a saved memory." };
+          const metadata: MemoryRepoMetadata = {
+            ...entry.metadata,
+            ...(options.by ? { by: options.by } : {}),
+          };
+          const next = renderMemoryRepoEntry(screened.content, metadata);
+          if (next === raw.trim()) return { entry, unchanged: true };
+          const updated = parseMemoryRepoLine(next, line);
+          if (!updated) return { entry: null, error: "That text cannot be saved." };
+          const duplicate = parseMemoryRepoEntries(file).find(
+            (other) => other.line !== line && other.hash === updated.hash,
+          );
+          const nextFile = replaceLine(file, line, duplicate ? null : next);
+          if (Buffer.byteLength(nextFile, "utf8") > this.fileLimit(relPath)) {
+            return { entry: null, error: `${relPath} is full; consolidate it first.` };
+          }
+          await this.writeFileAtomic(relPath, nextFile);
+          await this.commitPaths([relPath], `Edit: ${preview(screened.content)}`, {
+            origin: options.origin ?? "memory_hub",
+          });
+          if (duplicate) {
+            const shifted = duplicate.line > line ? duplicate.line - 1 : duplicate.line;
+            return { entry: { ...duplicate, line: shifted } };
+          }
+          return { entry: updated };
+        }),
+      );
+    } catch (error) {
+      return { entry: null, error: this.describeError(error) };
+    }
+  }
+
+  /**
+   * Move the entry at a line to another file (pin = move to `MEMORY.md`), keeping its
+   * metadata (`by` may be set). When the target already holds the same text, only the
+   * source line is removed and the target's line is returned.
+   */
+  async moveEntry(
+    relPath: string,
+    line: number,
+    targetPath: string,
+    options: { expectHash?: string; by?: MemoryRepoAuthor; origin?: MemoryRepoOrigin } = {},
+  ): Promise<{ moved: { path: string; line: number } | null; error?: string }> {
+    if (!this.isWritable()) return { moved: null, error: "The memory repo is not available." };
+    if (!isSafeRepoPath(relPath) || !isSafeRepoPath(targetPath)) {
+      return { moved: null, error: "Not a memory repo file." };
+    }
+    if (relPath === targetPath) return { moved: null, error: "The memory is already there." };
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          const source = await this.readFile(relPath);
+          if (source === null) return { moved: null, error: "No such memory file." };
+          const entry = parseMemoryRepoLine(splitLines(source)[line - 1] ?? "", line);
+          const problem = editableEntryProblem(entry, options.expectHash);
+          if (problem || !entry) return { moved: null, error: problem ?? "That line is not a saved memory." };
+          const target = await this.readFile(targetPath);
+          if (target === null) return { moved: null, error: "No such memory file." };
+          const metadata: MemoryRepoMetadata = {
+            ...entry.metadata,
+            ...(options.by ? { by: options.by } : {}),
+          };
+          const rendered = renderMemoryRepoEntry(entry.text, metadata);
+          const existing = parseMemoryRepoEntries(target).find((other) => other.hash === entry.hash);
+          let nextTarget = target;
+          let targetLine: number;
+          if (existing) {
+            targetLine = existing.line;
+          } else {
+            nextTarget = insertEntryLine(target, rendered, targetPath === MEMORY_REPO_ENTRY_FILE);
+            targetLine = splitLines(nextTarget).findIndex((row) => row === rendered) + 1;
+            if (Buffer.byteLength(nextTarget, "utf8") > this.fileLimit(targetPath)) {
+              return { moved: null, error: `${targetPath} is full; consolidate it first.` };
+            }
+          }
+          const changed = [relPath];
+          await this.writeFileAtomic(relPath, replaceLine(source, line, null));
+          if (nextTarget !== target) {
+            await this.writeFileAtomic(targetPath, nextTarget);
+            changed.push(targetPath);
+          }
+          await this.commitPaths(
+            changed,
+            `${targetPath === MEMORY_REPO_ENTRY_FILE ? "Pin" : "Move"}: ${preview(entry.text)}`,
+            { origin: options.origin ?? "memory_hub" },
+          );
+          return { moved: { path: targetPath, line: targetLine } };
+        }),
+      );
+    } catch (error) {
+      return { moved: null, error: this.describeError(error) };
+    }
+  }
+
+  /**
+   * Remove every entry `match` accepts (default: in every file), in one commit. The
+   * workspace marker lines are kept. Returns how many entries were removed.
+   */
+  async forgetWhere(
+    match: (entry: MemoryRepoEntry, file: string) => boolean,
+    options: { files?: string[]; message: string; origin?: MemoryRepoOrigin },
+  ): Promise<number> {
+    if (!this.isWritable()) return 0;
+    const files = options.files?.filter((file) => isSafeRepoPath(file));
+    try {
+      return await this.removeMatching(match, options.message, files, options.origin);
+    } catch (error) {
+      logger.warn("Memory repo forget failed:", error);
+      return 0;
+    }
+  }
+
+  /**
+   * The absolute path of a repo file for "Open file": a safe repo-relative markdown path
+   * to a regular file with no symlink between the root and the file; null otherwise.
+   */
+  async resolveFile(relPath: string): Promise<string | null> {
+    if (!this.ready || !isSafeRepoPath(relPath)) return null;
+    const absolute = path.join(this.root, relPath);
+    try {
+      if (await this.hasSymlinkUnderRoot(absolute, true)) return null;
+      const stat = await fs.lstat(absolute);
+      return stat.isFile() ? absolute : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private fileLimit(relPath: string): number {
+    return relPath === MEMORY_REPO_ENTRY_FILE
+      ? MEMORY_REPO_LIMITS.entryFileBytes
+      : MEMORY_REPO_LIMITS.fileBytes;
   }
 
   /**
@@ -866,6 +1074,7 @@ export class MemoryRepoService {
           } as const;
         }
         const metadata: MemoryRepoMetadata = {
+          ...extraMetadata(input.metadata, Boolean(input.taskId)),
           by: input.by,
           kind: input.kind,
           ...(input.subject ? { subject: input.subject } : {}),
@@ -974,9 +1183,10 @@ export class MemoryRepoService {
 
   /** Remove every entry `match` accepts in `files` (default: all files), in one commit. */
   private async removeMatching(
-    match: (entry: MemoryRepoEntry) => boolean,
+    match: (entry: MemoryRepoEntry, file: string) => boolean,
     message: string,
     files?: string[],
+    origin: MemoryRepoOrigin = "memory_hub",
   ): Promise<number> {
     return this.serialized(() =>
       this.locked(async () => {
@@ -991,7 +1201,7 @@ export class MemoryRepoService {
             const entry = parseMemoryRepoLine(row, index + 1);
             // The workspace marker line keeps the file mapped.
             if (!entry || entry.metadata.workspace) return true;
-            if (!match(entry)) return true;
+            if (!match(entry, file)) return true;
             removed += 1;
             return false;
           });
@@ -1000,7 +1210,7 @@ export class MemoryRepoService {
             changed.push(file);
           }
         }
-        if (changed.length > 0) await this.commitPaths(changed, message, { origin: "memory_hub" });
+        if (changed.length > 0) await this.commitPaths(changed, message, { origin });
         return removed;
       }),
     );
@@ -1189,6 +1399,43 @@ export function taskSourceLink(taskId: string): string {
 
 function normalizeSubject(subject: string | null | undefined): string | null {
   return parseMemoryRepoLine(`- x [subject: ${subject ?? ""}]`, 1)?.subject ?? null;
+}
+
+/** The caller's extra metadata, without the keys `remember` owns. */
+function extraMetadata(
+  metadata: Record<string, string> | undefined,
+  hasTask: boolean,
+): MemoryRepoMetadata {
+  const out: MemoryRepoMetadata = {};
+  for (const [rawKey, value] of Object.entries(metadata ?? {})) {
+    const key = rawKey.trim().toLowerCase();
+    if (!/^[a-z][\w-]*$/.test(key) || RESERVED_METADATA_KEYS.has(key)) continue;
+    if (key === "source" && hasTask) continue;
+    if (typeof value === "string" && value.trim()) out[key] = value;
+  }
+  return out;
+}
+
+/** Why an entry cannot be edited, moved or removed from the Hub; null when it can. */
+function editableEntryProblem(entry: MemoryRepoEntry | null, expectHash?: string): string | null {
+  if (!entry) return "That line is not a saved memory.";
+  if (expectHash && entry.hash !== expectHash) {
+    return "The memory file changed; reload and try again.";
+  }
+  // The `[workspace: <id>]` marker line maps the file to its workspace.
+  if (entry.metadata.workspace) return "That line names the workspace; it cannot be changed here.";
+  return null;
+}
+
+function screenErrorMessage(reason: "empty" | "low_salience" | "secret_only"): string {
+  switch (reason) {
+    case "empty":
+      return "A memory cannot be empty.";
+    case "secret_only":
+      return "That text is only a secret; secrets are not saved to memory.";
+    default:
+      return "That text is too short to be a useful memory.";
+  }
 }
 
 function preview(text: string): string {

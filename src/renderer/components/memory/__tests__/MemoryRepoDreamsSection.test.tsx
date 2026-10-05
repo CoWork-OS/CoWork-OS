@@ -184,7 +184,7 @@ describe("Review tab: memory folder dreams", () => {
     expect(splitDreams(null)).toEqual({ pending: [], automatic: [] });
   });
 
-  it("leaves the workspace proposals view unchanged", () => {
+  it("leaves the workspace commitments view separate", () => {
     const html = renderToStaticMarkup(
       <MemoryReviewView
         state={null}
@@ -193,15 +193,11 @@ describe("Review tab: memory folder dreams", () => {
         notice={null}
         busyId={null}
         canWrite
-        onAccept={vi.fn()}
-        onReject={vi.fn()}
         onUndo={vi.fn()}
-        onRunNow={vi.fn()}
-        onToggleLlm={vi.fn()}
         onDismissMessage={vi.fn()}
       />,
     );
-    expect(html).toContain("Loading proposals...");
+    expect(html).toContain("Loading changes...");
     expect(html).not.toContain('data-group="memory-folder"');
   });
 });

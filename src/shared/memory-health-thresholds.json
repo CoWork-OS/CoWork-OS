@@ -18,11 +18,8 @@
     "maxTelemetryRatio": 0.05,
     "maxDuplicateRate": 0.01,
     "maxStuckHeartbeat": 0,
-    "maxStuckDreaming": 0,
-    "maxDreamingFailures7d": 0,
     "maxOrphanEmbeddings": 0,
     "maxPendingWrites": 25,
-    "maxDbMb": 1024,
-    "maxLlmBudgetRatio": 1
+    "maxDbMb": 1024
   }
 }

@@ -46,16 +46,13 @@ describe("MemoryFeaturesManager", () => {
     expect(settings.checkpointCaptureEnabled).toBe(true);
     expect(settings.wakeUpLayersEnabled).toBe(true);
     expect(settings.temporalKnowledgeEnabled).toBe(true);
-    expect(settings.layeredMemoryEnabled).toBe(false);
     expect(settings.transcriptStoreEnabled).toBe(false);
     expect(settings.durableContextEnabled).toBe(false);
     expect(settings.durableContextMode).toBe("off");
     expect(settings.durableContextLargePayloadThreshold).toBe(25000);
-    expect(settings.backgroundConsolidationEnabled).toBe(false);
     expect(settings.queryOrchestratorEnabled).toBe(false);
     expect(settings.curatedMemoryEnabled).toBe(true);
     expect(settings.sessionRecallEnabled).toBe(true);
-    expect(settings.topicMemoryEnabled).toBe(true);
     expect(settings.defaultArchiveInjectionEnabled).toBe(false);
     expect(settings.autoPromoteToCuratedMemoryEnabled).toBe(false);
   });
@@ -100,6 +97,8 @@ describe("MemoryFeaturesManager", () => {
       "sessionLineageEnabled",
       "verbatimRecallEnabled",
       "progressiveRecallToolsEnabled",
+      "layeredMemoryEnabled",
+      "topicMemoryEnabled",
     ]) {
       expect(settings).not.toHaveProperty(legacyKey);
     }
@@ -108,16 +107,13 @@ describe("MemoryFeaturesManager", () => {
     expect(settings.checkpointCaptureEnabled).toBe(true);
     expect(settings.wakeUpLayersEnabled).toBe(false);
     expect(settings.temporalKnowledgeEnabled).toBe(false);
-    expect(settings.layeredMemoryEnabled).toBe(true);
     expect(settings.transcriptStoreEnabled).toBe(true);
     expect(settings.durableContextEnabled).toBe(true);
     expect(settings.durableContextMode).toBe("on");
     expect(settings.durableContextLargePayloadThreshold).toBe(12000);
-    expect(settings.backgroundConsolidationEnabled).toBe(true);
     expect(settings.queryOrchestratorEnabled).toBe(true);
     expect(settings.curatedMemoryEnabled).toBe(false);
     expect(settings.sessionRecallEnabled).toBe(false);
-    expect(settings.topicMemoryEnabled).toBe(false);
     expect(settings.defaultArchiveInjectionEnabled).toBe(true);
     expect(settings.autoPromoteToCuratedMemoryEnabled).toBe(true);
   });
@@ -136,26 +132,22 @@ describe("MemoryFeaturesManager", () => {
       checkpointCaptureEnabled: true,
       wakeUpLayersEnabled: true,
       temporalKnowledgeEnabled: true,
-      layeredMemoryEnabled: false,
       transcriptStoreEnabled: false,
       durableContextEnabled: false,
       durableContextMode: "off",
       durableContextLargePayloadThreshold: 25000,
-      backgroundConsolidationEnabled: false,
       queryOrchestratorEnabled: false,
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
       defaultArchiveInjectionEnabled: false,
       memoryWriteApprovalMode: "off",
       autoPromoteToCuratedMemoryEnabled: false,
       structuredObservationsEnabled: true,
       memoryInspectorEnabled: true,
-      dreamingLlmEnabled: false,
-      dreamingLlmDailyTokenBudget: 20000,
       memoryCompressionDailyTokenBudget: 20000,
-      memoryRepoEnabled: false,
+      memoryRepoEnabled: true,
       memoryRepoPath: "",
+      memoryRepoDefaultOnApplied: true,
       memoryRepoDreamingEnabled: true,
       memoryRepoDreamDailyTokenBudget: 50000,
     });
@@ -179,7 +171,25 @@ describe("MemoryFeaturesManager", () => {
     expect(mocks.storedSettings).toMatchObject({ memoryRepoDreamDailyTokenBudget: 1234 });
   });
 
-  it("keeps the memory repo off by default and tells listeners about saves", () => {
+  it("turns the memory folder on once, then keeps the user's choice", () => {
+    // A stored `false` from before the default-on migration is turned on.
+    MemoryFeaturesManager.saveSettings({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryRepoEnabled: false,
+    });
+    expect(mocks.storedSettings).toMatchObject({ memoryRepoEnabled: true, memoryRepoDefaultOnApplied: true });
+    // After the migration, turning it off holds.
+    MemoryFeaturesManager.saveSettings({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryRepoEnabled: false,
+      memoryRepoDefaultOnApplied: true,
+    });
+    expect(mocks.storedSettings).toMatchObject({ memoryRepoEnabled: false });
+  });
+
+  it("tells listeners about saves", () => {
     const seen: Array<boolean | undefined> = [];
     const unsubscribe = MemoryFeaturesManager.onSaved((saved) => seen.push(saved.memoryRepoEnabled));
     MemoryFeaturesManager.saveSettings({

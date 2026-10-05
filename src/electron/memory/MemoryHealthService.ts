@@ -17,8 +17,6 @@ import type {
   MemoryRepoDreamsReport,
   MemoryRepoStatusReport,
 } from "../../shared/memory-repo-types";
-import type { MemoryFeaturesSettings } from "../../shared/types";
-import { CURATION_LLM_DEFAULT_DAILY_BUDGET } from "./memory-curation-llm";
 import type { MemoryHealthCounts } from "./memory-health-sql";
 import type { MemoryStatementPort } from "./memory-statement-port";
 import { MEMORY_REPO_LIMITS } from "./repo/memory-repo-format";
@@ -27,7 +25,6 @@ const MIB = 1024 * 1024;
 
 export interface MemoryHealthDeps {
   port: Pick<MemoryStatementPort, "unit">;
-  getSettings: () => MemoryFeaturesSettings;
   /** Supermemory switch and whether it has credentials (never the credentials). */
   getSupermemoryStatus: () => { enabled: boolean; connected: boolean };
   getChronicleEnabled: () => boolean;
@@ -59,15 +56,11 @@ function thresholdCheck(
 
 export function evaluateMemoryHealth(
   counts: MemoryHealthCounts,
-  context: {
-    llmEnabled: boolean;
-    llmDailyBudget: number;
-    thresholds?: typeof MEMORY_HEALTH_THRESHOLDS;
-  },
+  context: { thresholds?: typeof MEMORY_HEALTH_THRESHOLDS } = {},
 ): MemoryHealthCheck[] {
   const t = context.thresholds ?? MEMORY_HEALTH_THRESHOLDS;
   const checks: MemoryHealthCheck[] = [];
-  const { archive, memoryItems, heartbeat, dreaming, embeddings, pendingWrites } = counts;
+  const { archive, memoryItems, heartbeat, embeddings, pendingWrites } = counts;
 
   checks.push(
     thresholdCheck(
@@ -120,71 +113,6 @@ export function evaluateMemoryHealth(
       "<=",
       t.maxStuckHeartbeat,
     ),
-    thresholdCheck(
-      {
-        id: "stuck_dreaming_runs",
-        label: "Stuck Dreaming runs",
-        unit: "count",
-        detail: "Dreaming runs still marked running after an hour.",
-      },
-      dreaming?.stuck ?? null,
-      "<=",
-      t.maxStuckDreaming,
-    ),
-    thresholdCheck(
-      {
-        id: "dreaming_failures",
-        label: "Failed Dreaming runs (7 days)",
-        unit: "count",
-        detail: "Dreaming runs that ended with an error in the last 7 days.",
-      },
-      dreaming?.failedLast7d ?? null,
-      "<=",
-      t.maxDreamingFailures7d,
-    ),
-  );
-
-  checks.push({
-    id: "dreaming_last_run",
-    label: "Dreaming last run",
-    status: dreaming ? "info" : "skip",
-    value: dreaming?.lastRunAt ?? null,
-    detail: dreaming?.lastRunAt
-      ? "When Dreaming last started curating a workspace."
-      : "Dreaming has not run yet.",
-  });
-
-  if (!context.llmEnabled) {
-    checks.push({
-      id: "dreaming_llm_budget",
-      label: "Dreaming AI synthesis tokens (24 h)",
-      status: "info",
-      value: dreaming?.llmTokensLastDay ?? null,
-      unit: "tokens",
-      detail: "AI synthesis is off; Dreaming uses no model tokens.",
-    });
-  } else {
-    const used = dreaming?.llmTokensLastDay ?? null;
-    const budget = Math.max(1, context.llmDailyBudget);
-    checks.push(
-      thresholdCheck(
-        {
-          id: "dreaming_llm_budget",
-          label: "Dreaming AI synthesis budget (24 h)",
-          unit: "ratio",
-          detail:
-            used === null
-              ? ""
-              : `${used.toLocaleString("en-US")} of ${budget.toLocaleString("en-US")} daily tokens used.`,
-        },
-        used === null ? null : used / budget,
-        "<=",
-        t.maxLlmBudgetRatio,
-      ),
-    );
-  }
-
-  checks.push(
     thresholdCheck(
       {
         id: "orphan_embeddings",
@@ -410,11 +338,7 @@ export class MemoryHealthService {
       now,
       stuckAfterMs: MEMORY_HEALTH_STUCK_AFTER_MS,
     });
-    const settings = this.deps.getSettings();
-    const checks = evaluateMemoryHealth(counts, {
-      llmEnabled: settings.dreamingLlmEnabled === true,
-      llmDailyBudget: settings.dreamingLlmDailyTokenBudget ?? CURATION_LLM_DEFAULT_DAILY_BUDGET,
-    });
+    const checks = evaluateMemoryHealth(counts);
     if (this.deps.getMemoryRepoStatus) {
       const repo = await this.deps.getMemoryRepoStatus().catch(() => null);
       checks.push(...evaluateMemoryRepoHealth(repo));

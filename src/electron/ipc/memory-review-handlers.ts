@@ -1,9 +1,8 @@
 /**
- * Memory Hub "Review" IPC: Dreaming's curation proposals (accept / reject), the changes it
- * applied (undo), a manual run and the LLM synthesis switch. Every payload is validated
- * with zod in main (memory-review-ipc-validation.ts); every request names the workspace
- * the Hub is showing, which must exist, and MemoryReviewService only reaches proposals and
- * log entries of that workspace.
+ * Memory Hub "Review" IPC: the commitments closed automatically, with undo. Every payload
+ * is validated with zod in main (memory-review-ipc-validation.ts); every request names the
+ * workspace the Hub is showing, which must exist, and MemoryReviewService only reaches log
+ * entries of that workspace.
  */
 import { ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
@@ -11,8 +10,6 @@ import type { MemoryReviewService } from "../memory/MemoryReviewService";
 import { RATE_LIMIT_CONFIGS, rateLimiter } from "../utils/rate-limiter";
 import { validateInput } from "../utils/validation";
 import {
-  MemoryReviewProposalRequestSchema,
-  MemoryReviewSetLlmRequestSchema,
   MemoryReviewUndoRequestSchema,
   MemoryReviewWorkspaceRequestSchema,
 } from "./memory-review-ipc-validation";
@@ -27,13 +24,7 @@ export interface MemoryReviewIpcDeps {
 
 type Handler = (raw: unknown) => Promise<unknown>;
 
-const MUTATING_CHANNELS = [
-  IPC_CHANNELS.MEMORY_REVIEW_ACCEPT,
-  IPC_CHANNELS.MEMORY_REVIEW_REJECT,
-  IPC_CHANNELS.MEMORY_REVIEW_UNDO,
-  IPC_CHANNELS.MEMORY_REVIEW_RUN_NOW,
-  IPC_CHANNELS.MEMORY_REVIEW_SET_LLM,
-] as const;
+const MUTATING_CHANNELS = [IPC_CHANNELS.MEMORY_REVIEW_UNDO] as const;
 
 function defaultRateLimit(channel: string): void {
   if (!rateLimiter.check(channel)) {
@@ -67,35 +58,10 @@ export function createMemoryReviewIpcHandlers(deps: MemoryReviewIpcDeps): Record
       (raw) => validateInput(MemoryReviewWorkspaceRequestSchema, raw, "memory review"),
       (value) => deps.service.state(value.workspaceId),
     ),
-    [IPC_CHANNELS.MEMORY_REVIEW_COUNT]: handler(
-      null,
-      (raw) => validateInput(MemoryReviewWorkspaceRequestSchema, raw, "memory review"),
-      (value) => deps.service.count(value.workspaceId),
-    ),
-    [IPC_CHANNELS.MEMORY_REVIEW_ACCEPT]: handler(
-      IPC_CHANNELS.MEMORY_REVIEW_ACCEPT,
-      (raw) => validateInput(MemoryReviewProposalRequestSchema, raw, "memory review proposal"),
-      (value) => deps.service.accept(value.workspaceId, value.id),
-    ),
-    [IPC_CHANNELS.MEMORY_REVIEW_REJECT]: handler(
-      IPC_CHANNELS.MEMORY_REVIEW_REJECT,
-      (raw) => validateInput(MemoryReviewProposalRequestSchema, raw, "memory review proposal"),
-      (value) => deps.service.reject(value.workspaceId, value.id),
-    ),
     [IPC_CHANNELS.MEMORY_REVIEW_UNDO]: handler(
       IPC_CHANNELS.MEMORY_REVIEW_UNDO,
       (raw) => validateInput(MemoryReviewUndoRequestSchema, raw, "memory review undo"),
       (value) => deps.service.undo(value.workspaceId, value.id),
-    ),
-    [IPC_CHANNELS.MEMORY_REVIEW_RUN_NOW]: handler(
-      IPC_CHANNELS.MEMORY_REVIEW_RUN_NOW,
-      (raw) => validateInput(MemoryReviewWorkspaceRequestSchema, raw, "memory review run"),
-      (value) => deps.service.runNow(value.workspaceId),
-    ),
-    [IPC_CHANNELS.MEMORY_REVIEW_SET_LLM]: handler(
-      IPC_CHANNELS.MEMORY_REVIEW_SET_LLM,
-      (raw) => validateInput(MemoryReviewSetLlmRequestSchema, raw, "memory review setting"),
-      (value) => deps.service.setLlmEnabled(value.enabled),
     ),
   };
 }

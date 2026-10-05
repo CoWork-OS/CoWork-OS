@@ -13,7 +13,6 @@ import type {
 } from "../../../shared/types";
 import { HeartbeatService, type HeartbeatServiceDeps } from "../HeartbeatService";
 import { BackgroundDispatchBudget } from "../BackgroundDispatchBudget";
-import { MemoryPressureService } from "../../memory/MemoryPressureService";
 
 vi.mock("electron", () => ({
   app: {
@@ -663,100 +662,35 @@ describe("HeartbeatService v3", () => {
     expect(heartbeatEvents.some((event) => event.type === "dispatch_skipped")).toBe(true);
   });
 
-  it("passes the workspace access guard into background memory dreaming", async () => {
+  it("runs the commitment sweep on a pulse and reports the closed commitments", async () => {
     createAgent("agent-1", { heartbeatProfile: "observer" });
-    const readGuard = vi.fn((_candidatePath: string) => true);
-    let dreamingReadGuard: ((candidatePath: string) => boolean) | undefined;
-    const service = createService({
-      getWorkspaceMemoryReadGuard: () => readGuard,
-      runMemoryDreaming: async (params) => {
-        dreamingReadGuard = params.readGuard;
-        return { id: "dreaming-1", status: "completed", candidateCount: 0 };
-      },
-    });
-
-    await service.submitHeartbeatSignal({
-      agentRoleId: "agent-1",
-      workspaceId: "workspace-1",
-      signalFamily: "memory_drift",
-      source: "hook",
-      fingerprint: "memory-guard",
-      urgency: "high",
-      confidence: 1,
-      reason: "Memory needs review",
-    });
+    const runCommitmentExpiry = vi.fn(async () => ({ expired: 2 }));
+    const service = createService({ runCommitmentExpiry });
 
     const result = await service.triggerHeartbeat("agent-1");
 
-    expect(result.dreamingRunId).toBe("dreaming-1");
-    expect(dreamingReadGuard).toBe(readGuard);
-    expect(readGuard).toHaveBeenCalled();
+    expect(runCommitmentExpiry).toHaveBeenCalledOnce();
+    expect(result.commitmentsExpired).toBe(2);
   });
 
-  it("skips background memory dreaming when access-profile resolution fails", async () => {
+  it("reports nothing when the sweep did not run or closed nothing", async () => {
     createAgent("agent-1", { heartbeatProfile: "observer" });
-    const runMemoryDreaming = vi.fn(async () => ({ id: "should-not-run" }));
+    const skipped = createService({ runCommitmentExpiry: async () => null });
+    expect((await skipped.triggerHeartbeat("agent-1")).commitmentsExpired).toBeUndefined();
+    const empty = createService({ runCommitmentExpiry: async () => ({ expired: 0 }) });
+    expect((await empty.triggerHeartbeat("agent-1")).commitmentsExpired).toBeUndefined();
+  });
+
+  it("keeps a failing commitment sweep from failing the pulse", async () => {
+    createAgent("agent-1", { heartbeatProfile: "observer" });
     const service = createService({
-      getWorkspaceMemoryReadGuard: () => {
-        throw new Error("settings unavailable");
+      runCommitmentExpiry: async () => {
+        throw new Error("database closed");
       },
-      runMemoryDreaming,
     });
-
-    await service.submitHeartbeatSignal({
-      agentRoleId: "agent-1",
-      workspaceId: "workspace-1",
-      signalFamily: "memory_drift",
-      source: "hook",
-      fingerprint: "memory-guard-error",
-      urgency: "high",
-      confidence: 1,
-      reason: "Memory needs review",
-    });
-
     const result = await service.triggerHeartbeat("agent-1");
-
     expect(result.status).not.toBe("error");
-    expect(result.dreamingRunId).toBeUndefined();
-    expect(runMemoryDreaming).not.toHaveBeenCalled();
-  });
-
-  it("runs the daily idle curation for a due workspace when nothing else triggered Dreaming", async () => {
-    createAgent("agent-1", { heartbeatProfile: "observer" });
-    const runMemoryDreaming = vi.fn(async () => ({
-      id: "daily-1",
-      status: "completed",
-      candidateCount: 0,
-    }));
-    const findMemoryCurationWorkspace = vi.fn(async () => ({
-      workspaceId: "workspace-2",
-      workspacePath: "/tmp/workspace-2",
-    }));
-    const service = createService({ runMemoryDreaming, findMemoryCurationWorkspace });
-
-    const result = await service.triggerHeartbeat("agent-1");
-
-    expect(findMemoryCurationWorkspace).toHaveBeenCalledOnce();
-    expect(runMemoryDreaming).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceId: "workspace-2",
-        workspacePath: "/tmp/workspace-2",
-        trigger: "daily",
-        signalCount: 0,
-      }),
-    );
-    expect(result.dreamingRunId).toBe("daily-1");
-  });
-
-  it("skips the daily curation when no workspace is due", async () => {
-    createAgent("agent-1", { heartbeatProfile: "observer" });
-    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
-    const none = createService({
-      runMemoryDreaming,
-      findMemoryCurationWorkspace: async () => null,
-    });
-    await none.triggerHeartbeat("agent-1");
-    expect(runMemoryDreaming).not.toHaveBeenCalled();
+    expect(result.commitmentsExpired).toBeUndefined();
   });
 
   it("offers the memory folder its daily dream once per pulse, without awaiting it", async () => {
@@ -878,7 +812,6 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     heartbeatEvents = [];
     automationOutcomes = [];
     services = [];
-    MemoryPressureService.resetHandledPressure();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-heartbeat-guards-"));
     process.env.COWORK_USER_DATA_DIR = path.join(tmpDir, "user-data");
     workspacePaths = new Map([
@@ -1281,14 +1214,14 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     expect((await runRepo.get(run.id))?.status).toBe("failed");
   });
 
-  it("skips run rows, reflection and Dreaming for pulses outside active hours", async () => {
+  it("skips run rows, reflection and the commitment sweep for pulses outside active hours", async () => {
     createAgent("agent-1", {
       heartbeatProfile: "observer",
       activeHours: { timezone: "UTC", startHour: 1, endHour: 2 },
     });
     const runWorkflowReflection = vi.fn(async () => ({ id: "r" }));
-    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
-    const service = createService({ runWorkflowReflection, runMemoryDreaming });
+    const runCommitmentExpiry = vi.fn(async () => ({ expired: 0 }));
+    const service = createService({ runWorkflowReflection, runCommitmentExpiry });
     await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
       workspaceId: "workspace-1",
@@ -1304,19 +1237,19 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     await vi.advanceTimersByTimeAsync(6_000);
 
     expect(runWorkflowReflection).not.toHaveBeenCalled();
-    expect(runMemoryDreaming).not.toHaveBeenCalled();
+    expect(runCommitmentExpiry).not.toHaveBeenCalled();
     expect(await runRepoOf(service).getLatestRun("agent-1", "pulse")).toBeUndefined();
     expect(mockAgents.get("agent-1")?.lastPulseResult).toBe("idle");
   });
 
-  it("defers before reflection and Dreaming during foreground work", async () => {
+  it("defers before reflection and the commitment sweep during foreground work", async () => {
     createAgent("agent-1", { heartbeatProfile: "observer" });
     const runWorkflowReflection = vi.fn(async () => ({ id: "r" }));
-    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
+    const runCommitmentExpiry = vi.fn(async () => ({ expired: 0 }));
     const service = createService({
       hasActiveForegroundTask: () => true,
       runWorkflowReflection,
-      runMemoryDreaming,
+      runCommitmentExpiry,
     });
     await service.submitHeartbeatSignal({
       agentRoleId: "agent-1",
@@ -1334,15 +1267,15 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
 
     expect(heartbeatEvents.some((event) => event.type === "pulse_deferred")).toBe(true);
     expect(runWorkflowReflection).not.toHaveBeenCalled();
-    expect(runMemoryDreaming).not.toHaveBeenCalled();
+    expect(runCommitmentExpiry).not.toHaveBeenCalled();
     expect(await runRepoOf(service).getLatestRun("agent-1", "pulse")).toBeUndefined();
   });
 
-  it("skips Dreaming when heartbeat memory maintenance is turned off", async () => {
+  it("skips the commitment sweep when heartbeat memory maintenance is turned off", async () => {
     createAgent("agent-1", { heartbeatProfile: "observer" });
-    const runMemoryDreaming = vi.fn(async () => ({ id: "d" }));
+    const runCommitmentExpiry = vi.fn(async () => ({ expired: 0 }));
     const service = createService({
-      runMemoryDreaming,
+      runCommitmentExpiry,
       getMemoryFeaturesSettings: () =>
         ({ heartbeatMaintenanceEnabled: false }) as ReturnType<
           NonNullable<HeartbeatServiceDeps["getMemoryFeaturesSettings"]>
@@ -1362,75 +1295,7 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     await service.start();
     await vi.advanceTimersByTimeAsync(6_000);
 
-    expect(runMemoryDreaming).not.toHaveBeenCalled();
-  });
-
-  it("triggers Dreaming for hot-memory pressure only when the pressure changes", async () => {
-    createAgent("agent-1", { heartbeatProfile: "observer" });
-    const memoryFile = path.join(workspacePaths.get("workspace-1")!, ".cowork", "MEMORY.md");
-    fs.mkdirSync(path.dirname(memoryFile), { recursive: true });
-    fs.writeFileSync(memoryFile, "- Use deterministic prompts\n- Use deterministic prompts\n");
-    const runMemoryDreaming = vi.fn(async () => ({ id: "d", status: "completed" }));
-    const service = createService({ runMemoryDreaming });
-    // Pressure analysis reads files for real, so wait for each pulse to complete.
-    const pulse = async (count: number, advanceMs: number) => {
-      await vi.advanceTimersByTimeAsync(advanceMs);
-      await vi.waitFor(() =>
-        expect(
-          heartbeatEvents.filter((event) => event.type === "pulse_completed").length,
-        ).toBeGreaterThanOrEqual(count),
-      );
-    };
-
-    await service.start();
-    await pulse(1, 6_000);
-    expect(runMemoryDreaming).toHaveBeenCalledTimes(1);
-
-    await pulse(2, 61_000);
-    expect(runMemoryDreaming).toHaveBeenCalledTimes(1);
-
-    fs.writeFileSync(
-      memoryFile,
-      "- Use deterministic prompts\n- Use deterministic prompts\n- Prefer pnpm for installs\n- Prefer pnpm for installs\n",
-    );
-    await pulse(3, 61_000);
-    expect(runMemoryDreaming).toHaveBeenCalledTimes(2);
-  });
-
-  it("consumes memory signals once Dreaming ran, and keeps them when it was skipped", async () => {
-    createAgent("agent-1", { heartbeatProfile: "observer" });
-    let skipped: string | undefined = "cooldown";
-    const runMemoryDreaming = vi.fn(async () => ({ id: "d", status: "completed", skipped }));
-    const service = createService({ runMemoryDreaming });
-    await service.submitHeartbeatSignal({
-      agentRoleId: "agent-1",
-      workspaceId: "workspace-1",
-      signalFamily: "correction_learning",
-      source: "tasks",
-      fingerprint: "correction",
-      urgency: "low",
-      confidence: 0.6,
-      reason: "User corrected the agent",
-    });
-
-    const pulse = async (count: number, advanceMs: number) => {
-      await vi.advanceTimersByTimeAsync(advanceMs);
-      await vi.waitFor(() =>
-        expect(
-          heartbeatEvents.filter((event) => event.type === "pulse_completed").length,
-        ).toBeGreaterThanOrEqual(count),
-      );
-    };
-
-    await service.start();
-    await pulse(1, 6_000);
-    expect(runMemoryDreaming).toHaveBeenCalledTimes(1);
-    expect((await service.getStatus("agent-1"))?.compressedSignalCount).toBe(1);
-
-    skipped = undefined;
-    await pulse(2, 61_000);
-    expect(runMemoryDreaming).toHaveBeenCalledTimes(2);
-    expect((await service.getStatus("agent-1"))?.compressedSignalCount).toBe(0);
+    expect(runCommitmentExpiry).not.toHaveBeenCalled();
   });
 
   it("prunes old finished heartbeat runs while keeping the newest per agent", async () => {

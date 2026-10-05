@@ -49,16 +49,4 @@ export class MemoryCurationRepository {
   archiveEvidence(workspaceId: string, since: number, limit = 300): Promise<ArchiveEvidenceRow[]> {
     return this.sql.unit("memoryCuration_archiveEvidence", [workspaceId, since, limit]);
   }
-
-  llmTokensSince(since: number): Promise<number> {
-    return this.sql.unit("memoryCuration_llmTokensSince", [since]);
-  }
-
-  dueWorkspaces(workspaceIds: string[], activeSince: number, runSince: number): Promise<string[]> {
-    return this.sql.unit("memoryCuration_dueWorkspaces", [workspaceIds, activeSince, runSince]);
-  }
-
-  pendingCount(workspaceId: string): Promise<number> {
-    return this.sql.unit("memoryCuration_pendingCount", [workspaceId]);
-  }
 }

@@ -117,15 +117,4 @@ export const MEMORY_CURATION_UNITS = {
     (db: Database.Database, [workspaceId, since, limit]) =>
       new MemoryCurationStore(db).archiveEvidence(workspaceId, since, limit),
   ),
-  memoryCuration_llmTokensSince: defineReadUnit(tuple(time), (db: Database.Database, [since]) =>
-    new MemoryCurationStore(db).llmTokensSince(since),
-  ),
-  memoryCuration_dueWorkspaces: defineReadUnit(
-    tuple((value: unknown, path: string) => list(value, path, id, 500), time, time),
-    (db: Database.Database, [workspaceIds, activeSince, runSince]) =>
-      new MemoryCurationStore(db).dueWorkspaces(workspaceIds, activeSince, runSince),
-  ),
-  memoryCuration_pendingCount: defineReadUnit(tuple(id), (db: Database.Database, [workspaceId]) =>
-    new MemoryCurationStore(db).pendingCount(workspaceId),
-  ),
 } satisfies UnitCatalog;

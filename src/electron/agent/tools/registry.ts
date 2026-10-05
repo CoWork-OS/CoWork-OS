@@ -168,13 +168,9 @@ import {
   ChronicleSettingsManager,
 } from "../../chronicle";
 import { taskDisablesMemoryCapture } from "../../memory/no-memory-directive";
-import { MemoryWriter } from "../../memory/MemoryWriter";
 import { isThirdPartyGatewayTask } from "../../gateway/gateway-sender-identity";
-import {
-  MEMORY_LANE_STORES,
-  preferredNameCandidate,
-  responseStyleCandidate,
-} from "../../memory/memory-items-lanes";
+import { rememberPreferredNameInFolder } from "../../memory/repo/memory-repo-producers";
+import { createLogger } from "../../utils/logger";
 import { CitationTracker } from "../citation/CitationTracker";
 import { OrchestrationRepository } from "../orchestration-repository-facades";
 import {
@@ -570,6 +566,8 @@ export function getMcpPaymentLimitError(input: unknown, toolSchema?: MCPTool): s
  * ToolRegistry manages all available tools and their execution
  * Integrates with SecurityPolicyManager for context-aware tool filtering
  */
+const registryLogger = createLogger("ToolRegistry");
+
 export class ToolRegistry {
   private static mermaidValidationInitialized = false;
   private fileTools: FileTools;
@@ -10212,17 +10210,11 @@ ${skillDescriptions}`;
       );
     }
 
-    // Save the user's name
+    // Save the user's name: PersonalityManager is the source of truth, mirrored into the
+    // memory folder's me.md as the user's `[subject: preferred_name]` line.
     PersonalityManager.setUserName(userName);
-    // The user-stated `preferred_name` memory item (PersonalityManager mirrors it).
-    const nameCandidate = preferredNameCandidate(userName, { source: "user_stated" });
-    MemoryWriter.writeInBackground(
-      nameCandidate && {
-        ...nameCandidate,
-        taskId: this.taskId,
-        originWorkspaceId: this.workspace.id,
-      },
-      "set_user_name",
+    void rememberPreferredNameInFolder(userName, { taskId: this.taskId }).catch((error) =>
+      registryLogger.warn("Could not mirror the user's name into the memory folder:", error),
     );
 
     console.log(`[ToolRegistry] User name set to: ${userName}`);
@@ -10325,23 +10317,9 @@ ${skillDescriptions}`;
       );
     }
 
-    PersonalityManager.setResponseStyle(style);
+    // The user asked for this style: explicit, so style adaptation leaves it alone.
+    PersonalityManager.setResponseStyle(style, { explicit: true });
     console.log(`[ToolRegistry] Response style updated:`, changes);
-    // The user asked for this style: a user-stated `response_style` memory item, which
-    // inferred style adaptations do not override.
-    let fullStyle = style;
-    try {
-      fullStyle = { ...PersonalityManager.loadSettings().responseStyle, ...style };
-    } catch {
-      // Settings unavailable; record the dimensions that were set.
-    }
-    MemoryWriter.writeInBackground(
-      responseStyleCandidate(fullStyle, {
-        source: "user_stated",
-        store: MEMORY_LANE_STORES.personality,
-      }),
-      "set_response_style",
-    );
 
     return {
       success: true,

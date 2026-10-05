@@ -1,7 +1,9 @@
 /**
  * Memory folder IPC (memoryRepo:*, docs/memory-repo-phase1-design.md §9): status, open the
- * folder, compact its history, and read entry lines by ref; and the dreams over it
- * (docs/memory-repo-phase2-design.md §5-§7): list, diff, accept, reject, undo, dream now.
+ * folder, compact its history, and read entry lines by ref; the dreams over it
+ * (docs/memory-repo-phase2-design.md §5-§7): list, diff, accept, reject, undo, dream now; and
+ * the Memory Hub entries (docs/memory-repo-phase3-design.md §5): list, edit, delete, pin and
+ * open a file.
  * The folder is always resolved in main from the settings (the running service's root); the
  * renderer never sends a path. Payloads are validated with zod in main
  * (memory-repo-ipc-validation.ts).
@@ -14,11 +16,21 @@ import type {
   MemoryRepoDreamActionResult,
   MemoryRepoDreamNowResult,
   MemoryRepoDreamsReport,
+  MemoryRepoEntriesReport,
+  MemoryRepoEntryActionResult,
   MemoryRepoLine,
   MemoryRepoStatusReport,
 } from "../../shared/memory-repo-types";
 import { getMemoryRepoDreamer, type MemoryRepoDreamer } from "../memory/repo/MemoryRepoDreamer";
 import type { MemoryRepoService } from "../memory/repo/MemoryRepoService";
+import {
+  listMemoryRepoEntries,
+  memoryRepoFileToOpen,
+  pinMemoryRepoEntry,
+  removeMemoryRepoEntry,
+  updateMemoryRepoEntry,
+  type MemoryRepoHubPort,
+} from "../memory/repo/memory-repo-hub";
 import {
   buildMemoryRepoDreamsReport,
   loadMemoryRepoDreamSettings,
@@ -33,7 +45,11 @@ import { validateInput } from "../utils/validation";
 import {
   MemoryRepoDreamDiffRequestSchema,
   MemoryRepoDreamRequestSchema,
+  MemoryRepoEntriesRequestSchema,
+  MemoryRepoEntryRequestSchema,
   MemoryRepoNoArgsSchema,
+  MemoryRepoOpenFileRequestSchema,
+  MemoryRepoUpdateEntryRequestSchema,
   MemoryRepoReadLinesRequestSchema,
 } from "./memory-repo-ipc-validation";
 
@@ -56,6 +72,10 @@ export interface MemoryRepoIpcDeps {
   dreamSettings?: () => MemoryRepoDreamSettings;
   /** Throws when the channel is over its rate limit. */
   checkRateLimit?: (channel: string) => void;
+  /** The running service for the Memory Hub entry channels (default: none). */
+  getHubService?: () => MemoryRepoHubPort | null;
+  /** Whether the workspace the Hub shows exists (default: any). */
+  workspaceExists?: (workspaceId: string) => Promise<boolean>;
 }
 
 type Handler = (raw: unknown) => Promise<unknown>;
@@ -79,6 +99,12 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
       const value = validateInput(MemoryRepoDreamRequestSchema, raw, "memory folder dream");
       return runMemoryRepoDreamAction(deps.getService(), action, value.id);
     };
+  const getHubService = deps.getHubService ?? (() => null);
+  const requireWorkspace = async (workspaceId: string) => {
+    if (deps.workspaceExists && !(await deps.workspaceExists(workspaceId))) {
+      throw new Error("Workspace not found");
+    }
+  };
   const noArgs =
     (channel: string, run: () => Promise<unknown>): Handler =>
     async (raw) => {
@@ -139,6 +165,40 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
       "reject",
     ),
     [IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM]: dreamAction(IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM, "undo"),
+    [IPC_CHANNELS.MEMORY_REPO_ENTRIES]: async (raw): Promise<MemoryRepoEntriesReport> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_ENTRIES);
+      const value = validateInput(MemoryRepoEntriesRequestSchema, raw, "memory folder entries");
+      await requireWorkspace(value.workspaceId);
+      return listMemoryRepoEntries(getHubService(), value.workspaceId);
+    },
+    [IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY]: async (raw): Promise<MemoryRepoEntryActionResult> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY);
+      const value = validateInput(MemoryRepoUpdateEntryRequestSchema, raw, "memory folder edit");
+      await requireWorkspace(value.workspaceId);
+      return updateMemoryRepoEntry(getHubService(), value);
+    },
+    [IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY]: async (raw): Promise<MemoryRepoEntryActionResult> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY);
+      const value = validateInput(MemoryRepoEntryRequestSchema, raw, "memory folder delete");
+      await requireWorkspace(value.workspaceId);
+      return removeMemoryRepoEntry(getHubService(), value);
+    },
+    [IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY]: async (raw): Promise<MemoryRepoEntryActionResult> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY);
+      const value = validateInput(MemoryRepoEntryRequestSchema, raw, "memory folder pin");
+      await requireWorkspace(value.workspaceId);
+      return pinMemoryRepoEntry(getHubService(), value);
+    },
+    [IPC_CHANNELS.MEMORY_REPO_OPEN_FILE]: async (raw): Promise<{ success: true }> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_OPEN_FILE);
+      const value = validateInput(MemoryRepoOpenFileRequestSchema, raw, "memory folder file");
+      await requireWorkspace(value.workspaceId);
+      // The path is resolved under the running folder's root; the renderer never names it.
+      const absolute = await memoryRepoFileToOpen(getHubService(), value);
+      const error = await deps.openPath(absolute);
+      if (error) throw new Error(error);
+      return { success: true };
+    },
     [IPC_CHANNELS.MEMORY_REPO_DREAM_NOW]: noArgs(
       IPC_CHANNELS.MEMORY_REPO_DREAM_NOW,
       async (): Promise<MemoryRepoDreamNowResult> => {
@@ -162,6 +222,12 @@ export function setupMemoryRepoHandlers(deps: MemoryRepoIpcDeps): void {
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_REJECT_DREAM, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_DREAM_NOW, DREAM_NOW_RATE_LIMIT);
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_ENTRIES, RATE_LIMIT_CONFIGS.standard);
+  // Edit, delete and pin commit to the folder; one button each is the only caller.
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY, RATE_LIMIT_CONFIGS.limited);
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, RATE_LIMIT_CONFIGS.limited);
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY, RATE_LIMIT_CONFIGS.limited);
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
   const handlers = createMemoryRepoIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
     ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));

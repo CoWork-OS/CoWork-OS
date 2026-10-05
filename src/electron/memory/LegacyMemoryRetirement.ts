@@ -127,7 +127,7 @@ export type LegacyMemoryRetirementResult =
       pendingWritesDeleted: number;
     };
 
-interface BackupInfo {
+export interface BackupInfo {
   written: boolean;
   encrypted: boolean;
   blobsOmitted: boolean;
@@ -258,12 +258,13 @@ function backupTimestamp(now: number): string {
   return new Date(now).toISOString().replace(/[:.]/g, "-");
 }
 
-async function writeBackup(
+export async function writeBackup(
   dir: string,
   now: number,
   payload: Record<string, unknown>,
   blobs: Record<string, unknown>,
   encryption: SafeStorageLike | null,
+  prefix = "legacy-memory",
 ): Promise<BackupInfo & { path: string }> {
   let encrypt: SafeStorageLike | null = null;
   try {
@@ -272,7 +273,7 @@ async function writeBackup(
     encrypt = null;
   }
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  const base = path.join(dir, `legacy-memory-${backupTimestamp(now)}`);
+  const base = path.join(dir, `${prefix}-${backupTimestamp(now)}`);
   const data = encrypt
     ? encrypt.encryptString(JSON.stringify({ ...payload, settings: blobs }))
     : JSON.stringify({ ...payload, settings: { omitted: "os_encryption_unavailable" } }, null, 2);

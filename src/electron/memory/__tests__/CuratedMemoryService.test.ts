@@ -26,7 +26,7 @@ async function createWorkspace(): Promise<string> {
 
 /**
  * Curated memory is the workspace scope of memory_items: an in-memory profile database, a
- * writer, and a workspace directory for the generated kit files.
+ * writer, and a workspace directory (the retired generated kit files are never written).
  */
 async function useMemoryItems(): Promise<{
   db: Database.Database;
@@ -79,7 +79,7 @@ afterEach(async () => {
 });
 
 describeWithSqlite("CuratedMemoryService", () => {
-  it("adds curated user memory as a workspace item and syncs USER.md", async () => {
+  it("adds curated user memory as a workspace item without writing USER.md", async () => {
     const { db, workspacePath } = await useMemoryItems();
     const result = await CuratedMemoryService.curate({
       workspaceId: "ws1",
@@ -103,9 +103,9 @@ describeWithSqlite("CuratedMemoryService", () => {
         task_id: "task-1",
       },
     ]);
-    const userMd = await fs.readFile(path.join(workspacePath, ".cowork", "USER.md"), "utf8");
-    expect(userMd).toContain("Auto Curated Memory");
-    expect(userMd).toContain("Prefers concise answers");
+    await expect(fs.stat(path.join(workspacePath, ".cowork", "USER.md"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("uses id-based replace (a new revision) and truncates oversized content", async () => {

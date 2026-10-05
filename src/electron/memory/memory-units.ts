@@ -4,7 +4,6 @@ import { int, record } from "../database/statements/unit-args";
 import { KNOWLEDGE_GRAPH_UNITS } from "../knowledge-graph/knowledge-graph-units";
 import { PLAYBOOK_EVIDENCE_UNITS } from "./playbook-evidence-units";
 import { SUGGESTION_UNITS } from "./suggestion-units";
-import { DREAMING_UNITS } from "./dreaming-units";
 import { BOX_BRAIN_UNITS } from "./box-brain-units";
 import { MEMORY_OBSERVATION_UNITS } from "./memory-observation-units";
 import { DURABLE_CONTEXT_UNITS } from "./durable-context-units";
@@ -70,7 +69,6 @@ export const MEMORY_UNITS = {
   ...KNOWLEDGE_GRAPH_UNITS,
   ...PLAYBOOK_EVIDENCE_UNITS,
   ...SUGGESTION_UNITS,
-  ...DREAMING_UNITS,
   ...BOX_BRAIN_UNITS,
   ...MEMORY_OBSERVATION_UNITS,
   ...DURABLE_CONTEXT_UNITS,

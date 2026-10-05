@@ -284,16 +284,17 @@ describeWithSqlite("memory purge (SEC-15, LIFE-4)", () => {
     const clearMemories = vi.spyOn(MemoryService, "clearWorkspace").mockResolvedValue();
     vi.spyOn(MemoryService, "clearPromptRecallCache").mockImplementation(() => undefined);
     vi.spyOn(durableService.DurableContextService, "clearWorkspace").mockResolvedValue(1);
-    const syncCurated = vi
-      .spyOn(curated.CuratedMemoryService, "syncWorkspaceFiles")
-      .mockResolvedValue();
+    // The generated kit block strip looks the workspace up first.
+    const findWorkspace = vi
+      .spyOn(curated.CuratedMemoryService, "findWorkspace")
+      .mockResolvedValue(undefined);
 
     const result = await MemoryWorkspacePurgeService.purgeWorkspace({ id: workspace.id });
 
     expect(result.success).toBe(true);
     expect(result.errors).toEqual({});
     expect(clearMemories).toHaveBeenCalledWith(workspace.id);
-    expect(syncCurated).toHaveBeenCalledWith(workspace.id);
+    expect(findWorkspace).toHaveBeenCalledWith(workspace.id);
     expect(result.counts).toMatchObject({
       memories: 2,
       durableContext: 1,

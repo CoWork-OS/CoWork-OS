@@ -221,6 +221,11 @@ async function writeManagedKitDoc(
 
 export class OnboardingProfileService {
   static async applyGlobalProfile(data: OnboardingProfileData): Promise<void> {
+    // With the memory folder running, the facts are `me.md` lines tagged `origin: onboarding`
+    // and re-onboarding replaces exactly those.
+    if (await UserProfileService.replaceTaggedFacts("onboarding", buildOnboardingProfileFacts(data))) {
+      return;
+    }
     const existingFacts = UserProfileService.getProfile().facts;
     for (const fact of existingFacts) {
       if (fact.lastTaskId === ONBOARDING_FACT_TASK_ID || isLegacyOnboardingFact(fact)) {

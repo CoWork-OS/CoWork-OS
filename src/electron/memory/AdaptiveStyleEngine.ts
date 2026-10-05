@@ -2,12 +2,12 @@
  * AdaptiveStyleEngine — Learns user communication preferences from observed patterns
  *
  * Observes user messages and feedback signals over time, then gradually adjusts the
- * user's response style to match. The style is a fact in `memory_items` (the single
- * `response_style` subject, docs/memory-engine.md §4a): an adaptation writes it as
- * `inferred` (outranked by a style the user chose), and PersonalityManager's live style
- * mirrors the active item (memory-read-side.ts). This engine keeps only its own
- * bookkeeping in settings (observations, rate limits, adaptation history). All changes
- * are rate-limited (max N shifts per week), auditable, and admin-disableable via
+ * user's response style to match. The style lives in PersonalityManager (the source of
+ * truth, docs/memory-repo-phase3-design.md §4): an adaptation sets it directly, and never
+ * while the user chose a style (`responseStyleExplicit`, set by Settings and
+ * `set_response_style`). This engine keeps only its own bookkeeping in settings
+ * (observations, rate limits, adaptation history). All changes are rate-limited (max N
+ * shifts per week), auditable, and admin-disableable via
  * GuardrailSettings.adaptiveStyleEnabled.
  *
  * Signals observed:
@@ -30,9 +30,7 @@ import {
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { PersonalityManager } from "../settings/personality-manager";
-import { MemoryWriter } from "./MemoryWriter";
-import { hasExplicitResponseStyle, setResponseStyleAdaptationSource } from "./memory-read-side";
-import { MEMORY_LANE_STORES, responseStyleCandidate } from "./memory-items-lanes";
+import { setResponseStyleAdaptationSource } from "./memory-read-side";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -306,15 +304,13 @@ export class AdaptiveStyleEngine {
    */
   static maybeAdapt(): void {
     if (!this.isEnabled()) return;
-    // Without the memory engine there is no store for the style fact (CLI, early startup).
-    if (!MemoryWriter.get()) return;
 
     const state = this.loadState();
     this.resetWeekIfNeeded(state);
 
-    // An explicit choice (a user-stated or user-confirmed `response_style` memory item)
-    // is not adapted away: inference only adjusts the style while the user has not chosen.
-    if (hasExplicitResponseStyle()) {
+    // An explicit choice (Settings, `set_response_style`) is not adapted away: inference
+    // only adjusts the style while the user has not chosen.
+    if (PersonalityManager.isResponseStyleExplicit()) {
       if (state.pendingSignals.length > 0) {
         state.pendingSignals = state.pendingSignals.filter((s) => s.source !== "feedback");
         this.saveState(state);
@@ -385,20 +381,14 @@ export class AdaptiveStyleEngine {
       state.adaptationHistory = state.adaptationHistory.slice(-50);
     }
 
-    // The adapted style is the `response_style` fact in memory_items; the read side applies
-    // it to PersonalityManager once written. It is inferred, so a style the user stated
-    // explicitly is not overridden.
-    MemoryWriter.writeInBackground(
-      responseStyleCandidate(
-        { ...currentStyle, ...styleUpdate },
-        {
-          source: "inferred",
-          store: MEMORY_LANE_STORES.adaptiveStyle,
-          reason: adaptations.map((adaptation) => adaptation.reason).join("; "),
-        },
-      ),
-      "adaptive style",
-    );
+    // The adapted style goes to PersonalityManager directly; it stays inferred (the
+    // explicit flag is left as it is, unset here).
+    try {
+      PersonalityManager.setResponseStyle(styleUpdate);
+    } catch {
+      // Settings unavailable (CLI, early startup): nothing is adapted this time.
+      return;
+    }
     state.weeklyAdaptationCount += adaptations.length;
     state.lastAdaptationAt = Date.now();
     state.pendingSignals = state.pendingSignals.filter((s) => s.source !== "feedback");

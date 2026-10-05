@@ -4,10 +4,20 @@ import {
 } from "../../electron/memory/repo/memory-repo-bootstrap";
 import { MemoryRepoService } from "../../electron/memory/repo/MemoryRepoService";
 import { readMemoryRepoLines } from "../../electron/memory/repo/memory-repo-read";
+import { promoteObservationToMemoryFolder } from "../../electron/memory/repo/memory-repo-producers";
+import {
+  listMemoryRepoEntries,
+  pinMemoryRepoEntry,
+  removeMemoryRepoEntry,
+  updateMemoryRepoEntry,
+} from "../../electron/memory/repo/memory-repo-hub";
 import {
   MemoryRepoDreamIdSchema,
   MemoryRepoDreamPartSchema,
+  MemoryRepoEntriesRequestSchema,
+  MemoryRepoEntryRequestSchema,
   MemoryRepoRefsSchema,
+  MemoryRepoUpdateEntryRequestSchema,
 } from "../../electron/ipc/memory-repo-ipc-validation";
 import { getMemoryRepoDreamer } from "../../electron/memory/repo/MemoryRepoDreamer";
 import {
@@ -64,8 +74,6 @@ import {
 import type { MemoryHealthService } from "../../electron/memory/MemoryHealthService";
 import { MemoryHubWorkspaceRequestSchema } from "../../electron/ipc/memory-health-ipc-validation";
 import {
-  MemoryReviewProposalRequestSchema,
-  MemoryReviewSetLlmRequestSchema,
   MemoryReviewUndoRequestSchema,
   MemoryReviewWorkspaceRequestSchema,
 } from "../../electron/ipc/memory-review-ipc-validation";
@@ -102,19 +110,15 @@ const featureBooleanKeys = [
   "checkpointCaptureEnabled",
   "wakeUpLayersEnabled",
   "temporalKnowledgeEnabled",
-  "layeredMemoryEnabled",
   "transcriptStoreEnabled",
   "durableContextEnabled",
-  "backgroundConsolidationEnabled",
   "queryOrchestratorEnabled",
   "curatedMemoryEnabled",
   "sessionRecallEnabled",
-  "topicMemoryEnabled",
   "defaultArchiveInjectionEnabled",
   "autoPromoteToCuratedMemoryEnabled",
   "structuredObservationsEnabled",
   "memoryInspectorEnabled",
-  "dreamingLlmEnabled",
   "memoryRepoEnabled",
   "memoryRepoDreamingEnabled",
 ] as const;
@@ -123,7 +127,6 @@ const featureSettings = z
     ...Object.fromEntries(featureBooleanKeys.map((key) => [key, z.boolean().optional()])),
     durableContextMode: z.enum(["off", "experimental", "on"]).optional(),
     durableContextLargePayloadThreshold: z.number().int().min(1).max(1_000_000).optional(),
-    dreamingLlmDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryCompressionDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryRepoPath: z.string().trim().max(1024).optional(),
     memoryRepoDreamDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
@@ -294,51 +297,18 @@ export function createBrowserMemoryDefinitions(options: {
       }
     };
 
-  // Memory Hub "What CoWork knows": same service and schemas as the desktop IPC. Kit
-  // re-renders after a change run under the workspace's file access rules.
-  const guardAllows =
-    (workspace: Workspace, operation: "read" | "write") =>
-    (candidatePath: string): boolean => {
-      try {
-        kitGuard(workspace)(candidatePath, operation);
-        return true;
-      } catch {
-        return false;
-      }
-    };
+  // Memory Hub "What CoWork knows": same service and schemas as the desktop IPC.
   const memoryItems =
     options.memoryItems ??
     new MemoryItemsHubService({
       getWriter: () => MemoryWriter.get(),
       getTask: async (taskId) => (await options.getTask?.(taskId)) ?? undefined,
-      syncKitFiles: async (workspaceId) => {
-        const workspace = await options.resolveWorkspace(workspaceId);
-        if (!workspace?.permissions.write) return;
-        await CuratedMemoryService.syncWorkspaceFiles(workspaceId, {
-          readGuard: guardAllows(workspace, "read"),
-          writeGuard: guardAllows(workspace, "write"),
-        });
-      },
+      getWorkspaceName: async (workspaceId) =>
+        (await options.resolveWorkspace(workspaceId))?.name ?? null,
     });
   // Memory Hub "Review": same service and schemas as the desktop IPC (memoryReview:*).
   const memoryReview =
-    options.memoryReview ??
-    (options.db
-      ? createMemoryReviewService(options.db, {
-          resolveWorkspace: async (workspaceId) => {
-            const workspace = await options.resolveWorkspace(workspaceId);
-            return workspace?.path ? { id: workspace.id, path: workspace.path } : null;
-          },
-          syncKitFiles: async (workspaceId) => {
-            const workspace = await options.resolveWorkspace(workspaceId);
-            if (!workspace?.permissions.write) return;
-            await CuratedMemoryService.syncWorkspaceFiles(workspaceId, {
-              readGuard: guardAllows(workspace, "read"),
-              writeGuard: guardAllows(workspace, "write"),
-            });
-          },
-        })
-      : null);
+    options.memoryReview ?? (options.db ? createMemoryReviewService(options.db) : null);
   // Memory Hub "Sources" and "Health": same service and schema as the desktop IPC
   // (memoryHub:*). Health is profile-wide aggregate counts; the workspace gates access.
   const memoryHealth =
@@ -561,6 +531,26 @@ export function createBrowserMemoryDefinitions(options: {
         if (!detail || detail.workspaceId !== workspace.id) {
           throw new WebApplicationError("NOT_FOUND", "Memory observation is unavailable.", 404);
         }
+        // An explicit user act: the user's line in the memory folder (same as the desktop
+        // IPC); commitments and a folder that is off keep the curated path.
+        const promoted = await promoteObservationToMemoryFolder({
+          workspaceId: detail.workspaceId,
+          workspaceName: workspace.name,
+          taskId: detail.taskId,
+          target: value.target ?? "workspace",
+          kind: value.kind ?? "project_fact",
+          content: detail.title || detail.narrative,
+        });
+        if (promoted) {
+          if (!promoted.success) {
+            throw new WebApplicationError(
+              "CONFLICT",
+              promoted.error || "Memory promotion could not be applied.",
+              409,
+            );
+          }
+          return promoted;
+        }
         const result = await CuratedMemoryService.curate({
           workspaceId: detail.workspaceId,
           taskId: detail.taskId,
@@ -569,12 +559,6 @@ export function createBrowserMemoryDefinitions(options: {
           kind: value.kind ?? "project_fact",
           content: detail.title || detail.narrative,
           reason: "Promoted from Memory Hub Inspector",
-          filesystemReadGuard: (candidatePath) =>
-            evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "read").decision ===
-            "allow",
-          filesystemWriteGuard: (candidatePath) =>
-            evaluateWorkspaceFilesystemAccess(workspace, candidatePath, "write").decision ===
-            "allow",
         });
         if (!result.success) {
           throw new WebApplicationError(
@@ -847,25 +831,8 @@ export function createBrowserMemoryDefinitions(options: {
     getMemoryReview: workspaceAction(MemoryReviewWorkspaceRequestSchema, "read", (value) =>
       reviewCall((service) => service.state(value.workspaceId)),
     ),
-    getMemoryReviewCount: workspaceAction(MemoryReviewWorkspaceRequestSchema, "read", (value) =>
-      reviewCall((service) => service.count(value.workspaceId)),
-    ),
-    acceptMemoryProposal: workspaceAction(MemoryReviewProposalRequestSchema, "write", (value) =>
-      reviewCall((service) => service.accept(value.workspaceId, value.id)),
-    ),
-    rejectMemoryProposal: workspaceAction(MemoryReviewProposalRequestSchema, "write", (value) =>
-      reviewCall((service) => service.reject(value.workspaceId, value.id)),
-    ),
     undoMemoryChange: workspaceAction(MemoryReviewUndoRequestSchema, "write", (value) =>
       reviewCall((service) => service.undo(value.workspaceId, value.id)),
-    ),
-    runMemoryCuration: workspaceAction(MemoryReviewWorkspaceRequestSchema, "write", (value) =>
-      reviewCall((service) => service.runNow(value.workspaceId)),
-    ),
-    setMemoryCurationLlmEnabled: workspaceAction(
-      MemoryReviewSetLlmRequestSchema,
-      "write",
-      (value) => reviewCall((service) => service.setLlmEnabled(value.enabled)),
     ),
     getMemorySources: workspaceAction(MemoryHubWorkspaceRequestSchema, "read", (value) =>
       healthCall((service) => service.sources(value.workspaceId)),
@@ -873,7 +840,7 @@ export function createBrowserMemoryDefinitions(options: {
     getMemoryHealth: workspaceAction(MemoryHubWorkspaceRequestSchema, "read", () =>
       healthCall((service) => service.health()),
     ),
-    // Memory folder (beta): same contract as the desktop IPC (memoryRepo:*). Opening the
+    // Memory folder: same contract as the desktop IPC (memoryRepo:*). Opening the
     // folder is desktop-only; the browser host has no local file manager to open it in.
     getMemoryRepoStatus: noArgs(() => memoryRepoStatus()),
     compactMemoryRepoHistory: noArgs(async (): Promise<MemoryRepoCompactResult> => {
@@ -882,6 +849,19 @@ export function createBrowserMemoryDefinitions(options: {
       return service.compactHistory();
     }, true),
     readMemoryRepoLines: action(MemoryRepoRefsSchema, (refs) => readMemoryRepoLines(refs)),
+    // Memory Hub "What CoWork knows" over the folder; "Open file" stays desktop-only.
+    getMemoryRepoEntries: workspaceAction(MemoryRepoEntriesRequestSchema, "read", (value) =>
+      listMemoryRepoEntries(MemoryRepoService.get(), value.workspaceId),
+    ),
+    updateMemoryRepoEntry: workspaceAction(MemoryRepoUpdateEntryRequestSchema, "write", (value) =>
+      updateMemoryRepoEntry(MemoryRepoService.get(), value),
+    ),
+    removeMemoryRepoEntry: workspaceAction(MemoryRepoEntryRequestSchema, "delete", (value) =>
+      removeMemoryRepoEntry(MemoryRepoService.get(), value),
+    ),
+    pinMemoryRepoEntry: workspaceAction(MemoryRepoEntryRequestSchema, "write", (value) =>
+      pinMemoryRepoEntry(MemoryRepoService.get(), value),
+    ),
     // Dreams over the memory folder (docs/memory-repo-phase2-design.md §5-§7).
     getMemoryRepoDreams: noArgs(() =>
       buildMemoryRepoDreamsReport({

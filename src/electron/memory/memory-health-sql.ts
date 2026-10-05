@@ -212,13 +212,6 @@ export interface MemoryHealthCounts {
   archive: { total: number; telemetry: number; duplicateRows: number } | null;
   memoryItems: { active: number; duplicateRows: number } | null;
   heartbeat: { stuck: number } | null;
-  dreaming: {
-    stuck: number;
-    lastRunAt: number | null;
-    failedLast7d: number;
-    /** LLM tokens of runs created in the last 24 hours; null without the column. */
-    llmTokensLastDay: number | null;
-  } | null;
   embeddings: { total: number; orphans: number } | null;
   pendingWrites: { pending: number } | null;
   database: { totalBytes: number; freelistBytes: number };
@@ -235,7 +228,6 @@ export function collectMemoryHealth(
     archive: null,
     memoryItems: null,
     heartbeat: null,
-    dreaming: null,
     embeddings: null,
     pendingWrites: null,
     database: {
@@ -280,32 +272,6 @@ export function collectMemoryHealth(
         `SELECT count(*) AS n FROM heartbeat_runs WHERE status = 'running' AND ${start} < ?`,
         stuckBefore,
       ),
-    };
-  }
-
-  if (tableExists(db, "dreaming_runs")) {
-    const last = db.prepare("SELECT max(started_at) AS t FROM dreaming_runs").get() as {
-      t: number | null;
-    };
-    result.dreaming = {
-      stuck: count(
-        db,
-        "SELECT count(*) AS n FROM dreaming_runs WHERE status = 'running' AND started_at < ?",
-        stuckBefore,
-      ),
-      lastRunAt: typeof last.t === "number" ? last.t : null,
-      failedLast7d: count(
-        db,
-        "SELECT count(*) AS n FROM dreaming_runs WHERE status = 'failed' AND started_at >= ?",
-        args.now - 7 * DAY_MS,
-      ),
-      llmTokensLastDay: hasColumn(db, "dreaming_runs", "llm_tokens")
-        ? count(
-            db,
-            "SELECT COALESCE(sum(llm_tokens), 0) AS n FROM dreaming_runs WHERE created_at >= ?",
-            args.now - DAY_MS,
-          )
-        : null,
     };
   }
 

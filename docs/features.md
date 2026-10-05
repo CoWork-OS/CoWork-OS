@@ -640,7 +640,7 @@ A set of connected subsystems that make improvement visible and measurable over 
 | **Playbook-to-Skill Promotion**   | When a playbook pattern is reinforced 3+ times, auto-generates a `skill_proposal` for admin review. No skill is created until explicitly approved.                                                                                                                                         |
 | **Channel Persona Adapter**       | Applies channel-appropriate communication directives (Slack = terse/structured, email = formal/greeting+sign-off, WhatsApp = short/emoji, etc.) on top of the core persona without replacing it.                                                                                           |
 | **Evolution Metrics**             | Computes 5 on-demand metrics: Correction Rate, Style Adaptations, Knowledge Graph growth, Task Success Rate, and Style Alignment. Produces an overall 0–100 Evolution Score. Surfaced in the Daily Briefing.                                                                               |
-| **Daily Log Summarizer**          | Reads compact per-task summary lines from `.cowork/memory/summaries/<YYYY-MM-DD>.md` (written by `MemoryConsolidator` when background consolidation is on), applies recency decay, and feeds them into the structured-memory lane.                                                                                                                        |
+| **Daily Log Summarizer**          | Retired in memory repo Phase 3: the memory folder and its dreaming replace daily summaries ([design](memory-repo-phase3-design.md)). |
 
 **Behavior Adaptation controls** (Settings > Guardrails > Behavior Adaptation):
 

@@ -17,7 +17,6 @@ vi.mock("../../../memory/MemoryService", () => ({
 vi.mock("../../../memory/CuratedMemoryService", () => ({
   CuratedMemoryService: {
     list: vi.fn(async () => []),
-    syncWorkspaceFiles: vi.fn(async () => undefined),
   },
 }));
 vi.mock("../../../memory/MemoryWriteGate", () => ({

@@ -12,7 +12,7 @@ import type Database from "better-sqlite3";
  */
 
 export const LEGACY_DREAMING_DISMISSAL =
-  "Retired: replaced by the memory curator, which proposes concrete changes to memory items.";
+  "Retired: the Dreaming review queue was replaced by the memory folder's dreaming.";
 
 function tableExists(db: Database.Database, name: string): boolean {
   const row = db
@@ -81,16 +81,15 @@ export function ensureMemoryCurationSchema(db: Database.Database, now = Date.now
 }
 
 /**
- * The pre-curator Dreaming produced constant-text proposals ("A recent correction should be
- * reviewed…") with nothing to apply. Close the open ones once; curator proposals always
- * carry an `operation`, so they are never matched.
+ * Dreaming's review queue is retired (docs/memory-repo-phase3-design.md §6): nothing reads
+ * `dreaming_candidates` any more. Close the open proposals so retention can drop them.
  */
 export function dismissLegacyDreamingCandidates(db: Database.Database, now: number): number {
   return db
     .prepare(
       `UPDATE dreaming_candidates
        SET status = 'dismissed', resolution = ?, reviewed_at = ?
-       WHERE status IN ('proposed', 'accepted') AND operation IS NULL`,
+       WHERE status IN ('proposed', 'accepted')`,
     )
     .run(LEGACY_DREAMING_DISMISSAL, now).changes;
 }

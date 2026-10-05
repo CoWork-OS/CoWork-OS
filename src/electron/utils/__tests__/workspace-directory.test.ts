@@ -3,8 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureWorkspaceDirectory, ensureWorkspaceDirectorySync } from "../workspace-directory";
-import { DailyLogSummarizer } from "../../memory/DailyLogSummarizer";
-import { LayeredMemoryIndexService } from "../../memory/LayeredMemoryIndexService";
 import { TranscriptStore } from "../../memory/TranscriptStore";
 import { createScheduledRunDirectory } from "../../cron/workspace-context";
 import { writeTemplate } from "../../context/kit-operations";
@@ -82,8 +80,6 @@ describe("deleted workspace folders", () => {
     fs.rmSync(root, { recursive: true });
     const operations = [
       () => TranscriptStore.ensureLayout(root),
-      () => LayeredMemoryIndexService.ensureLayout(root),
-      () => DailyLogSummarizer.writeSummary(root, "2026-09-30", "Summary"),
       () => writeTemplate(root, ".cowork/MEMORY.md", "Memory", "missing"),
     ];
     for (const operation of operations) {

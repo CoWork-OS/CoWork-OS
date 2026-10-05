@@ -6,7 +6,6 @@ import { PlaybookService } from "./PlaybookService";
 import { RelationshipMemoryService } from "./RelationshipMemoryService";
 import { UserProfileService } from "./UserProfileService";
 import { buildWorkspaceKitContext } from "./WorkspaceKitContext";
-import { DailyLogSummarizer } from "./DailyLogSummarizer";
 import { CuratedMemoryService } from "./CuratedMemoryService";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import { BoxSettingsManager } from "../settings/box-manager";
@@ -36,7 +35,6 @@ export type MemorySourceKind =
   | "memory"
   | "knowledge_graph"
   | "workspace_kit"
-  | "daily_summary"
   | "box_brain";
 
 export interface MemoryFragment {
@@ -151,7 +149,6 @@ function emptySourceAttribution(): Record<MemorySourceKind, number> {
     memory: 0,
     knowledge_graph: 0,
     workspace_kit: 0,
-    daily_summary: 0,
     box_brain: 0,
   };
 }
@@ -405,26 +402,6 @@ async function extractKnowledgeGraphFragments(
   }
 }
 
-function extractDailySummaryFragments(
-  workspacePath: string,
-  taskPrompt: string,
-  readGuard?: MarkdownMemoryReadGuard,
-): MemoryFragment[] {
-  try {
-    return DailyLogSummarizer.getRecentSummaryFragments(
-      workspacePath,
-      taskPrompt,
-      5,
-      readGuard,
-    ).map((fragment) => ({
-      ...fragment,
-      source: "daily_summary" as const,
-    }));
-  } catch {
-    return [];
-  }
-}
-
 function dedupeAndRank(fragments: MemoryFragment[], now: number): MemoryFragment[] {
   const deduped = new Map<string, MemoryFragment>();
   for (const fragment of fragments) {
@@ -467,7 +444,6 @@ function groupBySource(fragments: MemoryFragment[]): Record<MemorySourceKind, Me
     memory: [],
     knowledge_graph: [],
     workspace_kit: [],
-    daily_summary: [],
     box_brain: [],
   };
   for (const fragment of fragments) {
@@ -545,7 +521,6 @@ export class MemorySynthesizer {
       memory: 0,
       knowledge_graph: 0,
       workspace_kit: 0,
-      daily_summary: 0,
       box_brain: grouped.box_brain.length,
     };
 
@@ -563,20 +538,18 @@ export class MemorySynthesizer {
 
   static async buildStructuredMemoryContext(
     workspaceId: string,
-    workspacePath: string,
+    _workspacePath: string,
     taskPrompt: string,
     options: {
       includeKnowledgeGraph?: boolean;
       includeArchive?: boolean;
       tokenBudget?: number;
-      filesystemReadGuard?: MarkdownMemoryReadGuard;
       boxBrainHits?: MemorySearchResult[];
     } = {},
   ): Promise<SynthesizedContext> {
     const now = Date.now();
     const fragments = [
       ...(await extractPlaybookFragments(workspaceId, taskPrompt)),
-      ...extractDailySummaryFragments(workspacePath, taskPrompt, options.filesystemReadGuard),
       ...(await extractBoxBrainFragments(workspaceId, taskPrompt, options.boxBrainHits)),
     ];
     if (options.includeKnowledgeGraph !== false) {
@@ -602,12 +575,6 @@ export class MemorySynthesizer {
         parts.push(`- ${sanitize(fragment.text)}`);
       }
     }
-    if (grouped.daily_summary.length) {
-      parts.push("\n## Recent Summaries");
-      for (const fragment of grouped.daily_summary) {
-        parts.push(sanitize(fragment.text));
-      }
-    }
     if (grouped.memory.length) {
       parts.push("\n## Archived Recall");
       for (const fragment of grouped.memory) {
@@ -629,7 +596,6 @@ export class MemorySynthesizer {
       memory: grouped.memory.length,
       knowledge_graph: grouped.knowledge_graph.length,
       workspace_kit: 0,
-      daily_summary: grouped.daily_summary.length,
       box_brain: grouped.box_brain.length,
     };
 
@@ -740,14 +706,13 @@ export class MemorySynthesizer {
       includeKnowledgeGraph: false,
       includeArchive: false,
       tokenBudget: l1Budget,
-      filesystemReadGuard: options.filesystemReadGuard,
       boxBrainHits: options.boxBrainHits,
     });
     const l1: LayeredContextResult = {
       ...story,
       layer: "L1",
       title: "L1 Essential Story",
-      description: "Durable decisions, recent summaries, and active commitments.",
+      description: "Durable decisions, past task patterns, and active commitments.",
       injectedByDefault: true,
     };
 
@@ -765,7 +730,7 @@ export class MemorySynthesizer {
    * gateway, this workspace's memory settings); MemoryContextBuilder renders L0 (the pinned
    * profile block) and L1 (memory_items recall for the prompt) from memory_items; the
    * synthesizer adds the kit slice,
-   * playbook and summaries around L1, as in the `memory_context` section.
+   * playbook around L1, as in the `memory_context` section.
    */
   static async buildLayerPreview(
     workspaceId: string,
@@ -851,10 +816,6 @@ export class MemorySynthesizer {
     const sourceNote =
       layers.source === "none" ? " Memory is not available yet (the memory engine is not running)." : "";
     const recallHints = this.buildRecallHintsContext();
-    const l2Description =
-      settings.topicMemoryEnabled !== false
-        ? "Excluded from default injection. `memory_recall` (scope knowledge) returns matching topic packs when the task needs them."
-        : "Topic packs are currently disabled.";
     const l3Description =
       'Excluded from default injection. Use `memory_recall` (index, then detail "full") when exact recall is needed.';
 
@@ -884,7 +845,7 @@ export class MemorySynthesizer {
         layer: "L1",
         title: "L1 Memory context",
         description:
-          "memory_items recall for the request, with the .cowork kit slice, past task patterns and recent summaries (the plan step's memory section)." +
+          "memory_items recall for the request, with the .cowork kit slice and past task patterns (the plan step's memory section)." +
           sourceNote,
         includedText: memoryContext.text,
         ...(memoryContext.text
@@ -900,19 +861,6 @@ export class MemorySynthesizer {
           excludedCount: memoryContext.droppedCount,
         },
         injectedByDefault: true,
-      },
-      {
-        layer: "L2",
-        title: "L2 Topic Packs",
-        description: "Topic-focused packs built from layered memory files.",
-        includedText: "",
-        excludedText: l2Description,
-        budget: {
-          usedTokens: 0,
-          budgetTokens: 0,
-          excludedCount: 0,
-        },
-        injectedByDefault: false,
       },
       {
         layer: "L3",
@@ -935,7 +883,7 @@ export class MemorySynthesizer {
       taskPrompt: effectivePrompt,
       generatedAt: Date.now(),
       injectedLayerIds: ["L0", "L1"],
-      excludedLayerIds: ["L2", "L3"],
+      excludedLayerIds: ["L3"],
       layers: previewLayers,
     };
   }
@@ -992,7 +940,6 @@ export class MemorySynthesizer {
           memory: 0,
           knowledge_graph: 0,
           workspace_kit: layered.l0.sourceAttribution.workspace_kit,
-          daily_summary: layered.l1.sourceAttribution.daily_summary,
           box_brain: layered.l1.sourceAttribution.box_brain,
         },
         droppedCount: layered.l0.droppedCount + layered.l1.droppedCount,
@@ -1025,7 +972,6 @@ export class MemorySynthesizer {
         includeKnowledgeGraph: options.includeKnowledgeGraph !== false,
         includeArchive: settings.defaultArchiveInjectionEnabled === true,
         tokenBudget: structuredBudget,
-        filesystemReadGuard: options.filesystemReadGuard,
         boxBrainHits: options.boxBrainHits,
       },
     );
@@ -1066,7 +1012,6 @@ export class MemorySynthesizer {
       memory: structured.sourceAttribution.memory,
       knowledge_graph: structured.sourceAttribution.knowledge_graph,
       workspace_kit: kitText ? 1 : 0,
-      daily_summary: structured.sourceAttribution.daily_summary,
       box_brain: structured.sourceAttribution.box_brain,
     };
 

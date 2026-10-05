@@ -11,6 +11,10 @@ import { createLogger } from "../../utils/logger";
 import { MemoryWriter, type MemoryWorkspacePolicy } from "../MemoryWriter";
 import { MemoryRepoService, type MemoryRepoStatus } from "./MemoryRepoService";
 import { runMemoryRepoExport } from "./MemoryRepoExport";
+import { runMemoryItemsFactRetirement } from "./MemoryItemsFactRetirement";
+import path from "node:path";
+import { getSafeStorage } from "../../utils/safe-storage";
+import { getUserDataDir } from "../../utils/user-data-dir";
 import {
   DREAM_DEFAULT_DAILY_TOKEN_BUDGET,
   MemoryRepoDreamer,
@@ -127,11 +131,22 @@ export function reconfigureMemoryRepo(): Promise<MemoryRepoStatus | null> {
         const writer = MemoryWriter.get();
         const workspaceName = options.workspaceName;
         if (writer) {
+          const listItems = () =>
+            writer.repository.list({ statuses: ["active"], includePrivate: false, limit: 5000 });
           void runMemoryRepoExport(service, {
-            listItems: () =>
-              writer.repository.list({ statuses: ["active"], includePrivate: false, limit: 5000 }),
+            listItems,
             workspaceName: (id) => (workspaceName ? workspaceName(id) : Promise.resolve(null)),
-          }).catch((error) => logger.warn("Memory repo export failed:", error));
+          })
+            // Then retire the fact rows the folder now holds (Phase 3 §3).
+            .then(() =>
+              runMemoryItemsFactRetirement(service, {
+                listItems,
+                deleteItem: (id) => writer.setStatus(id, "deleted"),
+                encryption: getSafeStorage(),
+                backupDir: path.join(getUserDataDir(), "backups"),
+              }),
+            )
+            .catch((error) => logger.warn("Memory repo export or fact retirement failed:", error));
         }
       }
       return status;

@@ -1,7 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AdaptiveStyleEngine } from "../AdaptiveStyleEngine";
-import { MemoryWriter, type MemoryCandidate } from "../MemoryWriter";
-import { setExplicitResponseStyleState } from "../memory-read-side";
 
 // ── Mocks ─────────────────────────────────────────────────────────────
 
@@ -41,24 +39,16 @@ const setResponseStyleMock = vi.fn((style: Record<string, string>) => {
   Object.assign(mockResponseStyle, style);
 });
 
+let mockExplicit = false;
+
 vi.mock("../../settings/personality-manager", () => ({
   PersonalityManager: {
     loadSettings: () => ({ responseStyle: mockResponseStyle }),
     setResponseStyle: (...args: unknown[]) =>
       setResponseStyleMock(...(args as [Record<string, string>])),
+    isResponseStyleExplicit: () => mockExplicit,
   },
 }));
-
-/**
- * The adapted style is written to memory_items as the `response_style` item, and the read
- * side mirrors it into PersonalityManager. This fake writer does both at once: it records
- * the candidate and applies its structured style (`source_ref.style`) the way the read
- * side does, so `setResponseStyleMock` sees what the engine wrote.
- */
-const ingestMock = vi.fn(async (candidate: MemoryCandidate) => {
-  setResponseStyleMock(candidate.sourceRef?.style as Record<string, string>);
-  return { status: "skipped" as const, reason: "empty" as const };
-});
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
@@ -77,44 +67,23 @@ describe("AdaptiveStyleEngine", () => {
       explanationDepth: "balanced",
     };
     AdaptiveStyleEngine.reset();
-    setExplicitResponseStyleState(false);
-    ingestMock.mockClear();
-    MemoryWriter.setInstance({ ingest: ingestMock } as unknown as MemoryWriter);
+    mockExplicit = false;
   });
 
-  afterEach(() => {
-    MemoryWriter.setInstance(null);
-  });
-
-  describe("memory_items response_style", () => {
-    it("writes the adapted style as an inferred response_style item", () => {
+  describe("PersonalityManager response style", () => {
+    it("writes only the adapted dimension to PersonalityManager, keeping the flag", () => {
       AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
-      expect(ingestMock).toHaveBeenCalledTimes(1);
-      const candidate = ingestMock.mock.calls[0][0];
-      expect(candidate).toMatchObject({
-        kind: "preference",
-        scope: "global",
-        subjectKey: "response_style",
-        source: "inferred",
-        sourceRef: {
-          store: "adaptive_style",
-          id: "response_style",
-          style: expect.objectContaining({ responseLength: "terse" }),
-        },
-      });
-    });
-
-    it("does not adapt without the memory engine (no store for the style)", () => {
-      MemoryWriter.setInstance(null);
-      AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
-      expect(setResponseStyleMock).not.toHaveBeenCalled();
-      expect(AdaptiveStyleEngine.getAdaptationHistory()).toEqual([]);
+      expect(setResponseStyleMock).toHaveBeenCalledTimes(1);
+      expect(setResponseStyleMock.mock.calls[0]).toEqual([{ responseLength: "terse" }]);
+      expect(AdaptiveStyleEngine.getAdaptationHistory()).toEqual([
+        expect.objectContaining({ dimension: "responseLength", toValue: "terse" }),
+      ]);
     });
   });
 
   describe("explicit response style", () => {
     it("does not adapt while the user has chosen a style explicitly", () => {
-      setExplicitResponseStyleState(true);
+      mockExplicit = true;
       AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
       for (let i = 0; i < 20; i++) {
         AdaptiveStyleEngine.observe("fix bug");
@@ -124,9 +93,9 @@ describe("AdaptiveStyleEngine", () => {
     });
 
     it("drops feedback seen while locked instead of replaying it later", () => {
-      setExplicitResponseStyleState(true);
+      mockExplicit = true;
       AdaptiveStyleEngine.observeFeedback("reject", "Response was too verbose and wordy");
-      setExplicitResponseStyleState(false);
+      mockExplicit = false;
       AdaptiveStyleEngine.maybeAdapt();
       expect(setResponseStyleMock).not.toHaveBeenCalled();
     });

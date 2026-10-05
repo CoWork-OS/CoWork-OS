@@ -170,14 +170,7 @@ import { startMemoryRepo, stopMemoryRepo } from "./memory/repo/memory-repo-boots
 import { getMemoryRepoDreamer } from "./memory/repo/MemoryRepoDreamer";
 import { MemoryWriter } from "./memory/MemoryWriter";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
-import { DreamingRepository } from "./memory/DreamingRepository";
-import {
-  DREAMING_DAILY_INTERVAL_MS,
-  MEMORY_CURATION_ACTIVE_WINDOW_MS,
-} from "./memory/DreamingService";
-import { MemoryCurationRepository } from "./memory/MemoryCurationRepository";
-import { createDreamingService } from "./memory/memory-review-wiring";
-import { MemoryPressureService } from "./memory/MemoryPressureService";
+import { createCommitmentExpiryService } from "./memory/memory-review-wiring";
 import { loadPolicies } from "./admin/policies";
 import { evaluateWorkspaceFilesystemAccess } from "./security/access-profile-paths";
 import {
@@ -3028,6 +3021,15 @@ if (isMacSafeStorageMigrationWorker) {
           });
         };
 
+        // Commitment expiry on the Heartbeat pulse; one instance keeps the daily cooldown.
+        const commitmentExpiry = createCommitmentExpiryService(db, {
+          listWorkspaceIds: () =>
+            workspaceRepo
+              .findAll()
+              .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
+              .map((workspace) => workspace.id),
+        });
+
         // Initialize HeartbeatService with dependencies
         const heartbeatDeps: HeartbeatServiceDeps = {
           db,
@@ -3169,67 +3171,9 @@ if (isMacSafeStorageMigrationWorker) {
             const run = await subconsciousLoopService?.runFromHeartbeat(workspaceId);
             return run ? { id: run.id, outcome: run.outcome } : null;
           },
-          runMemoryDreaming: async ({
-            workspaceId,
-            workspacePath,
-            reason,
-            signalCount,
-            heartbeatRunId,
-            readGuard,
-            trigger,
-          }) => {
-            const pressureInstructions =
-              trigger === "daily"
-                ? ""
-                : MemoryPressureService.buildCompactionInstructions(
-                    await MemoryPressureService.analyze(workspacePath, readGuard),
-                  );
-            const result = await createDreamingService(dbManager.getDatabase()).run({
-              workspaceId,
-              workspacePath,
-              triggerSource: "heartbeat",
-              triggerHeartbeatRunId: heartbeatRunId,
-              instructions: [
-                trigger === "daily"
-                  ? "Daily idle curation."
-                  : `Heartbeat saw ${signalCount} memory signal(s): ${reason}`,
-                pressureInstructions,
-              ]
-                .filter(Boolean)
-                .join("\n\n"),
-              readGuard,
-              // The daily pass is due by definition; signal and pressure runs keep the cooldown.
-              bypassCooldown: trigger === "daily",
-            });
-            return {
-              id: result.run.id,
-              status: result.run.status,
-              candidateCount: result.candidates.length,
-              appliedCount: result.appliedLogIds?.length ?? 0,
-              skipped: result.skipped,
-            };
-          },
-          findMemoryCurationWorkspace: async (preferredWorkspaceId) => {
-            const contexts = workspaceRepo
-              .findAll()
-              .filter(
-                (workspace) =>
-                  workspace.path && !workspace.isTemp && !isTempWorkspaceId(workspace.id),
-              );
-            const ordered = [
-              ...contexts.filter((workspace) => workspace.id === preferredWorkspaceId),
-              ...contexts.filter((workspace) => workspace.id !== preferredWorkspaceId),
-            ];
-            const now = Date.now();
-            const due = await new MemoryCurationRepository(
-              new DreamingRepository(db).statementPort,
-            ).dueWorkspaces(
-              ordered.map((workspace) => workspace.id).slice(0, 500),
-              now - MEMORY_CURATION_ACTIVE_WINDOW_MS,
-              now - DREAMING_DAILY_INTERVAL_MS,
-            );
-            const next = ordered.find((workspace) => workspace.id === due[0]);
-            return next ? { workspaceId: next.id, workspacePath: next.path } : null;
+          runCommitmentExpiry: async () => {
+            const result = await commitmentExpiry.sweep();
+            return typeof result === "string" ? null : { expired: result.expired };
           },
           runMemoryRepoDream: () => getMemoryRepoDreamer()?.run("daily") ?? Promise.resolve(null),
           addNotification: async (params) => {

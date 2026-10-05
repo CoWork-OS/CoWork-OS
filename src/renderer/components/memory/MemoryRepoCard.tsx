@@ -150,7 +150,7 @@ export interface MemoryRepoCardProps {
 }
 
 /**
- * "Memory folder (beta)" (docs/memory-repo-phase1-design.md §9): switch the markdown + git
+ * "Memory folder" (docs/memory-repo-phase1-design.md §9): switch the markdown + git
  * memory folder on or off, choose where it lives, open it, and compact its history. The
  * path is only ever sent as the `memoryRepoPath` setting; main validates it on save.
  */
@@ -300,7 +300,7 @@ export function MemoryRepoCard({
       <div className="settings-form-group">
         <div className="memory-hub-toggle-row">
           <div className="memory-hub-grow">
-            <div className="memory-hub-primary-label">Memory folder (beta)</div>
+            <div className="memory-hub-primary-label">Memory folder</div>
             <p className="settings-form-hint memory-hub-hint-tight">
               Memory is kept as plain notes in a folder you can open and edit. The agent reads it,
               and saves to it through CoWork, which keeps every change in its history.

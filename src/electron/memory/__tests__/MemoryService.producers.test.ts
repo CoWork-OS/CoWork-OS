@@ -7,6 +7,9 @@
  * follows their archive row. Archive rows live in in-memory SQLite through the real
  * capture SQL; memory items through a real MemoryWriter.
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MemorySettings } from "../../database/repositories";
@@ -14,6 +17,8 @@ import { insertCapturedMemory } from "../memory-capture-sql";
 import { createMemoryStatementPort } from "../memory-statement-port";
 import { MemoryWriter } from "../MemoryWriter";
 import { MemoryItemsRepository } from "../MemoryItemsRepository";
+import { MemoryRepoService } from "../repo/MemoryRepoService";
+import { parseMemoryRepoEntries } from "../repo/memory-repo-format";
 import { createMemoryItemsTestDb, nativeSqliteAvailable, rowsOf } from "./memory-items-test-db";
 
 vi.mock("electron", () => ({ app: { getPath: () => "/tmp/cowork-test" } }));
@@ -383,6 +388,70 @@ describeWithSqlite("memory producers", () => {
       await session.add({ type: "observation", body: "Uses a standing desk", header, fact });
       await MemoryService.deleteImported("ws-1");
       expect(rowsOf(db, "status = 'active'")).toHaveLength(0);
+    });
+
+    describe("with the memory folder running", () => {
+      let base: string;
+      let repo: MemoryRepoService;
+      const meLines = () =>
+        parseMemoryRepoEntries(fs.readFileSync(path.join(repo.root, "me.md"), "utf8"));
+
+      beforeEach(async () => {
+        base = fs.mkdtempSync(path.join(os.tmpdir(), "memory-import-folder-"));
+        repo = new MemoryRepoService({ root: path.join(base, "memory"), runtime: "node" });
+        await repo.start();
+        MemoryRepoService.setInstance(repo);
+      });
+
+      afterEach(() => {
+        MemoryRepoService.setInstance(null);
+        fs.rmSync(base, { recursive: true, force: true });
+      });
+
+      it("writes imported facts to me.md as agent lines tagged source: import", async () => {
+        const session = await MemoryService.openImportSession({ workspaceId: "ws-1" });
+        const outcome = await session.add({
+          type: "observation",
+          body: "Prefers TypeScript",
+          header,
+          fact,
+        });
+        const archiveId = outcome.status === "created" ? outcome.memory.id : "";
+        expect(outcome).toMatchObject({ factItemId: expect.stringMatching(/^repo:me\.md#L\d+$/) });
+        expect(rowsOf(db)).toHaveLength(0);
+        expect(meLines()).toEqual([
+          expect.objectContaining({
+            text: "Prefers TypeScript",
+            by: "agent",
+            kind: "preference",
+            metadata: expect.objectContaining({ source: "import", import: `ws-1/${archiveId}` }),
+          }),
+        ]);
+
+        // Ignoring the row forgets the line; un-ignoring writes it again.
+        await MemoryService.setImportedPromptRecallIgnored("ws-1", archiveId, true);
+        expect(meLines()).toEqual([]);
+        await MemoryService.setImportedPromptRecallIgnored("ws-1", archiveId, false);
+        expect(meLines().map((line) => line.text)).toEqual(["Prefers TypeScript"]);
+        expect(await MemoryService.deleteImportedEntry("ws-1", archiveId)).toBe(true);
+        expect(meLines()).toEqual([]);
+      });
+
+      it("keeps private imports out of the folder and deletes a workspace's imported lines", async () => {
+        const privateSession = await MemoryService.openImportSession({
+          workspaceId: "ws-2",
+          forcePrivate: true,
+        });
+        await privateSession.add({ type: "observation", body: "Works in Lisbon", header, fact });
+        expect(rowsOf(db, "workspace_id = 'ws-2'")[0]).toMatchObject({ privacy: "private" });
+
+        const session = await MemoryService.openImportSession({ workspaceId: "ws-1" });
+        await session.add({ type: "observation", body: "Prefers TypeScript", header, fact });
+        await session.add({ type: "observation", body: "Uses a standing desk", header, fact });
+        expect(meLines()).toHaveLength(2);
+        await MemoryService.deleteImported("ws-1");
+        expect(meLines()).toEqual([]);
+      });
     });
 
     it("pasted imports go through the same gate and are private by default", async () => {

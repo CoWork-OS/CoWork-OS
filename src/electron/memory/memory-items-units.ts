@@ -20,14 +20,13 @@ import {
   strList,
   tuple,
 } from "../database/statements/unit-args";
-import { MemoryItemsStore } from "./memory-items-sql";
+import { MemoryItemsStore, deleteKitRenderState } from "./memory-items-sql";
 import {
   MEMORY_ITEM_KINDS,
   MEMORY_ITEM_PRIVACY,
   MEMORY_ITEM_SCOPES,
   MEMORY_ITEM_SOURCES,
   MEMORY_ITEM_STATUSES,
-  type KitRenderState,
   type ListMemoryItemsRequest,
   type MemoryItemsPageRequest,
   type MemorySourceRef,
@@ -157,29 +156,6 @@ function pageRequest(value: unknown, path: string): MemoryItemsPageRequest {
   };
 }
 
-function kitRenderState(value: unknown, path: string): KitRenderState {
-  const input = record(json(value, path, 2_000_000), path);
-  return {
-    hash: str(input.hash, `${path}.hash`, 128),
-    source: oneOf(input.source, `${path}.source`, ["memory_items", "curated"] as const),
-    entries: list(
-      input.entries,
-      `${path}.entries`,
-      (entry, entryPath) => {
-        const item = record(entry, entryPath);
-        return {
-          id: id(item.id, `${entryPath}.id`),
-          line: str(item.line, `${entryPath}.line`, CONTENT_MAX),
-        };
-      },
-      1000,
-    ),
-    renderedAt: int(input.renderedAt, `${path}.renderedAt`),
-  };
-}
-
-const kitStateKey = (value: unknown, path: string) => str(value, path, 300);
-
 const closingStatus = (value: unknown, path: string) =>
   oneOf(value, path, ["superseded", "archived", "deleted"] as const);
 
@@ -258,13 +234,7 @@ export const MEMORY_ITEMS_UNITS = {
   memoryItems_purgeGlobal: defineUnit(tuple(), (db: Database.Database) =>
     new MemoryItemsStore(db).purgeGlobal(),
   ),
-  memoryItems_getKitRenderState: defineReadUnit(
-    tuple(kitStateKey),
-    (db: Database.Database, [key]) => new MemoryItemsStore(db).getKitRenderState(key),
-  ),
-  memoryItems_setKitRenderState: defineUnit(
-    tuple(kitStateKey, kitRenderState, (value: unknown, path: string) => int(value, path)),
-    (db: Database.Database, [key, state, now]) =>
-      new MemoryItemsStore(db).setKitRenderState(key, state, now),
+  memoryItems_clearKitRenderState: defineUnit(tuple(id), (db: Database.Database, [workspaceId]) =>
+    deleteKitRenderState(db, workspaceId),
   ),
 } satisfies UnitCatalog;

@@ -233,13 +233,9 @@ import { permissionScopeFingerprint, summarizePermissionScope } from "../securit
 import { buildPermissionSecurityContext } from "./security/export-permission-context";
 import { evaluateNetworkPolicy } from "../security/network-policy";
 import { PlaybookService } from "../memory/PlaybookService";
-import { UserProfileService } from "../memory/UserProfileService";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { AdaptiveStyleEngine } from "../memory/AdaptiveStyleEngine";
-import { MemoryConsolidator } from "../memory/MemoryConsolidator";
 import { MemoryWorkspacePurgeService } from "../memory/MemoryWorkspacePurgeService";
-import { createDreamingService } from "../memory/memory-review-wiring";
-import { MemoryPressureService } from "../memory/MemoryPressureService";
 import { TranscriptStore } from "../memory/TranscriptStore";
 import { DurableContextService } from "../memory/DurableContextService";
 import { getAwarenessService } from "../awareness/AwarenessService";
@@ -792,12 +788,9 @@ export class AgentDaemon extends EventEmitter {
    * When dequeued, these must resume via continuation flow, not normal execution.
    */
   private pendingContinuationTaskIds: Set<string> = new Set();
-  private pendingMemoryConsolidations: Set<string> = new Set();
-  /** Delay timers of scheduled consolidations; cancelled at shutdown. */
-  private memoryConsolidationTimers = new Set<ReturnType<typeof setTimeout>>();
   /**
-   * Background memory work (consolidation and Dreaming, executor playbook learning) that
-   * writes to the database after a task ends. Shutdown waits for it, bounded.
+   * Background memory work (executor playbook learning) that writes to the database after
+   * a task ends. Shutdown waits for it, bounded.
    */
   private readonly backgroundMemoryWork = new InFlightWork();
   /** Shutdown's bound for background memory work (inside the 10 s shutdown step). */
@@ -9292,7 +9285,7 @@ export class AgentDaemon extends EventEmitter {
 
   /**
    * Feed the conversation index, the one search index over task conversations
-   * (memory_recall, query orchestrator, Dreaming, Mission Control
+   * (memory_recall, query orchestrator, commitment expiry, Mission Control
    * recall). Runs for every task whatever the memory settings, except tasks whose prompt
    * carries a `<no-memory>` directive. Writes are batched by the service.
    */
@@ -9335,11 +9328,7 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
 
-    if (
-      !features.transcriptStoreEnabled &&
-      !features.backgroundConsolidationEnabled &&
-      !features.checkpointCaptureEnabled
-    ) {
+    if (!features.transcriptStoreEnabled && !features.checkpointCaptureEnabled) {
       return;
     }
 
@@ -9401,10 +9390,6 @@ export class AgentDaemon extends EventEmitter {
         readGuard: canRead,
         writeGuard: canWrite,
       }).catch(() => undefined);
-    }
-
-    if (features.backgroundConsolidationEnabled && legacyType === "task_completed") {
-      this.scheduleMemoryConsolidation(task);
     }
   }
 
@@ -9863,84 +9848,6 @@ export class AgentDaemon extends EventEmitter {
    */
   trackBackgroundWork<T>(work: Promise<T>): Promise<T> {
     return this.backgroundMemoryWork ? this.backgroundMemoryWork.track(work) : work;
-  }
-
-  private scheduleMemoryConsolidation(task: Task): void {
-    if (this.shutdownRequested || this.pendingMemoryConsolidations.has(task.workspaceId)) {
-      return;
-    }
-    const workspace = this.workspaceRepo.findById(task.workspaceId);
-    if (!workspace?.path) {
-      return;
-    }
-    const effectiveWorkspace = this.applyTaskWorkspaceOverrides(task, workspace);
-    const canRead = (candidatePath: string): boolean =>
-      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "read").decision ===
-      "allow";
-    const canWrite = (candidatePath: string): boolean =>
-      evaluateWorkspaceFilesystemAccess(effectiveWorkspace, candidatePath, "write").decision ===
-      "allow";
-    this.pendingMemoryConsolidations.add(task.workspaceId);
-    const timer = setTimeout(() => {
-      this.memoryConsolidationTimers?.delete(timer);
-      if (this.shutdownRequested) {
-        this.pendingMemoryConsolidations.delete(task.workspaceId);
-        return;
-      }
-      const run = (async () => {
-        const consolidation = await MemoryConsolidator.run({
-          workspaceId: task.workspaceId,
-          workspacePath: workspace.path,
-          taskId: task.id,
-          taskPrompt: task.prompt,
-          readGuard: canRead,
-          writeGuard: canWrite,
-        });
-        const pressureInstructions = MemoryPressureService.buildCompactionInstructions(
-          await MemoryPressureService.analyze(workspace.path, canRead),
-        );
-        const dreaming = await createDreamingService(this.dbManager.getDatabase()).run({
-          workspaceId: task.workspaceId,
-          workspacePath: workspace.path,
-          triggerSource: "task_completion",
-          sourceTaskId: task.id,
-          taskPrompt: task.prompt,
-          readGuard: canRead,
-          instructions: [
-            "Review recent task completion evidence for memory drift, corrections, stale context, and open loops.",
-            pressureInstructions,
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
-        });
-        return { consolidation, dreaming };
-      })()
-        .then((result) => {
-          this.logEvent(task.id, "log", {
-            message: result.consolidation.skipped
-              ? "Memory consolidation skipped; Dreaming reviewed memory evidence"
-              : "Memory consolidation and Dreaming completed",
-            consolidation: result.consolidation,
-            dreaming: {
-              runId: result.dreaming.run.id,
-              status: result.dreaming.run.status,
-              candidateCount: result.dreaming.candidates.length,
-              appliedCount: result.dreaming.appliedLogIds?.length ?? 0,
-            },
-          });
-        })
-        .catch((error) => {
-          this.logEvent(task.id, "error", {
-            error: error instanceof Error ? error.message : String(error),
-            source: "memory_dreaming",
-          });
-        })
-        .finally(() => {
-          this.pendingMemoryConsolidations.delete(task.workspaceId);
-        });
-      void this.trackBackgroundWork(run);
-    }, 1000);
-    this.memoryConsolidationTimers?.add(timer);
   }
 
   private normalizeArtifactEventPayload(
@@ -10808,7 +10715,7 @@ export class AgentDaemon extends EventEmitter {
               // is invalidated as corrected by the user.
               PlaybookService.recordUserCorrection(task.workspaceId, taskId).catch(() => {});
 
-              // Lets Heartbeat route the correction to Dreaming (fire-and-forget, no user text).
+              // A correction-learning signal for Heartbeat (fire-and-forget, no user text).
               emitCorrectionLearningSignal({ workspaceId: task.workspaceId, taskId });
             } catch {
               // best-effort
@@ -17620,14 +17527,9 @@ export class AgentDaemon extends EventEmitter {
       if (cancellationTimer) clearTimeout(cancellationTimer);
     }
 
-    // Consolidations that have not started are dropped (the next task completion schedules
-    // one again); running consolidation, Dreaming and executor learning get a bounded wait
-    // so they do not write after the database closes. Work still running after the bound
-    // is abandoned: its late writes fail and are dropped.
-    // (Optional chaining: partially constructed daemons in tests lack these fields.)
-    this.memoryConsolidationTimers?.forEach((timer) => clearTimeout(timer));
-    this.memoryConsolidationTimers?.clear();
-    this.pendingMemoryConsolidations?.clear();
+    // Running executor learning gets a bounded wait so it does not write after the database
+    // closes. Work still running after the bound is abandoned: its late writes fail and are
+    // dropped. (Partially constructed daemons in tests may lack the field.)
     const backgroundWork = this.backgroundMemoryWork;
     if (backgroundWork && !(await backgroundWork.drain(AgentDaemon.BACKGROUND_WORK_DRAIN_MS))) {
       log.warn(

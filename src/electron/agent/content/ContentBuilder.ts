@@ -8,7 +8,6 @@ import {
 } from "../executor-prompt-sections";
 import type { LLMSystemBlock } from "../llm";
 import type { ExecutionMode, TaskDomain } from "../../../shared/types";
-import { LayeredMemoryIndexService } from "../../memory/LayeredMemoryIndexService";
 import {
   DESIGN_SYSTEM_MIN_TOKENS,
   DESIGN_SYSTEM_SECTION_TOKENS,
@@ -63,10 +62,6 @@ export interface BuildExecutionPromptParams {
   taskDomain: TaskDomain;
   webSearchModeContract: string;
   worktreeBranch?: string;
-  allowLayeredMemory?: boolean;
-  /** Task-scoped filesystem guards used by layered-memory reads/writes. */
-  filesystemReadGuard?: (candidatePath: string) => boolean;
-  filesystemWriteGuard?: (candidatePath: string) => boolean;
   totalBudgetTokens: number;
   sectionCache?: Map<string, string | null>;
 }
@@ -79,8 +74,6 @@ export interface BuildExecutionPromptResult {
   totalTokens: number;
   droppedSections: string[];
   truncatedSections: string[];
-  topicCount: number;
-  memoryIndexInjected: boolean;
 }
 
 function toSystemBlock(section: PromptSection): LLMSystemBlock | null {
@@ -185,28 +178,6 @@ export class ContentBuilder {
   static async buildExecutionPrompt(
     params: BuildExecutionPromptParams,
   ): Promise<BuildExecutionPromptResult> {
-    let memoryIndex = "";
-    let topicText = "";
-    let topicCount = 0;
-
-    if (params.allowLayeredMemory) {
-      const snapshot = await LayeredMemoryIndexService.refreshIndex({
-        workspaceId: params.workspaceId,
-        workspacePath: params.workspacePath,
-        taskPrompt: params.taskPrompt,
-        readGuard: params.filesystemReadGuard,
-        writeGuard: params.filesystemWriteGuard,
-      });
-      memoryIndex = snapshot.indexContent;
-      topicCount = snapshot.topics.length;
-      if (snapshot.topics.length > 0) {
-        topicText = snapshot.topics
-          .slice(0, 3)
-          .map((topic) => `### ${topic.title}\n${topic.content}`)
-          .join("\n\n");
-      }
-    }
-
     const modeDomainContract =
       params.modeDomainContractPrompt ||
       buildModeDomainContract(params.executionMode, params.taskDomain);
@@ -236,17 +207,6 @@ export class ContentBuilder {
             dropPriority: 2,
             layerKind: "optional",
             cacheScope: "session",
-          }),
-          makeSection("memory_index", memoryIndex, 1300, {
-            required: params.allowLayeredMemory,
-            layerKind: params.allowLayeredMemory ? "always" : "optional",
-            cacheScope: "turn",
-          }),
-          makeSection("memory_topics", topicText, 1000, {
-            required: false,
-            dropPriority: 4,
-            layerKind: "on_demand",
-            cacheScope: "turn",
           }),
           ...buildMemoryContextSections(params),
           makeSection("awareness_snapshot", params.awarenessSnapshot, 800, {
@@ -353,17 +313,6 @@ export class ContentBuilder {
             layerKind: "optional",
             cacheScope: "session",
           }),
-          makeSection("memory_index", memoryIndex, 1300, {
-            required: params.allowLayeredMemory,
-            layerKind: params.allowLayeredMemory ? "always" : "optional",
-            cacheScope: "turn",
-          }),
-          makeSection("memory_topics", topicText, 1000, {
-            required: false,
-            dropPriority: 4,
-            layerKind: "on_demand",
-            cacheScope: "turn",
-          }),
           ...buildMemoryContextSections(params),
           makeSection("awareness_snapshot", params.awarenessSnapshot, 800, {
             required: false,
@@ -434,8 +383,6 @@ export class ContentBuilder {
       totalTokens: composed.totalTokens,
       droppedSections: composed.droppedSections,
       truncatedSections: composed.truncatedSections,
-      topicCount,
-      memoryIndexInjected: Boolean(memoryIndex),
     };
   }
 }

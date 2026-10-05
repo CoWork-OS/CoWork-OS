@@ -8,6 +8,7 @@
  * only store of these facts (the legacy lanes are retired), so nothing is mirrored;
  * workspace changes re-render the `.cowork/USER.md` / `MEMORY.md` views (`syncKitFiles`).
  */
+import { MemoryRepoService } from "./repo/MemoryRepoService";
 import { randomUUID } from "crypto";
 import type {
   MemoryHubItem,
@@ -412,6 +413,8 @@ export class MemoryItemsHubService {
    */
   async clearGlobal(): Promise<{ success: true; deleted: number }> {
     const deleted = await this.writer().purgeGlobal();
+    // The user's global files in the memory repo, then its history is compacted.
+    await MemoryRepoService.get()?.clearGlobal();
     return { success: true, deleted };
   }
 

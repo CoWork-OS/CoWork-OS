@@ -17,6 +17,7 @@ export const PINNED_CONTEXT_TAGS = {
     close: "</cowork_compaction_summary>",
   },
   userProfile: { open: "<cowork_user_profile>", close: "</cowork_user_profile>" },
+  memoryRepo: { open: "<cowork_memory_repo>", close: "</cowork_memory_repo>" },
   sharedContext: { open: "<cowork_shared_context>", close: "</cowork_shared_context>" },
   memoryRecall: { open: "<cowork_memory_recall>", close: "</cowork_memory_recall>" },
   taskListReminder: {
@@ -38,6 +39,7 @@ export const PINNED_CONTEXT_OPEN_TAGS: readonly string[] = Object.values(PINNED_
 const SYMBOLIC_TAG_ALIASES: Record<string, PinnedContextTagPair> = {
   PINNED_COMPACTION_SUMMARY: PINNED_CONTEXT_TAGS.compactionSummary,
   PINNED_USER_PROFILE: PINNED_CONTEXT_TAGS.userProfile,
+  PINNED_MEMORY_REPO: PINNED_CONTEXT_TAGS.memoryRepo,
   PINNED_SHARED_CONTEXT: PINNED_CONTEXT_TAGS.sharedContext,
   PINNED_MEMORY_RECALL: PINNED_CONTEXT_TAGS.memoryRecall,
   PINNED_TASK_LIST_REMINDER: PINNED_CONTEXT_TAGS.taskListReminder,

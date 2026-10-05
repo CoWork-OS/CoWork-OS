@@ -11,6 +11,7 @@ import {
 } from "../../utils/bounded-pdf-parser";
 
 import { ProtectedCredentialService } from "../../security/protected-credential-service";
+import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 
 const MAX_HTTP_RESPONSE_BYTES = 5 * 1024 * 1024;
 // A truncated PDF cannot be parsed, so PDFs get their own (still bounded) limit and are never cut.
@@ -556,6 +557,9 @@ export class WebFetchTools {
         content += `\n\n... [Content truncated] Continue with startChar=${end} (${totalLength} chars total).`;
       }
 
+      // Web content is untrusted: a later agent memory write goes to the inbox (design §7.3).
+      recordUntrustedContentRead(this.daemon, this.taskId, "web", url, "web_fetch");
+
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "web_fetch",
         result: {
@@ -734,6 +738,9 @@ export class WebFetchTools {
         responseBody = responseBody.substring(0, maxLength) + "\n\n... [Response truncated]";
       }
       responseBody = redactSecret(responseBody, credentialSecret);
+      if (responseBody) {
+        recordUntrustedContentRead(this.daemon, this.taskId, "web", url, "http_request");
+      }
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "http_request",

@@ -48,6 +48,7 @@ import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 const mockDaemon = {
   logEvent: vi.fn(),
   registerArtifact: vi.fn(),
+  recordSensitiveSourceRead: vi.fn(),
 };
 
 const mockProtectedCredentialService = {
@@ -281,11 +282,20 @@ describe("WebFetchTools", () => {
           text: async () => "Hello, World!",
         });
 
-        const result = await webFetchTools.webFetch({ url: "https://example.com/text" });
+        const result = await webFetchTools.webFetch({ url: "https://example.com/text?q=1" });
 
         expect(result.success).toBe(true);
         expect(result.title).toBe("Plain Text");
         expect(result.content).toBe("Hello, World!");
+        // Web content taints the task, so a later agent memory write goes to the inbox.
+        expect(mockDaemon.recordSensitiveSourceRead).toHaveBeenCalledWith(
+          "test-task-id",
+          expect.objectContaining({
+            path: "https://example.com/text",
+            trustLevel: "untrusted",
+            sourceLabel: "web",
+          }),
+        );
       });
     });
 

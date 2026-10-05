@@ -23,6 +23,7 @@
  * forgotten by the orphan sweep. Copies sent before remote ids were recorded cannot be
  * addressed and stay remote.
  */
+import { MemoryRepoService } from "./repo/MemoryRepoService";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
@@ -153,6 +154,8 @@ export class MemoryWorkspacePurgeService {
   static async purgeTaskFiles(params: {
     taskId: string;
     workspacePath?: string | null;
+    /** An explicit user delete: also remove what the task's agent saved to the memory repo. */
+    purgeDerivedMemory?: boolean;
   }): Promise<MemoryTaskFilePurgeResult> {
     const result: MemoryTaskFilePurgeResult = {
       transcripts: 0,
@@ -166,6 +169,13 @@ export class MemoryWorkspacePurgeService {
     }
     // Supermemory copies of the rows the task delete purged (SEC-17).
     SupermemoryService.scheduleOrphanSweep();
+    if (params.purgeDerivedMemory && SAFE_TASK_ID.test(params.taskId)) {
+      try {
+        await MemoryRepoService.get()?.purgeTask(params.taskId);
+      } catch (error) {
+        result.errors.push(`memory repo: ${errorMessage(error)}`);
+      }
+    }
     const workspacePath = params.workspacePath;
     if (!workspacePath || !SAFE_TASK_ID.test(params.taskId)) return result;
 
@@ -264,6 +274,11 @@ export class MemoryWorkspacePurgeService {
       }
       logger.warn(`Clearing memory rows for workspace ${workspaceId} failed:`, error);
     }
+
+    await step("memoryItems", async () => {
+      // The workspace's file in the memory repo (then the history is compacted).
+      return (await MemoryRepoService.get()?.clearWorkspace(workspaceId)) ? 1 : 0;
+    });
 
     if (workspacePath) {
       // Rewrite the auto-managed blocks in .cowork/USER.md and .cowork/MEMORY.md from the

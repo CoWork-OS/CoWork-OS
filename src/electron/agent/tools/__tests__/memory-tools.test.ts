@@ -63,6 +63,8 @@ import { MemoryWriter } from "../../../memory/MemoryWriter";
 import { MemoryItemsRepository } from "../../../memory/MemoryItemsRepository";
 import { MemoryRecallService, type MemoryRecallDeps } from "../../../memory/MemoryRecall";
 import { MemoryRecallStore } from "../../../memory/memory-recall-sql";
+import { MemoryRepoService } from "../../../memory/repo/MemoryRepoService";
+import { parseMemoryRepoLine } from "../../../memory/repo/memory-repo-format";
 import {
   createMemoryItemsTestDb,
   nativeSqliteAvailable,
@@ -493,6 +495,46 @@ describeWithSqlite("memory tools", () => {
       });
       expect(rowsOf(db, "id = ?", keep.id)[0].status).toBe("active");
       expect((await tools.forget({ match: "nothing like this" })).success).toBe(false);
+    });
+
+    it("forgets a memory repo entry by match through the repo service", async () => {
+      const file = [
+        "# Me",
+        "",
+        "- Parking spot number is 42 [by: agent; source: cowork://tasks/task-1]",
+        "- Coffee machine is on floor 2",
+      ].join("\n");
+      recallDeps.memoryRepo = () => ({
+        listFiles: async () => ["me.md"],
+        readFile: async (relPath) => (relPath === "me.md" ? file : null),
+        stamp: async () => "1",
+      });
+      const forgetLine = vi.fn(async (_path: string, line: number) => ({
+        removed: parseMemoryRepoLine(file.split("\n")[line - 1], line),
+      }));
+      MemoryRepoService.setInstance({
+        isWritable: () => true,
+        entryAt: async (_path: string, line: number) =>
+          parseMemoryRepoLine(file.split("\n")[line - 1], line),
+        forget: forgetLine,
+      } as Any);
+      try {
+        const daemon = makeDaemon();
+        const tools = new MemoryTools(workspace, daemon, "task-1");
+        expect(await tools.forget({ match: "parking spot 42" })).toEqual({
+          success: true,
+          forgotten: "repo:me.md#L3",
+        });
+        expect(forgetLine).toHaveBeenCalledWith(
+          "me.md",
+          3,
+          expect.objectContaining({ taskId: "task-1" }),
+        );
+        // This task's own agent line: no approval needed.
+        expect(daemon.requestApproval).not.toHaveBeenCalled();
+      } finally {
+        MemoryRepoService.setInstance(null);
+      }
     });
 
     describe("approval", () => {

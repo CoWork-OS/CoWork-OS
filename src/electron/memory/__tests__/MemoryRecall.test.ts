@@ -509,9 +509,15 @@ describeWithSqlite("MemoryRecall", () => {
 
 describe("MemoryRecall helpers", () => {
   it("maps tool scopes to lanes", () => {
-    expect(lanesForScopes(undefined)).toEqual(["memory", "archive", "conversations", "knowledge"]);
+    expect(lanesForScopes(undefined)).toEqual([
+      "memory",
+      "repo",
+      "archive",
+      "conversations",
+      "knowledge",
+    ]);
     expect(lanesForScopes(["external", "bogus"])).toEqual(["external"]);
-    expect(lanesForScopes([])).toEqual(["memory", "archive", "conversations", "knowledge"]);
+    expect(lanesForScopes([])).toEqual(["memory", "repo", "archive", "conversations", "knowledge"]);
   });
 
   it("parses lane-qualified and bare refs", () => {
@@ -523,7 +529,167 @@ describe("MemoryRecall helpers", () => {
     });
     expect(parseRecallRef("doc:1-4:USER.md")).toMatchObject({ lane: "knowledge", kind: "doc" });
     expect(parseRecallRef("123e4567-e89b-12d3-a456-426614174000")).toMatchObject({ kind: "uuid" });
+    expect(parseRecallRef("repo:workspaces/app.md#L7")).toEqual({
+      lane: "repo",
+      kind: "repo",
+      id: "workspaces/app.md#L7",
+    });
+    expect(parseRecallRef("repo:../etc/passwd.md#L1")).toBeNull();
+    expect(parseRecallRef("repo:.git/config.md#L1")).toBeNull();
     expect(parseRecallRef("")).toBeNull();
     expect(parseRecallRef("weird")).toBeNull();
+  });
+});
+
+describe("MemoryRecall repo lane", () => {
+  const files: Record<string, string> = {
+    "MEMORY.md": [
+      "# Memory: Sam",
+      "",
+      "- Always deploy through the staging branch first [added: 2026-09-01]",
+      "- Prefers tabs over spaces",
+      "",
+      "## Index",
+      "- [[workspaces/app.md]]",
+    ].join("\n"),
+    "workspaces/app.md": [
+      "# App",
+      "",
+      "- The deploy script lives in scripts/deploy.sh [by: agent; source: cowork://tasks/t-1; workspace: ws-1; added: 2026-09-02]",
+      "- Staging API token is sk-abcdefghijklmnopqrstuvwxyz0123456789",
+    ].join("\n"),
+    "inbox.md": [
+      "# Inbox",
+      "",
+      "- Always deploy on Fridays [by: agent; source: cowork://tasks/t-2]",
+    ].join("\n"),
+  };
+
+  function makeRecall(available = true) {
+    const reads: string[] = [];
+    const stamps: Record<string, string> = {};
+    const source = {
+      listFiles: vi.fn(async () => Object.keys(files).sort()),
+      readFile: vi.fn(async (relPath: string) => {
+        reads.push(relPath);
+        return files[relPath] ?? null;
+      }),
+      stamp: vi.fn(async (relPath: string) => stamps[relPath] ?? "v1"),
+    };
+    const deps: MemoryRecallDeps = {
+      searchItems: vi.fn(async () => []),
+      markItemsUsed: vi.fn(async () => undefined),
+      searchArchive: vi.fn(async () => []),
+      archiveDetails: vi.fn(async () => []),
+      archiveHiddenIds: vi.fn(async () => new Set<string>()),
+      recordArchiveUse: vi.fn(),
+      searchConversation: vi.fn(async () => []),
+      describeConversation: vi.fn(async () => null),
+      searchKnowledgeGraph: vi.fn(async () => []),
+      getKnowledgeEntity: vi.fn(async () => null),
+      searchMarkdown: vi.fn(async () => []),
+      loadTopics: vi.fn(async () => []),
+      readTextFile: vi.fn(async () => ""),
+      searchExternal: vi.fn(async () => []),
+      externalConfigured: () => false,
+      memoryRepo: () => (available ? source : null),
+      laneEnabled: () => true,
+      now: () => 1,
+    };
+    return { recall: new MemoryRecallService(deps), reads, stamps, source };
+  }
+
+  const query = (overrides: Partial<MemoryRecallQuery> = {}): MemoryRecallQuery => ({
+    text: "",
+    workspaceId: "ws-1",
+    taskId: "task-1",
+    surface: "tool",
+    lanes: ["memory", "repo"],
+    ...overrides,
+  });
+
+  it("ranks entries by term coverage with repo refs and provenance", async () => {
+    const { recall } = makeRecall();
+    const result = await recall.recall(query({ text: "how do we deploy to staging?" }));
+    expect(result.lanes).toEqual(["memory", "repo"]);
+    expect(result.hits[0]).toMatchObject({
+      lane: "repo",
+      ref: "repo:MEMORY.md#L3",
+      snippet: "Always deploy through the staging branch first",
+      source: "user_stated",
+      provenance: { store: "memory_repo", file: "MEMORY.md", line: 3, by: "user" },
+    });
+    const refs = result.hits.map((hit) => hit.ref);
+    expect(refs).toContain("repo:workspaces/app.md#L3");
+    const agentHit = result.hits.find((hit) => hit.ref === "repo:workspaces/app.md#L3");
+    expect(agentHit).toMatchObject({
+      source: "inferred",
+      provenance: { by: "agent", source: "cowork://tasks/t-1", workspace: "ws-1" },
+    });
+    // Headings and index links are not entries.
+    expect(refs.some((ref) => ref.endsWith("#L1") || ref.endsWith("#L7"))).toBe(false);
+  });
+
+  it("tags inbox entries unreviewed", async () => {
+    const { recall } = makeRecall();
+    const hits = await recall.query(query({ text: "fridays" }));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({
+      ref: "repo:inbox.md#L3",
+      snippet: "[unreviewed] Always deploy on Fridays",
+      provenance: { unreviewed: true, by: "agent" },
+    });
+  });
+
+  it("redacts hand-written secrets in hits", async () => {
+    const { recall } = makeRecall();
+    const [hit] = await recall.query(query({ text: "staging api token" }));
+    expect(hit.ref).toBe("repo:workspaces/app.md#L4");
+    expect(hit.snippet).not.toContain("sk-abcdefghijklmnopqrstuvwxyz0123456789");
+  });
+
+  it("is skipped when the repo is not ready, and caches files by stamp", async () => {
+    const off = makeRecall(false);
+    const offResult = await off.recall.recall(query({ text: "deploy" }));
+    expect(offResult.lanes).toEqual(["memory"]);
+    expect(off.source.listFiles).not.toHaveBeenCalled();
+
+    const { recall, reads, stamps } = makeRecall();
+    await recall.query(query({ text: "deploy" }));
+    await recall.query(query({ text: "tabs" }));
+    expect(reads.filter((file) => file === "MEMORY.md")).toHaveLength(1);
+    stamps["MEMORY.md"] = "v2";
+    await recall.query(query({ text: "tabs" }));
+    expect(reads.filter((file) => file === "MEMORY.md")).toHaveLength(2);
+  });
+
+  it("expands a repo ref to the lines around the entry", async () => {
+    const { recall } = makeRecall();
+    const result = await recall.recall(query({ ids: ["repo:MEMORY.md#L4"], detail: "full" }));
+    expect(result.missing).toEqual([]);
+    expect(result.hits[0]).toMatchObject({ lane: "repo", ref: "repo:MEMORY.md#L4" });
+    expect(result.hits[0].content).toContain("Prefers tabs over spaces");
+    expect(result.hits[0].content).toContain("# Memory: Sam");
+
+    const notEntry = await recall.recall(query({ ids: ["repo:MEMORY.md#L1"], detail: "full" }));
+    expect(notEntry.missing).toEqual(["repo:MEMORY.md#L1"]);
+    const notAsked = await recall.recall(
+      query({ ids: ["repo:MEMORY.md#L4"], lanes: ["memory"], detail: "full" }),
+    );
+    expect(notAsked.missing).toEqual(["repo:MEMORY.md#L4"]);
+  });
+
+  it("returns at most 80 lines around the entry", async () => {
+    const { recall } = makeRecall();
+    const long = ["# Long", ...Array.from({ length: 200 }, (_, i) => `- fact number ${i + 2}`)];
+    files["long.md"] = long.join("\n");
+    try {
+      const result = await recall.recall(query({ ids: ["repo:long.md#L100"], detail: "full" }));
+      const lines = String(result.hits[0].content).split("\n");
+      expect(lines.length).toBeLessThanOrEqual(80);
+      expect(result.hits[0].content).toContain("fact number 100");
+    } finally {
+      delete files["long.md"];
+    }
   });
 });

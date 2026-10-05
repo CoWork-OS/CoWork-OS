@@ -94,6 +94,11 @@ export interface MemoryContextLayersRequest {
   /** Subjects another section renders (default DEFAULT_EXTERNALLY_RENDERED_SUBJECTS). */
   omitSubjects?: readonly string[];
   contactRef?: string;
+  /**
+   * Normalized-content hashes another block already renders (the memory folder's
+   * `<cowork_memory_repo>` block, design §6.1): L0 and L1 skip items with these hashes.
+   */
+  excludeHashes?: readonly string[];
 }
 
 export interface MemoryContextLayers {
@@ -337,6 +342,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
     const omit = new Set(request.omitSubjects ?? DEFAULT_EXTERNALLY_RENDERED_SUBJECTS);
     const l0Budget = Math.max(0, request.budgets?.l0Tokens ?? MEMORY_L0_TOKENS);
     const version = (this.deps.getHotMemoryVersion ?? getHotMemoryVersion)();
+    const exclude = new Set(request.excludeHashes ?? []);
     const l0Key = [
       source,
       request.workspaceId ?? "",
@@ -345,6 +351,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
       decision.allowCuratedItems ? "c" : "-",
       [...omit].sort().join(","),
       l0Budget,
+      [...exclude].sort().join(","),
     ].join("|");
 
     // L0 is computed even when only L1 is requested: L1 must not repeat L0 facts.
@@ -352,7 +359,10 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
     if (!l0State) {
       const candidates = await this.loadItemEntries(port, request);
       const eligible = candidates.filter(
-        (entry) => isL0Entry(entry) && !(entry.subjectKey && omit.has(entry.subjectKey)),
+        (entry) =>
+          isL0Entry(entry) &&
+          !(entry.subjectKey && omit.has(entry.subjectKey)) &&
+          !exclude.has(entry.contentHash),
       );
       const deduped = dedupeEntries(eligible);
       const rendered = renderBlock(L0_HEADER, deduped, l0Budget, true);
@@ -371,7 +381,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
       if (this.l1Cache?.key === l1Key) {
         l1 = this.l1Cache.block;
       } else {
-        l1 = await this.buildL1(port, request, focus, l1Budget, l0State.entries, omit);
+        l1 = await this.buildL1(port, request, focus, l1Budget, l0State.entries, omit, exclude);
         this.l1Cache = { key: l1Key, block: l1 };
       }
     }
@@ -461,6 +471,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
     budget: number,
     l0Entries: MemoryContextEntry[],
     omit: Set<string>,
+    exclude: ReadonlySet<string> = new Set(),
   ): Promise<MemoryContextBlock | null> {
     let hits: MemoryItem[] = [];
     try {
@@ -478,7 +489,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
       subjects: new Set(
         l0Entries.map((entry) => entry.subjectKey).filter((key): key is string => !!key),
       ),
-      hashes: new Set(l0Entries.map((entry) => entry.contentHash)),
+      hashes: new Set([...l0Entries.map((entry) => entry.contentHash), ...exclude]),
       refs: new Set(l0Entries.map((entry) => entry.ref)),
     };
     for (const subject of omit) seen.subjects.add(subject);

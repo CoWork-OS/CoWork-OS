@@ -66,8 +66,8 @@ export interface MemoryHealthCheck {
   threshold?: number;
   /** Plain-language detail: what was counted, or why the check was skipped. */
   detail: string;
-  /** `ratio` values are shown as percentages, `mib` as sizes. */
-  unit?: "ratio" | "count" | "mib" | "tokens";
+  /** `ratio` values are shown as percentages, `mib` and `bytes` as sizes. */
+  unit?: "ratio" | "count" | "mib" | "tokens" | "bytes";
 }
 
 export interface MemoryHealthReport {

@@ -2,6 +2,7 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { GoogleWorkspaceSettingsManager } from "../../settings/google-workspace-manager";
 import { gmailRequest } from "../../utils/gmail-api";
+import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 import {
   hasGoogleWorkspaceScopeCoverage,
   hasGoogleWorkspaceTokens,
@@ -400,6 +401,11 @@ export class GmailTools {
     return resolved.filter(Boolean);
   }
 
+  /** Mail text is third-party content: a later agent memory write goes to the inbox. */
+  private recordMailRead(location: string, tool: string): void {
+    recordUntrustedContentRead(this.daemon, this.taskId, "mailbox", location, tool);
+  }
+
   async executeCodexStyleTool(name: GmailCodexStyleTool, input: Record<string, Any>): Promise<Any> {
     const settings = this.loadEnabledSettings();
 
@@ -420,6 +426,7 @@ export class GmailTools {
           const emails = await Promise.all(
             refs.map((ref) => this.getMessage(settings, ref.id, "metadata")),
           );
+          this.recordMailRead("gmail://search", name);
           return {
             success: true,
             emails: emails.map((email) => formatMessageSummary(email, false)),
@@ -455,6 +462,7 @@ export class GmailTools {
           const messages = await Promise.all(
             batchIds.map((messageId: string) => this.getMessage(settings, messageId, "full")),
           );
+          this.recordMailRead("gmail://messages", name);
           return {
             success: true,
             emails: messages.map((message) => formatMessageSummary(message, true)),
@@ -469,6 +477,7 @@ export class GmailTools {
               ? input.id
               : (await this.getMessage(settings, input.id, "metadata")).threadId;
           if (!threadId) throw new Error("Unable to resolve Gmail thread id");
+          this.recordMailRead(`gmail://threads/${threadId}`, name);
           return {
             success: true,
             ...(await this.getThread(settings, threadId, input.max_messages)),
@@ -993,6 +1002,12 @@ export class GmailTools {
         throw error;
       }
       throw new Error(message);
+    }
+
+    if (action === "get_message") {
+      this.recordMailRead(`gmail://messages/${input.message_id}`, "gmail_action");
+    } else if (action === "get_thread") {
+      this.recordMailRead(`gmail://threads/${input.thread_id}`, "gmail_action");
     }
 
     this.daemon.logEvent(this.taskId, "tool_result", {

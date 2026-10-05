@@ -154,7 +154,26 @@ describe("MemoryFeaturesManager", () => {
       dreamingLlmEnabled: false,
       dreamingLlmDailyTokenBudget: 20000,
       memoryCompressionDailyTokenBudget: 20000,
+      memoryRepoEnabled: false,
+      memoryRepoPath: "",
     });
+  });
+
+  it("keeps the memory repo off by default and tells listeners about saves", () => {
+    const seen: Array<boolean | undefined> = [];
+    const unsubscribe = MemoryFeaturesManager.onSaved((saved) => seen.push(saved.memoryRepoEnabled));
+    MemoryFeaturesManager.saveSettings({
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryRepoEnabled: true,
+      memoryRepoPath: "  /Users/me/CoWork Memory  ",
+    });
+    unsubscribe();
+    expect(mocks.storedSettings).toMatchObject({
+      memoryRepoEnabled: true,
+      memoryRepoPath: "/Users/me/CoWork Memory",
+    });
+    expect(seen).toEqual([true]);
   });
 
   it("keeps the AI compression budget positive and bounded", () => {

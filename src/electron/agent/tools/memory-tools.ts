@@ -13,6 +13,10 @@
  * The 16 tools these replaced were hidden aliases for one release and have been retired
  * (RETIRED_MEMORY_TOOL_NAMES); they are no longer registered.
  */
+import { MemoryRepoService, taskSourceLink } from "../../memory/repo/MemoryRepoService";
+import { memoryRepoRef, parseMemoryRepoRef } from "../../memory/repo/memory-repo-format";
+import { isUntrustedExternalSource } from "../security/export-permission-context";
+import { isMemoryRepoReadAllowed } from "../../security/memory-repo-access";
 import { randomUUID } from "crypto";
 import * as path from "path";
 import type { LLMTool } from "../llm/types";
@@ -601,6 +605,22 @@ export class MemoryTools {
         };
       }
 
+      // The memory repo (docs/memory-repo-phase1-design.md), when it runs, holds the user's
+      // and workspace facts; contact, task and private facts stay in memory_items.
+      if (!thirdPartySender && (scope === "global" || scope === "workspace")) {
+        const repoResult = await this.rememberInRepo({
+          content,
+          kind: itemKind,
+          scope,
+          source,
+          pin,
+          pinRequested,
+          subjectKey,
+          userText,
+        });
+        if (repoResult) return repoResult;
+      }
+
       const result = await writer.ingest({
         content,
         kind: itemKind,
@@ -648,6 +668,91 @@ export class MemoryTools {
     } catch (error) {
       return fail(String(error instanceof Error ? error.message : error));
     }
+  }
+
+  /**
+   * Write a fact into the memory repo. Null when the repo is not running or the fact must
+   * stay in memory_items (strict privacy, repo unavailable); a result otherwise.
+   */
+  private async rememberInRepo(input: {
+    content: string;
+    kind: MemoryItemKind;
+    scope: "global" | "workspace";
+    source: MemoryItemSource;
+    pin: boolean;
+    pinRequested: boolean;
+    subjectKey: string;
+    userText: string;
+  }): Promise<Record<string, unknown> | null> {
+    const repo = MemoryRepoService.get();
+    // Only tasks whose memoryRepo layer is on (the access scope the executor sets).
+    if (!repo?.isWritable() || !isMemoryRepoReadAllowed()) return null;
+    const tool = MEMORY_REMEMBER_TOOL;
+    const by = input.source === "user_stated" ? "user" : "agent";
+    const tainted =
+      by === "agent" &&
+      (this.daemon.listRecentSensitiveSources?.(this.taskId) ?? []).some((item) =>
+        isUntrustedExternalSource(item),
+      );
+    const result = await repo.remember({
+      text: input.content,
+      kind: input.kind,
+      scope: input.scope,
+      workspaceId: this.workspace.id,
+      workspaceName: this.workspace.name,
+      by,
+      pinned: input.pin,
+      subject: input.subjectKey || null,
+      taskId: this.taskId,
+      tainted,
+      originText: input.userText,
+      origin: "agent_tool",
+    });
+    if (result.status === "skipped") {
+      if (result.reason === "private" || result.reason === "unavailable") return null;
+      const error =
+        result.reason === "busy"
+          ? "The memory repo is busy; try again in a moment."
+          : result.reason === "outranked"
+            ? `Not saved: it would replace what the user stated. ${result.detail ?? ""}`.trim()
+            : result.reason === "too_large"
+              ? `Not saved: ${result.detail ?? "the memory file is full"}`
+              : `Not saved (${result.reason}).`;
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool,
+        success: false,
+        error,
+        reason: result.reason,
+      });
+      return { success: false, error, reason: result.reason };
+    }
+    this.daemon.logEvent(this.taskId, "tool_result", {
+      tool,
+      success: true,
+      memoryId: result.ref,
+      action: result.action,
+      source: input.source,
+    });
+    return {
+      success: true,
+      id: result.ref,
+      action: result.action,
+      kind: input.kind,
+      scope: input.scope,
+      source: input.source,
+      file: result.path,
+      ...(result.path === "inbox.md"
+        ? {
+            note: "Saved to the unreviewed inbox: this task read untrusted content, so the memory is not used in prompts until the user reviews it.",
+          }
+        : {}),
+      ...(input.pin && result.path === "MEMORY.md" ? { pinned: true } : {}),
+      ...(input.pinRequested && !input.pin
+        ? { note: "Not pinned: pin only when the user asks to keep it in every prompt." }
+        : {}),
+      ...(result.replaced ? { replaced: result.replaced } : {}),
+      ...(result.redactions > 0 ? { redactions: result.redactions } : {}),
+    };
   }
 
   /**
@@ -827,6 +932,8 @@ export class MemoryTools {
       return fail("Provide the id of the memory (from memory_recall) or match text.");
 
     try {
+      const repoRef = parseMemoryRepoRef(id);
+      if (repoRef) return await this.forgetRepoEntry(repoRef.path, repoRef.line, input?.reason, fail, done);
       if (id) {
         const parsed = parseRecallRef(id);
         if (!parsed) return fail(`Unknown memory id "${id}".`);
@@ -904,6 +1011,10 @@ export class MemoryTools {
           candidates: candidates.slice(0, 5).map((hit) => ({ id: hit.ref, snippet: hit.snippet })),
         });
       }
+      const repoTarget = parseMemoryRepoRef(candidates[0].ref);
+      if (repoTarget) {
+        return await this.forgetRepoEntry(repoTarget.path, repoTarget.line, input?.reason, fail, done);
+      }
       const target = parseRecallRef(candidates[0].ref);
       if (target?.lane === "memory") {
         const item = await this.findForgettableItem(target.id);
@@ -930,13 +1041,40 @@ export class MemoryTools {
     }
   }
 
-  /** Memory items and own archive rows containing every term of `match`. */
+  /**
+   * Remove a line of the memory repo. A line this task's agent wrote is removed without
+   * asking; anything else takes the `memory_delete` approval.
+   */
+  private async forgetRepoEntry(
+    relPath: string,
+    line: number,
+    reason: unknown,
+    fail: (error: string, extra?: Record<string, unknown>) => Record<string, unknown>,
+    done: (ref: string) => Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const repo = MemoryRepoService.get();
+    if (!repo?.isWritable()) return fail("The memory repo is not available.");
+    const entry = await repo.entryAt(relPath, line);
+    const ref = memoryRepoRef(relPath, line);
+    if (!entry) return fail(`No saved memory at "${ref}". Recall it again to get its current id.`);
+    const target: ForgetTarget = {
+      ref,
+      content: entry.text,
+      source: entry.by === "user" ? "user" : "agent",
+      selfCreated: entry.by === "agent" && entry.metadata.source === taskSourceLink(this.taskId),
+    };
+    if (!(await this.confirmForget(target, reason))) return fail(FORGET_DENIED_ERROR, { denied: true });
+    const removed = await repo.forget(relPath, line, { expectHash: entry.hash, taskId: this.taskId });
+    return removed.removed ? done(ref) : fail(removed.error ?? `Could not forget "${ref}".`);
+  }
+
+  /** Memory items, memory repo entries and own archive rows containing every term of `match`. */
   private async forgetCandidates(match: string): Promise<MemoryRecallHit[]> {
     const result = await MemoryRecallService.getDefault().recall({
       text: match,
       workspaceId: this.workspace.id,
       taskId: this.taskId,
-      lanes: ["memory", "archive"],
+      lanes: ["memory", "repo", "archive"],
       minSource: "third_party",
       surface: "tool",
       detail: "full",

@@ -60,6 +60,17 @@ describe("resolveMemoryInjection matrix", () => {
     expect(decision.layers.sharedContext).toBe(!input.noMemory && retained && channelOk);
     // Project guidance is not memory.
     expect(decision.layers.projectGuidance).toBe(input.gatewayContext === "private");
+    // The memory folder is off unless its setting is on (not passed here).
+    expect(decision.layers.memoryRepo).toBe(false);
+    expect(
+      resolveMemoryInjection({ ...input, memoryRepoEnabled: true }).layers.memoryRepo,
+    ).toBe(
+      !input.noMemory &&
+        retained &&
+        !input.isSubAgent &&
+        input.gatewayContext === "private" &&
+        input.workspaceSettings?.privacyMode !== "disabled",
+    );
     if (!memoryOn) expect(decision.reasons.l0).toBeDefined();
   });
 });
@@ -92,6 +103,44 @@ describe("resolveMemoryInjection details", () => {
     expect(noRead.layers.l0).toBe(true);
     const noPack = resolveMemoryInjection({ contextPackInjectionEnabled: false });
     expect(noPack.layers.sharedContext || noPack.layers.workspaceKit).toBe(false);
+  });
+
+  it("gates the memory folder block (design §6.2)", () => {
+    const on = { memoryRepoEnabled: true } as const;
+    expect(resolveMemoryInjection(on).layers.memoryRepo).toBe(true);
+    expect(resolveMemoryInjection({}).reasons.memoryRepo).toBe("memory_off");
+    expect(resolveMemoryInjection({ ...on, noMemory: true }).reasons.memoryRepo).toBe(
+      "no_memory_directive",
+    );
+    // Never in group/public channels, even with trusted shared context.
+    const trustedGroup = resolveMemoryInjection({
+      ...on,
+      gatewayContext: "group",
+      allowSharedContextMemory: true,
+    });
+    expect(trustedGroup.layers.l0).toBe(true);
+    expect(trustedGroup.layers.memoryRepo).toBe(false);
+    expect(trustedGroup.reasons.memoryRepo).toBe("group_channel");
+    // Never a sub-agent, even with retainMemory, never a verifier.
+    expect(
+      resolveMemoryInjection({ ...on, isSubAgent: true, retainMemory: true }).layers.memoryRepo,
+    ).toBe(false);
+    expect(
+      resolveMemoryInjection({ ...on, retainMemory: true, workerRole: "verifier" }).layers
+        .memoryRepo,
+    ).toBe(false);
+    expect(resolveMemoryInjection({ ...on, retainMemory: false }).layers.memoryRepo).toBe(false);
+    expect(
+      resolveMemoryInjection({ ...on, workspaceSettings: { enabled: false } }).reasons.memoryRepo,
+    ).toBe("memory_off");
+    // The repo is outside the workspace: no read access or context pack needed.
+    expect(
+      resolveMemoryInjection({
+        ...on,
+        workspaceCanRead: false,
+        contextPackInjectionEnabled: false,
+      }).layers.memoryRepo,
+    ).toBe(true);
   });
 
   it("reports curated items as disallowed when curated memory is off", () => {

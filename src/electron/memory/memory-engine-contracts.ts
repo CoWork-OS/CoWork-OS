@@ -10,8 +10,17 @@ import type {
   MemoryItemSource,
 } from "./memory-items-types";
 
-/** Lanes recall can fuse; `memory` is memory_items, the others are existing stores. */
-export type MemoryRecallLane = "memory" | "archive" | "conversations" | "knowledge" | "external";
+/**
+ * Lanes recall can fuse; `memory` is memory_items, `repo` the memory repo's markdown entries
+ * (docs/memory-repo-phase1-design.md §6.3), the others are existing stores.
+ */
+export type MemoryRecallLane =
+  | "memory"
+  | "repo"
+  | "archive"
+  | "conversations"
+  | "knowledge"
+  | "external";
 
 /** Where a request comes from; drives privacy and channel rules in the injection policy. */
 export type MemorySurface =

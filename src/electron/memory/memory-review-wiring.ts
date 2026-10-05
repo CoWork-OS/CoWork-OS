@@ -14,6 +14,7 @@ import { MemoryReviewService } from "./MemoryReviewService";
 import { MemoryWriter } from "./MemoryWriter";
 import { SupermemoryService } from "./SupermemoryService";
 import { createMemoryStatementPort } from "./memory-statement-port";
+import { memoryRepoStatus } from "./repo/memory-repo-bootstrap";
 
 /** Dreaming over the profile database, reading the curator settings from Memory features. */
 export function createDreamingService(
@@ -70,5 +71,6 @@ export function createMemoryHealthService(db: Database.Database): MemoryHealthSe
       return { enabled: status.enabled, connected: status.isConfigured };
     },
     getChronicleEnabled: () => ChronicleSettingsManager.loadSettings().enabled === true,
+    getMemoryRepoStatus: () => memoryRepoStatus(),
   });
 }

@@ -164,6 +164,7 @@ import { BoxBrainService } from "./memory/BoxBrainService";
 import { MemoryRetentionService } from "./memory/MemoryRetentionService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
 import { startMemoryEngine } from "./memory/memory-engine-bootstrap";
+import { startMemoryRepo, stopMemoryRepo } from "./memory/repo/memory-repo-bootstrap";
 import { MemoryWriter } from "./memory/MemoryWriter";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
 import { DreamingRepository } from "./memory/DreamingRepository";
@@ -1975,8 +1976,11 @@ if (isMacSafeStorageMigrationWorker) {
       await normalizeTemplatedRoleCoreBoundary();
       await ensureCoreAutomationProfiles();
       await ensureCoreBotTeams();
+      // Shared with the memory repo startup below (workspace paths and names).
+      let hostWorkspaceRepository: WorkspaceRepository | null = null;
       try {
         const db = dbManager.getDatabase();
+        hostWorkspaceRepository = new WorkspaceRepository(db);
         const automationProfileRepo = new AutomationProfileRepository(db);
         const coreTraceRepo = new CoreTraceRepository(db);
         const coreMemoryCandidateRepo = new CoreMemoryCandidateRepository(db);
@@ -2001,7 +2005,7 @@ if (isMacSafeStorageMigrationWorker) {
           coreMemoryDistillRunRepo,
           coreMemoryScopeStateRepo,
           automationProfileRepo,
-          new WorkspaceRepository(db),
+          hostWorkspaceRepository,
           coreMemoryScopeResolver,
         );
         coreFailureMiningService = new CoreFailureMiningService(
@@ -2138,6 +2142,18 @@ if (isMacSafeStorageMigrationWorker) {
             getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
           });
         }
+        // Memory repo (docs/memory-repo-phase1-design.md): off unless enabled in settings;
+        // stopped by the "memory repo" shutdown step.
+        const memoryRepoWorkspaces = hostWorkspaceRepository;
+        void startMemoryRepo({
+          runtime: "desktop",
+          readOnly: startupQuietMode,
+          getWorkspacePolicy: (workspaceId) => MemoryService.getSettings(workspaceId),
+          listWorkspacePaths: async () =>
+            memoryRepoWorkspaces ? (await memoryRepoWorkspaces.findAll()).map((w) => w.path) : [],
+          workspaceName: async (id) =>
+            memoryRepoWorkspaces ? ((await memoryRepoWorkspaces.findById(id))?.name ?? null) : null,
+        });
 
         // Initialize FTS worker thread for off-main-thread memory search
         const { FtsWorkerClient } = await import("./database/FtsWorkerClient");
@@ -4661,6 +4677,12 @@ if (isMacSafeStorageMigrationWorker) {
             await kitWriterOwnership?.stop();
             kitWriterOwnership = null;
           },
+        },
+        // Finish the memory repo write in progress (bounded) and stop its writer.
+        {
+          name: "memory repo",
+          requiresQuiescence: true,
+          run: () => stopMemoryRepo(),
         },
         {
           name: "MCP servers",

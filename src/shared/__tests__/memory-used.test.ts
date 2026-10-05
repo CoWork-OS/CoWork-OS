@@ -74,6 +74,37 @@ describe("memory used attribution", () => {
       memory: 2,
       archive: 0,
       external: 1,
+      repo: 0,
+    });
+  });
+
+  it("parses memory folder refs into the repo lane", () => {
+    expect(parseMemoryUsedRef("repo:workspaces/billing-service.md#L4")).toEqual({
+      ref: "repo:workspaces/billing-service.md#L4",
+      lane: "repo",
+      id: "workspaces/billing-service.md#L4",
+    });
+    expect(parseMemoryUsedRef("repo:MEMORY.md#L0")).toBeNull();
+    expect(parseMemoryUsedRef("repo:MEMORY.md")).toBeNull();
+    expect(parseMemoryUsedRef("repo:notes.txt#L1")).toBeNull();
+    expect(
+      countMemoryUsedRefs(["repo:MEMORY.md#L3", "repo:me.md#L5", "memory:a", "repo:x#L1"]),
+    ).toEqual({ memory: 1, archive: 0, external: 0, repo: 2 });
+  });
+
+  it("attributes repo refs to the reply that follows", () => {
+    const result = attributeMemoryUse("t", [
+      {
+        type: "memory_used",
+        timestamp: 1,
+        payload: { surface: "memory_repo", refs: ["repo:MEMORY.md#L3", "repo:MEMORY.md#L3"] },
+      },
+      { id: "r", type: "assistant_message", timestamp: 2 },
+    ]);
+    expect(result.replies.r).toEqual({
+      eventId: "r",
+      refs: ["repo:MEMORY.md#L3"],
+      surfaces: ["memory_repo"],
     });
   });
 });

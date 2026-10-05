@@ -25,6 +25,8 @@ import { containsNoMemoryDirective, taskDisablesMemoryCapture } from "./no-memor
  * - `sharedContext`: the pinned `.cowork` PRIORITIES / CROSS_SIGNALS / MISTAKES block.
  * - `workspaceKit`: the `.cowork` kit slice of the memory section (USER.md, MEMORY.md, …).
  * - `projectGuidance`: repo-root AGENTS.md / CLAUDE.md and docs maps.
+ * - `memoryRepo`: the `<cowork_memory_repo>` block (the user's memory folder: MEMORY.md and the
+ *   workspace's file; docs/memory-repo-phase1-design.md §6.2).
  */
 export type MemoryLayer =
   | "l0"
@@ -32,7 +34,8 @@ export type MemoryLayer =
   | "external"
   | "sharedContext"
   | "workspaceKit"
-  | "projectGuidance";
+  | "projectGuidance"
+  | "memoryRepo";
 
 export const MEMORY_LAYERS: readonly MemoryLayer[] = [
   "l0",
@@ -41,6 +44,7 @@ export const MEMORY_LAYERS: readonly MemoryLayer[] = [
   "sharedContext",
   "workspaceKit",
   "projectGuidance",
+  "memoryRepo",
 ];
 
 export type MemoryPrivacyMode = "normal" | "strict" | "disabled";
@@ -67,6 +71,8 @@ export interface MemoryInjectionPolicyInput {
   workspaceCanRead?: boolean;
   /** The workspace may reach the network without approval (external providers). */
   externalNetworkAllowed?: boolean;
+  /** The memory folder setting (`memoryRepoEnabled`) is on and the repo service is ready. */
+  memoryRepoEnabled?: boolean;
 }
 
 export interface MemoryLayerDecision {
@@ -90,6 +96,7 @@ function allOff(): Record<MemoryLayer, boolean> {
     sharedContext: false,
     workspaceKit: false,
     projectGuidance: false,
+    memoryRepo: false,
   };
 }
 
@@ -148,6 +155,16 @@ export function resolveMemoryInjection(input: MemoryInjectionPolicyInput): Memor
   if (!contextPack || !canRead) deny("projectGuidance", "read_only_denied");
   else if (!isPrivateGateway) deny("projectGuidance", "group_channel");
   else layers.projectGuidance = true;
+
+  // The memory folder is personal and spans workspaces: private gateway only (never group or
+  // public, even with trusted shared context), never a sub-agent or verifier, and off with the
+  // workspace memory switch. It lives outside the workspace, so read access does not matter.
+  if (input.noMemory) deny("memoryRepo", "no_memory_directive");
+  else if (input.memoryRepoEnabled !== true) deny("memoryRepo", "memory_off");
+  else if (!retainMemory || input.isSubAgent || isVerifier) deny("memoryRepo", "scope_mismatch");
+  else if (!isPrivateGateway) deny("memoryRepo", "group_channel");
+  else if (memoryOff) deny("memoryRepo", "memory_off");
+  else layers.memoryRepo = true;
 
   const memory = layers.l0 || layers.l1 || layers.external;
   return {

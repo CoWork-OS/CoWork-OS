@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Memory folder (beta)**: turn on **Settings > Memory > Memory folder** to keep what CoWork learns about you and your workspaces as plain markdown notes in a local git repo (`~/CoWork Memory` by default), in the open [Agent Memory Repo](https://github.com/AgentMemoryRepo/agentmemoryrepo) format. The agent reads the folder and saves to it as it works (each change is a commit you can inspect); you can open and edit the notes in any editor. What the agent saves after reading web pages, email or other untrusted content goes to an unreviewed `inbox.md` that is never put in prompts. **Compact history** removes old versions so deleted memories are really gone. Off by default. See [Memory Repo design](docs/memory-repo-phase1-design.md).
+
 - **Memory Hub Sources and Health tabs**: **Sources** shows where CoWork's memory comes from (you, the agent, Dreaming, imports, other people, Chronicle, Supermemory, the knowledge graph) and opens the matching facts; **Health** runs the memory health checks with PASS/WARN results and a Refresh button.
 - **AI memory compression is on by default**: long memories get a one-line summary from your configured model and related ones are grouped into digests. It costs tokens: up to 20,000 a day across all workspaces (adjustable in **Settings > Memory**). Turn it off per workspace with **AI memory compression**. Private memories are never sent.
 - **Wider Mission Control recall**: recall also searches your memory items and, when connected and network access is on, Supermemory; older tasks and activity are found too.

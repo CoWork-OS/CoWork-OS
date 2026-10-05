@@ -1,0 +1,847 @@
+/**
+ * MemoryRepoService — the only writer of the memory repo (docs/memory-repo-phase1-design.md).
+ *
+ * The repo is a local git repository of markdown files in the Agent Memory Repo format,
+ * outside every workspace. The agent never writes its files or runs git on it: every change
+ * goes through `remember` / `forget` / the purge helpers here, which
+ *   1. screen the text (salience, secret redaction: `screenMemoryText`, shared with
+ *      MemoryWriter) and apply `<no-memory>` and the workspace memory settings;
+ *   2. pick the file (§5.1: `me.md`, `lessons.md`, `workspaces/<slug>.md`, `MEMORY.md` for
+ *      pinned statements of the user, `inbox.md` for agent writes from tainted tasks);
+ *   3. dedupe by normalized text, replace by subject (an agent never replaces a user line);
+ *   4. take the cross-process lock, commit any hand edits, write the file atomically
+ *      (no symlinks under the root) and commit with hardened git (memory-repo-git.ts).
+ *
+ * Without git the files are still written, but nothing is committed.
+ */
+import { createHash } from "node:crypto";
+import fsSync from "node:fs";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import type { MemoryRepoStatusReport } from "../../../shared/memory-repo-types";
+import { createLogger } from "../../utils/logger";
+import {
+  screenMemoryText,
+  workspaceMemoryPolicyDecision,
+  type MemoryWorkspacePolicy,
+} from "../MemoryWriter";
+import type { MemoryItemKind } from "../memory-items-types";
+import { containsNoMemoryDirective } from "../no-memory-directive";
+import {
+  MEMORY_REPO_ENTRY_FILE,
+  MEMORY_REPO_INBOX_FILE,
+  MEMORY_REPO_LESSONS_FILE,
+  MEMORY_REPO_LIMITS,
+  MEMORY_REPO_ME_FILE,
+  MEMORY_REPO_WORKSPACES_DIR,
+  ensureIndexLink,
+  initialEntryFile,
+  initialTopicFile,
+  insertEntryLine,
+  isSafeRepoPath,
+  isoDay,
+  memoryRepoRef,
+  parseMemoryRepoEntries,
+  parseMemoryRepoLine,
+  renderMemoryRepoEntry,
+  replaceLine,
+  splitLines,
+  workspaceSlug,
+  type MemoryRepoAuthor,
+  type MemoryRepoEntry,
+  type MemoryRepoMetadata,
+} from "./memory-repo-format";
+import {
+  isGitAvailable,
+  parsePorcelainZ,
+  runMemoryRepoGit,
+  type GitRunner,
+} from "./memory-repo-git";
+import { MemoryRepoBusyError, withMemoryRepoLock } from "./memory-repo-lock";
+
+const logger = createLogger("MemoryRepo");
+
+/** Files editors and Finder leave next to notes; never part of memory. */
+const MEMORY_REPO_GITIGNORE = [".DS_Store", "Thumbs.db", "*.tmp", "*.swp", "*~", ".obsidian/", ".vscode/", ".idea/", ""].join("\n");
+
+/** Kinds that describe the user; global ones go to `me.md`. */
+const ABOUT_USER_KINDS: ReadonlySet<MemoryItemKind> = new Set([
+  "identity",
+  "preference",
+  "correction",
+]);
+
+export type MemoryRepoOrigin = "agent_tool" | "memory_hub" | "export" | "hand_edit";
+
+export interface MemoryRepoRememberInput {
+  text: string;
+  kind: MemoryItemKind;
+  scope: "global" | "workspace";
+  workspaceId?: string | null;
+  workspaceName?: string | null;
+  by: MemoryRepoAuthor;
+  /** Keep it in every prompt: honoured only for the user's own statements. */
+  pinned?: boolean;
+  subject?: string | null;
+  taskId?: string | null;
+  /** The task read untrusted content: an agent write goes to `inbox.md`. */
+  tainted?: boolean;
+  /** Checked for `<no-memory>`. */
+  originText?: string | null;
+  noMemory?: boolean;
+  origin: MemoryRepoOrigin;
+  /** Day the fact was learned (export keeps the original date). */
+  addedAt?: number;
+  /** Skip the workspace memory settings (an explicit user act, an export). */
+  skipWorkspacePolicy?: boolean;
+}
+
+export type MemoryRepoSkipReason =
+  | "empty"
+  | "low_salience"
+  | "secret_only"
+  | "no_memory"
+  | "memory_disabled"
+  | "private"
+  | "outranked"
+  | "too_large"
+  | "unavailable"
+  | "busy"
+  | "dirty";
+
+export type MemoryRepoWriteResult =
+  | {
+      status: "written";
+      action: "inserted" | "replaced" | "reinforced";
+      ref: string;
+      path: string;
+      line: number;
+      redactions: number;
+      replaced?: string;
+    }
+  | { status: "skipped"; reason: MemoryRepoSkipReason; ref?: string; detail?: string };
+
+/** The service status; the renderer sees it with the setting (`MemoryRepoStatusReport`). */
+export type MemoryRepoStatus = Omit<MemoryRepoStatusReport, "enabled">;
+
+export interface MemoryRepoChange {
+  paths: string[];
+  version: string;
+}
+
+export interface MemoryRepoServiceDeps {
+  root: string;
+  runtime: "desktop" | "node" | "cli";
+  /** No writes at all (CLI, quiet mode). */
+  readOnly?: boolean;
+  git?: GitRunner;
+  now?: () => number;
+  /** Workspace memory settings; null means "no settings" (allowed). */
+  getWorkspacePolicy?: (workspaceId: string) => Promise<MemoryWorkspacePolicy | null>;
+  /** The user's preferred name for the MEMORY.md title. */
+  ownerName?: () => string | null | undefined;
+  lockTimeoutMs?: number;
+}
+
+type ChangeListener = (change: MemoryRepoChange) => void;
+
+/** Lowest-level error for a write that touched nothing. */
+class SkipWrite extends Error {
+  constructor(
+    readonly reason: MemoryRepoSkipReason,
+    readonly detail?: string,
+  ) {
+    super(reason);
+  }
+}
+
+export class MemoryRepoService {
+  private static instance: MemoryRepoService | null = null;
+
+  static get(): MemoryRepoService | null {
+    return this.instance;
+  }
+
+  static setInstance(service: MemoryRepoService | null): void {
+    this.instance = service;
+  }
+
+  readonly root: string;
+  private readonly git: GitRunner;
+  private readonly now: () => number;
+  private readonly listeners = new Set<ChangeListener>();
+  private ready = false;
+  private problem: string | undefined;
+  private hasGit = false;
+  private writeCount = 0;
+  private head: string | null = null;
+  private lastWriteError: string | null = null;
+  private chain: Promise<unknown> = Promise.resolve();
+  private stopped = false;
+  private workspaceFiles: Map<string, string> | null = null;
+
+  constructor(private readonly deps: MemoryRepoServiceDeps) {
+    this.root = path.resolve(deps.root);
+    this.git = deps.git ?? runMemoryRepoGit;
+    this.now = deps.now ?? Date.now;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
+
+  /** Create the repo when the path is missing or empty, adopt an existing memory repo. */
+  async start(): Promise<MemoryRepoStatus> {
+    this.hasGit = await isGitAvailable(this.git);
+    try {
+      await this.openOrCreate();
+      this.ready = true;
+      this.problem = undefined;
+    } catch (error) {
+      this.ready = false;
+      this.problem = error instanceof Error ? error.message : String(error);
+      logger.warn(`Memory repo unavailable at ${this.root}: ${this.problem}`);
+    }
+    return this.status();
+  }
+
+  /** Wait (bounded) for the write in progress; no new writes after this. */
+  async stop(timeoutMs = 3_000): Promise<void> {
+    this.stopped = true;
+    await Promise.race([
+      this.chain.catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  }
+
+  isReady(): boolean {
+    return this.ready;
+  }
+
+  isWritable(): boolean {
+    return this.ready && !this.deps.readOnly && !this.stopped;
+  }
+
+  /** Changes on every write (HEAD when git is available), for prompt-block caches. */
+  version(): string {
+    return `${this.head ?? "nogit"}:${this.writeCount}`;
+  }
+
+  onChange(listener: ChangeListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  async status(): Promise<MemoryRepoStatus> {
+    const base: MemoryRepoStatus = {
+      root: this.root,
+      ready: this.ready,
+      writable: this.isWritable(),
+      gitAvailable: this.hasGit,
+      ...(this.problem ? { problem: this.problem } : {}),
+      lastWriteError: this.lastWriteError,
+    };
+    if (!this.ready) return base;
+    const entryFile = await this.readFile(MEMORY_REPO_ENTRY_FILE);
+    const inbox = await this.readFile(MEMORY_REPO_INBOX_FILE);
+    let clean: boolean | undefined;
+    let head: string | null = null;
+    let lastCommitAt: number | null = null;
+    if (this.hasGit) {
+      try {
+        clean = parsePorcelainZ(await this.runGit(["status", "--porcelain=v1", "-z"])).length === 0;
+        const log = (await this.runGit(["log", "-1", "--format=%H %ct"])).trim();
+        if (log) {
+          const [sha, seconds] = log.split(" ");
+          head = sha;
+          lastCommitAt = Number(seconds) * 1000;
+        }
+      } catch {
+        // An empty repo has no log; status failures surface as `clean: undefined`.
+      }
+    }
+    return {
+      ...base,
+      clean,
+      head,
+      lastCommitAt,
+      entryFileBytes: Buffer.byteLength(entryFile ?? "", "utf8"),
+      inboxEntries: parseMemoryRepoEntries(inbox ?? "").length,
+    };
+  }
+
+  private async openOrCreate(): Promise<void> {
+    const stat = await fs.lstat(this.root).catch(() => null);
+    if (stat?.isSymbolicLink()) throw new Error("the memory folder is a symbolic link");
+    if (stat && !stat.isDirectory()) throw new Error("the memory path is not a folder");
+    const empty = !stat || (await fs.readdir(this.root)).length === 0;
+    if (empty) {
+      if (this.deps.readOnly) throw new Error("the memory folder does not exist yet");
+      await this.create();
+      return;
+    }
+    const hasEntryFile = await this.readFile(MEMORY_REPO_ENTRY_FILE).then((text) => text !== null);
+    if (!hasEntryFile) throw new Error("the folder is not a memory repo (no MEMORY.md)");
+    if (this.hasGit) {
+      const top = await this.runGit(["rev-parse", "--show-toplevel"]).catch(() => "");
+      const realRoot = await fs.realpath(this.root);
+      const realTop = top.trim() ? await fs.realpath(top.trim()).catch(() => "") : "";
+      if (!realTop) {
+        // A folder of memory files without git: start its history.
+        if (!this.deps.readOnly) await this.initGit("Start memory history");
+      } else if (realTop !== realRoot) {
+        throw new Error("the memory folder is inside another git repository");
+      } else {
+        this.head = (await this.runGit(["rev-parse", "HEAD"]).catch(() => "")).trim() || null;
+      }
+    }
+  }
+
+  private async create(): Promise<void> {
+    await fs.mkdir(this.root, { recursive: true });
+    await this.writeFileAtomic(MEMORY_REPO_ENTRY_FILE, initialEntryFile(this.deps.ownerName?.()));
+    await this.writeFileAtomic(MEMORY_REPO_ME_FILE, initialTopicFile("About me"));
+    await this.writeFileAtomic(MEMORY_REPO_LESSONS_FILE, initialTopicFile("Lessons"));
+    await fs.writeFile(path.join(this.root, ".gitignore"), MEMORY_REPO_GITIGNORE, { mode: 0o600 });
+    if (this.hasGit) await this.initGit("Create memory repo");
+  }
+
+  private async initGit(message: string): Promise<void> {
+    await this.runGit(["init", "-q"]);
+    await this.runGit(["symbolic-ref", "HEAD", "refs/heads/main"]).catch(() => undefined);
+    const files = (await this.listFiles()).filter((file) => isSafeRepoPath(file));
+    if (fsSync.existsSync(path.join(this.root, ".gitignore"))) files.push(".gitignore");
+    if (files.length > 0) await this.runGit(["add", "--", ...files]);
+    await this.commit(message, { origin: "hand_edit" }, true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reads
+  // ---------------------------------------------------------------------------
+
+  /** A repo file's text, or null when missing, unsafe or a symlink. */
+  async readFile(relPath: string): Promise<string | null> {
+    if (!isSafeRepoPath(relPath)) return null;
+    const absolute = path.join(this.root, relPath);
+    try {
+      if (await this.hasSymlinkUnderRoot(absolute, true)) return null;
+      const stat = await fs.stat(absolute);
+      if (!stat.isFile() || stat.size > MEMORY_REPO_LIMITS.fileBytes * 4) return null;
+      return await fs.readFile(absolute, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  /** Root-relative markdown paths, `.git` and hidden entries skipped, at most the file limit. */
+  async listFiles(): Promise<string[]> {
+    const out: string[] = [];
+    const walk = async (dir: string, rel: string): Promise<void> => {
+      if (out.length >= MEMORY_REPO_LIMITS.files) return;
+      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (entry.name.startsWith(".")) continue;
+        const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) await walk(path.join(dir, entry.name), childRel);
+        else if (entry.isFile() && /\.md$/i.test(entry.name)) out.push(childRel);
+        if (out.length >= MEMORY_REPO_LIMITS.files) return;
+      }
+    };
+    await walk(this.root, "");
+    return out.sort();
+  }
+
+  async entries(relPath: string): Promise<MemoryRepoEntry[]> {
+    return parseMemoryRepoEntries((await this.readFile(relPath)) ?? "");
+  }
+
+  /** The workspace's file (`workspaces/<slug>.md`), if one names this workspace id. */
+  async workspaceFile(workspaceId: string): Promise<string | null> {
+    if (!workspaceId) return null;
+    const map = await this.workspaceFileMap();
+    return map.get(workspaceId) ?? null;
+  }
+
+  private async workspaceFileMap(): Promise<Map<string, string>> {
+    if (this.workspaceFiles) return this.workspaceFiles;
+    const map = new Map<string, string>();
+    for (const file of await this.listFiles()) {
+      if (!file.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) continue;
+      for (const entry of await this.entries(file)) {
+        const id = entry.metadata.workspace;
+        if (id && !map.has(id)) map.set(id, file);
+      }
+    }
+    this.workspaceFiles = map;
+    return map;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Writes
+  // ---------------------------------------------------------------------------
+
+  async remember(input: MemoryRepoRememberInput): Promise<MemoryRepoWriteResult> {
+    if (!this.isWritable()) return { status: "skipped", reason: "unavailable" };
+    const screened = screenMemoryText(input.text, MEMORY_REPO_LIMITS.entryChars);
+    if (!screened.ok) return { status: "skipped", reason: screened.reason };
+    if (input.noMemory || containsNoMemoryDirective(input.originText)) {
+      return { status: "skipped", reason: "no_memory" };
+    }
+    if (!input.skipWorkspacePolicy && input.workspaceId && this.deps.getWorkspacePolicy) {
+      let policy: MemoryWorkspacePolicy | null = null;
+      try {
+        policy = await this.deps.getWorkspacePolicy(input.workspaceId);
+      } catch {
+        policy = null;
+      }
+      const decision = workspaceMemoryPolicyDecision(
+        policy,
+        input.by === "user" ? "user_stated" : "inferred",
+      );
+      if (!decision.allowed) return { status: "skipped", reason: "memory_disabled" };
+      // Strict privacy keeps memory private; the repo only holds what may be in a prompt.
+      if (decision.private) return { status: "skipped", reason: "private" };
+    }
+    if (input.scope === "workspace" && !input.workspaceId) {
+      return { status: "skipped", reason: "unavailable", detail: "workspace scope needs a workspace" };
+    }
+    return this.serialized(() => this.writeEntry(input, screened.content, screened.redactions));
+  }
+
+  /** Remove the entry at `repo:<path>#L<n>`. `expectHash` guards against shifted lines. */
+  async forget(
+    relPath: string,
+    line: number,
+    options: { expectHash?: string; reason?: string; taskId?: string | null } = {},
+  ): Promise<{ removed: MemoryRepoEntry | null; error?: string }> {
+    if (!this.isWritable()) return { removed: null, error: "The memory repo is not available." };
+    if (!isSafeRepoPath(relPath)) return { removed: null, error: "Not a memory repo file." };
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          const text = await this.readFile(relPath);
+          if (text === null) return { removed: null, error: "No such memory file." };
+          const entry = parseMemoryRepoLine(splitLines(text)[line - 1] ?? "", line);
+          if (!entry) return { removed: null, error: "That line is not a saved memory." };
+          if (options.expectHash && entry.hash !== options.expectHash) {
+            return { removed: null, error: "The memory file changed; recall the memory again." };
+          }
+          await this.writeFileAtomic(relPath, replaceLine(text, line, null));
+          await this.commitPaths([relPath], `Forget: ${preview(entry.text)}`, {
+            origin: "agent_tool",
+            taskId: options.taskId ?? null,
+          });
+          return { removed: entry };
+        }),
+      );
+    } catch (error) {
+      return { removed: null, error: this.describeError(error) };
+    }
+  }
+
+  /** The entry at a line, for approval prompts and attribution. */
+  async entryAt(relPath: string, line: number): Promise<MemoryRepoEntry | null> {
+    const text = await this.readFile(relPath);
+    if (text === null) return null;
+    return parseMemoryRepoLine(splitLines(text)[line - 1] ?? "", line);
+  }
+
+  /**
+   * Remove agent lines learned in a task (task delete with `purgeDerivedMemory`). The
+   * history keeps them until the user compacts it.
+   */
+  async purgeTask(taskId: string): Promise<number> {
+    if (!this.isWritable() || !taskId) return 0;
+    const source = taskSourceLink(taskId);
+    return this.removeMatching(
+      (entry) => entry.by === "agent" && entry.metadata.source === source,
+      `Forget what task ${taskId.slice(0, 8)} learned`,
+    );
+  }
+
+  /** Delete a workspace's file and its index link, then compact (Clear All Memories). */
+  async clearWorkspace(workspaceId: string): Promise<boolean> {
+    if (!this.isWritable()) return false;
+    const file = await this.workspaceFile(workspaceId);
+    if (!file) return false;
+    await this.serialized(() =>
+      this.locked(async () => {
+        await this.commitHandEdits();
+        await fs.rm(path.join(this.root, file), { force: true });
+        const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? "";
+        const linkLine = splitLines(entryFile).findIndex(
+          (row) => row.trim() === `- [[${file.replace(/\.md$/i, "")}]]`,
+        );
+        const changed = [file];
+        if (linkLine >= 0) {
+          await this.writeFileAtomic(MEMORY_REPO_ENTRY_FILE, replaceLine(entryFile, linkLine + 1, null));
+          changed.push(MEMORY_REPO_ENTRY_FILE);
+        }
+        this.workspaceFiles = null;
+        await this.commitPaths(changed, "Clear workspace memory", { origin: "memory_hub" });
+      }),
+    );
+    await this.compactHistory();
+    return true;
+  }
+
+  /** Empty the user's global files (Clear global memories), then compact. */
+  async clearGlobal(): Promise<void> {
+    if (!this.isWritable()) return;
+    await this.removeMatching(() => true, "Clear global memories", [
+      MEMORY_REPO_ENTRY_FILE,
+      MEMORY_REPO_ME_FILE,
+      MEMORY_REPO_LESSONS_FILE,
+      MEMORY_REPO_INBOX_FILE,
+    ]);
+    await this.compactHistory();
+  }
+
+  /**
+   * Replace the history with one commit of the current files, so removed lines are really
+   * gone (§7.2). This departs from the spec skill's "never rewrite history" on purpose; the
+   * repo has no remote in Phase 1.
+   */
+  async compactHistory(): Promise<{ compacted: boolean; error?: string }> {
+    if (!this.isWritable()) return { compacted: false, error: "The memory repo is not available." };
+    if (!this.hasGit) return { compacted: false, error: "git is not available." };
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          const temp = `compact-${this.now().toString(36)}`;
+          await this.runGit(["checkout", "-q", "--orphan", temp]);
+          await this.commit("Compact memory history", { origin: "memory_hub" }, true);
+          await this.runGit(["branch", "-D", "main"]).catch(() => undefined);
+          await this.runGit(["branch", "-m", "main"]);
+          await this.runGit(["reflog", "expire", "--expire=now", "--all"]);
+          await this.runGit(["gc", "-q", "--prune=now"]);
+          this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
+          this.notify([]);
+          return { compacted: true };
+        }),
+      );
+    } catch (error) {
+      return { compacted: false, error: this.describeError(error) };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internals
+  // ---------------------------------------------------------------------------
+
+  private async writeEntry(
+    input: MemoryRepoRememberInput,
+    content: string,
+    redactions: number,
+  ): Promise<MemoryRepoWriteResult> {
+    try {
+      return await this.locked(async () => {
+        const target = await this.chooseFile(input);
+        const created = (await this.readFile(target.path)) === null;
+        let text = created ? target.initial : ((await this.readFile(target.path)) ?? "");
+        const entries = parseMemoryRepoEntries(text);
+        const hash = parseMemoryRepoLine(`- ${content}`, 1)?.hash;
+        const same = entries.find((entry) => entry.hash === hash);
+        if (same) {
+          return {
+            status: "written",
+            action: "reinforced",
+            ref: memoryRepoRef(target.path, same.line),
+            path: target.path,
+            line: same.line,
+            redactions,
+          } as const;
+        }
+        const metadata: MemoryRepoMetadata = {
+          by: input.by,
+          kind: input.kind,
+          ...(input.subject ? { subject: input.subject } : {}),
+          ...(input.taskId ? { source: taskSourceLink(input.taskId) } : {}),
+          added: isoDay(input.addedAt ?? this.now()),
+        };
+        const line = renderMemoryRepoEntry(content, metadata);
+        const holder = input.subject
+          ? entries.find((entry) => entry.subject && entry.subject === normalizeSubject(input.subject))
+          : undefined;
+        let action: "inserted" | "replaced" = "inserted";
+        let lineNumber: number;
+        if (holder) {
+          if (holder.by === "user" && input.by === "agent") {
+            throw new SkipWrite("outranked", `The user stated "${preview(holder.text)}".`);
+          }
+          text = replaceLine(text, holder.line, line);
+          action = "replaced";
+          lineNumber = holder.line;
+        } else {
+          text = insertEntryLine(text, line, target.path === MEMORY_REPO_ENTRY_FILE);
+          lineNumber = splitLines(text).findIndex((row) => row === line) + 1;
+        }
+        const limit =
+          target.path === MEMORY_REPO_ENTRY_FILE
+            ? MEMORY_REPO_LIMITS.entryFileBytes
+            : MEMORY_REPO_LIMITS.fileBytes;
+        if (Buffer.byteLength(text, "utf8") > limit) {
+          throw new SkipWrite("too_large", `${target.path} is full; consolidate it first.`);
+        }
+        await this.commitHandEdits();
+        const changed = [target.path];
+        await this.writeFileAtomic(target.path, text);
+        // The inbox is unreviewed: never linked, so following the index never reaches it.
+        if (created && target.path !== MEMORY_REPO_ENTRY_FILE && target.path !== MEMORY_REPO_INBOX_FILE) {
+          const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? initialEntryFile();
+          const linked = ensureIndexLink(entryFile, target.path);
+          if (linked !== entryFile) {
+            await this.writeFileAtomic(MEMORY_REPO_ENTRY_FILE, linked);
+            changed.push(MEMORY_REPO_ENTRY_FILE);
+          }
+        }
+        if (target.path.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) this.workspaceFiles = null;
+        await this.commitPaths(
+          changed,
+          `${action === "replaced" ? "Update" : "Remember"} ${input.kind}: ${preview(content)}`,
+          { origin: input.origin, taskId: input.taskId ?? null },
+        );
+        return {
+          status: "written",
+          action,
+          ref: memoryRepoRef(target.path, lineNumber),
+          path: target.path,
+          line: lineNumber,
+          redactions,
+          ...(holder ? { replaced: holder.text } : {}),
+        } as const;
+      });
+    } catch (error) {
+      if (error instanceof SkipWrite) {
+        return { status: "skipped", reason: error.reason, ...(error.detail ? { detail: error.detail } : {}) };
+      }
+      if (error instanceof MemoryRepoBusyError) return { status: "skipped", reason: "busy" };
+      this.lastWriteError = this.describeError(error);
+      logger.warn("Memory repo write failed:", error);
+      return { status: "skipped", reason: "unavailable", detail: this.lastWriteError };
+    }
+  }
+
+  private async chooseFile(
+    input: MemoryRepoRememberInput,
+  ): Promise<{ path: string; initial: string }> {
+    if (input.by === "agent" && input.tainted) {
+      return {
+        path: MEMORY_REPO_INBOX_FILE,
+        initial: initialTopicFile("Inbox (unreviewed: saved by the agent after reading untrusted content)"),
+      };
+    }
+    if (input.by === "user" && input.pinned) {
+      const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? "";
+      if (Buffer.byteLength(entryFile, "utf8") < MEMORY_REPO_LIMITS.entryFileBytes - MEMORY_REPO_LIMITS.entryChars * 2) {
+        return { path: MEMORY_REPO_ENTRY_FILE, initial: initialEntryFile(this.deps.ownerName?.()) };
+      }
+    }
+    if (input.scope === "global") {
+      return ABOUT_USER_KINDS.has(input.kind)
+        ? { path: MEMORY_REPO_ME_FILE, initial: initialTopicFile("About me") }
+        : { path: MEMORY_REPO_LESSONS_FILE, initial: initialTopicFile("Lessons") };
+    }
+    const workspaceId = String(input.workspaceId);
+    const existing = await this.workspaceFile(workspaceId);
+    const name = input.workspaceName?.trim() || "Workspace";
+    const header = `${initialTopicFile(name)}${renderMemoryRepoEntry("CoWork workspace", {
+      by: "user",
+      workspace: workspaceId,
+    })}\n`;
+    if (existing) return { path: existing, initial: header };
+    const taken = new Set(await this.listFiles());
+    const slug = workspaceSlug(name);
+    let candidate = `${MEMORY_REPO_WORKSPACES_DIR}/${slug}.md`;
+    for (let n = 2; taken.has(candidate); n += 1) {
+      candidate = `${MEMORY_REPO_WORKSPACES_DIR}/${slug}-${n}.md`;
+    }
+    return { path: candidate, initial: header };
+  }
+
+  /** Remove every entry `match` accepts in `files` (default: all files), in one commit. */
+  private async removeMatching(
+    match: (entry: MemoryRepoEntry) => boolean,
+    message: string,
+    files?: string[],
+  ): Promise<number> {
+    return this.serialized(() =>
+      this.locked(async () => {
+        await this.commitHandEdits();
+        let removed = 0;
+        const changed: string[] = [];
+        for (const file of files ?? (await this.listFiles())) {
+          const text = await this.readFile(file);
+          if (text === null) continue;
+          const lines = splitLines(text);
+          const keep = lines.filter((row, index) => {
+            const entry = parseMemoryRepoLine(row, index + 1);
+            // The workspace marker line keeps the file mapped.
+            if (!entry || entry.metadata.workspace) return true;
+            if (!match(entry)) return true;
+            removed += 1;
+            return false;
+          });
+          if (keep.length !== lines.length) {
+            await this.writeFileAtomic(file, keep.join("\n"));
+            changed.push(file);
+          }
+        }
+        if (changed.length > 0) await this.commitPaths(changed, message, { origin: "memory_hub" });
+        return removed;
+      }),
+    );
+  }
+
+  private serialized<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.chain.then(job, job);
+    this.chain = run.catch(() => undefined);
+    return run;
+  }
+
+  private locked<T>(job: () => Promise<T>): Promise<T> {
+    return withMemoryRepoLock(this.lockPath(), job, {
+      timeoutMs: this.deps.lockTimeoutMs ?? 5_000,
+      runtime: this.deps.runtime,
+      now: this.now,
+    });
+  }
+
+  private lockPath(): string {
+    const gitDir = path.join(this.root, ".git");
+    if (fsSync.existsSync(gitDir)) return path.join(gitDir, "cowork-write.lock");
+    const key = createHash("sha256").update(this.root).digest("hex").slice(0, 16);
+    return path.join(os.tmpdir(), `cowork-memory-${key}.lock`);
+  }
+
+  /**
+   * Commit hand edits to markdown files before a write (§5.3). Anything else in the work
+   * tree (non-markdown files, conflicts, a merge or rebase) stops the write.
+   */
+  private async commitHandEdits(): Promise<void> {
+    if (!this.hasGit) return;
+    for (const marker of ["MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
+      if (fsSync.existsSync(path.join(this.root, ".git", marker))) {
+        throw new SkipWrite("dirty", "a git operation is in progress in the memory folder");
+      }
+    }
+    const all = parsePorcelainZ(await this.runGit(["status", "--porcelain=v1", "-z", "-uall"]));
+    // Untracked files that are not memory notes (.DS_Store, editor folders) are left alone.
+    const changes = all.filter((change) => change.code !== "??" || isSafeRepoPath(change.path));
+    if (changes.length === 0) return;
+    const unsafe = changes.find(
+      (change) =>
+        change.code.includes("U") ||
+        change.code === "AA" ||
+        change.code === "DD" ||
+        !isSafeRepoPath(change.path),
+    );
+    if (unsafe) {
+      throw new SkipWrite("dirty", `unexpected change in the memory folder: ${unsafe.path}`);
+    }
+    await this.runGit(["add", "-A", "--", ...changes.map((change) => change.path)]);
+    await this.commit("Hand edits", { origin: "hand_edit" });
+    this.workspaceFiles = null;
+  }
+
+  private async commitPaths(
+    paths: string[],
+    message: string,
+    meta: { origin: MemoryRepoOrigin; taskId?: string | null },
+  ): Promise<void> {
+    this.writeCount += 1;
+    if (this.hasGit) {
+      await this.runGit(["add", "-A", "--", ...paths]);
+      await this.commit(message, meta);
+    }
+    this.lastWriteError = null;
+    this.notify(paths);
+  }
+
+  private async commit(
+    message: string,
+    meta: { origin: MemoryRepoOrigin; taskId?: string | null },
+    allowEmpty = false,
+  ): Promise<void> {
+    const body = [
+      message.slice(0, 200),
+      "",
+      `Origin: ${meta.origin}`,
+      ...(meta.taskId ? [`Task: ${meta.taskId}`] : []),
+    ].join("\n");
+    await this.runGit(["commit", "-q", "--no-verify", ...(allowEmpty ? ["--allow-empty"] : []), "-m", body]);
+    this.head = (await this.runGit(["rev-parse", "HEAD"]).catch(() => "")).trim() || null;
+  }
+
+  private runGit(args: string[]): Promise<string> {
+    return this.git(this.root, args);
+  }
+
+  /** Atomic write of a repo file; refuses a symlink anywhere between the root and the file. */
+  private async writeFileAtomic(relPath: string, text: string): Promise<void> {
+    if (!isSafeRepoPath(relPath)) throw new Error(`unsafe memory path: ${relPath}`);
+    const absolute = path.join(this.root, relPath);
+    await fs.mkdir(path.dirname(absolute), { recursive: true });
+    if (await this.hasSymlinkUnderRoot(absolute, false)) {
+      throw new Error(`refusing to write through a symbolic link: ${relPath}`);
+    }
+    const temp = path.join(
+      path.dirname(absolute),
+      `.${path.basename(absolute)}.${process.pid}.${this.now().toString(36)}.tmp`,
+    );
+    await fs.writeFile(temp, text.endsWith("\n") ? text : `${text}\n`, { mode: 0o600 });
+    await fs.rename(temp, absolute);
+  }
+
+  private async hasSymlinkUnderRoot(absolute: string, includeLeaf: boolean): Promise<boolean> {
+    const relative = path.relative(this.root, absolute);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return true;
+    const segments = relative.split(path.sep);
+    let current = this.root;
+    const rootStat = await fs.lstat(current).catch(() => null);
+    if (rootStat?.isSymbolicLink()) return true;
+    for (let i = 0; i < segments.length; i += 1) {
+      current = path.join(current, segments[i]);
+      if (i === segments.length - 1 && !includeLeaf) {
+        const leaf = await fs.lstat(current).catch(() => null);
+        return leaf?.isSymbolicLink() === true;
+      }
+      const stat = await fs.lstat(current).catch(() => null);
+      if (!stat) return false;
+      if (stat.isSymbolicLink()) return true;
+    }
+    return false;
+  }
+
+  private notify(paths: string[]): void {
+    const change = { paths, version: this.version() };
+    for (const listener of this.listeners) {
+      try {
+        listener(change);
+      } catch (error) {
+        logger.warn("Memory repo change listener failed:", error);
+      }
+    }
+  }
+
+  private describeError(error: unknown): string {
+    if (error instanceof SkipWrite) return error.detail ?? error.reason;
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+export function taskSourceLink(taskId: string): string {
+  return `cowork://tasks/${taskId}`;
+}
+
+function normalizeSubject(subject: string | null | undefined): string | null {
+  return parseMemoryRepoLine(`- x [subject: ${subject ?? ""}]`, 1)?.subject ?? null;
+}
+
+function preview(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
+}

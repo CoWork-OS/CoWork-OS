@@ -433,6 +433,12 @@ import {
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { AppearanceManager, getDevLogCaptureEnabled } from "../settings/appearance-manager";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
+import {
+  memoryRepoPathSettingProblem,
+  memoryRepoStatus,
+} from "../memory/repo/memory-repo-bootstrap";
+import { MemoryRepoService } from "../memory/repo/MemoryRepoService";
+import { readMemoryRepoLines } from "../memory/repo/memory-repo-read";
 import { PersonalityManager } from "../settings/personality-manager";
 import { NotionSettingsManager } from "../settings/notion-manager";
 import { testNotionConnection } from "../utils/notion-api";
@@ -549,6 +555,7 @@ import {
 } from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupMemoryHealthHandlers } from "./memory-health-handlers";
+import { setupMemoryRepoHandlers } from "./memory-repo-handlers";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
@@ -5996,6 +6003,7 @@ export async function setupIpcHandlers(
       await MemoryWorkspacePurgeService.purgeTaskFiles({
         taskId: id,
         workspacePath: workspace?.path,
+        purgeDerivedMemory: true,
       });
     }
   });
@@ -11605,6 +11613,15 @@ export async function setupIpcHandlers(
     service: createMemoryHealthService(db),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
+
+  // Memory folder (beta): status, open, compact history and entry lines by ref. The
+  // folder is the running service's root, never a path from the renderer.
+  setupMemoryRepoHandlers({
+    status: () => memoryRepoStatus(),
+    getService: () => MemoryRepoService.get(),
+    readLines: (refs) => readMemoryRepoLines(refs),
+    openPath: (folder) => shell.openPath(folder),
+  });
 }
 
 /**
@@ -13659,6 +13676,8 @@ function setupMemoryHandlers(): void {
   // Save global memory feature toggles
   ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, async (_event, settings: Any) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+    const memoryRepoPathProblem = await memoryRepoPathSettingProblem(settings?.memoryRepoPath);
+    if (memoryRepoPathProblem) throw new Error(memoryRepoPathProblem);
     try {
       MemoryFeaturesManager.saveSettings(settings);
       return { success: true };

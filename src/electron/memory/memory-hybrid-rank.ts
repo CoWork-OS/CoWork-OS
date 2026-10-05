@@ -40,18 +40,30 @@ export function truncateMemorySnippet(text: string, maxLength: number): string {
   return text.slice(0, maxLength - 3) + "...";
 }
 
-export function mergeLexicalOnly<T extends { id: string }>(
+/** Imported (cross-workspace) matches count half as much as this workspace's own. */
+export const IMPORTED_LEXICAL_FACTOR = 0.5;
+
+/**
+ * Local matches first, then imported ones. A raw `|bm25|` score is unbounded, so a result
+ * that carries `relevanceScore` gets the rank-based score the hybrid stage uses
+ * (`1 / (1 + rank)`, halved for imports) and stays comparable with hybrid results.
+ */
+export function mergeLexicalOnly<T extends { id: string; relevanceScore?: number }>(
   local: T[],
   imported: T[],
   limit: number,
 ): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
-  for (const r of [...local, ...imported]) {
-    if (seen.has(r.id)) continue;
+  const add = (r: T, score: number): boolean => {
+    if (seen.has(r.id)) return false;
     seen.add(r.id);
-    out.push(r);
-    if (out.length >= limit) return out;
+    out.push(typeof r.relevanceScore === "number" ? { ...r, relevanceScore: score } : r);
+    return out.length >= limit;
+  };
+  for (const [idx, r] of local.entries()) if (add(r, 1 / (1 + idx))) return out;
+  for (const [idx, r] of imported.entries()) {
+    if (add(r, IMPORTED_LEXICAL_FACTOR / (1 + idx))) return out;
   }
   return out;
 }
@@ -61,7 +73,7 @@ export function wantsSemanticStage(query: string): boolean {
   return tokenizeForLocalEmbedding(query).length >= 2;
 }
 
-interface HybridRankInput<T extends { id: string }> {
+interface HybridRankInput<T extends { id: string; relevanceScore?: number }> {
   query: string;
   limit: number;
   lexicalLocal: T[];
@@ -83,14 +95,14 @@ export type HybridRankPlan<T> =
  * Lexical-only queries return the lexical candidates themselves; otherwise every result
  * is rebuilt from its full row.
  */
-export function rankHybridMemories<T extends { id: string }>(
+export function rankHybridMemories<T extends { id: string; relevanceScore?: number }>(
   params: HybridRankInput<T> & { loadRows(ids: string[]): HybridCandidateRow[] },
 ): Array<T | HybridLexicalResult> {
   const plan = planHybridMemories(params);
   return "results" in plan ? plan.results : plan.rank(params.loadRows(plan.candidateIds));
 }
 
-export function planHybridMemories<T extends { id: string }>(
+export function planHybridMemories<T extends { id: string; relevanceScore?: number }>(
   params: HybridRankInput<T>,
 ): HybridRankPlan<T> {
   const { query, limit, lexicalLocal, lexicalImportedGlobal } = params;
@@ -106,23 +118,23 @@ export function planHybridMemories<T extends { id: string }>(
   for (const r of lexicalLocal) candidateIds.add(r.id);
   for (const r of lexicalImportedGlobal) candidateIds.add(r.id);
 
-  // Semantic candidate set: scan local, then imported-global embeddings; keep top K.
+  // Semantic candidate set: scan local, then imported-global embeddings; the top K join the
+  // candidates. Every scanned score is kept, so a lexical match outside the top K still
+  // gets its own semantic score instead of 0.
   const semanticK = hybridSemanticK(limit);
   const semanticCandidates: Array<{ id: string; score: number }> = [];
+  const semanticScoreById = new Map<string, number>();
   for (const source of [params.workspaceEmbeddings, params.importedEmbeddings]) {
     if (!source) continue;
     for (const [memoryId, entry] of source) {
       const score = cosineSimilarity(queryEmbedding, entry.embedding);
       if (!Number.isFinite(score) || score <= 0) continue;
       semanticCandidates.push({ id: memoryId, score });
+      semanticScoreById.set(memoryId, Math.max(score, semanticScoreById.get(memoryId) ?? 0));
     }
   }
   semanticCandidates.sort((a, b) => b.score - a.score);
-  const semanticScoreById = new Map<string, number>();
-  for (const cand of semanticCandidates.slice(0, semanticK)) {
-    candidateIds.add(cand.id);
-    semanticScoreById.set(cand.id, cand.score);
-  }
+  for (const cand of semanticCandidates.slice(0, semanticK)) candidateIds.add(cand.id);
 
   const lexicalRankLocal = new Map<string, number>();
   lexicalLocal.forEach((r, idx) => lexicalRankLocal.set(r.id, idx));
@@ -136,7 +148,8 @@ export function planHybridMemories<T extends { id: string }>(
       const idxLocal = lexicalRankLocal.get(mem.id);
       const idxImported = lexicalRankImported.get(mem.id);
       const baselineLocal = idxLocal === undefined ? 0 : 1 / (1 + idxLocal);
-      const baselineImported = idxImported === undefined ? 0 : 1 / (1 + idxImported);
+      const baselineImported =
+        idxImported === undefined ? 0 : IMPORTED_LEXICAL_FACTOR / (1 + idxImported);
       const baseline = Math.max(baselineLocal, baselineImported);
       // Weighted hybrid score. Favor lexical when present but allow semantic to lift matches.
       const hybrid = 0.55 * semantic + 0.45 * baseline;

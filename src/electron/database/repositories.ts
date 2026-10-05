@@ -6889,8 +6889,8 @@ export class MemoryStore {
       const clauses: string[] = [];
       const params: unknown[] = [workspaceId];
       for (const token of likeTokens) {
-        clauses.push("(content LIKE ? OR summary LIKE ?)");
-        const like = `%${token}%`;
+        clauses.push(`(content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+        const like = likeContainsPattern(token);
         params.push(like, like);
       }
 
@@ -6999,8 +6999,8 @@ export class MemoryStore {
     const clauses: string[] = [];
     const params: unknown[] = [];
     for (const token of likeTokens) {
-      clauses.push("(m.content LIKE ? OR m.summary LIKE ?)");
-      const like = `%${token}%`;
+      clauses.push(`(m.content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR m.summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+      const like = likeContainsPattern(token);
       params.push(like, like);
     }
 
@@ -7109,8 +7109,8 @@ export class MemoryStore {
     const clauses: string[] = [];
     const params: unknown[] = [workspaceId];
     for (const token of likeTokens) {
-      clauses.push("(content LIKE ? OR summary LIKE ?)");
-      const like = `%${token}%`;
+      clauses.push(`(content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+      const like = likeContainsPattern(token);
       params.push(like, like);
     }
 
@@ -7158,11 +7158,12 @@ export class MemoryStore {
     const likeStmt = this.db.prepare(`
       SELECT id, summary, content, type, created_at, task_id
       FROM memories
-      WHERE workspace_id = ? AND is_private = 0 AND (content LIKE ? OR summary LIKE ?)
+      WHERE workspace_id = ? AND is_private = 0
+        AND (content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})
       ORDER BY created_at DESC
       LIMIT ?
     `);
-    const like = `%${marker}%`;
+    const like = likeContainsPattern(marker);
     return mapRows(likeStmt.all(workspaceId, like, like, limit) as Record<string, unknown>[]);
   }
 

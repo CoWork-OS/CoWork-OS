@@ -226,8 +226,11 @@ export function setupImprovementHandlers(service: SubconsciousLoopService): void
   );
   ipcMain.handle(
     IPC_CHANNELS.IMPROVEMENT_REVIEW_RUN,
-    async (_event, runId: string, reviewStatus: "accepted" | "dismissed") => {
-      const run = await service.reviewRun(validateInput(UUIDSchema, runId, "run ID"), reviewStatus);
+    async (_event, runId: string, reviewStatus: unknown) => {
+      const run = await service.reviewRun(
+        validateInput(UUIDSchema, runId, "run ID"),
+        validateInput(SubconsciousReviewStatusSchema, reviewStatus, "review status"),
+      );
       return run
         ? (await service.listImprovementCampaigns()).find((item) => item.id === run.id)
         : undefined;

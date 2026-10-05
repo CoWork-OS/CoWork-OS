@@ -222,6 +222,8 @@ export class MemoryService {
   private static compressionInProgress = false;
   private static compressionPauseCount = 0;
   private static compressionDrainTimer?: ReturnType<typeof setTimeout>;
+  /** Pending compression retries; cleared at shutdown so none fires against a closed DB. */
+  private static compressionRetryTimers = new Set<ReturnType<typeof setTimeout>>();
   private static compressionBudgetByWorkspace = new Map<string, number[]>();
   private static compressionDiagnosticsByWorkspace = new Map<string, CompressionDiagnostics>();
   private static sideChannelPolicyDepth = 0;
@@ -2545,6 +2547,7 @@ export class MemoryService {
   }
 
   private static scheduleCompressionDrain(delayMs = COMPRESSION_DRAIN_DELAY_MS): void {
+    if (!this.initialized) return;
     if (this.compressionDrainTimer) {
       if (delayMs === 0) {
         clearTimeout(this.compressionDrainTimer);
@@ -2592,6 +2595,7 @@ export class MemoryService {
    */
   private static async processCompressionQueue(): Promise<void> {
     if (
+      !this.initialized ||
       this.compressionInProgress ||
       this.compressionQueue.length === 0 ||
       this.isCompressionPaused()
@@ -3028,7 +3032,9 @@ export class MemoryService {
 
     this.compressionRetryCounts.set(group.batchKey, attempts);
     const retryDelayMs = Math.max(delayMs, COMPRESSION_RETRY_BASE_DELAY_MS * 2 ** (attempts - 1));
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this.compressionRetryTimers.delete(timer);
+      if (!this.initialized) return;
       for (const memoryId of group.memoryIds) {
         if (!this.compressionQueue.includes(memoryId)) {
           this.compressionQueue.push(memoryId);
@@ -3036,6 +3042,8 @@ export class MemoryService {
       }
       this.scheduleCompressionDrain(0);
     }, retryDelayMs);
+    timer.unref?.();
+    this.compressionRetryTimers.add(timer);
   }
 
   /**
@@ -3322,6 +3330,8 @@ export class MemoryService {
       clearTimeout(this.compressionDrainTimer);
       this.compressionDrainTimer = undefined;
     }
+    for (const timer of this.compressionRetryTimers) clearTimeout(timer);
+    this.compressionRetryTimers.clear();
     if (this.archiveCleanupTimer) {
       clearTimeout(this.archiveCleanupTimer);
       this.archiveCleanupTimer = undefined;

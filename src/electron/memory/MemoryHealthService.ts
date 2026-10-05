@@ -13,7 +13,10 @@ import {
   type MemorySourcesReport,
 } from "../../shared/memory-health-types";
 import type { MemoryHubSource } from "../../shared/memory-hub-types";
-import type { MemoryRepoStatusReport } from "../../shared/memory-repo-types";
+import type {
+  MemoryRepoDreamsReport,
+  MemoryRepoStatusReport,
+} from "../../shared/memory-repo-types";
 import type { MemoryFeaturesSettings } from "../../shared/types";
 import { CURATION_LLM_DEFAULT_DAILY_BUDGET } from "./memory-curation-llm";
 import type { MemoryHealthCounts } from "./memory-health-sql";
@@ -33,6 +36,8 @@ export interface MemoryHealthDeps {
    * disk, not in the database `qa:memory-health` reads, so the script has no such check.
    */
   getMemoryRepoStatus?: () => Promise<MemoryRepoStatusReport>;
+  /** Dreams over the memory folder (Phase 2 design §7). Service-only, like the folder checks. */
+  getMemoryRepoDreams?: () => Promise<MemoryRepoDreamsReport>;
   now?: () => number;
 }
 
@@ -302,6 +307,62 @@ export function evaluateMemoryRepoHealth(status: MemoryRepoStatusReport | null):
   return checks;
 }
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * "Memory folder dreaming" (docs/memory-repo-phase2-design.md §7): SKIP while the folder or
+ * dreaming is off; WARN when a dream failed in the last 7 days or a review has waited longer
+ * than 7 days; otherwise INFO with the last run.
+ */
+export function evaluateMemoryRepoDreamHealth(
+  status: MemoryRepoStatusReport | null,
+  report: MemoryRepoDreamsReport | null,
+  now: number,
+): MemoryHealthCheck {
+  const base = { id: "memory_repo_dreaming", label: "Memory folder dreaming", value: null };
+  if (!status?.enabled || !status.ready) {
+    return { ...base, status: "skip", detail: "The memory folder is off or not ready." };
+  }
+  if (!report) {
+    return { ...base, status: "warn", detail: "The dream records could not be read." };
+  }
+  if (!report.dreamingEnabled) {
+    return { ...base, status: "skip", detail: "Dreaming over the memory folder is off." };
+  }
+  const ran = report.dreams.filter((dream) => dream.status !== "skipped");
+  const last = ran[0] ?? report.dreams[0];
+  const failed = report.dreams.filter(
+    (dream) => dream.status === "failed" && dream.startedAt >= now - WEEK_MS,
+  );
+  const waiting = report.dreams.filter(
+    (dream) => dream.reviewStatus === "pending" && dream.finishedAt < now - WEEK_MS,
+  );
+  const problems: string[] = [];
+  if (failed.length) {
+    problems.push(
+      `${failed.length} ${failed.length === 1 ? "dream" : "dreams"} failed in the last 7 days (last: ${failed[0].error ?? "unknown error"})`,
+    );
+  }
+  if (waiting.length) {
+    problems.push(
+      `${waiting.length} ${waiting.length === 1 ? "proposal has" : "proposals have"} waited for review more than 7 days`,
+    );
+  }
+  const lastLine = last
+    ? `Last dream ${new Date(last.startedAt).toISOString().slice(0, 16).replace("T", " ")} UTC`
+    : "No dream yet";
+  const pending = report.pendingReviews ? `; ${report.pendingReviews} waiting for review` : "";
+  return {
+    ...base,
+    status: problems.length ? "warn" : "info",
+    value: report.pendingReviews,
+    unit: "count",
+    detail: problems.length
+      ? `${problems.join("; ")}. ${lastLine}.`
+      : `${lastLine}${pending}; ${report.tokensUsedToday.toLocaleString("en-US")} of ${report.dailyBudget.toLocaleString("en-US")} tokens used today.`,
+  };
+}
+
 export class MemoryHealthService {
   constructor(private readonly deps: MemoryHealthDeps) {}
 
@@ -357,6 +418,13 @@ export class MemoryHealthService {
     if (this.deps.getMemoryRepoStatus) {
       const repo = await this.deps.getMemoryRepoStatus().catch(() => null);
       checks.push(...evaluateMemoryRepoHealth(repo));
+      if (this.deps.getMemoryRepoDreams) {
+        const dreams =
+          repo?.enabled && repo.ready
+            ? await this.deps.getMemoryRepoDreams().catch(() => null)
+            : null;
+        checks.push(evaluateMemoryRepoDreamHealth(repo, dreams, now));
+      }
     }
     return {
       generatedAt: now,

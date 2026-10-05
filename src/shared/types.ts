@@ -117,6 +117,13 @@ export interface MemoryFeaturesSettings {
   memoryRepoEnabled?: boolean;
   /** Folder of the memory repo; empty means the default (`~/CoWork Memory`). */
   memoryRepoPath?: string;
+  /**
+   * Let a periodic AI pass ("dream") tidy the memory folder and save what recent tasks taught
+   * (docs/memory-repo-phase2-design.md). Default on; it only matters while the folder is on.
+   */
+  memoryRepoDreamingEnabled?: boolean;
+  /** Token budget of memory folder dreaming per rolling 24 hours (default 50 000). */
+  memoryRepoDreamDailyTokenBudget?: number;
 }
 
 export type MemoryWriteApprovalStatus = "pending" | "applying" | "applied" | "rejected" | "failed";
@@ -9790,6 +9797,13 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_OPEN_FOLDER: "memoryRepo:openFolder",
   MEMORY_REPO_COMPACT_HISTORY: "memoryRepo:compactHistory",
   MEMORY_REPO_READ_LINES: "memoryRepo:readLines",
+  // Dreaming over the memory folder (docs/memory-repo-phase2-design.md §5-§7)
+  MEMORY_REPO_DREAMS: "memoryRepo:dreams",
+  MEMORY_REPO_DREAM_DIFF: "memoryRepo:dreamDiff",
+  MEMORY_REPO_ACCEPT_DREAM: "memoryRepo:acceptDream",
+  MEMORY_REPO_REJECT_DREAM: "memoryRepo:rejectDream",
+  MEMORY_REPO_UNDO_DREAM: "memoryRepo:undoDream",
+  MEMORY_REPO_DREAM_NOW: "memoryRepo:dreamNow",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",

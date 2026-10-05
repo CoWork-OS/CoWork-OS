@@ -105,3 +105,40 @@
   display: inline-block;
   text-align: center;
 }
+
+/* Memory folder dreams: the diff of a proposal or an automatic commit. */
+.memory-review-folder {
+  margin-top: 12px;
+}
+
+.memory-review-diff {
+  margin: 6px 0 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre;
+  color: var(--color-text-secondary);
+}
+
+.memory-review-diff-line {
+  display: block;
+}
+
+.memory-review-diff-line--add {
+  color: var(--color-success);
+  background: var(--color-success-subtle);
+}
+
+.memory-review-diff-line--del {
+  color: var(--color-error);
+  background: var(--color-error-subtle);
+}
+
+.memory-review-diff-line--meta {
+  color: var(--color-text-tertiary);
+}

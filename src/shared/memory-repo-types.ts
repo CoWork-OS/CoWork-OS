@@ -43,3 +43,84 @@ export interface MemoryRepoLine {
 
 /** Most refs one `memoryRepo:readLines` request may name. */
 export const MEMORY_REPO_READ_LINES_MAX = 50;
+
+// ---------------------------------------------------------------------------
+// Dreaming over the memory folder (docs/memory-repo-phase2-design.md §5-§7)
+// ---------------------------------------------------------------------------
+
+/** One operation of a dream as the Review tab shows it. */
+export interface MemoryRepoDreamOperation {
+  /** `auto` (applied), `review` (waiting), `rejected` (invalid) or `skipped` (no longer applied). */
+  decision: string;
+  description: string;
+  /** The model's reason for the change. */
+  reason?: string;
+  /** Why it needs review, or why it was rejected or skipped. */
+  why?: string;
+}
+
+/** One dream run, without git internals (branch names, full shas). */
+export interface MemoryRepoDreamSummary {
+  id: string;
+  trigger: "daily" | "manual";
+  status: "completed" | "skipped" | "failed";
+  startedAt: number;
+  finishedAt: number;
+  summary: string;
+  skipReason?: string;
+  error?: string;
+  tokens: number;
+  /** Changes applied automatically (one commit on main). */
+  autoCount: number;
+  /** Short sha of the automatic commit, when it still exists. */
+  autoCommitShort?: string;
+  /** When the automatic commit was undone. */
+  undoneAt?: number;
+  undone: boolean;
+  /** The automatic commit exists and was not undone. */
+  canUndo: boolean;
+  /** Changes waiting for review (one commit on a review branch). */
+  reviewCount: number;
+  reviewStatus: "pending" | "accepted" | "rejected" | "stale" | null;
+  /** Operations dropped as invalid. */
+  rejected: number;
+  operations: MemoryRepoDreamOperation[];
+  /** Why the automatic commit is gone (history compacted). */
+  historyNote?: string;
+}
+
+export interface MemoryRepoDreamsReport {
+  /** Newest first. */
+  dreams: MemoryRepoDreamSummary[];
+  /** Tokens dreams used in the last 24 hours. */
+  tokensUsedToday: number;
+  dailyBudget: number;
+  /** Whether `memoryRepoDreamingEnabled` is on. */
+  dreamingEnabled: boolean;
+  /** Whether the memory folder is on and ready (dreams can run and be reviewed). */
+  folderReady: boolean;
+  /** Dreams whose review part waits for Accept or Reject. */
+  pendingReviews: number;
+}
+
+export type MemoryRepoDreamPart = "review" | "auto";
+
+/** Result of Accept, Reject and Undo on a dream. */
+export interface MemoryRepoDreamActionResult {
+  ok: boolean;
+  error?: string;
+}
+
+/** Result of "Dream now". */
+export interface MemoryRepoDreamNowResult {
+  ran: boolean;
+  /** Why no dream ran (unavailable, no_git, disabled, nothing_new, budget, busy, failed). */
+  reason?: string;
+  error?: string;
+  dream?: MemoryRepoDreamSummary;
+}
+
+/** Longest dream diff sent to the renderer (characters). */
+export const MEMORY_REPO_DREAM_DIFF_MAX = 200_000;
+/** Dreams listed by `memoryRepo:dreams`. */
+export const MEMORY_REPO_DREAMS_LIMIT = 30;

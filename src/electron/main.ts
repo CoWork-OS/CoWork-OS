@@ -22,6 +22,8 @@ import { ChannelRepository, ChannelUserRepository } from "./database/repository-
 import {
   AnnotationRepository,
   ChannelMessageRepository,
+  TaskEventReplayRepository,
+  TaskRepository,
   WorkspaceRepository,
 } from "./database/repository-facades";
 import path from "path";
@@ -165,6 +167,7 @@ import { MemoryRetentionService } from "./memory/MemoryRetentionService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
 import { startMemoryEngine } from "./memory/memory-engine-bootstrap";
 import { startMemoryRepo, stopMemoryRepo } from "./memory/repo/memory-repo-bootstrap";
+import { getMemoryRepoDreamer } from "./memory/repo/MemoryRepoDreamer";
 import { MemoryWriter } from "./memory/MemoryWriter";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
 import { DreamingRepository } from "./memory/DreamingRepository";
@@ -1976,11 +1979,16 @@ if (isMacSafeStorageMigrationWorker) {
       await normalizeTemplatedRoleCoreBoundary();
       await ensureCoreAutomationProfiles();
       await ensureCoreBotTeams();
-      // Shared with the memory repo startup below (workspace paths and names).
+      // Shared with the memory repo startup below (workspace paths and names; recent tasks
+      // for dreaming).
       let hostWorkspaceRepository: WorkspaceRepository | null = null;
+      let hostTaskRepository: TaskRepository | null = null;
+      let hostTaskEventReplayRepository: TaskEventReplayRepository | null = null;
       try {
         const db = dbManager.getDatabase();
         hostWorkspaceRepository = new WorkspaceRepository(db);
+        hostTaskRepository = new TaskRepository(db);
+        hostTaskEventReplayRepository = new TaskEventReplayRepository(db);
         const automationProfileRepo = new AutomationProfileRepository(db);
         const coreTraceRepo = new CoreTraceRepository(db);
         const coreMemoryCandidateRepo = new CoreMemoryCandidateRepository(db);
@@ -2153,6 +2161,12 @@ if (isMacSafeStorageMigrationWorker) {
             memoryRepoWorkspaces ? (await memoryRepoWorkspaces.findAll()).map((w) => w.path) : [],
           workspaceName: async (id) =>
             memoryRepoWorkspaces ? ((await memoryRepoWorkspaces.findById(id))?.name ?? null) : null,
+          findTasksCreatedBetween: async (params) =>
+            hostTaskRepository ? hostTaskRepository.findByCreatedAtRange(params) : [],
+          findTaskEvents: async (taskId, types, maxEvents) =>
+            hostTaskEventReplayRepository
+              ? hostTaskEventReplayRepository.findByTaskIdAndTypes(taskId, types, maxEvents)
+              : [],
         });
 
         // Initialize FTS worker thread for off-main-thread memory search
@@ -3217,6 +3231,7 @@ if (isMacSafeStorageMigrationWorker) {
             const next = ordered.find((workspace) => workspace.id === due[0]);
             return next ? { workspaceId: next.id, workspacePath: next.path } : null;
           },
+          runMemoryRepoDream: () => getMemoryRepoDreamer()?.run("daily") ?? Promise.resolve(null),
           addNotification: async (params) => {
             const notificationService = getNotificationService();
             await notificationService?.add(params);

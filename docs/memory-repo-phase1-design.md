@@ -393,6 +393,8 @@ The "What CoWork knows" tab is not rebuilt in Phase 1; it keeps showing `memory_
 
 ## 10. How Phase 2 builds on this
 
+Implemented: see [memory-repo-phase2-design.md](memory-repo-phase2-design.md).
+
 Dreaming becomes an agent task: it reads the repo, `inbox.md` and the transcripts of recent
 tasks (conversation index), works on a branch `dream/<date>` in a worktree, and ends with a
 diff. Changes that only touch `by: agent` lines merge automatically; anything touching

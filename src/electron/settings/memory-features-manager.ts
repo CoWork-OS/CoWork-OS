@@ -33,6 +33,8 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   memoryCompressionDailyTokenBudget: 20000,
   memoryRepoEnabled: false,
   memoryRepoPath: "",
+  memoryRepoDreamingEnabled: true,
+  memoryRepoDreamDailyTokenBudget: 50000,
 };
 
 function isEnabled(value: boolean | undefined): boolean {
@@ -99,6 +101,11 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     memoryRepoEnabled: isEnabled(settings.memoryRepoEnabled),
     memoryRepoPath:
       typeof settings.memoryRepoPath === "string" ? settings.memoryRepoPath.trim().slice(0, 1024) : "",
+    memoryRepoDreamingEnabled: settings.memoryRepoDreamingEnabled !== false,
+    memoryRepoDreamDailyTokenBudget: Math.min(
+      1_000_000,
+      Math.max(1, Math.floor(normalizePositiveNumber(settings.memoryRepoDreamDailyTokenBudget, 50000))),
+    ),
   };
 }
 

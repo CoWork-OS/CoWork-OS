@@ -7,6 +7,7 @@ import type {
 import { hasHostMethod } from "../../host/browser-capabilities";
 import "./memory-knowledge.css";
 import "./memory-review.css";
+import { MemoryRepoDreamsSection } from "./MemoryRepoDreamsSection";
 import { KIND_LABELS, SOURCE_LABELS, formatRelative, sourceTone } from "./memory-knowledge-model";
 import {
   MEMORY_REVIEW_METHODS,
@@ -291,12 +292,15 @@ export function MemoryReviewTab({
   canWrite = true,
   api = reviewApi,
   onCountChange,
+  onDreamCountChange,
 }: {
   workspaceId: string;
   canWrite?: boolean;
   api?: () => MemoryReviewApi;
   /** Called with the pending proposal count whenever it is (re)loaded. */
   onCountChange?: (count: number) => void;
+  /** Called with the number of memory folder dreams waiting for review. */
+  onDreamCountChange?: (count: number) => void;
 }) {
   const [state, setState] = useState<MemoryReviewState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -349,31 +353,42 @@ export function MemoryReviewTab({
     }
   };
 
+  // The memory folder is profile-wide, so its dreams are listed under every workspace.
+  const folder = <MemoryRepoDreamsSection onCountChange={onDreamCountChange} />;
+
   if (!available) {
     return (
-      <p className="settings-form-hint">Memory review is not connected to this browser host yet.</p>
+      <>
+        <p className="settings-form-hint">
+          Memory review is not connected to this browser host yet.
+        </p>
+        {folder}
+      </>
     );
   }
 
   return (
-    <MemoryReviewView
-      state={state}
-      loading={loading}
-      error={error}
-      notice={notice}
-      busyId={busyId}
-      canWrite={canWrite}
-      onAccept={(id) => void apply(id, () => acceptProposal(api(), workspaceId, id))}
-      onReject={(id) => void apply(id, () => rejectProposal(api(), workspaceId, id))}
-      onUndo={(id) => void apply(id, () => undoChange(api(), workspaceId, id))}
-      onRunNow={() => void apply("run", () => runCurationNow(api(), workspaceId))}
-      onToggleLlm={(enabled) =>
-        void apply("llm", () => setLlmSynthesis(api(), workspaceId, enabled))
-      }
-      onDismissMessage={() => {
-        setError(null);
-        setNotice(null);
-      }}
-    />
+    <>
+      <MemoryReviewView
+        state={state}
+        loading={loading}
+        error={error}
+        notice={notice}
+        busyId={busyId}
+        canWrite={canWrite}
+        onAccept={(id) => void apply(id, () => acceptProposal(api(), workspaceId, id))}
+        onReject={(id) => void apply(id, () => rejectProposal(api(), workspaceId, id))}
+        onUndo={(id) => void apply(id, () => undoChange(api(), workspaceId, id))}
+        onRunNow={() => void apply("run", () => runCurationNow(api(), workspaceId))}
+        onToggleLlm={(enabled) =>
+          void apply("llm", () => setLlmSynthesis(api(), workspaceId, enabled))
+        }
+        onDismissMessage={() => {
+          setError(null);
+          setNotice(null);
+        }}
+      />
+      {folder}
+    </>
   );
 }

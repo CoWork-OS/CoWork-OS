@@ -2885,6 +2885,7 @@ export class ToolRegistry {
                 await ChronicleMemoryService.getInstance().notePromotedObservation(
                   this.workspace.path,
                   record,
+                  { noMemory: !promotionAllowed },
                 );
               evidenceRefs.push({
                 evidenceId: record.id,

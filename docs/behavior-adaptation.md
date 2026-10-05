@@ -12,7 +12,7 @@ Both settings live in **Settings → Guardrails → Behavior Adaptation**.
 
 **Setting:** `adaptiveStyleEnabled` (default: `false`)
 
-When enabled, `AdaptiveStyleEngine` observes user messages and feedback to nudge `PersonalityManager` style dimensions (response length, emoji usage, explanation depth) within a weekly drift budget.
+When enabled, `AdaptiveStyleEngine` observes user messages and feedback to nudge style dimensions (response length, emoji usage, explanation depth) within a weekly drift budget. The adapted style is stored as an `inferred` `response_style` fact in `memory_items` and mirrored into `PersonalityManager` (see [Memory Engine](memory-engine.md#4a-prompt-read-path-implemented)). The engine does not adapt while you have set a style yourself (in Settings or with `set_response_style`), and it ignores messages from channel senders other than the workspace owner.
 
 **Rate limit:** `adaptiveStyleMaxDriftPerWeek` (default: `1`) — the maximum number of one-level style shifts in any rolling 7-day window.
 

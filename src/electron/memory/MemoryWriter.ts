@@ -58,6 +58,25 @@ const RAW_TELEMETRY =
 
 const PREFERRED_NAME_LINE = /^Preferred name:\s*\S/i;
 
+/**
+ * The shared salience gate (step 1), also applied by the archive's capture and import paths
+ * (`MemoryService.capture`, `MemoryService.openImportSession`): `empty` for blank text,
+ * `low_salience` for text under 3 characters, text without a letter or digit, and raw
+ * telemetry. Null when the text is worth keeping.
+ */
+export function memoryTextSalience(text: string): "empty" | "low_salience" | null {
+  const content = normalizeMemoryItemContent(text);
+  if (!content) return "empty";
+  if (
+    content.length < MIN_SALIENT_CHARS ||
+    !/[\p{L}\p{N}]/u.test(content) ||
+    RAW_TELEMETRY.test(content)
+  ) {
+    return "low_salience";
+  }
+  return null;
+}
+
 /** Sources that record an explicit user act; memory-off settings do not block them. */
 const EXPLICIT_SOURCES: ReadonlySet<MemoryItemSource> = new Set([
   "user_stated",
@@ -420,15 +439,9 @@ export class MemoryWriter {
     const skip = (reason: MemoryWriteSkipReason) =>
       ({ ok: false, result: { status: "skipped", reason } }) as const;
     // 1. Salience.
+    const salience = memoryTextSalience(candidate.content);
+    if (salience) return skip(salience);
     let content = normalizeMemoryItemContent(candidate.content);
-    if (!content) return skip("empty");
-    if (
-      content.length < MIN_SALIENT_CHARS ||
-      !/[\p{L}\p{N}]/u.test(content) ||
-      RAW_TELEMETRY.test(content)
-    ) {
-      return skip("low_salience");
-    }
 
     // 2. Redaction.
     const redaction = redactSecrets(content);

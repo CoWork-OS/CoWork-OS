@@ -8,7 +8,8 @@ import { AutomationProfileRepository } from "../agents/agent-repository-facades"
 import { WorkspaceRepository } from "../database/repository-facades";
 
 import { MemoryService } from "../memory/MemoryService";
-import { CuratedMemoryService } from "../memory/CuratedMemoryService";
+import { MemoryWriter, type MemoryWriteSkipReason } from "../memory/MemoryWriter";
+import type { MemoryItemKind } from "../memory/memory-items-types";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 
 import type {
@@ -19,6 +20,33 @@ import type {
 
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
 import { coreCandidateFingerprint } from "./core-memory-hygiene";
+import { AUTO_ACCEPT_RESOLUTION } from "./CoreMemoryCandidateService";
+
+/** `source_ref.store` of `memory_items` written from core memory candidates. */
+export const CORE_CANDIDATE_STORE = "core_candidate";
+
+/**
+ * Candidate types that state a fact (memory_items kind); the rest (open loops, watch items,
+ * recurring workflow hints) are events and stay in the archive.
+ */
+const FACT_KINDS: Partial<Record<CoreMemoryCandidate["candidateType"], MemoryItemKind>> = {
+  preference: "preference",
+  constraint: "rule",
+  correction: "correction",
+  project_state: "project_fact",
+  pattern: "insight",
+};
+
+/** Runtime signals with no memory value: recorded as `skipped`, never written. */
+const NOT_MEMORY_TYPES = new Set<CoreMemoryCandidate["candidateType"]>(["ignored_noise"]);
+
+/** Skips that a later pass could overcome (settings change); the candidate stays accepted. */
+const RETRYABLE_SKIPS = new Set<MemoryWriteSkipReason>(["memory_disabled"]);
+
+type CandidateWrite =
+  | { status: "written"; ref: string }
+  | { status: "retry" }
+  | { status: "skipped"; reason: string };
 
 /** Outcome of writing a group of accepted candidates (duplicates of one fingerprint). */
 interface CandidateApplyResult {
@@ -176,9 +204,11 @@ export class CoreMemoryDistiller {
 
   /**
    * Writes the leading candidate of a duplicate group once and records the lifecycle: the
-   * leader becomes `applied`, the rest `merged`. Candidates without a workspace cannot be
-   * written and become `skipped`. When the capture is declined (for example memory capture is
-   * off) the group stays `accepted` so a later pass can retry.
+   * leader becomes `applied`, the rest `merged`. Candidates without a workspace, runtime
+   * signals and facts the memory hygiene drops for good (low salience, only a secret,
+   * `<no-memory>`, outranked by a more trusted fact) become `skipped`. When the write is
+   * declined by settings (memory or capture off) the group stays `accepted` so a later pass
+   * can retry.
    */
   private async applyCandidateGroup(group: CoreMemoryCandidate[]): Promise<CandidateApplyResult> {
     const [leader, ...duplicates] = group;
@@ -199,13 +229,17 @@ export class CoreMemoryDistiller {
       );
       return { written: false, appliedIds: [] };
     }
-    const stored = await this.writeCandidateMemory(leader);
-    if (!stored) return { written: false, appliedIds: [] };
-    await this.candidateRepo.markLifecycle(
-      [leader.id],
-      "applied",
-      `Written to memory ${stored.id}.`,
-    );
+    const write = await this.writeCandidateMemory(leader);
+    if (write.status === "retry") return { written: false, appliedIds: [] };
+    if (write.status === "skipped") {
+      await this.candidateRepo.markLifecycle(
+        group.map((candidate) => candidate.id),
+        "skipped",
+        `Not written to memory: ${write.reason}.`,
+      );
+      return { written: false, appliedIds: [] };
+    }
+    await this.candidateRepo.markLifecycle([leader.id], "applied", `Written to ${write.ref}.`);
     if (duplicates.length) {
       await this.candidateRepo.markLifecycle(
         duplicates.map((candidate) => candidate.id),
@@ -217,17 +251,58 @@ export class CoreMemoryDistiller {
     return { written: true, appliedIds: [leader.id] };
   }
 
-  private async writeCandidateMemory(candidate: CoreMemoryCandidate) {
+  /**
+   * Writes one accepted candidate through the shared memory hygiene (docs/memory-engine.md
+   * §1). Facts go to `memory_items` through `MemoryWriter` as `inferred` items (salience,
+   * redaction, `<no-memory>`, workspace memory settings, dedupe and supersession); events go
+   * to the archive through `MemoryService.capture` (the same settings, redaction and
+   * content-hash dedupe). An inferred `rule` is injected on every turn (L0), so a constraint
+   * becomes one only when the user accepted the candidate or enabled auto-promotion;
+   * otherwise it stays an archive event (Dreaming may still promote it, with review).
+   */
+  private async writeCandidateMemory(candidate: CoreMemoryCandidate): Promise<CandidateWrite> {
     const workspaceId = candidate.workspaceId;
-    if (!workspaceId) return null;
-    const type = this.mapCandidateToMemoryType(candidate);
+    if (!workspaceId) return { status: "skipped", reason: "candidate has no workspace" };
+    if (NOT_MEMORY_TYPES.has(candidate.candidateType)) {
+      return { status: "skipped", reason: "a runtime signal, not a memory" };
+    }
+    const content = `${candidate.summary}${candidate.details ? `\n${candidate.details}` : ""}`;
+    const kind = this.factKindFor(candidate);
+    const writer = MemoryWriter.get();
+    if (kind && writer) {
+      const result = await writer.ingest({
+        content,
+        kind,
+        // A global-scope candidate is about the user everywhere; every other core scope
+        // (workspace, automation profile, code workspace, pull request) lives in its workspace.
+        scope: candidate.scopeKind === "global" ? "global" : "workspace",
+        workspaceId: candidate.scopeKind === "global" ? null : workspaceId,
+        source: "inferred",
+        sourceRef: {
+          store: CORE_CANDIDATE_STORE,
+          id: candidate.id,
+          traceId: candidate.traceId,
+          profileId: candidate.profileId,
+          candidateType: candidate.candidateType,
+          scopeKind: candidate.scopeKind,
+          scopeRef: candidate.scopeRef,
+        },
+        confidence: candidate.confidence,
+        originWorkspaceId: workspaceId,
+        originText: content,
+      });
+      if (result.status === "written")
+        return { status: "written", ref: `memory item ${result.item.id}` };
+      if (RETRYABLE_SKIPS.has(result.reason)) return { status: "retry" };
+      return { status: "skipped", reason: result.reason.replace(/_/g, " ") };
+    }
+
     // Provenance (trace, candidate, scope) travels in the capture options and is stored as
     // observation metadata; keeping it out of the content lets identical memories dedupe.
-    const content = `${candidate.summary}${candidate.details ? `\n${candidate.details}` : ""}`;
     const archiveEntry = await MemoryService.captureCoreMemory(
       workspaceId,
       undefined,
-      type,
+      this.mapCandidateToMemoryType(candidate),
       content,
       false,
       {
@@ -242,25 +317,22 @@ export class CoreMemoryDistiller {
         scopeRef: candidate.scopeRef,
       },
     );
-    const shouldPromoteToCurated =
-      MemoryFeaturesManager.loadSettings().autoPromoteToCuratedMemoryEnabled === true &&
-      (candidate.candidateType === "preference" ||
-        candidate.candidateType === "constraint" ||
-        candidate.candidateType === "pattern" ||
-        candidate.candidateType === "correction" ||
-        candidate.candidateType === "recurring_task");
-    if (shouldPromoteToCurated) {
-      const curatedEntry = await CuratedMemoryService.upsertDistilledEntry({
-        workspaceId,
-        target: "workspace",
-        kind: this.mapCandidateToCuratedKind(candidate),
-        content: candidate.summary,
-        confidence: candidate.confidence,
-      });
-      return curatedEntry || archiveEntry;
-    }
+    // Declined (memory or auto-capture off, an excluded pattern, `<no-memory>`): retried by
+    // a later pass, as before.
+    return archiveEntry
+      ? { status: "written", ref: `memory ${archiveEntry.id}` }
+      : { status: "retry" };
+  }
 
-    return archiveEntry;
+  /** The `memory_items` kind of a fact candidate, or null when it is an archive event. */
+  private factKindFor(candidate: CoreMemoryCandidate): MemoryItemKind | null {
+    const kind = FACT_KINDS[candidate.candidateType] ?? null;
+    if (kind !== "rule") return kind;
+    const userAccepted = candidate.resolution !== AUTO_ACCEPT_RESOLUTION;
+    return userAccepted ||
+      MemoryFeaturesManager.loadSettings().autoPromoteToCuratedMemoryEnabled === true
+      ? kind
+      : null;
   }
 
   private mapCandidateToMemoryType(candidate: CoreMemoryCandidate) {
@@ -279,23 +351,6 @@ export class CoreMemoryDistiller {
         return "observation" as const;
       default:
         return "observation" as const;
-    }
-  }
-
-  private mapCandidateToCuratedKind(candidate: CoreMemoryCandidate) {
-    switch (candidate.candidateType) {
-      case "preference":
-        return "preference" as const;
-      case "constraint":
-        return "constraint" as const;
-      case "pattern":
-        return "workflow_rule" as const;
-      case "correction":
-        return "workflow_rule" as const;
-      case "recurring_task":
-        return "workflow_rule" as const;
-      default:
-        return "project_fact" as const;
     }
   }
 }

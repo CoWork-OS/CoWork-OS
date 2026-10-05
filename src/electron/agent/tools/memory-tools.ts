@@ -235,6 +235,25 @@ export interface ContextRecallToolInput {
 
 const SUPERMEMORY_UNAVAILABLE = "Supermemory is not connected or network access is off.";
 
+/**
+ * Why the workspace's memory settings refuse an external (Supermemory) write, or null when
+ * they allow it. Unreadable settings refuse (fail closed).
+ */
+async function externalMemoryWriteRefusal(workspaceId: string): Promise<string | null> {
+  try {
+    const settings = await MemoryService.getSettings(workspaceId);
+    if (!settings.enabled || settings.privacyMode === "disabled") {
+      return "Memory is turned off for this workspace; nothing was saved externally.";
+    }
+    if (settings.privacyMode === "strict") {
+      return "This workspace keeps memories private (strict privacy); external memory is not written.";
+    }
+    return null;
+  } catch {
+    return "Workspace memory settings could not be read; nothing was saved externally.";
+  }
+}
+
 export class MemoryTools {
   constructor(
     private workspace: Workspace,
@@ -648,6 +667,10 @@ export class MemoryTools {
     if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
       return fail(SUPERMEMORY_UNAVAILABLE);
     }
+    // Workspace memory settings: nothing leaves the device when memory is off, or when
+    // privacy mode is `disabled` or `strict` (strict makes every memory private).
+    const policyError = await externalMemoryWriteRefusal(this.workspace.id);
+    if (policyError) return fail(policyError, { reason: "memory_policy" });
     try {
       const result = await SupermemoryService.remember({
         workspace: { id: this.workspace.id, name: this.workspace.name },

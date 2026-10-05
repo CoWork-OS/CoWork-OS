@@ -49,7 +49,7 @@ The old monolithic synthesized-memory block mixed durable facts, broad archive r
 
 Facts about the user and workspace live in `memory_items` (written through `MemoryWriter`). One policy, `MemoryInjectionPolicy`, decides per task and turn which memory layers a prompt may receive (private gateway, retained memory, workspace memory switch, `<no-memory>`, sub-agents and verifiers). One builder, `MemoryContextBuilder`, renders them within one budget:
 
-1. **L0** (identity, rules, pinned and user-stated preferences, open commitments, curated facts) as the pinned `<cowork_user_profile>` block on step and follow-up turns, or `<cowork_hot_memory>` in the planning and chat system prompts. Cached per session and rebuilt when memory changes. Until the one-time lane migration has run, L0 is read from the legacy stores (curated entries, user profile, relationship memory).
+1. **L0** (identity, rules, pinned and user-stated preferences, open commitments, curated facts) as the pinned `<cowork_user_profile>` block on step and follow-up turns, or `<cowork_hot_memory>` in the planning and chat system prompts. Cached per session and rebuilt when memory changes. `memory_items` is the only source: the one-time lane migration runs at startup before anything reads memory, and the legacy stores are retired.
 2. **L1** (memory items relevant to the request) as `<cowork_relevant_memory>`, or on plan steps inside the memory context section, where `MemorySynthesizer` adds:
    - the `.cowork` kit slice
    - playbook patterns
@@ -76,26 +76,24 @@ Default runtime behavior:
 
 ### Curated-memory guardrails
 
-- Curated entry content is capped at **320 characters**
+- Facts live in `memory_items` (at most 1000 characters each); the `CuratedMemoryService` view caps curated entry content at **320 characters**
 - `match` strings for replace/remove are capped at **120 characters**
-- the agent writes facts with `memory_remember` (the earlier `memory_curate` tool is removed); curated entries keep stable `id` values so Memory Hub replace/remove operations are deterministic
-- Curated file sync into `.cowork/USER.md` and `.cowork/MEMORY.md` is serialized per workspace and retried on file-change races; once the lane migration has run, the generated blocks are rendered from `memory_items` and hand edits are synced back
+- the agent writes facts with `memory_remember` (the earlier `memory_curate` tool is removed); items keep stable `id` values so Memory Hub edit/delete operations are deterministic
+- Curated file sync into `.cowork/USER.md` and `.cowork/MEMORY.md` is serialized per workspace and retried on file-change races; the generated blocks are rendered from `memory_items` and hand edits are synced back
 
 ### Dreaming curation
 
-Dreaming runs above the layered memory runtime as a review-first memory hygiene pass. It reads recent transcript spans, structured observations, and curated hot memory, then proposes `dreaming_candidates` for stale entries, corrections, open loops, recurring tasks, constraints, ignored-noise patterns, or curated-memory cleanup.
-
-Dreaming does not change what is injected into prompts by itself. Candidates stay `proposed` because there is no review UI yet; once accepted, they are meant to flow through the owning memory service before they affect `L0`, `L1`, topic packs, or recall behavior.
+Dreaming is the curator of `memory_items`. It merges duplicates, flags conflicts, promotes archive outcomes that recur in two or more tasks into inferred facts, decays unused inferences and closes finished commitments. Safe operations on inferred facts are applied through `MemoryWriter` (each one logged and undoable); everything else, and anything the user stated or confirmed, waits in the Memory Hub Review tab. Curation changes `L0` and `L1` only through the facts it writes. See [Dreaming](dreaming.md).
 
 ### Sources
 
 | Layer                  | Sources                                                                                                           |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **L0**                 | `memory_items` (legacy `CuratedMemoryService`, `UserProfileService`, `RelationshipMemoryService` before the lane migration) |
+| **L0**                 | `memory_items` (`MemoryContextBuilder`); the profile, relationship and curated services are views of it         |
 | **L1**                 | `memory_items` recall, the `.cowork` kit slice, `PlaybookService`, `DailyLogSummarizer`, Box Brain hits            |
 | **L2 Topic Packs**     | `memory_recall` (scope `knowledge`) over `.cowork/memory/topics/*.md`                                             |
 | **L3 Deep Recall**     | `memory_recall`, `context_recall`                                                                                 |
-| **Dreaming Evidence**  | transcript spans, structured observations, curated hot memory, and heartbeat memory-drift signals                 |
+| **Dreaming Evidence**  | active `memory_items`, archive outcomes of the last 30 days, conversation-index done signals                      |
 
 `daily_summary` fragments come from `.cowork/memory/summaries/<YYYY-MM-DD>.md` files written by `MemoryConsolidator` through `DailyLogSummarizer` (see [Daily Summaries](#6-daily-summaries)).
 
@@ -131,7 +129,7 @@ On plan steps the L1 block sits in the memory context section together with the 
 
 ### Solution
 
-`AdaptiveStyleEngine` observes every user message and feedback signal, then gradually shifts `PersonalityManager` settings within configurable rate limits.
+`AdaptiveStyleEngine` observes every user message and feedback signal, then gradually shifts the response style within configurable rate limits. It writes the style as an `inferred` `response_style` item in `memory_items`, which `PersonalityManager` mirrors. It does not adapt while the user has set a style (in Settings or with `set_response_style`), and messages from channel senders other than the workspace owner are not observed (see [Memory Engine](memory-engine.md) §3, §4a).
 
 **Signals observed:**
 | Signal | How detected | Effect |

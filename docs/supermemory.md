@@ -12,7 +12,7 @@ This integration is intentionally modeled after the Hermes-style provider shape:
 - optional explicit Memory Write review gating before external writes commit
 - guarded failure behavior so provider outages do not break the main agent loop
 
-Supermemory does **not** replace CoWork's local memory system. CoWork keeps its own archive memory, curated hot memory, workspace kit files, transcript recall, and knowledge graph. Supermemory is an additional external memory lane.
+Supermemory does **not** replace CoWork's local memory system. CoWork keeps its own fact store (`memory_items`), archive memory, workspace kit files, conversation recall, and knowledge graph ([Memory Engine](memory-engine.md)). Supermemory is an additional external memory lane.
 
 The task's [access profile](access-profiles.md) remains the ceiling for this
 integration. Profile network and connector rules apply before Supermemory
@@ -91,7 +91,7 @@ These are sanitized into a valid Supermemory `containerTag`.
 CoWork now has three distinct memory surfaces:
 
 1. **Local prompt-visible memory**
-   Curated hot memory, `USER.md`, `MEMORY.md`, and the `L0/L1` wake-up layers.
+   `memory_items` facts (L0/L1), the `USER.md` / `MEMORY.md` blocks rendered from them, and the wake-up layers.
 
 2. **Local deep recall**
    `memory_recall` over saved facts, the archive, earlier conversations, `.cowork` notes, topic packs and the knowledge graph; `context_recall` for the active task after compaction.
@@ -162,7 +162,9 @@ That last point matters: CoWork currently mirrors memory captures, not the full 
 
 Automatic captures are salience-gated, so mirroring sends task outcomes, decisions and feedback, errors, corrections and explicit saves rather than raw tool calls and results.
 
-CoWork does not store the Supermemory id of a mirrored document. Deleting, suppressing or redacting a local memory, deleting a task, **Clear All Memories** and disabling Supermemory therefore do not remove mirrored copies. Use `memory_forget` with an `external:<id>` id (or `scope: "external"` with the exact text), or the Supermemory dashboard to remove them.
+CoWork stores the Supermemory id of each copy (`supermemory_remote_refs`, SEC-17): deleting, suppressing or redacting a local memory, deleting a task and **Clear All Memories** forget the remote copy, and "Disconnect & purge" deletes every recorded copy. Copies sent before remote ids were kept cannot be addressed; remove them with `memory_forget` (an `external:<id>` id, or `scope: "external"` with the exact text) or the Supermemory dashboard.
+
+Reads never become local memory: the profile block and `memory_recall` external hits are held only in a per-task prompt cache, labelled as third-party context, and never written to `memory_items` or the archive (so a remote fact is never stored as something the user said).
 
 For the local structured-memory model, see [Structured Memory Observations](memory-observations.md).
 
@@ -185,10 +187,15 @@ access. This is the only remote delete path; local deletes do not call it.
 
 - `memory_remember` with `scope: "external"` creates an external memory directly in the
   workspace container. If an explicit Memory Write review mode covers external writes, it
-  returns a pending approval id instead. If the payload contains obvious secrets, CoWork
-  blocks the write rather than persisting it to the approval queue. A task that opted out
-  with `<no-memory>` cannot use it, a task started by a third-party channel sender is
-  refused, and plan, analyze and verifier modes treat it as a write.
+  returns a pending approval id instead. Before anything leaves the device the write goes
+  through the shared memory hygiene: content with `<no-memory>` is refused, secret values
+  are redacted with the shared detector (text that is only a secret is refused), and the
+  workspace memory settings apply: memory off, privacy mode `disabled` or `strict` (strict
+  keeps every memory private) refuse the write, and unreadable settings refuse it too.
+  Payloads that still look like credentials (`token=…`) are blocked rather than persisted
+  to the approval queue. A task that opted out with `<no-memory>` cannot use it, a task
+  started by a third-party channel sender is refused, and plan, analyze and verifier modes
+  treat it as a write.
 - `memory_forget` with `scope: "external"` and `match` sends the text to Supermemory, which
   forgets the matching memory.
 
@@ -257,7 +264,8 @@ Important boundaries:
 - external writes can be approval-gated before leaving the device
 - obvious secrets in external-memory payloads are blocked before they are stored in the pending queue
 - private memory entries are not mirrored
-- mirrored copies are not removed by local deletes; there is no automatic remote forget
+- copies with a recorded remote id are forgotten when their local record is deleted or hidden
+- Supermemory results are never stored locally as memory
 - workspace kit files remain local and governed by CoWork's existing memory/runtime policies
 
 If you want fully local-only operation, leave Supermemory disabled.

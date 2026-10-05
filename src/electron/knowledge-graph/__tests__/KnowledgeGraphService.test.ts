@@ -26,6 +26,8 @@ const describeWithNativeDb = BetterSqlite3 ? describe : describe.skip;
 const databases: Array<import("better-sqlite3").Database> = [];
 
 function resetService(): void {
+  clearTimeout((KnowledgeGraphService as Any).cleanupTimer);
+  (KnowledgeGraphService as Any).cleanupTimer = undefined;
   (KnowledgeGraphService as Any).repo = null;
   (KnowledgeGraphService as Any).initialized = false;
   (KnowledgeGraphService as Any).lastDecayRun = new Map();

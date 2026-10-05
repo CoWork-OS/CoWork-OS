@@ -11,11 +11,19 @@ import {
   num,
   oneOf,
   opt,
+  record,
   str,
   strList,
   tuple,
 } from "../database/statements/unit-args";
 import { KnowledgeGraphStore } from "./knowledge-graph-sql";
+import {
+  KG_CLEANUP_PHASES,
+  type KGCleanupCounts,
+  isKGCleanupPending,
+  recordKGCleanup,
+  runKGCleanupPhase,
+} from "./knowledge-graph-maintenance-sql";
 
 /**
  * Knowledge graph transaction units (async SQLite migration plan, DB6), part of the
@@ -49,7 +57,25 @@ const edgeInput = (value: unknown) =>
     validTo: opt(num),
   })(value);
 
-const observationInput = (value: unknown) => fields({ entityId: id, content: text })(value);
+const observationInput = (value: unknown) =>
+  fields({ entityId: id, content: text, fingerprint: opt(id) })(value);
+
+const CLEANUP_COUNT_KEYS = [
+  "caseDuplicatesMerged",
+  "noisyTechnologiesDeleted",
+  "freeMailOrganizationsDeleted",
+  "freeMailEdgesDeleted",
+  "subdomainOrganizationsFixed",
+  "automatedSendersDeleted",
+  "observationsDeduped",
+] as const satisfies ReadonlyArray<keyof KGCleanupCounts>;
+
+const cleanupCounts = (value: unknown, path: string): KGCleanupCounts => {
+  const input = record(value, path);
+  const counts = {} as KGCleanupCounts;
+  for (const key of CLEANUP_COUNT_KEYS) counts[key] = int(input[key], `${path}.${key}`);
+  return counts;
+};
 
 const store = (db: Database.Database) => new KnowledgeGraphStore(db);
 
@@ -81,6 +107,9 @@ export const KNOWLEDGE_GRAPH_UNITS = {
     store(db).getSubgraph(ws, entityIds, asOf),
   ),
   kg_getStats: defineReadUnit(tuple(id), (db, [workspaceId]) => store(db).getStats(workspaceId)),
+  kg_getWritePolicy: defineReadUnit(tuple(id), (db, [workspaceId]) =>
+    store(db).getWritePolicy(workspaceId),
+  ),
   kg_contextEntities: defineReadUnit(
     tuple(id, text, int, opt(num)),
     (db, [ws, query, limit, asOf]) => store(db).contextEntities(ws, query, limit, asOf),
@@ -92,10 +121,17 @@ export const KNOWLEDGE_GRAPH_UNITS = {
       store(db).upsertEntity(ws, input, entitySource, taskId),
   ),
   kg_updateEntity: defineUnit(
-    tuple(id, id, (value: unknown) =>
-      fields({ description: opt(text), properties: opt(properties), confidence: opt(num) })(value),
+    tuple(
+      id,
+      id,
+      (value: unknown) =>
+        fields({ description: opt(text), properties: opt(properties), confidence: opt(num) })(
+          value,
+        ),
+      opt(source),
     ),
-    (db, [ws, entityId, patch]) => store(db).updateEntity(ws, entityId, patch),
+    (db, [ws, entityId, patch, updateSource]) =>
+      store(db).updateEntity(ws, entityId, patch, updateSource),
   ),
   kg_deleteEntity: defineUnit(tuple(id, id), (db, [ws, entityId]) =>
     store(db).deleteEntity(ws, entityId),
@@ -114,7 +150,22 @@ export const KNOWLEDGE_GRAPH_UNITS = {
     (db, [ws, input, observationSource, taskId]) =>
       store(db).addObservationChecked(ws, input, observationSource, taskId),
   ),
-  kg_applyConfidenceDecay: defineUnit(tuple(id, opt(num), opt(num)), (db, [ws, decayRate, floor]) =>
-    store(db).applyConfidenceDecay(ws, decayRate, floor),
+  kg_applyConfidenceDecay: defineUnit(
+    tuple(id, opt(num), opt(num), opt(num)),
+    (db, [ws, decayRate, floor, now]) => store(db).applyConfidenceDecay(ws, decayRate, floor, now),
+  ),
+  // One-time data-quality cleanup (KnowledgeGraphCleanup.ts); each phase is one unit.
+  // Not read-only: checking the marker creates its table when missing.
+  kgCleanup_pending: defineUnit(
+    () => ({}),
+    (db: Database.Database) => isKGCleanupPending(db),
+  ),
+  kgCleanup_phase: defineUnit(
+    fields({ phase: (value: unknown, path: string) => oneOf(value, path, KG_CLEANUP_PHASES) }),
+    (db: Database.Database, { phase }) => runKGCleanupPhase(db, phase),
+  ),
+  kgCleanup_complete: defineUnit(
+    fields({ counts: cleanupCounts, now: int }),
+    (db: Database.Database, { counts, now }) => recordKGCleanup(db, counts, now),
   ),
 } satisfies UnitCatalog;

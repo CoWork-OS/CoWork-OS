@@ -120,6 +120,9 @@ hero:
       text: Runtime Visibility
       link: /operator-runtime-visibility
     - theme: alt
+      text: Memory Engine
+      link: /memory-engine
+    - theme: alt
       text: Structured Memory
       link: /memory-observations
     - theme: alt
@@ -207,10 +210,12 @@ features:
     details: Ask questions about an active running session from the right side panel without steering or stopping the parent task. Side Chat uses a read-only side fork with hidden parent context, live status snapshots for progress questions, a side-only visible transcript, and Markdown-rendered answers.
   - title: Runtime Visibility
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
+  - title: Memory Engine
+    details: One local fact store written through one MemoryWriter, four memory tools (memory_recall, memory_remember, memory_forget, context_recall), Dreaming curation with a Review tab and undo, per-reply "Memory used", and privacy-first defaults.
   - title: Structured Memory
-    details: Local archive memories now have inspectable observation metadata, progressive index/timeline/detail recall tools, Memory Hub privacy controls, deterministic rebuild status, and soft-delete suppression.
+    details: Local archive memories have inspectable observation metadata, progressive index/detail recall through memory_recall, Memory Hub privacy controls, deterministic rebuild status, and soft-delete suppression.
   - title: Box Brain
-    details: Opt-in, bounded background indexing from one Box folder through Hosted MCP, incremental private local recall with preserved Box source URLs, and reviewable Dreaming candidates. Box remains the source of truth and the background index never writes back.
+    details: Opt-in, bounded background indexing from one Box folder through Hosted MCP, incremental private local recall with preserved Box source URLs, and Dreaming curation after each sync. Box remains the source of truth and the background index never writes back.
   - title: Rich Artifact Previews
     details: Format-aware in-app preview popup for HTML, Markdown, code (with syntax highlighting), JSON tree view, CSV/TSV tables, XLSX, DOCX, PDF, images (fit/actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format adapts the modal width, header subtitle metadata, and per-format actions; Copy path / Show in Finder / Open externally / Close are unified across every format.
   - title: Smart PDF Attachments
@@ -230,7 +235,7 @@ features:
   - title: Chronicle
     details: Opt-in desktop recent-screen context for vague on-screen references, with Memory Hub controls, local passive capture, `screen_context` recall, pause/resume, and Mission Control evidence.
   - title: Optional Supermemory
-    details: Add Supermemory as an external memory lane with prompt-time profile injection, explicit external memory tools, optional mirroring of non-private local memory captures, and Memory Write Approval controls for external writes, while keeping CoWork's local memory system primary.
+    details: Add Supermemory as an external memory lane with prompt-time profile injection, an external scope in the memory tools, optional mirroring of non-private local memory captures, and forget/purge of mirrored copies, while keeping CoWork's local memory system primary.
   - title: Runtime Orchestration
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
   - title: Managed Agents
@@ -252,7 +257,7 @@ features:
   - title: Managed Devices
     details: Connect local and remote CoWork nodes, inspect device summaries, browse remote workspaces, and launch tasks against selected machines from one Devices tab.
   - title: Core Automation
-    details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Dreaming curates reviewable memory candidates, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
+    details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Dreaming curates the memory fact store, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
   - title: Automations
     details: Main-sidebar Automation Studio provides Discover, Library, Builder, and Activity for versioned structured flows with dry runs, variables, Yes/No branches, approvals, cancellation, recovery, and retained evidence. Advanced Settings keeps prompt-based routines, queueing, schedules, webhooks, triggers, briefing, and Workflow Intelligence policy; tasks can still become same-thread or new-task automations from the task menu.
   - title: Heartbeat V3

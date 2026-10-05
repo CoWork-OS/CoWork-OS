@@ -57,9 +57,9 @@ Defines the vocabulary of entity types. 10 built-in types are seeded per workspa
 
 ### Entities (`kg_entities`)
 
-Core nodes in the graph. Each entity has a type, name, optional description, flexible JSON properties, confidence score (0-1), and source tracking.
+Core nodes in the graph. Each entity has a type, name, optional description, flexible JSON properties, confidence score (0-1), and source tracking (`source`: who created it, raised to the highest-precedence writer that later confirmed it; `description_source`: who wrote the current description; `last_seen_at`: last reinforcement).
 
-**Unique constraint:** `(workspace_id, entity_type_id, name)` ensures no duplicate entities of the same type and name within a workspace.
+**Names are unique case-insensitively.** `normalized_name` (NFKC, whitespace collapsed, lower-cased) has a unique index on `(workspace_id, entity_type_id, normalized_name)`, so `Go`, `go` and `GO` are one entity; any casing finds it on upsert. The schema upgrade that adds the column backfills it and first merges existing case duplicates: the canonical entity is the one with the highest source precedence (then the most edges and observations, then the oldest); edges and observations move to it (self-loops and duplicate current edges are dropped, duplicate observations removed), the best description by source precedence is kept, properties merge with the higher-precedence source winning, and contact identities pointing at a merged entity are re-pointed. Known technologies keep their canonical casing (`Electron`, not `electron`).
 
 ### Edges (`kg_edges`)
 
@@ -79,7 +79,7 @@ Current facts are protected by a partial unique index on `(workspace_id, source_
 
 ### Observations (`kg_observations`)
 
-Timestamped facts or notes attached to entities. Append-only log that tracks changes and discoveries over time.
+Timestamped facts or notes attached to entities. Append-only log that tracks changes and discoveries over time, without repeats: an observation whose `fingerprint` (a mailbox event's, otherwise a hash of the normalized text) or text already exists on the entity is not added again; the existing one is returned (and adopted by a higher-precedence writer). A new observation reinforces its entity.
 
 ## Search Capabilities
 
@@ -97,13 +97,46 @@ If FTS5 is unavailable (rare SQLite builds), search falls back to `LIKE` pattern
 
 ## Auto-Extraction
 
-After each successful task, the executor calls `KnowledgeGraphService.extractEntitiesFromTaskResult()` which uses regex-based pattern matching to identify:
+After each successful task, the executor calls `KnowledgeGraphService.extractEntitiesFromTaskResult()` which uses pattern matching (no LLM) to identify:
 
-- **Technologies:** Common frameworks, languages, and tools (React, Node.js, TypeScript, Docker, etc.)
+- **Technologies:** a fixed list of frameworks, languages and tools (rules in `knowledge-graph/kg-extraction.ts`)
 - **File paths:** Source file references matching common patterns (src/, lib/, app/, etc.)
-- **API endpoints:** HTTP method + path patterns (GET /api/users, POST /auth/login, etc.)
+- **API endpoints:** upper-case HTTP method + path (GET /api/users, POST /auth/login, etc.)
 
 Auto-extracted entities are stored with `source='auto'` and `confidence=0.85`.
+
+### Technology extraction rules
+
+Technology names are matched with three levels of precision, and never inside a path, URL or dotted identifier (`src/electron/main.ts` is not "Electron"):
+
+| Level | Names | Matched when |
+| --- | --- | --- |
+| Distinctive | TypeScript, JavaScript, Node.js, Next.js, Python, Docker, Kubernetes, PostgreSQL (Postgres), MongoDB, Redis, GraphQL, Webpack, FastAPI, Django, SQLite | any casing; stored in canonical casing |
+| Exact casing | Vue, Vite, Angular, Electron, Flask, Tailwind, REST (RESTful) | only as written ("REST API", not "a restful weekend") |
+| Ambiguous English words | Go, Rust, Express, React | only in a code-ish context: inline code (`` `go` ``), an import / `require` / `npm install` of the package, a file name (`main.go`, `Cargo.toml`), a shell command (`go build`, `cargo test`), a dotted version (`Go 1.22`, `React 18`), "using X" / "written in X", or a technical noun after the name ("Go module", "Express server", "React component") |
+
+So "let's go ahead and rest; express our thanks and react calmly" extracts nothing.
+
+### Mailbox ingest
+
+`KnowledgeGraphService.ingestMailboxEvent()` (called by `MailboxAutomationHub`) adds the contact (person), their organization, a project hint and one observation per entity:
+
+- Free-mail, personal-ISP and relay domains (gmail.com, googlemail.com, outlook / hotmail / live / msn, yahoo, icloud.com, me.com, proton, gmx, yandex, aol, zoho, privaterelay.appleid.com, users.noreply.github.com, ...) never become an organization or a `works_at` edge.
+- The organization is named after the registrable domain, not the first label: `news.amazon.com` → "Amazon", `mail.acme.co.uk` → "Acme". An explicit `company` / `organization` in the event wins.
+- Automated senders (noreply, notifications, bounces, newsletters, ...) do not become people; their organization still gets the observation.
+- Each event adds its observation once per entity (fingerprint `mailbox:<type>:<event fingerprint>`), however often it is delivered.
+
+## Source Precedence
+
+Writers rank **manual > agent (`kg_*` tools) > auto (extraction, mailbox)**:
+
+- An upsert or update never replaces a description written by a higher-precedence source; the rest of the write (properties, confidence) still applies, and `kg_update_entity` says when it kept the description.
+- On upsert, properties merge with the higher-precedence source winning on conflicting keys.
+- An entity's `source` is raised to the highest writer that confirmed it, so an agent-confirmed entity is no longer decayed or eligible for cleanup.
+
+## Memory Settings
+
+Automatic writes (task extraction and mailbox ingest) respect the workspace's memory settings: nothing is written when memory is off (`enabled = 0`) or `privacyMode` is `disabled`, or when the task prompt, result or mail text carries `<no-memory>`. If the settings cannot be read, automatic writes are skipped. Explicit `kg_*` tool writes (`kg_create_entity`, `kg_update_entity`, `kg_create_edge`, `kg_add_observation`) may proceed with memory off, as the user asked for them, but are refused in a task that opted out with `<no-memory>` (or whose content carries it). Reads and deletes are never blocked.
 
 ## Confidence Scoring & Decay
 
@@ -111,12 +144,26 @@ Auto-extracted entities are stored with `source='auto'` and `confidence=0.85`.
 - **Agent-created entities:** confidence 1.0
 - **Auto-extracted entities:** confidence 0.85
 
-Confidence decay runs periodically for auto-extracted entities older than 30 days:
+Confidence decay runs at most once a day per workspace (after task extraction) for auto-extracted entities not **reinforced** for 30 days. Reinforcement (`last_seen_at`) is set on creation, on every upsert or update, and when a new observation is added; decay keys on it rather than on `created_at`, so an entity that keeps being seen keeps its confidence. Decay changes only `confidence`: it does not touch `updated_at`.
 
 - Decay rate: 0.95 per run (5% reduction each cycle)
 - Floor: 0.3 (entities never decay below this)
+- Manual and agent entities never decay
 
 When an entity is created again (upsert), its confidence is boosted by 0.1 (capped at 1.0).
+
+## One-Time Cleanup
+
+`KnowledgeGraphCleanup.ts` removes the noise the old extraction left, once per profile: it runs two minutes after startup (`KnowledgeGraphService.initialize`), is claimed through `maintenance-claim-sql.ts` so the desktop app and the node daemon never run it together, and records the marker `kg_quality_cleanup_v1` in `maintenance_state` with its counts (also logged). Each phase is idempotent and one transaction:
+
+1. merge case duplicates (as above);
+2. delete automatic technology entities that are ambiguous English words (`go`, `rust`, `express`, `react`) or English-word names in a casing extraction no longer accepts (`rest`, `electron`);
+3. delete free-mail / relay organizations (by stored domain, or by name for mailbox rows without one) and the automatic `works_at` edges to them;
+4. rename organizations the old ingest named after a mail subdomain ("News" from `news.amazon.com`, "Accounts" from `accounts.google.com`) to the registrable label, merging into an existing organization of that name;
+5. delete the person entities the old ingest made of automated senders (mailbox rows whose `email` property, or "Email contact …" description, is a noreply, notifications, bounce, newsletter, news, alerts or updates address), with their edges and observations;
+6. delete duplicate observations (same normalized text on one entity; the highest-precedence source, then the oldest, is kept).
+
+Deletions only touch `source = 'auto'` entities that no manual or agent edge or observation references; manual and agent entities are never deleted (a case duplicate is merged into its canonical entity instead).
 
 ## Context Injection
 
@@ -183,7 +230,7 @@ The knowledge graph also grows passively. After each completed task, the system 
 - File paths referenced in the task (src/components/App.tsx, etc.)
 - API endpoints (GET /api/users, POST /auth/login, etc.)
 
-These auto-extracted entities appear with `confidence=0.85` and decay over time if not reinforced.
+These auto-extracted entities appear with `confidence=0.85` and decay over time if not reinforced. Ambiguous names (Go, Rust, Express, React) are only picked up from code-ish context, so prose such as "let's go" adds nothing.
 
 ## Privacy & Isolation
 
@@ -204,10 +251,10 @@ These auto-extracted entities appear with `confidence=0.85` and decay over time 
 | **Observations**       | None                | Append-only timestamped fact log per entity |
 | **Auto-extraction**    | None                | Regex-based extraction from task results    |
 | **Confidence scoring** | None                | 0-1 confidence with time-based decay        |
-| **Deduplication**      | None                | Upsert on (workspace, type, name)           |
+| **Deduplication**      | None                | Upsert on (workspace, type, case-insensitive name); observation fingerprints |
 | **Context injection**  | Manual tool use     | Tool-driven (`kg_*`); not in the default prompt |
 | **Multi-workspace**    | Single file         | Per-workspace isolation                     |
-| **Privacy**            | None                | Inherits workspace memory privacy settings  |
+| **Privacy**            | None                | Automatic writes respect workspace memory settings and `<no-memory>` |
 | **Agent tools**        | ~3 basic            | 10 comprehensive tools                      |
 | **Subgraph queries**   | None                | Multi-entity subgraph extraction            |
 | **Cascade deletes**    | Manual cleanup      | Automatic via FK constraints + transactions |

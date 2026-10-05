@@ -27,69 +27,37 @@ The audit also ran read-only aggregate queries against the live desktop database
 
 File references are relative to `src/electron/` unless prefixed.
 
-### Status (2026-10-03, Phase 3)
+### Status
 
-The findings below describe `main` @ `069740faf`, before any fixes.
+Updated 2026-10-04. The findings below describe `main` @ `069740faf`, before any fixes. The
+current design is in [memory-engine.md](memory-engine.md).
 
-| Status | Findings |
-|---|---|
-| Fixed in Phase 0 (merged, `28e423ff1`, PR #291) | SEC-1..12 |
-| Fixed in Phase 1 (merged, `ad1db1d94`, PR #292) | DATA-1, 2, 3, 9, 11, 12; LOOP-1..11; PROMPT-1..4, 6, 8, 9; RECALL-1, 3; LIFE-1..4; SEC-14, 15; §6 dead-code and dead-settings cleanup; §7 doc drift in the memory docs |
-| Phase 2 complete (branch `cowork-os/memory-phase2`) | **Roadmap item 1:** `memory_items` store + `MemoryWriter` (salience gate, redaction, dedupe, trust-ranked supersession), one-time lane migration, dual writes from the legacy stores, purge and retention. **Item 2:** `MemoryInjectionPolicy` + `MemoryContextBuilder` for every prompt surface (L0 pinned profile, L1 recall per step, one budget, dedupe by subject and content hash, `memory_used` attribution); `MemoryRecall` (one Unicode FTS builder, weighted RRF across memory, archive, conversations, knowledge and external lanes). **Item 3:** one conversation index. **Item 4:** four agent tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`) with the 16 earlier tools as hidden aliases for one release, and a generated routing hint naming only visible tools. **§8.4 Memory Hub:** "What CoWork knows" tab over `memory_items` (list, why, add, edit, pin, delete, clear global), layer preview built with the policy and builder, and kit auto-blocks rendered from `memory_items` with back-sync of hand edits at curated trust boundaries (PROMPT-12). **Item 5:** scheduler consolidation (one suggestion sink). **Item 6:** `[PLAYBOOK]`/`[SUGGESTION]` payload tables. Also PROMPT-5, 7, 10, 11; RECALL-2, 7; a response style set in Settings is recorded as `user_stated` and locks style adaptation. Design: [memory-engine.md](memory-engine.md) |
-| Phase 3 (branch `cowork-os/memory-phase3`) | Dreaming as the curator of `memory_items`, with the Memory Hub Review tab and undo; `MemoryWriter` parity in the node daemon; per-reply "Memory used" (desktop and browser host); memory evals in the harness battery and a read-only health check; Supermemory remote ids, forget and purge on disable (SEC-17); SEC-13 (1, 2) and SEC-16, with a settings UI for the owner's channel accounts; a dedicated `memory_delete` approval for `memory_forget`; lexical recall quality (stopwords, KG observations, coverage-aware fusion); retention of settled memory-write approvals and a one-time markdown index purge; memory flush at desktop shutdown. Details below |
-| Decided | **Real local embeddings (DATA-6): skipped by decision (2026-10-03).** Recall stays lexical FTS plus reciprocal-rank fusion; the memory evals gate recall quality |
-| Phase 3: legacy retirement | **Tool aliases removed:** the 16 hidden memory tool aliases are no longer registered (Supermemory through `memory_recall` / `memory_remember` / `memory_forget` scope `external`). **Dual writes removed:** no `dualWrite`, no legacy mirror, no legacy read fallbacks; `memory_items` is the only store of facts about the user. The profile, relationship (commitments with status and due date, contact memory) and curated services are views over `memory_items`; awareness beliefs and the adaptive style write it directly, and PersonalityManager's name and style mirror it. The lane migration runs awaited at startup; the mailbox prompt reads contact-scope items; approval-gated `memory_remember` replays through `MemoryWriter`. Profile-fact and recurring-history IPC removed; commitments keep an editor. A source guard test keeps the retired stores out of runtime code. **Data retirement:** a one-time migration writes an encrypted export (OS keychain), verifies every record has a `memory_items` row, then deletes the `user-profile` / `relationship-memory` blobs and drops `curated_memory_entries` and the other dead tables. Design: [memory-engine.md](memory-engine.md) §4b, §5 |
-| Phase 3 (remaining) | The producers not yet routed through `MemoryWriter` ([memory-engine.md](memory-engine.md) §8); SEC-17 copies made before remote ids were kept cannot be addressed |
-| Other open findings | SEC-18; LIFE-5 (partial); RECALL-4..6, 8, 9; DATA-4..8, 10, 13; LOOP-12..15; the Memory Hub Review/Sources/Health tabs of §8.4 |
+| Work | State | Findings closed and main changes |
+|---|---|---|
+| Phase 0 — security and privacy hotfix | Merged, PR #291 | SEC-1..12 |
+| Phase 1 — stop the bleeding | Merged, PR #292 | DATA-1, 2, 3, 9, 11, 12; LOOP-1..11; PROMPT-1..4, 6, 8, 9; RECALL-1, 3; LIFE-1..4; SEC-14, 15; §6 dead code and settings; §7 doc drift |
+| Phase 2 — unified engine | Merged, PR #299 | `memory_items` + `MemoryWriter`; `MemoryInjectionPolicy` + `MemoryContextBuilder` (L0/L1, one budget, `memory_used` attribution); `MemoryRecall` (one Unicode FTS builder, weighted RRF); one conversation index; four tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`); "What CoWork knows" tab, layer preview, kit back-sync (PROMPT-12); playbook and suggestion tables; Heartbeat schedules AutonomyEngine and Awareness, with one suggestion sink and one background dispatch budget. PROMPT-5, 7, 10, 11; RECALL-2, 7 |
+| Phase 3 — make it great | Merged, PR #301 | Dreaming as the curator with the Review tab, undo and an optional budgeted LLM pass; per-reply "Memory used" (desktop and browser host); `memory_delete` approval for `memory_forget`; Supermemory remote ids, forget and "Disconnect & purge" (SEC-17); channel owner accounts (SEC-16); SEC-13; daemon parity; lexical recall quality; `qa:memory-evals` and `qa:memory-health`; retention of settled approvals; markdown index purge; flush at shutdown |
+| Legacy retirement | Merged, PR #306 | The 16 tool aliases removed; dual writes, legacy mirror and legacy reads removed; profile, relationship and curated services are views of `memory_items`; one-time data retirement with an encrypted export, then the old blobs and tables are dropped |
+| Related fixes | Merged | Prompt caching tiers and cached-token logging (#303, #304); short-answer completion gate; core-candidate keyword heuristics removed and their leftover proposals dismissed |
+| Memory producers | Pending PR (`cowork-os/memory-producers-kg-cleanup`) | Every producer through the same hygiene ([memory-engine.md](memory-engine.md) §1): core-candidate facts → `MemoryWriter` (`inferred`); Chronicle archive-only and private; one gated import session for ChatGPT and pasted imports (imported user facts become `import` items); Supermemory explicit writes redacted and gated, remote reads never stored; a source guard on writes to `memories` / `memory_items`. DATA-13 import parts |
+| Knowledge graph data quality | Pending PR (same branch) | DATA-10: precise technology extraction, case-insensitive names with merge, free-mail denylist, registrable-domain organization names, automated-sender filtering, source precedence, `last_seen_at` decay, memory-settings gating, one-time `kg_quality_cleanup_v1` ([knowledge-graph.md](knowledge-graph.md)) |
+| Decided | — | Real local embeddings (DATA-6) skipped: recall stays lexical FTS plus reciprocal-rank fusion, gated by the memory evals |
 
-Phase 0 deviations from the §9 plan:
+**Remaining.**
 
-- **SEC-1:** checkpoints stay in the workspace rather than moving to `userData`. Phase 0 stopped restoring permission state from checkpoint files, ignored far-future checkpoints and protected `.cowork/memory/transcripts` from agent file writes. Phase 1 added HMAC signing with a key held in encrypted settings; unsigned or legacy `sha256` checkpoints are rejected.
-- **SEC-2:** mailbox-sourced relationship items are kept out of profile prompts (and injected text is escaped) rather than routed to a contact-scoped `third_party` lane.
-- **SEC-10:** spoofed `[Imported from` prefixes are neutralized and private imports stay in their workspace; there is no `is_imported` column.
-- **SEC-13** (background writers bypassing access profiles) was not addressed in Phase 0 or Phase 1.
+- Memory Hub **Sources** and **Health** tabs (§8.4); the Review tab shipped.
+- Kit back-sync runs only on the next kit sync; no trigger on file edit.
+- Superseded `memory_items` revisions are kept indefinitely; add age-based retention once the Hub shows history.
+- Approval-gated memory-write modes (`COWORK_MEMORY_WRITE_APPROVAL_MODE`) do not stage core-candidate fact writes.
+- Supermemory copies sent before remote ids were recorded cannot be addressed (forget them by text or in Supermemory).
+- SEC-18 (autonomous task creation without approval) and LIFE-5 (instance sprawl): partially addressed.
+- RECALL-4, 5, 6, 8, 9 (RECALL-9 partly: one FTS builder for memory recall); DATA-4, 5, 7, 8, 13 (non-import parts); LOOP-12..15.
 
-Phase 3 progress (branch `cowork-os/memory-phase3`):
-
-- **SEC-13 (1) and (2) fixed.**
-  - Workflow Intelligence writes no `.cowork/subconscious/**` while it is disabled. Enabling it starts a refresh.
-  - Artifacts go only to the owning workspace's own `.cowork/subconscious`, never to an enclosing git root.
-  - Every artifact write passes the confined internal-write check and the workspace access profile (`security/background-write-guard.ts`).
-  - CrossSignal, Feedback and Lore pass a `pathGuard` to `writeKitFileWithSnapshot`.
-  - (3) was already resolved in Phase 1: `CoreMemoryDistiller.refreshIndex` no longer runs.
-- **Daemon parity.** The node daemon starts the memory engine (`MemoryWriter`, read side, lane migration), retention, the knowledge graph and Lore. It flushes memory writes at shutdown. A desktop app and a daemon on one profile claim one-time migrations atomically (`maintenance-claim-sql.ts`).
-- **SEC-16 fixed.** Channel tasks record whether the sender is the workspace owner (self-chat, or `ownerUserIds` in the channel config). Other senders no longer feed awareness beliefs, the adaptive style, `user_stated` facts or the curated profile; `memory_remember` stores what they say as a private contact-scope `third_party` item.
-- **SEC-17 fixed** for copies written from now on: remote ids are kept (`supermemory_remote_refs`); deletes, suppression, privacy changes, task delete, Clear All Memories and `memory_forget` forget the remote copy; "Disconnect & purge" deletes every recorded copy before disabling; mirror writes use the workspace name for `{workspaceName}` containers; 4xx answers no longer trip the circuit breaker. (4) was addressed in Phase 2 (own sanitized `external_memory` tag); (2) is limited only by the Phase 1 capture salience gate (`mirrorMemoryWrites` still defaults to on). Copies made before remote ids were kept cannot be addressed.
-- **Per-reply "Memory used"** on chat replies, from the hidden `memory_used` events (now emitted per turn). **`memory_forget` asks before deleting** (except facts the task's own agent inferred). A stale Personality settings copy no longer records its response style as the user's choice.
-- **§8.5 quality gates.**
-  - Memory evals: `npm run qa:memory-evals`, also in `qa:harness`.
-  - Read-only health check: `npm run qa:memory-health`.
-  - Both are described in [harness-eval-battery.md](harness-eval-battery.md).
-- **`memory_forget` approval.** A dedicated `memory_delete` approval type, classified as a
-  delete by the permission engine (prompted in default and dangerous-only modes, denied when
-  the workspace delete capability is off). The dialog reads "Forget a memory" and shows the
-  memory, its source and the reason; channel approval messages leave the memory text out.
-- **SEC-16 owner accounts.** Each channel's settings has "Your Account on This Channel": the
-  `ownerUserIds` list, typed or set with "This is me" next to an allowed user, validated in
-  main ([channels.md](channels.md#your-account-on-a-channel-memory)). Pairing and allowlists are
-  not taken as owner evidence: they admit anyone the owner lets in. Voice-note updates of
-  `PRIORITIES.md` now also require the owner as sender.
-- **SEC-13 leftovers.** Every `writeKitFileWithSnapshot` caller passes a path guard: kit seeding
-  and onboarding from Settings use the workspace's effective access profile
-  (`security/effective-workspace.ts`), and the gateway's voice-note `PRIORITIES.md` update uses
-  the background guard.
-- **Recall quality (RECALL-9 follow-up).** Any-term FTS queries drop a small multilingual
-  stopword list (en/tr/de/fr/es); knowledge-graph search also matches observations; fusion
-  scales each hit by its coverage of the query's distinctive terms. Golden set (27 queries,
-  one added for KG observations): recall@5 0.923 → 1.0, recall@1 0.769 → 0.889, MRR 0.848 →
-  0.944 (gates 0.90 and 0.75).
-- **Lifecycle.** Retention drops `pending_memory_writes` rows that are applied, rejected or
-  failed and older than 30 days (the live profile held 10,006 rejected rows). A one-time,
-  marker-recorded purge removes excluded markdown index rows (with their FTS rows) in every
-  workspace, not only in workspaces whose index syncs. The desktop app stops retention and the
-  engine and flushes `MemoryWriter` before the database closes, as the daemon does.
-- **"Memory used" in the browser host** (`getMemoryUsedForTask`), and "Open in Memory Hub"
-  switches the Hub to the task's workspace.
+Deviations from the §9 plan: checkpoints stay in the workspace but are HMAC-signed and never
+restore permission state (SEC-1); spoofed `[Imported from` prefixes are neutralized instead of
+adding an `is_imported` column (SEC-10); mailbox items became contact-scope `third_party` items
+in Phase 2 rather than in Phase 0 (SEC-2).
 
 ---
 
@@ -172,7 +140,7 @@ Status key: 🟢 live · 🟡 live but off by default or rarely triggers · 🔴
 | `ProactiveSuggestionsService` | `[SUGGESTION]{json}` rows stored inside `memories` | 🟢 |
 | `CoreMemoryCandidateService` / `CoreMemoryDistiller` | Heuristic candidates from Heartbeat/WI traces → memories | 🟢 but duplicating |
 | `ChronicleMemoryService` | `screen_context` memories from promoted frames | 🟡 (Chronicle is opt-in) |
-| `ChatGPTImporter`, `MemoryService.importFromText` | Imports; both bypass the gate and the observation sidecar | 🟡 manual |
+| `ChatGPTImporter`, `MemoryService.importFromText` | Imports; both bypass the gate and the observation sidecar (*fixed in Phase 3: one gated import API*) | 🟡 manual |
 | `BoxBrainService` | Box folder → memories | 🔴 always fails (unbound `this`) |
 | `MemoryWriteGate` | Review queue | ⚫ staging only works when the `COWORK_MEMORY_WRITE_APPROVAL_MODE` env var is set |
 | Awareness belief regexes → `UserProfileService` | "I prefer / I need to / I am" → durable profile facts | 🟢 |
@@ -353,7 +321,7 @@ The SQL used is in Appendix A so this health check can be re-run.
 | DATA-7 | Med | **Compression and the storage cap don't work.** The single-item LLM compression path can never run (it compares summary tokens). Batch "digests" add new rows that bypass the gate, the sidecar and the mirror. The storage cap counts only content+summary, not the ~5 KB embedding, sidecar or FTS, and it deletes the oldest rows first regardless of value. | `memory/MemoryService.ts:455, 2336-2338, 2584, 2723`; `database/repositories.ts:7262` |
 | DATA-8 | Med | **FTS write churn.** Every search awaits a reference-count update, and `memories_fts_update` fires on any column change. Observation `INSERT OR REPLACE` without `recursive_triggers` leaves ghost FTS rows, which bloat the index and skew BM25. | `memory/MemoryService.ts:1261`; `database/schema.ts:2759-2764`; `memory/memory-capture-sql.ts:86` |
 | DATA-9 ✔ | Med | **The markdown memory index is polluted and thrashes.** 94% of indexed files are `.cowork/.history/` snapshots and `.cowork/subconscious/` artifacts. Unified recall and the distiller index from the workspace *root* while the executor indexes `.cowork`. The index is keyed by workspace only, so each switch deletes rows and reindexes the whole repo. | `memory/MarkdownMemoryIndexService.ts:99-101, 179-229`; `agent/RuntimeVisibilityService.ts:282`; live table |
-| DATA-10 | Med | **KG data quality.** The case-insensitive tech regex turns "go", "rest", "express" and "rust" into entities. Names are unique case-sensitively, so `Go`/`go`/`GO` are separate entities. Mailbox ingest creates "Gmail"/"Outlook" organisations with `works_at` edges, and appends observations with no dedupe. Auto upserts overwrite manual descriptions. Decay keys on `created_at`. | `knowledge-graph/KnowledgeGraphService.ts:171-174, 209-327, 411-413`; `knowledge-graph/knowledge-graph-sql.ts:581-597, 669`; `database/schema.ts:5416` |
+| DATA-10 | Med | **KG data quality.** *(Fixed in Phase 3, see Status.)* The case-insensitive tech regex turns "go", "rest", "express" and "rust" into entities. Names are unique case-sensitively, so `Go`/`go`/`GO` are separate entities. Mailbox ingest creates "Gmail"/"Outlook" organisations with `works_at` edges, and appends observations with no dedupe. Auto upserts overwrite manual descriptions. Decay keys on `created_at`. | `knowledge-graph/KnowledgeGraphService.ts:171-174, 209-327, 411-413`; `knowledge-graph/knowledge-graph-sql.ts:581-597, 669`; `database/schema.ts:5416` |
 | DATA-11 | Med | **Box Brain sync always fails.** It calls `MemoryService.capture`, `replaceMemory` and `deleteEntries` as unbound methods, so `this` is undefined and the run is marked failed. Tests inject deps, so they never hit this. | `memory/BoxBrainService.ts:925-933, 954-957`; `main.ts:2116` |
 | DATA-12 | Med | **The daily summary is a transcript dump.** `MemoryConsolidator` overwrites today's summary with span counts and raw span JSON (or "none captured" boilerplate), and L1 injects it. A crash leaves `consolidation.lock` behind forever. | `memory/MemoryConsolidator.ts:64-74, 98-124`; `memory/DailyLogSummarizer.ts:69` |
 | DATA-13 | Low | **Smaller defects.** 437 orphan embeddings. `profileId`/`coreTraceId`/`candidateId`/`scope*` capture options are never persisted. The `{duplicate}` flag is never read. `importFromText` dedupes only within a single paste. ChatGPT import dedupe is per workspace, and LLM failures are counted as processed. | `memory/MemoryService.ts:689-705, 1601-1614`; `memory/ChatGPTImporter.ts:201, 627-639` |

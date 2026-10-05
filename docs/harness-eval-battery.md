@@ -65,7 +65,7 @@ Two limits apply. The archive lane runs its host search here; the FTS worker's h
 - per-store sizes
 - the archive's age split, telemetry ratio and duplicate rate
 - `memory_items` by status, source, scope and kind
-- curated entries
+- curated entries (until the legacy data retirement drops the table)
 - pending writes
 - core memory candidates
 - Dreaming runs (including stuck runs)

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   supermemoryForget: vi.fn(),
   supermemoryRemember: vi.fn(),
   supermemoryConfigured: false,
+  getSettings: vi.fn(),
 }));
 
 vi.mock("../../../memory/MemoryService", () => ({
@@ -28,6 +29,7 @@ vi.mock("../../../memory/MemoryService", () => ({
     capture: mocks.capture,
     getFullDetails: mocks.getFullDetails,
     deleteEntries: mocks.deleteEntries,
+    getSettings: mocks.getSettings,
   },
 }));
 vi.mock("../../../memory/CuratedMemoryService", () => ({
@@ -140,6 +142,7 @@ describeWithSqlite("memory tools", () => {
     mocks.capture.mockResolvedValue({ id: "arch-1" });
     mocks.getFullDetails.mockResolvedValue([]);
     mocks.deleteEntries.mockResolvedValue(1);
+    mocks.getSettings.mockResolvedValue({ enabled: true, privacyMode: "normal" });
     mocks.syncWorkspaceFiles.mockResolvedValue(undefined);
     mocks.searchConversation.mockResolvedValue([]);
     mocks.durableSearch.mockResolvedValue([]);
@@ -647,6 +650,28 @@ describeWithSqlite("memory tools", () => {
       // Nothing is written locally.
       expect(rowsOf(db)).toHaveLength(0);
       expect(mocks.capture).not.toHaveBeenCalled();
+    });
+
+    it("refuses external writes when workspace memory settings keep memory local", async () => {
+      mocks.supermemoryConfigured = true;
+      mocks.supermemoryRemember.mockResolvedValue({ containerTag: "tag", memoryIds: ["sm-1"] });
+      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
+      for (const settings of [
+        { enabled: false, privacyMode: "normal" },
+        { enabled: true, privacyMode: "disabled" },
+        { enabled: true, privacyMode: "strict" },
+      ]) {
+        mocks.getSettings.mockResolvedValueOnce(settings);
+        expect(
+          await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }),
+        ).toMatchObject({ success: false, reason: "memory_policy" });
+      }
+      mocks.getSettings.mockRejectedValueOnce(new Error("db closed"));
+      expect(
+        (await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }))
+          .success,
+      ).toBe(false);
+      expect(mocks.supermemoryRemember).not.toHaveBeenCalled();
     });
 
     it("reports a staged external write", async () => {

@@ -1,6 +1,7 @@
 # Memory Engine — design and Phase 2 foundation
 
-**Status.** Phase 2 foundation, 2026-10-03, with the Phase 3 additions noted inline. The write
+**Status.** Implemented (updated 2026-10-04): the Phase 2 foundation with the Phase 3 additions, the legacy
+retirement and the producer routing noted inline. The write
 side described here is implemented: the `memory_items` store, `MemoryWriter`, the one-time lane
 migration and purge/retention. `memory_items` is the only store of facts about the user: the
 legacy lanes are retired as stores (§5: no dual writes, no mirror, no legacy read paths), and
@@ -26,6 +27,29 @@ this file as the contract. File references are relative to `src/electron/memory/
 | Raw conversation | `task_events` + the conversation index | Owned by the conversation-index consolidation, not this engine. |
 | Playbook entries, proactive suggestions | Their own tables (`playbook_entries`, `suggestions`) | Moved out of `memories` by a parallel Phase 2 change. |
 | Retired lanes: `curated_memory_entries`, SecureSettings `user-profile`, `relationship-memory`; awareness beliefs and the adaptive style as fact sources | Read only by the one-time lane migration, then exported and dropped by the data retirement | Their services are views of `memory_items` (§5). Awareness keeps its belief state (`awareness-state`) as signals; the adaptive style engine keeps its own bookkeeping (`adaptive-style-engine`). |
+
+### Producers and their write path
+
+Every producer that writes memory goes through the same hygiene: the salience gate
+(`memoryTextSalience`, shared by `MemoryWriter` and the archive), secret redaction
+(`sensitive-content.ts`), policy (`<no-memory>`, scope and privacy, workspace memory
+settings) and dedupe. Facts go through `MemoryWriter.ingest` (§3); archive rows through
+`MemoryService` (`capture`, the gated import API `openImportSession`, source sync
+`replaceMemory`). The source guard `__tests__/memory-writers-sanctioned.test.ts` fails when
+any other runtime module inserts into `memories` or `memory_items` or reaches their
+low-level writers (`insertCapturedMemory`, the `memory.capture` worker command,
+`MemoryRepository`, `MemoryItemsRepository`, the `memoryItems_ingest` unit).
+
+| Producer | Route | Notes |
+|---|---|---|
+| `memory_remember`, Memory Hub, kit back-sync, awareness, adaptive style, `set_user_name` / `set_response_style`, mailbox, Dreaming promotions | `MemoryWriter` | §3, §4b, §5, §5b. |
+| Core memory candidates (`CoreMemoryDistiller`) | Facts → `MemoryWriter` as `inferred`; events → `MemoryService.capture` | Fact types: preference → `preference`, correction → `correction`, project_state → `project_fact`, pattern → `insight`, constraint → `rule`. An inferred `rule` is L0 on every turn, so a constraint is a fact only when the user accepted the candidate (not the hot-path auto-accept) or `autoPromoteToCuratedMemoryEnabled` is on; otherwise it is an archive event. Scope: `global` for a global core scope, else `workspace` (the candidate's workspace governs policy). `source_ref = { store: "core_candidate", id: <candidate id>, traceId, profileId, candidateType, scopeKind, scopeRef }`. Open loops, watch items and recurring-workflow hints are archive events (capture dedupe). `ignored_noise` is a runtime signal: never written. Lifecycle: written or reinforced → `applied`; dropped for good (no workspace, low salience, secret only, `<no-memory>`, outranked, runtime signal) → `skipped` with the reason; refused by settings (memory or capture off) → stays `accepted` and is retried. Without a running writer (CLI) facts fall back to the archive. The former curated promotion (`upsertDistilledEntry`) is no longer used by the distiller. |
+| Chronicle (`ChronicleMemoryService`) | `MemoryService.capture`, archive only | One private `screen_context` row per promoted observation (`allowExternalMirror: false`), the task's `<no-memory>` passed as `noMemory`. Screen text is third-party content and never becomes a `memory_items` fact; Dreaming does not auto-promote screen-captured evidence. |
+| Imports: ChatGPT export, pasted memory exports (`importFromText`) | `MemoryService.openImportSession` | One session per import. Opening it refuses when memory is off or privacy mode is `disabled`; strict privacy or `forcePrivate` make the rows private (private imports stay in their workspace). Auto-capture does not apply (an explicit act). Per entry: `<no-memory>`, input sanitization, inline `<private>`, redaction (secret-only entries dropped), salience, excluded patterns, then dedupe against every imported row visible in the workspace (own rows and non-private imports of any workspace, so a re-import or an import into a second workspace adds nothing) and the capture's content-hash dedupe; the row is written with its embedding (also into the cross-workspace imported-embedding cache) and observation sidecar (`origin: import`) in one capture; `finish` applies the storage cap. Imports are never mirrored to Supermemory. ChatGPT `observation` entries (facts about the user) are also written as `import` items (trust 0.6, never `user_stated`) in the workspace scope with `source_ref = { store: "import", id: <archive row id>, importer, conversationId }`; deleting the row (Inspector delete, delete imported entry, Delete imported, Clear All Memories) deletes the fact, and ignoring the row for prompt recall archives it (un-ignoring writes it again). A fact another source also holds (alias only) is left alone. ChatGPT conversations already imported and visible in the workspace are skipped before the LLM call; a failed distillation counts as an error, not as processed. |
+| Supermemory (`SupermemoryService`) | Remote only | Explicit remember (`memory_remember` scope `external`): `<no-memory>` refused, secrets redacted (secret-only refused), refused when workspace memory is off or privacy mode is `disabled` / `strict`; mirror writes copy archive rows that already passed `capture` and are non-private. Profile and search results are only cached per task for the prompt (third-party tag) and never stored locally, so a remote fact is never `user_stated` here. |
+| Box Brain | `MemoryService.capture` / `replaceMemory` | Private source rows (`origin: import`, `forceCapture`). |
+| Task outcomes, corrections, feedback, errors (daemon, executor), `memory_remember` kinds `outcome` / `error` / `note`, approved archive writes | `MemoryService.capture` | Salience-gated upstream (`memory-capture-salience.ts`) and at capture. |
+| Compression batch digests | `MemoryService` internal | Digest of rows that passed capture; redacted again before storage. |
 
 ## 2. `memory_items`
 
@@ -169,7 +193,7 @@ and `superseded` apply to the active revision only. Reactivation always goes thr
 
 ## 4. Read side — contracts only
 
-`memory-engine-contracts.ts` defines the interfaces; another wave implements them.
+`memory-engine-contracts.ts` defines the interfaces; §4a and §4b describe the implementations.
 
 ```ts
 interface MemoryRecall {
@@ -319,6 +343,10 @@ lane migration. PersonalityManager's user name and response style are mirrors of
   fills the remaining slots with entities whose observations contain the query's distinctive
   terms (observations are not in the FTS index); those hits carry the matching observations,
   so the recall hit shows them.
+  The graph's entities are unique per workspace, type and case-insensitive name, automatic
+  extraction and mailbox ingest skip workspaces with memory off and `<no-memory>` text, and
+  observations are deduped, so the lane no longer returns `Go`/`go` twins, "Gmail"
+  organizations or repeated mailbox notes ([knowledge-graph.md](knowledge-graph.md), DATA-10).
 - **Visibility, once per lane.** Memory items: `active`, unexpired, global or this workspace,
   task scope only for the active task, contact scope only for `contactRef`; `private` only with
   `policy.includePrivate` (or the handled contact's own items); minimum trust `inferred` unless
@@ -442,6 +470,8 @@ await a refresh before they return, so callers read their own writes.
 | Awareness beliefs | `beliefCandidate`, written by `AwarenessService` directly (`user_confirmed` when confirmed or learned from feedback; `preferred_name` / `response_length` single-valued). |
 | `AdaptiveStyleEngine` | `response_style`, `inferred`, with `source_ref.style`; PersonalityManager mirrors it (§4a). |
 | `set_user_name` / `set_response_style` tools, a style set in Settings | `preferred_name` / `response_style`, `user_stated` (`writeInBackground`). |
+| Core memory candidates | Fact candidates through `MemoryWriter` as `inferred` items (§1); the distiller no longer promotes into the curated lane. |
+| Imports | Imported facts as `import` items through the gated import API (§1). |
 | Approval-gated `memory_remember` | Staged with `MemoryWriteGate` (target `curated`, action `remember`) as the candidate itself (kind, scope, source, subject, record id) and replayed through `MemoryWriter` after approval, without a curated-lane conversion. |
 
 The store also updates the provenance fields of an edited record whose text is unchanged (an
@@ -465,7 +495,10 @@ marker exists. It writes an encrypted safety export (`<userData>/backups/legacy-
 OS keychain; without OS encryption a plaintext export leaves the settings blobs out), verifies
 that every exported record has a `memory_items` row (re-ingesting missing ones in migration
 mode, aborting and retrying on the next start otherwise), then deletes the `user-profile` and
-`relationship-memory` blobs (only if unchanged since the export) and drops the retired tables.
+`relationship-memory` blobs (only if unchanged since the export) and drops the retired tables
+(`curated_memory_entries`, the unused `memory_summaries` and `heartbeat_policies`, the retired
+self-improvement `improvement_*` tables once Workflow Intelligence has copied them, and the
+`transcript_spans` tables once the conversation index migration has finished).
 `adaptive-style-engine` (engine bookkeeping) and `awareness-state` (belief signals) are kept.
 
 ### Generated kit views
@@ -605,11 +638,14 @@ by the schema setup (`memory-curation-log-sql.ts`).
 ## 6. The archive (`memories`) and its future
 
 - **Now (Phase 2):** `memories` stays the episodic store: task outcomes, resolved errors,
-  feedback, corrections as events, explicit `memory_remember` notes, Chronicle and imports. It keeps
-  its own capture salience gate, retention (`retention_days`), privacy states and FTS.
-  `memory_items` is the semantic fact store. The two do not reference each other yet; a fact
-  learned from an archived event should carry the archive row id in `source_ref` (`{ store:
-  "archive", id }`) when a producer starts writing such facts.
+  feedback, corrections as events, explicit `memory_remember` notes, core-candidate events,
+  Chronicle and imports. It keeps its own capture path (the shared salience gate, redaction,
+  settings and content-hash dedupe, §1), retention (`retention_days`), privacy states and
+  FTS. `memory_items` is the semantic fact store. Facts link back to archive rows in two ways:
+  Dreaming promotions list their evidence as `source_ref.aliases` (`archive:<id>`), and
+  imported facts name their imported row as the primary ref (`{ store: "import", id }`), so
+  the fact follows the row's delete and ignore. (The import store is distinct from
+  `archive` so that deleting one piece of Dreaming evidence never deletes a promoted fact.)
 - **Phase 3 (unification):** Dreaming promotes recurring archive outcomes into `memory_items`
   facts (`source: inferred`, `source_ref.aliases` listing the supporting archive rows), and
   `MemoryRecall` fuses both lanes. The archive then becomes the `outcome`/`decision` event lane
@@ -676,8 +712,15 @@ by the schema setup (`memory-curation-log-sql.ts`).
    Hub shows history.
 6. `findBySourceRef` matches aliases with `json_each`, which cannot use an index; fine for the
    expected size (hundreds to low thousands of rows), revisit if the table grows.
-7. Producers not yet routed through `MemoryWriter`: core memory candidates, Chronicle,
-   imports, Supermemory. Agent fact writes go through `MemoryWriter` (`memory_remember`, §4b).
+7. Done: every producer goes through the same hygiene (§1, "Producers and their write
+   path"): core memory candidates (facts through `MemoryWriter`, events through `capture`),
+   Chronicle (archive only, through `capture`), imports (the gated import API, imported facts
+   as `import` items) and Supermemory (explicit remembers redacted and policy-checked; reads
+   never stored locally). A source guard keeps new code from inserting into `memories` or
+   `memory_items` outside the sanctioned modules. Open: approval-gated memory-write modes
+   (`COWORK_MEMORY_WRITE_APPROVAL_MODE`) do not stage core-candidate fact writes (the
+   distiller writes facts directly; the curated promotion it replaced was staged in
+   `background_only` / `curated_only` modes).
 8. Done: the legacy stores are retired (§5): the 16 hidden tool aliases are removed (§4b), the
    dual writes and the legacy mirror are removed, the services are views of `memory_items`, and
    the data retirement exports and drops the old stores. Open: a commitment edited from an

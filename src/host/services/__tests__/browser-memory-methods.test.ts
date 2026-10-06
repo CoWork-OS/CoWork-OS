@@ -575,4 +575,36 @@ describe("browser memory folder methods", () => {
     }
     await expect(call("getMemoryRepoDreamDiff", ["d-1", "branch"])).rejects.toThrow();
   });
+
+  it("mirrors the desktop Sync now with the same results", async () => {
+    const { MemoryRepoService } = await import("../../../electron/memory/repo/MemoryRepoService");
+    MemoryRepoService.setInstance(null);
+    const { call, definitions } = setup();
+    expect(definitions.syncMemoryRepoNow).toMatchObject({ mutation: true, maxArgs: 0 });
+    await expect(call("syncMemoryRepoNow")).resolves.toEqual({
+      error: "The memory folder is off.",
+    });
+    const state = {
+      remoteUrl: "https://github.com/sam/memory.git",
+      lastPullAt: 1,
+      lastPushAt: 2,
+      ahead: 0,
+      behind: 0,
+      conflict: null,
+      lastError: null,
+    };
+    const syncNow = vi.fn(async () => state);
+    const service = { isSyncConfigured: vi.fn(() => false), syncNow };
+    MemoryRepoService.setInstance(service as never);
+    try {
+      await expect(call("syncMemoryRepoNow")).resolves.toEqual({
+        error: expect.stringContaining("Sync is off"),
+      });
+      service.isSyncConfigured.mockReturnValue(true);
+      await expect(call("syncMemoryRepoNow")).resolves.toEqual(state);
+      expect(syncNow).toHaveBeenCalledWith({ push: true });
+    } finally {
+      MemoryRepoService.setInstance(null);
+    }
+  });
 });

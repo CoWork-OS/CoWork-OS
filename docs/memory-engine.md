@@ -808,6 +808,13 @@ facts stay in `memory_items`, as do the other producers. See
 a review branch): [memory-repo-phase2-design.md](memory-repo-phase2-design.md). The heuristic
 curator in §5b keeps curating `memory_items`.
 
+**Sync and team memory.** The folder can sync with a private git remote the user owns
+(`memoryRepoRemoteUrl`, only after the "private and mine" confirmation; the user's own git
+credentials; dream review branches are never pushed), and up to three team memory repos
+(`memoryRepoTeamRepos`) are read next to it in the prompt and recall, never written. The
+Memory folder card has a Sync and a Team memory section; Health adds "Memory folder sync" and
+"Team memory". See [memory-repo-phase4-design.md](memory-repo-phase4-design.md).
+
 ## 8. Gaps and next steps
 
 1. Done for prompts (§4a), the Memory Hub layer preview (§5a) and the mailbox prompt

@@ -60,6 +60,16 @@ import {
 } from "./memory-repo-git";
 import { MemoryRepoBusyError, withMemoryRepoLock } from "./memory-repo-lock";
 import {
+  MEMORY_REPO_SYNC_REMOTE,
+  configureSyncRemote,
+  emptySyncState,
+  memoryRepoRemoteUrlProblem,
+  pullMemoryRepo,
+  pushMemoryRepo,
+  redactRemoteUrl,
+  type MemoryRepoSyncState,
+} from "./memory-repo-sync";
+import {
   applyDreamOperations,
   describeDreamOperation,
   type ClassifiedDreamOperation,
@@ -169,6 +179,8 @@ export interface MemoryRepoServiceDeps {
   /** The user's preferred name for the MEMORY.md title. */
   ownerName?: () => string | null | undefined;
   lockTimeoutMs?: number;
+  /** Tests only: accept a local path as the sync remote. */
+  allowLocalRemotesForTests?: boolean;
 }
 
 type ChangeListener = (change: MemoryRepoChange) => void;
@@ -224,6 +236,13 @@ export class MemoryRepoService {
   private chain: Promise<unknown> = Promise.resolve();
   private stopped = false;
   private workspaceFiles: Map<string, string> | null = null;
+  /** Private-remote sync (Phase 4); null when off. */
+  private syncUrl: string | null = null;
+  private syncState: MemoryRepoSyncState = emptySyncState();
+  private pushTimer: NodeJS.Timeout | null = null;
+  /** History was rewritten (compaction): the next push replaces the remote's history. */
+  private forcePushPending = false;
+  private silentNotify = false;
 
   constructor(private readonly deps: MemoryRepoServiceDeps) {
     this.root = path.resolve(deps.root);
@@ -253,6 +272,8 @@ export class MemoryRepoService {
   /** Wait (bounded) for the write in progress; no new writes after this. */
   async stop(timeoutMs = 3_000): Promise<void> {
     this.stopped = true;
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.pushTimer = null;
     await Promise.race([
       this.chain.catch(() => undefined),
       new Promise((resolve) => setTimeout(resolve, timeoutMs)),
@@ -279,6 +300,7 @@ export class MemoryRepoService {
 
   async status(): Promise<MemoryRepoStatus> {
     const base: MemoryRepoStatus = {
+      sync: this.syncUrl ? { ...this.syncState } : null,
       root: this.root,
       ready: this.ready,
       writable: this.isWritable(),
@@ -348,6 +370,7 @@ export class MemoryRepoService {
     await this.writeFileAtomic(MEMORY_REPO_ME_FILE, initialTopicFile("About me"));
     await this.writeFileAtomic(MEMORY_REPO_LESSONS_FILE, initialTopicFile("Lessons"));
     await fs.writeFile(path.join(this.root, ".gitignore"), MEMORY_REPO_GITIGNORE, { mode: 0o600 });
+    await fs.writeFile(path.join(this.root, ".gitattributes"), "*.md merge=union\n", { mode: 0o600 });
     if (this.hasGit) await this.initGit("Create memory repo");
   }
 
@@ -356,6 +379,7 @@ export class MemoryRepoService {
     await this.runGit(["symbolic-ref", "HEAD", "refs/heads/main"]).catch(() => undefined);
     const files = (await this.listFiles()).filter((file) => isSafeRepoPath(file));
     if (fsSync.existsSync(path.join(this.root, ".gitignore"))) files.push(".gitignore");
+    if (fsSync.existsSync(path.join(this.root, ".gitattributes"))) files.push(".gitattributes");
     if (files.length > 0) await this.runGit(["add", "--", ...files]);
     await this.commit(message, { origin: "hand_edit" }, true);
   }
@@ -733,6 +757,7 @@ export class MemoryRepoService {
           await this.runGit(["branch", "-m", "main"]);
           await this.runGit(["reflog", "expire", "--expire=now", "--all"]);
           await this.runGit(["gc", "-q", "--prune=now"]);
+          if (this.syncUrl) this.forcePushPending = true;
           this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
           this.notify([]);
           return { compacted: true };
@@ -741,6 +766,130 @@ export class MemoryRepoService {
     } catch (error) {
       return { compacted: false, error: this.describeError(error) };
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
+  // ---------------------------------------------------------------------------
+
+  /** Make the managed remote match the setting (null turns sync off). */
+  async configureSync(url: string | null): Promise<{ ok: boolean; error?: string }> {
+    const next = url && url.trim() ? url.trim() : null;
+    if (next && !this.deps.allowLocalRemotesForTests && memoryRepoRemoteUrlProblem(next)) {
+      return { ok: false, error: memoryRepoRemoteUrlProblem(next) ?? "Invalid remote." };
+    }
+    if (!this.isWritable() || !this.hasGit) {
+      this.syncUrl = null;
+      return { ok: !next, ...(next ? { error: "Sync needs a writable memory folder and git." } : {}) };
+    }
+    try {
+      await this.serialized(() => this.locked(() => configureSyncRemote(this.git, this.root, next)));
+      this.syncUrl = next;
+      this.syncState = { ...emptySyncState(), remoteUrl: next ? redactRemoteUrl(next) : null };
+      if (!next && this.pushTimer) {
+        clearTimeout(this.pushTimer);
+        this.pushTimer = null;
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: this.describeError(error) };
+    }
+  }
+
+  isSyncConfigured(): boolean {
+    return this.syncUrl !== null;
+  }
+
+  /**
+   * Pull (fetch + rebase local commits) and, unless `push: false`, push. A conflict aborts the
+   * rebase and pauses pushing until a later sync succeeds.
+   */
+  async syncNow(options: { push?: boolean } = {}): Promise<MemoryRepoSyncState> {
+    if (!this.syncUrl || !this.isWritable() || !this.hasGit) return { ...this.syncState };
+    try {
+      await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          await this.ensureUnionMerge();
+          if (this.forcePushPending) {
+            // History was compacted: the remote's history is replaced, not rebased onto.
+            await this.runGit(["fetch", "--quiet", "--no-tags", MEMORY_REPO_SYNC_REMOTE, "main"]).catch(
+              () => undefined,
+            );
+            const forced = await pushMemoryRepo(this.git, this.root, { force: true });
+            this.syncState = forced.ok
+              ? { ...this.syncState, lastPushAt: this.now(), ahead: 0, behind: 0, conflict: null, lastError: null }
+              : { ...this.syncState, lastError: forced.error };
+            if (forced.ok) this.forcePushPending = false;
+            return;
+          }
+          const pulled = await pullMemoryRepo(this.git, this.root);
+          const now = this.now();
+          if (!pulled.ok) {
+            this.syncState = {
+              ...this.syncState,
+              conflict: pulled.conflict ?? null,
+              lastError: pulled.error ?? pulled.conflict ?? null,
+            };
+            return;
+          }
+          this.syncState = {
+            ...this.syncState,
+            lastPullAt: now,
+            ahead: pulled.ahead,
+            behind: pulled.behind,
+            conflict: null,
+            lastError: null,
+          };
+          if (pulled.changed) {
+            this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
+            this.writeCount += 1;
+            this.workspaceFiles = null;
+            this.silentNotify = true;
+            try {
+              this.notify([]);
+            } finally {
+              this.silentNotify = false;
+            }
+          }
+          if (options.push === false || (this.syncState.ahead === 0 && !this.forcePushPending)) return;
+          const pushed = await pushMemoryRepo(this.git, this.root, { force: this.forcePushPending });
+          if (pushed.ok) {
+            this.forcePushPending = false;
+            this.syncState = { ...this.syncState, lastPushAt: this.now(), ahead: 0, lastError: null };
+          } else {
+            this.syncState = { ...this.syncState, lastError: pushed.error };
+          }
+        }),
+      );
+    } catch (error) {
+      this.syncState = { ...this.syncState, lastError: this.describeError(error) };
+    }
+    return { ...this.syncState };
+  }
+
+  /**
+   * Memory notes are line lists: two machines adding lines to the same file should keep both
+   * (git's `union` merge), instead of stopping on a conflict. Dreaming tidies duplicates.
+   */
+  private async ensureUnionMerge(): Promise<void> {
+    const file = path.join(this.root, ".gitattributes");
+    const current = await fs.readFile(file, "utf8").catch(() => "");
+    if (/^\*\.md\s+merge=union\s*$/m.test(current)) return;
+    await fs.writeFile(file, `${current.trimEnd()}${current.trim() ? "\n" : ""}*.md merge=union\n`, {
+      mode: 0o600,
+    });
+    await this.runGit(["add", "--", ".gitattributes"]);
+    await this.commit("Merge memory notes line by line", { origin: "memory_hub" });
+  }
+
+  private schedulePush(delayMs = 30_000): void {
+    if (this.pushTimer || this.stopped) return;
+    this.pushTimer = setTimeout(() => {
+      this.pushTimer = null;
+      void this.syncNow().catch(() => undefined);
+    }, delayMs);
+    this.pushTimer.unref?.();
   }
 
   // ---------------------------------------------------------------------------
@@ -909,9 +1058,21 @@ export class MemoryRepoService {
       return await this.serialized(() =>
         this.locked(async () => {
           await this.commitHandEdits();
+          // A review was made against older lines: a change underneath it must conflict (stale),
+          // not be unioned in as sync merges are. `.git/info/attributes` wins over .gitattributes.
+          const infoAttributes = path.join(this.root, ".git", "info", "attributes");
+          const previousAttributes = await fs.readFile(infoAttributes, "utf8").catch(() => null);
+          await fs.mkdir(path.dirname(infoAttributes), { recursive: true });
+          await fs.writeFile(infoAttributes, "*.md merge=text\n", { mode: 0o600 });
+          const restoreAttributes = () =>
+            previousAttributes === null
+              ? fs.rm(infoAttributes, { force: true })
+              : fs.writeFile(infoAttributes, previousAttributes, { mode: 0o600 });
           try {
             await this.runGit(["merge", "--no-ff", "--no-edit", "-m", `Accept dream ${record.id}`, branch]);
+            await restoreAttributes();
           } catch (error) {
+            await restoreAttributes();
             await this.runGit(["merge", "--abort"]).catch(() => undefined);
             await this.writeDreamRecord({ ...record, reviewStatus: "stale" });
             await this.runGit(["branch", "-D", branch]).catch(() => undefined);
@@ -1339,6 +1500,7 @@ export class MemoryRepoService {
   }
 
   private notify(paths: string[]): void {
+    if (this.syncUrl && !this.silentNotify) this.schedulePush();
     const change = { paths, version: this.version() };
     for (const listener of this.listeners) {
       try {

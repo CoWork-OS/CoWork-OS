@@ -434,7 +434,7 @@ import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { AppearanceManager, getDevLogCaptureEnabled } from "../settings/appearance-manager";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import {
-  memoryRepoPathSettingProblem,
+  memoryRepoSettingsProblem,
   memoryRepoStatus,
 } from "../memory/repo/memory-repo-bootstrap";
 import { MemoryRepoService } from "../memory/repo/MemoryRepoService";
@@ -13679,7 +13679,7 @@ function setupMemoryHandlers(
   // Save global memory feature toggles
   ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, async (_event, settings: Any) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
-    const memoryRepoPathProblem = await memoryRepoPathSettingProblem(settings?.memoryRepoPath);
+    const memoryRepoPathProblem = await memoryRepoSettingsProblem(settings);
     if (memoryRepoPathProblem) throw new Error(memoryRepoPathProblem);
     try {
       MemoryFeaturesManager.saveSettings(settings);

@@ -150,6 +150,26 @@ describe("MemoryFeaturesManager", () => {
       memoryRepoDefaultOnApplied: true,
       memoryRepoDreamingEnabled: true,
       memoryRepoDreamDailyTokenBudget: 50000,
+      memoryRepoRemoteUrl: "",
+      memoryRepoRemoteConfirmedPrivate: false,
+      memoryRepoTeamRepos: [],
+    });
+  });
+
+  it("keeps sync off until confirmed and normalizes team repos", () => {
+    MemoryFeaturesManager.saveSettings({
+      memoryRepoRemoteUrl: "  git@github.com:me/memory.git ",
+      memoryRepoTeamRepos: [
+        { name: "Platform", path: "/Users/me/team-memory", workspaceIds: ["ws-1", 7 as never] },
+        { name: "platform", path: "/Users/me/other" },
+        { name: "bad/name", path: "/x" },
+        { name: "", path: "/y" },
+      ] as never,
+    });
+    expect(mocks.storedSettings).toMatchObject({
+      memoryRepoRemoteUrl: "git@github.com:me/memory.git",
+      memoryRepoRemoteConfirmedPrivate: false,
+      memoryRepoTeamRepos: [{ name: "Platform", path: "/Users/me/team-memory", workspaceIds: ["ws-1"] }],
     });
   });
 

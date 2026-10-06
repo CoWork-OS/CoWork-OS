@@ -16,6 +16,9 @@ import path from "node:path";
 export const MEMORY_REPO_GIT_NAME = "CoWork OS";
 export const MEMORY_REPO_GIT_EMAIL = "memory@cowork.invalid";
 const GIT_TIMEOUT_MS = 10_000;
+/** fetch/push/pull talk to a remote (Phase 4 sync): longer timeout, never prompt. */
+const NETWORK_COMMANDS: ReadonlySet<string> = new Set(["fetch", "push", "pull", "ls-remote"]);
+const GIT_NETWORK_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 8 * 1024 * 1024;
 
 export class MemoryRepoGitError extends Error {
@@ -83,9 +86,11 @@ export const runMemoryRepoGit: GitRunner = (cwd, args) =>
       [...hardeningArgs(), ...args],
       {
         cwd,
-        env: scrubbedEnv(),
+        env: NETWORK_COMMANDS.has(args[0] ?? "")
+          ? { ...scrubbedEnv(), GIT_SSH_COMMAND: "ssh -o BatchMode=yes" }
+          : scrubbedEnv(),
         shell: false,
-        timeout: GIT_TIMEOUT_MS,
+        timeout: NETWORK_COMMANDS.has(args[0] ?? "") ? GIT_NETWORK_TIMEOUT_MS : GIT_TIMEOUT_MS,
         maxBuffer: MAX_BUFFER,
         windowsHide: true,
       },

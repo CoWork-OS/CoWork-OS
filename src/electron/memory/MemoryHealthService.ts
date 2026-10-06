@@ -291,6 +291,84 @@ export function evaluateMemoryRepoDreamHealth(
   };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function utcMinute(at: number): string {
+  return `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/**
+ * "Memory folder sync" (docs/memory-repo-phase4-design.md §3): SKIP when no confirmed private
+ * remote is set (or the folder is off); WARN on a paused conflict, or an error with no
+ * successful pull or push in the last day; otherwise INFO with the last sync. Service-only.
+ */
+export function evaluateMemoryRepoSyncHealth(
+  status: MemoryRepoStatusReport | null,
+  now: number,
+): MemoryHealthCheck {
+  const base = { id: "memory_repo_sync", label: "Memory folder sync", value: null };
+  const sync = status?.enabled && status.ready ? status.sync : null;
+  if (!sync) {
+    return { ...base, status: "skip", detail: "Sync with a private repository is not set up." };
+  }
+  const lastSync = Math.max(sync.lastPullAt ?? 0, sync.lastPushAt ?? 0);
+  const lastLine = lastSync ? `Last sync ${utcMinute(lastSync)}` : "Not synced yet";
+  if (sync.conflict) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `Sync is paused by a conflict: ${sync.conflict}. Open the memory folder, resolve it, then press Sync now. ${lastLine}.`,
+    };
+  }
+  if (sync.lastError && lastSync < now - DAY_MS) {
+    return {
+      ...base,
+      status: "warn",
+      detail: `Sync has failed for more than a day: ${sync.lastError}. ${lastLine}.`,
+    };
+  }
+  const pending = [
+    sync.ahead ? `${sync.ahead} to push` : "",
+    sync.behind ? `${sync.behind} to pull` : "",
+    sync.lastError ? `last error: ${sync.lastError}` : "",
+  ].filter(Boolean);
+  return {
+    ...base,
+    status: "info",
+    detail: `${lastLine}${sync.remoteUrl ? ` with ${sync.remoteUrl}` : ""}${pending.length ? `; ${pending.join("; ")}` : ""}.`,
+  };
+}
+
+/**
+ * "Team memory" (docs/memory-repo-phase4-design.md §3): SKIP when no team repo is configured;
+ * WARN when one is missing or not a memory repo; PASS otherwise. Service-only.
+ */
+export function evaluateTeamMemoryHealth(status: MemoryRepoStatusReport | null): MemoryHealthCheck {
+  const base = { id: "memory_repo_team", label: "Team memory", unit: "count" as const };
+  const team = status?.team ?? [];
+  if (!team.length) {
+    return { ...base, status: "skip", value: null, detail: "No team memory is configured." };
+  }
+  const broken = team.filter((repo) => !repo.ready);
+  if (broken.length) {
+    return {
+      ...base,
+      status: "warn",
+      value: broken.length,
+      detail: `${broken
+        .map((repo) => `${repo.name} is not read: ${repo.problem ?? "not a memory repo"}`)
+        .join("; ")}.`,
+    };
+  }
+  const failing = team.filter((repo) => repo.lastPullError).map((repo) => repo.name);
+  return {
+    ...base,
+    status: "pass",
+    value: 0,
+    detail: `${team.length} team ${team.length === 1 ? "repo" : "repos"} read${failing.length ? `; the last update failed for ${failing.join(", ")}` : ""}.`,
+  };
+}
+
 export class MemoryHealthService {
   constructor(private readonly deps: MemoryHealthDeps) {}
 
@@ -342,6 +420,8 @@ export class MemoryHealthService {
     if (this.deps.getMemoryRepoStatus) {
       const repo = await this.deps.getMemoryRepoStatus().catch(() => null);
       checks.push(...evaluateMemoryRepoHealth(repo));
+      checks.push(evaluateMemoryRepoSyncHealth(repo, now));
+      checks.push(evaluateTeamMemoryHealth(repo));
       if (this.deps.getMemoryRepoDreams) {
         const dreams =
           repo?.enabled && repo.ready

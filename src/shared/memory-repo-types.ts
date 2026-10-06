@@ -25,6 +25,51 @@ export interface MemoryRepoStatusReport {
   /** Entries waiting in `inbox.md`. */
   inboxEntries?: number;
   lastWriteError?: string | null;
+  /** Private-remote sync (docs/memory-repo-phase4-design.md §1); absent when sync is off. */
+  sync?: MemoryRepoSyncStatus | null;
+  /** Team memory repos read next to the folder (docs/memory-repo-phase4-design.md §2). */
+  team?: TeamMemoryRepoStatus[];
+}
+
+/** One configured team memory repo (read-only), as the renderer sees it. */
+export interface TeamMemoryRepoStatus {
+  name: string;
+  /** The resolved folder. */
+  root: string;
+  /** The folder is a memory repo CoWork reads. */
+  ready: boolean;
+  /** Why it is not read (missing, not a memory repo, refused path, ...). */
+  problem?: string;
+  /** Workspaces it applies to; empty = all. */
+  workspaceIds: string[];
+  /** Last fast-forward from its remote (ms), or null. */
+  lastPullAt: number | null;
+  lastPullError: string | null;
+}
+
+/** `memoryRepo:syncNow`: the sync state after the pull and push, or why nothing ran. */
+export type MemoryRepoSyncNowResult = MemoryRepoSyncStatus | { error: string };
+
+/** `memoryRepo:syncNow` while the memory folder is off. */
+export const MEMORY_REPO_SYNC_FOLDER_OFF_ERROR = "The memory folder is off.";
+/** `memoryRepo:syncNow` while no confirmed private remote is set. */
+export const MEMORY_REPO_SYNC_OFF_ERROR =
+  "Sync is off: add your private repository's URL and confirm it is private and yours.";
+
+/** Most team memory repos (`memoryRepoTeamRepos`). */
+export const MEMORY_REPO_TEAM_REPOS_MAX = 3;
+
+/** Sync with the user's private remote, as the renderer sees it. */
+export interface MemoryRepoSyncStatus {
+  /** The remote URL without user info. */
+  remoteUrl: string | null;
+  lastPullAt: number | null;
+  lastPushAt: number | null;
+  ahead: number;
+  behind: number;
+  /** A pull hit a conflict: sync is paused until the user resolves it. */
+  conflict: string | null;
+  lastError: string | null;
 }
 
 export interface MemoryRepoCompactResult {

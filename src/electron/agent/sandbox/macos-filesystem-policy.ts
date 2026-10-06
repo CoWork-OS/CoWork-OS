@@ -4,7 +4,7 @@ import * as fs from "fs";
 import type { Workspace } from "../../../shared/types";
 import type { SandboxOptions } from "./sandbox-factory";
 import { resolveAccessControlledPath } from "../../security/access-profile-paths";
-import { getMemoryRepoRoot } from "../../security/memory-repo-access";
+import { getMemoryRepoRoot, getTeamMemoryRepoRoots } from "../../security/memory-repo-access";
 import { escapeSandboxProfileString, validatePathForSandboxProfile } from "./security-utils";
 import { collectPolicyPathEntries } from "./policy-paths";
 
@@ -213,9 +213,14 @@ export function macOSFilesystemRestrictions(
   // writes it, whatever the workspace or a profile rule grants (a home-folder workspace
   // contains it). The agent reads memory through the file tools, which apply the task's
   // memory repo layer; only MemoryRepoService writes it. Last, so no grant above overrides.
-  const memoryRepoRoot = getMemoryRepoRoot();
-  if (memoryRepoRoot) {
-    const memoryRoots = [...new Set([...aliases(memoryRepoRoot), path.resolve(memoryRepoRoot)])];
+  // Team memory repos (docs/memory-repo-phase4-design.md §2) get the same deny.
+  const memoryRepoRoots = [getMemoryRepoRoot(), ...getTeamMemoryRepoRoots()].filter(
+    (root): root is string => Boolean(root),
+  );
+  if (memoryRepoRoots.length > 0) {
+    const memoryRoots = [
+      ...new Set(memoryRepoRoots.flatMap((root) => [...aliases(root), path.resolve(root)])),
+    ];
     for (const root of memoryRoots) validatePathForSandboxProfile(root);
     result += `(deny file-read* file-write* ${union(memoryRoots.map(subpath))})\n`;
   }

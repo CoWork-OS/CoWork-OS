@@ -71,6 +71,9 @@ export const NO_MEMORY_WRITE_ERROR =
 export const FORGET_DENIED_ERROR =
   "The user did not approve forgetting this memory. It was kept; do not retry.";
 
+export const TEAM_MEMORY_READ_ONLY_ERROR =
+  "Team memory is read-only; edit it in the team's repository.";
+
 /** What memory_forget is about to delete, for the approval prompt. */
 interface ForgetTarget {
   ref: string;
@@ -950,6 +953,7 @@ export class MemoryTools {
       const repoRef = parseMemoryRepoRef(id);
       if (repoRef) return await this.forgetRepoEntry(repoRef.path, repoRef.line, input?.reason, fail, done);
       if (id) {
+        if (/^team:/i.test(id)) return fail(TEAM_MEMORY_READ_ONLY_ERROR);
         const parsed = parseRecallRef(id);
         if (!parsed) return fail(`Unknown memory id "${id}".`);
         switch (parsed.kind) {
@@ -1101,6 +1105,8 @@ export class MemoryTools {
       if (termCoverage(hit.content ?? hit.snippet ?? "", match) < 1) continue;
       // Imported rows of other workspaces are readable here but not this task's to delete.
       if (hit.lane === "archive" && hit.provenance?.imported === true) continue;
+      // Team memory repos are read-only (docs/memory-repo-phase4-design.md §2).
+      if (hit.ref.startsWith("team:")) continue;
       visible.push(hit);
     }
     return visible;

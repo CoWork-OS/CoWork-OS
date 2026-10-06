@@ -2,7 +2,6 @@ import type Database from "better-sqlite3";
 import type { MemoryItemContextSearchRequest } from "./memory-context-sql";
 import type { CuratedEntryMigrationRow } from "./memory-items-sql";
 import type {
-  KitRenderState,
   ListMemoryItemsRequest,
   MemoryItem,
   MemoryItemIngestOutcome,
@@ -87,7 +86,7 @@ export class MemoryItemsRepository {
     return this.sql.unit("memoryItems_recordLaneMigration", [summary, now]);
   }
 
-  // ---- Memory Hub and kit back-sync ----
+  // ---- Memory Hub ----
 
   listPage(request: MemoryItemsPageRequest): Promise<MemoryItemsPage> {
     return this.sql.unit("memoryItems_listPage", [request]);
@@ -108,11 +107,8 @@ export class MemoryItemsRepository {
     return this.sql.unit("memoryItems_purgeGlobal", []);
   }
 
-  getKitRenderState(key: string): Promise<KitRenderState | null> {
-    return this.sql.unit("memoryItems_getKitRenderState", [key]);
-  }
-
-  setKitRenderState(key: string, state: KitRenderState, now = Date.now()): Promise<void> {
-    return this.sql.unit("memoryItems_setKitRenderState", [key, state, now]);
+  /** Delete the workspace's leftover kit render-state keys (retired generated kit blocks). */
+  clearKitRenderState(workspaceId: string): Promise<number> {
+    return this.sql.unit("memoryItems_clearKitRenderState", [workspaceId]);
   }
 }

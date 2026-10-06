@@ -38,6 +38,7 @@ import { MemoryTierService } from "./MemoryTierService";
 import { SupermemoryService } from "./SupermemoryService";
 import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository";
 import { MemoryWriter, memoryTextSalience } from "./MemoryWriter";
+import { writableMemoryRepo } from "./repo/memory-repo-producers";
 import { InFlightWork } from "../utils/in-flight-work";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
@@ -159,6 +160,11 @@ export interface PromptRecallDiagnostics {
 
 /** `source_ref.store` of facts written by the import API; `id` is the archive row. */
 export const IMPORT_FACT_STORE = "import";
+
+/** The `import` tag of an imported fact's memory folder line: `<workspace>/<archive row>`. */
+function importFactTag(workspaceId: string, archiveId: string): string {
+  return `${workspaceId}/${archiveId}`;
+}
 
 const IMPORT_HEADER_PREFIX = "[Imported from ";
 
@@ -2002,7 +2008,10 @@ export class MemoryService {
   }
 
   /**
-   * An imported fact about the user as a `memory_items` item: source `import` (never
+   * An imported fact about the user. With the memory folder running (and a row that is not
+   * private): an agent line in `me.md` tagged `source: import` and `import: <workspace>/<row>`
+   * (docs/memory-repo-phase3-design.md §4), so deleting or ignoring the row forgets it;
+   * the result is its `repo:` ref. Otherwise a `memory_items` item: source `import` (never
    * `user_stated`), workspace scope (the import's workspace; Clear All Memories removes
    * it), private when the imported row is. `source_ref` names the archive row
    * (`{ store: "import", id }`), so deleting or ignoring the imported row forgets it.
@@ -2014,6 +2023,25 @@ export class MemoryService {
     isPrivate: boolean,
     fact: NonNullable<MemoryImportEntry["fact"]>,
   ): Promise<string | undefined> {
+    const repo = isPrivate ? null : writableMemoryRepo();
+    if (repo) {
+      try {
+        const result = await repo.remember({
+          text: content,
+          kind: fact.kind,
+          scope: "global",
+          by: "agent",
+          origin: "import",
+          originText: content,
+          metadata: { source: IMPORT_FACT_STORE, import: importFactTag(workspaceId, archiveId) },
+        });
+        if (result.status === "written") return result.ref;
+        // Unavailable (a write error): fall through to memory_items, nothing is lost.
+        if (result.reason !== "unavailable") return undefined;
+      } catch (error) {
+        logger.warn("[MemoryService] Imported fact was not written to the memory folder:", error);
+      }
+    }
     const writer = MemoryWriter.get();
     if (!writer) return undefined;
     try {
@@ -2049,8 +2077,10 @@ export class MemoryService {
     archiveIds: string[],
     status: "deleted" | "archived",
   ): Promise<void> {
+    if (archiveIds.length === 0) return;
+    await this.forgetImportedFolderFacts((tag) => archiveIds.some((id) => tag.endsWith(`/${id}`)));
     const writer = MemoryWriter.get();
-    if (!writer || archiveIds.length === 0) return;
+    if (!writer) return;
     for (const archiveId of archiveIds) {
       try {
         const items = await writer.repository.findBySourceRef(
@@ -2071,6 +2101,18 @@ export class MemoryService {
 
   /** Write an un-ignored imported row's fact again (reactivation goes through ingest). */
   private static async restoreImportedFact(memory: Memory): Promise<void> {
+    // Folder lines are removed while their row is ignored; imported facts are the
+    // `observation` rows of an import, written as preferences (ChatGPTImporter).
+    if (!memory.isPrivate && memory.type === "observation" && writableMemoryRepo()) {
+      const body = importedBody(memory.content);
+      if (body) {
+        await this.writeImportedFact(memory.workspaceId, memory.id, body, false, {
+          kind: "preference",
+          importer: "import",
+        });
+      }
+      return;
+    }
     const writer = MemoryWriter.get();
     if (!writer) return;
     try {
@@ -2095,8 +2137,26 @@ export class MemoryService {
     }
   }
 
+  /** Remove the memory folder lines imported with rows whose `import` tag matches. */
+  private static async forgetImportedFolderFacts(match: (tag: string) => boolean): Promise<void> {
+    const repo = writableMemoryRepo();
+    if (!repo) return;
+    try {
+      await repo.forgetWhere(
+        (entry) =>
+          entry.metadata.source === IMPORT_FACT_STORE &&
+          typeof entry.metadata.import === "string" &&
+          match(entry.metadata.import),
+        { message: "Forget imported facts", origin: "import" },
+      );
+    } catch (error) {
+      logger.warn("[MemoryService] Could not forget imported facts in the memory folder:", error);
+    }
+  }
+
   /** Every fact the import API wrote for the workspace's imported rows. */
   private static async deleteImportedFactsOfWorkspace(workspaceId: string): Promise<void> {
+    await this.forgetImportedFolderFacts((tag) => tag.startsWith(`${workspaceId}/`));
     const writer = MemoryWriter.get();
     if (!writer) return;
     try {

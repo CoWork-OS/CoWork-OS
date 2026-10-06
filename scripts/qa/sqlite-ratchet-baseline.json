@@ -6,8 +6,8 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1669,
-    "getDatabase": 131,
+    "prepare": 1721,
+    "getDatabase": 129,
     "runtimeImport": 49
   },
   "files": {
@@ -29,10 +29,10 @@
       "prepare": 5
     },
     "src/electron/activity/ActivityRepository.ts": {
-      "prepare": 11
+      "prepare": 12
     },
     "src/electron/agent/daemon.ts": {
-      "getDatabase": 33
+      "getDatabase": 32
     },
     "src/electron/agent/decisions/decision-usage-telemetry.ts": {
       "getDatabase": 1
@@ -148,7 +148,7 @@
       "runtimeImport": 1
     },
     "src/electron/core/CoreMemoryCleanupRepository.ts": {
-      "prepare": 10
+      "prepare": 13
     },
     "src/electron/core/CoreMemoryDistillRunRepository.ts": {
       "prepare": 4,
@@ -280,14 +280,17 @@
     "src/electron/ipc/handlers.ts": {
       "getDatabase": 8
     },
+    "src/electron/knowledge-graph/knowledge-graph-maintenance-sql.ts": {
+      "prepare": 34
+    },
     "src/electron/knowledge-graph/knowledge-graph-sql.ts": {
-      "prepare": 28
+      "prepare": 33
     },
     "src/electron/mailbox/mailbox-units.ts": {
       "prepare": 1
     },
     "src/electron/main.ts": {
-      "getDatabase": 36
+      "getDatabase": 35
     },
     "src/electron/managed/managed-sql.ts": {
       "prepare": 15
@@ -308,14 +311,14 @@
     "src/electron/memory/CuratedMemoryService.ts": {
       "getDatabase": 1
     },
-    "src/electron/memory/dreaming-sql.ts": {
-      "prepare": 8
-    },
     "src/electron/memory/durable-context-sql.ts": {
       "prepare": 28
     },
     "src/electron/memory/DurableContextService.ts": {
       "getDatabase": 1
+    },
+    "src/electron/memory/kit-writer-lease-sql.ts": {
+      "prepare": 4
     },
     "src/electron/memory/legacy-memory-retirement-sql.ts": {
       "prepare": 14
@@ -332,6 +335,9 @@
     "src/electron/memory/memory-cleanup-sql.ts": {
       "prepare": 20
     },
+    "src/electron/memory/memory-compression-usage-sql.ts": {
+      "prepare": 3
+    },
     "src/electron/memory/memory-context-sql.ts": {
       "prepare": 2
     },
@@ -339,10 +345,13 @@
       "prepare": 6
     },
     "src/electron/memory/memory-curation-sql.ts": {
-      "prepare": 18
+      "prepare": 14
+    },
+    "src/electron/memory/memory-health-sql.ts": {
+      "prepare": 7
     },
     "src/electron/memory/memory-items-sql.ts": {
-      "prepare": 29
+      "prepare": 27
     },
     "src/electron/memory/memory-observation-sql.ts": {
       "prepare": 12
@@ -360,6 +369,9 @@
     "src/electron/memory/memory-retention-sql.ts": {
       "prepare": 11,
       "getDatabase": 1
+    },
+    "src/electron/memory/memory-summary-reindex-sql.ts": {
+      "prepare": 9
     },
     "src/electron/memory/memory-units.ts": {
       "prepare": 2

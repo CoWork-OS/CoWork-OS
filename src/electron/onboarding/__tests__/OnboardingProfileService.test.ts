@@ -8,6 +8,7 @@ const userProfileServiceMock = vi.hoisted(() => ({
   getProfile: vi.fn(),
   deleteFact: vi.fn(),
   addFact: vi.fn(),
+  replaceTaggedFacts: vi.fn(),
 }));
 
 const memoryServiceMock = vi.hoisted(() => ({
@@ -56,6 +57,8 @@ describe("OnboardingProfileService", () => {
     userProfileServiceMock.getProfile.mockReset();
     userProfileServiceMock.deleteFact.mockReset();
     userProfileServiceMock.addFact.mockReset();
+    userProfileServiceMock.replaceTaggedFacts.mockReset();
+    userProfileServiceMock.replaceTaggedFacts.mockResolvedValue(false);
     memoryServiceMock.syncWorkspaceMarkdown.mockClear();
   });
 
@@ -111,6 +114,17 @@ describe("OnboardingProfileService", () => {
         ([request]) => request.taskId === "onboarding-profile",
       ),
     ).toBe(true);
+  });
+
+  it("replaces the onboarding-tagged facts in the memory folder when it runs", async () => {
+    userProfileServiceMock.replaceTaggedFacts.mockResolvedValue(true);
+    await OnboardingProfileService.applyGlobalProfile(buildProfile());
+    const [origin, facts] = userProfileServiceMock.replaceTaggedFacts.mock.calls[0];
+    expect(origin).toBe("onboarding");
+    expect(facts).toContainEqual(expect.objectContaining({ value: "Preferred name: Alex" }));
+    expect(userProfileServiceMock.getProfile).not.toHaveBeenCalled();
+    expect(userProfileServiceMock.deleteFact).not.toHaveBeenCalled();
+    expect(userProfileServiceMock.addFact).not.toHaveBeenCalled();
   });
 
   it("overwrites stale priorities and tools sections when onboarding clears them", async () => {

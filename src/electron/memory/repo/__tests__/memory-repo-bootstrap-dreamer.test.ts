@@ -14,7 +14,7 @@ vi.mock("../../../settings/memory-features-manager", () => ({
   },
 }));
 
-import { startMemoryRepo, stopMemoryRepo } from "../memory-repo-bootstrap";
+import { memoryRepoStatus, startMemoryRepo, stopMemoryRepo } from "../memory-repo-bootstrap";
 import { getMemoryRepoDreamer } from "../MemoryRepoDreamer";
 
 describe("memory repo bootstrap: dreamer lifecycle", () => {
@@ -58,5 +58,32 @@ describe("memory repo bootstrap: dreamer lifecycle", () => {
     // "no_git" only on machines without git, which gates before the setting.
     expect(["disabled", "no_git"]).toContain(outcome && !outcome.ran ? outcome.reason : null);
     expect(client.complete).not.toHaveBeenCalled();
+  });
+});
+
+describe("memory repo bootstrap: status with team memory", () => {
+  let base: string;
+
+  beforeEach(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "memory-repo-boot-team-"));
+  });
+
+  afterEach(async () => {
+    await stopMemoryRepo();
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it("lists the configured team repos with their problems in the status", async () => {
+    settings.current = {
+      memoryRepoEnabled: true,
+      memoryRepoPath: path.join(base, "repo"),
+      memoryRepoTeamRepos: [{ name: "Platform", path: path.join(base, "missing-team") }],
+    };
+    await startMemoryRepo({ runtime: "cli", readOnly: true });
+    const status = await memoryRepoStatus();
+    expect(status.team).toEqual([
+      expect.objectContaining({ name: "Platform", ready: false, workspaceIds: [] }),
+    ]);
+    expect(status.team[0].problem).toBeTruthy();
   });
 });

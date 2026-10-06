@@ -18,8 +18,6 @@ import {
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { loadNotificationStoreSync } from "../notifications/store";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
-import { MemoryWriter } from "../memory/MemoryWriter";
-import { beliefCandidate } from "../memory/memory-items-lanes";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
 
 const execFileAsync = promisify(execFile);
@@ -830,7 +828,6 @@ export class AwarenessService {
       ).slice(-8);
       existing.promotionStatus =
         existing.promotionStatus === "confirmed" ? "confirmed" : input.promotionStatus;
-      this.recordBeliefAsMemoryItem(existing);
       this.save();
       return;
     }
@@ -865,18 +862,9 @@ export class AwarenessService {
     }
     this.state.beliefs.push(belief);
     this.state.beliefs = this.state.beliefs.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 250);
-    this.recordBeliefAsMemoryItem(belief);
+    // Beliefs stay awareness signals; they are no longer written as memory facts
+    // (docs/memory-repo-phase3-design.md §4: Dreaming over sessions replaces them).
     this.save();
-  }
-
-  /**
-   * Beliefs about the user (facts, preferences, goals) are written to `memory_items` as
-   * global facts (docs/memory-engine.md §5). The belief's id is the record id, so a belief
-   * whose value changes supersedes its previous revision, and a single-valued belief
-   * subject (preferred_name, response_length) lets a newer belief supersede an older one.
-   */
-  private recordBeliefAsMemoryItem(belief: AwarenessBelief): void {
-    MemoryWriter.writeInBackground(beliefCandidate(belief), "awareness belief");
   }
 
   private async pollDeviceContext(): Promise<void> {

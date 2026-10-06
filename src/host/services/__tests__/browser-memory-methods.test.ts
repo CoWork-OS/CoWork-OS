@@ -242,7 +242,7 @@ describe("browser memory services", () => {
     ).rejects.toThrow("Unavailable approval storage");
     expect(list).toHaveBeenCalledWith(workspace.id, 50);
   });
-  it("promotes only an observation in the authorized workspace with filesystem policy guards", async () => {
+  it("promotes only an observation in the authorized workspace", async () => {
     const details = vi
       .spyOn(MemoryObservationService, "details")
       .mockResolvedValue([
@@ -260,8 +260,6 @@ describe("browser memory services", () => {
         content: "Disposable promoted fact",
         target: "workspace",
         action: "add",
-        filesystemReadGuard: expect.any(Function),
-        filesystemWriteGuard: expect.any(Function),
       }),
     );
     details.mockResolvedValue([
@@ -524,6 +522,26 @@ describe("browser memory folder methods", () => {
     }
   });
 
+  it("mirrors the Memory Hub folder entry methods except opening a file", async () => {
+    const { MemoryRepoService } = await import("../../../electron/memory/repo/MemoryRepoService");
+    MemoryRepoService.setInstance(null);
+    const { definitions } = setup();
+    expect(definitions.getMemoryRepoEntries.mutation).toBe(false);
+    expect(definitions.updateMemoryRepoEntry.mutation).toBe(true);
+    expect(definitions.removeMemoryRepoEntry.mutation).toBe(true);
+    expect(definitions.pinMemoryRepoEntry.mutation).toBe(true);
+    expect(definitions.openMemoryRepoFile).toBeUndefined();
+    const validate = (method: string, value: unknown) => () =>
+      definitions[method].validate?.([value]);
+    const workspaceId = "7b0f8e4c-3a52-4d8e-9b1a-2f6c1d9e0a11";
+    const ref = { workspaceId, ref: "repo:me.md#L1", hash: "a".repeat(64) };
+    expect(validate("getMemoryRepoEntries", { workspaceId })).not.toThrow();
+    expect(validate("pinMemoryRepoEntry", ref)).not.toThrow();
+    expect(validate("removeMemoryRepoEntry", { ...ref, ref: "repo:../x.md#L1" })).toThrow();
+    expect(validate("updateMemoryRepoEntry", { ...ref, text: "" })).toThrow();
+    expect(validate("updateMemoryRepoEntry", { ...ref, hash: "nope", text: "Prefers tea" })).toThrow();
+  });
+
   it("mirrors the desktop dream methods with the same validation", async () => {
     const { MemoryRepoService } = await import("../../../electron/memory/repo/MemoryRepoService");
     MemoryRepoService.setInstance(null);
@@ -556,5 +574,37 @@ describe("browser memory folder methods", () => {
       await expect(call("undoMemoryRepoDream", [id])).rejects.toThrow();
     }
     await expect(call("getMemoryRepoDreamDiff", ["d-1", "branch"])).rejects.toThrow();
+  });
+
+  it("mirrors the desktop Sync now with the same results", async () => {
+    const { MemoryRepoService } = await import("../../../electron/memory/repo/MemoryRepoService");
+    MemoryRepoService.setInstance(null);
+    const { call, definitions } = setup();
+    expect(definitions.syncMemoryRepoNow).toMatchObject({ mutation: true, maxArgs: 0 });
+    await expect(call("syncMemoryRepoNow")).resolves.toEqual({
+      error: "The memory folder is off.",
+    });
+    const state = {
+      remoteUrl: "https://github.com/sam/memory.git",
+      lastPullAt: 1,
+      lastPushAt: 2,
+      ahead: 0,
+      behind: 0,
+      conflict: null,
+      lastError: null,
+    };
+    const syncNow = vi.fn(async () => state);
+    const service = { isSyncConfigured: vi.fn(() => false), syncNow };
+    MemoryRepoService.setInstance(service as never);
+    try {
+      await expect(call("syncMemoryRepoNow")).resolves.toEqual({
+        error: expect.stringContaining("Sync is off"),
+      });
+      service.isSyncConfigured.mockReturnValue(true);
+      await expect(call("syncMemoryRepoNow")).resolves.toEqual(state);
+      expect(syncNow).toHaveBeenCalledWith({ push: true });
+    } finally {
+      MemoryRepoService.setInstance(null);
+    }
   });
 });

@@ -4,11 +4,10 @@ This document describes how CoWork OS stores, curates, retrieves, and injects wo
 
 The runtime is a four-layer wake-up model built on top of these storage lanes:
 
-- **Facts (`memory_items`)**: small, prompt-visible facts about the user and workspace, written only through `MemoryWriter`, edited in the Memory Hub and mirrored into the `.cowork/USER.md` / `.cowork/MEMORY.md` auto-blocks
+- **Facts (`memory_items`)**: small, prompt-visible facts about the user and workspace, written only through `MemoryWriter` and edited in the Memory Hub (the generated `.cowork/USER.md` / `.cowork/MEMORY.md` auto-blocks are retired)
 - **Recall archive**: larger searchable episodic memory/history, not injected by default
 - **Structured observations**: inspectable sidecar metadata for archive memories
 - **Session recall**: recent transcript/checkpoint history for “what happened in that run?”
-- **Topic packs**: focused `.cowork/memory/topics/*.md` files loaded explicitly for topical work
 
 An optional external provider lane can also sit beside that local stack. Today that provider is Supermemory, and it is additive rather than authoritative.
 
@@ -27,8 +26,8 @@ write governance.
 Those lanes map into runtime layers as:
 
 - **L0 Identity**: pinned, identity, rule, commitment and user-stated `memory_items` + `USER.md` essentials
-- **L1 Essential Story**: `memory_items` recall for the request, playbook patterns, daily activity summaries
-- **L2 Topic Packs**: focused topic files loaded on demand
+- **L1 Essential Story**: `memory_items` recall for the request and playbook patterns
+- **L2** (topic packs) is retired
 - **L3 Deep Recall**: unified recall and verbatim quote search across tasks/messages/files/memory/KG
 
 Chronicle fits this model as a **screen-context evidence source**, not as a fifth memory lane. Raw passive frames stay ephemeral in app-local storage. When a task uses `screen_context_resolve`, only the single top match is promoted into workspace state, and only if its confidence is at least `0.5`, the task did not opt out with `<no-memory>`, and the access profile allows writing the Chronicle directory. Promoted observations become searchable through unified recall as `screen_context`. When enabled, they can also create linked `screen_context` archive rows through `MemoryService.capture`; those rows are always private, so they stay local and are never mirrored to Supermemory. Screen text never becomes a `memory_items` fact.
@@ -76,12 +75,10 @@ Read-only recall tools are not staged. Search, profile fetch, inspector views, a
 ## Overview
 
 ```text
-memory_remember facts / Memory Hub / kit back-sync / core candidate facts / awareness / imports
+memory_remember facts / Memory Hub / core candidate facts / awareness / imports
         │
         ├─→ MemoryWriter (salience, redaction, policy, dedupe, supersession)
-        │     ├─→ memory_items (SQLite, the only fact store)
-        │     ├─→ .cowork/USER.md (auto block, rendered)
-        │     └─→ .cowork/MEMORY.md (auto block, rendered)
+        │     └─→ memory_items (SQLite, the only fact store)
         │
         ├─→ MemoryService
         │     ├─→ memories + embeddings (archive lane)
@@ -98,9 +95,6 @@ memory_remember facts / Memory Hub / kit back-sync / core candidate facts / awar
         ├─→ DreamingService (curator of memory_items)
         │     ├─→ MemoryWriter.applyCuration (safe ops, logged in memory_curation_log, undoable)
         │     └─→ dreaming_candidates (proposals for the Memory Hub Review tab)
-        │
-        └─→ MemoryConsolidator / DailyLogSummarizer
-              └─→ .cowork/memory/summaries (one line per task per day)
 
 MemorySynthesizer.synthesize()
         │
@@ -108,11 +102,11 @@ MemorySynthesizer.synthesize()
         │     ├─→ workspace kit essentials
         │     └─→ memory_items L0 (MemoryContextBuilder)
         └─→ L1 Essential Story
-              └─→ playbook / daily summaries / Box Brain hits
+              └─→ playbook / Box Brain hits
 
 Agent memory tools (audit §8.3)
         ├─→ memory_recall    MemoryRecall: memory_items + archive + conversations
-        │                    + knowledge (KG, .cowork markdown, topic packs) + Supermemory
+        │                    + knowledge (KG, .cowork markdown) + Supermemory
         ├─→ memory_remember  MemoryWriter (facts) or the archive (outcome/error/note)
         ├─→ memory_forget    real delete of an item or own archive row (asks first)
         ├─→ context_recall   the active task's earlier conversation after compaction
@@ -135,7 +129,7 @@ The agent sees four memory tools (audit §8.3), always exposed in the memory lan
 
 | Tool | Does | Policy |
 |---|---|---|
-| `memory_recall` | One query over `memory_items`, the archive, the conversation index (other tasks), knowledge (KG entities, `.cowork` markdown, topic packs) and, when asked for and allowed, Supermemory. Lists are fused by weighted reciprocal rank; results are an index (`id`, lane, snippet, provenance, relevance, token estimate) until `detail: "full"` with `ids`. | Read. Allowed in plan/analyze modes and every plan step. `external` scope needs network access and the `external_service` approval. |
+| `memory_recall` | One query over `memory_items`, the archive, the conversation index (other tasks), knowledge (KG entities, `.cowork` markdown) and, when asked for and allowed, Supermemory. Lists are fused by weighted reciprocal rank; results are an index (`id`, lane, snippet, provenance, relevance, token estimate) until `detail: "full"` with `ids`. | Read. Allowed in plan/analyze modes and every plan step. `external` scope needs network access and the `external_service` approval. |
 | `memory_remember` | Facts (`preference`, `identity`, `rule`, `project_fact`, `decision`, `commitment`, `correction`, `insight`) through `MemoryWriter`; `outcome`, `error`, `note` to the archive; scope `external` stores the memory only in Supermemory. `user_stated` only when the model sets `user_asked` and the user's latest message really asks to remember (otherwise `inferred`, never pinned, and kept out of L0 until the user pins or confirms it). The agent is told to save, as it works, what a later task would need and the user would otherwise repeat. | Memory write: available in every plan step; denied in plan/analyze modes and to verifier/researcher workers; staged when memory-write approval is on; blocked by `<no-memory>`. |
 | `memory_forget` | Real delete of a memory item visible to this workspace (with its older revisions), of this workspace's archive row, or of a Supermemory entry (an `external:<id>` id, or `scope: "external"` with `match` text that Supermemory matches). Otherwise `match` must identify exactly one memory. | Memory write. Asks the user first (`memory_delete` approval, "Forget a memory") unless the item was inferred by this task's agent itself; Supermemory ids take the `external_service` approval. |
 | `context_recall` | The active task's earlier conversation (never another task's): durable compaction context when enabled, then the conversation index. | Read. |
@@ -164,7 +158,7 @@ This lane is for the small set of durable facts that should stay front-and-cente
 
 ### How entries arrive
 
-- explicit user actions (Memory Hub add/edit, `user_stated`) and hand edits inside the kit auto-blocks (back-synced as `curated`)
+- explicit user actions (Memory Hub add/edit, `user_stated`)
 - the agent's `memory_remember` (`user_stated` only when the user asked to remember, else `inferred`)
 - accepted core memory candidates of a fact type (preference, correction, project state, workflow pattern; a constraint only when the user accepted it or auto-promotion is on): `CoreMemoryDistiller` writes them through `MemoryWriter` as `inferred` items with `source_ref.store = "core_candidate"` ([memory-engine.md](memory-engine.md) §1)
 - Dreaming promotions of recurring outcomes, imported facts (`import`), awareness beliefs and the adaptive response style (`inferred`)
@@ -380,37 +374,19 @@ Exact wording comes from `memory_recall` too: conversation hits are clean excerp
 
 ---
 
-## Topic Packs
+## Retired: Topic Packs, Daily Summaries and Generated Kit Blocks
 
-**Service:** `src/electron/memory/LayeredMemoryIndexService.ts`  
-**Files:** `.cowork/memory/MEMORY.md`, `.cowork/memory/topics/*.md`
+Topic packs (`.cowork/memory/topics/*.md` and the `.cowork/memory/MEMORY.md` index), daily
+summaries (`.cowork/memory/summaries/*.md`) and the generated `USER.md` / `MEMORY.md`
+auto-blocks are retired, with the `layeredMemoryEnabled`, `topicMemoryEnabled` and
+`backgroundConsolidationEnabled` settings that drove them. Durable notes live in the memory
+folder (the memory repo) and `memory_items`; recall reaches them through `memory_recall`.
 
-Topic packs are query-scoped, focused memory slices generated from:
-
-- relevant archive recall
-- relevant indexed markdown
-- L0 fact summary lines
-- recent daily summaries
-
-### Retrieval path
-
-- `memory_recall` (scope `knowledge`) returns matching existing topic packs as `topic:<file>` hits; it only reads, and never creates the topic directories
-- topic files are rebuilt by the prompt path (`LayeredMemoryIndexService.refreshIndex`), not by a tool
-- topic snippets are intentionally capped so packs stay compact
-
-Topic packs are for topical work such as “bring me the onboarding context for billing migrations,” not for always-on prompt injection.
-
----
-
-## Daily Summaries
-
-**Writer:** `src/electron/memory/MemoryConsolidator.ts` (via `DailyLogSummarizer.appendTaskLine`)  
-**Reader:** `src/electron/memory/DailyLogSummarizer.ts`  
-**Location:** `.cowork/memory/summaries/<YYYY-MM-DD>.md`
-
-When `backgroundConsolidationEnabled` is on (default off), each completed task adds or replaces one line in today's summary under `## Task Activity`: the time, a short excerpt of the task prompt and the number of transcript events. A file keeps at most 40 lines of at most 200 characters. Raw transcript payloads are never copied into the summary; older summaries in the previous "Consolidated Signals" layout are replaced on the next append. A consolidation lock left behind by a crashed run is removed after 10 minutes.
-
-Recent summaries (last 7 days) are injected as `daily_summary` fragments in `L1 Essential Story`. They are an activity index, not a synthesis of decisions or preferences. There is no separate raw daily log.
+- Nothing reads or writes the topic and summary files any more; the markdown index excludes
+  `memory/topics/` and `memory/summaries/`, and Clear All Memories still removes leftovers.
+- Leftover generated blocks in `USER.md` / `MEMORY.md` are removed once per workspace when a
+  task plans in it (see [memory-engine.md](memory-engine.md) §5, "Generated kit views"); the
+  prompt strips them meanwhile.
 
 ---
 
@@ -421,10 +397,10 @@ Recent summaries (last 7 days) are injected as `daily_summary` fragments in `L1 
 Prompt synthesis now builds separate sections instead of one monolithic synthesized-memory block:
 
 - `L0 Identity`: `memory_items` L0 built by `MemoryContextBuilder` (pinned, identity, rule, commitment, curated and user-stated items, named preferences); `memory_items` is the only source
-- `<cowork_structured_memory>` — `L1 Essential Story`: playbook, daily summaries and Box Brain hits; on plan steps the builder's `memory_items` recall takes the former hot-memory slot. The knowledge graph is not injected in the default wake-up path; agents reach it through `memory_recall` (scope `knowledge`) and the `kg_*` tools.
+- `<cowork_structured_memory>` — `L1 Essential Story`: playbook and Box Brain hits; on plan steps the builder's `memory_items` recall takes the former hot-memory slot. The knowledge graph is not injected in the default wake-up path; agents reach it through `memory_recall` (scope `knowledge`) and the `kg_*` tools.
 - optional Supermemory profile block — external profile/search context appended only when enabled
 
-`L2 Topic Packs` and `L3 Deep Recall` are not injected into the live prompt by default. They stay explicit and tool-driven.
+`L3 Deep Recall` is not injected into the live prompt by default. It stays explicit and tool-driven.
 
 Durable Runtime Context is another explicit, tool-driven lane. It is not part of the default
 `L0/L1` prompt payload and is not workspace-wide memory. When enabled, it stores task-scoped runtime
@@ -472,7 +448,7 @@ Memory Hub also shows a preview of the current `L0/L1` payload plus the `L2/L3` 
 **Service:** `src/electron/memory/MemoryWorkspacePurgeService.ts`
 
 - **Task delete:** in the same transaction as the task row, durable context (including the task's conversation index rows), legacy transcript span rows, and the archive memories (except imported rows and explicit saves), KG facts and Playbook evidence derived from the task are removed, and task foreign keys in `dreaming_runs` and `pending_memory_writes` are cleared. Task-scoped `memory_items` are deleted, and with `purgeDerivedMemory` so are inferred, third-party and system items learned in the task. The task's transcript files (leftover JSONL spans, checkpoints, lock file) and its Chronicle observations are removed afterwards, and Supermemory copies of its rows are forgotten.
-- **Clear All Memories** (per workspace, from Memory settings): archive memories and observations, durable context, the workspace's `memory_items` (and the auto-managed blocks in `.cowork/USER.md` / `.cowork/MEMORY.md`), knowledge graph, Dreaming runs and candidates, core memory candidates, Playbook evidence, pending memory writes, transcripts, topic packs and `.cowork/memory/MEMORY.md`, daily summaries, Chronicle observations and every Supermemory copy recorded for the workspace. Each store is cleared separately and the result reports per-store counts and failures. Global items are cleared with "Clear global memories" in the Memory Hub.
+- **Clear All Memories** (per workspace, from Memory settings): archive memories and observations, durable context, the workspace's `memory_items` (and leftover generated blocks in `.cowork/USER.md` / `.cowork/MEMORY.md`), knowledge graph, Dreaming runs and candidates, core memory candidates, Playbook evidence, pending memory writes, transcripts, leftover topic pack and daily summary files (and `.cowork/memory/MEMORY.md`), Chronicle observations and every Supermemory copy recorded for the workspace. Each store is cleared separately and the result reports per-store counts and failures. Global items are cleared with "Clear global memories" in the Memory Hub.
 - **Not covered:** Supermemory copies sent before remote ids were recorded (`supermemory_remote_refs`); remove them with `memory_forget` (scope `external`) or in Supermemory directly.
 
 ---

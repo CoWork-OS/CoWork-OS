@@ -8,10 +8,6 @@ import { AutomationProfileRepository } from "../agents/agent-repository-facades"
 import { WorkspaceRepository } from "../database/repository-facades";
 
 import { MemoryService } from "../memory/MemoryService";
-import { MemoryWriteGate } from "../memory/MemoryWriteGate";
-import { MemoryWriter, type MemoryWriteSkipReason } from "../memory/MemoryWriter";
-import type { MemoryItemKind } from "../memory/memory-items-types";
-import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 
 import type {
   CoreMemoryCandidate,
@@ -21,32 +17,12 @@ import type {
 
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";
 import { coreCandidateFingerprint } from "./core-memory-hygiene";
-import { AUTO_ACCEPT_RESOLUTION } from "./CoreMemoryCandidateService";
-
-/** `source_ref.store` of `memory_items` written from core memory candidates. */
-export const CORE_CANDIDATE_STORE = "core_candidate";
-
-/**
- * Candidate types that state a fact (memory_items kind); the rest (open loops, watch items,
- * recurring workflow hints) are events and stay in the archive.
- */
-const FACT_KINDS: Partial<Record<CoreMemoryCandidate["candidateType"], MemoryItemKind>> = {
-  preference: "preference",
-  constraint: "rule",
-  correction: "correction",
-  project_state: "project_fact",
-  pattern: "insight",
-};
 
 /** Runtime signals with no memory value: recorded as `skipped`, never written. */
 const NOT_MEMORY_TYPES = new Set<CoreMemoryCandidate["candidateType"]>(["ignored_noise"]);
 
-/** Skips that a later pass could overcome (settings change); the candidate stays accepted. */
-const RETRYABLE_SKIPS = new Set<MemoryWriteSkipReason>(["memory_disabled"]);
-
 type CandidateWrite =
   | { status: "written"; ref: string }
-  | { status: "staged"; pendingId: string }
   | { status: "retry" }
   | { status: "skipped"; reason: string };
 
@@ -206,11 +182,9 @@ export class CoreMemoryDistiller {
 
   /**
    * Writes the leading candidate of a duplicate group once and records the lifecycle: the
-   * leader becomes `applied`, the rest `merged`. Candidates without a workspace, runtime
-   * signals and facts the memory hygiene drops for good (low salience, only a secret,
-   * `<no-memory>`, outranked by a more trusted fact) become `skipped`. When the write is
-   * declined by settings (memory or capture off) the group stays `accepted` so a later pass
-   * can retry.
+   * leader becomes `applied`, the rest `merged`. Candidates without a workspace and runtime
+   * signals become `skipped`. When the archive declines the write (memory or capture off,
+   * an excluded pattern, `<no-memory>`) the group stays `accepted` so a later pass can retry.
    */
   private async applyCandidateGroup(group: CoreMemoryCandidate[]): Promise<CandidateApplyResult> {
     const [leader, ...duplicates] = group;
@@ -233,23 +207,6 @@ export class CoreMemoryDistiller {
     }
     const write = await this.writeCandidateMemory(leader);
     if (write.status === "retry") return { written: false, appliedIds: [] };
-    if (write.status === "staged") {
-      // The pending write now owns the fact: approving it writes the memory item, rejecting
-      // it drops it. The group is settled so later passes do not stage it again.
-      await this.candidateRepo.markLifecycle(
-        [leader.id],
-        "applied",
-        `Staged for review as pending memory write ${write.pendingId}.`,
-      );
-      if (duplicates.length) {
-        await this.candidateRepo.markLifecycle(
-          duplicates.map((candidate) => candidate.id),
-          "merged",
-          `Merged into candidate ${leader.id}.`,
-        );
-      }
-      return { written: false, appliedIds: [] };
-    }
     if (write.status === "skipped") {
       await this.candidateRepo.markLifecycle(
         group.map((candidate) => candidate.id),
@@ -271,13 +228,10 @@ export class CoreMemoryDistiller {
   }
 
   /**
-   * Writes one accepted candidate through the shared memory hygiene (docs/memory-engine.md
-   * §1). Facts go to `memory_items` through `MemoryWriter` as `inferred` items (salience,
-   * redaction, `<no-memory>`, workspace memory settings, dedupe and supersession); events go
-   * to the archive through `MemoryService.capture` (the same settings, redaction and
-   * content-hash dedupe). An inferred `rule` is injected on every turn (L0), so a constraint
-   * becomes one only when the user accepted the candidate or enabled auto-promotion;
-   * otherwise it stays an archive event (Dreaming may still promote it, with review).
+   * Writes one accepted candidate to the archive through `MemoryService.captureCoreMemory`
+   * (memory settings, redaction and content-hash dedupe). Candidates are events: facts are
+   * no longer written to `memory_items` (docs/memory-repo-phase3-design.md §4); Dreaming
+   * over sessions promotes what deserves to be remembered into the memory folder.
    */
   private async writeCandidateMemory(candidate: CoreMemoryCandidate): Promise<CandidateWrite> {
     const workspaceId = candidate.workspaceId;
@@ -286,63 +240,6 @@ export class CoreMemoryDistiller {
       return { status: "skipped", reason: "a runtime signal, not a memory" };
     }
     const content = `${candidate.summary}${candidate.details ? `\n${candidate.details}` : ""}`;
-    const kind = this.factKindFor(candidate);
-    const writer = MemoryWriter.get();
-    if (kind && writer) {
-      // A global-scope candidate is about the user everywhere; every other core scope
-      // (workspace, automation profile, code workspace, pull request) lives in its workspace.
-      const scope = candidate.scopeKind === "global" ? "global" : "workspace";
-      const sourceRef = {
-        store: CORE_CANDIDATE_STORE,
-        id: candidate.id,
-        traceId: candidate.traceId,
-        profileId: candidate.profileId,
-        candidateType: candidate.candidateType,
-        scopeKind: candidate.scopeKind,
-        scopeRef: candidate.scopeRef,
-      };
-      // Approval-gated write modes (`background_only`, `curated_only`, `all`) stage the fact
-      // as a `remember` write; the gate replays it through MemoryWriter once approved.
-      const gate = await MemoryWriteGate.evaluate({
-        workspaceId,
-        target: "curated",
-        action: "remember",
-        origin: "distill",
-        summary: `Remember ${kind}`,
-        payload: {
-          action: "remember",
-          kind,
-          scope,
-          scopeRef: null,
-          source: "inferred",
-          confidence: candidate.confidence,
-          recordId: candidate.id,
-          sourceRef,
-          content,
-        },
-        proposedValue: content,
-      });
-      if (!gate.allowed) {
-        if ("staged" in gate) return { status: "staged", pendingId: gate.pendingId };
-        return { status: "skipped", reason: gate.error };
-      }
-      const result = await writer.ingest({
-        content,
-        kind,
-        scope,
-        workspaceId: scope === "global" ? null : workspaceId,
-        source: "inferred",
-        sourceRef,
-        confidence: candidate.confidence,
-        originWorkspaceId: workspaceId,
-        originText: content,
-      });
-      if (result.status === "written")
-        return { status: "written", ref: `memory item ${result.item.id}` };
-      if (RETRYABLE_SKIPS.has(result.reason)) return { status: "retry" };
-      return { status: "skipped", reason: result.reason.replace(/_/g, " ") };
-    }
-
     // Provenance stays on the candidate (marked applied with "Written to memory <id>"),
     // not in the content, so identical memories dedupe.
     const archiveEntry = await MemoryService.captureCoreMemory(
@@ -363,17 +260,6 @@ export class CoreMemoryDistiller {
     return archiveEntry
       ? { status: "written", ref: `memory ${archiveEntry.id}` }
       : { status: "retry" };
-  }
-
-  /** The `memory_items` kind of a fact candidate, or null when it is an archive event. */
-  private factKindFor(candidate: CoreMemoryCandidate): MemoryItemKind | null {
-    const kind = FACT_KINDS[candidate.candidateType] ?? null;
-    if (kind !== "rule") return kind;
-    const userAccepted = candidate.resolution !== AUTO_ACCEPT_RESOLUTION;
-    return userAccepted ||
-      MemoryFeaturesManager.loadSettings().autoPromoteToCuratedMemoryEnabled === true
-      ? kind
-      : null;
   }
 
   private mapCandidateToMemoryType(candidate: CoreMemoryCandidate) {

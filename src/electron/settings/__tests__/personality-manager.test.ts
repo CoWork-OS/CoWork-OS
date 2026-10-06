@@ -831,6 +831,43 @@ describe("PersonalityManager - response style", () => {
     });
   });
 
+  describe("responseStyleExplicit", () => {
+    it("is set by an explicit style and kept by plain style updates", () => {
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(false);
+      PersonalityManager.setResponseStyle({ responseLength: "terse" }, { explicit: true });
+      expect(mockStoredSettings?.responseStyleExplicit).toBe(true);
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(true);
+      expect(PersonalityManager.loadSettings().responseStyleExplicit).toBe(true);
+      // An inferred adaptation does not clear the user's choice.
+      PersonalityManager.setResponseStyle({ emojiUsage: "none" });
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(true);
+    });
+
+    it("ignores the flag in saves from the renderer and imported profiles", () => {
+      PersonalityManager.setResponseStyleExplicit(true);
+      const config = PersonalityManager.loadConfigV2();
+      PersonalityManager.saveConfigV2({ ...config, responseStyleExplicit: false });
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(true);
+      PersonalityManager.saveSettings({
+        ...PersonalityManager.loadSettings(),
+        responseStyleExplicit: false,
+      });
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(true);
+      PersonalityManager.setResponseStyleExplicit(false);
+      PersonalityManager.importProfile(JSON.stringify({ responseStyleExplicit: true }));
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(false);
+      expect(mockStoredSettings).not.toHaveProperty("responseStyleExplicit");
+    });
+
+    it("is read from storage before the cache is warm and cleared by a reset", () => {
+      mockStoredSettings = { ...MINIMAL_V2, responseStyleExplicit: true };
+      PersonalityManager.clearCache();
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(true);
+      PersonalityManager.resetToDefaults(true);
+      expect(PersonalityManager.isResponseStyleExplicit()).toBe(false);
+    });
+  });
+
   describe("response style prompt generation", () => {
     it("should include emoji none instruction", () => {
       mockStoredSettings = {

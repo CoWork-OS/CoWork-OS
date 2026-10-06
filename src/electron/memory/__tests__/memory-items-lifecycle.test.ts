@@ -168,7 +168,7 @@ describeWithSqlite("memory items lifecycle", () => {
     });
   });
 
-  describe("curated memory and kit view", () => {
+  describe("curated memory", () => {
     let workspacePath: string;
 
     beforeEach(async () => {
@@ -183,9 +183,6 @@ describeWithSqlite("memory items lifecycle", () => {
       (CuratedMemoryService as unknown as Record<string, unknown>).initialized = false;
       await fs.rm(workspacePath, { recursive: true, force: true });
     });
-
-    const userMd = () => fs.readFile(path.join(workspacePath, ".cowork", "USER.md"), "utf8");
-    const memoryMd = () => fs.readFile(path.join(workspacePath, ".cowork", "MEMORY.md"), "utf8");
 
     it("writes add, replace and remove to memory_items (a stale id follows the record)", async () => {
       const added = await CuratedMemoryService.curate({
@@ -223,8 +220,8 @@ describeWithSqlite("memory items lifecycle", () => {
       expect(rowsOf(db, "status = 'archived'")).toHaveLength(1);
     });
 
-    it("renders the kit blocks from memory_items only", async () => {
-      // A row left in the retired table is never rendered.
+    it("serves prompt entries from memory_items only and never writes kit files", async () => {
+      // A row left in the retired table is never served.
       db.prepare(
         `INSERT INTO curated_memory_entries (id, workspace_id, target, kind, content,
            normalized_key, source, created_at, updated_at)
@@ -241,14 +238,22 @@ describeWithSqlite("memory items lifecycle", () => {
       await write({ content: "Decided to keep SQLite", kind: "decision" });
       await write({ content: "Private plan", kind: "project_fact", privacy: "private" });
       await write({ content: "Calls the user Sam", kind: "identity" });
-      await CuratedMemoryService.syncWorkspaceFiles("ws-1");
 
-      const memory = await memoryMd();
-      expect(memory).toContain("Rule: Run the linter before commits");
-      expect(memory).toContain("Decision: Decided to keep SQLite");
-      expect(memory).not.toContain("Private plan");
-      expect(memory).not.toContain("Legacy table fact");
-      expect(await userMd()).toContain("identity: Calls the user Sam");
+      const entries = await CuratedMemoryService.getPromptEntries("ws-1", 8);
+      const contents = entries.map((entry) => entry.content);
+      expect(contents).toEqual(
+        expect.arrayContaining([
+          "Run the linter before commits",
+          "Decided to keep SQLite",
+          "Calls the user Sam",
+        ]),
+      );
+      expect(contents).not.toContain("Private plan");
+      expect(contents).not.toContain("Legacy table fact");
+      // The generated USER.md / MEMORY.md blocks are retired: nothing is written.
+      await expect(fs.stat(path.join(workspacePath, ".cowork"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     });
   });
 });

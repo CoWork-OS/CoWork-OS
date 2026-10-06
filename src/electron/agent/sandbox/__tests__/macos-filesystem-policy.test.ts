@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Workspace } from "../../../../shared/types";
 import { MacOSSandbox } from "../macos-sandbox";
 import { SandboxRunner } from "../runner";
-import { setMemoryRepoRoot } from "../../../security/memory-repo-access";
+import { setMemoryRepoRoot, setTeamMemoryRepoRoots } from "../../../security/memory-repo-access";
 
 // Exercise the real kernel boundary; a generated string assertion cannot show
 // whether Seatbelt permits rename, replacement, or a broad grant over a deny.
@@ -374,6 +374,43 @@ describe.skipIf(process.platform !== "darwin")("macOS filesystem policy executio
         expect(ordinary.exitCode, ordinary.stderr).toBe(0);
       } finally {
         setMemoryRepoRoot(null);
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "keeps run_command out of team memory repos too (legacy=%s)",
+    async (legacy) => {
+      const team = path.join(base, "team-memory");
+      const personal = path.join(base, "memory");
+      for (const root of [team, personal]) {
+        fs.mkdirSync(root, { recursive: true });
+        fs.writeFileSync(path.join(root, "MEMORY.md"), "- team fact");
+      }
+      workspace.permissions.allowedPaths = [base];
+      try {
+        setMemoryRepoRoot(personal);
+        setTeamMemoryRepoRoots([team]);
+        const file = path.join(team, "MEMORY.md");
+        const read = await execute(
+          `process.stdout.write(require('fs').readFileSync(${JSON.stringify(file)}, 'utf8'))`,
+          legacy,
+        );
+        expect(read.exitCode).not.toBe(0);
+        expect(read.stdout).not.toContain("team fact");
+        expect((await write(file, legacy)).exitCode).not.toBe(0);
+        expect((await write(path.join(team, "new.md"), legacy)).exitCode).not.toBe(0);
+        expect(fs.readFileSync(file, "utf8")).toBe("- team fact");
+        expect(fs.existsSync(path.join(team, "new.md"))).toBe(false);
+        // A team repo alone (no personal folder) is still denied.
+        setMemoryRepoRoot(null);
+        expect((await write(path.join(team, "other.md"), legacy)).exitCode).not.toBe(0);
+        expect(fs.existsSync(path.join(team, "other.md"))).toBe(false);
+        const ordinary = await write(path.join(workspace.path, "output.txt"), legacy);
+        expect(ordinary.exitCode, ordinary.stderr).toBe(0);
+      } finally {
+        setMemoryRepoRoot(null);
+        setTeamMemoryRepoRoots([]);
       }
     },
   );

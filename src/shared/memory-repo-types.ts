@@ -25,6 +25,51 @@ export interface MemoryRepoStatusReport {
   /** Entries waiting in `inbox.md`. */
   inboxEntries?: number;
   lastWriteError?: string | null;
+  /** Private-remote sync (docs/memory-repo-phase4-design.md §1); absent when sync is off. */
+  sync?: MemoryRepoSyncStatus | null;
+  /** Team memory repos read next to the folder (docs/memory-repo-phase4-design.md §2). */
+  team?: TeamMemoryRepoStatus[];
+}
+
+/** One configured team memory repo (read-only), as the renderer sees it. */
+export interface TeamMemoryRepoStatus {
+  name: string;
+  /** The resolved folder. */
+  root: string;
+  /** The folder is a memory repo CoWork reads. */
+  ready: boolean;
+  /** Why it is not read (missing, not a memory repo, refused path, ...). */
+  problem?: string;
+  /** Workspaces it applies to; empty = all. */
+  workspaceIds: string[];
+  /** Last fast-forward from its remote (ms), or null. */
+  lastPullAt: number | null;
+  lastPullError: string | null;
+}
+
+/** `memoryRepo:syncNow`: the sync state after the pull and push, or why nothing ran. */
+export type MemoryRepoSyncNowResult = MemoryRepoSyncStatus | { error: string };
+
+/** `memoryRepo:syncNow` while the memory folder is off. */
+export const MEMORY_REPO_SYNC_FOLDER_OFF_ERROR = "The memory folder is off.";
+/** `memoryRepo:syncNow` while no confirmed private remote is set. */
+export const MEMORY_REPO_SYNC_OFF_ERROR =
+  "Sync is off: add your private repository's URL and confirm it is private and yours.";
+
+/** Most team memory repos (`memoryRepoTeamRepos`). */
+export const MEMORY_REPO_TEAM_REPOS_MAX = 3;
+
+/** Sync with the user's private remote, as the renderer sees it. */
+export interface MemoryRepoSyncStatus {
+  /** The remote URL without user info. */
+  remoteUrl: string | null;
+  lastPullAt: number | null;
+  lastPushAt: number | null;
+  ahead: number;
+  behind: number;
+  /** A pull hit a conflict: sync is paused until the user resolves it. */
+  conflict: string | null;
+  lastError: string | null;
 }
 
 export interface MemoryRepoCompactResult {
@@ -124,3 +169,61 @@ export interface MemoryRepoDreamNowResult {
 export const MEMORY_REPO_DREAM_DIFF_MAX = 200_000;
 /** Dreams listed by `memoryRepo:dreams`. */
 export const MEMORY_REPO_DREAMS_LIMIT = 30;
+
+// ---------------------------------------------------------------------------
+// Memory Hub "What CoWork knows" over the memory folder (docs/memory-repo-phase3-design.md §5)
+// ---------------------------------------------------------------------------
+
+/** One entry of a memory folder file as the Memory Hub shows it. */
+export interface MemoryRepoHubEntry {
+  /** `repo:<path>#L<n>`. */
+  ref: string;
+  path: string;
+  line: number;
+  /** The entry text (redacted for display). */
+  text: string;
+  by: "user" | "agent";
+  kind: string | null;
+  /** `added` day (`YYYY-MM-DD`), when the line has one. */
+  added: string | null;
+  /** The task it was learned in (`source: cowork://tasks/<id>`), when there is one. */
+  taskId: string | null;
+  /** Hash of the entry text: sent back with edits so a shifted line is never changed. */
+  hash: string;
+  /** Other source (`import`), when the line names one that is not a task. */
+  source: string | null;
+}
+
+export type MemoryRepoHubFileRole = "entry" | "me" | "lessons" | "workspace" | "topic" | "inbox";
+
+export interface MemoryRepoHubFile {
+  path: string;
+  /** The file's `# ` heading, or its name. */
+  title: string;
+  role: MemoryRepoHubFileRole;
+  entries: MemoryRepoHubEntry[];
+  /** More entries than the Hub lists. */
+  truncated?: boolean;
+}
+
+/** `memoryRepo:entries`: the folder as seen from one workspace. */
+export interface MemoryRepoEntriesReport {
+  /** The folder is on and ready (otherwise the Hub shows `memory_items` facts). */
+  available: boolean;
+  writable: boolean;
+  /** `MEMORY.md`, `me.md`, `lessons.md`, global topic files, then this workspace's file. */
+  files: MemoryRepoHubFile[];
+  /** `inbox.md`: saved after reading untrusted content, not used until reviewed. */
+  inbox: MemoryRepoHubFile | null;
+}
+
+/** Result of Edit, Delete and Pin on a memory folder entry. */
+export interface MemoryRepoEntryActionResult {
+  ok: boolean;
+  error?: string;
+  /** The entry's ref after the change (Edit, Pin). */
+  ref?: string;
+}
+
+/** Entries listed per file by `memoryRepo:entries`. */
+export const MEMORY_REPO_HUB_ENTRIES_PER_FILE = 500;

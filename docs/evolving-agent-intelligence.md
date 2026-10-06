@@ -1,5 +1,7 @@
 # Evolving Agent Intelligence
 
+> **Retired (memory repo Phase 3).** Daily summaries, topic packs and the heuristic Dreaming curator described below were removed; the memory folder and its dreaming replace them. See [memory-repo-phase3-design.md](memory-repo-phase3-design.md).
+
 CoWork OS has a layered memory runtime, a full personality engine, 15+ channels, and a playbook system that auto-captures what worked. The **Evolving Agent Intelligence** layer connects these systems so the agent visibly improves over time — reducing correction overhead, aligning to communication preferences, and surfacing quantifiable ROI metrics.
 
 All improvements are opt-in (admin-toggleable), rate-limited, and governed by the existing guardrail system. No changes to the security or local-first architecture.

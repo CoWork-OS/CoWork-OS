@@ -309,7 +309,7 @@ export function responseStyleCandidate(
       store: origin.store,
       id: "response_style",
       ...(origin.reason ? { reason: origin.reason.slice(0, 200) } : {}),
-      // The structured style: PersonalityManager mirrors it (memory-read-side.ts).
+      // The structured style (legacy lane migration; PersonalityManager is the source of truth).
       style: pickResponseStyle(style),
     },
     confidence: origin.source === "inferred" ? 0.6 : 0.95,

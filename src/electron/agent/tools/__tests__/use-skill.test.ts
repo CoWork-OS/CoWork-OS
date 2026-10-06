@@ -1248,9 +1248,11 @@ describe("set_response_style tool", () => {
 
       expect(result.success).toBe(true);
       expect(result.changes).toContain("emoji usage: expressive");
-      expect(PersonalityManager.setResponseStyle).toHaveBeenCalledWith({
-        emojiUsage: "expressive",
-      });
+      // A style the user asks for is explicit: style adaptation leaves it alone.
+      expect(PersonalityManager.setResponseStyle).toHaveBeenCalledWith(
+        { emojiUsage: "expressive" },
+        { explicit: true },
+      );
     });
 
     it("should set response length", async () => {

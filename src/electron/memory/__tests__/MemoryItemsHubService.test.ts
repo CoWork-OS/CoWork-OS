@@ -1,5 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { MemoryRepoService } from "../repo/MemoryRepoService";
+import { parseMemoryRepoEntries } from "../repo/memory-repo-format";
 import { MemoryItemsRepository } from "../MemoryItemsRepository";
 import { MemoryHubError, MemoryItemsHubService } from "../MemoryItemsHubService";
 import { MemoryWriter } from "../MemoryWriter";
@@ -12,7 +17,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
   let writer: MemoryWriter;
   let clock: number;
   let bumps: number;
-  let syncKitFiles: ReturnType<typeof vi.fn>;
   let hub: MemoryItemsHubService;
 
   beforeEach(async () => {
@@ -26,10 +30,8 @@ describeWithSqlite("MemoryItemsHubService", () => {
         bumps += 1;
       },
     });
-    syncKitFiles = vi.fn(async () => undefined);
     hub = new MemoryItemsHubService({
       getWriter: () => writer,
-      syncKitFiles,
       getTask: async (taskId) =>
         taskId === "task-1"
           ? { id: "task-1", title: "Plan the launch", workspaceId: "ws-1" }
@@ -149,7 +151,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
       success: true,
       item: { source: "user_stated", scope: "global", workspaceId: null, pinned: true },
     });
-    expect(syncKitFiles).not.toHaveBeenCalled();
 
     const local = await hub.add({
       workspaceId: "ws-1",
@@ -158,7 +159,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
       scope: "workspace",
     });
     expect(local).toMatchObject({ success: true, item: { workspaceId: "ws-1" } });
-    expect(syncKitFiles).toHaveBeenCalledWith("ws-1");
     const row = rowsOf(db, "content = ?", "Releases are cut on Tuesdays")[0];
     expect(JSON.parse(String(row.source_ref))).toMatchObject({ store: "memory_hub" });
 
@@ -187,7 +187,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
       kind: "project_fact",
     });
     expect(rowsOf(db, "id = ?", localId)[0].status).toBe("superseded");
-    expect(syncKitFiles).toHaveBeenCalledWith("ws-1");
 
     const detail = await hub.get("ws-1", result.item.id);
     expect(detail.previous.map((item) => item.id)).toEqual([localId]);
@@ -211,7 +210,7 @@ describeWithSqlite("MemoryItemsHubService", () => {
     expect(rowsOf(db, "id = ?", globalId)[0].pinned).toBe(0);
   });
 
-  it("delete scrubs every revision and re-renders kit files", async () => {
+  it("delete scrubs every revision", async () => {
     const { localId } = await seed();
     const edited = await hub.update({
       workspaceId: "ws-1",
@@ -219,7 +218,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
       content: "The API uses MySQL",
     });
     if (!edited.success || !edited.item) throw new Error("edit failed");
-    syncKitFiles.mockClear();
     const before = bumps;
 
     expect(await hub.delete({ workspaceId: "ws-1", id: edited.item.id })).toEqual({
@@ -232,7 +230,6 @@ describeWithSqlite("MemoryItemsHubService", () => {
       ["deleted", ""],
     ]);
     expect(bumps).toBeGreaterThan(before);
-    expect(syncKitFiles).toHaveBeenCalledWith("ws-1");
     expect((await hub.list({ workspaceId: "ws-1" })).items.some((i) => i.id === localId)).toBe(
       false,
     );
@@ -259,6 +256,75 @@ describeWithSqlite("MemoryItemsHubService", () => {
     expect(result).toEqual({ success: true, deleted: 1 });
     expect(rowsOf(db, "id = ?", globalId)).toHaveLength(0);
     expect(rowsOf(db, "id IN (?, ?)", localId, contactId)).toHaveLength(2);
+  });
+
+  describe("with the memory folder running", () => {
+    let base: string;
+    let repo: MemoryRepoService;
+    let folderHub: MemoryItemsHubService;
+    const lines = (file: string) =>
+      parseMemoryRepoEntries(fs.readFileSync(path.join(repo.root, file), "utf8"));
+
+    beforeEach(async () => {
+      base = fs.mkdtempSync(path.join(os.tmpdir(), "memory-hub-folder-"));
+      repo = new MemoryRepoService({ root: path.join(base, "memory"), runtime: "node" });
+      await repo.start();
+      folderHub = new MemoryItemsHubService({
+        getWriter: () => writer,
+        getMemoryRepo: () => repo,
+        getWorkspaceName: async (id) => (id === "ws-1" ? "Billing" : null),
+      });
+    });
+
+    afterEach(() => {
+      fs.rmSync(base, { recursive: true, force: true });
+    });
+
+    it("adds facts as the user's lines: me.md, the workspace file, MEMORY.md when pinned", async () => {
+      const global = await folderHub.add({
+        workspaceId: "ws-1",
+        content: "Prefers concise answers",
+        kind: "preference",
+        scope: "global",
+      });
+      expect(global).toMatchObject({ success: true, item: null, ref: expect.stringMatching(/^repo:me\.md#L/) });
+      await folderHub.add({ workspaceId: "ws-1", content: "The API uses Postgres", kind: "project_fact", scope: "workspace" });
+      await folderHub.add({ workspaceId: "ws-1", content: "Answer in English", kind: "preference", scope: "global", pinned: true });
+      expect(lines("me.md")).toEqual([expect.objectContaining({ text: "Prefers concise answers", by: "user" })]);
+      expect(lines("workspaces/billing.md").map((entry) => entry.text)).toContain("The API uses Postgres");
+      expect(lines("MEMORY.md").map((entry) => entry.text)).toEqual(["Answer in English"]);
+      expect(rowsOf(db)).toHaveLength(0);
+      const again = await folderHub.add({ workspaceId: "ws-1", content: "Prefers concise answers", kind: "preference", scope: "global" });
+      expect(again).toMatchObject({ success: true, action: "reinforced" });
+    });
+
+    it("keeps commitments in memory_items", async () => {
+      const result = await folderHub.add({
+        workspaceId: "ws-1",
+        content: "Send the Q3 report by Friday",
+        kind: "commitment",
+        scope: "workspace",
+      });
+      expect(result).toMatchObject({ success: true, item: expect.objectContaining({ kind: "commitment" }) });
+      expect(rowsOf(db)).toHaveLength(1);
+    });
+
+    it("moves an edited or pinned fact item to the folder and deletes the item", async () => {
+      const { globalId, localId } = await seed();
+      const edited = await folderHub.update({ workspaceId: "ws-1", id: localId, content: "The API uses PostgreSQL 17" });
+      expect(edited).toMatchObject({ success: true, action: "moved", ref: expect.stringMatching(/^repo:workspaces\/billing\.md#L/) });
+      expect(rowsOf(db, "id = ? AND status = 'active'", localId)).toHaveLength(0);
+      const pinned = await folderHub.setPinned({ workspaceId: "ws-1", id: globalId, pinned: true });
+      expect(pinned).toMatchObject({ success: true, ref: expect.stringMatching(/^repo:MEMORY\.md#L/) });
+      expect(lines("MEMORY.md").map((entry) => entry.text)).toEqual(["Prefers concise answers"]);
+      expect(rowsOf(db, "id = ? AND status = 'active'", globalId)).toHaveLength(0);
+    });
+
+    it("reports a folder skip instead of falling back", async () => {
+      const result = await folderHub.add({ workspaceId: "ws-1", content: "ok", kind: "preference", scope: "global" });
+      expect(result).toMatchObject({ success: false });
+      expect(rowsOf(db)).toHaveLength(0);
+    });
   });
 
   it("reports the engine as unavailable before the writer starts", async () => {

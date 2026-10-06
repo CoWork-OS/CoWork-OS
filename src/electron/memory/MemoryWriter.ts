@@ -206,8 +206,7 @@ export type MemoryItemsRepositoryPort = Pick<
   | "revisions"
   | "setPinned"
   | "purgeGlobal"
-  | "getKitRenderState"
-  | "setKitRenderState"
+  | "clearKitRenderState"
 >;
 
 export type MemoryCurationPort = Pick<MemoryCurationRepository, "apply" | "undo">;

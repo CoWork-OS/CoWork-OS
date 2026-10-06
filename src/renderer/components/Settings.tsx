@@ -9695,6 +9695,7 @@ export function Settings({
                 <MemoryHubSettings
                   initialWorkspaceId={workspaceId}
                   onSettingsChanged={onSettingsChanged}
+                  onOpenTask={onOpenTask}
                 />
               ) : activeTab === "insights" ? (
                 <UsageInsightsPanel workspaceId={workspaceId} />

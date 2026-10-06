@@ -7,6 +7,7 @@ import { checkProjectAccessFromMarkdown } from "../security/project-access";
 import { InputSanitizer } from "../agent/security";
 import { redactSensitiveMarkdownContent } from "./MarkdownMemoryIndexService";
 import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
+import { removeGeneratedMemoryBlocks } from "./generated-kit-blocks";
 
 type ExtractedSection = {
   title: string;
@@ -181,26 +182,12 @@ function stripMarkedBlock(markdown: string, startMarker: string, endMarker: stri
 }
 
 /**
- * Generated curated auto-blocks of USER.md / MEMORY.md (CuratedMemoryService): views of
- * memory_items. A block cut by the kit truncation (no end marker) is dropped to the end.
+ * Retired generated blocks of USER.md / MEMORY.md (generated-kit-blocks.ts). Files that
+ * still carry them are cleaned once per workspace; the prompt strips them meanwhile, and a
+ * block cut by the kit truncation (no end marker) is dropped to the end.
  */
-const GENERATED_MEMORY_BLOCKS: Array<[string, string]> = [
-  ["<!-- cowork:auto:curated-user:start -->", "<!-- cowork:auto:curated-user:end -->"],
-  ["<!-- cowork:auto:curated-workspace:start -->", "<!-- cowork:auto:curated-workspace:end -->"],
-];
-
 function stripGeneratedMemoryBlocks(markdown: string): string {
-  let out = markdown;
-  for (const [start, end] of GENERATED_MEMORY_BLOCKS) {
-    const startAt = out.indexOf(start);
-    if (startAt === -1) continue;
-    const endAt = out.indexOf(end, startAt);
-    out =
-      endAt === -1
-        ? out.slice(0, startAt)
-        : `${out.slice(0, startAt)}${out.slice(endAt + end.length).replace(/^\n/, "")}`;
-  }
-  return out.trim();
+  return removeGeneratedMemoryBlocks(markdown).trim();
 }
 
 function formatWorkspaceKitBody(

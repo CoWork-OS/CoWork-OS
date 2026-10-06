@@ -117,10 +117,9 @@ function formatNumber(value: number, unit: MemoryHealthCheck["unit"]): string {
   }
 }
 
-/** The value column of a check ("-" when unavailable; a date for the last Dreaming run). */
+/** The value column of a check ("-" when unavailable). */
 export function formatHealthValue(check: MemoryHealthCheck): string {
   if (check.value === null) return "-";
-  if (check.id === "dreaming_last_run") return new Date(check.value).toLocaleString();
   return formatNumber(check.value, check.unit);
 }
 

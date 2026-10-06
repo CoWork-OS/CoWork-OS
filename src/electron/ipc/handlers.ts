@@ -434,7 +434,7 @@ import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { AppearanceManager, getDevLogCaptureEnabled } from "../settings/appearance-manager";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 import {
-  memoryRepoPathSettingProblem,
+  memoryRepoSettingsProblem,
   memoryRepoStatus,
 } from "../memory/repo/memory-repo-bootstrap";
 import { MemoryRepoService } from "../memory/repo/MemoryRepoService";
@@ -559,6 +559,7 @@ import { setupMemoryRepoHandlers } from "./memory-repo-handlers";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
+import { promoteObservationToMemoryFolder } from "../memory/repo/memory-repo-producers";
 import { SupermemoryService } from "../memory/SupermemoryService";
 import { SupermemoryRemoteRefRepository } from "../memory/SupermemoryRemoteRefRepository";
 import { MemoryWriteGate } from "../memory/MemoryWriteGate";
@@ -9701,7 +9702,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.PERSONALITY_SAVE_SETTINGS, async (_, settings, rawOptions) => {
     const options = parsePersonalitySaveOptions(rawOptions);
-    // A response style chosen here is user-stated memory (locks style adaptation).
+    // A response style chosen here is explicit (locks style adaptation).
     withSettingsResponseStyleMirror(() => PersonalityManager.saveSettings(settings), {
       baseline: options.responseStyleBaseline ?? null,
     });
@@ -11573,17 +11574,20 @@ export async function setupIpcHandlers(
   setupKitHandlers(workspaceRepo, agentDaemon);
 
   // Memory system handlers
-  setupMemoryHandlers();
+  setupMemoryHandlers({
+    workspaceName: async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.name ?? null,
+  });
 
   // Memory Hub "What CoWork knows": memory_items list/get/add/edit/pin/delete/why.
   setupMemoryItemsHandlers({
     service: new MemoryItemsHubService({
       getWriter: () => MemoryWriter.get(),
+      getWorkspaceName: async (workspaceId) =>
+        (await workspaceRepo.findById(workspaceId))?.name ?? null,
       getTask: async (taskId) => {
         const task = await taskRepo.findById(taskId);
         return task ? { id: task.id, title: task.title, workspaceId: task.workspaceId } : undefined;
       },
-      syncKitFiles: (workspaceId) => CuratedMemoryService.syncWorkspaceFiles(workspaceId),
     }),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
     // Per-reply "Memory used": the hidden memory_used events with the replies they precede.
@@ -11596,15 +11600,9 @@ export async function setupIpcHandlers(
     },
   });
 
-  // Memory Hub "Review": Dreaming's curation proposals, applied changes and undo.
+  // Memory Hub "Review": automatic commitment expiries with undo.
   setupMemoryReviewHandlers({
-    service: createMemoryReviewService(db, {
-      resolveWorkspace: async (workspaceId) => {
-        const workspace = await workspaceRepo.findById(workspaceId);
-        return workspace?.path ? { id: workspace.id, path: workspace.path } : null;
-      },
-      syncKitFiles: (workspaceId) => CuratedMemoryService.syncWorkspaceFiles(workspaceId),
-    }),
+    service: createMemoryReviewService(db),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 
@@ -11614,13 +11612,16 @@ export async function setupIpcHandlers(
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 
-  // Memory folder (beta): status, open, compact history and entry lines by ref. The
+  // Memory folder: status, open, compact history and entry lines by ref. The
   // folder is the running service's root, never a path from the renderer.
   setupMemoryRepoHandlers({
     status: () => memoryRepoStatus(),
     getService: () => MemoryRepoService.get(),
     readLines: (refs) => readMemoryRepoLines(refs),
     openPath: (folder) => shell.openPath(folder),
+    // Memory Hub "What CoWork knows" over the folder: entries, edit, delete, pin, open file.
+    getHubService: () => MemoryRepoService.get(),
+    workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 }
 
@@ -13610,7 +13611,9 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
 /**
  * Set up Memory System IPC handlers
  */
-function setupMemoryHandlers(): void {
+function setupMemoryHandlers(
+  deps: { workspaceName?: (workspaceId: string) => Promise<string | null> } = {},
+): void {
   rateLimiter.configure(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.AWARENESS_UPDATE_BELIEF, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.AWARENESS_DELETE_BELIEF, RATE_LIMIT_CONFIGS.limited);
@@ -13676,7 +13679,7 @@ function setupMemoryHandlers(): void {
   // Save global memory feature toggles
   ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, async (_event, settings: Any) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
-    const memoryRepoPathProblem = await memoryRepoPathSettingProblem(settings?.memoryRepoPath);
+    const memoryRepoPathProblem = await memoryRepoSettingsProblem(settings);
     if (memoryRepoPathProblem) throw new Error(memoryRepoPathProblem);
     try {
       MemoryFeaturesManager.saveSettings(settings);
@@ -14012,6 +14015,17 @@ function setupMemoryHandlers(): void {
       await MemoryObservationService.details([validated.memoryId], validated.workspaceId)
     )[0];
     if (!detail) return { success: false, error: "Memory observation not found" };
+    // An explicit user act: the user's line in the memory folder (workspace file, or me.md
+    // for target `user`); commitments and a folder that is off keep the curated path.
+    const promoted = await promoteObservationToMemoryFolder({
+      workspaceId: detail.workspaceId,
+      workspaceName: (await deps.workspaceName?.(detail.workspaceId)) ?? null,
+      taskId: detail.taskId,
+      target: validated.target || "workspace",
+      kind: validated.kind || "project_fact",
+      content: detail.title || detail.narrative,
+    });
+    if (promoted) return promoted;
     return CuratedMemoryService.curate({
       workspaceId: detail.workspaceId,
       taskId: detail.taskId,

@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   getFullDetails: vi.fn(),
   deleteEntries: vi.fn(),
   evaluate: vi.fn(),
-  syncWorkspaceFiles: vi.fn(),
   durableEnabled: false,
   durableSearch: vi.fn(),
   durableDescribe: vi.fn(),
@@ -31,9 +30,6 @@ vi.mock("../../../memory/MemoryService", () => ({
     deleteEntries: mocks.deleteEntries,
     getSettings: mocks.getSettings,
   },
-}));
-vi.mock("../../../memory/CuratedMemoryService", () => ({
-  CuratedMemoryService: { syncWorkspaceFiles: mocks.syncWorkspaceFiles },
 }));
 vi.mock("../../../memory/MemoryWriteGate", () => ({
   MemoryWriteGate: { evaluate: mocks.evaluate },
@@ -145,7 +141,6 @@ describeWithSqlite("memory tools", () => {
     mocks.getFullDetails.mockResolvedValue([]);
     mocks.deleteEntries.mockResolvedValue(1);
     mocks.getSettings.mockResolvedValue({ enabled: true, privacyMode: "normal" });
-    mocks.syncWorkspaceFiles.mockResolvedValue(undefined);
     mocks.searchConversation.mockResolvedValue([]);
     mocks.durableSearch.mockResolvedValue([]);
     db = await createMemoryItemsTestDb(["ws-1", "ws-2"]);
@@ -166,7 +161,6 @@ describeWithSqlite("memory tools", () => {
       searchKnowledgeGraph: vi.fn(async () => []),
       getKnowledgeEntity: vi.fn(async () => null),
       searchMarkdown: vi.fn(async () => []),
-      loadTopics: vi.fn(async () => []),
       readTextFile: vi.fn(async () => ""),
       searchExternal: vi.fn(async () => []),
       externalConfigured: () => mocks.supermemoryConfigured,
@@ -324,8 +318,6 @@ describeWithSqlite("memory tools", () => {
       expect(result).toMatchObject({ success: true, source: "inferred", scope: "workspace" });
       const [row] = rowsOf(db);
       expect(row).toMatchObject({ source: "inferred", workspace_id: "ws-1", task_id: "task-1" });
-      // A workspace fact re-renders the generated kit files.
-      expect(mocks.syncWorkspaceFiles).toHaveBeenCalledWith("ws-1", expect.any(Object));
     });
 
     it("does not pin a fact the agent saved on its own", async () => {
@@ -360,8 +352,6 @@ describeWithSqlite("memory tools", () => {
         pinned: true,
       });
       expect(rowsOf(db)[0]).toMatchObject({ workspace_id: null, scope: "global", trust: 1 });
-      // Global facts are not part of a workspace's kit files.
-      expect(mocks.syncWorkspaceFiles).not.toHaveBeenCalled();
     });
 
     it("keeps a single-valued subject: an inference cannot replace what the user stated", async () => {

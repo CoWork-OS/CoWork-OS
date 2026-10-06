@@ -538,47 +538,6 @@ export class MemoryCurationStore {
     }));
   }
 
-  /** Tokens spent on curator LLM synthesis since `since`, across workspaces (daily budget). */
-  llmTokensSince(since: number): number {
-    if (!tableExists(this.db, "dreaming_runs")) return 0;
-    const row = this.db
-      .prepare(
-        "SELECT COALESCE(SUM(llm_tokens), 0) AS total FROM dreaming_runs WHERE created_at >= ?",
-      )
-      .get(since) as { total: number };
-    return Number(row.total) || 0;
-  }
-
-  /**
-   * Of the given workspaces, those due for the daily idle curation: no Dreaming run (of any
-   * outcome) since `runSince` and a task created since `activeSince`. In the given order.
-   * Both lookups use an index: (workspace_id, created_at) on each table.
-   */
-  dueWorkspaces(workspaceIds: string[], activeSince: number, runSince: number): string[] {
-    if (!tableExists(this.db, "dreaming_runs") || !tableExists(this.db, "tasks")) return [];
-    const recent = this.db.prepare(
-      "SELECT 1 FROM dreaming_runs WHERE workspace_id = ? AND created_at >= ? LIMIT 1",
-    );
-    const active = this.db.prepare(
-      "SELECT 1 FROM tasks WHERE workspace_id = ? AND created_at >= ? LIMIT 1",
-    );
-    return workspaceIds.filter(
-      (workspaceId) => !recent.get(workspaceId, runSince) && active.get(workspaceId, activeSince),
-    );
-  }
-
-  /** Open curator proposals of a workspace (the Memory Hub badge). */
-  pendingCount(workspaceId: string): number {
-    if (!tableExists(this.db, "dreaming_candidates")) return 0;
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count FROM dreaming_candidates
-         WHERE workspace_id = ? AND target = 'memory_items' AND status = 'proposed'`,
-      )
-      .get(workspaceId) as { count: number };
-    return Number(row.count) || 0;
-  }
-
   private setStatus(id: string, status: MemoryItemStatus, now: number): void {
     this.db
       .prepare("UPDATE memory_items SET status = ?, updated_at = ? WHERE id = ?")

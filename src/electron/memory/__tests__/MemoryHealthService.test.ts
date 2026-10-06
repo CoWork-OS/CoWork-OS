@@ -13,10 +13,13 @@ import {
   evaluateMemoryHealth,
   evaluateMemoryRepoDreamHealth,
   evaluateMemoryRepoHealth,
+  evaluateMemoryRepoSyncHealth,
+  evaluateTeamMemoryHealth,
 } from "../MemoryHealthService";
 import type {
   MemoryRepoDreamSummary,
   MemoryRepoDreamsReport,
+  MemoryRepoStatusReport,
 } from "../../../shared/memory-repo-types";
 import { createMemoryStatementPort } from "../memory-statement-port";
 import type { MemoryHealthCounts } from "../memory-health-sql";
@@ -59,7 +62,6 @@ describe("evaluateMemoryHealth", () => {
     archive: null,
     memoryItems: null,
     heartbeat: null,
-    dreaming: null,
     embeddings: null,
     pendingWrites: null,
     database: { totalBytes: 4096, freelistBytes: 0 },
@@ -67,31 +69,16 @@ describe("evaluateMemoryHealth", () => {
   };
 
   it("skips checks whose tables are missing", () => {
-    const checks = evaluateMemoryHealth(empty, { llmEnabled: false, llmDailyBudget: 20_000 });
+    const checks = evaluateMemoryHealth(empty);
     const status = Object.fromEntries(checks.map((check) => [check.id, check.status]));
     expect(status).toMatchObject({
       archive_telemetry_ratio: "skip",
       memory_items_duplicate_rate: "skip",
       stuck_heartbeat_runs: "skip",
-      dreaming_last_run: "skip",
-      dreaming_llm_budget: "info",
       orphan_embeddings: "skip",
       database_size: "pass",
       migration_markers: "skip",
     });
-  });
-
-  it("warns when AI synthesis used more than its daily budget", () => {
-    const counts: MemoryHealthCounts = {
-      ...empty,
-      dreaming: { stuck: 0, lastRunAt: NOW, failedLast7d: 0, llmTokensLastDay: 30_000 },
-    };
-    const budget = evaluateMemoryHealth(counts, {
-      llmEnabled: true,
-      llmDailyBudget: 20_000,
-    }).find((check) => check.id === "dreaming_llm_budget");
-    expect(budget).toMatchObject({ status: "warn", value: 1.5, op: "<=", threshold: 1 });
-    expect(budget?.detail).toContain("30,000 of 20,000");
   });
 });
 
@@ -243,10 +230,9 @@ describe.skipIf(!nativeSqliteAvailable)("MemoryHealthService", () => {
     ).run(NOW);
   }
 
-  function service(db: Db, settings: Record<string, unknown> = {}) {
+  function service(db: Db) {
     return new MemoryHealthService({
       port: createMemoryStatementPort(db),
-      getSettings: () => settings as never,
       getSupermemoryStatus: () => ({ enabled: true, connected: false }),
       getChronicleEnabled: () => true,
       now: () => NOW,
@@ -302,10 +288,7 @@ describe.skipIf(!nativeSqliteAvailable)("MemoryHealthService", () => {
   it("matches the qa:memory-health numbers and flags breaches", async () => {
     const { db, ws, other } = profile();
     seed(db, ws, other);
-    const report = await service(db, {
-      dreamingLlmEnabled: true,
-      dreamingLlmDailyTokenBudget: 1000,
-    }).health();
+    const report = await service(db).health();
     const byId = Object.fromEntries(report.checks.map((check) => [check.id, check]));
 
     const reference = script.collectReport(
@@ -317,17 +300,14 @@ describe.skipIf(!nativeSqliteAvailable)("MemoryHealthService", () => {
     expect(byId.archive_duplicate_rate.value).toBeCloseTo(reference.archive.duplicateRate);
     expect(byId.memory_items_duplicate_rate.value).toBeCloseTo(reference.memoryItems.duplicateRate);
     expect(byId.stuck_heartbeat_runs.value).toBe(reference.heartbeat.stuck);
-    expect(byId.stuck_dreaming_runs.value).toBe(reference.dreaming.stuck);
     expect(byId.orphan_embeddings.value).toBe(reference.embeddings.orphans);
     expect(byId.pending_memory_writes.value).toBe(reference.pendingWrites.pending);
 
     expect(byId.archive_telemetry_ratio).toMatchObject({ status: "warn", value: 2 / 7 });
     expect(byId.memory_items_duplicate_rate).toMatchObject({ status: "pass", value: 0 });
     expect(byId.stuck_heartbeat_runs).toMatchObject({ status: "warn", value: 1 });
-    expect(byId.stuck_dreaming_runs).toMatchObject({ status: "pass", value: 0 });
-    expect(byId.dreaming_failures).toMatchObject({ status: "warn", value: 1 });
-    expect(byId.dreaming_last_run).toMatchObject({ status: "info", value: NOW - HOUR });
-    expect(byId.dreaming_llm_budget).toMatchObject({ status: "warn", value: 1.2 });
+    // The heuristic curator's runs (still in the profile) no longer produce checks.
+    expect(Object.keys(byId).filter((id) => id.startsWith("dreaming"))).toEqual([]);
     expect(byId.orphan_embeddings).toMatchObject({ status: "warn", value: 1 });
     expect(byId.pending_memory_writes).toMatchObject({ status: "pass", value: 1 });
     expect(byId.database_size.status).toBe("pass");
@@ -411,7 +391,6 @@ describe("memory folder health (service-only; not in qa:memory-health)", () => {
       archive: null,
       memoryItems: null,
       heartbeat: null,
-      dreaming: null,
       embeddings: null,
       pendingWrites: null,
       database: { totalBytes: 4096, freelistBytes: 0 },
@@ -420,7 +399,6 @@ describe("memory folder health (service-only; not in qa:memory-health)", () => {
     const build = (status: () => Promise<typeof ready>) =>
       new MemoryHealthService({
         port: { unit: (async () => counts) as never },
-        getSettings: () => ({}),
         getSupermemoryStatus: () => ({ enabled: false, connected: false }),
         getChronicleEnabled: () => false,
         getMemoryRepoStatus: status,
@@ -551,7 +529,6 @@ describe("memory folder dreaming health (service-only)", () => {
       archive: null,
       memoryItems: null,
       heartbeat: null,
-      dreaming: null,
       embeddings: null,
       pendingWrites: null,
       database: { totalBytes: 4096, freelistBytes: 0 },
@@ -561,7 +538,6 @@ describe("memory folder dreaming health (service-only)", () => {
     const build = (status: typeof ready) =>
       new MemoryHealthService({
         port: { unit: (async () => counts) as never },
-        getSettings: () => ({}),
         getSupermemoryStatus: () => ({ enabled: false, connected: false }),
         getChronicleEnabled: () => false,
         getMemoryRepoStatus: async () => status,
@@ -579,5 +555,126 @@ describe("memory folder dreaming health (service-only)", () => {
     const off = await build({ ...ready, enabled: false }).health();
     expect(off.checks.find((check) => check.id === "memory_repo_dreaming")?.status).toBe("skip");
     expect(dreamsCalls).toBe(1);
+  });
+});
+
+describe("memory folder sync and team memory health (service-only)", () => {
+  const ready: MemoryRepoStatusReport = {
+    enabled: true,
+    root: "/Users/sam/CoWork Memory",
+    ready: true,
+    writable: true,
+    gitAvailable: true,
+    clean: true,
+    entryFileBytes: 900,
+    inboxEntries: 0,
+    lastWriteError: null,
+  };
+  const sync = {
+    remoteUrl: "https://github.com/sam/memory.git",
+    lastPullAt: NOW - 60_000,
+    lastPushAt: NOW - 30_000,
+    ahead: 0,
+    behind: 0,
+    conflict: null,
+    lastError: null,
+  };
+  const team = {
+    name: "Platform",
+    root: "/Users/sam/Team Memory",
+    ready: true,
+    workspaceIds: [],
+    lastPullAt: NOW - 60_000,
+    lastPullError: null,
+  };
+
+  it("skips sync when it is not set up or the folder is off", () => {
+    expect(evaluateMemoryRepoSyncHealth(ready, NOW)).toMatchObject({
+      id: "memory_repo_sync",
+      label: "Memory folder sync",
+      status: "skip",
+    });
+    expect(evaluateMemoryRepoSyncHealth({ ...ready, sync: null }, NOW).status).toBe("skip");
+    expect(evaluateMemoryRepoSyncHealth({ ...ready, enabled: false, sync }, NOW).status).toBe(
+      "skip",
+    );
+    expect(evaluateMemoryRepoSyncHealth(null, NOW).status).toBe("skip");
+  });
+
+  it("reports the last sync as info, and warns on a conflict or a lasting error", () => {
+    const ok = evaluateMemoryRepoSyncHealth({ ...ready, sync: { ...sync, ahead: 2 } }, NOW);
+    expect(ok.status).toBe("info");
+    expect(ok.detail).toContain("Last sync 2026-10-05 11:59 UTC");
+    expect(ok.detail).toContain("2 to push");
+    const conflict = evaluateMemoryRepoSyncHealth(
+      { ...ready, sync: { ...sync, conflict: "MEMORY.md changed on both sides" } },
+      NOW,
+    );
+    expect(conflict).toMatchObject({ status: "warn" });
+    expect(conflict.detail).toContain("Sync now");
+    // A fresh error after a recent sync is not yet a warning.
+    expect(
+      evaluateMemoryRepoSyncHealth({ ...ready, sync: { ...sync, lastError: "timeout" } }, NOW)
+        .status,
+    ).toBe("info");
+    const stale = evaluateMemoryRepoSyncHealth(
+      {
+        ...ready,
+        sync: {
+          ...sync,
+          lastPullAt: NOW - 2 * 86_400_000,
+          lastPushAt: null,
+          lastError: "Permission denied (publickey)",
+        },
+      },
+      NOW,
+    );
+    expect(stale).toMatchObject({ status: "warn" });
+    expect(stale.detail).toContain("Permission denied");
+  });
+
+  it("skips team memory when none is configured, warns for a broken repo, passes otherwise", () => {
+    expect(evaluateTeamMemoryHealth(ready)).toMatchObject({
+      id: "memory_repo_team",
+      label: "Team memory",
+      status: "skip",
+    });
+    expect(evaluateTeamMemoryHealth({ ...ready, team: [team] })).toMatchObject({
+      status: "pass",
+      value: 0,
+    });
+    const broken = evaluateTeamMemoryHealth({
+      ...ready,
+      team: [team, { ...team, name: "Design", ready: false, problem: "the folder is missing" }],
+    });
+    expect(broken).toMatchObject({ status: "warn", value: 1 });
+    expect(broken.detail).toContain("Design is not read: the folder is missing");
+  });
+
+  it("adds both rows to the report", async () => {
+    const counts: MemoryHealthCounts = {
+      archive: null,
+      memoryItems: null,
+      heartbeat: null,
+      embeddings: null,
+      pendingWrites: null,
+      database: { totalBytes: 4096, freelistBytes: 0 },
+      markers: null,
+    };
+    const report = await new MemoryHealthService({
+      port: { unit: (async () => counts) as never },
+      getSupermemoryStatus: () => ({ enabled: false, connected: false }),
+      getChronicleEnabled: () => false,
+      getMemoryRepoStatus: async () => ({
+        ...ready,
+        sync: { ...sync, conflict: "conflict in me.md" },
+        team: [team],
+      }),
+      now: () => NOW,
+    }).health();
+    const byId = Object.fromEntries(report.checks.map((check) => [check.id, check]));
+    expect(byId.memory_repo_sync.status).toBe("warn");
+    expect(byId.memory_repo_team.status).toBe("pass");
+    expect(report.ok).toBe(false);
   });
 });

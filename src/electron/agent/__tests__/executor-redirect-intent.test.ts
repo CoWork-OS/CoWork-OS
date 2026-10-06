@@ -473,8 +473,6 @@ describe("TaskExecutor — redirect follow-up wiring after a completed task", ()
       turnGuidance = params.turnGuidancePrompt;
       return {
         systemBlocks: [],
-        memoryIndexInjected: false,
-        topicCount: 0,
         droppedSections: [],
         truncatedSections: [],
         totalTokens: 0,

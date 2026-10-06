@@ -30,6 +30,7 @@ import path from "path";
 import { createLogger } from "../utils/logger";
 import { ChronicleObservationRepository } from "../chronicle/ChronicleObservationRepository";
 import { CuratedMemoryService } from "./CuratedMemoryService";
+import { stripCuratedKitBlocksOnce } from "./kit-block-strip";
 import { DurableContextService } from "./DurableContextService";
 import { MemoryService } from "./MemoryService";
 import { SupermemoryService } from "./SupermemoryService";
@@ -281,15 +282,17 @@ export class MemoryWorkspacePurgeService {
     });
 
     if (workspacePath) {
-      // Rewrite the auto-managed blocks in .cowork/USER.md and .cowork/MEMORY.md from the
-      // now-empty curated table, so cleared facts stop being injected from the files.
+      // Remove leftover generated memory blocks from .cowork/USER.md and .cowork/MEMORY.md
+      // (retired views of memory_items), so cleared facts are not left quoted in the files.
       await step("curatedEntries", async () => {
-        await CuratedMemoryService.syncWorkspaceFiles(workspaceId);
+        const stored = await CuratedMemoryService.findWorkspace(workspaceId);
+        if (stored) await stripCuratedKitBlocksOnce({ ...stored, path: workspacePath });
         return 0;
       });
       await step("transcripts", async () =>
         transcriptDeletionCount(await TranscriptStore.deleteWorkspace(workspacePath)),
       );
+      // Leftover files of the retired topic packs and daily summaries.
       await step("topicFiles", async () => {
         const topics = await removeConfinedFiles(
           workspacePath,

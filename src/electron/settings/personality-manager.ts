@@ -123,6 +123,7 @@ function migrateV1ToV2(v1: PersonalitySettings): PersonalityConfigV2 {
     activePersonality: v1.activePersonality,
     customPrompt: v1.customPrompt,
     customName: v1.customName,
+    ...(v1.responseStyleExplicit === true ? { responseStyleExplicit: true } : {}),
   };
 }
 
@@ -186,6 +187,7 @@ export class PersonalityManager {
       quirks: config.quirks,
       relationship: config.relationship ?? DEFAULT_RELATIONSHIP,
       workStyle: config.workStyle,
+      ...(config.responseStyleExplicit === true ? { responseStyleExplicit: true } : {}),
     };
   }
 
@@ -314,6 +316,7 @@ export class PersonalityManager {
       }
 
       config.relationship = this.sanitizeRelationshipData(config.relationship) as RelationshipData;
+      if (config.responseStyleExplicit !== true) delete config.responseStyleExplicit;
       if (config.activePersona && !isValidPersonaId(config.activePersona)) {
         config.activePersona = "companion";
       }
@@ -362,14 +365,24 @@ export class PersonalityManager {
   /**
    * Save V2 config to encrypted database
    */
-  static saveConfigV2(config: PersonalityConfigV2): void {
+  static saveConfigV2(
+    config: PersonalityConfigV2,
+    options: { responseStyleExplicit?: boolean } = {},
+  ): void {
     try {
       if (!SecureSettingsRepository.isInitialized()) {
         throw new Error("SecureSettingsRepository not initialized");
       }
       const repository = SecureSettingsRepository.getInstance();
-      const sanitized = {
-        ...config,
+      // The explicit-style flag is the main process's: a saved form or an imported profile
+      // keeps the stored value; only `setResponseStyle(..., { explicit })` and
+      // `setResponseStyleExplicit` change it.
+      const explicit = options.responseStyleExplicit ?? this.storedResponseStyleExplicit();
+      const rest: PersonalityConfigV2 = { ...config };
+      delete rest.responseStyleExplicit;
+      const sanitized: PersonalityConfigV2 = {
+        ...rest,
+        ...(explicit ? { responseStyleExplicit: true } : {}),
         relationship: this.sanitizeRelationshipData(config.relationship) as RelationshipData,
       };
       repository.save("personality", sanitized);
@@ -1009,15 +1022,48 @@ ${companionMindset}`;
   }
 
   /**
-   * Update response style preferences
+   * Update response style preferences. `explicit: true` records that the user chose this
+   * style (style adaptation stops); `explicit: false` that it was inferred; omitted keeps
+   * the flag.
    */
-  static setResponseStyle(style: Partial<ResponseStylePreferences>): void {
+  static setResponseStyle(
+    style: Partial<ResponseStylePreferences>,
+    options: { explicit?: boolean } = {},
+  ): void {
     const config = this.loadConfigV2();
     config.style = {
       ...config.style,
       ...style,
     };
-    this.saveConfigV2(config);
+    this.saveConfigV2(config, { responseStyleExplicit: options.explicit });
+  }
+
+  /** Whether the user chose the response style (AdaptiveStyleEngine does not adapt it). */
+  static isResponseStyleExplicit(): boolean {
+    try {
+      return this.loadConfigV2().responseStyleExplicit === true;
+    } catch {
+      return false;
+    }
+  }
+
+  static setResponseStyleExplicit(explicit: boolean): void {
+    const config = this.loadConfigV2();
+    if ((config.responseStyleExplicit === true) === explicit) return;
+    this.saveConfigV2(config, { responseStyleExplicit: explicit });
+  }
+
+  private static storedResponseStyleExplicit(): boolean {
+    if (this.cachedConfigV2) return this.cachedConfigV2.responseStyleExplicit === true;
+    try {
+      if (!SecureSettingsRepository.isInitialized()) return false;
+      const stored = SecureSettingsRepository.getInstance().load<Partial<PersonalityConfigV2>>(
+        "personality",
+      );
+      return stored?.responseStyleExplicit === true;
+    } catch {
+      return false;
+    }
   }
 
   /**

@@ -250,7 +250,7 @@ import {
   buildWorkspaceKitContext,
   isDesignSystemRelevantTask,
 } from "../memory/WorkspaceKitContext";
-import { KitFileWatcher } from "../memory/KitFileWatcher";
+import { stripCuratedKitBlocksOnce } from "../memory/kit-block-strip";
 import {
   MEMORY_CONTEXT_SECTION_TOKENS,
   MEMORY_L1_COMPACT_TOKENS,
@@ -17615,9 +17615,7 @@ ${transcript}
       return {
         contextPackInjectionEnabled: false,
         heartbeatMaintenanceEnabled: false,
-        layeredMemoryEnabled: false,
         transcriptStoreEnabled: false,
-        backgroundConsolidationEnabled: false,
         queryOrchestratorEnabled: false,
       };
     }
@@ -18484,8 +18482,6 @@ ${transcript}
     totalTokens: number;
     droppedSections: string[];
     truncatedSections: string[];
-    topicCount: number;
-    memoryIndexInjected: boolean;
   }> {
     const queryOrchestrator = new QueryOrchestrator(params.memoryFeatures);
     let transcriptContext = "";
@@ -18550,10 +18546,6 @@ ${transcript}
       taskDomain: params.taskDomain,
       webSearchModeContract: this.buildWebSearchModeContract(),
       worktreeBranch: this.task.worktreeBranch,
-      filesystemReadGuard: (candidatePath: string) => this.canReadWorkspacePath(candidatePath),
-      filesystemWriteGuard: (candidatePath: string) =>
-        evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "write").decision ===
-        "allow",
       totalBudgetTokens: EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET,
       transcriptContext,
       sectionCache: this.promptSectionCache,
@@ -30005,8 +29997,9 @@ You are continuing a previous conversation. The context from the previous conver
     try {
       const readGuard = (candidatePath: string) => this.canReadWorkspacePath(candidatePath);
       if (planningMemoryDecision.layers.workspaceKit) {
-        // Hand edits of the kit's generated blocks sync back on save from now on.
-        KitFileWatcher.watchWorkspace(this.workspace);
+        // Retired generated memory blocks are removed from USER.md / MEMORY.md once per
+        // workspace (fire-and-forget; the prompt strips them meanwhile).
+        void stripCuratedKitBlocksOnce(this.workspace);
         kitContext = buildWorkspaceKitContext(
           this.workspace.path,
           this.getContractPrompt(),
@@ -30180,8 +30173,6 @@ Return ONLY a JSON object:
       });
       this.emitEvent("log", {
         message: "Planning prompt built",
-        memoryIndexInjected: builtPrompt.memoryIndexInjected,
-        topicCount: builtPrompt.topicCount,
         droppedSections: builtPrompt.droppedSections,
         truncatedSections: builtPrompt.truncatedSections,
         totalTokens: builtPrompt.totalTokens,
@@ -32313,8 +32304,6 @@ Return ONLY a JSON object:
     });
     this.emitEvent("log", {
       message: "Execution prompt built",
-      memoryIndexInjected: builtPrompt.memoryIndexInjected,
-      topicCount: builtPrompt.topicCount,
       droppedSections: builtPrompt.droppedSections,
       truncatedSections: builtPrompt.truncatedSections,
       totalTokens: builtPrompt.totalTokens,
@@ -41182,8 +41171,6 @@ Return ONLY a JSON object:
     });
     this.emitEvent("log", {
       message: "Follow-up prompt built",
-      memoryIndexInjected: builtPrompt.memoryIndexInjected,
-      topicCount: builtPrompt.topicCount,
       droppedSections: builtPrompt.droppedSections,
       truncatedSections: builtPrompt.truncatedSections,
       totalTokens: builtPrompt.totalTokens,

@@ -1,15 +1,16 @@
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DreamingRepository } from "../DreamingRepository";
-import { DreamingService, MAX_AUTO_APPLY } from "../DreamingService";
+import { CommitmentExpiryService } from "../CommitmentExpiryService";
 import { MemoryCurationRepository } from "../MemoryCurationRepository";
 import { MemoryItemsRepository } from "../MemoryItemsRepository";
 import { MemoryReviewService } from "../MemoryReviewService";
 import { MemoryWriter, type MemoryCandidate } from "../MemoryWriter";
+import type { ConversationHit } from "../conversation-index-sql";
 import { LEGACY_DREAMING_DISMISSAL, ensureMemoryCurationSchema } from "../memory-curation-log-sql";
-import type { CurationLlmClient } from "../memory-curation-llm";
-import type { MemoryFeaturesSettings } from "../../../shared/types";
 import { createMemoryItemsTestDb, nativeSqliteAvailable } from "./memory-items-test-db";
+
+// Commitment expiry and the Review tab's undo over a real memory_items schema
+// (docs/memory-repo-phase3-design.md §6).
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
@@ -18,10 +19,6 @@ const DAY = 24 * 60 * 60 * 1000;
 async function createCurationTestDb(): Promise<Database.Database> {
   const db = await createMemoryItemsTestDb(["ws-1", "ws-2"]);
   db.exec(`
-    CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT,
-      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-    );
     CREATE TABLE memories (
       id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, task_id TEXT, type TEXT NOT NULL,
       content TEXT NOT NULL, summary TEXT, tokens INTEGER NOT NULL DEFAULT 0,
@@ -42,76 +39,70 @@ async function createCurationTestDb(): Promise<Database.Database> {
       status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER, resolution TEXT
     );
   `);
-  // A legacy boilerplate proposal, from before the curator.
   db.prepare(
     `INSERT INTO dreaming_runs (id, workspace_id, scope_kind, scope_ref, status, trigger_source,
        started_at, created_at) VALUES ('old-run', 'ws-1', 'workspace', 'ws-1', 'completed', 'heartbeat', 1, 1)`,
   ).run();
-  db.prepare(
+  const candidate = db.prepare(
     `INSERT INTO dreaming_candidates (id, run_id, workspace_id, action, target, proposed_value,
        rationale, confidence, status, created_at)
-     VALUES ('legacy', 'old-run', 'ws-1', 'correction', 'core_memory',
-       'A recent correction should be reviewed for durable memory promotion.', 'x', 0.8, 'proposed', 1)`,
-  ).run();
+     VALUES (?, 'old-run', 'ws-1', ?, ?, 'x', 'x', 0.8, ?, 1)`,
+  );
+  candidate.run("legacy", "correction", "core_memory", "proposed");
+  candidate.run("curator", "memory_merge", "memory_items", "proposed");
+  candidate.run("closed", "memory_decay", "memory_items", "rejected");
   ensureMemoryCurationSchema(db, 5);
   return db;
 }
 
-describeWithSqlite("memory curator (SQLite)", () => {
+describeWithSqlite("commitment expiry (SQLite)", () => {
   let db: Database.Database;
   let writer: MemoryWriter;
   let items: MemoryItemsRepository;
   let curation: MemoryCurationRepository;
-  let dreaming: DreamingRepository;
   let clock: number;
-  let settings: Partial<MemoryFeaturesSettings>;
+  let hits: Map<string, ConversationHit[]>;
 
-  const ingest = async (overrides: Partial<MemoryCandidate>) => {
+  const commitment = async (overrides: Partial<MemoryCandidate> = {}) => {
     const result = await writer.ingest({
-      content: "Prefers short status updates every morning",
-      kind: "preference",
+      content: "Send the quarterly report to finance",
+      kind: "commitment",
       scope: "workspace",
       workspaceId: "ws-1",
       source: "inferred",
+      sourceRef: { store: "test", id: String(Math.random()), dueAt: clock - 5 * DAY },
       ...overrides,
     });
     if (result.status !== "written") throw new Error(`not written: ${result.reason}`);
     return result.item;
   };
 
-  const service = (deps: Partial<ConstructorParameters<typeof DreamingService>[1]> = {}) =>
-    new DreamingService(dreaming, {
+  const archiveRow = (id: string, workspaceId: string, content: string, at: number) =>
+    db
+      .prepare(
+        `INSERT INTO memories (id, workspace_id, task_id, type, content, created_at, updated_at)
+         VALUES (?, ?, 't1', 'decision', ?, ?, ?)`,
+      )
+      .run(id, workspaceId, content, at, at);
+
+  const expiry = (deps: Partial<ConstructorParameters<typeof CommitmentExpiryService>[0]> = {}) =>
+    new CommitmentExpiryService({
       now: () => clock,
       getWriter: () => writer,
       curation,
-      searchConversation: async () => [],
-      getSettings: () => settings,
+      searchConversation: async ({ workspaceId }) => hits.get(workspaceId) ?? [],
+      listWorkspaceIds: () => ["ws-1", "ws-2"],
       ...deps,
     });
 
-  const review = (syncKitFiles = vi.fn(async () => undefined)) =>
-    new MemoryReviewService({
-      dreaming,
-      curation,
-      getWriter: () => writer,
-      getSettings: () => settings as MemoryFeaturesSettings,
-      syncKitFiles,
-      now: () => clock,
-    });
-
-  const runRequest = {
-    workspaceId: "ws-1",
-    workspacePath: "/tmp/ws-1",
-    triggerSource: "manual" as const,
-  };
+  const review = () => new MemoryReviewService({ curation, getWriter: () => writer });
 
   beforeEach(async () => {
     db = await createCurationTestDb();
     clock = 500 * DAY;
-    settings = {};
+    hits = new Map();
     items = new MemoryItemsRepository(db);
     curation = new MemoryCurationRepository(db);
-    dreaming = new DreamingRepository(db);
     writer = new MemoryWriter({
       repository: items,
       curation,
@@ -124,66 +115,76 @@ describeWithSqlite("memory curator (SQLite)", () => {
     db.close();
   });
 
-  it("dismisses legacy boilerplate proposals once, at schema setup", async () => {
-    const legacy = await dreaming.findCandidateById("legacy");
-    expect(legacy).toMatchObject({ status: "dismissed", resolution: LEGACY_DREAMING_DISMISSAL });
+  it("dismisses every open Dreaming proposal once, at schema setup", () => {
+    const rows = db
+      .prepare("SELECT id, status, resolution FROM dreaming_candidates ORDER BY id")
+      .all() as Array<{ id: string; status: string; resolution: string | null }>;
+    expect(rows).toEqual([
+      { id: "closed", status: "rejected", resolution: null },
+      { id: "curator", status: "dismissed", resolution: LEGACY_DREAMING_DISMISSAL },
+      { id: "legacy", status: "dismissed", resolution: LEGACY_DREAMING_DISMISSAL },
+    ]);
   });
 
-  it("applies a safe merge with an audit log row, and undo restores both items", async () => {
-    const keep = await ingest({ content: "Prefers short status updates every morning" });
-    await writer.ingest({
-      content: "Prefers short status updates every morning",
-      kind: "preference",
-      scope: "workspace",
-      workspaceId: "ws-1",
-      source: "inferred",
-    });
-    const dup = await ingest({ content: "prefers SHORT status updates, every morning please" });
-    const result = await service().run(runRequest);
-    expect(result.run).toMatchObject({ status: "completed", appliedCount: 1, queuedCount: 0 });
-    expect(result.appliedLogIds).toHaveLength(1);
+  it("closes a past-due commitment with archive evidence; undo reopens it for good", async () => {
+    const item = await commitment();
+    archiveRow("m1", "ws-1", "Quarterly report sent to finance, task completed", clock - 4 * DAY);
 
-    const keptAfter = await items.findById(keep.id);
-    const dupAfter = await items.findById(dup.id);
-    expect(keptAfter).toMatchObject({ status: "active", reinforcedCount: 2 });
-    expect(dupAfter?.status).toBe("superseded");
-
+    const result = await expiry().sweep();
+    expect(result).toMatchObject({ checked: 1, expired: 1, refused: {} });
+    expect((await items.findById(item.id))?.status).toBe("archived");
     const [log] = await curation.listLog("ws-1");
-    expect(log).toMatchObject({ op: "merge", origin: "auto", itemIds: [keep.id, dup.id] });
-    expect(log.before.map((entry) => entry.status)).toEqual(["active", "active"]);
+    expect(log).toMatchObject({
+      op: "expire_commitment",
+      origin: "auto",
+      fingerprint: `expire_commitment:${item.id}`,
+      itemIds: [item.id],
+    });
+    expect(log.rationale).toContain("Quarterly report sent to finance");
 
-    const undone = await review().undo("ws-1", log.id);
-    expect(undone).toMatchObject({ success: true });
-    expect(await items.findById(keep.id)).toMatchObject({ status: "active", reinforcedCount: 1 });
-    expect((await items.findById(dup.id))?.status).toBe("active");
+    const hub = review();
+    const state = await hub.state("ws-1");
+    expect(state.recent).toEqual([
+      expect.objectContaining({
+        id: log.id,
+        op: "expire_commitment",
+        canUndo: true,
+        items: [expect.objectContaining({ id: item.id, before: "active", after: "archived" })],
+      }),
+    ]);
+    expect((await hub.state("ws-2")).recent).toEqual([]);
+    await expect(hub.undo("ws-2", log.id)).rejects.toThrow(/not found/);
 
-    // The undone change is not applied again by the next run.
-    clock += DAY;
-    const again = await service().run(runRequest);
-    expect(again.run.appliedCount).toBe(0);
-    expect((await items.findById(dup.id))?.status).toBe("active");
+    expect(await hub.undo("ws-1", log.id)).toMatchObject({ success: true });
+    expect((await items.findById(item.id))?.status).toBe("active");
+    expect((await hub.state("ws-1")).recent[0]).toMatchObject({ undoneAt: expect.any(Number) });
+
+    // The undone expiry is never applied again.
+    expect(await expiry().sweep()).toMatchObject({ checked: 1, expired: 0 });
+    expect((await items.findById(item.id))?.status).toBe("active");
   });
 
-  it("never changes user-stated items automatically; they go to review", async () => {
-    const stated = await ingest({
-      source: "user_stated",
-      content: "Prefers short status updates every morning",
+  it("leaves user-stated, undated, recent and unproven commitments open", async () => {
+    const stated = await commitment({ source: "user_stated" });
+    const undated = await commitment({
+      content: "Send the quarterly budget to finance",
+      sourceRef: { store: "test", id: "undated" },
     });
-    const inferred = await ingest({ content: "prefers short status updates every morning!!" });
-    // Same hash class: write a near-duplicate rather than an exact one.
-    const near = await ingest({ content: "Prefers short status updates on every morning" });
-    const result = await service().run(runRequest);
-    expect(result.run.appliedCount).toBe(0);
-    expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0]).toMatchObject({
-      target: "memory_items",
-      action: "memory_merge",
-      status: "proposed",
+    const recent = await commitment({
+      content: "Send the quarterly forecast to finance",
+      sourceRef: { store: "test", id: "recent", dueAt: clock - DAY / 2 },
     });
-    for (const item of [stated, near]) {
+    const unproven = await commitment({
+      content: "Book the offsite venue",
+      sourceRef: { store: "test", id: "venue", dueAt: clock - 60 * DAY },
+    });
+    archiveRow("m1", "ws-1", "Quarterly report sent to finance, task completed", clock - 4 * DAY);
+
+    expect(await expiry().sweep()).toMatchObject({ checked: 1, expired: 0 });
+    for (const item of [stated, undated, recent, unproven]) {
       expect((await items.findById(item.id))?.status).toBe("active");
     }
-    expect(inferred.id).toBe(stated.id); // exact duplicate was reinforced into the stated item
+    expect(await curation.listLog("ws-1")).toEqual([]);
 
     // The store refuses an automatic change to a protected item even if asked directly.
     const refused = await writer.applyCuration({
@@ -195,233 +196,91 @@ describeWithSqlite("memory curator (SQLite)", () => {
       summary: "x",
       rationale: null,
       allowProtected: false,
-      operation: { op: "decay", itemIds: [stated.id] },
+      operation: { op: "expire_commitment", itemIds: [stated.id] },
     });
     expect(refused).toMatchObject({ status: "refused", reason: "protected" });
   });
 
-  it("accepting a review proposal applies it through MemoryWriter; reject blocks it", async () => {
-    const stated = await ingest({ source: "user_stated", content: "Prefers concise answers" });
-    const inferred = await ingest({ content: "Prefers detailed answers" });
-    const run = await service().run(runRequest);
-    expect(run.candidates.map((candidate) => candidate.action)).toEqual([
-      "memory_resolve_conflict",
+  it("closes a global commitment from conversation evidence in a recent workspace", async () => {
+    const item = await commitment({ scope: "global", workspaceId: null });
+    hits.set("ws-2", [
+      {
+        id: "h1",
+        eventId: "e1",
+        taskId: "t9",
+        snippet: "The quarterly report was sent to finance this morning",
+        timestamp: clock - 2 * DAY,
+      } as ConversationHit,
     ]);
 
-    const sync = vi.fn(async () => undefined);
-    const hub = review(sync);
-    const state = await hub.state("ws-1");
-    expect(state.pendingCount).toBe(1);
-    expect(state.pending[0]).toMatchObject({
-      op: "resolve_conflict",
-      keepId: stated.id,
-      items: [
-        expect.objectContaining({ id: stated.id }),
-        expect.objectContaining({ id: inferred.id }),
-      ],
-    });
-    expect(await hub.count("ws-1")).toBe(1);
-
-    // Another workspace cannot see or accept it.
-    await expect(hub.accept("ws-2", state.pending[0].id)).rejects.toThrow(/not found/);
-
-    expect(await hub.accept("ws-1", state.pending[0].id)).toMatchObject({ success: true });
-    expect((await items.findById(inferred.id))?.status).toBe("superseded");
-    expect((await items.findById(stated.id))?.status).toBe("active");
-    expect(sync).toHaveBeenCalledWith("ws-1");
-    const after = await hub.state("ws-1");
-    expect(after.pending).toHaveLength(0);
-    expect(after.recent[0]).toMatchObject({
-      op: "resolve_conflict",
-      origin: "review",
-      canUndo: true,
-    });
-
-    // A second accept of the same proposal is refused.
-    expect(await hub.accept("ws-1", state.pending[0].id)).toMatchObject({
-      success: false,
-      reason: "reviewed",
-    });
+    expect(await expiry().sweep()).toMatchObject({ expired: 1 });
+    expect((await items.findById(item.id))?.status).toBe("archived");
+    expect(await curation.listLog("ws-1")).toEqual([]);
+    const [log] = await curation.listLog("ws-2");
+    expect(log).toMatchObject({ op: "expire_commitment", hasGlobal: true });
   });
 
-  it("rejected proposals are not proposed again", async () => {
-    await ingest({ content: "Prefers concise answers" });
-    await ingest({ content: "Prefers detailed answers" });
-    const first = await service().run(runRequest);
-    expect(first.candidates).toHaveLength(1);
-    expect(await review().reject("ws-1", first.candidates[0].id)).toMatchObject({ success: true });
+  it("runs once a day per process and waits for the lane migration", async () => {
+    const service = expiry();
+    expect(await service.sweep()).toMatchObject({ expired: 0 });
+    expect(await service.sweep()).toBe("cooldown");
     clock += DAY;
-    const second = await service().run(runRequest);
-    expect(second.candidates).toHaveLength(0);
-    expect(second.run.stats).toMatchObject({ blocked: 1 });
-  });
+    expect(await service.sweep()).toMatchObject({ expired: 0 });
+    expect(await service.sweep({ force: true })).toMatchObject({ expired: 0 });
 
-  it("promotes a recurring correction from two tasks, and undo tombstones the new item", async () => {
-    const insert = db.prepare(
-      `INSERT INTO memories (id, workspace_id, task_id, type, content, created_at, updated_at)
-       VALUES (?, 'ws-1', ?, 'insight', ?, ?, ?)`,
-    );
-    insert.run(
-      "m1",
-      "t1",
-      "[CORRECTION] User corrected agent\nUser said: always use pnpm instead of npm for installs here\nTask context: a",
-      clock - DAY,
-      clock - DAY,
-    );
-    insert.run(
-      "m2",
-      "t2",
-      "[CORRECTION] User corrected agent\nUser said: use pnpm instead of npm for installs here\nTask context: b",
-      clock - DAY,
-      clock - DAY,
-    );
-    const result = await service().run(runRequest);
-    expect(result.run.appliedCount).toBe(1);
-    const [log] = await curation.listLog("ws-1");
-    expect(log).toMatchObject({ op: "promote", createdIds: [expect.any(String)] });
-    const created = await items.findById(log.createdIds[0]);
-    expect(created).toMatchObject({
-      kind: "correction",
-      source: "inferred",
-      scope: "workspace",
-      status: "active",
-    });
-    expect(created?.sourceRef.aliases).toEqual(
-      expect.arrayContaining(["archive:m1", "archive:m2"]),
-    );
-
-    expect(await review().undo("ws-1", log.id)).toMatchObject({ success: true });
-    expect(await items.findById(log.createdIds[0])).toMatchObject({
-      status: "deleted",
-      content: "",
-    });
-    expect((await curation.findLog(log.id))?.undoneAt).toEqual(expect.any(Number));
-    // An undone promotion is not learned again from the same evidence.
-    clock += DAY;
-    expect((await service().run(runRequest)).run.appliedCount).toBe(0);
-  });
-
-  it("refuses an undo after the item changed since", async () => {
-    const old = await ingest({ content: "Enjoys jazz playlists while coding" });
-    db.prepare(
-      "UPDATE memory_items SET last_used_at = ?, updated_at = ?, created_at = ? WHERE id = ?",
-    ).run(clock - 400 * DAY, clock - 400 * DAY, clock - 400 * DAY, old.id);
-    const result = await service().run(runRequest);
-    expect(result.run.appliedCount).toBe(1);
-    expect((await items.findById(old.id))?.status).toBe("archived");
-    const [log] = await curation.listLog("ws-1");
-    // Reactivated by a new write of the same fact in the meantime.
-    await ingest({ content: "Enjoys jazz playlists while coding" });
-    const undone = await review().undo("ws-1", log.id);
-    expect(undone).toMatchObject({ success: false, reason: "conflict" });
-  });
-
-  it("forgetting an item scrubs curation log rows that quote it", async () => {
-    const old = await ingest({ content: "Enjoys jazz playlists while coding" });
-    db.prepare(
-      "UPDATE memory_items SET last_used_at = 1, updated_at = 1, created_at = 1 WHERE id = ?",
-    ).run(old.id);
-    await service().run(runRequest);
-    expect(await curation.listLog("ws-1")).toHaveLength(1);
-    await writer.setStatus(old.id, "deleted");
-    expect(await curation.listLog("ws-1")).toHaveLength(0);
-  });
-
-  it("caps automatic changes per run and records counts", async () => {
-    for (let index = 0; index < MAX_AUTO_APPLY + 3; index += 1) {
-      const item = await ingest({
-        content: `Unused fact alpha${index} bravo${index} charlie${index} delta${index}`,
-      });
-      db.prepare(
-        "UPDATE memory_items SET last_used_at = 1, updated_at = 1, created_at = 1 WHERE id = ?",
-      ).run(item.id);
-    }
-    const result = await service().run(runRequest);
-    expect(result.run.appliedCount).toBe(MAX_AUTO_APPLY);
-    expect(result.run.stats).toMatchObject({ deferred: 3, applied_decay: MAX_AUTO_APPLY });
-  });
-
-  it("skips while the lane migration has not finished", async () => {
     db.prepare("DELETE FROM maintenance_state").run();
-    const result = await service().run(runRequest);
-    expect(result.run.status).toBe("skipped");
+    expect(await expiry().sweep()).toBe("unavailable");
+    expect(await expiry({ getWriter: () => null }).sweep()).toBe("unavailable");
   });
 
-  describe("LLM synthesis", () => {
-    const client = (text: string, onCall = vi.fn()): CurationLlmClient => ({
-      async complete(request) {
-        onCall(request);
-        return { text, inputTokens: 300, outputTokens: 50 };
-      },
+  it("shares one in-flight sweep", async () => {
+    await commitment();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const search = vi.fn(async () => {
+      await gate;
+      return [];
     });
-
-    it("is off by default", async () => {
-      const onCall = vi.fn();
-      await ingest({ content: "Keeps a dark editor theme" });
-      await service({ llmClient: client('{"proposals":[]}', onCall) }).run(runRequest);
-      expect(onCall).not.toHaveBeenCalled();
-    });
-
-    it("queues valid proposals for review, drops invalid ones, and records tokens", async () => {
-      settings = { dreamingLlmEnabled: true, dreamingLlmDailyTokenBudget: 50_000 };
-      await ingest({ content: "Keeps a dark editor theme" });
-      await ingest({ content: "Uses a dark color scheme in the editor" });
-      await ingest({ source: "user_stated", content: "Reads email only after lunch" });
-      const onCall = vi.fn();
-      const text = JSON.stringify({
-        proposals: [
-          { op: "merge", keep: "i1", merge: ["i2"], reason: "same preference" },
-          // Touches a user-stated item: dropped.
-          { op: "decay", item: "i3", reason: "old" },
-          // Unknown alias: dropped.
-          { op: "merge", keep: "i1", merge: ["i9"], reason: "x" },
-        ],
-      });
-      const result = await service({ llmClient: client(text, onCall) }).run(runRequest);
-      expect(onCall).toHaveBeenCalledOnce();
-      // The prompt carries aliases, not ids, and marks text as untrusted.
-      const request = onCall.mock.calls[0][0];
-      expect(request.system).toMatch(/untrusted data/);
-      expect(request.user).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
-      expect(result.run).toMatchObject({ llmTokens: 350, llmCalls: 1 });
-      expect(result.run.stats).toMatchObject({ llm_rejected: 2 });
-      expect(result.candidates.filter((candidate) => candidate.origin === "llm")).toHaveLength(1);
-      expect(result.run.appliedCount).toBe(0);
-    });
-
-    it("ignores malformed output and respects the daily budget", async () => {
-      settings = { dreamingLlmEnabled: true, dreamingLlmDailyTokenBudget: 50_000 };
-      await ingest({ content: "Keeps a dark editor theme" });
-      await ingest({ content: "Reads the news at breakfast" });
-      const bad = await service({
-        llmClient: client('Sure! {"proposals":[{"op":"delete_everything"}]}'),
-      }).run(runRequest);
-      expect(bad.run.stats).toMatchObject({ llm_invalid_output: 1 });
-      expect(bad.candidates).toHaveLength(0);
-
-      settings = { dreamingLlmEnabled: true, dreamingLlmDailyTokenBudget: 100 };
-      const onCall = vi.fn();
-      clock += 1;
-      const capped = await service({ llmClient: client('{"proposals":[]}', onCall) }).run(
-        runRequest,
-      );
-      expect(onCall).not.toHaveBeenCalled();
-      expect(capped.run.stats).toMatchObject({ llm_budget: 1 });
-    });
+    const service = expiry({ searchConversation: search });
+    const first = service.sweep();
+    await vi.waitFor(() => expect(search).toHaveBeenCalled());
+    expect(await service.sweep({ force: true })).toBe("in_flight");
+    release();
+    expect(await first).toMatchObject({ checked: 1, expired: 0 });
   });
 
-  it("lists workspaces due for the daily curation", async () => {
-    db.prepare("INSERT INTO tasks VALUES ('t1', 'ws-1', 't', ?, ?)").run(clock, clock);
-    db.prepare("INSERT INTO tasks VALUES ('t2', 'ws-2', 't', ?, ?)").run(
-      clock - 60 * DAY,
-      clock - 60 * DAY,
-    );
-    expect(await curation.dueWorkspaces(["ws-1", "ws-2"], clock - 14 * DAY, clock - DAY)).toEqual([
-      "ws-1",
+  it("lists and undoes only commitment expiries, and forgetting scrubs the log", async () => {
+    const item = await commitment();
+    archiveRow("m1", "ws-1", "Quarterly report sent to finance, task completed", clock - 4 * DAY);
+    await expiry().sweep();
+    const other = await writer.ingest({
+      content: "Enjoys jazz playlists while coding",
+      kind: "preference",
+      scope: "workspace",
+      workspaceId: "ws-1",
+      source: "inferred",
+    });
+    if (other.status !== "written") throw new Error("not written");
+    const decay = await writer.applyCuration({
+      workspaceId: "ws-1",
+      runId: null,
+      candidateId: null,
+      origin: "auto",
+      fingerprint: "decay:x",
+      summary: "Archived an unused item",
+      rationale: null,
+      allowProtected: false,
+      operation: { op: "decay", itemIds: [other.item.id] },
+    });
+    if (decay.status !== "applied") throw new Error("not applied");
+
+    const hub = review();
+    expect((await hub.state("ws-1")).recent.map((change) => change.op)).toEqual([
+      "expire_commitment",
     ]);
-    await service().run(runRequest);
-    expect(await curation.dueWorkspaces(["ws-1", "ws-2"], clock - 14 * DAY, clock - DAY)).toEqual(
-      [],
-    );
+    await expect(hub.undo("ws-1", decay.log.id)).rejects.toThrow(/not found/);
+
+    await writer.setStatus(item.id, "deleted");
+    expect((await curation.listLog("ws-1")).map((log) => log.op)).toEqual(["decay"]);
   });
 });

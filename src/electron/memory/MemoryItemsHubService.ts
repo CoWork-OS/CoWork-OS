@@ -5,10 +5,10 @@
  * Every write goes through MemoryWriter. Callers pass the workspace the Hub is showing;
  * an item is visible and editable only when it belongs to that workspace or is not bound
  * to any workspace (global items, workspace-less contact items). `memory_items` is the
- * only store of these facts (the legacy lanes are retired), so nothing is mirrored;
- * workspace changes re-render the `.cowork/USER.md` / `MEMORY.md` views (`syncKitFiles`).
+ * only store of these facts (the legacy lanes are retired), so nothing is mirrored.
  */
 import { MemoryRepoService } from "./repo/MemoryRepoService";
+import { memoryRepoSkipMessage, writableMemoryRepo } from "./repo/memory-repo-producers";
 import { randomUUID } from "crypto";
 import type {
   MemoryHubItem,
@@ -18,7 +18,6 @@ import type {
   MemoryHubMutationResult,
   MemoryHubWhy,
 } from "../../shared/memory-hub-types";
-import { createLogger } from "../utils/logger";
 import { memoryWriteSkipMessage } from "./memory-item-revise";
 import type { MemoryWriter, MemoryWriteResult } from "./MemoryWriter";
 import {
@@ -30,8 +29,6 @@ import {
   type MemoryItemSource,
   type MemorySourceRef,
 } from "./memory-items-types";
-
-const logger = createLogger("MemoryItemsHub");
 
 /** Source ref store of items added or edited in the Memory Hub. */
 export const MEMORY_HUB_STORE = "memory_hub";
@@ -55,12 +52,18 @@ void VOCABULARIES_MATCH;
 export interface MemoryItemsHubDeps {
   /** The process-wide writer (null before the memory engine starts). */
   getWriter: () => MemoryWriter | null;
+  /**
+   * The memory folder when it is writable (default: the running one). Facts the user adds,
+   * edits or pins go there (docs/memory-repo-phase3-design.md §4); commitments, contact and
+   * task items stay in `memory_items`.
+   */
+  getMemoryRepo?: () => MemoryRepoService | null;
+  /** The workspace's name, for a new `workspaces/<slug>.md`. */
+  getWorkspaceName?: (workspaceId: string) => Promise<string | null>;
   /** Task title for the "why" link; the title is shown only for the Hub's workspace. */
   getTask?: (
     taskId: string,
   ) => Promise<{ id: string; title?: string | null; workspaceId?: string | null } | undefined>;
-  /** Re-render `.cowork/USER.md` / `MEMORY.md` for a workspace after a change. */
-  syncKitFiles?: (workspaceId: string) => Promise<void>;
 }
 
 export class MemoryHubError extends Error {
@@ -266,7 +269,65 @@ export class MemoryItemsHubService {
     };
   }
 
-  /** A fact the user typed: `user_stated`, global or in the Hub's workspace. */
+  private memoryRepo(): MemoryRepoService | null {
+    return writableMemoryRepo(this.deps.getMemoryRepo);
+  }
+
+  /** A fact (not a commitment, contact or task item) that belongs in the memory folder. */
+  private static isFolderFact(item: Pick<MemoryItem, "scope" | "kind" | "privacy">): boolean {
+    return (
+      (item.scope === "global" || item.scope === "workspace") &&
+      item.kind !== "commitment" &&
+      item.privacy !== "private"
+    );
+  }
+
+  /** Write the user's fact to the memory folder; null when the folder could not take it. */
+  private async rememberInFolder(
+    repo: MemoryRepoService,
+    request: {
+      workspaceId: string;
+      content: string;
+      kind: MemoryItemKind;
+      scope: "global" | "workspace";
+      pinned: boolean;
+      taskId?: string | null;
+    },
+  ): Promise<MemoryHubMutationResult | null> {
+    let workspaceName: string | null = null;
+    if (request.scope === "workspace") {
+      try {
+        workspaceName = (await this.deps.getWorkspaceName?.(request.workspaceId)) ?? null;
+      } catch {
+        workspaceName = null;
+      }
+    }
+    const result = await repo.remember({
+      text: request.content,
+      kind: request.kind,
+      scope: request.scope,
+      workspaceId: request.workspaceId,
+      workspaceName,
+      by: "user",
+      pinned: request.pinned,
+      taskId: request.taskId ?? null,
+      originText: request.content,
+      origin: "memory_hub",
+      // An explicit user act in the Hub (as `user_stated` items were).
+      skipWorkspacePolicy: true,
+    });
+    if (result.status === "skipped") {
+      // Unavailable (a write error): the caller keeps the memory_items path.
+      if (result.reason === "unavailable") return null;
+      return { success: false, error: memoryRepoSkipMessage(result), reason: result.reason };
+    }
+    return { success: true, item: null, action: result.action, ref: result.ref };
+  }
+
+  /**
+   * A fact the user typed, global or in the Hub's workspace: a line in the memory folder
+   * when it runs (commitments excepted), otherwise a `user_stated` item.
+   */
   async add(request: {
     workspaceId: string;
     content: string;
@@ -274,6 +335,14 @@ export class MemoryItemsHubService {
     scope: "global" | "workspace";
     pinned?: boolean;
   }): Promise<MemoryHubMutationResult> {
+    const repo = request.kind === "commitment" ? null : this.memoryRepo();
+    if (repo) {
+      const written = await this.rememberInFolder(repo, {
+        ...request,
+        pinned: request.pinned === true,
+      });
+      if (written) return written;
+    }
     const result = await this.writer().ingest({
       content: request.content,
       kind: request.kind,
@@ -289,7 +358,6 @@ export class MemoryItemsHubService {
     if (result.status === "skipped") {
       return { success: false, error: memoryWriteSkipMessage(result), reason: result.reason };
     }
-    if (result.item.workspaceId) await this.syncKit(result.item.workspaceId);
     return { success: true, item: toMemoryHubItem(result.item), action: result.action };
   }
 
@@ -306,17 +374,21 @@ export class MemoryItemsHubService {
     if (item.status !== "active") {
       return { success: false, error: "Only current memories can be edited.", reason: "status" };
     }
+    const moved = await this.moveToFolder(item, request.workspaceId, {
+      content: request.content,
+      pinned: item.pinned,
+    });
+    if (moved) return moved;
     const result = await this.editItem(item, request.content, MEMORY_HUB_STORE);
     if (result.status === "skipped") {
       return { success: false, error: memoryWriteSkipMessage(result), reason: result.reason };
     }
-    if (item.workspaceId) await this.syncKit(item.workspaceId);
     return { success: true, item: toMemoryHubItem(result.item), action: result.action };
   }
 
   /**
-   * Shared by the Hub and kit back-sync. Unchanged text (same content hash) is a no-op
-   * reported as `updated`.
+   * Edit an item (`kit_file` is the provenance of the retired kit back-sync). Unchanged
+   * text (same content hash) is a no-op reported as `updated`.
    */
   async editItem(
     item: MemoryItem,
@@ -377,24 +449,54 @@ export class MemoryItemsHubService {
     if (item.status !== "active") {
       return { success: false, error: "Only current memories can be pinned.", reason: "status" };
     }
+    if (request.pinned) {
+      const moved = await this.moveToFolder(item, request.workspaceId, {
+        content: item.content,
+        pinned: true,
+      });
+      if (moved) return moved;
+    }
     await this.writer().setPinned(item.id, request.pinned);
     const updated = await this.writer().repository.findById(item.id);
     return { success: true, item: updated ? toMemoryHubItem(updated) : null };
   }
 
   /**
+   * Edit or pin of a fact item while the memory folder runs: the fact moves to the folder
+   * (the user's line; pinned = `MEMORY.md`) and the item is deleted. Null when the item is
+   * not a folder fact or the folder could not take it (the item path applies).
+   */
+  private async moveToFolder(
+    item: MemoryItem,
+    workspaceId: string,
+    change: { content: string; pinned: boolean },
+  ): Promise<MemoryHubMutationResult | null> {
+    const repo = MemoryItemsHubService.isFolderFact(item) ? this.memoryRepo() : null;
+    if (!repo) return null;
+    const written = await this.rememberInFolder(repo, {
+      workspaceId: item.workspaceId ?? workspaceId,
+      content: change.content,
+      kind: item.kind,
+      scope: item.scope === "workspace" && item.workspaceId ? "workspace" : "global",
+      pinned: change.pinned,
+      taskId: item.taskId,
+    });
+    if (!written || !written.success) return written;
+    await this.removeItem(item, "deleted");
+    return { ...written, action: "moved" };
+  }
+
+  /**
    * A real forget: the item and its older revisions become tombstones with their text
-   * scrubbed (retention drops them), the hot-memory version is bumped (by the writer) and
-   * kit views are re-rendered.
+   * scrubbed (retention drops them) and the hot-memory version is bumped (by the writer).
    */
   async delete(request: { workspaceId: string; id: string }): Promise<MemoryHubMutationResult> {
     const item = await this.owned(request.workspaceId, request.id);
     await this.removeItem(item, "deleted");
-    if (item.workspaceId) await this.syncKit(item.workspaceId);
     return { success: true, item: null };
   }
 
-  /** Shared by the Hub (`deleted`) and kit back-sync (`archived`, a removed line). */
+  /** Hub delete (`deleted`), or an archive (`archived`). */
   async removeItem(item: MemoryItem, mode: "deleted" | "archived"): Promise<void> {
     const writer = this.writer();
     if (mode === "deleted") {
@@ -416,15 +518,5 @@ export class MemoryItemsHubService {
     // The user's global files in the memory repo, then its history is compacted.
     await MemoryRepoService.get()?.clearGlobal();
     return { success: true, deleted };
-  }
-
-  private async syncKit(workspaceId: string): Promise<void> {
-    if (!this.deps.syncKitFiles) return;
-    try {
-      await this.deps.syncKitFiles(workspaceId);
-    } catch (error) {
-      // The database change is committed; the files catch up on the next sync.
-      logger.warn("Kit file sync after a Memory Hub change failed:", error);
-    }
   }
 }

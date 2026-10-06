@@ -13,17 +13,19 @@
  * The 16 tools these replaced were hidden aliases for one release and have been retired
  * (RETIRED_MEMORY_TOOL_NAMES); they are no longer registered.
  */
+import { PersonalityManager } from "../../settings/personality-manager";
+import { sanitizeStoredPreferredName } from "../../utils/preferred-name";
+import { normalizeSubjectKey } from "../../memory/memory-items-types";
+import { rememberPreferredNameInFolder } from "../../memory/repo/memory-repo-producers";
 import { MemoryRepoService, taskSourceLink } from "../../memory/repo/MemoryRepoService";
 import { memoryRepoRef, parseMemoryRepoRef } from "../../memory/repo/memory-repo-format";
 import { isUntrustedExternalSource } from "../security/export-permission-context";
 import { isMemoryRepoReadAllowed } from "../../security/memory-repo-access";
 import { randomUUID } from "crypto";
-import * as path from "path";
 import type { LLMTool } from "../llm/types";
 import type { Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import { MemoryService } from "../../memory/MemoryService";
-import { CuratedMemoryService } from "../../memory/CuratedMemoryService";
 import { MemoryWriteGate } from "../../memory/MemoryWriteGate";
 import { MemoryWriter, type MemoryWriteResult } from "../../memory/MemoryWriter";
 import { MemoryItemsHubService } from "../../memory/MemoryItemsHubService";
@@ -68,6 +70,9 @@ export const NO_MEMORY_WRITE_ERROR =
 
 export const FORGET_DENIED_ERROR =
   "The user did not approve forgetting this memory. It was kept; do not retry.";
+
+export const TEAM_MEMORY_READ_ONLY_ERROR =
+  "Team memory is read-only; edit it in the team's repository.";
 
 /** What memory_forget is about to delete, for the approval prompt. */
 interface ForgetTarget {
@@ -607,7 +612,8 @@ export class MemoryTools {
 
       // The memory repo (docs/memory-repo-phase1-design.md), when it runs, holds the user's
       // and workspace facts; contact, task and private facts stay in memory_items.
-      if (!thirdPartySender && (scope === "global" || scope === "workspace")) {
+      // Commitments stay in memory_items: they carry due dates the briefing and reminders use.
+      if (!thirdPartySender && (scope === "global" || scope === "workspace") && itemKind !== "commitment") {
         const repoResult = await this.rememberInRepo({
           content,
           kind: itemKind,
@@ -638,9 +644,6 @@ export class MemoryTools {
       });
       if (result.status === "skipped") {
         return fail(skipMessage(result), { reason: result.reason });
-      }
-      if (result.item.scope === "workspace" && result.item.workspaceId) {
-        await this.syncKitFiles(result.item.workspaceId);
       }
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool,
@@ -689,6 +692,21 @@ export class MemoryTools {
     if (!repo?.isWritable() || !isMemoryRepoReadAllowed()) return null;
     const tool = MEMORY_REMEMBER_TOOL;
     const by = input.source === "user_stated" ? "user" : "agent";
+    // The preferred name lives in PersonalityManager (Phase 3); a stated name updates it and
+    // mirrors into me.md, like set_user_name.
+    if (by === "user" && normalizeSubjectKey(input.subjectKey) === "preferred_name") {
+      const name = sanitizeStoredPreferredName(
+        input.content.replace(/^\s*(?:preferred name|my name is|call me)\s*:?\s*/i, ""),
+      );
+      if (name) {
+        PersonalityManager.setUserName(name);
+        const named = await rememberPreferredNameInFolder(name, { taskId: this.taskId });
+        if (named?.status === "written") {
+          this.daemon.logEvent(this.taskId, "tool_result", { tool, success: true, memoryId: named.ref });
+          return { success: true, id: named.ref, action: named.action, kind: input.kind, scope: "global", source: input.source, file: named.path };
+        }
+      }
+    }
     const tainted =
       by === "agent" &&
       (this.daemon.listRecentSensitiveSources?.(this.taskId) ?? []).some((item) =>
@@ -935,6 +953,7 @@ export class MemoryTools {
       const repoRef = parseMemoryRepoRef(id);
       if (repoRef) return await this.forgetRepoEntry(repoRef.path, repoRef.line, input?.reason, fail, done);
       if (id) {
+        if (/^team:/i.test(id)) return fail(TEAM_MEMORY_READ_ONLY_ERROR);
         const parsed = parseRecallRef(id);
         if (!parsed) return fail(`Unknown memory id "${id}".`);
         switch (parsed.kind) {
@@ -1086,6 +1105,8 @@ export class MemoryTools {
       if (termCoverage(hit.content ?? hit.snippet ?? "", match) < 1) continue;
       // Imported rows of other workspaces are readable here but not this task's to delete.
       if (hit.lane === "archive" && hit.provenance?.imported === true) continue;
+      // Team memory repos are read-only (docs/memory-repo-phase4-design.md §2).
+      if (hit.ref.startsWith("team:")) continue;
       visible.push(hit);
     }
     return visible;
@@ -1123,10 +1144,7 @@ export class MemoryTools {
 
   /** Delete a memory item, as the Memory Hub does. */
   private async deleteItem(id: string): Promise<void> {
-    const hub = new MemoryItemsHubService({
-      getWriter: () => MemoryWriter.get(),
-      syncKitFiles: (workspaceId) => this.syncKitFiles(workspaceId),
-    });
+    const hub = new MemoryItemsHubService({ getWriter: () => MemoryWriter.get() });
     await hub.delete({ workspaceId: this.workspace.id, id });
   }
 
@@ -1311,35 +1329,11 @@ export class MemoryTools {
     }
   }
 
-  /** Re-render `.cowork/USER.md` / `MEMORY.md` after a change (best effort, guarded). */
-  private async syncKitFiles(workspaceId: string): Promise<void> {
-    if (workspaceId !== this.workspace.id || this.workspace.permissions?.write === false) return;
-    try {
-      await CuratedMemoryService.syncWorkspaceFiles(workspaceId, {
-        readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
-        writeGuard: (candidatePath) => this.canWriteWorkspacePath(candidatePath),
-      });
-    } catch {
-      // The database change is committed; the files catch up on the next sync.
-    }
-  }
-
   private canReadWorkspacePath(candidatePath: string): boolean {
     try {
       return (
         evaluateWorkspaceFilesystemAccess(this.workspace, candidatePath, "read").decision ===
         "allow"
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private canWriteWorkspacePath(candidatePath: string): boolean {
-    try {
-      return (
-        evaluateWorkspaceFilesystemAccess(this.workspace, path.resolve(candidatePath), "write")
-          .decision === "allow"
       );
     } catch {
       return false;

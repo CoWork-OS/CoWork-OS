@@ -37,6 +37,21 @@ export function getMemoryRepoRoot(): string | null {
   return memoryRepoRoot;
 }
 
+let teamMemoryRepoRoots: string[] = [];
+
+/** Register the team memory repo roots (docs/memory-repo-phase4-design.md §2): read-only. */
+export function setTeamMemoryRepoRoots(roots: readonly string[]): void {
+  teamMemoryRepoRoots = roots
+    .map((root) => (typeof root === "string" ? root.trim() : ""))
+    .filter(Boolean)
+    .map((root) => nodePath.resolve(root));
+}
+
+/** The registered team memory repo roots (lexical, absolute). */
+export function getTeamMemoryRepoRoots(): string[] {
+  return [...teamMemoryRepoRoots];
+}
+
 /** Run `fn` (one tool call) with this task's memory repo access. */
 export function runWithMemoryRepoAccess<T>(scope: MemoryRepoAccessScope, fn: () => T): T {
   return accessScope.run({ readAllowed: scope.readAllowed === true }, fn);

@@ -19,16 +19,12 @@ export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
     ingestUrl,
     activePhase,
     lastRuntimeTrace,
-    lastPromptStack,
-    lastConsolidation,
     lastSessionFork,
   } = useMemo(() => {
     let ingest: string | null = null;
     let phase: DebugPhase = "hypothesize";
     let phaseFound = false;
     let runtimeTrace: { tool: string; decision: string; status: string } | null = null;
-    let promptStack: { memoryIndexInjected: boolean; topicCount: number } | null = null;
-    let consolidation: { topicCount?: number; skipped?: boolean } | null = null;
     let sessionFork: { sourceTaskId?: string; branchLabel?: string } | null = null;
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i];
@@ -72,25 +68,6 @@ export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
           status: typeof envelope?.status === "string" ? envelope.status : "unknown",
         };
       }
-      if (!promptStack && e.type === "log" && payload?.message === "Prompt stack built") {
-        promptStack = {
-          memoryIndexInjected: payload?.memoryIndexInjected === true,
-          topicCount: typeof payload?.topicCount === "number" ? payload.topicCount : 0,
-        };
-      }
-      if (
-        !consolidation &&
-        e.type === "log" &&
-        typeof payload?.consolidation === "object" &&
-        payload?.message &&
-        String(payload.message).includes("Memory consolidation")
-      ) {
-        const result = payload.consolidation as Record<string, unknown>;
-        consolidation = {
-          topicCount: typeof result.topicCount === "number" ? result.topicCount : undefined,
-          skipped: result.skipped === true,
-        };
-      }
       if (!sessionFork && e.type === "log" && payload?.message === "Session fork created") {
         sessionFork = {
           sourceTaskId:
@@ -98,7 +75,7 @@ export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
           branchLabel: typeof payload?.branchLabel === "string" ? payload.branchLabel : undefined,
         };
       }
-      if (ingest && phaseFound && runtimeTrace && promptStack && consolidation && sessionFork) {
+      if (ingest && phaseFound && runtimeTrace && sessionFork) {
         break;
       }
     }
@@ -106,8 +83,6 @@ export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
       ingestUrl: ingest,
       activePhase: phase,
       lastRuntimeTrace: runtimeTrace,
-      lastPromptStack: promptStack,
-      lastConsolidation: consolidation,
       lastSessionFork: sessionFork,
     };
   }, [events]);
@@ -182,18 +157,6 @@ export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
         <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
           Runtime: <code>{lastRuntimeTrace.tool}</code> · decision {lastRuntimeTrace.decision} ·
           status {lastRuntimeTrace.status}
-        </div>
-      ) : null}
-      {lastPromptStack ? (
-        <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
-          Prompt stack: memory index {lastPromptStack.memoryIndexInjected ? "on" : "off"} · topics{" "}
-          {lastPromptStack.topicCount}
-        </div>
-      ) : null}
-      {lastConsolidation ? (
-        <div style={{ fontSize: "0.68rem", color: "var(--color-text-muted, #8b8fa3)" }}>
-          Consolidation: {lastConsolidation.skipped ? "skipped" : "completed"} · topics{" "}
-          {lastConsolidation.topicCount ?? 0}
         </div>
       ) : null}
       {lastSessionFork ? (

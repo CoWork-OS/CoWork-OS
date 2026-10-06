@@ -42,16 +42,18 @@ import type {
 import type { MemoryUsedForTask } from "../shared/memory-used";
 import type {
   MemoryReviewMutationResult,
-  MemoryReviewRunResult,
   MemoryReviewState,
 } from "../shared/memory-review-types";
 import type { MemoryHealthReport, MemorySourcesReport } from "../shared/memory-health-types";
 import type {
   MemoryRepoCompactResult,
+  MemoryRepoSyncNowResult,
   MemoryRepoDreamActionResult,
   MemoryRepoDreamNowResult,
   MemoryRepoDreamPart,
   MemoryRepoDreamsReport,
+  MemoryRepoEntriesReport,
+  MemoryRepoEntryActionResult,
   MemoryRepoLine,
   MemoryRepoStatusReport,
 } from "../shared/memory-repo-types";
@@ -4290,30 +4292,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_WHY, data),
   clearGlobalMemoryItems: (data: { workspaceId: string; confirm: true }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ITEMS_CLEAR_GLOBAL, data),
-  // Memory Hub "Review" (Dreaming's curation proposals and applied changes)
+  // Memory Hub "Review" (automatic commitment expiries with undo)
   getMemoryReview: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_GET, data),
-  getMemoryReviewCount: (data: { workspaceId: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_COUNT, data),
-  acceptMemoryProposal: (data: { workspaceId: string; id: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_ACCEPT, data),
-  rejectMemoryProposal: (data: { workspaceId: string; id: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_REJECT, data),
   undoMemoryChange: (data: { workspaceId: string; id: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_UNDO, data),
-  runMemoryCuration: (data: { workspaceId: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_RUN_NOW, data),
-  setMemoryCurationLlmEnabled: (data: { workspaceId: string; enabled: boolean }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REVIEW_SET_LLM, data),
   // Memory Hub "Sources" and "Health" (aggregate counts only)
   getMemorySources: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_SOURCES, data),
   getMemoryHealth: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_HEALTH, data),
-  // Memory folder (beta): the folder is resolved in main, never sent from here
+  // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
   compactMemoryRepoHistory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY),
+  syncMemoryRepoNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW),
   readMemoryRepoLines: (refs: string[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_READ_LINES, { refs }),
   // Dreams over the memory folder: review, undo and "Dream now"
@@ -4327,6 +4320,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
   undoMemoryRepoDream: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM, { id }),
   dreamMemoryRepoNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_DREAM_NOW),
+  // Memory Hub "What CoWork knows" over the memory folder.
+  getMemoryRepoEntries: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_ENTRIES, data),
+  updateMemoryRepoEntry: (data: { workspaceId: string; ref: string; hash: string; text: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY, data),
+  removeMemoryRepoEntry: (data: { workspaceId: string; ref: string; hash: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, data),
+  pinMemoryRepoEntry: (data: { workspaceId: string; ref: string; hash: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY, data),
+  openMemoryRepoFile: (data: { workspaceId: string; path: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, data),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -7946,29 +7950,16 @@ export interface ElectronAPI {
     confirm: true;
   }) => Promise<{ success: boolean; deleted: number }>;
   getMemoryReview: (data: { workspaceId: string }) => Promise<MemoryReviewState>;
-  getMemoryReviewCount: (data: { workspaceId: string }) => Promise<number>;
-  acceptMemoryProposal: (data: {
-    workspaceId: string;
-    id: string;
-  }) => Promise<MemoryReviewMutationResult>;
-  rejectMemoryProposal: (data: {
-    workspaceId: string;
-    id: string;
-  }) => Promise<MemoryReviewMutationResult>;
   undoMemoryChange: (data: {
     workspaceId: string;
     id: string;
-  }) => Promise<MemoryReviewMutationResult>;
-  runMemoryCuration: (data: { workspaceId: string }) => Promise<MemoryReviewRunResult>;
-  setMemoryCurationLlmEnabled: (data: {
-    workspaceId: string;
-    enabled: boolean;
   }) => Promise<MemoryReviewMutationResult>;
   getMemorySources: (data: { workspaceId: string }) => Promise<MemorySourcesReport>;
   getMemoryHealth: (data: { workspaceId: string }) => Promise<MemoryHealthReport>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
+  syncMemoryRepoNow: () => Promise<MemoryRepoSyncNowResult>;
   readMemoryRepoLines: (refs: string[]) => Promise<MemoryRepoLine[]>;
   getMemoryRepoDreams: () => Promise<MemoryRepoDreamsReport>;
   getMemoryRepoDreamDiff: (id: string, part: MemoryRepoDreamPart) => Promise<string>;
@@ -7976,6 +7967,24 @@ export interface ElectronAPI {
   rejectMemoryRepoDream: (id: string) => Promise<MemoryRepoDreamActionResult>;
   undoMemoryRepoDream: (id: string) => Promise<MemoryRepoDreamActionResult>;
   dreamMemoryRepoNow: () => Promise<MemoryRepoDreamNowResult>;
+  getMemoryRepoEntries: (data: { workspaceId: string }) => Promise<MemoryRepoEntriesReport>;
+  updateMemoryRepoEntry: (data: {
+    workspaceId: string;
+    ref: string;
+    hash: string;
+    text: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
+  removeMemoryRepoEntry: (data: {
+    workspaceId: string;
+    ref: string;
+    hash: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
+  pinMemoryRepoEntry: (data: {
+    workspaceId: string;
+    ref: string;
+    hash: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
+  openMemoryRepoFile: (data: { workspaceId: string; path: string }) => Promise<{ success: true }>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

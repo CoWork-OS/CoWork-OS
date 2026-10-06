@@ -7,9 +7,24 @@ import {
   type MemoryHubSource,
   type MemoryHubWhy,
 } from "../../../shared/memory-hub-types";
+import type {
+  MemoryRepoEntriesReport,
+  MemoryRepoHubEntry,
+} from "../../../shared/memory-repo-types";
 import { hasHostMethod } from "../../host/browser-capabilities";
 import { takeMemoryHubFocus } from "./memory-hub-focus";
 import "./memory-knowledge.css";
+import { MemoryFolderKnowledge, type MemoryFolderKnowledgeProps } from "./MemoryFolderKnowledge";
+import {
+  MEMORY_FOLDER_METHODS,
+  countFolderEntries,
+  deleteFolderEntry,
+  editFolderEntry,
+  filterFolderFiles,
+  pinFolderEntry,
+  type FolderFlowResult,
+  type MemoryFolderApi,
+} from "./memory-folder-model";
 import {
   KIND_LABELS,
   MEMORY_KNOWLEDGE_PAGE_SIZE,
@@ -85,6 +100,14 @@ export interface MemoryKnowledgeViewProps {
   onClearGlobal: () => void;
   onLoadMore: () => void;
   onDismissMessage: () => void;
+  /**
+   * The memory folder (docs/memory-repo-phase3-design.md §5). When it is available, facts
+   * come from its files and `items` only supply commitments and "From other people".
+   */
+  folderView?: { report: MemoryRepoEntriesReport } & Omit<
+    MemoryFolderKnowledgeProps,
+    "files" | "inbox"
+  >;
 }
 
 function WhyPanel({ why }: { why: KnowledgeWhyState }) {
@@ -241,17 +264,34 @@ function KnowledgeItemRow({
 
 /** Presentational view of the tab; MemoryKnowledgeTab owns the state and IPC. */
 export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
-  const { groups, fromOthers } = useMemo(() => groupKnowledge(props.items), [props.items]);
-  const hasGlobal = props.items.some((item) => item.scope === "global");
+  const folder = props.folderView?.report.available ? props.folderView : null;
+  const { groups: allGroups, fromOthers } = useMemo(() => groupKnowledge(props.items), [props.items]);
+  // With the memory folder, facts are its entries; memory_items keeps the commitments.
+  const groups = folder ? allGroups.filter((group) => group.id === "commitments") : allGroups;
+  const filters = {
+    query: props.query,
+    kind: props.kindFilter,
+    source: props.sourceFilter,
+    pinnedOnly: props.pinnedOnly,
+  };
+  const folderFiles = folder ? filterFolderFiles(folder.report.files, filters) : [];
+  const folderInbox =
+    folder?.report.inbox ? (filterFolderFiles([folder.report.inbox], filters)[0] ?? null) : null;
+  const folderCount =
+    folderFiles.reduce((total, file) => total + file.entries.length, 0) +
+    (folderInbox?.entries.length ?? 0);
+  const hasGlobal =
+    props.items.some((item) => item.scope === "global") ||
+    (folder ? countFolderEntries(folder.report) > 0 : false);
   const filtered =
     Boolean(props.query.trim()) || Boolean(props.kindFilter) || Boolean(props.sourceFilter);
 
   return (
     <div className="memory-knowledge">
       <p className="settings-form-hint">
-        Facts CoWork uses about you and this workspace. Edits and deletes take effect on the next
-        reply. Private items are never written to <code>.cowork/USER.md</code> or{" "}
-        <code>.cowork/MEMORY.md</code>.
+        {folder
+          ? "Facts CoWork uses about you and this workspace, from your memory folder. Edits and deletes take effect on the next reply."
+          : "Facts CoWork uses about you and this workspace. Edits and deletes take effect on the next reply."}
       </p>
       {props.notice && (
         <div role="status" className="memory-knowledge-notice">
@@ -373,9 +413,13 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
         </div>
       )}
 
-      {props.loading && props.items.length === 0 ? (
+      {folder && (
+        <MemoryFolderKnowledge {...folder} files={folderFiles} inbox={folderInbox} />
+      )}
+
+      {props.loading && props.items.length === 0 && folderCount === 0 ? (
         <div className="settings-loading">Loading memories...</div>
-      ) : groups.length === 0 && fromOthers.length === 0 ? (
+      ) : groups.length === 0 && fromOthers.length === 0 && folderCount === 0 ? (
         <div className="settings-empty">
           {filtered
             ? "No memories match these filters."
@@ -420,7 +464,9 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
 
       <div className="memory-knowledge-footer">
         <span className="settings-form-hint">
-          Showing {props.items.length} of {props.total}
+          {folder
+            ? `${folderCount} in the memory folder, ${props.items.length} of ${props.total} commitments and messages`
+            : `Showing ${props.items.length} of ${props.total}`}
         </span>
         {props.hasMore && (
           <button
@@ -448,7 +494,7 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
   );
 }
 
-function knowledgeApi(): MemoryKnowledgeApi {
+function knowledgeApi(): MemoryKnowledgeApi & Partial<MemoryFolderApi> {
   return window.electronAPI;
 }
 
@@ -469,14 +515,17 @@ export function MemoryKnowledgeTab({
   api = knowledgeApi,
   confirm = (message: string) => window.confirm(message),
   initialSourceFilter = "",
+  onOpenTask,
 }: {
   workspaceId: string;
   canWrite?: boolean;
   canDelete?: boolean;
   /** Source filter to start with ("Show" in the Sources tab). */
   initialSourceFilter?: MemoryHubSource | "";
-  api?: () => MemoryKnowledgeApi;
+  api?: () => MemoryKnowledgeApi & Partial<MemoryFolderApi>;
   confirm?: (message: string) => boolean;
+  /** Open the task a memory folder entry was learned in. */
+  onOpenTask?: (taskId: string) => void;
 }) {
   const [items, setItems] = useState<MemoryHubItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -501,6 +550,51 @@ export function MemoryKnowledgeTab({
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const available = MEMORY_KNOWLEDGE_METHODS.every((method) => hasHostMethod(method));
+  const folderAvailable = MEMORY_FOLDER_METHODS.every(
+    (method) => hasHostMethod(method) && typeof api()[method] === "function",
+  );
+  const canOpenFile =
+    hasHostMethod("openMemoryRepoFile") && typeof api().openMemoryRepoFile === "function";
+  const [folderReport, setFolderReport] = useState<MemoryRepoEntriesReport | null>(null);
+  const [folderEditing, setFolderEditing] = useState<{ ref: string; draft: string } | null>(null);
+  const [folderBusyRef, setFolderBusyRef] = useState<string | null>(null);
+  const folderRef = useRef(folderReport);
+  folderRef.current = folderReport;
+  const folderApi = api as () => MemoryFolderApi;
+
+  const loadFolder = useCallback(async () => {
+    if (!workspaceId || !folderAvailable) return;
+    try {
+      setFolderReport(await folderApi().getMemoryRepoEntries({ workspaceId }));
+    } catch (folderError) {
+      setFolderReport(null);
+      setError(
+        folderError instanceof Error ? folderError.message : "Failed to load the memory folder.",
+      );
+    }
+  }, [folderApi, workspaceId, folderAvailable]);
+
+  useEffect(() => {
+    setFolderEditing(null);
+    if (available) void loadFolder();
+  }, [loadFolder, available]);
+
+  const applyFolder = async (busy: string, run: (report: MemoryRepoEntriesReport) => Promise<FolderFlowResult>) => {
+    const report = folderRef.current;
+    if (!report) return null;
+    setFolderBusyRef(busy);
+    try {
+      const result = await run(report);
+      setFolderReport(result.report);
+      if (!result.cancelled) {
+        setError(result.error ?? null);
+        setNotice(result.error ? null : (result.notice ?? null));
+      }
+      return result;
+    } finally {
+      setFolderBusyRef(null);
+    }
+  };
 
   const load = useCallback(
     async (offset: number) => {
@@ -594,7 +688,10 @@ export function MemoryKnowledgeTab({
         void apply("add", () =>
           addKnowledgeItem(api(), workspaceId, itemsRef.current, addDraft),
         ).then((result) => {
-          if (!result.error) setAddDraft((draft) => ({ ...draft, content: "" }));
+          if (result.error) return;
+          setAddDraft((draft) => ({ ...draft, content: "" }));
+          // A fact added while the folder runs is a line in it.
+          void loadFolder();
         })
       }
       onStartEdit={(item) => {
@@ -650,13 +747,64 @@ export function MemoryKnowledgeTab({
       onClearGlobal={() =>
         void apply("clear-global", () =>
           clearGlobalKnowledge(api(), workspaceId, itemsRef.current, confirm),
-        )
+        ).then(() => void loadFolder())
       }
       onLoadMore={() => void load(items.length)}
       onDismissMessage={() => {
         setError(null);
         setNotice(null);
       }}
+      folderView={
+        folderReport
+          ? {
+              report: folderReport,
+              editing: folderEditing,
+              busyRef: folderBusyRef,
+              canWrite: canWrite && folderReport.writable,
+              canDelete: canDelete && folderReport.writable,
+              canOpenFile,
+              onOpenTask,
+              onStartEdit: (entry: MemoryRepoHubEntry) =>
+                setFolderEditing({ ref: entry.ref, draft: entry.text }),
+              onEditDraftChange: (draft: string) =>
+                setFolderEditing((value) => (value ? { ...value, draft } : value)),
+              onCancelEdit: () => setFolderEditing(null),
+              onSaveEdit: () => {
+                const target = folderEditing;
+                const entry = target ? findFolderEntry(folderReport, target.ref) : null;
+                if (!target || !entry) return;
+                void applyFolder(entry.ref, (report) =>
+                  editFolderEntry(folderApi(), workspaceId, report, entry, target.draft),
+                ).then((result) => {
+                  if (result && !result.error) setFolderEditing(null);
+                });
+              },
+              onPin: (entry: MemoryRepoHubEntry) =>
+                void applyFolder(entry.ref, (report) =>
+                  pinFolderEntry(folderApi(), workspaceId, report, entry),
+                ),
+              onDelete: (entry: MemoryRepoHubEntry) =>
+                void applyFolder(entry.ref, (report) =>
+                  deleteFolderEntry(folderApi(), workspaceId, report, entry, confirm),
+                ),
+              onOpenFile: (path: string) => {
+                const open = api().openMemoryRepoFile;
+                if (!open) return;
+                open({ workspaceId, path }).catch((openError: unknown) =>
+                  setError(openError instanceof Error ? openError.message : "Could not open the file."),
+                );
+              },
+            }
+          : undefined
+      }
     />
   );
+}
+
+function findFolderEntry(report: MemoryRepoEntriesReport, ref: string): MemoryRepoHubEntry | null {
+  for (const file of [...report.files, ...(report.inbox ? [report.inbox] : [])]) {
+    const entry = file.entries.find((candidate) => candidate.ref === ref);
+    if (entry) return entry;
+  }
+  return null;
 }

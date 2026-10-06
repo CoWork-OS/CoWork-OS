@@ -54,7 +54,6 @@ import {
   type PruneHeartbeatRunsInput,
   type PruneHeartbeatRunsResult,
 } from "./HeartbeatRunRepository";
-import { MemoryPressureService } from "../memory/MemoryPressureService";
 
 import { CoreTraceService } from "../core/CoreTraceService";
 import { CoreMemoryCandidateService } from "../core/CoreMemoryCandidateService";
@@ -201,30 +200,12 @@ export interface HeartbeatServiceDeps {
     signalCount: number;
     heartbeatRunId: string;
   }) => Promise<{ id?: string; outcome?: string } | null>;
-  runMemoryDreaming?: (params: {
-    workspaceId: string;
-    workspacePath: string;
-    reason: string;
-    signalCount: number;
-    heartbeatRunId: string;
-    readGuard?: WorkspaceMemoryReadGuard;
-    /** What triggered the run: memory signals, hot-memory pressure, or the daily idle pass. */
-    trigger?: "signals" | "pressure" | "daily";
-  }) => Promise<{
-    id?: string;
-    status?: string;
-    candidateCount?: number;
-    appliedCount?: number;
-    /** Set when Dreaming did not run (cooldown or an overlapping run). */
-    skipped?: string;
-  } | null>;
   /**
-   * The next workspace due for the daily idle curation (active recently, no Dreaming run in
-   * the last day), preferring the pulse's workspace; null when none is due.
+   * Commitment expiry (docs/memory-repo-phase3-design.md §6): closes past-due commitments
+   * that later activity says were done. Offered once per idle pulse; the service keeps its
+   * own daily cooldown and returns null when it did not run.
    */
-  findMemoryCurationWorkspace?: (
-    preferredWorkspaceId?: string,
-  ) => Promise<{ workspaceId: string; workspacePath: string } | null>;
+  runCommitmentExpiry?: () => Promise<{ expired: number } | null>;
   /**
    * The daily dream over the memory folder (docs/memory-repo-phase2-design.md §6). Offered
    * once per idle pulse; the dreamer enforces its own interval, budget and settings.
@@ -980,32 +961,17 @@ export class HeartbeatService extends EventEmitter {
         }
       }
 
-      const dreamingRun = await this.maybeRunMemoryDreaming({
-        agentRoleId: agent.id,
-        workspaceId,
-        workspacePath: workspaceId ? this.deps.getWorkspacePath(workspaceId) : undefined,
-        decision,
-        signals: pulseSignals,
-        heartbeatRunId: pulseRun.id,
-      });
+      const commitmentSweep = await this.maybeRunCommitmentExpiry();
       this.offerMemoryRepoDream();
-      if (dreamingRun) {
-        result = {
-          ...result,
-          dreamingRunId: dreamingRun.id,
-          dreamingCandidateCount: dreamingRun.candidateCount,
-        };
+      if (commitmentSweep && commitmentSweep.expired > 0) {
+        result = { ...result, commitmentsExpired: commitmentSweep.expired };
         if (coreTrace) {
           await this.deps.coreTraceService?.appendPhaseEvent(
             coreTrace.id,
             "decision",
-            "heartbeat.dreaming_triggered",
-            "Heartbeat triggered Dreaming from memory-drift signals.",
-            {
-              dreamingRunId: dreamingRun.id,
-              dreamingStatus: dreamingRun.status,
-              candidateCount: dreamingRun.candidateCount,
-            },
+            "heartbeat.commitments_expired",
+            "Heartbeat closed past-due commitments that were done.",
+            { expired: commitmentSweep.expired },
           );
         }
       }
@@ -1646,110 +1612,19 @@ export class HeartbeatService extends EventEmitter {
     }
   }
 
-  private async maybeRunMemoryDreaming(params: {
-    agentRoleId: string;
-    workspaceId?: string;
-    workspacePath?: string;
-    decision: HeartbeatPulseDecision;
-    signals: HeartbeatSignal[];
-    heartbeatRunId: string;
-  }): Promise<{ id?: string; status?: string; candidateCount?: number } | null> {
-    if (!this.deps.runMemoryDreaming) return null;
-    // Memory Hub's "heartbeat maintenance" switch turns off Dreaming and pressure-driven
-    // compaction from the pulse.
-    if (this.isHeartbeatMaintenanceDisabled()) return null;
-    if (!params.workspaceId || !params.workspacePath) {
-      return this.maybeRunDailyCuration(params.heartbeatRunId, params.workspaceId);
-    }
-    // Heartbeat runs without a task executor, so they must resolve their own
-    // filesystem boundary before inspecting memory or transcripts.
-    let readGuard: WorkspaceMemoryReadGuard;
-    try {
-      readGuard = this.deps.getWorkspaceMemoryReadGuard(params.workspaceId);
-    } catch (error) {
-      console.warn("[HeartbeatService] Could not resolve memory access profile:", error);
-      return null;
-    }
-    const memorySignals = params.signals.filter(
-      (signal) =>
-        signal.signalFamily === "memory_drift" ||
-        signal.signalFamily === "correction_learning" ||
-        signal.signalFamily === "cross_workspace_patterns",
-    );
-    const memorySignalCount = memorySignals.length;
-    let pressureInstructions = "";
-    let pressureFingerprint = "";
-    try {
-      const report = await MemoryPressureService.analyze(params.workspacePath, readGuard);
-      pressureInstructions = MemoryPressureService.buildCompactionInstructions(report);
-      pressureFingerprint = MemoryPressureService.fingerprint(report);
-    } catch {
-      pressureInstructions = "";
-    }
-    // Pressure only triggers Dreaming when it changed since the last run that handled it;
-    // otherwise unchanged pressure would re-trigger on every pulse.
-    const pressureTriggers =
-      Boolean(pressureInstructions) &&
-      MemoryPressureService.hasPressureChanged(params.workspaceId, pressureFingerprint);
-    if (memorySignalCount === 0 && !pressureTriggers) {
-      return this.maybeRunDailyCuration(params.heartbeatRunId, params.workspaceId);
-    }
-    try {
-      const run = await this.deps.runMemoryDreaming({
-        workspaceId: params.workspaceId,
-        workspacePath: params.workspacePath,
-        reason: memorySignalCount > 0 ? params.decision.reason : "hot-memory pressure",
-        signalCount: memorySignalCount,
-        heartbeatRunId: params.heartbeatRunId,
-        readGuard,
-        trigger: memorySignalCount > 0 ? "signals" : "pressure",
-      });
-      if (run?.skipped) return null;
-      if (run) {
-        if (pressureInstructions) {
-          MemoryPressureService.markPressureHandled(params.workspaceId, pressureFingerprint);
-        }
-        // The signals were handed to Dreaming; keep them from re-triggering it.
-        this.removeDecisionSignals(
-          params.agentRoleId,
-          memorySignals,
-          memorySignals.map((signal) => signal.id),
-        );
-      }
-      return run;
-    } catch (error) {
-      console.warn("[HeartbeatService] Dreaming failed:", error);
-      return null;
-    }
-  }
-
   /**
-   * Daily idle curation: when nothing else triggered Dreaming and no task is in the
-   * foreground, curate the next active workspace that has not had a run for a day (the
-   * pulse's workspace first). One workspace per pulse; no timer of its own.
+   * Commitment expiry: only when heartbeat maintenance is on and no task is in the
+   * foreground. The service's own cooldown makes this a daily pass.
    */
-  private async maybeRunDailyCuration(
-    heartbeatRunId: string,
-    preferredWorkspaceId?: string,
-  ): Promise<{ id?: string; status?: string; candidateCount?: number } | null> {
-    if (!this.deps.runMemoryDreaming || !this.deps.findMemoryCurationWorkspace) return null;
+  private async maybeRunCommitmentExpiry(): Promise<{ expired: number } | null> {
+    const runCommitmentExpiry = this.deps.runCommitmentExpiry;
+    if (!runCommitmentExpiry) return null;
     try {
+      if (this.isHeartbeatMaintenanceDisabled()) return null;
       if (this.deps.hasActiveForegroundTask?.()) return null;
-      const target = await this.deps.findMemoryCurationWorkspace(preferredWorkspaceId);
-      if (!target) return null;
-      const readGuard = this.deps.getWorkspaceMemoryReadGuard(target.workspaceId);
-      const run = await this.deps.runMemoryDreaming({
-        workspaceId: target.workspaceId,
-        workspacePath: target.workspacePath,
-        reason: "daily curation",
-        signalCount: 0,
-        heartbeatRunId,
-        readGuard,
-        trigger: "daily",
-      });
-      return run?.skipped ? null : run;
+      return await runCommitmentExpiry();
     } catch (error) {
-      console.warn("[HeartbeatService] Daily memory curation failed:", error);
+      logger.warn("Commitment expiry failed:", error);
       return null;
     }
   }

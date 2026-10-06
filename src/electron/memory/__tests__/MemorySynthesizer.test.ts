@@ -115,27 +115,11 @@ vi.mock("../WorkspaceKitContext", () => ({
   buildWorkspaceKitContext: vi.fn().mockReturnValue("### Rules\n- Always use TypeScript"),
 }));
 
-vi.mock("../DailyLogSummarizer", () => ({
-  DailyLogSummarizer: {
-    getRecentSummaryFragments: vi.fn().mockReturnValue([
-      {
-        key: "daily-1",
-        text: "## Daily Summary\n- Important decision: use deterministic prompts",
-        relevance: 0.6,
-        confidence: 0.75,
-        updatedAt: Date.now() - 50_000,
-        estimatedTokens: 20,
-      },
-    ]),
-  },
-}));
-
 vi.mock("../../settings/memory-features-manager", () => ({
   MemoryFeaturesManager: {
     loadSettings: vi.fn().mockReturnValue({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
       wakeUpLayersEnabled: true,
       defaultArchiveInjectionEnabled: false,
     }),
@@ -299,7 +283,6 @@ describe("MemorySynthesizer", () => {
     vi.mocked(MemoryFeaturesManager.loadSettings).mockReturnValueOnce({
       curatedMemoryEnabled: false,
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
       wakeUpLayersEnabled: true,
       defaultArchiveInjectionEnabled: false,
     } as Any);
@@ -324,7 +307,6 @@ describe("MemorySynthesizer", () => {
     (MemoryFeaturesManager.loadSettings as Any).mockReturnValueOnce({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
       wakeUpLayersEnabled: true,
       defaultArchiveInjectionEnabled: true,
     } as Any);
@@ -357,7 +339,7 @@ describe("MemorySynthesizer", () => {
 
     const result = await MemorySynthesizer.synthesize("ws1", "/workspace", "Deploy the API");
 
-    expect(result.text).toContain("Recent Summaries");
+    expect(result.text).toContain("Curated Hot Memory");
     expect(result.text).not.toContain("Past Task Patterns");
     expect(result.text).not.toContain("Known Entities");
   });
@@ -366,7 +348,6 @@ describe("MemorySynthesizer", () => {
     vi.mocked(MemoryFeaturesManager.loadSettings).mockReturnValueOnce({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
       wakeUpLayersEnabled: false,
       defaultArchiveInjectionEnabled: true,
     } as Any);
@@ -412,7 +393,6 @@ describe("MemorySynthesizer", () => {
     vi.mocked(MemoryFeaturesManager.loadSettings).mockReturnValueOnce({
       curatedMemoryEnabled: true,
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
       wakeUpLayersEnabled: false,
       defaultArchiveInjectionEnabled: true,
     } as Any);
@@ -449,7 +429,7 @@ describe("MemorySynthesizer", () => {
     );
 
     expect(preview.injectedLayerIds).toEqual(["L0", "L1"]);
-    expect(preview.excludedLayerIds).toEqual(["L2", "L3"]);
+    expect(preview.excludedLayerIds).toEqual(["L3"]);
     expect(buildLayers).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "ws1",

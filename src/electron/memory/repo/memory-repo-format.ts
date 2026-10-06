@@ -245,6 +245,31 @@ export function parseMemoryRepoRef(raw: string): { path: string; line: number } 
   return { path: relPath, line };
 }
 
+/** Team memory repo names (settings: letters, digits, spaces, `.`, `_`, `-`; no `:`). */
+const TEAM_MEMORY_NAME = /^[\p{L}\p{N} ._-]{1,60}$/u;
+
+/**
+ * `team:<name>:<path>#L<n>` refs of read-only team memory repos
+ * (docs/memory-repo-phase4-design.md §2).
+ */
+export function teamMemoryRef(name: string, relPath: string, line: number): string {
+  return `team:${name}:${relPath.replace(/\\/g, "/")}#L${line}`;
+}
+
+export function parseTeamMemoryRef(
+  raw: string,
+): { name: string; path: string; line: number } | null {
+  const match = /^team:([^:]+):(.+)#L(\d+)$/.exec(String(raw || "").trim());
+  if (!match) return null;
+  const name = match[1].trim();
+  if (!TEAM_MEMORY_NAME.test(name)) return null;
+  const line = Number(match[3]);
+  if (!Number.isInteger(line) || line < 1) return null;
+  const relPath = match[2].replace(/\\/g, "/");
+  if (!isSafeRepoPath(relPath)) return null;
+  return { name, path: relPath, line };
+}
+
 /** Root-relative markdown path without `.`/`..`/empty segments, hidden files or `.git`. */
 export function isSafeRepoPath(relPath: string): boolean {
   const normalized = String(relPath || "").replace(/\\/g, "/");

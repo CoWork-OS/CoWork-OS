@@ -598,7 +598,6 @@ does not prove that the required MCP tools were discovered or usable.
 | `src/electron/memory/BoxBrainRepository.ts`   | SQLite-backed source, item, and run persistence.                                                                                                             |
 | `src/electron/memory/MemoryService.ts`        | Explicit imported-memory capture/replacement, privacy/exclusion handling, local embeddings, and recall cache invalidation.                                   |
 | `src/electron/memory/MemorySynthesizer.ts`    | Query-based Box Brain recall and the `Box Brain (source-backed)` context section.                                                                            |
-| `src/electron/memory/DreamingService.ts`      | Dreaming curation runs (safe operations applied, the rest queued for the Review tab) and run persistence.                                                    |
 | `src/electron/database/schema.ts`             | `box_brain_sources`, `box_brain_items`, and `box_brain_runs` tables and indexes.                                                                             |
 | `src/electron/mcp/box-integration.ts`         | Managed Box MCP endpoint, Streamable HTTP transport, bearer auth, and token-refresh alignment.                                                               |
 | `src/electron/mcp/client/MCPClientManager.ts` | Server connection, tool discovery, and direct server-tool calls.                                                                                             |

@@ -199,6 +199,96 @@ describeWithGit("MemoryRepoService", () => {
     expect(read("MEMORY.md")).not.toContain("billing-service");
   });
 
+  it("writes extra metadata but never lets it override what remember sets", async () => {
+    const written = await remember({
+      text: "Works on the billing team",
+      kind: "identity",
+      scope: "global",
+      by: "user",
+      taskId: null,
+      metadata: { origin: "onboarding", by: "agent", source: "import", "bad key": "x" },
+    });
+    expect(written).toMatchObject({ status: "written", path: "me.md" });
+    const [entry] = parseMemoryRepoEntries(read("me.md"));
+    expect(entry.metadata).toMatchObject({ by: "user", origin: "onboarding", source: "import" });
+    expect(entry.metadata["bad key"]).toBeUndefined();
+    // A task source wins over a `source` tag.
+    await remember({ text: "Prefers dark mode", kind: "preference", scope: "global", metadata: { source: "import" } });
+    const dark = parseMemoryRepoEntries(read("me.md")).find((row) => row.text === "Prefers dark mode");
+    expect(dark?.metadata.source).toBe("cowork://tasks/task-1");
+  });
+
+  it("edits an entry's text keeping its metadata, guarded by the expected hash", async () => {
+    const written = await remember();
+    if (written.status !== "written") throw new Error("not written");
+    const before = await service.entryAt(written.path, written.line);
+    expect(
+      await service.updateEntry(written.path, written.line, "Deploys go through canary", { expectHash: "nope" }),
+    ).toMatchObject({ entry: null, error: expect.stringMatching(/changed/) });
+    const edited = await service.updateEntry(written.path, written.line, "Deploys go through canary first", {
+      expectHash: before?.hash,
+      by: "user",
+    });
+    expect(edited.entry).toMatchObject({ text: "Deploys go through canary first", by: "user", kind: "rule" });
+    expect(edited.entry?.metadata.source).toBe("cowork://tasks/task-1");
+    expect(read(written.path)).not.toContain("staging");
+    expect(git(root, "log", "-1", "--format=%B")).toContain("Origin: memory_hub");
+    // Screening applies; the workspace marker line is not editable.
+    expect(await service.updateEntry(written.path, written.line, "ok")).toMatchObject({ entry: null });
+    const marker = parseMemoryRepoEntries(read(written.path)).find((row) => row.metadata.workspace);
+    expect(await service.updateEntry(written.path, marker!.line, "Another workspace name here")).toMatchObject({
+      entry: null,
+      error: expect.stringMatching(/workspace/),
+    });
+  });
+
+  it("pins an entry by moving it to MEMORY.md above the index", async () => {
+    const written = await remember({ text: "Prefers short answers", kind: "preference", scope: "global" });
+    if (written.status !== "written") throw new Error("not written");
+    const entry = await service.entryAt(written.path, written.line);
+    const moved = await service.moveEntry(written.path, written.line, "MEMORY.md", {
+      expectHash: entry?.hash,
+      by: "user",
+    });
+    expect(moved.moved?.path).toBe("MEMORY.md");
+    expect(read("me.md")).not.toContain("Prefers short answers");
+    const memory = read("MEMORY.md");
+    expect(memory.indexOf("Prefers short answers")).toBeLessThan(memory.indexOf("## Index"));
+    const pinned = await service.entryAt("MEMORY.md", moved.moved!.line);
+    expect(pinned).toMatchObject({ text: "Prefers short answers", by: "user", kind: "preference" });
+    expect(await service.moveEntry("MEMORY.md", moved.moved!.line, "MEMORY.md")).toMatchObject({ moved: null });
+  });
+
+  it("forgets the entries a predicate selects and resolves files for opening", async () => {
+    await remember({ text: "Onboarding said this", kind: "identity", scope: "global", by: "user", metadata: { origin: "onboarding" } });
+    await remember({ text: "The user said this later", kind: "identity", scope: "global", by: "user" });
+    const removed = await service.forgetWhere((entry) => entry.metadata.origin === "onboarding", {
+      files: ["me.md", "../outside.md"],
+      message: "Replace onboarding facts",
+      origin: "onboarding",
+    });
+    expect(removed).toBe(1);
+    expect(read("me.md")).toContain("The user said this later");
+    expect(read("me.md")).not.toContain("Onboarding said this");
+    expect(await service.resolveFile("me.md")).toBe(path.join(root, "me.md"));
+    expect(await service.resolveFile("../etc/passwd.md")).toBeNull();
+    expect(await service.resolveFile("missing.md")).toBeNull();
+    fs.symlinkSync(path.join(root, "me.md"), path.join(root, "link.md"));
+    expect(await service.resolveFile("link.md")).toBeNull();
+  });
+
+  it("tells instance listeners when the running service changes", () => {
+    const seen: Array<MemoryRepoService | null> = [];
+    const stop = MemoryRepoService.onInstanceChange((next) => seen.push(next));
+    MemoryRepoService.setInstance(service);
+    MemoryRepoService.setInstance(service);
+    MemoryRepoService.setInstance(null);
+    stop();
+    MemoryRepoService.setInstance(service);
+    MemoryRepoService.setInstance(null);
+    expect(seen).toEqual([service, null]);
+  });
+
   it("refuses a folder that is not a memory repo and adopts an existing one", async () => {
     const other = path.join(base, "notes");
     fs.mkdirSync(other);

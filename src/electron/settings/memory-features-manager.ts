@@ -5,7 +5,7 @@
  */
 
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
-import { MemoryFeaturesSettings } from "../../shared/types";
+import { MemoryFeaturesSettings, MemoryRepoTeamRepoSetting } from "../../shared/types";
 
 const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   contextPackInjectionEnabled: true,
@@ -13,25 +13,22 @@ const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   checkpointCaptureEnabled: true,
   wakeUpLayersEnabled: true,
   temporalKnowledgeEnabled: true,
-  layeredMemoryEnabled: false,
   transcriptStoreEnabled: false,
   durableContextEnabled: false,
   durableContextMode: "off",
   durableContextLargePayloadThreshold: 25000,
-  backgroundConsolidationEnabled: false,
   queryOrchestratorEnabled: false,
   curatedMemoryEnabled: true,
   sessionRecallEnabled: true,
-  topicMemoryEnabled: true,
   defaultArchiveInjectionEnabled: false,
   memoryWriteApprovalMode: "off",
   autoPromoteToCuratedMemoryEnabled: false,
   structuredObservationsEnabled: true,
   memoryInspectorEnabled: true,
-  dreamingLlmEnabled: false,
-  dreamingLlmDailyTokenBudget: 20000,
   memoryCompressionDailyTokenBudget: 20000,
-  memoryRepoEnabled: false,
+  memoryRepoEnabled: true,
+  // `memoryRepoDefaultOnApplied` is deliberately absent: a stored blob without it gets the
+  // one-time default-on migration in normalizeSettings.
   memoryRepoPath: "",
   memoryRepoDreamingEnabled: true,
   memoryRepoDreamDailyTokenBudget: 50000,
@@ -53,7 +50,8 @@ function normalizePositiveNumber(value: unknown, fallback: number): number {
 }
 
 // Builds the settings from known keys only, so retired keys still present in a stored blob
-// (`verbatimRecallEnabled`, `progressiveRecallToolsEnabled`) are dropped on load and save.
+// (`verbatimRecallEnabled`, `progressiveRecallToolsEnabled`, `layeredMemoryEnabled`,
+// `topicMemoryEnabled`) are dropped on load and save.
 function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSettings {
   const durableContextMode = normalizeDurableContextMode(settings.durableContextMode);
   const durableContextEnabled =
@@ -67,7 +65,6 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     checkpointCaptureEnabled: durableContextEnabled || settings.checkpointCaptureEnabled !== false,
     wakeUpLayersEnabled: settings.wakeUpLayersEnabled !== false,
     temporalKnowledgeEnabled: settings.temporalKnowledgeEnabled !== false,
-    layeredMemoryEnabled: isEnabled(settings.layeredMemoryEnabled),
     // No longer writes transcript spans (the conversation index is always fed from task
     // events). It now only turns on the query orchestrator's `transcript_context` prompt
     // section and the checkpoint resume label.
@@ -79,26 +76,23 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
     durableContextLargePayloadThreshold: Math.floor(
       normalizePositiveNumber(settings.durableContextLargePayloadThreshold, 25000),
     ),
-    backgroundConsolidationEnabled: isEnabled(settings.backgroundConsolidationEnabled),
     queryOrchestratorEnabled: isEnabled(settings.queryOrchestratorEnabled),
     curatedMemoryEnabled: settings.curatedMemoryEnabled !== false,
     sessionRecallEnabled: settings.sessionRecallEnabled !== false,
-    topicMemoryEnabled: settings.topicMemoryEnabled !== false,
     defaultArchiveInjectionEnabled: isEnabled(settings.defaultArchiveInjectionEnabled),
     memoryWriteApprovalMode: normalizeMemoryWriteApprovalMode(settings.memoryWriteApprovalMode),
     autoPromoteToCuratedMemoryEnabled: isEnabled(settings.autoPromoteToCuratedMemoryEnabled),
     structuredObservationsEnabled: settings.structuredObservationsEnabled !== false,
     memoryInspectorEnabled: settings.memoryInspectorEnabled !== false,
-    dreamingLlmEnabled: isEnabled(settings.dreamingLlmEnabled),
-    dreamingLlmDailyTokenBudget: Math.min(
-      1_000_000,
-      Math.floor(normalizePositiveNumber(settings.dreamingLlmDailyTokenBudget, 20000)),
-    ),
     memoryCompressionDailyTokenBudget: Math.min(
       1_000_000,
       Math.floor(normalizePositiveNumber(settings.memoryCompressionDailyTokenBudget, 20000)),
     ),
-    memoryRepoEnabled: isEnabled(settings.memoryRepoEnabled),
+    // Phase 3 turned the memory folder on for everyone once; a stored `false` from before
+    // was usually the saved default, not a choice. After that, the user's choice holds.
+    memoryRepoEnabled:
+      settings.memoryRepoDefaultOnApplied === true ? isEnabled(settings.memoryRepoEnabled) : true,
+    memoryRepoDefaultOnApplied: true,
     memoryRepoPath:
       typeof settings.memoryRepoPath === "string" ? settings.memoryRepoPath.trim().slice(0, 1024) : "",
     memoryRepoDreamingEnabled: settings.memoryRepoDreamingEnabled !== false,
@@ -106,7 +100,38 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
       1_000_000,
       Math.max(1, Math.floor(normalizePositiveNumber(settings.memoryRepoDreamDailyTokenBudget, 50000))),
     ),
+    memoryRepoRemoteUrl:
+      typeof settings.memoryRepoRemoteUrl === "string"
+        ? settings.memoryRepoRemoteUrl.trim().slice(0, 500)
+        : "",
+    memoryRepoRemoteConfirmedPrivate: isEnabled(settings.memoryRepoRemoteConfirmedPrivate),
+    memoryRepoTeamRepos: normalizeTeamRepos(settings.memoryRepoTeamRepos),
   };
+}
+
+const MAX_TEAM_REPOS = 3;
+
+function normalizeTeamRepos(value: unknown): MemoryRepoTeamRepoSetting[] {
+  if (!Array.isArray(value)) return [];
+  const out: MemoryRepoTeamRepoSetting[] = [];
+  const names = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const entry = raw as Record<string, unknown>;
+    const name = typeof entry.name === "string" ? entry.name.trim().slice(0, 60) : "";
+    const repoPath = typeof entry.path === "string" ? entry.path.trim().slice(0, 1024) : "";
+    if (!name || !repoPath || names.has(name.toLowerCase())) continue;
+    if (!/^[\p{L}\p{N} ._-]+$/u.test(name)) continue;
+    names.add(name.toLowerCase());
+    const workspaceIds = Array.isArray(entry.workspaceIds)
+      ? entry.workspaceIds
+          .filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 128)
+          .slice(0, 200)
+      : [];
+    out.push({ name, path: repoPath, ...(workspaceIds.length ? { workspaceIds } : {}) });
+    if (out.length >= MAX_TEAM_REPOS) break;
+  }
+  return out;
 }
 
 function normalizeMemoryWriteApprovalMode(

@@ -10,7 +10,6 @@ import { setStatementClient } from "../../database/statements/statement-route";
 import { KnowledgeGraphRepository } from "../../knowledge-graph/KnowledgeGraphRepository";
 import { MemoryFeaturesManager } from "../../settings/memory-features-manager";
 import { createBoxBrainRepository } from "../BoxBrainRepository";
-import { DreamingRepository } from "../DreamingRepository";
 import { DurableContextService } from "../DurableContextService";
 import { MarkdownMemoryIndexService } from "../MarkdownMemoryIndexService";
 import { MemoryHealthService } from "../MemoryHealthService";
@@ -278,35 +277,6 @@ describe("memory domain on the host and in the database worker", () => {
       dismissedCount: await suggestions.countFeedback("ws", "dismissed", 2),
     };
 
-    const dreaming = new DreamingRepository(db);
-    const run = await dreaming.createRun({
-      workspaceId: "ws",
-      scopeKind: "workspace",
-      scopeRef: "ws",
-      status: "running",
-      triggerSource: "manual",
-      evidenceCount: 1,
-      candidateCount: 0,
-      startedAt: start,
-    });
-    const [candidate] = await dreaming.bulkCreateCandidates([
-      {
-        runId: run.id,
-        workspaceId: "ws",
-        action: "curated_add",
-        target: "curated_memory",
-        proposedValue: "Invoices close on Friday",
-        rationale: "Seen twice",
-        confidence: 0.8,
-        evidenceRefs: [],
-        status: "proposed",
-      },
-    ]);
-    result.dreaming = {
-      reviewed: await dreaming.reviewCandidate({ id: candidate.id, status: "accepted" }),
-      runs: await dreaming.listRuns({ workspaceId: "ws" }),
-    };
-
     const box = createBoxBrainRepository(db);
     const source = await box.ensureSource("ws", "box-server", {
       enabled: true,
@@ -382,7 +352,6 @@ describe("memory domain on the host and in the database worker", () => {
     // Memory Hub Sources and Health (read units). The file size can differ by backend.
     const hubHealth = new MemoryHealthService({
       port: sql,
-      getSettings: () => ({}) as ReturnType<typeof MemoryFeaturesManager.loadSettings>,
       getSupermemoryStatus: () => ({ enabled: false, connected: false }),
       getChronicleEnabled: () => false,
     });

@@ -2,6 +2,17 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MemoryHubItem } from "../../../../shared/memory-hub-types";
+import type {
+  MemoryRepoEntriesReport,
+  MemoryRepoHubEntry,
+} from "../../../../shared/memory-repo-types";
+import {
+  deleteFolderEntry,
+  editFolderEntry,
+  filterFolderFiles,
+  pinFolderEntry,
+  type MemoryFolderApi,
+} from "../memory-folder-model";
 import { MemoryKnowledgeView, type MemoryKnowledgeViewProps } from "../MemoryKnowledgeTab";
 import {
   addKnowledgeItem,
@@ -337,5 +348,222 @@ describe("What CoWork knows flows", () => {
       describePurgeCounts({ memories: 12, memoryItems: 3, transcripts: 0, curatedEntries: 1 }),
     ).toEqual(["12 archived memories", "3 facts (What CoWork knows)", "1 curated entries"]);
     expect(describePurgeCounts(undefined)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The memory folder (docs/memory-repo-phase3-design.md §5)
+// ---------------------------------------------------------------------------
+
+function folderEntry(overrides: Partial<MemoryRepoHubEntry>): MemoryRepoHubEntry {
+  return {
+    ref: "repo:me.md#L3",
+    path: "me.md",
+    line: 3,
+    text: "Prefers short answers",
+    by: "user",
+    kind: "preference",
+    added: "2026-10-05",
+    taskId: null,
+    hash: "a".repeat(64),
+    source: null,
+    ...overrides,
+  };
+}
+
+const FOLDER: MemoryRepoEntriesReport = {
+  available: true,
+  writable: true,
+  files: [
+    {
+      path: "MEMORY.md",
+      title: "Memory: Mesut",
+      role: "entry",
+      entries: [folderEntry({ ref: "repo:MEMORY.md#L3", path: "MEMORY.md", text: "Answer in English" })],
+    },
+    {
+      path: "me.md",
+      title: "About me",
+      role: "me",
+      entries: [
+        folderEntry({}),
+        folderEntry({
+          ref: "repo:me.md#L4",
+          line: 4,
+          text: "Prefers TypeScript",
+          by: "agent",
+          source: "import",
+        }),
+      ],
+    },
+    {
+      path: "workspaces/billing.md",
+      title: "Billing",
+      role: "workspace",
+      entries: [
+        folderEntry({
+          ref: "repo:workspaces/billing.md#L4",
+          path: "workspaces/billing.md",
+          text: "Deploys go through staging",
+          by: "agent",
+          kind: "rule",
+          taskId: "task-9",
+        }),
+      ],
+    },
+  ],
+  inbox: {
+    path: "inbox.md",
+    title: "Inbox",
+    role: "inbox",
+    entries: [
+      folderEntry({ ref: "repo:inbox.md#L3", path: "inbox.md", text: "Send reports elsewhere", by: "agent" }),
+    ],
+  },
+};
+
+function folderView(overrides: Partial<NonNullable<MemoryKnowledgeViewProps["folderView"]>> = {}) {
+  const noop = () => {};
+  return {
+    report: FOLDER,
+    editing: null,
+    busyRef: null,
+    canWrite: true,
+    canDelete: true,
+    canOpenFile: true,
+    onStartEdit: noop,
+    onEditDraftChange: noop,
+    onSaveEdit: noop,
+    onCancelEdit: noop,
+    onPin: noop,
+    onDelete: noop,
+    onOpenFile: noop,
+    ...overrides,
+  };
+}
+
+function folderApi(overrides: Partial<Record<keyof MemoryFolderApi, unknown>> = {}) {
+  return {
+    getMemoryRepoEntries: vi.fn(async () => FOLDER),
+    updateMemoryRepoEntry: vi.fn(async () => ({ ok: true, ref: "repo:me.md#L3" })),
+    removeMemoryRepoEntry: vi.fn(async () => ({ ok: true })),
+    pinMemoryRepoEntry: vi.fn(async () => ({ ok: true, ref: "repo:MEMORY.md#L4" })),
+    ...overrides,
+  } as unknown as MemoryFolderApi & Record<keyof MemoryFolderApi, ReturnType<typeof vi.fn>>;
+}
+
+describe("What CoWork knows over the memory folder", () => {
+  it("shows the folder files with entries, keeps only commitments and other people from items", () => {
+    const markup = render({
+      items: [...ITEMS, item({ id: "loop", kind: "commitment", content: "Send the Q3 deck" })],
+      folderView: folderView({ onOpenTask: () => {} }),
+    });
+    for (const text of [
+      "Memory: Mesut",
+      "About me",
+      "Billing",
+      "Answer in English",
+      "Prefers TypeScript",
+      "Deploys go through staging",
+      "By you",
+      "By CoWork",
+      "Imported",
+      "Added 2026-10-05",
+      "Source task",
+      "Open file",
+      "Send the Q3 deck",
+      "Dana asked for the Q3 numbers",
+      "Unreviewed",
+      "Send reports elsewhere",
+    ]) {
+      expect(markup).toContain(text);
+    }
+    // Facts from memory_items are not listed next to the folder.
+    expect(markup).not.toContain("Never push to main");
+    expect(markup).not.toContain('data-group="preferences"');
+    expect(markup).toContain('data-group="commitments"');
+    // MEMORY.md entries are already pinned; the inbox offers "Keep and pin".
+    const pinnedSection = markup.slice(
+      markup.indexOf('data-file="MEMORY.md"'),
+      markup.indexOf('data-file="me.md"'),
+    );
+    expect(pinnedSection).not.toContain(">Pin</button>");
+    const meSection = markup.slice(markup.indexOf('data-file="me.md"'), markup.indexOf('data-file="workspaces/billing.md"'));
+    expect((meSection.match(/>Pin<\/button>/g) || []).length).toBe(2);
+    expect(markup).toContain(">Keep and pin</button>");
+    expect(markup.indexOf('data-file="inbox.md"')).toBeGreaterThan(markup.indexOf('data-file="workspaces/billing.md"'));
+  });
+
+  it("filters folder entries with the tab's filters and hides actions it cannot take", () => {
+    const markup = render({
+      query: "typescript",
+      folderView: folderView({ canOpenFile: false, canWrite: false }),
+    });
+    expect(markup).toContain("Prefers TypeScript");
+    expect(markup).not.toContain("Answer in English");
+    expect(markup).not.toContain("Open file");
+    expect(markup).not.toContain('data-file="MEMORY.md"');
+    const pinnedOnly = render({ pinnedOnly: true, folderView: folderView() });
+    expect(pinnedOnly).toContain("Answer in English");
+    expect(pinnedOnly).not.toContain("Prefers short answers");
+    const imported = filterFolderFiles(FOLDER.files, { query: "", kind: "", source: "import", pinnedOnly: false });
+    expect(imported.flatMap((file) => file.entries.map((entry) => entry.text))).toEqual(["Prefers TypeScript"]);
+    const mine = filterFolderFiles(FOLDER.files, { query: "", kind: "", source: "user_stated", pinnedOnly: false });
+    expect(mine.flatMap((file) => file.entries.map((entry) => entry.by))).toEqual(["user", "user"]);
+  });
+
+  it("falls back to the items view when the folder is unavailable", () => {
+    const markup = render({ folderView: folderView({ report: { ...FOLDER, available: false } }) });
+    expect(markup).toContain('data-group="preferences"');
+    expect(markup).not.toContain("About me");
+  });
+
+  it("edits, pins and deletes an entry by ref and hash, then reloads the folder", async () => {
+    const api = folderApi();
+    const entry = FOLDER.files[1].entries[0];
+    const edited = await editFolderEntry(api, WS, FOLDER, entry, "  Prefers very short answers ");
+    expect(api.updateMemoryRepoEntry).toHaveBeenCalledWith({
+      workspaceId: WS,
+      ref: entry.ref,
+      hash: entry.hash,
+      text: "Prefers very short answers",
+    });
+    expect(edited).toMatchObject({ notice: "Memory updated.", report: FOLDER });
+    expect(await editFolderEntry(api, WS, FOLDER, entry, "  ")).toMatchObject({ error: expect.any(String) });
+
+    expect(await pinFolderEntry(api, WS, FOLDER, entry)).toMatchObject({ notice: expect.stringMatching(/pinned/) });
+    expect(api.pinMemoryRepoEntry).toHaveBeenCalledWith({ workspaceId: WS, ref: entry.ref, hash: entry.hash });
+
+    expect(await deleteFolderEntry(api, WS, FOLDER, entry, () => false)).toMatchObject({ cancelled: true });
+    expect(api.removeMemoryRepoEntry).not.toHaveBeenCalled();
+    expect(await deleteFolderEntry(api, WS, FOLDER, entry, () => true)).toMatchObject({
+      notice: "Memory forgotten.",
+    });
+    expect(api.getMemoryRepoEntries).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports a refused action and shows the folder as it is now", async () => {
+    const fresh = { ...FOLDER, files: FOLDER.files.slice(0, 1) };
+    const api = folderApi({
+      removeMemoryRepoEntry: vi.fn(async () => ({ ok: false, error: "The memory file changed; reload and try again." })),
+      getMemoryRepoEntries: vi.fn(async () => fresh),
+    });
+    const result = await deleteFolderEntry(api, WS, FOLDER, FOLDER.files[1].entries[0], () => true);
+    expect(result).toEqual({ report: fresh, error: "The memory file changed; reload and try again." });
+    const thrown = await pinFolderEntry(
+      folderApi({ pinMemoryRepoEntry: vi.fn(async () => Promise.reject(new Error("Rate limit exceeded."))) }),
+      WS,
+      FOLDER,
+      FOLDER.files[1].entries[0],
+    );
+    expect(thrown).toEqual({ report: FOLDER, error: "Rate limit exceeded." });
+  });
+
+  it("counts a fact added to the folder as added", async () => {
+    const api = mockApi({
+      addMemoryItem: vi.fn(async () => ({ success: true, item: null, action: "inserted", ref: "repo:me.md#L5" })),
+    });
+    const result = await addKnowledgeItem(api, WS, [], { content: "Likes tea", kind: "preference", scope: "global" });
+    expect(result).toEqual({ items: [], notice: "Memory added." });
   });
 });

@@ -67,9 +67,7 @@ const MEMORY_FEATURES_OFF = {
   contextPackInjectionEnabled: false,
   heartbeatMaintenanceEnabled: false,
   promptStackV2Enabled: false,
-  layeredMemoryEnabled: false,
   transcriptStoreEnabled: false,
-  backgroundConsolidationEnabled: false,
   queryOrchestratorEnabled: false,
   sessionLineageEnabled: false,
 };

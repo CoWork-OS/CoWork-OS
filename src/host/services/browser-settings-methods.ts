@@ -1683,7 +1683,7 @@ export function createBrowserSettingsDefinitions(
       (args) => {
         const settings = PersonalitySettingsSchema.safeParse(args[0]);
         if (!settings.success) return invalid();
-        // A response style chosen here is user-stated memory (locks style adaptation).
+        // A response style chosen here is explicit (locks style adaptation).
         withSettingsResponseStyleMirror(() =>
           PersonalityManager.saveSettings(settings.data as never),
         );

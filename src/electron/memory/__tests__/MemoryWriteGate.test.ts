@@ -99,7 +99,6 @@ vi.mock("../MemoryService", () => ({
 
 vi.mock("../CuratedMemoryService", () => ({
   CuratedMemoryService: {
-    syncWorkspaceFiles: vi.fn(async () => undefined),
     curate: serviceMocks.curate,
     upsertDistilledEntry: serviceMocks.upsertDistilledEntry,
   },

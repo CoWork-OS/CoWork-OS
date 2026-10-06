@@ -8,7 +8,9 @@ vi.mock("electron", () => ({ ipcMain: { handle: vi.fn() } }));
 import { IPC_CHANNELS } from "../../../shared/types";
 import { MEMORY_REPO_DREAM_DIFF_MAX } from "../../../shared/memory-repo-types";
 import type { MemoryRepoDreamRecord } from "../../memory/repo/MemoryRepoService";
-import { createMemoryRepoIpcHandlers } from "../memory-repo-handlers";
+import { ipcMain } from "electron";
+import { rateLimiter } from "../../utils/rate-limiter";
+import { createMemoryRepoIpcHandlers, setupMemoryRepoHandlers } from "../memory-repo-handlers";
 
 const NOW = Date.now();
 
@@ -115,7 +117,7 @@ describe("memory folder IPC", () => {
       channel.startsWith("memoryRepo:"),
     );
     expect(Object.keys(handlers).sort()).toEqual([...channels].sort());
-    expect(channels).toHaveLength(10);
+    expect(channels).toHaveLength(16);
   });
 
   it("returns the status and rate-limits every channel", async () => {
@@ -133,6 +135,17 @@ describe("memory folder IPC", () => {
     await handlers[IPC_CHANNELS.MEMORY_REPO_REJECT_DREAM]({ id: "abc" });
     await handlers[IPC_CHANNELS.MEMORY_REPO_UNDO_DREAM]({ id: "abc" });
     await handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW](undefined);
+    await handlers[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](undefined);
+    // The Memory Hub entry channels (no folder service here: nothing to act on).
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const ref = { workspaceId, ref: "repo:me.md#L3", hash: "a".repeat(64) };
+    await handlers[IPC_CHANNELS.MEMORY_REPO_ENTRIES]({ workspaceId });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY]({ ...ref, text: "Prefers tea" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY](ref);
+    await handlers[IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY](ref);
+    await expect(
+      handlers[IPC_CHANNELS.MEMORY_REPO_OPEN_FILE]({ workspaceId, path: "me.md" }),
+    ).rejects.toThrow(/not available/);
     for (const channel of Object.keys(handlers)) {
       expect(checkRateLimit).toHaveBeenCalledWith(channel);
     }
@@ -354,5 +367,84 @@ describe("memory folder dream IPC", () => {
     await expect(
       setup({ noDreamer: true }).handlers[IPC_CHANNELS.MEMORY_REPO_DREAM_NOW](undefined),
     ).resolves.toEqual({ ran: false, reason: "unavailable" });
+  });
+});
+
+describe("memory folder sync IPC", () => {
+  const syncState = {
+    remoteUrl: "https://github.com/sam/memory.git",
+    lastPullAt: NOW - 1000,
+    lastPushAt: NOW - 500,
+    ahead: 0,
+    behind: 0,
+    conflict: null,
+    lastError: null,
+  };
+  const build = (
+    syncService: { isSyncConfigured: () => boolean; syncNow: () => Promise<unknown> } | null,
+    checkRateLimit: (channel: string) => void = vi.fn(),
+  ) =>
+    createMemoryRepoIpcHandlers({
+      status: vi.fn(),
+      getService: () => null,
+      readLines: vi.fn(),
+      openPath: vi.fn(),
+      checkRateLimit,
+      getSyncService: () => syncService as never,
+    });
+
+  it("pulls and pushes through the running service and returns its sync state", async () => {
+    const syncNow = vi.fn(async () => syncState);
+    const checkRateLimit = vi.fn();
+    const handlers = build({ isSyncConfigured: () => true, syncNow }, checkRateLimit);
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](undefined)).resolves.toEqual(syncState);
+    expect(syncNow).toHaveBeenCalledWith({ push: true });
+    expect(checkRateLimit).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW);
+  });
+
+  it("returns an error when the folder or sync is off", async () => {
+    await expect(build(null)[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](undefined)).resolves.toEqual({
+      error: "The memory folder is off.",
+    });
+    const syncNow = vi.fn();
+    await expect(
+      build({ isSyncConfigured: () => false, syncNow })[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](
+        undefined,
+      ),
+    ).resolves.toEqual({ error: expect.stringContaining("Sync is off") });
+    expect(syncNow).not.toHaveBeenCalled();
+  });
+
+  it("takes no payload", async () => {
+    const syncNow = vi.fn(async () => syncState);
+    const handlers = build({ isSyncConfigured: () => true, syncNow });
+    for (const payload of [{ push: false }, "now", { url: "https://evil.example/x.git" }]) {
+      await expect(handlers[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](payload)).rejects.toThrow(
+        /Invalid/,
+      );
+    }
+    expect(syncNow).not.toHaveBeenCalled();
+  });
+
+  it("allows six syncs a minute", async () => {
+    const handle = vi.mocked(ipcMain.handle);
+    handle.mockClear();
+    rateLimiter.reset(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW);
+    const syncNow = vi.fn(async () => syncState);
+    setupMemoryRepoHandlers({
+      status: vi.fn(),
+      getService: () => null,
+      readLines: vi.fn(),
+      openPath: vi.fn(),
+      getSyncService: () => ({ isSyncConfigured: () => true, syncNow }) as never,
+    });
+    const registered = handle.mock.calls.find(
+      ([channel]) => channel === IPC_CHANNELS.MEMORY_REPO_SYNC_NOW,
+    )?.[1] as ((event: unknown, raw: unknown) => Promise<unknown>) | undefined;
+    expect(registered).toBeDefined();
+    for (let i = 0; i < 6; i++) await registered!({}, undefined);
+    await expect(registered!({}, undefined)).rejects.toThrow(/Rate limit/);
+    expect(syncNow).toHaveBeenCalledTimes(6);
+    rateLimiter.reset(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW);
   });
 });

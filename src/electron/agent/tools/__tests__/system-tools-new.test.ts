@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const memoryFeatureMocks = vi.hoisted(() => ({
   loadSettings: vi.fn().mockReturnValue({
     sessionRecallEnabled: true,
-    topicMemoryEnabled: true,
   }),
   getCurrentLocation: vi.fn(),
 }));
@@ -47,7 +46,6 @@ beforeEach(() => {
   memoryFeatureMocks.getCurrentLocation.mockReset();
   memoryFeatureMocks.loadSettings.mockReturnValue({
     sessionRecallEnabled: true,
-    topicMemoryEnabled: true,
   });
   memoryServiceMocks.searchAsync.mockReset().mockResolvedValue([]);
   memoryServiceMocks.searchWorkspaceMarkdown.mockReset().mockReturnValue([]);
@@ -143,7 +141,6 @@ describe("SystemTools.getToolDefinitions", () => {
   it("returns all tools in non-headless mode", () => {
     memoryFeatureMocks.loadSettings.mockReturnValue({
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
     });
     const tools = SystemTools.getToolDefinitions();
     expect(tools.length).toBeGreaterThan(6);
@@ -161,7 +158,6 @@ describe("SystemTools.getToolDefinitions", () => {
   it("returns only safe tools in headless mode", () => {
     memoryFeatureMocks.loadSettings.mockReturnValue({
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
     });
     const tools = SystemTools.getToolDefinitions({ headless: true });
     expect(tools).toHaveLength(3);
@@ -181,7 +177,6 @@ describe("SystemTools.getToolDefinitions", () => {
   it("returns full tools when headless is false", () => {
     memoryFeatureMocks.loadSettings.mockReturnValue({
       sessionRecallEnabled: true,
-      topicMemoryEnabled: true,
     });
     const tools = SystemTools.getToolDefinitions({ headless: false });
     expect(tools.length).toBeGreaterThan(4);

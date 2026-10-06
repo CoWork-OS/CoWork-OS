@@ -42,7 +42,7 @@ low-level writers (`insertCapturedMemory`, the `memory.capture` worker command,
 
 | Producer | Route | Notes |
 |---|---|---|
-| `memory_remember`, Memory Hub, kit back-sync, awareness, adaptive style, `set_user_name` / `set_response_style`, mailbox, Dreaming promotions | `MemoryWriter` | §3, §4b, §5, §5b. |
+| `memory_remember`, Memory Hub, awareness, adaptive style, `set_user_name` / `set_response_style`, mailbox, Dreaming promotions | `MemoryWriter` | §3, §4b, §5, §5b. |
 | Core memory candidates (`CoreMemoryDistiller`) | Facts → `MemoryWriter` as `inferred`; events → `MemoryService.capture` | Fact types: preference → `preference`, correction → `correction`, project_state → `project_fact`, pattern → `insight`, constraint → `rule`. An inferred `rule` is L0 on every turn, so a constraint is a fact only when the user accepted the candidate (not the hot-path auto-accept) or `autoPromoteToCuratedMemoryEnabled` is on; otherwise it is an archive event. Scope: `global` for a global core scope, else `workspace` (the candidate's workspace governs policy). `source_ref = { store: "core_candidate", id: <candidate id>, traceId, profileId, candidateType, scopeKind, scopeRef }`. Open loops, watch items and recurring-workflow hints are archive events (capture dedupe); their provenance is the candidate, marked `applied` with the archive row id (capture options carry no trace or candidate ids). `ignored_noise` is a runtime signal: never written. Lifecycle: written or reinforced → `applied`; dropped for good (no workspace, low salience, secret only, `<no-memory>`, outranked, runtime signal) → `skipped` with the reason; refused by settings (memory or capture off) → stays `accepted` and is retried. Without a running writer (CLI) facts fall back to the archive. The former curated promotion (`upsertDistilledEntry`) is no longer used by the distiller. |
 | Chronicle (`ChronicleMemoryService`) | `MemoryService.capture`, archive only | One private `screen_context` row per promoted observation (`allowExternalMirror: false`), the task's `<no-memory>` passed as `noMemory`. Screen text is third-party content and never becomes a `memory_items` fact; Dreaming does not auto-promote screen-captured evidence. |
 | Imports: ChatGPT export, pasted memory exports (`importFromText`) | `MemoryService.openImportSession` | One session per import. Opening it refuses when memory is off or privacy mode is `disabled`; strict privacy or `forcePrivate` make the rows private (private imports stay in their workspace). Auto-capture does not apply (an explicit act). Per entry: `<no-memory>`, input sanitization, inline `<private>`, redaction (secret-only entries dropped), salience, excluded patterns, then dedupe against every imported row visible in the workspace (own rows and non-private imports of any workspace, so a re-import or an import into a second workspace adds nothing) and the capture's content-hash dedupe; the row is written with its embedding (also into the cross-workspace imported-embedding cache) and observation sidecar (`origin: import`) in one capture; `finish` applies the storage cap. Imports are never mirrored to Supermemory. ChatGPT `observation` entries (facts about the user) are also written as `import` items (trust 0.6, never `user_stated`) in the workspace scope with `source_ref = { store: "import", id: <archive row id>, importer, conversationId }`; deleting the row (Inspector delete, delete imported entry, Delete imported, Clear All Memories) deletes the fact, and ignoring the row for prompt recall archives it (un-ignoring writes it again). A fact another source also holds (alias only) is left alone. ChatGPT conversations already imported and visible in the workspace are skipped before the LLM call; a conversation imported only into another workspace (privately there) is imported again from its stored entries (type and distilled text, rows whose observation is suppressed or redacted excluded) without a new LLM call, through the same session; a failed distillation counts as an error, not as processed. |
@@ -334,8 +334,8 @@ lane migration. PersonalityManager's user name and response style are mirrors of
   `memory-recall-sql.ts`), `archive` (`MemoryService.searchForRecallAsync`: the hybrid search
   and Phase 0 visibility filter of `searchAsync`, without counting a listing as a reference),
   `conversations` (`DurableContextService.searchConversation`, the active task excluded by
-  default), `knowledge` (KG `searchEntities`, the `.cowork` markdown index, existing topic
-  packs, read-only), `external` (Supermemory; only when `policy.allowExternal` and configured).
+  default), `knowledge` (KG `searchEntities` and the `.cowork` markdown index, read-only;
+  topic packs are retired and `topic:` refs are unknown), `external` (Supermemory; only when `policy.allowExternal` and configured).
 - **One FTS builder.** The memory lane uses `database/fts-query.ts` (Unicode, prefix-aware,
   operator-safe: all terms, then any term), with a term-match fallback when FTS5 is missing.
   The markdown index, mailbox search and YouTube transcripts use its term extraction,
@@ -365,7 +365,7 @@ lane migration. PersonalityManager's user name and response style are mirrors of
   this workspace plus non-private imports. Conversations, KG, files: this workspace only; files
   through the caller's read guard and inside `.cowork/`.
 - **Fusion.** Weighted reciprocal rank (k = 60): memory 1.0, archive 0.8, conversations 0.7,
-  knowledge 0.6 (topic packs ×0.6), external 0.5; imported archive rows count half. Each
+  knowledge 0.6, external 0.5; imported archive rows count half. Each
   contribution is scaled by term coverage: `0.4 + 0.6 × coverage`, where coverage is the share
   of the query's distinctive (non-stopword) terms in the hit's text, applied when the query
   has at least two such terms. Rank fusion alone let a one-word match in a strong lane outrank
@@ -373,7 +373,7 @@ lane migration. PersonalityManager's user name and response style are mirrors of
   kept, all lane ranks recorded). `relevance` is the fused score relative to the best hit.
 - **Hits** add `snippet`, `relevance`, `tokenEstimate`, `kind` and `provenance` to the contract
   type. `detail: "full"` adds `content` (≤ 4000 characters); `ids` expand lane-qualified refs
-  (`memory:`, `archive:`, `event:`, `kg:`, `doc:<start>-<end>:<path>`, `topic:<file>`) with the
+  (`memory:`, `archive:`, `event:`, `kg:`, `doc:<start>-<end>:<path>`, `repo:`) with the
   same visibility rules. `query` has no side effects; `markUsed` sets `last_used_at` on items and
   records an archive reference — the tools call it only for results returned in full.
 - **Failures.** `recall()` reports per-lane errors; `query()` throws when every lane failed, so
@@ -531,55 +531,22 @@ self-improvement `improvement_*` tables once Workflow Intelligence has copied th
 `transcript_spans` tables once the conversation index migration has finished).
 `adaptive-style-engine` (engine bookkeeping) and `awareness-state` (belief signals) are kept.
 
-### Generated kit views
+### Generated kit views (retired)
 
-`CuratedMemoryService.syncWorkspaceFiles` renders the `USER.md` / `MEMORY.md` auto-blocks from
-`memory_items` only (without a writer it does nothing):
+The `USER.md` / `MEMORY.md` auto-blocks (`<!-- cowork:auto:curated-user:* -->`,
+`<!-- cowork:auto:curated-workspace:* -->`) used to render `memory_items` into the kit, with
+back-sync of hand edits and a `KitFileWatcher`. All of that is retired
+(docs/memory-repo-phase3-design.md §6): facts live in `memory_items` and the memory folder,
+and nothing writes the blocks any more.
 
-- `USER.md` block: active, non-private workspace items of kind `identity`/`preference`, plus any
-  item curated into the user lane (`source_ref.target = 'user'`).
-- `MEMORY.md` block: every other active, non-private workspace item.
-- Labels are memory kinds (`Rule`, `Decision`, …). Private items (strict privacy mode) are not
-  rendered, because kit files are injected into prompts.
-
-**Privacy.** `USER.md` and `MEMORY.md` live in the workspace (and may be committed with it), so
-they only ever show non-private items: strict privacy mode makes new items `private`, and
-private items, contact items and global items are never rendered into either file.
-
-**Back-sync (PROMPT-12).** Hand edits inside the auto-blocks are no longer overwritten:
-
-- Every sync records the rendered block per workspace and file (`maintenance_state`, key
-  `kit_render_state:<workspaceId>:<user|workspace>`: body hash plus one `{ id, line }` per
-  bullet). Clear All Memories drops these rows with the items.
-- On the next sync, a block whose hash differs from the recorded one was edited. Its bullet
-  lines (`- Label: text`, label optional) are compared with the rendered lines: unchanged
-  lines are kept, a new line similar to a vanished one is an **edit** of that item (a new
-  `curated` revision superseding it, with `editedVia: "kit_file"`; a changed label changes
-  the kind), other new lines are **adds** (`curated`, `source_ref.store = "kit_file"`), and
-  other vanished lines **archive** their item. Items the user stated or confirmed (`user_stated`, `user_confirmed`) are never
-  edited or archived from the file; that has to happen in the Memory Hub.
-- Only blocks rendered from `memory_items` are synced back. Without a recorded block (first
-  sync, a file that arrived with a cloned repository) nothing is imported. A block that was
-  deleted entirely is re-rendered, not read as "forget everything". Items that changed in the
-  database since the render keep the database version.
-- The block is then re-rendered from the database and the file is written only when its
-  content changes, so a sync after a sync does nothing (no write loop). If the file's mtime
-  changes between reading the edits and applying them, nothing is applied and the read is
-  retried; a file that changes after edits were applied is left for the next sync.
-- Back-sync runs on every kit sync (a curated write, a Memory Hub change, Clear All
-  Memories) and on a file edit: `KitFileWatcher` (installed by `startMemoryEngine`, closed
-  with it) watches the `.cowork` directory of each workspace whose kit was synced or used by
-  a task (at most 32, least recently used dropped first) and, 1.5 s after the last change to
-  `USER.md` or `MEMORY.md`, runs the kit sync with `fromFileEdit`. That sync re-reads the
-  workspace and needs its access profile to allow reading and writing the kit files, and it
-  refuses a `.cowork` directory or kit file that is a symlink or resolves outside the
-  workspace. One sync runs at a time per workspace (an edit during it runs one more); the
-  write a sync makes leads to one more sync that changes nothing. The desktop app and the
-  node daemon each watch on their own; the database's unique indexes keep a concurrent
-  back-sync from duplicating items.
-- An agent can write `.cowork/USER.md` like any workspace file, so kit edits cannot be
-  attributed to the user: they carry `curated` trust (0.85) and never outrank or overwrite
-  what the user stated.
+- Leftover blocks are removed once per workspace (`stripCuratedKitBlocksOnce`,
+  `kit-block-strip.ts`) when a task plans in it and from Clear All Memories. The pass only
+  writes a file that still has markers (with a `.history` snapshot), and skips (to retry
+  later) when the kit files are symlinks or resolve outside the workspace, or when the
+  workspace's access profile denies reading or writing them. It then deletes the
+  workspace's `kit_render_state:<workspaceId>:<user|workspace>` keys.
+- The prompt still strips the markers from kit text as a defense.
+- Items written by the old back-sync keep their `kit_file` provenance.
 
 ## 5a. Memory Hub: "What CoWork knows", Sources and Health
 
@@ -630,10 +597,9 @@ content or credentials.
 - **Health** (the whole profile database, every workspace; the workspace only gates access):
   the checks of `npm run qa:memory-health` with PASS / WARN / SKIP (a missing table) / INFO and
   their thresholds. Archive telemetry ratio ≤ 5 %, archive and `memory_items` duplicate rate
-  ≤ 1 %, no heartbeat or Dreaming run still `running` after an hour, no failed Dreaming run in
-  7 days, Dreaming's last run (info), AI synthesis tokens of the last 24 hours ≤ the daily
-  budget (info while synthesis is off), no orphan embeddings, ≤ 25 memory writes waiting for
-  approval, database ≤ 1024 MiB, and every one-time memory migration marker present.
+  ≤ 1 %, no heartbeat run still `running` after an hour, no orphan embeddings, ≤ 25 memory
+  writes waiting for approval, database ≤ 1024 MiB, and every one-time memory migration marker
+  present (the Hub adds the memory folder's checks, including "Memory folder dreaming").
   A Refresh button reruns the checks (`memoryHub:health` allows 10 calls a minute).
 - The thresholds, the stuck-run age and the migration marker keys live in
   `src/shared/memory-health-thresholds.json`, read by both the service and the script (`ci` is
@@ -641,69 +607,41 @@ content or credentials.
   script's SQL; `__tests__/MemoryHealthService.test.ts` checks both give the same numbers on the
   same database.
 
-## 5b. Dreaming: the curator of `memory_items` (Phase 3)
+## 5b. Commitment expiry (Phase 3)
 
-Audit §8.2 "Dreaming as the only curator". `DreamingService.ts` runs the curation;
-`MemoryCurator.ts` holds the deterministic heuristics (pure); `memory-curation-llm.ts` the
-optional LLM step; `memory-curation-sql.ts` / `memory-curation-units.ts` apply and undo
-operations; `MemoryReviewService.ts` backs the Memory Hub Review tab.
+The heuristic curator of `memory_items` (`DreamingService`, `MemoryCurator`,
+`memory-curation-llm`, the `dreaming_candidates` review queue, "Run Dreaming now", the
+`dreamingLlm*` settings and their health checks) was retired in Phase 3
+([memory-repo-phase3-design.md §6](memory-repo-phase3-design.md#6-retired)): global and
+workspace facts live in the memory folder, which has its own dreaming
+([memory-repo-phase2-design.md](memory-repo-phase2-design.md)). The `dreaming_runs` and
+`dreaming_candidates` tables stay for history; retention prunes them, and the schema setup
+closed their open proposals as `dismissed` (`memory-curation-log-sql.ts`).
 
-**Inputs** (per workspace): active `global` and `workspace` items (contact and task items are
-never curated), archive outcomes of the last 30 days (`decision`, `error`, `insight`
-including `[CORRECTION]` rows, `preference`, `constraint`, `correction_rule`,
-`workflow_pattern`; suppressed and redacted rows excluded), and conversation-index hits that
-show an overdue commitment was done.
+What stays is commitment expiry, `CommitmentExpiryService.ts`, offered by every Heartbeat
+pulse while heartbeat maintenance is on and no task is in the foreground; the service runs at
+most once a day per process (in-memory cooldown, no state table) and waits for the lane
+migration.
 
-**Operations** (fixed set; `MEMORY_CURATION_OPS` in `shared/memory-review-types.ts`):
-
-| Operation | Heuristic | Safe (auto-applied) when | Otherwise |
-|---|---|---|---|
-| `merge` | same scope and kind, derived subject, word-set Jaccard ≥ 0.75 (0.6–0.75 → review); keeps the strongest item (trust, pin, reinforcement, confidence, use, recency), supersedes the rest, folds their refs into `aliases` and their reinforcement into the keeper | all items have the same trust and none is `user_stated`/`user_confirmed` | review |
-| `resolve_conflict` | same scope and kind, topic overlap ≥ 0.5 with opposite polarity (negation or an antonym pair); suggests the more trusted item, then the newer | never | always review |
-| `promote` | archive outcomes of one kind that recur (Jaccard ≥ 0.5) in ≥ 2 distinct tasks and match no active item; corrections → `correction`, preferences → `preference`, constraints → `rule`, other outcomes → `project_fact`; written as `inferred` with `source_ref.aliases = archive:<id>` | kind is not `rule` and no evidence is private, imported or captured from the screen | review (accepting writes `user_confirmed`) |
-| `decay` | unused (last use / update) for 60–180 days by kind, extended by reinforcement; trust ≤ 0.6; not pinned; never `identity` or `rule` | source is `inferred` | review (`import`) |
-| `expire_commitment` | past `dueAt` with a done signal (archive or conversation), or ≥ 30 days overdue | done signal and not stated/confirmed by the user | review |
-
-At most one operation per item per run; at most 25 automatic operations and 20 queued
-proposals per run. Items the user stated or confirmed are never changed automatically: the
-store refuses it (`protected`) unless the user accepted the change in the Review tab.
-
-**Apply and undo.** Every applied operation goes through `MemoryWriter.applyCuration`
-(serialized with other writes; a promotion runs the writer's salience, redaction and policy
-steps) and is one transaction with its `memory_curation_log` row: op, item ids, created
-ids, before/after snapshots, run id, origin (`auto` or `review`), `applied_at`,
-`undone_at`. `MemoryWriter.undoCuration` restores the prior status, pin, reinforcement,
-confidence and provenance, and tombstones items the operation created. Undo is refused when
-an item changed since, or when reactivating would collide with an active item holding the
-same content or subject. Undone and rejected changes are never applied or proposed again
-(fingerprints). Log rows that quote an item are deleted when the item is really deleted
-(forget, task purge, Clear All Memories, clear global); retention drops log rows after 90
-days.
-
-**LLM synthesis** (`dreamingLlmEnabled`, off by default; `dreamingLlmDailyTokenBudget`,
-default 20 000 tokens per day across workspaces, counted from `dreaming_runs.llm_tokens`).
-One call per run on the configured provider (cheap profile, usage telemetry
-`memory_curation`). The model sees aliases (`i3`, `e7`), never ids or private items; its
-answer must be strict JSON matching a zod schema, may only use `merge`,
-`resolve_conflict`, `promote` (≥ 2 tasks) and `decay`, and may only reference aliases it was
-given. Everything it proposes is queued for review.
-
-**Triggers.** Heartbeat memory signals and hot-memory pressure (6 h workspace cooldown, as in
-Phase 1), task completion when `backgroundConsolidationEnabled`, Box Brain imports, a manual
-"Run Dreaming now" in the Review tab, and a once-daily idle pass: a pulse with no other
-Dreaming trigger and no foreground task curates the next workspace with a task created in the last
-14 days and no Dreaming run in the last 24 hours (the pulse's workspace first; one per
-pulse; no timer of its own). Runs wait for the lane migration. `dreaming_runs` records
-`applied_count`, `queued_count`, `llm_tokens`, `llm_calls` and per-operation `stats`.
-
-**Review tab** (Memory Hub, `memoryReview:*` IPC, zod-validated in main,
-`memory-review-ipc-validation.ts`; same methods in the browser host): pending proposals
-with their items, why, why it needs review and evidence, with Accept / Reject; recent
-changes with Undo; the AI synthesis switch and today's token use. The tab label shows the
-pending count. A proposal whose items are gone or changed is dismissed instead of applied.
-
-The pre-curator constant-text candidates are gone; open ones were closed as `dismissed`
-by the schema setup (`memory-curation-log-sql.ts`).
+- **Input:** active `commitment` items of scope `global` or `workspace` (contact items are
+  never touched) at least a day past `source_ref.dueAt`, not `user_stated` or
+  `user_confirmed`.
+- **Evidence:** an archive outcome of the last 30 days (`memory-curation-sql.ts`
+  `archiveEvidence`) or a conversation-index hit, dated no earlier than a week before the due
+  date, that shares the commitment's words and says "done", "sent", "shipped", …. Workspace
+  commitments are checked in their workspace; global ones in the five most recently used
+  workspaces. At most 20 conversation searches per sweep, least recently searched first.
+- **Apply:** at most 25 expiries per sweep, each one `MemoryWriter.applyCuration({ op:
+  "expire_commitment" })` with origin `auto`: one transaction with its `memory_curation_log`
+  row (before/after snapshots, fingerprint `expire_commitment:<id>`). The store re-checks the
+  invariants and refuses protected items. Nothing is queued for review; a commitment without
+  evidence stays open.
+- **Undo:** the Memory Hub Review tab lists the workspace's expiries under "Closed
+  commitments" (`memoryReview:get` / `memoryReview:undo`, zod-validated in main,
+  `memory-review-ipc-validation.ts`; same methods in the browser host).
+  `MemoryWriter.undoCuration` reopens the item; undo is refused when it changed since, and an
+  undone fingerprint is never applied again. Log rows that quote an item are deleted when the
+  item is really deleted; retention drops log rows after 90 days.
 
 ## 6. The archive (`memories`) and its future
 
@@ -811,17 +749,16 @@ reindexes summary changes. The marker stores `scanned`, `summariesRewritten`,
   `memory:markdown_index_exclusion_purge:v1` in `maintenance_state`, deferred with the first
   retention run): it deletes file, chunk and chunk-FTS rows of every workspace whose path the
   index excludes (`markdown-index-exclusions.ts`: `.history/`, `subconscious/`, `chronicle/`,
-  `memory/transcripts/`, `memory/topics/`, `memory/locks/`, `tmp/`, `scratchpad*`, nested
+  `memory/transcripts/`, `memory/topics/`, `memory/summaries/`, `memory/locks/`, `tmp/`, `scratchpad*`, nested
   `.history`, and stale rows from the old workspace-root index). The per-workspace purge still
   runs when a workspace's index syncs.
 - **Shutdown.** The desktop app and the node daemon stop retention and the engine's deferred
   jobs and flush queued `MemoryWriter` writes (shutdown step "memory engine") before the
   conversation index, the memory service and the database close. Earlier steps settle the
   untracked async work that used to write after the database closed:
-  - The agent daemon cancels consolidations that are still waiting on their 1 s delay and
-    waits up to 3 s (`AgentDaemon.BACKGROUND_WORK_DRAIN_MS`) for running consolidation and
-    Dreaming and for executor playbook learning, which the executor registers through
-    `trackBackgroundWork` (`utils/in-flight-work.ts`). Work still running after the bound is
+  - The agent daemon waits up to 3 s (`AgentDaemon.BACKGROUND_WORK_DRAIN_MS`) for executor
+    playbook learning, which the executor registers through `trackBackgroundWork`
+    (`utils/in-flight-work.ts`). Work still running after the bound is
     abandoned; its late writes fail and are dropped.
   - The kit writers stop (flushing their debounced writes) and release the kit-writer lease
     (step "kit writers").
@@ -871,6 +808,13 @@ facts stay in `memory_items`, as do the other producers. See
 a review branch): [memory-repo-phase2-design.md](memory-repo-phase2-design.md). The heuristic
 curator in §5b keeps curating `memory_items`.
 
+**Sync and team memory.** The folder can sync with a private git remote the user owns
+(`memoryRepoRemoteUrl`, only after the "private and mine" confirmation; the user's own git
+credentials; dream review branches are never pushed), and up to three team memory repos
+(`memoryRepoTeamRepos`) are read next to it in the prompt and recall, never written. The
+Memory folder card has a Sync and a Team memory section; Health adds "Memory folder sync" and
+"Team memory". See [memory-repo-phase4-design.md](memory-repo-phase4-design.md).
+
 ## 8. Gaps and next steps
 
 1. Done for prompts (§4a), the Memory Hub layer preview (§5a) and the mailbox prompt
@@ -881,7 +825,7 @@ curator in §5b keeps curating `memory_items`.
    app flushes the same way (§7).
 2. Done: kit-file edits and Memory Hub edits go through `MemoryWriter` (§5, §5a); kit edits
    carry `curated` trust because agent and user writes to the files cannot be told apart.
-   Done: back-sync also runs on a kit file edit (`KitFileWatcher`, §5).
+   Retired: the generated kit blocks and their back-sync (§5).
 3. Done: "Clear global memories" in the Memory Hub. It does not reset awareness's belief
    state (signals) or the adaptive style engine's bookkeeping; PersonalityManager's name and
    style keep their last mirrored values.

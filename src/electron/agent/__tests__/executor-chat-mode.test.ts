@@ -304,8 +304,6 @@ describe("TaskExecutor chat mode", () => {
     executor.buildIntegrationMentionGuidancePrompt = () => "";
     executor.buildExecutionSystemPrompt = async () => ({
       systemBlocks: [],
-      memoryIndexInjected: false,
-      topicCount: 0,
       droppedSections: [],
       truncatedSections: [],
       totalTokens: 0,
@@ -438,8 +436,6 @@ describe("TaskExecutor chat mode", () => {
       executor.buildIntegrationMentionGuidancePrompt = () => "";
       executor.buildExecutionSystemPrompt = async () => ({
         systemBlocks: [],
-        memoryIndexInjected: false,
-        topicCount: 0,
         droppedSections: [],
         truncatedSections: [],
         totalTokens: 0,

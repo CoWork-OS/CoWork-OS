@@ -14,22 +14,31 @@ const mocks = vi.hoisted(() => ({
   evaluate: vi.fn(),
   getSettings: vi.fn(),
   capture: vi.fn(),
+  setUserName: vi.fn(),
 }));
 
 vi.mock("../../../memory/MemoryService", () => ({
   MemoryService: { capture: mocks.capture, getSettings: mocks.getSettings },
 }));
 vi.mock("../../../memory/CuratedMemoryService", () => ({
-  CuratedMemoryService: { syncWorkspaceFiles: vi.fn() },
+  CuratedMemoryService: {},
+}));
+vi.mock("../../../settings/personality-manager", () => ({
+  PersonalityManager: { setUserName: mocks.setUserName },
 }));
 vi.mock("../../../memory/MemoryWriteGate", () => ({
   MemoryWriteGate: { evaluate: mocks.evaluate },
 }));
 
-import { MemoryTools } from "../memory-tools";
+import { MemoryTools, TEAM_MEMORY_READ_ONLY_ERROR } from "../memory-tools";
 import { MemoryWriter } from "../../../memory/MemoryWriter";
 import { MemoryRepoService } from "../../../memory/repo/MemoryRepoService";
 import { runWithMemoryRepoAccess } from "../../../security/memory-repo-access";
+import {
+  configureTeamMemoryRepos,
+  resetTeamMemoryReposForTests,
+  teamMemoryReposFor,
+} from "../../../memory/repo/memory-repo-team";
 
 function hasGit(): boolean {
   try {
@@ -148,6 +157,29 @@ describeWithGit("memory tools with the memory repo", () => {
     expect(ingest).toHaveBeenCalled();
   });
 
+  it("sets the preferred name from a stated name and mirrors it into me.md", () => inScope(async () => {
+    const tools = new MemoryTools(workspace, makeDaemon("Remember: call me Sam"), "task-1");
+    const result = await tools.remember({
+      content: "Preferred name: Sam",
+      kind: "identity",
+      subject: "preferred_name",
+      user_asked: true,
+    });
+    expect(mocks.setUserName).toHaveBeenCalledWith("Sam");
+    expect(result).toMatchObject({ success: true, file: "me.md" });
+    expect(read("me.md")).toContain("Preferred name: Sam [by: user; kind: identity; subject: preferred_name");
+  }));
+
+  it("keeps commitments in memory_items", () => inScope(async () => {
+    const ingest = vi.fn(async () => ({ status: "skipped", reason: "memory_disabled" }));
+    MemoryWriter.setInstance({ ingest, repository: {} } as Any);
+    await new MemoryTools(workspace, makeDaemon(), "task-1").remember({
+      content: "Send the invoice to Bob by Friday",
+      kind: "commitment",
+    });
+    expect(ingest).toHaveBeenCalledWith(expect.objectContaining({ kind: "commitment" }));
+  }));
+
   it("keeps strict-privacy facts in memory_items", () => inScope(async () => {
     mocks.getSettings.mockResolvedValue({ enabled: true, privacyMode: "strict" });
     const ingest = vi.fn(async () => ({ status: "skipped", reason: "memory_disabled" }));
@@ -177,5 +209,31 @@ describeWithGit("memory tools with the memory repo", () => {
       expect.any(Object),
     );
     expect(read("me.md")).toContain("Likes green tea");
+  }));
+
+  it("refuses to forget a team memory line (team repos are read-only)", () => inScope(async () => {
+    const teamRoot = path.join(base, "team-memory");
+    const seed = new MemoryRepoService({ root: teamRoot, runtime: "desktop" });
+    await seed.start();
+    await seed.stop();
+    fs.appendFileSync(path.join(teamRoot, "MEMORY.md"), "- Releases ship on Tuesdays\n");
+    const before = fs.readFileSync(path.join(teamRoot, "MEMORY.md"), "utf8");
+    const line = before.split("\n").indexOf("- Releases ship on Tuesdays") + 1;
+    try {
+      await configureTeamMemoryRepos([{ name: "Platform", path: teamRoot }], {
+        personalRoot: repo.root,
+        workspacePaths: [],
+      });
+      expect(teamMemoryReposFor("ws-1").map((team) => team.name)).toEqual(["Platform"]);
+      const daemon = makeDaemon();
+      const result = await new MemoryTools(workspace, daemon, "task-1").forget({
+        id: `team:Platform:MEMORY.md#L${line}`,
+      });
+      expect(result).toMatchObject({ success: false, error: TEAM_MEMORY_READ_ONLY_ERROR });
+      expect(daemon.requestApproval).not.toHaveBeenCalled();
+      expect(fs.readFileSync(path.join(teamRoot, "MEMORY.md"), "utf8")).toBe(before);
+    } finally {
+      resetTeamMemoryReposForTests();
+    }
   }));
 });

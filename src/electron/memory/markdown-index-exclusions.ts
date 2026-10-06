@@ -9,7 +9,8 @@ const INDEX_ROOT_DIRNAME = ".cowork";
 /**
  * Paths (relative to the index root) that hold generated or bulk artifacts, not
  * memory: kit history snapshots, subconscious and chronicle artifacts, raw
- * transcripts, generated topic packs, lock files, scratch files and scratchpads.
+ * transcripts, retired topic packs and daily summaries, lock files, scratch files and
+ * scratchpads.
  */
 export const EXCLUDED_INDEX_PREFIXES = [
   ".history/",
@@ -17,6 +18,7 @@ export const EXCLUDED_INDEX_PREFIXES = [
   "chronicle/",
   "memory/transcripts/",
   "memory/topics/",
+  "memory/summaries/",
   "memory/locks/",
   "tmp/",
 ] as const;

@@ -43,7 +43,6 @@ const THRESHOLD_FLAGS = {
   "--max-telemetry-ratio": { key: "maxTelemetryRatio", kind: "ratio" },
   "--max-duplicate-rate": { key: "maxDuplicateRate", kind: "ratio" },
   "--max-stuck-heartbeat": { key: "maxStuckHeartbeat", kind: "count" },
-  "--max-stuck-dreaming": { key: "maxStuckDreaming", kind: "count" },
   "--max-orphan-embeddings": { key: "maxOrphanEmbeddings", kind: "count" },
   "--max-pending-writes": { key: "maxPendingWrites", kind: "count" },
   "--min-memory-items": { key: "minMemoryItems", kind: "count" },
@@ -67,8 +66,8 @@ Output:
   --json                      Machine-readable JSON on stdout.
   --top <n>                   Rows in the per-store size list (default 15).
   --no-dbstat                 Skip the page scan for per-store sizes (faster on large DBs).
-  --stuck-after <duration>    Age after which a 'running' heartbeat/Dreaming run counts as
-                              stuck: 90s, 30m, 1h, 2d; a bare number is minutes (default 1h).
+  --stuck-after <duration>    Age after which a 'running' heartbeat run counts as stuck:
+                              90s, 30m, 1h, 2d; a bare number is minutes (default 1h).
   --snapshot-limit-mb <n>     Largest WAL database read into memory when its -wal file is
                               absent (default 1024; 0 always opens the file directly).
 
@@ -81,7 +80,6 @@ Thresholds (none apply unless passed; a breach exits 1):
                               per workspace + type) and active memory_items (same content_hash
                               per workspace/scope/scope_ref/kind).
   --max-stuck-heartbeat <n>   heartbeat_runs still 'running' after --stuck-after.
-  --max-stuck-dreaming <n>    dreaming_runs still 'running' after --stuck-after.
   --max-orphan-embeddings <n> memory_embeddings rows whose memory no longer exists.
   --max-pending-writes <n>    pending_memory_writes with status 'pending'.
   --min-memory-items <n>      Active memory_items rows.
@@ -551,45 +549,6 @@ function coreCandidates(db, schema) {
   return { status: "ok", total, byTypeStatus: rows };
 }
 
-function dreaming(db, schema, now, stuckAfterMs) {
-  const missing = schema.missing("dreaming_runs", "status");
-  if (missing) return missing;
-  const byStatus = countBy(
-    db,
-    "SELECT status AS value, count(*) AS n FROM dreaming_runs GROUP BY 1 ORDER BY 2 DESC",
-  );
-  const total = byStatus.reduce((sum, row) => sum + row.n, 0);
-  const timeColumn = schema.hasColumns("dreaming_runs", "started_at")
-    ? "started_at"
-    : schema.hasColumns("dreaming_runs", "created_at")
-      ? "created_at"
-      : null;
-  const lastRunAt = timeColumn
-    ? db.prepare(`SELECT max(${timeColumn}) AS t FROM dreaming_runs`).get().t
-    : "missing";
-  const stuck = timeColumn
-    ? db
-        .prepare(
-          `SELECT count(*) AS n FROM dreaming_runs WHERE status = 'running' AND ${timeColumn} < ?`,
-        )
-        .get(now - stuckAfterMs).n
-    : "missing";
-  const candidates = schema.hasColumns("dreaming_candidates", "status")
-    ? countBy(
-        db,
-        "SELECT status AS value, count(*) AS n FROM dreaming_candidates GROUP BY 1 ORDER BY 2 DESC",
-      )
-    : "missing";
-  return {
-    status: "ok",
-    total,
-    byStatus,
-    lastRunAt: typeof lastRunAt === "number" ? new Date(lastRunAt).toISOString() : lastRunAt,
-    stuck,
-    candidates,
-  };
-}
-
 function heartbeat(db, schema, now, stuckAfterMs) {
   const missing = schema.missing("heartbeat_runs", "status", "created_at");
   if (missing) return missing;
@@ -715,7 +674,6 @@ export function collectReport(db, options, now = Date.now()) {
     curated: section(() => curated(db, schema)),
     pendingWrites: section(() => pendingWrites(db, schema)),
     coreCandidates: section(() => coreCandidates(db, schema)),
-    dreaming: section(() => dreaming(db, schema, now, options.stuckAfterMs)),
     heartbeat: section(() => heartbeat(db, schema, now, options.stuckAfterMs)),
     conversation: section(() => conversation(db, schema)),
     markdownFiles: section(() => markdownFiles(db, schema, options.top)),
@@ -752,7 +710,6 @@ export function evaluateChecks(report, thresholds, fileBytes) {
     () => report.memoryItems.duplicateRate,
   );
   add("stuck heartbeat runs", t.maxStuckHeartbeat, "<=", () => report.heartbeat.stuck);
-  add("stuck dreaming runs", t.maxStuckDreaming, "<=", () => report.dreaming.stuck);
   add("orphan embeddings", t.maxOrphanEmbeddings, "<=", () => report.embeddings.orphans);
   add("pending memory writes", t.maxPendingWrites, "<=", () => report.pendingWrites.pending);
   add("active memory_items", t.minMemoryItems, ">=", () => report.memoryItems.active);
@@ -871,16 +828,6 @@ export function formatHuman(result) {
       report.coreCandidates,
       (c) =>
         `  total ${c.total}\n${table(c.byTypeStatus, [["type"], ["status"], ["n"], ["distinctSummaries", null, "distinct"]])}`,
-    ),
-  );
-  out.push(
-    sectionText("Dreaming", report.dreaming, (d) =>
-      [
-        `  runs ${d.total} · last run ${d.lastRunAt ?? "never"} · stuck ${d.stuck}`,
-        valueRows(d.byStatus),
-        "  candidates:",
-        valueRows(d.candidates),
-      ].join("\n"),
     ),
   );
   out.push(

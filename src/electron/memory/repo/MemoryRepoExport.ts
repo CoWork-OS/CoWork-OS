@@ -66,6 +66,8 @@ export async function runMemoryRepoExport(
         item.status === "active" &&
         item.privacy !== "private" &&
         item.source !== "third_party" &&
+        // Commitments stay in memory_items (operational data with due dates).
+        item.kind !== "commitment" &&
         (item.scope === "global" || (item.scope === "workspace" && item.workspaceId)),
     )
     .sort((a, b) => a.createdAt - b.createdAt);

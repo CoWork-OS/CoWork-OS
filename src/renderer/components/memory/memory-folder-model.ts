@@ -9,6 +9,7 @@ import type {
   MemoryRepoEntryActionResult,
   MemoryRepoHubEntry,
   MemoryRepoHubFile,
+  MemoryRepoKeepTarget,
 } from "../../../shared/memory-repo-types";
 
 export type MemoryFolderApi = {
@@ -28,6 +29,13 @@ export type MemoryFolderApi = {
     workspaceId: string;
     ref: string;
     hash: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
+  /** Keep an inbox entry (move it to me.md, lessons.md or the workspace's file). */
+  keepMemoryRepoEntry?: (data: {
+    workspaceId: string;
+    ref: string;
+    hash: string;
+    target: MemoryRepoKeepTarget;
   }) => Promise<MemoryRepoEntryActionResult>;
   /** Desktop only. */
   openMemoryRepoFile?: (data: { workspaceId: string; path: string }) => Promise<{ success: true }>;
@@ -193,5 +201,31 @@ export function pinFolderEntry(
     () => api.pinMemoryRepoEntry({ workspaceId, ref: entry.ref, hash: entry.hash }),
     "Memory pinned: CoWork keeps it in every prompt.",
     "Failed to pin the memory.",
+  );
+}
+
+const KEEP_NOTICES: Record<MemoryRepoKeepTarget, string> = {
+  me: "Kept in About you.",
+  lessons: "Kept in Lessons.",
+  workspace: "Kept for this workspace.",
+};
+
+/** Keep = move an inbox entry to me.md, lessons.md or the workspace's file, as yours. */
+export function keepFolderEntry(
+  api: MemoryFolderApi,
+  workspaceId: string,
+  report: MemoryRepoEntriesReport,
+  entry: MemoryRepoHubEntry,
+  target: MemoryRepoKeepTarget,
+): Promise<FolderFlowResult> {
+  const keep = api.keepMemoryRepoEntry;
+  if (!keep) return Promise.resolve({ report, error: "Keeping is not available here." });
+  return runAndReload(
+    api,
+    workspaceId,
+    report,
+    () => keep({ workspaceId, ref: entry.ref, hash: entry.hash, target }),
+    KEEP_NOTICES[target],
+    "Failed to keep the memory.",
   );
 }

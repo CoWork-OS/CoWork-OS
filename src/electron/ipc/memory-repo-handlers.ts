@@ -3,7 +3,9 @@
  * folder, compact its history, and read entry lines by ref; the dreams over it
  * (docs/memory-repo-phase2-design.md §5-§7): list, diff, accept, reject, undo, dream now; and
  * the Memory Hub entries (docs/memory-repo-phase3-design.md §5): list, edit, delete, pin and
- * open a file; and sync with the user's private remote (docs/memory-repo-phase4-design.md §1).
+ * open a file; and sync with the user's private remote (docs/memory-repo-phase4-design.md §1);
+ * and importing notes from a folder and keeping inbox entries (docs/memory-repo-phase5-design.md
+ * §3). The import folder is chosen in a native picker in main.
  * The folder is always resolved in main from the settings (the running service's root); the
  * renderer never sends a path. Payloads are validated with zod in main
  * (memory-repo-ipc-validation.ts).
@@ -20,6 +22,7 @@ import {
   type MemoryRepoDreamsReport,
   type MemoryRepoEntriesReport,
   type MemoryRepoEntryActionResult,
+  type MemoryRepoImportResult,
   type MemoryRepoLine,
   type MemoryRepoStatusReport,
   type MemoryRepoSyncNowResult,
@@ -27,6 +30,11 @@ import {
 import { getMemoryRepoDreamer, type MemoryRepoDreamer } from "../memory/repo/MemoryRepoDreamer";
 import { MemoryRepoService } from "../memory/repo/MemoryRepoService";
 import {
+  importMemoryNotesFromFolder,
+  type MemoryRepoImportService,
+} from "../memory/repo/memory-repo-import";
+import {
+  keepMemoryRepoEntry,
   listMemoryRepoEntries,
   memoryRepoFileToOpen,
   pinMemoryRepoEntry,
@@ -50,6 +58,7 @@ import {
   MemoryRepoDreamRequestSchema,
   MemoryRepoEntriesRequestSchema,
   MemoryRepoEntryRequestSchema,
+  MemoryRepoKeepEntryRequestSchema,
   MemoryRepoNoArgsSchema,
   MemoryRepoOpenFileRequestSchema,
   MemoryRepoUpdateEntryRequestSchema,
@@ -83,6 +92,12 @@ export interface MemoryRepoIpcDeps {
   workspaceExists?: (workspaceId: string) => Promise<boolean>;
   /** The running service for "Sync now" (default: the process-wide one). */
   getSyncService?: () => Pick<MemoryRepoService, "isSyncConfigured" | "syncNow"> | null;
+  /** Native folder picker for "Import notes from a folder"; null when cancelled. */
+  pickFolder?: () => Promise<string | null>;
+  /** The running service for the import (default: the process-wide one). */
+  getImportService?: () => MemoryRepoImportService | null;
+  /** The workspace's name, for a workspace file Keep creates (default: none). */
+  workspaceName?: (workspaceId: string) => Promise<string | null>;
 }
 
 type Handler = (raw: unknown) => Promise<unknown>;
@@ -108,6 +123,7 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
     };
   const getHubService = deps.getHubService ?? (() => null);
   const getSyncService = deps.getSyncService ?? (() => MemoryRepoService.get());
+  const getImportService = deps.getImportService ?? (() => MemoryRepoService.get());
   const requireWorkspace = async (workspaceId: string) => {
     if (deps.workspaceExists && !(await deps.workspaceExists(workspaceId))) {
       throw new Error("Workspace not found");
@@ -197,6 +213,29 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
       await requireWorkspace(value.workspaceId);
       return pinMemoryRepoEntry(getHubService(), value);
     },
+    [IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY]: async (raw): Promise<MemoryRepoEntryActionResult> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY);
+      const value = validateInput(MemoryRepoKeepEntryRequestSchema, raw, "memory folder keep");
+      await requireWorkspace(value.workspaceId);
+      const workspaceName =
+        value.target === "workspace" && deps.workspaceName
+          ? await deps.workspaceName(value.workspaceId).catch(() => null)
+          : null;
+      return keepMemoryRepoEntry(getHubService(), { ...value, workspaceName });
+    },
+    [IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER]: noArgs(
+      IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER,
+      async (): Promise<MemoryRepoImportResult> => {
+        const empty = { files: 0, imported: 0, duplicates: 0, skipped: 0, truncated: false };
+        const service = getImportService();
+        if (!service?.isWritable()) return { ...empty, error: "The memory folder is not available." };
+        if (!deps.pickFolder) return { ...empty, error: "Importing needs the desktop app." };
+        // The folder comes from the native picker in main, never from the renderer.
+        const folder = await deps.pickFolder();
+        if (!folder) return { ...empty, cancelled: true };
+        return importMemoryNotesFromFolder(service, folder);
+      },
+    ),
     [IPC_CHANNELS.MEMORY_REPO_OPEN_FILE]: async (raw): Promise<{ success: true }> => {
       limit(IPC_CHANNELS.MEMORY_REPO_OPEN_FILE);
       const value = validateInput(MemoryRepoOpenFileRequestSchema, raw, "memory folder file");
@@ -245,6 +284,9 @@ export function setupMemoryRepoHandlers(deps: MemoryRepoIpcDeps): void {
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
+  // Keep commits to the folder; import opens a picker and reads a whole folder.
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY, RATE_LIMIT_CONFIGS.limited);
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW, SYNC_NOW_RATE_LIMIT);
   const handlers = createMemoryRepoIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {

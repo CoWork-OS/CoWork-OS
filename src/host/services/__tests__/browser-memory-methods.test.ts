@@ -540,6 +540,12 @@ describe("browser memory folder methods", () => {
     expect(validate("removeMemoryRepoEntry", { ...ref, ref: "repo:../x.md#L1" })).toThrow();
     expect(validate("updateMemoryRepoEntry", { ...ref, text: "" })).toThrow();
     expect(validate("updateMemoryRepoEntry", { ...ref, hash: "nope", text: "Prefers tea" })).toThrow();
+    // Keep an inbox entry; importing a folder needs the desktop folder picker.
+    expect(definitions.keepMemoryRepoEntry.mutation).toBe(true);
+    expect(definitions.importMemoryRepoFolder).toBeUndefined();
+    expect(validate("keepMemoryRepoEntry", { ...ref, target: "lessons" })).not.toThrow();
+    expect(validate("keepMemoryRepoEntry", { ...ref, target: "MEMORY" })).toThrow();
+    expect(validate("keepMemoryRepoEntry", ref)).toThrow();
   });
 
   it("mirrors the desktop dream methods with the same validation", async () => {

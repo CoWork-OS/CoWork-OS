@@ -20,6 +20,12 @@ export const MEMORY_REPO_ME_FILE = "me.md";
 export const MEMORY_REPO_LESSONS_FILE = "lessons.md";
 export const MEMORY_REPO_INBOX_FILE = "inbox.md";
 export const MEMORY_REPO_WORKSPACES_DIR = "workspaces";
+/**
+ * Shared notes of agents working on one goal (docs/memory-repo-phase5-design.md §2):
+ * `swarms/<slug>/`. Not the user's memory: never linked from MEMORY.md, never in the Hub,
+ * never read by dreams.
+ */
+export const MEMORY_REPO_SWARMS_DIR = "swarms";
 export const MEMORY_REPO_INDEX_HEADING = "## Index";
 
 /** Size limits (§3). */
@@ -278,4 +284,9 @@ export function isSafeRepoPath(relPath: string): boolean {
   return normalized
     .split("/")
     .every((segment) => segment && segment !== "." && segment !== ".." && !segment.startsWith("."));
+}
+
+/** Whether a repo-relative path is inside `swarms/`. */
+export function isSwarmRepoPath(relPath: string): boolean {
+  return String(relPath || "").replace(/\\/g, "/").startsWith(`${MEMORY_REPO_SWARMS_DIR}/`);
 }

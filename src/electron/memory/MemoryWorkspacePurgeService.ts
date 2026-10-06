@@ -177,6 +177,14 @@ export class MemoryWorkspacePurgeService {
         result.errors.push(`memory repo: ${errorMessage(error)}`);
       }
     }
+    // A deleted root task takes its swarm folder with it (docs/memory-repo-phase5-design.md §2).
+    if (SAFE_TASK_ID.test(params.taskId)) {
+      try {
+        await MemoryRepoService.get()?.purgeSwarm(params.taskId);
+      } catch (error) {
+        result.errors.push(`swarm notes: ${errorMessage(error)}`);
+      }
+    }
     const workspacePath = params.workspacePath;
     if (!workspacePath || !SAFE_TASK_ID.test(params.taskId)) return result;
 

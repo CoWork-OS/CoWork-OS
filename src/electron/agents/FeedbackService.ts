@@ -2,13 +2,19 @@ import { ensureWorkspaceDirectorySync } from "../utils/workspace-directory";
 import { recentTaskEventsOfType } from "./agent-signal-reads";
 import { AgentRoleRepository } from "./agent-repository-facades";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
 import type Database from "better-sqlite3";
 import type { AgentDaemon } from "../agent/daemon";
 
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
+import { isThirdPartyGatewayTask } from "../gateway/gateway-sender-identity";
+import { MISTAKES_AUTO_BLOCK } from "../memory/generated-kit-blocks";
+import type { MemoryRepoService } from "../memory/repo/MemoryRepoService";
+import { writableMemoryRepo } from "../memory/repo/memory-repo-producers";
 import { createBackgroundKitPathGuard } from "../security/background-write-guard";
+import { createLogger } from "../utils/logger";
 
 type Any = any;
 
@@ -40,8 +46,9 @@ const KIT_DIRNAME = ".cowork";
 const FEEDBACK_DIR = path.join(KIT_DIRNAME, "feedback");
 const MISTAKES_PATH = path.join(KIT_DIRNAME, "MISTAKES.md");
 
-const AUTO_MISTAKES_START = "<!-- cowork:auto:mistakes:start -->";
-const AUTO_MISTAKES_END = "<!-- cowork:auto:mistakes:end -->";
+const [AUTO_MISTAKES_START, AUTO_MISTAKES_END] = MISTAKES_AUTO_BLOCK;
+
+const logger = createLogger("Feedback");
 
 const FLUSH_DEBOUNCE_MS = 12_000;
 const STARTUP_REBUILD_LIMIT = 2500;
@@ -104,9 +111,7 @@ function defaultMistakesTemplate(): string {
     "Use it to capture rejection reasons and durable preference patterns.",
     "",
     "## Patterns",
-    AUTO_MISTAKES_START,
-    "- (none)",
-    AUTO_MISTAKES_END,
+    "- ",
     "",
     "## Notes",
     "- ",
@@ -114,6 +119,18 @@ function defaultMistakesTemplate(): string {
   ].join("\n");
 }
 
+/** The folder entry subject of a feedback pattern: a repeat replaces the same line. */
+export function feedbackPatternSubject(patternKey: string): string {
+  return `feedback:${createHash("sha256").update(patternKey).digest("hex").slice(0, 16)}`;
+}
+
+/**
+ * Turns 👍/👎/edit feedback into the weekly feedback logs (`.cowork/feedback/`) and the
+ * reason-bearing rejections into correction patterns. While the memory folder is writable,
+ * each pattern from the workspace owner's live feedback is a `correction` entry of the
+ * workspace's folder file (docs/memory-repo-phase5-design.md §1); with the folder off the
+ * patterns go to the generated block of `.cowork/MISTAKES.md`, as before.
+ */
 export class FeedbackService {
   private taskRepo: TaskRepository;
   private workspaceRepo: WorkspaceRepository;
@@ -122,7 +139,10 @@ export class FeedbackService {
   private agentDaemon: AgentDaemon | null = null;
   private stopped = false;
 
-  constructor(private db: Database.Database) {
+  constructor(
+    private db: Database.Database,
+    private readonly getMemoryRepo: () => MemoryRepoService | null = () => writableMemoryRepo(),
+  ) {
     this.taskRepo = new TaskRepository(db);
     this.workspaceRepo = new WorkspaceRepository(db);
     this.agentRoleRepo = new AgentRoleRepository(db);
@@ -218,7 +238,6 @@ export class FeedbackService {
 
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace?.path) return;
-    if (!this.ensureKitDirExists(workspace.path)) return;
 
     const decision = typeof payload?.decision === "string" ? payload.decision.trim() : "";
     const reason = typeof payload?.reason === "string" ? payload.reason.trim() : "";
@@ -237,12 +256,28 @@ export class FeedbackService {
           ? task.assignedAgentRoleId
           : null;
     const agentName = await this.formatAgentName(agentRoleId);
+    const isPattern = (decision === "rejected" || decision === "edit") && Boolean(reason);
+    const patternDisplay = isPattern ? sanitizeInline(`${agentName}: ${reason}`) : "";
+
+    // Live feedback from the workspace owner (desktop or a private chat with the owner) is
+    // a correction in the memory folder. The startup rebuild never writes the folder.
+    if (isPattern && opts?.queueWeekly && !isThirdPartyGatewayTask(task)) {
+      await this.rememberPattern({
+        text: patternDisplay,
+        reason,
+        workspaceId,
+        workspaceName: workspace.name ?? null,
+        taskId,
+      });
+    }
+
+    if (!this.ensureKitDirExists(workspace.path)) return;
 
     const state = this.getWorkspaceState(workspaceId);
 
     // Pattern capture (institutional learning): only store reason-bearing negative feedback.
-    if ((decision === "rejected" || decision === "edit") && reason) {
-      const patternDisplay = sanitizeInline(`${agentName}: ${reason}`);
+    // These feed the MISTAKES.md fallback block (written only while the folder is off).
+    if (isPattern) {
       const key = patternDisplay.toLowerCase();
       const existing = state.patterns.get(key);
       if (existing) {
@@ -269,6 +304,36 @@ export class FeedbackService {
     }
 
     this.scheduleFlush(workspaceId);
+  }
+
+  private async rememberPattern(params: {
+    text: string;
+    reason: string;
+    workspaceId: string;
+    workspaceName: string | null;
+    taskId: string;
+  }): Promise<void> {
+    const service = this.getMemoryRepo();
+    if (!service) return;
+    try {
+      const result = await service.remember({
+        text: params.text,
+        kind: "correction",
+        scope: "workspace",
+        workspaceId: params.workspaceId,
+        workspaceName: params.workspaceName,
+        by: "user",
+        subject: feedbackPatternSubject(params.text.toLowerCase()),
+        taskId: params.taskId,
+        originText: params.reason,
+        origin: "feedback",
+      });
+      if (result.status === "skipped") {
+        logger.debug(`Feedback pattern not saved to the memory folder (${result.reason})`);
+      }
+    } catch (error) {
+      logger.warn("Saving a feedback pattern to the memory folder failed:", error);
+    }
   }
 
   private scheduleFlush(workspaceId: string): void {
@@ -346,7 +411,8 @@ export class FeedbackService {
       }
     }
 
-    // === Mistakes / preferences ===
+    // === Mistakes / preferences (fallback while the memory folder is off) ===
+    if (this.getMemoryRepo()) return;
     try {
       const absPath = path.join(workspace.path, MISTAKES_PATH);
       let current = "";

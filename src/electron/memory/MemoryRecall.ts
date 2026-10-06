@@ -27,7 +27,10 @@
  * `query` has no side effects. A use is counted with `markUsed`, which callers invoke for
  * hits they actually return in full or inject, never for a listing.
  */
-import { isMemoryRepoReadAllowed } from "../security/memory-repo-access";
+import {
+  getMemoryRepoSwarmReadPrefix,
+  isMemoryRepoReadAllowed,
+} from "../security/memory-repo-access";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { createLogger } from "../utils/logger";
@@ -45,6 +48,7 @@ import { redactSensitiveMarkdownContent } from "./markdown-index-sql";
 import { MemoryRepoService } from "./repo/MemoryRepoService";
 import {
   MEMORY_REPO_INBOX_FILE,
+  isSwarmRepoPath,
   memoryRepoRef,
   parseMemoryRepoEntries,
   parseMemoryRepoRef,
@@ -1156,10 +1160,14 @@ export class MemoryRecallService implements MemoryRecall {
 // Production wiring
 // ---------------------------------------------------------------------------
 
-function memoryRepoRecallSource(service: MemoryRepoService): MemoryRepoRecallSource {
+function memoryRepoRecallSource(
+  service: MemoryRepoService,
+  include: (relPath: string) => boolean = () => true,
+): MemoryRepoRecallSource {
   return {
-    listFiles: () => service.listFiles(),
-    readFile: (relPath) => service.readFile(relPath),
+    listFiles: async () => (await service.listFiles()).filter(include),
+    // Refs expanded by id go through the same filter (a swarm-only task reads nothing else).
+    readFile: async (relPath) => (include(relPath) ? service.readFile(relPath) : null),
     async stamp(relPath) {
       try {
         const stat = await fs.stat(path.join(service.root, relPath));
@@ -1294,8 +1302,15 @@ export function defaultMemoryRecallDeps(): MemoryRecallDeps {
       const service = MemoryRepoService.get();
       // Only for a task whose memoryRepo layer is on (private, not a sub-agent, memory on):
       // the tool call runs inside that task's memory-repo access scope.
-      if (!service?.isReady() || !isMemoryRepoReadAllowed()) return null;
-      return memoryRepoRecallSource(service);
+      if (!service?.isReady()) return null;
+      // Swarm folders (docs/memory-repo-phase5-design.md §2): only the task's own swarm. A
+      // swarm member without the memoryRepo layer recalls from that folder alone.
+      const swarmPrefix = getMemoryRepoSwarmReadPrefix();
+      const inOwnSwarm = (file: string) => !!swarmPrefix && file.startsWith(`${swarmPrefix}/`);
+      if (isMemoryRepoReadAllowed()) {
+        return memoryRepoRecallSource(service, (file) => !isSwarmRepoPath(file) || inOwnSwarm(file));
+      }
+      return swarmPrefix ? memoryRepoRecallSource(service, inOwnSwarm) : null;
     },
     teamMemoryRepos(workspaceId) {
       // Same gate as the personal folder: the task's memory-repo access scope.

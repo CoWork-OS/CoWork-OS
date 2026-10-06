@@ -257,10 +257,7 @@ Use it to capture rejection reasons and durable preference patterns.
 
 ## Patterns
 
-<!-- cowork:auto:mistakes:start -->
-
-- (none)
-<!-- cowork:auto:mistakes:end -->
+-
 
 ## Notes
 
@@ -324,10 +321,7 @@ It captures the shared history between you and the agent in this workspace.
 
 ## Milestones
 
-<!-- cowork:auto:lore:start -->
-
-- (none)
-<!-- cowork:auto:lore:end -->
+-
 
 ## Inside References
 

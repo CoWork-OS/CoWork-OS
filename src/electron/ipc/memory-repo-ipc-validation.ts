@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MEMORY_REPO_READ_LINES_MAX } from "../../shared/memory-repo-types";
+import { MEMORY_REPO_KEEP_TARGETS, MEMORY_REPO_READ_LINES_MAX } from "../../shared/memory-repo-types";
 import { MEMORY_REPO_LIMITS, isSafeRepoPath, parseMemoryRepoRef } from "../memory/repo/memory-repo-format";
 import { WorkspaceIdSchema } from "../utils/validation";
 
@@ -76,5 +76,15 @@ export const MemoryRepoOpenFileRequestSchema = z
       .refine((value) => !value.includes("\\") && isSafeRepoPath(value), {
         message: "Invalid memory file",
       }),
+  })
+  .strict();
+
+/** `memoryRepo:keepEntry`: move an inbox entry to `me.md`, `lessons.md` or the workspace's file. */
+export const MemoryRepoKeepEntryRequestSchema = z
+  .object({
+    workspaceId: WorkspaceIdSchema,
+    ref: MemoryRepoRefSchema,
+    hash: MemoryRepoEntryHashSchema,
+    target: z.enum(MEMORY_REPO_KEEP_TARGETS),
   })
   .strict();

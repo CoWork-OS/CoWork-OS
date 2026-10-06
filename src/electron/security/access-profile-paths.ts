@@ -5,6 +5,7 @@ import type { AccessFilesystemRule } from "../../shared/access-profiles";
 import type { Workspace } from "../../shared/types";
 import {
   getMemoryRepoRoot,
+  getMemoryRepoSwarmReadPrefix,
   getTeamMemoryRepoRoots,
   isMemoryRepoReadAllowed,
 } from "./memory-repo-access";
@@ -517,6 +518,30 @@ function classifyMemoryRepoPath(
   return inside ? "repo" : "outside";
 }
 
+/**
+ * Whether both the lexical and the canonical path are inside the personal memory repo's
+ * `swarms/<slug>/` folder the current tool call may read (docs/memory-repo-phase5-design.md
+ * §2). Both must be inside, so a symlink cannot reach the rest of the repo.
+ */
+function isWithinReadableSwarmFolder(lexicalPath: string, canonicalPath: string): boolean {
+  const prefix = getMemoryRepoSwarmReadPrefix();
+  const root = getMemoryRepoRoot();
+  if (!prefix || !root) return false;
+  const folder = nodePath.resolve(root, prefix);
+  const bases = new Set<string>([folder]);
+  try {
+    bases.add(canonicalizeAccessPath(folder));
+  } catch {
+    // The folder may not exist yet; the lexical path still applies.
+  }
+  const inside = (target: string) =>
+    [...bases].some((base) => {
+      const relative = nodePath.relative(base, target);
+      return relative === "" || (!relative.startsWith("..") && !nodePath.isAbsolute(relative));
+    });
+  return inside(nodePath.resolve(lexicalPath)) && inside(canonicalPath);
+}
+
 function resolveWorkspacePolicyPath(workspacePath: string, value: string): string {
   value = expandHomeShortcutPath(value);
   return canonicalizeAccessPath(
@@ -622,7 +647,8 @@ export function evaluateWorkspaceFilesystemAccess(
     if (ruleDecision === "deny") {
       return { decision: "deny", path: operationPath, reason: "profile_filesystem_denied" };
     }
-    return isMemoryRepoReadAllowed()
+    // A swarm member without the memoryRepo layer reads its own swarm folder only.
+    return isMemoryRepoReadAllowed() || isWithinReadableSwarmFolder(requestedPath, resolvedPath)
       ? { decision: "allow", path: operationPath, reason: "memory_repo_read" }
       : { decision: "deny", path: operationPath, reason: "memory_repo_unavailable" };
   }

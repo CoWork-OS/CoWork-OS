@@ -82,6 +82,7 @@ import { ChannelTools } from "./channel-tools";
 import { EmailImapTools } from "./email-imap-tools";
 import { GitTools } from "./git-tools";
 import { MemoryTools } from "./memory-tools";
+import { SwarmTools } from "./swarm-tools";
 import { readFilesByPatterns } from "./read-files";
 import type { LLMTool, LLMToolPromptRenderContext } from "../llm/types";
 import { SearchProviderFactory } from "../search";
@@ -180,6 +181,7 @@ import {
 } from "../tool-semantics";
 import { isComputerUseToolName } from "../../../shared/computer-use-contract";
 import { writeKitFileWithSnapshot } from "../../context/kit-revisions";
+import { appendLoreEntry, LORE_SECTIONS, type LoreSection } from "../../context/lore-file";
 import { getACPRegistry } from "../../acp";
 import { RemoteAgentInvoker } from "../../acp/remote-invoker";
 import {
@@ -615,6 +617,9 @@ export class ToolRegistry {
   private knowledgeGraphTools: KnowledgeGraphTools;
   private scrapingTools: ScrapingTools;
   private memoryTools: MemoryTools;
+  private swarmTools: SwarmTools;
+  /** swarm_note is offered only to swarm members (set by the executor). */
+  private swarmToolsAvailable = false;
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
   private qaTools: QATools;
@@ -697,6 +702,7 @@ export class ToolRegistry {
     this.knowledgeGraphTools = new KnowledgeGraphTools(workspace, daemon, taskId);
     this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
     this.memoryTools = new MemoryTools(workspace, daemon, taskId);
+    this.swarmTools = new SwarmTools(workspace, daemon, taskId);
     this.documentTools = new DocumentTools(
       workspace,
       taskId,
@@ -789,6 +795,7 @@ export class ToolRegistry {
       knowledgeGraph: KnowledgeGraphTools.isEnabled(),
       emailImap: Boolean(this.emailImapTools?.isAvailable?.()),
       channelHistory: Boolean(this.channelTools),
+      swarm: this.swarmToolsAvailable,
     };
     let infraState: { enabled: boolean; enabledCategories?: Any } = { enabled: false };
     try {
@@ -1083,6 +1090,16 @@ export class ToolRegistry {
     return this.citationTracker;
   }
 
+  /**
+   * Offer swarm_note (docs/memory-repo-phase5-design.md §2): the executor sets this when the
+   * task's swarm layer is on and the task is not a verifier. The tool checks membership again.
+   */
+  setSwarmToolsAvailable(available: boolean): void {
+    if (this.swarmToolsAvailable === available) return;
+    this.swarmToolsAvailable = available;
+    this.invalidateToolCaches();
+  }
+
   /** Enable deep work mode — extends spawn_agent max_turns cap to 250 */
   setDeepWorkMode(enabled: boolean): void {
     this._deepWorkMode = enabled;
@@ -1185,6 +1202,7 @@ export class ToolRegistry {
     this.knowledgeGraphTools.setWorkspace(workspace);
     this.scrapingTools.setWorkspace(workspace);
     this.memoryTools.setWorkspace(workspace);
+    this.swarmTools.setWorkspace(workspace);
     this.documentTools.setWorkspace(workspace);
     this.scratchpadTools.setWorkspace(workspace);
     this._codeExecTools = undefined;
@@ -1493,6 +1511,11 @@ export class ToolRegistry {
     // Memory tools: memory_recall, memory_remember, memory_forget, context_recall (audit
     // §8.3). The tools they replaced are retired (RETIRED_MEMORY_TOOL_NAMES).
     allTools.push(...MemoryTools.getToolDefinitions());
+
+    // Swarm notes: only for agents that share a goal with other agents (phase 5 §2).
+    if (this.swarmToolsAvailable) {
+      allTools.push(...SwarmTools.getToolDefinitions());
+    }
 
     // Scraping tools (Scrapling integration - JS rendering, structured extraction)
     // Only add when scraping is enabled in settings
@@ -2818,6 +2841,11 @@ export class ToolRegistry {
       "context_recall",
       async ({ request }) => this.memoryTools.contextRecall(request.input),
       readParallelSchedulerSpec,
+    );
+    register(
+      "swarm_note",
+      async ({ request }) => this.swarmTools.note(request.input),
+      exclusiveSchedulerSpec,
     );
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
@@ -4740,6 +4768,7 @@ ${skillDescriptions}`;
     if (name === "memory_remember") return await this.memoryTools.remember(input);
     if (name === "memory_forget") return await this.memoryTools.forget(input);
     if (name === "context_recall") return await this.memoryTools.contextRecall(input);
+    if (name === "swarm_note") return await this.swarmTools.note(input);
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
@@ -10593,10 +10622,9 @@ ${skillDescriptions}`;
       throw new Error(`Entry too long (max 200 characters, got ${entry.length})`);
     }
 
-    const section = input.section || "milestones";
-    const validSections = ["milestones", "references", "notes"];
-    if (!validSections.includes(section)) {
-      throw new Error(`Invalid section: ${section}. Valid options: ${validSections.join(", ")}`);
+    const section = (input.section || "milestones") as LoreSection;
+    if (!LORE_SECTIONS.includes(section)) {
+      throw new Error(`Invalid section: ${section}. Valid options: ${LORE_SECTIONS.join(", ")}`);
     }
 
     const workspacePath = this.workspace?.path;
@@ -10613,8 +10641,6 @@ ${skillDescriptions}`;
     const lorePath = path.join(kitDir, "LORE.md");
     this.assertWorkspaceKitPathAccess(lorePath, "read");
     this.assertWorkspaceKitPathAccess(lorePath, "write");
-    const AUTO_LORE_START = "<!-- cowork:auto:lore:start -->";
-    const AUTO_LORE_END = "<!-- cowork:auto:lore:end -->";
 
     let current = "";
     if (fs.existsSync(lorePath)) {
@@ -10623,27 +10649,6 @@ ${skillDescriptions}`;
       } catch {
         current = "";
       }
-    }
-
-    if (!current) {
-      current = [
-        "# Shared Lore",
-        "",
-        "This file is workspace-local and can be auto-updated by the system.",
-        "It captures the shared history between you and the agent in this workspace.",
-        "",
-        "## Milestones",
-        AUTO_LORE_START,
-        "- (none)",
-        AUTO_LORE_END,
-        "",
-        "## Inside References",
-        "- ",
-        "",
-        "## Notes",
-        "- ",
-        "",
-      ].join("\n");
     }
 
     // Sanitize the entry text
@@ -10655,55 +10660,8 @@ ${skillDescriptions}`;
     const now = new Date();
     const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-    if (section === "milestones") {
-      // Append within auto markers
-      const startIdx = current.indexOf(AUTO_LORE_START);
-      const endIdx = current.indexOf(AUTO_LORE_END);
-
-      if (startIdx >= 0 && endIdx > startIdx) {
-        const inner = current.slice(startIdx + AUTO_LORE_START.length, endIdx);
-        const existingLines = inner
-          .split("\n")
-          .map((l) => l.trimEnd())
-          .filter((l) => /^\s*-\s+\S/.test(l) && l.trim() !== "- (none)");
-        existingLines.push(`- [${dateStamp}] ${sanitized}`);
-        const capped = existingLines.slice(-40);
-        const body = capped.join("\n").trimEnd();
-        const replacement = `${AUTO_LORE_START}\n${body}\n${AUTO_LORE_END}`;
-
-        const before = current.slice(0, startIdx).trimEnd();
-        const after = current.slice(endIdx + AUTO_LORE_END.length).trimStart();
-        current = `${before}\n${replacement}\n\n${after}`.trimEnd() + "\n";
-      } else {
-        // No markers — append under Milestones heading
-        const heading = "## Milestones";
-        const headingIdx = current.indexOf(heading);
-        if (headingIdx >= 0) {
-          const afterHeading = headingIdx + heading.length;
-          const before = current.slice(0, afterHeading);
-          const after = current.slice(afterHeading);
-          current = `${before}\n- [${dateStamp}] ${sanitized}${after}`;
-        } else {
-          current += `\n## Milestones\n- [${dateStamp}] ${sanitized}\n`;
-        }
-      }
-    } else {
-      // For "references" or "notes", append under the matching heading
-      const headingMap: Record<string, string> = {
-        references: "## Inside References",
-        notes: "## Notes",
-      };
-      const heading = headingMap[section];
-      const headingIdx = current.indexOf(heading);
-      if (headingIdx >= 0) {
-        const afterHeading = headingIdx + heading.length;
-        const before = current.slice(0, afterHeading);
-        const after = current.slice(afterHeading);
-        current = `${before}\n- ${sanitized}${after}`;
-      } else {
-        current += `\n${heading}\n- ${sanitized}\n`;
-      }
-    }
+    // Milestones are plain lines under their heading, outside the retired generated block.
+    current = appendLoreEntry(current, section, sanitized, dateStamp);
 
     writeKitFileWithSnapshot(
       lorePath,

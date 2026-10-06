@@ -33,7 +33,8 @@ vi.mock("../agent-repository-facades", () => ({
   },
 }));
 
-import { FeedbackService } from "../FeedbackService";
+import { FeedbackService, feedbackPatternSubject } from "../FeedbackService";
+import type { MemoryRepoService } from "../../memory/repo/MemoryRepoService";
 import { CrossSignalService } from "../CrossSignalService";
 import type { AgentDaemon } from "../../agent/daemon";
 
@@ -151,6 +152,130 @@ describe("FeedbackService access boundary", () => {
     expect(() => guard!(path.join(tmpDir, ".cowork", "MISTAKES.md"), "write")).toThrow(
       /Access denied/,
     );
+  });
+});
+
+describe("FeedbackService with the memory folder", () => {
+  type RememberInput = Record<string, unknown>;
+  function folder() {
+    const remember = vi.fn(async (_input: RememberInput) => ({
+      status: "written" as const,
+      action: "inserted" as const,
+      ref: "repo:workspaces/ws.md#L3",
+      path: "workspaces/ws.md",
+      line: 3,
+      redactions: 0,
+    }));
+    const service = { remember, isWritable: () => true } as unknown as MemoryRepoService;
+    return { remember, getService: () => service };
+  }
+  const mistakesWrites = () =>
+    writeKitFileWithSnapshot.mock.calls.filter(
+      (call) => call[0] === path.join(tmpDir, ".cowork", "MISTAKES.md"),
+    );
+
+  it("saves the owner's live reason as a workspace correction and skips the MISTAKES.md block", async () => {
+    workspaces.set("ws-1", { ...workspaces.get("ws-1"), name: "Acme" });
+    const { remember, getService } = folder();
+    const daemon = new EventEmitter();
+    const service = new FeedbackService({} as never, getService);
+    await service.start(daemon as unknown as AgentDaemon);
+
+    daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "Too vague" });
+    await vi.waitFor(() => expect(remember).toHaveBeenCalledTimes(1));
+    daemon.emit("user_feedback", { taskId: "task-a", decision: "edit", reason: "too   vague" });
+    await vi.waitFor(() => expect(remember).toHaveBeenCalledTimes(2));
+    // Approvals and reasonless rejections are not patterns.
+    daemon.emit("user_feedback", { taskId: "task-a", decision: "approved", reason: "Nice" });
+    daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected" });
+    await service.stop();
+
+    expect(remember).toHaveBeenCalledTimes(2);
+    expect(remember.mock.calls[0][0]).toEqual({
+      text: "Researcher: Too vague",
+      kind: "correction",
+      scope: "workspace",
+      workspaceId: "ws-1",
+      workspaceName: "Acme",
+      by: "user",
+      subject: feedbackPatternSubject("researcher: too vague"),
+      taskId: "task-a",
+      originText: "Too vague",
+      origin: "feedback",
+    });
+    expect(remember.mock.calls[0][0].subject).toMatch(/^feedback:[0-9a-f]{16}$/);
+    // A repeat of the same pattern replaces the same line.
+    expect(remember.mock.calls[1][0].subject).toBe(remember.mock.calls[0][0].subject);
+    expect(mistakesWrites()).toHaveLength(0);
+    expect(fs.existsSync(path.join(tmpDir, ".cowork", "MISTAKES.md"))).toBe(false);
+    // The weekly feedback log is kept.
+    const files = fs.readdirSync(path.join(tmpDir, ".cowork", "feedback"));
+    expect(files).toHaveLength(1);
+  });
+
+  it("writes the folder for the owner's private chat but not for another sender", async () => {
+    tasks.set("task-owner", {
+      id: "task-owner",
+      workspaceId: "ws-1",
+      assignedAgentRoleId: "role-b",
+      agentConfig: { originChannel: "telegram", gatewayContext: "private", gatewaySenderIsOwner: true },
+    });
+    tasks.set("task-other", {
+      id: "task-other",
+      workspaceId: "ws-1",
+      assignedAgentRoleId: "role-b",
+      agentConfig: { originChannel: "telegram", gatewayContext: "private", gatewaySenderIsOwner: false },
+    });
+    const { remember, getService } = folder();
+    const daemon = new EventEmitter();
+    const service = new FeedbackService({} as never, getService);
+    await service.start(daemon as unknown as AgentDaemon);
+
+    daemon.emit("user_feedback", { taskId: "task-other", decision: "rejected", reason: "Stranger" });
+    daemon.emit("user_feedback", { taskId: "task-owner", decision: "rejected", reason: "Owner" });
+    await vi.waitFor(() => expect(remember).toHaveBeenCalledTimes(1));
+    await service.stop();
+
+    expect(remember).toHaveBeenCalledTimes(1);
+    expect(remember.mock.calls[0][0]).toMatchObject({ text: "Writer: Owner", taskId: "task-owner" });
+    expect(mistakesWrites()).toHaveLength(0);
+  });
+
+  it("saves to the folder without a .cowork kit and never from the startup rebuild", async () => {
+    fs.rmSync(path.join(tmpDir, ".cowork"), { recursive: true, force: true });
+    recentTaskEventsOfType.mockResolvedValueOnce([
+      {
+        taskId: "task-a",
+        timestamp: Date.now() - 1000,
+        payload: JSON.stringify({ decision: "rejected", reason: "Old reason" }),
+      },
+    ]);
+    const { remember, getService } = folder();
+    const daemon = new EventEmitter();
+    const service = new FeedbackService({} as never, getService);
+    await service.start(daemon as unknown as AgentDaemon);
+    expect(remember).not.toHaveBeenCalled();
+
+    daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "New reason" });
+    await vi.waitFor(() => expect(remember).toHaveBeenCalledTimes(1));
+    await service.stop();
+    expect(remember.mock.calls[0][0]).toMatchObject({ text: "Researcher: New reason" });
+    expect(fs.existsSync(path.join(tmpDir, ".cowork"))).toBe(false);
+  });
+
+  it("falls back to the MISTAKES.md block when the folder is not writable", async () => {
+    const daemon = new EventEmitter();
+    const service = new FeedbackService({} as never, () => null);
+    await service.start(daemon as unknown as AgentDaemon);
+    daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "Too vague" });
+    await vi.waitFor(() => {
+      expect((service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size).toBe(1);
+    });
+    await service.stop();
+
+    const written = mistakesWrites().at(-1)?.[1] as string;
+    expect(written).toContain("<!-- cowork:auto:mistakes:start -->\n- Researcher: Too vague\n");
+    expect(written).toContain("## Notes");
   });
 });
 

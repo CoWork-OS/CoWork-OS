@@ -492,6 +492,11 @@ export interface SessionRuntimeDeps {
    * gated again by the policy's `memoryRepo` layer.
    */
   buildMemoryRepoBlock?: () => string | Promise<string>;
+  /**
+   * The `<cowork_swarm>` block (docs/memory-repo-phase5-design.md §2): peer notes of the
+   * agents on the same goal, gated again by the policy's `swarm` layer.
+   */
+  buildSwarmBlock?: () => string | Promise<string>;
   upsertPinnedUserBlock: (messages: LLMMessage[], opts: Any) => void;
   removePinnedUserBlock: (messages: LLMMessage[], tag: string) => void;
   computeSharedContextKey: () => string;
@@ -2104,6 +2109,8 @@ export class SessionRuntime {
     allowMemoryInjection: boolean;
     /** The policy's `memoryRepo` layer: personal, private gateway only, never sub-agents. */
     allowMemoryRepoInjection?: boolean;
+    /** The policy's `swarm` layer: the task shares a goal with other agents (sub-agents too). */
+    allowSwarmInjection?: boolean;
     memoryQuery: string;
     contextLabel: string;
     lastTurnMemoryRecallQuery: string;
@@ -2174,6 +2181,23 @@ export class SessionRuntime {
       });
     } else {
       this.deps.removePinnedUserBlock(messages, tags.memoryRepo.open);
+    }
+
+    // Swarm notes follow the memory folder block: peer context, never instructions.
+    const swarmBlock =
+      opts.allowSwarmInjection && this.deps.buildSwarmBlock ? await this.deps.buildSwarmBlock() : "";
+    if (swarmBlock) {
+      this.deps.upsertPinnedUserBlock(messages, {
+        tag: tags.swarm.open,
+        content: swarmBlock,
+        insertAfterTag: memoryRepoBlock
+          ? tags.memoryRepo.open
+          : userProfileBlock
+            ? tags.userProfile.open
+            : tags.compactionSummary.open,
+      });
+    } else {
+      this.deps.removePinnedUserBlock(messages, tags.swarm.open);
     }
 
     if (opts.allowSharedContextInjection) {

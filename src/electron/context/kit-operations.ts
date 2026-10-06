@@ -230,9 +230,7 @@ export const templatesForInit = (
         `This file is workspace-local and can be auto-updated by the system.\n` +
         `It captures shared history between the human and the assistant.\n\n` +
         `## Milestones\n` +
-        `<!-- cowork:auto:lore:start -->\n` +
-        `- (none)\n` +
-        `<!-- cowork:auto:lore:end -->\n\n` +
+        `- \n\n` +
         `## Notes\n` +
         `- \n`,
     },
@@ -424,9 +422,7 @@ export const templatesForInit = (
         `This file is workspace-local and can be auto-updated by the system.\n` +
         `Use it to capture rejection reasons and durable preference patterns.\n\n` +
         `## Patterns\n` +
-        `<!-- cowork:auto:mistakes:start -->\n` +
-        `- (none)\n` +
-        `<!-- cowork:auto:mistakes:end -->\n\n` +
+        `- \n\n` +
         `## Notes\n` +
         `- \n`,
     },
@@ -632,7 +628,7 @@ export const ensureDefaultKitCronJobs = async (
       "   - limit: 500",
       `   - workspace_id: "${workspaceId}"`,
       "   - include_payload: true",
-      "2) Read `.cowork/MISTAKES.md` to ground preference patterns in actual recorded feedback.",
+      "2) Ground preference patterns in actual recorded feedback: the corrections in the memory folder (your memory context) and `.cowork/MISTAKES.md`.",
       "3) Write a weekly report to `.cowork/memory/weekly/{{date}}.md` with:",
       "   - Wins (what shipped / moved forward)",
       "   - Misses (what stalled / why)",
@@ -645,7 +641,7 @@ export const ensureDefaultKitCronJobs = async (
       "   Keep it to 5-15 bullets, only durable learnings and preferences (no daily noise).",
       "",
       "Constraints:",
-      "- Do not hallucinate; ground everything in tool output and `.cowork/MISTAKES.md`.",
+      "- Do not hallucinate; ground everything in tool output, `.cowork/MISTAKES.md` and the memory folder's corrections.",
       '- Ignore events from tasks titled "Kit: Hourly Memory Digest" / "Kit: Daily Context Sync" / "Kit: Weekly Synthesis".',
       "",
       "Return 1-3 sentences confirming the write (do not paste the full report).",

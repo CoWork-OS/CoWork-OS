@@ -54,6 +54,8 @@ import type {
   MemoryRepoDreamsReport,
   MemoryRepoEntriesReport,
   MemoryRepoEntryActionResult,
+  MemoryRepoImportResult,
+  MemoryRepoKeepTarget,
   MemoryRepoLine,
   MemoryRepoStatusReport,
 } from "../shared/memory-repo-types";
@@ -4331,6 +4333,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY, data),
   openMemoryRepoFile: (data: { workspaceId: string; path: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, data),
+  keepMemoryRepoEntry: (data: {
+    workspaceId: string;
+    ref: string;
+    hash: string;
+    target: MemoryRepoKeepTarget;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY, data),
+  // Main opens the folder picker; no path is sent from here.
+  importMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -7985,6 +7995,13 @@ export interface ElectronAPI {
     hash: string;
   }) => Promise<MemoryRepoEntryActionResult>;
   openMemoryRepoFile: (data: { workspaceId: string; path: string }) => Promise<{ success: true }>;
+  keepMemoryRepoEntry: (data: {
+    workspaceId: string;
+    ref: string;
+    hash: string;
+    target: MemoryRepoKeepTarget;
+  }) => Promise<MemoryRepoEntryActionResult>;
+  importMemoryRepoFolder: () => Promise<MemoryRepoImportResult>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

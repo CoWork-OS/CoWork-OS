@@ -1644,6 +1644,8 @@ export type ToolType =
   | "memory_remember"
   | "memory_forget"
   | "context_recall"
+  // Swarm notes (peer notes of agents on one goal)
+  | "swarm_note"
   // Scratchpad tools (session-scoped agent notes)
   | "scratchpad_write"
   | "scratchpad_read"
@@ -2096,6 +2098,8 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   memory_remember: "write",
   memory_forget: "write",
   context_recall: "read",
+  // Peer notes in the task's swarm folder (memory folder `swarms/<slug>/`).
+  swarm_note: "write",
   // Scratchpad
   scratchpad_write: "write",
   scratchpad_read: "read",
@@ -2132,12 +2136,16 @@ export const CONTEXT_TOOL_RESTRICTIONS: Record<
   },
   group: {
     deniedGroups: ["group:memory"],
-    deniedTools: ["read_clipboard", "write_clipboard"],
+    // swarm_note writes the owner's memory folder. It is not in group:memory (read-only
+    // helpers keep it), so shared contexts deny it by name.
+    deniedTools: ["read_clipboard", "write_clipboard", "swarm_note"],
     requireApprovalFor: ["delete_file"],
   },
   public: {
     deniedGroups: ["group:memory"],
-    deniedTools: ["read_clipboard", "write_clipboard"],
+    // swarm_note writes the owner's memory folder. It is not in group:memory (read-only
+    // helpers keep it), so shared contexts deny it by name.
+    deniedTools: ["read_clipboard", "write_clipboard", "swarm_note"],
     requireApprovalFor: ["delete_file"],
   },
 };
@@ -9692,6 +9700,9 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_REMOVE_ENTRY: "memoryRepo:removeEntry",
   MEMORY_REPO_PIN_ENTRY: "memoryRepo:pinEntry",
   MEMORY_REPO_OPEN_FILE: "memoryRepo:openFile",
+  // Importing notes from a folder and keeping inbox entries (docs/memory-repo-phase5-design.md §3)
+  MEMORY_REPO_IMPORT_FOLDER: "memoryRepo:importFolder",
+  MEMORY_REPO_KEEP_ENTRY: "memoryRepo:keepEntry",
   // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
   MEMORY_REPO_SYNC_NOW: "memoryRepo:syncNow",
 

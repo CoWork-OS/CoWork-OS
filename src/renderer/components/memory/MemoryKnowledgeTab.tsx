@@ -10,6 +10,7 @@ import {
 import type {
   MemoryRepoEntriesReport,
   MemoryRepoHubEntry,
+  MemoryRepoKeepTarget,
 } from "../../../shared/memory-repo-types";
 import { hasHostMethod } from "../../host/browser-capabilities";
 import { takeMemoryHubFocus } from "./memory-hub-focus";
@@ -21,6 +22,7 @@ import {
   deleteFolderEntry,
   editFolderEntry,
   filterFolderFiles,
+  keepFolderEntry,
   pinFolderEntry,
   type FolderFlowResult,
   type MemoryFolderApi,
@@ -555,6 +557,8 @@ export function MemoryKnowledgeTab({
   );
   const canOpenFile =
     hasHostMethod("openMemoryRepoFile") && typeof api().openMemoryRepoFile === "function";
+  const canKeep =
+    hasHostMethod("keepMemoryRepoEntry") && typeof api().keepMemoryRepoEntry === "function";
   const [folderReport, setFolderReport] = useState<MemoryRepoEntriesReport | null>(null);
   const [folderEditing, setFolderEditing] = useState<{ ref: string; draft: string } | null>(null);
   const [folderBusyRef, setFolderBusyRef] = useState<string | null>(null);
@@ -787,6 +791,14 @@ export function MemoryKnowledgeTab({
                 void applyFolder(entry.ref, (report) =>
                   deleteFolderEntry(folderApi(), workspaceId, report, entry, confirm),
                 ),
+              ...(canKeep
+                ? {
+                    onKeep: (entry: MemoryRepoHubEntry, target: MemoryRepoKeepTarget) =>
+                      void applyFolder(entry.ref, (report) =>
+                        keepFolderEntry(folderApi(), workspaceId, report, entry, target),
+                      ),
+                  }
+                : {}),
               onOpenFile: (path: string) => {
                 const open = api().openMemoryRepoFile;
                 if (!open) return;

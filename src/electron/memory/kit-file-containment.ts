@@ -1,13 +1,16 @@
 /**
  * Containment check for the workspace kit files that memory code rewrites
- * (`.cowork/USER.md`, `.cowork/MEMORY.md`): they are touched only when they stay inside
- * the workspace.
+ * (`.cowork/USER.md`, `.cowork/MEMORY.md`, `.cowork/MISTAKES.md`, `.cowork/LORE.md`): they
+ * are touched only when they stay inside the workspace.
  */
 import fsp from "fs/promises";
 import path from "path";
 
-/** Kit files that once carried generated memory blocks. */
-export const KIT_FILE_NAMES: readonly string[] = ["USER.md", "MEMORY.md"];
+/**
+ * Kit files that carry (or once carried) generated memory blocks: the one-time strip
+ * rewrites them, so each is also checked for containment.
+ */
+export const KIT_FILE_NAMES: readonly string[] = ["USER.md", "MEMORY.md", "MISTAKES.md", "LORE.md"];
 
 function isInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);

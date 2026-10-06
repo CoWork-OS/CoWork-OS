@@ -3441,3 +3441,56 @@ describe("SessionRuntime pinned memory folder block", () => {
     );
   });
 });
+
+describe("SessionRuntime pinned swarm block", () => {
+  const prepare = (runtime: Any, allowMemoryRepoInjection: boolean, allowSwarmInjection: boolean) =>
+    runtime.prepareMessagesForTurnIteration({
+      messages: [{ role: "user", content: "hi" }],
+      phase: "step",
+      systemPromptTokens: 0,
+      allowSharedContextInjection: false,
+      allowMemoryInjection: false,
+      allowMemoryRepoInjection,
+      allowSwarmInjection,
+      memoryQuery: "",
+      contextLabel: "step:swarm-gate",
+      lastTurnMemoryRecallQuery: "",
+      lastTurnMemoryRecallBlock: "",
+      lastSharedContextKey: "",
+      lastSharedContextBlock: "",
+    });
+
+  it("pins swarm notes after the memory folder block only under the swarm layer", async () => {
+    const harness = createHarness();
+    const runtime = harness.runtime as Any;
+    const buildSwarmBlock = vi.fn().mockResolvedValue("<cowork_swarm>\nGoal: x\n</cowork_swarm>");
+    const upsertPinnedUserBlock = vi.fn();
+    const removePinnedUserBlock = vi.fn();
+    runtime.deps.buildMemoryRepoBlock = () => "<cowork_memory_repo>\n- a\n</cowork_memory_repo>";
+    runtime.deps.buildSwarmBlock = buildSwarmBlock;
+    runtime.deps.upsertPinnedUserBlock = upsertPinnedUserBlock;
+    runtime.deps.removePinnedUserBlock = removePinnedUserBlock;
+    const swarmTag = PINNED_CONTEXT_TAGS.swarm.open;
+
+    await prepare(runtime, true, false);
+    expect(buildSwarmBlock).not.toHaveBeenCalled();
+    expect(removePinnedUserBlock).toHaveBeenCalledWith(expect.anything(), swarmTag);
+
+    await prepare(runtime, true, true);
+    expect(upsertPinnedUserBlock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tag: swarmTag, insertAfterTag: PINNED_CONTEXT_TAGS.memoryRepo.open }),
+    );
+
+    // A sub-agent: no personal memory, still the swarm block.
+    upsertPinnedUserBlock.mockClear();
+    await prepare(runtime, false, true);
+    expect(upsertPinnedUserBlock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        tag: swarmTag,
+        insertAfterTag: PINNED_CONTEXT_TAGS.compactionSummary.open,
+      }),
+    );
+  });
+});

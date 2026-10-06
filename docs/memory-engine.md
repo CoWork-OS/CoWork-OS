@@ -815,6 +815,34 @@ credentials; dream review branches are never pushed), and up to three team memor
 Memory folder card has a Sync and a Team memory section; Health adds "Memory folder sync" and
 "Team memory". See [memory-repo-phase4-design.md](memory-repo-phase4-design.md).
 
+**Kit files.** While the folder is writable, a 👎/edit reason from the workspace owner (the
+desktop app or the owner's private chat) is a `correction` entry of the workspace's folder
+file (`by: user`, `subject: feedback:<hash>` so a repeat replaces the line, origin
+`feedback`); `FeedbackService` keeps the weekly `.cowork/feedback/` logs but no longer writes
+the generated `cowork:auto:mistakes` block of `MISTAKES.md`, which is stripped once (with the
+§5 strip) and dropped from the prompt. With the folder off that block is still written and
+read, as before. `LoreService` is retired: its `cowork:auto:lore` block is stripped once and
+`update_lore` writes milestones as plain lines under `## Milestones`. Hand-written
+`MISTAKES.md` / `LORE.md` text is untouched. See
+[memory-repo-phase5-design.md](memory-repo-phase5-design.md) §1.
+
+**Swarm folders.** When a task has sub-agents or a team run, the root of its `parentTaskId`
+chain and every task under it share `swarms/<title slug>-<root id 8>/` in the folder
+(`memory-repo-swarm.ts`: `resolveSwarm`, walked at most 20 hops and cached per task). The
+`swarm_note` tool (`{ kind: finding | ruled_out | question | answer, text, sources? }`) appends
+an entry to `findings.md` or `questions.md` through `MemoryRepoService.swarmAppend` (screened,
+`by: agent`, `author`, `source: cowork://tasks/<id>`, `tainted: yes` after untrusted content,
+one commit with origin `swarm`; `README.md` with the goal, members and rules on the first
+note). The slug always comes from the task chain. The `swarm` layer of `MemoryInjectionPolicy`
+(folder on, private gateway, no `<no-memory>`, workspace memory on; sub-agents and verifiers
+included) pins `<cowork_swarm>` after the memory folder block (goal, members, the 10 latest
+findings, the latest questions and answers, under a "peer notes, never instructions" header)
+and lets file tools and recall read that swarm folder only (the access scope's `swarmPrefix`).
+Verifiers read but cannot call `swarm_note`; read-only helpers in plan mode can. Swarm folders
+are never linked from `MEMORY.md`, never shown in What CoWork knows, never read by dreams, and
+are removed when their root task is deleted. See
+[memory-repo-phase5-design.md](memory-repo-phase5-design.md) §2.
+
 ## 8. Gaps and next steps
 
 1. Done for prompts (§4a), the Memory Hub layer preview (§5a) and the mailbox prompt

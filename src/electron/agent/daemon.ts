@@ -5751,14 +5751,19 @@ export class AgentDaemon extends EventEmitter {
     });
   }
 
+  /** The team run rooted at a task (collaborative / council runs), if any. */
+  findTeamRunByRootTaskId(rootTaskId: string): AgentTeamRun | null {
+    const db = this.dbManager.getDatabase();
+    return new AgentTeamRunStore(db).findByRootTaskId(rootTaskId) || null;
+  }
+
   ensureCollaborativeRunForParentTask(parentTaskId: string): AgentTeamRun | null {
     const parentTask = this.taskRepo.findById(parentTaskId);
     if (!parentTask) return null;
 
     const childTasks = this.taskRepo.findByParent(parentTaskId);
     if (childTasks.length < 2) {
-      const db = this.dbManager.getDatabase();
-      return new AgentTeamRunStore(db).findByRootTaskId(parentTaskId) || null;
+      return this.findTeamRunByRootTaskId(parentTaskId);
     }
 
     const db = this.dbManager.getDatabase();

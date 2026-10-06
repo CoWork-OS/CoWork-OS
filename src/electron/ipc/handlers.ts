@@ -35,6 +35,7 @@ import {
   ipcMain,
   shell,
   BrowserWindow,
+  dialog,
   app as _app,
   nativeTheme,
   type IpcMainInvokeEvent,
@@ -11622,6 +11623,21 @@ export async function setupIpcHandlers(
     // Memory Hub "What CoWork knows" over the folder: entries, edit, delete, pin, open file.
     getHubService: () => MemoryRepoService.get(),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+    workspaceName: async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.name ?? null,
+    // "Import notes from a folder": the folder is chosen here, never sent by the renderer.
+    pickFolder: async () => {
+      const options: Electron.OpenDialogOptions = {
+        properties: ["openDirectory"],
+        title: "Import notes from a folder",
+        buttonLabel: "Import",
+      };
+      const owner = BrowserWindow.getFocusedWindow() ?? getMainWindow();
+      const result =
+        owner && !owner.isDestroyed()
+          ? await dialog.showOpenDialog(owner, options)
+          : await dialog.showOpenDialog(options);
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
   });
 }
 

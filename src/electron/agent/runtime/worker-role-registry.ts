@@ -107,6 +107,12 @@ export function getReadOnlyExecutionToolRestrictions(): string[] {
   return [...VERIFIER_DENY_LIST];
 }
 
+/**
+ * Verifiers read swarm notes but never write them (docs/memory-repo-phase5-design.md §2).
+ * Kept out of VERIFIER_DENY_LIST: read-only helpers share that list and may write notes.
+ */
+const VERIFIER_ONLY_DENY_LIST = ["swarm_note"];
+
 const RESEARCHER_DENY_LIST = [
   "group:write",
   "delete_file",
@@ -198,7 +204,7 @@ const BUILTIN_WORKER_ROLES: Record<WorkerRoleKind, WorkerRoleSpec> = {
     retainMemory: false,
     llmProfile: "strong",
     executionMode: "verified",
-    toolRestrictions: VERIFIER_DENY_LIST,
+    toolRestrictions: [...VERIFIER_DENY_LIST, ...VERIFIER_ONLY_DENY_LIST],
     mutationAllowed: false,
     completionContract:
       "Start the final answer with VERDICT: PASS|FAIL|PARTIAL, then give the smallest evidence-backed finding set.",
@@ -377,6 +383,9 @@ export function resolveWorkerRoleAgentConfig(
   );
   for (const entry of readOnlyExecution ? VERIFIER_DENY_LIST : spec.toolRestrictions) {
     restrictions.add(entry);
+  }
+  if (workerRole === "verifier") {
+    for (const entry of VERIFIER_ONLY_DENY_LIST) restrictions.add(entry);
   }
   next.toolRestrictions = Array.from(restrictions);
   return next;

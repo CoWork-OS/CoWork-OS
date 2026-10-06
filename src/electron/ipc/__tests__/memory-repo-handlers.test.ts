@@ -117,7 +117,7 @@ describe("memory folder IPC", () => {
       channel.startsWith("memoryRepo:"),
     );
     expect(Object.keys(handlers).sort()).toEqual([...channels].sort());
-    expect(channels).toHaveLength(16);
+    expect(channels).toHaveLength(18);
   });
 
   it("returns the status and rate-limits every channel", async () => {
@@ -143,6 +143,8 @@ describe("memory folder IPC", () => {
     await handlers[IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY]({ ...ref, text: "Prefers tea" });
     await handlers[IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY](ref);
     await handlers[IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY](ref);
+    await handlers[IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY]({ ...ref, target: "me" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER](undefined);
     await expect(
       handlers[IPC_CHANNELS.MEMORY_REPO_OPEN_FILE]({ workspaceId, path: "me.md" }),
     ).rejects.toThrow(/not available/);

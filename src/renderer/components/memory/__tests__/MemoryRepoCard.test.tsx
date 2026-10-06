@@ -3,7 +3,17 @@ import { describe, expect, it, vi } from "vitest";
 import type { MemoryRepoStatusReport } from "../../../../shared/memory-repo-types";
 import { dreamLastLine, dreamNowMessage } from "../memory-repo-dreams-model";
 import {
+  MemoryRepoSyncView,
+  MemoryRepoTeamView,
+  memoryRepoSyncLine,
+  syncNowMessage,
+  teamRepoDraftProblem,
+  teamRepoStatusLine,
+  teamRepoWorkspacesLabel,
+} from "../MemoryRepoSyncTeam";
+import {
   COMPACT_HISTORY_CONFIRM,
+  compactHistoryConfirm,
   MemoryRepoCard,
   MemoryRepoDreamingView,
   memoryRepoErrorMessage,
@@ -209,5 +219,191 @@ describe("Memory folder card: Dreaming", () => {
       />,
     );
     expect(off).not.toContain("memory-repo-dreaming");
+  });
+});
+
+describe("Memory folder card: sync and team memory", () => {
+  const sync = {
+    remoteUrl: "https://github.com/sam/memory.git",
+    lastPullAt: Date.now() - 5 * 60_000,
+    lastPushAt: Date.now() - 2 * 60_000,
+    ahead: 1,
+    behind: 0,
+    conflict: null,
+    lastError: null,
+  };
+  const syncProps = {
+    savedRemoteUrl: "git@github.com:sam/memory.git",
+    confirmed: true,
+    folderReady: true,
+    sync,
+    canSyncNow: true,
+    disabled: false,
+    syncing: false,
+    message: null,
+    onSaveRemoteUrl: vi.fn(),
+    onConfirmChange: vi.fn(),
+    onSyncNow: vi.fn(),
+  };
+
+  it("adds the replaced remote history to the compact confirmation when sync is on", () => {
+    expect(compactHistoryConfirm(false)).toBe(COMPACT_HISTORY_CONFIRM);
+    expect(compactHistoryConfirm(true)).toContain(
+      "It also replaces the history of your synced repository.",
+    );
+  });
+
+  it("renders the sync section with its explanation, URL, confirmation and Sync now", () => {
+    const html = renderToStaticMarkup(<MemoryRepoSyncView {...syncProps} />);
+    expect(html).toContain("Sync");
+    expect(html).toContain("private git repository you own");
+    expect(html).toContain("credential helper or SSH");
+    expect(html).toContain("Dream review branches are never pushed");
+    expect(html).toContain('value="git@github.com:sam/memory.git"');
+    expect(html).toContain("This repository is private and mine");
+    expect(html).toContain("Sync now");
+    expect(html).toContain("With https://github.com/sam/memory.git");
+    expect(html).toContain("1 to push");
+    expect(html).not.toContain("Sync stays off until this is checked");
+    const unconfirmed = renderToStaticMarkup(
+      <MemoryRepoSyncView {...syncProps} confirmed={false} sync={null} />,
+    );
+    expect(unconfirmed).toContain("Sync stays off until this is checked");
+    expect(unconfirmed).toContain("Off until you confirm");
+    expect(
+      renderToStaticMarkup(
+        <MemoryRepoSyncView
+          {...syncProps}
+          message={{ tone: "error", text: "URLs with credentials are refused" }}
+        />,
+      ),
+    ).toContain("URLs with credentials are refused");
+  });
+
+  it("describes each sync state and the Sync now result", () => {
+    const base = { remoteUrl: "x", confirmed: true, folderReady: true, sync };
+    expect(memoryRepoSyncLine({ ...base, remoteUrl: "" }).text).toMatch(/^Off/);
+    expect(memoryRepoSyncLine({ ...base, sync: null }).text).toMatch(/on and ready/);
+    expect(
+      memoryRepoSyncLine({ ...base, sync: { ...sync, conflict: "MEMORY.md changed" } }),
+    ).toMatchObject({ tone: "warning", text: expect.stringContaining("Sync now") });
+    expect(
+      memoryRepoSyncLine({ ...base, sync: { ...sync, lastError: "timeout" } }),
+    ).toMatchObject({ tone: "warning", text: expect.stringContaining("last error: timeout") });
+    expect(syncNowMessage({ error: "Sync is off" })).toEqual({
+      tone: "error",
+      text: "Sync is off",
+    });
+    expect(syncNowMessage(sync)).toEqual({ tone: "success", text: "Synced." });
+    expect(syncNowMessage({ ...sync, conflict: "c" }).tone).toBe("error");
+  });
+
+  it("renders the team section with each repo's workspaces, status and Remove", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRepoTeamView
+        repos={[
+          { name: "Platform", path: "/Users/sam/Team/Platform" },
+          { name: "Design", path: "/Users/sam/Team/Design", workspaceIds: ["w1", "w2"] },
+        ]}
+        statuses={[
+          {
+            name: "Platform",
+            root: "/Users/sam/Team/Platform",
+            ready: true,
+            workspaceIds: [],
+            lastPullAt: null,
+            lastPullError: null,
+          },
+          {
+            name: "Design",
+            root: "/Users/sam/Team/Design",
+            ready: false,
+            problem: "the folder is not a memory repo (no MEMORY.md)",
+            workspaceIds: ["w1", "w2"],
+            lastPullAt: null,
+            lastPullError: null,
+          },
+        ]}
+        workspaceId="w1"
+        disabled={false}
+        message={{ tone: "error", text: "Design: Two team repos cannot overlap." }}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(html).toContain("Team memory");
+    expect(html).toContain("never writes it");
+    expect(html).toContain("every 10 minutes");
+    expect(html).toContain("Platform");
+    expect(html).toContain("All workspaces");
+    expect(html).toContain("2 workspaces");
+    expect(html).toContain("Not read: the folder is not a memory repo (no MEMORY.md).");
+    expect(html).toContain("Remove");
+    expect(html).toContain("Only for this workspace");
+    expect(html).toContain("Add a team repo");
+    expect(html).toContain("Two team repos cannot overlap.");
+  });
+
+  it("hides the add form at three repos and checks a new repo before saving", () => {
+    const three = ["A", "B", "C"].map((name) => ({ name, path: `/t/${name}` }));
+    const html = renderToStaticMarkup(
+      <MemoryRepoTeamView
+        repos={three}
+        statuses={[]}
+        disabled={false}
+        message={null}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(html).not.toContain("Add a team repo");
+    expect(html).toContain("At most 3 team repos");
+    expect(teamRepoDraftProblem({ name: "D", path: "/t/D" }, three)).toMatch(/At most 3/);
+    expect(teamRepoDraftProblem({ name: "", path: "/t" }, [])).toMatch(/name/);
+    expect(teamRepoDraftProblem({ name: "a/b", path: "/t" }, [])).toMatch(/letters/);
+    expect(teamRepoDraftProblem({ name: "a", path: "/t" }, [{ name: "A", path: "/x" }])).toMatch(
+      /Another/,
+    );
+    expect(teamRepoDraftProblem({ name: "Team", path: " " }, [])).toMatch(/folder/);
+    expect(teamRepoDraftProblem({ name: "Team 1", path: "/t" }, [])).toBeNull();
+    expect(teamRepoWorkspacesLabel(undefined)).toBe("All workspaces");
+    expect(teamRepoWorkspacesLabel(["w"])).toBe("1 workspace");
+    expect(
+      teamRepoStatusLine({
+        name: "A",
+        root: "/t/A",
+        ready: true,
+        workspaceIds: [],
+        lastPullAt: null,
+        lastPullError: "not a fast-forward",
+      }),
+    ).toMatchObject({ tone: "warning", text: expect.stringContaining("not a fast-forward") });
+  });
+
+  it("shows the sync and team sections in the card while the folder is on", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRepoCard
+        features={{
+          contextPackInjectionEnabled: true,
+          heartbeatMaintenanceEnabled: true,
+          memoryRepoEnabled: true,
+          memoryRepoRemoteUrl: "https://github.com/sam/memory.git",
+          memoryRepoTeamRepos: [{ name: "Platform", path: "/Users/sam/Team" }],
+        }}
+        onFeaturesSaved={vi.fn()}
+        api={vi.fn() as never}
+      />,
+    );
+    expect(html).toContain('data-testid="memory-repo-sync"');
+    expect(html).toContain('value="https://github.com/sam/memory.git"');
+    expect(html).toContain('data-testid="memory-repo-team"');
+    expect(html).toContain("/Users/sam/Team");
+    const off = renderToStaticMarkup(
+      <MemoryRepoCard
+        features={{ contextPackInjectionEnabled: true, heartbeatMaintenanceEnabled: true }}
+        onFeaturesSaved={vi.fn()}
+        api={vi.fn() as never}
+      />,
+    );
+    expect(off).not.toContain('data-testid="memory-repo-sync"');
+    expect(off).toContain('data-testid="memory-repo-team"');
   });
 });

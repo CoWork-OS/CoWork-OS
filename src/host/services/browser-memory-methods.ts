@@ -1,5 +1,5 @@
 import {
-  memoryRepoPathSettingProblem,
+  memoryRepoSettingsProblem,
   memoryRepoStatus,
 } from "../../electron/memory/repo/memory-repo-bootstrap";
 import { MemoryRepoService } from "../../electron/memory/repo/MemoryRepoService";
@@ -27,7 +27,12 @@ import {
   runMemoryRepoDreamAction,
   toMemoryRepoDreamNowResult,
 } from "../../electron/memory/repo/memory-repo-dream-report";
-import type { MemoryRepoCompactResult } from "../../shared/memory-repo-types";
+import {
+  MEMORY_REPO_SYNC_FOLDER_OFF_ERROR,
+  MEMORY_REPO_SYNC_OFF_ERROR,
+  type MemoryRepoCompactResult,
+  type MemoryRepoSyncNowResult,
+} from "../../shared/memory-repo-types";
 import path from "node:path";
 import { statSync, existsSync } from "node:fs";
 import {
@@ -129,6 +134,20 @@ const featureSettings = z
     durableContextLargePayloadThreshold: z.number().int().min(1).max(1_000_000).optional(),
     memoryCompressionDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryRepoPath: z.string().trim().max(1024).optional(),
+    memoryRepoRemoteUrl: z.string().trim().max(500).optional(),
+    memoryRepoRemoteConfirmedPrivate: z.boolean().optional(),
+    memoryRepoTeamRepos: z
+      .array(
+        z
+          .object({
+            name: z.string().trim().min(1).max(60),
+            path: z.string().trim().min(1).max(1024),
+            workspaceIds: z.array(z.string().max(128)).max(200).optional(),
+          })
+          .strict(),
+      )
+      .max(3)
+      .optional(),
     memoryRepoDreamDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
     memoryWriteApprovalMode: z
       .enum(["off", "curated_only", "external_only", "background_only", "all"])
@@ -739,7 +758,7 @@ export function createBrowserMemoryDefinitions(options: {
     saveMemoryFeaturesSettings: action(
       featureSettings,
       async (value) => {
-        const repoPathProblem = await memoryRepoPathSettingProblem(value.memoryRepoPath);
+        const repoPathProblem = await memoryRepoSettingsProblem(value);
         if (repoPathProblem) throw new Error(repoPathProblem);
         MemoryFeaturesManager.saveSettings({
           ...MemoryFeaturesManager.loadSettings(),
@@ -904,6 +923,14 @@ export function createBrowserMemoryDefinitions(options: {
     dreamMemoryRepoNow: noArgs(async () => {
       const dreamer = getMemoryRepoDreamer();
       return toMemoryRepoDreamNowResult(dreamer ? await dreamer.run("manual") : null);
+    }, true),
+    // Sync with the private remote (docs/memory-repo-phase4-design.md §1): same results as
+    // the desktop `memoryRepo:syncNow`.
+    syncMemoryRepoNow: noArgs(async (): Promise<MemoryRepoSyncNowResult> => {
+      const service = MemoryRepoService.get();
+      if (!service) return { error: MEMORY_REPO_SYNC_FOLDER_OFF_ERROR };
+      if (!service.isSyncConfigured()) return { error: MEMORY_REPO_SYNC_OFF_ERROR };
+      return service.syncNow({ push: true });
     }, true),
     getMemoryObservationBackfillStatus: noArgs(() => MemoryObservationService.getBackfillStatus()),
     rebuildMemoryObservationMetadata: {

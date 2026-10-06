@@ -4,8 +4,9 @@ import type {
   MemoryRepoDreamNowResult,
   MemoryRepoDreamsReport,
   MemoryRepoStatusReport,
+  MemoryRepoSyncNowResult,
 } from "../../../shared/memory-repo-types";
-import type { MemoryFeaturesSettings } from "../../../shared/types";
+import type { MemoryFeaturesSettings, MemoryRepoTeamRepoSetting } from "../../../shared/types";
 import { hasHostMethod } from "../../host/browser-capabilities";
 import { formatRelative } from "./memory-knowledge-model";
 import {
@@ -14,6 +15,12 @@ import {
   dreamNowMessage,
   dreamTokensLine,
 } from "./memory-repo-dreams-model";
+import {
+  MemoryRepoSyncView,
+  MemoryRepoTeamView,
+  syncNowMessage,
+  type SectionMessage,
+} from "./MemoryRepoSyncTeam";
 
 /** `memoryRepoDreamDailyTokenBudget` when unset (the settings manager's default). */
 export const MEMORY_REPO_DREAM_DEFAULT_BUDGET = 50_000;
@@ -27,6 +34,7 @@ export type MemoryRepoApi = {
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
   getMemoryRepoDreams?: () => Promise<MemoryRepoDreamsReport>;
   dreamMemoryRepoNow?: () => Promise<MemoryRepoDreamNowResult>;
+  syncMemoryRepoNow?: () => Promise<MemoryRepoSyncNowResult>;
 };
 
 export interface MemoryRepoDreamingViewProps {
@@ -105,6 +113,13 @@ export function MemoryRepoDreamingView(props: MemoryRepoDreamingViewProps) {
 export const COMPACT_HISTORY_CONFIRM =
   "Compact the memory folder's history?\n\nRemoves old versions so deleted memories are really gone. This can't be undone.";
 
+/** The compact confirmation; with sync on the remote's history is replaced too. */
+export function compactHistoryConfirm(syncConfigured: boolean): string {
+  return syncConfigured
+    ? `${COMPACT_HISTORY_CONFIRM} It also replaces the history of your synced repository.`
+    : COMPACT_HISTORY_CONFIRM;
+}
+
 /** The message of an error from main, without Electron's "Error invoking remote method" prefix. */
 export function memoryRepoErrorMessage(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
@@ -147,6 +162,8 @@ export interface MemoryRepoCardProps {
   confirm?: (message: string) => boolean;
   /** Re-read the status this long after a save, once main has restarted the folder. */
   settleMs?: number;
+  /** The workspace the Memory Hub shows (team repos can be limited to it). */
+  workspaceId?: string | null;
 }
 
 /**
@@ -160,11 +177,16 @@ export function MemoryRepoCard({
   api = defaultApi,
   confirm = (message: string) => window.confirm(message),
   settleMs = 1500,
+  workspaceId = null,
 }: MemoryRepoCardProps) {
   const [status, setStatus] = useState<MemoryRepoStatusReport | null>(null);
   const [pathDraft, setPathDraft] = useState(features.memoryRepoPath ?? "");
   const [busy, setBusy] = useState<"save" | "open" | "compact" | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [syncMessage, setSyncMessage] = useState<SectionMessage>(null);
+  const [teamMessage, setTeamMessage] = useState<SectionMessage>(null);
+  const [syncing, setSyncing] = useState(false);
+  const canSyncNow = hasHostMethod("syncMemoryRepoNow");
   const generation = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canOpen = hasHostMethod("openMemoryRepoFolder");
@@ -213,9 +235,18 @@ export function MemoryRepoCard({
     };
   }, [loadStatus]);
 
-  const save = async (updates: Partial<MemoryFeaturesSettings>, done: string) => {
+  const save = async (
+    updates: Partial<MemoryFeaturesSettings>,
+    done: string,
+    section: "folder" | "sync" | "team" = "folder",
+  ): Promise<boolean> => {
+    // Each section shows its own result (main's validation error next to the field saved).
+    const setFeedback =
+      section === "sync" ? setSyncMessage : section === "team" ? setTeamMessage : setMessage;
     setBusy("save");
     setMessage(null);
+    setSyncMessage(null);
+    setTeamMessage(null);
     try {
       // Merge into the stored settings, not this card's copy (other cards save the same object).
       const stored = await api()
@@ -223,19 +254,40 @@ export function MemoryRepoCard({
         .catch(() => null);
       await api().saveMemoryFeaturesSettings({ ...(stored ?? features), ...updates });
       onFeaturesSaved(await api().getMemoryFeaturesSettings());
-      setMessage({ tone: "success", text: done });
+      setFeedback({ tone: "success", text: done });
       await loadStatus();
       if (settleTimer.current) clearTimeout(settleTimer.current);
       settleTimer.current = setTimeout(() => void loadStatus(), settleMs);
+      return true;
     } catch (error) {
-      setMessage({
+      setFeedback({
         tone: "error",
         text: memoryRepoErrorMessage(error, "Failed to save the memory folder settings."),
       });
+      return false;
     } finally {
       setBusy(null);
     }
   };
+
+  const syncNow = async () => {
+    const run = api().syncMemoryRepoNow;
+    if (!run) return;
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const result = await run();
+      setSyncMessage(syncNowMessage(result));
+    } catch (error) {
+      setSyncMessage({ tone: "error", text: memoryRepoErrorMessage(error, "Sync failed.") });
+    } finally {
+      setSyncing(false);
+      await loadStatus();
+    }
+  };
+
+  const saveTeamRepos = (repos: MemoryRepoTeamRepoSetting[], done: string) =>
+    save({ memoryRepoTeamRepos: repos }, done, "team");
 
   const openFolder = async () => {
     const open = api().openMemoryRepoFolder;
@@ -255,7 +307,7 @@ export function MemoryRepoCard({
   };
 
   const compact = async () => {
-    if (!confirm(COMPACT_HISTORY_CONFIRM)) return;
+    if (!confirm(compactHistoryConfirm(Boolean(status?.sync)))) return;
     setBusy("compact");
     setMessage(null);
     try {
@@ -406,6 +458,43 @@ export function MemoryRepoCard({
           onDreamNow={() => void dreamNow()}
         />
       )}
+
+      {enabled && (
+        <MemoryRepoSyncView
+          savedRemoteUrl={features.memoryRepoRemoteUrl ?? ""}
+          confirmed={features.memoryRepoRemoteConfirmedPrivate === true}
+          folderReady={Boolean(ready)}
+          sync={status?.sync}
+          canSyncNow={canSyncNow}
+          disabled={busy !== null}
+          syncing={syncing}
+          message={syncMessage}
+          onSaveRemoteUrl={(url) =>
+            void save(
+              { memoryRepoRemoteUrl: url },
+              url ? "Repository saved." : "Sync off.",
+              "sync",
+            )
+          }
+          onConfirmChange={(confirmed) =>
+            void save(
+              { memoryRepoRemoteConfirmedPrivate: confirmed },
+              confirmed ? "Confirmed." : "Sync off.",
+              "sync",
+            )
+          }
+          onSyncNow={() => void syncNow()}
+        />
+      )}
+
+      <MemoryRepoTeamView
+        repos={features.memoryRepoTeamRepos ?? []}
+        statuses={status?.team}
+        workspaceId={workspaceId}
+        disabled={busy !== null}
+        message={teamMessage}
+        onSave={saveTeamRepos}
+      />
     </div>
   );
 }

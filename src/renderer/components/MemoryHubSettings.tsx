@@ -1330,7 +1330,11 @@ export function MemoryHubSettings(props?: {
       {hasHostMethods("getMemoryRepoStatus", "compactMemoryRepoHistory") && (
         <div className="settings-subsection">
           <h3>Memory Folder</h3>
-          <MemoryRepoCard features={features} onFeaturesSaved={setFeatures} />
+          <MemoryRepoCard
+            features={features}
+            onFeaturesSaved={setFeatures}
+            workspaceId={selectedWorkspaceId || null}
+          />
         </div>
       )}
 

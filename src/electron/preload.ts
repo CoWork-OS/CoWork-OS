@@ -47,6 +47,7 @@ import type {
 import type { MemoryHealthReport, MemorySourcesReport } from "../shared/memory-health-types";
 import type {
   MemoryRepoCompactResult,
+  MemoryRepoSyncNowResult,
   MemoryRepoDreamActionResult,
   MemoryRepoDreamNowResult,
   MemoryRepoDreamPart,
@@ -4305,6 +4306,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
   compactMemoryRepoHistory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY),
+  syncMemoryRepoNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW),
   readMemoryRepoLines: (refs: string[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_READ_LINES, { refs }),
   // Dreams over the memory folder: review, undo and "Dream now"
@@ -7957,6 +7959,7 @@ export interface ElectronAPI {
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
+  syncMemoryRepoNow: () => Promise<MemoryRepoSyncNowResult>;
   readMemoryRepoLines: (refs: string[]) => Promise<MemoryRepoLine[]>;
   getMemoryRepoDreams: () => Promise<MemoryRepoDreamsReport>;
   getMemoryRepoDreamDiff: (id: string, part: MemoryRepoDreamPart) => Promise<string>;

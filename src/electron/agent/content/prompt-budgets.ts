@@ -51,8 +51,14 @@ export const MEMORY_L1_COMPACT_TOKENS = 250;
 
 /**
  * The `<cowork_memory_repo>` block (docs/memory-repo-phase1-design.md §6.1): the memory
- * folder's MEMORY.md (500) plus the current workspace's file (300).
+ * folder's MEMORY.md (500) plus the current workspace's file (300), then the MEMORY.md of up
+ * to 3 team memory repos (300 each, docs/memory-repo-phase4-design.md §2): 1,700 at most.
  */
 export const MEMORY_REPO_ENTRY_FILE_TOKENS = 500;
 export const MEMORY_REPO_WORKSPACE_FILE_TOKENS = 300;
-export const MEMORY_REPO_TOKENS = MEMORY_REPO_ENTRY_FILE_TOKENS + MEMORY_REPO_WORKSPACE_FILE_TOKENS;
+export const MEMORY_REPO_TEAM_FILE_TOKENS = 300;
+export const MEMORY_REPO_MAX_TEAM_REPOS = 3;
+export const MEMORY_REPO_TOKENS =
+  MEMORY_REPO_ENTRY_FILE_TOKENS +
+  MEMORY_REPO_WORKSPACE_FILE_TOKENS +
+  MEMORY_REPO_TEAM_FILE_TOKENS * MEMORY_REPO_MAX_TEAM_REPOS;

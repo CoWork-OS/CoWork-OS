@@ -3,7 +3,11 @@ import * as nodeOs from "node:os";
 import * as nodePath from "node:path";
 import type { AccessFilesystemRule } from "../../shared/access-profiles";
 import type { Workspace } from "../../shared/types";
-import { getMemoryRepoRoot, isMemoryRepoReadAllowed } from "./memory-repo-access";
+import {
+  getMemoryRepoRoot,
+  getTeamMemoryRepoRoots,
+  isMemoryRepoReadAllowed,
+} from "./memory-repo-access";
 
 export type AccessFilesystemOperation = "read" | "write" | "delete";
 export type AccessFilesystemDecision = "allow" | "deny" | "unmatched";
@@ -477,22 +481,28 @@ export function isProtectedWorkspacePath(
 }
 
 /**
- * Where a path sits relative to the memory repo root (design §6.4): outside, inside, or
- * inside its `.git`. Both the lexical and the canonical path are compared against both the
- * lexical and the canonical root, so neither a symlink into the repo nor `..` segments nor
- * the macOS /var alias can hide a path that is in it.
+ * Where a path sits relative to the memory repo roots (design §6.4): the personal memory
+ * folder and every team memory repo (docs/memory-repo-phase4-design.md §2, read-only under
+ * the same rule). Outside, inside, or inside a root's `.git`. Both the lexical and the
+ * canonical path are compared against both the lexical and the canonical root, so neither a
+ * symlink into a repo nor `..` segments nor the macOS /var alias can hide a path that is in it.
  */
 function classifyMemoryRepoPath(
   lexicalPath: string,
   canonicalPath: string,
 ): "outside" | "repo" | "repo_git" {
-  const root = getMemoryRepoRoot();
-  if (!root) return "outside";
-  const roots = new Set<string>([nodePath.resolve(root)]);
-  try {
-    roots.add(canonicalizeAccessPath(root));
-  } catch {
-    // The root may be missing; the lexical root still applies.
+  const configured = [getMemoryRepoRoot(), ...getTeamMemoryRepoRoots()].filter(
+    (root): root is string => Boolean(root),
+  );
+  if (configured.length === 0) return "outside";
+  const roots = new Set<string>();
+  for (const root of configured) {
+    roots.add(nodePath.resolve(root));
+    try {
+      roots.add(canonicalizeAccessPath(root));
+    } catch {
+      // The root may be missing; the lexical root still applies.
+    }
   }
   let inside = false;
   for (const base of roots) {

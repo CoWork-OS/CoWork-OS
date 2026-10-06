@@ -12,6 +12,7 @@ import {
   lanesForScopes,
   parseRecallRef,
   type MemoryRecallDeps,
+  type MemoryRepoRecallSource,
 } from "../MemoryRecall";
 import { MemoryRecallStore } from "../memory-recall-sql";
 import { createMemoryStatementPort } from "../memory-statement-port";
@@ -539,6 +540,16 @@ describe("MemoryRecall helpers", () => {
     expect(parseRecallRef("repo:.git/config.md#L1")).toBeNull();
     expect(parseRecallRef("")).toBeNull();
     expect(parseRecallRef("weird")).toBeNull();
+    expect(parseRecallRef("team:Platform Team:topics/ci.md#L4")).toEqual({
+      lane: "repo",
+      kind: "team",
+      id: "Platform Team:topics/ci.md#L4",
+    });
+    expect(parseRecallRef("team:Platform:../secret.md#L1")).toBeNull();
+    expect(parseRecallRef("team:Platform:.git/config.md#L1")).toBeNull();
+    expect(parseRecallRef("team:Platform:notes.txt#L1")).toBeNull();
+    expect(parseRecallRef("team:a/b:MEMORY.md#L1")).toBeNull();
+    expect(parseRecallRef("team:Platform:MEMORY.md#L0")).toBeNull();
   });
 });
 
@@ -566,7 +577,10 @@ describe("MemoryRecall repo lane", () => {
     ].join("\n"),
   };
 
-  function makeRecall(available = true) {
+  function makeRecall(
+    available = true,
+    teams?: Array<{ name: string; source: MemoryRepoRecallSource }>,
+  ) {
     const reads: string[] = [];
     const stamps: Record<string, string> = {};
     const source = {
@@ -593,6 +607,7 @@ describe("MemoryRecall repo lane", () => {
       searchExternal: vi.fn(async () => []),
       externalConfigured: () => false,
       memoryRepo: () => (available ? source : null),
+      teamMemoryRepos: (workspaceId) => (teams && workspaceId === "ws-1" ? teams : []),
       laneEnabled: () => true,
       now: () => 1,
     };
@@ -691,5 +706,85 @@ describe("MemoryRecall repo lane", () => {
     } finally {
       delete files["long.md"];
     }
+  });
+
+  describe("team memory repos", () => {
+    const teamFiles: Record<string, string> = {
+      "MEMORY.md": [
+        "# Platform",
+        "",
+        "- Deploy freezes start on Friday at noon [by: user; added: 2026-09-20]",
+        "- The team token is sk-abcdefghijklmnopqrstuvwxyz0123456789",
+      ].join("\n"),
+      "topics/ci.md": [
+        "# CI",
+        ...Array.from({ length: 150 }, (_, i) => `- ci fact number ${i + 2}`),
+      ].join("\n"),
+    };
+    const teamSource = (): MemoryRepoRecallSource => ({
+      listFiles: vi.fn(async () => Object.keys(teamFiles)),
+      readFile: vi.fn(async (relPath: string) => teamFiles[relPath] ?? null),
+      stamp: vi.fn(async () => "t1"),
+    });
+
+    it("searches applicable team repos with team refs, labels and provenance", async () => {
+      const { recall } = makeRecall(true, [{ name: "Platform", source: teamSource() }]);
+      const hits = await recall.query(query({ text: "deploy freezes friday" }));
+      const team = hits.find((hit) => hit.ref.startsWith("team:"));
+      expect(team).toMatchObject({
+        lane: "repo",
+        ref: "team:Platform:MEMORY.md#L3",
+        snippet: "[team Platform] Deploy freezes start on Friday at noon",
+        source: "third_party",
+        provenance: {
+          store: "team_memory",
+          team: "Platform",
+          file: "MEMORY.md",
+          line: 3,
+          by: "user",
+        },
+      });
+      const [secret] = await recall.query(query({ text: "team token" }));
+      expect(secret.ref).toBe("team:Platform:MEMORY.md#L4");
+      expect(secret.snippet).not.toContain("sk-abcdefghijklmnopqrstuvwxyz0123456789");
+      // Another workspace: the team repo does not apply.
+      const elsewhere = await recall.query(
+        query({ text: "deploy freezes friday", workspaceId: "ws-9" }),
+      );
+      expect(elsewhere.some((hit) => hit.ref.startsWith("team:"))).toBe(false);
+    });
+
+    it("runs the repo lane on team repos alone", async () => {
+      const { recall } = makeRecall(false, [{ name: "Platform", source: teamSource() }]);
+      const result = await recall.recall(query({ text: "deploy freezes" }));
+      expect(result.lanes).toEqual(["memory", "repo"]);
+      expect(result.hits[0].ref).toBe("team:Platform:MEMORY.md#L3");
+    });
+
+    it("expands team refs up to 80 lines, only for configured repos", async () => {
+      const { recall } = makeRecall(true, [{ name: "Platform", source: teamSource() }]);
+      const result = await recall.recall(
+        query({ ids: ["team:Platform:topics/ci.md#L100"], detail: "full" }),
+      );
+      expect(result.missing).toEqual([]);
+      expect(result.hits[0]).toMatchObject({
+        lane: "repo",
+        ref: "team:Platform:topics/ci.md#L100",
+        provenance: { store: "team_memory", team: "Platform" },
+      });
+      const content = String(result.hits[0].content);
+      expect(content.startsWith("[team Platform] ")).toBe(true);
+      expect(content.split("\n").length).toBeLessThanOrEqual(80);
+      expect(content).toContain("ci fact number 100");
+
+      const unknown = await recall.recall(
+        query({ ids: ["team:Other:MEMORY.md#L3"], detail: "full" }),
+      );
+      expect(unknown.missing).toEqual(["team:Other:MEMORY.md#L3"]);
+      const notHere = await recall.recall(
+        query({ ids: ["team:Platform:MEMORY.md#L3"], detail: "full", workspaceId: "ws-9" }),
+      );
+      expect(notHere.missing).toEqual(["team:Platform:MEMORY.md#L3"]);
+    });
   });
 });

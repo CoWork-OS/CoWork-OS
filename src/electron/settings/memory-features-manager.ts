@@ -5,7 +5,7 @@
  */
 
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
-import { MemoryFeaturesSettings } from "../../shared/types";
+import { MemoryFeaturesSettings, MemoryRepoTeamRepoSetting } from "../../shared/types";
 
 const DEFAULT_SETTINGS: MemoryFeaturesSettings = {
   contextPackInjectionEnabled: true,
@@ -100,7 +100,38 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
       1_000_000,
       Math.max(1, Math.floor(normalizePositiveNumber(settings.memoryRepoDreamDailyTokenBudget, 50000))),
     ),
+    memoryRepoRemoteUrl:
+      typeof settings.memoryRepoRemoteUrl === "string"
+        ? settings.memoryRepoRemoteUrl.trim().slice(0, 500)
+        : "",
+    memoryRepoRemoteConfirmedPrivate: isEnabled(settings.memoryRepoRemoteConfirmedPrivate),
+    memoryRepoTeamRepos: normalizeTeamRepos(settings.memoryRepoTeamRepos),
   };
+}
+
+const MAX_TEAM_REPOS = 3;
+
+function normalizeTeamRepos(value: unknown): MemoryRepoTeamRepoSetting[] {
+  if (!Array.isArray(value)) return [];
+  const out: MemoryRepoTeamRepoSetting[] = [];
+  const names = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const entry = raw as Record<string, unknown>;
+    const name = typeof entry.name === "string" ? entry.name.trim().slice(0, 60) : "";
+    const repoPath = typeof entry.path === "string" ? entry.path.trim().slice(0, 1024) : "";
+    if (!name || !repoPath || names.has(name.toLowerCase())) continue;
+    if (!/^[\p{L}\p{N} ._-]+$/u.test(name)) continue;
+    names.add(name.toLowerCase());
+    const workspaceIds = Array.isArray(entry.workspaceIds)
+      ? entry.workspaceIds
+          .filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 128)
+          .slice(0, 200)
+      : [];
+    out.push({ name, path: repoPath, ...(workspaceIds.length ? { workspaceIds } : {}) });
+    if (out.length >= MAX_TEAM_REPOS) break;
+  }
+  return out;
 }
 
 function normalizeMemoryWriteApprovalMode(

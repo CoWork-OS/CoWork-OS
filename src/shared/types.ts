@@ -59,6 +59,14 @@ export interface TraySettings {
   notificationStyle?: DesktopNotificationStyle;
 }
 
+/** One team memory repo: a local folder (a memory repo), optionally for some workspaces only. */
+export interface MemoryRepoTeamRepoSetting {
+  name: string;
+  path: string;
+  /** Empty or absent: every workspace. */
+  workspaceIds?: string[];
+}
+
 // Global memory feature toggles (applies across workspaces)
 export interface MemoryFeaturesSettings {
   /** Inject `.cowork/*` context pack into the agent prompt (workspace-scoped files). */
@@ -109,6 +117,12 @@ export interface MemoryFeaturesSettings {
   memoryRepoPath?: string;
   /** Set once the Phase 3 default-on migration has applied (docs/memory-repo-phase3-design.md §2). */
   memoryRepoDefaultOnApplied?: boolean;
+  /** Private remote the memory folder syncs with (docs/memory-repo-phase4-design.md §1); empty = off. */
+  memoryRepoRemoteUrl?: string;
+  /** The user confirmed the remote is private and theirs; sync stays off until then. */
+  memoryRepoRemoteConfirmedPrivate?: boolean;
+  /** Team memory repos read next to the personal folder (docs/memory-repo-phase4-design.md §2). */
+  memoryRepoTeamRepos?: MemoryRepoTeamRepoSetting[];
   /**
    * Let a periodic AI pass ("dream") tidy the memory folder and save what recent tasks taught
    * (docs/memory-repo-phase2-design.md). Default on; it only matters while the folder is on.
@@ -9678,6 +9692,8 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_REMOVE_ENTRY: "memoryRepo:removeEntry",
   MEMORY_REPO_PIN_ENTRY: "memoryRepo:pinEntry",
   MEMORY_REPO_OPEN_FILE: "memoryRepo:openFile",
+  // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
+  MEMORY_REPO_SYNC_NOW: "memoryRepo:syncNow",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",

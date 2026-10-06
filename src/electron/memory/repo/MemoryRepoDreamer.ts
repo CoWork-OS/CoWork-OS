@@ -117,6 +117,8 @@ export class MemoryRepoDreamer {
     settings: { enabled: boolean; dailyTokenBudget: number },
   ): Promise<MemoryRepoDreamOutcome> {
     const startedAt = this.now();
+    // Dream over the latest memory: pull what other machines wrote first (Phase 4 sync).
+    if (service.isSyncConfigured()) await service.syncNow({ push: false }).catch(() => undefined);
     const previous = (await service.listDreams(50)).filter((record) => record.status !== "skipped");
     const last = previous[0];
     if (trigger === "daily" && last && startedAt - last.startedAt < DREAM_DAILY_INTERVAL_MS) {

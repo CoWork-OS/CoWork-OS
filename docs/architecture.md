@@ -137,8 +137,8 @@ The `.cowork/` workspace kit holds durable human-edited operating context.
 - `HEARTBEAT.md` is reserved for recurring heartbeat checklist work
 - `USER.md` and `MEMORY.md` can contain both human-authored content and auto-managed curated-memory blocks
 - project-scoped context lives under `.cowork/projects/<projectId>/`
-- `CROSS_SIGNALS.md`, `MISTAKES.md` (and the feedback files) and `LORE.md` are written by the kit
-  writers (`CrossSignalService`, `FeedbackService`, `LoreService`). A desktop app and a node daemon
+- `CROSS_SIGNALS.md` and the feedback files (plus the `MISTAKES.md` pattern block while the memory
+  folder is off) are written by the kit writers (`CrossSignalService`, `FeedbackService`). A desktop app and a node daemon
   on one profile would both rewrite them, so only the owner of the profile's kit-writer lease runs
   them (`agents/kit-writer-ownership.ts`, row `kit_writer_lease` in `maintenance_state`): a 60 s
   lease renewed every 15 s, taken over by the next process once a crashed owner's lease expires.

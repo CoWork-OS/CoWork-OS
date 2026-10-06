@@ -58,6 +58,11 @@ export interface ToolPolicyContext {
   botTeamId?: string;
   /** Set only after the daemon verifies the sender's active team membership. */
   botMessagingAuthorized?: boolean;
+  /**
+   * Set only when the executor resolved the task's swarm from its parent chain and the
+   * task's swarm layer is on (not for verifiers): swarm_note may cross the plan gate.
+   */
+  swarmMember?: boolean;
 }
 
 export interface ToolPolicyResult {
@@ -216,6 +221,8 @@ const ALWAYS_VISIBLE_TOOLS = new Set([
   "memory_remember",
   "memory_forget",
   "context_recall",
+  // Swarm members only (the registry offers it only to them).
+  "swarm_note",
   "system_info",
   "Skill",
 ]);
@@ -564,6 +571,8 @@ const READONLY_GIT_TOOLS = new Set([
 ]);
 
 const ALWAYS_MUTATING = new Set([
+  // Writes a note to the memory folder; plan mode allows it only for swarm members.
+  "swarm_note",
   "run_command",
   "stop_process",
   "run_applescript",
@@ -706,6 +715,11 @@ function applyModeGate(
   }
   if (mode === "chat") {
     return `Tool "${toolName}" is blocked in chat mode because chat mode is direct-answer only and does not allow tool calls.`;
+  }
+  // Read-only helpers run in plan mode but still share what they find with their swarm
+  // (phase 5 §2): a note in the swarm folder, not a workspace or memory mutation.
+  if (toolName === "swarm_note" && ctx.swarmMember === true) {
+    return null;
   }
   if (toolName === "request_user_input") {
     if (mode === "plan" || mode === "debug") return null;

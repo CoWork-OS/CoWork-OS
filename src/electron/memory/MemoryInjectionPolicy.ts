@@ -27,6 +27,8 @@ import { containsNoMemoryDirective, taskDisablesMemoryCapture } from "./no-memor
  * - `projectGuidance`: repo-root AGENTS.md / CLAUDE.md and docs maps.
  * - `memoryRepo`: the `<cowork_memory_repo>` block (the user's memory folder: MEMORY.md and the
  *   workspace's file; docs/memory-repo-phase1-design.md §6.2).
+ * - `swarm`: the `<cowork_swarm>` block and read access to the task's own `swarms/<slug>/`
+ *   folder (peer notes of agents on the same goal; docs/memory-repo-phase5-design.md §2).
  */
 export type MemoryLayer =
   | "l0"
@@ -35,7 +37,8 @@ export type MemoryLayer =
   | "sharedContext"
   | "workspaceKit"
   | "projectGuidance"
-  | "memoryRepo";
+  | "memoryRepo"
+  | "swarm";
 
 export const MEMORY_LAYERS: readonly MemoryLayer[] = [
   "l0",
@@ -45,6 +48,7 @@ export const MEMORY_LAYERS: readonly MemoryLayer[] = [
   "workspaceKit",
   "projectGuidance",
   "memoryRepo",
+  "swarm",
 ];
 
 export type MemoryPrivacyMode = "normal" | "strict" | "disabled";
@@ -73,6 +77,8 @@ export interface MemoryInjectionPolicyInput {
   externalNetworkAllowed?: boolean;
   /** The memory folder setting (`memoryRepoEnabled`) is on and the repo service is ready. */
   memoryRepoEnabled?: boolean;
+  /** The task belongs to a swarm (its parent chain's root has children or a team run). */
+  swarmAvailable?: boolean;
 }
 
 export interface MemoryLayerDecision {
@@ -97,6 +103,7 @@ function allOff(): Record<MemoryLayer, boolean> {
     workspaceKit: false,
     projectGuidance: false,
     memoryRepo: false,
+    swarm: false,
   };
 }
 
@@ -165,6 +172,17 @@ export function resolveMemoryInjection(input: MemoryInjectionPolicyInput): Memor
   else if (!isPrivateGateway) deny("memoryRepo", "group_channel");
   else if (memoryOff) deny("memoryRepo", "memory_off");
   else layers.memoryRepo = true;
+
+  // Swarm notes are peer notes of agents on the same goal, not personal memory: sub-agents
+  // and verifiers get them (read-only for verifiers: swarm_note is denied to them). They live
+  // in the memory folder, so the folder, the private gateway, `<no-memory>` and the workspace
+  // memory switch still apply.
+  if (input.noMemory) deny("swarm", "no_memory_directive");
+  else if (input.memoryRepoEnabled !== true) deny("swarm", "memory_off");
+  else if (input.swarmAvailable !== true) deny("swarm", "scope_mismatch");
+  else if (!isPrivateGateway) deny("swarm", "group_channel");
+  else if (memoryOff) deny("swarm", "memory_off");
+  else layers.swarm = true;
 
   const memory = layers.l0 || layers.l1 || layers.external;
   return {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -8,6 +8,7 @@ import {
   buildWorkspaceKitContext,
   isDesignSystemRelevantTask,
 } from "../WorkspaceKitContext";
+import { MemoryRepoService } from "../repo/MemoryRepoService";
 
 function writeFile(p: string, content: string): void {
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -309,6 +310,37 @@ describe("WorkspaceKitContext", () => {
     const dailyIdx = out.indexOf("Daily Log");
     expect(mistakesIdx).toBeLessThan(loreIdx);
     expect(loreIdx).toBeLessThan(dailyIdx);
+  });
+
+  it("drops the MISTAKES.md feedback-pattern block only while the memory folder is writable", () => {
+    writeFile(
+      path.join(tmpDir, ".cowork", "MISTAKES.md"),
+      [
+        "# Mistakes",
+        "",
+        "## Patterns",
+        "<!-- cowork:auto:mistakes:start -->",
+        "- Main: GENERATED_PATTERN",
+        "<!-- cowork:auto:mistakes:end -->",
+        "- HAND_WRITTEN_PATTERN",
+        "",
+      ].join("\n"),
+    );
+    const options = { excludeGeneratedMemoryBlocks: true };
+    const spy = vi.spyOn(MemoryRepoService, "get");
+    try {
+      spy.mockReturnValue(null);
+      const folderOff = buildWorkspaceKitContext(tmpDir, "any", new Date(), options);
+      expect(folderOff).toContain("GENERATED_PATTERN");
+      expect(folderOff).toContain("HAND_WRITTEN_PATTERN");
+
+      spy.mockReturnValue({ isWritable: () => true } as unknown as MemoryRepoService);
+      const folderOn = buildWorkspaceKitContext(tmpDir, "any", new Date(), options);
+      expect(folderOn).not.toContain("GENERATED_PATTERN");
+      expect(folderOn).toContain("HAND_WRITTEN_PATTERN");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("includes SOUL.md as free-form content (not just filled template fields)", () => {

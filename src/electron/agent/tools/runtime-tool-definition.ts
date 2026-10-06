@@ -58,6 +58,8 @@ const READ_PARALLEL_TOOLS = new Set([
 ]);
 
 const EXCLUSIVE_TOOLS = new Set([
+  // Appends to the swarm folder and commits: one at a time.
+  "swarm_note",
   "write_file",
   "edit_file",
   "delete_file",
@@ -192,6 +194,8 @@ const ALWAYS_EXPOSE_TOOLS = new Set([
   "memory_remember",
   "memory_forget",
   "context_recall",
+  // Swarm notes (phase 5 §2): offered only to swarm members, never deferred for them.
+  "swarm_note",
   // Keep bot-to-bot handoffs discoverable for persistent bot conversations.
   // Runtime policy still gates execution; deferring this tool makes delegation
   // silently unavailable when the prompt omits the exact tool name.

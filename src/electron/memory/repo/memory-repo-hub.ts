@@ -15,6 +15,7 @@ import {
   type MemoryRepoHubEntry,
   type MemoryRepoHubFile,
   type MemoryRepoHubFileRole,
+  type MemoryRepoKeepTarget,
 } from "../../../shared/memory-repo-types";
 import { redactSensitiveMarkdownContent } from "../markdown-index-sql";
 import type { MemoryRepoService } from "./MemoryRepoService";
@@ -24,6 +25,7 @@ import {
   MEMORY_REPO_LESSONS_FILE,
   MEMORY_REPO_ME_FILE,
   MEMORY_REPO_WORKSPACES_DIR,
+  isSwarmRepoPath,
   memoryRepoRef,
   parseMemoryRepoEntries,
   parseMemoryRepoLine,
@@ -43,7 +45,8 @@ export type MemoryRepoHubPort = Pick<
   | "forget"
   | "moveEntry"
   | "resolveFile"
->;
+> &
+  Partial<Pick<MemoryRepoService, "keepEntry">>;
 
 const TASK_SOURCE = /^cowork:\/\/tasks\/([A-Za-z0-9_.:-]{1,128})$/;
 
@@ -64,6 +67,8 @@ export function memoryRepoFileRole(relPath: string): MemoryRepoHubFileRole {
 
 /** Whether a workspace's Hub may see a file: global files and the inbox, or its own file. */
 function visibleIn(relPath: string, ownWorkspaceFile: string | null): boolean {
+  // Swarm folders are agents' shared notes, not the user's memory (phase 5 §2).
+  if (isSwarmRepoPath(relPath)) return false;
   if (!relPath.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) return true;
   return relPath === ownWorkspaceFile;
 }
@@ -207,6 +212,29 @@ export async function pinMemoryRepoEntry(
     origin: "memory_hub",
   });
   if (!result.moved) return { ok: false, error: result.error ?? "The memory was not pinned." };
+  return { ok: true, ref: memoryRepoRef(result.moved.path, result.moved.line) };
+}
+
+/**
+ * Keep an inbox entry (docs/memory-repo-phase5-design.md §3): move it to `me.md`,
+ * `lessons.md` or this workspace's file (created when missing) as the user's line.
+ */
+export async function keepMemoryRepoEntry(
+  service: MemoryRepoHubPort | null,
+  request: MemoryRepoEntryRequest & { target: MemoryRepoKeepTarget; workspaceName?: string | null },
+): Promise<MemoryRepoEntryActionResult> {
+  const target = await resolveRef(service, request);
+  if ("error" in target) return { ok: false, error: target.error };
+  if (target.path !== MEMORY_REPO_INBOX_FILE) {
+    return { ok: false, error: "Only inbox entries can be kept." };
+  }
+  if (!target.service.keepEntry) return { ok: false, error: "The memory folder is not available." };
+  const result = await target.service.keepEntry(target.path, target.line, request.target, {
+    expectHash: request.hash,
+    workspaceId: request.workspaceId,
+    workspaceName: request.workspaceName ?? null,
+  });
+  if (!result.moved) return { ok: false, error: result.error ?? "The memory was not kept." };
   return { ok: true, ref: memoryRepoRef(result.moved.path, result.moved.line) };
 }
 

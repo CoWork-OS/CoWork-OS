@@ -25,6 +25,10 @@ const USER_START = "<!-- cowork:auto:curated-user:start -->";
 const USER_END = "<!-- cowork:auto:curated-user:end -->";
 const WS_START = "<!-- cowork:auto:curated-workspace:start -->";
 const WS_END = "<!-- cowork:auto:curated-workspace:end -->";
+const LORE_START = "<!-- cowork:auto:lore:start -->";
+const LORE_END = "<!-- cowork:auto:lore:end -->";
+const MISTAKES_START = "<!-- cowork:auto:mistakes:start -->";
+const MISTAKES_END = "<!-- cowork:auto:mistakes:end -->";
 
 let tmpDir: string;
 let workspacePath: string;
@@ -62,6 +66,14 @@ describe("removeGeneratedMemoryBlocks", () => {
     expect(removeGeneratedMemoryBlocks(`a\n${WS_START}\n- cut off`)).toBe("a\n");
     expect(removeGeneratedMemoryBlocks("no markers\n")).toBe("no markers\n");
   });
+
+  it("removes the lore and feedback-pattern blocks unless feedback patterns are kept", () => {
+    const text = `a\n${LORE_START}\n- m\n${LORE_END}\nb\n${MISTAKES_START}\n- p\n${MISTAKES_END}\nc\n`;
+    expect(removeGeneratedMemoryBlocks(text)).toBe("a\nb\nc\n");
+    expect(removeGeneratedMemoryBlocks(text, { keepFeedbackPatterns: true })).toBe(
+      `a\nb\n${MISTAKES_START}\n- p\n${MISTAKES_END}\nc\n`,
+    );
+  });
 });
 
 describe("stripCuratedKitBlocksOnce", () => {
@@ -86,6 +98,44 @@ describe("stripCuratedKitBlocksOnce", () => {
       USER_START,
     );
     expect(mocks.clearKitRenderState).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("removes the LORE.md block always and the MISTAKES.md block only with a writable folder", async () => {
+    const lore = `# Shared Lore\n\n## Milestones\n- [2026-10-01] by hand\n${LORE_START}\n- [2026-10-02] task\n${LORE_END}\n\n## Notes\n- n\n`;
+    const mistakes = `# Mistakes\n\n## Patterns\n${MISTAKES_START}\n- Main: too long\n${MISTAKES_END}\n\n## Notes\n- mine\n`;
+    write("LORE.md", lore);
+    write("MISTAKES.md", mistakes);
+
+    // Folder off: MISTAKES.md keeps its live fallback block.
+    expect(await stripCuratedKitBlocksOnce(workspace(), () => false)).toEqual({
+      status: "done",
+      changedFiles: [path.join(".cowork", "LORE.md")],
+    });
+    expect(read("LORE.md")).toBe(
+      "# Shared Lore\n\n## Milestones\n- [2026-10-01] by hand\n\n## Notes\n- n\n",
+    );
+    expect(read("MISTAKES.md")).toBe(mistakes);
+
+    // Folder writable (a later process): the block goes, the hand-written text stays.
+    resetKitBlockStripForTests();
+    expect(await stripCuratedKitBlocksOnce(workspace(), () => true)).toEqual({
+      status: "done",
+      changedFiles: [path.join(".cowork", "MISTAKES.md")],
+    });
+    expect(read("MISTAKES.md")).toBe("# Mistakes\n\n## Patterns\n\n## Notes\n- mine\n");
+  });
+
+  it("refuses a MISTAKES.md that is a symlink", async () => {
+    const outside = path.join(tmpDir, "outside-mistakes.md");
+    const content = `# Mistakes\n${MISTAKES_START}\n- a\n${MISTAKES_END}\n`;
+    fs.writeFileSync(outside, content);
+    fs.symlinkSync(outside, kitPath("MISTAKES.md"));
+
+    expect(await stripCuratedKitBlocksOnce(workspace(), () => true)).toEqual({
+      status: "skipped",
+      reason: "outside_workspace",
+    });
+    expect(fs.readFileSync(outside, "utf8")).toBe(content);
   });
 
   it("removes a truncated block (no end marker) through the end of the file", async () => {

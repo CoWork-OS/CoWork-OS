@@ -19,7 +19,10 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { MemoryRepoStatusReport } from "../../../shared/memory-repo-types";
+import type {
+  MemoryRepoKeepTarget,
+  MemoryRepoStatusReport,
+} from "../../../shared/memory-repo-types";
 import { createLogger } from "../../utils/logger";
 import {
   screenMemoryText,
@@ -34,12 +37,14 @@ import {
   MEMORY_REPO_LESSONS_FILE,
   MEMORY_REPO_LIMITS,
   MEMORY_REPO_ME_FILE,
+  MEMORY_REPO_SWARMS_DIR,
   MEMORY_REPO_WORKSPACES_DIR,
   ensureIndexLink,
   initialEntryFile,
   initialTopicFile,
   insertEntryLine,
   isSafeRepoPath,
+  isSwarmRepoPath,
   isoDay,
   memoryRepoRef,
   parseMemoryRepoEntries,
@@ -52,6 +57,19 @@ import {
   type MemoryRepoEntry,
   type MemoryRepoMetadata,
 } from "./memory-repo-format";
+import {
+  SWARM_FINDINGS_FILE,
+  SWARM_NOTE_KINDS,
+  SWARM_QUESTIONS_FILE,
+  SWARM_README_FILE,
+  initialSwarmNotesFile,
+  renderSwarmReadme,
+  swarmFileForKind,
+  swarmFolderPath,
+  swarmSlug,
+  type SwarmMember,
+  type SwarmNoteKind,
+} from "./memory-repo-swarm";
 import {
   isGitAvailable,
   parsePorcelainZ,
@@ -87,6 +105,25 @@ const ABOUT_USER_KINDS: ReadonlySet<MemoryItemKind> = new Set([
   "correction",
 ]);
 
+/** The `# ` heading of a new `inbox.md`. */
+const MEMORY_REPO_INBOX_TITLE = "Inbox (unreviewed: saved by the agent after reading untrusted content)";
+
+/** One note read from another folder, before screening (`importToInbox`). */
+export interface MemoryRepoImportEntry {
+  text: string;
+  kind?: MemoryItemKind | null;
+  /** `YYYY-MM-DD` from the source line; anything else becomes today. */
+  added?: string | null;
+}
+
+export interface MemoryRepoImportOutcome {
+  imported: number;
+  duplicates: number;
+  skipped: number;
+  truncated: boolean;
+  error?: string;
+}
+
 export type MemoryRepoOrigin =
   | "agent_tool"
   | "memory_hub"
@@ -94,7 +131,9 @@ export type MemoryRepoOrigin =
   | "hand_edit"
   | "dream"
   | "onboarding"
-  | "import";
+  | "import"
+  | "feedback"
+  | "swarm";
 
 /** Metadata keys `remember` sets itself; `metadata` cannot override them. */
 const RESERVED_METADATA_KEYS: ReadonlySet<string> = new Set([
@@ -132,6 +171,23 @@ export interface MemoryRepoRememberInput {
    * when there is no `taskId`.
    */
   metadata?: Record<string, string>;
+}
+
+/** A peer note in a swarm folder (`swarmAppend`). */
+export interface MemoryRepoSwarmAppendInput {
+  slug: string;
+  kind: SwarmNoteKind;
+  text: string;
+  /** The author's role or title (metadata `author`). */
+  author?: string | null;
+  taskId?: string | null;
+  sources?: string[];
+  /** The author read untrusted content (metadata `tainted: yes`). */
+  tainted?: boolean;
+  /** For the README written with the first note. */
+  goal?: string;
+  rootTaskId?: string;
+  members?: SwarmMember[];
 }
 
 export type MemoryRepoSkipReason =
@@ -646,6 +702,173 @@ export class MemoryRepoService {
   }
 
   /**
+   * Keep an inbox entry (docs/memory-repo-phase5-design.md §3): move it to `me.md`,
+   * `lessons.md` or the workspace's file as the user's line, keeping its other metadata.
+   * The target file is created (and linked from the index) when missing.
+   */
+  async keepEntry(
+    relPath: string,
+    line: number,
+    target: MemoryRepoKeepTarget,
+    options: { expectHash?: string; workspaceId?: string | null; workspaceName?: string | null } = {},
+  ): Promise<{ moved: { path: string; line: number } | null; error?: string }> {
+    if (!this.isWritable()) return { moved: null, error: "The memory repo is not available." };
+    if (relPath !== MEMORY_REPO_INBOX_FILE) {
+      return { moved: null, error: "Only inbox entries can be kept." };
+    }
+    if (target === "workspace" && !options.workspaceId) {
+      return { moved: null, error: "Keeping it for a workspace needs a workspace." };
+    }
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          const source = await this.readFile(relPath);
+          if (source === null) return { moved: null, error: "No such memory file." };
+          const entry = parseMemoryRepoLine(splitLines(source)[line - 1] ?? "", line);
+          const problem = editableEntryProblem(entry, options.expectHash);
+          if (problem || !entry) return { moved: null, error: problem ?? "That line is not a saved memory." };
+          const file =
+            target === "workspace"
+              ? await this.chooseFile({
+                  text: entry.text,
+                  kind: entry.kind ?? "project_fact",
+                  scope: "workspace",
+                  workspaceId: options.workspaceId,
+                  workspaceName: options.workspaceName,
+                  by: "user",
+                  origin: "memory_hub",
+                })
+              : target === "me"
+                ? { path: MEMORY_REPO_ME_FILE, initial: initialTopicFile("About me") }
+                : { path: MEMORY_REPO_LESSONS_FILE, initial: initialTopicFile("Lessons") };
+          const current = await this.readFile(file.path);
+          const created = current === null;
+          const targetText = current ?? file.initial;
+          const rendered = renderMemoryRepoEntry(entry.text, { ...entry.metadata, by: "user" });
+          const existing = parseMemoryRepoEntries(targetText).find((other) => other.hash === entry.hash);
+          let nextTarget = targetText;
+          let targetLine: number;
+          if (existing) {
+            targetLine = existing.line;
+          } else {
+            nextTarget = insertEntryLine(targetText, rendered, false);
+            targetLine = splitLines(nextTarget).findIndex((row) => row === rendered) + 1;
+            if (Buffer.byteLength(nextTarget, "utf8") > this.fileLimit(file.path)) {
+              return { moved: null, error: `${file.path} is full; consolidate it first.` };
+            }
+          }
+          const changed = [relPath];
+          await this.writeFileAtomic(relPath, replaceLine(source, line, null));
+          if (created || nextTarget !== targetText) {
+            await this.writeFileAtomic(file.path, nextTarget);
+            changed.push(file.path);
+          }
+          if (created) {
+            const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? initialEntryFile();
+            const linked = ensureIndexLink(entryFile, file.path);
+            if (linked !== entryFile) {
+              await this.writeFileAtomic(MEMORY_REPO_ENTRY_FILE, linked);
+              changed.push(MEMORY_REPO_ENTRY_FILE);
+            }
+          }
+          if (file.path.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) this.workspaceFiles = null;
+          await this.commitPaths(changed, `Keep: ${preview(entry.text)}`, { origin: "memory_hub" });
+          return { moved: { path: file.path, line: targetLine } };
+        }),
+      );
+    } catch (error) {
+      return { moved: null, error: this.describeError(error) };
+    }
+  }
+
+  /**
+   * Add notes read from another folder to `inbox.md` (docs/memory-repo-phase5-design.md §3),
+   * in one commit: each text is screened like `remember` (salience, secrets, `<no-memory>`),
+   * deduped against every file of the folder, and written as an agent line with
+   * `source: import` and `import: <label>`. Stops at the inbox size limit (`truncated`).
+   */
+  async importToInbox(
+    entries: ReadonlyArray<MemoryRepoImportEntry>,
+    label: string,
+  ): Promise<MemoryRepoImportOutcome> {
+    const outcome: MemoryRepoImportOutcome = { imported: 0, duplicates: 0, skipped: 0, truncated: false };
+    if (!this.isWritable()) return { ...outcome, error: "The memory repo is not available." };
+    const lines: string[] = [];
+    for (const candidate of entries) {
+      if (containsNoMemoryDirective(candidate.text)) {
+        outcome.skipped += 1;
+        continue;
+      }
+      const screened = screenMemoryText(candidate.text, MEMORY_REPO_LIMITS.entryChars);
+      if (!screened.ok) {
+        outcome.skipped += 1;
+        continue;
+      }
+      lines.push(
+        renderMemoryRepoEntry(screened.content, {
+          by: "agent",
+          ...(candidate.kind ? { kind: candidate.kind } : {}),
+          source: "import",
+          import: label,
+          added: candidate.added && /^\d{4}-\d{2}-\d{2}$/.test(candidate.added)
+            ? candidate.added
+            : isoDay(this.now()),
+        }),
+      );
+    }
+    if (lines.length === 0) return outcome;
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          const known = new Set<string>();
+          for (const file of (await this.listFiles()).filter((name) => !isSwarmRepoPath(name))) {
+            for (const entry of parseMemoryRepoEntries((await this.readFile(file)) ?? "")) {
+              known.add(entry.hash);
+            }
+          }
+          const current = await this.readFile(MEMORY_REPO_INBOX_FILE);
+          let text = current ?? initialTopicFile(MEMORY_REPO_INBOX_TITLE);
+          for (const line of lines) {
+            const parsed = parseMemoryRepoLine(line, 1);
+            if (!parsed) {
+              outcome.skipped += 1;
+              continue;
+            }
+            if (known.has(parsed.hash)) {
+              outcome.duplicates += 1;
+              continue;
+            }
+            const next = insertEntryLine(text, line, false);
+            if (Buffer.byteLength(next, "utf8") > MEMORY_REPO_LIMITS.fileBytes) {
+              outcome.truncated = true;
+              break;
+            }
+            text = next;
+            known.add(parsed.hash);
+            outcome.imported += 1;
+          }
+          if (outcome.imported === 0) return outcome;
+          await this.writeFileAtomic(MEMORY_REPO_INBOX_FILE, text);
+          await this.commitPaths(
+            [MEMORY_REPO_INBOX_FILE],
+            `Import ${outcome.imported} note${outcome.imported === 1 ? "" : "s"} from ${label}`,
+            { origin: "import" },
+          );
+          return outcome;
+        }),
+      );
+    } catch (error) {
+      if (error instanceof MemoryRepoBusyError) {
+        return { ...outcome, imported: 0, error: "The memory folder is busy; try again." };
+      }
+      this.lastWriteError = this.describeError(error);
+      return { ...outcome, imported: 0, error: this.lastWriteError };
+    }
+  }
+
+  /**
    * Remove every entry `match` accepts (default: in every file), in one commit. The
    * workspace marker lines are kept. Returns how many entries were removed.
    */
@@ -696,6 +919,161 @@ export class MemoryRepoService {
       (entry) => entry.by === "agent" && entry.metadata.source === source,
       `Forget what task ${taskId.slice(0, 8)} learned`,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Swarm folders (docs/memory-repo-phase5-design.md §2)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Append a peer note to `swarms/<slug>/findings.md` (finding, ruled_out) or `questions.md`
+   * (question, answer), creating `README.md` with the first note. Screened like `remember`;
+   * one commit per note (origin `swarm`); never linked from MEMORY.md. The slug comes from
+   * the task chain (`resolveSwarm`), never from the model.
+   */
+  async swarmAppend(input: MemoryRepoSwarmAppendInput): Promise<MemoryRepoWriteResult> {
+    if (!this.isWritable()) return { status: "skipped", reason: "unavailable" };
+    const folder = swarmFolderPath(input.slug);
+    if (!folder) return { status: "skipped", reason: "unavailable", detail: "invalid swarm" };
+    if (!(SWARM_NOTE_KINDS as readonly string[]).includes(input.kind)) {
+      return { status: "skipped", reason: "empty", detail: "unknown note kind" };
+    }
+    const screened = screenMemoryText(input.text, MEMORY_REPO_LIMITS.entryChars);
+    if (!screened.ok) return { status: "skipped", reason: screened.reason };
+    if (containsNoMemoryDirective(input.text)) return { status: "skipped", reason: "no_memory" };
+    const sources = (input.sources ?? [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .slice(0, 5)
+      .join(", ");
+    const metadata: MemoryRepoMetadata = {
+      by: "agent",
+      kind: input.kind,
+      ...(input.taskId ? { source: taskSourceLink(input.taskId) } : {}),
+      added: isoDay(this.now()),
+      ...(input.author?.trim() ? { author: input.author.trim() } : {}),
+      ...(sources ? { sources } : {}),
+      ...(input.tainted ? { tainted: "yes" } : {}),
+    };
+    const relPath = `${folder}/${swarmFileForKind(input.kind)}`;
+    const readmePath = `${folder}/${SWARM_README_FILE}`;
+    const redactions = screened.redactions;
+    return this.serialized(async () => {
+      try {
+        return await this.locked(async () => {
+          const current = await this.readFile(relPath);
+          let text = current ?? initialSwarmNotesFile(input.kind);
+          const hash = parseMemoryRepoLine(`- ${screened.content}`, 1)?.hash;
+          const same = parseMemoryRepoEntries(text).find((entry) => entry.hash === hash);
+          if (same) {
+            return {
+              status: "written",
+              action: "reinforced",
+              ref: memoryRepoRef(relPath, same.line),
+              path: relPath,
+              line: same.line,
+              redactions,
+            } as const;
+          }
+          const line = renderMemoryRepoEntry(screened.content, metadata);
+          text = insertEntryLine(text, line, false);
+          if (Buffer.byteLength(text, "utf8") > MEMORY_REPO_LIMITS.fileBytes) {
+            throw new SkipWrite("too_large", `${relPath} is full.`);
+          }
+          await this.commitHandEdits();
+          const changed = [relPath];
+          await this.writeFileAtomic(relPath, text);
+          if ((await this.readFile(readmePath)) === null) {
+            await this.writeFileAtomic(
+              readmePath,
+              renderSwarmReadme({
+                goal: input.goal ?? "",
+                rootTaskId: input.rootTaskId ?? "",
+                members: input.members ?? [],
+              }),
+            );
+            changed.push(readmePath);
+          }
+          await this.commitPaths(changed, `Swarm ${input.kind}: ${preview(screened.content)}`, {
+            origin: "swarm",
+            taskId: input.taskId ?? null,
+          });
+          const lineNumber = splitLines(text).findIndex((row) => row === line) + 1;
+          return {
+            status: "written",
+            action: "inserted",
+            ref: memoryRepoRef(relPath, lineNumber),
+            path: relPath,
+            line: lineNumber,
+            redactions,
+          } as const;
+        });
+      } catch (error) {
+        if (error instanceof SkipWrite) {
+          return { status: "skipped", reason: error.reason, ...(error.detail ? { detail: error.detail } : {}) };
+        }
+        if (error instanceof MemoryRepoBusyError) return { status: "skipped", reason: "busy" };
+        this.lastWriteError = this.describeError(error);
+        logger.warn("Memory repo swarm write failed:", error);
+        return { status: "skipped", reason: "unavailable", detail: this.lastWriteError };
+      }
+    });
+  }
+
+  /** The texts of a swarm folder's files (null when missing). */
+  async swarmFiles(
+    slug: string,
+  ): Promise<{ readme: string | null; findings: string | null; questions: string | null } | null> {
+    const folder = swarmFolderPath(slug);
+    if (!folder || !this.ready) return null;
+    return {
+      readme: await this.readFile(`${folder}/${SWARM_README_FILE}`),
+      findings: await this.readFile(`${folder}/${SWARM_FINDINGS_FILE}`),
+      questions: await this.readFile(`${folder}/${SWARM_QUESTIONS_FILE}`),
+    };
+  }
+
+  /**
+   * Remove the swarm folder of a root task (the root task was deleted), in one commit.
+   * Folders are matched by the root id in the slug and confirmed by the README's root link.
+   */
+  async purgeSwarm(rootTaskId: string): Promise<number> {
+    if (!this.isWritable() || !rootTaskId) return 0;
+    const suffix = `-${swarmSlug("", rootTaskId).split("-").pop()}`;
+    const swarmsDir = path.join(this.root, MEMORY_REPO_SWARMS_DIR);
+    // Most deleted tasks never started a swarm: skip the lock then.
+    const candidates = await fs.readdir(swarmsDir).catch(() => [] as string[]);
+    if (!candidates.some((name) => name.endsWith(suffix))) return 0;
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          const names = await fs.readdir(swarmsDir, { withFileTypes: true }).catch(() => []);
+          const folders: string[] = [];
+          for (const entry of names) {
+            if (!entry.isDirectory() || !entry.name.endsWith(suffix)) continue;
+            const folder = swarmFolderPath(entry.name);
+            if (!folder) continue;
+            const readme = await this.readFile(`${folder}/${SWARM_README_FILE}`);
+            if (readme !== null && !readme.includes(taskSourceLink(rootTaskId))) continue;
+            if (await this.hasSymlinkUnderRoot(path.join(this.root, folder), true)) continue;
+            folders.push(folder);
+          }
+          if (folders.length === 0) return 0;
+          await this.commitHandEdits();
+          for (const folder of folders) {
+            await fs.rm(path.join(this.root, folder), { recursive: true, force: true });
+          }
+          await this.commitPaths(folders, `Remove swarm notes of task ${rootTaskId.slice(0, 8)}`, {
+            origin: "swarm",
+            taskId: rootTaskId,
+          });
+          return folders.length;
+        }),
+      );
+    } catch (error) {
+      logger.warn("Memory repo swarm purge failed:", error);
+      return 0;
+    }
   }
 
   /** Delete a workspace's file and its index link, then compact (Clear All Memories). */
@@ -1309,10 +1687,7 @@ export class MemoryRepoService {
     input: MemoryRepoRememberInput,
   ): Promise<{ path: string; initial: string }> {
     if (input.by === "agent" && input.tainted) {
-      return {
-        path: MEMORY_REPO_INBOX_FILE,
-        initial: initialTopicFile("Inbox (unreviewed: saved by the agent after reading untrusted content)"),
-      };
+      return { path: MEMORY_REPO_INBOX_FILE, initial: initialTopicFile(MEMORY_REPO_INBOX_TITLE) };
     }
     if (input.by === "user" && input.pinned) {
       const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? "";

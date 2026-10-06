@@ -8,6 +8,7 @@ import { InputSanitizer } from "../agent/security";
 import { redactSensitiveMarkdownContent } from "./MarkdownMemoryIndexService";
 import type { MarkdownMemoryReadGuard } from "./MarkdownMemoryIndexService";
 import { removeGeneratedMemoryBlocks } from "./generated-kit-blocks";
+import { writableMemoryRepo } from "./repo/memory-repo-producers";
 
 type ExtractedSection = {
   title: string;
@@ -197,10 +198,14 @@ function formatWorkspaceKitBody(
 ): string {
   const withoutLore =
     contract.file === "LORE.md" ? stripMarkedBlock(body, AUTO_LORE_START, AUTO_LORE_END) : body;
+  // MISTAKES.md feedback patterns are memory-folder corrections while the folder is
+  // writable; with the folder off the generated block is the live fallback and stays.
   const normalizedBody =
     excludeGeneratedMemoryBlocks && (contract.file === "USER.md" || contract.file === "MEMORY.md")
       ? stripGeneratedMemoryBlocks(withoutLore)
-      : withoutLore;
+      : excludeGeneratedMemoryBlocks && contract.file === "MISTAKES.md" && writableMemoryRepo()
+        ? stripGeneratedMemoryBlocks(withoutLore)
+        : withoutLore;
   switch (contract.parser) {
     case "kv-lines":
       return extractFilledKvLines(normalizedBody) || normalizedBody.trim();

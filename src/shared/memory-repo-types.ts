@@ -227,3 +227,30 @@ export interface MemoryRepoEntryActionResult {
 
 /** Entries listed per file by `memoryRepo:entries`. */
 export const MEMORY_REPO_HUB_ENTRIES_PER_FILE = 500;
+
+// ---------------------------------------------------------------------------
+// Importing notes from a folder (docs/memory-repo-phase5-design.md §3)
+// ---------------------------------------------------------------------------
+
+/** Where Keep moves an inbox entry: `me.md`, `lessons.md` or the workspace's file. */
+export const MEMORY_REPO_KEEP_TARGETS = ["me", "lessons", "workspace"] as const;
+export type MemoryRepoKeepTarget = (typeof MEMORY_REPO_KEEP_TARGETS)[number];
+
+/** `memoryRepo:importFolder`: what came over from the chosen folder into `inbox.md`. */
+export interface MemoryRepoImportResult {
+  /** The user closed the folder picker. */
+  cancelled?: boolean;
+  error?: string;
+  /** The chosen folder's name (never its full path). */
+  folderName?: string;
+  /** Markdown files read. */
+  files: number;
+  /** Entries added to the inbox. */
+  imported: number;
+  /** Entries the memory folder already holds. */
+  duplicates: number;
+  /** Entries refused by screening (too short, only a secret, `<no-memory>`) and files skipped. */
+  skipped: number;
+  /** A limit was reached (files, bytes, or the inbox size): some notes were not read or added. */
+  truncated: boolean;
+}

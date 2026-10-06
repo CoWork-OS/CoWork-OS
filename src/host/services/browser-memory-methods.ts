@@ -6,6 +6,7 @@ import { MemoryRepoService } from "../../electron/memory/repo/MemoryRepoService"
 import { readMemoryRepoLines } from "../../electron/memory/repo/memory-repo-read";
 import { promoteObservationToMemoryFolder } from "../../electron/memory/repo/memory-repo-producers";
 import {
+  keepMemoryRepoEntry,
   listMemoryRepoEntries,
   pinMemoryRepoEntry,
   removeMemoryRepoEntry,
@@ -16,6 +17,7 @@ import {
   MemoryRepoDreamPartSchema,
   MemoryRepoEntriesRequestSchema,
   MemoryRepoEntryRequestSchema,
+  MemoryRepoKeepEntryRequestSchema,
   MemoryRepoRefsSchema,
   MemoryRepoUpdateEntryRequestSchema,
 } from "../../electron/ipc/memory-repo-ipc-validation";
@@ -880,6 +882,13 @@ export function createBrowserMemoryDefinitions(options: {
     ),
     pinMemoryRepoEntry: workspaceAction(MemoryRepoEntryRequestSchema, "write", (value) =>
       pinMemoryRepoEntry(MemoryRepoService.get(), value),
+    ),
+    // Keep an inbox entry. Importing a folder stays desktop-only (it needs a native picker).
+    keepMemoryRepoEntry: workspaceAction(
+      MemoryRepoKeepEntryRequestSchema,
+      "write",
+      (value, workspace) =>
+        keepMemoryRepoEntry(MemoryRepoService.get(), { ...value, workspaceName: workspace.name }),
     ),
     // Dreams over the memory folder (docs/memory-repo-phase2-design.md §5-§7).
     getMemoryRepoDreams: noArgs(() =>

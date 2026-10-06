@@ -3,6 +3,7 @@ import type {
   MemoryRepoCompactResult,
   MemoryRepoDreamNowResult,
   MemoryRepoDreamsReport,
+  MemoryRepoImportResult,
   MemoryRepoStatusReport,
   MemoryRepoSyncNowResult,
 } from "../../../shared/memory-repo-types";
@@ -35,7 +36,42 @@ export type MemoryRepoApi = {
   getMemoryRepoDreams?: () => Promise<MemoryRepoDreamsReport>;
   dreamMemoryRepoNow?: () => Promise<MemoryRepoDreamNowResult>;
   syncMemoryRepoNow?: () => Promise<MemoryRepoSyncNowResult>;
+  /** Desktop only: main opens a folder picker and imports its notes into the inbox. */
+  importMemoryRepoFolder?: () => Promise<MemoryRepoImportResult>;
 };
+
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/** The result line of "Import notes from a folder"; null when the picker was closed. */
+export function importResultMessage(
+  result: MemoryRepoImportResult,
+): { tone: "success" | "error"; text: string } | null {
+  if (result.cancelled) return null;
+  if (result.error) return { tone: "error", text: result.error };
+  const from = result.folderName ? ` from "${result.folderName}"` : "";
+  if (result.imported === 0) {
+    const why =
+      result.files === 0
+        ? "no markdown notes were found"
+        : result.duplicates > 0
+          ? "your memory already has them"
+          : "none of them could be kept";
+    return { tone: "success", text: `Nothing imported${from}: ${why}.` };
+  }
+  const extra = [
+    result.duplicates > 0 ? `${plural(result.duplicates, "duplicate", "duplicates")} left out` : "",
+    result.skipped > 0 ? `${result.skipped} skipped` : "",
+    result.truncated ? "a size limit was reached, so some notes were not read" : "",
+  ].filter(Boolean);
+  return {
+    tone: "success",
+    text: `Imported ${plural(result.imported, "note", "notes")}${from} into the inbox${
+      extra.length ? ` (${extra.join("; ")})` : ""
+    }. Keep the ones you want in What CoWork knows.`,
+  };
+}
 
 export interface MemoryRepoDreamingViewProps {
   dreamingEnabled: boolean;
@@ -181,7 +217,7 @@ export function MemoryRepoCard({
 }: MemoryRepoCardProps) {
   const [status, setStatus] = useState<MemoryRepoStatusReport | null>(null);
   const [pathDraft, setPathDraft] = useState(features.memoryRepoPath ?? "");
-  const [busy, setBusy] = useState<"save" | "open" | "compact" | null>(null);
+  const [busy, setBusy] = useState<"save" | "open" | "compact" | "import" | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [syncMessage, setSyncMessage] = useState<SectionMessage>(null);
   const [teamMessage, setTeamMessage] = useState<SectionMessage>(null);
@@ -190,6 +226,8 @@ export function MemoryRepoCard({
   const generation = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canOpen = hasHostMethod("openMemoryRepoFolder");
+  // Desktop only: the browser host has no native folder picker (and no such method).
+  const canImport = hasHostMethod("importMemoryRepoFolder");
   const enabled = features.memoryRepoEnabled === true;
   const savedPath = features.memoryRepoPath ?? "";
   const canListDreams = hasHostMethod("getMemoryRepoDreams");
@@ -300,6 +338,24 @@ export function MemoryRepoCard({
       setMessage({
         tone: "error",
         text: memoryRepoErrorMessage(error, "Failed to open the memory folder."),
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importFolder = async () => {
+    const run = api().importMemoryRepoFolder;
+    if (!run) return;
+    setBusy("import");
+    setMessage(null);
+    try {
+      setMessage(importResultMessage(await run()));
+      await loadStatus();
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: memoryRepoErrorMessage(error, "Failed to import the notes."),
       });
     } finally {
       setBusy(null);
@@ -421,6 +477,17 @@ export function MemoryRepoCard({
             onClick={() => void openFolder()}
           >
             {busy === "open" ? "Opening..." : "Open memory folder"}
+          </button>
+        )}
+        {canImport && (
+          <button
+            type="button"
+            className="settings-button"
+            disabled={busy !== null || !ready || status?.writable === false}
+            onClick={() => void importFolder()}
+            title="Bring notes from another agent's memory folder or any folder of markdown notes into the inbox"
+          >
+            {busy === "import" ? "Importing..." : "Import notes from a folder…"}
           </button>
         )}
         <button

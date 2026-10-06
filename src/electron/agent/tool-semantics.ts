@@ -137,6 +137,16 @@ const MEMORY_TOOL_SEMANTICS: ToolSemantics[] = (
 }));
 TOOL_SEMANTICS_TABLE.push(...MEMORY_TOOL_SEMANTICS);
 
+// Swarm notes (docs/memory-repo-phase5-design.md §2): a note in the memory folder, no file.
+TOOL_SEMANTICS_TABLE.push({
+  canonicalName: "swarm_note",
+  aliases: ["swarm_note"],
+  mutatesFile: false,
+  artifactKind: "none",
+  dedupeClass: "swarm_note",
+  requiredInputSchemaKey: null,
+});
+
 const ALIAS_TO_SEMANTICS = new Map<string, ToolSemantics>();
 const CANONICAL_TO_SEMANTICS = new Map<string, ToolSemantics>();
 

@@ -15,6 +15,7 @@ import {
   initialTopicFile,
   insertEntryLine,
   isSafeRepoPath,
+  isSwarmRepoPath,
   isoDay,
   parseMemoryRepoEntries,
   renderMemoryRepoEntry,
@@ -112,7 +113,10 @@ export function buildDreamInput(params: {
     ...(params.priority ?? []),
     MEMORY_REPO_ENTRY_FILE,
     ...[...params.files.keys()].sort(),
-  ].filter((file, index, all) => params.files.has(file) && all.indexOf(file) === index);
+  ]
+    // Dreams never read swarm folders (agents' shared notes; phase 5 §2).
+    .filter((file) => !isSwarmRepoPath(file))
+    .filter((file, index, all) => params.files.has(file) && all.indexOf(file) === index);
   const sections: string[] = [];
   let used = 0;
   let omitted = 0;
@@ -146,6 +150,9 @@ export function buildDreamInput(params: {
   for (const [index, raw] of splitLines(inboxText).entries()) {
     const entry = parseMemoryRepoEntries(raw)[0];
     if (!entry) continue;
+    // Notes imported from a folder wait for the user (docs/memory-repo-phase5-design.md §3):
+    // without an alias the dream can neither promote nor discard them.
+    if (isImportedInboxEntry(entry)) continue;
     counter += 1;
     const alias = `L${counter}`;
     lines.set(alias, toRef(alias, MEMORY_REPO_INBOX_FILE, index + 1, entry, true));
@@ -189,6 +196,11 @@ export function buildDreamInput(params: {
     tasks,
     estimatedInputTokens: Math.ceil((SYSTEM_PROMPT.length + user.length) / 4),
   };
+}
+
+/** An inbox line imported from another folder (`source: import`). */
+export function isImportedInboxEntry(entry: Pick<MemoryRepoEntry, "metadata">): boolean {
+  return entry.metadata.source === "import";
 }
 
 function toRef(
@@ -300,7 +312,7 @@ function normalizeForQuote(value: string): string {
 }
 
 function validTarget(path: string): boolean {
-  return isSafeRepoPath(path) && path !== MEMORY_REPO_INBOX_FILE;
+  return isSafeRepoPath(path) && path !== MEMORY_REPO_INBOX_FILE && !isSwarmRepoPath(path);
 }
 
 /**

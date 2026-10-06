@@ -18,6 +18,7 @@ import type { MemoryItem } from "../memory-items-types";
 import type { SafeStorageLike } from "../../utils/safe-storage";
 import type { MemoryRepoService } from "./MemoryRepoService";
 import { MEMORY_REPO_EXPORT_MARKER } from "./MemoryRepoExport";
+import { isSwarmRepoPath } from "./memory-repo-format";
 import { MemoryRepoBusyError, withMemoryRepoLock } from "./memory-repo-lock";
 
 const logger = createLogger("MemoryItemsFactRetirement");
@@ -70,6 +71,8 @@ export async function runMemoryItemsFactRetirement(
         const now = (deps.now ?? Date.now)();
         const inFolder = new Set<string>();
         for (const file of await service.listFiles()) {
+          // Swarm notes are agents' notes, not the user's facts.
+          if (isSwarmRepoPath(file)) continue;
           for (const entry of await service.entries(file)) inFolder.add(entry.hash);
         }
         const rows = (await deps.listItems()).filter(isRetiredFactRow);

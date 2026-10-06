@@ -1,4 +1,8 @@
-import type { MemoryRepoHubEntry, MemoryRepoHubFile } from "../../../shared/memory-repo-types";
+import type {
+  MemoryRepoHubEntry,
+  MemoryRepoHubFile,
+  MemoryRepoKeepTarget,
+} from "../../../shared/memory-repo-types";
 import { KIND_LABELS } from "./memory-knowledge-model";
 import { folderFileHint } from "./memory-folder-model";
 import type { MemoryHubKind } from "../../../shared/memory-hub-types";
@@ -18,6 +22,8 @@ export interface MemoryFolderKnowledgeProps {
   onSaveEdit: () => void;
   onCancelEdit: () => void;
   onPin: (entry: MemoryRepoHubEntry) => void;
+  /** Keep an inbox entry as yours (absent: only "Keep and pin" is offered). */
+  onKeep?: (entry: MemoryRepoHubEntry, target: MemoryRepoKeepTarget) => void;
   onDelete: (entry: MemoryRepoHubEntry) => void;
   onOpenFile: (path: string) => void;
   /** Open the task an entry was learned in (absent: the task is shown, not linked). */
@@ -28,6 +34,16 @@ function kindLabel(kind: string | null): string | null {
   if (!kind || kind === "identity" || kind === "preference") return null;
   return KIND_LABELS[kind as MemoryHubKind] ?? null;
 }
+
+const KEEP_ACTIONS: ReadonlyArray<{ target: MemoryRepoKeepTarget; label: string; title: string }> = [
+  { target: "me", label: "Keep: about me", title: "Keep it as yours in me.md" },
+  { target: "lessons", label: "Keep: lesson", title: "Keep it as yours in lessons.md" },
+  {
+    target: "workspace",
+    label: "Keep: this workspace",
+    title: "Keep it as yours in this workspace's file",
+  },
+];
 
 function FolderEntryRow({
   entry,
@@ -101,6 +117,20 @@ function FolderEntryRow({
       </div>
       {!editing && (
         <div className="memory-knowledge-actions">
+          {file.role === "inbox" &&
+            props.onKeep &&
+            KEEP_ACTIONS.map((action) => (
+              <button
+                key={action.target}
+                type="button"
+                className="memory-inline-btn"
+                onClick={() => props.onKeep?.(entry, action.target)}
+                disabled={busy || !props.canWrite}
+                title={action.title}
+              >
+                {action.label}
+              </button>
+            ))}
           {file.role !== "entry" && (
             <button
               type="button"
@@ -194,8 +224,8 @@ export function MemoryFolderKnowledge(props: MemoryFolderKnowledgeProps) {
             Unreviewed <span className="memory-knowledge-count">{props.inbox.entries.length}</span>
           </summary>
           <p className="settings-form-hint">
-            Saved by CoWork after reading untrusted content. Not used in replies until you keep
-            it with "Keep and pin".
+            Saved by CoWork after reading untrusted content, or imported from a folder. Not used in
+            replies until you keep it.
           </p>
           <FolderFileSection file={props.inbox} props={props} />
         </details>

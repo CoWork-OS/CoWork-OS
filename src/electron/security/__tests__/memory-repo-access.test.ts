@@ -113,6 +113,43 @@ describe("memory repo filesystem boundary", () => {
     );
   });
 
+  it("lets a swarm-only scope read its own swarm folder and nothing else (phase 5 §2)", () => {
+    const swarm = path.join(repo, "swarms", "goal-a1b2c3d4");
+    fs.mkdirSync(swarm, { recursive: true });
+    fs.mkdirSync(path.join(repo, "swarms", "other-ffffffff"), { recursive: true });
+    fs.writeFileSync(path.join(swarm, "findings.md"), "# Findings\n");
+    fs.writeFileSync(path.join(repo, "swarms", "other-ffffffff", "findings.md"), "# Findings\n");
+    // A symlink inside the swarm folder must not reach the rest of the repo.
+    fs.symlinkSync(path.join(repo, "MEMORY.md"), path.join(swarm, "leak.md"));
+    const swarmOnly = <T>(fn: () => T): T =>
+      runWithMemoryRepoAccess({ readAllowed: false, swarmPrefix: "swarms/goal-a1b2c3d4" }, fn);
+    const read = (target: string) =>
+      swarmOnly(() => evaluateWorkspaceFilesystemAccess(workspace, target, "read"));
+    expect(read(path.join(swarm, "findings.md"))).toMatchObject({
+      decision: "allow",
+      reason: "memory_repo_read",
+    });
+    expect(read(swarm).decision).toBe("allow");
+    for (const target of [
+      path.join(repo, "MEMORY.md"),
+      path.join(repo, "swarms"),
+      path.join(repo, "swarms", "other-ffffffff", "findings.md"),
+      path.join(swarm, "..", "..", "MEMORY.md"),
+      path.join(swarm, "leak.md"),
+    ]) {
+      expect(read(target)).toMatchObject({ decision: "deny", reason: "memory_repo_unavailable" });
+    }
+    expect(
+      swarmOnly(() => evaluateWorkspaceFilesystemAccess(workspace, path.join(swarm, "findings.md"), "write")),
+    ).toMatchObject({ decision: "deny", reason: "protected_path" });
+    // A malformed prefix is ignored.
+    expect(
+      runWithMemoryRepoAccess({ readAllowed: false, swarmPrefix: "swarms/../" }, () =>
+        evaluateWorkspaceFilesystemAccess(workspace, path.join(repo, "MEMORY.md"), "read"),
+      ),
+    ).toMatchObject({ decision: "deny" });
+  });
+
   it("never offers an approval for a refused read", async () => {
     const request = vi.fn(async () => true);
     const result = await resolveWorkspaceFilesystemAccessWithApproval(

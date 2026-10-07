@@ -16,7 +16,7 @@ There are two different concepts in the product:
    These are individual skills installed into the managed skills directory and surfaced in the Skills settings area.
    This is the capability documented here.
 
-Bundled skills such as [`manim-video`](skills/manim-video.md), [`kami`](skills/kami.md), and [`unbroker`](skills/unbroker.md) do not need installation from the Skill Store. They ship with the app and are available immediately.
+Bundled skills such as [`manim-video`](skills/manim-video.md), [`motion-film`](skills/motion-film.md), [`motion-editor`](skills/motion-editor.md), [`kami`](skills/kami.md), and [`unbroker`](skills/unbroker.md) do not need installation from the Skill Store. They ship with the app and are available immediately.
 
 ## Supported Skill Sources
 

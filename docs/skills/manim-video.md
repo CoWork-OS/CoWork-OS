@@ -175,7 +175,7 @@ Strong fits:
 Weak fits:
 
 - “Edit this podcast clip.”
-- “Make a generic product promo video.”
+- “Make a generic product promo video.” — use [`motion-film`](motion-film.md)
 - “Create a static diagram.”
 
 ## Related Features And Skills
@@ -184,6 +184,7 @@ Weak fits:
 - [Use Cases](../use-cases.md): copy-paste prompts that include `manim-video`
 - [Use Case Showcase](../showcase.md): example workflows powered by the skill
 - [Skill Store & External Skills](../skill-store-and-external-skills.md): explains why this one is bundled and available immediately
+- [`motion-film`](motion-film.md): for launch videos, promos, and other motion-design films rendered in code
 - `video-frames`: for extracting stills or clips from an existing video, not generating a new animation
 - built-in video generation providers: better for model-generated video clips, not deterministic technical animation
 

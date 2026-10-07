@@ -23,7 +23,7 @@ See [Heartbeat v3](heartbeat-v3.md) for the full architecture reference.
 
 ### New UI surfaces
 
-- **Ideas panel**: a curated launch panel accessible from the sidebar above Sessions. Displays pre-written workflow prompts organized by category. Includes an `/ideas` gateway route for deep-linking. See [Ideas Panel: Supported Capabilities](ideas-capabilities.md).
+- **Ideas panel**: a curated launch panel accessible from the sidebar above Sessions. Displays pre-written workflow prompts organized by category. Includes an `/ideas` gateway route for deep-linking. (Since replaced by the use-case gallery.)
 - **Mission Control task controls**: start, pause, stop, and retry actions for tasks are now accessible directly from Mission Control without navigating to the individual task view.
 
 ### New providers and model capabilities
@@ -71,7 +71,7 @@ See [Heartbeat v3](heartbeat-v3.md) for the full architecture reference.
 ### Documentation refresh
 
 - **Heartbeat v3**: new comprehensive architecture doc at [docs/heartbeat-v3.md](heartbeat-v3.md).
-- **Ideas capabilities**: new reference doc at [docs/ideas-capabilities.md](ideas-capabilities.md) listing tools and fallbacks for each Ideas panel prompt.
+- **Ideas capabilities**: new reference doc (since removed) listing tools and fallbacks for each Ideas panel prompt.
 - **Providers**: Azure Anthropic added to the built-in providers table with a setup section.
 - **Features**: Ideas panel, document editing sessions, and video generation entries added.
 - **Changelog and README**: updated to reflect 0.5.12 changes.

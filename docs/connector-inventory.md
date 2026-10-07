@@ -11,7 +11,7 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 | Native app integrations | 14 |
 | Gateway channels | 19 |
 | MCP connectors (Settings > Connectors) | 67 |
-| Bundled skills | 150 |
+| Bundled skills | 152 |
 
 Requirement keys: `macos-only`, `local-service` (a local app or server must be running), `public-webhook` (a reachable HTTPS URL is needed in production), `oauth-consent`, `api-key`, `cli-binary`, `personal-account-session`.
 
@@ -221,6 +221,8 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `memory-kit` | Memory Kit | Tools |  |
 | `model-usage` | Model-usage | Tools |  |
 | `moltbook` | Moltbook | Tools |  |
+| `motion-editor` | Motion Editor | Creative |  |
+| `motion-film` | Motion Film | Creative |  |
 | `multi-pr-review` | multi-pr-review | Development |  |
 | `nano-pdf` | Nano-pdf | Tools |  |
 | `usecase-newsletter-digest` | Newsletter Digest | Use Cases |  |

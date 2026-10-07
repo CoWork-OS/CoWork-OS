@@ -514,29 +514,14 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
         acpTask.status = "failed";
         acpTask.error = err?.message || "Failed to create task";
       }
-    } else if (assignee.origin === "remote" && assignee.endpoint) {
-      try {
-        const result = await remoteInvoker.invoke(assignee, {
-          assigneeId,
-          title,
-          prompt,
-          workspaceId: p.workspaceId,
-        });
-        acpTask.remoteTaskId = result.remoteTaskId;
-        acpTask.status = result.status;
-        acpTask.result = result.result;
-        acpTask.error = result.error;
-        if (
-          result.status === "completed" ||
-          result.status === "failed" ||
-          result.status === "cancelled"
-        ) {
-          acpTask.completedAt = Date.now();
-        }
-      } catch (err: Any) {
-        acpTask.status = "failed";
-        acpTask.error = err?.message || "Failed to invoke remote agent";
-      }
+    } else if (assignee.origin === "remote") {
+      // New remote sends go only through the orchestration graph, which runs
+      // remote dispatch admission (policy, network policy, approval). Without it
+      // this server must not invoke the agent directly. Polling and cancelling an
+      // already-admitted remote task below stay on the invoker.
+      acpTask.status = "failed";
+      acpTask.error = "Remote ACP task delegation is not configured on this server";
+      acpTask.completedAt = Date.now();
     }
 
     acpTasks.set(acpTask.id, acpTask);

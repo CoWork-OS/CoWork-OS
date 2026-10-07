@@ -13,7 +13,7 @@ import {
 } from "./address-classes";
 
 /** True when HTTP(S)_PROXY applies to this URL (respecting NO_PROXY). */
-function usesEnvProxy(endpoint: URL): boolean {
+export function usesEnvProxy(endpoint: URL): boolean {
   const env = process.env;
   const proxy =
     endpoint.protocol === "https:"

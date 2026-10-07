@@ -6,6 +6,12 @@ import { AgentDaemon } from "../daemon";
 import { getACPRegistry } from "../../acp";
 import { OrchestrationGraphEngine } from "../orchestration/OrchestrationGraphEngine";
 
+// Admission is covered in OrchestrationGraphEngine.test.ts; these tests exercise cancellation.
+const allowRemoteAcpDispatch = {
+  evaluate: async () => ({ decision: "allow" as const }),
+  requestApproval: async () => ({ approved: true }),
+};
+
 function createGraphSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE orchestration_graph_runs (
@@ -135,6 +141,7 @@ describe("AgentDaemon.cancelTask graph coordination", () => {
       getTaskById: async () => undefined,
       cancelTask: async () => {},
       getActiveAgentRoles: () => [],
+      remoteAcpAdmission: allowRemoteAcpDispatch,
     });
     for (const key of ["first-run-node", "second-run-node"]) {
       await graph.createRun({
@@ -276,6 +283,7 @@ describe("AgentDaemon.cancelTask graph coordination", () => {
       getTaskById: async () => undefined,
       cancelTask: async () => {},
       getActiveAgentRoles: () => [],
+      remoteAcpAdmission: allowRemoteAcpDispatch,
     });
     await graph.createRun({
       rootTaskId: "parent-path-task",

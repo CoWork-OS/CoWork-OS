@@ -1,8 +1,9 @@
+import { promises as dns } from "node:dns";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ACPAgentCard } from "../types";
-import { RemoteAgentInvoker } from "../remote-invoker";
-import { afterEach, describe, expect, it } from "vitest";
+import { RemoteAgentInvoker, validateRemoteAgentEndpoint } from "../remote-invoker";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("RemoteAgentInvoker dispatch fallback", () => {
   let server: Server | undefined;
@@ -165,6 +166,78 @@ describe("RemoteAgentInvoker dispatch fallback", () => {
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
     return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   }
+});
+
+describe("RemoteAgentInvoker destination checks", () => {
+  let server: Server | undefined;
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    if (server?.listening) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+    }
+    server = undefined;
+  });
+
+  it("rejects a hostname that resolves to a private address without connecting", async () => {
+    for (const name of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]) {
+      vi.stubEnv(name, "");
+    }
+    const lookup = vi
+      .spyOn(dns, "lookup")
+      .mockResolvedValue([{ address: "10.0.0.5", family: 4 }] as Any);
+
+    await expect(
+      new RemoteAgentInvoker().invoke(makeAgent("https://agent.example.test/acp"), makeTask()),
+    ).rejects.toThrow(/internal/);
+    expect(lookup).toHaveBeenCalledWith("agent.example.test", expect.anything());
+  });
+
+  it("does not follow a redirect to another host", async () => {
+    const methods: string[] = [];
+    server = createServer((request, response) => {
+      methods.push(request.url || "");
+      response.writeHead(302, { location: "http://169.254.169.254/latest/meta-data" });
+      response.end();
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/acp`;
+
+    await expect(new RemoteAgentInvoker().invoke(makeAgent(endpoint), makeTask())).rejects.toThrow(
+      "HTTP 302",
+    );
+    expect(methods).toEqual(["/acp"]);
+  });
+});
+
+describe("validateRemoteAgentEndpoint", () => {
+  it.each([
+    "https://[fd00::1]/acp",
+    "https://[fe80::1]/acp",
+    "https://[::ffff:10.0.0.1]/acp",
+    "https://[::ffff:a9fe:a9fe]/acp",
+    "https://10.0.0.1/acp",
+    "https://169.254.169.254/",
+  ])("rejects the private literal %s", (endpoint) => {
+    expect(() => validateRemoteAgentEndpoint(endpoint)).toThrow(/private or link-local/);
+  });
+
+  it.each([
+    "http://[::1]:8080/acp",
+    "http://127.0.0.1:9/acp",
+    "http://localhost:9/acp",
+    "https://agent.example.com/acp",
+  ])("accepts %s", (endpoint) => {
+    expect(validateRemoteAgentEndpoint(endpoint)).toBeInstanceOf(URL);
+  });
+
+  it.each(["http://agent.example.com/acp", "http://agent.localhost/acp"])(
+    "requires https for %s",
+    (endpoint) => {
+      expect(() => validateRemoteAgentEndpoint(endpoint)).toThrow(/https/);
+    },
+  );
 });
 
 function makeAgent(endpoint: string): ACPAgentCard {

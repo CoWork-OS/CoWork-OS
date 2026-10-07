@@ -8,7 +8,7 @@
  * Example: canvas://abc123-def456/index.html
  */
 
-import { protocol, type Protocol } from "electron";
+import type { Protocol } from "electron";
 import * as path from "path";
 import * as fs from "fs";
 import { CanvasManager } from "./canvas-manager";
@@ -66,11 +66,21 @@ function createErrorResponse(statusCode: number, message: string): Response {
 }
 
 /**
+ * Electron's protocol module, loaded on first use: the headless daemon imports the canvas
+ * manager (and this module) without Electron installed, so it must not load at import time.
+ */
+function electronProtocol(): Protocol {
+  // A static import would load Electron in the headless daemon, where it is not installed.
+  // oxlint-disable-next-line typescript-eslint(no-require-imports)
+  return (require("electron") as typeof import("electron")).protocol;
+}
+
+/**
  * Register the canvas:// protocol scheme as privileged
  * Must be called before app.ready
  */
 export function registerCanvasScheme(): void {
-  protocol.registerSchemesAsPrivileged([
+  electronProtocol().registerSchemesAsPrivileged([
     {
       scheme: "canvas",
       privileges: {
@@ -89,7 +99,7 @@ export function registerCanvasScheme(): void {
  * Must be called after app.ready
  */
 export function registerCanvasProtocol(
-  targetProtocol: Protocol = protocol,
+  targetProtocol: Protocol = electronProtocol(),
   allowedSessionId?: string,
 ): void {
   targetProtocol.handle("canvas", async (request) => {

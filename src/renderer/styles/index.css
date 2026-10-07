@@ -20947,6 +20947,146 @@ a,
   margin-top: 20px;
 }
 
+/* "From another assistant" memory import (PromptMemoryImportWizard) */
+.memory-text-import-modal {
+  width: min(96vw, 620px);
+  max-width: 620px;
+  max-height: 88vh;
+}
+
+.memory-text-import-modal .mcp-modal-header h3 {
+  margin: 0;
+}
+
+.memory-text-import-result-title {
+  margin: 0 0 8px;
+  color: var(--color-text-primary);
+}
+
+.memory-text-import-footer .chatgpt-import-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.memory-text-import-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.memory-text-import-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.memory-text-import-step-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-text-import-step-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  line-height: 28px;
+}
+
+.memory-text-import-prompt {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.memory-text-import-prompt pre {
+  margin: 0;
+  padding: 12px 14px 44px;
+  max-height: 112px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent);
+  mask-image: linear-gradient(to bottom, #000 40%, transparent);
+}
+
+.memory-text-import-prompt.is-expanded pre {
+  max-height: 320px;
+  overflow-y: auto;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.memory-text-import-prompt-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.memory-text-import-paste {
+  width: 100%;
+  min-height: 160px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.memory-text-import-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.memory-text-import-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-text-import-option .settings-select {
+  width: auto;
+}
+
+.memory-text-import-note {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.memory-text-import-note.is-error {
+  color: var(--color-error);
+}
+
+.memory-text-import-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
 .chatgpt-import-btn {
   padding: 8px 20px;
   border-radius: 6px;

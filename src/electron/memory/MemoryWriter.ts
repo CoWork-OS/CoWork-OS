@@ -533,6 +533,7 @@ export class MemoryWriter {
       pinned: candidate.pinned === true,
       privacy,
       taskId: nonEmpty(candidate.taskId) ?? null,
+      originWorkspaceId: governingWorkspace ?? null,
       expiresAt:
         typeof candidate.expiresAt === "number" && Number.isFinite(candidate.expiresAt)
           ? Math.floor(candidate.expiresAt)

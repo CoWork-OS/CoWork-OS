@@ -32,6 +32,7 @@ export interface NotionRequestOptions {
   path: string;
   body?: Record<string, Any>;
   timeoutMs?: number;
+  beforeSend?: () => void | Promise<void>;
 }
 
 export interface NotionRequestResult {
@@ -59,6 +60,7 @@ export async function notionRequest(
   }
 
   const timeoutMs = options.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await options.beforeSend?.();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

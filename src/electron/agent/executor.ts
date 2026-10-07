@@ -1,3 +1,5 @@
+import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
+import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { resolveInteractionMode } from "./strategy/interaction-mode";
 import { QUALITY_PASS_SYSTEM_PROMPT, isQualityRewriteSafe } from "./quality-pass-output";
@@ -8566,26 +8568,13 @@ ${transcript}
       }
     }
 
-    if (this.task.agentConfig?.botConversation === true && this.task.agentConfig.botTeamId) {
+    const botTeamContext =
+      this.task.agentConfig?.botConversation === true
+        ? this.daemon.getBotTeamPromptContext?.(this.task.id)
+        : undefined;
+    if (botTeamContext) {
       lines.push("");
-      lines.push("PERSISTENT BOT TEAM:");
-      lines.push(
-        "This conversation belongs to the persistent CoWork Bot Team. Use send_agent_message with bot= to delegate or report durable teammate updates.",
-      );
-      lines.push(
-        "The available teammate handles are atlas, forge, scribe, exec, chief-community-officer, and product-engineer.",
-      );
-      if (roleId && this.daemon.getAgentRoleById(roleId)?.name === "atlas-your-chief-of-staff") {
-        lines.push(
-          "As the lead, delegate focused read-only or execution work to the relevant teammates, wait for their durable replies, and summarize only received results.",
-        );
-      }
-      lines.push(
-        "For any inbound teammate handoff, complete the focused work and send the concise result back to the requesting teammate. Prefer send_agent_message with task_id from the [NEW TEAMMATE HANDOFF] boundary so the durable reply is correlated; otherwise use that teammate's bot handle. Do not default to Atlas unless Atlas is the requester.",
-      );
-      lines.push(
-        "A [CORRELATED TEAM REPLY] is a delivery receipt for your own earlier handoff, not a new request. Do not send another message for it or start a reply loop; finish the turn after recording the received result. Only message again when the receipt explicitly contains a new action request.",
-      );
+      lines.push(buildBotTeamContextPrompt(botTeamContext));
     }
 
     const workerRole = resolveWorkerRoleKind(this.task.workerRole);
@@ -12448,10 +12437,7 @@ ${transcript}
    * the stricter rules, and the task-level test-run requirement still needs a
    * passing run at the end.
    */
-  private isDiagnosticCommandRunStep(
-    step: PlanStep,
-    stepContract: StepExecutionContract,
-  ): boolean {
+  private isDiagnosticCommandRunStep(step: PlanStep, stepContract: StepExecutionContract): boolean {
     if (stepContract.requiresMutation || stepContract.mode !== "analysis_only") return false;
     if (step.kind === "recovery" || this.isVerificationStepForCompletion(step)) return false;
     const description = String(step.description || "");
@@ -12654,8 +12640,9 @@ ${transcript}
    * command passed later, e.g. `npm test` red and only a single file re-run.
    */
   private getUnresolvedTestCommandFailures(): UnresolvedTestCommandFailures | null {
-    return findUnresolvedTestCommandFailures(this.verificationCommandLedger?.runs || [], (segment) =>
-      this.isTestCommand(segment),
+    return findUnresolvedTestCommandFailures(
+      this.verificationCommandLedger?.runs || [],
+      (segment) => this.isTestCommand(segment),
     );
   }
 
@@ -15229,9 +15216,7 @@ ${transcript}
             .filter(([, count]) => count > 0)
             .map(([tool]) => tool)
         : [];
-    return this.commandRunCompletedObserved
-      ? [...successfulTools, "run_command"]
-      : successfulTools;
+    return this.commandRunCompletedObserved ? [...successfulTools, "run_command"] : successfulTools;
   }
 
   private responseLooksOperationalOnly(text: string): boolean {
@@ -19183,8 +19168,9 @@ ${transcript}
     const delegationContext = [context, this.task.title, this.task.prompt, this.lastUserMessage]
       .filter(Boolean)
       .join("\n");
-    return /\b(?:send_agent_message|delegate|delegat(?:e|ing)|teammate|bot team|ask\s+(?:the\s+)?(?:forge|scribe|exec|chief-community-officer|product-engineer|atlas))\b/i.test(
+    return hasBotTeamDelegationRequest(
       delegationContext,
+      this.daemon.getBotTeamPromptContext?.(this.task.id),
     );
   }
 
@@ -22797,9 +22783,10 @@ You are continuing a previous conversation. The context from the previous conver
         result.slice(0, limit),
         result.length > limit ? "[UI observation clipped]" : "",
         "END APP UI",
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
     }
-
 
     // Keep bounded text-file content available when a later plan step starts
     // with a fresh LLM context. Previously cross-step memory retained only the
@@ -34250,9 +34237,8 @@ Return ONLY a JSON object:
                         ? "Switch to an access profile that permits command tools (Ask for approval, Approve for me, or Full access), or continue without commands."
                         : undefined;
                     hasUnavailableToolAttempt = true;
-                    const unavailableToolRepeated = unavailableToolsAttempted.has(
-                      canonicalContentName,
-                    );
+                    const unavailableToolRepeated =
+                      unavailableToolsAttempted.has(canonicalContentName);
                     unavailableToolsAttempted.add(canonicalContentName);
                     if (alternatives.length > 0 && !unavailableToolRepeated) {
                       // An available alternative can do the work; the step only
@@ -35035,7 +35021,11 @@ Return ONLY a JSON object:
                               this.isHardToolFailure(toolName, toolResult, error),
                           });
                           this.recordCrossStepToolFailure(content.name, failureMessage);
-                          toolLoopProgress.recordOutcome(canonicalContentName, content.input, false);
+                          toolLoopProgress.recordOutcome(
+                            canonicalContentName,
+                            content.input,
+                            false,
+                          );
                           if (this.isVerificationCommandCall(canonicalContentName, content.input)) {
                             iterationInvestigated = true;
                           }
@@ -35415,11 +35405,7 @@ Return ONLY a JSON object:
                           diagnosticCommandRunStep &&
                           this.isVerificationCommandCall(canonicalContentName, content.input) &&
                           isCompletedNonZeroExitCommandResultUtil(result);
-                        if (
-                          content.name === "run_command" &&
-                          !toolSucceeded &&
-                          !diagnosticRedRun
-                        ) {
+                        if (content.name === "run_command" && !toolSucceeded && !diagnosticRedRun) {
                           hadRunCommandFailure = true;
                         } else if (hadRunCommandFailure && (toolSucceeded || diagnosticRedRun)) {
                           hadToolSuccessAfterRunCommandFailure = true;
@@ -40561,6 +40547,12 @@ Return ONLY a JSON object:
           return;
         }
       }
+      if (typeof this.daemon.getDatabase === "function")
+        await enforceResponsibilityTaskStart(
+          this.daemon.getDatabase(),
+          this.task.id,
+          this.task.workspaceId,
+        );
       const persistedAgentConfig =
         this.daemon.getTask(this.task.id)?.agentConfig ?? this.task.agentConfig;
       try {
@@ -42620,7 +42612,11 @@ Return ONLY a JSON object:
                               this.isHardToolFailure(toolName, toolResult, error),
                           });
                           this.recordCrossStepToolFailure(canonicalContentName, failureMessage);
-                          toolLoopProgress.recordOutcome(canonicalContentName, content.input, false);
+                          toolLoopProgress.recordOutcome(
+                            canonicalContentName,
+                            content.input,
+                            false,
+                          );
                           if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
                             hasHardToolFailureAttempt = true;
                           }

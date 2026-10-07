@@ -16,6 +16,42 @@ function isInside(root, candidate) {
   );
 }
 
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalize(entry)]),
+    );
+  }
+  return value;
+}
+
+function approvalRevisionHash(approval) {
+  const serialized = JSON.stringify(
+    canonicalize({
+      taskId: approval.taskId,
+      type: approval.type,
+      description: approval.description,
+      details: approval.details,
+      requestedAt: approval.requestedAt,
+    }),
+  );
+  if (typeof serialized !== "string" || serialized.length > 256000)
+    throw new Error("Approval revision exceeds limit");
+  return crypto.createHash("sha256").update(serialized).digest("hex");
+}
+
+function approvalRevisionMatches(approval, expectedRevisionHash) {
+  return (
+    typeof expectedRevisionHash === "string" &&
+    /^[0-9a-f]{64}$/.test(expectedRevisionHash) &&
+    expectedRevisionHash === approval.revisionHash &&
+    expectedRevisionHash === approvalRevisionHash(approval)
+  );
+}
+
 function startFixtureControlPlane({
   profileDir,
   workerDelayMs = 25,
@@ -27,6 +63,17 @@ function startFixtureControlPlane({
   const workers = new Map();
   const approvals = new Map();
   const approvalResponses = [];
+  function addApprovalRow(input) {
+    const approval = {
+      ...input,
+      id: input.id || crypto.randomUUID(),
+      status: input.status || "pending",
+      requestedAt: Number.isFinite(input.requestedAt) ? input.requestedAt : Date.now(),
+    };
+    approval.revisionHash = approvalRevisionHash(approval);
+    approvals.set(approval.id, approval);
+    return approval;
+  }
   let serverReady;
   const listening = new Promise((resolve, reject) => {
     serverReady = resolve;
@@ -188,15 +235,13 @@ function startFixtureControlPlane({
         };
         tasks.set(task.id, task);
         if (fixtureScenario.approvalType) {
-          const approval = {
-            id: crypto.randomUUID(),
+          const approval = addApprovalRow({
             taskId: task.id,
             type: fixtureScenario.approvalType,
             description: "Fixture approval boundary probe",
             details: fixtureScenario.approvalDetails || {},
-            status: "pending",
-          };
-          approvals.set(approval.id, approval);
+            requestedAt: now,
+          });
           task.status = "paused";
           task.approvalId = approval.id;
         } else {
@@ -240,6 +285,8 @@ function startFixtureControlPlane({
       if (method === "approval.respond") {
         const approval = approvals.get(String(params.approvalId || ""));
         if (!approval) return fail("approval not found");
+        if (!approvalRevisionMatches(approval, params.expectedRevisionHash))
+          return response(ws, id, true, { status: "not_found" });
         approval.status = params.approved === true ? "approved" : "denied";
         approvalResponses.push({
           id: approval.id,
@@ -321,9 +368,7 @@ function startFixtureControlPlane({
       return [...approvalResponses];
     },
     addApproval(input) {
-      const approval = { id: crypto.randomUUID(), status: "pending", ...input };
-      approvals.set(approval.id, approval);
-      return approval;
+      return addApprovalRow(input);
     },
     async close() {
       await Promise.all([...workers.keys()].map((taskId) => stopWorker(taskId)));
@@ -333,4 +378,4 @@ function startFixtureControlPlane({
   };
 }
 
-module.exports = { startFixtureControlPlane };
+module.exports = { approvalRevisionHash, approvalRevisionMatches, startFixtureControlPlane };

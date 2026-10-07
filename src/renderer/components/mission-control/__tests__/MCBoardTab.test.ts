@@ -87,17 +87,14 @@ function makeData(taskOverrides: Partial<Task> = {}): MissionControlData {
 }
 
 describe("MCBoardTab", () => {
-  it("renders task action icons and resolves the assignee icon component", () => {
+  it("renders task action icons and draws the assignee as its character", () => {
     const markup = renderBoard(makeData());
 
     expect(markup).toContain("lucide-eye");
     expect(markup).toContain("lucide-flag");
     expect(markup).toContain("lucide-zap");
     expect(markup).toContain("lucide-arrow-right");
-    expect(markup).toContain("mc-v2-task-assignee-avatar");
-    // The default assignee glyph is the shared Phosphor bot mark (a 256 unit
-    // viewBox), not a lucide icon.
-    expect(markup).toMatch(/mc-v2-task-assignee-avatar[^>]*>\s*<svg[^>]*viewBox="0 0 256 256"/);
+    expect(markup).toMatch(/mc-v2-task-assignee"><svg class="bot-mascot"[^>]*data-mascot="/);
   });
 
   it("keeps unassigned tasks to the three non-owner action icons", () => {

@@ -132,6 +132,7 @@ interface SidebarProps {
   onBotDeleted?: (botId: string) => void | Promise<void>;
   onNewSession?: () => void;
   onOpenSettings: () => void;
+  onOpenBotMemory?: (workspaceId: string, botName: string) => void;
   isDevicesActive?: boolean;
 
   onTasksChanged: () => void;
@@ -852,6 +853,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.onBotUpdated === next.onBotUpdated &&
     prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
+    prev.onOpenBotMemory === next.onOpenBotMemory &&
     prev.onOpenSettings === next.onOpenSettings
   );
 }
@@ -883,6 +885,7 @@ function SidebarComponent({
   onReopenBot,
   onNewSession,
   onOpenSettings,
+  onOpenBotMemory,
   isDevicesActive = false,
   isLoadingMoreTasks = false,
 
@@ -3140,6 +3143,7 @@ function SidebarComponent({
         <>
           {visibleSidebarTab === "bots" ? (
             <BotsPane
+              workspaceId={workspace?.id}
               roles={botRoles}
               tasks={botTasks}
               selectedTaskId={highlightSelection ? selectedTaskId : null}
@@ -3150,6 +3154,7 @@ function SidebarComponent({
               onRetry={() => void loadAgentRoles()}
               onSelectTask={onSelectTask}
               onOpenBot={onOpenBot}
+              onOpenBotMemory={hasHostMethods("listMemoryItems","getMemorySettings","getMemoryFeaturesSettings","getRecentMemories") ? onOpenBotMemory : undefined}
               onReopenBot={onReopenBot}
               onOpenAgents={browserAction(
                 ["listManagedAgents", "listManagedSessions"],

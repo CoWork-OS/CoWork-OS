@@ -153,11 +153,133 @@ describeWithSqlite("RoutineWorkflowEngine", () => {
       runId: waiting.id,
       stepId: step.id,
       approved: true,
+      reviewDigest: step.reviewDigest,
     });
 
     expect(waiting.status).toBe("waiting_for_approval");
     expect(completed.status).toBe("completed");
     expect(executeAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the resolved action input and refreshes approval when that input changes", async () => {
+    routine.approvalPolicy = { mode: "confirm_external" };
+    const executeAction = vi.fn(async ({ input }) => ({ messageId: input.to }));
+    const repository = new Repository(db);
+    const engine = new Engine(repository, { executeAction });
+    const definition: RoutineWorkflowDefinition = {
+      version: 1,
+      starterNodeId: "starter",
+      nodes: [
+        { id: "starter", kind: "starter", operation: "starter.manual", name: "Manual", config: {} },
+        {
+          id: "email",
+          kind: "action",
+          operation: "gmail.notify",
+          name: "Email",
+          config: {
+            to: { $ref: "trigger.recipient" },
+            subject: "Review",
+            body: "Ready",
+          },
+        },
+      ],
+      edges: [{ id: "edge", sourceNodeId: "starter", targetNodeId: "email" }],
+    };
+
+    const waiting = await engine.start({
+      routine,
+      workflow: definition,
+      workflowVersionId: "version-1",
+      trigger: { recipient: "first@example.com" },
+    });
+    const initialStep = repository.findStep(waiting.id, "email")!;
+    expect(initialStep.input).toMatchObject({ to: "first@example.com", body: "Ready" });
+    expect(initialStep.reviewDigest).toMatch(/^[a-f0-9]{64}$/);
+
+    repository.updateRun(waiting.id, {
+      context: {
+        ...waiting.context,
+        trigger: { recipient: "second@example.com" },
+        nodes: { starter: { recipient: "second@example.com" } },
+      },
+    });
+    const refreshed = await engine.respondToApproval({
+      routine,
+      workflow: definition,
+      runId: waiting.id,
+      stepId: initialStep.id,
+      approved: true,
+      reviewDigest: initialStep.reviewDigest,
+    });
+    const refreshedStep = repository.findStep(waiting.id, "email")!;
+
+    expect(refreshed.status).toBe("waiting_for_approval");
+    expect(refreshedStep.input).toMatchObject({ to: "second@example.com", body: "Ready" });
+    expect(refreshedStep.reviewDigest).not.toBe(initialStep.reviewDigest);
+    expect(refreshedStep.error).toMatch(/changed after this review/i);
+    expect(executeAction).not.toHaveBeenCalled();
+
+    await expect(
+      engine.respondToApproval({
+        routine,
+        workflow: definition,
+        runId: waiting.id,
+        stepId: initialStep.id,
+        approved: true,
+        reviewDigest: initialStep.reviewDigest,
+      }),
+    ).rejects.toThrow(/review changed/i);
+    expect(executeAction).not.toHaveBeenCalled();
+
+    const completed = await engine.respondToApproval({
+      routine,
+      workflow: definition,
+      runId: waiting.id,
+      stepId: initialStep.id,
+      approved: true,
+      reviewDigest: refreshedStep.reviewDigest,
+    });
+    expect(completed.status).toBe("completed");
+    expect(executeAction).toHaveBeenCalledTimes(1);
+    expect(executeAction.mock.calls[0][0].input.to).toBe("second@example.com");
+  });
+
+  it("blocks approval when review details would be truncated", async () => {
+    routine.approvalPolicy = { mode: "confirm_external" };
+    const executeAction = vi.fn(async () => ({ ok: true }));
+    const repository = new Repository(db);
+    const engine = new Engine(repository, { executeAction });
+    const definition: RoutineWorkflowDefinition = {
+      version: 1,
+      starterNodeId: "starter",
+      nodes: [
+        { id: "starter", kind: "starter", operation: "starter.manual", name: "Manual", config: {} },
+        {
+          id: "labels",
+          kind: "action",
+          operation: "gmail.add_labels",
+          name: "Apply labels",
+          config: {
+            messageIds: Array.from({ length: 201 }, (_, index) => `message-${index}`),
+            labels: ["archive"],
+          },
+        },
+      ],
+      edges: [{ id: "edge", sourceNodeId: "starter", targetNodeId: "labels" }],
+    };
+
+    const run = await engine.start({
+      routine,
+      workflow: definition,
+      workflowVersionId: "version-1",
+      trigger: {},
+    });
+    const step = repository.findStep(run.id, "labels")!;
+
+    expect(run.status).toBe("failed");
+    expect(step.status).toBe("failed");
+    expect(step.error).toMatch(/exceed the review limit/i);
+    expect(executeAction).not.toHaveBeenCalled();
   });
 
   it("requires approval for external writes under auto-safe", async () => {
@@ -200,6 +322,7 @@ describeWithSqlite("RoutineWorkflowEngine", () => {
       runId: waiting.id,
       stepId: step.id,
       approved: true,
+      reviewDigest: step.reviewDigest,
     });
 
     expect(failed.status).toBe("failed");

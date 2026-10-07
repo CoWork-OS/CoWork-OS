@@ -18,6 +18,40 @@ describe("NotificationService", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it("persists stable bot delivery identities across restart and keeps concrete decisions distinct", async () => {
+    const service = new NotificationService({ storePath });
+    const base = {
+      type: "input_required" as const,
+      title: "Decision",
+      message: "Open work",
+      taskId: "task",
+      workspaceId: "ws",
+      agentRoleId: "bot",
+      desktopAlert: false,
+    };
+    const first = await service.add({ ...base, id: "bot-" + "a".repeat(64) });
+    await service.add({ ...base, id: "bot-" + "b".repeat(64) });
+    const restarted = new NotificationService({ storePath });
+    expect(restarted.list()).toHaveLength(2);
+    expect(await restarted.add({ ...base, id: first.id })).toEqual(first);
+    expect(restarted.list()).toHaveLength(2);
+    await expect(restarted.add({ ...base, id: first.id, workspaceId: "other" })).rejects.toThrow(
+      "another scope",
+    );
+  });
+  it("does not publish or retain a failed durable write", async () => {
+    fs.writeFileSync(path.join(tmpDir, "blocked"), "not a directory");
+    const events: NotificationEvent[] = [];
+    const service = new NotificationService({
+      storePath: path.join(tmpDir, "blocked", "notifications.json"),
+      onEvent: (event) => events.push(event),
+    });
+    await expect(
+      service.add({ type: "info", title: "Failed", message: "No effect" }),
+    ).rejects.toThrow();
+    expect(service.list()).toEqual([]);
+    expect(events).toEqual([]);
+  });
   it("does not add the same unresolved input-required notification more than once per task", async () => {
     const events: NotificationEvent[] = [];
     const service = new NotificationService({

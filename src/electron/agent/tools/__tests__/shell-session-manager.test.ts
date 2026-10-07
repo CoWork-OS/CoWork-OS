@@ -41,6 +41,52 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void>
 }
 
 describe("shell-session-manager", () => {
+  it.skipIf(process.platform === "win32")(
+    "rechecks authority after persistent setup before sending command bytes",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID(),
+        workspaceId = randomUUID();
+      const marker = `${testUserDataDir}/not-authorized-${randomUUID()}`;
+      const fallbackRunner = vi.fn();
+      const beforeExecute = vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("responsibility revoked"));
+      try {
+        await expect(
+          manager.runCommand({
+            taskId,
+            workspaceId,
+            workspacePath: testUserDataDir,
+            command: `echo executed > '${marker}'`,
+            timeoutMs: 10000,
+            beforeExecute,
+            fallbackRunner,
+          }),
+        ).rejects.toThrow("responsibility revoked");
+        expect(beforeExecute).toHaveBeenCalledTimes(2);
+        await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+        expect(fallbackRunner).not.toHaveBeenCalled();
+        const allowed = await manager.runCommand({
+          taskId,
+          workspaceId,
+          workspacePath: testUserDataDir,
+          command: "echo new-admission",
+          timeoutMs: 10000,
+          beforeExecute: async () => {},
+          fallbackRunner,
+        });
+        expect(allowed.stdout).toBe("new-admission");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+  );
+
   it("lets agent commands run past five minutes up to the run_command maximum", () => {
     expect(_testUtils.resolveCommandTimeoutMs("task", 20 * 60 * 1000)).toBe(20 * 60 * 1000);
     expect(_testUtils.resolveCommandTimeoutMs("task", 2 * 60 * 60 * 1000)).toBe(30 * 60 * 1000);

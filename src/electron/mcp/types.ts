@@ -298,9 +298,13 @@ export interface MCPElicitationResult {
 }
 
 export interface MCPToolCallOptions {
+  /** Trusted caller gate after queueing, immediately before transport submission. */
+  beforeSend?: () => Promise<void>;
   onElicitation?: (request: MCPElicitationRequest) => Promise<MCPElicitationResult>;
   signal?: AbortSignal;
 }
+
+export type MCPTransportRequestOptions = Pick<MCPToolCallOptions, "beforeSend" | "signal">;
 
 // MCP Protocol Methods
 export const MCP_METHODS = {
@@ -355,7 +359,11 @@ export interface MCPTransport {
   send(message: JSONRPCRequest | JSONRPCNotification): Promise<void>;
   /** Present on transports that implement server-to-client approval requests. */
   sendResponse?(message: JSONRPCResponse): Promise<void>;
-  sendRequest(method: string, params?: Record<string, Any>): Promise<Any>;
+  sendRequest(
+    method: string,
+    params?: Record<string, Any>,
+    options?: MCPTransportRequestOptions,
+  ): Promise<Any>;
   onMessage(handler: (message: JSONRPCResponse | JSONRPCNotification) => void): void;
   onClose(handler: (error?: Error) => void): void;
   onError(handler: (error: Error) => void): void;

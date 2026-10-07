@@ -31,6 +31,7 @@ describe("authorization identity", () => {
         accessProfile: {},
         authorization: { key: "old" },
         reason: "review",
+        draftRevision: { version: 1, state: "bound", entries: [{ sha256: "trusted" }] },
       }),
     ).toEqual(authorizationToolInput(original));
     expect(

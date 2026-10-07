@@ -1,3 +1,4 @@
+import { ChannelDecisionSettings } from "./ChannelDecisionSettings";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import { ChannelData, ChannelUserData, SecurityMode } from "../../shared/types";
@@ -459,7 +460,23 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
             onSaved={(config) =>
               setChannels((prev) =>
                 prev.map((entry) =>
-                  entry.id === selectedChannel.id ? { ...entry, config } : entry,
+                  entry.id === selectedChannel.id
+                    ? { ...entry, config: { ...entry.config, ownerUserIds: config.ownerUserIds } }
+                    : entry,
+                ),
+              )
+            }
+          />
+
+          <ChannelDecisionSettings
+            key={selectedChannel.id}
+            channel={selectedChannel}
+            onSaved={(enabled) =>
+              setChannels((prev) =>
+                prev.map((entry) =>
+                  entry.id === selectedChannel.id
+                    ? { ...entry, config: { ...entry.config, decisionMessagesEnabled: enabled } }
+                    : entry,
                 ),
               )
             }

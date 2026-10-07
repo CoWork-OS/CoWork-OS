@@ -1,3 +1,10 @@
+import { TEAMS_REFERENCE_UNITS } from "../gateway/teams-conversation-reference-units";
+import { CHANNEL_DECISION_UNITS } from "../gateway/channel-decision-units";
+import { NOTIFICATION_INBOX_UNITS } from "../notifications/notification-inbox-units";
+import { BOT_NOTIFICATION_UNITS } from "../notifications/bot-notification-units";
+import { BOT_RESPONSIBILITY_UNITS } from "../automation/responsibility-units";
+import { SCHEDULER_LEASE_UNITS } from "../automation/scheduler-lease-units";
+import { DISPATCH_BUDGET_UNITS } from "../automation/dispatch-budget-units";
 import { AGENT_UNITS } from "../agents/agent-units";
 import { CORE_UNITS } from "../core/core-units";
 import { IDENTITY_UNITS } from "../identity/identity-units";
@@ -37,6 +44,13 @@ import { RECURRING_APPROVAL_UNITS } from "../security/recurring-approval-units";
  * catalog registry can load it without a cycle.
  */
 export const SERVICE_UNITS = {
+  ...TEAMS_REFERENCE_UNITS,
+  ...CHANNEL_DECISION_UNITS,
+  ...NOTIFICATION_INBOX_UNITS,
+  ...BOT_NOTIFICATION_UNITS,
+  ...BOT_RESPONSIBILITY_UNITS,
+  ...SCHEDULER_LEASE_UNITS,
+  ...DISPATCH_BUDGET_UNITS,
   ...AGENT_UNITS,
   ...ROUTINE_UNITS,
   ...CORE_UNITS,

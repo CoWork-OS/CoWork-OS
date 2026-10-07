@@ -104,6 +104,8 @@ export interface MemoryScopeKey {
  * store's ingest unit only dedupes, supersedes and persists it, atomically.
  */
 export interface PreparedMemoryItemWrite extends MemoryScopeKey {
+  /** Governing workspace of a live global/contact capture, for source-task binding. */
+  originWorkspaceId?: string | null;
   kind: MemoryItemKind;
   subjectKey: string;
   /** True when the subject key was derived from the content hash (not a named subject). */

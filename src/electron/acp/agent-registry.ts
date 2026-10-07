@@ -19,6 +19,7 @@ import type {
   ACPAgentRegisterParams,
 } from "./types";
 import { validateRemoteAgentEndpoint } from "./remote-invoker";
+import { botIconText } from "../../shared/bot-mascots";
 
 const logger = createLogger("ACPAgentRegistry");
 
@@ -100,7 +101,8 @@ export class ACPAgentRegistry {
       description: role.description || `${role.displayName} agent`,
       version: "1.0.0",
       provider: "CoWork OS",
-      icon: role.icon,
+      // ACP clients render the icon as text, so mascots go out as their emoji.
+      icon: botIconText(role.icon),
       capabilities,
       origin: "local",
       localRoleId: role.id,

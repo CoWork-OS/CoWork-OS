@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import { BOARD_COLUMNS, TASK_PRIORITY_OPTIONS } from "./useMissionControlData";
 import type { MissionControlData } from "./useMissionControlData";
-import { resolveTwinIcon } from "../../utils/twin-icons";
+import { resolveBotMascot } from "../../../shared/bot-mascots";
+import { BotMascot } from "../bot-mascot/BotMascot";
 
 interface MCBoardTabProps {
   data: MissionControlData;
@@ -406,9 +407,6 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                   const stale = isTaskStale(task);
                   const estimate = formatTaskEstimate(task.estimatedMinutes);
                   const agentStatus = assignedAgent ? getAgentStatus(assignedAgent.id) : "offline";
-                  const AssignedAgentIcon = assignedAgent
-                    ? resolveTwinIcon(assignedAgent.icon)
-                    : null;
                   const hasBadges = Boolean(task.priority) || labels.length > 0;
                   const taskUpdatedAt = formatRelativeTime(task.updatedAt || task.createdAt);
 
@@ -530,14 +528,11 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                       )}
                       {assignedAgent && (
                         <div className="mc-v2-task-assignee">
-                          <span
-                            className="mc-v2-task-assignee-avatar"
-                            style={{ backgroundColor: assignedAgent.color }}
-                          >
-                            {AssignedAgentIcon ? (
-                              <AssignedAgentIcon size={12} strokeWidth={2} aria-hidden="true" />
-                            ) : null}
-                          </span>
+                          <BotMascot
+                            mascot={resolveBotMascot(assignedAgent.icon)}
+                            size={22}
+                            animated={false}
+                          />
                           <span className="mc-v2-task-assignee-name">
                             {assignedAgent.displayName}
                           </span>

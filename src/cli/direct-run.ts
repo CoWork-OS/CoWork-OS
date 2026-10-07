@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { presentApprovalRevision } from "../electron/agent/approval-revision";
+import { formatApproval } from "./format";
 import { TaskRepository, WorkspaceRepository } from "../electron/database/repository-facades";
 import {
   ApprovalRepository,
@@ -1107,18 +1109,11 @@ async function runLocalMetadataCommand(
       return 0;
     }
     case "approvals-list": {
-      const rows = await approvals.findPending(args.limit || 100);
+      const rows = (await approvals.findPending(args.limit || 100)).map(presentApprovalRevision);
       writeEvent(
         args,
         { type: "approvals", approvals: rows },
-        rows.length
-          ? rows
-              .map(
-                (approval) =>
-                  `${approval.id}  ${approval.type}  ${approval.description}  task=${approval.taskId}`,
-              )
-              .join("\n")
-          : "No pending approvals.",
+        rows.length ? rows.map(formatApproval).join("\n") : "No pending approvals.",
       );
       return 0;
     }

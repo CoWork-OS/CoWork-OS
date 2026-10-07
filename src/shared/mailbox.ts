@@ -32,7 +32,10 @@ export type MailboxQueuedActionStatus =
   | "succeeded"
   | "sent"
   | "failed"
+  | "outcome_unknown"
   | "cancelled";
+
+export type MailboxSendOutcomeResolution = "confirmed_sent" | "confirmed_not_sent";
 
 export type MailboxQueuedActionType =
   | "send"
@@ -57,7 +60,8 @@ export type MailboxComposeDraftStatus =
   | "sending"
   | "sent"
   | "discarded"
-  | "failed";
+  | "failed"
+  | "outcome_unknown";
 
 export type MailboxRemoteContentPolicy = "load" | "block" | "ask";
 

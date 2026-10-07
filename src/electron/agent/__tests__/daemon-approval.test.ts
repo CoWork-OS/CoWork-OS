@@ -272,7 +272,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
   it("keeps session approve-all behavior for safe network reads", async () => {
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-1" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -316,7 +317,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     expect(approved).toBe(true);
     expect(approvalRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "approved",
+        status: "pending",
       }),
     );
     expect(evaluatePermissionRequest).toHaveBeenCalled();
@@ -326,7 +327,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     });
   });
 
-  it("routes ordinary approval decisions to assistant input without creating a queue row", async () => {
+  it("routes ordinary approval decisions to assistant input with a canonical request", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
     const previousVitest = process.env.VITEST;
@@ -335,8 +336,10 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     delete process.env.VITEST;
 
     const approvalRepo = {
-      create: vi.fn(),
-      update: vi.fn(),
+      create: vi.fn((row: Any) => ({ id: "inline-request", ...row })),
+      approvedRevisionCurrent: vi.fn().mockResolvedValue(true),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -356,7 +359,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     const daemonLike = {
       sessionAutoApproveAll: false,
       approvalRepo,
-      requestAssistantApproval: vi.fn().mockResolvedValue(true),
+      requestAssistantApproval: vi.fn(async (...args: Any[]) => (args[7] ? args[7](true) : true)),
       logEvent: vi.fn(),
       updateTask: vi.fn(),
       evaluatePermissionRequest,
@@ -376,7 +379,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       );
 
       expect(approved).toBe(true);
-      expect(approvalRepo.create).not.toHaveBeenCalled();
+      expect(approvalRepo.create).toHaveBeenCalledOnce();
       expect(daemonLike.requestAssistantApproval).toHaveBeenCalledWith(
         "task-no-prompt",
         "network_access",
@@ -385,6 +388,11 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
         null,
         "domain:web_fetch:docs.example.com",
         undefined,
+        expect.any(Function),
+        expect.objectContaining({
+          approvalId: "inline-request",
+          revisionHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        }),
       );
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -431,8 +439,13 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
         });
       const daemonLike = {
         sessionAutoApproveAll: false,
-        approvalRepo: { create: vi.fn(), update: vi.fn() },
-        requestAssistantApproval: vi.fn().mockResolvedValue(true),
+        approvalRepo: {
+          create: vi.fn((row: Any) => ({ id: "inline-request", ...row })),
+          resolvePending: vi.fn().mockResolvedValue(true),
+          approvedRevisionCurrent: vi.fn().mockResolvedValue(true),
+          update: vi.fn(),
+        },
+        requestAssistantApproval: vi.fn(async (...args: Any[]) => (args[7] ? args[7](true) : true)),
         isApprovalAuthorityCurrent: AgentDaemon.prototype["isApprovalAuthorityCurrent"],
         logEvent: vi.fn(),
         updateTask: vi.fn(),
@@ -458,7 +471,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
         expect(approved).toBe(expected);
         expect(daemonLike.requestAssistantApproval).toHaveBeenCalledTimes(1);
-        expect(evaluatePermissionRequest).toHaveBeenCalledTimes(2);
+        expect(evaluatePermissionRequest).toHaveBeenCalledTimes(expected ? 3 : 2);
         expect(
           daemonLike.logEvent.mock.calls.some(
             (call: Any[]) =>
@@ -489,7 +502,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-denied-net" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -561,7 +575,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-2" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -624,7 +639,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-3" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -692,7 +708,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-export" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -751,7 +768,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-cu" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -808,7 +826,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
 
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-timeout" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -895,7 +914,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
   it("invalidates a pending approval when the tool execution is aborted", async () => {
     const approvalRepo = {
       create: vi.fn().mockReturnValue({ id: "approval-aborted-tool" }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const evaluatePermissionRequest = vi.fn().mockReturnValue({
       evaluation: {
@@ -1003,7 +1023,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     const daemonLike = {
       pendingApprovals,
       approvalRepo: {
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue(true),
+        resolvePending: vi.fn().mockResolvedValue(true),
       },
       updateTask: vi.fn(),
       logEvent: vi.fn(),
@@ -1054,7 +1075,12 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     );
     expect(manifestSpy).toHaveBeenCalled();
     expect(runtime.recordPermissionSuccess).toHaveBeenCalledWith("tool open_url");
-    expect(daemonLike.approvalRepo.update).toHaveBeenCalledWith("approval-4", "approved");
+    expect(daemonLike.approvalRepo.resolvePending).toHaveBeenCalledWith(
+      "approval-4",
+      "approved",
+      expect.objectContaining({ taskId: "task-4" }),
+      undefined,
+    );
 
     manifestSpy.mockRestore();
   });
@@ -1069,7 +1095,8 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
         details: {},
         status: "pending",
       }),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue(true),
+      resolvePending: vi.fn().mockResolvedValue(true),
     };
     const taskRepo = {
       findById: vi.fn().mockReturnValue({
@@ -1097,7 +1124,12 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     );
 
     expect(result).toBe("handled");
-    expect(approvalRepo.update).toHaveBeenCalledWith("approval-restart", "approved");
+    expect(approvalRepo.resolvePending).toHaveBeenCalledWith(
+      "approval-restart",
+      "approved",
+      expect.objectContaining({ taskId: "task-restart" }),
+      undefined,
+    );
     expect(daemonLike.updateTask).toHaveBeenCalledWith(
       "task-restart",
       expect.objectContaining({ status: "interrupted", terminalStatus: undefined }),
@@ -1189,58 +1221,71 @@ describe("AgentDaemon.buildPermissionRules", () => {
 });
 
 describe("boundary authorization broker", () => {
-  it("consumes an identity-bound queued response exactly once", () => {
-    const daemon = {
-      pendingDurableApprovalGrants: new Map(),
-      evaluatePermissionRequest: vi.fn(() => ({ authorizationKey: "current-exact-operation" })),
-      buildPermissionTrackingKey: vi.fn(() => "legacy-broad-scope"),
-    } as Any;
-    AgentDaemon.prototype["rememberDurableApprovalGrant"].call(daemon, "task-legacy", {
+  it("consumes an identity-bound queued response exactly once", async () => {
+    const approval = {
       id: "approval-old",
       taskId: "task-legacy",
       type: "run_command",
+      description: "Review",
+      requestedAt: Date.now(),
+      status: "approved",
       details: {
         command: "npm test",
         authorization: { version: 1, key: "current-exact-operation" },
         permissionPrompt: { scope: { kind: "tool", toolName: "run_command" } },
       },
-    });
+    };
+    const daemon = {
+      pendingDurableApprovalGrants: new Map(),
+      approvalRepo: {
+        findById: vi.fn().mockResolvedValue(approval),
+        approvedRevisionCurrent: vi.fn().mockResolvedValue(true),
+      },
+      isApprovalAuthorityCurrent: vi.fn().mockResolvedValue(true),
+    } as Any;
+    AgentDaemon.prototype["rememberDurableApprovalGrant"].call(
+      daemon,
+      "task-legacy",
+      approval as Any,
+    );
     expect(
-      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+      await AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
         daemon,
         "task-legacy",
         "legacy-broad-scope",
       ),
     ).toBeUndefined();
     expect(
-      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+      await AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
         daemon,
         "task-legacy",
         "current-exact-operation",
       ),
     ).toMatchObject({ approvalId: "approval-old" });
     expect(
-      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+      await AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
         daemon,
         "task-legacy",
         "current-exact-operation",
       ),
     ).toBeUndefined();
   });
-
-  it("does not reuse an expired durable grant", () => {
+  it("does not reuse an expired durable grant", async () => {
     const daemon = {
       pendingDurableApprovalGrants: new Map([
         [
           "task-old",
           new Map([
-            ["exact-operation", { approvalId: "expired", grantedAt: Date.now() - 6 * 60 * 1000 }],
+            [
+              "exact-operation",
+              { approvalId: "expired", grantedAt: Date.now() - 6 * 60 * 1000, revisionHash: "old" },
+            ],
           ]),
         ],
       ]),
     } as Any;
     expect(
-      AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
+      await AgentDaemon.prototype["consumeDurableApprovalGrant"].call(
         daemon,
         "task-old",
         "exact-operation",
@@ -1461,7 +1506,9 @@ describe("inline approval card routing (legacy approval queue off)", () => {
       sessionAutoApproveAll: false,
       approvalRepo: {
         create: vi.fn((row: Record<string, unknown>) => ({ id: "approval-auto", ...row })),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue(true),
+        resolvePending: vi.fn().mockResolvedValue(true),
+        approvedRevisionCurrent: vi.fn().mockResolvedValue(true),
       },
       requestAssistantApproval: vi.fn().mockResolvedValue(false),
       canSessionAutoApproveType: AgentDaemon.prototype["canSessionAutoApproveType"],
@@ -1501,7 +1548,9 @@ describe("inline approval card routing (legacy approval queue off)", () => {
   it("escalates an Approve for me ask the automatic review cannot approve to the card", async () => {
     useInlineCardRuntime();
     const daemon = buildDaemon({ agentConfig: { accessProfileId: "approve_for_me" } });
-    daemon.requestAssistantApproval.mockResolvedValue(true);
+    daemon.requestAssistantApproval.mockImplementation(async (...args: Any[]) =>
+      args[7] ? args[7](true) : true,
+    );
 
     const approved = await AgentDaemon.prototype.requestApproval.call(
       daemon,
@@ -1513,7 +1562,7 @@ describe("inline approval card routing (legacy approval queue off)", () => {
 
     expect(approved).toBe(true);
     expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
-    expect(daemon.approvalRepo.create).not.toHaveBeenCalled();
+    expect(daemon.approvalRepo.create).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -1609,7 +1658,9 @@ describe("inline approval card routing (legacy approval queue off)", () => {
   it("still raises the card for an interactive desktop task", async () => {
     useInlineCardRuntime();
     const daemon = buildDaemon({ agentConfig: { accessProfileId: "ask_for_approval" } });
-    daemon.requestAssistantApproval.mockResolvedValue(true);
+    daemon.requestAssistantApproval.mockImplementation(async (...args: Any[]) =>
+      args[7] ? args[7](true) : true,
+    );
 
     await expect(
       AgentDaemon.prototype.requestApproval.call(
@@ -1801,4 +1852,388 @@ it("auto-approves routine app consent only under effective Full access and curre
   fixture.evaluatePermissionRequest.mockResolvedValue({ evaluation: { decision: "allow" } });
   fixture.taskRepo.findById.mockReturnValue({ id: "task", status: "completed" });
   expect(await authorized()).toBe(false);
+});
+
+describe("approval resolution wins before effects", () => {
+  it("serializes opposite process-local responses under one approval key", async () => {
+    let release!: (won: boolean) => void;
+    const transition = new Promise<boolean>((resolve) => {
+      release = resolve;
+    });
+    const daemonLike = {
+      pendingApprovals: new Map(),
+      approvalRepo: {
+        findById: vi.fn().mockResolvedValue({
+          id: "cas-competing-response",
+          taskId: "task-competing",
+          status: "pending",
+        }),
+        resolvePending: vi.fn().mockReturnValue(transition),
+      },
+      taskRepo: { findById: vi.fn().mockReturnValue({ status: "blocked" }) },
+      persistApprovalActionRule: vi.fn().mockResolvedValue({}),
+      resumeTaskAfterDurableWait: vi.fn().mockResolvedValue(undefined),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    const first = AgentDaemon.prototype.respondToApproval.call(
+      daemonLike,
+      "cas-competing-response",
+      true,
+    );
+    await vi.waitFor(() => expect(daemonLike.approvalRepo.resolvePending).toHaveBeenCalledOnce());
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(
+        daemonLike,
+        "cas-competing-response",
+        false,
+      ),
+    ).toBe("in_progress");
+    release(true);
+    expect(await first).toBe("handled");
+    expect(daemonLike.persistApprovalActionRule).toHaveBeenCalledOnce();
+    expect(daemonLike.resumeTaskAfterDurableWait).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks authority after the winning transition before any grant", async () => {
+    const daemonLike = {
+      pendingApprovals: new Map(),
+      approvalRepo: {
+        findById: vi.fn().mockResolvedValue({
+          id: "cas-authority-change",
+          taskId: "task-authority",
+          status: "pending",
+        }),
+        resolvePending: vi.fn().mockResolvedValue(true),
+      },
+      taskRepo: { findById: vi.fn().mockReturnValue({ status: "blocked" }) },
+      isApprovalAuthorityCurrent: vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+      persistApprovalActionRule: vi.fn(),
+      rememberDurableApprovalGrant: vi.fn(),
+      resumeTaskAfterDurableWait: vi.fn(),
+      updateTask: vi.fn(),
+    } as Any;
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(daemonLike, "cas-authority-change", true),
+    ).toBe("not_found");
+    expect(daemonLike.isApprovalAuthorityCurrent).toHaveBeenCalledTimes(2);
+    expect(daemonLike.persistApprovalActionRule).not.toHaveBeenCalled();
+    expect(daemonLike.resumeTaskAfterDurableWait).not.toHaveBeenCalled();
+  });
+  it("cannot resurrect a task cancelled during grant persistence", async () => {
+    const task = { status: "blocked" };
+    const daemonLike = {
+      pendingApprovals: new Map(),
+      approvalRepo: {
+        findById: vi.fn().mockResolvedValue({
+            id: "cas-cancelled-effect",
+            taskId: "task-cancelled-effect",
+            status: "pending",
+          }),
+        resolvePending: vi.fn().mockResolvedValue(true),
+      },
+      taskRepo: { findById: vi.fn().mockImplementation(() => task) },
+      persistApprovalActionRule: vi.fn().mockImplementation(async () => {
+        task.status = "cancelled";
+        return {};
+      }),
+      rememberDurableApprovalGrant: vi.fn(),
+      resumeTaskAfterDurableWait: vi.fn(),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(daemonLike, "cas-cancelled-effect", true),
+    ).toBe("not_found");
+    expect(daemonLike.rememberDurableApprovalGrant).not.toHaveBeenCalled();
+    expect(daemonLike.resumeTaskAfterDurableWait).not.toHaveBeenCalled();
+    expect(daemonLike.updateTask).not.toHaveBeenCalled();
+  });
+  it("does not persist grants or resume a losing durable response", async () => {
+    const daemonLike = {
+      pendingApprovals: new Map(),
+      approvalRepo: {
+        findById: vi
+          .fn()
+          .mockResolvedValue({ id: "cas-loser", taskId: "task-cas", status: "pending" }),
+        resolvePending: vi.fn().mockResolvedValue(false),
+      },
+      taskRepo: { findById: vi.fn().mockReturnValue({ id: "task-cas", status: "blocked" }) },
+      persistApprovalActionRule: vi.fn(),
+      rememberDurableApprovalGrant: vi.fn(),
+      grantExternalFileApprovalsFromDetails: vi.fn(),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+      resumeTaskAfterDurableWait: vi.fn(),
+    } as Any;
+    expect(await AgentDaemon.prototype.respondToApproval.call(daemonLike, "cas-loser", true)).toBe(
+      "not_found",
+    );
+    expect(daemonLike.persistApprovalActionRule).not.toHaveBeenCalled();
+    expect(daemonLike.rememberDurableApprovalGrant).not.toHaveBeenCalled();
+    expect(daemonLike.resumeTaskAfterDurableWait).not.toHaveBeenCalled();
+    expect(daemonLike.updateTask).not.toHaveBeenCalled();
+  });
+  it("retires a losing process-local wait without granting or resolving true", async () => {
+    const pending = {
+      approval: { id: "cas-local-loser", taskId: "task-cas-local", status: "pending" },
+      taskId: "task-cas-local",
+      resolved: false,
+      resolve: vi.fn(),
+      reject: vi.fn(),
+      timeoutHandle: setTimeout(() => undefined, 60000),
+    };
+    const daemonLike = {
+      pendingApprovals: new Map([["cas-local-loser", pending]]),
+      approvalRepo: { resolvePending: vi.fn().mockResolvedValue(false) },
+      taskRepo: { findById: vi.fn().mockReturnValue({ status: "blocked" }) },
+      persistApprovalActionRule: vi.fn(),
+      getExecutorForTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(daemonLike, "cas-local-loser", true),
+    ).toBe("not_found");
+    expect(pending.reject).toHaveBeenCalledOnce();
+    expect(pending.resolve).not.toHaveBeenCalled();
+    expect(daemonLike.persistApprovalActionRule).not.toHaveBeenCalled();
+    expect(daemonLike.getExecutorForTask).not.toHaveBeenCalled();
+    expect(daemonLike.pendingApprovals.size).toBe(0);
+  });
+  it("rejects an existing wait if grant persistence fails after the winning decision", async () => {
+    const pending = {
+      approval: { id: "cas-effect-failure", taskId: "task-cas-failure", status: "pending" },
+      taskId: "task-cas-failure",
+      resolved: false,
+      resolve: vi.fn(),
+      reject: vi.fn(),
+      timeoutHandle: setTimeout(() => undefined, 60000),
+    };
+    const daemonLike = {
+      pendingApprovals: new Map([["cas-effect-failure", pending]]),
+      approvalRepo: { resolvePending: vi.fn().mockResolvedValue(true) },
+      taskRepo: { findById: vi.fn().mockReturnValue({ status: "blocked" }) },
+      persistApprovalActionRule: vi
+        .fn()
+        .mockRejectedValue(new Error("fixture persistence failure")),
+      getExecutorForTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    await expect(
+      AgentDaemon.prototype.respondToApproval.call(daemonLike, "cas-effect-failure", true),
+    ).rejects.toThrow("fixture persistence failure");
+    expect(pending.reject).toHaveBeenCalledOnce();
+    expect(pending.resolve).not.toHaveBeenCalled();
+    expect(daemonLike.pendingApprovals.size).toBe(0);
+    expect(daemonLike.getExecutorForTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("transport revision handoff", () => {
+  function fixture(id: string) {
+    const approval = {
+      id,
+      taskId: "revision-task",
+      type: "run_command",
+      description: "Review",
+      details: { command: "first" },
+      requestedAt: Date.now(),
+      status: "pending",
+    };
+    const daemon = {
+      pendingApprovals: new Map(),
+      approvalRepo: {
+        findById: vi.fn().mockResolvedValue(approval),
+        approvedRevisionCurrent: vi.fn().mockResolvedValue(true),
+        resolvePending: vi.fn().mockResolvedValue(true),
+      },
+      taskRepo: { findById: vi.fn().mockReturnValue({ status: "blocked" }) },
+      persistApprovalActionRule: vi.fn().mockResolvedValue({}),
+      resumeTaskAfterDurableWait: vi.fn(),
+      rememberDurableApprovalGrant: vi.fn(),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+    } as Any;
+    return { approval, daemon };
+  }
+  it("refuses a changed revision before consuming the approval response key", async () => {
+    const { approval, daemon } = fixture("transport-revision-stale");
+    const { approvalRequestRevisionHash } = await import("../approval-revision");
+    const expected = approvalRequestRevisionHash(approval as Any);
+    daemon.approvalRepo.findById.mockResolvedValue({
+      ...approval,
+      details: { command: "changed" },
+    });
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(
+        daemon,
+        approval.id,
+        true,
+        undefined,
+        undefined,
+        expected,
+      ),
+    ).toBe("not_found");
+    expect(daemon.approvalRepo.resolvePending).not.toHaveBeenCalled();
+    expect(daemon.persistApprovalActionRule).not.toHaveBeenCalled();
+    daemon.approvalRepo.findById.mockResolvedValue(approval);
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(
+        daemon,
+        approval.id,
+        true,
+        undefined,
+        undefined,
+        expected,
+      ),
+    ).toBe("handled");
+    expect(daemon.approvalRepo.resolvePending).toHaveBeenCalledOnce();
+  });
+  it("refuses a revision that changes during the durable handoff", async () => {
+    const { approval, daemon } = fixture("transport-revision-race");
+    const { approvalRequestRevisionHash } = await import("../approval-revision");
+    daemon.approvalRepo.findById
+      .mockResolvedValueOnce(approval)
+      .mockResolvedValueOnce({ ...approval, description: "changed after validation" });
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(
+        daemon,
+        approval.id,
+        true,
+        undefined,
+        undefined,
+        approvalRequestRevisionHash(approval as Any),
+      ),
+    ).toBe("not_found");
+    expect(daemon.approvalRepo.resolvePending).not.toHaveBeenCalled();
+    expect(daemon.resumeTaskAfterDurableWait).not.toHaveBeenCalled();
+  });
+  it("does not resolve a different process-local wait revision", async () => {
+    const { approval, daemon } = fixture("transport-local-revision");
+    const { approvalRequestRevisionHash } = await import("../approval-revision");
+    daemon.pendingApprovals.set(approval.id, {
+      approval: { ...approval, details: { command: "different local wait" } },
+    });
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(
+        daemon,
+        approval.id,
+        false,
+        undefined,
+        undefined,
+        approvalRequestRevisionHash(approval as Any),
+      ),
+    ).toBe("not_found");
+    expect(daemon.approvalRepo.resolvePending).not.toHaveBeenCalled();
+    expect(daemon.pendingApprovals.has(approval.id)).toBe(true);
+  });
+  it("passes the claimed route through the exact revision response to the writer", async () => {
+    const { approval, daemon } = fixture("transport-claimed-revision");
+    const { approvalRequestRevisionHash } = await import("../approval-revision");
+    const guard = { routeId: "route", claimId: "claim" };
+    expect(
+      await AgentDaemon.prototype.respondToApproval.call(
+        daemon,
+        approval.id,
+        true,
+        undefined,
+        undefined,
+        approvalRequestRevisionHash(approval as Any),
+        guard,
+      ),
+    ).toBe("handled");
+    expect(daemon.approvalRepo.resolvePending).toHaveBeenCalledWith(
+      approval.id,
+      "approved",
+      approval,
+      undefined,
+      guard,
+    );
+  });
+  it("refuses a channel claim without the displayed revision", async () => {
+    const { approval, daemon } = fixture("transport-missing-revision");
+    await expect(
+      AgentDaemon.prototype.respondToApproval.call(
+        daemon,
+        approval.id,
+        true,
+        undefined,
+        undefined,
+        undefined,
+        { routeId: "route", claimId: "claim" },
+      ),
+    ).rejects.toThrow("displayed revision");
+    expect(daemon.approvalRepo.resolvePending).not.toHaveBeenCalled();
+  });
+  it("fails closed for a concrete review when a restarted caller has no displayed revision", async () => {
+    const { approval, daemon } = fixture("transport-missing-review-revision");
+    daemon.approvalRepo.findById.mockResolvedValue({
+      ...approval,
+      details: { reviewFiles: ["draft.md"] },
+    });
+
+    await expect(
+      AgentDaemon.prototype.respondToApproval.call(daemon, approval.id, true, undefined, undefined),
+    ).resolves.toBe("not_found");
+    expect(daemon.approvalRepo.resolvePending).not.toHaveBeenCalled();
+    expect(daemon.persistApprovalActionRule).not.toHaveBeenCalled();
+  });
+  it("fails closed when the displayed local review is concrete but the persisted row changed", async () => {
+    const { approval, daemon } = fixture("transport-local-missing-review-revision");
+    const localApproval = { ...approval, details: { draftRevision: { state: "bound" } } };
+    const pending = { approval: localApproval, resolved: false };
+    daemon.pendingApprovals.set(approval.id, pending);
+
+    await expect(
+      AgentDaemon.prototype.respondToApproval.call(daemon, approval.id, true, undefined, undefined),
+    ).resolves.toBe("not_found");
+    expect(daemon.approvalRepo.resolvePending).not.toHaveBeenCalled();
+    expect(daemon.persistApprovalActionRule).not.toHaveBeenCalled();
+    expect(daemon.rememberDurableApprovalGrant).not.toHaveBeenCalled();
+    expect(daemon.pendingApprovals.get(approval.id)).toBe(pending);
+    expect(pending.resolved).toBe(false);
+  });
+});
+
+describe("approval event revision presentation", () => {
+  it("persists the main-computed hash beside the request shown to the renderer", async () => {
+    const approval = {
+      id: "approval-event-revision",
+      taskId: "approval-event-task",
+      type: "run_command",
+      description: "Review this command",
+      details: { command: "node --version" },
+      status: "pending",
+      requestedAt: Date.now(),
+    };
+    const { approvalRequestRevisionHash } = await import("../approval-revision");
+    const persistTimelineEvent = vi.fn();
+    const daemon = {
+      taskRepo: { findById: vi.fn().mockReturnValue({ status: "blocked" }) },
+      normalizeArtifactEventPayload: vi.fn(),
+      maybeEnrichLlmTelemetryPayload: vi.fn(),
+      getCurrentEventSeq: vi.fn().mockReturnValue(0),
+      nextEventSeq: vi.fn().mockReturnValue(1),
+      activeTimelineStageByTask: new Map(),
+      transitionTimelineStage: vi.fn(),
+      trackTimelineStepState: vi.fn(),
+      trackEvidenceRefs: vi.fn(),
+      timelineMetrics: { totalEvents: 0, orderViolations: 0, droppedEvents: 0 },
+      persistTimelineEvent,
+      maybeEmitAssistantMediaPreview: vi.fn(),
+    } as Any;
+
+    (AgentDaemon.prototype as Any).logEventWithinTaskRowReadScope.call(
+      daemon,
+      approval.taskId,
+      "approval_requested",
+      { approval },
+    );
+
+    const [event, legacy] = persistTimelineEvent.mock.calls[0];
+    expect(event.payload.approval.revisionHash).toBe(approvalRequestRevisionHash(approval as Any));
+    expect(legacy.legacyPayload.approval.revisionHash).toBe(
+      approvalRequestRevisionHash(approval as Any),
+    );
+  });
 });

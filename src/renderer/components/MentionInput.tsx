@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { AgentRoleData, MentionType } from "../../electron/preload";
-import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { resolveBotMascot } from "../../shared/bot-mascots";
+import { BotMascot } from "./bot-mascot/BotMascot";
 
 interface MentionInputProps {
   workspaceId: string;
@@ -16,6 +17,10 @@ const MENTION_TYPE_OPTIONS: { value: MentionType; label: string; description: st
   { value: "review", label: "Review", description: "Request a review of work done" },
   { value: "fyi", label: "FYI", description: "Informational, no action needed" },
 ];
+
+function renderAgentIcon(agent: Pick<AgentRoleData, "icon">) {
+  return <BotMascot mascot={resolveBotMascot(agent.icon)} size={28} />;
+}
 
 export function MentionInput({
   workspaceId,
@@ -141,12 +146,7 @@ export function MentionInput({
                 className="mention-dropdown-item"
                 onClick={() => handleSelectAgent(agent)}
               >
-                <span className="agent-icon" style={{ backgroundColor: agent.color }}>
-                  {(() => {
-                    const Icon = getEmojiIcon(agent.icon || "🤖");
-                    return <Icon size={16} strokeWidth={2} />;
-                  })()}
-                </span>
+                {renderAgentIcon(agent)}
                 <div className="agent-info">
                   <span className="agent-name">{agent.displayName}</span>
                   <span className="agent-description">{agent.description}</span>
@@ -160,12 +160,7 @@ export function MentionInput({
       {selectedAgent && (
         <div className="mention-details">
           <div className="selected-agent">
-            <span className="agent-icon" style={{ backgroundColor: selectedAgent.color }}>
-              {(() => {
-                const Icon = getEmojiIcon(selectedAgent.icon || "🤖");
-                return <Icon size={16} strokeWidth={2} />;
-              })()}
-            </span>
+            {renderAgentIcon(selectedAgent)}
             <span className="agent-name">{selectedAgent.displayName}</span>
             <button className="btn-clear" onClick={handleCancel}>
               &times;

@@ -1,3 +1,6 @@
+import { BotWorkResultStore } from "./bot-work-result-store";
+import { BotWorkStore } from "./bot-work-store";
+import { BotOutcomeMetricsStore } from "./bot-outcome-metrics-store";
 import type Database from "better-sqlite3";
 import type { UnitCatalog } from "./statements/statement-catalog";
 import { storeUnit } from "./statements/store-units";
@@ -48,6 +51,20 @@ import { WorkSessionProtocolRepository } from "./WorkSessionProtocolRepository";
  * a method is a write when it, or a method it calls, writes or opens a transaction.
  */
 export const STORAGE_UNITS = {
+  botOutcomeMetrics_summary: storeUnit(
+    (db: Database.Database) => new BotOutcomeMetricsStore(db),
+    "summary",
+    { readonly: true, report: true },
+  ),
+  botWorkResult_manifest: storeUnit(
+    (db: Database.Database) => new BotWorkResultStore(db),
+    "manifest",
+    { readonly: true, report: true },
+  ),
+  botWork_list: storeUnit((db: Database.Database) => new BotWorkStore(db), "list", {
+    readonly: true,
+    report: true,
+  }),
   browserGitMutationReceipt_reserve: storeUnit(
     (db: Database.Database) => new BrowserGitMutationReceiptStore(db),
     "reserve",
@@ -219,6 +236,21 @@ export const STORAGE_UNITS = {
     "listOpenByTask",
     { readonly: true },
   ),
+  approval_resolvePending: storeUnit(
+    (db: Database.Database) => new ApprovalStore(db),
+    "resolvePending",
+    { readonly: false },
+  ),
+  approval_draftPreviews: storeUnit(
+    (db: Database.Database) => new ApprovalStore(db),
+    "draftPreviews",
+    { readonly: true },
+  ),
+  approval_approvedRevisionCurrent: storeUnit(
+    (db: Database.Database) => new ApprovalStore(db),
+    "approvedRevisionCurrent",
+    { readonly: true },
+  ),
   approval_create: storeUnit((db: Database.Database) => new ApprovalStore(db), "create", {
     readonly: false,
   }),
@@ -272,6 +304,11 @@ export const STORAGE_UNITS = {
   inputRequest_resolve: storeUnit((db: Database.Database) => new InputRequestStore(db), "resolve", {
     readonly: false,
   }),
+  inputRequest_getApprovalBinding: storeUnit(
+    (db: Database.Database) => new InputRequestStore(db),
+    "getApprovalBinding",
+    { readonly: true },
+  ),
   inputRequest_findById: storeUnit(
     (db: Database.Database) => new InputRequestStore(db),
     "findById",
@@ -1018,6 +1055,13 @@ export const STORAGE_UNITS = {
   task_findByWorkspace: storeUnit((db: Database.Database) => new TaskStore(db), "findByWorkspace", {
     readonly: true,
   }),
+  task_findByScheduledRun: storeUnit(
+    (db: Database.Database) => new TaskStore(db),
+    "findByScheduledRun",
+    {
+      readonly: true,
+    },
+  ),
   task_findBySessionId: storeUnit((db: Database.Database) => new TaskStore(db), "findBySessionId", {
     readonly: true,
   }),

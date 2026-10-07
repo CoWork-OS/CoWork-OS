@@ -86,8 +86,13 @@ export interface EventTrigger {
 
 export interface TriggerEvent {
   source: TriggerSource;
+  /** Stable source identity when the ingress adapter provides one (for replay dedupe). */
+  eventId?: string;
   timestamp: number;
-  fields: Record<string, string | number | boolean>;
+  fields: Record<string, string | number | boolean> & {
+    /** Configured gateway connection that produced the event, when available. */
+    channelInstanceId?: string;
+  };
 }
 
 export interface TriggerHistoryEntry {
@@ -114,6 +119,10 @@ export interface EventTriggerRegistry {
 }
 
 export interface EventTriggerServiceDeps {
+  getResponsibilityAccess?: () => {
+    settings?: import("../../shared/types").PermissionSettingsData;
+    adminPolicies?: import("../admin/policies").AdminPolicies;
+  };
   createTask: (params: {
     title: string;
     prompt: string;
@@ -129,8 +138,10 @@ export interface EventTriggerServiceDeps {
     channelType: string;
     channelId: string;
     text: string;
-  }) => Promise<void>;
-  wakeAgent?: (agentRoleId: string, prompt: string) => void;
+    /** Present for journaled Node/Electron actions; omitted by the DB-less legacy fallback. */
+    idempotencyKey?: string;
+  }) => Promise<{ messageId: string }>;
+  wakeAgent?: (agentRoleId: string, prompt: string) => void | Promise<void>;
   getDefaultWorkspaceId: () => string;
   getActiveTaskCount?: () => number;
   log?: (...args: unknown[]) => void;
@@ -138,5 +149,5 @@ export interface EventTriggerServiceDeps {
     trigger: EventTrigger;
     event: TriggerEvent;
     historyEntry: TriggerHistoryEntry;
-  }) => void;
+  }) => void | Promise<void>;
 }

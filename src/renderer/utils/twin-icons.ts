@@ -18,7 +18,9 @@ import {
   type LucideProps,
 } from "lucide-react";
 import { BotGlyph } from "../components/BotGlyph";
-import { getEmojiIcon } from "./emoji-icon-map";
+import { MASCOT_CATALOG } from "../components/bot-mascot/mascot-catalog";
+import { getMascotGlyph } from "../components/bot-mascot/mascot-glyph";
+import { resolveBotMascot } from "../../shared/bot-mascots";
 
 /** Lucide icon keys for twin icon picker. Matches PRESET_ICONS from AgentRoleEditor. */
 export const TWIN_ICON_KEYS = [
@@ -63,13 +65,20 @@ export const LUCIDE_TWIN_ICONS: Record<TwinIconKey, ComponentType<LucideProps>> 
   Brain,
 };
 
+export function isTwinIconKey(icon: string | null | undefined): icon is TwinIconKey {
+  return !!icon && (TWIN_ICON_KEYS as readonly string[]).includes(icon);
+}
+
 /**
- * Resolve twin icon string to a Lucide React component.
- * Supports Lucide icon keys (e.g. "Laptop", "Bot") and legacy emoji for backward compatibility.
+ * Resolve a bot's icon value to a Lucide-compatible React component. Every bot is
+ * drawn as its character: mascots (`mascot:<id>`) as chosen, and Lucide keys or
+ * legacy emoji as the closest character (see `resolveBotMascot`).
  */
 export function resolveTwinIcon(icon: string | undefined): ComponentType<LucideProps> {
-  if (!icon) return BotGlyph;
-  const key = icon as TwinIconKey;
-  if (LUCIDE_TWIN_ICONS[key]) return LUCIDE_TWIN_ICONS[key];
-  return getEmojiIcon(icon);
+  return getMascotGlyph(resolveBotMascot(icon));
+}
+
+/** Human-readable name for an icon value: the character the bot is drawn as. */
+export function botIconLabel(icon: string | null | undefined): string {
+  return MASCOT_CATALOG[resolveBotMascot(icon)].label;
 }

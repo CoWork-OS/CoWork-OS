@@ -107,7 +107,12 @@ export interface XCommandResult {
 export async function runBirdCommand(
   settings: XSettingsData,
   args: string[],
-  options?: { json?: boolean; timeoutMs?: number },
+  options?: {
+    json?: boolean;
+    timeoutMs?: number;
+    beforeExec?: () => void | Promise<void>;
+    beforeSpawn?: () => void;
+  },
 ): Promise<XCommandResult> {
   const useJson = options?.json !== false;
   const timeoutMs = options?.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -115,6 +120,8 @@ export async function runBirdCommand(
   const fullArgs = [...globalArgs, ...args, ...(useJson ? ["--json"] : [])];
 
   try {
+    await options?.beforeExec?.();
+    options?.beforeSpawn?.();
     const { stdout, stderr } = await execFileAsync("bird", fullArgs, {
       timeout: timeoutMs,
       maxBuffer: MAX_OUTPUT_BYTES,

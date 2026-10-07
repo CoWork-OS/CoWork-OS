@@ -7,7 +7,7 @@
  * away once the roster line already says who is running.
  */
 
-import { getEmojiIcon } from "../../utils/emoji-icon-map";
+import { resolveTwinIcon } from "../../utils/twin-icons";
 import {
   formatAgentRosterLine,
   stripAgentRoleSuffix,
@@ -53,7 +53,7 @@ export function AgentRosterRow({
     <>
       <span className="agent-roster-glyphs" aria-hidden="true">
         {visibleGlyphs.map((agent) => {
-          const Icon = getEmojiIcon(agent.icon || "🤖");
+          const Icon = resolveTwinIcon(agent.icon || "🤖");
           return (
             <span
               key={agent.id}

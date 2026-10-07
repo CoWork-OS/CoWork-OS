@@ -1,6 +1,5 @@
-import * as fs from "fs";
 import * as path from "path";
-import { Workspace } from "../../../shared/types";
+import { OneDriveSettingsData, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { OneDriveSettingsManager } from "../../settings/onedrive-manager";
 import { onedriveRequest } from "../../utils/onedrive-api";
@@ -8,6 +7,13 @@ import {
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
+import {
+  captureIntegrationUploadSnapshot,
+  createIntegrationEffectGuard,
+  integrationEffectReview,
+  IntegrationUploadSnapshot,
+  workspaceIntegrationUploadReview,
+} from "./integration-effect-guard";
 
 type OneDriveAction =
   | "get_drive"
@@ -78,6 +84,36 @@ export class OneDriveTools {
     }
   }
 
+  private createEffectGuard(
+    initialSettings: OneDriveSettingsData,
+    input: OneDriveActionInput,
+    details: Record<string, unknown>,
+    errorPrefix: string,
+    uploadSnapshot?: IntegrationUploadSnapshot,
+  ) {
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName: "onedrive_action",
+      toolInput: input,
+      approvalDetails: details,
+      uploadSnapshot,
+      initialSettings,
+      loadSettings: () => OneDriveSettingsManager.loadSettings(),
+      settingsEnabled: (current) => current.enabled && Boolean(current.accessToken),
+      settingsFingerprint: (current) =>
+        JSON.stringify({
+          enabled: current.enabled,
+          driveId: current.driveId,
+          timeoutMs: current.timeoutMs,
+        }),
+      authConfig: (current) => ({ type: "bearer", token: current.accessToken }),
+      errorPrefix,
+    });
+  }
+
   private getDrivePrefix(inputDriveId?: string): string {
     const settingsDriveId = OneDriveSettingsManager.loadSettings().driveId;
     const driveId = inputDriveId || settingsDriveId;
@@ -135,14 +171,22 @@ export class OneDriveTools {
         const parentPath = input.parent_id
           ? `/items/${input.parent_id}/children`
           : "/root/children";
-        await this.requireApproval("Create a OneDrive folder", {
-          action: "create_folder",
+        const details = integrationEffectReview("onedrive_action", input, "create_folder", {
           parent_id: input.parent_id || "root",
           name: input.name,
+          drive_id: drivePrefix,
         });
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "OneDrive action",
+        );
+        await this.requireApproval("Create a OneDrive folder", details);
         result = await onedriveRequest(settings, {
           method: "POST",
           path: `${drivePrefix}${parentPath}`,
+          beforeSend,
           body: {
             name: input.name,
             folder: {},
@@ -154,7 +198,7 @@ export class OneDriveTools {
       case "upload_file": {
         if (!input.file_path) throw new Error("Missing file_path for upload_file");
         const resolved = await this.resolveFilePath(input.file_path);
-        const data = fs.readFileSync(resolved);
+        const snapshot = captureIntegrationUploadSnapshot(this.workspace, resolved);
         const fileName = input.name || path.basename(resolved);
         let uploadPath: string;
         if (input.remote_path) {
@@ -169,28 +213,49 @@ export class OneDriveTools {
         } else {
           uploadPath = `${drivePrefix}/root:/${encodeURIComponent(fileName)}:/content`;
         }
-        await this.requireApproval(`Upload file to OneDrive: ${fileName}`, {
-          action: "upload_file",
-          destination: input.remote_path || input.parent_id || "root",
-          file: fileName,
-        });
+        const destination = input.remote_path || input.parent_id || "root";
+        const details = workspaceIntegrationUploadReview(
+          this.workspace,
+          "onedrive_action",
+          input,
+          "upload_file",
+          { destination, drive_id: drivePrefix, file: fileName },
+          snapshot,
+        );
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "OneDrive upload",
+          snapshot,
+        );
+        await this.requireApproval(`Upload file to OneDrive: ${fileName}`, details);
         result = await onedriveRequest(settings, {
           method: "PUT",
           path: uploadPath,
-          body: data,
+          body: snapshot.data,
           headers: { "Content-Type": "application/octet-stream" },
+          beforeSend,
         });
         break;
       }
       case "delete_item": {
         if (!input.item_id) throw new Error("Missing item_id for delete_item");
-        await this.requireApproval("Delete a OneDrive item", {
-          action: "delete_item",
+        const details = integrationEffectReview("onedrive_action", input, "delete_item", {
           item_id: input.item_id,
+          drive_id: drivePrefix,
         });
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "OneDrive action",
+        );
+        await this.requireApproval("Delete a OneDrive item", details);
         result = await onedriveRequest(settings, {
           method: "DELETE",
           path: `${drivePrefix}/items/${input.item_id}`,
+          beforeSend,
         });
         break;
       }

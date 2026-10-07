@@ -229,6 +229,12 @@ export interface CronEvent {
  * Dependencies required by the cron service
  */
 export interface CronServiceDeps {
+  /** Runtime admission check before resolving sources, executing or delivering a job. */
+  beforeExecuteJob?: (
+    job: CronJob,
+  ) => Promise<void | { skipReason?: string; agentConfig?: AgentConfig }>;
+  /** Rechecked before direct or queued channel delivery; denial spends no send attempt. */
+  beforeDeliverJob?: (jobId: string) => Promise<void>;
   nowMs?: () => number;
   storePath: string;
   cronEnabled: boolean;
@@ -318,6 +324,11 @@ export interface CronServiceDeps {
     } | null;
   } | null>;
   getTaskResultText?: (taskId: string) => Promise<string | undefined>;
+  findTaskForRun?: (params: {
+    jobId: string;
+    workspaceId: string;
+    runAtMs: number;
+  }) => Promise<{ id: string; status: string } | null>;
   findActiveTaskForJob?: (params: {
     jobId: string;
     taskTitle?: string;
@@ -411,7 +422,17 @@ export interface CronRunHistoryResult {
  */
 export type CronRunResult =
   | { ok: true; ran: true; taskId: string }
-  | { ok: true; ran: false; reason: "not-due" | "disabled" | "not-found" | "already-running" }
+  | {
+      ok: true;
+      ran: false;
+      reason:
+        | "not-due"
+        | "disabled"
+        | "not-found"
+        | "already-running"
+        | "no-signal"
+        | "future-paused";
+    }
   | { ok: false; error: string };
 
 export type CronRemoveResult =

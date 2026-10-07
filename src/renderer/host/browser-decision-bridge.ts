@@ -8,6 +8,11 @@ import type {
   Workspace,
 } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
+import {
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+  resolveInlineApprovalDraftReviewResponse,
+  type InlineApprovalDraftReview,
+} from "../../shared/approval-draft-presentation";
 import type { BrowserHostTransport } from "../../renderer-web/transport";
 
 const PAGE_SIZE = 100;
@@ -46,6 +51,7 @@ interface DecisionScope {
 }
 
 interface PendingApproval extends ApprovalRequest {
+  revisionHash: string;
   workspaceId: string;
   taskTitle: string;
   taskStatus: string;
@@ -73,7 +79,7 @@ interface InputRequestListOptions {
 
 type BrowserDecisionMethods = Pick<
   ElectronAPI,
-  "respondToApproval" | "listInputRequests" | "respondToInputRequest"
+  "respondToApproval" | "listInputRequests" | "respondToInputRequest" | "getInputRequestDraftReview"
 >;
 
 export interface BrowserDecisionBridge {
@@ -297,29 +303,53 @@ export function createBrowserDecisionBridge(
     if (typeof approved !== "boolean") {
       throw new Error("Choose approve or deny for this request.");
     }
+    if (
+      typeof response.expectedRevisionHash !== "string" ||
+      !REVISION_HASH_RE.test(response.expectedRevisionHash)
+    ) {
+      throw new Error("Refresh this approval and review its current revision before deciding.");
+    }
     if ((action === "allow_once" && !approved) || (action === "deny_once" && approved)) {
       throw new Error("The approval action does not match the selected decision.");
     }
 
     const approval = await refreshKnownScope<PendingApproval>("approval", response.approvalId);
     if (!approval) throw new StaleBrowserDecisionError("approval");
+    if (approval.revisionHash !== response.expectedRevisionHash) {
+      throw new StaleBrowserDecisionError("approval", approval);
+    }
     const params = {
       approvalId: approval.id,
       workspaceId: approval.workspaceId,
       taskId: approval.taskId,
       expectedVersion: approval.expectedVersion,
+      expectedRevisionHash: response.expectedRevisionHash,
       approved,
     };
-    const result = await options.mutate<{ status?: string }>("approval.respond", params, {
-      workspaceId: approval.workspaceId,
-      taskId: approval.taskId,
-      id: approval.id,
-      expectedVersion: approval.expectedVersion,
-    });
+    let result: { status?: string };
+    try {
+      result = await options.mutate<{ status?: string }>("approval.respond", params, {
+        workspaceId: approval.workspaceId,
+        taskId: approval.taskId,
+        id: approval.id,
+        expectedVersion: approval.expectedVersion,
+      });
+    } catch (error) {
+      if (!isStaleStateError(error)) throw error;
+      const current = await refreshKnownScope<PendingApproval>("approval", approval.id);
+      throw new StaleBrowserDecisionError("approval", current);
+    }
+    if (result?.status === "in_progress") return "in_progress";
+    if (result?.status === "not_found") {
+      const current = await refreshKnownScope<PendingApproval>("approval", approval.id);
+      if (current) throw new StaleBrowserDecisionError("approval", current);
+      return "not_found";
+    }
     if (result?.status !== "handled" && result?.status !== "duplicate") {
       throw new Error("The host did not confirm the approval decision.");
     }
     approvals.delete(approval.id);
+    return result.status;
   };
 
   const listInputRequests: ElectronAPI["listInputRequests"] = async (
@@ -393,8 +423,65 @@ export function createBrowserDecisionBridge(
     return { status: result.status, requestId: request.id };
   };
 
+  const getInputRequestDraftReview: ElectronAPI["getInputRequestDraftReview"] = async (
+    inputRequestId,
+    taskId,
+  ): Promise<InlineApprovalDraftReview | undefined> => {
+    assertActive();
+    const request = await refreshKnownScope<PendingInputRequest>("input_request", inputRequestId);
+    if (!request || request.taskId !== taskId) return undefined;
+
+    const response = await options.rpc<Record<string, unknown>>("input_request.get", {
+      requestId: request.id,
+      workspaceId: request.workspaceId,
+      taskId: request.taskId,
+      expectedVersion: request.expectedVersion,
+    });
+    if (!isRecord(response) || !isRecord(response.inputRequest)) return undefined;
+    const current = response.inputRequest;
+    if (
+      current.id !== request.id ||
+      current.taskId !== request.taskId ||
+      current.status !== "pending" ||
+      current.requestedAt !== request.expectedVersion
+    )
+      return undefined;
+
+    const requiresActionReview = request.questions.some(
+      (question) => question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+    );
+    const draftReview = isRecord(current.draftReview) ? current.draftReview : {};
+    const normalized = resolveInlineApprovalDraftReviewResponse(
+      {
+        draft: draftReview.draft,
+        previews: draftReview.previews,
+        responsibilityActionReview: current.responsibilityActionReview,
+      },
+      requiresActionReview,
+    );
+    if (!normalized) return undefined;
+
+    return {
+      draft: normalized.draft,
+      previews: normalized.previews,
+      ...(normalized.responsibilityActionReview
+        ? {
+            responsibilityActionReview: {
+              required: true,
+              ...normalized.responsibilityActionReview,
+            },
+          }
+        : {}),
+    };
+  };
+
   return {
-    methods: { respondToApproval, listInputRequests, respondToInputRequest },
+    methods: {
+      respondToApproval,
+      listInputRequests,
+      respondToInputRequest,
+      getInputRequestDraftReview,
+    },
     hydrateTaskEvent,
     dispose() {
       disposed = true;
@@ -415,11 +502,14 @@ export class UnsupportedBrowserDecisionActionError extends Error {
   }
 }
 
-class StaleBrowserDecisionError extends Error {
+export class StaleBrowserDecisionError extends Error {
   readonly code = "STALE_STATE" as const;
   readonly retryable = false;
 
-  constructor(kind: string) {
+  constructor(
+    kind: string,
+    readonly currentApproval?: PendingApproval,
+  ) {
     super(`This ${kind} is no longer pending. Refresh the task to see its current state.`);
     this.name = "StaleBrowserDecisionError";
   }
@@ -451,6 +541,9 @@ function parseApproval(value: unknown): PendingApproval | null {
   ) {
     return null;
   }
+  if (typeof value.revisionHash !== "string" || !REVISION_HASH_RE.test(value.revisionHash)) {
+    throw new Error("The browser host returned an approval without a valid review revision.");
+  }
   return {
     id: value.id,
     taskId: value.taskId,
@@ -466,6 +559,7 @@ function parseApproval(value: unknown): PendingApproval | null {
     status: "pending",
     requestedAt: typeof value.requestedAt === "number" ? value.requestedAt : value.expectedVersion,
     expectedVersion: value.expectedVersion,
+    revisionHash: value.revisionHash,
   };
 }
 
@@ -555,6 +649,12 @@ function withoutStalePendingPayload(
 
 function firstString(...values: unknown[]): string | undefined {
   return values.find((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+const REVISION_HASH_RE = /^[0-9a-f]{64}$/;
+
+function isStaleStateError(error: unknown): boolean {
+  return isRecord(error) && error.code === "STALE_STATE";
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

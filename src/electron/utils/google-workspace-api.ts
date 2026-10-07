@@ -47,6 +47,7 @@ export interface GoogleDriveRequestOptions {
   body?: Record<string, Any>;
   timeoutMs?: number;
   signal?: AbortSignal;
+  beforeSend?: () => void | Promise<void>;
 }
 
 export interface GoogleDriveRequestResult {
@@ -91,6 +92,7 @@ export async function googleDriveRequest(
       headers["Content-Type"] = "application/json";
     }
 
+    await options.beforeSend?.();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const abort = () => controller.abort(options.signal?.reason);
@@ -162,6 +164,7 @@ export async function googleDriveUpload(
   data: Uint8Array,
   contentType: string,
   signal?: AbortSignal,
+  beforeSend?: () => void | Promise<void>,
 ): Promise<GoogleDriveRequestResult> {
   const url = `${GOOGLE_DRIVE_UPLOAD_BASE}/files/${fileId}?uploadType=media`;
 
@@ -173,6 +176,7 @@ export async function googleDriveUpload(
       "Content-Type": contentType,
     };
 
+    await beforeSend?.();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const abort = () => controller.abort(signal?.reason);

@@ -5,7 +5,13 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DatabaseManager } from "../../electron/database/schema";
-import { InputRequestStore, TaskStore, WorkspaceStore } from "../../electron/database/repositories";
+import {
+  ApprovalStore,
+  InputRequestStore,
+  TaskStore,
+  WorkspaceStore,
+} from "../../electron/database/repositories";
+import { approvalRequestRevisionHash } from "../../electron/agent/approval-revision";
 import { ErrorCodes, Events, Methods } from "../../electron/control-plane/protocol";
 import type { ControlPlaneServer } from "../../electron/control-plane/server";
 import { TASK_EVENT_BRIDGE_ALLOWLIST } from "../../electron/control-plane/task-event-bridge-contract";
@@ -179,6 +185,64 @@ describeWithSqlite("Node Control Plane browser parity", () => {
     });
     const stored = new WorkspaceStore(manager.getDatabase()).findById(result.workspace.id);
     expect(stored?.permissions.delete).toBe(true);
+  });
+
+  it("presents and resolves only the listed approval revision on Node Control Plane", async () => {
+    const workspace = createWorkspace();
+    const task = new TaskStore(manager.getDatabase()).create({
+      title: "Approval review",
+      prompt: "Review a concrete draft",
+      status: "blocked",
+      workspaceId: workspace.id,
+    });
+    const approval = new ApprovalStore(manager.getDatabase()).create({
+      taskId: task.id,
+      type: "data_export",
+      description: "Review the export draft",
+      details: { reviewFiles: ["draft.md"] },
+      status: "pending",
+      requestedAt: Date.now(),
+    });
+    const respondToApproval = vi.fn().mockResolvedValue("handled");
+    const methods = registerMethods({ respondToApproval });
+    const admin = scopedClient(["admin"]);
+    const expectedRevisionHash = approvalRequestRevisionHash(approval);
+
+    const taskScoped = (await methods.get(Methods.APPROVAL_LIST)!(admin, {
+      taskId: task.id,
+    })) as { approvals: Array<{ id: string; revisionHash?: string }> };
+    const global = (await methods.get(Methods.APPROVAL_LIST)!(admin, {})) as {
+      approvals: Array<{ id: string; revisionHash?: string }>;
+    };
+    expect(taskScoped.approvals).toContainEqual(
+      expect.objectContaining({ id: approval.id, revisionHash: expectedRevisionHash }),
+    );
+    expect(global.approvals).toContainEqual(
+      expect.objectContaining({ id: approval.id, revisionHash: expectedRevisionHash }),
+    );
+
+    await expect(
+      methods.get(Methods.APPROVAL_RESPOND)!(admin, {
+        approvalId: approval.id,
+        approved: true,
+        expectedRevisionHash,
+      }),
+    ).resolves.toEqual({ status: "handled" });
+    expect(respondToApproval).toHaveBeenCalledWith(
+      approval.id,
+      true,
+      undefined,
+      undefined,
+      expectedRevisionHash,
+    );
+    await expect(
+      methods.get(Methods.APPROVAL_RESPOND)!(admin, {
+        approvalId: approval.id,
+        approved: true,
+        expectedRevisionHash: "invalid",
+      }),
+    ).rejects.toMatchObject({ code: ErrorCodes.INVALID_PARAMS });
+    expect(respondToApproval).toHaveBeenCalledOnce();
   });
 
   it("uses durable daemon admission only for explicit operation keys", async () => {

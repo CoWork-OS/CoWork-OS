@@ -3,14 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const createMailboxDraft = vi.fn();
 const getMailboxClientState = vi.fn();
 const isAvailable = vi.fn();
+const listThreads = vi.fn();
+const listThreadsForAccount = vi.fn();
 const getThread = vi.fn();
+const getThreadForAccount = vi.fn();
 
 vi.mock("../../../mailbox/MailboxService", () => ({
   MailboxService: class {
     createMailboxDraft = createMailboxDraft;
     getMailboxClientState = getMailboxClientState;
     isAvailable = isAvailable;
+    listThreads = listThreads;
+    listThreadsForAccount = listThreadsForAccount;
     getThread = getThread;
+    getThreadForAccount = getThreadForAccount;
   },
 }));
 
@@ -21,6 +27,10 @@ describe("MailboxTools", () => {
     createMailboxDraft.mockReset();
     getMailboxClientState.mockReset();
     isAvailable.mockReset();
+    listThreads.mockReset();
+    listThreadsForAccount.mockReset();
+    getThread.mockReset();
+    getThreadForAccount.mockReset();
   });
 
   it("creates a product mailbox compose frame for assistant-generated drafts", async () => {
@@ -102,5 +112,35 @@ describe("MailboxTools", () => {
         sourceLabel: "mailbox",
       }),
     );
+  });
+
+  it("passes the selected account through scoped mailbox list and thread reads", async () => {
+    const tools = new MailboxTools(
+      { id: "workspace-1" } as Any,
+      { logEvent: vi.fn() } as Any,
+      "task-1",
+      {} as Any,
+    );
+    listThreadsForAccount.mockResolvedValue([{ id: "thread-1" }]);
+    getThreadForAccount.mockResolvedValue({ id: "thread-1", messages: [] });
+
+    await tools.executeAction({
+      action: "list_threads",
+      account_id: "gmail:user@example.com",
+      query: "invoice",
+    });
+    await tools.executeAction({
+      action: "get_thread",
+      account_id: "gmail:user@example.com",
+      thread_id: "thread-1",
+    });
+
+    expect(listThreadsForAccount).toHaveBeenCalledWith(
+      "gmail:user@example.com",
+      expect.objectContaining({ query: "invoice" }),
+    );
+    expect(listThreads).not.toHaveBeenCalled();
+    expect(getThreadForAccount).toHaveBeenCalledWith("thread-1", "gmail:user@example.com");
+    expect(getThread).not.toHaveBeenCalled();
   });
 });

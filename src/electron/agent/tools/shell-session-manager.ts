@@ -67,6 +67,8 @@ export interface ShellRunRequest {
   scope?: ShellSessionScope;
   sessionId?: string;
   timeoutMs: number;
+  /** Revalidate admission after setup and immediately before command submission. */
+  beforeExecute?: () => Promise<void>;
   onOutput?: (event: { stream: "stdout" | "stderr"; output: string }) => void;
   fallbackRunner: () => Promise<
     Omit<ShellCommandResult, "usedPersistentSession" | "sessionId" | "sessionEvent">
@@ -841,6 +843,7 @@ export class ShellSessionManager {
 
   async runCommand(request: ShellRunRequest): Promise<ShellCommandResult> {
     await this.ensureStateLoaded();
+    await request.beforeExecute?.();
 
     if (request.signal?.aborted) {
       return {
@@ -907,6 +910,14 @@ export class ShellSessionManager {
         usedPersistentSession: false,
         sessionId: session.info.id,
       };
+    }
+
+    try {
+      await request.beforeExecute?.();
+    } catch (error) {
+      this.activeSessionRuns.delete(runKey);
+      await this.stopSessionById(session.info.id).catch(() => undefined);
+      throw error;
     }
 
     const targetCwd = request.cwd

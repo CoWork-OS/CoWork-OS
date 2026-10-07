@@ -3,10 +3,13 @@ import { AgentDaemon } from "../daemon";
 import { GoogleWorkspaceSettingsManager } from "../../settings/google-workspace-manager";
 import { googleCalendarRequest } from "../../utils/google-calendar-api";
 import {
-  hasGoogleWorkspaceScopeCoverage,
-  hasGoogleWorkspaceTokens,
-  inferGoogleWorkspaceConnectionMode,
-} from "../../../shared/google-workspace";
+  createIntegrationEffectGuard,
+  googleWorkspaceAuthConfig,
+  googleWorkspacePolicyFingerprint,
+  googleWorkspaceScopeReady,
+  integrationEffectRequestDigest,
+  integrationEffectReview,
+} from "./integration-effect-guard";
 
 type CalendarAction =
   | "list_calendars"
@@ -108,13 +111,7 @@ export class GoogleCalendarTools {
 
   static isEnabled(): boolean {
     const settings = GoogleWorkspaceSettingsManager.loadSettings();
-    const mode = inferGoogleWorkspaceConnectionMode(settings.connectionMode, settings.scopes);
-    return (
-      settings.enabled &&
-      mode === "workspace" &&
-      hasGoogleWorkspaceTokens(settings) &&
-      hasGoogleWorkspaceScopeCoverage(settings.scopes, "workspace")
-    );
+    return googleWorkspaceScopeReady(settings, "workspace", "workspace");
   }
 
   private formatAuthError(error: unknown): string | null {
@@ -144,6 +141,28 @@ export class GoogleCalendarTools {
     if (!approved) {
       throw new Error("User denied Google Calendar action");
     }
+  }
+
+  private createEffectGuard(
+    initialSettings: ReturnType<typeof GoogleWorkspaceSettingsManager.loadSettings>,
+    input: GoogleCalendarActionInput,
+    details: Record<string, unknown>,
+  ) {
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName: "calendar_action",
+      toolInput: input,
+      approvalDetails: details,
+      initialSettings,
+      loadSettings: () => GoogleWorkspaceSettingsManager.loadSettings(),
+      settingsEnabled: (current) => googleWorkspaceScopeReady(current, "workspace", "workspace"),
+      settingsFingerprint: googleWorkspacePolicyFingerprint,
+      authConfig: googleWorkspaceAuthConfig,
+      errorPrefix: "Google Calendar action",
+    });
   }
 
   async executeAction(input: GoogleCalendarActionInput): Promise<Any> {
@@ -200,45 +219,116 @@ export class GoogleCalendarTools {
           break;
         }
         case "create_event": {
-          const eventPayload = buildEventPayload(input);
-          await this.requireApproval("Create a Google Calendar event", {
-            action: "create_event",
-            calendar_id: calendarId,
-            summary: eventPayload.summary,
+          const eventPayload = structuredClone(buildEventPayload(input));
+          const method = "POST";
+          const requestPath = `/calendars/${encodeURIComponent(calendarId)}/events`;
+          const details = integrationEffectReview("calendar_action", input, action, {
+            reviewedEffect: {
+              version: 1,
+              provider: "google_calendar",
+              operation: action,
+              calendarId,
+              event: eventPayload,
+              request: {
+                method,
+                path: requestPath,
+                sha256: integrationEffectRequestDigest(method, requestPath, eventPayload),
+              },
+            },
           });
+          await this.requireApproval("Create a Google Calendar event", details);
+          const beforeSend = await this.createEffectGuard(settings, input, details);
           result = await googleCalendarRequest(settings, {
-            method: "POST",
-            path: `/calendars/${encodeURIComponent(calendarId)}/events`,
+            method,
+            path: requestPath,
             body: eventPayload,
+            beforeSend,
           });
           break;
         }
         case "update_event": {
           if (!input.event_id) throw new Error("Missing event_id for update_event");
-          const updatePayload = buildEventPayload(input);
-          await this.requireApproval("Update a Google Calendar event", {
-            action: "update_event",
-            calendar_id: calendarId,
-            event_id: input.event_id,
-            summary: updatePayload.summary,
+          const updatePayload = structuredClone(buildEventPayload(input));
+          const method = "PATCH";
+          const requestPath = `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(input.event_id)}`;
+          const details = integrationEffectReview("calendar_action", input, action, {
+            reviewedEffect: {
+              version: 1,
+              provider: "google_calendar",
+              operation: action,
+              calendarId,
+              eventId: input.event_id,
+              event: updatePayload,
+              request: {
+                method,
+                path: requestPath,
+                sha256: integrationEffectRequestDigest(method, requestPath, updatePayload),
+              },
+            },
           });
+          await this.requireApproval("Update a Google Calendar event", details);
+          const beforeSend = await this.createEffectGuard(settings, input, details);
           result = await googleCalendarRequest(settings, {
-            method: "PATCH",
-            path: `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(input.event_id)}`,
+            method,
+            path: requestPath,
             body: updatePayload,
+            beforeSend,
           });
           break;
         }
         case "delete_event": {
           if (!input.event_id) throw new Error("Missing event_id for delete_event");
-          await this.requireApproval("Delete a Google Calendar event", {
-            action: "delete_event",
-            calendar_id: calendarId,
-            event_id: input.event_id,
+          const method = "DELETE";
+          const requestPath = `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(input.event_id)}`;
+          const initialEvent = await googleCalendarRequest(settings, {
+            method: "GET",
+            path: requestPath,
           });
+          const reviewedEvent = initialEvent.data ?? {};
+          const eventRevisionSha256 = integrationEffectRequestDigest(
+            "GET",
+            requestPath,
+            reviewedEvent,
+          );
+          const details = integrationEffectReview("calendar_action", input, action, {
+            reviewedEffect: {
+              version: 1,
+              provider: "google_calendar",
+              operation: action,
+              calendarId,
+              eventId: input.event_id,
+              previousEvent: reviewedEvent,
+              eventRevisionSha256,
+              request: {
+                method,
+                path: requestPath,
+                sha256: integrationEffectRequestDigest(method, requestPath, undefined),
+              },
+            },
+          });
+          await this.requireApproval("Delete a Google Calendar event", details);
+          const beforeSend = await this.createEffectGuard(settings, input, details);
           result = await googleCalendarRequest(settings, {
-            method: "DELETE",
-            path: `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(input.event_id)}`,
+            method,
+            path: requestPath,
+            beforeSend: async () => {
+              await beforeSend();
+              const currentEvent = await googleCalendarRequest(settings, {
+                method: "GET",
+                path: requestPath,
+              });
+              const currentRevisionSha256 = integrationEffectRequestDigest(
+                "GET",
+                requestPath,
+                currentEvent.data ?? {},
+              );
+              if (currentRevisionSha256 !== eventRevisionSha256) {
+                throw new Error(
+                  "Calendar event changed after review; approve its current revision before deleting",
+                );
+              }
+              await beforeSend();
+            },
           });
           break;
         }

@@ -60,6 +60,8 @@ export interface MemoryItemsHubDeps {
   getMemoryRepo?: () => MemoryRepoService | null;
   /** The workspace's name, for a new `workspaces/<slug>.md`. */
   getWorkspaceName?: (workspaceId: string) => Promise<string | null>;
+  /** Resolve only the recorded bot identity; never derive ownership from current assignment. */
+  getBot?: (id: string) => Promise<{ id: string; displayName: string } | undefined>;
   /** Task title for the "why" link; the title is shown only for the Hub's workspace. */
   getTask?: (
     taskId: string,
@@ -87,6 +89,12 @@ export function isMemoryItemVisibleIn(
 export function toMemoryHubItem(item: MemoryItem): MemoryHubItem {
   return {
     id: item.id,
+    originBotId:
+      typeof item.sourceRef.agentRoleId === "string" &&
+      item.sourceRef.agentRoleId.trim() &&
+      item.sourceRef.agentRoleId.length <= 128
+        ? item.sourceRef.agentRoleId
+        : null,
     workspaceId: item.workspaceId,
     scope: item.scope,
     scopeRef: item.scopeRef,
@@ -191,6 +199,18 @@ export class MemoryItemsHubService {
     return item;
   }
 
+  private async view(item: MemoryItem): Promise<MemoryHubItem> {
+    const value = toMemoryHubItem(item);
+    if (value.originBotId) {
+      try {
+        const bot = await this.deps.getBot?.(value.originBotId);
+        if (bot?.id === value.originBotId) value.originBotName = bot.displayName;
+      } catch {
+        /* Historical provenance remains visible if the bot is unavailable. */
+      }
+    }
+    return value;
+  }
   async list(request: MemoryHubListRequest): Promise<MemoryHubListResult> {
     const limit = Math.max(1, Math.min(200, Math.floor(request.limit ?? 100)));
     const offset = Math.max(0, Math.floor(request.offset ?? 0));
@@ -205,9 +225,11 @@ export class MemoryItemsHubService {
       limit,
       offset,
     });
-    const items = page.items
+    const items = await Promise.all(
+      page.items
       .filter((item) => isMemoryItemVisibleIn(item, request.workspaceId))
-      .map(toMemoryHubItem);
+        .map((item) => this.view(item)),
+    );
     return { items, total: page.total, offset, hasMore: offset + page.items.length < page.total };
   }
 

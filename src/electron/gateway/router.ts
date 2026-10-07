@@ -1,3 +1,6 @@
+import { ChannelDecisionService } from "./ChannelDecisionService";
+import { ChannelDecisionRepository } from "./ChannelDecisionRepository";
+import { ApprovalRepository } from "../database/repository-facades";
 /**
  * Message Router
  *
@@ -79,6 +82,7 @@ import {
 } from "../../shared/skill-slash-commands";
 import { formatTimelineActivityLabel } from "../../shared/timeline-v2";
 import { DEFAULT_QUIRKS } from "../../shared/types";
+import { botIconText } from "../../shared/bot-mascots";
 import { formatChatTranscriptForPrompt, prefetchTranscriptUsers } from "./chat-transcript";
 import { evaluateWorkspaceRouterRules } from "./router-rules";
 import { applyResearchChatRouting } from "./router-research-routing";
@@ -133,6 +137,7 @@ import { normalizeRemoteIncomingCommand } from "./remote-command-normalizer";
 import { gatewaySenderAgentConfig } from "./gateway-sender-identity";
 import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
+import { approvalRequestRevisionHash, approvalRevisionMatches } from "../agent/approval-revision";
 export type { RouterConfig } from "./router-helpers";
 
 type Any = any;
@@ -208,6 +213,7 @@ export class MessageRouter {
   private artifactRepo: ArtifactRepository;
   private agentRoleRepo: AgentRoleRepository;
   private deliveryService: ChannelDeliveryService;
+  private decisionService?: ChannelDecisionService;
   private rawAdapterSendMessages: WeakMap<ChannelAdapter, ChannelAdapter["sendMessage"]> =
     new WeakMap();
 
@@ -235,6 +241,8 @@ export class MessageRouter {
     {
       taskId: string;
       approval: Any;
+      /** Hash of the exact request shown in the chat; a decision applies only to it. */
+      revisionHash?: string;
       sessionId: string;
       chatId: string;
       channelType: ChannelType;
@@ -312,6 +320,26 @@ export class MessageRouter {
     this.taskRepo = new TaskRepository(db);
     this.artifactRepo = new ArtifactRepository(db);
     this.agentRoleRepo = new AgentRoleRepository(db);
+    if (agentDaemon) {
+      const approvalRepo = new ApprovalRepository(db);
+      this.decisionService = new ChannelDecisionService({
+        repository: new ChannelDecisionRepository(db),
+        getSession: (id) => this.sessionRepo.findById(id),
+        getChannel: (id) => this.channelRepo.findById(id),
+        getApproval: (id) => approvalRepo.findById(id),
+        getAdapter: (id) => this.getAdapterByChannelId(id),
+        describeApproval: (request) => this.compactExternalApprovalDescription(request),
+        respond: (input) =>
+          agentDaemon.respondToApproval(
+            input.approvalId,
+            input.approved,
+            input.approved ? "allow_once" : "deny_once",
+            input.attribution,
+            input.expectedRevisionHash,
+            input.guard,
+          ),
+      });
+    }
     this.deliveryService = new ChannelDeliveryService({
       getAdapter: (channelType, channelId) =>
         channelId
@@ -1008,9 +1036,9 @@ export class MessageRouter {
         workspace = await this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
       }
     } else {
-      const existingTemp = (await this.workspaceRepo
-        .findAll())
-        .find((candidate) => isTempWorkspaceInScope(candidate.id, "gateway"));
+      const existingTemp = (await this.workspaceRepo.findAll()).find((candidate) =>
+        isTempWorkspaceInScope(candidate.id, "gateway"),
+      );
       if (existingTemp && !createNew) {
         workspace = await this.ensureTempWorkspaceRecord(
           existingTemp.id,
@@ -1074,6 +1102,18 @@ export class MessageRouter {
     adapter.onMessage(async (message) => {
       await this.handleMessage(adapter, message);
     });
+
+    if (
+      channelId &&
+      adapter.onDecision &&
+      this.decisionService &&
+      (adapter.type === "slack" || adapter.type === "teams")
+    ) {
+      adapter.onDecision(async (event) => {
+        if (this.shuttingDown || this.getAdapterByChannelId(channelId) !== adapter) return;
+        await this.decisionService!.handle(channelId, event);
+      });
+    }
 
     // Set up callback query handler for inline keyboards
     if (adapter.onCallbackQuery) {
@@ -2029,6 +2069,7 @@ export class MessageRouter {
       channel: channelType,
       timestamp: new Date(),
       data: {
+        channelId: channel.id,
         messageId: message.messageId,
         chatId: message.chatId,
         userId: message.userId,
@@ -2289,9 +2330,9 @@ export class MessageRouter {
             pendingSelection: undefined,
           });
         } else if (pendingSelection.type === "workspace") {
-          const workspaces = (await this.workspaceRepo
-            .findAll())
-            .filter((workspace) => this.isUserSelectableWorkspace(workspace));
+          const workspaces = (await this.workspaceRepo.findAll()).filter((workspace) =>
+            this.isUserSelectableWorkspace(workspace),
+          );
           const isNumeric = /^[0-9]+$/.test(text);
           const num = parseInt(text, 10);
           let workspace: Workspace | undefined;
@@ -2410,9 +2451,9 @@ export class MessageRouter {
     // Check if session has no workspace - might be workspace selection
     if (!session?.workspaceId) {
       // Check if this looks like workspace selection (number or short name)
-      const workspaces = (await this.workspaceRepo
-        .findAll())
-        .filter((workspace) => this.isUserSelectableWorkspace(workspace));
+      const workspaces = (await this.workspaceRepo.findAll()).filter((workspace) =>
+        this.isUserSelectableWorkspace(workspace),
+      );
       if (workspaces.length > 0) {
         // Try to match by number
         const num = parseInt(text, 10);
@@ -4092,7 +4133,7 @@ export class MessageRouter {
 
       const roleRows = roles.map((role, index) => {
         const isActive = role.id === selectedRoleId ? " (active for this chat)" : "";
-        return `${index + 1}. ${role.icon} ${role.name} — ${role.displayName}${isActive}`;
+        return `${index + 1}. ${botIconText(role.icon)} ${role.name} — ${role.displayName}${isActive}`;
       });
 
       const status = selectedRole
@@ -4174,7 +4215,7 @@ export class MessageRouter {
     });
     await adapter.sendMessage({
       chatId: message.chatId,
-      text: `✅ Saved preference for this chat: ${role.icon} ${role.name} (${role.displayName})`,
+      text: `✅ Saved preference for this chat: ${botIconText(role.icon)} ${role.name} (${role.displayName})`,
     });
   }
 
@@ -5787,9 +5828,9 @@ export class MessageRouter {
     message: IncomingMessage,
     sessionId: string,
   ): Promise<void> {
-    const workspaces = (await this.workspaceRepo
-      .findAll())
-      .filter((workspace) => this.isUserSelectableWorkspace(workspace));
+    const workspaces = (await this.workspaceRepo.findAll()).filter((workspace) =>
+      this.isUserSelectableWorkspace(workspace),
+    );
 
     if (workspaces.length === 0) {
       await adapter.sendMessage({
@@ -5902,9 +5943,9 @@ export class MessageRouter {
       return;
     }
 
-    const workspaces = (await this.workspaceRepo
-      .findAll())
-      .filter((workspace) => this.isUserSelectableWorkspace(workspace));
+    const workspaces = (await this.workspaceRepo.findAll()).filter((workspace) =>
+      this.isUserSelectableWorkspace(workspace),
+    );
     const selector = args.join(" ");
     let workspace;
 
@@ -7744,10 +7785,52 @@ export class MessageRouter {
 
     await this.clearTransientTaskProgress(route.routedTaskId);
 
-    // Store approval for response handling
+    if (route.adapter.type === "slack" || route.adapter.type === "teams") {
+      const channel = await this.channelRepo.findById(route.channelId);
+      if (channel?.config.decisionMessagesEnabled === true) {
+        try {
+          if (!this.decisionService || !route.requestingUserId)
+            throw new Error("Decision route is unavailable");
+          await this.decisionService.publish({
+            approvalId: approval.id,
+            sessionId: route.sessionId,
+            actorId: route.requestingUserId,
+          });
+        } catch {
+          await route.adapter.sendMessage({
+            chatId: route.chatId,
+            text: "An approval needs your review in CoWork. Channel decision buttons are unavailable for this request.",
+            parseMode: "text",
+          });
+        }
+        // Typed routes must never fall back to weaker legacy command/callback authority.
+        return;
+      }
+    }
+
+    // Store approval for response handling. The displayed revision binds a decision to
+    // the content shown here. Exact reviews (files, bound drafts, responsibility writes)
+    // get no hash: chat prompts never show their bytes, so the daemon keeps refusing
+    // those legacy decisions instead of letting a public digest stand in for a review.
+    let revisionHash: string | undefined;
+    const details = approval?.details;
+    const exactReview =
+      details?.reviewFiles !== undefined ||
+      details?.draftRevision?.state === "bound" ||
+      details?.responsibilityActionReview !== undefined;
+    try {
+      revisionHash = exactReview
+        ? undefined
+        : approvalRevisionMatches(approval, approval?.revisionHash)
+          ? approval.revisionHash
+          : approvalRequestRevisionHash(approval);
+    } catch {
+      revisionHash = undefined;
+    }
     this.pendingApprovals.set(approval.id, {
       taskId,
       approval,
+      revisionHash,
       sessionId: route.sessionId,
       chatId: route.chatId,
       channelType: route.adapter.type,
@@ -8309,7 +8392,13 @@ export class MessageRouter {
     }
 
     try {
-      const status = await this.agentDaemon.respondToApproval(approvalId, approved);
+      const status = await this.agentDaemon.respondToApproval(
+        approvalId,
+        approved,
+        undefined,
+        undefined,
+        data.revisionHash,
+      );
       if (status === "in_progress") {
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -9497,25 +9586,28 @@ Node.js: \`${nodeVersion}\`
       return;
     }
 
-    // Group chat safety: only the user who triggered the approval request can respond.
-    if (
-      data.contextType === "group" &&
-      data.requestingUserId &&
-      query.userId !== data.requestingUserId
-    ) {
+    // Approval buttons can satisfy a tool permission gate, so always bind the
+    // decision to the task requester, including in direct messages.
+    if (!data.requestingUserId || query.userId !== data.requestingUserId) {
       const who = data.requestingUserName
         ? `*${data.requestingUserName}*`
         : "the original requester";
       await adapter.sendMessage({
         chatId: query.chatId,
-        text: `⚠️ Only ${who} can approve/deny this request in a group chat.`,
+        text: `⚠️ Only ${who} can approve/deny this request.`,
         parseMode: "markdown",
       });
       return;
     }
 
     try {
-      const status = await this.agentDaemon.respondToApproval(approvalId, approved);
+      const status = await this.agentDaemon.respondToApproval(
+        approvalId,
+        approved,
+        undefined,
+        undefined,
+        data.revisionHash,
+      );
       if (status === "in_progress") {
         await adapter.sendMessage({
           chatId: query.chatId,

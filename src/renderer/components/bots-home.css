@@ -1,0 +1,431 @@
+/* Bots home: the top of the Agents page. Colours come from the page's --agents-*
+   palette, which the calm theme maps onto light and dark tokens. */
+.bots-home {
+  display: grid;
+  gap: 22px;
+  margin-bottom: 28px;
+}
+
+.bots-home-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.bots-home-header h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  line-height: 1.1;
+  font-weight: 600;
+  color: var(--agents-text);
+}
+
+.bots-home-header p {
+  margin: 6px 0 0;
+  color: var(--agents-muted);
+  font-size: 0.95rem;
+}
+
+.bots-home-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.bots-home-actions .agents-primary-btn,
+.bots-home-actions .agents-secondary-btn,
+.bots-home-first .agents-primary-btn {
+  padding: 9px 16px;
+  font-size: 0.9rem;
+}
+
+.bots-home-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bots-home-stat {
+  display: grid;
+  justify-content: stretch;
+  justify-items: start;
+  align-content: start;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--agents-border);
+  border-radius: 14px;
+  background: var(--agents-surface-strong);
+  color: var(--agents-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.bots-home-stat:hover {
+  border-color: var(--agents-border-strong);
+}
+
+.bots-home-stat.active {
+  border-color: var(--agents-text);
+}
+
+.bots-home-stat span {
+  font-size: 0.8rem;
+  color: var(--agents-muted);
+}
+
+.bots-home-stat strong {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.bots-home-stat.attention strong {
+  color: var(--color-warning, #b54708);
+}
+
+.bots-home-stat:focus-visible,
+.bots-home-row-button:focus-visible,
+.bots-home-row-icon:focus-visible,
+.bots-home-template:focus-visible,
+.bots-home-link:focus-visible {
+  outline: 2px solid var(--agents-accent);
+  outline-offset: 2px;
+}
+
+.bots-home-section {
+  display: grid;
+  gap: 12px;
+}
+
+.bots-home-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bots-home-section-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--agents-text);
+}
+
+.bots-home-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--agents-muted);
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.bots-home-list {
+  display: grid;
+  border: 1px solid var(--agents-border);
+  border-radius: 14px;
+  background: var(--agents-surface-strong);
+  overflow: hidden;
+}
+
+.bots-home-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+}
+
+.bots-home-row + .bots-home-row {
+  border-top: 1px solid var(--agents-border);
+}
+
+.bots-home-row-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bots-home-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bots-home-row-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--agents-text);
+}
+
+.bots-home-row-loading {
+  color: var(--agents-subtle);
+}
+
+.bots-home-row-description {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  color: var(--agents-muted);
+}
+
+.bots-home-row-meta {
+  font-size: 0.8rem;
+  color: var(--agents-subtle);
+}
+
+.bots-home-chip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bots-home-chip-attention {
+  background: var(--color-warning-subtle, rgba(251, 191, 36, 0.16));
+  color: var(--color-warning, #b54708);
+}
+
+.bots-home-chip-active {
+  background: var(--agents-accent-soft);
+  color: var(--agents-accent);
+}
+
+.bots-home-chip-paused,
+.bots-home-chip-quiet {
+  background: color-mix(in srgb, var(--agents-muted) 12%, transparent);
+  color: var(--agents-muted);
+}
+
+.bots-home-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bots-home-row-button,
+.bots-home-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  border: 1px solid var(--agents-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--agents-text);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.bots-home-row-button {
+  padding: 0 12px;
+}
+
+.bots-home-row-button svg {
+  flex: none;
+}
+
+.bots-home-row-icon {
+  width: 32px;
+  padding: 0;
+  color: var(--agents-muted);
+}
+
+.bots-home-row-icon svg {
+  flex: none;
+}
+
+.bots-home-row-button:hover,
+.bots-home-row-icon:hover {
+  border-color: var(--agents-border-strong);
+  background: color-mix(in srgb, var(--agents-text) 5%, transparent);
+}
+
+.bots-home-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px;
+  border: 1px dashed var(--agents-border-strong);
+  border-radius: 14px;
+  color: var(--agents-muted);
+  font-size: 0.9rem;
+}
+
+.bots-home-first {
+  flex-direction: column;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.bots-home-first strong {
+  color: var(--agents-text);
+  font-size: 1.05rem;
+}
+
+.bots-home-first span {
+  max-width: 420px;
+}
+
+.bots-home-templates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.bots-home-template {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--agents-border);
+  border-radius: 14px;
+  background: var(--agents-surface-strong);
+  color: var(--agents-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.bots-home-template:hover {
+  border-color: var(--agents-border-strong);
+}
+
+.bots-home-template-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bots-home-template-copy strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.bots-home-template-copy span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--agents-muted);
+}
+
+/* Workspace agents: managed agents, kept below the bots and folded by default. */
+.agents-workspace-section {
+  border: 1px solid var(--agents-border);
+  border-radius: 14px;
+  background: var(--agents-surface-strong);
+  margin-bottom: 28px;
+}
+
+.agents-workspace-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  background: none;
+  color: var(--agents-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.agents-workspace-toggle strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.agents-workspace-toggle span {
+  font-size: 0.84rem;
+  color: var(--agents-muted);
+}
+
+.agents-workspace-toggle svg {
+  flex: none;
+  color: var(--agents-muted);
+  transition: transform 0.2s ease;
+}
+
+.agents-workspace-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.agents-workspace-body {
+  padding: 0 16px 16px;
+}
+
+.agents-workspace-body .agents-library-card {
+  min-height: 0;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.agents-workspace-body .agents-library-card-copy strong {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.agents-workspace-body .agents-library-card-copy p,
+.agents-workspace-body .agents-library-card-meta {
+  font-size: 0.85rem;
+}
+
+.agents-workspace-body .agents-tab {
+  padding: 6px 12px;
+  font-size: 0.86rem;
+}
+
+.agents-workspace-body .agents-row-actions .agents-secondary-btn {
+  padding: 7px 14px;
+  font-size: 0.86rem;
+}
+
+.agents-workspace-body .agents-governance-item {
+  font-size: 0.85rem;
+}
+
+.agents-workspace-body .agents-library-surface {
+  margin-bottom: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .bots-home-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .bots-home-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .bots-home-row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}

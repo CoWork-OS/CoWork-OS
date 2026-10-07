@@ -11,6 +11,7 @@ import {
 import { getRoutineListDisplayState } from "./routine-list-state";
 import { loadRoutineSettingsData } from "./routine-settings-load";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
+import type { MailboxAccount } from "../../shared/mailbox";
 
 type CronSchedule =
   | { kind: "cron"; expr: string; tz?: string }
@@ -58,6 +59,7 @@ type RoutineTrigger =
       id: string;
       type: "mailbox_event";
       enabled: boolean;
+      accountId?: string;
       eventType?: string;
       subjectContains?: string;
       provider?: string;
@@ -194,6 +196,7 @@ type RoutineFormState = {
   channelEventTextContains: string;
   channelEventSenderContains: string;
   mailboxEventEnabled: boolean;
+  mailboxEventAccountId: string;
   mailboxEventType: string;
   mailboxEventProvider: string;
   mailboxEventSubjectContains: string;
@@ -303,6 +306,7 @@ function createDefaultFormState(workspaceId = ""): RoutineFormState {
     channelEventTextContains: "",
     channelEventSenderContains: "",
     mailboxEventEnabled: false,
+    mailboxEventAccountId: "",
     mailboxEventType: "",
     mailboxEventProvider: "",
     mailboxEventSubjectContains: "",
@@ -326,6 +330,7 @@ export function RoutineSettingsPanel({
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [runs, setRuns] = useState<RoutineRun[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [mailboxAccounts, setMailboxAccounts] = useState<MailboxAccount[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServerStatus[]>([]);
   const [hooksStatus, setHooksStatus] = useState<RoutineHookStatus | null>(null);
   const [hooksSettings, setHooksSettings] = useState<RoutineHookSettings | null>(null);
@@ -392,6 +397,10 @@ export function RoutineSettingsPanel({
           hasHostMethod("getCronStatus")
             ? window.electronAPI.getCronStatus()
             : Promise.resolve(null),
+        mailboxes: () =>
+          hasHostMethod("getMailboxSyncStatus")
+            ? window.electronAPI.getMailboxSyncStatus()
+            : Promise.resolve({ accounts: [] as MailboxAccount[] }),
       });
       const errors: string[] = [];
       function apply<T>(
@@ -431,6 +440,9 @@ export function RoutineSettingsPanel({
         setMcpServers(Array.isArray(value) ? value : []),
       );
       apply("Scheduler status", data.cron, setCronStatus);
+      apply("Mailbox accounts", data.mailboxes, (value) =>
+        setMailboxAccounts(value?.accounts || []),
+      );
       setError(errors.length ? errors.join("\n") : null);
     } catch (err: Any) {
       setError(err.message || "Failed to load routines");
@@ -546,6 +558,8 @@ export function RoutineSettingsPanel({
       channelEventSenderContains:
         channelTrigger?.type === "channel_event" ? channelTrigger.senderContains || "" : "",
       mailboxEventEnabled: Boolean(mailboxTrigger),
+      mailboxEventAccountId:
+        mailboxTrigger?.type === "mailbox_event" ? mailboxTrigger.accountId || "" : "",
       mailboxEventType:
         mailboxTrigger?.type === "mailbox_event" ? mailboxTrigger.eventType || "" : "",
       mailboxEventProvider:
@@ -1264,6 +1278,31 @@ export function RoutineSettingsPanel({
                     gap: 12,
                   }}
                 >
+                  <label className="settings-field">
+                    <span>Mailbox account</span>
+                    <select
+                      className="settings-input"
+                      value={form.mailboxEventAccountId}
+                      onChange={(event) =>
+                        setForm({ ...form, mailboxEventAccountId: event.target.value })
+                      }
+                    >
+                      <option value="">Select one account</option>
+                      {form.mailboxEventAccountId &&
+                        !mailboxAccounts.some(
+                          (account) => account.id === form.mailboxEventAccountId,
+                        ) && (
+                          <option value={form.mailboxEventAccountId}>
+                            Unavailable saved account
+                          </option>
+                        )}
+                      {mailboxAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.address} · {account.provider} · {account.status}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <input
                     className="settings-input"
                     value={form.mailboxEventType}
@@ -1471,10 +1510,7 @@ export function RoutineSettingsPanel({
                       <Play size={16} />
                       Run Now
                     </button>
-                    <button
-                      className="settings-button"
-                      onClick={() => startEdit(routine)}
-                    >
+                    <button className="settings-button" onClick={() => startEdit(routine)}>
                       <Pencil size={16} />
                       Edit
                     </button>
@@ -1747,6 +1783,7 @@ function buildTriggers(form: RoutineFormState, existing: Routine | null): Routin
       ...(mailboxExisting || { id: window.crypto.randomUUID() }),
       type: "mailbox_event",
       enabled: true,
+      accountId: form.mailboxEventAccountId.trim() || undefined,
       eventType: form.mailboxEventType.trim() || undefined,
       provider: form.mailboxEventProvider.trim() || undefined,
       subjectContains: form.mailboxEventSubjectContains.trim() || undefined,

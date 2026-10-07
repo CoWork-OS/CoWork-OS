@@ -7,6 +7,7 @@ import {
   parseAssistantApprovalAnswer,
   shouldUseAssistantApprovalInput,
 } from "../assistant-approval";
+import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../../shared/approval-draft-presentation";
 
 describe("assistant mediated approvals", () => {
   it("routes every permission ask through the assistant while keeping allow decisions silent", () => {
@@ -69,6 +70,41 @@ describe("assistant mediated approvals", () => {
       }),
     ).toBe(true);
   });
+
+  it("marks exact workspace write review with its persisted one-time decision question", () => {
+    const request = buildAssistantApprovalRequest("workspace_write", "Review write", {
+      tool: "write_file",
+      responsibilityActionReview: { version: 1 },
+    });
+    expect(request.questions[0]?.id).toBe(RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID);
+    expect(request.questions[0]?.options.map((option) => option.label)).toEqual([
+      "Deny once",
+      "Allow once",
+    ]);
+    expect(
+      parseAssistantApprovalAnswer(
+        { approval_decision: { optionLabel: "Allow once" } },
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      parseAssistantApprovalAnswer(
+        {
+          [RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID]: { optionLabel: "Allow once" },
+        },
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      isAssistantApprovalInputRequest({
+        id: "review-request",
+        taskId: "task-1",
+        ...request,
+        status: "pending",
+        requestedAt: Date.now(),
+      }),
+    ).toBe(true);
+  });
 });
 
 it("makes the duration and app scope explicit while keeping Deny first", () => {
@@ -83,4 +119,37 @@ it("makes the duration and app scope explicit while keeping Deny first", () => {
   expect(
     parseAssistantApprovalAnswer({ approval_decision: { optionLabel: "Allow for this task" } }),
   ).toBe(true);
+});
+
+it("offers a chat-scoped consent for read-only web access in a bot chat", () => {
+  const request = buildAssistantApprovalRequest(
+    "network_access",
+    "Let this bot search and read web pages for this chat?",
+    {
+      taskConsentScope: "searching and opening web pages in this chat",
+      taskConsentLabel: "Allow for this chat",
+    },
+  );
+  expect(request.questions[0].question).toContain(
+    "Consent covers searching and opening web pages in this chat.",
+  );
+  expect(request.questions[0].question).not.toContain("until this task ends");
+  expect(request.questions[0].options.map((option) => option.label)).toEqual([
+    "Deny",
+    "Allow for this chat",
+  ]);
+  expect(
+    parseAssistantApprovalAnswer({ approval_decision: { optionLabel: "Allow for this chat" } }),
+  ).toBe(true);
+  // Only the two supported labels are accepted; anything else falls back.
+  expect(
+    buildAssistantApprovalRequest("network_access", "x", {
+      taskConsentScope: "y",
+      taskConsentLabel: "Allow forever",
+    }).questions[0].options[1].label,
+  ).toBe("Allow for this task");
+  // Without a consent scope, network access stays a one-time decision.
+  expect(
+    buildAssistantApprovalRequest("network_access", "x", {}).questions[0].options[1].label,
+  ).toBe("Allow once");
 });

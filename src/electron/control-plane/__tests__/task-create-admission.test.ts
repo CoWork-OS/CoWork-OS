@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../../agent/daemon";
 import { DatabaseManager } from "../../database/schema";
+import { AgentRoleStore } from "../../agents/AgentRoleRepository";
+import { BotWorkControlStore } from "../../automation/BotWorkControlStore";
 import { TaskStore, WorkspaceStore } from "../../database/repositories";
 import type { ControlPlaneServer } from "../server";
 import { ErrorCodes, Methods } from "../protocol";
@@ -138,5 +140,39 @@ describe("Electron Control Plane durable task creation", () => {
     expect(legacy).not.toHaveProperty("replayed");
     expect(startTask).toHaveBeenCalledWith(expect.objectContaining({ id: legacy.taskId }));
     expect(createTaskIdempotent).not.toHaveBeenCalled();
+  });
+
+  it("checks a bot's future pause before unkeyed task insertion or native start", async () => {
+    const workspace = createWorkspace();
+    const db = manager.getDatabase();
+    const bot = new AgentRoleStore(db).create({
+      name: "private-fixture",
+      displayName: "Fixture",
+      description: "Fixture",
+      capabilities: [],
+    });
+    new BotWorkControlStore(db).begin(
+      {
+        scope: { workspaceId: workspace.id, agentRoleId: bot.id },
+        requestId: "pause",
+        action: "pause_bot",
+      },
+      Date.now(),
+    );
+    const startTask = vi.fn();
+    register({ startTask });
+    await expect(
+      methods.get(Methods.TASK_CREATE)!(
+        { hasScope: () => true },
+        {
+          title: "Due",
+          prompt: "Due",
+          workspaceId: workspace.id,
+          assignedAgentRoleId: bot.id,
+        },
+      ),
+    ).rejects.toThrow("Bot future runs are paused");
+    expect(startTask).not.toHaveBeenCalled();
+    expect(new TaskStore(db).findAll()).toHaveLength(0);
   });
 });

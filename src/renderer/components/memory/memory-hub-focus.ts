@@ -6,6 +6,7 @@
  */
 export interface MemoryHubFocusRequest {
   itemId: string;
+  contextBotName?: string;
   /** Text the tab's search is set to, so the item is in the first page. */
   query: string;
   /** The workspace the Hub should show (the task's workspace). */
@@ -37,4 +38,19 @@ export function takeMemoryHubFocus(workspaceId?: string): MemoryHubFocusRequest 
   pending = null;
   if (request?.workspaceId && workspaceId && request.workspaceId !== workspaceId) return null;
   return request;
+}
+
+/** Opens workspace context from a bot without claiming ownership of historical records. */
+export function requestBotMemoryContext(workspaceId: string, botName: string): void {
+  pending = {
+    workspaceId: workspaceId.trim(),
+    itemId: "",
+    query: "",
+    contextBotName: botName.trim().slice(0, 100),
+  };
+}
+export function peekBotMemoryContext(): { workspaceId: string; botName: string } | null {
+  return pending?.workspaceId && pending.contextBotName
+    ? { workspaceId: pending.workspaceId, botName: pending.contextBotName }
+    : null;
 }

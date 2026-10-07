@@ -8,29 +8,9 @@
 /**
  * Supported channel types
  */
-export const CHANNEL_TYPES = [
-  "telegram",
-  "discord",
-  "slack",
-  "whatsapp",
-  "imessage",
-  "signal",
-  "mattermost",
-  "matrix",
-  "twitch",
-  "line",
-  "bluebubbles",
-  "email",
-  "teams",
-  "googlechat",
-  "feishu",
-  "wecom",
-  "x",
-  "whatsapp_cloud",
-  "twilio_sms",
-] as const;
-
-export type ChannelType = (typeof CHANNEL_TYPES)[number];
+import type { ChannelType } from "../../../shared/gateway-channel-types";
+export { CHANNEL_TYPES } from "../../../shared/gateway-channel-types";
+export type { ChannelType } from "../../../shared/gateway-channel-types";
 
 /**
  * Channel connection status
@@ -117,6 +97,29 @@ export interface OutgoingMessage {
   disableLinkPreview?: boolean;
 }
 
+/** A pre-authorized durable route rendered by an adapter; contains no execution grant. */
+export interface ChannelDecisionMessage {
+  routeId: string;
+  chatId: string;
+  title: string;
+  summary: string;
+  revisionHash?: string;
+  draftFiles?: { present: number; missing: number };
+  expiresAt: number;
+  replyTo?: string;
+}
+export interface ChannelDecisionEvent {
+  routeId: string;
+  channelType: "slack" | "teams";
+  chatId: string;
+  messageId: string;
+  actorId: string;
+  callbackId: string;
+  action: "approve" | "deny";
+  transport: "slack_socket" | "teams_botframework";
+}
+export type ChannelDecisionHandler = (event: ChannelDecisionEvent) => void | Promise<void>;
+
 /**
  * Callback query from inline keyboard button press
  */
@@ -167,6 +170,8 @@ export interface MessageAttachment {
  * Channel configuration base
  */
 export interface ChannelConfig {
+  /** Opt-in typed decision messages; still require a configured owner account. */
+  decisionMessagesEnabled?: boolean;
   /** Whether this channel is enabled */
   enabled: boolean;
   /** Default agent role ID for tasks created from this channel */
@@ -792,6 +797,12 @@ export interface ChannelAdapter {
    * @returns The sent message ID
    */
   sendMessage(message: OutgoingMessage): Promise<string>;
+
+  /** Typed decisions require a separately registered durable-route handler. */
+  sendDecision?(message: ChannelDecisionMessage): Promise<string>;
+  onDecision?(handler: ChannelDecisionHandler): void;
+  /** Adapter implementation capability; does not establish live destination support. */
+  readonly decisionCapabilities?: { approve: boolean; deny: boolean };
 
   /**
    * Edit an existing message

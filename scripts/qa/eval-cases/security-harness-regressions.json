@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "standard-a8cfb79b-20261002",
-    "taskId": "standard-a8cfb79b-20261002"
+    "incident": "bots-gateway-approval-requester-binding-20261006",
+    "taskId": "bots-gateway-approval-requester-binding-20261006"
   },
   "categories": [
     {
@@ -26,6 +26,317 @@
         "expectedFindingFingerprint": "approval-boundary-sandbox",
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true
+      }
+    },
+    {
+      "id": "bots-admitted-channel-instance-receipts-confirmed-fix",
+      "prompt": "Regression guard for Pin selected channel instances to immutable runs and reject replacement from source sampling through history reads: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-admitted-channel-instance-receipts",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/automation/__tests__/responsibility-history-instance.test.ts"
+      }
+    },
+    {
+      "id": "bots-approval-response-cas-confirmed-fix",
+      "prompt": "Regression guard for Only one pending approval revision can resolve before permission grants and task resume across processes: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-approval-response-cas",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/database/__tests__/approval-resolution.test.ts"
+      }
+    },
+    {
+      "id": "bots-auto-approval-transition-confirmed-fix",
+      "prompt": "Regression guard for Create pending automatic reviews and require a winning current decision before permission success or grants: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-auto-approval-transition",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/__tests__/approval-auto-resolution.test.ts"
+      }
+    },
+    {
+      "id": "bots-autonomy-dispatch-checkpoint-confirmed-fix",
+      "prompt": "Regression guard for Persist autonomy decisions before admission and refuse revoked policy or unavailable execution: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-autonomy-dispatch-checkpoint",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/awareness/__tests__/AutonomyEngine.test.ts"
+      }
+    },
+    {
+      "id": "bots-autonomy-state-merge-confirmed-fix",
+      "prompt": "Regression guard for Preserve current autonomy policy and scoped decisions during automatic outcome persistence: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-autonomy-state-merge",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/awareness/__tests__/AutonomyEngine.test.ts"
+      }
+    },
+    {
+      "id": "bots-box-approved-byte-consumption-confirmed-fix",
+      "prompt": "Regression guard for Bind Box upload bytes to trusted draft capture and recheck current authority at the POST boundary: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-box-approved-byte-consumption",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/utils/__tests__/box-upload-boundary.test.ts"
+      }
+    },
+    {
+      "id": "bots-browser-displayed-approval-revisions-confirmed-fix",
+      "prompt": "Regression guard for Bind browser decisions and reconciliation to the reviewed approval revision: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-browser-displayed-approval-revisions",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/renderer/host/browser-decision-bridge.test.ts"
+      }
+    },
+    {
+      "id": "bots-browser-effect-authority-confirmed-fix",
+      "prompt": "Regression guard for Recheck current workspace authority and durable stop policy after browser setup and before actions: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-browser-effect-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/browser-tools.test.ts"
+      }
+    },
+    {
+      "id": "bots-cached-history-review-boundaries-confirmed-fix",
+      "prompt": "Regression guard for Reject ambiguous history instances and recheck upload and MCP authority after awaited policy: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-cached-history-review-boundaries",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts"
+      }
+    },
+    {
+      "id": "bots-channel-approval-consumption-confirmed-fix",
+      "prompt": "Regression guard for Channel authority remains current before responder grants and restart consumption: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-channel-approval-consumption",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/__tests__/channel-approval-resumption.test.ts"
+      }
+    },
+    {
+      "id": "bots-cli-displayed-approval-revisions-confirmed-fix",
+      "prompt": "Regression guard for Require CLI displayed revision hashes and report approval outcomes truthfully: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-cli-displayed-approval-revisions",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/cli/__tests__/main.test.ts"
+      }
+    },
+    {
+      "id": "bots-displayed-approval-revisions-confirmed-fix",
+      "prompt": "Regression guard for Bind modern desktop and Control Plane responses to presented request revisions and retain stale UI requests: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-displayed-approval-revisions",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/__tests__/daemon-approval.test.ts"
+      }
+    },
+    {
+      "id": "bots-file-write-effect-authority-confirmed-fix",
+      "prompt": "Regression guard for Recheck workspace authority and durable stop policy before opened-file truncation and content writes: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-file-write-effect-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/file-tools-write-line-stats.test.ts"
+      }
+    },
+    {
+      "id": "bots-gateway-approval-requester-binding-20261006-confirmed-fix",
+      "prompt": "Regression guard for Require private-session provenance and exact original requester identity for gateway approvals: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-gateway-approval-requester-binding-20261006",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true
+      }
+    },
+    {
+      "id": "bots-immutable-operation-input-confirmed-fix",
+      "prompt": "Regression guard for Own and seal tool arguments before asynchronous policy review and execution: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-immutable-operation-input",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts"
+      }
+    },
+    {
+      "id": "bots-inline-approval-revision-confirmed-fix",
+      "prompt": "Regression guard for Inline answers validate the canonical request and captured file revision before permission success: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-inline-approval-revision",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/__tests__/inline-approval-revision.test.ts"
+      }
+    },
+    {
+      "id": "bots-inline-input-recovery-confirmed-fix",
+      "prompt": "Regression guard for Interrupted approval cards cannot replay ordinary input; input responses have one durable winner: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-inline-input-recovery",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/database/__tests__/input-approval-link.test.ts"
+      }
+    },
+    {
+      "id": "bots-mcp-http-submission-authority-confirmed-fix",
+      "prompt": "Regression guard for Recheck authority after HTTP credential setup, propagate cancellation, fence stale connection responses and prevent tool replay or redirect forwarding: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-mcp-http-submission-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/mcp/client/transports/__tests__/StreamableHttpTransport.test.ts"
+      }
+    },
+    {
+      "id": "bots-mcp-queued-effect-authority-confirmed-fix",
+      "prompt": "Regression guard for Recheck current task, workspace, connector and responsibility authority after queued MCP startup and before transport submission: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-mcp-queued-effect-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/mcp/client/__tests__/elicitation.test.ts"
+      }
+    },
+    {
+      "id": "bots-memory-caller-authority-confirmed-fix",
+      "prompt": "Regression guard for Non-owner and legacy channel DMs cannot inject owner memory or recall and forget personal stores: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-memory-caller-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/memory-tools.test.ts"
+      }
+    },
+    {
+      "id": "bots-memory-delegated-surface-authority-confirmed-fix",
+      "prompt": "Regression guard for Private channel memory requires positive owner evidence and child tasks preserve parent sender authority: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-memory-delegated-surface-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/__tests__/daemon-child-task.test.ts"
+      }
+    },
+    {
+      "id": "bots-required-draft-capture-confirmed-fix",
+      "prompt": "Regression guard for Refuse explicit draft review grants when trusted capture is unavailable, missing, invalid or unsupported: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-required-draft-capture",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/__tests__/approval-grant-revision.test.ts"
+      }
+    },
+    {
+      "id": "bots-shell-effect-authority-confirmed-fix-confirmed-fix",
+      "prompt": "Regression guard for Recheck current shell policy and governed responsibility after asynchronous setup before command effects: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-shell-effect-authority-confirmed-fix",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "tests/tools/shell-tools.test.ts"
+      }
+    },
+    {
+      "id": "bots-transient-draft-review-confirmed-fix",
+      "prompt": "Regression guard for Inspect exact recorded draft bytes on demand under task approval and read scope without persisting or exporting preview contents: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-transient-draft-review",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/database/__tests__/approval-drafts.test.ts"
+      }
+    },
+    {
+      "id": "bots-trusted-oauth-refresh-authority-confirmed-fix",
+      "prompt": "Regression guard for Preserve trusted OAuth rotation while refusing manual credential changes and stale Box refresh writes: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-trusted-oauth-refresh-authority",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/mcp/client/transports/__tests__/StreamableHttpTransport.test.ts"
+      }
+    },
+    {
+      "id": "bots-x-reviewed-media-bytes-confirmed-fix",
+      "prompt": "Regression guard for Bind X media commands to reviewed snapshots and recheck authority immediately before spawn: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "bots-x-reviewed-media-bytes",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/x-tools-media-upload.test.ts"
       }
     },
     {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentRoleData } from "../../electron/preload";
+import { botIconText } from "../../shared/bot-mascots";
 import type {
   AgentTeam,
   AgentTeamItem,
@@ -1049,7 +1050,7 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                       <div key={m.id} className="mc-row">
                         <div className="mc-row-main">
                           <div className="mc-row-title">
-                            {role?.icon} {role?.displayName || m.agentRoleId}
+                            {botIconText(role?.icon)} {role?.displayName || m.agentRoleId}
                           </div>
                           <div className="mc-row-sub">
                             {m.isRequired ? (
@@ -1285,7 +1286,9 @@ export function AgentTeamsPanel({ workspaceId, agents, tasks, onOpenTask }: Agen
                                 </span>
                                 <span className="mc-muted">
                                   Owner:{" "}
-                                  {owner ? `${owner.icon} ${owner.displayName}` : "Unassigned"}
+                                  {owner
+                                    ? `${botIconText(owner.icon)} ${owner.displayName}`
+                                    : "Unassigned"}
                                 </span>
                                 {linkedTask && (
                                   <button

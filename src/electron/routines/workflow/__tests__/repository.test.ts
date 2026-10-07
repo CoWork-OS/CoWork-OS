@@ -36,6 +36,47 @@ describeWithSqlite("RoutineWorkflowRepository", () => {
     expect(repository.getActiveVersion("routine")?.id).toBe(second.id);
   });
 
+  it("adds the action review digest to an existing workflow-step table", () => {
+    db.exec(`
+      CREATE TABLE routine_run_steps (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        routine_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        input_json TEXT,
+        output_json TEXT,
+        error TEXT,
+        approval_id TEXT,
+        started_at INTEGER,
+        finished_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(run_id, node_id)
+      );
+    `);
+
+    const repository = new Repository(db, () => 100);
+    const run = repository.createRun({
+      routineId: "routine",
+      workflowVersionId: "version",
+      triggerNodeId: "starter",
+      context: {},
+    });
+    repository.initializeSteps(run.id, "routine", definition("old").nodes);
+    const step = repository.findStep(run.id, "starter")!;
+    repository.updateStep(step.id, { reviewDigest: "a".repeat(64) });
+
+    expect(repository.getStep(step.id)?.reviewDigest).toBe("a".repeat(64));
+    expect(
+      (db.prepare("PRAGMA table_info(routine_run_steps)").all() as Array<{ name: string }>).some(
+        (column) => column.name === "review_digest",
+      ),
+    ).toBe(true);
+  });
+
   it("deduplicates inbox events and workflow runs", () => {
     const repository = new Repository(db, () => 100);
     const eventOne = repository.enqueueEvent({

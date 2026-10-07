@@ -17,7 +17,9 @@ import {
   type BotConversationProjection,
   type BotConversationState,
 } from "../../shared/bot-lifecycle";
-import { BotGlyph } from "./BotGlyph";
+import { BotMascot } from "./bot-mascot/BotMascot";
+import { mascotExpressionForConversation } from "./bot-mascot/mascot-expressions";
+import { resolveBotMascot } from "../../shared/bot-mascots";
 import {
   formatHandoffReplyState,
   normalizeCollaboratorLabel,
@@ -28,6 +30,8 @@ import "./BotCollaborationHeader.css";
 export interface BotCollaborationHeaderProps {
   task: Pick<Task, "status" | "error" | "resultSummary" | "terminalStatus">;
   botName: string;
+  /** The bot's icon value; a mascot icon shows the character instead of the generic mark. */
+  botIcon?: string;
   events?: TaskEvent[];
   childEvents?: TaskEvent[];
   childTasks?: Array<
@@ -68,6 +72,7 @@ function withoutCurrentBotCollaborator(
 export function BotCollaborationHeader({
   task,
   botName,
+  botIcon,
   events = [],
   childEvents = [],
   childTasks = [],
@@ -75,6 +80,7 @@ export function BotCollaborationHeader({
   onOpenBotConversation,
   conversationProjection = null,
 }: BotCollaborationHeaderProps) {
+  const mascot = resolveBotMascot(botIcon);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const derivedProjection = useMemo(
     () =>
@@ -110,8 +116,15 @@ export function BotCollaborationHeader({
       data-bot-state={projection.state}
     >
       <div className="bot-collaboration-header-row">
-        <span className="bot-collaboration-avatar" aria-hidden="true">
-          <BotGlyph size={16} />
+        <span
+          className="bot-collaboration-avatar bot-collaboration-avatar-mascot"
+          aria-hidden="true"
+        >
+          <BotMascot
+            mascot={mascot}
+            size={28}
+            expression={mascotExpressionForConversation(projection.state)}
+          />
         </span>
         <div className="bot-collaboration-copy">
           <div className="bot-collaboration-status-line">
@@ -258,10 +271,6 @@ export function BotCollaborationHeader({
               </div>
             </div>
           )}
-          <div className="bot-collaboration-disclosure-note">
-            Execution details stay hidden from the conversation. The task activity timeline remains
-            available when you need the full trace.
-          </div>
         </div>
       )}
     </section>

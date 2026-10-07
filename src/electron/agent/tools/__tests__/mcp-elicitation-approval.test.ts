@@ -15,6 +15,11 @@ describe("MCP elicitation task approval", () => {
       Object.assign(registry, {
         taskId: "calculator-test",
         daemon: { requestApproval },
+        workspace: {
+          id: "fixture-workspace",
+          path: "/tmp/fixture-workspace",
+          permissions: { read: true, write: false, delete: false, network: false, shell: false },
+        },
         evaluateMcpEndpointNetworkPolicy: () => null,
         getMcpServerName: () => "codex-cu",
         formatMCPResult: async (result: Any) => result,
@@ -28,6 +33,7 @@ describe("MCP elicitation task approval", () => {
       });
       vi.spyOn(MCPClientManager, "getInstance").mockReturnValue({
         hasTool: () => true,
+        getServerIdForTool: () => "fixture-server",
         getAllTools: () => [{ name: "js" }],
         callTool,
       } as Any);
@@ -69,6 +75,11 @@ describe("Codex app consent scopes", () => {
     Object.assign(registry, {
       taskId: "task-1",
       daemon,
+      workspace: {
+        id: "fixture-workspace",
+        path: "/tmp/fixture-workspace",
+        permissions: { read: true, write: false, delete: false, network: false, shell: false },
+      },
       evaluateMcpEndpointNetworkPolicy: () => null,
       getMcpServerName: () => "codex-cu",
       formatMCPResult: async (result: Any) => result,

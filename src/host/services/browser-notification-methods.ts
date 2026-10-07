@@ -41,6 +41,7 @@ export function createBrowserNotificationDefinitions(
 ): BrowserDesktopDefinitions {
   const listAuthorized = async (context: WebRequestContext): Promise<AppNotification[]> => {
     assertSession(context);
+    await sources.service.refresh();
     const rows = sources.service.list();
     const visible: AppNotification[] = [];
     for (const notification of rows) {
@@ -71,6 +72,7 @@ export function createBrowserNotificationDefinitions(
       validate: ([id]) => [parseId(id)],
       handler: async ([id], context) => {
         assertSession(context);
+        await sources.service.refresh();
         const notification = sources.service.list().find((item) => item.id === id);
         if (!notification || !(await canAccessNotification(sources, notification))) {
           throw notificationUnavailable();
@@ -101,6 +103,7 @@ export function createBrowserNotificationDefinitions(
       validate: ([id]) => [parseId(id)],
       handler: async ([id], context) => {
         assertSession(context);
+        await sources.service.refresh();
         const notification = sources.service.list().find((item) => item.id === id);
         if (!notification || !(await canAccessNotification(sources, notification))) {
           throw notificationUnavailable();

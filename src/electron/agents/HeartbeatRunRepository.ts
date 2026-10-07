@@ -1,3 +1,4 @@
+import { assertBotFutureAdmission } from "../automation/BotWorkControlStore";
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import {
@@ -76,6 +77,21 @@ export class HeartbeatRunStore {
   constructor(private db?: Database.Database) {}
 
   create(input: CreateHeartbeatRunInput): HeartbeatRun {
+    if (this.db && input.runType === "pulse" && input.workspaceId && input.agentRoleId) {
+      const db = this.db;
+      return db
+        .transaction(() => {
+          assertBotFutureAdmission(db, {
+            workspaceId: input.workspaceId!,
+            assignedAgentRoleId: input.agentRoleId,
+          });
+          return this.createRecord(input);
+        })
+        .immediate();
+    }
+    return this.createRecord(input);
+  }
+  private createRecord(input: CreateHeartbeatRunInput): HeartbeatRun {
     const now = Date.now();
     const run: HeartbeatRun = {
       id: randomUUID(),
@@ -458,7 +474,9 @@ export class HeartbeatRunStore {
         invalidateTaskRowReads(db);
       }
       const runsDeleted = db
-        .prepare("DELETE FROM heartbeat_runs WHERE id IN (SELECT id FROM temp.heartbeat_runs_prune)")
+        .prepare(
+          "DELETE FROM heartbeat_runs WHERE id IN (SELECT id FROM temp.heartbeat_runs_prune)",
+        )
         .run().changes;
       db.exec("DROP TABLE IF EXISTS temp.heartbeat_runs_prune");
       return { runsDeleted, eventsDeleted };

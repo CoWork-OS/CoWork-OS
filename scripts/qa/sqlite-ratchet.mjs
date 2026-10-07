@@ -40,12 +40,19 @@ export function trackedCounts(inventory) {
 }
 
 /**
- * Files whose SQL runs in transaction units (the audit's "shared SQL" rules, DB7): their
- * statements execute in the database worker, so their counts may grow without an update.
+ * Shared-SQL files may grow because their statements execute in database transaction units.
+ * Other rules can exempt only a specific inventory key (for example a connection handle
+ * passed to an async facade) without exempting new synchronous SQL in the same module.
  */
 export function unitStoreMatcher(rules = JSON.parse(readFileSync(RULES_PATH, "utf8")).rules) {
   const compiled = rules.map((rule) => ({ ...rule, regex: new RegExp(rule.pattern) }));
-  return (path) => compiled.find((rule) => rule.regex.test(path))?.domain === "shared SQL";
+  return (path, key) => {
+    const rule = compiled.find((candidate) => candidate.regex.test(path));
+    return (
+      rule?.domain === "shared SQL" ||
+      (typeof key === "string" && rule?.ratchetExemptKeys?.includes(key) === true)
+    );
+  };
 }
 
 export function compareToBaseline(current, baseline, isUnitStore = () => false) {
@@ -56,7 +63,7 @@ export function compareToBaseline(current, baseline, isUnitStore = () => false) 
     for (const key of TRACKED_KEYS) {
       const now = current[path]?.[key] ?? 0;
       const before = baseline[path]?.[key] ?? 0;
-      if (now > before && !isUnitStore(path)) increased.push({ path, key, before, now });
+      if (now > before && !isUnitStore(path, key)) increased.push({ path, key, before, now });
       else if (now < before) decreased.push({ path, key, before, now });
     }
   }

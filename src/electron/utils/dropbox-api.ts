@@ -29,6 +29,7 @@ export interface DropboxRequestOptions {
   path: string;
   body?: Record<string, Any>;
   timeoutMs?: number;
+  beforeSend?: () => void | Promise<void>;
 }
 
 export interface DropboxRequestResult {
@@ -54,6 +55,7 @@ export async function dropboxRequest(
   };
 
   const timeoutMs = options.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await options.beforeSend?.();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -89,7 +91,12 @@ export async function dropboxRequest(
 
 export async function dropboxContentUpload(
   settings: DropboxSettingsData,
-  opts: { path: string; data: Uint8Array; timeoutMs?: number },
+  opts: {
+    path: string;
+    data: Uint8Array;
+    timeoutMs?: number;
+    beforeSend?: () => void | Promise<void>;
+  },
 ): Promise<DropboxRequestResult> {
   if (!settings.accessToken) {
     throw new Error(
@@ -111,6 +118,7 @@ export async function dropboxContentUpload(
   };
 
   const timeoutMs = opts.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await opts.beforeSend?.();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

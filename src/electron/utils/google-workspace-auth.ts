@@ -11,12 +11,27 @@ import {
 } from "../../shared/google-workspace";
 import { GoogleWorkspaceSettingsManager } from "../settings/google-workspace-manager";
 import { getBundledGoogleWorkspaceOAuthClientId } from "./google-workspace-oauth-client";
+import type { MCPAuthConfig } from "../mcp/types";
+import { recordOAuthRefresh } from "../security/oauth-refresh-proof";
 
-const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
+export const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 const RECONNECT_HINT = "Reconnect Google Workspace in Settings > Integrations > Google Workspace.";
 const inFlightRefreshes = new Map<string, Promise<string>>();
 const recentTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
+
+function refreshProofAuth(settings: GoogleWorkspaceSettingsData): MCPAuthConfig {
+  const effective = getGoogleWorkspaceSettingsForAccount(settings);
+  return {
+    type: "bearer",
+    token: effective.accessToken,
+    refreshToken: effective.refreshToken,
+    clientId: effective.clientId || getBundledGoogleWorkspaceOAuthClientId(),
+    clientSecret: effective.clientSecret,
+    tokenUrl: effective.refreshToken ? GOOGLE_OAUTH_TOKEN_URL : undefined,
+    expiresAt: effective.tokenExpiresAt,
+  };
+}
 
 function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
@@ -171,6 +186,7 @@ async function refreshGoogleWorkspaceAccessTokenUncached(
     });
   }
 
+  recordOAuthRefresh(refreshProofAuth(settings), refreshProofAuth(nextSettings));
   GoogleWorkspaceSettingsManager.saveSettings(nextSettings);
   GoogleWorkspaceSettingsManager.clearCache();
 

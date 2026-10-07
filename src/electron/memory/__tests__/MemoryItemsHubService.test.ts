@@ -32,6 +32,8 @@ describeWithSqlite("MemoryItemsHubService", () => {
     });
     hub = new MemoryItemsHubService({
       getWriter: () => writer,
+      getBot: async (id) =>
+        id === "private-fixture" ? { id, displayName: "Renamed private fixture" } : undefined,
       getTask: async (taskId) =>
         taskId === "task-1"
           ? { id: "task-1", title: "Plan the launch", workspaceId: "ws-1" }
@@ -84,6 +86,35 @@ describeWithSqlite("MemoryItemsHubService", () => {
     return { globalId: ids[0], localId: ids[1], foreignId: ids[2], contactId: ids[3] };
   }
 
+  it("exposes only recorded bot attribution, leaving historical task knowledge unattributed", async () => {
+    const recorded = await writer.ingest({
+      kind: "project_fact",
+      scope: "workspace",
+      workspaceId: "ws-1",
+      content: "The release report uses the recorded bot source",
+      source: "user_stated",
+      sourceRef: { store: "fixture", id: "recorded", agentRoleId: "private-fixture" },
+      mode: "migration",
+      taskId: "task-1",
+    });
+    const historical = await writer.ingest({
+      kind: "project_fact",
+      scope: "workspace",
+      workspaceId: "ws-1",
+      content: "Historical release notes were captured before bot provenance",
+      source: "user_stated",
+      sourceRef: { store: "fixture", id: "historical" },
+      taskId: "task-1",
+    });
+    if (recorded.status !== "written" || historical.status !== "written")
+      throw Error("Fixture was not written");
+    const page = await hub.list({ workspaceId: "ws-1" });
+    expect(page.items.find((item) => item.id === recorded.item.id)?.originBotId).toBe(
+      "private-fixture",
+    );
+    expect(page.items.find((item) => item.id === historical.item.id)?.originBotId).toBeNull();
+    expect(JSON.stringify(page.items)).not.toContain("sourceRef");
+  });
   it("lists the workspace's items with global and contact items, never another workspace's", async () => {
     const { foreignId, contactId } = await seed();
     const page = await hub.list({ workspaceId: "ws-1" });

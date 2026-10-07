@@ -1,4 +1,23 @@
 import {
+  parseCliApprovalResponse as getCliApprovalResponseArgv,
+  respondToCliApprovalResponse,
+  type CliApprovalResponse,
+} from "./agent/approval-cli";
+import { BotNotificationService } from "./notifications/BotNotificationService";
+import { BotNotificationRuntime } from "./notifications/BotNotificationRuntime";
+import { BotWorkControlRecovery } from "./automation/BotWorkControlRecovery";
+import { prepareResponsibilitySchedule } from "./automation/responsibility-signals";
+import { BotResponsibilityRepository } from "./automation/BotResponsibilityRepository";
+import { SchedulerOwnership } from "./automation/SchedulerOwnership";
+import {
+  connectorTriggerEvents,
+  connectorTriggerSubscription,
+} from "./automation/connector-trigger-events";
+import { createHeadlessBotAutomation } from "./automation/headless-bot-services";
+import { AutomationRuntime, setAutomationRuntime } from "./automation/AutomationRuntime";
+import { PersistentDispatchBudget } from "./automation/PersistentDispatchBudget";
+import { setBackgroundDispatchBudget } from "./agents/BackgroundDispatchBudget";
+import {
   CoreEvalCaseRepository,
   CoreFailureClusterRepository,
   CoreFailureRecordRepository,
@@ -30,7 +49,7 @@ import path from "path";
 import os from "os";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { fileURLToPath, pathToFileURL } from "url";
 import {
   app,
@@ -82,8 +101,6 @@ import {
   setHeartbeatService,
 } from "./agents/HeartbeatService";
 import { setHeartbeatSignalEmitter } from "./agents/heartbeat-signal-bus";
-
-import { ensureDefaultBotRoles, ensureDefaultBotTeam } from "./agents/bot-team";
 
 import { ActivityRepository } from "./activity/activity-repository-facades";
 
@@ -357,6 +374,8 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
 let databaseWorkerDrained = true;
 let agentDaemon: AgentDaemon;
 let channelGateway: ChannelGateway;
+const automationRuntime = new AutomationRuntime(isHeadlessMode() ? "electron_headless" : "desktop");
+let headlessBotAutomation: ReturnType<typeof createHeadlessBotAutomation> | null = null;
 let cronService: CronService | null = null;
 let pulseService: PulseService | null = null;
 let hostPerfMonitor: HostPerfMonitorHandle | null = null;
@@ -422,6 +441,8 @@ const managedBriefingCleanupTimer = setInterval(
 );
 
 const HEADLESS = isHeadlessMode();
+// Worker threads do not inherit argv; the env flag keeps their headless policy aligned.
+if (HEADLESS) process.env.COWORK_HEADLESS = "1";
 const FORCE_ENABLE_CONTROL_PLANE = shouldEnableControlPlaneFromArgsOrEnv();
 const PRINT_CONTROL_PLANE_TOKEN = shouldPrintControlPlaneTokenFromArgsOrEnv();
 const IMPORT_ENV_SETTINGS = shouldImportEnvSettingsFromArgsOrEnv();
@@ -546,9 +567,6 @@ async function ensureCoreAutomationProfiles(): Promise<void> {
   const agentRoleRepo = new AgentRoleRepository(db);
   const automationProfileRepo = new AutomationProfileRepository(db);
 
-  // Seed the Grok-style custom bot roster before creating automation profiles
-  // so the new roles participate in the same lifecycle as built-in agents.
-  await ensureDefaultBotRoles(db);
   const addedAgents = await agentRoleRepo.syncNewDefaults();
   if (addedAgents.length > 0) {
     logger.info(`Added ${addedAgents.length} new default agent(s)`);
@@ -603,25 +621,6 @@ async function ensureCoreAutomationProfiles(): Promise<void> {
         ),
     ),
   });
-}
-
-async function ensureCoreBotTeams(): Promise<void> {
-  const db = dbManager.getDatabase();
-  const workspaceRepo = new WorkspaceStore(db);
-  // Roles are global; the team is workspace-scoped. Seed the most recently
-  // used workspace only and let bot conversation creation seed later
-  // workspaces lazily. This avoids filling old/temporary QA workspaces with
-  // duplicate team records.
-  const workspace = workspaceRepo.findAll()[0];
-  if (!workspace) return;
-  try {
-    await ensureDefaultBotTeam(db, workspace.id);
-  } catch (error) {
-    logger.warn("Unable to seed the CoWork bot team for workspace", {
-      workspaceId: workspace.id,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 }
 
 app.on("web-contents-created", (_event, contents) => {
@@ -1302,7 +1301,6 @@ if (!isMacSafeStorageMigrationWorker) {
 }
 
 const CLI_DIRECT_RUN_FLAG = "--cowork-cli-direct-run";
-const CLI_APPROVAL_RESPONSE_FLAG = "--cowork-cli-approval-response";
 const DEV_SINGLE_INSTANCE_EXIT_CODE = 73;
 
 function isCliDirectRunMode(): boolean {
@@ -1314,34 +1312,12 @@ function getCliDirectRunArgv(): string[] {
   return index >= 0 ? process.argv.slice(index + 1) : [];
 }
 
-function getArgValueFrom(argv: string[], flag: string): string | undefined {
-  const index = argv.indexOf(flag);
-  if (index < 0) return undefined;
-  const value = argv[index + 1];
-  return value && !value.startsWith("--") ? value : undefined;
-}
-
-function getCliApprovalResponseArgv(
-  argv: string[],
-): { approvalId: string; approved: boolean } | null {
-  if (!argv.includes(CLI_APPROVAL_RESPONSE_FLAG)) return null;
-  const approvalId = getArgValueFrom(argv, "--approval-id") || "";
-  if (!approvalId) return null;
-  return {
-    approvalId,
-    approved: argv.includes("--approved"),
-  };
-}
-
-async function handleCliApprovalResponse(request: {
-  approvalId: string;
-  approved: boolean;
-}): Promise<void> {
+async function handleCliApprovalResponse(request: CliApprovalResponse): Promise<void> {
   if (!agentDaemon) {
     logger.warn("CLI approval response received before agent daemon was ready");
     return;
   }
-  const result = await agentDaemon.respondToApproval(request.approvalId, request.approved);
+  const result = await respondToCliApprovalResponse(agentDaemon, request);
   logger.info(
     `CLI approval response ${request.approved ? "approved" : "rejected"} ${request.approvalId}: ${result}`,
   );
@@ -1559,6 +1535,7 @@ if (isMacSafeStorageMigrationWorker) {
         isFullScreen: shouldStartFullScreen,
         ...initialWindowBounds
       } = getInitialMainWindowBounds();
+      const hideMainWindowForAcceptance = process.env.COWORK_TEST_HIDE_MAIN_WINDOW === "1";
       let rendererRecoveryAttempts = 0;
 
       // Determine initial background color when the window should be opaque.
@@ -1577,6 +1554,7 @@ if (isMacSafeStorageMigrationWorker) {
       }
 
       mainWindow = new BrowserWindow({
+        show: !hideMainWindowForAcceptance,
         ...initialWindowBounds,
         minWidth: MAIN_WINDOW_MIN_WIDTH,
         minHeight: MAIN_WINDOW_MIN_HEIGHT,
@@ -1605,6 +1583,8 @@ if (isMacSafeStorageMigrationWorker) {
         },
       });
 
+      if (hideMainWindowForAcceptance) app.dock?.hide();
+
       if (shouldStartMaximized) {
         mainWindow.maximize();
       }
@@ -1619,7 +1599,7 @@ if (isMacSafeStorageMigrationWorker) {
         }
         if (process.env.NODE_ENV === "development") {
           void mainWindow.loadURL(getDevServerUrl());
-          mainWindow.webContents.openDevTools();
+          if (!hideMainWindowForAcceptance) mainWindow.webContents.openDevTools();
           return;
         }
 
@@ -1821,6 +1801,13 @@ if (isMacSafeStorageMigrationWorker) {
       try {
         // Schema initialization runs in a bootstrap worker (DB6).
         dbManager = await DatabaseManager.open();
+        setBackgroundDispatchBudget(
+          new PersistentDispatchBudget(dbManager.getDatabase(), {
+            getSchedulerFence: () => automationRuntime.captureFence(),
+          }),
+        );
+        automationRuntime.attachOwnership(new SchedulerOwnership(dbManager.getDatabase()));
+        setAutomationRuntime(automationRuntime);
       } catch (error) {
         // DB6: a profile this build must not open (a newer schema, or another process
         // stuck preparing it) fails clearly instead of leaving the app without a window.
@@ -1971,7 +1958,6 @@ if (isMacSafeStorageMigrationWorker) {
       }
       await normalizeTemplatedRoleCoreBoundary();
       await ensureCoreAutomationProfiles();
-      await ensureCoreBotTeams();
       // Shared with the memory repo startup below (workspace paths and names; recent tasks
       // for dreaming).
       let hostWorkspaceRepository: WorkspaceRepository | null = null;
@@ -2217,6 +2203,19 @@ if (isMacSafeStorageMigrationWorker) {
       const numbatService = NumbatService.initialize(dbManager.getDatabase());
       recurringApprovalService = new RecurringApprovalService(dbManager.getDatabase());
       agentDaemon = new AgentDaemon(dbManager, { recurringApprovalService });
+      automationRuntime.registerRecovery(
+        new BotWorkControlRecovery(
+          dbManager.getDatabase(),
+          agentDaemon,
+          automationRuntime,
+          new BotNotificationRuntime(
+            dbManager.getDatabase(),
+            automationRuntime,
+            () => getNotificationService(),
+            !HEADLESS,
+          ),
+        ),
+      );
       numbatService.attachTaskEventEmitter((taskId, type, payload) => {
         agentDaemon?.logEvent(taskId, type, payload);
       });
@@ -2496,6 +2495,16 @@ if (isMacSafeStorageMigrationWorker) {
                 const job = cronService ? await cronService.get(evt.jobId) : null;
                 const jobName = job?.name || "Scheduled Task";
                 const task = evt.taskId ? taskRepo.findById(evt.taskId) : null;
+                if (
+                  task?.assignedAgentRoleId &&
+                  (
+                    await new BotNotificationService(dbManager.getDatabase()).get({
+                      workspaceId: task.workspaceId,
+                      agentRoleId: task.assignedAgentRoleId,
+                    })
+                  ).enabled
+                )
+                  return;
                 const taskResult = resolveTaskResultText({
                   summary: task?.resultSummary,
                   semanticSummary: task?.semanticSummary,
@@ -2537,6 +2546,18 @@ if (isMacSafeStorageMigrationWorker) {
         };
 
         cronService = new CronService({
+          beforeExecuteJob: async (job) => {
+            await automationRuntime.assertOwnership();
+            await new BotResponsibilityRepository(db).assertCronJobMayExecute(job.id);
+            return prepareResponsibilitySchedule(db, job, {
+              settings: PermissionSettingsManager.loadSettings(),
+              adminPolicies: loadPolicies(),
+            });
+          },
+          beforeDeliverJob: async (jobId) => {
+            await automationRuntime.assertOwnership();
+            await new BotResponsibilityRepository(db).assertCronJobMayDeliver(jobId);
+          },
           cronEnabled: true,
           runnerKind: "desktop",
           storePath: getCronStorePath(),
@@ -2597,12 +2618,15 @@ if (isMacSafeStorageMigrationWorker) {
             };
           },
           executeWorkflow: async ({ routineId, jobId, runAtMs, agentConfig }) => {
+            await automationRuntime.assertOwnership();
             if (!routineService) {
               throw new Error("Routine service has not finished starting.");
             }
             return routineService.runScheduledWorkflow(routineId, jobId, runAtMs, agentConfig);
           },
           createTask: async (params) => {
+            await automationRuntime.assertOwnership();
+            const schedulerFence = automationRuntime.captureFence();
             const isManagedBriefing =
               params.title.startsWith("Daily Briefing:") ||
               params.prompt.includes(DAILY_BRIEFING_MARKER);
@@ -2636,11 +2660,15 @@ if (isMacSafeStorageMigrationWorker) {
                 ...(params.assignedAgentRoleId
                   ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
                   : {}),
-                agentConfig: mergeCouncilCronAgentConfig(
-                  params.agentConfig,
-                  preparedCouncilTask.agentConfig,
-                  params.jobId,
-                ),
+                agentConfig: {
+                  ...mergeCouncilCronAgentConfig(
+                    params.agentConfig,
+                    preparedCouncilTask.agentConfig,
+                    params.jobId,
+                  ),
+                  scheduledRunAtMs: params.agentConfig?.scheduledRunAtMs,
+                  backgroundSchedulerFence: schedulerFence,
+                },
                 source: "cron",
               });
               await councilService?.bindRunTask(preparedCouncilTask.runId, task.id);
@@ -2660,12 +2688,13 @@ if (isMacSafeStorageMigrationWorker) {
               ...(params.assignedAgentRoleId
                 ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
                 : {}),
-              agentConfig: mergedAgentConfig,
+              agentConfig: { ...mergedAgentConfig, backgroundSchedulerFence: schedulerFence },
               source: "cron",
             });
             return { id: task.id };
           },
           sendTaskMessage: async (params) => {
+            await automationRuntime.assertOwnership();
             const task = taskRepo.findById(params.taskId);
             if (!task) {
               throw new Error(`Target task not found: ${params.taskId}`);
@@ -2778,6 +2807,8 @@ if (isMacSafeStorageMigrationWorker) {
               events,
             });
           },
+          findTaskForRun: async ({ workspaceId, jobId, runAtMs }) =>
+            taskRepo.findByScheduledRun(workspaceId, jobId, runAtMs),
           findActiveTaskForJob: async (params) => {
             if (params.runMode !== "new_task") return null;
             const title = typeof params.taskTitle === "string" ? params.taskTitle.trim() : "";
@@ -2814,6 +2845,7 @@ if (isMacSafeStorageMigrationWorker) {
           },
           // Channel delivery handler - sends job results to messaging platforms
           deliverToChannel: async (params) => {
+            await automationRuntime.assertOwnership();
             if (!channelGateway) {
               throw new Error("Cannot deliver to channel - gateway not initialized");
             }
@@ -2897,10 +2929,15 @@ if (isMacSafeStorageMigrationWorker) {
           },
         });
         setCronService(cronService);
+        automationRuntime.register(
+          "cron",
+          cronService,
+          startupQuietMode ? "Quiet startup" : undefined,
+        );
         if (startupQuietMode) {
           logger.info("Cron Service initialized (quiet mode; not started)");
         } else {
-          await cronService.start();
+          await automationRuntime.start("cron");
         }
         if (councilService) {
           for (const councilId of await councilService.listAllIds()) {
@@ -3190,13 +3227,18 @@ if (isMacSafeStorageMigrationWorker) {
 
         heartbeatService = new HeartbeatService(heartbeatDeps);
         setHeartbeatService(heartbeatService);
+        automationRuntime.register(
+          "heartbeat",
+          heartbeatService,
+          startupQuietMode ? "Quiet startup" : undefined,
+        );
         setHeartbeatSignalEmitter(
           async (input) => (await heartbeatService?.submitSignalForAll(input)) ?? [],
         );
         if (startupQuietMode) {
           logger.info("HeartbeatService initialized (quiet mode; not started)");
         } else {
-          await heartbeatService.start();
+          await automationRuntime.start("heartbeat");
         }
 
         setHeartbeatWakeSubmitter(async ({ text, mode }) => {
@@ -3215,7 +3257,7 @@ if (isMacSafeStorageMigrationWorker) {
               .findAll()
               .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
               .map((workspace) => workspace.id),
-          createTask: async (workspaceId, title, prompt) =>
+          createTask: async (workspaceId, title, prompt, dispatchOptions) =>
             agentDaemon.createTask({
               title,
               prompt,
@@ -3223,6 +3265,7 @@ if (isMacSafeStorageMigrationWorker) {
               source: "hook",
               agentConfig: {
                 allowUserInput: false,
+                backgroundDispatchTicket: dispatchOptions?.backgroundDispatchTicket,
               },
             }),
           hasActiveManualTask: (workspaceId) =>
@@ -3409,7 +3452,8 @@ if (isMacSafeStorageMigrationWorker) {
           recordAutomationOutcome: async (outcome) => automationOutcomeService?.record(outcome),
         });
         setStrategicPlannerService(strategicPlannerService);
-        strategicPlannerService.start();
+        automationRuntime.register("strategic_planner", strategicPlannerService);
+        await automationRuntime.start("strategic_planner");
         logger.info("Strategic Planner initialized");
       } catch (error) {
         logger.error("Failed to initialize Strategic Planner:", error);
@@ -3497,6 +3541,24 @@ if (isMacSafeStorageMigrationWorker) {
         } catch (error) {
           logger.error("Failed to initialize Channel Gateway (headless):", error);
           // Don't fail app startup if gateway init fails
+        }
+
+        try {
+          headlessBotAutomation = createHeadlessBotAutomation({
+            db: dbManager.getDatabase(),
+            runtime: automationRuntime,
+            agentDaemon,
+            channelGateway,
+            getCronService: () => cronService,
+            heartbeat: heartbeatService,
+            mcpClientManager: MCPClientManager.getInstance(),
+            log: (...args) => logger.warn("[BotAutomation]", ...args),
+          });
+          eventTriggerService = headlessBotAutomation.triggers;
+          routineService = headlessBotAutomation.routines;
+          if (!startupQuietMode) await headlessBotAutomation.start();
+        } catch (error) {
+          logger.error("Headless bot automation failed to initialize:", error);
         }
 
         // Start Control Plane if enabled (or force-enabled via flag/env)
@@ -3633,36 +3695,13 @@ if (isMacSafeStorageMigrationWorker) {
             workspaces[0]
           );
         };
-        const extractConnectorTriggerSubscription = (trigger: {
-          source: string;
-          conditions: Array<{ field: string; value: string }>;
-        }): {
-          serverId?: string;
-          connectorId?: string;
-          resourceUri?: string;
-        } | null => {
-          if (trigger.source !== "connector_event") {
-            return null;
-          }
-          const getConditionValue = (...fields: string[]): string | undefined => {
-            for (const field of fields) {
-              const match = trigger.conditions.find((condition) => condition.field === field);
-              if (match?.value) {
-                return match.value;
-              }
-            }
-            return undefined;
-          };
-          return {
-            serverId: getConditionValue("serverId"),
-            connectorId: getConditionValue("connectorId", "source"),
-            resourceUri: getConditionValue("resourceUri"),
-          };
-        };
-
         // Event Triggers
         eventTriggerService = new EventTriggerService(
           {
+            getResponsibilityAccess: () => ({
+              settings: PermissionSettingsManager.loadSettings(),
+              adminPolicies: loadPolicies(),
+            }),
             createTask: async (params: {
               title: string;
               prompt: string;
@@ -3673,12 +3712,16 @@ if (isMacSafeStorageMigrationWorker) {
                 title: params.title,
                 prompt: params.prompt,
                 workspaceId: params.workspaceId,
-                agentConfig: params.agentConfig,
+                agentConfig: {
+                  ...params.agentConfig,
+                  backgroundSchedulerFence: automationRuntime.captureFence(),
+                },
                 source: "hook",
               });
               return { id: task.id };
             },
             sendTaskMessage: async (params) => {
+              await automationRuntime.assertOwnership();
               const taskRepoForTrigger = new TaskStore(db);
               const task = taskRepoForTrigger.findById(params.taskId);
               if (!task) {
@@ -3692,27 +3735,32 @@ if (isMacSafeStorageMigrationWorker) {
               channelType: string;
               channelId: string;
               text: string;
+              idempotencyKey?: string;
             }) => {
-              await channelGateway.sendMessage?.(
+              await automationRuntime.assertOwnership();
+              const messageId = await channelGateway.sendMessage?.(
                 params.channelType as Any,
                 params.channelId,
                 params.text,
+                { idempotencyKey: params.idempotencyKey },
               );
+              if (!messageId) throw new Error("Channel gateway did not return a message receipt");
+              return { messageId };
             },
-            wakeAgent: (agentRoleId: string) => {
-              if (!heartbeatService) return;
-              void heartbeatService.triggerHeartbeat(agentRoleId).catch((error) => {
-                logger.debug("[EventTriggers] wakeAgent failed:", error);
-              });
+            wakeAgent: async (agentRoleId: string) => {
+              if (!heartbeatService) throw new Error("Heartbeat service is unavailable");
+              const result = await heartbeatService.triggerHeartbeat(agentRoleId);
+              if (result.status === "error")
+                throw new Error(result.error || "Agent wake was not accepted");
             },
             getDefaultWorkspaceId: () => "",
             getActiveTaskCount: () => agentDaemon.getQueueStatus().runningTaskIds.length,
             log: (...args: unknown[]) => console.log("[EventTriggers]", ...args),
-            onTriggerFired: (payload) => {
-              void MailboxAutomationRegistry.recordTriggerFire(payload).catch((error) => {
+            onTriggerFired: async (payload) => {
+              await MailboxAutomationRegistry.recordTriggerFire(payload).catch((error) => {
                 logger.warn("[EventTriggers] Could not record mailbox trigger fire:", error);
               });
-              void routineService?.recordEventTriggerFire(payload).catch((error) => {
+              await routineService?.recordEventTriggerFire(payload).catch((error) => {
                 logger.warn("[EventTriggers] Could not record routine trigger fire:", error);
               });
             },
@@ -3724,7 +3772,7 @@ if (isMacSafeStorageMigrationWorker) {
         const syncMcpTriggerSubscriptions = async (): Promise<void> => {
           const subscriptions = currentTriggerService
             .listTriggers()
-            .map(extractConnectorTriggerSubscription)
+            .map(connectorTriggerSubscription)
             .filter((value): value is NonNullable<typeof value> => Boolean(value));
           await mcpClientManager.syncTriggerResourceSubscriptions(subscriptions);
         };
@@ -3743,54 +3791,18 @@ if (isMacSafeStorageMigrationWorker) {
           },
         });
         mailboxForwardingService.start();
-        await currentTriggerService.start();
+        automationRuntime.register("event_triggers", currentTriggerService);
+        await automationRuntime.start("event_triggers");
         setHookTriggerEmitter((event) => {
-          void currentTriggerService.evaluateEvent(event);
+          void currentTriggerService
+            .evaluateEvent(event)
+            .catch((error) => logger.warn("[EventTriggers] Hook event was not persisted:", error));
         });
         mcpClientManager.on("connector_event", (event) => {
-          void currentTriggerService.evaluateEvent({
-            source: "connector_event",
-            timestamp: event.timestamp,
-            fields: {
-              type: event.type,
-              changeType: event.type,
-              serverId: event.serverId,
-              connectorId: event.connectorId || "",
-              serverName: event.serverName,
-              source: event.connectorId || event.serverName,
-              resourceUri: event.resourceUri || "",
-              data: JSON.stringify(event.payload || {}),
-              payload: JSON.stringify(event.payload || {}),
-            },
-          });
-          if ((event.connectorId || "").trim().toLowerCase() === "github") {
-            const githubPayload =
-              event.payload && typeof event.payload === "object"
-                ? (event.payload as Record<string, unknown>)
-                : {};
-            void currentTriggerService.evaluateEvent({
-              source: "github_event",
-              timestamp: event.timestamp,
-              fields: {
-                connectorId: "github",
-                eventName:
-                  typeof githubPayload.eventName === "string"
-                    ? githubPayload.eventName
-                    : typeof githubPayload.event === "string"
-                      ? githubPayload.event
-                      : "",
-                action: typeof githubPayload.action === "string" ? githubPayload.action : "",
-                repository:
-                  typeof githubPayload.repository === "string"
-                    ? githubPayload.repository
-                    : typeof githubPayload.repo === "string"
-                      ? githubPayload.repo
-                      : "",
-                ref: typeof githubPayload.ref === "string" ? githubPayload.ref : "",
-                resourceUri: event.resourceUri || "",
-                payload: JSON.stringify(event.payload || {}),
-              },
-            });
+          for (const triggerEvent of connectorTriggerEvents(event)) {
+            void currentTriggerService
+              .evaluateEvent(triggerEvent)
+              .catch((error) => logger.warn("Connector trigger event failed:", error));
           }
         });
         void syncMcpTriggerSubscriptions();
@@ -3805,9 +3817,10 @@ if (isMacSafeStorageMigrationWorker) {
               title: params.title,
               prompt: params.prompt,
               workspaceId: params.workspaceId,
-              ...(params.accessProfileId
-                ? { agentConfig: { accessProfileId: params.accessProfileId } }
-                : {}),
+              agentConfig: {
+                backgroundSchedulerFence: automationRuntime.captureFence(),
+                ...(params.accessProfileId ? { accessProfileId: params.accessProfileId } : {}),
+              },
               source: "api",
             });
             return { id: task.id };
@@ -3838,12 +3851,30 @@ if (isMacSafeStorageMigrationWorker) {
               ...(params.assignedAgentRoleId
                 ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
                 : {}),
-              agentConfig: params.agentConfig,
+              agentConfig: {
+                ...params.agentConfig,
+                backgroundSchedulerFence: automationRuntime.captureFence(),
+              },
               source: params.source,
             });
             return { id: task.id };
           },
+          createTaskIdempotent: async (params) => {
+            await automationRuntime.assertOwnership();
+            const admitted = await agentDaemon.createTaskIdempotent({
+              ...params,
+              taskOverrides: params.assignedAgentRoleId
+                ? { assignedAgentRoleId: params.assignedAgentRoleId }
+                : undefined,
+              agentConfig: {
+                ...params.agentConfig,
+                backgroundSchedulerFence: automationRuntime.captureFence(),
+              },
+            });
+            return { id: admitted.task.id };
+          },
           sendTaskMessage: async (params) => {
+            await automationRuntime.assertOwnership();
             const task = routineTaskRepo.findById(params.taskId);
             if (!task) {
               throw new Error(`Target task not found: ${params.taskId}`);
@@ -3905,7 +3936,11 @@ if (isMacSafeStorageMigrationWorker) {
           executeWorkflowAction,
         });
         setupRoutineHandlers(routineService);
-        await routineService.startWorkflowRuntime();
+        automationRuntime.register("routines", {
+          start: () => routineService!.startWorkflowRuntime(),
+          stop: () => routineService!.stopWorkflowRuntime(),
+        });
+        await automationRuntime.start("routines");
         workflowStarterWatcher = new GoogleWorkspaceWorkflowStarterWatcher(db, routineService);
         workflowStarterWatcher.start();
         currentTriggerService.setFireInterceptor((trigger, event) =>
@@ -4417,16 +4452,32 @@ if (isMacSafeStorageMigrationWorker) {
         // Hook triggers into gateway message events
         channelGateway.onEvent((event) => {
           if (event.type === "message:received" && event.data) {
-            void eventTriggerService?.evaluateEvent({
-              source: "channel_message",
-              fields: {
-                channelType: event.channel || "",
-                chatId: (event.data.chatId as string) || "",
-                text: (event.data.text as string) || "",
-                senderName: (event.data.senderName as string) || "",
-              },
-              timestamp: Date.now(),
-            });
+            const channelType = event.channel || "";
+            const chatId = (event.data.chatId as string) || "";
+            const messageId = (event.data.messageId as string) || "";
+            const channelDbId = (event.data.channelId as string) || "";
+            const identityParts = [channelType, channelDbId, chatId, messageId];
+            const eventId = identityParts.every((part) => part.length > 0 && part.length <= 1024)
+              ? `gateway-message-v1:${createHash("sha256")
+                  .update(JSON.stringify(["gateway-message-v1", ...identityParts]))
+                  .digest("hex")}`
+              : undefined;
+            void eventTriggerService
+              ?.evaluateEvent({
+                source: "channel_message",
+                ...(eventId ? { eventId } : {}),
+                fields: {
+                  channelType,
+                  channelInstanceId: channelDbId,
+                  chatId,
+                  text: (event.data.text as string) || "",
+                  senderName: (event.data.senderName as string) || "",
+                },
+                timestamp: event.timestamp.getTime(),
+              })
+              .catch((error) =>
+                logger.warn("[EventTriggers] Gateway event was not persisted:", error),
+              );
           }
         });
 
@@ -4517,7 +4568,13 @@ if (isMacSafeStorageMigrationWorker) {
             await waitForComposerDraftWrites();
           },
         },
-        { name: "workflow runtime", run: () => routineService?.stopWorkflowRuntime() },
+        {
+          name: "workflow runtime",
+          run: async () => {
+            if (headlessBotAutomation) await headlessBotAutomation.stop();
+            else await automationRuntime.stop("routines");
+          },
+        },
         {
           name: "workflow watcher",
           run: () => {
@@ -4528,7 +4585,7 @@ if (isMacSafeStorageMigrationWorker) {
         {
           name: "cron",
           run: async () => {
-            await cronService?.stop();
+            await automationRuntime.stop("cron");
             setCronService(null);
           },
         },
@@ -4563,8 +4620,8 @@ if (isMacSafeStorageMigrationWorker) {
         },
         {
           name: "strategic planner",
-          run: () => {
-            strategicPlannerService?.stop();
+          run: async () => {
+            await automationRuntime.stop("strategic_planner");
             strategicPlannerService = null;
             setStrategicPlannerService(null);
           },
@@ -4595,7 +4652,7 @@ if (isMacSafeStorageMigrationWorker) {
         {
           name: "event triggers",
           run: async () => {
-            await eventTriggerService?.stop();
+            await automationRuntime.stop("event_triggers");
             eventTriggerService = null;
           },
         },
@@ -4610,11 +4667,12 @@ if (isMacSafeStorageMigrationWorker) {
           name: "heartbeats",
           run: async () => {
             setHeartbeatSignalEmitter(null);
-            await heartbeatService?.stop();
+            await automationRuntime.stop("heartbeat");
             heartbeatService = null;
             setHeartbeatService(null);
           },
         },
+        { name: "automation ownership", run: () => automationRuntime.shutdown() },
         // Keep lifecycle listeners, MCP, memory, and storage alive until tasks settle.
         { name: "agent daemon", run: () => agentDaemon?.shutdown() },
         {

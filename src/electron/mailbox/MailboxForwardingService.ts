@@ -49,6 +49,7 @@ type ForwardingMessage = {
 
 type MessageForwardOutcome =
   | { status: "sent" | "already_sent" | "dry_run"; messageId: string }
+  | { status: "outcome_unknown"; messageId: string; error: string }
   | { status: "failed"; messageId: string; error: string };
 
 type ThreadEvaluation = {
@@ -61,6 +62,7 @@ type RunSummary = {
   matchedMessages: number;
   sentMessages: number;
   alreadySentMessages: number;
+  outcomeUnknownMessages: number;
   rejectedThreads: number;
   failedMessages: number;
   dryRun: boolean;
@@ -340,12 +342,22 @@ export class MailboxForwardingService {
       );
       CREATE INDEX IF NOT EXISTS idx_mailbox_forwarding_message_runs_thread
         ON mailbox_forwarding_message_runs(thread_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_mailbox_forwarding_message_runs_status
+        ON mailbox_forwarding_message_runs(status);
 
       CREATE TABLE IF NOT EXISTS mailbox_forwarding_run_state (
         automation_id TEXT PRIMARY KEY,
         last_successful_scan_at INTEGER,
         updated_at INTEGER NOT NULL
       );
+    `);
+    // Older releases used `error` for both pre-send and ambiguous provider failures.
+    // Keep those rows from being retried as if Gmail definitely rejected the send.
+    this.deps.db.exec(`
+      UPDATE mailbox_forwarding_message_runs
+      SET status = 'outcome_unknown',
+          error = COALESCE(error, 'A previous send attempt has no recorded provider outcome.')
+      WHERE status IN ('error', 'sending');
     `);
   }
 
@@ -496,6 +508,7 @@ export class MailboxForwardingService {
     let matchedMessages = 0;
     let sentMessages = 0;
     let alreadySentMessages = 0;
+    let outcomeUnknownMessages = 0;
     let rejectedThreads = 0;
     let failedMessages = 0;
 
@@ -532,10 +545,14 @@ export class MailboxForwardingService {
           alreadySentMessages += 1;
         } else if (outcome.status === "failed") {
           failedMessages += 1;
+        } else if (outcome.status === "outcome_unknown") {
+          outcomeUnknownMessages += 1;
         }
       }
 
-      const hasFailures = targetOutcomes.some((outcome) => outcome.status === "failed");
+      const hasFailures = targetOutcomes.some(
+        (outcome) => outcome.status === "failed" || outcome.status === "outcome_unknown",
+      );
       if (recipe.dryRun) {
         await this.applyThreadLabels(settings, threadId, {
           add: [labelMap.candidate],
@@ -554,25 +571,31 @@ export class MailboxForwardingService {
       }
     }
 
-    if (!recipe.dryRun && failedMessages === 0) {
+    if (!recipe.dryRun && failedMessages === 0 && outcomeUnknownMessages === 0) {
       await this.setLastSuccessfulScanAt(automationId, Date.now());
     }
 
     const summary = recipe.dryRun
       ? `Dry run matched ${matchedMessages} message${matchedMessages === 1 ? "" : "s"} across ${matchedThreads} thread${matchedThreads === 1 ? "" : "s"}`
       : `Forwarded ${sentMessages + alreadySentMessages} message${sentMessages + alreadySentMessages === 1 ? "" : "s"} across ${matchedThreads} thread${matchedThreads === 1 ? "" : "s"}`;
+    const failureSummary =
+      failedMessages > 0
+        ? `${summary} with ${failedMessages} failure${failedMessages === 1 ? "" : "s"}`
+        : summary;
+    const outcomeSummary =
+      outcomeUnknownMessages > 0
+        ? `${failureSummary}; ${outcomeUnknownMessages} message${outcomeUnknownMessages === 1 ? "" : "s"} need delivery verification`
+        : failureSummary;
     return {
       matchedThreads,
       matchedMessages,
       sentMessages,
       alreadySentMessages,
+      outcomeUnknownMessages,
       rejectedThreads,
       failedMessages,
       dryRun: Boolean(recipe.dryRun),
-      summary:
-        failedMessages > 0
-          ? `${summary} with ${failedMessages} failure${failedMessages === 1 ? "" : "s"}`
-          : summary,
+      summary: outcomeSummary,
     };
   }
 
@@ -801,11 +824,31 @@ export class MailboxForwardingService {
     if (alreadyForwarded?.status === "sent") {
       return { status: "already_sent", messageId: message.id };
     }
+    if (
+      alreadyForwarded?.status === "sending" ||
+      alreadyForwarded?.status === "outcome_unknown" ||
+      alreadyForwarded?.status === "error"
+    ) {
+      const error =
+        alreadyForwarded.status === "sending"
+          ? "A previous send attempt has no recorded provider outcome. Verify delivery before retrying."
+          : "A previous send attempt has an uncertain provider outcome. Verify delivery before retrying.";
+      await this.sql.run("forwarding_forwardMessage_5", [
+        automationId,
+        message.id,
+        message.threadId,
+        error,
+        Date.now(),
+        Date.now(),
+      ]);
+      return { status: "outcome_unknown", messageId: message.id, error };
+    }
 
     if (recipe.dryRun) {
       return { status: "dry_run", messageId: message.id };
     }
 
+    let sendAttemptStarted = false;
     try {
       const attachments: Array<{ filename: string; mimeType: string; data: Uint8Array }> = [];
       for (const attachment of message.attachments) {
@@ -846,6 +889,15 @@ export class MailboxForwardingService {
         originalMessageId: message.id,
         attachments,
       });
+      const intentAt = Date.now();
+      await this.sql.run("forwarding_forwardMessage_4", [
+        automationId,
+        message.id,
+        message.threadId,
+        intentAt,
+        intentAt,
+      ]);
+      sendAttemptStarted = true;
       await gmailRequest(settings, {
         method: "POST",
         path: "/users/me/messages/send",
@@ -866,6 +918,18 @@ export class MailboxForwardingService {
     } catch (error) {
       const now = Date.now();
       const errorMessage = error instanceof Error ? error.message : String(error);
+      if (sendAttemptStarted) {
+        const messageText = `${errorMessage}. Verify Gmail delivery before retrying.`;
+        await this.sql.run("forwarding_forwardMessage_5", [
+          automationId,
+          message.id,
+          message.threadId,
+          messageText,
+          now,
+          now,
+        ]);
+        return { status: "outcome_unknown", messageId: message.id, error: messageText };
+      }
       await this.sql.run("forwarding_forwardMessage_3", [
         automationId,
         message.id,

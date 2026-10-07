@@ -1,3 +1,5 @@
+import { GraphTaskAdmissionClosedError, type GraphTaskAdmission } from "./graph-task-admission";
+import { serviceStatements } from "../../database/service-statements";
 import type Database from "better-sqlite3";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
@@ -74,6 +76,7 @@ export interface OrchestrationGraphEngineDeps {
     workerRole?: WorkerRoleKind;
     teamRunId?: string;
     teamItemId?: string;
+    graphAdmission?: GraphTaskAdmission;
   }) => Promise<Task>;
   createRootTask: (params: {
     title: string;
@@ -83,6 +86,7 @@ export interface OrchestrationGraphEngineDeps {
     workerRole?: WorkerRoleKind;
     agentConfig?: AgentConfig;
     source?: Task["source"];
+    graphAdmission?: GraphTaskAdmission;
   }) => Promise<Task>;
   getTaskById: (taskId: string) => Promise<Task | undefined>;
   cancelTask: (taskId: string) => Promise<void>;
@@ -153,7 +157,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
   private readonly runLocks = new Set<string>();
 
   constructor(
-    db: Database.Database,
+    private readonly db: Database.Database,
     private readonly deps: OrchestrationGraphEngineDeps,
   ) {
     super();
@@ -750,6 +754,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
 
     try {
       const prompt = await this.buildPromptWithDependencyContext(run.id, claimed);
+      await serviceStatements(this.db).unit("botWorkControl_assertNotStopped", [run.rootTaskId]);
       if (claimed.dispatchTarget === "remote_acp") {
         const acpAgentId = claimed.acpAgentId;
         if (!acpAgentId) throw new Error("Remote ACP node is missing acpAgentId");
@@ -772,6 +777,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
           workerRole: claimed.workerRole,
           agentConfig: claimed.agentConfig,
           source: "api",
+          graphAdmission: { runId: run.id, nodeId: claimed.id, claimId },
         });
         await this.persistLocalDispatchResult(run, claimed, claimId, task);
         return;
@@ -793,11 +799,18 @@ export class OrchestrationGraphEngine extends EventEmitter {
         assignedAgentRoleId: claimed.assignedAgentRoleId,
         teamRunId: claimed.teamRunId,
         teamItemId: claimed.teamItemId,
+        graphAdmission: { runId: run.id, nodeId: claimed.id, claimId },
       });
       await this.persistLocalDispatchResult(run, claimed, claimId, child);
     } catch (error: Any) {
       const message = error?.message || String(error);
-      await this.recordDispatchFailure(run, claimed, claimId, message, effectBoundaryEntered);
+      await this.recordDispatchFailure(
+        run,
+        claimed,
+        claimId,
+        message,
+        effectBoundaryEntered && !(error instanceof GraphTaskAdmissionClosedError),
+      );
     } finally {
       activeDispatchClaimIds.delete(claimId);
     }
@@ -866,6 +879,9 @@ export class OrchestrationGraphEngine extends EventEmitter {
     const latestRun = (await this.repo.findSnapshotByRunId(run.id))?.run;
     const terminalStatus = taskGraphStatus(task);
     const status =
+      (["completed", "failed", "cancelled"].includes(current.status)
+        ? current.status
+        : undefined) ||
       terminalStatus ||
       (latestRun?.status === "running" && current.status === "running" ? "running" : "blocked");
     const cancellationRequested = status === "blocked" || latestRun?.status !== "running";
@@ -883,7 +899,9 @@ export class OrchestrationGraphEngine extends EventEmitter {
       taskId: task.id,
       publicHandle: task.id,
       startedAt: current.startedAt || Date.now(),
-      completedAt: terminalStatus ? Date.now() : status === "blocked" ? Date.now() : undefined,
+      completedAt:
+        current.completedAt ||
+        (terminalStatus ? Date.now() : status === "blocked" ? Date.now() : undefined),
       summary:
         status === "running"
           ? `Dispatched: ${node.title}`
@@ -896,6 +914,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
     if (!updated) return;
 
     if (cancellationRequested) {
+      if (latestRun?.metadata?.botWorkControl) return;
       await this.requestNodeCancellation(
         updated,
         "Cancellation requested while dispatch was in flight",

@@ -6,7 +6,10 @@ export function authorizationToolInput(details: Record<string, unknown>): unknow
   if (Object.prototype.hasOwnProperty.call(details, "params")) return details.params;
   return Object.fromEntries(
     Object.entries(details).filter(
-      ([key]) => !["permissionPrompt", "accessProfile", "authorization", "reason"].includes(key),
+      ([key]) =>
+        !["permissionPrompt", "accessProfile", "authorization", "reason", "draftRevision"].includes(
+          key,
+        ),
     ),
   );
 }

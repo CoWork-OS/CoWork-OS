@@ -1,3 +1,6 @@
+import { TeamsConversationReferenceRepository } from "./TeamsConversationReferenceRepository";
+import { createTeamsAdapter } from "./channels/teams";
+import { authorizationFingerprint } from "../security/authorization-identity";
 /**
  * Channel Gateway
  *
@@ -132,6 +135,7 @@ export class ChannelGateway {
   private securityManager: SecurityManager;
   private sessionManager: SessionManager;
   private channelRepo: ChannelRepository;
+  private teamsReferenceRepo: InstanceType<typeof TeamsConversationReferenceRepository>;
   private userRepo: ChannelUserRepository;
   private sessionRepo: ChannelSessionRepository;
   private messageRepo: ChannelMessageRepository;
@@ -159,6 +163,7 @@ export class ChannelGateway {
     this.securityManager = new SecurityManager(db);
     this.sessionManager = new SessionManager(db);
     this.channelRepo = new ChannelRepository(db);
+    this.teamsReferenceRepo = new TeamsConversationReferenceRepository(db);
     this.userRepo = new ChannelUserRepository(db);
     this.sessionRepo = new ChannelSessionRepository(db);
     this.messageRepo = new ChannelMessageRepository(db);
@@ -1714,7 +1719,7 @@ export class ChannelGateway {
   async updateChannel(channelId: string, updates: Partial<Channel>): Promise<void> {
     await this.channelRepo.update(channelId, updates);
 
-    if (updates.config === undefined) return;
+    if (updates.config === undefined && updates.securityConfig === undefined) return;
 
     const channel = await this.channelRepo.findById(channelId);
     if (!channel) return;
@@ -1725,6 +1730,16 @@ export class ChannelGateway {
       ((await this.channelRepo.findAllByType(channel.type)).length === 1
         ? this.router.getAdapter(channel.type as ChannelType)
         : undefined);
+    if (channel.type === "teams") {
+      const reconnect = channel.enabled && adapter?.status === "connected";
+      await adapter?.disconnect();
+      this.router.unregisterAdapter(channelId);
+      const replacement = this.createAdapterForChannel(channel);
+      this.router.registerAdapter(replacement, channel.id);
+      if (reconnect) await replacement.connect();
+      return;
+    }
+    if (updates.config === undefined) return;
     if (this.isMicrosoftEmailOAuthChannel(channel)) {
       if (adapter) {
         void adapter.disconnect().catch(() => undefined);
@@ -2442,6 +2457,61 @@ export class ChannelGateway {
           appToken: channel.config.appToken as string,
           signingSecret: channel.config.signingSecret as string | undefined,
         });
+
+      case "teams": {
+        const appId = channel.config.appId as string,
+          tenantId = channel.config.tenantId as string | undefined;
+        const adapter = createTeamsAdapter({
+          enabled: channel.enabled,
+          appId,
+          appPassword: channel.config.appPassword as string,
+          tenantId,
+          displayName: channel.config.displayName as string | undefined,
+          webhookPort: channel.config.webhookPort as number | undefined,
+        });
+        const capturedConfig = authorizationFingerprint(channel.config);
+        // Capture one stable sealed policy version without passing credentials to the worker.
+        const binding = (async () => {
+          const first = await this.teamsReferenceRepo.policy(channel.id);
+          const current = await this.channelRepo.findById(channel.id);
+          const second = await this.teamsReferenceRepo.policy(channel.id);
+          if (
+            !first ||
+            first !== second ||
+            !current ||
+            current.configReadError ||
+            current.type !== "teams" ||
+            authorizationFingerprint(current.config) !== capturedConfig
+          )
+            return undefined;
+          return first;
+        })().catch(() => undefined);
+        adapter.setDecisionReferencePersistence({
+          save: async (reference) => {
+            const policyHash = await binding;
+            if (!policyHash || !tenantId) throw new Error("Teams reference binding unavailable");
+            await this.teamsReferenceRepo.put({
+              channelId: channel.id,
+              appId,
+              tenantId,
+              policyHash,
+              reference,
+            });
+          },
+          load: async (chatId) => {
+            const policyHash = await binding;
+            if (!policyHash || !tenantId) return undefined;
+            return this.teamsReferenceRepo.get({
+              channelId: channel.id,
+              chatId,
+              appId,
+              tenantId,
+              policyHash,
+            });
+          },
+        });
+        return adapter;
+      }
 
       case "whatsapp":
         return createWhatsAppAdapter({

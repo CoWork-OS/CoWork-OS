@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,127 +43,42 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("repairs revoked membership only after explicit reopen approval", async () => {
-    const [repositories, botTeam] = await Promise.all([
-      import("../../database/repositories"),
-      import("../../agents/bot-team"),
-    ]);
-    const workspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
-      "Bot recovery workspace",
-      tempDir,
-      { read: true, write: true, delete: true, network: true, shell: false },
-    );
-    const seeded = botTeam.ensureDefaultBotTeam(manager.getDatabase(), workspace.id);
-    expect(seeded).toBeTruthy();
-    const role = seeded!.roles.find((candidate) => candidate.name === "scribe")!;
-    const memberRepo = new (
-      await import("../../agents/AgentTeamMemberRepository")
-    ).AgentTeamMemberStore(manager.getDatabase());
-    expect(memberRepo.removeByTeamAndRole(seeded!.team.id, role.id)).toBe(true);
-
-    const taskRepo = new repositories.TaskStore(manager.getDatabase());
-    const oldTask = taskRepo.create({
-      title: role.displayName,
-      prompt: "Old bot conversation",
-      status: "failed",
-      workspaceId: workspace.id,
-      assignedAgentRoleId: role.id,
-      agentConfig: {
-        botConversation: true,
-        botTeamId: seeded!.team.id,
-        conversationMode: "hybrid",
-        executionMode: "execute",
-        executionModeSource: "strategy",
-      },
+  async function fixture(teamName = "User configured team") {
+    const repositories = await import("../../database/repositories");
+    const { AgentRoleStore } = await import("../../agents/AgentRoleRepository");
+    const { AgentTeamStore } = await import("../../agents/AgentTeamRepository");
+    const { AgentTeamMemberStore } = await import("../../agents/AgentTeamMemberRepository");
+    const db = manager.getDatabase();
+    const workspace = new repositories.WorkspaceStore(db).create("Bot workspace", tempDir, {
+      read: true,
+      write: true,
+      delete: true,
+      network: true,
+      shell: false,
     });
-
-    const createTask = async (params: Any): Promise<Any> =>
-      taskRepo.create({
-        title: params.title,
-        prompt: params.prompt,
-        status: "pending",
-        workspaceId: params.workspaceId,
-        assignedAgentRoleId: params.taskOverrides?.assignedAgentRoleId,
-        agentConfig: params.agentConfig,
-      });
-    const daemonLike = {
-      dbManager: manager,
-      taskRepo,
-      createTask,
-      logEvent: vi.fn(),
-    } as Any;
-
-    await expect(
-      AgentDaemon.prototype.reopenBotConversation.call(daemonLike, {
-        workspaceId: workspace.id,
-        taskId: oldTask.id,
+    const roleRepo = new AgentRoleStore(db);
+    const roles = ["Coordinator", "Researcher", "Maker"].map((displayName) =>
+      roleRepo.create({
+        name: `custom-${randomUUID()}`,
+        displayName,
+        systemPrompt: `User instructions for ${displayName}`,
+        capabilities: ["research"],
       }),
-    ).rejects.toThrow("BOT_MEMBERSHIP_REVOKED");
-    expect(memberRepo.findByTeamAndRole(seeded!.team.id, role.id)).toBeUndefined();
-
-    const reopened = await AgentDaemon.prototype.reopenBotConversation.call(daemonLike, {
+    );
+    const team = new AgentTeamStore(db).create({
       workspaceId: workspace.id,
-      taskId: oldTask.id,
-      repairMembership: true,
+      name: teamName,
+      leadAgentRoleId: roles[0].id,
+      persistent: true,
     });
-
-    expect(reopened.id).not.toBe(oldTask.id);
-    expect(reopened.workspaceId).toBe(workspace.id);
-    expect(reopened.assignedAgentRoleId).toBe(role.id);
-    expect(reopened.agentConfig).toMatchObject({
-      botConversation: true,
-      botTeamId: seeded!.team.id,
-    });
-    expect(taskRepo.findById(oldTask.id)?.status).toBe("failed");
-    expect(memberRepo.findByTeamAndRole(seeded!.team.id, role.id)).toBeTruthy();
-    expect(daemonLike.logEvent).toHaveBeenCalledWith(
-      reopened.id,
-      "task_created",
-      expect.objectContaining({ recoveryAction: "repair_membership" }),
-    );
-  });
-
-  it("branches a built-in bot transcript into a temporary workspace without moving its source or team", async () => {
-    const [repositories, botTeam] = await Promise.all([
-      import("../../database/repositories"),
-      import("../../agents/bot-team"),
-    ]);
-    const sourceWorkspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
-      "Source workspace",
-      `${tempDir}/source`,
-      { read: true, write: true, delete: true, network: true, shell: false },
-    );
-    const targetWorkspaceId = "__temp_workspace__:bot-recovery-target";
-    const now = Date.now();
-    manager
-      .getDatabase()
-      .prepare(
-        "INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        targetWorkspaceId,
-        "Temporary workspace",
-        `${tempDir}/target`,
-        now,
-        now,
-        JSON.stringify({ read: true, write: true, delete: true, network: true, shell: false }),
-      );
-    const sourceTeam = botTeam.ensureDefaultBotTeam(manager.getDatabase(), sourceWorkspace.id)!;
-    const targetTeam = botTeam.ensureDefaultBotTeam(manager.getDatabase(), targetWorkspaceId)!;
-    const role = sourceTeam.roles.find((candidate) => candidate.name === "scribe")!;
-    const taskRepo = new repositories.TaskStore(manager.getDatabase());
-    const source = taskRepo.create({
-      title: role.displayName,
-      prompt: "Source transcript",
-      status: "completed",
-      workspaceId: sourceWorkspace.id,
-      assignedAgentRoleId: role.id,
-      agentConfig: { botConversation: true, botTeamId: sourceTeam.team.id },
-    });
-    const daemonLike = {
+    const memberRepo = new AgentTeamMemberStore(db);
+    roles.forEach((role) => memberRepo.add({ teamId: team.id, agentRoleId: role.id }));
+    const taskRepo = new repositories.TaskStore(db);
+    const daemon = {
       dbManager: manager,
       taskRepo,
-      createTask: async (params: Any) =>
+      logEvent: vi.fn(),
+      createTask: vi.fn(async (params: Any) =>
         taskRepo.create({
           title: params.title,
           prompt: params.prompt,
@@ -173,212 +89,240 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
           branchLabel: params.taskOverrides?.branchLabel,
           agentConfig: params.agentConfig,
         }),
-      logEvent: vi.fn(),
+      ),
     } as Any;
+    Object.setPrototypeOf(daemon, AgentDaemon.prototype);
+    const conversation = (role = roles[0], overrides: Any = {}) =>
+      taskRepo.create({
+        title: role.displayName,
+        prompt: "Original private transcript",
+        status: "completed",
+        workspaceId: workspace.id,
+        assignedAgentRoleId: role.id,
+        agentConfig: { botConversation: true, botTeamId: team.id },
+        ...overrides,
+      });
+    return { db, workspace, roles, roleRepo, team, memberRepo, taskRepo, daemon, conversation };
+  }
 
-    const branch = await AgentDaemon.prototype.reopenBotConversation.call(daemonLike, {
-      workspaceId: targetWorkspaceId,
+  it("reopens a standalone bot without creating a role or team or rewriting its prompt", async () => {
+    const f = await fixture();
+    const role = f.roles[1];
+    const source = f.conversation(role, { agentConfig: { botConversation: true } });
+    const before = f.db.prepare("SELECT COUNT(*) AS count FROM agent_roles").get();
+    const teamsBefore = f.db.prepare("SELECT COUNT(*) AS count FROM agent_teams").get();
+    const reopened = await f.daemon.reopenBotConversation({
+      workspaceId: f.workspace.id,
       taskId: source.id,
     });
-
-    expect(branch.id).not.toBe(source.id);
-    expect(branch.workspaceId).toBe(targetWorkspaceId);
-    expect(branch.branchFromTaskId).toBe(source.id);
-    expect(branch.agentConfig?.botTeamId).toBe(targetTeam.team.id);
-    expect(taskRepo.findById(source.id)?.workspaceId).toBe(sourceWorkspace.id);
-    expect(taskRepo.findById(source.id)?.agentConfig?.botTeamId).toBe(sourceTeam.team.id);
-
-    const customTeam = new (await import("../../agents/AgentTeamRepository")).AgentTeamStore(
-      manager.getDatabase(),
-    ).create({
-      workspaceId: sourceWorkspace.id,
-      name: "Restricted team",
-      leadAgentRoleId: role.id,
-      maxParallelAgents: 1,
-      isActive: true,
-      persistent: true,
-    });
-    const restrictedSource = taskRepo.create({
-      title: role.displayName,
-      prompt: "Restricted transcript",
-      status: "completed",
-      workspaceId: sourceWorkspace.id,
-      assignedAgentRoleId: role.id,
-      agentConfig: { botConversation: true, botTeamId: customTeam.id },
-    });
-    await expect(
-      AgentDaemon.prototype.reopenBotConversation.call(daemonLike, {
-        workspaceId: targetWorkspaceId,
-        taskId: restrictedSource.id,
-        repairMembership: true,
-      }),
-    ).rejects.toThrow("BOT_WORKSPACE_CONFLICT");
+    expect(reopened.id).not.toBe(source.id);
+    expect(reopened.assignedAgentRoleId).toBe(role.id);
+    expect(reopened.agentConfig?.botTeamId).toBeUndefined();
+    expect(reopened.branchFromTaskId).toBe(source.id);
+    expect(reopened.prompt).not.toContain("Original private transcript");
+    expect(f.daemon.createTask).toHaveBeenCalledWith(expect.objectContaining({ autoStart: false }));
+    expect(f.db.prepare("SELECT COUNT(*) AS count FROM agent_roles").get()).toEqual(before);
+    expect(f.db.prepare("SELECT COUNT(*) AS count FROM agent_teams").get()).toEqual(teamsBefore);
+    expect(f.roleRepo.findById(role.id)?.systemPrompt).toBe(role.systemPrompt);
+    expect(f.taskRepo.findById(source.id)?.prompt).toBe(source.prompt);
   });
 
-  it("reports a missing reusable conversation without making the peer look available", async () => {
-    const [repositories, botTeam] = await Promise.all([
-      import("../../database/repositories"),
-      import("../../agents/bot-team"),
-    ]);
-    const workspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
-      "Bot peer workspace",
-      tempDir,
-      { read: true, write: true, delete: true, network: true, shell: false },
-    );
-    const seeded = botTeam.ensureDefaultBotTeam(manager.getDatabase(), workspace.id)!;
-    const atlas = seeded.roles.find((candidate) => candidate.name === "atlas-your-chief-of-staff")!;
-    const forge = seeded.roles.find((candidate) => candidate.name === "forge")!;
-    const taskRepo = new repositories.TaskStore(manager.getDatabase());
-    const sender = taskRepo.create({
-      title: atlas.displayName,
-      prompt: "Atlas",
-      status: "pending",
-      workspaceId: workspace.id,
-      assignedAgentRoleId: atlas.id,
-      agentConfig: {
-        botConversation: true,
-        botTeamId: seeded.team.id,
-        conversationMode: "hybrid",
-        executionMode: "execute",
-        executionModeSource: "strategy",
-      },
+  it("creates a first conversation for a user bot that has never joined a team", async () => {
+    const f = await fixture();
+    const role = f.roleRepo.create({
+      name: randomUUID(),
+      displayName: "Independent",
+      capabilities: [],
     });
-    const daemonLike = { dbManager: manager, taskRepo } as Any;
-    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
+    const reopened = await f.daemon.reopenBotConversation({
+      workspaceId: f.workspace.id,
+      agentRoleId: role.id,
+    });
+    expect(reopened.agentConfig?.botConversation).toBe(true);
+    expect(reopened.agentConfig?.botTeamId).toBeUndefined();
+    expect(reopened.branchFromTaskId).toBeUndefined();
+    expect(await f.daemon.listBotTeamPeers(reopened.id)).toEqual([]);
+    expect(f.daemon.getBotConversationMessagingContext(reopened.id)).toEqual({ authorized: false });
+  });
 
-    const peers = await AgentDaemon.prototype.listBotTeamPeers.call(daemonLike, sender.id);
-    const forgePeer = peers.find((peer) => peer.roleId === forge.id);
-    expect(forgePeer).toMatchObject({
-      roleId: forge.id,
+  it("does not restore revoked membership during normalization or ordinary reopen, including legacy team names", async () => {
+    const f = await fixture("CoWork Bot Team");
+    const role = f.roles[1];
+    f.memberRepo.removeByTeamAndRole(f.team.id, role.id);
+    const source = f.conversation(role);
+    const before = f.taskRepo.findById(source.id);
+    f.daemon.ensureBotTaskTeam(source);
+    expect(f.taskRepo.findById(source.id)).toEqual(before);
+    expect(await f.daemon.listBotTeamPeers(source.id)).toEqual([]);
+    await expect(
+      f.daemon.reopenBotConversation({ workspaceId: f.workspace.id, taskId: source.id }),
+    ).rejects.toThrow("BOT_MEMBERSHIP_REVOKED");
+    expect(f.memberRepo.findByTeamAndRole(f.team.id, role.id)).toBeUndefined();
+    const reopened = await f.daemon.reopenBotConversation({
+      workspaceId: f.workspace.id,
+      taskId: source.id,
+      repairMembership: true,
+    });
+    expect(reopened.agentConfig?.botTeamId).toBe(f.team.id);
+    expect(f.memberRepo.findByTeamAndRole(f.team.id, role.id)).toBeTruthy();
+  });
+
+  it("does not resurrect a deactivated bot through reopen or messaging", async () => {
+    const f = await fixture();
+    const source = f.conversation(f.roles[1]);
+    f.roleRepo.delete(f.roles[1].id);
+    await expect(
+      f.daemon.reopenBotConversation({ workspaceId: f.workspace.id, taskId: source.id }),
+    ).rejects.toThrow("BOT_NOT_FOUND");
+    expect(f.daemon.getBotConversationMessagingContext(source.id)).toEqual({ authorized: false });
+    expect(f.roleRepo.findById(f.roles[1].id)?.isActive).toBe(false);
+    expect(f.taskRepo.findById(source.id)).toBeTruthy();
+  });
+
+  it("only lists active members of the selected team without global roster fallback", async () => {
+    const f = await fixture();
+    const outsider = f.roleRepo.create({
+      name: randomUUID(),
+      displayName: "Unrelated",
+      capabilities: [],
+    });
+    f.roleRepo.delete(f.roles[2].id);
+    const sender = f.conversation();
+    const peers = await f.daemon.listBotTeamPeers(sender.id);
+    expect(peers.map((peer: Any) => peer.roleId)).toEqual([f.roles[0].id, f.roles[1].id]);
+    expect(peers.some((peer: Any) => peer.roleId === outsider.id)).toBe(false);
+    expect(peers.find((peer: Any) => peer.roleId === f.roles[1].id)).toMatchObject({
       available: false,
       availability: "conversation_unavailable",
       recoveryAction: "reopen",
     });
   });
 
-  it("repairs a missing member on the reserved default team during routing", async () => {
-    const [repositories, botTeam, memberModule] = await Promise.all([
-      import("../../database/repositories"),
-      import("../../agents/bot-team"),
-      import("../../agents/AgentTeamMemberRepository"),
-    ]);
-    const workspace = new repositories.WorkspaceStore(manager.getDatabase()).create(
-      "Bot roster repair workspace",
-      tempDir,
-      { read: true, write: true, delete: true, network: true, shell: false },
-    );
-    const seeded = botTeam.ensureDefaultBotTeam(manager.getDatabase(), workspace.id)!;
-    const cco = seeded.roles.find((candidate) => candidate.name === "chief-community-officer")!;
-    const memberRepo = new memberModule.AgentTeamMemberStore(manager.getDatabase());
-    expect(memberRepo.removeByTeamAndRole(seeded.team.id, cco.id)).toBe(true);
-
-    const taskRepo = new repositories.TaskStore(manager.getDatabase());
-    const task = taskRepo.create({
-      title: cco.displayName,
-      prompt: "Find community opportunities",
-      status: "pending",
-      workspaceId: workspace.id,
-      assignedAgentRoleId: cco.id,
-      agentConfig: {
-        botConversation: true,
-        botTeamId: seeded.team.id,
-        conversationMode: "hybrid",
-        executionMode: "execute",
-        executionModeSource: "strategy",
-      },
+  it("preserves configured team IDs and resolves a renamed teammate by stable bot ID", async () => {
+    const f = await fixture();
+    const source = f.conversation();
+    f.roleRepo.update({ id: f.roles[1].id, name: randomUUID(), displayName: "Renamed researcher" });
+    const peer = await f.daemon.resolveBotTeamPeer(source.id, { botName: f.roles[1].id });
+    expect(peer).toMatchObject({
+      ok: true,
+      role: { id: f.roles[1].id },
+      task: { workspaceId: f.workspace.id, agentConfig: { botTeamId: f.team.id } },
     });
-    const daemonLike = { dbManager: manager, taskRepo } as Any;
-    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
-
-    const normalized = (AgentDaemon.prototype as Any).ensureBotTaskTeam.call(daemonLike, task);
-
-    expect(normalized.agentConfig?.botTeamId).toBe(seeded.team.id);
-    expect(memberRepo.findByTeamAndRole(seeded.team.id, cco.id)).toBeTruthy();
+    expect(f.daemon.getBotTeamPromptContext(source.id)).toMatchObject({
+      teamName: f.team.name,
+      isLead: true,
+      peers: expect.arrayContaining([
+        expect.objectContaining({ id: f.roles[1].id, displayName: "Renamed researcher" }),
+      ]),
+    });
   });
 
-  it("reconciles the reserved team when a bot conversation crosses temporary workspaces", async () => {
-    const [repositories, botTeam] = await Promise.all([
-      import("../../database/repositories"),
-      import("../../agents/bot-team"),
-    ]);
-    const previousWorkspaceId = "__temp_workspace__:previous-ui-session";
-    const currentWorkspaceId = "__temp_workspace__:current-ui-session";
-    const insertWorkspace = (id: string, name: string, workspacePath: string) => {
-      const now = Date.now();
-      manager
-        .getDatabase()
-        .prepare(
-          "INSERT INTO workspaces (id, name, path, created_at, last_used_at, permissions) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .run(
-          id,
-          name,
-          workspacePath,
-          now,
-          now,
-          JSON.stringify({ read: true, write: true, delete: true, network: true, shell: false }),
-        );
-    };
-    insertWorkspace(previousWorkspaceId, "Previous Temporary Workspace", `${tempDir}/previous`);
-    insertWorkspace(currentWorkspaceId, "Current Temporary Workspace", `${tempDir}/current`);
-    const previousTeam = botTeam.ensureDefaultBotTeam(manager.getDatabase(), previousWorkspaceId)!;
-    const atlas = previousTeam.roles.find(
-      (candidate) => candidate.name === "atlas-your-chief-of-staff",
-    )!;
-    const taskRepo = new repositories.TaskStore(manager.getDatabase());
-    const sender = taskRepo.create({
-      title: atlas.displayName,
-      prompt: "Coordinate the current workspace",
-      status: "pending",
-      workspaceId: currentWorkspaceId,
-      assignedAgentRoleId: atlas.id,
-      agentConfig: {
-        botConversation: true,
-        botTeamId: previousTeam.team.id,
-        conversationMode: "hybrid",
-        executionMode: "execute",
-        executionModeSource: "strategy",
-      },
+  it("resolves duplicate display names within the selected team and rejects ambiguous members", async () => {
+    const f = await fixture();
+    const outsider = f.roleRepo.create({
+      name: randomUUID(),
+      displayName: "Shared name",
+      capabilities: [],
     });
-    const createTask = async (params: Any): Promise<Any> =>
-      taskRepo.create({
-        title: params.title,
-        prompt: params.prompt,
-        status: "pending",
-        workspaceId: params.workspaceId,
-        assignedAgentRoleId: params.taskOverrides?.assignedAgentRoleId,
-        agentConfig: params.agentConfig,
-      });
-    const daemonLike = {
-      dbManager: manager,
-      taskRepo,
-      createTask,
-      logEvent: vi.fn(),
-    } as Any;
-    Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
-
-    const resolved = await AgentDaemon.prototype.resolveBotTeamPeer.call(daemonLike, sender.id, {
-      botName: "scribe",
+    f.roleRepo.update({ id: outsider.id, sortOrder: -100 });
+    f.roleRepo.update({ id: f.roles[1].id, displayName: "Shared name" });
+    const sender = f.conversation();
+    const peer = await f.daemon.resolveBotTeamPeer(sender.id, { botName: "Shared name" });
+    expect(peer).toMatchObject({ ok: true, role: { id: f.roles[1].id } });
+    f.roleRepo.update({ id: f.roles[2].id, displayName: "Shared name" });
+    f.daemon.createTask.mockClear();
+    expect(await f.daemon.resolveBotTeamPeer(sender.id, { botName: "Shared name" })).toMatchObject({
+      ok: false,
+      error: "BOT_NOT_FOUND",
+      message: expect.stringContaining("ambiguous"),
     });
+    expect(f.daemon.createTask).not.toHaveBeenCalled();
+    expect(await f.daemon.resolveBotTeamPeer(sender.id, { botName: f.roles[2].id })).toMatchObject({
+      ok: true,
+      role: { id: f.roles[2].id },
+    });
+  });
 
-    expect(resolved).toMatchObject({ ok: true });
-    const updatedSender = taskRepo.findById(sender.id)!;
-    const currentTeam = new (await import("../../agents/AgentTeamRepository")).AgentTeamStore(
-      manager.getDatabase(),
-    ).findByName(currentWorkspaceId, botTeam.DEFAULT_BOT_TEAM_NAME);
-    expect(currentTeam).toBeTruthy();
-    expect(updatedSender.agentConfig?.botTeamId).toBe(currentTeam?.id);
-    expect(updatedSender.agentConfig?.botTeamId).not.toBe(previousTeam.team.id);
-    expect((resolved as Any).task.workspaceId).toBe(currentWorkspaceId);
-    expect(daemonLike.logEvent).toHaveBeenCalledWith(
-      sender.id,
-      "log",
-      expect.objectContaining({
-        previousBotTeamId: previousTeam.team.id,
-        botTeamId: currentTeam?.id,
-        workspaceId: currentWorkspaceId,
+  it("requires explicit workspace branching and never inherits the source team or transcript", async () => {
+    const f = await fixture();
+    const repositories = await import("../../database/repositories");
+    const target = new repositories.WorkspaceStore(f.db).create("Target", `${tempDir}/target`, {
+      read: true,
+      write: true,
+      delete: true,
+      network: true,
+      shell: false,
+    });
+    const source = f.conversation();
+    await expect(
+      f.daemon.reopenBotConversation({ workspaceId: target.id, taskId: source.id }),
+    ).rejects.toThrow("BOT_WORKSPACE_CONFLICT");
+    const sourceBefore = f.taskRepo.findById(source.id);
+    const branch = await f.daemon.reopenBotConversation({
+      workspaceId: target.id,
+      taskId: source.id,
+      branchToWorkspace: true,
+    });
+    expect(branch.workspaceId).toBe(target.id);
+    expect(branch.agentConfig?.botTeamId).toBeUndefined();
+    expect(branch.prompt).not.toBe(source.prompt);
+    expect(f.taskRepo.findById(source.id)).toEqual(sourceBefore);
+    expect(f.daemon.getBotConversationMessagingContext(branch.id)).toEqual({ authorized: false });
+    await expect(
+      f.daemon.reopenBotConversation({
+        workspaceId: target.id,
+        taskId: source.id,
+        branchToWorkspace: true,
+        botTeamId: f.team.id,
+        repairMembership: true,
       }),
-    );
+    ).rejects.toThrow("BOT_TEAM_UNAVAILABLE");
+  });
+
+  it("does not reconcile a foreign team when its conversation was moved to another workspace", async () => {
+    const f = await fixture("CoWork Bot Team");
+    const source = f.conversation();
+    const foreign = { ...source, workspaceId: "__temp_workspace__:different" };
+    const normalized = f.daemon.ensureBotTaskTeam(foreign);
+    expect(normalized.agentConfig?.botTeamId).toBe(f.team.id);
+    expect(f.daemon.getBotTeamContext(normalized)).toBeUndefined();
+  });
+
+  it("rejects stale or inactive teams without creating a replacement", async () => {
+    const f = await fixture();
+    const { AgentTeamStore } = await import("../../agents/AgentTeamRepository");
+    new AgentTeamStore(f.db).update({ id: f.team.id, isActive: false });
+    const source = f.conversation();
+    await expect(
+      f.daemon.reopenBotConversation({
+        workspaceId: f.workspace.id,
+        taskId: source.id,
+        repairMembership: true,
+      }),
+    ).rejects.toThrow("BOT_TEAM_UNAVAILABLE");
+    const stale = f.conversation(f.roles[1], {
+      agentConfig: { botConversation: true, botTeamId: "missing" },
+    });
+    await expect(
+      f.daemon.reopenBotConversation({ workspaceId: f.workspace.id, taskId: stale.id }),
+    ).rejects.toThrow("BOT_TEAM_UNAVAILABLE");
+    expect(f.db.prepare("SELECT COUNT(*) AS count FROM agent_teams").get()).toEqual({ count: 1 });
+  });
+
+  it("does not reopen work tasks or attribute another bot's history to a replacement identity", async () => {
+    const f = await fixture();
+    const work = f.conversation(f.roles[0], { agentConfig: {} });
+    await expect(
+      f.daemon.reopenBotConversation({ workspaceId: f.workspace.id, taskId: work.id }),
+    ).rejects.toThrow("BOT_CONVERSATION_UNAVAILABLE");
+    const source = f.conversation();
+    await expect(
+      f.daemon.reopenBotConversation({
+        workspaceId: f.workspace.id,
+        taskId: source.id,
+        agentRoleId: f.roles[1].id,
+      }),
+    ).rejects.toThrow("BOT_ROLE_CONFLICT");
   });
 
   it("replays a delivered teammate handoff after a restart when no plan was persisted", () => {

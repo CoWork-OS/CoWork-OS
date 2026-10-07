@@ -318,6 +318,116 @@ describeWithSqlite("MailboxForwardingService", () => {
     nowSpy.mockRestore();
   });
 
+  it("does not resend an email when Gmail's send outcome is ambiguous", async () => {
+    const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
+    const { MailboxForwardingService } = await import("../MailboxForwardingService");
+    const created = await MailboxAutomationRegistry.createForward({
+      name: "Forward invoices once",
+      schedule: { kind: "every", everyMs: 15 * 60 * 1000 },
+      targetEmail: "ops@example.com",
+      allowedSenders: ["billing@vendor.com"],
+      allowedDomains: [],
+      attachmentExtensions: ["pdf"],
+      dryRun: false,
+    });
+    let sendAttempts = 0;
+    gmailRequestMock.mockImplementation(
+      async (_settings: unknown, options: { path: string; method: string; body?: Any }) => {
+        if (options.path === "/users/me/labels" && options.method === "GET") {
+          return { status: 200, data: { labels: [] } };
+        }
+        if (options.path === "/users/me/labels" && options.method === "POST") {
+          return { status: 200, data: { id: `label-${Math.random()}` } };
+        }
+        if (options.path === "/users/me/messages" && options.method === "GET") {
+          return {
+            status: 200,
+            data: { messages: [{ id: "msg-ambiguous", threadId: "thread-ambiguous" }] },
+          };
+        }
+        if (options.path === "/users/me/threads/thread-ambiguous" && options.method === "GET") {
+          return {
+            status: 200,
+            data: {
+              id: "thread-ambiguous",
+              messages: [
+                {
+                  id: "msg-ambiguous",
+                  threadId: "thread-ambiguous",
+                  internalDate: Date.now(),
+                  labelIds: ["INBOX"],
+                  payload: {
+                    headers: [
+                      { name: "From", value: "Billing <billing@vendor.com>" },
+                      { name: "Subject", value: "Invoice 42" },
+                    ],
+                    parts: [
+                      {
+                        filename: "invoice.pdf",
+                        mimeType: "application/pdf",
+                        body: { data: Buffer.from("fake-pdf").toString("base64url") },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          };
+        }
+        if (options.path === "/users/me/messages/send" && options.method === "POST") {
+          sendAttempts += 1;
+          throw new Error("Connection closed after request submission");
+        }
+        if (
+          options.path === "/users/me/threads/thread-ambiguous/modify" &&
+          options.method === "POST"
+        ) {
+          return { status: 200, data: {} };
+        }
+        throw new Error(`Unhandled gmailRequest call: ${options.method} ${options.path}`);
+      },
+    );
+
+    const service = new MailboxForwardingService({ db });
+    const firstSummary = await service.runNow(created.id);
+    db.prepare(
+      `UPDATE mailbox_forwarding_message_runs
+       SET status = 'sending'
+       WHERE automation_id = ? AND message_id = ?`,
+    ).run(created.id, "msg-ambiguous");
+    const restartedService = new MailboxForwardingService({ db });
+    const secondSummary = await restartedService.runNow(created.id);
+    const row = db
+      .prepare(
+        "SELECT status FROM mailbox_forwarding_message_runs WHERE automation_id = ? AND message_id = ?",
+      )
+      .get(created.id, "msg-ambiguous") as { status: string };
+
+    expect(firstSummary).toContain("need delivery verification");
+    expect(secondSummary).toContain("need delivery verification");
+    expect(row.status).toBe("outcome_unknown");
+    expect(sendAttempts).toBe(1);
+  });
+
+  it("migrates legacy forwarding errors to a no-retry outcome", async () => {
+    const { MailboxForwardingService } = await import("../MailboxForwardingService");
+    new MailboxForwardingService({ db });
+    db.prepare(
+      `INSERT INTO mailbox_forwarding_message_runs
+       (automation_id, message_id, thread_id, status, error, created_at, updated_at)
+       VALUES ('automation-legacy', 'message-legacy', 'thread-legacy', 'error', 'timeout', 1, 1)`,
+    ).run();
+
+    new MailboxForwardingService({ db });
+    const row = db
+      .prepare(
+        "SELECT status FROM mailbox_forwarding_message_runs WHERE automation_id = ? AND message_id = ?",
+      )
+      .get("automation-legacy", "message-legacy") as { status: string };
+
+    expect(row.status).toBe("outcome_unknown");
+  });
+
   it("recomputes nextRunAt after a manual run instead of reusing a stale past-due value", async () => {
     const { MailboxAutomationRegistry } = await import("../MailboxAutomationRegistry");
     const { MailboxForwardingService } = await import("../MailboxForwardingService");

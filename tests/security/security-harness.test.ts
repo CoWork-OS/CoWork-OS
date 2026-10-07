@@ -23,6 +23,12 @@ describe("security harness", () => {
       highRisk: true,
       reasons: ["tool-policy"],
     });
+    expect(
+      harness.classifyHighRiskFile("src/electron/gateway/ChannelDecisionStore.ts"),
+    ).toMatchObject({
+      highRisk: true,
+      reasons: ["channel-gateway-boundary"],
+    });
     expect(harness.classifyHighRiskFile("docs/security/security-model.md")).toMatchObject({
       highRisk: false,
     });

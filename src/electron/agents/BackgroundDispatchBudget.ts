@@ -10,8 +10,8 @@
  *
  * User-initiated work (manual pulses, "run now") is recorded but never refused.
  *
- * The ledger is in-memory: after a restart the shared counter starts at zero. Heartbeat's own
- * per-agent budget is DB-backed and still applies on top of this one.
+ * Production installs a database-backed authority before workers start. This in-memory
+ * implementation is retained for isolated tests; per-agent limits still apply on top.
  */
 
 export type BackgroundDispatchSource =
@@ -32,16 +32,41 @@ export interface BackgroundDispatchRequest {
   entityKey?: string;
   /** User-initiated: recorded against the budget but never refused. */
   manual?: boolean;
+  /** Stable producer occurrence identity; replay must not create a second run. */
+  occurrenceKey?: string;
 }
 
 export interface BackgroundDispatchDecision {
   allowed: boolean;
-  reason?: "workspace_budget_exhausted" | "entity_cooldown";
+  reason?: "workspace_budget_exhausted" | "entity_cooldown" | "duplicate_occurrence";
   dispatchesToday: number;
   maxPerDay: number;
   cooldownUntil?: number;
   /** Present when the dispatch was recorded; pass it to `refund` if task creation fails. */
   ticket?: string;
+  /** A durable ticket must be committed with task creation. */
+  durable?: boolean;
+}
+
+export interface BackgroundDispatchBudgetAuthority {
+  check(
+    request: BackgroundDispatchRequest,
+  ): BackgroundDispatchDecision | Promise<BackgroundDispatchDecision>;
+  tryConsume(
+    request: BackgroundDispatchRequest,
+  ): BackgroundDispatchDecision | Promise<BackgroundDispatchDecision>;
+  refund(ticket?: string): void | Promise<void>;
+  snapshot(workspaceId: string):
+    | {
+        dispatchesToday: number;
+        maxPerDay: number;
+        bySource: Partial<Record<BackgroundDispatchSource, number>>;
+      }
+    | Promise<{
+        dispatchesToday: number;
+        maxPerDay: number;
+        bySource: Partial<Record<BackgroundDispatchSource, number>>;
+      }>;
 }
 
 interface LedgerEntry {
@@ -111,7 +136,9 @@ export class BackgroundDispatchBudget {
     const entityKey = normalizeDispatchEntityKey(request.entityKey);
     if (entityKey) {
       const latest = this.entries
-        .filter((entry) => entry.workspaceId === request.workspaceId && entry.entityKey === entityKey)
+        .filter(
+          (entry) => entry.workspaceId === request.workspaceId && entry.entityKey === entityKey,
+        )
         .reduce((max, entry) => Math.max(max, entry.at), 0);
       if (latest && now - latest < this.entityCooldownMs) {
         return {
@@ -169,14 +196,20 @@ export class BackgroundDispatchBudget {
   }
 }
 
-let sharedBudget: BackgroundDispatchBudget | null = null;
+let sharedBudget: BackgroundDispatchBudgetAuthority | null = null;
 
-export function getBackgroundDispatchBudget(): BackgroundDispatchBudget {
-  if (!sharedBudget) sharedBudget = new BackgroundDispatchBudget();
+export function getBackgroundDispatchBudget(): BackgroundDispatchBudgetAuthority {
+  if (!sharedBudget) {
+    if (process.env.NODE_ENV !== "test")
+      throw new Error("The durable background dispatch authority is not initialized");
+    sharedBudget = new BackgroundDispatchBudget();
+  }
   return sharedBudget;
 }
 
 /** Test seam. */
-export function setBackgroundDispatchBudget(budget: BackgroundDispatchBudget | null): void {
+export function setBackgroundDispatchBudget(
+  budget: BackgroundDispatchBudgetAuthority | null,
+): void {
   sharedBudget = budget;
 }

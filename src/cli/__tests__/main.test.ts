@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ControlPlaneClient } from "../control-plane-client";
 import { main, parseArgs, parseInteractiveCommand } from "../main";
 
 afterEach(() => {
@@ -104,5 +105,97 @@ describe("run command guard", () => {
     expect(code).toBe(1);
     expect(stderr).toContain("Did you mean `cowork doctor`?");
     expect(stderr).toContain("cowork run --force doctor");
+  });
+});
+
+describe("CLI displayed approval revisions", () => {
+  it.each([undefined, "latest", "A".repeat(64)])(
+    "refuses an unreviewed revision %s before sending",
+    async (hash) => {
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const connect = vi.spyOn(ControlPlaneClient.prototype, "connect").mockResolvedValue();
+      const request = vi
+        .spyOn(ControlPlaneClient.prototype, "request")
+        .mockResolvedValue({ status: "handled" });
+      expect(
+        await main([
+          "approve",
+          "approval-1",
+          "--remote",
+          "--token",
+          "fixture",
+          ...(hash ? ["--revision-hash", hash] : []),
+        ]),
+      ).toBe(1);
+      expect(connect).not.toHaveBeenCalled();
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["handled", "duplicate", "not_found", "in_progress", "unknown"])(
+    "reports %s without claiming an unconfirmed decision",
+    async (status) => {
+      let stdout = "";
+      let stderr = "";
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+        stdout += String(chunk);
+        return true;
+      });
+      vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+        stderr += String(chunk);
+        return true;
+      });
+      vi.spyOn(ControlPlaneClient.prototype, "connect").mockResolvedValue();
+      const request = vi
+        .spyOn(ControlPlaneClient.prototype, "request")
+        .mockResolvedValue({ status });
+      const close = vi.spyOn(ControlPlaneClient.prototype, "close").mockImplementation(() => {});
+      const hash = "a".repeat(64);
+      const code = await main([
+        "approve",
+        "approval-1",
+        "--remote",
+        "--token",
+        "fixture",
+        "--revision-hash",
+        hash,
+      ]);
+      const confirmed = status === "handled" || status === "duplicate";
+      expect(code).toBe(confirmed ? 0 : 1);
+      expect(request).toHaveBeenCalledWith("approval.respond", {
+        approvalId: "approval-1",
+        approved: true,
+        expectedRevisionHash: hash,
+      });
+      expect(close).toHaveBeenCalledOnce();
+      expect(stdout.includes("Approved approval")).toBe(confirmed);
+      expect(Boolean(stderr)).toBe(!confirmed);
+    },
+  );
+
+  it("binds a rejection to the displayed hash too", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(ControlPlaneClient.prototype, "connect").mockResolvedValue();
+    const request = vi
+      .spyOn(ControlPlaneClient.prototype, "request")
+      .mockResolvedValue({ status: "handled" });
+    vi.spyOn(ControlPlaneClient.prototype, "close").mockImplementation(() => {});
+    const hash = "b".repeat(64);
+    expect(
+      await main([
+        "reject",
+        "approval-1",
+        "--remote",
+        "--token",
+        "fixture",
+        "--revision-hash",
+        hash,
+      ]),
+    ).toBe(0);
+    expect(request).toHaveBeenCalledWith("approval.respond", {
+      approvalId: "approval-1",
+      approved: false,
+      expectedRevisionHash: hash,
+    });
   });
 });

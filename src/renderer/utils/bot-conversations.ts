@@ -1,4 +1,4 @@
-import { isTempWorkspaceId, type AgentTeam, type Task } from "../../shared/types";
+import { isTempWorkspaceId, type Task } from "../../shared/types";
 import type { CreateTaskOptions } from "../components/MainContent/main-content-types";
 
 /** Cross-component signal used by the bot details rail to reveal inline history. */
@@ -134,12 +134,8 @@ export function matchesBotConversation(
 export function shouldReopenBotConversationInWorkspace(
   task: Pick<Task, "workspaceId" | "agentConfig">,
   workspaceId: string,
-  teams: ReadonlyArray<Pick<AgentTeam, "id" | "isActive" | "persistent">>,
+  _teams?: ReadonlyArray<{ id: string; isActive: boolean; persistent: boolean }>,
 ): boolean {
-  if (!isTempWorkspaceId(workspaceId)) return false;
-  if (task.workspaceId !== workspaceId) return true;
-  const teamId = task.agentConfig?.botTeamId;
-  return Boolean(
-    teamId && !teams.some((team) => team.id === teamId && team.isActive && team.persistent),
-  );
+  // Opening an existing local conversation never repairs its team authorization.
+  return isTempWorkspaceId(workspaceId) && task.workspaceId !== workspaceId;
 }

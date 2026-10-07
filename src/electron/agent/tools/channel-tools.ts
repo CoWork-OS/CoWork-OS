@@ -1,3 +1,4 @@
+import { readResponsibilityChannelHistory } from "../../automation/responsibility-task-policy";
 import { ChannelRepository } from "../../database/repository-facades";
 import type Database from "better-sqlite3";
 import { serviceStatements } from "../../database/service-statements";
@@ -310,7 +311,7 @@ export class ChannelTools {
     const channelType = typeof input?.channel === "string" ? input.channel.trim() : "";
     const chatId = typeof input?.chat_id === "string" ? input.chat_id.trim() : "";
     const limitRaw = typeof input?.limit === "number" ? input.limit : undefined;
-    const limit = Math.min(Math.max(limitRaw ?? 50, 1), 200);
+    const limit = Math.trunc(Math.min(Math.max(limitRaw ?? 50, 1), 200));
     const sinceRaw = typeof input?.since === "string" ? input.since.trim() : "";
     const directionRaw = typeof input?.direction === "string" ? input.direction.trim() : "";
     const direction: ChannelHistoryDirection =
@@ -355,13 +356,16 @@ export class ChannelTools {
       };
     }
 
-    const rows = await serviceStatements(this.db).unit("channelHistory_chatMessages", [
+    const rows = await readResponsibilityChannelHistory(
+      this.db,
+      this.taskId,
+      channelType,
       channel.id,
       chatId,
       typeof sinceMs === "number" ? sinceMs : null,
       direction,
       limit,
-    ]);
+    );
     const messages = rows
       .map((r) => {
         const ts = typeof r.timestamp === "number" ? r.timestamp : Number(r.timestamp ?? 0);

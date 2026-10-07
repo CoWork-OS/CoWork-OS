@@ -1,3 +1,7 @@
+import { registerBotWorkControlMethods } from "../electron/control-plane/registerBotWorkControlMethods";
+import { registerBotResponsibilityMethods } from "../electron/control-plane/registerBotResponsibilityMethods";
+import { registerAutomationRuntimeMethods } from "../electron/control-plane/registerAutomationRuntimeMethods";
+import { registerBotWorkMethods } from "../electron/control-plane/registerBotWorkMethods";
 import { TaskRepository, WorkspaceRepository } from "../electron/database/repository-facades";
 import { ChannelRepository } from "../electron/database/repository-facades";
 import {
@@ -12,7 +16,8 @@ import { ErrorCodes, Events, Methods } from "../electron/control-plane/protocol"
 import type { ControlPlaneServer } from "../electron/control-plane/server";
 import { ControlPlaneSettingsManager } from "../electron/control-plane/settings";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
-import type { AgentConfig, PermissionMode } from "../shared/types";
+import type { AgentConfig, ApprovalRequest, PermissionMode } from "../shared/types";
+import { presentApprovalRevision } from "../electron/agent/approval-revision";
 import { DEFAULT_WORKSPACE_PERMISSIONS, isTempWorkspaceId } from "../shared/types";
 import type { AgentDaemon } from "../electron/agent/daemon";
 import type { DatabaseManager } from "../electron/database/schema";
@@ -60,6 +65,7 @@ export interface ControlPlaneMethodDeps {
   agentDaemon: AgentDaemon;
   dbManager: DatabaseManager;
   channelGateway?: ChannelGateway;
+  getRoutineService?: () => import("../electron/routines/service").RoutineService | null;
 }
 
 function requireScope(client: Any, scope: "admin" | "read" | "write" | "operator"): void {
@@ -164,14 +170,31 @@ function sanitizeTaskIdParams(params: unknown): { taskId: string } {
   return { taskId };
 }
 
-function sanitizeApprovalRespondParams(params: unknown): { approvalId: string; approved: boolean } {
+function sanitizeApprovalRespondParams(params: unknown): {
+  approvalId: string;
+  approved: boolean;
+  expectedRevisionHash?: string;
+} {
   const p = (params ?? {}) as Any;
   const approvalId = typeof p.approvalId === "string" ? p.approvalId.trim() : "";
   const approved = p.approved;
+  const expectedRevisionHash = p.expectedRevisionHash;
   if (!approvalId) throw { code: ErrorCodes.INVALID_PARAMS, message: "approvalId is required" };
   if (typeof approved !== "boolean")
     throw { code: ErrorCodes.INVALID_PARAMS, message: "approved is required (boolean)" };
-  return { approvalId, approved };
+  if (
+    expectedRevisionHash !== undefined &&
+    (typeof expectedRevisionHash !== "string" || !/^[0-9a-f]{64}$/.test(expectedRevisionHash))
+  )
+    throw {
+      code: ErrorCodes.INVALID_PARAMS,
+      message: "expectedRevisionHash must be a lowercase SHA-256 hash",
+    };
+  return {
+    approvalId,
+    approved,
+    ...(expectedRevisionHash !== undefined ? { expectedRevisionHash } : {}),
+  };
 }
 
 function sanitizeInputRequestListParams(params: unknown): {
@@ -819,6 +842,15 @@ export function registerControlPlaneMethods(
     plannerService: getStrategicPlannerService(),
     requireScope,
   });
+  registerBotWorkMethods({ server, db, requireScope });
+  registerBotWorkControlMethods({ server, db, agentDaemon, requireScope });
+  registerBotResponsibilityMethods({
+    server,
+    db,
+    requireScope,
+    getRoutineService: deps.getRoutineService,
+  });
+  registerAutomationRuntimeMethods({ server, requireScope });
   registerWorkSessionMethods({
     server,
     db,
@@ -1054,6 +1086,7 @@ export function registerControlPlaneMethods(
       prompt: validated.prompt,
       status: "pending",
       workspaceId: validated.workspaceId,
+      assignedAgentRoleId: validated.assignedAgentRoleId,
       agentConfig: normalizedAgentConfig,
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
@@ -1061,7 +1094,6 @@ export function registerControlPlaneMethods(
 
     const initialUpdates: Any = {};
     if (validated.assignedAgentRoleId) {
-      initialUpdates.assignedAgentRoleId = validated.assignedAgentRoleId;
       initialUpdates.boardColumn = "todo";
     }
     if (Object.keys(initialUpdates).length > 0) {
@@ -1205,30 +1237,34 @@ export function registerControlPlaneMethods(
     requireScope(client, "admin");
     const { limit, offset, taskId } = sanitizeApprovalListParams(params);
 
-    const approvals = taskId
+    const approvalRows: ApprovalRequest[] = taskId
       ? (await approvalRepo.findPendingByTaskId(taskId)).slice(offset, offset + limit)
       : await (async () => {
           const rows = (await controlPlaneStatements(db).all("api_listPendingApprovals", [
             limit,
             offset,
           ])) as Any[];
-          return rows.map((row) => ({
-            id: String(row.id ?? ""),
-            taskId: String(row.task_id ?? ""),
-            type: row.type,
-            description: row.description,
-            details: (() => {
-              try {
-                return row.details ? JSON.parse(String(row.details)) : {};
-              } catch {
-                return {};
-              }
-            })(),
-            status: row.status,
-            requestedAt: Number(row.requested_at ?? 0),
-            resolvedAt: row.resolved_at ? Number(row.resolved_at) : undefined,
-          }));
+          return rows.map(
+            (row) =>
+              ({
+                id: String(row.id ?? ""),
+                taskId: String(row.task_id ?? ""),
+                type: String(row.type ?? "") as ApprovalRequest["type"],
+                description: String(row.description ?? ""),
+                details: (() => {
+                  try {
+                    return row.details ? JSON.parse(String(row.details)) : {};
+                  } catch {
+                    return {};
+                  }
+                })(),
+                status: String(row.status ?? "pending") as ApprovalRequest["status"],
+                requestedAt: Number(row.requested_at ?? 0),
+                resolvedAt: row.resolved_at ? Number(row.resolved_at) : undefined,
+              }) satisfies ApprovalRequest,
+          );
         })();
+    const approvals = approvalRows.map((approval) => presentApprovalRevision(approval));
 
     const enriched = await Promise.all(
       approvals.map(async (a: Any) => {
@@ -1246,8 +1282,14 @@ export function registerControlPlaneMethods(
 
   server.registerMethod(Methods.APPROVAL_RESPOND, async (client, params) => {
     requireScope(client, "admin");
-    const { approvalId, approved } = sanitizeApprovalRespondParams(params);
-    const status = await agentDaemon.respondToApproval(approvalId, approved);
+    const { approvalId, approved, expectedRevisionHash } = sanitizeApprovalRespondParams(params);
+    const status = await agentDaemon.respondToApproval(
+      approvalId,
+      approved,
+      undefined,
+      undefined,
+      expectedRevisionHash,
+    );
     return { status };
   });
 

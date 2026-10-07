@@ -206,7 +206,7 @@ export class MCPServerConnection extends EventEmitter {
   ): Promise<MCPCallResult> {
     // Stdio elicitation has no reliable parent request ID. Serialize calls so an
     // approval can only reach the task that owns the currently executing call.
-    if (this.config.transport !== "stdio") return this.executeToolCall(name, args);
+    if (this.config.transport !== "stdio") return this.executeToolCall(name, args, options);
     const previous = this.toolCallQueue;
     let release!: () => void;
     this.toolCallQueue = new Promise<void>((resolve) => {
@@ -217,14 +217,18 @@ export class MCPServerConnection extends EventEmitter {
     this.activeToolCall = context;
     try {
       if (context.signal?.aborted) throw new Error("MCP tool call cancelled");
-      return await this.executeToolCall(name, args);
+      return await this.executeToolCall(name, args, context);
     } finally {
       if (this.activeToolCall === context) this.activeToolCall = null;
       release();
     }
   }
 
-  private async executeToolCall(name: string, args: Record<string, Any>): Promise<MCPCallResult> {
+  private async executeToolCall(
+    name: string,
+    args: Record<string, Any>,
+    options: MCPToolCallOptions,
+  ): Promise<MCPCallResult> {
     if (this.status !== "connected" || !this.transport) {
       throw new Error(`Server ${this.config.name} is not connected`);
     }
@@ -235,13 +239,31 @@ export class MCPServerConnection extends EventEmitter {
       throw new Error(`Tool ${name} not found on server ${this.config.name}`);
     }
 
+    const transport = this.transport;
+    const beforeSend = async () => {
+      if (options.signal?.aborted) throw new Error("MCP tool call cancelled");
+      await options.beforeSend?.();
+      if (options.signal?.aborted) throw new Error("MCP tool call cancelled");
+      if (
+        this.status !== "connected" ||
+        this.transport !== transport ||
+        !this.tools.some((tool) => tool.name === name)
+      )
+        throw new Error("MCP connection or tool changed before send");
+    };
+    await beforeSend();
+
     logger.debug(`Calling tool ${name} on ${this.config.name}`);
 
     try {
-      const result = await this.transport!.sendRequest(MCP_METHODS.TOOLS_CALL, {
-        name,
-        arguments: args,
-      });
+      const result = await transport.sendRequest(
+        MCP_METHODS.TOOLS_CALL,
+        {
+          name,
+          arguments: args,
+        },
+        { beforeSend, signal: options.signal },
+      );
 
       return result as MCPCallResult;
     } catch (error: Any) {

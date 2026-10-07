@@ -176,6 +176,14 @@ export function configureLlmFromControlPlaneParams(params: unknown): {
         };
       }
       break;
+    case "openai-compatible":
+      updatedSettings = applyProviderApiKeyAndBaseUrl(
+        updatedSettings,
+        "openaiCompatible",
+        validated.apiKey,
+        baseUrl,
+      );
+      break;
     case "gemini":
       if (validated.apiKey) {
         updatedSettings.gemini = { ...updatedSettings.gemini, apiKey: validated.apiKey };

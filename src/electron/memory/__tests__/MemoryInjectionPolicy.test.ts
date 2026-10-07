@@ -281,3 +281,77 @@ describe("DefaultMemoryInjectionPolicy (contract)", () => {
     );
   });
 });
+
+describe("channel caller memory authority", () => {
+  it.each([false, undefined])("denies owner layers for a non-owner or legacy DM (%s)", (owner) => {
+    const decision = resolveMemoryInjection(
+      memoryPolicyInputForTask({
+        agentConfig: {
+          originChannel: "telegram",
+          gatewayContext: "private",
+          gatewaySenderIsOwner: owner,
+          allowSharedContextMemory: true,
+        },
+      }),
+    );
+    expect(decision.memory).toBe(false);
+    expect(decision.allowPrivateItems).toBe(false);
+    // Every owner layer is off, including layers added later.
+    expect(Object.entries(decision.layers).filter(([, enabled]) => enabled)).toEqual([]);
+    expect(memoryItemAllowed(item(), decision).allowed).toBe(false);
+  });
+  it("keeps local and verified-owner DM memory", () => {
+    for (const agentConfig of [
+      undefined,
+      { originChannel: "telegram", gatewayContext: "private" as const, gatewaySenderIsOwner: true },
+    ]) {
+      const decision = resolveMemoryInjection(memoryPolicyInputForTask({ agentConfig }));
+      expect(decision.memory).toBe(true);
+      expect(decision.layers.workspaceKit).toBe(true);
+      expect(decision.allowPrivateItems).toBe(true);
+    }
+  });
+  it("preserves explicit shared group grants while excluding private items and owner kit files", () => {
+    const decision = resolveMemoryInjection(
+      memoryPolicyInputForTask({
+        agentConfig: {
+          originChannel: "slack",
+          gatewayContext: "group",
+          gatewaySenderIsOwner: false,
+          allowSharedContextMemory: true,
+        },
+      }),
+    );
+    expect(decision.memory).toBe(true);
+    expect(decision.allowPrivateItems).toBe(false);
+    expect(decision.layers.workspaceKit).toBe(false);
+    expect(memoryItemAllowed(item({ privacy: "private" }), decision).allowed).toBe(false);
+  });
+});
+
+describe("surface contract caller authority", () => {
+  it.each([false, undefined])(
+    "denies unattributed private-channel surfaces (%s)",
+    async (owner) => {
+      const policy = new DefaultMemoryInjectionPolicy();
+      const context = {
+        workspaceId: "ws",
+        surface: "channel_private" as const,
+        gatewaySenderIsOwner: owner,
+      };
+      expect((await policy.surfaceAllowed(context)).allowed).toBe(false);
+      expect(policy.itemAllowed(item(), context).allowed).toBe(false);
+      expect(policy.itemAllowed(item({ privacy: "private" }), context).allowed).toBe(false);
+    },
+  );
+  it("admits a positively identified owner's private channel", async () => {
+    const policy = new DefaultMemoryInjectionPolicy();
+    const context = {
+      workspaceId: "ws",
+      surface: "channel_private" as const,
+      gatewaySenderIsOwner: true,
+    };
+    expect((await policy.surfaceAllowed(context)).allowed).toBe(true);
+    expect(policy.itemAllowed(item({ privacy: "private" }), context).allowed).toBe(true);
+  });
+});

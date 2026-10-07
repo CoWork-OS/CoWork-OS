@@ -1,6 +1,10 @@
-import * as fs from "fs";
+import { WorkspaceArtifactEvidenceInspector } from "../../sessions/WorkspaceArtifactEvidenceInspector";
+import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
+import { credentialFingerprint, isProvenOAuthRefresh } from "../../security/oauth-refresh-proof";
+import { snapshotToolInput } from "./tool-input-snapshot";
+import type { MCPAuthConfig } from "../../mcp/types";
 import * as path from "path";
-import { Workspace } from "../../../shared/types";
+import { BoxSettingsData, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { BoxSettingsManager } from "../../settings/box-manager";
 import { boxRequest, boxUploadFile } from "../../utils/box-api";
@@ -8,6 +12,7 @@ import {
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
+import { createIntegrationEffectGuard, integrationEffectReview } from "./integration-effect-guard";
 
 type BoxAction =
   | "get_current_user"
@@ -92,7 +97,46 @@ export class BoxTools {
     }
   }
 
+  private createActionEffectGuard(
+    initialSettings: BoxSettingsData,
+    input: BoxActionInput,
+    details: Record<string, unknown>,
+  ) {
+    const credential = (settings: BoxSettingsData): MCPAuthConfig => ({
+      type: "bearer",
+      token: settings.accessToken,
+      refreshToken: settings.refreshToken,
+      clientId: settings.clientId,
+      clientSecret: settings.clientSecret,
+      tokenUrl: settings.refreshToken ? "https://api.box.com/oauth2/token" : undefined,
+      expiresAt: settings.tokenExpiresAt,
+    });
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName: "box_action",
+      toolInput: input,
+      approvalDetails: details,
+      initialSettings,
+      loadSettings: () => BoxSettingsManager.loadSettings(),
+      settingsEnabled: (current) =>
+        current.enabled && Boolean(current.accessToken || current.refreshToken),
+      settingsFingerprint: (current) =>
+        JSON.stringify({
+          enabled: current.enabled,
+          scopes: current.scopes ? [...current.scopes].sort() : undefined,
+          mcpEnabled: current.mcpEnabled,
+          timeoutMs: current.timeoutMs,
+        }),
+      authConfig: credential,
+      errorPrefix: "Box action",
+    });
+  }
+
   async executeAction(input: BoxActionInput): Promise<Any> {
+    input = snapshotToolInput(input);
     const settings = BoxSettingsManager.loadSettings();
     if (!settings.enabled) {
       throw new Error("Box integration is disabled. Enable it in Settings > Integrations > Box.");
@@ -165,14 +209,16 @@ export class BoxTools {
       case "create_folder": {
         if (!input.name) throw new Error("Missing name for create_folder");
         const parentId = input.parent_id || DEFAULT_FOLDER_ID;
-        await this.requireApproval("Create a Box folder", {
-          action: "create_folder",
+        const details = integrationEffectReview("box_action", input, "create_folder", {
           parent_id: parentId,
           name: input.name,
         });
+        const beforeSend = await this.createActionEffectGuard(settings, input, details);
+        await this.requireApproval("Create a Box folder", details);
         result = await boxRequest(settings, {
           method: "POST",
           path: "/folders",
+          beforeSend,
           body: {
             name: input.name,
             parent: { id: parentId },
@@ -182,22 +228,29 @@ export class BoxTools {
       }
       case "delete_file": {
         if (!input.file_id) throw new Error("Missing file_id for delete_file");
-        await this.requireApproval("Delete a Box file", {
-          action: "delete_file",
+        const details = integrationEffectReview("box_action", input, "delete_file", {
           file_id: input.file_id,
         });
-        result = await boxRequest(settings, { method: "DELETE", path: `/files/${input.file_id}` });
+        const beforeSend = await this.createActionEffectGuard(settings, input, details);
+        await this.requireApproval("Delete a Box file", details);
+        result = await boxRequest(settings, {
+          method: "DELETE",
+          path: `/files/${input.file_id}`,
+          beforeSend,
+        });
         break;
       }
       case "delete_folder": {
         if (!input.folder_id) throw new Error("Missing folder_id for delete_folder");
-        await this.requireApproval("Delete a Box folder", {
-          action: "delete_folder",
+        const details = integrationEffectReview("box_action", input, "delete_folder", {
           folder_id: input.folder_id,
         });
+        const beforeSend = await this.createActionEffectGuard(settings, input, details);
+        await this.requireApproval("Delete a Box folder", details);
         result = await boxRequest(settings, {
           method: "DELETE",
           path: `/folders/${input.folder_id}`,
+          beforeSend,
         });
         break;
       }
@@ -205,17 +258,80 @@ export class BoxTools {
         if (!input.file_path) throw new Error("Missing file_path for upload_file");
         const parentId = input.parent_id || DEFAULT_FOLDER_ID;
         const resolved = await this.resolveFilePath(input.file_path);
-        const data = fs.readFileSync(resolved);
-        const fileName = input.name || path.basename(resolved);
-        await this.requireApproval(`Upload file to Box: ${fileName}`, {
+        const snapshot = new WorkspaceArtifactEvidenceInspector({
+          maxBytes: 4 * 1024 * 1024,
+        }).snapshot(this.workspace, resolved);
+        if (snapshot.status !== "present" || !snapshot.data)
+          throw new Error("Box upload draft cannot be captured for review");
+        const data = snapshot.data;
+        const details = {
+          tool: "box_action",
+          params: input,
           action: "upload_file",
           parent_id: parentId,
+          reviewFiles: [resolved],
+          expectedDraftRevisions: [
+            { reference: resolved, sha256: snapshot.sha256, size: snapshot.size },
+          ],
+        };
+        const scope = (workspace: Workspace) =>
+          JSON.stringify({
+            id: workspace.id,
+            path: workspace.path,
+            permissions: workspace.permissions,
+          });
+        const admittedScope = scope(this.workspace);
+        const authority = await this.daemon.getToolEffectAuthority(this.taskId, details);
+        if (!authority) throw new Error("Box upload authority unavailable");
+        const credential = (value: typeof settings): MCPAuthConfig => ({
+          type: "bearer",
+          token: value.accessToken,
+          refreshToken: value.refreshToken,
+          clientId: value.clientId,
+          clientSecret: value.clientSecret,
+          tokenUrl: value.refreshToken ? "https://api.box.com/oauth2/token" : undefined,
+          expiresAt: value.tokenExpiresAt,
+        });
+        const admittedCredential = credential(settings);
+        const beforeSend = async () => {
+          const check = () => {
+            const effective = this.daemon.getEffectiveWorkspaceForTask(this.taskId);
+            const current = BoxSettingsManager.loadSettings();
+            const auth = credential(current);
+            if (
+              !effective ||
+              scope(effective) !== admittedScope ||
+              scope(this.workspace) !== admittedScope ||
+              !current.enabled ||
+              (credentialFingerprint(auth) !== credentialFingerprint(admittedCredential) &&
+                !isProvenOAuthRefresh(admittedCredential, auth))
+            )
+              throw new Error("Box upload authority changed before send");
+          };
+          check();
+          await enforceResponsibilityToolPolicy(
+            this.daemon.getDatabase(),
+            this.taskId,
+            this.workspace.id,
+            this.workspace.path,
+            "box_action",
+            input,
+          );
+          check();
+          if ((await this.daemon.getToolEffectAuthority(this.taskId, details)) !== authority)
+            throw new Error("Box upload task authority changed before send");
+          check();
+        };
+        const fileName = input.name || path.basename(resolved);
+        await this.requireApproval(`Upload file to Box: ${fileName}`, {
+          ...details,
           file: fileName,
         });
         result = await boxUploadFile(settings, {
           fileName,
           parentId,
           data,
+          beforeSend,
         });
         break;
       }

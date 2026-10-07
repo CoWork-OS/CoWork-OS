@@ -1,3 +1,6 @@
+import type { BotWorkResultStore } from "./bot-work-result-store";
+import type { BotWorkStore } from "./bot-work-store";
+import type { BotOutcomeMetricsStore } from "./bot-outcome-metrics-store";
 import type Database from "better-sqlite3";
 import { StatementPort } from "./statements/statement-port";
 import { flushPendingTimelineTask } from "./timeline-write-registry";
@@ -192,6 +195,9 @@ export const AnnotationRepository = repositoryFacade<
 >("annotation_", ANNOTATION_METHODS);
 
 const APPROVAL_METHODS = [
+  "draftPreviews",
+  "approvedRevisionCurrent",
+  "resolvePending",
   "create",
   "update",
   "findById",
@@ -223,6 +229,7 @@ export const WorkspacePermissionRuleRepository = repositoryFacade<
 
 const INPUTREQUEST_METHODS = [
   "create",
+  "getApprovalBinding",
   "resolve",
   "findById",
   "findPendingByTaskId",
@@ -658,6 +665,7 @@ const TASK_METHODS = [
   "findSidebarSummaries",
   "findByStatus",
   "findByWorkspace",
+  "findByScheduledRun",
   "findBySessionId",
   "countByWorkspace",
   "findByCreatedAtRange",
@@ -710,3 +718,17 @@ export const WorkspaceRepository = repositoryFacade<
   WorkspaceStore,
   (typeof WORKSPACE_METHODS)[number]
 >("workspace_", WORKSPACE_METHODS);
+
+export type BotWorkRepository = AsyncStore<BotWorkStore, "list">;
+export const BotWorkRepository = repositoryFacade<BotWorkStore, "list">("botWork_", ["list"]);
+export type BotOutcomeMetricsRepository = AsyncStore<BotOutcomeMetricsStore, "summary">;
+export const BotOutcomeMetricsRepository = repositoryFacade<BotOutcomeMetricsStore, "summary">(
+  "botOutcomeMetrics_",
+  ["summary"],
+);
+
+export type BotWorkResultRepository = AsyncStore<BotWorkResultStore, "manifest">;
+export const BotWorkResultRepository = repositoryFacade<BotWorkResultStore, "manifest">(
+  "botWorkResult_",
+  ["manifest"],
+);

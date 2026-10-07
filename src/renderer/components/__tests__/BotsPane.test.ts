@@ -9,9 +9,11 @@ import {
   getBotConversationReadinessLabel,
   getBotHandle,
   getBotLatestTask,
+  getBotMascotExpression,
   getBotPreview,
   getBotRelativeTime,
   getBotTimestamp,
+  pickDefaultBotMascot,
   stripMarkdownForBotPreview,
 } from "../BotsPane";
 
@@ -327,5 +329,36 @@ describe("BotsPane", () => {
 
     expect(markup).toContain("No bots yet");
     expect(markup).toContain("Create bot");
+  });
+
+  it("draws a mascot bot as its character, with eyes that follow its readiness", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BotsPane, {
+        roles: [{ ...bot, icon: "mascot:research" }],
+        tasks: [{ ...task, status: "executing" } as Any],
+        selectedTaskId: null,
+        onSelectTask: () => {},
+      }),
+    );
+
+    expect(markup).toContain("sidebar-bot-avatar sidebar-bot-avatar-mascot");
+    expect(markup).toContain('data-mascot="research"');
+    expect(markup).toContain('data-expression="working"');
+    // The status dot stays alongside the character.
+    expect(markup).toContain("sidebar-bot-status active");
+  });
+
+  it("maps roster readiness onto mascot expressions", () => {
+    expect(getBotMascotExpression("ready")).toBe("idle");
+    expect(getBotMascotExpression("working")).toBe("working");
+    expect(getBotMascotExpression("waiting")).toBe("thinking");
+    expect(getBotMascotExpression("attention")).toBe("attention");
+    expect(getBotMascotExpression("unavailable")).toBe("error");
+    expect(getBotMascotExpression("working", false)).toBe("sleeping");
+  });
+
+  it("gives a new bot a character no other bot is using", () => {
+    expect(pickDefaultBotMascot([])).toBe("code");
+    expect(pickDefaultBotMascot([{ icon: "mascot:code" }, { icon: "Bot" }])).toBe("research");
   });
 });

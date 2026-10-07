@@ -1,3 +1,4 @@
+import { credentialFingerprint, recordOAuthRefresh } from "../../../security/oauth-refresh-proof";
 /**
  * StreamableHttpTransport - MCP Streamable HTTP transport
  *
@@ -9,6 +10,7 @@
 import { EventEmitter } from "events";
 import {
   MCPTransport,
+  MCPTransportRequestOptions,
   MCPServerConfig,
   JSONRPCRequest,
   JSONRPCResponse,
@@ -99,6 +101,7 @@ function formatHttpError(status: number, statusText: string, body: string): Erro
 export class StreamableHttpTransport extends EventEmitter implements MCPTransport {
   private config: MCPServerConfig;
   private connected = false;
+  private connectionGeneration = 0;
   private requestId = 0;
   private sessionId: string | null = null;
   private protocolVersion = DEFAULT_PROTOCOL_VERSION;
@@ -129,11 +132,14 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       throw new Error("Streamable HTTP transport requires an http:// or https:// URL");
     }
 
+    this.connectionGeneration++;
     this.connected = true;
   }
 
   async disconnect(): Promise<void> {
     const sessionId = this.sessionId;
+    this.connected = false;
+    this.connectionGeneration++;
 
     for (const controller of this.activeAbortControllers) {
       controller.abort();
@@ -160,7 +166,11 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     this.protocolVersion = DEFAULT_PROTOCOL_VERSION;
   }
 
-  async sendRequest(method: string, params?: Record<string, Any>): Promise<Any> {
+  async sendRequest(
+    method: string,
+    params?: Record<string, Any>,
+    options: MCPTransportRequestOptions = {},
+  ): Promise<Any> {
     if (!this.connected) {
       throw new Error("Not connected");
     }
@@ -176,7 +186,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       this.lastInitializeRequest = request;
     }
 
-    return (await this.postMessage(request, true)) as Any;
+    return (await this.postMessage(request, true, true, options)) as Any;
   }
 
   async send(message: JSONRPCRequest | JSONRPCNotification): Promise<void> {
@@ -207,21 +217,48 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     message: OutgoingMessage,
     expectsResponse: boolean,
     allowSessionRecovery = true,
+    options: MCPTransportRequestOptions = {},
   ): Promise<Any | undefined> {
     if (!this.config.url) {
       throw new Error("No URL configured for Streamable HTTP transport");
     }
 
+    const endpoint = this.config.url;
+    const generation = this.connectionGeneration;
+    if (options.signal?.aborted) throw new Error("MCP tool call cancelled");
     await this.ensureFreshToken();
-    const response = await this.fetchWithTimeout(this.config.url, {
-      method: "POST",
-      headers: this.buildHeaders(message),
-      body: JSON.stringify(message),
-    });
+    if (options.signal?.aborted) throw new Error("MCP tool call cancelled");
+    await options.beforeSend?.();
+    if (options.signal?.aborted) throw new Error("MCP tool call cancelled");
+    if (!this.connected || generation !== this.connectionGeneration || endpoint !== this.config.url)
+      throw new Error("MCP HTTP connection or endpoint changed before send");
+    const response = await this.fetchWithTimeout(
+      endpoint,
+      {
+        method: "POST",
+        headers: this.buildHeaders(message),
+        body: JSON.stringify(message),
+      },
+      options.signal,
+    );
 
+    if (!this.connected || generation !== this.connectionGeneration) {
+      throw new Error(
+        message.method === "tools/call"
+          ? "MCP_TOOL_OUTCOME_UNCONFIRMED: connection changed after submission. Inspect the outcome before retrying."
+          : "MCP HTTP connection changed after submission",
+      );
+    }
     const returnedSessionId = response.headers.get(SESSION_HEADER);
     if (returnedSessionId) {
       this.sessionId = returnedSessionId;
+    }
+
+    if (response.status === 404 && message.method === "tools/call") {
+      await response.text().catch(() => undefined);
+      throw new Error(
+        "MCP_TOOL_OUTCOME_UNCONFIRMED: tool request returned 404. Inspect its outcome before retrying; no automatic replay was sent.",
+      );
     }
 
     if (
@@ -238,8 +275,8 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
         id: ++this.requestId,
       };
       this.lastInitializeRequest = initializeRequest;
-      await this.postMessage(initializeRequest, true, false);
-      return this.postMessage(message, expectsResponse, false);
+      await this.postMessage(initializeRequest, true, false, options);
+      return this.postMessage(message, expectsResponse, false, options);
     }
 
     const body = await response.text();
@@ -340,8 +377,8 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     if (this.config.registryId === "box") {
       const boxSettings = BoxSettingsManager.loadSettings();
       if (boxSettings.accessToken || boxSettings.refreshToken) {
+        const previousAuth = this.config.auth ? structuredClone(this.config.auth) : undefined;
         const accessToken = await getBoxAccessToken(boxSettings);
-        const previousAuth = this.config.auth;
         const nextAuth = {
           ...(this.config.auth || {}),
           type: "bearer" as const,
@@ -352,6 +389,17 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
           tokenUrl: boxSettings.refreshToken ? BOX_TOKEN_URL : undefined,
           expiresAt: boxSettings.tokenExpiresAt,
         };
+        let currentAuth = previousAuth;
+        try {
+          currentAuth = MCPSettingsManager.getServer(this.config.id)?.auth ?? previousAuth;
+        } catch {
+          /* Unavailable settings retain the local flow. */
+        }
+        if (
+          credentialFingerprint(currentAuth) !== credentialFingerprint(previousAuth) ||
+          credentialFingerprint(this.config.auth) !== credentialFingerprint(previousAuth)
+        )
+          throw new Error("MCP credentials changed during Box token refresh");
         this.config.auth = nextAuth;
 
         const authChanged =
@@ -373,7 +421,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       }
     }
 
-    const auth = this.config.auth;
+    const auth = this.config.auth ? structuredClone(this.config.auth) : undefined;
     if (!auth?.refreshToken || !auth.clientId || !auth.clientSecret || !auth.tokenUrl) {
       return;
     }
@@ -414,7 +462,12 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
         throw new Error("MCP OAuth token refresh returned invalid JSON");
       }
 
-      if (!tokenData?.access_token) {
+      if (
+        typeof tokenData?.access_token !== "string" ||
+        !tokenData.access_token.trim() ||
+        (tokenData.refresh_token !== undefined &&
+          (typeof tokenData.refresh_token !== "string" || !tokenData.refresh_token.trim()))
+      ) {
         throw new Error("MCP OAuth token refresh did not return an access_token");
       }
 
@@ -427,7 +480,20 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
             ? Date.now() + tokenData.expires_in * 1000
             : undefined,
       };
+      // A manual credential edit during refresh must not be overwritten by its late response.
+      let currentAuth = auth;
+      try {
+        currentAuth = MCPSettingsManager.getServer(this.config.id)?.auth ?? auth;
+      } catch {
+        /* Unavailable settings retain the local flow. */
+      }
+      if (
+        credentialFingerprint(currentAuth) !== credentialFingerprint(auth) ||
+        credentialFingerprint(this.config.auth) !== credentialFingerprint(auth)
+      )
+        throw new Error("MCP credentials changed during token refresh");
       this.config.auth = nextAuth;
+      recordOAuthRefresh(auth, nextAuth);
 
       try {
         MCPSettingsManager.updateServer(this.config.id, { auth: nextAuth });
@@ -459,6 +525,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
   private async fetchWithTimeout(
     input: string,
     init: RequestInit & { method: string },
+    signal?: AbortSignal,
   ): Promise<Response> {
     const controller = new AbortController();
     this.activeAbortControllers.add(controller);
@@ -468,8 +535,14 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     );
 
     try {
-      return await fetch(input, { ...init, signal: controller.signal });
+      if (signal?.aborted) throw new Error("MCP tool call cancelled");
+      return await fetch(input, {
+        ...init,
+        redirect: "manual",
+        signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
+      });
     } catch (error: Any) {
+      if (signal?.aborted) throw new Error("MCP tool call cancelled");
       if (error?.name === "AbortError") {
         throw new Error(`Request timeout for MCP method: ${init.method}`);
       }

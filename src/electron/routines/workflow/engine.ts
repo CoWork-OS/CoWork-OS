@@ -1,5 +1,5 @@
 import { RoutineWorkflowRepository } from "../routine-repository-facades";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   RoutineWorkflowDefinition,
   RoutineWorkflowNode,
@@ -248,6 +248,7 @@ export class RoutineWorkflowEngine {
     runId: string;
     stepId: string;
     approved: boolean;
+    reviewDigest?: string;
   }): Promise<RoutineWorkflowRunRecord> {
     const run = await this.requireRun(input.runId);
     const step = await this.repository.getStep(input.stepId);
@@ -267,9 +268,46 @@ export class RoutineWorkflowEngine {
       }))!;
     }
     const context = this.getContext(run);
+    if (input.reviewDigest !== step.reviewDigest) {
+      throw new Error("The action review changed. Reload the current details before approving.");
+    }
+    const node = findWorkflowNode(input.workflow.nodes, step.nodeId);
+    if (!node || node.operation !== step.operation) {
+      throw new Error("The pending approval no longer matches this workflow action.");
+    }
+    const variableContext: WorkflowVariableContext = {
+      trigger: context.trigger,
+      nodes: context.nodes,
+      run: { id: run.id, routineId: run.routineId },
+    };
+    const resolvedInput = resolveWorkflowInputs(node.config, variableContext);
+    const currentReviewDigest = workflowActionReviewDigest(
+      run.id,
+      run.routineId,
+      run.workflowVersionId,
+      node.id,
+      node.operation,
+      resolvedInput,
+    );
+    if (!step.reviewDigest || step.reviewDigest !== currentReviewDigest) {
+      if (!hasCompleteActionReviewPreview(resolvedInput)) {
+        await this.failUnreviewableAction({ run, step, input: resolvedInput });
+        return this.requireRun(run.id);
+      }
+      await this.savePendingActionReview({
+        run,
+        step,
+        input: resolvedInput,
+        reviewDigest: currentReviewDigest,
+        message: step.reviewDigest
+          ? "Action details changed after this review. Inspect the updated details and approve again."
+          : "This approval needs a fresh review. Inspect the action details and approve again.",
+      });
+      return this.requireRun(run.id);
+    }
     context.approvedStepIds = Array.from(new Set([...context.approvedStepIds, step.id]));
-    await this.repository.updateStep(step.id, { status: "pending", approvalId: "approved" });
     await this.repository.updateRun(run.id, { status: "running", context });
+    await this.repository.updateStep(step.id, { status: "pending", approvalId: "approved" });
     return this.continueRun(input.routine, input.workflow, run.id);
   }
 
@@ -294,9 +332,9 @@ export class RoutineWorkflowEngine {
   ): Promise<RoutineWorkflowRunRecord | null> {
     const run = await this.repository.getRun(runId);
     if (!run) return null;
-    const interrupted = (await this.repository
-      .listSteps(runId))
-      .filter((step) => step.status === "running" || step.status === "retrying");
+    const interrupted = (await this.repository.listSteps(runId)).filter(
+      (step) => step.status === "running" || step.status === "retrying",
+    );
     if (interrupted.length === 0) return run;
 
     const context = this.getContext(run);
@@ -374,16 +412,48 @@ export class RoutineWorkflowEngine {
     };
     const resolvedInput = resolveWorkflowInputs(node.config, variableContext);
     const approved = context.approvedStepIds.includes(step.id);
-    if (!context.dryRun && !approved && this.nodeNeedsApproval(routine, node)) {
-      const approvalId =
-        step.approvalId && step.approvalId !== "approved" ? step.approvalId : randomUUID();
-      await this.repository.updateStep(step.id, {
-        status: "waiting_for_approval",
-        input: redactForStorage(resolvedInput),
-        approvalId,
-      });
-      await this.repository.updateRun(runId, { status: "waiting_for_approval" });
+    const requiresApproval = this.nodeNeedsApproval(routine, node);
+    if (!context.dryRun && requiresApproval && !hasCompleteActionReviewPreview(resolvedInput)) {
+      await this.failUnreviewableAction({ run, step, input: resolvedInput });
+      return "failed";
+    }
+    if (!context.dryRun && !approved && requiresApproval) {
+      const reviewDigest = workflowActionReviewDigest(
+        run.id,
+        run.routineId,
+        run.workflowVersionId,
+        node.id,
+        node.operation,
+        resolvedInput,
+      );
+      await this.savePendingActionReview({ run, step, input: resolvedInput, reviewDigest });
       return "waiting_for_approval";
+    }
+    if (!context.dryRun && approved && requiresApproval) {
+      const currentReviewDigest = workflowActionReviewDigest(
+        run.id,
+        run.routineId,
+        run.workflowVersionId,
+        node.id,
+        node.operation,
+        resolvedInput,
+      );
+      if (!step.reviewDigest || step.reviewDigest !== currentReviewDigest) {
+        context.approvedStepIds = context.approvedStepIds.filter((id) => id !== step.id);
+        if (!hasCompleteActionReviewPreview(resolvedInput)) {
+          await this.failUnreviewableAction({ run, step, input: resolvedInput, context });
+          return "failed";
+        }
+        await this.savePendingActionReview({
+          run,
+          step,
+          input: resolvedInput,
+          reviewDigest: currentReviewDigest,
+          message:
+            "Action details changed after approval. Inspect the updated details and approve again.",
+        });
+        return "waiting_for_approval";
+      }
     }
 
     const nodeRisk = highestNodeRisk(node);
@@ -579,6 +649,52 @@ export class RoutineWorkflowEngine {
     }
   }
 
+  private async savePendingActionReview(input: {
+    run: RoutineWorkflowRunRecord;
+    step: RoutineWorkflowStepRecord;
+    input: Record<string, unknown>;
+    reviewDigest: string;
+    message?: string;
+  }): Promise<void> {
+    await this.repository.updateStep(input.step.id, {
+      status: "waiting_for_approval",
+      input: redactForStorage(input.input),
+      reviewDigest: input.reviewDigest,
+      approvalId: randomUUID(),
+      error: input.message,
+      finishedAt: undefined,
+    });
+    await this.repository.updateRun(input.run.id, {
+      status: "waiting_for_approval",
+      error: input.message,
+      finishedAt: undefined,
+    });
+  }
+
+  private async failUnreviewableAction(input: {
+    run: RoutineWorkflowRunRecord;
+    step: RoutineWorkflowStepRecord;
+    input: Record<string, unknown>;
+    context?: StoredRunContext;
+  }): Promise<void> {
+    const message =
+      "Action details exceed the review limit and cannot be approved safely. Split the target list or simplify the action.";
+    await this.repository.updateStep(input.step.id, {
+      status: "failed",
+      input: redactForStorage(input.input),
+      error: message,
+      approvalId: undefined,
+      reviewDigest: undefined,
+      finishedAt: this.now(),
+    });
+    await this.repository.updateRun(input.run.id, {
+      status: "failed",
+      ...(input.context ? { context: input.context } : {}),
+      error: message,
+      finishedAt: this.now(),
+    });
+  }
+
   private async finishRun(
     runId: string,
     stepByNode: Map<string, RoutineWorkflowStepRecord>,
@@ -645,6 +761,43 @@ function highestNodeRisk(node: RoutineWorkflowNode): WorkflowRiskLevel {
     (highest, risk) => (order.indexOf(risk) > order.indexOf(highest) ? risk : highest),
     "read",
   );
+}
+
+function workflowActionReviewDigest(
+  runId: string,
+  routineId: string,
+  workflowVersionId: string,
+  nodeId: string,
+  operation: string,
+  input: Record<string, unknown>,
+): string {
+  const canonicalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (!isRecord(value)) return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalize(item)]),
+    );
+  };
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        canonicalize({ runId, routineId, workflowVersionId, nodeId, operation, input }),
+      ),
+    )
+    .digest("hex");
+}
+
+function hasCompleteActionReviewPreview(value: unknown, depth = 0): boolean {
+  if (depth > 8) return false;
+  if (Array.isArray(value)) {
+    return (
+      value.length <= 200 && value.every((item) => hasCompleteActionReviewPreview(item, depth + 1))
+    );
+  }
+  if (!isRecord(value)) return true;
+  return Object.values(value).every((item) => hasCompleteActionReviewPreview(item, depth + 1));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

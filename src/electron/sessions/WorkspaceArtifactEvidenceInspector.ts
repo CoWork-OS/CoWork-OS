@@ -8,7 +8,13 @@ const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const READ_CHUNK_BYTES = 64 * 1024;
 
 export type WorkspaceArtifactInspection =
-  | { status: "present"; path: string; sha256: string; size: number }
+  | {
+      status: "present";
+      path: string;
+      sha256: string;
+      size: number;
+      preview?: { text: string; truncated: boolean };
+    }
   | { status: "missing"; path: string }
   | {
       status: "unavailable";
@@ -83,13 +89,33 @@ function containsSymlink(root: string, relative: string, io: WorkspaceArtifactEv
 /** Read and hash one exact workspace file using the workspace's normal read policy. */
 export class WorkspaceArtifactEvidenceInspector {
   constructor(
-    private readonly options: { maxBytes?: number; io?: WorkspaceArtifactEvidenceIo } = {},
+    private readonly options: {
+      maxBytes?: number;
+      io?: WorkspaceArtifactEvidenceIo;
+      previewMaxChars?: number;
+    } = {},
   ) {}
 
   inspect(
     workspace: Pick<Workspace, "path" | "permissions">,
     rawPath: string,
   ): WorkspaceArtifactInspection {
+    return this.read(workspace, rawPath, false);
+  }
+
+  /** Transient bytes from the same descriptor/version as the hash; never part of persisted inspection. */
+  snapshot(
+    workspace: Pick<Workspace, "path" | "permissions">,
+    rawPath: string,
+  ): WorkspaceArtifactInspection & { data?: Buffer } {
+    return this.read(workspace, rawPath, true);
+  }
+
+  private read(
+    workspace: Pick<Workspace, "path" | "permissions">,
+    rawPath: string,
+    retainBytes: boolean,
+  ): WorkspaceArtifactInspection & { data?: Buffer } {
     const maxBytes = Math.max(1, Math.floor(this.options.maxBytes ?? DEFAULT_MAX_BYTES));
     const io = this.options.io || systemIo;
     let workspaceRoot = "";
@@ -176,6 +202,13 @@ export class WorkspaceArtifactEvidenceInspector {
 
       const digest = createHash("sha256");
       const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES);
+      const previewMaxChars = Number.isSafeInteger(this.options.previewMaxChars)
+        ? Math.min(2000, Math.max(0, this.options.previewMaxChars!))
+        : 0;
+      const dataChunks: Buffer[] = [];
+      const previewChunks: Buffer[] = [];
+      const previewByteLimit = previewMaxChars * 4 + 4;
+      let previewBytes = 0;
       let bytesRead = 0;
       while (true) {
         const read = io.readSync(fd, buffer, 0, buffer.length, bytesRead);
@@ -183,6 +216,12 @@ export class WorkspaceArtifactEvidenceInspector {
         bytesRead += read;
         if (bytesRead > maxBytes) return unavailable("too_large", rawPath);
         digest.update(buffer.subarray(0, read));
+        if (retainBytes) dataChunks.push(Buffer.from(buffer.subarray(0, read)));
+        if (previewMaxChars && previewBytes < previewByteLimit) {
+          const count = Math.min(read, previewByteLimit - previewBytes);
+          previewChunks.push(Buffer.from(buffer.subarray(0, count)));
+          previewBytes += count;
+        }
       }
 
       const finalFdStats = io.fstatSync(fd, { bigint: true });
@@ -203,11 +242,32 @@ export class WorkspaceArtifactEvidenceInspector {
         return unavailable("changed_during_read", rawPath);
       }
       assertWorkspaceFilesystemAccess(workspace, finalRealPath, "read", "completion evidence file");
+      let preview: { text: string; truncated: boolean } | undefined;
+      if (previewMaxChars) {
+        try {
+          const text = new TextDecoder("utf-8", { fatal: true }).decode(
+            Buffer.concat(previewChunks),
+            { stream: previewBytes < bytesRead },
+          );
+          if (!text.includes("\0")) {
+            let excerpt = text.slice(0, previewMaxChars);
+            if (/[\uD800-\uDBFF]$/.test(excerpt)) excerpt = excerpt.slice(0, -1);
+            preview = {
+              text: excerpt,
+              truncated: excerpt.length < text.length || previewBytes < bytesRead,
+            };
+          }
+        } catch {
+          /* Binary or invalid UTF-8 files still have hash evidence, without a text preview. */
+        }
+      }
       return {
         status: "present",
         path: finalRealPath,
         sha256: digest.digest("hex"),
         size: bytesRead,
+        ...(preview ? { preview } : {}),
+        ...(retainBytes ? { data: Buffer.concat(dataChunks, bytesRead) } : {}),
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {

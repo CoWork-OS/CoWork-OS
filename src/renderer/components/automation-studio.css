@@ -1295,6 +1295,16 @@
   color: var(--color-text-secondary);
 }
 
+.studio-step-review p {
+  margin: 8px 0 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.studio-step-timeline article .studio-review-note {
+  color: var(--color-text-muted);
+}
+
 .studio-step-timeline pre {
   max-height: 220px;
   overflow: auto;
@@ -1308,8 +1318,11 @@
 }
 
 .studio-approval-actions {
+  grid-column: 3;
+  grid-row: 1;
   display: flex;
   gap: 6px;
+  justify-content: flex-end;
 }
 
 .studio-empty {

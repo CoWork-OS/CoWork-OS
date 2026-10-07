@@ -158,7 +158,9 @@ read-only unavailable profile and may pause for user action. A later approval ca
 profile. See [Access Profiles](access-profiles.md) for the full field reference and migration
 contract.
 
-`approve` and `reject` use a local desktop handoff by default. The CLI sends the response to the already-running CoWork OS app through the app's single-instance bridge, so the live task runtime can wake and continue without Control Plane. If no desktop app is running, open CoWork OS and retry, or use `cowork approve <approvalId> --remote` / `cowork reject <approvalId> --remote` against a running Control Plane target.
+`cowork approvals` displays the pending request details and its `--revision-hash` value. Review those details, then run `cowork approve <approvalId> --revision-hash <displayed-hash>` or `cowork reject <approvalId> --revision-hash <displayed-hash>`. The hash is required for both decisions; changed requests require a fresh review. Remote responses report success only when the server confirms `handled` or `duplicate`.
+
+`approve` and `reject` use a local desktop handoff by default. The CLI sends the response to the already-running CoWork OS app through the app's single-instance bridge, so the live task runtime can wake and continue without Control Plane. If no desktop app is running, open CoWork OS and retry, or use `cowork approve <approvalId> --revision-hash <displayed-hash> --remote` / `cowork reject <approvalId> --revision-hash <displayed-hash> --remote` against a running Control Plane target.
 
 ### Local Management Commands
 

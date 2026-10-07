@@ -9,7 +9,8 @@ import {
   type SqlParam,
   type UnitCatalog,
 } from "../database/statements/statement-catalog";
-import { record, str } from "../database/statements/unit-args";
+import { num, oneOf, record, str } from "../database/statements/unit-args";
+import type { MailboxSendOutcomeResolution } from "../../shared/mailbox";
 import { MAILBOX_STATEMENTS, type MailboxStatementName } from "./mailbox-statements";
 
 /**
@@ -130,6 +131,44 @@ function validateWrites(args: unknown): [MailboxThreadWrite[]] {
   ];
 }
 
+function validateSendOutcomeUnknown(args: unknown): [string, string, string, number] {
+  const values = array(args, "args", 4);
+  if (values.length !== 4) {
+    throw new StatementCatalogError("args must contain action id, draft id, error, and timestamp");
+  }
+  return [
+    str(values[0], "args[0]", 500),
+    str(values[1], "args[1]", 500),
+    str(values[2], "args[2]", 8_000),
+    num(values[3], "args[3]"),
+  ];
+}
+
+function validateRecovery(args: unknown): [string, number] {
+  const values = array(args, "args", 2);
+  if (values.length !== 2) {
+    throw new StatementCatalogError("args must contain error text and timestamp");
+  }
+  return [str(values[0], "args[0]", 8_000), num(values[1], "args[1]")];
+}
+
+function validateResolveSendOutcome(
+  args: unknown,
+): [string, string, MailboxSendOutcomeResolution, number] {
+  const values = array(args, "args", 4);
+  if (values.length !== 4) {
+    throw new StatementCatalogError(
+      "args must contain action id, draft id, resolution, and timestamp",
+    );
+  }
+  return [
+    str(values[0], "args[0]", 500),
+    str(values[1], "args[1]", 500),
+    oneOf(values[2], "args[2]", ["confirmed_sent", "confirmed_not_sent"]),
+    num(values[3], "args[3]"),
+  ];
+}
+
 function readThreadUpsertState(
   db: Database.Database,
   input: MailboxThreadUpsertStateInput,
@@ -222,5 +261,43 @@ export const MAILBOX_UNITS = {
   ),
   mailbox_applyThreadWrites: defineUnit(validateWrites, (db, [writes]) =>
     applyThreadWrites(db, writes),
+  ),
+  mailbox_markSendOutcomeUnknown: defineUnit(
+    validateSendOutcomeUnknown,
+    (db, [actionId, draftId, error, now]) => {
+      statement(db, "markMailboxSendOutcomeUnknown_1").run(error, now, actionId);
+      statement(db, "markMailboxSendOutcomeUnknown_2").run(error, now, draftId);
+      statement(db, "markMailboxSendOutcomeUnknown_3").run(error, now, draftId);
+    },
+  ),
+  mailbox_recoverInterruptedSends: defineUnit(validateRecovery, (db, [error, now]) => {
+    for (const name of [
+      "recoverInterruptedMailboxSends_1",
+      "recoverInterruptedMailboxSends_2",
+      "recoverInterruptedMailboxSends_3",
+    ] as const) {
+      statement(db, name).run(error, now);
+    }
+  }),
+  mailbox_resolveSendOutcome: defineUnit(
+    validateResolveSendOutcome,
+    (db, [actionId, draftId, resolution, now]) => {
+      if (resolution === "confirmed_sent") {
+        const result = statement(db, "resolveMailboxSendOutcomeConfirmed_1").run(now, actionId);
+        if (result.changes !== 1) {
+          throw new Error("Mailbox send is no longer awaiting outcome resolution.");
+        }
+        statement(db, "resolveMailboxSendOutcomeConfirmed_2").run(now, draftId);
+        statement(db, "resolveMailboxSendOutcomeConfirmed_3").run(now, draftId);
+        return;
+      }
+
+      const result = statement(db, "resolveMailboxSendOutcomeRetry_1").run(now, now, actionId);
+      if (result.changes !== 1) {
+        throw new Error("Mailbox send is no longer awaiting outcome resolution.");
+      }
+      statement(db, "resolveMailboxSendOutcomeRetry_2").run(now, draftId);
+      statement(db, "resolveMailboxSendOutcomeRetry_3").run(now, draftId);
+    },
   ),
 } satisfies UnitCatalog;

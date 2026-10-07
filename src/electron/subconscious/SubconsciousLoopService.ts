@@ -2374,16 +2374,27 @@ export class SubconsciousLoopService {
     // Heartbeat, AutonomyEngine and the Strategic Planner. Over budget, the decision is
     // surfaced as a review suggestion instead of creating a task.
     let budgetTicket: string | undefined;
+    let durableBudgetTicket: string | undefined;
     if ((dispatchKind === "task" || dispatchKind === "code_change_task") && workspaceId) {
-      const grant = getBackgroundDispatchBudget().tryConsume({
+      const grant = await getBackgroundDispatchBudget().tryConsume({
         workspaceId,
         source: "workflow_intelligence",
+        occurrenceKey: `workflow_intelligence:decision:${decision.id}`,
         entityKey: target.key,
       });
       if (!grant.allowed) {
+        if (grant.reason === "duplicate_occurrence") {
+          return this.skippedDispatch(
+            decision,
+            target,
+            dispatchKind,
+            "This persisted decision has already been admitted for dispatch.",
+          );
+        }
         return this.dispatchSuggestionForReview(target, decision, evidence);
       }
       budgetTicket = grant.ticket;
+      durableBudgetTicket = grant.durable ? grant.ticket : undefined;
     }
     let taskCreated = false;
     try {
@@ -2402,7 +2413,10 @@ export class SubconsciousLoopService {
             prompt,
             workspaceId,
             source: "subconscious",
-            agentConfig: buildCoreAutomationAgentConfig(),
+            agentConfig: {
+              ...buildCoreAutomationAgentConfig(),
+              backgroundDispatchTicket: durableBudgetTicket,
+            },
           });
           taskCreated = true;
           return this.completedDispatch(decision, target, dispatchKind, {
@@ -2499,15 +2513,19 @@ export class SubconsciousLoopService {
             taskOverrides: {
               workerRole: "implementer",
             },
-            agentConfig: buildCoreAutomationAgentConfig(undefined, {
-              llmProfile: "strong",
-              requireWorktree: this.getSettings().perExecutorPolicy.codeChangeTask.requireWorktree,
-              verificationAgent:
-                this.getSettings().perExecutorPolicy.codeChangeTask.verificationRequired,
-              reviewPolicy: this.getSettings().perExecutorPolicy.codeChangeTask.strictReview
-                ? "strict"
-                : "balanced",
-            }),
+            agentConfig: {
+              ...buildCoreAutomationAgentConfig(undefined, {
+                llmProfile: "strong",
+                requireWorktree:
+                  this.getSettings().perExecutorPolicy.codeChangeTask.requireWorktree,
+                verificationAgent:
+                  this.getSettings().perExecutorPolicy.codeChangeTask.verificationRequired,
+                reviewPolicy: this.getSettings().perExecutorPolicy.codeChangeTask.strictReview
+                  ? "strict"
+                  : "balanced",
+              }),
+              backgroundDispatchTicket: durableBudgetTicket,
+            },
           });
           taskCreated = true;
           return this.completedDispatch(decision, target, dispatchKind, {
@@ -2529,7 +2547,7 @@ export class SubconsciousLoopService {
         completedAt: now(),
       };
     } finally {
-      if (!taskCreated) getBackgroundDispatchBudget().refund(budgetTicket);
+      if (!taskCreated) await getBackgroundDispatchBudget().refund(budgetTicket);
     }
     // Every switch case returns; TypeScript does not see that through try/finally.
     return null;

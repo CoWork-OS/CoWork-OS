@@ -1,3 +1,7 @@
+import {
+  normalizeTeamsDecisionReference,
+  type TeamsDecisionReferencePersistence,
+} from "./teams-conversation-reference";
 /**
  * Microsoft Teams Channel Adapter
  *
@@ -29,7 +33,17 @@ import {
   ChannelInfo,
   TeamsConfig,
   MessageAttachment,
+  ChannelDecisionMessage,
+  ChannelDecisionHandler,
 } from "./types";
+
+import { createTeamsDecisionHttpClient } from "./teams-decision-http";
+import {
+  decisionFallback,
+  teamsDecisionCard,
+  teamsDecisionEvent,
+  isTeamsDecisionActivity,
+} from "./decision-cards";
 
 /**
  * Simple TTL cache for message deduplication
@@ -80,6 +94,11 @@ export class TeamsAdapter implements ChannelAdapter {
   readonly type = "teams" as const;
 
   private adapter: CloudAdapter | null = null;
+  private decisionReferencePersistence?: TeamsDecisionReferencePersistence;
+  private decisionHandlers: ChannelDecisionHandler[] = [];
+  get decisionCapabilities() {
+    return { approve: Boolean(this.config.tenantId), deny: Boolean(this.config.tenantId) };
+  }
   private server: http.Server | null = null;
   private _status: ChannelStatus = "disconnected";
   private _botUsername?: string;
@@ -96,6 +115,21 @@ export class TeamsAdapter implements ChannelAdapter {
   constructor(config: TeamsConfig) {
     this.config = config;
     this.deduplicationCache = new MessageDeduplicationCache();
+  }
+
+  setDecisionReferencePersistence(persistence: TeamsDecisionReferencePersistence): void {
+    this.decisionReferencePersistence = persistence;
+  }
+
+  private async decisionReference(
+    chatId: string,
+  ): Promise<Partial<ConversationReference> | undefined> {
+    if (!this.decisionReferencePersistence) return this.conversationReferences.get(chatId);
+    // Always re-read current durable authority; do not resurrect an old in-memory reference.
+    // Bot Framework consumes the routing IDs; display names are intentionally not persisted.
+    return (await this.decisionReferencePersistence.load(chatId)) as unknown as
+      | Partial<ConversationReference>
+      | undefined;
   }
 
   get status(): ChannelStatus {
@@ -246,9 +280,63 @@ export class TeamsAdapter implements ChannelAdapter {
   private async handleActivity(context: TurnContext): Promise<void> {
     const activity = context.activity;
 
+    // This method runs only inside CloudAdapter.process's authenticated turn callback.
+    // A submission, including a malformed one, must never become a task prompt.
+    if (isTeamsDecisionActivity(activity)) {
+      let reference: Partial<ConversationReference> | undefined;
+      try {
+        reference = await this.decisionReference(activity.conversation?.id);
+      } catch {
+        this.handleError(new Error("Teams decision reference is unavailable"), "decisionReference");
+        return;
+      }
+      if (this.decisionReferencePersistence && activity.serviceUrl !== reference?.serviceUrl)
+        return;
+      const decision = teamsDecisionEvent(activity, this.config.tenantId, reference?.bot?.id);
+      if (decision) {
+        for (const handler of this.decisionHandlers) {
+          try {
+            await handler(decision);
+          } catch (error) {
+            this.handleError(
+              error instanceof Error ? error : new Error(String(error)),
+              "decisionHandler",
+            );
+          }
+        }
+      }
+      return;
+    }
+
     // Store conversation reference for proactive messaging
     const conversationRef = TurnContext.getConversationReference(activity);
+    if (
+      activity.channelId === "msteams" &&
+      this.config.tenantId &&
+      activity.channelData?.tenant?.id === this.config.tenantId &&
+      conversationRef.conversation &&
+      (!activity.conversation.tenantId || activity.conversation.tenantId === this.config.tenantId)
+    ) {
+      conversationRef.conversation.tenantId = this.config.tenantId;
+    }
     this.conversationReferences.set(activity.conversation.id, conversationRef);
+    if (
+      this.decisionReferencePersistence &&
+      this.config.tenantId &&
+      activity.channelId === "msteams" &&
+      activity.channelData?.tenant?.id === this.config.tenantId
+    ) {
+      try {
+        await this.decisionReferencePersistence.save(
+          normalizeTeamsDecisionReference(conversationRef, this.config.tenantId),
+        );
+      } catch {
+        this.handleError(
+          new Error("Teams conversation reference could not be saved"),
+          "decisionReference",
+        );
+      }
+    }
 
     // Handle different activity types
     switch (activity.type) {
@@ -564,6 +652,55 @@ export class TeamsAdapter implements ChannelAdapter {
     }
 
     return lastMessageId;
+  }
+
+  onDecision(handler: ChannelDecisionHandler): void {
+    this.decisionHandlers.push(handler);
+  }
+
+  async sendDecision(message: ChannelDecisionMessage): Promise<string> {
+    if (
+      !this.adapter ||
+      this._status !== "connected" ||
+      !this.config.tenantId ||
+      this.decisionHandlers.length === 0
+    )
+      throw new Error("Teams decision handler is not ready");
+    const reference = await this.decisionReference(message.chatId);
+    if (!reference?.bot?.id || reference.conversation?.tenantId !== this.config.tenantId)
+      throw new Error("No tenant-bound Teams conversation reference");
+    const attachment = teamsDecisionCard(message);
+    let messageId = "";
+    // One SDK attempt only; never retry an ambiguous card publication.
+    const decisionAdapter = new CloudAdapter(
+      new ConfigurationBotFrameworkAuthentication(
+        {
+          MicrosoftAppId: this.config.appId,
+          MicrosoftAppPassword: this.config.appPassword,
+          MicrosoftAppTenantId: this.config.tenantId,
+          MicrosoftAppType: "SingleTenant",
+        },
+        undefined,
+        undefined,
+        undefined,
+        { httpClient: createTeamsDecisionHttpClient() },
+      ),
+    );
+    await decisionAdapter.continueConversationAsync(
+      this.config.appId,
+      reference as ConversationReference,
+      async (context) => {
+        const response = await context.sendActivity({
+          type: "message",
+          text: decisionFallback(message),
+          attachments: [attachment],
+          replyToId: message.replyTo,
+        });
+        messageId = response?.id || "";
+      },
+    );
+    if (!messageId) throw new Error("Teams decision delivery has no message ID");
+    return messageId;
   }
 
   /**

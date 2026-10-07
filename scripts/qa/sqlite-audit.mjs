@@ -1,30 +1,51 @@
 #!/usr/bin/env node
 // Dependency audit for synchronous SQLite access (async SQLite migration plan, DB6; a
 // zero-exception gate since DB7: every file needs a specific, owned rule).
-// Every file in the ratchet register must be explained by a rule in
-// scripts/qa/sqlite-audit-rules.json (domain, how it is reached, migration plan).
+// Every file with tracked synchronous SQLite counts, plus every file in the ratchet register,
+// must be explained by a rule in scripts/qa/sqlite-audit-rules.json.
 //
 //   node scripts/qa/sqlite-audit.mjs            # check; prints the audit by domain
 //   node scripts/qa/sqlite-audit.mjs --markdown # the same as a Markdown table
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildInventory } from "./sqlite-inventory.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const RULES_PATH = resolve(REPO_ROOT, "scripts/qa/sqlite-audit-rules.json");
 const BASELINE_PATH = resolve(REPO_ROOT, "scripts/qa/sqlite-ratchet-baseline.json");
+const TRACKED_KEYS = ["prepare", "getDatabase", "runtimeImport"];
+const WORKER_MODULE_PATTERNS = [
+  /^src\/electron\/database\/async\/database-worker\.ts$/,
+  /^src\/electron\/database\/async\/commands\.ts$/,
+  /^src\/electron\/database\/fts-worker\.ts$/,
+  /^src\/electron\/memory\/memory-embedding-cache\.ts$/,
+];
+const isWorkerModule = (path) => WORKER_MODULE_PATTERNS.some((pattern) => pattern.test(path));
 
-export function audit({
-  baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8")),
-  rules = JSON.parse(readFileSync(RULES_PATH, "utf8")).rules,
-} = {}) {
+export function audit(options = {}) {
+  const baseline = options.baseline ?? JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+  const rules = options.rules ?? JSON.parse(readFileSync(RULES_PATH, "utf8")).rules;
+  const includeCurrentInventory =
+    options.inventory !== undefined || !Object.hasOwn(options, "baseline");
+  const files = new Map(Object.entries(baseline.files));
+  if (includeCurrentInventory) {
+    const inventory = options.inventory ?? buildInventory({ cwd: REPO_ROOT });
+    for (const file of inventory.files) {
+      if (isWorkerModule(file.path)) continue;
+      const counts = Object.fromEntries(
+        TRACKED_KEYS.filter((key) => file.counts[key] > 0).map((key) => [key, file.counts[key]]),
+      );
+      if (Object.keys(counts).length > 0) files.set(file.path, counts);
+    }
+  }
   const compiled = rules.map((rule) => ({ ...rule, regex: new RegExp(rule.pattern) }));
   const domains = new Map();
   const unexplained = [];
   // DB7 gate: a file only a backstop rule matches, and a rule without an owner, both fail.
   const backstopped = [];
   const unowned = compiled.filter((rule) => !rule.owner).map((rule) => rule.pattern);
-  for (const [file, counts] of Object.entries(baseline.files)) {
+  for (const [file, counts] of files) {
     const rule = compiled.find((candidate) => candidate.regex.test(file));
     if (!rule) {
       unexplained.push(file);

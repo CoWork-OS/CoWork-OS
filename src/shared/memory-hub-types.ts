@@ -48,6 +48,9 @@ export const MEMORY_HUB_ADDABLE_KINDS = [
 export type MemoryHubAddableKind = (typeof MEMORY_HUB_ADDABLE_KINDS)[number];
 
 export interface MemoryHubItem {
+  /** Capture-time bot source, only when recorded; never inferred from current task assignment. */
+  originBotId?: string | null;
+  originBotName?: string | null;
   id: string;
   workspaceId: string | null;
   scope: MemoryHubScope;

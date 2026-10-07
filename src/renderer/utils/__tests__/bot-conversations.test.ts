@@ -45,10 +45,10 @@ describe("bot conversations", () => {
       agentConfig: { botConversation: true, botTeamId: team.id },
     } as Task;
     expect(shouldReopenBotConversationInWorkspace(local, current, [team])).toBe(false);
-    expect(shouldReopenBotConversationInWorkspace(local, current, [])).toBe(true);
+    expect(shouldReopenBotConversationInWorkspace(local, current, [])).toBe(false);
     expect(
       shouldReopenBotConversationInWorkspace(local, current, [{ ...team, isActive: false }]),
-    ).toBe(true);
+    ).toBe(false);
   });
   it("recognizes only labeled bot recovery branches", () => {
     expect(

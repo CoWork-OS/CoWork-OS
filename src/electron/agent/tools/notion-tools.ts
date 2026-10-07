@@ -2,6 +2,11 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { NotionSettingsManager } from "../../settings/notion-manager";
 import { notionRequest } from "../../utils/notion-api";
+import {
+  createIntegrationEffectGuard,
+  integrationEffectRequestDigest,
+  integrationEffectReview,
+} from "./integration-effect-guard";
 
 type NotionAction =
   | "search"
@@ -75,6 +80,67 @@ export class NotionTools {
     if (!approved) {
       throw new Error("User denied Notion action");
     }
+  }
+
+  private createEffectGuard(
+    initialSettings: ReturnType<typeof NotionSettingsManager.loadSettings>,
+    input: NotionActionInput,
+    details: Record<string, unknown>,
+  ) {
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName: "notion_action",
+      toolInput: input,
+      approvalDetails: details,
+      initialSettings,
+      loadSettings: () => NotionSettingsManager.loadSettings(),
+      settingsEnabled: (current) => current.enabled && Boolean(current.apiKey),
+      settingsFingerprint: (current) =>
+        JSON.stringify({
+          enabled: current.enabled,
+          notionVersion: current.notionVersion,
+          timeoutMs: current.timeoutMs,
+        }),
+      authConfig: (current) => ({ type: "bearer", token: current.apiKey }),
+      errorPrefix: "Notion action",
+    });
+  }
+
+  private buildEffectReview(
+    input: NotionActionInput,
+    method: "POST" | "PATCH" | "DELETE",
+    requestPath: string,
+    body: unknown,
+    target: Record<string, unknown>,
+    previousResource?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return integrationEffectReview("notion_action", input, input.action, {
+      reviewedEffect: {
+        version: 1,
+        provider: "notion",
+        operation: input.action,
+        target,
+        ...(body === undefined ? {} : { change: body }),
+        ...(previousResource
+          ? {
+              previousResource,
+              previousRevisionSha256: integrationEffectRequestDigest(
+                "GET",
+                requestPath,
+                previousResource,
+              ),
+            }
+          : {}),
+        request: {
+          method,
+          path: requestPath,
+          sha256: integrationEffectRequestDigest(method, requestPath, body),
+        },
+      },
+    });
   }
 
   private buildPagination(input: NotionActionInput): Record<string, Any> {
@@ -200,26 +266,62 @@ export class NotionTools {
             throw new Error("Missing update payload (archived or block content)");
           }
         }
-        await this.requireApproval("Update a Notion block", {
-          action: "update_block",
-          block_id: input.block_id,
+        const requestPath = `/blocks/${input.block_id}`;
+        const requestBody = structuredClone(body);
+        const details = this.buildEffectReview(input, "PATCH", requestPath, requestBody, {
+          kind: "block",
+          id: input.block_id,
         });
+        await this.requireApproval("Update a Notion block", details);
+        const beforeSend = await this.createEffectGuard(settings, input, details);
         result = await notionRequest(settings, {
           method: "PATCH",
-          path: `/blocks/${input.block_id}`,
-          body,
+          path: requestPath,
+          body: requestBody,
+          beforeSend,
         });
         break;
       }
       case "delete_block": {
         if (!input.block_id) throw new Error("Missing block_id for delete_block");
-        await this.requireApproval("Delete a Notion block", {
-          action: "delete_block",
-          block_id: input.block_id,
-        });
+        const requestPath = `/blocks/${input.block_id}`;
+        const initialBlock = await notionRequest(settings, { method: "GET", path: requestPath });
+        const previousResource = initialBlock.data ?? {};
+        const previousRevision = integrationEffectRequestDigest(
+          "GET",
+          requestPath,
+          previousResource,
+        );
+        const details = this.buildEffectReview(
+          input,
+          "DELETE",
+          requestPath,
+          undefined,
+          { kind: "block", id: input.block_id },
+          previousResource,
+        );
+        await this.requireApproval("Delete a Notion block", details);
+        const beforeSend = await this.createEffectGuard(settings, input, details);
+        const deleteWithReview = async () => {
+          await beforeSend();
+          const currentBlock = await notionRequest(settings, { method: "GET", path: requestPath });
+          const currentResource = currentBlock.data ?? {};
+          const currentRevision = integrationEffectRequestDigest(
+            "GET",
+            requestPath,
+            currentResource,
+          );
+          if (currentRevision !== previousRevision) {
+            throw new Error(
+              "Notion block changed after review; approve its current revision before deleting",
+            );
+          }
+          await beforeSend();
+        };
         result = await notionRequest(settings, {
           method: "DELETE",
-          path: `/blocks/${input.block_id}`,
+          path: requestPath,
+          beforeSend: deleteWithReview,
         });
         break;
       }
@@ -256,11 +358,20 @@ export class NotionTools {
           if (input.icon) body.icon = input.icon;
           if (input.cover) body.cover = input.cover;
         }
-        await this.requireApproval("Create a Notion page", {
-          action: "create_page",
-          parent: body.parent,
+        const requestPath = "/pages";
+        const requestBody = structuredClone(body);
+        const details = this.buildEffectReview(input, "POST", requestPath, requestBody, {
+          kind: "page",
+          parent: requestBody.parent,
         });
-        result = await notionRequest(settings, { method: "POST", path: "/pages", body });
+        await this.requireApproval("Create a Notion page", details);
+        const beforeSend = await this.createEffectGuard(settings, input, details);
+        result = await notionRequest(settings, {
+          method: "POST",
+          path: requestPath,
+          body: requestBody,
+          beforeSend,
+        });
         break;
       }
       case "update_page": {
@@ -275,14 +386,19 @@ export class NotionTools {
             throw new Error("Missing update payload (properties, archived, icon, or cover)");
           }
         }
-        await this.requireApproval("Update a Notion page", {
-          action: "update_page",
-          page_id: input.page_id,
+        const requestPath = `/pages/${input.page_id}`;
+        const requestBody = structuredClone(body);
+        const details = this.buildEffectReview(input, "PATCH", requestPath, requestBody, {
+          kind: "page",
+          id: input.page_id,
         });
+        await this.requireApproval("Update a Notion page", details);
+        const beforeSend = await this.createEffectGuard(settings, input, details);
         result = await notionRequest(settings, {
           method: "PATCH",
-          path: `/pages/${input.page_id}`,
-          body,
+          path: requestPath,
+          body: requestBody,
+          beforeSend,
         });
         break;
       }
@@ -295,15 +411,20 @@ export class NotionTools {
           }
           body.children = input.children;
         }
-        await this.requireApproval("Append blocks in Notion", {
-          action: "append_blocks",
-          block_id: input.block_id,
-          count: Array.isArray(body.children) ? body.children.length : undefined,
+        const requestPath = `/blocks/${input.block_id}/children`;
+        const requestBody = structuredClone(body);
+        const details = this.buildEffectReview(input, "PATCH", requestPath, requestBody, {
+          kind: "block_children",
+          id: input.block_id,
+          count: Array.isArray(requestBody.children) ? requestBody.children.length : undefined,
         });
+        await this.requireApproval("Append blocks in Notion", details);
+        const beforeSend = await this.createEffectGuard(settings, input, details);
         result = await notionRequest(settings, {
           method: "PATCH",
-          path: `/blocks/${input.block_id}/children`,
-          body,
+          path: requestPath,
+          body: requestBody,
+          beforeSend,
         });
         break;
       }
@@ -320,11 +441,20 @@ export class NotionTools {
           body.properties = input.properties;
           if (typeof input.is_inline === "boolean") body.is_inline = input.is_inline;
         }
-        await this.requireApproval("Create a Notion data source", {
-          action: "create_data_source",
-          parent: body.parent,
+        const requestPath = "/data_sources";
+        const requestBody = structuredClone(body);
+        const details = this.buildEffectReview(input, "POST", requestPath, requestBody, {
+          kind: "data_source",
+          parent: requestBody.parent,
         });
-        result = await notionRequest(settings, { method: "POST", path: "/data_sources", body });
+        await this.requireApproval("Create a Notion data source", details);
+        const beforeSend = await this.createEffectGuard(settings, input, details);
+        result = await notionRequest(settings, {
+          method: "POST",
+          path: requestPath,
+          body: requestBody,
+          beforeSend,
+        });
         break;
       }
       case "update_data_source": {
@@ -338,14 +468,19 @@ export class NotionTools {
             throw new Error("Missing update payload (properties or title)");
           }
         }
-        await this.requireApproval("Update a Notion data source", {
-          action: "update_data_source",
-          data_source_id: input.data_source_id,
+        const requestPath = `/data_sources/${input.data_source_id}`;
+        const requestBody = structuredClone(body);
+        const details = this.buildEffectReview(input, "PATCH", requestPath, requestBody, {
+          kind: "data_source",
+          id: input.data_source_id,
         });
+        await this.requireApproval("Update a Notion data source", details);
+        const beforeSend = await this.createEffectGuard(settings, input, details);
         result = await notionRequest(settings, {
           method: "PATCH",
-          path: `/data_sources/${input.data_source_id}`,
-          body,
+          path: requestPath,
+          body: requestBody,
+          beforeSend,
         });
         break;
       }

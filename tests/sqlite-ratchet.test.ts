@@ -79,4 +79,19 @@ describe("sqlite-ratchet", () => {
       "src/electron/area/AreaService.ts",
     ]);
   });
+
+  it("exempts only explicitly listed inventory keys outside shared SQL modules", () => {
+    const result = compareToBaseline(
+      {
+        "src/electron/runtime/Bridge.ts": { getDatabase: 2, prepare: 1 },
+      },
+      {
+        "src/electron/runtime/Bridge.ts": { getDatabase: 1 },
+      },
+      (path, key) => path === "src/electron/runtime/Bridge.ts" && key === "getDatabase",
+    );
+    expect(result.increased).toEqual([
+      { path: "src/electron/runtime/Bridge.ts", key: "prepare", before: 0, now: 1 },
+    ]);
+  });
 });

@@ -301,6 +301,17 @@ describe("storage layer leaf repositories on the host and in the database worker
       workspaceId: other.id,
     });
     await tasks.update(created.id, { status: "executing", resultSummary: "halfway" });
+    const cronTask = await tasks.create({
+      title: "Cron occurrence",
+      prompt: "Fixture",
+      workspaceId: other.id,
+      source: "cron",
+      status: "completed",
+      agentConfig: { scheduledJobId: "parity-job", scheduledRunAtMs: 123 },
+    });
+    expect((await tasks.findByScheduledRun(other.id, "parity-job", 123))?.id).toBe(cronTask.id);
+    expect(await tasks.findByScheduledRun(other.id, "parity-job", 124)).toBeNull();
+    await tasks.delete(cronTask.id);
     const pinned = await tasks.togglePin(created.id);
     const moved = await tasks.moveToColumn(created.id, "review");
     const byWorkspace = await tasks.findByWorkspace(other.id);

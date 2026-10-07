@@ -1,3 +1,13 @@
+import { TEAMS_CONVERSATION_REFERENCE_SCHEMA } from "../gateway/TeamsConversationReferenceStore";
+import { CHANNEL_DECISION_SCHEMA } from "../gateway/ChannelDecisionStore";
+import { NOTIFICATION_INBOX_SCHEMA } from "../notifications/NotificationInboxStore";
+import { BOT_NOTIFICATION_SCHEMA } from "../notifications/BotNotificationStore";
+import {
+  BOT_RESPONSIBILITY_SCHEMA,
+  upgradeResponsibilityStateSchema,
+} from "../automation/responsibility-store";
+import { SCHEDULER_LEASE_SCHEMA } from "../automation/scheduler-lease-store";
+import { DISPATCH_BUDGET_SCHEMA } from "../automation/dispatch-budget-store";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
@@ -715,6 +725,7 @@ export class DatabaseManager {
   }
 
   private initializeSchema() {
+    upgradeResponsibilityStateSchema(this.db);
     // Create tables
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS workspaces (
@@ -846,6 +857,12 @@ export class DatabaseManager {
 
       CREATE INDEX IF NOT EXISTS idx_composer_drafts_workspace
         ON composer_drafts(workspace_id, surface, updated_at DESC);
+
+      ${DISPATCH_BUDGET_SCHEMA}
+      ${SCHEDULER_LEASE_SCHEMA}
+      ${BOT_RESPONSIBILITY_SCHEMA}
+      ${BOT_NOTIFICATION_SCHEMA}
+      ${NOTIFICATION_INBOX_SCHEMA}
 
       CREATE TABLE IF NOT EXISTS bot_notification_preferences (
         agent_role_id TEXT PRIMARY KEY,
@@ -1244,6 +1261,28 @@ export class DatabaseManager {
         FOREIGN KEY (task_id) REFERENCES tasks(id)
       );
 
+      CREATE TABLE IF NOT EXISTS responsibility_action_review_decisions (
+        approval_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        request_revision_hash TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('allow_once', 'deny_once')),
+        decided_at INTEGER NOT NULL,
+        FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS responsibility_action_review_claims (
+        approval_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        request_revision_hash TEXT NOT NULL,
+        execution_id TEXT NOT NULL,
+        outcome TEXT NOT NULL CHECK (outcome IN ('claimed', 'committed', 'uncertain')) DEFAULT 'claimed',
+        consumed_at INTEGER NOT NULL,
+        committed_at INTEGER,
+        FOREIGN KEY (approval_id) REFERENCES responsibility_action_review_decisions(approval_id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS workspace_permission_rules (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL,
@@ -1268,6 +1307,16 @@ export class DatabaseManager {
         requested_at INTEGER NOT NULL,
         resolved_at INTEGER,
         FOREIGN KEY (task_id) REFERENCES tasks(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS approval_input_links (
+        input_id TEXT PRIMARY KEY,
+        approval_id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL,
+        revision_hash TEXT NOT NULL,
+        FOREIGN KEY (input_id) REFERENCES input_requests(id) ON DELETE CASCADE,
+        FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
       );
 
       CREATE TABLE IF NOT EXISTS skills (
@@ -1627,6 +1676,9 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_company_sync_states_company ON company_sync_states(company_id, runtime_entity_kind, runtime_entity_id);
       CREATE INDEX IF NOT EXISTS idx_company_sync_states_org_node ON company_sync_states(org_node_id, runtime_entity_kind);
       -- Channel Gateway tables
+      ${CHANNEL_DECISION_SCHEMA}
+      ${TEAMS_CONVERSATION_REFERENCE_SCHEMA}
+
       CREATE TABLE IF NOT EXISTS channels (
         id TEXT PRIMARY KEY,
         type TEXT NOT NULL,
@@ -4531,7 +4583,8 @@ export class DatabaseManager {
             stagger_offset_minutes: Number(role.heartbeat_stagger_offset || 0),
             dispatch_cooldown_minutes: Number(role.heartbeat_dispatch_cooldown_minutes || 120),
             max_dispatches_per_day: Number(role.heartbeat_max_dispatches_per_day || 6),
-            profile: typeof role.heartbeat_profile === "string" ? role.heartbeat_profile : "observer",
+            profile:
+              typeof role.heartbeat_profile === "string" ? role.heartbeat_profile : "observer",
             active_hours:
               typeof role.heartbeat_active_hours === "string" ? role.heartbeat_active_hours : null,
           };
@@ -8076,9 +8129,7 @@ export class DatabaseManager {
     ];
     for (const [table, column] of childKeys) {
       try {
-        this.db.exec(
-          `CREATE INDEX IF NOT EXISTS idx_fk_${table}_${column} ON ${table}(${column})`,
-        );
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_fk_${table}_${column} ON ${table}(${column})`);
       } catch {
         // Table or column not created yet (lazy schema); the next start adds the index.
       }

@@ -48,6 +48,30 @@ describeWithSqlite("MemoryContextBuilder over memory_items", () => {
     db.close();
   });
 
+  it("does not reuse owner context for an unidentified channel DM", async () => {
+    await write({
+      content: "Owner private preference is violet",
+      privacy: "private",
+      pinned: true,
+    });
+    const request = {
+      workspaceId: "ws-1",
+      surface: "channel_private" as const,
+      focus: "preference",
+      budgetTokens: 1000,
+    };
+    expect(
+      (await builder.build({ ...request, gatewaySenderIsOwner: true }))
+        .map((block) => block.text)
+        .join(" "),
+    ).toContain("violet");
+    expect(await builder.build({ ...request, gatewaySenderIsOwner: false })).toEqual([]);
+    expect(await builder.build(request)).toEqual([]);
+    expect(
+      await builder.build({ ...request, surface: "channel_group", gatewaySenderIsOwner: true }),
+    ).toEqual([]);
+  });
+
   it("renders one fact once across scopes and sources", async () => {
     await write({ content: "Prefers concise answers", source: "user_stated" });
     await write({

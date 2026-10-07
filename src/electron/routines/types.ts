@@ -133,6 +133,8 @@ export interface RoutineChannelEventTrigger extends RoutineEventBaseTrigger {
 
 export interface RoutineMailboxEventTrigger extends RoutineEventBaseTrigger {
   type: "mailbox_event";
+  /** Required for governed activation; event responsibilities never subscribe to every inbox. */
+  accountId?: string;
   eventType?: string;
   subjectContains?: string;
   provider?: string;
@@ -258,6 +260,16 @@ export interface RoutineServiceDeps {
   loadHooksSettings: () => HooksConfig;
   saveHooksSettings: (settings: HooksConfig) => void;
   createTask?: (params: {
+    title: string;
+    prompt: string;
+    workspaceId: string;
+    assignedAgentRoleId?: string;
+    agentConfig?: AgentConfig;
+    source?: "manual" | "cron" | "hook" | "api";
+  }) => Promise<{ id: string }>;
+  createTaskIdempotent?: (params: {
+    operationKey: string;
+    requestIdentity: unknown;
     title: string;
     prompt: string;
     workspaceId: string;

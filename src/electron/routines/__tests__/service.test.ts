@@ -177,6 +177,35 @@ describeWithSqlite("RoutineService", () => {
     ).toBeTruthy();
   });
 
+  it("binds mailbox event triggers to the explicitly selected account", async () => {
+    await routineService.create({
+      name: "Selected Inbox Watch",
+      enabled: true,
+      workspaceId: "ws-1",
+      prompt: "Inspect selected responsibility sources.",
+      connectors: [],
+      triggers: [
+        {
+          id: "mailbox-account-trigger",
+          type: "mailbox_event",
+          enabled: true,
+          accountId: "mailbox-account-2",
+          eventType: "thread_classified",
+        },
+      ],
+    });
+
+    expect(eventTriggerService.listTriggers()).toHaveLength(1);
+    expect(eventTriggerService.listTriggers()[0]).toMatchObject({
+      source: "mailbox_event",
+      conditions: [
+        { field: "accountId", operator: "equals", value: "mailbox-account-2" },
+        { field: "eventType", operator: "equals", value: "thread_classified" },
+      ],
+      conditionLogic: "all",
+    });
+  });
+
   it("syncs task-session routines as thread follow-ups across schedule, api, and event triggers", async () => {
     await routineService.create({
       name: "Task Follow-up",

@@ -10,6 +10,7 @@ function loaders() {
     hooks: vi.fn(async () => ({ status: null, settings: null })),
     servers: vi.fn(async () => []),
     cron: vi.fn(async () => null),
+    mailboxes: vi.fn(async () => ({ accounts: [] })),
   };
 }
 
@@ -50,6 +51,15 @@ describe("routine settings loading", () => {
     expect(result.workspaces.status).toBe("fulfilled");
     expect(result.hooks.status).toBe("rejected");
     expect(result.servers.status).toBe("rejected");
+    expect(result.mailboxes.status).toBe("fulfilled");
     expect(calls.cron).toHaveBeenCalledOnce();
+  });
+
+  it("retains routine settings when mailbox account metadata is unavailable", async () => {
+    const calls = loaders();
+    calls.mailboxes.mockRejectedValueOnce(new Error("Mailbox API unavailable"));
+    const result = await loadRoutineSettingsData(calls);
+    expect(result.routines.status).toBe("fulfilled");
+    expect(result.mailboxes).toMatchObject({ status: "rejected" });
   });
 });

@@ -14256,6 +14256,16 @@
   color: var(--bot-mark-color);
   background: color-mix(in srgb, var(--bot-mark-color) 14%, transparent);
 }
+/* A bot's illustrated character replaces the tinted mark; the negative margin
+   keeps the header height unchanged. */
+.bot-conversation-identity-avatar.bot-conversation-identity-avatar-mascot {
+  flex-basis: 30px;
+  width: 30px;
+  height: 30px;
+  margin: -2px 0;
+  border-radius: 0;
+  background: none;
+}
 .bot-conversation-identity-copy {
   display: flex;
   flex-direction: column;
@@ -14412,6 +14422,11 @@
   border-radius: 50%;
   background: color-mix(in srgb, var(--bot-mark-color, var(--color-accent)) 16%, transparent);
   color: var(--bot-mark-color, var(--color-accent));
+}
+
+.bot-message-attribution-avatar.bot-message-attribution-avatar-mascot {
+  border-radius: 0;
+  background: none;
 }
 
 .bot-conversation .agent-inbound-message {

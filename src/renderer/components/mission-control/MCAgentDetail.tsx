@@ -1,4 +1,5 @@
-import { getEmojiIcon } from "../../utils/emoji-icon-map";
+import { resolveBotMascot } from "../../../shared/bot-mascots";
+import { BotMascot } from "../bot-mascot/BotMascot";
 import { AUTONOMY_BADGES } from "./useMissionControlData";
 import type { MissionControlData } from "./useMissionControlData";
 
@@ -33,12 +34,11 @@ export function MCAgentDetail({ data, agentId }: MCAgentDetailProps) {
   return (
     <>
       <div className="mc-v2-agent-detail-header">
-        <div className="mc-v2-agent-avatar" style={{ backgroundColor: agent.color }}>
-          {(() => {
-            const Icon = getEmojiIcon(agent.icon || "🤖");
-            return <Icon size={24} strokeWidth={2} />;
-          })()}
-        </div>
+        <BotMascot
+          mascot={resolveBotMascot(agent.icon)}
+          size={48}
+          expression={status === "working" ? "working" : "idle"}
+        />
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className="mc-v2-agent-detail-name">{agent.displayName}</span>

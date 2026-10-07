@@ -189,6 +189,7 @@ function scopeParams(key: MemoryScopeKey): string[] {
 }
 
 const MAX_SOURCE_ALIASES = 20;
+const BOT_SOURCE_FIELDS = ["agentRoleId", "capturedTaskId", "botAttributionRecordedAt"] as const;
 
 function refKey(ref: MemorySourceRef): string | null {
   return typeof ref.store === "string" && typeof ref.id === "string"
@@ -207,6 +208,13 @@ function mergeSourceRefs(
   incomingIsPrimary: boolean,
 ): MemorySourceRef {
   const primary = incomingIsPrimary ? { ...existing, ...incoming } : { ...existing };
+  // When another source becomes primary, its missing attribution must not inherit the
+  // old source's bot. Aliases retain identity for edits, not primary bot ownership.
+  if (incomingIsPrimary && refKey(existing) !== refKey(incoming)) {
+    for (const field of BOT_SOURCE_FIELDS) {
+      if (!(field in incoming)) delete primary[field];
+    }
+  }
   const aliases = new Set(
     Array.isArray(existing.aliases)
       ? existing.aliases.filter((value): value is string => typeof value === "string")
@@ -375,6 +383,11 @@ export class MemoryItemsStore {
         ? this.findBySourceRef(ref.store as string, ref.id as string, ["active"])[0]
         : undefined;
 
+    const capturedSource =
+      editTarget ??
+      (hasRef ? this.findBySourceRef(ref.store as string, ref.id as string)[0] : undefined);
+    write = this.withCapturedBotSource(write, capturedSource);
+
     if (write.status === "archived") {
       return this.insertArchived(write);
     }
@@ -416,6 +429,57 @@ export class MemoryItemsStore {
       item: inserted,
       supersededIds: replaced.map((item) => item.id),
     };
+  }
+
+  /** Record assignment in the same transaction as capture; never backfill from a later read. */
+  private withCapturedBotSource(
+    write: PreparedMemoryItemWrite,
+    editTarget?: MemoryItem,
+  ): PreparedMemoryItemWrite {
+    if (write.mode !== "live") return write;
+    const sourceRef = { ...write.sourceRef };
+    for (const field of BOT_SOURCE_FIELDS) delete sourceRef[field];
+    if (editTarget && refKey(editTarget.sourceRef) === refKey(sourceRef)) {
+      for (const field of BOT_SOURCE_FIELDS) {
+        if (field in editTarget.sourceRef) sourceRef[field] = editTarget.sourceRef[field];
+      }
+      return { ...write, sourceRef };
+    }
+    // Corrections of old records are not new bot captures, even if the old task is
+    // assigned to a bot today. Missing task tables support legacy migration/test stores.
+    const workspaceId = write.workspaceId ?? write.originWorkspaceId;
+    if (
+      editTarget ||
+      sourceRef.editedVia ||
+      !write.taskId ||
+      !workspaceId ||
+      (write.workspaceId &&
+        write.originWorkspaceId &&
+        write.workspaceId !== write.originWorkspaceId) ||
+      !tableExists(this.db, "tasks") ||
+      !tableExists(this.db, "agent_roles")
+    ) {
+      return { ...write, sourceRef };
+    }
+    const columns = this.db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+    if (
+      !["id", "workspace_id", "assigned_agent_role_id"].every((name) =>
+        columns.some((column) => column.name === name),
+      )
+    ) {
+      return { ...write, sourceRef };
+    }
+    const origin = this.db
+      .prepare(`SELECT t.assigned_agent_role_id AS roleId
+      FROM tasks t JOIN agent_roles r ON r.id = t.assigned_agent_role_id
+      WHERE t.id = ? AND t.workspace_id = ?`)
+      .get(write.taskId, workspaceId) as { roleId: string } | undefined;
+    if (origin?.roleId && origin.roleId.length <= 128) {
+      sourceRef.agentRoleId = origin.roleId;
+      sourceRef.capturedTaskId = write.taskId;
+      sourceRef.botAttributionRecordedAt = write.now;
+    }
+    return { ...write, sourceRef };
   }
 
   private reinforce(

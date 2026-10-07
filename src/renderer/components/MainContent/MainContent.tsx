@@ -20,6 +20,9 @@ import {
   BOT_PROFILE_UPDATED_EVENT,
 } from "../BotProfileDialog";
 import { BotGlyph } from "../BotGlyph";
+import { BotMascot } from "../bot-mascot/BotMascot";
+import { mascotExpressionForBotConversation } from "../bot-mascot/mascot-expressions";
+import { resolveBotMascot } from "../../../shared/bot-mascots";
 import {
   BOT_CONVERSATION_HISTORY_OPEN_EVENT,
   getConversationActionLabels,
@@ -1586,6 +1589,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   // out of the primary conversation surface.
   const isConversationOnlySurface = isChatTask || isBotConversation;
   const botName = props.botName as string | undefined;
+  const botMascot = resolveBotMascot(props.botIcon as string | undefined);
   const timelineItems = props.timelineItems as Array<any>;
   const timelineRef = props.timelineRef as React.RefObject<HTMLDivElement | null>;
   const toggleEventExpanded = props.toggleEventExpanded as (eventId: string) => void;
@@ -2074,6 +2078,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 getTaskEventPayloadRenderSignature(event),
                 parallelGroupsByAnchorEventId.has(event.id) ? 1 : 0,
                 suppressedParallelEventIds.has(event.id) ? 1 : 0,
+                // Bot messages show the bot's name and character, which load after the rows.
+                botName ?? "",
+                botMascot ?? "",
               ].join(":");
             };
 
@@ -2979,6 +2986,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     ?.trim() ||
                   botName ||
                   "Bot";
+                // Only this conversation's own bot has a known mascot; teammates
+                // relaying through it keep the generic mark.
+                const showSenderMascot =
+                  Boolean(botMascot) && botMessageSender === (botName || "Bot");
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div
@@ -2995,8 +3006,15 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           aria-label={`Agent message ${agentMessageProtocolReceipt.label.toLowerCase()}`}
                         >
                           <div className="bot-message-attribution">
-                            <span className="bot-message-attribution-avatar" aria-hidden="true">
-                              <BotGlyph size={12} />
+                            <span
+                              className={`bot-message-attribution-avatar${showSenderMascot ? " bot-message-attribution-avatar-mascot" : ""}`}
+                              aria-hidden="true"
+                            >
+                              {botMascot && showSenderMascot ? (
+                                <BotMascot mascot={botMascot} size={20} animated={false} />
+                              ) : (
+                                <BotGlyph size={12} />
+                              )}
                             </span>
                             <span>{botMessageSender}</span>
                           </div>
@@ -3024,8 +3042,19 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           <div className="chat-bubble assistant-bubble">
                             {isBotConversation && (
                               <div className="bot-message-attribution">
-                                <span className="bot-message-attribution-avatar" aria-hidden="true">
-                                  <BotGlyph size={12} />
+                                <span
+                                  className={`bot-message-attribution-avatar${showSenderMascot ? " bot-message-attribution-avatar-mascot" : ""}`}
+                                  aria-hidden="true"
+                                >
+                                  {botMascot && showSenderMascot ? (
+                                    <BotMascot
+                                      mascot={botMascot}
+                                      size={20}
+                                      animated={isLastAssistant}
+                                    />
+                                  ) : (
+                                    <BotGlyph size={12} />
+                                  )}
                                 </span>
                                 <span>{botMessageSender}</span>
                               </div>
@@ -3453,6 +3482,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       timelineHistoryError,
       isBotConversation,
       botName,
+      botMascot,
       isConversationOnlySurface,
       isTaskWorking,
       isReplayMode,
@@ -3513,6 +3543,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.timelineHistoryError === next.timelineHistoryError &&
     prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
     prev.botName === next.botName &&
+    prev.botIcon === next.botIcon &&
     prev.agentContext === next.agentContext &&
     prev.activityGroupsById === next.activityGroupsById &&
     prev.childEvents === next.childEvents &&
@@ -4459,6 +4490,12 @@ function MainContentComponent({
   const isBotConversation = task?.agentConfig?.botConversation === true;
   const isBotHandoffWaiting = isBotConversation && conversationProjection?.state === "waiting";
   const botName = botRole && botRole.id === task?.assignedAgentRoleId ? botRole.displayName : "Bot";
+  const botIcon = botRole && botRole.id === task?.assignedAgentRoleId ? botRole.icon : undefined;
+  const botMascot = resolveBotMascot(botIcon);
+  const botMascotExpression = mascotExpressionForBotConversation(
+    conversationProjection?.state,
+    taskStatusStripModel.state,
+  );
   const actionLabels = getConversationActionLabels(isBotConversation);
   const menuLabel = isBotConversation ? "Bot options" : actionLabels.menu;
   useEffect(() => {
@@ -8436,6 +8473,7 @@ function MainContentComponent({
       const index = optionIndex++;
       const displayLabel = option.type === "everyone" ? "Everybody" : option.label;
       const isIntegration = option.type === "integration" && option.integration;
+      const optionMascot = option.type === "agent" ? resolveBotMascot(option.icon) : null;
       return (
         <button
           key={`${option.type}-${option.id}`}
@@ -8453,6 +8491,8 @@ function MainContentComponent({
               label={option.label}
               size="sm"
             />
+          ) : optionMascot ? (
+            <BotMascot mascot={optionMascot} size={22} animated={false} />
           ) : (
             <span
               className="mention-autocomplete-icon"
@@ -11002,6 +11042,7 @@ function MainContentComponent({
       onOpenPresentationArtifact={openPresentationArtifact}
       onOpenWebArtifact={openWebArtifact}
       botName={botName}
+      botIcon={botIcon}
       onForkTaskSessionFromEvent={
         remoteSession ||
         !hasHostMethod("forkTaskSession") ||
@@ -11120,8 +11161,15 @@ function MainContentComponent({
                 title="Edit bot"
                 aria-label={`Edit bot ${botName}`}
               >
-                <span className="bot-conversation-identity-avatar" aria-hidden="true">
-                  <BotGlyph size={17} />
+                <span
+                  className={`bot-conversation-identity-avatar${botMascot ? " bot-conversation-identity-avatar-mascot" : ""}`}
+                  aria-hidden="true"
+                >
+                  {botMascot ? (
+                    <BotMascot mascot={botMascot} size={30} expression={botMascotExpression} />
+                  ) : (
+                    <BotGlyph size={17} />
+                  )}
                 </span>
                 <span className="bot-conversation-identity-copy">
                   <strong>{botName}</strong>
@@ -11645,6 +11693,7 @@ function MainContentComponent({
             <BotCollaborationHeader
               task={task}
               botName={botName || "Bot"}
+              botIcon={botIcon}
               events={events}
               childEvents={childEvents}
               childTasks={childTasks}

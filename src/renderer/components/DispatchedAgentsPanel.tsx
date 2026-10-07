@@ -5,7 +5,7 @@ import remarkBreaks from "remark-breaks";
 import { Check, X, Play, Loader2 } from "lucide-react";
 import type { Task, TaskEvent } from "../../shared/types";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
-import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { resolveTwinIcon } from "../utils/twin-icons";
 import { AgentRosterRow, type AgentRosterEntry } from "./timeline/AgentRosterRow";
 import { stripAgentRoleSuffix } from "../../shared/subagent-presentation";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
@@ -449,7 +449,7 @@ export function DispatchedAgentsPanel({
                 >
                   <span className="team-member-icon">
                     {(() => {
-                      const Icon = getEmojiIcon(info.role?.icon || "🤖");
+                      const Icon = resolveTwinIcon(info.role?.icon || "🤖");
                       return <Icon size={16} strokeWidth={1.5} />;
                     })()}
                   </span>
@@ -493,7 +493,7 @@ export function DispatchedAgentsPanel({
                       <div className="stream-agent-header-inline">
                         <span className="stream-agent-icon">
                           {(() => {
-                            const Icon = getEmojiIcon(item.agentIcon);
+                            const Icon = resolveTwinIcon(item.agentIcon);
                             return <Icon size={14} strokeWidth={1.5} />;
                           })()}
                         </span>

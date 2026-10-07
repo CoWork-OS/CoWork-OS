@@ -1,10 +1,50 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
 import { InFlightWork } from "../../utils/in-flight-work";
+import { enforceResponsibilityTaskStart } from "../../automation/responsibility-task-policy";
+
+// This suite isolates shutdown ownership; persisted policy has its own native tests.
+vi.mock("../../automation/responsibility-task-policy", () => ({
+  enforceResponsibilityTaskStart: vi.fn(async () => {}),
+}));
 
 vi.mock("electron", () => ({ app: { getPath: vi.fn().mockReturnValue("/tmp") } }));
 
 describe("daemon shutdown persistence", () => {
+  it("owns an outstanding responsibility policy lookup until shutdown drains the starter", async () => {
+    let releasePolicy!: () => void;
+    const policy = new Promise<void>((resolve) => {
+      releasePolicy = resolve;
+    });
+    vi.mocked(enforceResponsibilityTaskStart).mockImplementationOnce(() => policy);
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      getDatabase: vi.fn(() => ({})),
+      orchestrationGraphEngine: { stop: vi.fn() },
+      workSessionProtocolService: { getReliabilityService: () => ({ stop: vi.fn() }) },
+      pendingApprovals: new Map(),
+      pendingDurableApprovalGrants: new Map(),
+      pendingInputRequests: new Map(),
+      pendingRetries: new Map(),
+      pendingTaskImages: new Map(),
+      activeTasks: new Map(),
+      taskRepo: { findById: vi.fn(), update: vi.fn() },
+      finishQueueSlot: vi.fn(),
+      logEvent: vi.fn(),
+      removeAllListeners: vi.fn(),
+    });
+    const starter = AgentDaemon.prototype.startTaskImmediate.call(daemon, {
+      id: "policy-wait",
+      workspaceId: "fixture",
+    } as any);
+    expect(daemon.admittedStartOperations?.size).toBe(1);
+    const shutdown = daemon.shutdown();
+    releasePolicy();
+    await starter;
+    await shutdown;
+    expect(daemon.admittedStartOperations.size).toBe(0);
+    expect(daemon.finishQueueSlot).toHaveBeenCalledWith("policy-wait");
+    expect(daemon.activeTasks.size).toBe(0);
+  });
   it.each(["completed", "failed", "cancelled"])(
     "does not interrupt a durable %s task left active in the executor cache",
     async (status) => {
@@ -157,6 +197,7 @@ describe("daemon shutdown persistence", () => {
         profileSelected: true,
         status: "skipped",
       })),
+      getDatabase: vi.fn(() => ({})),
       maybeLaunchCollaborativeTask: vi.fn(() => collaboration),
       finishQueueSlot: vi.fn(),
       activeTasks: new Map(),

@@ -19,6 +19,152 @@ an agent role is not automatically a bot conversation. Only
 `agentConfig.botConversation === true` identifies a conversation in the Bots
 surface.
 
+## View a bot's work
+
+Use **Work** on the Bots page, the **View bot work** icon beside a bot in the roster,
+or the work counts in a bot chat's details rail. The header shows the bot's character,
+status (**Active** or **Paused**), a **Pause bot** / **Resume bot** button and a **⋯**
+menu with **Stop all running work**, **Stop all and pause** and **What this bot
+knows**. A workspace picker switches between workspaces where the bot has work; when
+you open it from a temporary workspace with nothing in it, it starts on the busiest
+saved workspace. Opening the view does not create a conversation or execute a task.
+
+- **Needs you** shows pending approvals, input requests, pauses, and interruptions
+  that need review. **Respond** opens the task and its decision controls.
+- **Working** includes assigned tasks and their delegated descendants, including
+  persisted child, external, and reconnect waits. Delegated rows are labeled separately.
+- **Scheduled** includes queued tasks, enabled saved cron jobs directly assigned to the
+  bot in this workspace, and the schedules of its responsibilities. A schedule that
+  would be skipped because the bot or the responsibility is paused is labeled
+  **Paused** instead of showing a next run. **Manage** opens it in Setup. Saved jobs show their recorded next run time. The
+  view distinguishes an available scheduler from a disabled or stopped runtime;
+  a saved time does not guarantee future execution.
+- **Results** shows terminal work and its recorded verification verdict (**Checked**,
+  **Partly checked**, **Check failed** or **Not checked**). **Details** on a result
+  shows its outcome contract, requirement checks, evidence and recorded output
+  revisions, each rechecked against the current file (matches, changed,
+  missing or unavailable). A completed task does not establish delivery, so external
+  delivery stays unknown unless a delivery receipt exists.
+
+Archived work, other workspaces, side chats, and unrelated team tasks are excluded.
+Empty completed conversations do not become results. Summary pages contain at most
+100 rows (25 by default), without raw prompts or transcripts. Refresh and load-more
+controls read existing records. The shared Control Plane method is `bot.work.list`,
+with existing `read` authorization:
+
+```json
+{"workspaceId":"your-workspace-id","agentRoleId":"your-bot-id","view":"working","limit":25}
+```
+
+Responses contain `items`, counts for the four views, scheduler state, and an
+optional `nextCursor`. Supply that cursor with the same workspace, bot, and view
+for the next page. Desktop uses `listBotWork`; the browser host additionally checks
+effective workspace read access. Bot names and team membership do not determine
+work ownership.
+
+### Responsibilities
+
+**Setup > Add responsibility** binds the bot to one existing paused
+routine (or creates a paused on-demand, hourly, daily or weekday routine inline).
+A definition records the objective, mode, selected sources, permitted actions,
+expected output, review boundary, destination, execution backend and budget.
+**Preview run** shows the trigger, next run time and any blockers; **Save paused**
+stores an immutable revision without starting anything. **Turn on**, **Run now**,
+**Pause**/**Resume** and **Turn off** are separate, explicit actions; turn it off to
+edit it. Each run records the
+exact definition revision it was admitted under; editing a responsibility returns
+it to paused and never authorizes an earlier pending action.
+
+| Mode | What the run may do |
+| --- | --- |
+| **Observe** | Read only the selected sources and produce an internal result. |
+| **Propose** | Prepare an inspectable draft; no effects. |
+| **Act within granted scope** | Perform only the exact selected actions. With the **all effects** review boundary each effect waits for an exact one-time review; otherwise only actions outside the grant need review. |
+
+Supported sources are selected workspace files (`read_file`, `list_directory`),
+cached history for one exact chat on an enabled channel, and `list_threads` /
+`get_thread` for one selected mailbox account. The supported action is a reviewed
+workspace `write_file`. Anything else is shown as a blocker and cannot be activated:
+unknown connector methods, other event sources, external outputs, deterministic
+workflows, remote targets and Slack/Teams destinations. Untrusted event or message
+text is never copied into task instructions.
+
+Scheduled and event responsibilities stay quiet when their selected sources are
+missing or unchanged: no task is created and no model is called. A changed source
+admits one task, and replayed events admit at most one. The headless Node daemon
+runs Observe and in-grant work. An Act responsibility that reviews every effect needs
+someone to answer an exact review, so it can only be activated in the desktop app and
+only with a manual trigger; on a headless runtime, or with a schedule or event
+trigger, it reports why and cannot be activated. For unattended Act work, grant the
+exact action and use the **outside granted scope** review boundary.
+
+### Controls, notifications and context
+
+Each running item has its own **Stop**. **Pause bot** stops scheduled and new work
+from starting for that bot only; running work and other bots continue. The menu's
+**Stop all running work** and **Stop all and pause** act on everything the bot is
+running in the workspace. Every control is durable: a one-line status reports what
+happened, with **Details**, and cleanup that is still pending or failed stays visible
+with **Try again** until it is confirmed. Resume never resolves a pending approval or
+replays a completed action.
+
+**Setup** holds the bot's responsibilities (each can be paused, resumed, run now, or
+turned off to edit), its notifications and a link to its memory.
+
+**Notifications** (in Setup) first chooses what to hear about: **needs a decision**
+and **finishes or fails** (the same toggles as the chat's details rail). Turning on
+**Also send to the inbox or desktop** routes decisions, meaningful results and
+failures to the app inbox, optionally with a desktop alert, with quiet hours and
+digests. Routes are off until you enable them. Receipts say **stored in inbox** or **delivery
+unknown**; an unknown delivery can be retried explicitly but is never resent
+automatically. Stored or cancelled notification records for finished work, and spent
+channel decision routes, are pruned after 90 days; unresolved deliveries and the
+receipts that make your requests idempotent are kept.
+
+**What this bot knows** (or **Open memory** in Setup) opens the Memory Hub for the
+bot's workspace. Items show
+their recorded source and date; historical records without recorded bot provenance
+appear as shared workspace context. Correcting or forgetting an item affects every
+later run. Private owner context is never given to group or non-owner channel tasks.
+
+### Decisions in a bot chat
+
+When a bot in a local desktop chat needs approval, it pauses and asks in the chat, as
+other bot apps do: the decision card shows **Deny** and **Allow once**, the roster row
+says **Waiting for your decision**, and the request appears in the bot's **Needs
+you**. For reading the web, one **Allow for this chat** covers searching and opening
+pages for that chat; it ends if the workspace policy or access profile changes. Chats
+linked to Slack, Teams or another channel do not show these cards; they use that
+channel's own decision path. Reviews of a responsibility's file writes say whether the
+file is one the responsibility may write and warn when it is not.
+
+### Slack and Teams decision cards
+
+With **Decision Cards** enabled on a Slack or Teams channel that has saved owner IDs,
+an approval for a task started by that owner in a private conversation is published
+as a Block Kit or Adaptive Card. The card shows the exact request revision; Approve
+and Deny apply once, only from the owner, and only while the request, permissions and
+files are unchanged. Group or public conversations, other requesters and older
+tasks without a recorded private context get a "review in CoWork" message instead.
+Legacy approval buttons on other channels are bound to the revision they displayed;
+file, draft and responsibility-write reviews cannot be approved from them and must be
+decided in CoWork.
+
+### Control Plane methods
+
+Desktop and the Node daemon expose the same methods under existing scopes:
+`bot.work.list`, `bot.work.result`, `bot.work.control.get` and
+`bot.work.control.state` (read), `bot.work.stop` (write; also pause/resume),
+`bot.responsibility.list|engines|preview` (read) and
+`bot.responsibility.create|revise|activate|pause|run|futureRuns` (write),
+`bot.notification.route.get|receipts` (read) and `bot.notification.route.update|retry`
+(write), `automation.runtime.status` (read) and `bot.metrics.summary` (read).
+`bot.metrics.summary` takes `workspaceId`, optional `agentRoleId` and `windowDays`
+(1–90) and returns baseline counters: verified outcomes, unresolved waits, committed
+and uncertain effects, recovery and delivery states, dispatch reservations and
+denials, model usage outside admitted work, and recent work-view latency. These are
+recorded counts, not targets.
+
 ## Concepts and boundaries
 
 CoWork uses three related but different objects:
@@ -75,13 +221,14 @@ does not apply formatting just because the model used Markdown syntax.
 
 ### 2. Create a bot
 
-1. Select the **+** button in the Bots header, or choose **Create bot** in the
-   empty state.
-2. Enter a display name. A stable internal name is generated from it using
+1. Select **New bot** on the Bots page or in the sidebar, or pick a template under
+   **Start from a template** to open the same dialog already filled in.
+2. Pick a character. Every bot is drawn as one of the illustrated characters, with
+   eyes that follow its state.
+3. Enter a display name. A stable internal name is generated from it using
    lowercase letters, numbers, and hyphens.
-3. Optionally add a description and instructions, then choose an icon and
-   color.
-4. Select **Create bot**.
+4. Optionally add what it helps with and instructions.
+5. Select **Create bot**.
 
 The internal name is used for storage and bot-team addressing; it is not a
 second display label in the sidebar. The simple create dialog gives the bot the
@@ -134,23 +281,26 @@ controls rather than a separate bot-only execution path.
 Open the edit control from a bot row, the bot identity in the conversation
 header, or the Bot details rail. The profile editor supports:
 
+- **Character**: how the bot is drawn everywhere it appears. Bots saved with an
+  older icon or emoji show the closest character until you save a new one.
 - **Name**: the human-readable display name.
-- **Description**: context shown to the bot and in the details rail.
+- **What it helps with**: context shown to the bot and in the details rail.
 - **Instructions**: the role-specific system guidance used for a later run.
-- **Icon** and **Color**: the persistent roster and conversation appearance.
 
 Descriptions and instructions preserve line breaks and are normalized before
 storage. The editor limits each long text field to 12,000 characters. Saved
 profile changes apply when the bot starts its next run; an already-running run
 may retain the context with which it started.
 
-The profile dialog keeps the **Delete bot**, **Cancel**, and **Save changes**
+The profile dialog keeps the **Delete bot**, **Cancel**, and **Save**
 actions visible in a fixed footer while the form body scrolls. This keeps the
 destructive and commit actions reachable even when the instructions are long.
 
-The Bot details rail also exposes the current conversation status, history,
-notification preferences for completion/input-required states, and the host
-computer status used by computer-use tools. **Copy bot link** copies a
+The Bot details rail also shows the bot's work counts (**Needs you**, **Working**,
+**Scheduled**; each opens that view) with a link to **Responsibilities and setup**,
+the current conversation status, history, the same "tell me when it needs a
+decision / finishes" toggles as Setup, and the host computer status used by
+computer-use tools. **Copy bot link** copies a
 `cowork://bots/<role-id>` link for the bot roster surface.
 
 ### 7. Delete a bot safely
@@ -165,43 +315,36 @@ System roles cannot be deleted. If a bot is missing after deletion, use
 `getAgentRoles(true)` or inspect the role's `isActive` state rather than deleting
 database rows manually.
 
-## Built-in CoWork bot team
+## User-configured bots and teams
 
-CoWork seeds a small roster of ordinary custom roles and attaches a persistent
-**CoWork Bot Team** to workspaces as bot conversations need it. The roles are
-global identities; the team and its membership are workspace-scoped.
+Custom bots belong to the user's configuration. CoWork does not install a named
+custom roster, select a coordinator by name, or attach every bot to a team.
+Standalone bots use the normal task runtime without team membership.
 
-| Display name | Internal name / bot handle | Default focus |
-| --- | --- | --- |
-| Atlas — Your Chief of Staff | `atlas-your-chief-of-staff` / `atlas` | Coordination, priorities, and delegation |
-| Forge — CoWork OS Product Engineer | `forge` | Product implementation and testing |
-| Scribe — Author and Publisher | `scribe` | Documentation and public-facing writing |
-| Exec | `exec` | Decisions, risks, and executable plans |
-| Chief Community Officer | `chief-community-officer` | Community feedback and growth conversations |
-| Product Engineer | `product-engineer` | Technical trade-offs and focused product work |
+Teams are optional, workspace-scoped collaboration groups. Existing user bot
+records, instructions, conversations, teams, and membership remain intact across
+startup and recovery. Startup does not rewrite custom instructions or recreate
+deactivated bots. The separate system-role/template catalog remains available.
 
-Atlas and Exec are seeded as lead-oriented roles. The other default roles are
-specialists. The roster is additive: startup synchronization preserves user
-edits and adds only the collaboration guidance required for peer messaging.
-
-The UI does not show handles next to bot names. Handles matter when a bot uses
-the runtime collaboration tool, for example `bot: "forge"` in a
-`send_agent_message` call.
+For a team conversation, runtime guidance lists only currently verified active
+members and identifies leadership from the configured team record. Bot IDs are
+stable selectors even after a rename; names and display names are convenience
+selectors. Replies go to the actual requester using the durable handoff boundary.
 
 ## How bot-to-bot collaboration works
 
 A bot conversation can use `send_agent_message` in either of two ways:
 
-- `bot`: address a named teammate in the current persistent bot team, such as
-  `forge` or `scribe`.
+- `bot`: address a verified teammate in the selected persistent bot team by
+  stable bot ID, internal name, or display name.
 - `task_id`: address a descendant child task using the normal agent-message
   contract.
 
 For a bot teammate, CoWork verifies all of the following before delivery:
 
-1. The sender is a bot conversation.
+1. The sender is a bot conversation assigned to an active bot role.
 2. The sender belongs to an active, persistent team.
-3. The recipient is a member of that same team and workspace.
+3. The recipient is an active role in that same team and workspace.
 4. The recipient is not the sender.
 
 Bot-team messages are durably admitted with sender/recipient provenance and a
@@ -230,7 +373,8 @@ not look like a generic missing bot.
 When a bot conversation is failed or unavailable, **Reopen conversation** is
 available from the Bots roster. Reopen creates a fresh conversation in the
 current workspace and links it to the old task for history without copying the
-old transcript. Team or membership repair is explicit; a foreign team is never
+old transcript. Standalone conversations reopen without creating a team. Team
+or membership repair is explicit; a foreign team is never
 silently reassigned. A workspace-boundary recovery follows the same rule for
 canonical WorkSessions and emits a durable `workspace_boundary_recovery`
 event.
@@ -381,6 +525,10 @@ bot marker and returns a dormant task; `sendMessage` starts the first turn.
   deactivated roles for diagnostics/history tooling.
 - `deleteAgentRole()` is a safe deactivation operation for custom roles. It
   returns `false` for a missing role or a protected system role.
+- `reopenBotConversation()` accepts an optional existing `botTeamId` and an
+  explicit `repairMembership` action. A cross-workspace fresh conversation requires
+  `branchToWorkspace: true`; it inherits neither the source's transcript nor its
+  team. Without an explicitly selected target team, the new conversation is standalone.
 - `listBotConversations()` supports workspace and role filters, archive
   inclusion, pagination, and a temporary-workspace all-workspaces mode used by
   the renderer when recovering a transcript after restart.
@@ -414,13 +562,14 @@ instructions are loaded.
 
 ### A teammate cannot be reached
 
-Confirm the sender is a bot conversation attached to the persistent CoWork Bot
-Team, use the internal handle rather than a display-name typo, and check that
+Confirm the sender is a bot conversation attached to an explicitly configured
+persistent team, use the stable bot ID for ambiguous names, and check that
 the recipient is a member of the same workspace team. `send_agent_message`
 cannot cross teams or workspaces. If the Bots roster shows **Unavailable —
 reopen to retry**, use the refresh action on that row. If the role membership
-was revoked, the recovery action repairs it explicitly and creates a fresh
-conversation; the old task and transcript remain intact.
+was revoked, restore it through the team configuration before reopening, or use
+an explicit `repairMembership: true` API request for that existing team. An ordinary
+reopen never restores membership. The old task and transcript remain intact.
 
 ### A conversation was restored after a workspace conflict
 
@@ -467,7 +616,8 @@ The bot implementation is intentionally split by responsibility:
 - `src/renderer/components/BotsPane.tsx` owns the roster, search, previews,
   create flow, and row-level edit entry point.
 - `src/renderer/components/BotProfileDialog.tsx` owns profile loading,
-  validation, save/delete confirmation, focus handling, and profile events.
+  validation, save/delete confirmation and profile events; it and the create
+  dialog share `BotFormDialog.tsx` (character, fields, focus handling, footer).
 - `src/renderer/components/BotConversationHistory.tsx` renders current and
   archived conversations for one bot.
 - `src/renderer/components/BotDetailsRail.tsx` renders identity, status,
@@ -480,10 +630,10 @@ The bot implementation is intentionally split by responsibility:
 - `src/electron/ipc/handlers.ts` validates role CRUD and bot-history requests;
   `src/electron/preload.ts` exposes the typed renderer boundary.
 - `src/electron/agents/AgentRoleRepository.ts` owns role persistence and safe
-  deactivation; `src/electron/agents/bot-team.ts` seeds the default roster and
-  workspace team.
+  deactivation; `src/electron/agents/bot-team.ts` builds generic guidance from
+  verified team membership.
 - `src/electron/database/repositories.ts` owns bot-conversation SQL queries;
-  `src/electron/agent/daemon.ts` attaches teams, resolves peers, and wakes
+  `src/electron/agent/daemon.ts` verifies configured teams, resolves peers, and wakes
   recipients; `src/electron/agent/tools/registry.ts` implements
   `send_agent_message`.
 - `src/shared/types.ts` contains `AgentRole`, `AgentConfig`,
@@ -512,3 +662,23 @@ For changes to peer messaging, also run the focused
 changes to task creation or runtime state, include the relevant daemon,
 executor, and task-working-state tests rather than relying on roster tests
 alone.
+
+
+### Approval decision cards
+
+In **Settings → Slack** or **Settings → Teams**, save your own channel account ID
+under **Your Account on This Channel**, then enable **Send approval decision cards**.
+The switch is off by default. Enabling it changes only card delivery configuration;
+CoWork still checks the channel, requester, task, current permissions, request revision
+and supported file revisions before accepting a decision.
+
+Cards offer approval once or denial for the displayed request and expire after five
+minutes. Changed requests or files require a fresh review. Requests unsupported by
+the card transport direct you to CoWork. An interrupted card delivery can remain
+unknown; review its pending approval in CoWork instead of assuming delivery succeeded.
+Slack requires a connected Socket Mode adapter; Teams requires its configured tenant
+and an authenticated conversation. Decision conversation references survive restart only for the same channel, app,
+tenant and unchanged configuration. References expire after 90 days and are capped
+at 1,000 per channel; expired records are pruned when new references are saved.
+A configuration change requires a fresh authenticated conversation. Live channel
+delivery still requires acceptance validation.

@@ -1,4 +1,11 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { ApprovalDraftReview } from "./ApprovalDraftReview";
+export { ApprovalDraftPreviewText } from "./ApprovalDraftReview";
+import {
+  type ApprovalDraftPreview,
+  approvalDraftPresentation,
+  responsibilityActionReviewPresentation,
+} from "../../shared/approval-draft-presentation";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import type {
   ApprovalRequest,
   ApprovalResponseAction,
@@ -58,6 +65,17 @@ function asRecord(value: unknown): Record<string, unknown> {
 function readString(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function formatReviewedValue(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() ? value : null;
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return null;
+  }
 }
 
 function readParamString(details: Record<string, unknown>, key: string): string | null {
@@ -168,7 +186,7 @@ function iconForType(type: ApprovalType): string {
 
 interface GenericApprovalDialogProps {
   approval: ApprovalRequest;
-  onRespond: (action: ApprovalResponseAction) => void;
+  onRespond: (action: ApprovalResponseAction, expectedRevisionHash?: string) => void;
   onApproveAllSession?: () => void;
 }
 
@@ -177,12 +195,54 @@ export function GenericApprovalDialog({
   onRespond,
   onApproveAllSession,
 }: GenericApprovalDialogProps) {
+  const [draftPreviews, setDraftPreviews] = useState<ApprovalDraftPreview[]>([]);
+  const [draftPreviewLoading, setDraftPreviewLoading] = useState(false);
+  useEffect(() => {
+    let current = true;
+    setDraftPreviews([]);
+    setDraftPreviewLoading(false);
+    if (
+      approval.status === "pending" &&
+      approvalDraftPresentation(approval.details)?.state === "bound" &&
+      typeof window !== "undefined" &&
+      window.electronAPI?.getApprovalDraftPreview
+    ) {
+      setDraftPreviewLoading(true);
+      void window.electronAPI
+        .getApprovalDraftPreview(approval)
+        .then((result) => {
+          if (current && Array.isArray(result))
+            setDraftPreviews(
+              result.filter(
+                (entry) =>
+                  typeof entry?.text === "string" &&
+                  entry.text.length <= 2000 &&
+                  typeof entry.sha256 === "string" &&
+                  /^[a-f0-9]{64}$/.test(entry.sha256) &&
+                  typeof entry.reference === "string" &&
+                  typeof entry.truncated === "boolean",
+              ),
+            );
+        })
+        .catch(() => {
+          /* Stale, denied or unavailable files remain without a preview. */
+        })
+        .finally(() => {
+          if (current) setDraftPreviewLoading(false);
+        });
+    }
+    return () => {
+      current = false;
+    };
+  }, [approval.id, approval.requestedAt, approval.revisionHash, approval.details, approval.status]);
   const [selectedScope, setSelectedScope] = useState<ScopeKey>("once");
   const [showAdvancedScopes, setShowAdvancedScopes] = useState(false);
   const details =
     approval.details && typeof approval.details === "object" && !Array.isArray(approval.details)
       ? (approval.details as Record<string, unknown>)
       : {};
+  const draft = approvalDraftPresentation(details);
+  const responsibilityActionReview = responsibilityActionReviewPresentation(approval.details);
   const toolName = toolNameForDetails(details);
   const command = typeof details.command === "string" ? details.command : null;
   const commandPreview = command ? buildApprovalCommandPreview(command) : null;
@@ -200,6 +260,11 @@ export function GenericApprovalDialog({
       : null;
   const appName = readParamString(details, "appName");
   const description = descriptionForApproval(approval.description, toolName, appName);
+  const reviewedEffect = asRecord(details.reviewedEffect);
+  const reviewedMessage = asRecord(reviewedEffect.message);
+  const reviewedEvent = asRecord(reviewedEffect.event);
+  const reviewedPreviousEvent = asRecord(reviewedEffect.previousEvent);
+  const reviewedNotionTarget = asRecord(reviewedEffect.target);
 
   const rows: { label: string; value: ReactNode }[] = [];
 
@@ -316,14 +381,214 @@ export function GenericApprovalDialog({
     });
   }
 
-  const suggestedActions = permissionPrompt?.suggestedActions?.length
-    ? permissionPrompt.suggestedActions
-    : [
-        { action: "deny_once" as const, label: "Deny once" },
-        { action: "allow_once" as const, label: "Allow once" },
-      ];
+  if (reviewedEffect.version === 1 && reviewedEffect.provider === "gmail") {
+    const operation = readString(reviewedEffect, "operation");
+    const emailOperation = [
+      "send_draft",
+      "send_email",
+      "send_message",
+      "reply_to_thread",
+      "forward_email",
+      "create_draft",
+      "update_draft",
+    ].includes(operation ?? "");
+    const effectLabels: Record<string, string> = {
+      send_draft: "Send this existing Gmail draft",
+      send_email: "Send this Gmail message",
+      send_message: "Send this Gmail message",
+      reply_to_thread: "Reply to this Gmail thread",
+      forward_email: "Forward this Gmail message",
+      create_draft: "Create a Gmail draft",
+      update_draft: "Update this Gmail draft",
+      create_label: "Create a Gmail label",
+      apply_labels: "Change labels on Gmail messages",
+      bulk_label: "Change labels on matching Gmail messages",
+      archive_thread: "Archive this Gmail thread",
+      modify_thread_labels: "Change labels on this Gmail thread",
+      batch_modify_messages: "Change labels on selected Gmail messages",
+      trash_message: "Move this Gmail message to Trash",
+    };
+    rows.push({ label: "Effect", value: effectLabels[operation ?? ""] ?? "Change Gmail data" });
+    if (emailOperation) {
+      for (const [label, key] of [
+        ["To", "to"],
+        ["Cc", "cc"],
+        ["Bcc", "bcc"],
+        ["Subject", "subject"],
+        ["Thread", "threadId"],
+      ] as const) {
+        const value = formatReviewedValue(reviewedMessage[key]);
+        if (value) rows.push({ label, value });
+      }
+      const body = formatReviewedValue(reviewedMessage.body);
+      if (body) {
+        rows.push({
+          label: "Message",
+          value: (
+            <div
+              className="session-approval-code-scroll"
+              role="region"
+              aria-label="Message to send"
+            >
+              <pre className="session-approval-code session-approval-code--multiline">{body}</pre>
+            </div>
+          ),
+        });
+      }
+      const attachments = reviewedMessage.attachments;
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        rows.push({ label: "Attachments", value: formatReviewedValue(attachments) });
+      }
+      for (const [label, key] of [
+        ["Reviewed draft revision", "draftRevisionSha256"],
+        ["Source draft revision", "sourceDraftRevisionSha256"],
+      ] as const) {
+        const revision = readString(reviewedEffect, key);
+        if (revision) rows.push({ label, value: revision });
+      }
+    } else {
+      const target = formatReviewedValue(reviewedEffect.target);
+      const change = formatReviewedValue(reviewedEffect.change);
+      if (target) rows.push({ label: "Target", value: target });
+      if (change) {
+        rows.push({
+          label: "Proposed change",
+          value: (
+            <div
+              className="session-approval-code-scroll"
+              role="region"
+              aria-label="Proposed Gmail change"
+            >
+              <pre className="session-approval-code session-approval-code--multiline">{change}</pre>
+            </div>
+          ),
+        });
+      }
+      const query = readString(reviewedMessage, "query");
+      const labelName = readString(reviewedMessage, "labelName");
+      const matchCount = formatReviewedValue(reviewedMessage.matchCount);
+      const messageIds = formatReviewedValue(reviewedMessage.messageIdsPreview);
+      const messageIdsSha256 = readString(reviewedEffect, "messageIdsSha256");
+      if (query) rows.push({ label: "Search", value: query });
+      if (labelName) rows.push({ label: "Label", value: labelName });
+      if (matchCount) rows.push({ label: "Matched messages", value: matchCount });
+      if (messageIds) rows.push({ label: "Sample message IDs", value: messageIds });
+      if (messageIdsSha256) rows.push({ label: "Matched set revision", value: messageIdsSha256 });
+    }
+  }
 
-  const allScopePairs = extractScopePairs(suggestedActions);
+  if (reviewedEffect.version === 1 && reviewedEffect.provider === "google_calendar") {
+    rows.push({
+      label: "Effect",
+      value: `Google Calendar ${String(reviewedEffect.operation ?? "change")}`,
+    });
+    const calendarId = formatReviewedValue(reviewedEffect.calendarId);
+    const eventId = formatReviewedValue(reviewedEffect.eventId);
+    if (calendarId) rows.push({ label: "Calendar", value: calendarId });
+    if (eventId) rows.push({ label: "Event ID", value: eventId });
+    const summary = formatReviewedValue(reviewedEvent.summary);
+    const start = formatReviewedValue(reviewedEvent.start);
+    const end = formatReviewedValue(reviewedEvent.end);
+    const location = formatReviewedValue(reviewedEvent.location);
+    const attendees = formatReviewedValue(reviewedEvent.attendees);
+    const eventDescription = formatReviewedValue(reviewedEvent.description);
+    if (summary) rows.push({ label: "Event", value: summary });
+    if (start) rows.push({ label: "Starts", value: start });
+    if (end) rows.push({ label: "Ends", value: end });
+    if (location) rows.push({ label: "Location", value: location });
+    if (attendees) rows.push({ label: "Attendees", value: attendees });
+    if (eventDescription) rows.push({ label: "Description", value: eventDescription });
+    if (Object.keys(reviewedEvent).length > 0) {
+      rows.push({
+        label: "Full event change",
+        value: (
+          <div
+            className="session-approval-code-scroll"
+            role="region"
+            aria-label="Full event change"
+          >
+            <pre className="session-approval-code session-approval-code--multiline">
+              {JSON.stringify(reviewedEvent, null, 2)}
+            </pre>
+          </div>
+        ),
+      });
+    }
+    if (Object.keys(reviewedPreviousEvent).length > 0) {
+      rows.push({
+        label: "Existing event to delete",
+        value: (
+          <div
+            className="session-approval-code-scroll"
+            role="region"
+            aria-label="Existing event to delete"
+          >
+            <pre className="session-approval-code session-approval-code--multiline">
+              {JSON.stringify(reviewedPreviousEvent, null, 2)}
+            </pre>
+          </div>
+        ),
+      });
+    }
+  }
+
+  if (reviewedEffect.version === 1 && reviewedEffect.provider === "notion") {
+    rows.push({
+      label: "Effect",
+      value: `Notion ${String(reviewedEffect.operation ?? "change")}`,
+    });
+    const targetKind = readString(reviewedNotionTarget, "kind");
+    const targetId = readString(reviewedNotionTarget, "id");
+    const targetParent = formatReviewedValue(reviewedNotionTarget.parent);
+    if (targetKind) rows.push({ label: "Resource", value: targetKind.replace(/_/g, " ") });
+    if (targetId) rows.push({ label: "Resource ID", value: targetId });
+    if (targetParent) rows.push({ label: "Parent", value: targetParent });
+    const change = formatReviewedValue(reviewedEffect.change);
+    if (change) {
+      rows.push({
+        label: "Proposed change",
+        value: (
+          <div
+            className="session-approval-code-scroll"
+            role="region"
+            aria-label="Proposed Notion change"
+          >
+            <pre className="session-approval-code session-approval-code--multiline">{change}</pre>
+          </div>
+        ),
+      });
+    }
+    const previousResource = formatReviewedValue(reviewedEffect.previousResource);
+    if (previousResource) {
+      rows.push({
+        label: "Existing resource",
+        value: (
+          <div
+            className="session-approval-code-scroll"
+            role="region"
+            aria-label="Existing Notion resource"
+          >
+            <pre className="session-approval-code session-approval-code--multiline">
+              {previousResource}
+            </pre>
+          </div>
+        ),
+      });
+    }
+  }
+
+  const suggestedActions =
+    responsibilityActionReview.state !== "absent"
+      ? []
+      : permissionPrompt?.suggestedActions?.length
+        ? permissionPrompt.suggestedActions
+        : [
+            { action: "deny_once" as const, label: "Deny once" },
+            { action: "allow_once" as const, label: "Allow once" },
+          ];
+
+  const allScopePairs =
+    responsibilityActionReview.state === "absent" ? extractScopePairs(suggestedActions) : null;
   const hasAdvancedScopes = allScopePairs?.some(
     (pair) => !["once", "session"].includes(pair.scope),
   );
@@ -358,7 +623,40 @@ export function GenericApprovalDialog({
           </dl>
         )}
 
-        {scopePairs ? (
+        <ApprovalDraftReview
+          draft={draft}
+          previews={draftPreviews}
+          loading={draftPreviewLoading}
+          responsibilityActionReview={
+            responsibilityActionReview.state === "absent" ? undefined : responsibilityActionReview
+          }
+        />
+
+        {responsibilityActionReview.state !== "absent" ? (
+          <>
+            <p className="session-approval-footer-hint">
+              This decision applies only to the proposed write shown above.
+            </p>
+            <div className="session-approval-actions">
+              <button
+                type="button"
+                className="session-approval-btn-deny"
+                onClick={() => onRespond("deny_once", approval.revisionHash)}
+              >
+                Deny once
+              </button>
+              {responsibilityActionReview.state === "valid" && (
+                <button
+                  type="button"
+                  className="session-approval-btn-allow"
+                  onClick={() => onRespond("allow_once", approval.revisionHash)}
+                >
+                  Approve once
+                </button>
+              )}
+            </div>
+          </>
+        ) : scopePairs ? (
           <>
             <div className="session-approval-scope-row">
               <span className="session-approval-scope-label">Remember for</span>
@@ -403,14 +701,18 @@ export function GenericApprovalDialog({
               <button
                 type="button"
                 className="session-approval-btn-deny"
-                onClick={() => activePair && onRespond(activePair.denyAction)}
+                onClick={() =>
+                  activePair && onRespond(activePair.denyAction, approval.revisionHash)
+                }
               >
                 Deny
               </button>
               <button
                 type="button"
                 className="session-approval-btn-allow"
-                onClick={() => activePair && onRespond(activePair.allowAction)}
+                onClick={() =>
+                  activePair && onRespond(activePair.allowAction, approval.revisionHash)
+                }
               >
                 Allow
               </button>
@@ -431,7 +733,7 @@ export function GenericApprovalDialog({
                       ? "session-approval-btn-allow"
                       : "session-approval-btn-deny"
                   }
-                  onClick={() => onRespond(action.action)}
+                  onClick={() => onRespond(action.action, approval.revisionHash)}
                 >
                   {action.label}
                 </button>
@@ -440,7 +742,10 @@ export function GenericApprovalDialog({
           </>
         )}
 
-        {onApproveAllSession && showAdvancedScopes && !details.accessProfile ? (
+        {responsibilityActionReview.state === "absent" &&
+        onApproveAllSession &&
+        showAdvancedScopes &&
+        !details.accessProfile ? (
           <button
             type="button"
             className="session-approval-approve-all-link"

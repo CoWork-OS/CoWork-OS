@@ -402,6 +402,9 @@ export class MemoryTools {
 
   async recall(input: MemoryRecallToolInput): Promise<Record<string, unknown>> {
     const tool = MEMORY_RECALL_TOOL;
+    if (!this.ownerMemoryToolsAllowed()) {
+      return this.recallError(tool, "Personal memory recall requires an owner conversation.");
+    }
     const query = asString(input?.query, MAX_QUERY_CHARS);
     const ids = asStringList(input?.ids, MAX_IDS);
     const requestedScopes = pickEnum(input?.scopes, MEMORY_RECALL_SCOPES);
@@ -942,6 +945,9 @@ export class MemoryTools {
       this.daemon.logEvent(this.taskId, "tool_result", { tool, success: false, error });
       return { success: false, error, ...extra };
     };
+    if (!this.ownerMemoryToolsAllowed()) {
+      return fail("Forgetting personal memory requires an owner conversation.");
+    }
     const done = (ref: string) => {
       this.daemon.logEvent(this.taskId, "tool_result", { tool, success: true, forgotten: ref });
       return { success: true, forgotten: ref };
@@ -1354,6 +1360,18 @@ export class MemoryTools {
     if (!isThirdPartyGatewayTask(task)) return null;
     const ref = task?.agentConfig?.gatewaySenderRef;
     return typeof ref === "string" && ref.trim() ? ref.trim().slice(0, 200) : "unattributed";
+  }
+
+  /** These tools span owner archives, files and external stores; shared grants do not apply. */
+  private ownerMemoryToolsAllowed(): boolean {
+    try {
+      const task = this.daemon.getTask?.(this.taskId);
+      if (!task || isThirdPartyGatewayTask(task)) return false;
+      const gateway = task.agentConfig?.gatewayContext;
+      return !gateway || gateway === "private";
+    } catch {
+      return false;
+    }
   }
 
   /** Supermemory may be queried: the workspace allows network access at all. */

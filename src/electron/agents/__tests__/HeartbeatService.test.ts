@@ -1,3 +1,4 @@
+import { DatabaseManager } from "../../database/schema";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -219,6 +220,71 @@ describe("HeartbeatService v3", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it("keeps a future-paused bot quiet before pulse, model and advisory work", async () => {
+    const manager = new DatabaseManager({ dbPath: path.join(tmpDir, "future-pause.db") });
+    const db = manager.getDatabase();
+    db.prepare(
+      "INSERT INTO bot_future_controls(workspace_id,agent_role_id,paused,version) VALUES(?,?,1,1)",
+    ).run("workspace-1", "agent-1");
+    createAgent("agent-1");
+    const reflection = vi.fn(),
+      dreaming = vi.fn();
+    const service = createService({
+      db,
+      runWorkflowReflection: reflection,
+      runMemoryDreaming: dreaming,
+    });
+    try {
+      const result = await service.triggerHeartbeat("agent-1");
+      expect(result.triggerReason).toBe("Bot future runs are paused");
+      expect(createdTasks).toHaveLength(0);
+      expect(createdSuggestions).toHaveLength(0);
+      expect(reflection).not.toHaveBeenCalled();
+      expect(dreaming).not.toHaveBeenCalled();
+      expect(db.prepare("SELECT COUNT(*) AS count FROM heartbeat_runs").get()).toEqual({
+        count: 0,
+      });
+    } finally {
+      await service.stop();
+      manager.close();
+    }
+  });
+  it("closes a pause racing after heartbeat preflight before its durable pulse admission", async () => {
+    const manager = new DatabaseManager({ dbPath: path.join(tmpDir, "future-race.db") });
+    const db = manager.getDatabase();
+    createAgent("agent-1");
+    const reflection = vi.fn(),
+      dreaming = vi.fn();
+    const activityRepo = {
+      list: async () => {
+        db.prepare(
+          "INSERT INTO bot_future_controls(workspace_id,agent_role_id,paused,version) VALUES(?,?,1,1)",
+        ).run("workspace-1", "agent-1");
+        return [];
+      },
+    } as unknown as HeartbeatServiceDeps["activityRepo"];
+    const service = createService({
+      db,
+      activityRepo,
+      runWorkflowReflection: reflection,
+      runMemoryDreaming: dreaming,
+    });
+    try {
+      const result = await service.triggerHeartbeat("agent-1");
+      expect(result.triggerReason).toBe("Bot future runs are paused");
+      expect(result.status).toBe("ok");
+      expect(createdTasks).toHaveLength(0);
+      expect(createdSuggestions).toHaveLength(0);
+      expect(reflection).not.toHaveBeenCalled();
+      expect(dreaming).not.toHaveBeenCalled();
+      expect(db.prepare("SELECT COUNT(*) AS count FROM heartbeat_runs").get()).toEqual({
+        count: 0,
+      });
+    } finally {
+      await service.stop();
+      manager.close();
+    }
+  });
   it("cancels scheduled pulses before storage is closed", async () => {
     createAgent("agent-1");
     const service = createService();
@@ -845,16 +911,20 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
   }
 
   function runRepoOf(service: HeartbeatService) {
-    return (service as unknown as {
-      runRepo: {
-        create: (input: Record<string, unknown>) => Promise<{ id: string }>;
-        attachTask: (runId: string, taskId: string) => Promise<void>;
-        finish: (runId: string, input: Record<string, unknown>) => Promise<unknown>;
-        get: (runId: string) => Promise<{ status?: string; error?: string } | undefined>;
-        getLatestRun: (agentId: string, type: string) => Promise<unknown>;
-        listRunningDispatches: (agentId: string) => Promise<Array<{ id: string; taskId?: string }>>;
-      };
-    }).runRepo;
+    return (
+      service as unknown as {
+        runRepo: {
+          create: (input: Record<string, unknown>) => Promise<{ id: string }>;
+          attachTask: (runId: string, taskId: string) => Promise<void>;
+          finish: (runId: string, input: Record<string, unknown>) => Promise<unknown>;
+          get: (runId: string) => Promise<{ status?: string; error?: string } | undefined>;
+          getLatestRun: (agentId: string, type: string) => Promise<unknown>;
+          listRunningDispatches: (
+            agentId: string,
+          ) => Promise<Array<{ id: string; taskId?: string }>>;
+        };
+      }
+    ).runRepo;
   }
 
   function timersOf(service: HeartbeatService): Map<string, unknown> {
@@ -1158,6 +1228,86 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     expect(createdTasks).toHaveLength(0);
     expect(createdSuggestions).toHaveLength(1);
     expect(dispatchBudget.snapshot("workspace-1").dispatchesToday).toBe(1);
+  });
+
+  it("refuses a restored scheduled pulse after task commit without emitting a review suggestion", async () => {
+    let manager = new DatabaseManager({ dbPath: path.join(tmpDir, "pulse-replay.db") });
+    const { WorkspaceStore } = await import("../../database/repositories");
+    const { TaskRepository } = await import("../../database/repository-facades");
+    const { PersistentDispatchBudget } = await import("../../automation/PersistentDispatchBudget");
+    const workspace = new WorkspaceStore(manager.getDatabase()).create(
+      "Pulse work",
+      workspacePaths.get("workspace-1")!,
+      { read: true, write: true, delete: false, shell: false, network: false },
+    );
+    let count = 0;
+    const run = async (lastPulseAt: number) => {
+      const agent = createAgent("restored-agent", {
+        lastPulseAt,
+        lastHeartbeatAt: Date.now(),
+        heartbeatProfile: "dispatcher",
+      });
+      const service = createService({
+        getDefaultWorkspaceId: () => workspace.id,
+        getTasksForAgent: () => [],
+        dispatchBudget: new PersistentDispatchBudget(manager.getDatabase(), {
+          maxPerWorkspacePerDay: 20,
+          entityCooldownMs: 0,
+        }),
+        createTask: async (workspaceId, prompt, title, _role, options) => {
+          count++;
+          return new TaskRepository(manager.getDatabase()).create({
+            workspaceId,
+            prompt,
+            title,
+            status: "pending",
+            agentConfig: options?.agentConfig,
+          });
+        },
+      });
+      await service.submitHeartbeatSignal({
+        agentRoleId: agent.id,
+        workspaceId: workspace.id,
+        signalFamily: "urgent_interrupt",
+        source: "hook",
+        fingerprint: "saved-urgent",
+        urgency: "critical",
+        confidence: 1,
+        reason: "Persisted urgent issue",
+        evidenceRefs: ["incident:saved"],
+      });
+      return (
+        service as unknown as {
+          runPulseBody: (
+            agent: AgentRole,
+            manual: boolean,
+          ) => Promise<import("../../../shared/types").HeartbeatResult>;
+        }
+      ).runPulseBody(agent, false);
+    };
+    try {
+      expect((await run(1000)).taskCreated).toBeTruthy();
+      expect(
+        manager.getDatabase().prepare("SELECT state FROM background_dispatch_reservations").all(),
+      ).toEqual([{ state: "committed" }]);
+      for (const service of services) await service.stop();
+      manager.close();
+      manager = new DatabaseManager({ dbPath: path.join(tmpDir, "pulse-replay.db") });
+      vi.setSystemTime(new Date("2026-03-23T12:00:00Z"));
+      const replay = await run(1000);
+      expect(replay.taskCreated).toBeUndefined();
+      expect(replay.pulseOutcome).toBe("idle");
+      expect(count).toBe(1);
+      expect(
+        manager.getDatabase().prepare("SELECT state FROM background_dispatch_reservations").all(),
+      ).toEqual([{ state: "committed" }]);
+      expect(createdSuggestions).toHaveLength(0);
+      expect((await run(2000)).taskCreated).toBeTruthy();
+      expect(count).toBe(2);
+    } finally {
+      for (const service of services) await service.stop();
+      manager.close();
+    }
   });
 
   it("records heartbeat task dispatches in the shared budget, manual pulses included", async () => {

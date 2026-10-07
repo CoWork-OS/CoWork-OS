@@ -1,3 +1,24 @@
+import type { ApprovalRequest } from "../shared/types";
+import type {
+  ApprovalDraftPreview,
+  InlineApprovalDraftReview,
+} from "../shared/approval-draft-presentation";
+import type {
+  BotNotificationScope,
+  BotNotificationRetry,
+  BotNotificationUpdate,
+  BotNotificationRoute,
+  BotNotificationReceipt,
+} from "../shared/bot-notification";
+import type {
+  BotResponsibility,
+  BotResponsibilityEngine,
+  BotResponsibilityPreview,
+  BotResponsibilityScope,
+  BotResponsibilitySave,
+  BotResponsibilityRevise,
+} from "../shared/bot-responsibility";
+import type { BotWorkQuery, BotWorkPage } from "../shared/types";
 import * as path from "path";
 import { contextBridge, ipcRenderer } from "electron";
 import * as fs from "fs";
@@ -191,6 +212,7 @@ import type {
   DocumentEditorSession,
   DocumentVersionEntry,
   ApprovalResponse,
+  ApprovalResponseStatus,
   InputRequest,
   InputRequestResponse,
   PermissionMode,
@@ -310,6 +332,7 @@ import type {
   MailboxMissionControlHandoffRequest,
   MailboxQuickReplySuggestionsResult,
   MailboxOutgoingMessage,
+  MailboxSendOutcomeResolution,
   MailboxQueuedAction,
   MailboxSavedViewPreviewResult,
   MailboxSavedViewRecord,
@@ -2528,6 +2551,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RETRY_ACTION, {
       actionId,
     }) as Promise<MailboxQueuedAction>,
+  resolveMailboxSendOutcome: (actionId: string, resolution: MailboxSendOutcomeResolution) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_RESOLVE_SEND_OUTCOME, {
+      actionId,
+      resolution,
+    }) as Promise<MailboxQueuedAction>,
   discardMailboxDraft: (draftId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, { draftId }) as Promise<boolean>,
   undoMailboxAction: (actionId: string) =>
@@ -2773,6 +2801,94 @@ contextBridge.exposeInMainWorld("electronAPI", {
       createdAt?: number;
     };
   }) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_LIST_SIDEBAR, opts),
+  activateBotResponsibility: (
+    request: import("../shared/bot-responsibility").BotResponsibilityControl,
+  ) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_RESPONSIBILITY_ACTIVATE,
+      request,
+    ) as Promise<BotResponsibility>,
+  getBotFutureControl: (request: {
+    scope: import("../shared/bot-responsibility").BotResponsibilityScope;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_CONTROL_STATE, request) as Promise<
+      import("../shared/bot-work-control").BotFutureControlState
+    >,
+  stopBotWork: (request: import("../shared/bot-work-control").BotWorkControlRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_STOP, request) as Promise<
+      import("../shared/bot-work-control").BotWorkControlReceipt
+    >,
+  getBotWorkControl: (request: import("../shared/bot-work-control").BotWorkControlRead) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_CONTROL_GET, request) as Promise<
+      import("../shared/bot-work-control").BotWorkControlReceipt | null
+    >,
+  setBotResponsibilityFutureRuns: (
+    request: import("../shared/bot-responsibility").BotResponsibilityFutureControl,
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_RESPONSIBILITY_FUTURE_RUNS, request) as Promise<
+      import("../shared/bot-responsibility").BotResponsibilityFutureReceipt
+    >,
+  pauseBotResponsibility: (
+    request: import("../shared/bot-responsibility").BotResponsibilityControl,
+  ) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_RESPONSIBILITY_PAUSE,
+      request,
+    ) as Promise<BotResponsibility>,
+  runBotResponsibility: (
+    request: import("../shared/bot-responsibility").BotResponsibilityRunRequest,
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_RESPONSIBILITY_RUN, request) as Promise<
+      import("./routines/types").RoutineRun | null
+    >,
+  listBotResponsibilities: (request: BotResponsibilityScope) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_RESPONSIBILITY_LIST, request) as Promise<
+      BotResponsibility[]
+    >,
+  listBotResponsibilityEngines: (request: BotResponsibilityScope) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_RESPONSIBILITY_ENGINES, request) as Promise<
+      BotResponsibilityEngine[]
+    >,
+  previewBotResponsibility: (request: BotResponsibilitySave) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_RESPONSIBILITY_PREVIEW,
+      request,
+    ) as Promise<BotResponsibilityPreview>,
+  createBotResponsibility: (request: BotResponsibilitySave) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_RESPONSIBILITY_CREATE,
+      request,
+    ) as Promise<BotResponsibility>,
+  reviseBotResponsibility: (request: BotResponsibilityRevise) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_RESPONSIBILITY_REVISE,
+      request,
+    ) as Promise<BotResponsibility>,
+  retryBotNotification: (request: BotNotificationRetry) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_NOTIFICATION_RETRY,
+      request,
+    ) as Promise<BotNotificationReceipt>,
+  getBotNotificationRoute: (scope: BotNotificationScope) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_NOTIFICATION_ROUTE_GET,
+      scope,
+    ) as Promise<BotNotificationRoute>,
+  updateBotNotificationRoute: (request: BotNotificationUpdate) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BOT_NOTIFICATION_ROUTE_UPDATE,
+      request,
+    ) as Promise<BotNotificationRoute>,
+  listBotNotificationReceipts: (scope: BotNotificationScope) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_NOTIFICATION_RECEIPTS, scope) as Promise<
+      BotNotificationReceipt[]
+    >,
+  getBotWorkResult: (request: import("../shared/bot-work-result").BotWorkResultRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_RESULT, request) as Promise<
+      import("../shared/bot-work-result").BotWorkResult
+    >,
+  listBotWork: (query: BotWorkQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_LIST, query) as Promise<BotWorkPage>,
   listBotConversations: (query: BotConversationListQuery) =>
     invokeTaskIpcWithRendererTiming(IPC_CHANNELS.BOT_CONVERSATIONS_LIST, query),
   reopenBotConversation: (request: BotConversationReopenRequest) =>
@@ -2957,8 +3073,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
   ) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
   // Approval APIs
+  getInputRequestDraftReview: (inputRequestId: string, taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.INPUT_REQUEST_DRAFT_REVIEW, {
+      inputRequestId,
+      taskId,
+    }) as Promise<InlineApprovalDraftReview | undefined>,
+  getApprovalDraftPreview: (approval: ApprovalRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_DRAFT_PREVIEW, approval) as Promise<
+      ApprovalDraftPreview[]
+    >,
   respondToApproval: (data: ApprovalResponse) =>
-    ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data),
+    ipcRenderer.invoke(IPC_CHANNELS.APPROVAL_RESPOND, data) as Promise<ApprovalResponseStatus>,
   listRecurringApprovalRules: (workspaceId?: string, includeRevoked = false) =>
     ipcRenderer.invoke(IPC_CHANNELS.RECURRING_APPROVAL_LIST, {
       workspaceId,
@@ -3704,10 +3829,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resetPersonalitySettings: (preserveRelationship?: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_RESET, preserveRelationship),
   getPersonalityConfigV2: () => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_GET_CONFIG_V2),
-  savePersonalityConfigV2: (
-    config: Any,
-    options?: { responseStyleBaseline?: object | null },
-  ) => ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2, config, options),
+  savePersonalityConfigV2: (config: Any, options?: { responseStyleBaseline?: object | null }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_SAVE_CONFIG_V2, config, options),
   exportPersonalityProfile: (format?: "json" | "md") =>
     ipcRenderer.invoke(IPC_CHANNELS.PERSONALITY_EXPORT, format),
   importPersonalityProfile: (data: string) =>
@@ -5835,6 +5958,10 @@ export interface ElectronAPI {
     patch: MailboxClientSettingsPatch,
   ) => Promise<MailboxClientState["settings"]>;
   retryMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
+  resolveMailboxSendOutcome: (
+    actionId: string,
+    resolution: MailboxSendOutcomeResolution,
+  ) => Promise<MailboxQueuedAction>;
   discardMailboxDraft: (draftId: string) => Promise<boolean>;
   undoMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
   summarizeMailboxThread: (threadId: string) => Promise<MailboxSummaryCard | null>;
@@ -6003,6 +6130,43 @@ export interface ElectronAPI {
       createdAt?: number;
     };
   }) => Promise<Any[]>;
+  retryBotNotification: (request: BotNotificationRetry) => Promise<BotNotificationReceipt>;
+  getBotNotificationRoute: (scope: BotNotificationScope) => Promise<BotNotificationRoute>;
+  updateBotNotificationRoute: (request: BotNotificationUpdate) => Promise<BotNotificationRoute>;
+  listBotNotificationReceipts: (scope: BotNotificationScope) => Promise<BotNotificationReceipt[]>;
+  getBotWorkResult: (
+    request: import("../shared/bot-work-result").BotWorkResultRequest,
+  ) => Promise<import("../shared/bot-work-result").BotWorkResult>;
+  listBotWork: (query: BotWorkQuery) => Promise<BotWorkPage>;
+  activateBotResponsibility: (
+    request: import("../shared/bot-responsibility").BotResponsibilityControl,
+  ) => Promise<BotResponsibility>;
+  getBotFutureControl: (request: {
+    scope: import("../shared/bot-responsibility").BotResponsibilityScope;
+  }) => Promise<import("../shared/bot-work-control").BotFutureControlState>;
+  stopBotWork: (
+    request: import("../shared/bot-work-control").BotWorkControlRequest,
+  ) => Promise<import("../shared/bot-work-control").BotWorkControlReceipt>;
+  getBotWorkControl: (
+    request: import("../shared/bot-work-control").BotWorkControlRead,
+  ) => Promise<import("../shared/bot-work-control").BotWorkControlReceipt | null>;
+  setBotResponsibilityFutureRuns: (
+    request: import("../shared/bot-responsibility").BotResponsibilityFutureControl,
+  ) => Promise<import("../shared/bot-responsibility").BotResponsibilityFutureReceipt>;
+  pauseBotResponsibility: (
+    request: import("../shared/bot-responsibility").BotResponsibilityControl,
+  ) => Promise<BotResponsibility>;
+  runBotResponsibility: (
+    request: import("../shared/bot-responsibility").BotResponsibilityRunRequest,
+  ) => Promise<import("./routines/types").RoutineRun | null>;
+  listBotResponsibilities: (request: BotResponsibilityScope) => Promise<BotResponsibility[]>;
+  listBotResponsibilityEngines: (
+    request: BotResponsibilityScope,
+  ) => Promise<BotResponsibilityEngine[]>;
+  previewBotResponsibility: (request: BotResponsibilitySave) => Promise<BotResponsibilityPreview>;
+  createBotResponsibility: (request: BotResponsibilitySave) => Promise<BotResponsibility>;
+  reviseBotResponsibility: (request: BotResponsibilityRevise) => Promise<BotResponsibility>;
+
   listBotConversations: (query: BotConversationListQuery) => Promise<Any[]>;
   reopenBotConversation: (request: BotConversationReopenRequest) => Promise<Task>;
   getComposerDraft?: (request: ComposerDraftGetRequest) => Promise<ComposerDraft | null>;
@@ -6228,7 +6392,12 @@ export interface ElectronAPI {
       delete?: boolean;
     },
   ) => Promise<Any>;
-  respondToApproval: (data: ApprovalResponse) => Promise<void>;
+  getInputRequestDraftReview: (
+    inputRequestId: string,
+    taskId: string,
+  ) => Promise<InlineApprovalDraftReview | undefined>;
+  getApprovalDraftPreview: (approval: ApprovalRequest) => Promise<ApprovalDraftPreview[]>;
+  respondToApproval: (data: ApprovalResponse) => Promise<ApprovalResponseStatus>;
   listRecurringApprovalRules: (
     workspaceId?: string,
     includeRevoked?: boolean,
@@ -7935,7 +8104,10 @@ export interface ElectronAPI {
   listMemoryItems: (data: MemoryHubListRequest) => Promise<MemoryHubListResult>;
   getMemoryItem: (data: { workspaceId: string; id: string }) => Promise<MemoryHubItemDetail>;
   /** Per-reply "Memory used" of a task (hidden memory_used events attributed to replies). */
-  getMemoryUsedForTask: (data: { workspaceId: string; taskId: string }) => Promise<MemoryUsedForTask>;
+  getMemoryUsedForTask: (data: {
+    workspaceId: string;
+    taskId: string;
+  }) => Promise<MemoryUsedForTask>;
   addMemoryItem: (data: {
     workspaceId: string;
     content: string;

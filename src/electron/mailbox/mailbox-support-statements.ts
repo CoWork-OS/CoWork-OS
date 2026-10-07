@@ -66,9 +66,25 @@ export const MAILBOX_SUPPORT_STATEMENTS = {
              updated_at = excluded.updated_at`,
   forwarding_forwardMessage_3: `INSERT INTO mailbox_forwarding_message_runs
              (automation_id, message_id, thread_id, status, error, created_at, updated_at)
-           VALUES (?, ?, ?, 'error', ?, ?, ?)
+           VALUES (?, ?, ?, 'error_before_send', ?, ?, ?)
            ON CONFLICT(automation_id, message_id) DO UPDATE SET
-             status = 'error',
+             status = 'error_before_send',
+             error = excluded.error,
+             thread_id = excluded.thread_id,
+             updated_at = excluded.updated_at`,
+  forwarding_forwardMessage_4: `INSERT INTO mailbox_forwarding_message_runs
+             (automation_id, message_id, thread_id, status, error, created_at, updated_at)
+           VALUES (?, ?, ?, 'sending', NULL, ?, ?)
+           ON CONFLICT(automation_id, message_id) DO UPDATE SET
+             status = 'sending',
+             error = NULL,
+             thread_id = excluded.thread_id,
+             updated_at = excluded.updated_at`,
+  forwarding_forwardMessage_5: `INSERT INTO mailbox_forwarding_message_runs
+             (automation_id, message_id, thread_id, status, error, created_at, updated_at)
+           VALUES (?, ?, ?, 'outcome_unknown', ?, ?, ?)
+           ON CONFLICT(automation_id, message_id) DO UPDATE SET
+             status = 'outcome_unknown',
              error = excluded.error,
              thread_id = excluded.thread_id,
              updated_at = excluded.updated_at`,

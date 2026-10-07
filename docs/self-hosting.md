@@ -164,9 +164,10 @@ In the encrypted settings store under the user data directory (see above). In he
 
 **How do approvals work without a desktop UI?**  
 Approvals are visible and actionable over the Control Plane (Web UI + `approval.list` /
-`approval.respond`). They operate within the task's access profile; an approval cannot widen a
-finite profile scope or repair an unavailable profile. See [Remote Access](remote-access.md) and
-[Access Profiles](access-profiles.md).
+`approval.respond`). A response must include the `expectedRevisionHash` from the exact row being
+reviewed; if its contents change, list and review the new revision before deciding. Approvals
+operate within the task's access profile; a decision cannot widen a finite profile scope or repair
+an unavailable profile. See [Remote Access](remote-access.md) and [Access Profiles](access-profiles.md).
 
 **Can I expose Control Plane to the public internet?**  
 Not recommended. Prefer SSH tunnel or Tailscale. Headless/managed startup blocks direct public binds unless Tailscale, private container context, or `COWORK_CONTROL_PLANE_ALLOW_INSECURE_PUBLIC_BIND=1` is configured. If you must reverse proxy it, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin and treat it like a high-value admin API.

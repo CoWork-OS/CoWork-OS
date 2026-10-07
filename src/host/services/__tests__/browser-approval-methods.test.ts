@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest, InputRequest, Task, Workspace } from "../../../shared/types";
+import { approvalRequestRevisionHash } from "../../../electron/agent/approval-revision";
 import {
   createBrowserApprovalMethods,
   type BrowserApprovalCommands,
@@ -36,6 +37,7 @@ const approval = (overrides: Partial<ApprovalRequest> = {}): ApprovalRequest =>
     requestedAt,
     ...overrides,
   }) as ApprovalRequest;
+const revisionHash = () => approvalRequestRevisionHash(approval());
 
 const inputRequest = (overrides: Partial<InputRequest> = {}): InputRequest =>
   ({
@@ -96,7 +98,7 @@ function sources(): BrowserApprovalSources & {
         : null,
     ),
     commands: {
-      respondToApproval: vi.fn(async () => "handled"),
+      respondToApproval: vi.fn(async () => "handled" as const),
       respondToInputRequest: vi.fn(async ({ requestId: id }) => ({
         status: "handled",
         requestId: id,
@@ -128,7 +130,7 @@ describe("browser approval and input methods", () => {
     );
 
     expect(approvalResult).toMatchObject({
-      approvals: [{ id: approvalId, expectedVersion: requestedAt }],
+      approvals: [{ id: approvalId, expectedVersion: requestedAt, revisionHash: revisionHash() }],
     });
     expect(inputResult).toMatchObject({
       inputRequests: [{ id: requestId, expectedVersion: requestedAt }],
@@ -155,6 +157,7 @@ describe("browser approval and input methods", () => {
       workspaceId: workspace.id,
       taskId: task.id,
       expectedVersion: requestedAt,
+      expectedRevisionHash: revisionHash(),
       approved: true,
     });
 
@@ -166,13 +169,78 @@ describe("browser approval and input methods", () => {
         workspaceId: workspace.id,
         taskId: task.id,
         expectedVersion: requestedAt,
+        expectedRevisionHash: revisionHash(),
       }),
     );
 
     expect(result).toEqual({ status: "handled", approvalId, decision: "approved" });
     expect(outcome).toMatchObject({ approval: { status: "approved", decision: "approved" } });
     expect(JSON.stringify(outcome)).not.toContain("command");
-    expect(dependency.commands.respondToApproval).toHaveBeenCalledWith(approvalId, true);
+    expect(dependency.commands.respondToApproval).toHaveBeenCalledWith(
+      approvalId,
+      true,
+      undefined,
+      undefined,
+      revisionHash(),
+    );
+  });
+
+  it("requires and binds the displayed revision before reusing an operation receipt", async () => {
+    const dependency = sources();
+    let saved = approval();
+    vi.mocked(dependency.getApproval).mockImplementation(async () => saved);
+    vi.mocked(dependency.commands.respondToApproval).mockImplementation(async () => {
+      saved = approval({ status: "approved" });
+      return "handled";
+    });
+    const respond = createBrowserApprovalMethods(dependency)["approval.respond"];
+    const base = {
+      approvalId,
+      workspaceId: workspace.id,
+      taskId: task.id,
+      expectedVersion: requestedAt,
+      approved: true,
+    };
+
+    expect(() => respond.validateParams!(base)).toThrow();
+    expect(() =>
+      respond.validateParams!({ ...base, expectedRevisionHash: "not-a-revision" }),
+    ).toThrow();
+    const params = respond.validateParams!({ ...base, expectedRevisionHash: revisionHash() });
+    await respond.handler(context, params);
+    saved = approval({ description: "A different command under the same timestamp" });
+
+    await expect(respond.handler(context, params)).rejects.toMatchObject({ code: "STALE_STATE" });
+    expect(dependency.commands.respondToApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it("catches an approval revision race at the command boundary and forwards the displayed hash", async () => {
+    const dependency = sources();
+    let saved = approval();
+    vi.mocked(dependency.getApproval).mockImplementation(async () => saved);
+    vi.mocked(dependency.commands.respondToApproval).mockImplementation(async () => {
+      saved = approval({ description: "Changed after the browser read" });
+      return "not_found";
+    });
+    const respond = createBrowserApprovalMethods(dependency)["approval.respond"];
+    const displayedHash = revisionHash();
+    const params = respond.validateParams!({
+      approvalId,
+      workspaceId: workspace.id,
+      taskId: task.id,
+      expectedVersion: requestedAt,
+      expectedRevisionHash: displayedHash,
+      approved: true,
+    });
+
+    await expect(respond.handler(context, params)).rejects.toMatchObject({ code: "STALE_STATE" });
+    expect(dependency.commands.respondToApproval).toHaveBeenCalledWith(
+      approvalId,
+      true,
+      undefined,
+      undefined,
+      displayedHash,
+    );
   });
 
   it("returns the durable input status without echoing submitted answers", async () => {
@@ -232,6 +300,7 @@ describe("browser approval and input methods", () => {
           workspaceId: workspace.id,
           taskId: task.id,
           expectedVersion: requestedAt - 1,
+          expectedRevisionHash: revisionHash(),
           approved: true,
         }),
       ),
@@ -244,6 +313,7 @@ describe("browser approval and input methods", () => {
           workspaceId: otherWorkspace.id,
           taskId: otherTask.id,
           expectedVersion: requestedAt,
+          expectedRevisionHash: revisionHash(),
           approved: true,
         }),
       ),
@@ -257,6 +327,7 @@ describe("browser approval and input methods", () => {
           workspaceId: workspace.id,
           taskId: task.id,
           expectedVersion: requestedAt,
+          expectedRevisionHash: revisionHash(),
           approved: false,
         }),
       ),
@@ -279,6 +350,7 @@ describe("browser approval and input methods", () => {
       workspaceId: workspace.id,
       taskId: task.id,
       expectedVersion: requestedAt,
+      expectedRevisionHash: revisionHash(),
       approved: true,
     });
 
@@ -292,6 +364,7 @@ describe("browser approval and input methods", () => {
           workspaceId: workspace.id,
           taskId: task.id,
           expectedVersion: requestedAt,
+          expectedRevisionHash: revisionHash(),
           approved: false,
         }),
       ),
@@ -318,6 +391,7 @@ describe("browser approval and input methods", () => {
       workspaceId: workspace.id,
       taskId: task.id,
       expectedVersion: requestedAt,
+      expectedRevisionHash: revisionHash(),
       approved: true,
     });
     const deny = respond.validateParams!({
@@ -325,6 +399,7 @@ describe("browser approval and input methods", () => {
       workspaceId: workspace.id,
       taskId: task.id,
       expectedVersion: requestedAt,
+      expectedRevisionHash: revisionHash(),
       approved: false,
     });
 
@@ -402,6 +477,7 @@ describe("browser approval and input methods", () => {
           workspaceId: workspace.id,
           taskId: task.id,
           expectedVersion: requestedAt,
+          expectedRevisionHash: revisionHash(),
           approved: true,
         }),
       ),

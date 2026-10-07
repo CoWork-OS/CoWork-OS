@@ -1,0 +1,238 @@
+/*
+ * Illustrated bot mascots. The body is a raster image; the eyes are SVG drawn on
+ * top so they can blink, look around and change expression. All motion is in the
+ * 256-unit artwork space, so it scales with the avatar.
+ */
+
+.bot-mascot {
+  display: inline-block;
+  flex: none;
+  overflow: visible;
+  vertical-align: middle;
+}
+
+.bot-mascot__body {
+  pointer-events: none;
+  user-select: none;
+}
+
+.bot-mascot__face,
+.bot-mascot__lid,
+.bot-mascot__eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Resting offsets, also used when motion is off. */
+.bot-mascot[data-expression="thinking"] .bot-mascot__face {
+  transform: translate(calc(var(--bm-look-right) * 0.6px), calc(var(--bm-look-up) * -0.85px));
+}
+
+.bot-mascot[data-expression="working"] .bot-mascot__face {
+  transform: translateY(calc(var(--bm-look-down) * 0.4px));
+}
+
+.bot-mascot[data-expression="sleeping"] .bot-mascot__face {
+  transform: translateY(calc(var(--bm-look-down) * 0.4px));
+}
+
+/* Idle: blink every few seconds and glance around now and then. */
+.bot-mascot--animated .bot-mascot__lid--blink {
+  animation: bot-mascot-blink var(--bm-blink-dur, 5s) var(--bm-blink-delay, 0s) infinite;
+}
+
+.bot-mascot--animated[data-expression="idle"] .bot-mascot__face {
+  animation: bot-mascot-glance var(--bm-glance-dur, 12s) var(--bm-glance-delay, 0s) infinite
+    cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+/* Thinking: eyes up and to the side, drifting slowly. */
+.bot-mascot--animated[data-expression="thinking"] .bot-mascot__face {
+  animation: bot-mascot-think 3.6s ease-in-out infinite alternate;
+}
+
+/* Working: scanning across the work. */
+.bot-mascot--animated[data-expression="working"] .bot-mascot__face {
+  animation: bot-mascot-scan 2.4s ease-in-out infinite;
+}
+
+/* Happy and error states can last a long time, so they settle after a few beats. */
+.bot-mascot--animated[data-expression="happy"] .bot-mascot__face {
+  animation: bot-mascot-bounce 2.8s ease-in-out 3;
+}
+
+.bot-mascot--animated[data-expression="sleeping"] .bot-mascot__face {
+  animation: bot-mascot-doze 4.8s ease-in-out infinite;
+}
+
+/* Attention: wide eyes that perk up and double-blink, asking for the user. */
+.bot-mascot--animated[data-expression="attention"] .bot-mascot__face {
+  animation: bot-mascot-perk 2.4s ease-in-out infinite;
+}
+
+.bot-mascot--animated[data-expression="attention"] .bot-mascot__lid--blink {
+  animation-name: bot-mascot-double-blink;
+  animation-duration: 3.6s;
+}
+
+.bot-mascot--animated[data-expression="error"] .bot-mascot__face {
+  animation: bot-mascot-shake 2.6s ease-in-out 2;
+}
+
+/* New expression: the eyes open into the new shape. */
+.bot-mascot--animated .bot-mascot__eye--pop {
+  animation: bot-mascot-pop 260ms cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+}
+
+@keyframes bot-mascot-blink {
+  0%,
+  90%,
+  100% {
+    transform: scaleY(1);
+  }
+  92% {
+    transform: scaleY(0.08);
+  }
+  95% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes bot-mascot-double-blink {
+  0%,
+  80%,
+  100% {
+    transform: scaleY(1);
+  }
+  82%,
+  88% {
+    transform: scaleY(0.08);
+  }
+  85%,
+  91% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes bot-mascot-glance {
+  0%,
+  18% {
+    transform: translate(0, 0);
+  }
+  22%,
+  34% {
+    transform: translate(calc(var(--bm-look-left) * -0.8px), calc(var(--bm-look-down) * 0.2px));
+  }
+  38%,
+  58% {
+    transform: translate(0, 0);
+  }
+  62%,
+  72% {
+    transform: translate(calc(var(--bm-look-right) * 0.8px), calc(var(--bm-look-up) * -0.5px));
+  }
+  76%,
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes bot-mascot-think {
+  from {
+    transform: translate(calc(var(--bm-look-right) * 0.35px), calc(var(--bm-look-up) * -0.95px));
+  }
+  to {
+    transform: translate(calc(var(--bm-look-right) * 0.85px), calc(var(--bm-look-up) * -0.7px));
+  }
+}
+
+@keyframes bot-mascot-scan {
+  0%,
+  100% {
+    transform: translate(calc(var(--bm-look-left) * -0.8px), calc(var(--bm-look-down) * 0.4px));
+  }
+  50% {
+    transform: translate(calc(var(--bm-look-right) * 0.8px), calc(var(--bm-look-down) * 0.4px));
+  }
+}
+
+@keyframes bot-mascot-bounce {
+  0%,
+  40%,
+  100% {
+    transform: translateY(0);
+  }
+  10% {
+    transform: translateY(calc(var(--bm-look-up) * -0.6px));
+  }
+  20% {
+    transform: translateY(0);
+  }
+  28% {
+    transform: translateY(calc(var(--bm-look-up) * -0.3px));
+  }
+}
+
+@keyframes bot-mascot-doze {
+  0%,
+  100% {
+    transform: translateY(calc(var(--bm-look-down) * 0.25px));
+  }
+  50% {
+    transform: translateY(calc(var(--bm-look-down) * 0.6px));
+  }
+}
+
+@keyframes bot-mascot-perk {
+  0%,
+  55%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  65% {
+    transform: translateY(calc(var(--bm-look-up) * -0.45px)) scale(1.08);
+  }
+  78% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes bot-mascot-shake {
+  0%,
+  70%,
+  100% {
+    transform: translateX(0);
+  }
+  74% {
+    transform: translateX(calc(var(--bm-look-left) * -0.5px));
+  }
+  78% {
+    transform: translateX(calc(var(--bm-look-right) * 0.5px));
+  }
+  82% {
+    transform: translateX(calc(var(--bm-look-left) * -0.3px));
+  }
+  86% {
+    transform: translateX(calc(var(--bm-look-right) * 0.2px));
+  }
+  90% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes bot-mascot-pop {
+  from {
+    transform: scaleY(0.12);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-mascot--animated .bot-mascot__face,
+  .bot-mascot--animated .bot-mascot__lid--blink,
+  .bot-mascot--animated .bot-mascot__eye--pop {
+    animation: none;
+  }
+}

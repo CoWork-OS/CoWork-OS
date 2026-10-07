@@ -8,6 +8,7 @@ import type {
 } from "../../../shared/types";
 import type { MissionControlData, OpsSubTab } from "./useMissionControlData";
 import { hasHostMethod, hasHostMethods } from "../../host/browser-capabilities";
+import { botIconText } from "../../../shared/bot-mascots";
 
 interface MCOpsTabProps {
   data: MissionControlData;
@@ -438,7 +439,7 @@ function OpsOperators({
           <div>
             <div className="mc-v2-ops-row-title">
               <span style={{ color: op.color }}>
-                {op.icon} {op.displayName}
+                {botIconText(op.icon)} {op.displayName}
               </span>
             </div>
             <div className="mc-v2-ops-row-subtitle">

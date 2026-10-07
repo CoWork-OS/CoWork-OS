@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { TaskStore } from "../repositories";
+import { BUILD_PROMPT_MARKER } from "../../../shared/build-task";
 
 describe("bot conversation query isolation", () => {
   it("filters before pagination and excludes archived conversations without excluding ordinary role work from generic lists", () => {
@@ -155,6 +156,19 @@ describe("bot conversation query isolation", () => {
           .findBotConversations("workspace-a", { agentRoleId: "bot-a" })
           .find((task) => task.id === "archived-chat")?.sessionArchived,
       ).toBe(true);
+      add("explicit-build", "workspace-a", "bot-a", '{"taskOrigin":"build"}', 1000);
+      add("legacy-long-build", "workspace-a", "bot-a", "{}", 1001);
+      db.prepare("UPDATE tasks SET prompt = ? WHERE id = ?").run(
+        `${"x".repeat(1100)}\n${BUILD_PROMPT_MARKER}`,
+        "legacy-long-build",
+      );
+      const buildSummaries = repo.findSidebarSummaries(2, 0);
+      expect(buildSummaries.map((task) => task.agentConfig?.taskOrigin)).toEqual([
+        "build",
+        "build",
+      ]);
+      expect(buildSummaries[0].sidebarPromptPreview?.length).toBeLessThanOrEqual(1024);
+      expect(buildSummaries[0].prompt).toBe("");
     } finally {
       db.close();
     }

@@ -188,6 +188,7 @@ export const InteractionModeSchema = z.discriminatedUnion("mode", [
 
 export const AgentConfigSchema = z
   .object({
+    taskOrigin: z.literal("build").optional(),
     providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
     modelKey: z.string().max(200).optional(),
     llmProfile: LlmProfileSchema.optional(),

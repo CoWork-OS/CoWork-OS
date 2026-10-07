@@ -3,6 +3,23 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskStore } from "../repositories";
 
 describe("TaskStore.findAll", () => {
+  it("preserves Build origin independently of the bounded sidebar prompt", () => {
+    const { repository, all, prepare } = createRepository();
+    all.mockReturnValue([
+      {
+        id: "build-1",
+        title: "Build",
+        status: "completed",
+        workspace_id: "ws",
+        created_at: 1,
+        sidebar_prompt_preview: "x".repeat(1024),
+        agent_config_task_origin: "build",
+      } as Any,
+    ]);
+    expect(repository.findSidebarSummaries(10, 0)[0].agentConfig?.taskOrigin).toBe("build");
+    expect(prepare.mock.calls[0][0]).toContain("'$.taskOrigin'");
+    expect(prepare.mock.calls[0][0]).toContain("INSTR(COALESCE(prompt, '')");
+  });
   it("queries exact cron occurrences independently of sidebar limits and task status", () => {
     const { repository, prepare, all } = createRepository();
     expect(repository.findByScheduledRun("ws", "job", 123)?.id).toBe("task-1");

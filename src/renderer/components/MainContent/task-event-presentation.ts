@@ -1,3 +1,4 @@
+import { stripBuildInstructions } from "../calm/build-task";
 import type { Task, TaskEvent, ExecutionMode } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { isVerificationStepDescription } from "../../../shared/plan-utils";
@@ -245,7 +246,7 @@ export const buildTaskTitle = (text: string): string => {
 };
 
 export function normalizeInitialPromptText(text: string): string {
-  return stripStrategyContextBlock(stripPptxBubbleContent(text))
+  return stripBuildInstructions(stripStrategyContextBlock(stripPptxBubbleContent(text)))
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .trim();

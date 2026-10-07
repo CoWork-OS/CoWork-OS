@@ -65,7 +65,12 @@ import {
 import { GenericApprovalDialog } from "./components/GenericApprovalDialog";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
 import { LibraryPanel } from "./components/calm/LibraryPanel";
-import { BuildPanel } from "./components/calm/BuildPanel";
+import { BuildPanel, type RecentBuild } from "./components/calm/BuildPanel";
+import { isBuildPrompt, isBuildTask } from "./components/calm/build-task";
+import {
+  prepareTaskAttachments,
+  type PendingAttachment,
+} from "./components/MainContent/attachments";
 import { GitChangesPanel } from "./components/GitChangesPanel";
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
 import {
@@ -167,20 +172,15 @@ import {
 import { hasTaskOutputs, resolveTaskOutputSummaryFromCompletionEvent } from "./utils/task-outputs";
 import {
   addUniqueTaskId,
-  buildTaskCompletionToast,
   decideCompletionPanelBehavior,
-  recordCompletionToastShown,
   removeTaskId,
   shouldClearUnseenOutputBadges,
-  shouldShowCompletionToast,
-  shouldNotifyForTaskCompletionTerminalStatus,
   shouldTrackUnseenCompletion,
 } from "./utils/task-completion-ux";
 import { isSpawnSubagentsPrompt } from "../shared/spawn-intent-detection";
 import { findMultitaskCommand, parseMultitaskCommand } from "../shared/multitask-command";
 import { isSynthesisChildTask } from "../shared/synthesis-agent-detection";
 import { classifyShellPermissionDecision } from "../shared/shell-permission-intents";
-import { isAutomatedTaskLike } from "../shared/automated-task-detection";
 import { resolveTaskStatusUpdateFromEvent } from "../shared/task-status";
 import {
   getFirstRunReadiness,
@@ -286,9 +286,6 @@ const HomeDashboard = lazy(() =>
 const AutomationStudioPanel = lazy(() => import("./components/AutomationStudioPanel"));
 const DevicesPanel = lazy(() =>
   import("./components/DevicesPanel").then((module) => ({ default: module.DevicesPanel })),
-);
-const IdeasPanel = lazy(() =>
-  import("./components/IdeasPanel").then((module) => ({ default: module.IdeasPanel })),
 );
 const InboxAgentPanel = lazy(() =>
   import("./components/InboxAgentPanel").then((module) => ({ default: module.InboxAgentPanel })),
@@ -707,7 +704,6 @@ type AppView =
   | "settings"
   | "browser"
   | "devices"
-  | "ideas"
   | "inboxAgent"
   | "agents"
   | "everydayAgent"
@@ -721,7 +717,6 @@ const SIDEBAR_SHELL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([
   "home",
   "automations",
   "devices",
-  "ideas",
   "inboxAgent",
   "agents",
   "everydayAgent",
@@ -792,6 +787,7 @@ type SelectedTaskWorkspaceViewProps = {
   uiDensity: UiDensity;
   homeResearchVaultEnabled: boolean;
   homeNextActionsEnabled: boolean;
+  costReceiptEnabled: boolean;
   rendererPerfLoggingEnabled: boolean;
   taskSwitchId: string | null;
   hasMoreTimelineHistory: boolean;
@@ -957,6 +953,7 @@ const SelectedTaskWorkspaceView = memo(
     uiDensity,
     homeResearchVaultEnabled,
     homeNextActionsEnabled,
+    costReceiptEnabled,
     rendererPerfLoggingEnabled,
     taskSwitchId,
     hasMoreTimelineHistory,
@@ -1444,12 +1441,29 @@ const SelectedTaskWorkspaceView = memo(
         };
       });
     }, [computedArtifactRefreshKey, effectiveSpreadsheetTaskWorking, spreadsheetArtifact]);
-    const artifactRefreshKey = effectiveSpreadsheetTaskWorking
-      ? lastSettledArtifactRefreshKey &&
-        lastSettledArtifactRefreshKey.path === spreadsheetArtifact?.path
-        ? lastSettledArtifactRefreshKey.key
-        : null
-      : computedArtifactRefreshKey;
+    // A build's page preview follows the build live: it reloads whenever the
+    // task writes any file, since the preview inlines the page's CSS and JS.
+    // Other artifacts stay frozen until the turn settles (below).
+    const liveBuildPreviewKey = useMemo(() => {
+      if (spreadsheetArtifact?.kind !== "webpage" || !isBuildTask(task)) return null;
+      let latest = 0;
+      for (const event of spreadsheetEvents) {
+        if (task?.id && event.taskId !== task.id) continue;
+        const type = getEffectiveTaskEventType(event);
+        if (type === "file_created" || type === "file_modified" || type === "file_deleted") {
+          latest = Math.max(latest, event.timestamp);
+        }
+      }
+      return latest > 0 ? `${spreadsheetArtifact.path}:live:${latest}` : null;
+    }, [spreadsheetArtifact, spreadsheetEvents, task]);
+    const artifactRefreshKey = liveBuildPreviewKey
+      ? liveBuildPreviewKey
+      : effectiveSpreadsheetTaskWorking
+        ? lastSettledArtifactRefreshKey &&
+          lastSettledArtifactRefreshKey.path === spreadsheetArtifact?.path
+          ? lastSettledArtifactRefreshKey.key
+          : null
+        : computedArtifactRefreshKey;
 
     // Above the full-screen returns: hooks must run on every render, including when
     // a full-screen artifact or browser closes back to the session.
@@ -1610,6 +1624,7 @@ const SelectedTaskWorkspaceView = memo(
           <Suspense fallback={<TaskViewSkeleton />}>
             <MainContent
               headerPlacement="title-bar"
+              rightPanelOpen={!effectiveRightCollapsed && !remoteTaskView}
               task={task}
               selectedTaskId={selectedTaskId}
               workspace={workspace}
@@ -1873,6 +1888,7 @@ const SelectedTaskWorkspaceView = memo(
                 onOpenPresentationArtifact={openPresentationArtifact}
                 onOpenWebArtifact={openWebArtifact}
                 rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                costReceiptEnabled={costReceiptEnabled}
                 highlightOutputPath={rightPanelInput.highlightOutputPath}
                 onHighlightConsumed={onHighlightConsumed}
               />
@@ -1927,6 +1943,7 @@ const SelectedTaskWorkspaceView = memo(
     prev.uiDensity === next.uiDensity &&
     prev.homeResearchVaultEnabled === next.homeResearchVaultEnabled &&
     prev.homeNextActionsEnabled === next.homeNextActionsEnabled &&
+    prev.costReceiptEnabled === next.costReceiptEnabled &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
     prev.terminalTabsOpen === next.terminalTabsOpen &&
@@ -2332,6 +2349,7 @@ export function App() {
   });
   const [homeResearchVaultEnabled, setHomeResearchVaultEnabled] = useState(false);
   const [homeNextActionsEnabled, setHomeNextActionsEnabled] = useState(false);
+  const [costReceiptEnabled, setCostReceiptEnabled] = useState(false);
 
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -2770,8 +2788,6 @@ export function App() {
   const selectedTaskHydrationAttemptedRef = useRef<Set<string>>(new Set());
   const restoredSelectionWorkspaceRef = useRef<string | null>(null);
   const selectionRestorationSettledWorkspaceRef = useRef<string | null>(null);
-  /** Tracks output paths we've already shown completion toast for (suppresses repeat toasts on follow-ups) */
-  const completionToastNotifiedPathsRef = useRef<Map<string, Set<string>>>(new Map());
   const botNotificationPoliciesRef = useRef<Map<string, BotNotificationPolicy>>(new Map());
 
   const updateBotConversationSnapshot = useCallback((taskId: string, updates: Partial<Task>) => {
@@ -2960,9 +2976,6 @@ export function App() {
     }
     for (const key of taskLastEventTimestampRef.current.keys()) {
       if (!activeIds.has(key)) taskLastEventTimestampRef.current.delete(key);
-    }
-    for (const key of completionToastNotifiedPathsRef.current.keys()) {
-      if (!activeIds.has(key)) completionToastNotifiedPathsRef.current.delete(key);
     }
     for (const key of taskSwitchStartedAtRef.current.keys()) {
       if (!activeIds.has(key)) taskSwitchStartedAtRef.current.delete(key);
@@ -3456,6 +3469,7 @@ export function App() {
         setDevRunLoggingEnabled(settings.devRunLoggingEnabled === true);
         setHomeResearchVaultEnabled(settings.homeResearchVaultEnabled === true);
         setHomeNextActionsEnabled(settings.homeNextActionsEnabled === true);
+        setCostReceiptEnabled(settings.costReceiptEnabled === true);
         setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
         setOnboardingCompleted(settings.onboardingCompleted ?? false);
         setOnboardingCompletedAt(settings.onboardingCompletedAt);
@@ -4670,9 +4684,8 @@ export function App() {
         })();
       }
 
-      // Show toast notifications for task completion/failure
+      // Track completed tasks and outputs without a completion popup.
       if (event.type === "task_completed") {
-        const task = tasksRef.current.find((t) => t.id === event.taskId);
         const isMainView = currentViewRef.current === "main";
         const isSelectedTask = selectedTaskIdRef.current === event.taskId;
         if (shouldTrackUnseenCompletion({ isMainView, isSelectedTask })) {
@@ -4686,85 +4699,9 @@ export function App() {
           event,
           fallbackEventsForTask,
         );
-        const toastDecision = shouldShowCompletionToast(
-          event.taskId,
-          outputSummary,
-          completionToastNotifiedPathsRef.current,
-        );
-        const terminalStatus =
-          typeof event.payload?.terminalStatus === "string"
-            ? event.payload.terminalStatus
-            : typeof task?.terminalStatus === "string"
-              ? task.terminalStatus
-              : undefined;
-        const botCompletionPolicy =
-          task?.agentConfig?.botConversation && task.assignedAgentRoleId
-            ? botNotificationPoliciesRef.current.get(task.assignedAgentRoleId)
-            : undefined;
-        const shouldShowToast =
-          toastDecision.show &&
-          shouldNotifyForTaskCompletionTerminalStatus(terminalStatus) &&
-          !isAutomatedTaskLike(task) &&
-          botCompletionPolicy?.onFinish !== false;
-        if (shouldShowToast) {
-          recordCompletionToastShown(
-            event.taskId,
-            toastDecision.pathsToRecord,
-            completionToastNotifiedPathsRef.current,
-            hasTaskOutputs(outputSummary),
-          );
-        }
-        const resolveWorkspacePathForTask = async (): Promise<string | undefined> => {
-          const taskForEvent = tasksRef.current.find((t) => t.id === event.taskId);
-          if (!taskForEvent) return currentWorkspaceRef.current?.path;
-          if (currentWorkspaceRef.current?.id === taskForEvent.workspaceId) {
-            return currentWorkspaceRef.current.path;
-          }
-          try {
-            const allWorkspaces = await window.electronAPI.listWorkspaces();
-            return allWorkspaces.find((w) => w.id === taskForEvent.workspaceId)?.path;
-          } catch {
-            return currentWorkspaceRef.current?.path;
-          }
-        };
         const primaryOutputPath = hasTaskOutputs(outputSummary)
           ? outputSummary.primaryOutputPath
           : undefined;
-        if (shouldShowToast) {
-          addToast(
-            buildTaskCompletionToast({
-              taskId: event.taskId,
-              taskTitle: task?.title,
-              outputSummary,
-              terminalStatus,
-              actionDependencies: hasTaskOutputs(outputSummary)
-                ? {
-                    resolveWorkspacePath: resolveWorkspacePathForTask,
-                    openFile: (path, workspacePath) =>
-                      window.electronAPI.openFile(path, workspacePath),
-                    showInFinder: (path, workspacePath) =>
-                      window.electronAPI.showInFinder(path, workspacePath),
-                    onViewInFiles: () => {
-                      setCurrentView("main");
-                      void selectTaskAfterDraftFlush(event.taskId);
-                      setRightSidebarCollapsed(false);
-                      if (primaryOutputPath) {
-                        setRightPanelHighlight({ taskId: event.taskId, path: primaryOutputPath });
-                      }
-                      setUnseenOutputTaskIds((prev) => removeTaskId(prev, event.taskId));
-                      setUnseenCompletedTaskIds((prev) => removeTaskId(prev, event.taskId));
-                    },
-                    onOpenFileError: (error) => {
-                      console.error("Failed to open completion output:", error);
-                    },
-                    onShowInFinderError: (error) => {
-                      console.error("Failed to reveal completion output:", error);
-                    },
-                  }
-                : undefined,
-            }),
-          );
-        }
 
         if (hasTaskOutputs(outputSummary)) {
           const panelBehavior = decideCompletionPanelBehavior({
@@ -5998,13 +5935,42 @@ export function App() {
     }
   };
 
-  // Build starts a new task, so picking a folder there only changes the
-  // working folder and never moves the currently selected task.
+  const recentBuilds = useMemo<RecentBuild[]>(
+    () =>
+      tasks
+        .filter((task) => !task.parentTaskId && isBuildTask(task))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 5)
+        .map((task) => ({
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          updatedAt: task.updatedAt,
+        })),
+    [tasks],
+  );
+
+  // Build starts a new task, so choosing a folder there only changes the
+  // working folder and never moves the selected task. A selected task would
+  // pull the workspace back to its own folder (and then restore that folder's
+  // last session, leaving Build), so deselect it like a new session does.
+  // Deselecting and switching in one render keeps the old folder's saved
+  // session pointer intact; skipping restoration keeps the new folder's too.
+  const selectBuildWorkspace = async (workspace: Workspace) => {
+    const requestId = ++selectedTaskRequestSeqRef.current;
+    await composerDraft.flush();
+    if (selectedTaskRequestSeqRef.current !== requestId) return;
+    restoredSelectionWorkspaceRef.current = workspace.id;
+    setSelectedTaskId(null);
+    setEvents([]);
+    setCurrentWorkspace(workspace);
+  };
+
   const handlePickBuildFolder = async () => {
     if (isBrowserHost) return;
     try {
       const workspace = await pickFolderWorkspace();
-      if (workspace) setCurrentWorkspace(workspace);
+      if (workspace) await selectBuildWorkspace(workspace);
     } catch (error) {
       console.error("Failed to change workspace:", error);
     }
@@ -6859,7 +6825,10 @@ export function App() {
     await handleCreateTask(title, prompt, { generateTitle: true });
   };
 
-  const handleCreateTaskFromIdea = async (prompt: string): Promise<boolean> => {
+  const handleCreateTaskFromPrompt = async (
+    prompt: string,
+    attachments: PendingAttachment[] = [],
+  ): Promise<boolean> => {
     let workspace = currentWorkspace;
     if (!workspace) {
       try {
@@ -6872,11 +6841,34 @@ export function App() {
       }
     }
     const title = prompt.slice(0, 50) + (prompt.length > 50 ? "..." : "");
+    let message = prompt;
+    let images: ImageAttachment[] | undefined;
+    if (attachments.length > 0 && workspace) {
+      try {
+        const prepared = await prepareTaskAttachments(workspace, prompt, attachments);
+        message = prepared.message;
+        images = prepared.images;
+        if (prepared.extractionWarnings.length > 0) {
+          addToast({
+            type: "warning",
+            title: "Some attachments could not be read",
+            message: `${prepared.extractionWarnings.join(", ")} were attached, but their content may be incomplete.`,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to attach files:", error);
+        addToast({ type: "error", title: "Error", message: "Could not attach files" });
+        return false;
+      }
+    }
     const admitted = await handleCreateTask(
       title,
-      prompt,
-      { generateTitle: true },
-      undefined,
+      message,
+      {
+        generateTitle: true,
+        ...(isBuildPrompt(prompt) ? { agentConfig: { taskOrigin: "build" as const } } : {}),
+      },
+      images,
       workspace || undefined,
     );
     if (admitted) clearRemoteTaskView();
@@ -7026,6 +7018,13 @@ export function App() {
     setHomeNextActionsEnabled(enabled);
     void window.electronAPI?.saveAppearanceSettings?.({
       homeNextActionsEnabled: enabled,
+    });
+  };
+
+  const handleCostReceiptEnabledChange = (enabled: boolean) => {
+    setCostReceiptEnabled(enabled);
+    void window.electronAPI?.saveAppearanceSettings?.({
+      costReceiptEnabled: enabled,
     });
   };
 
@@ -7408,9 +7407,6 @@ export function App() {
           return;
         case "missionControl":
           handleOpenMissionControl();
-          return;
-        case "ideas":
-          setCurrentView("ideas");
           return;
         case "build":
           setCurrentView("build");
@@ -8484,14 +8480,6 @@ export function App() {
                   }}
                   availableProviders={availableProviders}
                 />
-              ) : currentView === "ideas" ? (
-                <IdeasPanel
-                  onCreateTaskFromPrompt={handleCreateTaskFromIdea}
-                  onOpenModelSettings={() => {
-                    setSettingsTab("llm");
-                    setCurrentView("settings");
-                  }}
-                />
               ) : currentView === "inboxAgent" ? (
                 <InboxAgentPanel
                   externalAskRequest={inboxAgentAskRequest}
@@ -8552,9 +8540,11 @@ export function App() {
                 <GitChangesPanel workspace={currentWorkspace} />
               ) : currentView === "build" ? (
                 <BuildPanel
-                  onStart={handleCreateTaskFromIdea}
+                  onStart={handleCreateTaskFromPrompt}
                   workspace={currentWorkspace}
-                  onSelectWorkspace={setCurrentWorkspace}
+                  onSelectWorkspace={(workspace) => void selectBuildWorkspace(workspace)}
+                  recentBuilds={recentBuilds}
+                  onOpenBuild={(taskId) => void openTaskById(taskId)}
                   onPickFolder={handlePickBuildFolder}
                   folderPickerUnavailableReason={
                     isBrowserHost
@@ -8619,6 +8609,7 @@ export function App() {
                   uiDensity={uiDensity}
                   homeResearchVaultEnabled={homeResearchVaultEnabled}
                   homeNextActionsEnabled={homeNextActionsEnabled}
+                  costReceiptEnabled={costReceiptEnabled}
                   rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
                   taskSwitchId={selectedTaskSwitchId}
                   hasMoreTimelineHistory={selectedTaskTimelineHistory.hasMoreHistory}
@@ -8774,6 +8765,8 @@ export function App() {
               homeNextActionsEnabled={homeNextActionsEnabled}
               onHomeResearchVaultEnabledChange={handleHomeResearchVaultEnabledChange}
               onHomeNextActionsEnabledChange={handleHomeNextActionsEnabledChange}
+              costReceiptEnabled={costReceiptEnabled}
+              onCostReceiptEnabledChange={handleCostReceiptEnabledChange}
               initialTab={settingsTab}
               memoryReviewRequest={memoryReviewRequest}
               focusAutomation={focusAutomationOwner}

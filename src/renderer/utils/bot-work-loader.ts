@@ -47,6 +47,33 @@ export class BotWorkLoader {
     }
     this.publish(this.state);
   }
+  /**
+   * Re-read what is already shown without blanking it: the same number of items as are
+   * loaded (so "Load more" pages survive), keeping the current page if the read fails.
+   */
+  async refresh(): Promise<void> {
+    if (this.disposed || this.state.loading || !this.state.page) return;
+    const generation = ++this.generation;
+    const shown = this.state.page.items.length;
+    try {
+      const page = await this.query({
+        ...this.scope,
+        limit: Math.min(100, Math.max(this.scope.limit ?? 25, shown)),
+        cursor: undefined,
+      });
+      if (this.disposed || generation !== this.generation) return;
+      if (
+        page.workspaceId !== this.scope.workspaceId ||
+        page.agentRoleId !== this.scope.agentRoleId ||
+        page.view !== this.scope.view
+      )
+        return;
+      this.state = { page, loading: false, error: null };
+      this.publish(this.state);
+    } catch {
+      // A background refresh keeps what is on screen; the next one will try again.
+    }
+  }
   dispose(): void {
     this.disposed = true;
     this.generation++;

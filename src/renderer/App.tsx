@@ -1837,6 +1837,9 @@ const SelectedTaskWorkspaceView = memo(
             </>
           ) : task?.agentConfig?.botConversation && !remoteTaskView && !effectiveRightCollapsed ? (
             <BotDetailsRail
+              // One rail per bot: switching bots must not show the last bot's settings or
+              // let its late save land on the new one.
+              key={task.assignedAgentRoleId || task.id}
               task={task}
               conversationProjection={botConversationProjection}
               onEdit={() => {
@@ -7165,7 +7168,15 @@ export function App() {
   const handleOpenBot = useCallback(
     async (bot: BotRole) => {
       const workspaceId = currentWorkspace?.id;
-      if (!workspaceId || openingBotRef.current) return;
+      if (openingBotRef.current) return;
+      if (!workspaceId) {
+        addToast({
+          type: "error",
+          title: "Could not open bot",
+          message: "Select a workspace first, then open the bot again.",
+        });
+        return;
+      }
       openingBotRef.current = true;
       try {
         // Query the bot's canonical transcript, including records beyond the

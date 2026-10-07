@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeBotProfileText } from "../bot-profile";
+import { normalizeBotDisplayName, normalizeBotProfileText } from "../bot-profile";
 
 describe("normalizeBotProfileText", () => {
   it("keeps meaningful multiline profile text while trimming outer whitespace", () => {
@@ -10,5 +10,12 @@ describe("normalizeBotProfileText", () => {
 
   it("normalizes missing profile text to an empty string", () => {
     expect(normalizeBotProfileText(undefined)).toBe("");
+  });
+});
+
+describe("normalizeBotDisplayName", () => {
+  it("saves one line without emoji, the same for create and edit", () => {
+    expect(normalizeBotDisplayName("  🔬  Research\n bot ")).toBe("Research bot");
+    expect(normalizeBotDisplayName("🤖")).toBe("");
   });
 });

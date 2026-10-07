@@ -477,7 +477,7 @@ export function BotResponsibilityPanel({
               </div>
               <button
                 type="button"
-                disabled={record.state === "active" || controlling !== null}
+                disabled={record.state === "active" || controlling !== null || pending !== null}
                 title={record.state === "active" ? "Turn it off to edit" : undefined}
                 onClick={() => begin(record)}
                 aria-label={`Edit responsibility: ${record.definition.objective}`}
@@ -492,6 +492,7 @@ export function BotResponsibilityPanel({
                         type="button"
                         disabled={
                           controlling !== null ||
+                          pending !== null ||
                           record.futurePaused === true ||
                           record.botFuturePaused === true
                         }
@@ -504,6 +505,7 @@ export function BotResponsibilityPanel({
                           type="button"
                           disabled={
                             controlling !== null ||
+                            pending !== null ||
                             (record.botFuturePaused === true && record.futurePaused === true)
                           }
                           onClick={() => void control(record, "future")}
@@ -513,7 +515,7 @@ export function BotResponsibilityPanel({
                       )}
                       <button
                         type="button"
-                        disabled={controlling !== null}
+                        disabled={controlling !== null || pending !== null}
                         title="Stop it from running and allow editing"
                         onClick={() => void control(record, "pause")}
                       >
@@ -523,7 +525,7 @@ export function BotResponsibilityPanel({
                   ) : (
                     <button
                       type="button"
-                      disabled={controlling !== null}
+                      disabled={controlling !== null || pending !== null}
                       onClick={() => void control(record, "activate")}
                     >
                       Turn on

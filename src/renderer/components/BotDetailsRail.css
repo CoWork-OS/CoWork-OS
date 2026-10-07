@@ -394,3 +394,9 @@
   border-color: rgba(40, 47, 60, 0.14);
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
 }
+
+.bot-details-hint {
+  margin: 6px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}

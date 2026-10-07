@@ -31,6 +31,8 @@ export interface BotFormDialogProps {
   /** Shown left of the actions, e.g. when changes take effect. */
   footnote?: string;
   loading?: boolean;
+  /** The bot could not be loaded: show only the error, with nothing to edit or save. */
+  unavailable?: boolean;
   busy?: boolean;
   error?: string | null;
   /** Offers Delete bot at the start of the action bar. */
@@ -50,6 +52,7 @@ export function BotFormDialog({
   submitIcon,
   footnote,
   loading = false,
+  unavailable = false,
   busy = false,
   error = null,
   onDelete,
@@ -67,17 +70,26 @@ export function BotFormDialog({
     return () => opener?.focus();
   }, []);
 
-  // Focus the name field once loaded, close on Escape and keep Tab inside the dialog.
+  // Focus the name field once loaded.
+  useEffect(() => {
+    if (loading) return;
+    dialogRef.current?.querySelector<HTMLInputElement>(".bot-form-name")?.focus();
+  }, [loading]);
+
+  // Close on Escape and keep Tab inside the dialog, including while it loads.
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (!dialog || loading) return;
+    if (!dialog) return;
     const focusable = () =>
       Array.from(
         dialog.querySelectorAll<HTMLElement>(
           "button, input, textarea, select, [tabindex]:not([tabindex='-1'])",
         ),
       ).filter((element) => !element.hasAttribute("disabled"));
-    dialog.querySelector<HTMLInputElement>(".bot-form-name")?.focus();
+    // Until the fields load, hold focus inside the dialog rather than on the page behind it.
+    if (!dialog.contains(document.activeElement)) {
+      dialog.querySelector<HTMLElement>(".bot-form-icon-button")?.focus();
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -99,11 +111,11 @@ export function BotFormDialog({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [loading]);
+  }, []);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!busy && !loading) onSubmit();
+    if (!busy && !loading && !unavailable) onSubmit();
   };
   const set = (patch: Partial<BotFormValues>) => onChange({ ...values, ...patch });
 
@@ -141,7 +153,7 @@ export function BotFormDialog({
               <LoaderCircle className="spinning" size={18} />
               Loading bot…
             </div>
-          ) : (
+          ) : unavailable ? null : (
             <>
               <div className="bot-form-field">
                 <span id="bot-form-character-label">Character</span>
@@ -200,7 +212,7 @@ export function BotFormDialog({
               type="button"
               className="bot-form-danger"
               onClick={onDelete}
-              disabled={loading || busy}
+              disabled={loading || busy || unavailable}
             >
               Delete bot
             </button>
@@ -216,7 +228,11 @@ export function BotFormDialog({
             >
               Cancel
             </button>
-            <button type="submit" className="bot-form-primary" disabled={loading || busy}>
+            <button
+              type="submit"
+              className="bot-form-primary"
+              disabled={loading || busy || unavailable}
+            >
               {busy ? <LoaderCircle className="spinning" size={14} /> : submitIcon}
               {busy ? busyLabel : submitLabel}
             </button>

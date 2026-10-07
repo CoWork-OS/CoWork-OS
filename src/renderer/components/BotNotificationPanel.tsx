@@ -365,6 +365,19 @@ export function BotNotificationPanel({
             {busy ? "Saving…" : pending.current ? "Retry save" : "Save"}
           </button>
         )}
+        {/* A save that keeps failing must not lock the form: drop it and reload what is saved. */}
+        {options && pending.current && !busy && !retryPending.current && (
+          <button
+            type="button"
+            onClick={() => {
+              pending.current = null;
+              setError(null);
+              void refresh();
+            }}
+          >
+            Discard changes
+          </button>
+        )}
       </div>
       <details
         onToggle={(event) => {

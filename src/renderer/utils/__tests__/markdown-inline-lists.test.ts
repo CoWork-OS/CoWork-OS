@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { cleanAssistantMessageForDisplay } from "../../components/MainContent/markdown-normalization";
 import {
+  cleanAssistantMessageForDisplay,
+  normalizeTimelineTitleMarkdownForDisplay,
+} from "../../components/MainContent/markdown-normalization";
+import {
+  fixUnclosedBold,
   normalizeInlineLists,
   normalizeInlineHeadings,
   normalizeMarkdownForCollab,
@@ -157,6 +161,37 @@ describe("normalizeInlineHeadings", () => {
     expect(output).toContain("\n### Architecture");
     expect(output).toContain("\n## Feature Inventory");
   });
+
+  it("leaves # comments in fenced code untouched", () => {
+    const python = "```python\nx = 1 # note\ny = 2  ## also a comment\n```";
+    const bash = "```bash\necho hi # comment\n```";
+    const tilde = "~~~sh\nls # list\n~~~";
+    const input = `From X: ### Overview\n\n${python}\n\n${bash}\n\n${tilde}\n\nThen ## Next`;
+    expect(normalizeInlineHeadings(input)).toBe(
+      `From X:\n### Overview\n\n${python}\n\n${bash}\n\n${tilde}\n\nThen\n## Next`,
+    );
+    const unclosed = "```bash\necho hi # comment";
+    expect(normalizeInlineHeadings(unclosed)).toBe(unclosed);
+  });
+
+  it("does not rewrite across line boundaries", () => {
+    const inputs = [
+      "Intro\n\n## Section",
+      "Notes:\n\n    # indented code",
+      "Total ##\nNext line",
+      "- Parent\n  ### Child heading",
+    ];
+    for (const input of inputs) {
+      expect(normalizeInlineHeadings(input)).toBe(input);
+    }
+  });
+});
+
+describe("normalizeTimelineTitleMarkdownForDisplay", () => {
+  it("keeps inline # comments in fenced code on their line", () => {
+    const code = "```python\nx = 1 # note\n```";
+    expect(normalizeTimelineTitleMarkdownForDisplay(`Ran:\n\n${code}`)).toBe(`Ran:\n\n${code}`);
+  });
 });
 
 describe("unwrapMarkdownCodeBlocks", () => {
@@ -263,5 +298,25 @@ describe("normalizeMarkdownForCollab", () => {
     const input = "**CoWork OS** most likely fits";
     const output = normalizeMarkdownForCollab(input);
     expect(output).toBe(input);
+  });
+
+  it("leaves ** and # comments in fenced code untouched", () => {
+    const python = "```python\nsquare = x ** 2  # power\n```";
+    const bash = "~~~bash\nshopt -s globstar # enable **\n~~~";
+    const input = `**Electron desktop app\n\nFrom X: ### Overview\n\n${python}\n\n${bash}`;
+    expect(normalizeMarkdownForCollab(input)).toBe(
+      `**Electron desktop app**\n\nFrom X:\n### Overview\n\n${python}\n\n${bash}`,
+    );
+  });
+});
+
+describe("fixUnclosedBold", () => {
+  it("leaves ** inside fenced code untouched", () => {
+    const code = "```python\ny = x ** 2\n```";
+    expect(fixUnclosedBold(`**Unclosed\n\n${code}\n\n**Also unclosed`)).toBe(
+      `**Unclosed**\n\n${code}\n\n**Also unclosed**`,
+    );
+    const unclosed = "```js\nconst glob = 'src/**';";
+    expect(fixUnclosedBold(unclosed)).toBe(unclosed);
   });
 });

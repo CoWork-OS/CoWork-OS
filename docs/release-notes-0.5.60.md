@@ -16,6 +16,7 @@ The version skips from `0.5.54` to `0.5.60` to reflect the size of the change. R
 - **Database work off the main thread** — SQLite runs in worker threads in the desktop app, daemon and CLI, and new foreign-key indexes remove a startup stall of about 21 seconds on affected profiles.
 - **Agent reliability** — Background processes for dev servers and watchers, clearer command failures, completion checks based on observed evidence, honest test outcomes, better provider error handling and higher default budgets. A repo-root `AGENTS.md` (or `CLAUDE.md`) is loaded in every workspace, and the headless browser now handles tabs, popups, downloads, dialogs and uploads.
 - **New models, providers and channels** — GPT-6 Sol, GPT-6 Luna and GPT-6.1 Sol, OpenAI's official Sign in with ChatGPT (the older Codex sign-in stays as an unofficial fallback; image generation isn't available with it), the oMLX local provider, Anthropic adaptive thinking, wider prompt caching, WhatsApp Business (Cloud API) and Twilio SMS channels, Teams meeting transcripts, a Home Assistant connector and eight more ACP runtime agents.
+- **Interactive answers** — Replies can include interactive components such as photo collages, tables, charts, checklists and sliders or steppers that drive live calculations; the values you set are saved and used in your next message.
 - **Interface** — An opt-in Calm visual theme, a redesigned task feed that groups steps by turn, a per-task Cost panel, an Automation Library, an Add Tools page and a use-case gallery that replaces the Ideas panel.
 
 ## Upgrade notes
@@ -48,7 +49,10 @@ The version skips from `0.5.54` to `0.5.60` to reflect the size of the change. R
 - **Researcher tasks** — Researcher sub-tasks can no longer use external services or the browser.
 - **Memory tool names** — The 16 earlier memory tools (`search_memories`, `memory_save`, `memory_curate`, `supermemory_*`, `context_grep` and others) are removed and return "Unknown tool". Skills or prompts that name them must use `memory_recall`, `memory_remember`, `memory_forget` or `context_recall`.
 - **Memory settings** — The privacy mode "Disabled" is now the **Use memory** switch, and Chronicle is configured only in **Settings > Tools**.
+- **Connector blocklist** — The `connectors.blocked` admin policy is now enforced. If you added connectors to it earlier, they stop connecting and their tools disappear after the upgrade.
+- **Remote ACP agents** — Sending work to a remote ACP agent now goes through the tool policy, network policy and approval like local work, so it may ask for approval or be denied where it used to run directly. Saved credentials move into encrypted storage the first time CoWork loads those agents; if they can't be stored, calls to that agent are refused until they can. If you go back to 0.5.54, it calls these agents without their credentials.
 - **Bots** — No bot roster is installed and startup no longer rewrites bot instructions; existing bots, teams and history are kept. Responsibilities are always saved paused.
+- **Interactive answer photos** — Interactive answers can look up photos by description from Openverse and Wikimedia Commons (or your configured SearXNG), through the network policy. Set `COWORK_ANSWER_SURFACES=0` to turn interactive answers off.
 - **Diagrams** — Mermaid 12 uses a new default layout and look, so existing diagrams may render differently.
 
 ### Removed features
@@ -63,6 +67,8 @@ The version skips from `0.5.54` to `0.5.60` to reflect the size of the change. R
 ## Security
 
 - **Signal channel command injection** — signal-cli and ngrok commands no longer run through a shell, so message text and other arguments can't be interpreted as shell commands. On Windows, the `signal-cli.bat` launcher runs with quoted arguments and the message is passed on stdin. Thanks to Tal de Vries (@tal2k9dev-star) for reporting this. Advisory: GHSA-ggwv-w8g3-mc75.
+- **Remote ACP agents and connectors** — Remote ACP agent credentials move out of the agent card into encrypted storage and are no longer returned to Control Plane clients; remote sends pass policy, network policy and approval; and the connector blocklist admin policy is enforced.
+- **PDF parsing under heap flags** — A process-wide `--max-old-space-size` (for example in `NODE_OPTIONS`) no longer lifts the PDF workers' memory limit.
 - **Browser and network enforcement** — Agent browsers route through a local proxy that enforces network policy, including redirects. Network tools validate every resolved address, cap decoded responses at 5 MiB and drop credentials on cross-origin redirects. Canvas windows and web previews enforce their task's network policy.
 - **Sandbox and code execution** — Administrator network limits apply to code execution and the unsandboxed shell fallback, macOS sandbox rules follow the filesystem policy (read-only subtrees, `.git`, policy files and delete permission), and sandboxed commands can't reach other programs' local sockets such as the Docker daemon.
 - **Bounded inputs** — Webhook, cron webhook and Pulse bodies, Office and OpenDocument archives, imported skill archives, plugin manifests and PDF parsing all have size, time or memory limits; regex search runs in a terminable worker.
@@ -78,6 +84,7 @@ See the [September 30](security-fixes-2026-09-30.md), [October 2](security-fixes
 - **Bots** — Replies and handoffs wait for durable delivery and keep their order, bots created with a reused name get a numbered handle, and opening a bot no longer creates empty conversations.
 - **App lifecycle** — Quitting saves the composer draft before storage closes, shutdown completes cleanly, heartbeat history and temporary workspaces are pruned again, and settings that can't be decrypted no longer block saving.
 - **Scheduling and updates** — Persisted scheduled runs are reconciled on startup so runs aren't duplicated, and update checks say whether results are live or cached and no longer report "up to date" after a failed check.
+- **Collaborative teams and replies** — Collaborative team runs dispatch their synthesis step again, and lists, headings and code blocks in replies render without being split or rewritten.
 - **Interface** — Fixed blank-window crashes when returning from full-screen views, a duplicate notification icon on macOS and the sidebar crowding narrow windows.
 - **Memory and sandbox** — Memory summaries no longer all show the same first line, Everyday Agent "Delete local data" clears only that workspace, and the macOS sandbox works for workspaces under `/private/tmp`.
 

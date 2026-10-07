@@ -47,6 +47,7 @@ type AddNotificationParams = {
   suggestionId?: string;
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
+  openTarget?: AppNotification["openTarget"];
 };
 
 function getInputRequiredDedupeKey(notification: AppNotification): string | null {
@@ -243,6 +244,7 @@ export class NotificationService {
       suggestionId: params.suggestionId,
       recommendedDelivery: params.recommendedDelivery,
       companionStyle: params.companionStyle,
+      ...(params.openTarget ? { openTarget: params.openTarget } : {}),
     };
   }
   private findExistingPersistentNotification(

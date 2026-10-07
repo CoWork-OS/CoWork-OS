@@ -11,6 +11,7 @@ import {
   MEMORY_REPO_ENTRY_FILE,
   MEMORY_REPO_INBOX_FILE,
   MEMORY_REPO_LIMITS,
+  MEMORY_REPO_WORKSPACES_DIR,
   ensureIndexLink,
   initialTopicFile,
   insertEntryLine,
@@ -36,6 +37,7 @@ const MIN_QUOTE_CHARS = 8;
 export interface DreamTaskInput {
   taskId: string;
   title: string;
+  workspaceId?: string | null;
   workspaceName?: string | null;
   createdAt: number;
   userMessages: string[];
@@ -58,6 +60,10 @@ export interface DreamInput {
   lines: Map<string, DreamLineRef>;
   tasks: Map<string, DreamTaskInput>;
   estimatedInputTokens: number;
+  /** Every folder file that exists (shown or not). */
+  files?: ReadonlySet<string>;
+  /** Workspace id → its file (`workspaces/*.md` naming it with `[workspace: <id>]`). */
+  workspaceFiles?: ReadonlyMap<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +201,22 @@ export function buildDreamInput(params: {
     lines,
     tasks,
     estimatedInputTokens: Math.ceil((SYSTEM_PROMPT.length + user.length) / 4),
+    files: new Set(params.files.keys()),
+    workspaceFiles: workspaceFilesOf(params.files),
   };
+}
+
+/** Workspace id → the `workspaces/*.md` file that names it. */
+function workspaceFilesOf(files: Map<string, string>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [file, text] of files) {
+    if (!isWorkspacePath(file)) continue;
+    for (const entry of parseMemoryRepoEntries(text)) {
+      const id = entry.metadata.workspace;
+      if (id && !out.has(id)) out.set(id, file);
+    }
+  }
+  return out;
 }
 
 /** An inbox line imported from another folder (`source: import`). */
@@ -300,6 +321,10 @@ export interface ClassifiedDreamOperation {
   refs: DreamLineRef[];
   /** For add: the task id of the first evidence. */
   sourceTaskId?: string;
+  /** For add: where the entry goes when it differs from `op.file` (the workspace's file). */
+  targetFile?: string;
+  /** For add: a new workspace file to create with its workspace line. */
+  createWorkspace?: { id: string; name: string };
 }
 
 function normalizeForQuote(value: string): string {
@@ -309,6 +334,10 @@ function normalizeForQuote(value: string): string {
     .replace(/[“”]/g, '"')
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isWorkspacePath(path: string): boolean {
+  return path.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`);
 }
 
 function validTarget(path: string): boolean {
@@ -321,7 +350,7 @@ function validTarget(path: string): boolean {
  */
 export function classifyDreamOperations(
   operations: DreamOperation[],
-  input: Pick<DreamInput, "lines" | "tasks">,
+  input: Pick<DreamInput, "lines" | "tasks" | "files" | "workspaceFiles">,
 ): ClassifiedDreamOperation[] {
   const claimed = new Set<string>();
   const out: ClassifiedDreamOperation[] = [];
@@ -383,6 +412,21 @@ export function classifyDreamOperations(
           reject(op, "evidence names no known task");
           continue;
         }
+        // A workspace file must name its workspace, or nothing finds it again: put the entry
+        // in the evidence task's workspace file, or create that file with its workspace line.
+        let targetFile: string | undefined;
+        let createWorkspace: { id: string; name: string } | undefined;
+        if (isWorkspacePath(op.file) && !(input.files?.has(op.file) ?? true)) {
+          const task = op.evidence.map((e) => input.tasks.get(e.task)).find((t) => t?.workspaceId);
+          const workspaceId = task?.workspaceId ?? null;
+          if (!workspaceId) {
+            reject(op, "unknown workspace file");
+            continue;
+          }
+          const existing = input.workspaceFiles?.get(workspaceId);
+          if (existing) targetFile = existing;
+          else createWorkspace = { id: workspaceId, name: task?.workspaceName?.trim() || titleForFile(op.file) };
+        }
         if (op.file === MEMORY_REPO_ENTRY_FILE) {
           decision = "review";
           why = "adds to MEMORY.md, which is in every prompt";
@@ -390,7 +434,16 @@ export function classifyDreamOperations(
           decision = "review";
           why = "the evidence is not the user's own words";
         }
-        out.push({ op, decision, why, text: screened, refs, sourceTaskId: firstTask });
+        out.push({
+          op,
+          decision,
+          why,
+          text: screened,
+          refs,
+          sourceTaskId: firstTask,
+          ...(targetFile && targetFile !== op.file ? { targetFile } : {}),
+          ...(createWorkspace ? { createWorkspace } : {}),
+        });
         continue;
       }
       case "update":
@@ -403,6 +456,10 @@ export function classifyDreamOperations(
         }
         if (op.op === "move" && !validTarget(op.file)) {
           reject(op, "invalid file", refs);
+          continue;
+        }
+        if (op.op === "move" && isWorkspacePath(op.file) && !(input.files?.has(op.file) ?? true)) {
+          reject(op, "unknown workspace file", refs);
           continue;
         }
         if (touchesUser) {
@@ -421,6 +478,10 @@ export function classifyDreamOperations(
         }
         if (!validTarget(op.file)) {
           reject(op, "invalid file", refs);
+          continue;
+        }
+        if (isWorkspacePath(op.file) && !(input.files?.has(op.file) ?? true)) {
+          reject(op, "unknown workspace file", refs);
           continue;
         }
         decision = "review";
@@ -490,10 +551,15 @@ export function applyDreamOperations(params: {
     files.set(path, value);
     changed.add(path);
   };
-  const insertInto = (path: string, line: string) => {
+  const insertInto = (path: string, line: string, workspace?: { id: string; name: string }) => {
     let base = files.get(path);
     if (base === undefined) {
-      base = initialTopicFile(titleForFile(path));
+      base = workspace
+        ? `${initialTopicFile(workspace.name)}${renderMemoryRepoEntry("CoWork workspace", {
+            by: "user",
+            workspace: workspace.id,
+          })}\n`
+        : initialTopicFile(titleForFile(path));
       const entryFile = files.get(MEMORY_REPO_ENTRY_FILE);
       if (entryFile !== undefined) {
         const linked = ensureIndexLink(entryFile, path);
@@ -520,7 +586,7 @@ export function applyDreamOperations(params: {
       case "add": {
         const add = op.op;
         insertInto(
-          add.file,
+          op.targetFile ?? add.file,
           renderMemoryRepoEntry(op.text ?? add.text, {
             by: params.by,
             kind: add.kind,
@@ -528,6 +594,7 @@ export function applyDreamOperations(params: {
             ...(op.sourceTaskId ? { source: `cowork://tasks/${op.sourceTaskId}` } : {}),
             added: today,
           }),
+          op.createWorkspace,
         );
         break;
       }
@@ -606,7 +673,7 @@ export function describeDreamOperation(op: ClassifiedDreamOperation): string {
   const first = op.refs[0];
   switch (op.op.op) {
     case "add":
-      return `Add to ${op.op.file}: ${clip(op.text ?? op.op.text, 80)}`;
+      return `Add to ${op.targetFile ?? op.op.file}: ${clip(op.text ?? op.op.text, 80)}`;
     case "update":
       return `Update in ${first?.path}: ${clip(op.text ?? op.op.text, 80)}`;
     case "remove":

@@ -182,3 +182,53 @@ describe("applyDreamOperations", () => {
     expect(gone.skipped[0].why).toMatch(/no longer exists/);
   });
 });
+
+describe("dream adds to workspace files", () => {
+  const files = () =>
+    new Map([
+      ["MEMORY.md", "# Memory\n\n## Index\n- [[me]]\n- [[workspaces/billing]]\n"],
+      ["workspaces/billing.md", "# Billing\n\n- CoWork workspace [by: user; workspace: ws-1]\n"],
+    ]);
+  const task = (workspaceId: string | null, workspaceName: string | null) => ({
+    taskId: "task-1",
+    title: "Research",
+    workspaceId,
+    workspaceName,
+    createdAt: 1,
+    userMessages: ["Always report the chamber and decision date"],
+  });
+  const add = (file: string) =>
+    ({
+      op: "add",
+      file,
+      text: "Report the chamber and decision date",
+      kind: "preference",
+      evidence: [{ task: "T1", quote: "always report the chamber and decision date" }],
+    }) as const;
+
+  it("puts an entry for a guessed file into the workspace's own file", () => {
+    const input = buildDreamInput({ files: files(), tasks: [task("ws-1", "Billing")] });
+    const [op] = classifyDreamOperations([add("workspaces/billing-team.md")], input);
+    expect(op).toMatchObject({ decision: "auto", targetFile: "workspaces/billing.md" });
+    const result = applyDreamOperations({ files: files(), operations: [op], by: "agent", now: 0 });
+    expect(result.files.has("workspaces/billing-team.md")).toBe(false);
+    expect(result.files.get("workspaces/billing.md")).toContain("Report the chamber");
+  });
+
+  it("creates a new workspace file with its workspace line", () => {
+    const input = buildDreamInput({ files: files(), tasks: [task("ws-2", "Dayanak lens")] });
+    const [op] = classifyDreamOperations([add("workspaces/dayanak-lens.md")], input);
+    expect(op).toMatchObject({ createWorkspace: { id: "ws-2", name: "Dayanak lens" } });
+    const result = applyDreamOperations({ files: files(), operations: [op], by: "agent", now: 0 });
+    expect(result.files.get("workspaces/dayanak-lens.md")).toMatch(
+      /^# Dayanak lens\n\n- CoWork workspace \[by: user; workspace: ws-2\]\n- Report the chamber/,
+    );
+    expect(result.files.get("MEMORY.md")).toContain("[[workspaces/dayanak-lens]]");
+  });
+
+  it("refuses an unknown workspace file it cannot place", () => {
+    const input = buildDreamInput({ files: files(), tasks: [task(null, null)] });
+    const [op] = classifyDreamOperations([add("workspaces/nowhere.md")], input);
+    expect(op).toMatchObject({ decision: "rejected", why: "unknown workspace file" });
+  });
+});

@@ -153,6 +153,7 @@ describe("createDreamTaskLister", () => {
     expect(result[1]).toEqual({
       taskId: "t2",
       title: "Task t2",
+      workspaceId: "ws-2",
       workspaceName: "Name of ws-2",
       createdAt: 400,
       userMessages: ["Please do t2"],

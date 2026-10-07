@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Memory reviews notify you**: when a dream leaves changes for you to accept or reject, CoWork shows a notification ("Memory: 1 change to review"); clicking it opens Settings > Memory > Review. Notes a dream learns for a workspace now always land in that workspace's file (a file it created without the workspace link is repaired on the next save).
+
 - **Bots are user configuration only**: CoWork no longer installs a named bot roster, rewrites bot instructions at startup, or attaches bots to a default team. Existing bots, teams, membership and history are kept as they are.
 - **Feedback reasons are saved to your memory folder**: when you reject or edit a reply and say why, the reason is saved as a correction in the workspace's memory folder file (a repeat updates the same note) instead of the generated section of `.cowork/MISTAKES.md`, which is removed once (your own text stays). Only your own feedback counts, not feedback from others in a channel. With the memory folder off, `MISTAKES.md` is updated as before. The automatic per-task milestone list in `.cowork/LORE.md` is retired and removed once; milestones the agent records with `update_lore` are kept as plain lines.
 

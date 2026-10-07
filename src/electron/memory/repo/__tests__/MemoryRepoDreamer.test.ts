@@ -132,6 +132,26 @@ describeWithGit("MemoryRepoDreamer", () => {
     expect(git(service.root, "branch", "--list", "dream/*").trim()).toBe("");
   });
 
+  it("tells the user when a dream leaves changes for review, and only then", async () => {
+    const notified: string[] = [];
+    const dreamer = new MemoryRepoDreamer({
+      getService: () => service,
+      client,
+      listRecentTasks: async () => tasks,
+      settings: () => settings,
+      now: () => now,
+      onReviewPending: (record) => notified.push(`${record.id}:${record.reviewCount}`),
+    });
+    const outcome = await dreamer.run("manual");
+    if (!outcome.ran) throw new Error("did not run");
+    expect(notified).toEqual([`${outcome.record.id}:2`]);
+
+    answer = () => JSON.stringify({ summary: "", operations: [] });
+    now += 25 * 60 * 60 * 1000;
+    await dreamer.run("manual");
+    expect(notified).toHaveLength(1);
+  });
+
   it("undoes the automatic commit and rejects the review branch", async () => {
     const outcome = await makeDreamer().run("manual");
     if (!outcome.ran) throw new Error("did not run");

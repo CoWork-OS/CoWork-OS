@@ -12120,7 +12120,11 @@ export interface AppNotification {
   suggestionId?: string;
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
+  /** Where clicking it leads when it has no task: `memory_review` = Settings > Memory > Review. */
+  openTarget?: NotificationOpenTarget;
 }
+
+export type NotificationOpenTarget = "memory_review";
 
 export interface NotificationStoreFile {
   version: 1;

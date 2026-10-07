@@ -2146,6 +2146,23 @@ if (isMacSafeStorageMigrationWorker) {
             hostTaskEventReplayRepository
               ? hostTaskEventReplayRepository.findByTaskIdAndTypes(taskId, types, maxEvents)
               : [],
+          // A dream that left changes for review tells the user; the click opens Memory > Review.
+          notifyDreamReview: (record) => {
+            void getNotificationService()
+              ?.add({
+                id: `memory-dream-review:${record.id}`,
+                type: "info",
+                title:
+                  record.reviewCount === 1
+                    ? "Memory: 1 change to review"
+                    : `Memory: ${record.reviewCount} changes to review`,
+                message:
+                  record.summary.trim() ||
+                  "Dreaming suggested changes to your memory folder. Accept or reject them in Settings > Memory > Review.",
+                openTarget: "memory_review",
+              })
+              .catch((error) => logger.warn("Could not post the dream review notification:", error));
+          },
         });
 
         // Initialize FTS worker thread for off-main-thread memory search

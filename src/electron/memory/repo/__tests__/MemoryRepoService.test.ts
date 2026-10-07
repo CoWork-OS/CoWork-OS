@@ -91,6 +91,21 @@ describeWithGit("MemoryRepoService", () => {
     expect(await service.workspaceFile("ws-1")).toBe("workspaces/billing-service.md");
   });
 
+  it("adopts a workspace file that names no workspace instead of creating a second one", async () => {
+    fs.mkdirSync(path.join(root, "workspaces"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, "workspaces/billing-service.md"),
+      "# Billing service\n\n- Written by an older dream [by: agent; kind: rule]\n",
+    );
+    const result = await remember({ text: "Invoices close on the 5th", kind: "project_fact" });
+    expect(result).toMatchObject({ status: "written", path: "workspaces/billing-service.md" });
+    expect(fs.existsSync(path.join(root, "workspaces/billing-service-2.md"))).toBe(false);
+    expect(read("workspaces/billing-service.md")).toMatch(
+      /^# Billing service\n\n- CoWork workspace \[by: user; workspace: ws-1\]\n- Written by an older dream/,
+    );
+    expect(await service.workspaceFile("ws-1")).toBe("workspaces/billing-service.md");
+  });
+
   it("dedupes, replaces by subject, and never lets the agent replace the user", async () => {
     await remember();
     expect(await remember({ text: "deploys go through staging first." })).toMatchObject({

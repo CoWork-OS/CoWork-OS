@@ -191,6 +191,7 @@ export function createDreamTaskLister(
         result.push({
           taskId: task.id,
           title: trimText(task.title, MAX_TITLE_CHARS) || "Untitled task",
+          workspaceId: task.workspaceId ?? null,
           workspaceName: names.get(task.workspaceId) ?? null,
           createdAt: task.createdAt,
           userMessages: conversation.userMessages,

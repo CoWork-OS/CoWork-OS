@@ -43,6 +43,20 @@ export class AcpStore {
       );
   }
 
+  /**
+   * Rewrite a card whose credentials moved to secure storage. secure_delete zeroes the
+   * bytes the old plaintext occupied instead of leaving them in freed page space.
+   */
+  scrubRemoteAgentCard(card: ACPAgentCard, now: number): void {
+    const previous = Number(this.db.pragma("secure_delete", { simple: true }) ?? 0);
+    this.db.pragma("secure_delete = ON");
+    try {
+      this.persistRemoteAgent(card, now);
+    } finally {
+      this.db.pragma(`secure_delete = ${previous === 2 ? "FAST" : previous ? "ON" : "OFF"}`);
+    }
+  }
+
   deleteRemoteAgent(agentId: string): void {
     this.db.prepare("DELETE FROM acp_agents WHERE id = ?").run(agentId);
   }

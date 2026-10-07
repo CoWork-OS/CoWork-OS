@@ -149,6 +149,7 @@ export type SettingsCategory =
   | "browser-use"
   | "adaptive-style-engine"
   | "routine-workflow-secrets"
+  | "acp-remote-agent-secrets"
   | "awareness-state"
   | "autonomy-chief-of-staff"
   | "supermemory"

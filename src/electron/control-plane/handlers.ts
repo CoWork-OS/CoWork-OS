@@ -69,7 +69,12 @@ import { invalidateTaskRowReads, TaskEventRepository, TaskStore } from "../datab
 import { SearchProviderFactory } from "../agent/search";
 import { configureLlmFromControlPlaneParams, getControlPlaneLlmStatus } from "./llm-configure";
 import { checkTailscaleAvailability, getExposureStatus } from "../tailscale";
-import { registerACPMethods, shutdownACP, type ACPHandlerDeps } from "../acp";
+import {
+  redactAcpControlPlanePayload,
+  registerACPMethods,
+  shutdownACP,
+  type ACPHandlerDeps,
+} from "../acp";
 
 import { TailscaleSettingsManager } from "../tailscale/settings";
 import { RemoteGatewayClient } from "./remote-client";
@@ -1354,7 +1359,8 @@ function ensureFleetManager() {
           type: "event",
           deviceId,
           event,
-          payload,
+          // A remote device may predate ACP credential redaction; never forward its tokens.
+          payload: redactAcpControlPlanePayload(event, payload),
           status,
         });
       }
@@ -5067,7 +5073,8 @@ export function setupControlPlaneHandlers(
           ? await normalizeImagesForRemote(request.params)
           : request.params;
       const payload = await client.request(request.method, params, 15000);
-      return { ok: true, payload };
+      // A remote device may predate ACP credential redaction; never forward its tokens.
+      return { ok: true, payload: redactAcpControlPlanePayload(request.method, payload) };
     } catch (error: any) {
       return { ok: false, error: error.message || String(error) };
     }

@@ -16,7 +16,7 @@
  *   Or download from GitHub releases
  */
 
-import { spawn, ChildProcess, execSync, exec } from "child_process";
+import { spawn, ChildProcess, execFileSync, execFile } from "child_process";
 import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
@@ -242,7 +242,7 @@ export class SignalClient extends EventEmitter {
    */
   async checkInstallation(): Promise<{ installed: boolean; version?: string; error?: string }> {
     try {
-      const result = execSync(`${this.options.cliPath} --version`, {
+      const result = execFileSync(this.options.cliPath, ["--version"], {
         encoding: "utf-8",
         timeout: 5000,
       });
@@ -689,8 +689,12 @@ export class SignalClient extends EventEmitter {
         console.log(`Executing: ${this.options.cliPath} ${fullArgs.join(" ")}`);
       }
 
-      exec(
-        `${this.options.cliPath} ${fullArgs.map((a) => `"${a}"`).join(" ")}`,
+      // execFile with an argument array: no shell is involved, so message text,
+      // recipients, and other agent-influenced values can never be interpreted
+      // as shell syntax. Never build a command string here.
+      execFile(
+        this.options.cliPath,
+        fullArgs,
         {
           timeout: 30000,
           maxBuffer: 10 * 1024 * 1024, // 10MB

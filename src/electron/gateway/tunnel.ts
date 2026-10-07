@@ -14,7 +14,7 @@
  *   await tunnel.stop();
  */
 
-import { spawn, ChildProcess, execSync } from "child_process";
+import { spawn, ChildProcess, execSync, execFileSync } from "child_process";
 import { EventEmitter } from "events";
 import * as _net from "net";
 import * as http from "http";
@@ -293,7 +293,7 @@ export class TunnelManager extends EventEmitter {
     // If auth token provided, configure it first
     if (this.config.ngrokAuthToken) {
       try {
-        execSync(`ngrok config add-authtoken ${this.config.ngrokAuthToken}`, {
+        execFileSync("ngrok", ["config", "add-authtoken", this.config.ngrokAuthToken], {
           encoding: "utf-8",
           stdio: "pipe",
         });

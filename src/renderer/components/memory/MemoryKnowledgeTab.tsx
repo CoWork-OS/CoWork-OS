@@ -221,6 +221,14 @@ function KnowledgeItemRow({
         {item.private && <span className="settings-badge settings-badge--neutral">Private</span>}
         <span>{formatPercent(item.confidence)} confidence</span>
         <span>Last used {formatRelative(item.lastUsedAt)}</span>
+        <span title={item.originBotId ?? undefined}>
+          {item.originBotId
+            ? `Bot source: ${item.originBotName ?? item.originBotId}`
+            : item.private
+              ? "Private context"
+              : "Shared workspace context"}
+        </span>
+        <span>Recorded {new Date(item.createdAt).toLocaleDateString()}</span>
       </div>
       {!editing && (
         <div className="memory-knowledge-actions">

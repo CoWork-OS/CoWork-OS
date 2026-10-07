@@ -3182,3 +3182,45 @@ button {
 .collab-agent-open-task:active {
   transform: translateY(1px);
 }
+
+
+.session-approval-draft {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  text-align: left;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.session-approval-draft h4 { margin: 0 0 8px; font-size: 13px; }
+.session-approval-draft p { margin: 8px 0; color: var(--color-text-muted); }
+.session-approval-draft details { margin-top: 10px; }
+.session-approval-draft summary { cursor: pointer; }
+.session-approval-draft pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+.session-approval-draft-version { font-family: monospace; }
+
+.responsibility-grant-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+.responsibility-grant-note.outside {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-warning, #d97706) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #d97706) 45%, transparent);
+}

@@ -12,6 +12,16 @@ afterEach(() => {
 });
 
 describe("cost budget guardrail", () => {
+  it("honours an explicit zero cost budget before incurring cost", () => {
+    expect(GuardrailManager.isCostBudgetExceeded(0, { taskBudget: 0 })).toMatchObject({
+      exceeded: true,
+      limit: 0,
+      source: "task",
+    });
+    expect(
+      GuardrailManager.isCostBudgetExceeded(0, { taskBudget: 0, subscriptionBilled: true }),
+    ).toMatchObject({ exceeded: true, limit: 0, source: "task" });
+  });
   it("is on by default with a $10 per-task cap", () => {
     expect(GuardrailManager.getDefaults()).toMatchObject({
       costBudgetEnabled: true,

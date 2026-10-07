@@ -2,14 +2,28 @@ import { existsSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import * as path from "path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDaemon, BOT_HANDOFF_REPLY_TIMEOUT_MS } from "../daemon";
+import { DatabaseManager } from "../../database/schema";
 import type { TaskEvent } from "../../../shared/types";
 import { getOutstandingBotHandoffReply, getPendingBotHandoff } from "../../../shared/bot-handoff";
 import { QueuedAttachmentStore } from "../runtime/queued-attachment-store";
 
 type Any = Record<string, any>;
+
+const policyDirectory = mkdtempSync(path.join(tmpdir(), "cowork-agent-message-policy-"));
+const policyDbManager = new DatabaseManager({ dbPath: path.join(policyDirectory, "fixture.db") });
+afterAll(() => {
+  policyDbManager.close();
+  rmSync(policyDirectory, { recursive: true, force: true });
+});
+beforeEach(() => {
+  vi.spyOn(AgentDaemon.prototype, "getDatabase").mockImplementation(() =>
+    policyDbManager.getDatabase(),
+  );
+});
+afterEach(() => vi.restoreAllMocks());
 
 function makeEvent(id: string, taskId: string, type: TaskEvent["type"], payload: Any): TaskEvent {
   return {

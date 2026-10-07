@@ -1,3 +1,29 @@
+import { isAssistantApprovalInputRequest } from "../agent/assistant-approval";
+import {
+  assertApprovalDraftsCurrent,
+  captureApprovalDrafts,
+  readApprovalDraftPreviews,
+  type ApprovalDraftReadContext,
+} from "./approval-drafts";
+import {
+  ChannelDecisionStore,
+  type ChannelDecisionResolutionGuard,
+} from "../gateway/ChannelDecisionStore";
+import { approvalRequestRevisionHash } from "../agent/approval-revision";
+import { APPROVAL_REQUEST_TIMEOUT_MS } from "../agent/approval-timeouts";
+import { assertBotFutureAdmission } from "../automation/BotWorkControlStore";
+import {
+  assertGraphTaskAdmission,
+  linkGraphTaskAdmission,
+  type GraphTaskAdmission,
+} from "../agent/orchestration/graph-task-admission";
+import {
+  commitResponsibilitySignal,
+  captureResponsibilityRun,
+  persistResponsibilityTaskRun,
+} from "../automation/responsibility-store";
+import { assertSchedulerFence } from "../automation/scheduler-lease-store";
+import { commitDispatchReservation } from "../automation/dispatch-budget-store";
 import Database from "better-sqlite3";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
@@ -9,6 +35,16 @@ import {
   buildRetentionProtectedMemorySql,
 } from "../memory/memory-retention";
 import { PRUNE_TASK_EVENTS_BATCH_SQL } from "./maintenance-sql";
+import {
+  prepareApprovalInputLinkInsert,
+  prepareApprovalInputLinkLookup,
+  prepareApprovalResponsibilityReviewGate,
+  prepareApprovalInputLinkForResolution,
+  prepareLinkedInputResolution,
+  preparePendingApprovalResolution,
+  prepareResponsibilityActionDecisionInsert,
+  prepareScheduledRunRecoveryLookup,
+} from "./transactional-review-sql";
 import { purgeTaskDerivedRows } from "../memory/memory-purge-sql";
 import { deleteWorkspaceMemoriesOlderThan } from "../memory/memory-retention-sql";
 import {
@@ -769,7 +805,29 @@ export class TaskStore {
     };
   }
 
-  create(task: Omit<Task, "id" | "createdAt" | "updatedAt"> & { id?: string }): Task {
+  create(
+    task: Omit<Task, "id" | "createdAt" | "updatedAt"> & { id?: string },
+    graphAdmission?: GraphTaskAdmission,
+  ): Task {
+    if (
+      graphAdmission === undefined &&
+      task.assignedAgentRoleId === undefined &&
+      task.agentConfig?.backgroundDispatchTicket === undefined &&
+      task.agentConfig?.backgroundSchedulerFence === undefined &&
+      task.agentConfig?.automationRoutineId === undefined &&
+      task.agentConfig?.responsibilityRun === undefined &&
+      task.agentConfig?.responsibilitySignal === undefined &&
+      task.parentTaskId === undefined
+    )
+      return this.createInTransaction(task);
+    return this.db.transaction(() => this.createInTransaction(task, graphAdmission)).immediate();
+  }
+
+  private createInTransaction(
+    task: Omit<Task, "id" | "createdAt" | "updatedAt"> & { id?: string },
+    graphAdmission?: GraphTaskAdmission,
+  ): Task {
+    if (graphAdmission) assertGraphTaskAdmission(this.db, graphAdmission, task.workspaceId);
     const requestedId = task.id;
     if (
       requestedId !== undefined &&
@@ -789,6 +847,31 @@ export class TaskStore {
       updatedAt: Date.now(),
     };
 
+    captureResponsibilityRun(this.db, newTask);
+    assertBotFutureAdmission(this.db, newTask, !!graphAdmission);
+    const responsibilitySignal = newTask.agentConfig?.responsibilitySignal;
+    if (newTask.agentConfig && responsibilitySignal !== undefined) {
+      const { responsibilitySignal: _signal, ...config } = newTask.agentConfig;
+      void _signal;
+      newTask.agentConfig = config;
+    }
+    const backgroundDispatchTicket = newTask.agentConfig?.backgroundDispatchTicket;
+    const schedulerFence = newTask.agentConfig?.backgroundSchedulerFence;
+    if (schedulerFence) assertSchedulerFence(this.db, schedulerFence);
+    if (
+      newTask.agentConfig &&
+      ("backgroundDispatchTicket" in newTask.agentConfig ||
+        "backgroundSchedulerFence" in newTask.agentConfig)
+    ) {
+      const {
+        backgroundDispatchTicket: _ticket,
+        backgroundSchedulerFence: _fence,
+        ...executionConfig
+      } = newTask.agentConfig;
+      void _ticket;
+      newTask.agentConfig = executionConfig;
+    }
+
     const stmt = this.db.prepare(`
       INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, verification_verdict, verification_report, best_known_outcome, budget_usage, continuation_count, continuation_window, lifetime_turns_used, last_progress_score, auto_continue_block_reason, compaction_count, last_compaction_at, last_compaction_tokens_before, last_compaction_tokens_after, no_progress_streak, last_loop_fingerprint, risk_level, eval_case_id, eval_run_id, issue_id, heartbeat_run_id, company_id, goal_id, project_id, request_depth, billing_code, assigned_agent_role_id, worker_role, semantic_summary, target_node_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -805,7 +888,7 @@ export class TaskStore {
       newTask.createdAt,
       newTask.updatedAt,
       newTask.budgetTokens || null,
-      newTask.budgetCost || null,
+      newTask.budgetCost ?? null,
       newTask.successCriteria ? JSON.stringify(newTask.successCriteria) : null,
       newTask.maxAttempts || null,
       newTask.currentAttempt || 1,
@@ -853,6 +936,18 @@ export class TaskStore {
       newTask.semanticSummary || null,
       newTask.targetNodeId || null,
     );
+    if (graphAdmission) linkGraphTaskAdmission(this.db, graphAdmission, newTask.id);
+    persistResponsibilityTaskRun(this.db, newTask);
+    commitResponsibilitySignal(this.db, newTask, responsibilitySignal);
+    if (backgroundDispatchTicket) {
+      commitDispatchReservation(
+        this.db,
+        backgroundDispatchTicket,
+        newTask.id,
+        newTask.workspaceId,
+        newTask.createdAt,
+      );
+    }
     invalidateTaskRowReads(this.db);
 
     UsageInsightsProjector.getIfInitialized()?.enqueueTaskCreate(newTask);
@@ -1447,6 +1542,17 @@ export class TaskStore {
     return rows.map((row) => this.mapRowToTask(row));
   }
 
+  /** Recover only a unique task committed for this exact cron lease, regardless of status. */
+  findByScheduledRun(workspaceId: string, jobId: string, runAtMs: number): Task | null {
+    if (!workspaceId || !jobId || !Number.isSafeInteger(runAtMs) || runAtMs < 0) return null;
+    const rows = prepareScheduledRunRecoveryLookup(this.db).all(
+      workspaceId,
+      jobId,
+      runAtMs,
+    ) as Any[];
+    return rows.length === 1 ? this.mapRowToTask(rows[0]) : null;
+  }
+
   findBySessionId(sessionId: string, limit?: number, offset?: number): Task[] {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) return [];
@@ -1862,7 +1968,7 @@ export class TaskStore {
           : undefined,
       pinned: Number(row.is_pinned) === 1,
       budgetTokens: row.budget_tokens || undefined,
-      budgetCost: row.budget_cost || undefined,
+      budgetCost: row.budget_cost ?? undefined,
       error: row.error || undefined,
       // Verification/retry metadata
       successCriteria: row.success_criteria
@@ -4298,9 +4404,13 @@ export class AnnotationStore {
 export class ApprovalStore {
   constructor(private db: Database.Database) {}
 
-  create(approval: Omit<ApprovalRequest, "id">): ApprovalRequest {
+  create(
+    approval: Omit<ApprovalRequest, "id">,
+    draftReadContext?: ApprovalDraftReadContext,
+  ): ApprovalRequest {
     const newApproval: ApprovalRequest = {
       ...approval,
+      details: captureApprovalDrafts(this.db, approval, draftReadContext),
       id: uuidv4(),
     };
 
@@ -4322,17 +4432,260 @@ export class ApprovalStore {
     return newApproval;
   }
 
+  draftPreviews(approvalId: string, revisionHash: string) {
+    const request = this.findById(approvalId);
+    if (
+      !request ||
+      request.status !== "pending" ||
+      !Number.isSafeInteger(request.requestedAt) ||
+      Date.now() >= request.requestedAt + APPROVAL_REQUEST_TIMEOUT_MS ||
+      approvalRequestRevisionHash(request) !== revisionHash
+    )
+      throw new Error("Approval request changed or expired");
+    return readApprovalDraftPreviews(this.db, request);
+  }
+
+  /** Fresh approved-request/file check at grant consumption, never a read-scope grant. */
+  approvedRevisionCurrent(approvalId: string, revisionHash: string): boolean {
+    try {
+      const approval = this.findById(approvalId);
+      if (
+        !approval ||
+        approval.status !== "approved" ||
+        !Number.isSafeInteger(approval.requestedAt) ||
+        Date.now() >= approval.requestedAt + APPROVAL_REQUEST_TIMEOUT_MS ||
+        approvalRequestRevisionHash(approval) !== revisionHash
+      )
+        return false;
+      // An explicitly requested draft review cannot become permission when capture fails.
+      // Legacy file-access requests without a declared review retain their existing flow.
+      if (
+        approval.details?.reviewFiles !== undefined ||
+        approval.details?.draftRevision?.state === "bound"
+      )
+        assertApprovalDraftsCurrent(this.db, approval);
+      new ChannelDecisionStore(this.db).assertApprovedConsumption(approvalId, revisionHash);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   update(
     id: string,
     status: "approved" | "denied",
     attribution?: { principalId?: string; role?: string },
-  ): void {
+  ): boolean {
+    if (status === "approved") {
+      const row = prepareApprovalResponsibilityReviewGate(this.db).get(id) as
+        | { type: string; details: string }
+        | undefined;
+      try {
+        const details = row ? (JSON.parse(row.details) as Record<string, Any>) : undefined;
+        if (row?.type === "workspace_write" && details?.responsibilityActionReview?.version === 1)
+          return false;
+      } catch {
+        // Malformed requests are not treated as special grants here; the claim gate
+        // independently requires a well-formed one-time decision receipt.
+      }
+    }
     const stmt = this.db.prepare(`
       UPDATE approvals
       SET status = ?, resolved_at = ?, resolved_by_principal_id = ?, resolved_by_role = ?
-      WHERE id = ?
+      WHERE id = ? AND status = 'pending'
     `);
-    stmt.run(status, Date.now(), attribution?.principalId || null, attribution?.role || null, id);
+    return (
+      stmt.run(status, Date.now(), attribution?.principalId || null, attribution?.role || null, id)
+        .changes === 1
+    );
+  }
+
+  /** One pending request revision can win once, before any grant or task resume. */
+  resolvePending(
+    id: string,
+    status: "approved" | "denied",
+    expected: ApprovalRequest,
+    attribution?: { principalId?: string; role?: string },
+    channelGuard?: ChannelDecisionResolutionGuard,
+    responsibilityActionReviewDecision?: "allow_once" | "deny_once",
+    linkedInputResolution?: {
+      inputId: string;
+      taskId: string;
+      revisionHash: string;
+      status: "submitted" | "dismissed";
+      answers?: Record<string, { optionLabel?: string; otherText?: string }>;
+      taskDisposition?: "resume" | "pause" | "fail";
+      failureMessage?: string;
+    },
+  ): boolean {
+    if (!["approved", "denied"].includes(status) || expected.id !== id)
+      throw new Error("Invalid approval resolution");
+    const reviewMarker =
+      expected.type === "workspace_write" &&
+      expected.details &&
+      typeof expected.details === "object" &&
+      !Array.isArray(expected.details)
+        ? (expected.details as Record<string, Any>).responsibilityActionReview
+        : undefined;
+    const isResponsibilityActionReview =
+      reviewMarker && typeof reviewMarker === "object" && reviewMarker.version === 1;
+    if (
+      (isResponsibilityActionReview &&
+        status === "approved" &&
+        responsibilityActionReviewDecision !== "allow_once") ||
+      (responsibilityActionReviewDecision && !isResponsibilityActionReview) ||
+      (responsibilityActionReviewDecision === "allow_once" && status !== "approved") ||
+      (responsibilityActionReviewDecision === "deny_once" && status !== "denied")
+    )
+      throw new Error("Responsibility action review requires a one-time decision");
+    if (linkedInputResolution && !isResponsibilityActionReview)
+      throw new Error("Linked restart input requires a responsibility action review");
+    const resolve = () => {
+      const now = Date.now();
+      let serializedInputAnswers: string | null = null;
+      if (linkedInputResolution) {
+        const linked = prepareApprovalInputLinkForResolution(this.db).get(
+          linkedInputResolution.inputId,
+        ) as Any;
+        if (
+          !linked ||
+          linked.approval_id !== id ||
+          linked.task_id !== linkedInputResolution.taskId ||
+          linked.input_task_id !== linkedInputResolution.taskId ||
+          linked.task_id !== expected.taskId ||
+          linked.revision_hash !== linkedInputResolution.revisionHash ||
+          linked.revision_hash !== approvalRequestRevisionHash(expected) ||
+          linked.input_status !== "pending"
+        )
+          return false;
+        let questions: Any;
+        try {
+          questions = JSON.parse(linked.questions);
+        } catch {
+          return false;
+        }
+        const question = Array.isArray(questions) && questions.length === 1 ? questions[0] : null;
+        const options = Array.isArray(question?.options) ? question.options : [];
+        if (
+          question?.id !== "responsibility_action_review_decision" ||
+          options.length !== 2 ||
+          options[0]?.label !== "Deny once" ||
+          options[1]?.label !== "Allow once"
+        )
+          return false;
+
+        if (linkedInputResolution.status === "submitted") {
+          const answers = linkedInputResolution.answers;
+          const answer = answers?.responsibility_action_review_decision;
+          const optionLabel = answer?.optionLabel;
+          if (
+            !answers ||
+            Object.keys(answers).length !== 1 ||
+            !answer ||
+            Object.keys(answer).some((key) => key !== "optionLabel") ||
+            (optionLabel !== "Allow once" && optionLabel !== "Deny once") ||
+            (optionLabel === "Allow once" && responsibilityActionReviewDecision !== "allow_once") ||
+            (optionLabel === "Deny once" && responsibilityActionReviewDecision !== "deny_once")
+          )
+            return false;
+          try {
+            serializedInputAnswers = JSON.stringify(answers);
+          } catch {
+            return false;
+          }
+          if (!serializedInputAnswers || serializedInputAnswers.length > 16000) return false;
+        } else if (
+          linkedInputResolution.status !== "dismissed" ||
+          linkedInputResolution.answers !== undefined ||
+          responsibilityActionReviewDecision !== "deny_once"
+        )
+          return false;
+      }
+      if (channelGuard)
+        new ChannelDecisionStore(this.db).assertResolution(
+          channelGuard,
+          id,
+          status,
+          approvalRequestRevisionHash(expected),
+          now,
+        );
+      const won =
+        preparePendingApprovalResolution(this.db).run(
+          status,
+          now,
+          attribution?.principalId || null,
+          attribution?.role || null,
+          id,
+          expected.taskId,
+          expected.type,
+          expected.description,
+          JSON.stringify(expected.details),
+          expected.requestedAt,
+          status,
+          APPROVAL_REQUEST_TIMEOUT_MS,
+          now,
+        ).changes === 1;
+      if (won && isResponsibilityActionReview && responsibilityActionReviewDecision) {
+        prepareResponsibilityActionDecisionInsert(this.db).run(
+          id,
+          expected.taskId,
+          approvalRequestRevisionHash(expected),
+          responsibilityActionReviewDecision,
+          now,
+        );
+      }
+      if (won && linkedInputResolution) {
+        const inputUpdated = prepareLinkedInputResolution(this.db).run(
+          linkedInputResolution.status,
+          serializedInputAnswers,
+          now,
+          linkedInputResolution.inputId,
+          linkedInputResolution.taskId,
+        ).changes;
+        if (inputUpdated !== 1) throw new Error("Linked restart input changed during resolution");
+        if (linkedInputResolution.taskDisposition) {
+          const disposition = linkedInputResolution.taskDisposition;
+          const tasks = new TaskStore(this.db);
+          const task = tasks.findById(linkedInputResolution.taskId);
+          if (!task || ["completed", "failed", "cancelled"].includes(task.status))
+            throw new Error("Linked review task changed during resolution");
+          if (disposition === "resume")
+            tasks.update(linkedInputResolution.taskId, {
+              status: "executing",
+              completedAt: undefined,
+              terminalStatus: undefined,
+              failureClass: undefined,
+              error: undefined,
+            });
+          else if (disposition === "pause")
+            tasks.update(linkedInputResolution.taskId, {
+              status: "paused",
+              completedAt: undefined,
+              terminalStatus: "needs_user_action",
+              failureClass: undefined,
+            });
+          else
+            tasks.update(linkedInputResolution.taskId, {
+              status: "failed",
+              completedAt: now,
+              terminalStatus: "failed",
+              failureClass: "tool_error",
+              error: linkedInputResolution.failureMessage || "Reviewed write was denied.",
+            });
+        }
+      }
+      if (won && status === "approved" && channelGuard)
+        new ChannelDecisionStore(this.db).recordApprovedResolution(
+          channelGuard,
+          id,
+          approvalRequestRevisionHash(expected),
+        );
+      return won;
+    };
+    // No writer can revoke route authority between its check and this approval transition.
+    return channelGuard || isResponsibilityActionReview || linkedInputResolution
+      ? this.db.transaction(resolve).immediate()
+      : resolve();
   }
 
   findById(id: string): ApprovalRequest | undefined {
@@ -4542,12 +4895,15 @@ export class WorkspacePermissionRuleStore {
 export class InputRequestStore {
   constructor(private db: Database.Database) {}
 
-  create(request: {
-    taskId: string;
-    questions: InputRequest["questions"];
-    requestedAt: number;
-    status?: InputRequest["status"];
-  }): InputRequest {
+  create(
+    request: {
+      taskId: string;
+      questions: InputRequest["questions"];
+      requestedAt: number;
+      status?: InputRequest["status"];
+    },
+    binding?: { approvalId: string; revisionHash: string },
+  ): InputRequest {
     const newRequest: InputRequest = {
       id: uuidv4(),
       taskId: request.taskId,
@@ -4561,30 +4917,88 @@ export class InputRequestStore {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(
-      newRequest.id,
-      newRequest.taskId,
-      JSON.stringify(newRequest.questions),
-      newRequest.status,
-      null,
-      newRequest.requestedAt,
-      null,
-    );
+    const insert = () => {
+      if (binding) {
+        const approval = new ApprovalStore(this.db).findById(binding.approvalId);
+        if (
+          !approval ||
+          approval.taskId !== request.taskId ||
+          approval.status !== "pending" ||
+          approvalRequestRevisionHash(approval) !== binding.revisionHash ||
+          Date.now() >= approval.requestedAt + APPROVAL_REQUEST_TIMEOUT_MS ||
+          !isAssistantApprovalInputRequest(newRequest)
+        )
+          throw new Error("Invalid inline approval binding");
+      }
+      stmt.run(
+        newRequest.id,
+        newRequest.taskId,
+        JSON.stringify(newRequest.questions),
+        newRequest.status,
+        null,
+        newRequest.requestedAt,
+        null,
+      );
 
-    return newRequest;
+      if (binding)
+        prepareApprovalInputLinkInsert(this.db).run(
+          newRequest.id,
+          binding.approvalId,
+          request.taskId,
+          binding.revisionHash,
+        );
+      return newRequest;
+    };
+    return this.db.transaction(insert).immediate();
+  }
+
+  getApprovalBinding(
+    inputId: string,
+  ): { approvalId: string; taskId: string; revisionHash: string } | undefined {
+    const row = prepareApprovalInputLinkLookup(this.db).get(inputId) as Any;
+    if (!row) return undefined;
+    if (
+      typeof row.approval_id !== "string" ||
+      typeof row.task_id !== "string" ||
+      !/^[a-f0-9]{64}$/.test(row.revision_hash)
+    )
+      throw new Error("Invalid persisted inline approval binding");
+    return { approvalId: row.approval_id, taskId: row.task_id, revisionHash: row.revision_hash };
   }
 
   resolve(
     id: string,
     status: Extract<InputRequest["status"], "submitted" | "dismissed">,
     answers?: InputRequest["answers"],
-  ): void {
+  ): boolean {
     const stmt = this.db.prepare(`
       UPDATE input_requests
       SET status = ?, answers = ?, resolved_at = ?
       WHERE id = ? AND status = 'pending'
     `);
-    stmt.run(status, answers ? JSON.stringify(answers) : null, Date.now(), id);
+    return this.db
+      .transaction(() => {
+        const binding = this.getApprovalBinding(id);
+        if (binding && status === "submitted") {
+          const input = this.findById(id),
+            approval = new ApprovalStore(this.db).findById(binding.approvalId);
+          if (
+            !input ||
+            input.taskId !== binding.taskId ||
+            !isAssistantApprovalInputRequest(input) ||
+            !approval ||
+            approval.taskId !== binding.taskId ||
+            approval.status !== "pending" ||
+            approvalRequestRevisionHash(approval) !== binding.revisionHash ||
+            Date.now() >= approval.requestedAt + APPROVAL_REQUEST_TIMEOUT_MS
+          )
+            return false;
+        }
+        return (
+          stmt.run(status, answers ? JSON.stringify(answers) : null, Date.now(), id).changes === 1
+        );
+      })
+      .immediate();
   }
 
   findById(id: string): InputRequest | undefined {
@@ -6938,7 +7352,9 @@ export class MemoryStore {
       const clauses: string[] = [];
       const params: unknown[] = [workspaceId];
       for (const token of likeTokens) {
-        clauses.push(`(content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+        clauses.push(
+          `(content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
+        );
         const like = likeContainsPattern(token);
         params.push(like, like);
       }
@@ -7048,7 +7464,9 @@ export class MemoryStore {
     const clauses: string[] = [];
     const params: unknown[] = [];
     for (const token of likeTokens) {
-      clauses.push(`(m.content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR m.summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+      clauses.push(
+        `(m.content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR m.summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
+      );
       const like = likeContainsPattern(token);
       params.push(like, like);
     }
@@ -7158,7 +7576,9 @@ export class MemoryStore {
     const clauses: string[] = [];
     const params: unknown[] = [workspaceId];
     for (const token of likeTokens) {
-      clauses.push(`(content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`);
+      clauses.push(
+        `(content LIKE ? ${LIKE_ESCAPE_CLAUSE} OR summary LIKE ? ${LIKE_ESCAPE_CLAUSE})`,
+      );
       const like = likeContainsPattern(token);
       params.push(like, like);
     }

@@ -1,0 +1,165 @@
+.bot-responsibility-panel {
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  font-size: 13px;
+}
+.responsibility-heading,
+.responsibility-list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.responsibility-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.responsibility-heading p,
+.responsibility-help,
+.responsibility-list p {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  margin: 6px 0;
+}
+.responsibility-heading button {
+  flex-shrink: 0;
+}
+.responsibility-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+.responsibility-list li {
+  flex-wrap: wrap;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.responsibility-list li > div:first-child {
+  flex: 1 1 100%;
+}
+.responsibility-list strong,
+.responsibility-list p {
+  overflow-wrap: anywhere;
+}
+.responsibility-fields,
+.responsibility-operations {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.responsibility-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+.responsibility-fields h4 {
+  margin: 0;
+}
+.responsibility-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.responsibility-fields input,
+.responsibility-fields textarea,
+.responsibility-fields select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+}
+.responsibility-fields textarea {
+  resize: vertical;
+}
+.responsibility-fields input:focus-visible,
+.responsibility-fields textarea:focus-visible,
+.responsibility-fields select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.responsibility-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.responsibility-operations legend {
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.responsibility-operation {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr auto;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.responsibility-operation small {
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+.responsibility-fields .responsibility-checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.responsibility-checkbox input {
+  width: auto;
+}
+.responsibility-preview {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.responsibility-preview {
+  overflow-wrap: anywhere;
+}
+.responsibility-preview p {
+  margin: 9px 0 0;
+}
+.responsibility-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.responsibility-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .responsibility-heading,
+  .responsibility-list li {
+    flex-direction: column;
+  }
+  .responsibility-grid,
+  .responsibility-operation {
+    grid-template-columns: 1fr;
+  }
+}
+.responsibility-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+.responsibility-state {
+  font-weight: 600;
+}
+.responsibility-state.active {
+  color: var(--color-success, #16a34a);
+}
+.responsibility-state.paused {
+  color: var(--color-warning, #d97706);
+}

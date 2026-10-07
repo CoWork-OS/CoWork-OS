@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { refreshGoogleWorkspaceAccessToken } from "../google-workspace-auth";
+import { isProvenOAuthRefresh } from "../../security/oauth-refresh-proof";
 
 const settingsManagerMock = vi.hoisted(() => ({
   saveSettings: vi.fn(),
@@ -31,13 +32,14 @@ describe("refreshGoogleWorkspaceAccessToken", () => {
       ),
     });
 
+    const originalExpiry = Date.now() - 1000;
     const settings = {
       enabled: true,
       clientId: "client",
       clientSecret: "secret",
       accessToken: "old-access",
       refreshToken: "old-refresh",
-      tokenExpiresAt: Date.now() - 1000,
+      tokenExpiresAt: originalExpiry,
     };
 
     await expect(
@@ -51,6 +53,62 @@ describe("refreshGoogleWorkspaceAccessToken", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(settingsManagerMock.saveSettings).toHaveBeenCalledTimes(1);
     expect(settingsManagerMock.clearCache).toHaveBeenCalledTimes(1);
+    expect(
+      isProvenOAuthRefresh(
+        {
+          type: "bearer",
+          token: "old-access",
+          refreshToken: "old-refresh",
+          clientId: "client",
+          clientSecret: "secret",
+          tokenUrl: "https://oauth2.googleapis.com/token",
+          expiresAt: originalExpiry,
+        },
+        {
+          type: "bearer",
+          token: "new-access",
+          refreshToken: "old-refresh",
+          clientId: "client",
+          clientSecret: "secret",
+          tokenUrl: "https://oauth2.googleapis.com/token",
+          expiresAt: settingsManagerMock.saveSettings.mock.calls[0][0].tokenExpiresAt,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("records trusted refreshes for Google's public OAuth client without a secret", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: vi.fn().mockResolvedValue(JSON.stringify({ access_token: "public-new-access" })),
+    });
+    await refreshGoogleWorkspaceAccessToken({
+      enabled: true,
+      clientId: "public-client",
+      accessToken: "public-old-access",
+      refreshToken: "public-refresh",
+    });
+
+    expect(
+      isProvenOAuthRefresh(
+        {
+          type: "bearer",
+          token: "public-old-access",
+          refreshToken: "public-refresh",
+          clientId: "public-client",
+          tokenUrl: "https://oauth2.googleapis.com/token",
+        },
+        {
+          type: "bearer",
+          token: "public-new-access",
+          refreshToken: "public-refresh",
+          clientId: "public-client",
+          tokenUrl: "https://oauth2.googleapis.com/token",
+        },
+      ),
+    ).toBe(true);
   });
 
   it("clears broken OAuth tokens and asks the user to reconnect on invalid refresh token", async () => {

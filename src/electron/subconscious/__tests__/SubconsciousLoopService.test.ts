@@ -323,9 +323,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
     });
 
     await service.refreshTargets();
-    const codeTargets = (await service
-      .listTargets())
-      .filter((target) => target.target.kind === "code_workspace");
+    const codeTargets = (await service.listTargets()).filter(
+      (target) => target.target.kind === "code_workspace",
+    );
 
     expect(codeTargets).toHaveLength(1);
     expect(codeTargets[0]?.key).toBe("code_workspace:github:CoWork-OS/CoWork-OS");
@@ -623,7 +623,12 @@ describeWithSqlite("SubconsciousLoopService", () => {
         label: "Budgeted workspace",
         workspaceId: workspace.id,
       };
-      const decision = { runId: randomUUID(), winnerSummary: "Do it", recommendation: "Do it" };
+      const decision = {
+        id: randomUUID(),
+        runId: randomUUID(),
+        winnerSummary: "Do it",
+        recommendation: "Do it",
+      };
 
       const first = await internals.dispatchDecision(target, decision, []);
       expect(first).toMatchObject({ kind: "task", taskId: "wi-task-1" });
@@ -635,6 +640,64 @@ describeWithSqlite("SubconsciousLoopService", () => {
       expect(budget.snapshot(workspace.id).bySource).toEqual({ workflow_intelligence: 1 });
       service.stop();
     } finally {
+      setBackgroundDispatchBudget(null);
+    }
+  });
+
+  it("skips a committed WI decision replay without creating another task or suggestion", async () => {
+    const workspace = insertWorkspace("durable-replay");
+    const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
+    const { PersistentDispatchBudget } = await import("../../automation/PersistentDispatchBudget");
+    const { setBackgroundDispatchBudget } = await import("../../agents/BackgroundDispatchBudget");
+    const { TaskRepository } = await import("../../database/repository-facades");
+    let clock = Date.now();
+    const installBudget = () =>
+      setBackgroundDispatchBudget(
+        new PersistentDispatchBudget(db, {
+          maxPerWorkspacePerDay: 10,
+          entityCooldownMs: 0,
+          now: () => clock,
+        }),
+      );
+    installBudget();
+    const service = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
+    try {
+      const createTask = vi.fn(async (input) =>
+        new TaskRepository(db).create({ ...input, status: "pending" }),
+      );
+      await service.start({ createTask } as unknown as import("../../agent/daemon").AgentDaemon);
+      const internals = service as unknown as {
+        resolveDispatchKind: () => string;
+        dispatchSuggestionForReview: (...args: Any[]) => Promise<Any>;
+        dispatchDecision: (target: Any, decision: Any, evidence: Any[]) => Promise<Any>;
+      };
+      internals.resolveDispatchKind = () => "task";
+      const suggestion = vi.spyOn(internals, "dispatchSuggestionForReview");
+      const target = {
+        key: `workspace:${workspace.id}`,
+        kind: "workspace",
+        label: "Durable workspace",
+        workspaceId: workspace.id,
+      };
+      const decision = { id: randomUUID(), runId: randomUUID(), recommendation: "Do the work" };
+      expect(await internals.dispatchDecision(target, decision, [])).toMatchObject({
+        kind: "task",
+        status: "dispatched",
+      });
+      clock += 24 * 60 * 60 * 1000;
+      installBudget();
+      expect(await internals.dispatchDecision(target, { ...decision }, [])).toMatchObject({
+        kind: "task",
+        status: "skipped",
+      });
+      expect(createTask).toHaveBeenCalledTimes(1);
+      expect(suggestion).not.toHaveBeenCalled();
+      expect(
+        await internals.dispatchDecision(target, { ...decision, id: randomUUID() }, []),
+      ).toMatchObject({ kind: "task", status: "dispatched" });
+      expect(createTask).toHaveBeenCalledTimes(2);
+    } finally {
+      await service.stop();
       setBackgroundDispatchBudget(null);
     }
   });
@@ -810,9 +873,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
       durableTargetKinds: ["workspace"],
     });
     await first.refreshTargets();
-    expect((await first.listTargets()).some((target) => target.key === "agent_role:session-role")).toBe(
-      true,
-    );
+    expect(
+      (await first.listTargets()).some((target) => target.key === "agent_role:session-role"),
+    ).toBe(true);
     first.stop();
 
     const second = new SubconsciousLoopService(db, { getGlobalRoot: () => workspace.path });
@@ -959,7 +1022,9 @@ describeWithSqlite("SubconsciousLoopService", () => {
       service.saveSettings({ ...DEFAULT_SUBCONSCIOUS_SETTINGS, enabled: true, autoRun: false });
       await vi.waitFor(() => {
         expect(
-          fs.existsSync(path.join(workspace.path, ".cowork", "subconscious", "brain", "state.json")),
+          fs.existsSync(
+            path.join(workspace.path, ".cowork", "subconscious", "brain", "state.json"),
+          ),
         ).toBe(true);
       });
       service.stop();

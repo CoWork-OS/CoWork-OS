@@ -66,6 +66,7 @@ export interface HeartbeatDispatchDeps {
 }
 
 export interface DispatchExecutionInput {
+  backgroundDispatchTicket?: string;
   agent: AgentRole;
   heartbeatRunId: string;
   workspaceId: string;
@@ -127,9 +128,10 @@ export class HeartbeatDispatchEngine {
           input.agent.id,
           {
             source: "hook",
-            agentConfig: buildCoreAutomationAgentConfig(
-              resolveOperationalAutonomyPolicy(input.agent),
-            ),
+            agentConfig: {
+              ...buildCoreAutomationAgentConfig(resolveOperationalAutonomyPolicy(input.agent)),
+              backgroundDispatchTicket: input.backgroundDispatchTicket,
+            },
             taskOverrides: {
               assignedAgentRoleId: input.agent.id,
               heartbeatRunId: input.heartbeatRunId,

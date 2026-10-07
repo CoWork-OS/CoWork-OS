@@ -186,6 +186,8 @@ export interface RoutineWorkflowStepRecord {
   output?: Record<string, unknown>;
   error?: string;
   approvalId?: string;
+  /** SHA-256 revision of the exact action input shown for this approval. */
+  reviewDigest?: string;
   startedAt?: number;
   finishedAt?: number;
   createdAt: number;
@@ -233,4 +235,6 @@ export interface RoutineWorkflowApprovalRequest {
   runId: string;
   stepId: string;
   approved: boolean;
+  /** Digest of the action revision displayed by the client; absent legacy reviews are refreshed. */
+  reviewDigest?: string;
 }

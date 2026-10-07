@@ -1,3 +1,4 @@
+import Database from "better-sqlite3";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -1423,5 +1424,83 @@ describe("BrowserTools headless browser capabilities", () => {
     expect(descriptionOf("browser_tabs")).toContain("popup");
     expect(descriptionOf("browser_switch_tab")).toContain("browser_tabs");
     expect(descriptionOf("browser_close_tab")).toContain("headless");
+  });
+});
+
+describe("BrowserTools current effect authority", () => {
+  const workspace = {
+    id: "scope",
+    path: "/tmp",
+    permissions: {
+      read: true,
+      write: false,
+      delete: false,
+      shell: false,
+      network: true,
+    },
+  } as Any;
+  it("refuses navigation when asynchronous setup changes workspace authority", async () => {
+    const daemon = { logEvent: vi.fn(), registerArtifact: vi.fn() } as Any;
+    const tools = new BrowserTools(structuredClone(workspace), daemon, "task-1");
+    const navigate = vi.fn();
+    (tools as Any).browserService = { navigate };
+    vi.spyOn(tools as Any, "ensureVisibleNavigationAllowed").mockImplementation(async () => {
+      tools.setWorkspace({
+        ...workspace,
+        permissions: { ...workspace.permissions, network: false },
+      });
+      return "https://example.com";
+    });
+    vi.spyOn(tools as Any, "shouldUseVisibleWorkbenchForNavigation").mockResolvedValue(true);
+    const visibleNavigate = vi.spyOn((tools as Any).browserWorkbenchService, "navigate");
+    await expect(
+      tools.executeTool("browser_navigate", { url: "https://example.com" }),
+    ).rejects.toThrow("Browser authority changed");
+    expect(navigate).not.toHaveBeenCalled();
+    expect(visibleNavigate).not.toHaveBeenCalled();
+  });
+  it("fails closed for a governed task without responsibility storage", async () => {
+    const daemon = {
+      logEvent: vi.fn(),
+      getTaskById: vi.fn().mockResolvedValue({
+        agentConfig: { responsibilityRun: { responsibilityId: "r" } },
+      }),
+    } as Any;
+    const tools = new BrowserTools(workspace, daemon, "task-1");
+    const click = vi.fn().mockResolvedValue({ success: true });
+    (tools as Any).browserService = { click };
+    await expect(tools.executeTool("browser_click", { selector: "button" })).rejects.toThrow(
+      "Responsibility policy storage is unavailable",
+    );
+    expect(click).not.toHaveBeenCalled();
+  });
+  it("stops a batch when a durable stop intent appears after its first effect", async () => {
+    const db = new Database(":memory:");
+    db.exec(
+      "CREATE TABLE tasks(id TEXT PRIMARY KEY,workspace_id TEXT,parent_task_id TEXT,agent_config TEXT);CREATE TABLE bot_task_stop_intents(task_id TEXT PRIMARY KEY,active INTEGER)",
+    );
+    db.prepare("INSERT INTO tasks VALUES(?,?,NULL,NULL)").run("task-1", workspace.id);
+    const daemon = { logEvent: vi.fn(), getDatabase: () => db } as Any;
+    const tools = new BrowserTools(workspace, daemon, "task-1");
+    const click = vi.fn().mockImplementation(async () => {
+      db.prepare("INSERT OR IGNORE INTO bot_task_stop_intents VALUES (?,1)").run("task-1");
+      return { success: true };
+    });
+    (tools as Any).browserService = { click };
+    vi.spyOn(tools as Any, "selectBrowserActionsWithJev").mockResolvedValue(null);
+    vi.spyOn(tools as Any, "shouldPreferVisibleWorkbench").mockReturnValue(false);
+    try {
+      const result = await tools.executeTool("browser_act_batch", {
+        actions: [
+          { type: "click", selector: "#first" },
+          { type: "click", selector: "#second", delay_ms: 1 },
+        ],
+      });
+      expect(result.success).toBe(false);
+      expect(result.results[1].error).toContain("persisted stop request");
+      expect(click).toHaveBeenCalledOnce();
+    } finally {
+      db.close();
+    }
   });
 });

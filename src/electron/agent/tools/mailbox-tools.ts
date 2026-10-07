@@ -150,18 +150,26 @@ export class MailboxTools {
       case "sync":
         data = await this.mailboxService.sync(input.limit);
         break;
-      case "list_threads":
-        data = await this.mailboxService.listThreads({
+      case "list_threads": {
+        const filters = {
           query: input.query,
           category: (input.category as Any) || "all",
           needsReply: input.needs_reply,
           cleanupCandidate: input.cleanup_candidate,
           limit: input.limit,
-        });
+        };
+        data =
+          input.account_id !== undefined
+            ? await this.mailboxService.listThreadsForAccount(input.account_id, filters)
+            : await this.mailboxService.listThreads(filters);
         break;
+      }
       case "get_thread":
         if (!input.thread_id) throw new Error("Missing thread_id for get_thread");
-        data = await this.mailboxService.getThread(input.thread_id);
+        data =
+          input.account_id !== undefined
+            ? await this.mailboxService.getThreadForAccount(input.thread_id, input.account_id)
+            : await this.mailboxService.getThread(input.thread_id);
         break;
       case "summarize_thread":
         if (!input.thread_id) throw new Error("Missing thread_id for summarize_thread");

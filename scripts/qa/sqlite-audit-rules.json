@@ -172,9 +172,10 @@
     {
       "pattern": "^src/electron/agent/daemon\\.ts$",
       "domain": "daemon hot path",
-      "access": "The daemon keeps its synchronous task, workspace, approval and team stores. Its task SQL is WAL reads, which do not wait on writers; the lock stalls came from milestone commits, which run in the worker (slice C2). Its remaining getDatabase calls hand the connection to worker-backed facades.",
+      "access": "The daemon keeps its synchronous task, workspace, approval and team stores. Its task SQL is WAL reads, which do not wait on writers; the lock stalls came from milestone commits, which run in the worker (slice C2). New responsibility and graph checks use worker-backed units. The control-authority cancellation path retains one synchronous target check inside the immediate task-cancel transaction.",
       "plan": "reviewed exception (DB6): stays",
-      "owner": "agent runtime"
+      "owner": "agent runtime",
+      "ratchetExemptKeys": ["getDatabase"]
     },
     {
       "pattern": "^src/electron/sessions/(SessionProgressService|WorkSessionProtocolService|WorkSessionRolloutService)\\.ts$",
@@ -223,7 +224,8 @@
       "domain": "runtime wiring",
       "access": "Connection handles passed to worker-backed facades and statement ports, which key their routing by connection. No SQL runs here.",
       "plan": "stays: handles only; the host backend behind them is the rollback path",
-      "owner": "database platform"
+      "owner": "database platform",
+      "ratchetExemptKeys": ["getDatabase"]
     },
     {
       "pattern": "^src/electron/database/profile-lifecycle\\.ts$",
@@ -388,6 +390,21 @@
       "access": "Work context and session membership stores (contexts, task membership, human members, invites, audit): synchronous SQL run as services-domain units behind the async WorkContextService and SessionMembershipService facades (COWORK_DB_WORKER_SERVICES). Each authorization check shares its unit with the write it guards. The host keeps renderer client bindings and reads the one-row local principal once on its own connection.",
       "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
       "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/(automation/(BotWorkControlStore|dispatch-budget-store|receipt-retention|responsibility-mailbox|responsibility-store|responsibility-task-policy|scheduler-lease-store)|gateway/(ChannelDecisionStore|TeamsConversationReferenceStore)|notifications/(BotNotificationStore|NotificationInboxStore)|database/(approval-drafts|bot-outcome-metrics-store|bot-work-result-store|bot-work-store|transactional-review-sql)|agent/orchestration/graph-task-admission)\\.ts$",
+      "domain": "shared SQL",
+      "access": "Bot responsibility, stop-control, dispatch, receipt-retention, channel-decision, Teams-reference, notification, bot-work, outcome-metrics, review-draft and graph-admission statements execute through storage or services-domain units. The stop-authority check in AgentDaemon remains a single synchronous read inside the immediate task-cancel transaction to preserve atomic cancellation.",
+      "plan": "worker by default (DB7); retain only the reviewed atomic cancellation read on the host while its task-store transaction remains synchronous",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/agent/(executor|tools/(box-tools|browser-tools|file-tools|integration-effect-guard|registry|shell-tools|x-tools))\\.ts$",
+      "domain": "runtime wiring",
+      "access": "Agent and tool boundaries pass the database handle only to async responsibility-policy/review units and repository facades. SQL stays in the worker-backed services/storage modules.",
+      "plan": "stays: handles only; SQL runs through the worker-backed facades",
+      "owner": "agent runtime",
+      "ratchetExemptKeys": ["getDatabase"]
     },
     {
       "pattern": "^src/electron/(agents|council|supervisor|mission-control|managed|automation|triggers|routines|everyday-agent|subconscious|improvement|core|eval|identity|workspaces|first-task|briefing|file-hub|git|youtube|chronicle|voice|activity|sessions|hooks|acp|gateway|tray|utils)/",

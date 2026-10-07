@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { AgentRoleData, AgentCapability } from "../../electron/preload";
-import { TWIN_ICON_KEYS, resolveTwinIcon } from "../utils/twin-icons";
+import { botIconLabel } from "../utils/twin-icons";
 import { BOT_COLOR_PRESETS } from "../utils/bot-colors";
+import { resolveBotMascot } from "../../shared/bot-mascots";
+import { BotMascot } from "./bot-mascot/BotMascot";
+import { BotIconPicker } from "./bot-mascot/BotIconPicker";
 
 // Alias for UI usage
 type AgentRole = AgentRoleData;
@@ -68,6 +71,8 @@ export function AgentRoleEditor({
   const [activeTab, setActiveTab] = useState<"basic" | "capabilities" | "mission" | "advanced">(
     "basic",
   );
+
+  const editedMascot = resolveBotMascot(editedRole.icon);
 
   const handleChange = <K extends keyof AgentRole>(key: K, value: AgentRole[K]) => {
     setEditedRole((prev) => ({ ...prev, [key]: value }));
@@ -152,35 +157,22 @@ export function AgentRoleEditor({
                   <label>Icon</label>
                   <button
                     type="button"
-                    className="icon-button"
-                    style={{ backgroundColor: editedRole.color }}
+                    className="icon-button icon-button-mascot"
                     onClick={() => setShowIconPicker(!showIconPicker)}
+                    aria-label={`Icon: ${botIconLabel(editedRole.icon)}`}
+                    title={botIconLabel(editedRole.icon)}
                   >
-                    {(() => {
-                      const Icon = resolveTwinIcon(editedRole.icon);
-                      return <Icon size={20} strokeWidth={2} />;
-                    })()}
+                    <BotMascot mascot={editedMascot} size={42} />
                   </button>
                   {showIconPicker && (
-                    <div className="picker-dropdown">
-                      <div className="picker-grid">
-                        {TWIN_ICON_KEYS.map((iconKey) => {
-                          const Icon = resolveTwinIcon(iconKey);
-                          return (
-                            <button
-                              key={iconKey}
-                              type="button"
-                              className={`picker-item ${editedRole.icon === iconKey ? "selected" : ""}`}
-                              onClick={() => {
-                                handleChange("icon", iconKey);
-                                setShowIconPicker(false);
-                              }}
-                            >
-                              <Icon size={18} strokeWidth={2} />
-                            </button>
-                          );
-                        })}
-                      </div>
+                    <div className="picker-dropdown icon-picker-dropdown">
+                      <BotIconPicker
+                        value={editedRole.icon}
+                        onChange={(icon) => {
+                          handleChange("icon", icon);
+                          setShowIconPicker(false);
+                        }}
+                      />
                     </div>
                   )}
                 </div>
@@ -549,6 +541,14 @@ export function AgentRoleEditor({
           display: flex;
           align-items: center;
           justify-content: center;
+        }
+
+        .icon-button-mascot {
+          background: var(--color-bg-secondary);
+        }
+
+        .icon-picker-dropdown {
+          width: 320px;
         }
 
         .color-button {

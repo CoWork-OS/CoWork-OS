@@ -25,7 +25,7 @@ import type {
 } from "../../shared/types";
 import { MemorySettings } from "./MemorySettings";
 import { MemoryKnowledgeTab } from "./memory/MemoryKnowledgeTab";
-import { peekMemoryHubFocusWorkspace } from "./memory/memory-hub-focus";
+import { peekBotMemoryContext, peekMemoryHubFocusWorkspace } from "./memory/memory-hub-focus";
 import { MemoryReviewTab } from "./memory/MemoryReviewTab";
 import { MemorySourcesTab } from "./memory/MemorySourcesTab";
 import { MemoryHealthTab } from "./memory/MemoryHealthTab";
@@ -86,6 +86,7 @@ export function MemoryHubSettings(props?: {
   /** Open a task (the source task of a memory folder entry). */
   onOpenTask?: (taskId: string) => void;
 }) {
+  const [botOrigin] = useState(() => peekBotMemoryContext());
   const [features, setFeatures] = useState<MemoryFeaturesSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -286,12 +287,17 @@ export function MemoryHubSettings(props?: {
           .join("\n"),
       );
       setWorkspaces(combined);
+      if (botOrigin && !combined.some((w) => w.id === botOrigin.workspaceId))
+        setActionError(
+          "The workspace opened from this bot is no longer available. Select a workspace to continue.",
+        );
       // "Open in Memory Hub" from a task reply shows the task's workspace.
       const focusWorkspaceId = peekMemoryHubFocusWorkspace();
       if (focusWorkspaceId && combined.some((w) => w.id === focusWorkspaceId)) {
         setHubTab("knowledge");
       }
       setSelectedWorkspaceId((prev) => {
+        if (botOrigin && !combined.some((w) => w.id === botOrigin.workspaceId)) return "";
         if (focusWorkspaceId && combined.some((w) => w.id === focusWorkspaceId)) {
           return focusWorkspaceId;
         }
@@ -1088,6 +1094,13 @@ export function MemoryHubSettings(props?: {
     return (
       <div className="settings-section">
         {hubHeader}
+        {botOrigin?.workspaceId === selectedWorkspaceId && (
+          <p className="settings-form-hint">
+            Workspace context opened from {botOrigin.botName}. This Hub also includes private
+            context visible to you. Workspace records without a recorded bot source are shared
+            workspace context.
+          </p>
+        )}
         {selectedWorkspaceId ? (
           <MemoryKnowledgeTab
             key={`${selectedWorkspaceId}:${knowledgeSourceFilter}`}
@@ -2322,7 +2335,10 @@ export function MemoryHubSettings(props?: {
                     What chief-of-staff mode wants to do next and why.
                   </p>
                   {(autonomyDecisions || []).slice(0, 8).map((decision) => (
-                    <div key={decision.id} className="settings-card settings-item-card memory-hub-top-gap-sm">
+                    <div
+                      key={decision.id}
+                      className="settings-card settings-item-card memory-hub-top-gap-sm"
+                    >
                       <div className="memory-hub-row">
                         <div className="memory-hub-primary-label">{decision.title}</div>
                         <span

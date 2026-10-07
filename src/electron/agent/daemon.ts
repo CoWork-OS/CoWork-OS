@@ -1,3 +1,21 @@
+import { approvalRequestRevisionHash, presentApprovalRevision } from "./approval-revision";
+import type { ChannelDecisionResolutionGuard } from "../gateway/ChannelDecisionStore";
+import { approvalRevisionMatches } from "./approval-revision";
+import type { GraphTaskAdmission } from "./orchestration/graph-task-admission";
+import { BotWorkControlStore } from "../automation/BotWorkControlStore";
+import type { BotWorkCancellationAuthority } from "../automation/BotWorkControlService";
+import {
+  claimResponsibilityActionReview,
+  enforceResponsibilityTaskStart,
+  findReusableResponsibilityActionReview,
+  finishResponsibilityActionReview,
+  getResponsibilityActionReviewContext,
+  responsibilityActionReviewCanWait,
+  type ResponsibilityActionReviewClaimInput,
+  type ResponsibilityActionReviewOutcome,
+  type ResponsibilityActionReviewPayload,
+} from "../automation/responsibility-task-policy";
+import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../shared/approval-draft-presentation";
 import { isCodexComputerUseServer } from "../mcp/codex-computer-use";
 import { MCPSettingsManager } from "../mcp/settings";
 import { CanvasManager } from "../canvas/canvas-manager";
@@ -64,11 +82,7 @@ import { ActivityStore } from "../activity/ActivityRepository";
 import { AgentRoleStore } from "../agents/AgentRoleRepository";
 import { AgentTeamStore } from "../agents/AgentTeamRepository";
 import { AgentTeamMemberStore } from "../agents/AgentTeamMemberRepository";
-import {
-  DEFAULT_BOT_TEAM_NAME,
-  ensureDefaultBotRoles,
-  ensureDefaultBotTeam,
-} from "../agents/bot-team";
+import type { BotTeamPromptContext } from "../agents/bot-team";
 import { MentionStore } from "../agents/MentionRepository";
 import { buildAgentDispatchPrompt } from "../agents/agent-dispatch";
 import { extractMentionedRoles } from "../agents/mentions";
@@ -737,7 +751,7 @@ export class AgentDaemon extends EventEmitter {
   /** One-shot approval decisions carried across executor reconstruction after a restart. */
   private pendingDurableApprovalGrants: Map<
     string,
-    Map<string, { approvalId: string; grantedAt: number }>
+    Map<string, { approvalId: string; grantedAt: number; revisionHash: string }>
   > = new Map();
   /** Per-turn agentConfig overrides used by scheduled/event dispatch. */
   private transientAgentConfigOverrides: Map<string, AgentConfig> = new Map();
@@ -891,6 +905,7 @@ export class AgentDaemon extends EventEmitter {
           workspaceId: params.workspaceId,
           agentConfig: params.agentConfig,
           source: params.source,
+          graphAdmission: params.graphAdmission,
           taskOverrides: params.assignedAgentRoleId
             ? { assignedAgentRoleId: params.assignedAgentRoleId }
             : undefined,
@@ -2362,13 +2377,18 @@ export class AgentDaemon extends EventEmitter {
         ? await findAllPendingApprovals.call(this.approvalRepo)
         : await this.approvalRepo.findPending(1000);
     const promptsDisabled = approvalPromptsDisabled();
+    const retainedActionReviewInputIds = new Set<string>();
     for (const approval of pendingApprovals) {
       const task = this.taskRepo.findById(approval.taskId);
+      const recoverableReviewInput = task
+        ? await this.findRecoverableResponsibilityActionReviewInput(approval)
+        : undefined;
+      if (recoverableReviewInput) retainedActionReviewInputIds.add(recoverableReviewInput.id);
       const explicitHighImpact = isHighImpactApprovalDecision(
         String(approval.type || ""),
         approval.details,
       );
-      if (promptsDisabled || explicitHighImpact) {
+      if ((promptsDisabled || explicitHighImpact) && !recoverableReviewInput) {
         // Approval-free runtimes must not resurrect a stale durable wait after
         // restart. Explicit high-impact requests also fail closed even when
         // the legacy popup queue is temporarily enabled for diagnostics.
@@ -2394,6 +2414,26 @@ export class AgentDaemon extends EventEmitter {
         continue;
       }
       if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) continue;
+
+      if (recoverableReviewInput) {
+        const alreadyRehydrated =
+          task.status === "blocked" && task.terminalStatus === "awaiting_approval";
+        if (!alreadyRehydrated) {
+          this.taskRepo.update(approval.taskId, {
+            status: "blocked",
+            completedAt: undefined,
+            terminalStatus: "awaiting_approval",
+            failureClass: undefined,
+            error: "Awaiting a reviewed write decision. Resolve the linked task input to resume.",
+          });
+        }
+        this.logEvent(approval.taskId, "approval_wait_rehydrated", {
+          approvalId: approval.id,
+          requestId: recoverableReviewInput.id,
+          reason: "reviewed_write_wait_recovered_after_restart",
+        });
+        continue;
+      }
 
       const alreadyRehydrated =
         task.status === "blocked" && task.terminalStatus === "awaiting_approval";
@@ -2454,6 +2494,7 @@ export class AgentDaemon extends EventEmitter {
       // fail closed across a restart just like the legacy approval rows; a
       // fresh task turn can ask again with current authority and context.
       if (isAssistantApprovalInputRequest(request)) {
+        if (retainedActionReviewInputIds.has(request.id)) continue;
         if (typeof (this.inputRequestRepo as Any).resolve === "function") {
           await this.inputRequestRepo.resolve(request.id, "dismissed");
         }
@@ -2557,6 +2598,7 @@ export class AgentDaemon extends EventEmitter {
    * The task will either start immediately or be queued based on concurrency limits
    */
   async startTask(task: Task, images?: ImageAttachment[]): Promise<void> {
+    await enforceResponsibilityTaskStart(this.getDatabase(), task.id, task.workspaceId);
     this.pendingTaskImages ??= new Map();
     if (this.shutdownRequested) {
       throw new Error("Agent daemon is shutting down; task was not admitted.");
@@ -2691,6 +2733,11 @@ export class AgentDaemon extends EventEmitter {
     });
     this.getAdmittedStartOperations().add(admission);
     try {
+      await enforceResponsibilityTaskStart(this.getDatabase(), task.id, task.workspaceId);
+      if (this.shutdownRequested) {
+        this.finishQueueSlot(task.id);
+        return;
+      }
       console.log(`[AgentDaemon] Starting task ${task.id}: ${task.title}`);
 
       if (this.shouldStartAsQueuedContinuation(task)) {
@@ -4189,6 +4236,7 @@ export class AgentDaemon extends EventEmitter {
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
     autoStart?: boolean;
+    graphAdmission?: GraphTaskAdmission;
   }): Promise<Task> {
     const { task, derived } = this.createTaskRecord(params);
     this.logTaskIntentRouted(task.id, derived);
@@ -4380,9 +4428,10 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
+    graphAdmission?: GraphTaskAdmission;
   }) {
     const { input, derived } = this.prepareTaskCreation(params);
-    const task = this.taskRepo.create({ ...input, status: "pending" });
+    const task = this.taskRepo.create({ ...input, status: "pending" }, params.graphAdmission);
     const rootLineageUpdates: Partial<Task> = {
       sessionId: input.sessionId || task.id,
       resumeStrategy: input.resumeStrategy,
@@ -4411,11 +4460,7 @@ export class AgentDaemon extends EventEmitter {
     taskOverrides?: Partial<Task>;
     boardColumn?: Task["boardColumn"];
   }) {
-    const botTeamAgentConfig = this.attachDefaultBotTeam(
-      params.workspaceId,
-      params.taskOverrides?.assignedAgentRoleId,
-      params.agentConfig,
-    );
+    const botTeamAgentConfig = normalizeBotConversationAgentConfig(params.agentConfig);
     const taskAgentConfig = applyDefaultAccessProfile(
       botTeamAgentConfig,
       PermissionSettingsManager.loadSettings(),
@@ -4481,37 +4526,6 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
-  /**
-   * Give persistent bot conversations an explicit team identity. This is
-   * intentionally best-effort so ordinary task creation and lightweight test
-   * daemons continue to work when the team tables are unavailable.
-   */
-  private attachDefaultBotTeam(
-    workspaceId: string,
-    assignedAgentRoleId: string | undefined,
-    agentConfig: AgentConfig | undefined,
-  ): AgentConfig | undefined {
-    const normalizedAgentConfig = normalizeBotConversationAgentConfig(agentConfig);
-    if (
-      !normalizedAgentConfig?.botConversation ||
-      normalizedAgentConfig.botTeamId ||
-      !assignedAgentRoleId ||
-      !workspaceId
-    ) {
-      return normalizedAgentConfig;
-    }
-    try {
-      const seeded = ensureDefaultBotTeam(this.dbManager.getDatabase(), workspaceId);
-      if (!seeded || !seeded.roles.some((role) => role.id === assignedAgentRoleId)) {
-        return normalizedAgentConfig;
-      }
-      return this.prepareBotTeamAgentConfig(normalizedAgentConfig, seeded.team.id);
-    } catch (error) {
-      log.warn("Unable to attach the default bot team to a conversation:", error);
-      return normalizedAgentConfig;
-    }
-  }
-
   /** Keep team channels conversational while allowing task turns to use tools. */
   private prepareBotTeamAgentConfig(agentConfig: AgentConfig, teamId: string): AgentConfig {
     return (
@@ -4569,95 +4583,21 @@ export class AgentDaemon extends EventEmitter {
     if (!team || !team.isActive || !team.persistent || team.workspaceId !== task.workspaceId) {
       return undefined;
     }
+    const role = new AgentRoleStore(this.dbManager.getDatabase()).findById(
+      task.assignedAgentRoleId,
+    );
+    if (!role?.isActive) return undefined;
     const members = new AgentTeamMemberStore(this.dbManager.getDatabase()).listByTeam(team.id);
     const roleIds = new Set([team.leadAgentRoleId, ...members.map((member) => member.agentRoleId)]);
     if (!roleIds.has(task.assignedAgentRoleId)) return undefined;
     return { team, roleIds };
   }
 
+  /** Normalize conversation configuration without creating identities or granting membership. */
   private ensureBotTaskTeam(task: Task): Task {
-    if (task.agentConfig?.botConversation !== true || !task.assignedAgentRoleId) {
-      return task;
-    }
-    try {
-      const normalizedConfig = normalizeBotConversationAgentConfig(task.agentConfig);
-      if (
-        normalizedConfig &&
-        JSON.stringify(normalizedConfig) !== JSON.stringify(task.agentConfig)
-      ) {
-        this.taskRepo.update(task.id, { agentConfig: normalizedConfig });
-        task.agentConfig = normalizedConfig;
-      }
-      const db = this.dbManager.getDatabase();
-      const existingTeamId = task.agentConfig.botTeamId;
-      const existingTeam = existingTeamId
-        ? new AgentTeamStore(db).findById(existingTeamId)
-        : undefined;
-      // A non-empty team id is an authorization claim, not a hint that may be
-      // silently repaired. Legacy conversations without a team id may attach
-      // to the workspace's default team; an explicit stale, inactive, or
-      // non-member team fails closed and remains unavailable until repaired by
-      // an explicit product action. The one migration exception is the
-      // reserved default team crossing between temporary UI workspaces: the
-      // Bots pane can adopt a durable conversation into the current temporary
-      // workspace, so its built-in team must follow that adoption as well.
-      if (existingTeamId && !existingTeam) return task;
-      const canReconcileTemporaryDefaultTeam = Boolean(
-        existingTeam &&
-        existingTeam.name === DEFAULT_BOT_TEAM_NAME &&
-        existingTeam.isActive &&
-        existingTeam.persistent &&
-        existingTeam.workspaceId !== task.workspaceId &&
-        isTempWorkspaceId(existingTeam.workspaceId) &&
-        isTempWorkspaceId(task.workspaceId),
-      );
-      if (
-        existingTeam &&
-        (existingTeam.workspaceId !== task.workspaceId ||
-          !existingTeam.isActive ||
-          !existingTeam.persistent) &&
-        !canReconcileTemporaryDefaultTeam
-      ) {
-        return task;
-      }
-      // The built-in team is repairable: older conversations may point at a
-      // valid default team whose newer roster members were never attached.
-      // Re-seed that one reserved team on every access so named teammates such
-      // as the Chief Community Officer cannot disappear from routing.
-      const seeded =
-        existingTeam?.name === DEFAULT_BOT_TEAM_NAME
-          ? ensureDefaultBotTeam(db, task.workspaceId)
-          : existingTeam
-            ? { team: existingTeam, roles: ensureDefaultBotRoles(db) }
-            : ensureDefaultBotTeam(db, task.workspaceId);
-      if (
-        !seeded ||
-        !seeded.team.isActive ||
-        !seeded.team.persistent ||
-        seeded.team.workspaceId !== task.workspaceId ||
-        !seeded.roles.some((role) => role.id === task.assignedAgentRoleId)
-      ) {
-        return task;
-      }
-      const agentConfig = this.prepareBotTeamAgentConfig(task.agentConfig, seeded.team.id);
-      if (JSON.stringify(agentConfig) !== JSON.stringify(task.agentConfig)) {
-        this.taskRepo.update(task.id, { agentConfig });
-        task.agentConfig = agentConfig;
-        if (canReconcileTemporaryDefaultTeam) {
-          this.logEvent(task.id, "log", {
-            message: "Reconciled the built-in bot team with the current temporary workspace.",
-            previousBotTeamId: existingTeam?.id,
-            previousWorkspaceId: existingTeam?.workspaceId,
-            botTeamId: seeded.team.id,
-            workspaceId: task.workspaceId,
-          });
-        }
-      }
-      return task;
-    } catch (error) {
-      log.warn("Unable to attach the default bot team to an existing conversation:", error);
-      return task;
-    }
+    if (task.agentConfig?.botConversation !== true) return task;
+    const agentConfig = normalizeBotConversationAgentConfig(task.agentConfig);
+    return agentConfig ? { ...task, agentConfig } : task;
   }
 
   /**
@@ -4688,6 +4628,25 @@ export class AgentDaemon extends EventEmitter {
     return context?.team?.id
       ? { authorized: true, botTeamId: context.team.id }
       : { authorized: false };
+  }
+
+  /** Prompt metadata is derived from current authorization, never saved name assumptions. */
+  getBotTeamPromptContext(taskId: string): BotTeamPromptContext | undefined {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) return undefined;
+    const context = this.getVerifiedBotTeamContext(task);
+    if (!context?.team) return undefined;
+    const roleRepo = new AgentRoleStore(this.dbManager.getDatabase());
+    if (!roleRepo.findById(task.assignedAgentRoleId!)?.isActive) return undefined;
+    return {
+      teamName: context.team.name,
+      isLead: context.team.leadAgentRoleId === task.assignedAgentRoleId,
+      peers: Array.from(context.roleIds)
+        .filter((id) => id !== task.assignedAgentRoleId)
+        .map((id) => roleRepo.findById(id))
+        .filter((role): role is AgentRole => Boolean(role?.isActive))
+        .map(({ id, name, displayName }) => ({ id, name, displayName })),
+    };
   }
 
   private getVerifiedBotTeamContext(task: Task): ReturnType<AgentDaemon["getBotTeamContext"]> {
@@ -4915,12 +4874,13 @@ export class AgentDaemon extends EventEmitter {
     if (!existingSender) return [];
     const sender = this.ensureBotTaskTeam(existingSender);
     const diagnostic = this.getBotTeamDiagnostic(sender);
+    if (diagnostic.availability !== "available" || !this.getBotTeamContext(sender)) return [];
     const roleRepo = new AgentRoleStore(this.dbManager.getDatabase());
     const roles = diagnostic.roleIds.size
       ? Array.from(diagnostic.roleIds)
           .map((roleId) => roleRepo.findById(roleId))
-          .filter((role): role is AgentRole => Boolean(role))
-      : ensureDefaultBotRoles(this.dbManager.getDatabase());
+          .filter((role): role is AgentRole => Boolean(role?.isActive))
+      : [];
     return roles.map((role) => {
       const conversation = this.findReusableBotConversation(sender.workspaceId, role.id);
       const isSelf = role.id === sender.assignedAgentRoleId;
@@ -4969,86 +4929,71 @@ export class AgentDaemon extends EventEmitter {
     taskId?: string;
     agentRoleId?: string;
     repairMembership?: boolean;
+    botTeamId?: string;
+    branchToWorkspace?: boolean;
   }): Promise<Task> {
     const workspaceId = String(params.workspaceId || "").trim();
     if (!workspaceId) throw new Error("BOT_WORKSPACE_REQUIRED: workspaceId is required");
     const oldTask = params.taskId ? this.taskRepo.findById(params.taskId) : undefined;
-    if (params.taskId && !oldTask) {
+    if (params.taskId && (!oldTask || oldTask.agentConfig?.botConversation !== true)) {
       throw new Error("BOT_CONVERSATION_UNAVAILABLE: The bot conversation no longer exists.");
     }
     const roleId = params.agentRoleId?.trim() || oldTask?.assignedAgentRoleId?.trim() || "";
+    if (oldTask && roleId !== oldTask.assignedAgentRoleId) {
+      throw new Error("BOT_ROLE_CONFLICT: The source conversation belongs to another bot.");
+    }
     const role = roleId
       ? new AgentRoleStore(this.dbManager.getDatabase()).findById(roleId)
       : undefined;
-    if (!role) {
-      throw new Error("BOT_NOT_FOUND: The bot role is no longer available.");
+    if (!role?.isActive) {
+      throw new Error("BOT_NOT_FOUND: The bot role is no longer active.");
+    }
+    const crossesWorkspace = Boolean(oldTask && oldTask.workspaceId !== workspaceId);
+    if (crossesWorkspace && params.branchToWorkspace !== true) {
+      throw new Error("BOT_WORKSPACE_CONFLICT: Explicitly branch into the selected workspace.");
     }
 
+    // A fresh workspace never inherits the source's team authorization or transcript.
+    const teamId =
+      params.botTeamId?.trim() || (!crossesWorkspace ? oldTask?.agentConfig?.botTeamId : undefined);
     const db = this.dbManager.getDatabase();
-    const teamRepo = new AgentTeamStore(db);
-    const memberRepo = new AgentTeamMemberStore(db);
-    const oldTeamId = oldTask?.agentConfig?.botTeamId;
-    const oldTeam = typeof oldTeamId === "string" ? teamRepo.findById(oldTeamId) : undefined;
-    // A temporary UI workspace may continue a transcript from the reserved
-    // built-in team as a new branch. Never reassign the source task or borrow
-    // its team authorization from another workspace.
-    const canBranchBuiltInTeamToTemporaryWorkspace = Boolean(
-      oldTeam &&
-      oldTeam.name === DEFAULT_BOT_TEAM_NAME &&
-      oldTeam.isActive &&
-      oldTeam.persistent &&
-      oldTeam.workspaceId !== workspaceId &&
-      isTempWorkspaceId(workspaceId),
-    );
+    const team = teamId ? new AgentTeamStore(db).findById(teamId) : undefined;
     if (
-      oldTask &&
-      oldTask.workspaceId !== workspaceId &&
-      !canBranchBuiltInTeamToTemporaryWorkspace
+      teamId &&
+      (!team || !team.isActive || !team.persistent || team.workspaceId !== workspaceId)
     ) {
-      throw new Error(
-        "BOT_WORKSPACE_CONFLICT: The old bot conversation belongs to another workspace.",
-      );
+      throw new Error("BOT_TEAM_UNAVAILABLE: Select an active persistent team in this workspace.");
     }
-    let team =
-      oldTeam && oldTeam.workspaceId === workspaceId && oldTeam.isActive && oldTeam.persistent
-        ? oldTeam
-        : undefined;
-    if (!team) {
-      if (oldTeamId && !params.repairMembership && !canBranchBuiltInTeamToTemporaryWorkspace) {
-        throw new Error(
-          "BOT_TEAM_UNAVAILABLE: The old bot team is unavailable; repair the team before reopening.",
-        );
+    if (team) {
+      const memberRepo = new AgentTeamMemberStore(db);
+      const roleIds = new Set([
+        team.leadAgentRoleId,
+        ...memberRepo.listByTeam(team.id).map((member) => member.agentRoleId),
+      ]);
+      if (!roleIds.has(role.id)) {
+        if (!params.repairMembership) {
+          throw new Error(
+            "BOT_MEMBERSHIP_REVOKED: Explicitly repair membership before reopening this team conversation.",
+          );
+        }
+        memberRepo.add({
+          teamId: team.id,
+          agentRoleId: role.id,
+          memberOrder: 900,
+          isRequired: false,
+        });
       }
-      const seeded = ensureDefaultBotTeam(db, workspaceId);
-      team = seeded?.team;
-    }
-    if (!team) throw new Error("BOT_TEAM_UNAVAILABLE: No persistent bot team is available.");
-
-    const roleIds = new Set([
-      team.leadAgentRoleId,
-      ...memberRepo.listByTeam(team.id).map((member) => member.agentRoleId),
-    ]);
-    if (!roleIds.has(role.id)) {
-      if (!params.repairMembership) {
-        throw new Error(
-          "BOT_MEMBERSHIP_REVOKED: This role is no longer a member of the bot team; repair membership to continue.",
-        );
-      }
-      memberRepo.add({
-        teamId: team.id,
-        agentRoleId: role.id,
-        memberOrder: 900,
-        isRequired: false,
-      });
+    } else if (params.repairMembership) {
+      throw new Error("BOT_TEAM_UNAVAILABLE: Select an existing team to repair membership.");
     }
 
     const reopened = await this.createTask({
       title: role.displayName,
-      prompt: `Resume the ${role.displayName} bot conversation.`,
+      prompt: `Start chatting with ${role.displayName}.`,
       workspaceId,
       agentConfig: {
         botConversation: true,
-        botTeamId: team.id,
+        ...(team ? { botTeamId: team.id } : {}),
         conversationMode: "hybrid",
         executionMode: "execute",
         executionModeSource: "strategy",
@@ -5070,7 +5015,8 @@ export class AgentDaemon extends EventEmitter {
       recoveryAction: params.repairMembership ? "repair_membership" : "reopen",
       reopenedFromTaskId: oldTask?.id,
       botRoleId: role.id,
-      botTeamId: team.id,
+      ...(team ? { botTeamId: team.id } : {}),
+      ...(crossesWorkspace ? { branchedToWorkspace: true } : {}),
     });
     return reopened;
   }
@@ -5151,6 +5097,7 @@ export class AgentDaemon extends EventEmitter {
         const shortHandle = candidate.name.toLowerCase().split(/[^a-z0-9]+/)[0] || "";
         const displayShortHandle = candidate.displayName.toLowerCase().trim().split(/\s+/)[0] || "";
         return (
+          candidate.id.toLowerCase() === normalized ||
           handle === normalized ||
           shortHandle === normalized ||
           candidate.name.toLowerCase() === normalized ||
@@ -5159,16 +5106,28 @@ export class AgentDaemon extends EventEmitter {
           displayShortHandle === normalized
         );
       };
-      // Resolve against the stable role registry first so a known role that
-      // was removed from the team can produce a truthful membership error
-      // instead of looking like a misspelled bot.
-      role = roleRepo.findAll(true).find(matchesHandle);
+      // Prefer the selected team's identities. A duplicate display name in
+      // another team must not shadow a configured peer, and an ambiguous
+      // in-team selector must not route work to an arbitrary first match.
+      const matches = roleRepo.findAll(true).filter(matchesHandle);
+      const teamMatches = matches.filter(
+        (candidate) => context.roleIds.has(candidate.id) && candidate.isActive,
+      );
+      if (teamMatches.length > 1) {
+        return {
+          ok: false,
+          error: "BOT_NOT_FOUND",
+          message: "That bot selector is ambiguous in this team; use the stable bot ID.",
+        };
+      }
+      // A unique known non-member still produces a truthful membership error.
+      role = teamMatches[0] || (matches.length === 1 ? matches[0] : undefined);
       if (role) {
         target = this.findReusableBotConversation(sender.workspaceId, role.id);
       }
     }
 
-    if (!role || role.id === sender.assignedAgentRoleId) {
+    if (!role || !role.isActive || role.id === sender.assignedAgentRoleId) {
       return {
         ok: false,
         error: recipient.taskId ? "FORBIDDEN" : "BOT_NOT_FOUND",
@@ -5297,6 +5256,7 @@ export class AgentDaemon extends EventEmitter {
     priority?: number;
     budgetTokens?: number;
     budgetCost?: number;
+    graphAdmission?: GraphTaskAdmission;
   }): Promise<Task> {
     const parent = this.taskRepo.findById(params.parentTaskId);
     const requestedWorkerRole = resolveWorkerRoleKind(params.workerRole);
@@ -5594,6 +5554,22 @@ export class AgentDaemon extends EventEmitter {
       if (mergedGatewayContext) {
         next.gatewayContext = mergedGatewayContext;
       }
+      const parentOriginChannel = parent?.agentConfig?.originChannel;
+      if (parentOriginChannel) {
+        // Delegation cannot replace the admitted sender with a claimed owner. Legacy
+        // gateway tasks without sender evidence remain third-party in every child.
+        next.originChannel = parentOriginChannel;
+        next.gatewaySenderIsOwner = parent?.agentConfig?.gatewaySenderIsOwner === true;
+        next.allowSharedContextMemory =
+          parent?.agentConfig?.allowSharedContextMemory === true &&
+          params.agentConfig?.allowSharedContextMemory !== false;
+        const parentSenderRef = parent?.agentConfig?.gatewaySenderRef;
+        if (typeof parentSenderRef === "string" && parentSenderRef.trim()) {
+          next.gatewaySenderRef = parentSenderRef.trim().slice(0, 200);
+        } else {
+          delete next.gatewaySenderRef;
+        }
+      }
       if (mergedToolRestrictions) {
         next.toolRestrictions = mergedToolRestrictions;
       }
@@ -5633,21 +5609,24 @@ export class AgentDaemon extends EventEmitter {
 
     mergedAgentConfig = resolveWorkerRoleAgentConfig(workerRole, mergedAgentConfig);
 
-    const task = this.taskRepo.create({
-      title: params.title,
-      prompt: params.prompt,
-      rawPrompt: params.prompt,
-      userPrompt: params.userPrompt,
-      status: "pending",
-      workspaceId: params.workspaceId,
-      parentTaskId: params.parentTaskId,
-      agentType: params.agentType,
-      agentConfig: mergedAgentConfig,
-      workerRole,
-      depth: params.depth ?? 0,
-      budgetTokens: params.budgetTokens,
-      budgetCost: params.budgetCost,
-    });
+    const task = this.taskRepo.create(
+      {
+        title: params.title,
+        prompt: params.prompt,
+        rawPrompt: params.prompt,
+        userPrompt: params.userPrompt,
+        status: "pending",
+        workspaceId: params.workspaceId,
+        parentTaskId: params.parentTaskId,
+        agentType: params.agentType,
+        agentConfig: mergedAgentConfig,
+        workerRole,
+        depth: params.depth ?? 0,
+        budgetTokens: params.budgetTokens,
+        budgetCost: params.budgetCost,
+      },
+      params.graphAdmission,
+    );
     // Apply agent squad metadata before starting so role context is available immediately.
     const memoryFeatures = MemoryFeaturesManager.loadSettings();
     const initialUpdates: Partial<Task> = {
@@ -6241,19 +6220,42 @@ export class AgentDaemon extends EventEmitter {
   /**
    * Cancel a running or queued task
    */
-  async cancelTask(taskId: string): Promise<void> {
+  async cancelTask(
+    taskId: string,
+    options: {
+      cascade?: boolean;
+      waitForIdle?: boolean;
+      strictCleanup?: boolean;
+      scopeWorkspaceId?: string;
+      controlAuthority?: BotWorkCancellationAuthority;
+    } = {},
+  ): Promise<void> {
+    if (options.controlAuthority)
+      await serviceStatements(this.getDatabase()).unit("botWorkControl_assertTarget", [
+        options.controlAuthority.control,
+        taskId,
+        options.controlAuthority.fence,
+      ]);
     const existing = this.taskRepo.findById(taskId);
     if (!existing) {
       throw new Error(`Task ${taskId} not found`);
     }
+    if (options.scopeWorkspaceId && existing.workspaceId !== options.scopeWorkspaceId)
+      throw new Error("Task control workspace changed");
     // Background processes (run_command background: true) outlive a finished
     // turn so follow-ups can use them; cancelling or deleting the task, even a
     // completed one whose executor is gone, stops them.
     await getBackgroundProcessManager()
       .stopAllForTask(taskId, "task_cancelled")
-      .catch((error) =>
-        log.error(`[cancel] Stopping background processes failed for ${taskId}:`, error),
-      );
+      .catch((error) => {
+        if (options.strictCleanup) throw error;
+        log.error(`[cancel] Stopping background processes failed for ${taskId}:`, error);
+      });
+    if (
+      options.scopeWorkspaceId &&
+      this.taskRepo.findById(taskId)?.workspaceId !== options.scopeWorkspaceId
+    )
+      throw new Error("Task control workspace changed");
     // Don't clobber terminal states.
     if (
       existing.status === "completed" ||
@@ -6262,11 +6264,13 @@ export class AgentDaemon extends EventEmitter {
     ) {
       return;
     }
-    const graphCancellation = this.orchestrationGraphEngine
-      .cancelRunForRootTask(taskId)
-      .catch((error) => {
-        log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
-      });
+    const graphCancellation = (
+      options.cascade === false
+        ? Promise.resolve()
+        : this.orchestrationGraphEngine.cancelRunForRootTask(taskId)
+    ).catch((error) => {
+      log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
+    });
     this.pendingContinuationTaskIds.delete(taskId);
     const interruptRequestedAt = Date.now();
     this.logEvent(taskId, "agent_interrupt_requested", {
@@ -6278,7 +6282,11 @@ export class AgentDaemon extends EventEmitter {
 
     // Check if task is queued (not yet started)
     if (this.queueManager.cancelQueuedTask(taskId)) {
-      this.cancelTaskRecord(taskId, "Task removed from queue");
+      if (options.controlAuthority)
+        this.cancelTaskRecord(taskId, "Task removed from queue", {
+          controlAuthority: options.controlAuthority,
+        });
+      else this.cancelTaskRecord(taskId, "Task removed from queue");
       this.logEvent(taskId, "agent_interrupt_confirmed", {
         taskId,
         reason: "cancel",
@@ -6289,7 +6297,7 @@ export class AgentDaemon extends EventEmitter {
       });
       this.pendingTaskImages.delete(taskId);
       // Cascade cancellation to child tasks even for queued parents
-      const queuedChildren = this.taskRepo.findByParent(taskId);
+      const queuedChildren = options.cascade === false ? [] : this.taskRepo.findByParent(taskId);
       for (const child of queuedChildren) {
         if (
           child.status !== "completed" &&
@@ -6307,6 +6315,7 @@ export class AgentDaemon extends EventEmitter {
     const cached = this.activeTasks.get(taskId);
     if (cached) {
       await cached.executor.cancel("user");
+      if (options.waitForIdle) await cached.executor.waitForIdle();
       this.activeTasks.delete(taskId);
     }
 
@@ -6318,6 +6327,8 @@ export class AgentDaemon extends EventEmitter {
         requestedAt: interruptRequestedAt,
       },
       graphCancellation,
+      options.cascade !== false,
+      options.controlAuthority,
     );
   }
 
@@ -6343,6 +6354,8 @@ export class AgentDaemon extends EventEmitter {
     taskId: string,
     input: { message: string; actor: "user" | "external_runtime"; requestedAt: number },
     existingGraphCancellation?: Promise<unknown>,
+    cascade = true,
+    controlAuthority?: BotWorkCancellationAuthority,
   ): Promise<void> {
     const graphCancellation = (
       existingGraphCancellation || this.orchestrationGraphEngine.cancelRunForRootTask(taskId)
@@ -6350,7 +6363,8 @@ export class AgentDaemon extends EventEmitter {
       log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
     });
     // Persist cancellation for running tasks too (important for remote clients querying task status).
-    this.cancelTaskRecord(taskId, input.message);
+    if (controlAuthority) this.cancelTaskRecord(taskId, input.message, { controlAuthority });
+    else this.cancelTaskRecord(taskId, input.message);
     this.logEvent(taskId, "agent_interrupt_confirmed", {
       taskId,
       reason: "cancel",
@@ -6368,7 +6382,7 @@ export class AgentDaemon extends EventEmitter {
     this.pendingTaskImages.delete(taskId);
 
     // Cascade cancellation to all child tasks (agent sub-tasks)
-    const children = this.taskRepo.findByParent(taskId);
+    const children = cascade ? this.taskRepo.findByParent(taskId) : [];
     for (const child of children) {
       if (
         child.status !== "completed" &&
@@ -7409,7 +7423,7 @@ export class AgentDaemon extends EventEmitter {
     if (authorization?.version !== 1 || typeof authorization.key !== "string") return;
 
     const grants = (this as Any).pendingDurableApprovalGrants as
-      | Map<string, Map<string, { approvalId: string; grantedAt: number }>>
+      | Map<string, Map<string, { approvalId: string; grantedAt: number; revisionHash: string }>>
       | undefined;
     if (!grants) return;
     let taskGrants = grants.get(taskId);
@@ -7420,15 +7434,16 @@ export class AgentDaemon extends EventEmitter {
     taskGrants.set(authorization.key, {
       approvalId: approval.id,
       grantedAt: Date.now(),
+      revisionHash: approvalRequestRevisionHash(approval),
     });
   }
 
-  private consumeDurableApprovalGrant(
+  private async consumeDurableApprovalGrant(
     taskId: string,
     trackingKey: string,
-  ): { approvalId: string; grantedAt: number } | undefined {
+  ): Promise<{ approvalId: string; grantedAt: number; revisionHash: string } | undefined> {
     const grants = (this as Any).pendingDurableApprovalGrants as
-      | Map<string, Map<string, { approvalId: string; grantedAt: number }>>
+      | Map<string, Map<string, { approvalId: string; grantedAt: number; revisionHash: string }>>
       | undefined;
     if (!grants) return undefined;
     const taskGrants = grants.get(taskId);
@@ -7437,7 +7452,24 @@ export class AgentDaemon extends EventEmitter {
     if (!grant) return undefined;
     taskGrants.delete(trackingKey);
     if (taskGrants.size === 0) grants.delete(taskId);
-    return Date.now() - grant.grantedAt <= 5 * 60 * 1000 ? grant : undefined;
+    if (Date.now() - grant.grantedAt > APPROVAL_REQUEST_TIMEOUT_MS || !grant.revisionHash)
+      return undefined;
+    try {
+      const approval = await this.approvalRepo.findById(grant.approvalId);
+      if (
+        !approval ||
+        approval.taskId !== taskId ||
+        approval.status !== "approved" ||
+        approvalRequestRevisionHash(approval) !== grant.revisionHash ||
+        approval.details?.authorization?.key !== trackingKey ||
+        !(await this.isApprovalAuthorityCurrent(approval)) ||
+        !(await this.approvalRepo.approvedRevisionCurrent(approval.id, grant.revisionHash))
+      )
+        return undefined;
+      return grant;
+    } catch {
+      return undefined;
+    }
   }
 
   private buildRecurringApprovalInput(
@@ -7505,8 +7537,8 @@ export class AgentDaemon extends EventEmitter {
     );
   }
 
-  /** Snapshot authority for an explicit, in-memory task consent scope. */
-  async getTaskConsentAuthority(taskId: string, details: Any): Promise<string | null> {
+  /** Current execution authority for a delayed adapter call; never grants permission. */
+  async getToolEffectAuthority(taskId: string, details: Any): Promise<string | null> {
     const task = this.taskRepo.findById(taskId);
     if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return null;
     const permission = await this.evaluatePermissionRequest(
@@ -7515,6 +7547,30 @@ export class AgentDaemon extends EventEmitter {
       details,
       false,
     );
+    const currentTask = this.taskRepo.findById(taskId);
+    if (
+      !currentTask ||
+      isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask)) ||
+      permission.evaluation.decision === "deny"
+    )
+      return null;
+    const profile = this.getEffectiveAccessProfile(
+      taskId,
+      this.getTaskWithTransientAgentConfig(currentTask),
+      permission.workspace,
+    );
+    return authorizationFingerprint({ authority: permission.authorizationKey, profile });
+  }
+
+  /** Snapshot authority for an explicit, in-memory task consent scope. */
+  async getTaskConsentAuthority(
+    taskId: string,
+    details: Any,
+    approvalType: "external_service" | "network_access" = "external_service",
+  ): Promise<string | null> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return null;
+    const permission = await this.evaluatePermissionRequest(taskId, approvalType, details, false);
     const profile = this.getEffectiveAccessProfile(
       taskId,
       this.getTaskWithTransientAgentConfig(task),
@@ -7591,6 +7647,7 @@ export class AgentDaemon extends EventEmitter {
   async requestUserInput(
     taskId: string,
     args: RequestUserInputArgs,
+    approvalBinding?: { approvalId: string; revisionHash: string },
   ): Promise<InputRequestResponse> {
     const existingPending = await this.inputRequestRepo.findPendingByTaskId(taskId);
     if (existingPending.length > 0) {
@@ -7599,12 +7656,15 @@ export class AgentDaemon extends EventEmitter {
       );
     }
 
-    const request = await this.inputRequestRepo.create({
-      taskId,
-      questions: args.questions,
-      requestedAt: Date.now(),
-      status: "pending",
-    });
+    const request = await this.inputRequestRepo.create(
+      {
+        taskId,
+        questions: args.questions,
+        requestedAt: Date.now(),
+        status: "pending",
+      },
+      ...(approvalBinding ? [approvalBinding] : []),
+    );
 
     this.updateTask(taskId, {
       status: "paused",
@@ -7645,6 +7705,8 @@ export class AgentDaemon extends EventEmitter {
     } | null,
     trackingKey = type,
     signal?: AbortSignal,
+    validateDecision?: (approved: boolean) => Promise<boolean>,
+    approvalBinding?: { approvalId: string; revisionHash: string },
   ): Promise<boolean> {
     if (signal?.aborted) {
       throw new Error("Approval request cancelled because tool execution ended");
@@ -7689,6 +7751,7 @@ export class AgentDaemon extends EventEmitter {
         this,
         taskId,
         buildAssistantApprovalRequest(type, description, details),
+        ...(approvalBinding ? [approvalBinding] : []),
       );
       // An unanswered card must not block the tool forever. It times out like
       // a queued approval and resolves as a denial.
@@ -7716,8 +7779,19 @@ export class AgentDaemon extends EventEmitter {
         throw new Error("Approval request cancelled because tool execution ended");
       }
 
-      const approved =
-        response.status === "submitted" && parseAssistantApprovalAnswer(response.answers);
+      const isResponsibilityActionReview =
+        type === "workspace_write" &&
+        details &&
+        typeof details === "object" &&
+        typeof details.responsibilityActionReview === "object" &&
+        details.responsibilityActionReview?.version === 1;
+      let approved =
+        response.status === "submitted" &&
+        parseAssistantApprovalAnswer(response.answers, isResponsibilityActionReview);
+      if (validateDecision) approved = await validateDecision(approved);
+      if (signal?.aborted) {
+        throw new Error("Approval request cancelled because tool execution ended");
+      }
       if (approved) {
         runtime?.recordPermissionSuccess?.(trackingKey);
         this.logEvent(taskId, "approval_granted", {
@@ -7763,7 +7837,20 @@ export class AgentDaemon extends EventEmitter {
         return false;
       }
       if (signal?.aborted) {
-        await dismissPendingCard.call(this, taskId, error, "tool_execution_cancelled");
+        const preserveReviewedWriteForRestart =
+          this.shutdownRequested &&
+          type === "workspace_write" &&
+          details?.responsibilityActionReview?.version === 1 &&
+          Boolean(approvalBinding);
+        if (preserveReviewedWriteForRestart) {
+          this.logEvent(taskId, "approval_wait_suspended", {
+            approvalId: approvalBinding?.approvalId,
+            requestId: (await this.inputRequestRepo.findPendingByTaskId(taskId))[0]?.id,
+            reason: "daemon_restart",
+          });
+        } else {
+          await dismissPendingCard.call(this, taskId, error, "tool_execution_cancelled");
+        }
         throw error;
       }
       const errorMessage = String((error as Any)?.message || error || "");
@@ -7806,6 +7893,509 @@ export class AgentDaemon extends EventEmitter {
     this.logEvent(taskId, "input_request_dismissed", { requestId: pending.id, reason });
   }
 
+  private isValidResponsibilityActionReviewDetails(details: Any): boolean {
+    const review = details?.responsibilityActionReview as
+      | ResponsibilityActionReviewPayload
+      | undefined;
+    const params = details?.params as Record<string, unknown> | undefined;
+    if (
+      details?.tool !== "write_file" ||
+      !review ||
+      review.version !== 1 ||
+      review.operation?.connectorId !== "workspace_files" ||
+      review.operation?.method !== "write_file" ||
+      typeof review.canonicalPath !== "string" ||
+      review.canonicalPath.length < 1 ||
+      review.canonicalPath.length > 512 ||
+      path.posix.isAbsolute(review.canonicalPath) ||
+      review.canonicalPath.includes("\\") ||
+      path.posix.normalize(review.canonicalPath) !== review.canonicalPath ||
+      review.canonicalPath.split("/").includes("..") ||
+      params?.path !== review.canonicalPath ||
+      !Array.isArray(details.reviewFiles) ||
+      details.reviewFiles.length !== 1 ||
+      details.reviewFiles[0] !== review.canonicalPath ||
+      typeof review.content !== "string" ||
+      !Number.isSafeInteger(review.contentBytes) ||
+      review.contentBytes < 0 ||
+      review.contentBytes > 256000 ||
+      typeof review.contentSha256 !== "string" ||
+      !/^[0-9a-f]{64}$/.test(review.contentSha256)
+    )
+      return false;
+    const bytes = Buffer.from(review.content, "utf8");
+    const run = review.responsibilityRun;
+    return (
+      bytes.length === review.contentBytes &&
+      bytes.toString("utf8") === review.content &&
+      crypto.createHash("sha256").update(bytes).digest("hex") === review.contentSha256 &&
+      !!run &&
+      typeof run.id === "string" &&
+      run.id.length > 0 &&
+      Number.isSafeInteger(run.revision) &&
+      run.revision > 0 &&
+      Number.isSafeInteger(run.controlVersion) &&
+      run.controlVersion >= 0 &&
+      typeof run.workspaceId === "string" &&
+      run.workspaceId.length > 0 &&
+      typeof run.agentRoleId === "string" &&
+      run.agentRoleId.length > 0
+    );
+  }
+
+  private static isResponsibilityActionReviewApproval(
+    approval: ApprovalRequest | undefined,
+  ): boolean {
+    const review = approval?.details?.responsibilityActionReview;
+    return (
+      approval?.type === "workspace_write" &&
+      !!review &&
+      typeof review === "object" &&
+      (review as Record<string, unknown>).version === 1
+    );
+  }
+
+  /** Creates the exact one-time review request used only by native workspace writes. */
+  async requestResponsibilityActionApproval(
+    taskId: string,
+    review: ResponsibilityActionReviewPayload,
+    signal?: AbortSignal,
+  ): Promise<{
+    approvalId: string;
+    requestRevisionHash: string;
+    baseRevision: { status: "present" | "missing"; path: string; sha256?: string; size?: number };
+  } | null> {
+    if (
+      !this.isValidResponsibilityActionReviewDetails({
+        tool: "write_file",
+        params: { path: review.canonicalPath },
+        reviewFiles: [review.canonicalPath],
+        responsibilityActionReview: review,
+      })
+    )
+      return null;
+    const captured: {
+      value?: {
+        approvalId: string;
+        requestRevisionHash: string;
+        baseRevision: {
+          status: "present" | "missing";
+          path: string;
+          sha256?: string;
+          size?: number;
+        };
+      };
+    } = {};
+    const workspace = this.getEffectiveWorkspaceForTask(taskId);
+    if (!workspace || workspace.id !== review.responsibilityRun.workspaceId) return null;
+    try {
+      const reusable = await findReusableResponsibilityActionReview(
+        this.getDatabase(),
+        taskId,
+        workspace.id,
+        workspace.path,
+        review,
+      );
+      if (reusable) {
+        const existing = await this.approvalRepo.findById(reusable.approvalId);
+        if (
+          existing &&
+          AgentDaemon.isResponsibilityActionReviewApproval(existing) &&
+          existing.taskId === taskId &&
+          existing.status === "approved" &&
+          approvalRevisionMatches(existing, reusable.requestRevisionHash) &&
+          (await this.approvalRepo.approvedRevisionCurrent(
+            existing.id,
+            reusable.requestRevisionHash,
+          )) &&
+          (await this.isApprovalAuthorityCurrent(existing))
+        )
+          return reusable;
+      }
+    } catch (error) {
+      log.warn("Could not recover an unclaimed reviewed write approval:", error);
+    }
+    const approved = await this.requestApproval(
+      taskId,
+      "workspace_write",
+      `Review proposed write to ${review.canonicalPath}`,
+      {
+        tool: "write_file",
+        params: { path: review.canonicalPath },
+        path: review.canonicalPath,
+        reviewFiles: [review.canonicalPath],
+        responsibilityActionReview: review,
+      },
+      {
+        allowAutoApprove: false,
+        requireExplicitApproval: true,
+        responsibilityActionReview: true,
+        signal,
+        onApprovalCreated: (approval) => {
+          try {
+            const draft = approval.details?.draftRevision as Record<string, unknown> | undefined;
+            const entries = draft?.entries as Array<Record<string, unknown>> | undefined;
+            const entry = entries?.[0];
+            if (
+              draft?.version !== 1 ||
+              draft.state !== "bound" ||
+              draft.workspaceId !== review.responsibilityRun.workspaceId ||
+              !Array.isArray(entries) ||
+              entries.length !== 1 ||
+              entry?.reference !== review.canonicalPath ||
+              (entry.status !== "present" && entry.status !== "missing") ||
+              typeof entry.path !== "string" ||
+              path.resolve(entry.path) !==
+                path.resolve(
+                  fs.realpathSync.native(this.getEffectiveWorkspaceForTask(taskId)?.path || ""),
+                  review.canonicalPath,
+                ) ||
+              (entry.status === "present" &&
+                (!Number.isSafeInteger(entry.size) ||
+                  (entry.size as number) < 0 ||
+                  (entry.size as number) > 4 * 1024 * 1024 ||
+                  typeof entry.sha256 !== "string" ||
+                  !/^[0-9a-f]{64}$/.test(entry.sha256)))
+            )
+              return false;
+            captured.value = {
+              approvalId: approval.id,
+              requestRevisionHash: approvalRequestRevisionHash(approval),
+              baseRevision: {
+                status: entry.status,
+                path: entry.path,
+                ...(entry.status === "present"
+                  ? { sha256: entry.sha256 as string, size: entry.size as number }
+                  : {}),
+              },
+            };
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      },
+    );
+    const approvedReview = captured.value;
+    if (!approved || !approvedReview || signal?.aborted) return null;
+    const approval = await this.approvalRepo.findById(approvedReview.approvalId);
+    if (
+      !approval ||
+      !AgentDaemon.isResponsibilityActionReviewApproval(approval) ||
+      approval.status !== "approved" ||
+      !approvalRevisionMatches(approval, approvedReview.requestRevisionHash) ||
+      !(await this.approvalRepo.approvedRevisionCurrent(
+        approval.id,
+        approvedReview.requestRevisionHash,
+      )) ||
+      !(await this.isApprovalAuthorityCurrent(approval))
+    )
+      return null;
+    return approvedReview;
+  }
+
+  /** Current host authority check used only while presenting a linked write review. */
+  async isResponsibilityActionReviewAuthorityCurrent(approval: ApprovalRequest): Promise<boolean> {
+    if (
+      !AgentDaemon.isResponsibilityActionReviewApproval(approval) ||
+      approval.status !== "pending" ||
+      !this.isValidResponsibilityActionReviewDetails(approval.details)
+    )
+      return false;
+    const review = approval.details?.responsibilityActionReview as
+      | ResponsibilityActionReviewPayload
+      | undefined;
+    const workspace = this.getEffectiveWorkspaceForTask(approval.taskId);
+    if (
+      !review ||
+      !workspace ||
+      workspace.id !== review.responsibilityRun.workspaceId ||
+      workspace.permissions.read !== true ||
+      workspace.permissions.write !== true
+    )
+      return false;
+    try {
+      const currentRun = await getResponsibilityActionReviewContext(
+        this.getDatabase(),
+        approval.taskId,
+        workspace.id,
+        workspace.path,
+        review.canonicalPath,
+      );
+      if (
+        !currentRun ||
+        currentRun.id !== review.responsibilityRun.id ||
+        currentRun.revision !== review.responsibilityRun.revision ||
+        currentRun.controlVersion !== review.responsibilityRun.controlVersion ||
+        currentRun.workspaceId !== review.responsibilityRun.workspaceId ||
+        currentRun.agentRoleId !== review.responsibilityRun.agentRoleId
+      )
+        return false;
+      return await this.isApprovalAuthorityCurrent(approval);
+    } catch {
+      return false;
+    }
+  }
+
+  private isCanonicalResponsibilityActionReviewInput(request: InputRequest): boolean {
+    if (!Array.isArray(request.questions) || request.questions.length !== 1) return false;
+    const question = request.questions[0];
+    const options = question?.options;
+    return Boolean(
+      question?.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID &&
+      Array.isArray(options) &&
+      options.length === 2 &&
+      options[0]?.label === "Deny once" &&
+      options[1]?.label === "Allow once",
+    );
+  }
+
+  private responsibilityActionReviewInputDecision(
+    request: InputRequest,
+    answers: InputRequestResponse["answers"],
+  ): "allow_once" | "deny_once" | null {
+    if (!this.isCanonicalResponsibilityActionReviewInput(request) || !answers) return null;
+    if (Object.keys(answers).length !== 1) return null;
+    const answer = answers[RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID];
+    if (!answer || Object.keys(answer).some((key) => key !== "optionLabel")) return null;
+    if (answer.optionLabel === "Allow once") return "allow_once";
+    if (answer.optionLabel === "Deny once") return "deny_once";
+    return null;
+  }
+
+  private async findRecoverableResponsibilityActionReviewInput(
+    approval: ApprovalRequest,
+  ): Promise<InputRequest | undefined> {
+    if (
+      !AgentDaemon.isResponsibilityActionReviewApproval(approval) ||
+      approval.status !== "pending" ||
+      !this.isValidResponsibilityActionReviewDetails(approval.details)
+    )
+      return undefined;
+    const revisionHash = approvalRequestRevisionHash(approval);
+    if (
+      !(await responsibilityActionReviewCanWait(
+        this.getDatabase(),
+        approval.id,
+        approval.taskId,
+        revisionHash,
+      ))
+    )
+      return undefined;
+    const pending = await this.inputRequestRepo.findPendingByTaskId(approval.taskId);
+    const linked: InputRequest[] = [];
+    for (const request of pending) {
+      if (!this.isCanonicalResponsibilityActionReviewInput(request)) continue;
+      const binding = await this.inputRequestRepo.getApprovalBinding(request.id);
+      if (
+        binding?.approvalId === approval.id &&
+        binding.taskId === approval.taskId &&
+        binding.revisionHash === revisionHash
+      )
+        linked.push(request);
+    }
+    if (linked.length !== 1) return undefined;
+    try {
+      if (!(await this.isResponsibilityActionReviewAuthorityCurrent(approval))) return undefined;
+      await this.approvalRepo.draftPreviews(approval.id, revisionHash);
+      return linked[0];
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Resolves only a host-linked, canonical write review after its in-memory waiter was lost. */
+  private async resolveRestartedResponsibilityActionReviewInput(
+    request: InputRequest,
+    binding: { approvalId: string; taskId: string; revisionHash: string },
+    response: InputRequestResponse,
+  ): Promise<"handled" | "duplicate" | null> {
+    if (
+      binding.taskId !== request.taskId ||
+      !this.isCanonicalResponsibilityActionReviewInput(request)
+    )
+      return null;
+    const approval = await this.approvalRepo.findById(binding.approvalId);
+    if (
+      !approval ||
+      !AgentDaemon.isResponsibilityActionReviewApproval(approval) ||
+      approval.taskId !== request.taskId ||
+      approval.status !== "pending" ||
+      approvalRequestRevisionHash(approval) !== binding.revisionHash ||
+      !(await responsibilityActionReviewCanWait(
+        this.getDatabase(),
+        approval.id,
+        approval.taskId,
+        binding.revisionHash,
+      ))
+    )
+      return null;
+
+    const chosen =
+      response.status === "submitted"
+        ? this.responsibilityActionReviewInputDecision(request, response.answers)
+        : null;
+    const malformedDecision = response.status === "submitted" && !chosen;
+
+    let allow = chosen === "allow_once";
+    if (allow) {
+      try {
+        allow =
+          this.isValidResponsibilityActionReviewDetails(approval.details) &&
+          (await this.isResponsibilityActionReviewAuthorityCurrent(approval));
+        if (allow) await this.approvalRepo.draftPreviews(approval.id, binding.revisionHash);
+      } catch {
+        allow = false;
+      }
+    }
+
+    const explicitDenial = chosen === "deny_once" || response.status === "dismissed";
+    const resolvedInputStatus: "submitted" | "dismissed" =
+      allow || (explicitDenial && response.status === "submitted") ? "submitted" : "dismissed";
+    const decision = allow ? "allow_once" : "deny_once";
+    const won = await this.approvalRepo.resolvePending(
+      approval.id,
+      allow ? "approved" : "denied",
+      approval,
+      undefined,
+      undefined,
+      decision,
+      {
+        inputId: request.id,
+        taskId: request.taskId,
+        revisionHash: binding.revisionHash,
+        status: resolvedInputStatus,
+        ...(resolvedInputStatus === "submitted" ? { answers: response.answers } : {}),
+        taskDisposition:
+          allow || (explicitDenial && response.status === "submitted")
+            ? "resume"
+            : chosen === "allow_once" || malformedDecision
+              ? "fail"
+              : "pause",
+        ...(malformedDecision || (chosen === "allow_once" && !allow)
+          ? {
+              failureMessage: malformedDecision
+                ? "Reviewed write was denied because the decision input was invalid."
+                : "Reviewed write was denied because its authority or base revision changed.",
+            }
+          : {}),
+      },
+    );
+    if (!won) return "duplicate";
+
+    const currentTask = this.taskRepo.findById(request.taskId);
+    if (allow || (explicitDenial && response.status === "submitted")) {
+      if (currentTask && !isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask))) {
+        this.updateTask(request.taskId, {
+          status: "executing",
+          terminalStatus: undefined,
+          failureClass: undefined,
+        });
+      }
+      this.logEvent(request.taskId, allow ? "approval_granted" : "approval_denied", {
+        approvalId: approval.id,
+        requestId: request.id,
+        assistantInput: true,
+        approvalType: approval.type,
+        reason: allow ? "review_decision_recovered_after_restart" : "review_denied_after_restart",
+        recoveredAfterRestart: true,
+      });
+      const compactAnswers = JSON.stringify(response.answers || {}, null, 2);
+      await this.resumeTaskAfterDurableWait(
+        request.taskId,
+        `Structured input response for request ${request.id}:\n${compactAnswers}`,
+      );
+      return "handled";
+    }
+
+    if (currentTask && !isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask))) {
+      if (malformedDecision || (chosen === "allow_once" && !allow)) {
+        this.taskRepo.update(request.taskId, {
+          status: "failed",
+          completedAt: Date.now(),
+          terminalStatus: "failed",
+          failureClass: "tool_error",
+          error: "Reviewed write was denied because its authority or base revision changed.",
+        });
+      } else {
+        this.updateTask(request.taskId, {
+          status: "paused",
+          terminalStatus: "needs_user_action",
+          failureClass: undefined,
+        });
+      }
+    }
+    this.logEvent(request.taskId, "approval_denied", {
+      approvalId: approval.id,
+      requestId: request.id,
+      assistantInput: true,
+      approvalType: approval.type,
+      reason: malformedDecision
+        ? "review_input_invalid_after_restart"
+        : chosen === "allow_once"
+          ? "review_authority_changed_after_restart"
+          : "review_dismissed_after_restart",
+      recoveredAfterRestart: true,
+    });
+    return "handled";
+  }
+
+  async validateResponsibilityActionApproval(
+    input: ResponsibilityActionReviewClaimInput,
+    consume: boolean,
+  ): Promise<boolean> {
+    const approval = await this.approvalRepo.findById(input.approvalId);
+    if (
+      !approval ||
+      !AgentDaemon.isResponsibilityActionReviewApproval(approval) ||
+      approval.taskId !== input.taskId ||
+      approval.status !== "approved" ||
+      !approvalRevisionMatches(approval, input.requestRevisionHash) ||
+      !(await this.approvalRepo.approvedRevisionCurrent(approval.id, input.requestRevisionHash)) ||
+      !(await this.isApprovalAuthorityCurrent(approval))
+    )
+      return false;
+    if (!consume) return true;
+    try {
+      const claimed = await claimResponsibilityActionReview(this.getDatabase(), input);
+      if (!claimed) return false;
+      const afterClaim = await this.approvalRepo.findById(input.approvalId);
+      return Boolean(
+        afterClaim &&
+        AgentDaemon.isResponsibilityActionReviewApproval(afterClaim) &&
+        afterClaim.taskId === input.taskId &&
+        afterClaim.status === "approved" &&
+        approvalRevisionMatches(afterClaim, input.requestRevisionHash) &&
+        (await this.approvalRepo.approvedRevisionCurrent(
+          afterClaim.id,
+          input.requestRevisionHash,
+        )) &&
+        (await this.isApprovalAuthorityCurrent(afterClaim)),
+      );
+    } catch (error) {
+      log.warn("Failed to claim a reviewed responsibility write:", error);
+      return false;
+    }
+  }
+
+  async finishResponsibilityActionApproval(
+    input: ResponsibilityActionReviewClaimInput,
+    outcome: ResponsibilityActionReviewOutcome,
+  ): Promise<boolean> {
+    try {
+      return await finishResponsibilityActionReview(
+        this.getDatabase(),
+        input.approvalId,
+        input.requestRevisionHash,
+        input.executionId,
+        outcome,
+      );
+    } catch (error) {
+      log.warn("Failed to finalize a reviewed responsibility write:", error);
+      return false;
+    }
+  }
+
   async requestApproval(
     taskId: string,
     type: string,
@@ -7815,16 +8405,34 @@ export class AgentDaemon extends EventEmitter {
       allowAutoApprove?: boolean;
       signal?: AbortSignal;
       requireExplicitApproval?: boolean;
+      /** Internal native workspace write review flow; never populated from a tool argument. */
+      responsibilityActionReview?: boolean;
+      onApprovalCreated?: (approval: ApprovalRequest) => boolean;
     },
   ): Promise<boolean> {
     if (opts?.signal?.aborted) {
       throw new Error("Approval request cancelled because tool execution ended");
     }
-    const allowAutoApprove = opts?.allowAutoApprove !== false;
+    const isResponsibilityActionReview = opts?.responsibilityActionReview === true;
+    if (
+      isResponsibilityActionReview &&
+      (type !== "workspace_write" || !this.isValidResponsibilityActionReviewDetails(details))
+    )
+      return false;
+    const allowAutoApprove = isResponsibilityActionReview
+      ? false
+      : opts?.allowAutoApprove !== false;
     const enrichedDetails =
       details && typeof details === "object" && !Array.isArray(details)
         ? { ...details }
         : { value: details };
+    const acceptCreatedApproval = (approval: ApprovalRequest): boolean => {
+      try {
+        return opts?.onApprovalCreated?.(approval) !== false;
+      } catch {
+        return false;
+      }
+    };
     const permission = await this.evaluatePermissionRequest(
       taskId,
       type as ApprovalType,
@@ -7893,17 +8501,22 @@ export class AgentDaemon extends EventEmitter {
       | ((
           taskId: string,
           trackingKey: string,
-        ) => { approvalId: string; grantedAt: number } | undefined)
+        ) => Promise<{ approvalId: string; grantedAt: number; revisionHash: string } | undefined>)
       | undefined;
     const durableApprovalGrant =
-      permission.evaluation.decision === "ask" && consumeDurableApprovalGrant
-        ? consumeDurableApprovalGrant.call(
+      !isResponsibilityActionReview &&
+      permission.evaluation.decision === "ask" &&
+      consumeDurableApprovalGrant
+        ? await consumeDurableApprovalGrant.call(
             this,
             taskId,
             permission.authorizationKey || permission.trackingKey,
           )
         : undefined;
+    if (opts?.signal?.aborted) return false;
     if (durableApprovalGrant) {
+      const grantTask = this.taskRepo.findById(taskId);
+      if (!grantTask || isTerminalTaskStatus(deriveCanonicalTaskStatus(grantTask))) return false;
       permission.runtime?.recordPermissionSuccess(permission.trackingKey);
       if (type === "external_file_access") {
         this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
@@ -7919,7 +8532,11 @@ export class AgentDaemon extends EventEmitter {
     const recurringApprovalService = (this as Any).options?.recurringApprovalService as
       | RecurringApprovalService
       | undefined;
-    if (permission.evaluation.decision === "ask" && recurringApprovalService) {
+    if (
+      !isResponsibilityActionReview &&
+      permission.evaluation.decision === "ask" &&
+      recurringApprovalService
+    ) {
       const recurringInput = permission.workspace
         ? this.buildRecurringApprovalInput(
             type,
@@ -7996,7 +8613,10 @@ export class AgentDaemon extends EventEmitter {
         ? accessProfile
         : undefined;
     const autoReview =
-      allowAutoApprove && !opts?.requireExplicitApproval && autoReviewEnabledForProfile
+      !isResponsibilityActionReview &&
+      allowAutoApprove &&
+      !opts?.requireExplicitApproval &&
+      autoReviewEnabledForProfile
         ? this.canAutoReviewApprove(
             taskId,
             type as ApprovalType | undefined,
@@ -8010,56 +8630,74 @@ export class AgentDaemon extends EventEmitter {
       this.canSessionAutoApproveType(type as ApprovalType | undefined) &&
       autoReview.approved;
 
-    if (safeSessionAutoApprove) {
-      permission.runtime?.recordPermissionSuccess(permission.trackingKey);
-      if (type === "external_file_access") {
-        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
-      }
-      const approval = await this.approvalRepo.create({
-        taskId,
-        type: type as Any,
-        description,
-        details: permissionDetails,
-        status: "approved",
-        requestedAt: Date.now(),
-      });
-      await this.approvalRepo.update(approval.id, "approved");
-      this.logEvent(taskId, "approval_requested", {
-        approval,
-        autoApproved: true,
-      });
-      this.logEvent(taskId, "approval_granted", {
-        approvalId: approval.id,
-        autoApproved: true,
-        reason: "session_auto_approve",
-        autoReviewReason: autoReview.reason,
-        permissionReason: permission.evaluation.reason,
-      });
-      return true;
-    }
-
     if (autoReview.approved) {
+      const approval = await this.approvalRepo.create(
+        {
+          taskId,
+          type: type as Any,
+          description,
+          details: permissionDetails,
+          status: "pending",
+          requestedAt: Date.now(),
+        },
+        ...(permission.workspace ? [permission.workspace] : []),
+      );
+      if (
+        typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+        !(await this.isApprovalAuthorityCurrent(approval))
+      ) {
+        await this.approvalRepo.resolvePending(approval.id, "denied", approval);
+        return false;
+      }
+      if (!(await this.approvalRepo.resolvePending(approval.id, "approved", approval)))
+        return false;
+      const currentAuthority =
+        typeof (this as Any).isApprovalAuthorityCurrent !== "function" ||
+        (await this.isApprovalAuthorityCurrent(approval));
+      if (!currentAuthority || opts?.signal?.aborted) return false;
+      if (
+        approval.details?.reviewFiles !== undefined ||
+        approval.details?.draftRevision?.state === "bound"
+      ) {
+        // Automatic review also resumes from a durable decision: the reviewed
+        // bytes must still match before recording success or issuing a grant.
+        let revisionCurrent = false;
+        try {
+          revisionCurrent = await this.approvalRepo.approvedRevisionCurrent(
+            approval.id,
+            approvalRequestRevisionHash(approval),
+          );
+        } catch {
+          // Worker/read failures cannot turn an unchecked revision into a grant.
+        }
+        if (
+          !revisionCurrent ||
+          (typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+            !(await this.isApprovalAuthorityCurrent(approval)))
+        )
+          return false;
+      }
+      const currentTask = this.taskRepo.findById(taskId);
+      if (
+        !currentAuthority ||
+        !currentTask ||
+        isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask)) ||
+        opts?.signal?.aborted
+      )
+        return false;
+      // The durable decision must win before recording success or issuing any grant.
       permission.runtime?.recordPermissionSuccess(permission.trackingKey);
       if (type === "external_file_access") {
         this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
       }
-      const approval = await this.approvalRepo.create({
-        taskId,
-        type: type as Any,
-        description,
-        details: permissionDetails,
-        status: "approved",
-        requestedAt: Date.now(),
-      });
-      await this.approvalRepo.update(approval.id, "approved");
       this.logEvent(taskId, "approval_requested", {
-        approval,
+        approval: { ...approval, status: "approved" },
         autoApproved: true,
       });
       this.logEvent(taskId, "approval_granted", {
         approvalId: approval.id,
         autoApproved: true,
-        reason: "auto_review",
+        reason: safeSessionAutoApprove ? "session_auto_approve" : "auto_review",
         autoReviewReason: autoReview.reason,
         permissionReason: permission.evaluation.reason,
       });
@@ -8102,40 +8740,124 @@ export class AgentDaemon extends EventEmitter {
         typeof (this as Any).requestAssistantApproval === "function"
           ? (this as Any).requestAssistantApproval
           : AgentDaemon.prototype.requestAssistantApproval;
-      const approved = await assistantRequester.call(
-        this,
-        taskId,
-        type,
-        description,
-        permissionDetails,
-        permission.runtime,
-        permission.trackingKey,
-        opts?.signal,
-      );
-      // The card can stay open for up to the approval timeout. Like a queued
-      // approval, an "Allow once" answer only counts if the operation identity
-      // and the task's authority are unchanged since the card was raised.
-      if (
-        approved &&
-        typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
-        !(await this.isApprovalAuthorityCurrent({
+      // Persist the same canonical request used by queued decisions. The input
+      // card remains the human surface; no popup approval event is emitted.
+      const approval = await this.approvalRepo.create(
+        {
           taskId,
-          type,
+          type: type as Any,
+          description,
           details: permissionDetails,
-        } as ApprovalRequest))
-      ) {
-        permission.runtime?.recordPermissionDenial(permission.trackingKey);
-        this.logEvent(taskId, "approval_denied", {
-          assistantInput: true,
-          approvalType: type,
-          reason: "approval_authority_changed",
-        });
+          status: "pending",
+          requestedAt: Date.now(),
+        },
+        ...(permission.workspace ? [permission.workspace] : []),
+      );
+      if (!acceptCreatedApproval(approval)) {
+        await this.approvalRepo.resolvePending(approval.id, "denied", approval);
         return false;
       }
-      if (approved && type === "external_file_access") {
-        this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+      const validateDecision = async (approved: boolean): Promise<boolean> => {
+        if (!approved) {
+          if (isResponsibilityActionReview) {
+            try {
+              await this.approvalRepo.resolvePending(
+                approval.id,
+                "denied",
+                approval,
+                undefined,
+                undefined,
+                "deny_once",
+              );
+            } catch {
+              // A denial never grants the pending operation.
+            }
+          }
+          return false;
+        }
+        try {
+          if (
+            opts?.signal?.aborted ||
+            (typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+              !(await this.isApprovalAuthorityCurrent(approval)))
+          ) {
+            this.logEvent(taskId, "approval_denied", {
+              approvalId: approval.id,
+              assistantInput: true,
+              approvalType: type,
+              reason: "approval_authority_changed",
+            });
+            return false;
+          }
+          if (
+            isResponsibilityActionReview &&
+            !this.isValidResponsibilityActionReviewDetails(approval.details)
+          )
+            return false;
+          if (
+            !(await this.approvalRepo.resolvePending(
+              approval.id,
+              "approved",
+              approval,
+              undefined,
+              undefined,
+              isResponsibilityActionReview ? "allow_once" : undefined,
+            ))
+          )
+            return false;
+          if (
+            !(await this.approvalRepo.approvedRevisionCurrent(
+              approval.id,
+              approvalRequestRevisionHash(approval),
+            ))
+          )
+            return false;
+          if (
+            typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+            !(await this.isApprovalAuthorityCurrent(approval))
+          )
+            return false;
+          const currentTask = this.taskRepo.findById(taskId);
+          return Boolean(
+            currentTask &&
+            !isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask)) &&
+            !opts?.signal?.aborted,
+          );
+        } catch (error) {
+          log.warn("Failed to validate an inline approval decision:", error);
+          return false;
+        }
+      };
+      try {
+        const approved = await assistantRequester.call(
+          this,
+          taskId,
+          type,
+          description,
+          permissionDetails,
+          permission.runtime,
+          permission.trackingKey,
+          opts?.signal,
+          validateDecision,
+          { approvalId: approval.id, revisionHash: approvalRequestRevisionHash(approval) },
+        );
+        if (approved && type === "external_file_access") {
+          this.grantExternalFileApprovalsFromDetails(taskId, enrichedDetails);
+        }
+        return approved;
+      } finally {
+        // Denial, dismissal, timeout and input failure retire only our pending
+        // row. A winning durable decision cannot be overwritten by cleanup. A
+        // reviewed write is the exception during daemon shutdown: its exact
+        // pending approval/input pair is the durable wait rehydrated on restart.
+        if (!(this.shutdownRequested && isResponsibilityActionReview)) {
+          try {
+            await this.approvalRepo.resolvePending(approval.id, "denied", approval);
+          } catch (error) {
+            log.warn("Failed to retire an inline approval request:", error);
+          }
+        }
       }
-      return approved;
     }
 
     if (isAutomatedTaskLike(task) || task?.agentConfig?.humanInputPolicy === "none") {
@@ -8148,14 +8870,21 @@ export class AgentDaemon extends EventEmitter {
       return false;
     }
 
-    const approval = await this.approvalRepo.create({
-      taskId,
-      type: type as Any,
-      description,
-      details: permissionDetails,
-      status: "pending",
-      requestedAt: Date.now(),
-    });
+    const approval = await this.approvalRepo.create(
+      {
+        taskId,
+        type: type as Any,
+        description,
+        details: permissionDetails,
+        status: "pending",
+        requestedAt: Date.now(),
+      },
+      ...(permission.workspace ? [permission.workspace] : []),
+    );
+    if (!acceptCreatedApproval(approval)) {
+      await this.approvalRepo.resolvePending(approval.id, "denied", approval);
+      return false;
+    }
 
     this.updateTask(taskId, {
       status: "blocked",
@@ -8166,8 +8895,8 @@ export class AgentDaemon extends EventEmitter {
     // Emit event to UI
     this.logEvent(taskId, "approval_requested", { approval });
 
-    // Wait for user response
-    return new Promise((resolve, reject) => {
+    // Wait for user response, then revalidate captured files at the resumption boundary.
+    const approved = await new Promise<boolean>((resolve, reject) => {
       // Timeout after 5 minutes
       const timeoutHandle = setTimeout(() => {
         const pending = this.pendingApprovals.get(approval.id);
@@ -8237,6 +8966,27 @@ export class AgentDaemon extends EventEmitter {
         if (opts.signal.aborted) abortListener();
       }
     });
+    if (
+      approved &&
+      (approval.details?.reviewFiles !== undefined ||
+        approval.details?.draftRevision?.state === "bound")
+    ) {
+      if (
+        opts?.signal?.aborted ||
+        !(await this.isApprovalAuthorityCurrent(approval)) ||
+        !(await this.approvalRepo.approvedRevisionCurrent(
+          approval.id,
+          approvalRequestRevisionHash(approval),
+        ))
+      )
+        return false;
+    }
+    if (approved) {
+      const resumedTask = this.taskRepo.findById(taskId);
+      if (!resumedTask || isTerminalTaskStatus(deriveCanonicalTaskStatus(resumedTask)))
+        return false;
+    }
+    return approved && !opts?.signal?.aborted;
   }
 
   /**
@@ -8268,17 +9018,74 @@ export class AgentDaemon extends EventEmitter {
     approved: boolean,
     action?: ApprovalResponseAction,
     attribution?: SessionActionAttribution,
+    expectedRevisionHash?: string,
+    channelResolutionGuard?: ChannelDecisionResolutionGuard,
   ): Promise<"handled" | "duplicate" | "not_found" | "in_progress"> {
+    if (channelResolutionGuard && expectedRevisionHash === undefined)
+      throw new Error("Channel approval resolution requires its displayed revision");
+    const currentChannelRevision = async (request: ApprovalRequest): Promise<boolean> => {
+      try {
+        return await this.approvalRepo.approvedRevisionCurrent(
+          request.id,
+          approvalRequestRevisionHash(request),
+        );
+      } catch (error) {
+        log.warn("Failed to validate a channel approval before resumption:", error);
+        return false;
+      }
+    };
+    // A transport must bind execution to the revision it displayed. Do this before
+    // claiming process-local idempotency so a stale callback cannot consume a fresh response.
+    const local = this.pendingApprovals.get(approvalId);
+    const findPersistedApproval = (this.approvalRepo as Any).findById;
+    const persisted =
+      typeof findPersistedApproval === "function"
+        ? await findPersistedApproval.call(this.approvalRepo, approvalId)
+        : undefined;
+    const reviewApproval = persisted ?? local?.approval;
+    const isResponsibilityActionReview =
+      AgentDaemon.isResponsibilityActionReviewApproval(reviewApproval);
+    const requestedAction: ApprovalResponseAction =
+      action || (approved ? "allow_once" : "deny_once");
+    if (
+      isResponsibilityActionReview &&
+      requestedAction !== "allow_once" &&
+      requestedAction !== "deny_once"
+    )
+      return "not_found";
+    if (
+      expectedRevisionHash === undefined &&
+      [persisted, local?.approval].some(
+        (revisionSubject) =>
+          revisionSubject &&
+          (revisionSubject.details?.reviewFiles !== undefined ||
+            revisionSubject.details?.draftRevision?.state === "bound"),
+      )
+    ) {
+      // A concrete review cannot be approved by a legacy caller that never
+      // received the displayed revision. Never upgrade it to current content.
+      return "not_found";
+    }
+    if (expectedRevisionHash !== undefined) {
+      if (
+        !persisted ||
+        persisted.status !== "pending" ||
+        !approvalRevisionMatches(persisted, expectedRevisionHash) ||
+        (local && !approvalRevisionMatches(local.approval, expectedRevisionHash))
+      )
+        return "not_found";
+    }
     // Generate idempotency key for this approval response
     const idempotencyKey = IdempotencyManager.generateKey(
       "approval:respond",
       approvalId,
-      action || (approved ? "approve" : "deny"),
+      "decision",
     );
 
     // Check if this exact response was already processed
     const existing = approvalIdempotency.check(idempotencyKey);
     if (existing.exists) {
+      if (existing.status === "pending") return "in_progress";
       console.log(`[AgentDaemon] Duplicate approval response ignored: ${approvalId}`);
       return "duplicate";
     }
@@ -8292,6 +9099,17 @@ export class AgentDaemon extends EventEmitter {
     try {
       const pending = this.pendingApprovals.get(approvalId);
       if (pending && !pending.resolved) {
+        const approvalForDecision: ApprovalRequest =
+          expectedRevisionHash === undefined
+            ? pending.approval
+            : JSON.parse(JSON.stringify(pending.approval));
+        if (
+          expectedRevisionHash !== undefined &&
+          !approvalRevisionMatches(approvalForDecision, expectedRevisionHash)
+        ) {
+          approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+          return "not_found";
+        }
         const currentTask = this.taskRepo?.findById(pending.taskId);
         if (
           this.taskRepo &&
@@ -8318,7 +9136,7 @@ export class AgentDaemon extends EventEmitter {
         if (
           normalizedAction.startsWith("allow_") &&
           typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
-          !(await this.isApprovalAuthorityCurrent(pending.approval))
+          !(await this.isApprovalAuthorityCurrent(approvalForDecision))
         ) {
           normalizedAction = "deny_once";
           authorityChanged = true;
@@ -8326,20 +9144,98 @@ export class AgentDaemon extends EventEmitter {
         const denialReason = authorityChanged
           ? "Approval expired because task authority changed; retry the operation."
           : "User denied approval";
-        const persistenceResult = await this.persistApprovalActionRule(
-          normalizedAction,
-          pending.approval,
-        );
+
         const didApprove =
           normalizedAction === "allow_once" ||
           normalizedAction === "allow_session" ||
           normalizedAction === "allow_workspace" ||
           normalizedAction === "allow_profile" ||
           normalizedAction === "allow_recurring";
+        const won = await this.approvalRepo.resolvePending(
+          approvalId,
+          didApprove ? "approved" : "denied",
+          approvalForDecision,
+          attribution,
+          ...(channelResolutionGuard ? ([channelResolutionGuard] as const) : ([] as const)),
+          ...(isResponsibilityActionReview
+            ? ([normalizedAction as "allow_once" | "deny_once"] as const)
+            : ([] as const)),
+        );
+        const waitAlreadyClosed = Boolean(pending.resolved);
+        // Retire this process's wait before an asynchronous grant write. A timeout or
+        // competing responder cannot overwrite the winning durable decision.
+        pending.resolved = true;
+        clearTimeout(pending.timeoutHandle);
+        if (pending.abortSignal && pending.abortListener)
+          pending.abortSignal.removeEventListener("abort", pending.abortListener);
+        this.pendingApprovals.delete(approvalId);
+        const taskAfterDecision = this.taskRepo?.findById(pending.taskId);
+        const taskEnded =
+          this.taskRepo &&
+          (!taskAfterDecision ||
+            isTerminalTaskStatus(deriveCanonicalTaskStatus(taskAfterDecision)));
+        const authorityStillCurrent =
+          !won ||
+          waitAlreadyClosed ||
+          taskEnded ||
+          !didApprove ||
+          typeof (this as Any).isApprovalAuthorityCurrent !== "function" ||
+          (await this.isApprovalAuthorityCurrent(approvalForDecision));
+        const channelStillCurrent =
+          !won ||
+          waitAlreadyClosed ||
+          taskEnded ||
+          !didApprove ||
+          !channelResolutionGuard ||
+          (await currentChannelRevision(approvalForDecision));
+        const taskBeforeEffects = this.taskRepo?.findById(pending.taskId);
+        const taskStoppedBeforeEffects =
+          this.taskRepo &&
+          (!taskBeforeEffects ||
+            isTerminalTaskStatus(deriveCanonicalTaskStatus(taskBeforeEffects)));
+        if (
+          !won ||
+          waitAlreadyClosed ||
+          taskEnded ||
+          taskStoppedBeforeEffects ||
+          pending.abortSignal?.aborted ||
+          !authorityStillCurrent ||
+          !channelStillCurrent
+        ) {
+          pending.reject(new Error("Approval revision expired or was resolved elsewhere."));
+          approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+          return "not_found";
+        }
+        let persistenceResult;
+        try {
+          persistenceResult = await this.persistApprovalActionRule(
+            normalizedAction,
+            approvalForDecision,
+          );
+        } catch (error) {
+          pending.reject(error);
+          throw error;
+        }
+        const channelAfterPersistence =
+          !didApprove ||
+          !channelResolutionGuard ||
+          (await currentChannelRevision(approvalForDecision));
+        const taskAfterPersistence = this.taskRepo?.findById(pending.taskId);
+        if (
+          !channelAfterPersistence ||
+          pending.abortSignal?.aborted ||
+          (this.taskRepo &&
+            (!taskAfterPersistence ||
+              isTerminalTaskStatus(deriveCanonicalTaskStatus(taskAfterPersistence))))
+        ) {
+          pending.reject(new Error("Task ended before the approval could resume execution."));
+          approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+          return "not_found";
+        }
         const runtime = this.getExecutorForTask(pending.taskId)?.runtime || null;
         const prompt =
-          pending.approval?.details && typeof pending.approval.details === "object"
-            ? ((pending.approval.details as Record<string, unknown>).permissionPrompt as
+          approvalForDecision?.details && typeof approvalForDecision.details === "object"
+            ? ((approvalForDecision.details as Record<string, unknown>).permissionPrompt as
                 | PermissionPromptDetails
                 | undefined)
             : undefined;
@@ -8351,29 +9247,10 @@ export class AgentDaemon extends EventEmitter {
             runtime.recordPermissionDenial(trackingKey);
           }
         }
-        if (didApprove && pending.approval?.type === "external_file_access") {
-          this.grantExternalFileApprovalsFromDetails(pending.taskId, pending.approval.details);
+        if (didApprove && approvalForDecision?.type === "external_file_access") {
+          this.grantExternalFileApprovalsFromDetails(pending.taskId, approvalForDecision.details);
         }
 
-        // Mark as resolved first to prevent race condition with timeout
-        pending.resolved = true;
-
-        // Clear the timeout
-        clearTimeout(pending.timeoutHandle);
-        if (pending.abortSignal && pending.abortListener) {
-          pending.abortSignal.removeEventListener("abort", pending.abortListener);
-        }
-
-        this.pendingApprovals.delete(approvalId);
-        if (attribution) {
-          await this.approvalRepo.update(
-            approvalId,
-            didApprove ? "approved" : "denied",
-            attribution,
-          );
-        } else {
-          await this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
-        }
         const awaitingAnotherApproval = [...this.pendingApprovals.values()].some(
           (entry) => entry.taskId === pending.taskId && !entry.resolved,
         );
@@ -8410,8 +9287,17 @@ export class AgentDaemon extends EventEmitter {
       // restart.  Resolve the durable approval row directly and reconstruct
       // the executor from its checkpoint/events instead of returning a false
       // `not_found` response (or silently losing the user's decision).
-      const persistedApproval = await this.approvalRepo.findById(approvalId);
-      if (!persistedApproval || persistedApproval.status !== "pending") {
+      const persistedValue = await this.approvalRepo.findById(approvalId);
+      const persistedApproval: ApprovalRequest | undefined =
+        expectedRevisionHash !== undefined && persistedValue
+          ? JSON.parse(JSON.stringify(persistedValue))
+          : persistedValue;
+      if (
+        !persistedApproval ||
+        persistedApproval.status !== "pending" ||
+        (expectedRevisionHash !== undefined &&
+          !approvalRevisionMatches(persistedApproval, expectedRevisionHash))
+      ) {
         approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
         return "not_found";
       }
@@ -8457,21 +9343,68 @@ export class AgentDaemon extends EventEmitter {
         return "handled";
       }
 
+      const won = await this.approvalRepo.resolvePending(
+        approvalId,
+        didApprove ? "approved" : "denied",
+        persistedApproval,
+        attribution,
+        ...(channelResolutionGuard ? ([channelResolutionGuard] as const) : ([] as const)),
+        ...(isResponsibilityActionReview
+          ? ([normalizedAction as "allow_once" | "deny_once"] as const)
+          : ([] as const)),
+      );
+      if (!won) {
+        approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+        return "not_found";
+      }
+      const taskAfterDecision = this.taskRepo.findById(persistedApproval.taskId);
+      if (
+        !taskAfterDecision ||
+        isTerminalTaskStatus(deriveCanonicalTaskStatus(taskAfterDecision)) ||
+        (didApprove &&
+          typeof (this as Any).isApprovalAuthorityCurrent === "function" &&
+          !(await this.isApprovalAuthorityCurrent(persistedApproval)))
+      ) {
+        approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+        return "not_found";
+      }
+      const channelStillCurrent =
+        !didApprove || !channelResolutionGuard || (await currentChannelRevision(persistedApproval));
+      const taskBeforeEffects = this.taskRepo.findById(persistedApproval.taskId);
+      if (
+        !channelStillCurrent ||
+        !taskBeforeEffects ||
+        isTerminalTaskStatus(deriveCanonicalTaskStatus(taskBeforeEffects))
+      ) {
+        approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+        return "not_found";
+      }
       const persistenceResult = await this.persistApprovalActionRule(
         normalizedAction,
         persistedApproval,
       );
-      if (didApprove && normalizedAction === "allow_once") {
+      const channelAfterPersistence =
+        !didApprove || !channelResolutionGuard || (await currentChannelRevision(persistedApproval));
+      const taskAfterPersistence = this.taskRepo.findById(persistedApproval.taskId);
+      if (
+        !channelAfterPersistence ||
+        !taskAfterPersistence ||
+        isTerminalTaskStatus(deriveCanonicalTaskStatus(taskAfterPersistence))
+      ) {
+        approvalIdempotency.complete(idempotencyKey, { success: true, status: "not_found" });
+        return "not_found";
+      }
+      if (
+        didApprove &&
+        normalizedAction === "allow_once" &&
+        !AgentDaemon.isResponsibilityActionReviewApproval(persistedApproval)
+      ) {
         const rememberDurableApprovalGrant = (this as Any).rememberDurableApprovalGrant as
           | ((taskId: string, approval: ApprovalRequest) => void)
           | undefined;
         rememberDurableApprovalGrant?.call(this, persistedApproval.taskId, persistedApproval);
       }
-      if (attribution) {
-        await this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied", attribution);
-      } else {
-        await this.approvalRepo.update(approvalId, didApprove ? "approved" : "denied");
-      }
+
       if (didApprove && persistedApproval.type === "external_file_access") {
         this.grantExternalFileApprovalsFromDetails(
           persistedApproval.taskId,
@@ -8629,7 +9562,61 @@ export class AgentDaemon extends EventEmitter {
         return { status: "duplicate", requestId: response.requestId };
       }
 
-      await this.inputRequestRepo.resolve(response.requestId, response.status, response.answers);
+      const binding =
+        typeof (this.inputRequestRepo as Any).getApprovalBinding === "function"
+          ? await this.inputRequestRepo.getApprovalBinding(request.id)
+          : undefined;
+      const liveWaiter = this.pendingInputRequests.get(request.id);
+      if (binding && (!liveWaiter || liveWaiter.resolved)) {
+        const recovered = await this.resolveRestartedResponsibilityActionReviewInput(
+          request,
+          binding,
+          response,
+        );
+        if (recovered) {
+          inputRequestIdempotency.complete(idempotencyKey, { status: recovered });
+          return { status: recovered, requestId: response.requestId };
+        }
+      }
+      if (
+        (binding || isAssistantApprovalInputRequest(request)) &&
+        (!liveWaiter || liveWaiter.resolved)
+      ) {
+        // An interrupted approval card never becomes ordinary replayable input.
+        // Only its original revision may be retired; an approved winner survives.
+        if (!(await this.inputRequestRepo.resolve(request.id, "dismissed"))) {
+          inputRequestIdempotency.complete(idempotencyKey, { status: "duplicate" });
+          return { status: "duplicate", requestId: response.requestId };
+        }
+        if (binding && binding.taskId === request.taskId) {
+          const approval = await this.approvalRepo.findById(binding.approvalId);
+          if (
+            approval &&
+            approval.taskId === binding.taskId &&
+            approvalRequestRevisionHash(approval) === binding.revisionHash
+          ) {
+            await this.approvalRepo.resolvePending(approval.id, "denied", approval);
+          }
+        }
+        this.logEvent(request.taskId, "approval_denied", {
+          requestId: request.id,
+          approvalId: binding?.approvalId,
+          reason: "assistant_approval_failed_closed_after_restart",
+          recoveredAfterRestart: true,
+        });
+        inputRequestIdempotency.complete(idempotencyKey, { status: "handled" });
+        return { status: "handled", requestId: response.requestId };
+      }
+      if (
+        !(await this.inputRequestRepo.resolve(
+          response.requestId,
+          response.status,
+          response.answers,
+        ))
+      ) {
+        inputRequestIdempotency.complete(idempotencyKey, { status: "duplicate" });
+        return { status: "duplicate", requestId: response.requestId };
+      }
 
       if (response.status === "submitted") {
         this.logEvent(request.taskId, "assistant_message", {
@@ -8820,6 +9807,14 @@ export class AgentDaemon extends EventEmitter {
         : payload === undefined
           ? {}
           : ({ value: payload } as Record<string, unknown>);
+    if (
+      type === "approval_requested" &&
+      payloadObj.approval &&
+      typeof payloadObj.approval === "object" &&
+      !Array.isArray(payloadObj.approval)
+    ) {
+      payloadObj.approval = presentApprovalRevision(payloadObj.approval as ApprovalRequest);
+    }
     const securityLifecycleEvent =
       type === "task_created"
         ? "SessionStart"
@@ -9617,9 +10612,7 @@ export class AgentDaemon extends EventEmitter {
     { writtenAt: number; summaryCreatedAt: number }
   >();
 
-  private getSnapshotSummaryCreatedAt(
-    payload: Record<string, unknown> | null | undefined,
-  ): number {
+  private getSnapshotSummaryCreatedAt(payload: Record<string, unknown> | null | undefined): number {
     if (!payload) return 0;
     const transcript =
       payload.transcript && typeof payload.transcript === "object"
@@ -12625,8 +13618,23 @@ export class AgentDaemon extends EventEmitter {
     metadata?: {
       completedAt?: number;
       errorMessage?: string | null;
+      controlAuthority?: BotWorkCancellationAuthority;
     },
   ): void {
+    if (metadata?.controlAuthority) {
+      const authority = metadata.controlAuthority;
+      this.getDatabase()
+        .transaction(() => {
+          new BotWorkControlStore(this.getDatabase()).assertTarget(
+            authority.control,
+            taskId,
+            authority.fence,
+          );
+          this.cancelTaskRecord(taskId, message, { ...metadata, controlAuthority: undefined });
+        })
+        .immediate();
+      return;
+    }
     const existing = this.taskRepo.findById(taskId);
     const currentStatus = existing ? deriveCanonicalTaskStatus(existing) : undefined;
     if (isTerminalTaskStatus(currentStatus)) {
@@ -14857,6 +15865,7 @@ export class AgentDaemon extends EventEmitter {
         if (!recoveringQueuedFollowUp) return existing;
       }
     }
+    await enforceResponsibilityTaskStart(this.getDatabase(), task.id, task.workspaceId);
     // Bot conversations are created dormant and their first user turn enters
     // through sendMessage rather than startTaskImmediate. Attach the
     // workspace-scoped persistent team here as well so the initial executor
@@ -17283,6 +18292,54 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(`Task ${normalizedTaskId} was not found after updating its prompt.`);
     }
     return updatedTask;
+  }
+
+  async getActiveWorkTaskIds(): Promise<string[]> {
+    const graphRoots = await serviceStatements(this.getDatabase()).unit(
+      "botWorkControl_activeGraphRoots",
+      [],
+    );
+    return [
+      ...new Set([
+        ...this.activeTasks.keys(),
+        ...this.getQueueStatus().runningTaskIds,
+        ...getBackgroundProcessManager().activeTaskIds(),
+        ...graphRoots,
+      ]),
+    ];
+  }
+  async isTaskStopConfirmed(taskId: string): Promise<boolean> {
+    const graphs = await this.orchestrationGraphEngine
+      .getRepository()
+      .listSnapshotsByRootTaskId(taskId);
+    if (
+      graphs.some(
+        (graph) =>
+          graph.run.status === "running" ||
+          graph.nodes.some(
+            (node) => !["completed", "failed", "cancelled", "skipped"].includes(node.status),
+          ),
+      )
+    )
+      return false;
+    for (const graph of graphs)
+      for (const node of graph.nodes) {
+        if (node.taskId && !this.isLocalWorkStopConfirmed(node.taskId)) return false;
+      }
+    return this.isLocalWorkStopConfirmed(taskId);
+  }
+  isLocalWorkStopConfirmed(taskId: string): boolean {
+    const task = this.taskRepo.findById(taskId);
+    return (
+      !!task &&
+      ["completed", "failed", "cancelled"].includes(task.status) &&
+      !this.activeTasks.has(taskId) &&
+      !this.queueManager.isQueued(taskId) &&
+      !this.getQueueStatus().runningTaskIds.includes(taskId) &&
+      !getBackgroundProcessManager()
+        .list(taskId)
+        .some((process) => process.status === "running")
+    );
   }
 
   /**

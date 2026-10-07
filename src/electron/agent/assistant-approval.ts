@@ -1,4 +1,5 @@
 import type { ApprovalType, InputRequest, RequestUserInputArgs } from "../../shared/types";
+import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../shared/approval-draft-presentation";
 
 /**
  * The desktop approval fallback is rendered as a task input card. Keeping a
@@ -107,6 +108,19 @@ export function buildAssistantApprovalRequest(
   description: string,
   details?: unknown,
 ): RequestUserInputArgs {
+  const detailsRecord =
+    details && typeof details === "object" && !Array.isArray(details)
+      ? (details as Record<string, unknown>)
+      : undefined;
+  const actionReview = detailsRecord?.responsibilityActionReview;
+  const questionId =
+    approvalType === "workspace_write" &&
+    actionReview &&
+    typeof actionReview === "object" &&
+    (actionReview as Record<string, unknown>).version === 1
+      ? RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
+      : ASSISTANT_APPROVAL_QUESTION_ID;
+  const requiresExactWriteReview = questionId === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID;
   const safeDescription = normalizeText(description) || "The next operation needs your decision.";
   const scopePreview =
     details && typeof details === "object" && !Array.isArray(details)
@@ -119,26 +133,37 @@ export function buildAssistantApprovalRequest(
         )
       : "";
   const taskConsent =
-    approvalType === "external_service" &&
+    (approvalType === "external_service" || approvalType === "network_access") &&
     details &&
     typeof details === "object" &&
     typeof (details as Record<string, unknown>).taskConsentScope === "string"
       ? normalizeText((details as Record<string, unknown>).taskConsentScope)
       : "";
-  const allowLabel = taskConsent ? "Allow for this task" : "Allow once";
+  const consentLabel = normalizeText(detailsRecord?.taskConsentLabel, 40);
+  const allowLabel = taskConsent
+    ? consentLabel && /^Allow for this (task|chat)$/.test(consentLabel)
+      ? consentLabel
+      : "Allow for this task"
+    : "Allow once";
   const scopeText = scopePreview ? ` Scope: ${scopePreview}.` : "";
 
   return {
     questions: [
       {
         header: "Permission",
-        id: ASSISTANT_APPROVAL_QUESTION_ID,
-        question: `${safeDescription}${scopeText}${taskConsent ? ` Consent covers ${taskConsent} until this task ends.` : ""} Do you want CoWork to continue?`,
+        id: questionId,
+        question: `${safeDescription}${scopeText}${
+          taskConsent
+            ? allowLabel === "Allow for this chat"
+              ? ` Consent covers ${taskConsent}.`
+              : ` Consent covers ${taskConsent} until this task ends.`
+            : ""
+        } Do you want CoWork to continue?`,
         // Deny is first so an accidental Enter/keyboard submission fails
         // closed. The user can explicitly choose Allow once.
         options: [
           {
-            label: "Deny",
+            label: requiresExactWriteReview ? "Deny once" : "Deny",
             description: "Stop this operation and return control to the task.",
           },
           {
@@ -167,13 +192,22 @@ export function buildAssistantApprovalMessage(
 
 export function isAssistantApprovalInputRequest(request: InputRequest | undefined): boolean {
   return Boolean(
-    request?.questions?.some((question) => question.id === ASSISTANT_APPROVAL_QUESTION_ID),
+    request?.questions?.some(
+      (question) =>
+        question.id === ASSISTANT_APPROVAL_QUESTION_ID ||
+        question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+    ),
   );
 }
 
 export function parseAssistantApprovalAnswer(
   answers: InputRequest["answers"] | undefined,
+  responsibilityActionReview = false,
 ): boolean {
-  const label = answers?.[ASSISTANT_APPROVAL_QUESTION_ID]?.optionLabel;
+  const label = answers?.[
+    responsibilityActionReview
+      ? RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
+      : ASSISTANT_APPROVAL_QUESTION_ID
+  ]?.optionLabel;
   return typeof label === "string" && label.trim().toLowerCase().startsWith("allow");
 }

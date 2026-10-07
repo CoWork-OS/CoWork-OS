@@ -590,6 +590,10 @@ export const ApprovalResponseSchema = z
   .object({
     approvalId: z.string().uuid(),
     approved: z.boolean().optional(),
+    expectedRevisionHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     action: z
       .enum([
         "allow_once",

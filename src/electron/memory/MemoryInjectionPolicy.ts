@@ -7,7 +7,8 @@
  * `resolveMemoryInjection` is pure and synchronous; `DefaultMemoryInjectionPolicy` implements
  * the async contract in memory-engine-contracts.ts on top of it.
  */
-import type { GatewayContextType, WorkerRoleKind } from "../../shared/types";
+import { isThirdPartyGatewayTask } from "../gateway/gateway-sender-identity";
+import type { ChannelType, GatewayContextType, WorkerRoleKind } from "../../shared/types";
 import type {
   MemoryInjectionContext,
   MemoryInjectionDecision,
@@ -205,6 +206,8 @@ export interface MemoryPolicyTaskShape {
   rawPrompt?: string | null;
   userPrompt?: string | null;
   agentConfig?: {
+    originChannel?: ChannelType;
+    gatewaySenderIsOwner?: boolean;
     retainMemory?: boolean;
     gatewayContext?: GatewayContextType;
     allowSharedContextMemory?: boolean;
@@ -229,13 +232,18 @@ export function memoryPolicyInputForTask(
   > & { message?: string | null } = {},
 ): MemoryInjectionPolicyInput {
   const { message, ...rest } = extras;
+  const thirdParty = isThirdPartyGatewayTask(task);
+  const gatewayContext = task?.agentConfig?.gatewayContext;
+  // A DM is a transport shape, not proof that the caller owns personal memory.
+  const thirdPartyDirectMessage = thirdParty && (gatewayContext ?? "private") === "private";
   return {
     ...rest,
     retainMemory: task?.agentConfig?.retainMemory,
     isSubAgent: isSubAgentTaskShape(task),
     workerRole: task?.workerRole ?? null,
-    gatewayContext: task?.agentConfig?.gatewayContext,
-    allowSharedContextMemory: task?.agentConfig?.allowSharedContextMemory === true,
+    gatewayContext: thirdPartyDirectMessage ? "public" : gatewayContext,
+    allowSharedContextMemory:
+      !thirdPartyDirectMessage && task?.agentConfig?.allowSharedContextMemory === true,
     noMemory: taskDisablesMemoryCapture(task) || containsNoMemoryDirective(message),
   };
 }
@@ -278,9 +286,19 @@ export function memoryItemAllowed(
   return { allowed: true };
 }
 
-/** Surface → gateway mapping for callers that only know the contract's surface. */
-function gatewayOfSurface(surface: MemoryInjectionContext["surface"]): GatewayContextType {
-  return surface === "channel_group" ? "group" : "private";
+/** Resolve contract surfaces with the same positive-owner requirement as gateway tasks. */
+export function memoryPolicyInputForSurface(
+  context: Pick<MemoryInjectionContext, "surface" | "gatewaySenderIsOwner" | "noMemory">,
+): MemoryInjectionPolicyInput {
+  return {
+    gatewayContext:
+      context.surface === "channel_group"
+        ? "group"
+        : context.surface === "channel_private" && context.gatewaySenderIsOwner !== true
+          ? "public"
+          : "private",
+    noMemory: context.noMemory,
+  };
 }
 
 export interface DefaultMemoryInjectionPolicyDeps {
@@ -308,7 +326,7 @@ export class DefaultMemoryInjectionPolicy implements MemoryInjectionPolicy {
       }
     }
     return resolveMemoryInjection({
-      gatewayContext: gatewayOfSurface(context.surface),
+      ...memoryPolicyInputForSurface(context),
       workspaceSettings,
       noMemory: context.noMemory,
       curatedMemoryEnabled: this.deps.curatedMemoryEnabled?.() ?? true,
@@ -325,7 +343,7 @@ export class DefaultMemoryInjectionPolicy implements MemoryInjectionPolicy {
   itemAllowed(item: MemoryItem, context: MemoryInjectionContext): MemoryInjectionDecision {
     if (context.noMemory) return { allowed: false, reason: "no_memory_directive" };
     if (context.surface === "channel_group") return { allowed: false, reason: "group_channel" };
-    const decision = resolveMemoryInjection({ gatewayContext: gatewayOfSurface(context.surface) });
+    const decision = resolveMemoryInjection(memoryPolicyInputForSurface(context));
     return memoryItemAllowed(item, decision, {
       workspaceId: context.workspaceId,
       contactRef: context.contactRef,

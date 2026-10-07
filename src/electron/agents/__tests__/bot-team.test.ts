@@ -1,80 +1,54 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import {
+  buildBotTeamContextPrompt,
+  hasBotTeamDelegationRequest,
+  type BotTeamPromptContext,
+} from "../bot-team";
 
-const nativeSqliteAvailable = await import("better-sqlite3")
-  .then((module) => {
-    try {
-      const Database = module.default;
-      const probe = new Database(":memory:");
-      probe.close();
-      return true;
-    } catch {
-      return false;
-    }
-  })
-  .catch(() => false);
+const context: BotTeamPromptContext = {
+  teamName: "My chosen team",
+  isLead: false,
+  peers: [{ id: "user-bot-id", name: "quality+crew", displayName: "Quality Crew" }],
+};
 
-const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
-
-describeWithSqlite("default CoWork bot team", () => {
-  let tmpDir: string;
-  let previousUserDataDir: string | undefined;
-  let manager: import("../../database/schema").DatabaseManager;
-
-  beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-bot-team-"));
-    previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
-    process.env.COWORK_USER_DATA_DIR = tmpDir;
-    const { DatabaseManager } = await import("../../database/schema");
-    manager = new DatabaseManager();
+describe("configured bot team guidance", () => {
+  it("uses configured stable selectors and replies to the actual requester without inventing a lead", () => {
+    const prompt = buildBotTeamContextPrompt(context);
+    expect(prompt).toContain('bot="user-bot-id"');
+    expect(prompt).toContain('handle="quality+crew"');
+    expect(prompt).toContain("actual requesting teammate");
+    expect(prompt).toContain("[CORRELATED TEAM REPLY]");
+    expect(prompt).not.toContain("As the configured team lead");
+    expect(buildBotTeamContextPrompt({ ...context, isLead: true })).toContain(
+      "As the configured team lead",
+    );
   });
 
-  afterEach(() => {
-    manager?.close();
-    if (previousUserDataDir === undefined) delete process.env.COWORK_USER_DATA_DIR;
-    else process.env.COWORK_USER_DATA_DIR = previousUserDataDir;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+  it("keeps an empty configured team empty", () => {
+    expect(buildBotTeamContextPrompt({ ...context, peers: [] })).toContain("No other active bot");
   });
 
-  it("seeds a reusable roster and workspace-scoped persistent team idempotently", async () => {
-    const [
-      { WorkspaceStore: WorkspaceRepository },
-      { ensureDefaultBotTeam, DEFAULT_BOT_TEAM_NAME },
-    ] = await Promise.all([import("../../database/repositories"), import("../bot-team")]);
-    const workspace = new WorkspaceRepository(manager.getDatabase()).create(
-      "Bot Team Workspace",
-      tmpDir,
-      { read: true, write: true, delete: true, network: true, shell: false },
-    );
+  it.each([
+    "Ask Quality Crew for a review",
+    "Ask @quality+crew to inspect this",
+    "Ask user-bot-id for the result",
+    "Ask the Quality Crew for evidence",
+  ])("recognizes an actual configured selector: %s", (text) => {
+    expect(hasBotTeamDelegationRequest(text, context)).toBe(true);
+  });
 
-    const first = ensureDefaultBotTeam(manager.getDatabase(), workspace.id);
-    const second = ensureDefaultBotTeam(manager.getDatabase(), workspace.id);
-    expect(first?.team.name).toBe(DEFAULT_BOT_TEAM_NAME);
-    expect(first?.team.persistent).toBe(true);
-    expect(second?.team.id).toBe(first?.team.id);
-    expect(first?.roles.map((role) => role.name)).toEqual([
-      "atlas-your-chief-of-staff",
-      "forge",
-      "scribe",
-      "exec",
-      "chief-community-officer",
-      "product-engineer",
-    ]);
+  it.each([
+    "Ask qualityxcrew to inspect this",
+    "Ask quality+crew-extra for a review",
+    "Ask an unrelated bot to help",
+    "Describe the team design",
+  ])("does not invent peers or interpret a selector as a regular expression: %s", (text) => {
+    expect(hasBotTeamDelegationRequest(text, context)).toBe(false);
+  });
 
-    const members = manager
-      .getDatabase()
-      .prepare("SELECT COUNT(*) AS count FROM agent_team_members WHERE team_id = ?")
-      .get(first!.team.id) as { count: number };
-    expect(members.count).toBe(6);
-    expect(first?.roles[0].systemPrompt).toContain("send_agent_message");
-    expect(first?.roles.find((role) => role.name === "scribe")?.systemPrompt).toContain(
-      "requesting teammate",
-    );
-    expect(first?.roles.find((role) => role.name === "scribe")?.systemPrompt).toContain("task_id");
-    expect(first?.roles.find((role) => role.name === "scribe")?.systemPrompt).not.toContain(
-      "bot=atlas to return your result",
-    );
+  it("keeps explicit delegation language independent of bot names", () => {
+    expect(hasBotTeamDelegationRequest("Delegate this focused task")).toBe(true);
+    expect(hasBotTeamDelegationRequest("Use send_agent_message")).toBe(true);
+    expect(hasBotTeamDelegationRequest("Ask Quality Crew", undefined)).toBe(false);
   });
 });

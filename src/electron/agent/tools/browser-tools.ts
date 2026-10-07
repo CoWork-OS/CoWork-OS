@@ -1,3 +1,4 @@
+import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import * as os from "os";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -1725,6 +1726,47 @@ export class BrowserTools {
   }
 
   private async executeBrowserTool(toolName: string, input: Any): Promise<Any> {
+    const scopeFingerprint = (workspace: Workspace) =>
+      JSON.stringify({
+        id: workspace.id,
+        path: workspace.path,
+        permissions: workspace.permissions,
+      });
+    const admittedScope = scopeFingerprint(this.workspace);
+    const beforeEffect = async () => {
+      const checkScope = () => {
+        const effective =
+          typeof this.daemon.getEffectiveWorkspaceForTask === "function"
+            ? this.daemon.getEffectiveWorkspaceForTask(this.taskId)
+            : this.workspace;
+        if (
+          !effective ||
+          scopeFingerprint(effective) !== admittedScope ||
+          scopeFingerprint(this.workspace) !== admittedScope
+        ) {
+          throw new Error(
+            "Browser authority changed after tool admission; request approval again.",
+          );
+        }
+      };
+      checkScope();
+      if (typeof this.daemon.getDatabase === "function") {
+        await enforceResponsibilityToolPolicy(
+          this.daemon.getDatabase(),
+          this.taskId,
+          this.workspace.id,
+          this.workspace.path,
+          toolName,
+          input,
+        );
+      } else if (typeof this.daemon.getTaskById === "function") {
+        const task = await this.daemon.getTaskById(this.taskId);
+        if (task?.agentConfig?.responsibilityRun || task?.agentConfig?.automationRoutineId)
+          throw new Error("Responsibility policy storage is unavailable");
+      }
+      checkScope();
+    };
+    await beforeEffect();
     this.syncVisibleAccessPolicy(input);
     switch (toolName) {
       case "browser_attach": {
@@ -1762,8 +1804,16 @@ export class BrowserTools {
           timeout: 90000,
           debuggerUrl: validatedDebuggerUrl,
         });
+        await beforeEffect();
         await candidate.init();
-        await this.browserService.close();
+        try {
+          await beforeEffect();
+          await this.browserService.close();
+          await beforeEffect();
+        } catch (error) {
+          await candidate.close().catch(() => {});
+          throw error;
+        }
         this.browserService = candidate;
         this.browserState = {
           ...this.browserState,
@@ -1787,6 +1837,7 @@ export class BrowserTools {
         // backend from changing the error or bypassing the guardrail.
         const navigationUrl = await this.ensureVisibleNavigationAllowed(input?.url);
         if (await this.shouldUseVisibleWorkbenchForNavigation(input)) {
+          await beforeEffect();
           const visibleResult = await this.browserWorkbenchService.navigate({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
@@ -1825,6 +1876,7 @@ export class BrowserTools {
             let cloudSession: BrowserUseCloudSessionState | null = null;
             try {
               cloudSession = await this.ensureBrowserUseCloudConfigured(input);
+              await beforeEffect();
               const result = await this.browserService.navigate(url, input?.wait_until || "load");
               this.daemon.logEvent(this.taskId, "browser_action", {
                 action: "navigate",
@@ -1929,6 +1981,7 @@ export class BrowserTools {
                 ? null
                 : this.browserState.debuggerUrl,
           });
+          await beforeEffect();
           result = await this.browserService.navigate(input.url, input.wait_until || "load");
         } catch (error) {
           if (this.isProfileLaunchConflict(error)) {
@@ -2018,6 +2071,7 @@ export class BrowserTools {
               }
             }
           }
+          await beforeEffect();
           const result = await this.browserWorkbenchService.screenshot({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
@@ -2073,6 +2127,7 @@ export class BrowserTools {
           `screenshot-${Date.now()}.png`,
           "browser screenshot path",
         );
+        await beforeEffect();
         const result = await this.browserService.screenshot(output.path, full_page || false, {
           externalApprovalGranted: output.externalApprovalGranted,
         });
@@ -2155,6 +2210,7 @@ export class BrowserTools {
         if (!this.hasVisibleWorkbenchSession(input) && this.browserService.hasSession()) {
           const tabId = typeof input?.tab_id === "string" ? input.tab_id.trim() : "";
           if (!tabId) return { success: false, error: "tab_id is required" };
+          await beforeEffect();
           const result = await this.browserService.switchTab(tabId);
           this.daemon.logEvent(this.taskId, "browser_action", {
             action: "switch_tab",
@@ -2176,6 +2232,7 @@ export class BrowserTools {
         if (!this.hasVisibleWorkbenchSession(input) && this.browserService.hasSession()) {
           const tabId = typeof input?.tab_id === "string" ? input.tab_id.trim() : "";
           if (!tabId) return { success: false, error: "tab_id is required" };
+          await beforeEffect();
           const result = await this.browserService.closeTab(tabId);
           this.daemon.logEvent(this.taskId, "browser_action", {
             action: "close_tab",
@@ -2231,6 +2288,7 @@ export class BrowserTools {
       case "browser_click": {
         if (typeof input?.ref === "string" && input.ref.trim()) {
           if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+            await beforeEffect();
             const result = await this.browserWorkbenchService.clickRef(
               this.taskId,
               input.ref.trim(),
@@ -2255,6 +2313,7 @@ export class BrowserTools {
           return { success: false, error: "selector or ref is required" };
         }
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.click(
             this.taskId,
             input.selector,
@@ -2270,6 +2329,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.click(input.selector, this.getTimeoutMs(input));
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "click",
@@ -2282,6 +2342,7 @@ export class BrowserTools {
       case "browser_hover": {
         if (typeof input?.ref === "string" && input.ref.trim()) {
           if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+            await beforeEffect();
             const result = await this.browserWorkbenchService.hoverRef(
               this.taskId,
               input.ref.trim(),
@@ -2300,6 +2361,7 @@ export class BrowserTools {
           this.shouldPreferVisibleWorkbench(input) &&
           this.hasVisibleWorkbenchSession(input)
         ) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.hover(
             this.taskId,
             input.selector,
@@ -2320,6 +2382,7 @@ export class BrowserTools {
           return { success: false, error: "from_ref and to_ref are required" };
         }
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.dragRef(
             this.taskId,
             fromRef,
@@ -2337,6 +2400,7 @@ export class BrowserTools {
       case "browser_fill": {
         if (typeof input?.ref === "string" && input.ref.trim()) {
           if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+            await beforeEffect();
             const result = await this.browserWorkbenchService.fillRef(
               this.taskId,
               input.ref.trim(),
@@ -2362,6 +2426,7 @@ export class BrowserTools {
           return { success: false, error: "selector or ref is required" };
         }
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.fill(
             this.taskId,
             input.selector,
@@ -2378,6 +2443,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.fill(
           input.selector,
           input.value,
@@ -2394,6 +2460,7 @@ export class BrowserTools {
       case "browser_type": {
         if (typeof input?.ref === "string" && input.ref.trim()) {
           if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+            await beforeEffect();
             const result = await this.browserWorkbenchService.typeRef(
               this.taskId,
               input.ref.trim(),
@@ -2419,6 +2486,7 @@ export class BrowserTools {
           return { success: false, error: "selector or ref is required" };
         }
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.type(
             this.taskId,
             input.selector,
@@ -2435,6 +2503,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.type(
           input.selector,
           input.text,
@@ -2451,6 +2520,7 @@ export class BrowserTools {
 
       case "browser_press": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.press(
             this.taskId,
             input.key,
@@ -2466,6 +2536,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.press(input.key);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "press",
@@ -2504,6 +2575,7 @@ export class BrowserTools {
 
       case "browser_scroll": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.scroll(
             this.taskId,
             input.direction,
@@ -2519,6 +2591,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.scroll(input.direction, input.amount);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "scroll",
@@ -2529,6 +2602,7 @@ export class BrowserTools {
 
       case "browser_select": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.select(
             this.taskId,
             input.selector,
@@ -2545,6 +2619,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.select(input.selector, input.value);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "select",
@@ -2589,6 +2664,7 @@ export class BrowserTools {
         const filePath = await this.resolveWorkspaceReadablePath(input?.file_path);
         await fs.access(filePath);
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.uploadFile({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
@@ -2609,6 +2685,7 @@ export class BrowserTools {
               "(browser_get_content lists inputs with selectors).",
           };
         }
+        await beforeEffect();
         const result = await this.browserService.uploadFile(
           selector,
           filePath,
@@ -2624,6 +2701,7 @@ export class BrowserTools {
 
       case "browser_handle_dialog": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.handleDialog({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
@@ -2721,6 +2799,7 @@ export class BrowserTools {
 
       case "browser_emulate": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.emulate({
             taskId: this.taskId,
             sessionId: this.getSessionId(input),
@@ -2750,6 +2829,7 @@ export class BrowserTools {
       }
 
       case "browser_trace_start": {
+        await beforeEffect();
         const result = await this.browserWorkbenchService.traceStart(
           this.taskId,
           this.getSessionId(input),
@@ -2758,6 +2838,7 @@ export class BrowserTools {
       }
 
       case "browser_trace_stop": {
+        await beforeEffect();
         const result = await this.browserWorkbenchService.traceStop(
           this.taskId,
           this.getSessionId(input),
@@ -2773,6 +2854,7 @@ export class BrowserTools {
           );
         }
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.evaluate(
             this.taskId,
             input.script,
@@ -2787,6 +2869,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.evaluate(input.script);
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "evaluate",
@@ -2797,6 +2880,7 @@ export class BrowserTools {
 
       case "browser_back": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.goBack(
             this.taskId,
             this.getSessionId(input),
@@ -2810,6 +2894,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.goBack();
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "back",
@@ -2820,6 +2905,7 @@ export class BrowserTools {
 
       case "browser_forward": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.goForward(
             this.taskId,
             this.getSessionId(input),
@@ -2833,6 +2919,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.goForward();
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "forward",
@@ -2843,6 +2930,7 @@ export class BrowserTools {
 
       case "browser_reload": {
         if (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)) {
+          await beforeEffect();
           const result = await this.browserWorkbenchService.reload(
             this.taskId,
             this.getSessionId(input),
@@ -2856,6 +2944,7 @@ export class BrowserTools {
             return result;
           }
         }
+        await beforeEffect();
         const result = await this.browserService.reload();
         this.daemon.logEvent(this.taskId, "browser_action", {
           action: "reload",
@@ -2870,6 +2959,7 @@ export class BrowserTools {
           `page-${Date.now()}.pdf`,
           "browser PDF path",
         );
+        await beforeEffect();
         const result = await this.browserService.savePdf(output.path, {
           externalApprovalGranted: output.externalApprovalGranted,
         });
@@ -2915,6 +3005,7 @@ export class BrowserTools {
             const actType = String(act.type || "").toLowerCase();
             const actRef = typeof act.ref === "string" ? act.ref.trim() : "";
             try {
+              await beforeEffect();
               let result: Any = null;
               if (actType === "click") {
                 result = actRef
@@ -2957,6 +3048,7 @@ export class BrowserTools {
                       this.getSessionId(input),
                     );
               } else if (actType === "press") {
+                await beforeEffect();
                 result = await this.browserWorkbenchService.press(
                   this.taskId,
                   String(act.key || ""),
@@ -2977,6 +3069,7 @@ export class BrowserTools {
                   act.direction === "bottom"
                     ? act.direction
                     : "down";
+                await beforeEffect();
                 result = await this.browserWorkbenchService.scroll(
                   this.taskId,
                   direction,
@@ -3042,17 +3135,20 @@ export class BrowserTools {
           try {
             let r: Any;
             if (actType === "click") {
+              await beforeEffect();
               r = await this.browserService.click(
                 String(act.selector || ""),
                 (act.timeout_ms as number) || timeoutMs,
               );
             } else if (actType === "fill") {
+              await beforeEffect();
               r = await this.browserService.fill(
                 String(act.selector || ""),
                 String(act.value ?? ""),
                 (act.timeout_ms as number) || timeoutMs,
               );
             } else if (actType === "type") {
+              await beforeEffect();
               r = await this.browserService.type(
                 String(act.selector || ""),
                 String(act.text ?? ""),
@@ -3060,6 +3156,7 @@ export class BrowserTools {
                 (act.timeout_ms as number) || timeoutMs,
               );
             } else if (actType === "press") {
+              await beforeEffect();
               r = await this.browserService.press(String(act.key || ""));
             } else if (actType === "wait") {
               r = await this.browserService.waitForSelector(
@@ -3074,6 +3171,7 @@ export class BrowserTools {
                 act.direction === "bottom"
                   ? act.direction
                   : "down";
+              await beforeEffect();
               r = await this.browserService.scroll(
                 direction,
                 typeof act.amount === "number" ? act.amount : undefined,

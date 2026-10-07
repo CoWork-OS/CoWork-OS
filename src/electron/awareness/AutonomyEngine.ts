@@ -21,7 +21,7 @@ import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { UserProfileService } from "../memory/UserProfileService";
 import {
   getBackgroundDispatchBudget,
-  type BackgroundDispatchBudget,
+  type BackgroundDispatchBudgetAuthority,
 } from "../agents/BackgroundDispatchBudget";
 import { commitmentEntityKey } from "../agent/SuggestionSink";
 
@@ -65,7 +65,12 @@ export interface AutonomySuggestionProposal {
 interface AutonomyEngineDeps {
   getDefaultWorkspaceId?: () => string | undefined;
   listWorkspaceIds?: () => string[];
-  createTask?: (workspaceId: string, title: string, prompt: string) => Promise<{ id?: string }>;
+  createTask?: (
+    workspaceId: string,
+    title: string,
+    prompt: string,
+    options?: { backgroundDispatchTicket?: string },
+  ) => Promise<{ id?: string }>;
   hasActiveManualTask?: (workspaceId: string) => boolean;
   recordActivity?: (params: {
     workspaceId: string;
@@ -76,7 +81,7 @@ interface AutonomyEngineDeps {
   /** Route suggested decisions into the shared SuggestionSink. */
   proposeSuggestion?: (proposal: AutonomySuggestionProposal) => Promise<unknown>;
   /** Shared background dispatch budget; defaults to the process-wide one. */
-  dispatchBudget?: BackgroundDispatchBudget;
+  dispatchBudget?: BackgroundDispatchBudgetAuthority;
   log?: (...args: unknown[]) => void;
 }
 
@@ -155,6 +160,12 @@ export class AutonomyEngine {
   private started = false;
   /** Unsaved changes; the encrypted state is written only when this is set. */
   private dirty = false;
+  private mutationVersion = 0;
+  private configIntent: { kind: "explicit" | "migration" } | null = null;
+  private decisionEdits = new Map<
+    string,
+    { workspaceId?: string; status: AutonomyDecision["status"]; updatedAt: number }
+  >();
   private evaluationInFlight = new Set<string>();
   private lastEvaluatedAt = new Map<string, number>();
 
@@ -183,12 +194,12 @@ export class AutonomyEngine {
     if (this.started) return;
     this.started = true;
     this.ensureLoaded();
-    this.saveIfDirty();
+    await this.saveIfDirtyAsync();
   }
 
   async stop(): Promise<void> {
     this.started = false;
-    this.saveIfDirty();
+    await this.saveIfDirtyAsync();
   }
 
   /**
@@ -224,6 +235,7 @@ export class AutonomyEngine {
     };
     // An explicit save is the user's choice (including opting in to execute_local).
     this.state.policyVersion = AUTONOMY_POLICY_VERSION;
+    this.configIntent = { kind: "explicit" };
     this.markDirty();
     this.saveIfDirty();
     return this.getConfig();
@@ -287,6 +299,11 @@ export class AutonomyEngine {
     ) {
       decision.status = patch.status;
       decision.updatedAt = Date.now();
+      this.decisionEdits.set(id, {
+        workspaceId: decision.workspaceId,
+        status: patch.status,
+        updatedAt: decision.updatedAt,
+      });
       if (patch.status === "done" || patch.status === "dismissed") {
         this.state.outcomes.unshift({
           id: randomUUID(),
@@ -305,7 +322,11 @@ export class AutonomyEngine {
       this.markDirty();
       this.saveIfDirty();
     }
-    return { ...decision, evidenceRefs: [...decision.evidenceRefs] };
+    const saved = this.state.decisions.find((entry) => entry.id === id);
+    if (this.decisionEdits.has(id)) return null;
+    return saved && saved.workspaceId === decision.workspaceId && saved.status === decision.status
+      ? { ...saved, evidenceRefs: [...saved.evidenceRefs] }
+      : null;
   }
 
   private ensureLoaded(): void {
@@ -344,7 +365,8 @@ export class AutonomyEngine {
           }
         }
         next.policyVersion = AUTONOMY_POLICY_VERSION;
-        this.dirty = true;
+        this.configIntent = { kind: "migration" };
+        this.markDirty();
       }
       this.state = next;
     } catch {
@@ -354,19 +376,162 @@ export class AutonomyEngine {
 
   private markDirty(): void {
     this.dirty = true;
+    this.mutationVersion++;
   }
 
-  /** Full encrypted SecureSettings write, only when something actually changed. */
-  private saveIfDirty(): void {
-    if (!this.dirty) return;
-    if (!SecureSettingsRepository.isInitialized()) return;
-    try {
-      // save() returns false when the write was refused; keep the state dirty to retry.
-      if (SecureSettingsRepository.getInstance().save(STORAGE_KEY, this.state)) {
-        this.dirty = false;
+  private prepareStateSave() {
+    const snapshot = structuredClone(this.state);
+    const version = this.mutationVersion;
+    const configIntent = this.configIntent;
+    const edits = new Map(this.decisionEdits);
+    const mutate = (current: PersistedAutonomyState | undefined): PersistedAutonomyState => {
+      const writeConfig =
+        configIntent?.kind === "explicit" ||
+        (configIntent?.kind === "migration" &&
+          current &&
+          (current.policyVersion ?? 1) < AUTONOMY_POLICY_VERSION);
+      const config = writeConfig
+        ? {
+            ...current?.config,
+            ...snapshot.config,
+            actionPolicies: {
+              ...current?.config?.actionPolicies,
+              ...snapshot.config.actionPolicies,
+            },
+          }
+        : current?.config || structuredClone(DEFAULT_AUTONOMY_CONFIG);
+      const decisions = new Map(
+        (current?.decisions || []).map((entry) => [entry.id, structuredClone(entry)]),
+      );
+      const blockedEdits = new Set<string>();
+      const intentKey = (entry: AutonomyDecision) =>
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(entry)
+              .filter(([key]) => key !== "status" && key !== "updatedAt")
+              .sort(([a], [b]) => a.localeCompare(b)),
+          ),
+        );
+      for (const incoming of snapshot.decisions) {
+        const existing = decisions.get(incoming.id);
+        const edit = edits.get(incoming.id);
+        if (edit) {
+          const revision = existing?.statusRevision ?? 0;
+          if (
+            existing &&
+            existing.workspaceId === edit.workspaceId &&
+            Number.isSafeInteger(revision) &&
+            revision >= 0 &&
+            revision < Number.MAX_SAFE_INTEGER
+          )
+            decisions.set(incoming.id, {
+              ...existing,
+              status: edit.status,
+              updatedAt: edit.updatedAt,
+              statusRevision: revision + 1,
+            });
+          else blockedEdits.add(incoming.id);
+          continue;
+        }
+        if (!existing) {
+          const repeated = [...decisions.values()].some(
+            (entry) =>
+              entry.workspaceId === incoming.workspaceId &&
+              Boolean(incoming.fingerprint) &&
+              entry.fingerprint === incoming.fingerprint &&
+              entry.status !== "done" &&
+              entry.status !== "dismissed" &&
+              (entry.cooldownUntil || incoming.createdAt) >= incoming.createdAt,
+          );
+          if (!repeated) decisions.set(incoming.id, incoming);
+          continue;
+        }
+        if (
+          existing.status === "done" ||
+          existing.status === "dismissed" ||
+          incoming.updatedAt < existing.updatedAt ||
+          intentKey(existing) !== intentKey(incoming)
+        )
+          continue;
+        const executed =
+          incoming.status === "executed" &&
+          snapshot.actions.some(
+            (action) => action.decisionId === incoming.id && action.status === "success",
+          );
+        if (existing.status === "pending" && (executed || incoming.status === "suggested"))
+          decisions.set(incoming.id, {
+            ...existing,
+            status: incoming.status,
+            updatedAt: incoming.updatedAt,
+          });
       }
+      const mergeRows = <T extends { id: string; createdAt: number }>(
+        saved: T[],
+        local: T[],
+        maximum: number,
+      ): T[] =>
+        [...new Map([...local, ...saved].map((entry) => [entry.id, entry])).values()]
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .slice(0, maximum);
+      const worldModels = { ...current?.worldModels };
+      for (const [workspaceId, model] of Object.entries(snapshot.worldModels)) {
+        if (!worldModels[workspaceId] || model.generatedAt >= worldModels[workspaceId].generatedAt)
+          worldModels[workspaceId] = model;
+      }
+      return {
+        ...current,
+        config,
+        worldModels,
+        decisions: [...decisions.values()]
+          .filter((entry) => Date.now() - entry.createdAt <= 7 * 24 * 60 * 60 * 1000)
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, 120),
+        actions: mergeRows(current?.actions || [], snapshot.actions, MAX_ACTIONS),
+        outcomes: mergeRows(
+          current?.outcomes || [],
+          snapshot.outcomes.filter(
+            (entry) => !entry.decisionId || !blockedEdits.has(entry.decisionId),
+          ),
+          MAX_OUTCOMES,
+        ),
+        policyVersion: Math.max(
+          current?.policyVersion ?? 1,
+          snapshot.policyVersion ?? AUTONOMY_POLICY_VERSION,
+        ),
+      };
+    };
+    const finish = (saved: PersistedAutonomyState | undefined) => {
+      if (!saved) return;
+      if (this.configIntent === configIntent) this.configIntent = null;
+      for (const [id, edit] of edits)
+        if (this.decisionEdits.get(id) === edit) this.decisionEdits.delete(id);
+      if (this.mutationVersion !== version) return;
+      this.state = saved;
+      this.dirty = false;
+    };
+    return { mutate, finish };
+  }
+
+  /** Explicit edits retain their synchronous API; automatic saves use the worker path. */
+  private saveIfDirty(): void {
+    if (!this.dirty || !SecureSettingsRepository.isInitialized()) return;
+    try {
+      const save = this.prepareStateSave();
+      save.finish(SecureSettingsRepository.getInstance().update(STORAGE_KEY, save.mutate).value);
     } catch {
-      // best-effort; retried on the next change
+      // Keep the mutation and explicit intents for retry.
+    }
+  }
+
+  private async saveIfDirtyAsync(): Promise<void> {
+    if (!this.dirty || !SecureSettingsRepository.isInitialized()) return;
+    try {
+      const save = this.prepareStateSave();
+      save.finish(
+        (await SecureSettingsRepository.getInstance().updateAsync(STORAGE_KEY, save.mutate)).value,
+      );
+    } catch {
+      // Keep the mutation and explicit intents for retry.
     }
   }
 
@@ -387,7 +552,7 @@ export class AutonomyEngine {
         await this.proposeSuggestedDecisions(workspaceId, fresh);
       }
       this.pruneDecisions();
-      this.saveIfDirty();
+      await this.saveIfDirtyAsync();
     } catch (error) {
       this.deps.log?.("[AutonomyEngine] evaluation failed", workspaceId, error);
     } finally {
@@ -772,6 +937,136 @@ export class AutonomyEngine {
     return fresh;
   }
 
+  private adoptSavedDispatchState(saved: PersistedAutonomyState): void {
+    this.state.config = {
+      ...DEFAULT_AUTONOMY_CONFIG,
+      ...saved.config,
+      enabled: saved.config?.enabled === true,
+      actionPolicies: {
+        ...DEFAULT_AUTONOMY_CONFIG.actionPolicies,
+        ...saved.config?.actionPolicies,
+      },
+    };
+    for (const entry of saved.decisions || []) {
+      const local = this.state.decisions.find((decision) => decision.id === entry.id);
+      if (!local) this.state.decisions.push(structuredClone(entry));
+      else if (
+        entry.updatedAt > local.updatedAt ||
+        entry.status === "dismissed" ||
+        entry.status === "done"
+      )
+        Object.assign(local, structuredClone(entry));
+    }
+    const actionIds = new Set(this.state.actions.map((entry) => entry.id));
+    this.state.actions.push(...(saved.actions || []).filter((entry) => !actionIds.has(entry.id)));
+    this.state.actions = this.state.actions
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, MAX_ACTIONS);
+    const outcomeIds = new Set(this.state.outcomes.map((entry) => entry.id));
+    this.state.outcomes.push(
+      ...(saved.outcomes || []).filter((entry) => !outcomeIds.has(entry.id)),
+    );
+    this.state.outcomes = this.state.outcomes
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, MAX_OUTCOMES);
+    for (const [workspaceId, model] of Object.entries(saved.worldModels || {})) {
+      const local = this.state.worldModels[workspaceId];
+      if (!local || model.generatedAt > local.generatedAt)
+        this.state.worldModels[workspaceId] = structuredClone(model);
+    }
+  }
+
+  /** Persist the occurrence before task admission, using the current saved policy. */
+  private async checkpointDispatchDecision(decision: AutonomyDecision): Promise<boolean> {
+    if (!SecureSettingsRepository.isInitialized()) return false;
+    const candidate = structuredClone(decision);
+    let canonical: AutonomyDecision | undefined;
+    let admitted = false;
+    try {
+      const result =
+        await SecureSettingsRepository.getInstance().updateAsync<PersistedAutonomyState>(
+          STORAGE_KEY,
+          (current) => {
+            canonical = undefined;
+            admitted = false;
+            if (!current || (current.policyVersion ?? 1) < AUTONOMY_POLICY_VERSION)
+              return undefined;
+            const decisions = Array.isArray(current.decisions) ? current.decisions : [];
+            const existing =
+              decisions.find((entry) => entry.id === candidate.id) ||
+              decisions.find(
+                (entry) =>
+                  entry.workspaceId === candidate.workspaceId &&
+                  Boolean(candidate.fingerprint) &&
+                  entry.fingerprint === candidate.fingerprint &&
+                  entry.status !== "dismissed" &&
+                  entry.status !== "done" &&
+                  (entry.cooldownUntil || candidate.createdAt) >= candidate.createdAt,
+              );
+            canonical = existing || candidate;
+            if (canonical.workspaceId !== candidate.workspaceId) {
+              canonical = undefined;
+              return undefined;
+            }
+            if (
+              current.config?.enabled !== true ||
+              current.config.actionPolicies?.[canonical.actionType]?.level !== "execute_local" ||
+              canonical.status !== "pending"
+            )
+              return undefined;
+            admitted = true;
+            if (existing) return undefined;
+            return { ...current, decisions: [candidate, ...decisions].slice(0, 120) };
+          },
+        );
+      if (!result.value || result.revision === null) return false;
+      if ((result.value.policyVersion ?? 1) < AUTONOMY_POLICY_VERSION) return false;
+      this.adoptSavedDispatchState(result.value);
+      if (!canonical) return false;
+      Object.assign(decision, structuredClone(canonical));
+      this.state.decisions = this.state.decisions.filter(
+        (entry) => entry === decision || entry.id !== decision.id,
+      );
+      return (
+        admitted &&
+        result.value.decisions.some((entry) => entry.id === decision.id) &&
+        this.state.config.enabled &&
+        decision.status === "pending" &&
+        this.canExecuteLocally(decision.actionType)
+      );
+    } catch (error) {
+      this.deps.log?.(
+        "Autonomy dispatch checkpoint failed; work was not admitted",
+        decision.id,
+        error,
+      );
+      return false;
+    }
+  }
+
+  private dispatchDecisionCurrent(decision: AutonomyDecision): boolean {
+    try {
+      if (!SecureSettingsRepository.isInitialized()) return false;
+      const current =
+        SecureSettingsRepository.getInstance().load<PersistedAutonomyState>(STORAGE_KEY);
+      if (!current || (current.policyVersion ?? 1) < AUTONOMY_POLICY_VERSION) return false;
+      const saved = current.decisions?.find((entry) => entry.id === decision.id);
+      const unchanged = Boolean(saved) && JSON.stringify(saved) === JSON.stringify(decision);
+      this.adoptSavedDispatchState(current);
+      if (saved?.workspaceId === decision.workspaceId)
+        Object.assign(decision, structuredClone(saved));
+      return (
+        unchanged &&
+        this.state.config.enabled &&
+        decision.status === "pending" &&
+        this.canExecuteLocally(decision.actionType)
+      );
+    } catch (error) {
+      this.deps.log?.("Autonomy dispatch authority could not be revalidated", decision.id, error);
+      return false;
+    }
+  }
+
   private async executePendingDecisions(workspaceId: string): Promise<void> {
     const pending = this.state.decisions
       .filter((decision) => decision.workspaceId === workspaceId && decision.status === "pending")
@@ -794,34 +1089,51 @@ export class AutonomyEngine {
 
     const budget = this.deps.dispatchBudget || getBackgroundDispatchBudget();
     for (const decision of pending) {
+      if (decision.status !== "pending") continue;
       this.markDirty();
       if (!this.canExecuteLocally(decision.actionType)) {
         decision.status = "suggested";
         decision.updatedAt = Date.now();
         continue;
       }
+      if (!this.deps.createTask) {
+        decision.status = "suggested";
+        decision.updatedAt = Date.now();
+        continue;
+      }
+      if (!(await this.checkpointDispatchDecision(decision))) continue;
       // Task creation shares the background dispatch budget with Heartbeat, Workflow
       // Intelligence and the Strategic Planner; over budget, the decision stays a suggestion.
       const grant = decision.workspaceId
-        ? budget.tryConsume({
+        ? await budget.tryConsume({
             workspaceId: decision.workspaceId,
             source: "autonomy",
+            occurrenceKey: `autonomy:decision:${decision.id}`,
             entityKey: decision.entityKey || decision.fingerprint,
           })
         : undefined;
       if (grant && !grant.allowed) {
         decision.status = "suggested";
         decision.updatedAt = Date.now();
+        this.markDirty();
         this.deps.log?.("Autonomy task creation deferred by the shared dispatch budget", {
           decisionId: decision.id,
           reason: grant.reason,
         });
         continue;
       }
-      const action = await this.executeDecision(decision);
-      if (action.status !== "success") budget.refund(grant?.ticket);
+      if (!this.dispatchDecisionCurrent(decision)) {
+        await budget.refund(grant?.ticket);
+        continue;
+      }
+      const action = await this.executeDecision(
+        decision,
+        grant?.durable ? grant.ticket : undefined,
+      );
+      if (action.status !== "success") await budget.refund(grant?.ticket);
       this.state.actions.unshift(action);
       this.state.actions = this.state.actions.slice(0, MAX_ACTIONS);
+      this.markDirty();
     }
   }
 
@@ -830,7 +1142,10 @@ export class AutonomyEngine {
     return { routineId: decision.routineId };
   }
 
-  private async executeDecision(decision: AutonomyDecision): Promise<AutonomyAction> {
+  private async executeDecision(
+    decision: AutonomyDecision,
+    backgroundDispatchTicket?: string,
+  ): Promise<AutonomyAction> {
     const createdAt = Date.now();
     const metadata = this.buildActionMetadata(decision);
     if (!decision.workspaceId) {
@@ -849,11 +1164,14 @@ export class AutonomyEngine {
     }
 
     try {
-      await this.deps.createTask?.(
+      if (!this.deps.createTask) throw new Error("Autonomy task execution is unavailable");
+      const task = await this.deps.createTask(
         decision.workspaceId,
         decision.suggestedTaskTitle || decision.title,
         decision.suggestedPrompt || decision.description,
+        ...(backgroundDispatchTicket ? [{ backgroundDispatchTicket }] : []),
       );
+      if (!task?.id?.trim()) throw new Error("Autonomy task executor returned no task identity");
       decision.status = "executed";
       decision.updatedAt = createdAt;
       this.deps.recordActivity?.({

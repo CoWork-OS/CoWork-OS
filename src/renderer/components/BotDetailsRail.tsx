@@ -1,8 +1,24 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Bell, Check, Copy, MessagesSquare, PanelRightClose, Settings2 } from "lucide-react";
-import { BotGlyph } from "./BotGlyph";
+import {
+  Bell,
+  Check,
+  ClipboardList,
+  Copy,
+  MessagesSquare,
+  PanelRightClose,
+  Settings2,
+} from "lucide-react";
+import { BotWorkDialog, type BotWorkDialogTab } from "./BotWorkDialog";
+import { BOT_NOTIFICATION_POLICY_UPDATED_EVENT } from "./BotNotificationPanel";
+import { hasHostMethods } from "../host/browser-capabilities";
+import { BotMascot } from "./bot-mascot/BotMascot";
+import {
+  mascotExpressionForConversation,
+  mascotExpressionForTaskStatus,
+} from "./bot-mascot/mascot-expressions";
+import { resolveBotMascot } from "../../shared/bot-mascots";
 import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
-import type { BotNotificationPolicy, Task, TaskStatus } from "../../shared/types";
+import type { BotNotificationPolicy, BotWorkView, Task, TaskStatus } from "../../shared/types";
 import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 import type { AgentRoleData } from "../../electron/preload";
 import "./BotDetailsRail.css";
@@ -22,6 +38,8 @@ export interface BotDetailsRailProps {
   onEdit?: () => void;
   onOpenHistory?: () => void;
   onClose?: () => void;
+  /** Opens a task from the bot's work view. */
+  onSelectTask?: (taskId: string | null) => void;
 }
 
 /**
@@ -102,6 +120,7 @@ export function BotDetailsRail({
   onEdit,
   onOpenHistory,
   onClose,
+  onSelectTask,
 }: BotDetailsRailProps) {
   const [role, setRole] = useState<AgentRoleData | null>(null);
   const [policy, setPolicy] = useState<BotNotificationPolicy | null>(null);
@@ -110,6 +129,9 @@ export function BotDetailsRail({
   const [copied, setCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workCounts, setWorkCounts] = useState<Record<BotWorkView, number> | null>(null);
+  const [workTab, setWorkTab] = useState<BotWorkDialogTab | null>(null);
+  const [workToken, setWorkToken] = useState(0);
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roleId = task.assignedAgentRoleId || "";
   const botName = role?.displayName || task.assignedAgentRoleId || "Bot";
@@ -121,6 +143,10 @@ export function BotDetailsRail({
   const conversationStatusTone = conversationProjection
     ? getBotStatusTone(conversationProjection.state)
     : getBotStatusTone(task.status);
+  const mascot = resolveBotMascot(role?.icon);
+  const mascotExpression = conversationProjection
+    ? mascotExpressionForConversation(conversationProjection.state)
+    : mascotExpressionForTaskStatus(task.status);
   // Only offer the expand affordance for descriptions long enough to be clamped.
   const descriptionIsLong = useMemo(() => description.length > 180, [description]);
 
@@ -164,6 +190,37 @@ export function BotDetailsRail({
     setDescriptionExpanded(false);
   }, [roleId]);
 
+  // The bot's work at a glance; the full view opens in the work dialog.
+  const workAvailable = Boolean(onSelectTask && task.workspaceId && hasHostMethods("listBotWork"));
+  useEffect(() => {
+    if (!workAvailable || !roleId) return;
+    let cancelled = false;
+    void window.electronAPI
+      .listBotWork({
+        workspaceId: task.workspaceId,
+        agentRoleId: roleId,
+        view: "needs_you",
+        limit: 1,
+      })
+      .then((page) => {
+        if (!cancelled) setWorkCounts(page.counts);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [workAvailable, roleId, task.workspaceId, task.status, workToken]);
+
+  // The Setup tab edits the same toggles; follow its changes.
+  useEffect(() => {
+    const onUpdated = (event: Event) => {
+      const updated = (event as CustomEvent<BotNotificationPolicy>).detail;
+      if (updated?.agentRoleId === roleId) setPolicy(updated);
+    };
+    window.addEventListener(BOT_NOTIFICATION_POLICY_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(BOT_NOTIFICATION_POLICY_UPDATED_EVENT, onUpdated);
+  }, [roleId]);
+
   useEffect(() => {
     return () => {
       if (copyResetRef.current) clearTimeout(copyResetRef.current);
@@ -182,7 +239,7 @@ export function BotDetailsRail({
       });
       setPolicy(updated);
       window.dispatchEvent(
-        new CustomEvent("cowork:bot-notification-policy-updated", { detail: updated }),
+        new CustomEvent(BOT_NOTIFICATION_POLICY_UPDATED_EVENT, { detail: updated }),
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save notification settings.");
@@ -207,12 +264,12 @@ export function BotDetailsRail({
     <aside className="bot-details-rail" aria-label="Bot details">
       <header className="bot-details-rail-header">
         <span
-          className="bot-details-rail-icon"
+          className="bot-details-rail-icon bot-details-rail-icon-mascot"
           /* Role colours are data, so they have to reach CSS as a variable. */
           style={{ "--bot-role-color": role?.color || DEFAULT_BOT_COLOR } as CSSProperties}
           aria-hidden="true"
         >
-          <BotGlyph size={17} weight="fill" />
+          <BotMascot mascot={mascot} size={34} expression={mascotExpression} />
         </span>
         <div className="bot-details-rail-heading">
           <span className="bot-details-eyebrow">Bot</span>
@@ -280,6 +337,41 @@ export function BotDetailsRail({
         </div>
       ) : null}
 
+      {workAvailable && roleId ? (
+        <section className="bot-details-section">
+          <h3 className="bot-details-section-heading">
+            <ClipboardList size={13} />
+            <span>Work</span>
+          </h3>
+          <div className="bot-details-work">
+            {(
+              [
+                ["needs_you", "Needs you"],
+                ["working", "Working"],
+                ["scheduled", "Scheduled"],
+              ] as const
+            ).map(([view, label]) => (
+              <button
+                key={view}
+                type="button"
+                className={`bot-details-work-count${view === "needs_you" && (workCounts?.needs_you ?? 0) > 0 ? " attention" : ""}`}
+                onClick={() => setWorkTab(view)}
+              >
+                <strong>{workCounts ? workCounts[view] : "–"}</strong>
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="bot-details-link"
+            onClick={() => setWorkTab("setup")}
+          >
+            Responsibilities and setup
+          </button>
+        </section>
+      ) : null}
+
       <section className="bot-details-section">
         <h3 className="bot-details-section-heading">
           <MessagesSquare size={13} />
@@ -340,6 +432,21 @@ export function BotDetailsRail({
         <div className="bot-details-error" role="alert">
           {error}
         </div>
+      ) : null}
+      {workTab && onSelectTask && roleId ? (
+        <BotWorkDialog
+          key={`${task.workspaceId}:${roleId}`}
+          workspaceId={task.workspaceId}
+          botId={roleId}
+          botName={botName}
+          botIcon={role?.icon}
+          initialTab={workTab}
+          onClose={() => {
+            setWorkTab(null);
+            setWorkToken((value) => value + 1);
+          }}
+          onSelectTask={onSelectTask}
+        />
       ) : null}
     </aside>
   );

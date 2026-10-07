@@ -1,13 +1,25 @@
 import { createHash } from "crypto";
 import type {
+  ApprovalResponseAction,
+  ApprovalResponseStatus,
   ApprovalRequest,
   InputRequest,
   InputRequestAnswer,
   InputRequestResponse,
+  SessionActionAttribution,
   Task,
   Workspace,
 } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
+import {
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+  type InlineApprovalDraftReview,
+  type ResponsibilityActionReview,
+} from "../../shared/approval-draft-presentation";
+import {
+  approvalRequestRevisionHash,
+  approvalRevisionMatches,
+} from "../../electron/agent/approval-revision";
 import type { WebRequestContext, WebRpcMethod } from "../web/WebApplication";
 import { WebApplicationError } from "../web/WebApplication";
 
@@ -22,7 +34,13 @@ const SECRET_KEY_RE =
 const PROMPT_KEY_RE = /^(prompt|systemPrompt)$/i;
 
 export interface BrowserApprovalCommands {
-  respondToApproval(approvalId: string, approved: boolean): Promise<string>;
+  respondToApproval(
+    approvalId: string,
+    approved: boolean,
+    action: ApprovalResponseAction | undefined,
+    attribution: SessionActionAttribution | undefined,
+    expectedRevisionHash: string,
+  ): Promise<ApprovalResponseStatus>;
   respondToInputRequest(
     response: InputRequestResponse,
   ): Promise<{ status: string; requestId: string }>;
@@ -35,6 +53,10 @@ export interface BrowserApprovalSources {
   getApproval(approvalId: string): Promise<ApprovalRequest | null>;
   listPendingInputRequests(): Promise<InputRequest[]>;
   getInputRequest(requestId: string): Promise<InputRequest | null>;
+  getInputRequestDraftReview?(
+    requestId: string,
+    taskId: string,
+  ): Promise<InlineApprovalDraftReview | undefined>;
   commands: BrowserApprovalCommands;
 }
 
@@ -50,6 +72,7 @@ type PublicApproval = {
   status: "pending";
   requestedAt: number;
   expectedVersion: number;
+  revisionHash: string;
 };
 
 type PublicInputRequest = {
@@ -59,6 +82,10 @@ type PublicInputRequest = {
   taskTitle: string;
   taskStatus: string;
   questions: InputRequest["questions"];
+  responsibilityActionReview?:
+    | { required: true; state: "invalid" }
+    | { required: true; state: "valid"; review: ResponsibilityActionReview };
+  draftReview?: Pick<InlineApprovalDraftReview, "draft" | "previews">;
   status: "pending";
   requestedAt: number;
   expectedVersion: number;
@@ -76,6 +103,7 @@ interface ApprovalResponseParams {
   workspaceId: string;
   taskId: string;
   expectedVersion: number;
+  expectedRevisionHash: string;
   approved: boolean;
 }
 
@@ -136,9 +164,13 @@ export function createBrowserApprovalMethods(
         const scopedTaskIds = new Set(taskById.keys());
         const rows = pending
           .filter((request) => request.status === "pending" && scopedTaskIds.has(request.taskId))
-          .sort(comparePendingRows)
-          .map((request) => toPublicInputRequest(request, taskById.get(request.taskId)!));
-        return pageRows(rows, params, "inputRequests");
+          .sort(comparePendingRows);
+        const publicRows = await Promise.all(
+          rows.map((request) =>
+            toPublicInputRequest(request, taskById.get(request.taskId)!, sources),
+          ),
+        );
+        return pageRows(publicRows, params, "inputRequests");
       },
     },
     "approval.get": {
@@ -150,10 +182,16 @@ export function createBrowserApprovalMethods(
           workspaceId: string;
           taskId: string;
           expectedVersion: number;
+          expectedRevisionHash: string;
         };
         await assertTaskScope(sources, params.workspaceId, params.taskId);
         const approval = await sources.getApproval(params.approvalId);
-        assertApprovalScope(approval, params.taskId, params.expectedVersion);
+        assertApprovalScope(
+          approval,
+          params.taskId,
+          params.expectedVersion,
+          params.expectedRevisionHash,
+        );
         return { approval: publicApprovalOutcome(approval!) };
       },
     },
@@ -170,7 +208,12 @@ export function createBrowserApprovalMethods(
         await assertTaskScope(sources, params.workspaceId, params.taskId);
         const request = await sources.getInputRequest(params.requestId);
         assertInputRequestScope(request, params.taskId, params.expectedVersion);
-        return { inputRequest: publicInputOutcome(request!) };
+        return {
+          inputRequest: {
+            ...publicInputOutcome(request!),
+            ...(await publicInputReviewFields(sources, request!)),
+          },
+        };
       },
     },
     "approval.respond": {
@@ -179,6 +222,17 @@ export function createBrowserApprovalMethods(
       validateParams: parseApprovalResponse,
       handler: async (context, rawParams) => {
         const params = rawParams as ApprovalResponseParams;
+        // A receipt key must never turn a stale displayed review into a success.
+        await assertTaskScope(sources, params.workspaceId, params.taskId);
+        const current = await sources.getApproval(params.approvalId);
+        assertApprovalScope(
+          current,
+          params.taskId,
+          params.expectedVersion,
+          params.expectedRevisionHash,
+        );
+        const desired = params.approved ? "approved" : "denied";
+        if (current.status !== "pending" && current.status !== desired) throw staleDecision();
         const fingerprint = hashPayload({ method: "approval.respond", params });
         return executeOperation(context, fingerprint, operationReceipts, () =>
           serializeResolution(`approval:${params.approvalId}`, resolutionTails, () =>
@@ -214,7 +268,7 @@ async function resolveApproval(
 }> {
   await assertTaskScope(sources, params.workspaceId, params.taskId);
   const before = await sources.getApproval(params.approvalId);
-  assertApprovalScope(before, params.taskId, params.expectedVersion);
+  assertApprovalScope(before, params.taskId, params.expectedVersion, params.expectedRevisionHash);
   const desired = params.approved ? "approved" : "denied";
   if (before!.status !== "pending") {
     if (before!.status === desired)
@@ -224,12 +278,18 @@ async function resolveApproval(
 
   let commandStatus = "unknown";
   try {
-    commandStatus = await sources.commands.respondToApproval(params.approvalId, params.approved);
+    commandStatus = await sources.commands.respondToApproval(
+      params.approvalId,
+      params.approved,
+      undefined,
+      undefined,
+      params.expectedRevisionHash,
+    );
   } catch {
     // Re-read the durable row below. An IPC/worker reply can be lost after commit.
   }
   const after = await sources.getApproval(params.approvalId);
-  assertApprovalScope(after, params.taskId, params.expectedVersion);
+  assertApprovalScope(after, params.taskId, params.expectedVersion, params.expectedRevisionHash);
   if (after!.status === desired) {
     return {
       status: commandStatus === "handled" ? "handled" : "duplicate",
@@ -333,9 +393,14 @@ function assertApprovalScope(
   approval: ApprovalRequest | null,
   taskId: string,
   expectedVersion: number,
+  expectedRevisionHash: string,
 ): asserts approval is ApprovalRequest {
   if (!approval || approval.taskId !== taskId) throw invalidRequest();
-  if (approval.requestedAt !== expectedVersion) throw staleVersion();
+  if (
+    approval.requestedAt !== expectedVersion ||
+    !approvalRevisionMatches(approval, expectedRevisionHash)
+  )
+    throw staleVersion();
 }
 
 function assertInputRequestScope(
@@ -348,6 +413,7 @@ function assertInputRequestScope(
 }
 
 function toPublicApproval(approval: ApprovalRequest, task: Task): PublicApproval {
+  const revisionHash = approvalRequestRevisionHash(approval);
   return {
     id: approval.id,
     taskId: approval.taskId,
@@ -360,10 +426,16 @@ function toPublicApproval(approval: ApprovalRequest, task: Task): PublicApproval
     status: "pending",
     requestedAt: approval.requestedAt,
     expectedVersion: approval.requestedAt,
+    revisionHash,
   };
 }
 
-function toPublicInputRequest(request: InputRequest, task: Task): PublicInputRequest {
+async function toPublicInputRequest(
+  request: InputRequest,
+  task: Task,
+  sources: BrowserApprovalSources,
+): Promise<PublicInputRequest> {
+  const reviewFields = await publicInputReviewFields(sources, request);
   return {
     id: request.id,
     taskId: request.taskId,
@@ -379,9 +451,39 @@ function toPublicInputRequest(request: InputRequest, task: Task): PublicInputReq
         description: truncate(option.description, 500),
       })),
     })),
+    ...reviewFields,
     status: "pending",
     requestedAt: request.requestedAt,
     expectedVersion: request.requestedAt,
+  };
+}
+
+async function publicInputReviewFields(
+  sources: BrowserApprovalSources,
+  request: InputRequest,
+): Promise<
+  Pick<PublicInputRequest, "responsibilityActionReview" | "draftReview">
+> {
+  const required = request.questions.some(
+    (question) => question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+  );
+  if (!sources.getInputRequestDraftReview) {
+    return required
+      ? { responsibilityActionReview: { required: true, state: "invalid" } }
+      : {};
+  }
+  let loaded: InlineApprovalDraftReview | undefined;
+  try {
+    loaded = await sources.getInputRequestDraftReview(request.id, request.taskId);
+  } catch {
+    // A marked proposal must fail closed; it can never be reconstructed from prompt text.
+  }
+  const responsibilityActionReview = loaded?.responsibilityActionReview;
+  if (!required && !responsibilityActionReview) return {};
+  return {
+    responsibilityActionReview:
+      responsibilityActionReview ?? { required: true, state: "invalid" },
+    ...(loaded ? { draftReview: { draft: loaded.draft, previews: loaded.previews } } : {}),
   };
 }
 
@@ -392,6 +494,7 @@ function publicApprovalOutcome(approval: ApprovalRequest): Record<string, unknow
     status: approval.status,
     decision: approval.status === "pending" ? null : approval.status,
     requestedAt: approval.requestedAt,
+    revisionHash: approvalRequestRevisionHash(approval),
     resolvedAt: approval.resolvedAt ?? null,
   };
 }
@@ -458,6 +561,7 @@ function parseApprovalLookup(value: unknown): {
   workspaceId: string;
   taskId: string;
   expectedVersion: number;
+  expectedRevisionHash: string;
 } {
   if (!isRecord(value)) throw invalidRequest();
   return {
@@ -465,6 +569,7 @@ function parseApprovalLookup(value: unknown): {
     workspaceId: parseIdentifier(value.workspaceId, 128),
     taskId: parseIdentifier(value.taskId, 128),
     expectedVersion: parseVersion(value.expectedVersion),
+    expectedRevisionHash: parseApprovalRevisionHash(value.expectedRevisionHash),
   };
 }
 
@@ -492,8 +597,14 @@ function parseApprovalResponse(value: unknown): ApprovalResponseParams {
     workspaceId: parseIdentifier(value.workspaceId, 128),
     taskId: parseIdentifier(value.taskId, 128),
     expectedVersion: parseVersion(value.expectedVersion),
+    expectedRevisionHash: parseApprovalRevisionHash(value.expectedRevisionHash),
     approved: value.approved,
   };
+}
+
+function parseApprovalRevisionHash(value: unknown): string {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw invalidRequest();
+  return value;
 }
 
 function parseInputResponse(value: unknown): InputResponseParams {

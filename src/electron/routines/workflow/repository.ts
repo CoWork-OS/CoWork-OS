@@ -377,6 +377,7 @@ export class RoutineWorkflowStore {
         | "output"
         | "error"
         | "approvalId"
+        | "reviewDigest"
         | "startedAt"
         | "finishedAt"
       >
@@ -389,7 +390,7 @@ export class RoutineWorkflowStore {
       .prepare(
         `UPDATE routine_run_steps
          SET status = ?, attempt_count = ?, input_json = ?, output_json = ?, error = ?, approval_id = ?,
-             started_at = ?, finished_at = ?, updated_at = ?
+             review_digest = ?, started_at = ?, finished_at = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -399,6 +400,7 @@ export class RoutineWorkflowStore {
         updated.output ? JSON.stringify(updated.output) : null,
         updated.error || null,
         updated.approvalId || null,
+        updated.reviewDigest || null,
         updated.startedAt || null,
         updated.finishedAt || null,
         updated.updatedAt,
@@ -614,6 +616,7 @@ export class RoutineWorkflowStore {
         output_json TEXT,
         error TEXT,
         approval_id TEXT,
+        review_digest TEXT,
         started_at INTEGER,
         finished_at INTEGER,
         created_at INTEGER NOT NULL,
@@ -653,6 +656,10 @@ export class RoutineWorkflowStore {
       CREATE INDEX IF NOT EXISTS idx_routine_event_samples_source
       ON routine_event_samples(source, created_at DESC);
     `);
+    const stepColumns = this.db.prepare("PRAGMA table_info(routine_run_steps)").all() as Any[];
+    if (!stepColumns.some((column) => column.name === "review_digest")) {
+      this.db.exec("ALTER TABLE routine_run_steps ADD COLUMN review_digest TEXT");
+    }
   }
 
   private mapVersion(row: Any): WorkflowVersionRecord {
@@ -705,6 +712,7 @@ export class RoutineWorkflowStore {
       output: row.output_json ? parseJson(row.output_json, {}) : undefined,
       error: row.error ? String(row.error) : undefined,
       approvalId: row.approval_id ? String(row.approval_id) : undefined,
+      reviewDigest: row.review_digest ? String(row.review_digest) : undefined,
       startedAt: row.started_at ? Number(row.started_at) : undefined,
       finishedAt: row.finished_at ? Number(row.finished_at) : undefined,
       createdAt: Number(row.created_at),

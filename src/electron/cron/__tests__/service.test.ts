@@ -193,6 +193,49 @@ describe("CronService", () => {
       expect(mockCreateTask).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["completed", "ok"],
+      ["failed", "error"],
+      ["interrupted", "error"],
+    ])("recovers an uncheckpointed %s task from its exact occurrence", async (status, expected) => {
+      vi.useFakeTimers();
+      (loadCronStore as ReturnType<typeof vi.fn>).mockResolvedValue({
+        version: 1,
+        jobs: [
+          {
+            id: "job-crash",
+            name: "Crash",
+            enabled: false,
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            workspaceId: "ws-1",
+            taskPrompt: "Work",
+            schedule: { kind: "every", everyMs: 60000 },
+            state: { runningAtMs: 900000, runningRunMode: "new_task", runHistory: [] },
+          },
+        ],
+      } satisfies CronStoreFile);
+      const finder = vi.fn().mockResolvedValue({ id: "committed-task", status });
+      service = createService({
+        findTaskForRun: finder,
+        getTaskStatus: async () => ({ status, resultSummary: "Durable result" }),
+      });
+      await service.start();
+      const job = await service.get("job-crash");
+      expect(finder).toHaveBeenCalledWith({
+        jobId: "job-crash",
+        workspaceId: "ws-1",
+        runAtMs: 900000,
+      });
+      expect(job?.state).toMatchObject({ lastTaskId: "committed-task", lastStatus: expected });
+      expect(job?.state.runningAtMs).toBeUndefined();
+      expect(job?.state.runHistory).toEqual([
+        expect.objectContaining({ taskId: "committed-task", runAtMs: 900000, status: expected }),
+      ]);
+      expect(mockCreateTask).not.toHaveBeenCalled();
+      expect(saveCronStore).toHaveBeenCalled();
+    });
+
     it("does not adopt a matching interrupted task as a live run", async () => {
       (loadCronStore as ReturnType<typeof vi.fn>).mockResolvedValue({
         version: 1,

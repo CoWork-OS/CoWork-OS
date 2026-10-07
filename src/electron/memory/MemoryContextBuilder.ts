@@ -22,7 +22,11 @@ import { InputSanitizer } from "../agent/security/input-sanitizer";
 import { MEMORY_L0_TOKENS, MEMORY_L1_ITEMS_TOKENS } from "../agent/content/prompt-budgets";
 import { MemoryWriter } from "./MemoryWriter";
 import { getHotMemoryVersion } from "./hot-memory-version";
-import { resolveMemoryInjection, memoryItemAllowed } from "./MemoryInjectionPolicy";
+import {
+  resolveMemoryInjection,
+  memoryItemAllowed,
+  memoryPolicyInputForSurface,
+} from "./MemoryInjectionPolicy";
 import type { MemoryLayerDecision } from "./MemoryInjectionPolicy";
 import type { MemoryItemContextSearchRequest } from "./memory-context-sql";
 import type {
@@ -392,8 +396,7 @@ export class MemoryContextBuilderService implements MemoryContextBuilder {
   /** The contract entry point: surface-level decision, one budget split L0/L1. */
   async build(request: MemoryContextRequest): Promise<MemoryContextBlock[]> {
     const decision = resolveMemoryInjection({
-      gatewayContext: request.surface === "channel_group" ? "group" : "private",
-      noMemory: request.noMemory,
+      ...memoryPolicyInputForSurface(request),
     });
     const l0Tokens = Math.min(MEMORY_L0_TOKENS, Math.floor(request.budgetTokens * 0.6));
     const layers = await this.buildLayers({

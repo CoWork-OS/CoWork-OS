@@ -599,7 +599,9 @@ before exposing command tools or other actions. Approval prompts (command tools,
 writes, and other profile-permitted actions) can be handled remotely over the Control Plane:
 
 - CoWork broadcasts `approval_requested` events including an `approvalId`
-- Respond via `approval.respond` with `{ approvalId, approved }`
+- Review the row returned by `approval.list` and respond via `approval.respond` with
+  `{ approvalId, expectedRevisionHash, approved }`, using that row's `revisionHash`. If the request
+  changes, list and review the new revision before deciding.
 
 This enables running a VPS instance without requiring a local UI or messaging channels for approvals.
 

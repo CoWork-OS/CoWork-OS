@@ -205,6 +205,23 @@ describe("browser host bridge", () => {
     dispose();
   });
 
+  it("exposes scoped inline write-review loading when browser input requests are available", () => {
+    const fakeWindow = stubBrowserWindow();
+    const dispose = installBrowserHostBridge(
+      { request: vi.fn() } as unknown as BrowserHostTransport,
+      {
+        ...session,
+        capabilities: {
+          "tasks.inputRequests": { available: true },
+        },
+      } as WebSessionBootstrap,
+    );
+    const api = fakeWindow.electronAPI as unknown as Record<string, unknown>;
+
+    expect(api.getInputRequestDraftReview).toEqual(expect.any(Function));
+    dispose();
+  });
+
   it("leaves optional native local-model controls absent so browser UI can gate them", () => {
     const fakeWindow = stubBrowserWindow();
     const dispose = installBrowserHostBridge(

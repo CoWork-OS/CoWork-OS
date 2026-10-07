@@ -395,6 +395,14 @@ export class MemoryRecallService implements MemoryRecall {
 
   /** `query` plus the lanes that ran or failed and the refs that were not found. */
   async recall(request: MemoryRecallQuery): Promise<MemoryRecallResult> {
+    // Every lane can carry owner context, including ID expansion and external stores.
+    // Channel callers must present trusted owner evidence before any backend is read.
+    if (
+      request.surface === "channel_group" ||
+      (request.surface === "channel_private" && request.gatewaySenderIsOwner !== true)
+    ) {
+      return { hits: [], lanes: [], laneErrors: {}, missing: [] };
+    }
     const limit = Math.max(
       1,
       Math.min(MEMORY_RECALL_MAX_LIMIT, Math.floor(request.limit ?? MEMORY_RECALL_DEFAULT_LIMIT)),

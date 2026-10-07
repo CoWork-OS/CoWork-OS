@@ -17,7 +17,7 @@ import { SYNTHESIS_TASK_TITLE, isSynthesisChildTask } from "../../shared/synthes
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { normalizeMarkdownForCollab, fixUnclosedBold } from "../utils/markdown-inline-lists";
 import { replaceEmojisInChildren, stripLeadingEmoji } from "../utils/emoji-replacer";
-import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { resolveTwinIcon } from "../utils/twin-icons";
 import { AgentRosterRow, type AgentRosterEntry } from "./timeline/AgentRosterRow";
 
 function truncate(str: string, maxLen: number): string {
@@ -387,7 +387,7 @@ export function CollaborativeSummaryPanel({
               );
             }
             if (entry.kind === "spawn") {
-              const SpawnIcon = getEmojiIcon(entry.icon || "🤖");
+              const SpawnIcon = resolveTwinIcon(entry.icon || "🤖");
               return (
                 <div key={entry.id} className="collab-timeline-spawn">
                   <span className="collab-timeline-spawn-icon">

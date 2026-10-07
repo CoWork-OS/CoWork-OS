@@ -674,6 +674,37 @@ export function getControlPlaneWebUIHtml(): string {
         };
       }
 
+      async function submitApprovalDecision(approval, approved, approveButton, denyButton) {
+        approveButton.disabled = true;
+        denyButton.disabled = true;
+        try {
+          const result = await request('approval.respond', {
+            approvalId: approval.id,
+            approved,
+            expectedRevisionHash: approval.revisionHash,
+          });
+          await refreshApprovals();
+          if (result?.status === 'handled' || result?.status === 'duplicate') return;
+          if (result?.status === 'not_found') {
+            alert('This approval changed or expired. Pending approvals were refreshed; review the current request before deciding.');
+          } else if (result?.status === 'in_progress') {
+            alert('This approval response is still processing. Pending approvals were refreshed; check the current state before retrying.');
+          } else {
+            alert('The approval response was not confirmed. Pending approvals were refreshed; review the current request before retrying.');
+          }
+        } catch (error) {
+          try {
+            await refreshApprovals();
+          } catch {
+            // Keep the original response failure visible if refresh also fails.
+          }
+          alert('Approval response was not confirmed: ' + (error?.message || error));
+        } finally {
+          approveButton.disabled = false;
+          denyButton.disabled = false;
+        }
+      }
+
       function renderApprovals() {
         approvalCountEl.textContent = pendingApprovals.length ? pendingApprovals.length + ' pending' : 'No pending approvals';
         approvalsEl.innerHTML = '';
@@ -741,36 +772,12 @@ export function getControlPlaneWebUIHtml(): string {
           const btnA = document.createElement('button');
           btnA.className = 'btn primary';
           btnA.textContent = 'Approve';
-          btnA.onclick = async () => {
-            btnA.disabled = true;
-            btnD.disabled = true;
-            try {
-              await request('approval.respond', { approvalId: a.id, approved: true });
-              await refreshApprovals();
-            } catch (e) {
-              alert('Approval failed: ' + (e?.message || e));
-            } finally {
-              btnA.disabled = false;
-              btnD.disabled = false;
-            }
-          };
+          btnA.onclick = () => submitApprovalDecision(a, true, btnA, btnD);
           const btnD = document.createElement('button');
           btnD.className = 'btn danger';
           btnD.style.marginLeft = '8px';
           btnD.textContent = 'Deny';
-          btnD.onclick = async () => {
-            btnA.disabled = true;
-            btnD.disabled = true;
-            try {
-              await request('approval.respond', { approvalId: a.id, approved: false });
-              await refreshApprovals();
-            } catch (e) {
-              alert('Denial failed: ' + (e?.message || e));
-            } finally {
-              btnA.disabled = false;
-              btnD.disabled = false;
-            }
-          };
+          btnD.onclick = () => submitApprovalDecision(a, false, btnA, btnD);
           actions.appendChild(btnA);
           actions.appendChild(btnD);
 
@@ -837,7 +844,7 @@ export function getControlPlaneWebUIHtml(): string {
           pre.className = 'mono';
           pre.style.margin = '0';
           pre.style.whiteSpace = 'pre-wrap';
-          pre.textContent = lines.join('\n');
+          pre.textContent = lines.join('\\n');
           promptTd.appendChild(pre);
 
           if (questions.length > 0) {
@@ -1193,7 +1200,7 @@ export function getControlPlaneWebUIHtml(): string {
           return;
         }
 
-        const payload: { providerType: string; apiKey?: string; model?: string; settings?: Record<string, unknown> } = {
+        const payload = {
           providerType,
           apiKey: undefined,
           model: undefined,

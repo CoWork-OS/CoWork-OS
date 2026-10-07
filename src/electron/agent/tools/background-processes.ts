@@ -314,6 +314,15 @@ export class BackgroundProcessManager {
     return this.summarize(record);
   }
 
+  activeTaskIds(): string[] {
+    return [
+      ...new Set(
+        [...this.records.values()]
+          .filter((record) => record.status === "running")
+          .map((record) => record.taskId),
+      ),
+    ];
+  }
   list(taskId: string): BackgroundProcessSummary[] {
     return Array.from(this.records.values())
       .filter((record) => record.taskId === taskId)

@@ -63,6 +63,7 @@ interface CommandContext {
 }
 
 const VALUE_FLAGS = new Set([
+  "--revision-hash",
   "--url",
   "--token",
   "--profile",
@@ -864,16 +865,42 @@ async function pulse(ctx: CommandContext): Promise<number> {
 async function respondApproval(ctx: CommandContext, approved: boolean): Promise<number> {
   const approvalId = ctx.parsed.rest[0];
   if (!approvalId) {
-    process.stderr.write(`Usage: cowork ${approved ? "approve" : "reject"} <approvalId>\n`);
+    process.stderr.write(
+      `Usage: cowork ${approved ? "approve" : "reject"} <approvalId> --revision-hash <displayed-hash>\n`,
+    );
+    return 1;
+  }
+  const expectedRevisionHash = getFlag(ctx.parsed, "--revision-hash");
+  if (!expectedRevisionHash || !/^[0-9a-f]{64}$/.test(expectedRevisionHash)) {
+    process.stderr.write(
+      "Review the request with cowork approvals, then pass its displayed --revision-hash <hash>. A lowercase SHA-256 hash is required.\n",
+    );
     return 1;
   }
   if (!hasFlag(ctx.parsed, "--remote")) {
-    return runLocalApprovalResponseProcess(ctx, approvalId, approved);
+    return runLocalApprovalResponseProcess(ctx, approvalId, approved, expectedRevisionHash);
   }
 
   const client = await connectedClient(ctx);
   try {
-    const payload = await client.request(METHODS.APPROVAL_RESPOND, { approvalId, approved });
+    const payload = await client.request(METHODS.APPROVAL_RESPOND, {
+      approvalId,
+      approved,
+      expectedRevisionHash,
+    });
+    const status =
+      payload && typeof payload === "object" ? (payload as { status?: unknown }).status : undefined;
+    if (status !== "handled" && status !== "duplicate") {
+      const message =
+        status === "not_found"
+          ? "The approval changed or expired. Review cowork approvals again before deciding."
+          : status === "in_progress"
+            ? "The approval response is still processing. Check its state before retrying."
+            : "The approval response was not confirmed. Check its state before retrying.";
+      if (ctx.json) printJson(payload);
+      process.stderr.write(`${message}\n`);
+      return 1;
+    }
     printLinesOrJson(ctx, payload, [
       `${approved ? "Approved" : "Rejected"} approval ${approvalId}.`,
     ]);
@@ -887,6 +914,7 @@ function runLocalApprovalResponseProcess(
   ctx: CommandContext,
   approvalId: string,
   approved: boolean,
+  expectedRevisionHash: string,
 ): Promise<number> {
   const runtime = resolveDirectRuntime();
   if (!runtime.usesElectron) {
@@ -901,6 +929,8 @@ function runLocalApprovalResponseProcess(
     "--cowork-cli-approval-response",
     "--approval-id",
     approvalId,
+    "--revision-hash",
+    expectedRevisionHash,
     approved ? "--approved" : "--rejected",
   ];
 
@@ -1931,8 +1961,8 @@ function usage(): void {
       "  cowork tasks stale",
       "  cowork tasks cleanup --interrupted-cli --yes",
       "  cowork approvals",
-      "  cowork approve <approvalId>",
-      "  cowork reject <approvalId>",
+      "  cowork approve <approvalId> --revision-hash <displayed-hash>",
+      "  cowork reject <approvalId> --revision-hash <displayed-hash>",
       "  cowork providers list",
       "  cowork providers configure <provider> [--api-key <key>] [--model <model>]",
       "  cowork providers fallback list|add|remove",

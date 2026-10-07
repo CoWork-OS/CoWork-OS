@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import Database from "better-sqlite3";
 
 const sandboxMocks = vi.hoisted(() => ({
   sandbox: {
@@ -62,6 +63,8 @@ const mockWorkspace = {
   },
 } as Workspace;
 
+const defaultPolicies = loadPolicies();
+
 const SAFE_CMD_1 = `"${process.execPath}" -e "process.stdout.write('ok1')"`;
 const SAFE_CMD_2 = `"${process.execPath}" -v`;
 
@@ -74,6 +77,7 @@ describe("ShellTools auto-approval", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(loadPolicies).mockReset().mockReturnValue(structuredClone(defaultPolicies));
     delete process.env.COWORK_ALLOW_UNSANDBOXED_SHELL;
     (mockDaemon.requestApproval as any).mockReset().mockResolvedValue(true);
     (mockDaemon.logEvent as any).mockReset();
@@ -231,6 +235,121 @@ describe("ShellTools auto-approval", () => {
       const b = shellToolsAny.getCommandSignature(`${executable} "two"`);
       expect(a, executable).not.toBe(b);
     }
+  });
+
+  it("refuses a policy change while command approval is pending", async () => {
+    (mockDaemon.requestApproval as Any).mockImplementation(async () => {
+      shellTools.setWorkspace({
+        ...mockWorkspace,
+        permissions: { ...mockWorkspace.permissions, shell: false },
+      });
+      return true;
+    });
+    await expect(shellTools.runCommand(SAFE_CMD_1)).rejects.toThrow("authority changed");
+    expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+    expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
+  });
+
+  it("rechecks after asynchronous sandbox acquisition and releases an unused sandbox", async () => {
+    sandboxMocks.createSandbox.mockImplementation(async () => {
+      shellTools.setWorkspace({
+        ...mockWorkspace,
+        permissions: { ...mockWorkspace.permissions, shell: false },
+      });
+      return sandboxMocks.sandbox;
+    });
+    await expect(shellTools.runCommand(SAFE_CMD_1)).rejects.toThrow("authority changed");
+    expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+    expect(sandboxMocks.sandbox.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks background authority after sandbox acquisition before starting a process", async () => {
+    sandboxMocks.createSandbox.mockImplementation(async () => {
+      shellTools.setWorkspace({
+        ...mockWorkspace,
+        permissions: { ...mockWorkspace.permissions, shell: false },
+      });
+      return sandboxMocks.sandbox;
+    });
+    await expect(shellTools.startBackgroundCommand(SAFE_CMD_1)).rejects.toThrow(
+      "authority changed",
+    );
+    expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+    expect(sandboxMocks.sandbox.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("refuses execution when the daemon reports a different current workspace policy", async () => {
+    const daemon = {
+      ...mockDaemon,
+      getEffectiveWorkspaceForTask: () => ({
+        ...mockWorkspace,
+        permissions: { ...mockWorkspace.permissions, shell: false },
+      }),
+    } as Any;
+    const tools = new ShellTools(mockWorkspace, daemon, "task-current-policy");
+    await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow("authority changed");
+    expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+  });
+
+  it("refuses a newly revoked admin policy after approval", async () => {
+    (mockDaemon.requestApproval as Any).mockImplementation(async () => {
+      vi.mocked(loadPolicies).mockReturnValue({
+        ...defaultPolicies,
+        runtime: { ...defaultPolicies.runtime, requireSandboxForShell: false },
+      });
+      return true;
+    });
+    await expect(shellTools.runCommand(SAFE_CMD_1)).rejects.toThrow("authority changed");
+    expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for a governed task when effect-policy storage is unavailable", async () => {
+    const daemon = {
+      ...mockDaemon,
+      getTaskById: async () => ({
+        agentConfig: { responsibilityRun: { id: "private-responsibility" } },
+      }),
+    } as Any;
+    await expect(
+      new ShellTools(mockWorkspace, daemon, "governed-task").runCommand(SAFE_CMD_1),
+    ).rejects.toThrow("policy storage is unavailable");
+    expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+  });
+
+  it("honors a persisted stop written after admission while the sandbox is acquired", async () => {
+    const db = new Database(":memory:");
+    db.exec(
+      "CREATE TABLE tasks(id TEXT PRIMARY KEY,workspace_id TEXT,parent_task_id TEXT,agent_config TEXT);CREATE TABLE bot_task_stop_intents(task_id TEXT PRIMARY KEY,active INTEGER)",
+    );
+    db.prepare("INSERT INTO tasks VALUES(?,?,NULL,NULL)").run("stop-task", mockWorkspace.id);
+    const daemon = { ...mockDaemon, getDatabase: () => db } as Any;
+    const tools = new ShellTools(mockWorkspace, daemon, "stop-task");
+    sandboxMocks.createSandbox.mockImplementation(async () => {
+      db.prepare("INSERT INTO bot_task_stop_intents VALUES (?,1)").run("stop-task");
+      return sandboxMocks.sandbox;
+    });
+    try {
+      await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow("persisted stop request");
+      expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+      expect(sandboxMocks.sandbox.cleanup).toHaveBeenCalledOnce();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("allows fresh verification admission after an effect guard refused its earlier launch", async () => {
+    const command = "npm run type-check -- --authority-retry-fixture";
+    sandboxMocks.createSandbox.mockImplementationOnce(async () => {
+      shellTools.setWorkspace({
+        ...mockWorkspace,
+        permissions: { ...mockWorkspace.permissions, shell: false },
+      });
+      return sandboxMocks.sandbox;
+    });
+    await expect(shellTools.runCommand(command)).rejects.toThrow("authority changed");
+    shellTools.setWorkspace(mockWorkspace);
+    await expect(shellTools.runCommand(command)).resolves.toMatchObject({ success: true });
+    expect(sandboxMocks.sandbox.execute).toHaveBeenCalledOnce();
   });
 
   it("does not share a signature across chained commands", () => {
@@ -470,7 +589,7 @@ describe("ShellTools auto-approval", () => {
   });
 
   it("allows shell sandbox networking only with explicit coarse admin policy", async () => {
-    vi.mocked(loadPolicies).mockReturnValueOnce({
+    vi.mocked(loadPolicies).mockReturnValue({
       version: 1,
       updatedAt: new Date().toISOString(),
       packs: { allowed: [], blocked: [], required: [] },
@@ -609,7 +728,7 @@ describe("ShellTools auto-approval", () => {
   });
 
   it("fails closed when no OS sandbox is available", async () => {
-    vi.mocked(loadPolicies).mockReturnValueOnce({
+    vi.mocked(loadPolicies).mockReturnValue({
       version: 1,
       updatedAt: new Date().toISOString(),
       packs: { allowed: [], blocked: [], required: [] },
@@ -655,7 +774,7 @@ describe("ShellTools auto-approval", () => {
   });
 
   it("asks explicitly, and fails closed when declined, when no OS sandbox is available", async () => {
-    vi.mocked(loadPolicies).mockReturnValueOnce({
+    vi.mocked(loadPolicies).mockReturnValue({
       version: 1,
       updatedAt: new Date().toISOString(),
       packs: { allowed: [], blocked: [], required: [] },
@@ -711,7 +830,7 @@ describe("ShellTools auto-approval", () => {
   });
 
   it("does not allow policy-only override when sandboxing is required and env is absent", async () => {
-    vi.mocked(loadPolicies).mockReturnValueOnce({
+    vi.mocked(loadPolicies).mockReturnValue({
       version: 1,
       updatedAt: new Date().toISOString(),
       packs: { allowed: [], blocked: [], required: [] },
@@ -760,7 +879,7 @@ describe("ShellTools auto-approval", () => {
 
   it("allows explicit unsandboxed development fallback when requested", async () => {
     process.env.COWORK_ALLOW_UNSANDBOXED_SHELL = "1";
-    vi.mocked(loadPolicies).mockReturnValueOnce({
+    vi.mocked(loadPolicies).mockReturnValue({
       version: 1,
       updatedAt: new Date().toISOString(),
       packs: { allowed: [], blocked: [], required: [] },

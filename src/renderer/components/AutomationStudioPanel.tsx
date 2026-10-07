@@ -955,6 +955,7 @@ export default function AutomationStudioPanel({
         runId: step.runId,
         stepId: step.id,
         approved,
+        reviewDigest: step.reviewDigest,
       });
       const [nextRuns, nextSteps] = await Promise.all([
         window.electronAPI.listRoutineWorkflowRuns(undefined, 60),
@@ -968,6 +969,16 @@ export default function AutomationStudioPanel({
           ? approvalError.message
           : "The approval could not be recorded.",
       );
+      try {
+        const [nextRuns, nextSteps] = await Promise.all([
+          window.electronAPI.listRoutineWorkflowRuns(undefined, 60),
+          window.electronAPI.listRoutineWorkflowRunSteps(step.runId),
+        ]);
+        setRuns(nextRuns as RoutineWorkflowRunRecord[]);
+        setSteps(nextSteps as RoutineWorkflowStepRecord[]);
+      } catch {
+        // Keep the approval error visible if activity refresh is also unavailable.
+      }
     } finally {
       setBusy(null);
     }
@@ -2133,6 +2144,19 @@ export default function AutomationStudioPanel({
                         </em>
                       </div>
                       {step.status === "waiting_for_approval" && (
+                        <details className="studio-step-review" open>
+                          <summary>
+                            Action details
+                            {!step.reviewDigest ? " · refresh required" : " · bound to approval"}
+                          </summary>
+                          <p className="studio-review-note">
+                            Approval applies to this exact action input. If it changes, the flow
+                            will ask you to review it again.
+                          </p>
+                          <pre>{JSON.stringify(step.input || {}, null, 2)}</pre>
+                        </details>
+                      )}
+                      {step.status === "waiting_for_approval" && (
                         <div className="studio-approval-actions">
                           <button
                             className="studio-secondary"
@@ -2146,7 +2170,7 @@ export default function AutomationStudioPanel({
                             disabled={busy === `approval:${step.id}`}
                             onClick={() => void respondToApproval(step, true)}
                           >
-                            Approve once
+                            {step.reviewDigest ? "Approve once" : "Refresh review"}
                           </button>
                         </div>
                       )}

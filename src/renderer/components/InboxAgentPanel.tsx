@@ -3564,7 +3564,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                     </div>
                   )}
                   {mailboxClientState.queuedActions
-                    .filter((action) => action.status === "failed")
+                    .filter(
+                      (action) => action.status === "failed" || action.status === "outcome_unknown",
+                    )
                     .slice(0, 3)
                     .map((action) => (
                       <div
@@ -3587,29 +3589,88 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                             whiteSpace: "nowrap",
                           }}
                         >
-                          {action.type} failed{action.latestError ? `: ${action.latestError}` : ""}
+                          {action.status === "outcome_unknown"
+                            ? `${action.type} delivery status unknown; check Sent before choosing`
+                            : `${action.type} failed`}
+                          {action.latestError ? `: ${action.latestError}` : ""}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void runAction(async () => {
-                              await window.electronAPI.retryMailboxAction(action.id);
-                              await reloadAll(selectedThread?.id);
-                            })
-                          }
-                          style={{
-                            border: "1px solid var(--color-border-subtle)",
-                            background: "var(--color-bg-secondary)",
-                            borderRadius: "999px",
-                            color: "var(--color-text-muted)",
-                            fontSize: "0.68rem",
-                            padding: "2px 8px",
-                            cursor: "pointer",
-                            flexShrink: 0,
-                          }}
-                        >
-                          Retry
-                        </button>
+                        {action.status === "outcome_unknown" && action.type === "send" && (
+                          <>
+                            <button
+                              type="button"
+                              title="I checked the provider's Sent folder and confirmed this message was sent."
+                              onClick={() =>
+                                void runAction(async () => {
+                                  await window.electronAPI.resolveMailboxSendOutcome(
+                                    action.id,
+                                    "confirmed_sent",
+                                  );
+                                  await reloadAll(selectedThread?.id);
+                                })
+                              }
+                              style={{
+                                border: "1px solid var(--color-border-subtle)",
+                                background: "var(--color-bg-secondary)",
+                                borderRadius: "999px",
+                                color: "var(--color-text-muted)",
+                                fontSize: "0.62rem",
+                                padding: "2px 6px",
+                                cursor: "pointer",
+                                flexShrink: 0,
+                              }}
+                            >
+                              I verified sent
+                            </button>
+                            <button
+                              type="button"
+                              title="I checked the provider's Sent folder and confirmed this message was not sent. The app will try to send it now."
+                              onClick={() =>
+                                void runAction(async () => {
+                                  await window.electronAPI.resolveMailboxSendOutcome(
+                                    action.id,
+                                    "confirmed_not_sent",
+                                  );
+                                  await reloadAll(selectedThread?.id);
+                                })
+                              }
+                              style={{
+                                border: "1px solid var(--color-border-subtle)",
+                                background: "var(--color-bg-secondary)",
+                                borderRadius: "999px",
+                                color: "var(--color-text-muted)",
+                                fontSize: "0.62rem",
+                                padding: "2px 6px",
+                                cursor: "pointer",
+                                flexShrink: 0,
+                              }}
+                            >
+                              Not sent · retry
+                            </button>
+                          </>
+                        )}
+                        {action.status === "failed" && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void runAction(async () => {
+                                await window.electronAPI.retryMailboxAction(action.id);
+                                await reloadAll(selectedThread?.id);
+                              })
+                            }
+                            style={{
+                              border: "1px solid var(--color-border-subtle)",
+                              background: "var(--color-bg-secondary)",
+                              borderRadius: "999px",
+                              color: "var(--color-text-muted)",
+                              fontSize: "0.68rem",
+                              padding: "2px 8px",
+                              cursor: "pointer",
+                              flexShrink: 0,
+                            }}
+                          >
+                            Retry
+                          </button>
+                        )}
                       </div>
                     ))}
                 </>

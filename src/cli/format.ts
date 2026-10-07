@@ -20,6 +20,8 @@ export interface ApprovalLike {
   type?: string;
   description?: string;
   requestedAt?: number;
+  revisionHash?: string;
+  details?: unknown;
 }
 
 export function printJson(value: unknown): void {
@@ -45,7 +47,15 @@ export function formatApproval(approval: ApprovalLike): string {
   const type = approval.type || "approval";
   const task = approval.taskTitle || approval.taskId || "unknown task";
   const description = approval.description ? `  ${approval.description}` : "";
-  return `${id}  [${type}]  ${task}${description}`;
+  const details =
+    approval.details === undefined
+      ? ""
+      : `\n  Details: ${JSON.stringify(approval.details, null, 2)}`;
+  const revision =
+    typeof approval.revisionHash === "string" && /^[0-9a-f]{64}$/.test(approval.revisionHash)
+      ? `\n  --revision-hash ${approval.revisionHash}`
+      : "\n  Revision unavailable; review this request in the app.";
+  return `${id}  [${type}]  ${task}${description}${details}${revision}`;
 }
 
 export function buildTaskTitle(prompt: string): string {

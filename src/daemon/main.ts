@@ -1,3 +1,14 @@
+import { BotNotificationRuntime } from "../electron/notifications/BotNotificationRuntime";
+import { BotWorkControlRecovery } from "../electron/automation/BotWorkControlRecovery";
+import { PermissionSettingsManager } from "../electron/security/permission-settings-manager";
+import { loadPolicies } from "../electron/admin/policies";
+import { prepareResponsibilitySchedule } from "../electron/automation/responsibility-signals";
+import { BotResponsibilityRepository } from "../electron/automation/BotResponsibilityRepository";
+import { SchedulerOwnership } from "../electron/automation/SchedulerOwnership";
+import { createHeadlessBotAutomation } from "../electron/automation/headless-bot-services";
+import { AutomationRuntime, setAutomationRuntime } from "../electron/automation/AutomationRuntime";
+import { PersistentDispatchBudget } from "../electron/automation/PersistentDispatchBudget";
+import { setBackgroundDispatchBudget } from "../electron/agents/BackgroundDispatchBudget";
 import { TaskRepository } from "../electron/database/repository-facades";
 import { ChannelRepository, ChannelUserRepository } from "../electron/database/repository-facades";
 import { ChannelMessageRepository } from "../electron/database/repository-facades";
@@ -139,6 +150,7 @@ async function startControlPlane(options: {
     agentDaemon: AgentDaemon;
     dbManager: DatabaseManager;
     channelGateway: ChannelGateway;
+    getRoutineService: () => import("../electron/routines/service").RoutineService | null;
   };
   forceEnable: boolean;
   onEvent?: (evt: Any) => void;
@@ -253,7 +265,9 @@ async function startControlPlane(options: {
 async function main(): Promise<void> {
   // Daemon is always headless; set an env flag to keep core logic consistent even if the caller
   // forgot to pass `--headless`.
-  if (!process.env.COWORK_HEADLESS) {
+  // Also when `--headless` is passed with a different env value: worker threads see
+  // only the env, and must apply the same headless approval policy.
+  if (!process.env.COWORK_HEADLESS || isHeadlessMode()) {
     process.env.COWORK_HEADLESS = "1";
   }
   const HEADLESS = isHeadlessMode();
@@ -273,6 +287,14 @@ async function main(): Promise<void> {
   // Initialize database first - required for SecureSettingsRepository.
   // Schema initialization runs in a bootstrap worker (DB6).
   const dbManager = await DatabaseManager.open();
+  setBackgroundDispatchBudget(
+    new PersistentDispatchBudget(dbManager.getDatabase(), {
+      getSchedulerFence: () => automationRuntime.captureFence(),
+    }),
+  );
+  const automationRuntime = new AutomationRuntime("node");
+  automationRuntime.attachOwnership(new SchedulerOwnership(dbManager.getDatabase()));
+  setAutomationRuntime(automationRuntime);
   dbManager.beginRun("daemon");
   let databaseWorkerDrained = true;
   const hostPerfMonitor = startHostPerfMonitor({ runtime: "daemon" });
@@ -410,6 +432,20 @@ async function main(): Promise<void> {
   // Initialize agent daemon.
   const numbatService = NumbatService.initialize(dbManager.getDatabase());
   const agentDaemon = new AgentDaemon(dbManager);
+  const botInboxNotifications = new NotificationService({ db: dbManager.getDatabase() });
+  automationRuntime.registerRecovery(
+    new BotWorkControlRecovery(
+      dbManager.getDatabase(),
+      agentDaemon,
+      automationRuntime,
+      new BotNotificationRuntime(
+        dbManager.getDatabase(),
+        automationRuntime,
+        () => botInboxNotifications,
+        false,
+      ),
+    ),
+  );
   numbatService.attachTaskEventEmitter((taskId, type, payload) => {
     agentDaemon.logEvent(taskId, type, payload);
   });
@@ -475,6 +511,7 @@ async function main(): Promise<void> {
 
   // Initialize Cron Service for scheduled tasks (best-effort).
   let cronService: CronService | null = null;
+  let botAutomation: ReturnType<typeof createHeadlessBotAutomation> | null = null;
   try {
     const db = dbManager.getDatabase();
     const taskRepo = new TaskRepository(db);
@@ -484,6 +521,18 @@ async function main(): Promise<void> {
     const channelMessageRepo = new ChannelMessageRepository(db);
 
     cronService = new CronService({
+      beforeExecuteJob: async (job) => {
+        await automationRuntime.assertOwnership();
+        await new BotResponsibilityRepository(db).assertCronJobMayExecute(job.id);
+        return prepareResponsibilitySchedule(db, job, {
+          settings: PermissionSettingsManager.loadSettings(),
+          adminPolicies: loadPolicies(),
+        });
+      },
+      beforeDeliverJob: async (jobId) => {
+        await automationRuntime.assertOwnership();
+        await new BotResponsibilityRepository(db).assertCronJobMayDeliver(jobId);
+      },
       cronEnabled: true,
       runnerKind: "daemon",
       storePath: getCronStorePath(),
@@ -507,11 +556,16 @@ async function main(): Promise<void> {
           ...(params.assignedAgentRoleId
             ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
             : {}),
-          agentConfig: mergedAgentConfig,
+          agentConfig: {
+            ...mergedAgentConfig,
+            backgroundSchedulerFence: automationRuntime.captureFence(),
+          },
+          source: "cron",
         });
         return { id: task.id };
       },
       sendTaskMessage: async (params) => {
+        await automationRuntime.assertOwnership();
         const task = await taskRepo.findById(params.taskId);
         if (!task) {
           throw new Error(`Target task not found: ${params.taskId}`);
@@ -583,6 +637,8 @@ async function main(): Promise<void> {
           chat_truncated: rendered.truncated ? "true" : "false",
         };
       },
+      findTaskForRun: async ({ workspaceId, jobId, runAtMs }) =>
+        taskRepo.findByScheduledRun(workspaceId, jobId, runAtMs),
       getTaskStatus: async (taskId) => {
         const task = await taskRepo.findById(taskId);
         if (!task) return null;
@@ -602,6 +658,7 @@ async function main(): Promise<void> {
         });
       },
       deliverToChannel: async (params) => {
+        await automationRuntime.assertOwnership();
         const hasResult =
           params.status === "ok" &&
           !params.summaryOnly &&
@@ -644,11 +701,23 @@ async function main(): Promise<void> {
       },
       onEvent: async (evt) => {
         console.log("[Cron] Event:", evt.action, evt.jobId);
+        await botAutomation?.routines.recordScheduledEvent(evt);
       },
     });
 
     setCronService(cronService);
-    await cronService.start();
+    botAutomation = createHeadlessBotAutomation({
+      db: dbManager.getDatabase(),
+      runtime: automationRuntime,
+      agentDaemon,
+      channelGateway,
+      getCronService: () => cronService,
+      mcpClientManager,
+      log: (...args) => console.warn("[BotAutomation]", ...args),
+    });
+    await botAutomation.start();
+    automationRuntime.register("cron", cronService);
+    await automationRuntime.start("cron");
     console.log("[Daemon] Cron Service initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Cron Service:", error);
@@ -662,7 +731,8 @@ async function main(): Promise<void> {
       log: (...args) => console.log(...args),
     });
     setStrategicPlannerService(strategicPlannerService);
-    strategicPlannerService.start();
+    automationRuntime.register("strategic_planner", strategicPlannerService);
+    await automationRuntime.start("strategic_planner");
     console.log("[Daemon] Strategic Planner initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Strategic Planner:", error);
@@ -708,7 +778,12 @@ async function main(): Promise<void> {
   // Start Control Plane (local by default).
   let startedControlPlane: StartedControlPlane | null = null;
   const cp = await startControlPlane({
-    deps: { agentDaemon, dbManager, channelGateway },
+    deps: {
+      agentDaemon,
+      dbManager,
+      channelGateway,
+      getRoutineService: () => botAutomation?.routines ?? null,
+    },
     forceEnable: FORCE_ENABLE_CONTROL_PLANE,
     onEvent: (evt) => {
       try {
@@ -753,7 +828,7 @@ async function main(): Promise<void> {
       );
     } else {
       try {
-        const notificationService = new NotificationService();
+        const notificationService = botInboxNotifications;
         const identity = await createWebHostIdentity({
           userDataDir,
           profileId: getActiveProfileId(),
@@ -796,6 +871,9 @@ async function main(): Promise<void> {
     shutdownPromise = (async () => {
       console.log(`[Daemon] Shutting down (${reason})...`);
       const steps: readonly ShutdownStep[] = [
+        // Stop automation ingress before fencing the agent; keep storage open for drains.
+        { name: "bot automation", run: () => botAutomation?.stop() },
+        { name: "automation ownership", run: () => automationRuntime.shutdown() },
         // Fence and drain the agent before closing anything it may still use.
         { name: "agent daemon", run: () => agentDaemon.shutdown() },
         {
@@ -831,8 +909,8 @@ async function main(): Promise<void> {
         {
           name: "strategic planner",
           requiresQuiescence: true,
-          run: () => {
-            strategicPlannerService?.stop();
+          run: async () => {
+            await automationRuntime.stop("strategic_planner");
             setStrategicPlannerService(null);
           },
         },
@@ -840,7 +918,7 @@ async function main(): Promise<void> {
           name: "cron",
           requiresQuiescence: true,
           run: async () => {
-            if (cronService) await cronService.stop();
+            await automationRuntime.stop("cron");
           },
         },
         { name: "task lifecycle sync", run: () => detachTaskLifecycleSync() },

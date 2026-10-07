@@ -928,6 +928,7 @@ export function installBrowserHostBridge(
   if (session.capabilities["tasks.inputRequests"]?.available) {
     supported.listInputRequests = decisions.methods.listInputRequests;
     supported.respondToInputRequest = decisions.methods.respondToInputRequest;
+    supported.getInputRequestDraftReview = decisions.methods.getInputRequestDraftReview;
   }
   browserInfo.desktopMethods = {
     ...browserInfo.desktopMethods,

@@ -9,6 +9,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
+  ChevronRight,
   Clock3,
   Circle,
   FileText,
@@ -27,6 +28,8 @@ import {
   Wrench,
 } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
+import { BotsHome, templateMascot, type BotsHomeProps } from "./BotsHome";
+import { BotMascot } from "./bot-mascot/BotMascot";
 import type {
   AgentTemplate,
   AgentBuilderConnectionRequirement,
@@ -71,7 +74,7 @@ import {
   type AccessProfileDefinition,
   type AccessProfileId,
 } from "../../shared/access-profiles";
-import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { resolveBotMascot } from "../../shared/bot-mascots";
 import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
 
 type SkillLite = {
@@ -164,7 +167,11 @@ type PersistStudioDraftResult = {
 
 type AgentConnectionSettingsTab = "integrations" | "mcp" | "skills" | "morechannels" | "slack";
 
+const WORKSPACE_AGENTS_OPEN_KEY = "cowork:agents-page:workspace-agents-open";
+
 interface AgentsHubPanelProps {
+  /** The bots shown at the top of the page; templates come from this panel. */
+  bots: Omit<BotsHomeProps, "templates">;
   onOpenMissionControl?: () => void;
   onOpenSlackSettings?: () => void;
   onOpenSettings?: (tab: AgentConnectionSettingsTab) => void;
@@ -303,14 +310,6 @@ function formatSharingLabel(sharing?: ManagedAgentSharingConfig): string {
   if (sharing?.ownerLabel) return sharing.ownerLabel;
   if (sharing?.visibility) return sharing.visibility;
   return "Sharing not configured";
-}
-
-function formatIdentifierLabel(value: string): string {
-  return value
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (char) => char.toLocaleUpperCase());
 }
 
 function parseNumberedInstructionList(
@@ -1025,6 +1024,7 @@ export function AgentTestActionButton({
 }
 
 export function AgentsHubPanel({
+  bots,
   onOpenMissionControl,
   onOpenSlackSettings,
   onOpenSettings,
@@ -1079,7 +1079,9 @@ export function AgentsHubPanel({
   const [automationProfiles, setAutomationProfiles] = useState<Any[]>([]);
   const [conversionPanel, setConversionPanel] = useState<ConversionPanel>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [showcaseIndex, setShowcaseIndex] = useState(0);
+  const [workspaceAgentsOpen, setWorkspaceAgentsOpen] = useState(
+    () => window.localStorage?.getItem(WORKSPACE_AGENTS_OPEN_KEY) === "1",
+  );
   const [isCreateComposerOpen, setIsCreateComposerOpen] = useState(false);
   const [builderPlan, setBuilderPlan] = useState<AgentBuilderPlan | null>(null);
   const [builderStage, setBuilderStage] = useState<
@@ -1465,35 +1467,20 @@ export function AgentsHubPanel({
         return agents;
     }
   }, [agents, libraryTab, recentlyUsedAgents, scheduledAgents]);
-  const slackChannelTargetCount = agents.reduce(
-    (count, agent) =>
-      count + (getStudioConfig(agentDetails[agent.id])?.channelTargets?.length || 0),
-    0,
-  );
   const visibleLibraryAgents = libraryAgents.slice(0, 6);
   const visibleMissionControlAgentRoles =
     libraryTab === "all"
       ? activeMissionControlAgentRoles.slice(0, Math.max(0, 6 - visibleLibraryAgents.length))
       : [];
   const visibleAgentCount = agents.length + activeMissionControlAgentRoles.length;
-  const managedAgentInsights = agents
-    .map((agent) => agentInsights[agent.id])
-    .filter((insights): insights is ManagedAgentInsights => Boolean(insights));
-  const managedAgentInsightsComplete = managedAgentInsights.length === agents.length;
-  const managedAgentTotalRuns = managedAgentInsightsComplete
-    ? managedAgentInsights.reduce((total, insights) => total + insights.totalRuns, 0)
-    : null;
-
-  const featuredTemplates = useMemo(() => {
-    const preferred = templates.filter((template) => template.featured);
-    return (preferred.length > 0 ? preferred : templates).slice(0, 4);
-  }, [templates]);
-
-  const activeShowcaseTemplate =
-    featuredTemplates[showcaseIndex] || featuredTemplates[0] || templates[0] || null;
-  const showcaseSideTemplates = featuredTemplates
-    .filter((_, index) => index !== showcaseIndex)
-    .slice(0, 2);
+  const toggleWorkspaceAgents = (open: boolean) => {
+    setWorkspaceAgentsOpen(open);
+    try {
+      window.localStorage?.setItem(WORKSPACE_AGENTS_OPEN_KEY, open ? "1" : "0");
+    } catch {
+      // Storage can be unavailable (private host sessions); the toggle still works.
+    }
+  };
   const quickCreateTemplates = useMemo(
     () =>
       ["team-chat-qna", "morning-planner", "bug-triage"]
@@ -1501,19 +1488,6 @@ export function AgentsHubPanel({
         .filter((template): template is AgentTemplate => Boolean(template)),
     [templates],
   );
-
-  useEffect(() => {
-    if (showcaseIndex < featuredTemplates.length) return;
-    setShowcaseIndex(0);
-  }, [featuredTemplates.length, showcaseIndex]);
-
-  useEffect(() => {
-    if (featuredTemplates.length <= 1) return;
-    const interval = window.setInterval(() => {
-      setShowcaseIndex((current) => (current + 1) % featuredTemplates.length);
-    }, 5600);
-    return () => window.clearInterval(interval);
-  }, [featuredTemplates.length]);
 
   const toggleSkill = (skillId: string) => {
     if (!studioDraft) return;
@@ -2004,10 +1978,6 @@ export function AgentsHubPanel({
     await window.electronAPI.suspendManagedAgent(agentId);
     await loadData();
   };
-
-  if (loading) {
-    return <div className="agents-panel-loading">Loading agents...</div>;
-  }
 
   if (studioDraft) {
     const approvalPreview = getEffectiveApprovalPreview(
@@ -3460,9 +3430,12 @@ export function AgentsHubPanel({
           executionMode: "solo",
         }
       : null;
-    const AgentGlyph = templateRecord ? getTemplateGlyph(templateRecord) : BotGlyph;
     const customIcon = studio?.appearance?.icon;
-    const customColor = studio?.appearance?.color || templateRecord?.color || "#1570ef";
+    const agentMascot = customIcon
+      ? resolveBotMascot(customIcon)
+      : templateRecord
+        ? templateMascot(templateRecord)
+        : "assist";
     const starterPrompts = studio?.starterPrompts || [];
     const selectedSkillLabels = (studio?.skills || version?.skills || [])
       .map((skillId) => skills.find((skill) => skill.id === skillId)?.name || skillId)
@@ -3629,12 +3602,8 @@ export function AgentsHubPanel({
           </div>
 
           <section className="agents-agent-profile">
-            <div className="agents-agent-avatar" style={{ color: customColor }}>
-              {customIcon && customIcon !== "Bot" && customIcon.length <= 4 ? (
-                <span>{customIcon}</span>
-              ) : (
-                <AgentGlyph size={34} />
-              )}
+            <div className="agents-agent-avatar">
+              <BotMascot mascot={agentMascot} size={56} />
             </div>
             <h1>{selectedAgent.name}</h1>
             {studio?.subtitle ? <p>{studio.subtitle}</p> : null}
@@ -3902,355 +3871,260 @@ export function AgentsHubPanel({
 
   return (
     <div className="agents-panel">
-      {activeShowcaseTemplate ? (
-        <section
-          className="agents-showcase"
-          style={{ ["--agents-showcase-accent" as string]: activeShowcaseTemplate.color }}
-        >
-          <div className="agents-showcase-copy">
-            <span className="agents-showcase-eyebrow">Featured workflow</span>
-            <h2>{activeShowcaseTemplate.tagline || "Start with a proven workflow"}</h2>
-            <p>{activeShowcaseTemplate.description}</p>
-            <div className="agents-showcase-actions">
-              <button className="agents-primary-btn" onClick={() => setLibraryTab("templates")}>
-                Browse templates
-              </button>
-              <button className="agents-secondary-btn" onClick={handleOpenCreateComposer}>
-                Create agent
-              </button>
-            </div>
-            {featuredTemplates.length > 1 ? (
-              <div className="agents-showcase-dots" aria-label="Featured workflow selector">
-                {featuredTemplates.map((template, index) => (
-                  <button
-                    key={template.id}
-                    className={`agents-showcase-dot ${index === showcaseIndex ? "active" : ""}`}
-                    onClick={() => setShowcaseIndex(index)}
-                    aria-label={`Show ${template.name}`}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </div>
-          <div className="agents-showcase-visual">
-            <div className="agents-showcase-message">
-              {activeShowcaseTemplate.systemPrompt.split(".")[0]}
-            </div>
-            <div className="agents-showcase-core-card">
-              {(() => {
-                const TemplateGlyph = getTemplateGlyph(activeShowcaseTemplate);
-                return (
-                  <>
-                    <div className="agents-showcase-core-icon">
-                      <TemplateGlyph size={26} />
-                    </div>
-                    <div>
-                      <strong>{activeShowcaseTemplate.name}</strong>
-                      <span>{activeShowcaseTemplate.category}</span>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-            {showcaseSideTemplates[0] &&
-              (() => {
-                const template = showcaseSideTemplates[0];
-                const TemplateGlyph = getTemplateGlyph(template);
-                return (
-                  <button
-                    key={template.id}
-                    className="agents-showcase-side-card"
-                    onClick={() =>
-                      setStudioDraft(
-                        buildDraftFromTemplateWithRoles(template, workspaces, agentRoles),
-                      )
-                    }
-                  >
-                    <div className="agents-showcase-side-icon">
-                      <TemplateGlyph size={18} />
-                    </div>
-                    <div>
-                      <strong>{template.name}</strong>
-                      <span>{template.description}</span>
-                    </div>
-                  </button>
-                );
-              })()}
-            <div className="agents-showcase-status">
-              {(
-                activeShowcaseTemplate.requiredConnectorIds ||
-                activeShowcaseTemplate.studio?.requiredConnectorIds ||
-                []
-              )
-                .slice(0, 1)
-                .map((connectorId) => (
-                  <span key={connectorId}>{formatIdentifierLabel(connectorId)}</span>
-                ))}
-              {(
-                activeShowcaseTemplate.requiredConnectorIds ||
-                activeShowcaseTemplate.studio?.requiredConnectorIds ||
-                []
-              ).length === 0 ? (
-                <span>No connector required</span>
-              ) : null}
-              <span>
-                {activeShowcaseTemplate.studio?.scheduleConfig?.enabled ? "Scheduled" : "On demand"}
-              </span>
-            </div>
-          </div>
-        </section>
-      ) : null}
+      <BotsHome {...bots} templates={templates} />
 
-      {conversionPanel ? (
-        <section className="agents-summary-card agents-conversion-card">
-          <div className="agents-section-head">
-            <h2>
-              {conversionPanel === "agent-role"
-                ? "Convert Agent Persona"
-                : "Convert automation/profile"}
-            </h2>
+      <section className="agents-workspace-section">
+        <button
+          type="button"
+          className="agents-workspace-toggle"
+          aria-expanded={workspaceAgentsOpen}
+          onClick={() => toggleWorkspaceAgents(!workspaceAgentsOpen)}
+        >
+          <span>
+            <strong>Workspace agents</strong>
             <span>
-              Bring legacy assets into the managed-agent model without deleting the originals.
+              Agents you share with a team or deploy to Slack
+              {loading ? "" : ` · ${visibleAgentCount}`}
             </span>
-          </div>
-          <div className="agents-list">
-            {(conversionPanel === "agent-role" ? agentRoles : automationProfiles)
-              .slice(0, 8)
-              .map((entry) => (
-                <div key={entry.id} className="agents-list-row">
-                  <div>
-                    <strong>{entry.displayName || entry.id}</strong>
-                    <span>
-                      {entry.description || entry.profile || "No description configured."}
-                    </span>
-                  </div>
-                  <button
-                    className="agents-link-btn"
-                    onClick={() =>
-                      conversionPanel === "agent-role"
-                        ? void handleConvertAgentRole(entry.id)
-                        : void handleConvertAutomationProfile(entry.id)
-                    }
-                    disabled={
-                      conversionPanel === "agent-role"
-                        ? !hasHostMethod("convertAgentRoleToManagedAgent")
-                        : !hasHostMethod("convertAutomationProfileToManagedAgent")
-                    }
-                    title={
-                      window.coworkBrowserHost === true
-                        ? "Conversion is available in the desktop app."
-                        : undefined
-                    }
-                  >
-                    Convert
+          </span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+        {workspaceAgentsOpen ? (
+          <div className="agents-workspace-body">
+            {conversionPanel ? (
+              <section className="agents-summary-card agents-conversion-card">
+                <div className="agents-section-head">
+                  <h2>
+                    {conversionPanel === "agent-role"
+                      ? "Convert Agent Persona"
+                      : "Convert automation/profile"}
+                  </h2>
+                  <span>
+                    Bring legacy assets into the managed-agent model without deleting the originals.
+                  </span>
+                </div>
+                <div className="agents-list">
+                  {(conversionPanel === "agent-role" ? agentRoles : automationProfiles)
+                    .slice(0, 8)
+                    .map((entry) => (
+                      <div key={entry.id} className="agents-list-row">
+                        <div>
+                          <strong>{entry.displayName || entry.id}</strong>
+                          <span>
+                            {entry.description || entry.profile || "No description configured."}
+                          </span>
+                        </div>
+                        <button
+                          className="agents-link-btn"
+                          onClick={() =>
+                            conversionPanel === "agent-role"
+                              ? void handleConvertAgentRole(entry.id)
+                              : void handleConvertAutomationProfile(entry.id)
+                          }
+                          disabled={
+                            conversionPanel === "agent-role"
+                              ? !hasHostMethod("convertAgentRoleToManagedAgent")
+                              : !hasHostMethod("convertAutomationProfileToManagedAgent")
+                          }
+                          title={
+                            window.coworkBrowserHost === true
+                              ? "Conversion is available in the desktop app."
+                              : undefined
+                          }
+                        >
+                          Convert
+                        </button>
+                      </div>
+                    ))}
+                </div>
+                <div className="agents-row-actions">
+                  <button className="agents-link-btn" onClick={() => setConversionPanel(null)}>
+                    Close
                   </button>
                 </div>
-              ))}
-          </div>
-          <div className="agents-row-actions">
-            <button className="agents-link-btn" onClick={() => setConversionPanel(null)}>
-              Close
-            </button>
-          </div>
-        </section>
-      ) : null}
+              </section>
+            ) : null}
 
-      {error && <div className="agents-error-banner">{error}</div>}
+            {error && <div className="agents-error-banner">{error}</div>}
 
-      <section className="agents-metrics-strip">
-        <div className="agents-metric-pill">
-          <span>Total agents</span>
-          <strong>{visibleAgentCount}</strong>
-          {activeMissionControlAgentRoles.length > 0 ? (
-            <small>
-              {agents.length} managed · {activeMissionControlAgentRoles.length} Mission Control
-            </small>
-          ) : null}
-        </div>
-        <div className="agents-metric-pill">
-          <span>Managed runs</span>
-          <strong>{managedAgentTotalRuns ?? "Unavailable"}</strong>
-          {managedAgentTotalRuns === null ? <small>Insights did not load</small> : null}
-        </div>
-        <div className="agents-metric-pill">
-          <span>Slack channel targets</span>
-          <strong>{slackChannelTargetCount}</strong>
-        </div>
-        <div className="agents-metric-pill">
-          <span>Scheduled</span>
-          <strong>{scheduledAgents.length}</strong>
-        </div>
-      </section>
+            <section className="agents-library-surface">
+              <div className="agents-library-header">
+                <div className="agents-row-actions">
+                  <button className="agents-secondary-btn" onClick={handleOpenCreateComposer}>
+                    Create agent
+                  </button>
+                </div>
+                <div className="agents-tab-row agents-tab-row-primary agents-directory-tabs">
+                  {[
+                    ["recent", "Recently used"],
+                    ["mine", "Built by me"],
+                    ["all", "All agents"],
+                    ["templates", "Templates"],
+                  ].map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`agents-tab ${libraryTab === id ? "active" : ""}`}
+                      onClick={() => setLibraryTab(id as AgentsLibraryTab)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-      <section className="agents-library-surface">
-        <div className="agents-library-header">
-          <div className="agents-section-head agents-section-head-stack">
-            <h2>Keep work moving 24/7 with workspace agents</h2>
-            <span>Build agents that run reports, answer Slack questions, and update systems.</span>
-          </div>
-          <div className="agents-tab-row agents-tab-row-primary agents-directory-tabs">
-            {[
-              ["recent", "Recently used"],
-              ["mine", "Built by me"],
-              ["all", "All agents"],
-              ["templates", "Templates"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={`agents-tab ${libraryTab === id ? "active" : ""}`}
-                onClick={() => setLibraryTab(id as AgentsLibraryTab)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+              {libraryTab === "templates" ? (
+                <div className="agents-template-grid">
+                  {templates.map((template) => {
+                    const availablePackIds = new Set(pluginPacks.map((pack) => pack.name));
+                    const configuredConnectorIds = new Set(mcpServerIds.map((server) => server.id));
+                    const missingPacks = (template.requiredPackIds || []).filter(
+                      (packId) => !availablePackIds.has(packId),
+                    );
+                    const missingConnectors = (template.requiredConnectorIds || []).filter(
+                      (connectorId) => !configuredConnectorIds.has(connectorId),
+                    );
+                    return (
+                      <button
+                        key={template.id}
+                        className="agents-template-card"
+                        style={{ ["--template-accent" as string]: template.color }}
+                        onClick={() =>
+                          setStudioDraft(
+                            buildDraftFromTemplateWithRoles(template, workspaces, agentRoles),
+                          )
+                        }
+                      >
+                        <BotMascot mascot={templateMascot(template)} size={40} animated={false} />
+                        <div>
+                          <strong>{template.name}</strong>
+                          <p>{template.description}</p>
+                          <div className="agents-template-meta">
+                            <span>{template.category}</span>
+                            {(template.expectedArtifacts || []).slice(0, 3).map((artifact) => (
+                              <span key={artifact}>{artifact}</span>
+                            ))}
+                            {(template.requiredConnectorIds || []).length > 0 ? (
+                              <span>{template.requiredConnectorIds?.length || 0} connectors</span>
+                            ) : null}
+                            {missingPacks.length > 0 || missingConnectors.length > 0 ? (
+                              <span className="agents-template-warning">
+                                Missing setup: {missingPacks.length + missingConnectors.length}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : loading ? (
+                <div className="agents-panel-loading">Loading agents...</div>
+              ) : visibleLibraryAgents.length > 0 || visibleMissionControlAgentRoles.length > 0 ? (
+                <div className="agents-library-grid">
+                  {visibleLibraryAgents.map((agent) => {
+                    const studio = getStudioConfig(agentDetails[agent.id]);
+                    const insights = agentInsights[agent.id];
+                    const templateRecord = studio?.templateId
+                      ? templates.find((entry) => entry.id === studio.templateId) || {
+                          id: studio.templateId,
+                          name: studio.templateId,
+                          description: "",
+                          icon: "",
+                          color: "#1570ef",
+                          category: "operations",
+                          systemPrompt: "",
+                          executionMode: "solo",
+                        }
+                      : null;
+                    const mascot = studio?.appearance?.icon
+                      ? resolveBotMascot(studio.appearance.icon)
+                      : templateRecord
+                        ? templateMascot(templateRecord)
+                        : "assist";
+                    return (
+                      <button
+                        key={agent.id}
+                        className="agents-library-card"
+                        onClick={() => setSelectedAgentId(agent.id)}
+                      >
+                        <div className="agents-library-card-top">
+                          <BotMascot mascot={mascot} size={44} animated={false} />
+                        </div>
+                        <div className="agents-library-card-copy">
+                          <strong>{agent.name}</strong>
+                          <p>
+                            {agent.description || studio?.workflowBrief || "No description yet."}
+                          </p>
+                        </div>
+                        <div className="agents-library-card-meta">
+                          <span>{formatSharingLabel(studio?.sharing)}</span>
+                          {insights ? (
+                            <span className="agents-library-card-count">
+                              <Play size={18} />
+                              {formatCountLabel(insights.totalRuns, "run")}
+                            </span>
+                          ) : (
+                            <span className="agents-library-card-count muted">
+                              Stats unavailable
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {visibleMissionControlAgentRoles.map((agentRole) => {
+                    const cadence =
+                      agentRole.heartbeatPolicy?.cadenceMinutes || agentRole.pulseEveryMinutes;
+                    return (
+                      <button
+                        key={`mission-control-${agentRole.id}`}
+                        className="agents-library-card legacy"
+                        onClick={() => setConversionPanel("agent-role")}
+                      >
+                        <div className="agents-library-card-top">
+                          <BotMascot
+                            mascot={resolveBotMascot(agentRole.icon)}
+                            size={44}
+                            animated={false}
+                          />
+                        </div>
+                        <div className="agents-library-card-copy">
+                          <strong>{agentRole.displayName}</strong>
+                          <p>{agentRole.description || "No description configured."}</p>
+                        </div>
+                        <div className="agents-library-card-meta">
+                          <span>Agent Persona</span>
+                          <span className="agents-library-card-count">
+                            <Clock3 size={18} />
+                            {cadence ? `Every ${cadence}m` : "Heartbeat enabled"}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="agents-empty-state">No agents in this view yet.</div>
+              )}
+            </section>
 
-        {libraryTab === "templates" ? (
-          <div className="agents-template-grid">
-            {templates.map((template) => {
-              const TemplateGlyph = getTemplateGlyph(template);
-              const availablePackIds = new Set(pluginPacks.map((pack) => pack.name));
-              const configuredConnectorIds = new Set(mcpServerIds.map((server) => server.id));
-              const missingPacks = (template.requiredPackIds || []).filter(
-                (packId) => !availablePackIds.has(packId),
-              );
-              const missingConnectors = (template.requiredConnectorIds || []).filter(
-                (connectorId) => !configuredConnectorIds.has(connectorId),
-              );
-              return (
-                <button
-                  key={template.id}
-                  className="agents-template-card"
-                  style={{ ["--template-accent" as string]: template.color }}
-                  onClick={() =>
-                    setStudioDraft(
-                      buildDraftFromTemplateWithRoles(template, workspaces, agentRoles),
-                    )
-                  }
-                >
-                  <span className="agents-template-icon">
-                    <TemplateGlyph size={22} />
-                  </span>
-                  <div>
-                    <strong>{template.name}</strong>
-                    <p>{template.description}</p>
-                    <div className="agents-template-meta">
-                      <span>{template.category}</span>
-                      {(template.expectedArtifacts || []).slice(0, 3).map((artifact) => (
-                        <span key={artifact}>{artifact}</span>
-                      ))}
-                      {(template.requiredConnectorIds || []).length > 0 ? (
-                        <span>{template.requiredConnectorIds?.length || 0} connectors</span>
-                      ) : null}
-                      {missingPacks.length > 0 || missingConnectors.length > 0 ? (
-                        <span className="agents-template-warning">
-                          Missing setup: {missingPacks.length + missingConnectors.length}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+            <section className="agents-governance-strip">
+              <div className="agents-governance-item">
+                <ShieldCheck size={16} />
+                <span>Approval rules for sensitive actions</span>
+              </div>
+              <div className="agents-governance-item">
+                <Library size={16} />
+                <span>Share privately, with a team, or workspace-wide</span>
+              </div>
+              <div className="agents-governance-item">
+                <Send size={16} />
+                <span>Deploy into Slack without a separate bot flow</span>
+              </div>
+            </section>
           </div>
-        ) : visibleLibraryAgents.length > 0 || visibleMissionControlAgentRoles.length > 0 ? (
-          <div className="agents-library-grid">
-            {visibleLibraryAgents.map((agent) => {
-              const studio = getStudioConfig(agentDetails[agent.id]);
-              const insights = agentInsights[agent.id];
-              const templateRecord = studio?.templateId
-                ? templates.find((entry) => entry.id === studio.templateId) || {
-                    id: studio.templateId,
-                    name: studio.templateId,
-                    description: "",
-                    icon: "",
-                    color: "#1570ef",
-                    category: "operations",
-                    systemPrompt: "",
-                    executionMode: "solo",
-                  }
-                : null;
-              const TemplateGlyph = templateRecord ? getTemplateGlyph(templateRecord) : BotGlyph;
-              const cardColor = studio?.appearance?.color || templateRecord?.color || "#1570ef";
-              return (
-                <button
-                  key={agent.id}
-                  className="agents-library-card"
-                  onClick={() => setSelectedAgentId(agent.id)}
-                >
-                  <div className="agents-library-card-top">
-                    <span className="agents-library-card-icon" style={{ color: cardColor }}>
-                      <TemplateGlyph size={28} />
-                    </span>
-                  </div>
-                  <div className="agents-library-card-copy">
-                    <strong>{agent.name}</strong>
-                    <p>{agent.description || studio?.workflowBrief || "No description yet."}</p>
-                  </div>
-                  <div className="agents-library-card-meta">
-                    <span>{formatSharingLabel(studio?.sharing)}</span>
-                    {insights ? (
-                      <span className="agents-library-card-count">
-                        <Play size={18} />
-                        {formatCountLabel(insights.totalRuns, "run")}
-                      </span>
-                    ) : (
-                      <span className="agents-library-card-count muted">Stats unavailable</span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-            {visibleMissionControlAgentRoles.map((agentRole) => {
-              const Icon = getEmojiIcon(agentRole.icon || "🤖");
-              const cadence =
-                agentRole.heartbeatPolicy?.cadenceMinutes || agentRole.pulseEveryMinutes;
-              return (
-                <button
-                  key={`mission-control-${agentRole.id}`}
-                  className="agents-library-card legacy"
-                  onClick={() => setConversionPanel("agent-role")}
-                >
-                  <div className="agents-library-card-top">
-                    <span className="agents-library-card-icon" style={{ color: agentRole.color }}>
-                      <Icon size={28} />
-                    </span>
-                  </div>
-                  <div className="agents-library-card-copy">
-                    <strong>{agentRole.displayName}</strong>
-                    <p>{agentRole.description || "No description configured."}</p>
-                  </div>
-                  <div className="agents-library-card-meta">
-                    <span>Agent Persona</span>
-                    <span className="agents-library-card-count">
-                      <Clock3 size={18} />
-                      {cadence ? `Every ${cadence}m` : "Heartbeat enabled"}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="agents-empty-state">No agents in this view yet.</div>
-        )}
-      </section>
-
-      <section className="agents-governance-strip">
-        <div className="agents-governance-item">
-          <ShieldCheck size={16} />
-          <span>Approval rules for sensitive actions</span>
-        </div>
-        <div className="agents-governance-item">
-          <Library size={16} />
-          <span>Share privately, with a team, or workspace-wide</span>
-        </div>
-        <div className="agents-governance-item">
-          <Send size={16} />
-          <span>Deploy into Slack without a separate bot flow</span>
-        </div>
+        ) : null}
       </section>
 
       {renderAgentsStyles()}

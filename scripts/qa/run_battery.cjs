@@ -919,9 +919,24 @@ async function waitForTerminalStatus(client, taskId, options) {
     }
     for (const approval of pending) {
       if (respondedIds.has(approval.id)) continue;
+      if (
+        typeof approval.revisionHash !== "string" ||
+        !/^[0-9a-f]{64}$/.test(approval.revisionHash)
+      ) {
+        return {
+          ok: false,
+          reason: "approval_revision_missing",
+          approvalId: approval.id,
+          task,
+        };
+      }
       const response = await client.request(
         "approval.respond",
-        { approvalId: approval.id, approved: true },
+        {
+          approvalId: approval.id,
+          expectedRevisionHash: approval.revisionHash,
+          approved: true,
+        },
         deadlineAt,
       );
       if (

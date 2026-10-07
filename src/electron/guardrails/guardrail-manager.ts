@@ -403,7 +403,7 @@ export class GuardrailManager {
     if (
       typeof taskBudget === "number" &&
       Number.isFinite(taskBudget) &&
-      taskBudget > 0 &&
+      taskBudget >= 0 &&
       (!globalCapApplies || taskBudget <= settings.maxCostPerTask)
     ) {
       // A task budget can only tighten the global cap, never raise it.

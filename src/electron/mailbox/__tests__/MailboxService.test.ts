@@ -462,6 +462,209 @@ describeWithSqlite("MailboxService", () => {
     }
   });
 
+  it("fences compose sends when Gmail accepts a request but the response is lost", async () => {
+    const gmailApi = await import("../../utils/gmail-api");
+    const gmailRequestSpy = vi
+      .spyOn(gmailApi, "gmailRequest")
+      .mockImplementation(async (_settings, request) => {
+        if (request.path === "/users/me/drafts") {
+          return { data: { id: "provider-draft-ambiguous" } } as never;
+        }
+        if (request.path === "/users/me/drafts/send") {
+          throw new Error("connection closed after provider accepted the request");
+        }
+        return { data: {} } as never;
+      });
+
+    try {
+      await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+      const draft = await service.createMailboxDraft({
+        threadId: "gmail-thread:alpha",
+        mode: "reply",
+        bodyText: "Do not duplicate this reply.",
+      });
+      const outgoing = await service.sendMailboxDraft(draft.id);
+      const action = db
+        .prepare(
+          "SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'",
+        )
+        .get(draft.id) as { id: string };
+      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(
+        Date.now() - 1000,
+        action.id,
+      );
+
+      const attempted = await service.processMailboxQueue();
+      expect(attempted.failed).toBe(1);
+      const actionRow = db
+        .prepare("SELECT status, latest_error FROM mailbox_queued_actions WHERE id = ?")
+        .get(action.id) as { status: string; latest_error: string };
+      const draftRow = db
+        .prepare("SELECT status, provider_draft_id FROM mailbox_compose_drafts WHERE id = ?")
+        .get(draft.id) as { status: string; provider_draft_id: string | null };
+      const outgoingRow = db
+        .prepare("SELECT status FROM mailbox_outgoing_messages WHERE id = ?")
+        .get(outgoing.id) as { status: string };
+
+      expect(actionRow.status).toBe("outcome_unknown");
+      expect(actionRow.latest_error).toContain("Check the provider's Sent folder");
+      expect(draftRow).toEqual({
+        status: "outcome_unknown",
+        provider_draft_id: "provider-draft-ambiguous",
+      });
+      expect(outgoingRow.status).toBe("outcome_unknown");
+      expect(
+        gmailRequestSpy.mock.calls.filter(
+          ([, request]) => request.path === "/users/me/drafts/send",
+        ),
+      ).toHaveLength(1);
+
+      await expect(service.retryMailboxAction(action.id)).rejects.toThrow(
+        /delivery status is unknown/i,
+      );
+      await service.processMailboxQueue();
+      expect(
+        gmailRequestSpy.mock.calls.filter(
+          ([, request]) => request.path === "/users/me/drafts/send",
+        ),
+      ).toHaveLength(1);
+
+      const reconciled = await service.resolveMailboxSendOutcome(action.id, "confirmed_sent");
+      expect(reconciled.status).toBe("succeeded");
+      expect(
+        (
+          db.prepare("SELECT status FROM mailbox_compose_drafts WHERE id = ?").get(draft.id) as {
+            status: string;
+          }
+        ).status,
+      ).toBe("sent");
+      expect(
+        (
+          db
+            .prepare("SELECT status FROM mailbox_outgoing_messages WHERE id = ?")
+            .get(outgoing.id) as { status: string }
+        ).status,
+      ).toBe("sent");
+      expect(
+        gmailRequestSpy.mock.calls.filter(
+          ([, request]) => request.path === "/users/me/drafts/send",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      gmailRequestSpy.mockRestore();
+    }
+  });
+
+  it("retries an ambiguous send only after the user confirms it was not delivered", async () => {
+    const gmailApi = await import("../../utils/gmail-api");
+    let sendAttempts = 0;
+    const gmailRequestSpy = vi
+      .spyOn(gmailApi, "gmailRequest")
+      .mockImplementation(async (_settings, request) => {
+        if (request.path === "/users/me/drafts") {
+          return { data: { id: "provider-draft-manual-retry" } } as never;
+        }
+        if (request.path === "/users/me/drafts/send") {
+          sendAttempts += 1;
+          if (sendAttempts === 1) throw new Error("provider response lost");
+          return { data: { id: "provider-message-manual-retry" } } as never;
+        }
+        return { data: {} } as never;
+      });
+
+    try {
+      await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+      const draft = await service.createMailboxDraft({
+        threadId: "gmail-thread:alpha",
+        mode: "reply",
+        bodyText: "Retry only after checking Sent.",
+      });
+      await service.sendMailboxDraft(draft.id);
+      const action = db
+        .prepare(
+          "SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'",
+        )
+        .get(draft.id) as { id: string };
+      db.prepare("UPDATE mailbox_queued_actions SET next_attempt_at = ? WHERE id = ?").run(
+        Date.now() - 1000,
+        action.id,
+      );
+      await service.processMailboxQueue();
+      expect(
+        (
+          db.prepare("SELECT status FROM mailbox_queued_actions WHERE id = ?").get(action.id) as {
+            status: string;
+          }
+        ).status,
+      ).toBe("outcome_unknown");
+
+      const retried = await service.resolveMailboxSendOutcome(action.id, "confirmed_not_sent");
+      expect(retried.status).toBe("succeeded");
+      expect(sendAttempts).toBe(2);
+      expect(
+        gmailRequestSpy.mock.calls.filter(([, request]) => request.path === "/users/me/drafts"),
+      ).toHaveLength(1);
+      expect(
+        (
+          db.prepare("SELECT status FROM mailbox_compose_drafts WHERE id = ?").get(draft.id) as {
+            status: string;
+          }
+        ).status,
+      ).toBe("sent");
+    } finally {
+      gmailRequestSpy.mockRestore();
+    }
+  });
+
+  it("marks a compose send interrupted by restart as outcome unknown without replaying it", async () => {
+    const gmailApi = await import("../../utils/gmail-api");
+    const gmailRequestSpy = vi.spyOn(gmailApi, "gmailRequest");
+    await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+    const draft = await service.createMailboxDraft({
+      threadId: "gmail-thread:alpha",
+      mode: "reply",
+      bodyText: "Recover without replay.",
+    });
+    const outgoing = await service.sendMailboxDraft(draft.id);
+    const action = db
+      .prepare("SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'")
+      .get(draft.id) as { id: string };
+    db.prepare("UPDATE mailbox_queued_actions SET status = 'running' WHERE id = ?").run(action.id);
+    db.prepare("UPDATE mailbox_compose_drafts SET status = 'sending' WHERE id = ?").run(draft.id);
+    db.prepare("UPDATE mailbox_outgoing_messages SET status = 'sending' WHERE id = ?").run(
+      outgoing.id,
+    );
+
+    try {
+      const result = await service.processMailboxQueue();
+      expect(result.processed).toBe(0);
+      expect(gmailRequestSpy).not.toHaveBeenCalled();
+      expect(
+        (
+          db.prepare("SELECT status FROM mailbox_queued_actions WHERE id = ?").get(action.id) as {
+            status: string;
+          }
+        ).status,
+      ).toBe("outcome_unknown");
+      expect(
+        (
+          db.prepare("SELECT status FROM mailbox_compose_drafts WHERE id = ?").get(draft.id) as {
+            status: string;
+          }
+        ).status,
+      ).toBe("outcome_unknown");
+      expect(
+        (
+          db
+            .prepare("SELECT status FROM mailbox_outgoing_messages WHERE id = ?")
+            .get(outgoing.id) as { status: string }
+        ).status,
+      ).toBe("outcome_unknown");
+    } finally {
+      gmailRequestSpy.mockRestore();
+    }
+  });
+
   it("applies cleanup locally without mutating the mail server and restores the thread when new activity arrives", async () => {
     db.prepare(
       `INSERT INTO mailbox_threads
@@ -1294,6 +1497,52 @@ describeWithSqlite("MailboxService", () => {
 
     const imapThreads = await service.listThreads({ accountId: "imap:user@msn.com" });
     expect(imapThreads.map((thread) => thread.id)).toEqual(["imap-thread:msn-alpha"]);
+  });
+
+  it("limits responsibility mailbox reads to a configured account and omits relationship research", async () => {
+    db.prepare(
+      `INSERT INTO mailbox_accounts
+        (id, provider, address, display_name, status, capabilities_json, sync_cursor, last_synced_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "imap:other@example.com",
+      "imap",
+      "other@example.com",
+      "Other Mailbox",
+      "connected",
+      JSON.stringify(["threads"]),
+      null,
+      now,
+      now,
+      now,
+    );
+
+    const gmailThreads = await service.listThreadsForAccount("gmail:test@example.com", {
+      accountId: "imap:other@example.com",
+      mailboxView: "all",
+    });
+    expect(gmailThreads.length).toBeGreaterThan(0);
+    expect(gmailThreads.every((thread) => thread.accountId === "gmail:test@example.com")).toBe(
+      true,
+    );
+
+    const researchContact = vi.spyOn(service, "researchContact");
+    const detail = await service.getThreadForAccount(
+      "gmail-thread:alpha",
+      "gmail:test@example.com",
+    );
+    expect(detail?.messages).toHaveLength(2);
+    expect(detail).not.toHaveProperty("research");
+    expect(detail).not.toHaveProperty("contactMemory");
+    expect(detail).not.toHaveProperty("drafts");
+    expect(detail).not.toHaveProperty("proposals");
+    expect(researchContact).not.toHaveBeenCalled();
+    await expect(
+      service.getThreadForAccount("gmail-thread:alpha", "imap:other@example.com"),
+    ).resolves.toBeNull();
+    await expect(
+      service.listThreadsForAccount("imap:missing@example.com", { mailboxView: "all" }),
+    ).rejects.toThrow("selected mailbox account is unavailable");
   });
 
   it("normalizes structured IMAP addresses and html content from the email client", () => {

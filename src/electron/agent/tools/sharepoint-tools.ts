@@ -1,6 +1,5 @@
-import * as fs from "fs";
 import * as path from "path";
-import { Workspace } from "../../../shared/types";
+import { SharePointSettingsData, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { SharePointSettingsManager } from "../../settings/sharepoint-manager";
 import { sharepointRequest } from "../../utils/sharepoint-api";
@@ -8,6 +7,13 @@ import {
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
+import {
+  captureIntegrationUploadSnapshot,
+  createIntegrationEffectGuard,
+  integrationEffectReview,
+  IntegrationUploadSnapshot,
+  workspaceIntegrationUploadReview,
+} from "./integration-effect-guard";
 
 type SharePointAction =
   | "get_current_user"
@@ -79,6 +85,37 @@ export class SharePointTools {
       }
       throw error;
     }
+  }
+
+  private createEffectGuard(
+    initialSettings: SharePointSettingsData,
+    input: SharePointActionInput,
+    details: Record<string, unknown>,
+    errorPrefix: string,
+    uploadSnapshot?: IntegrationUploadSnapshot,
+  ) {
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName: "sharepoint_action",
+      toolInput: input,
+      approvalDetails: details,
+      uploadSnapshot,
+      initialSettings,
+      loadSettings: () => SharePointSettingsManager.loadSettings(),
+      settingsEnabled: (current) => current.enabled && Boolean(current.accessToken),
+      settingsFingerprint: (current) =>
+        JSON.stringify({
+          enabled: current.enabled,
+          siteId: current.siteId,
+          driveId: current.driveId,
+          timeoutMs: current.timeoutMs,
+        }),
+      authConfig: (current) => ({ type: "bearer", token: current.accessToken }),
+      errorPrefix,
+    });
   }
 
   private getSiteId(inputSiteId?: string): string {
@@ -165,14 +202,22 @@ export class SharePointTools {
         const parentPath = input.parent_id
           ? `/items/${input.parent_id}/children`
           : "/root/children";
-        await this.requireApproval("Create a SharePoint folder", {
-          action: "create_folder",
+        const details = integrationEffectReview("sharepoint_action", input, "create_folder", {
           parent_id: input.parent_id || "root",
           name: input.name,
+          drive_id: driveId,
         });
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "SharePoint action",
+        );
+        await this.requireApproval("Create a SharePoint folder", details);
         result = await sharepointRequest(settings, {
           method: "POST",
           path: `/drives/${driveId}${parentPath}`,
+          beforeSend,
           body: {
             name: input.name,
             folder: {},
@@ -185,7 +230,7 @@ export class SharePointTools {
         if (!input.file_path) throw new Error("Missing file_path for upload_file");
         const driveId = this.getDriveId(input.drive_id);
         const resolved = await this.resolveFilePath(input.file_path);
-        const data = fs.readFileSync(resolved);
+        const snapshot = captureIntegrationUploadSnapshot(this.workspace, resolved);
         const fileName = input.name || path.basename(resolved);
         let uploadPath: string;
         if (input.remote_path) {
@@ -200,29 +245,50 @@ export class SharePointTools {
         } else {
           uploadPath = `/drives/${driveId}/root:/${encodeURIComponent(fileName)}:/content`;
         }
-        await this.requireApproval(`Upload file to SharePoint: ${fileName}`, {
-          action: "upload_file",
-          destination: input.remote_path || input.parent_id || "root",
-          file: fileName,
-        });
+        const destination = input.remote_path || input.parent_id || "root";
+        const details = workspaceIntegrationUploadReview(
+          this.workspace,
+          "sharepoint_action",
+          input,
+          "upload_file",
+          { destination, drive_id: driveId, file: fileName },
+          snapshot,
+        );
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "SharePoint upload",
+          snapshot,
+        );
+        await this.requireApproval(`Upload file to SharePoint: ${fileName}`, details);
         result = await sharepointRequest(settings, {
           method: "PUT",
           path: uploadPath,
-          body: data,
+          body: snapshot.data,
           headers: { "Content-Type": "application/octet-stream" },
+          beforeSend,
         });
         break;
       }
       case "delete_item": {
         if (!input.item_id) throw new Error("Missing item_id for delete_item");
         const driveId = this.getDriveId(input.drive_id);
-        await this.requireApproval("Delete a SharePoint item", {
-          action: "delete_item",
+        const details = integrationEffectReview("sharepoint_action", input, "delete_item", {
           item_id: input.item_id,
+          drive_id: driveId,
         });
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "SharePoint action",
+        );
+        await this.requireApproval("Delete a SharePoint item", details);
         result = await sharepointRequest(settings, {
           method: "DELETE",
           path: `/drives/${driveId}/items/${input.item_id}`,
+          beforeSend,
         });
         break;
       }

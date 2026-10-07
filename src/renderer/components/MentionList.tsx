@@ -7,6 +7,8 @@ import {
   AgentRoleData,
 } from "../../electron/preload";
 import { useAgentContext } from "../hooks/useAgentContext";
+import { resolveBotMascot } from "../../shared/bot-mascots";
+import { BotMascot } from "./bot-mascot/BotMascot";
 
 interface MentionListProps {
   workspaceId?: string;
@@ -169,6 +171,10 @@ export function MentionList({
     return agent ? { icon: agent.icon, color: agent.color } : { icon: "?", color: "#6366f1" };
   };
 
+  const renderAgentAvatar = (agent: { icon: string; color: string }) => {
+    return <BotMascot mascot={resolveBotMascot(agent.icon)} size={24} animated={false} />;
+  };
+
   if (loading) {
     return <div className="mention-loading">{agentContext.getUiCopy("mentionLoading")}</div>;
   }
@@ -221,13 +227,9 @@ export function MentionList({
               >
                 <div className="mention-header">
                   <div className="mention-agents">
-                    <span className="agent-avatar" style={{ backgroundColor: fromAgent.color }}>
-                      {fromAgent.icon}
-                    </span>
+                    {renderAgentAvatar(fromAgent)}
                     <span className="mention-arrow">→</span>
-                    <span className="agent-avatar" style={{ backgroundColor: toAgent.color }}>
-                      {toAgent.icon}
-                    </span>
+                    {renderAgentAvatar(toAgent)}
                   </div>
 
                   <div className="mention-meta">

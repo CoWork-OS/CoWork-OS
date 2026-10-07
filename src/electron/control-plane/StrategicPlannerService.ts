@@ -1,3 +1,4 @@
+import { dispatchOccurrenceKey } from "../automation/dispatch-occurrence";
 import { AgentRoleRepository } from "../agents/agent-repository-facades";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import type Database from "better-sqlite3";
@@ -27,7 +28,7 @@ import type { AgentDaemon } from "../agent/daemon";
 import { ControlPlaneCoreService } from "./ControlPlaneCoreService";
 import {
   getBackgroundDispatchBudget,
-  type BackgroundDispatchBudget,
+  type BackgroundDispatchBudgetAuthority,
 } from "../agents/BackgroundDispatchBudget";
 import {
   buildAgentConfigFromAutonomyPolicy,
@@ -77,7 +78,7 @@ interface StrategicPlannerServiceDeps {
   log?: (...args: unknown[]) => void;
   recordAutomationOutcome?: (outcome: CreateAutomationRunOutcomeInput) => Promise<unknown>;
   /** Shared background dispatch budget (Heartbeat, AutonomyEngine, WI, Strategic Planner). */
-  dispatchBudget?: BackgroundDispatchBudget;
+  dispatchBudget?: BackgroundDispatchBudgetAuthority;
 }
 
 export class StrategicPlannerService {
@@ -238,7 +239,7 @@ export class StrategicPlannerService {
     await this.sql.run("planner_runNow_1", [runId, request.companyId, trigger, now, now]);
 
     try {
-      const outcome = await this.executePlanningRun(company, config, trigger);
+      const outcome = await this.executePlanningRun(company, config, trigger, runId);
       const outputType: CompanyOutputType =
         outcome.createdIssueIds.length > 0 || outcome.updatedIssueIds.length > 0
           ? "issue_batch"
@@ -428,6 +429,7 @@ export class StrategicPlannerService {
     company: Company,
     config: StrategicPlannerConfig,
     trigger: StrategicPlannerRunRequest["trigger"] = "manual",
+    runOccurrence = randomUUID(),
   ): Promise<{
     createdIssueIds: string[];
     updatedIssueIds: string[];
@@ -649,7 +651,14 @@ export class StrategicPlannerService {
 
     const dispatchedTaskIds: string[] = [];
     for (const issue of dispatchable) {
-      const taskId = await this.dispatchIssue(company, config, issue, plannerAgent, trigger);
+      const taskId = await this.dispatchIssue(
+        company,
+        config,
+        issue,
+        plannerAgent,
+        trigger,
+        runOccurrence,
+      );
       if (taskId) dispatchedTaskIds.push(taskId);
     }
 
@@ -667,6 +676,7 @@ export class StrategicPlannerService {
     issue: Issue,
     plannerAgent: AgentRole | undefined,
     trigger: StrategicPlannerRunRequest["trigger"] = "manual",
+    runOccurrence = randomUUID(),
   ): Promise<string | null> {
     if (!this.deps.agentDaemon) return null;
     const workspaceId =
@@ -686,9 +696,15 @@ export class StrategicPlannerService {
     // AutonomyEngine and Workflow Intelligence). Over budget, the issue stays in the backlog
     // for a later run. Manual runs are recorded but never refused.
     const budget = this.deps.dispatchBudget || getBackgroundDispatchBudget();
-    const grant = budget.tryConsume({
+    const grant = await budget.tryConsume({
       workspaceId,
       source: "strategic_planner",
+      occurrenceKey: dispatchOccurrenceKey("strategic_planner", [
+        company.id,
+        issue.id,
+        trigger === "manual" ? "manual" : "scheduled",
+        trigger === "manual" ? runOccurrence : config.lastRunAt || 0,
+      ]),
       entityKey: `issue:${issue.id}`,
       manual: trigger === "manual",
     });
@@ -720,6 +736,7 @@ export class StrategicPlannerService {
           }),
           ...buildAgentConfigFromAutonomyPolicy(resolveOperationalAutonomyPolicy(dispatchAgent)),
           allowUserInput: false,
+          backgroundDispatchTicket: grant.durable ? grant.ticket : undefined,
           gatewayContext: "private",
         },
       });
@@ -732,7 +749,7 @@ export class StrategicPlannerService {
       await this.core.attachTaskToRun(checkout.run.id, task.id);
       return task.id;
     } catch (error) {
-      if (!createdTaskId) budget.refund(grant.ticket);
+      if (!createdTaskId) await budget.refund(grant.ticket);
       throw error;
     }
   }

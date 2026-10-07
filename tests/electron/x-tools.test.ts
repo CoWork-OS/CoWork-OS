@@ -1,4 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { DatabaseManager } from "../../src/electron/database/schema";
 
 const mockRunBirdCommand = vi.hoisted(() => vi.fn());
 const mockSettingsLoad = vi.hoisted(() => vi.fn());
@@ -44,10 +48,18 @@ const mockWorkspace: Workspace = {
 const mockDaemon = {
   logEvent: vi.fn(),
   requestApproval: vi.fn().mockResolvedValue(true),
+  getDatabase: vi.fn(() => policyDbManager.getDatabase()),
+  getEffectiveWorkspaceForTask: vi.fn(() => mockWorkspace),
+  getToolEffectAuthority: vi.fn().mockResolvedValue("fixture-effect-authority"),
 };
+
+let policyDirectory = "";
+let policyDbManager: DatabaseManager;
 
 describe("XTools", () => {
   beforeEach(() => {
+    policyDirectory = mkdtempSync(path.join(tmpdir(), "cowork-x-tools-"));
+    policyDbManager = new DatabaseManager({ dbPath: path.join(policyDirectory, "fixture.db") });
     vi.clearAllMocks();
     mockRunBirdCommand.mockReset();
     mockSettingsLoad.mockReset();
@@ -62,6 +74,11 @@ describe("XTools", () => {
       cookieTimeoutMs: 20000,
       quoteDepth: 1,
     });
+  });
+
+  afterEach(() => {
+    policyDbManager.close();
+    rmSync(policyDirectory, { recursive: true, force: true });
   });
 
   const buildTool = () => new XTools(mockWorkspace, mockDaemon as any, "task-test");

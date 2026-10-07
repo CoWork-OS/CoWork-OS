@@ -4,6 +4,52 @@ import { AgentDaemon } from "../daemon";
 import { PermissionSettingsManager } from "../../security/permission-settings-manager";
 
 describe("AgentDaemon.createChildTask", () => {
+  it.each([false, undefined, true])(
+    "inherits parent channel sender evidence without child override (%s)",
+    async (owner) => {
+      const taskRepo = {
+        findById: vi
+          .fn()
+          .mockReturnValue({
+            id: "parent-1",
+            agentConfig: {
+              originChannel: "telegram",
+              gatewayContext: "private",
+              gatewaySenderIsOwner: owner,
+              gatewaySenderRef: "gateway:telegram:contact",
+            },
+          }),
+        update: vi.fn(),
+        create: vi.fn((task: Any) => ({ id: "child-1", ...task })),
+      };
+      const daemonLike = {
+        taskRepo,
+        startTask: vi.fn(),
+        ensureCollaborativeRunForParentTask: vi.fn(),
+      } as Any;
+      const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+        title: "Child",
+        prompt: "Inspect work",
+        workspaceId: "ws-1",
+        parentTaskId: "parent-1",
+        agentType: "sub",
+        agentConfig: {
+          originChannel: "slack",
+          gatewaySenderIsOwner: !owner,
+          gatewaySenderRef: "forged-owner",
+          retainMemory: true,
+          allowSharedContextMemory: true,
+        },
+      });
+      expect(child.agentConfig).toMatchObject({
+        originChannel: "telegram",
+        gatewaySenderIsOwner: owner === true,
+        gatewaySenderRef: "gateway:telegram:contact",
+        allowSharedContextMemory: false,
+      });
+    },
+  );
+
   it("persists the original child prompt as rawPrompt", async () => {
     const taskRepo = {
       findById: vi.fn().mockReturnValue(undefined),
@@ -34,6 +80,7 @@ describe("AgentDaemon.createChildTask", () => {
         prompt: "Build the public portal and constitution.",
         rawPrompt: "Build the public portal and constitution.",
       }),
+      undefined,
     );
     expect(child.rawPrompt).toBe("Build the public portal and constitution.");
     expect(daemonLike.ensureCollaborativeRunForParentTask).toHaveBeenCalledWith("parent-1");

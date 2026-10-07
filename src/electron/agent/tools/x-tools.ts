@@ -1,16 +1,17 @@
 import * as path from "path";
 import * as fs from "fs";
-import { Workspace } from "../../../shared/types";
+import * as os from "os";
+import { createHash } from "crypto";
+import { Workspace, XSettingsData } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { XSettingsManager } from "../../settings/x-manager";
 import { runBirdCommand } from "../../utils/x-cli";
+import { WorkspaceArtifactEvidenceInspector } from "../../sessions/WorkspaceArtifactEvidenceInspector";
+import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
+import { snapshotToolInput } from "./tool-input-snapshot";
 import { BrowserTools } from "./browser-tools";
 import { buildXComposeScript, buildXToggleFollowScript } from "./x-browser-scripts";
 import { notifyIntegrationAuthIssue } from "../../notifications/integration-auth";
-import {
-  assertWorkspaceReadableFileAccessWithApproval,
-  createWorkspaceFilesystemApprovalHandlers,
-} from "../../security/access-profile-paths";
 
 type XAction =
   | "whoami"
@@ -50,6 +51,49 @@ interface BrowserFallbackTweetItem {
 
 const MAX_COUNT = 50;
 const MAX_MEDIA = 4;
+const MAX_MEDIA_BYTES = 4 * 1024 * 1024;
+
+interface XMediaSnapshot {
+  path: string;
+  sha256: string;
+  size: number;
+  data: Buffer;
+}
+
+interface StagedXMedia {
+  directory: string;
+  paths: string[];
+}
+
+interface XCommandPreExecGate {
+  beforeExec: () => Promise<void>;
+  beforeSpawn: () => void;
+}
+
+function workspaceFingerprint(workspace: Workspace): string {
+  return JSON.stringify({
+    id: workspace.id,
+    path: workspace.path,
+    permissions: workspace.permissions,
+  });
+}
+
+function settingsFingerprint(settings: XSettingsData): string {
+  const commandSettings = {
+    enabled: settings.enabled,
+    authMethod: settings.authMethod,
+    authToken: settings.authToken,
+    ct0: settings.ct0,
+    cookieSource: settings.cookieSource,
+    chromeProfile: settings.chromeProfile,
+    chromeProfileDir: settings.chromeProfileDir,
+    firefoxProfile: settings.firefoxProfile,
+    timeoutMs: settings.timeoutMs,
+    cookieTimeoutMs: settings.cookieTimeoutMs,
+    quoteDepth: settings.quoteDepth,
+  };
+  return createHash("sha256").update(JSON.stringify(commandSettings)).digest("hex");
+}
 
 export class XTools {
   private browserTools: BrowserTools;
@@ -817,6 +861,8 @@ export class XTools {
     action: XWriteAction,
     input: XActionInput,
     reason: string,
+    beforeExec?: () => Promise<void>,
+    beforeSpawn?: () => void,
   ): Promise<Any> {
     const fallbackUrl = this.getBrowserFallbackUrl(action, input);
 
@@ -912,6 +958,8 @@ export class XTools {
         };
       }
 
+      await beforeExec?.();
+      beforeSpawn?.();
       const composeResult = await this.tryComposeInBrowser(input.text || "", action);
       if (composeResult.success && composeResult.submitted) {
         return {
@@ -958,6 +1006,8 @@ export class XTools {
 
     if (action === "follow" || action === "unfollow") {
       const normalizedHandle = this.normalizeHandle(input.user) || "";
+      await beforeExec?.();
+      beforeSpawn?.();
       const followResult = await this.tryToggleFollowButton(action, input.user);
       const manualAction = normalizedHandle
         ? `Open https://x.com/${normalizedHandle.replace(/^@/, "")} and click ${action} manually.`
@@ -1016,9 +1066,13 @@ export class XTools {
     action: XAction,
     input: XActionInput,
     reason: string,
+    beforeExec?: () => Promise<void>,
+    beforeSpawn?: () => void,
   ): Promise<Any> {
     if (this.isWriteAction(action)) {
-      return await this.runBrowserWriteFallback(action, input, reason);
+      await beforeExec?.();
+      beforeSpawn?.();
+      return await this.runBrowserWriteFallback(action, input, reason, beforeExec, beforeSpawn);
     }
 
     const fallbackUrl = this.getBrowserFallbackUrl(action, input);
@@ -1210,41 +1264,175 @@ export class XTools {
     return `@${bareHandle}`;
   }
 
-  private async resolveMediaPaths(media?: string[]): Promise<string[]> {
-    if (!media || media.length === 0) return [];
+  private captureMediaSnapshots(media?: string[]): XMediaSnapshot[] {
+    if (media === undefined) return [];
+    if (!Array.isArray(media)) throw new Error("Media must be a list of workspace file paths");
+    if (media.length > MAX_MEDIA)
+      throw new Error(`At most ${MAX_MEDIA} media files may be attached`);
+    if (media.length === 0) return [];
     if (!this.workspace.permissions.read) {
       throw new Error("Read permission not granted for media uploads");
     }
 
-    const normalized = media
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0)
-      .slice(0, MAX_MEDIA);
-
-    const resolved: string[] = [];
-    for (const item of normalized) {
-      try {
-        resolved.push(
-          await assertWorkspaceReadableFileAccessWithApproval(
-            this.workspace,
-            item,
-            "Media file",
-            createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "x"),
-          ),
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes("profile_filesystem_denied")) {
-          throw new Error(`Path is denied by the active access profile: ${item}`);
-        }
-        if (/does not exist/i.test(message)) {
-          throw new Error(`Media file not found: ${item}`);
-        }
-        throw new Error(`Media path must be inside the workspace or in Allowed Paths: ${item}`);
+    const inspector = new WorkspaceArtifactEvidenceInspector({ maxBytes: MAX_MEDIA_BYTES });
+    const seen = new Set<string>();
+    const snapshots: XMediaSnapshot[] = [];
+    for (const item of media as unknown[]) {
+      if (typeof item !== "string" || !item.trim()) {
+        throw new Error("Each media attachment must be a non-empty workspace file path");
       }
+      const snapshot = inspector.snapshot(this.workspace, item);
+      if (snapshot.status === "missing") throw new Error(`Media file not found: ${item}`);
+      if (snapshot.status !== "present" || !snapshot.data) {
+        throw new Error(`Media file cannot be captured for review: ${item}`);
+      }
+      if (snapshot.size <= 0 || snapshot.data.length !== snapshot.size) {
+        throw new Error(`Media file has no stable bytes to review: ${item}`);
+      }
+      const extension = path.extname(snapshot.path);
+      if (extension && !/^\.[a-zA-Z0-9]{1,16}$/.test(extension)) {
+        throw new Error("Media filename has an unsupported extension");
+      }
+      if (seen.has(snapshot.path)) throw new Error("Duplicate media file paths are not allowed");
+      seen.add(snapshot.path);
+      snapshots.push({
+        path: snapshot.path,
+        sha256: snapshot.sha256,
+        size: snapshot.size,
+        data: snapshot.data,
+      });
     }
+    return snapshots;
+  }
 
-    return resolved;
+  private stageMediaSnapshots(snapshots: XMediaSnapshot[]): StagedXMedia | undefined {
+    if (snapshots.length === 0) return undefined;
+
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-x-media-"));
+    const paths: string[] = [];
+    try {
+      fs.chmodSync(directory, 0o700);
+      for (const [index, snapshot] of snapshots.entries()) {
+        const extension = path.extname(snapshot.path);
+        if (extension && !/^\.[a-zA-Z0-9]{1,16}$/.test(extension)) {
+          throw new Error("Media filename has an unsupported extension");
+        }
+        const stagedPath = path.join(
+          directory,
+          `media-${String(index + 1).padStart(2, "0")}${extension}`,
+        );
+        const flags =
+          fs.constants.O_WRONLY |
+          fs.constants.O_CREAT |
+          fs.constants.O_EXCL |
+          (fs.constants.O_NOFOLLOW || 0);
+        const fd = fs.openSync(stagedPath, flags, 0o600);
+        try {
+          fs.writeFileSync(fd, snapshot.data);
+        } finally {
+          fs.closeSync(fd);
+        }
+        fs.chmodSync(stagedPath, 0o600);
+        paths.push(stagedPath);
+      }
+      return { directory, paths };
+    } catch (error) {
+      fs.rmSync(directory, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  private cleanupStagedMedia(staged: StagedXMedia | undefined): void {
+    if (staged) fs.rmSync(staged.directory, { recursive: true, force: true });
+  }
+
+  private withStagedMediaGate(
+    gate: XCommandPreExecGate,
+    snapshots: XMediaSnapshot[],
+    staged: StagedXMedia | undefined,
+  ): XCommandPreExecGate {
+    return {
+      beforeExec: gate.beforeExec,
+      beforeSpawn: () => {
+        gate.beforeSpawn();
+        if (snapshots.length === 0) return;
+        if (!staged || staged.paths.length !== snapshots.length) {
+          throw new Error("X media staging changed before command execution");
+        }
+        if ((fs.statSync(staged.directory).mode & 0o777) !== 0o700) {
+          throw new Error("X media staging permissions changed before command execution");
+        }
+        for (const [index, snapshot] of snapshots.entries()) {
+          const stagedPath = staged.paths[index];
+          const stats = fs.lstatSync(stagedPath);
+          if (!stats.isFile() || (stats.mode & 0o777) !== 0o600) {
+            throw new Error("X media staging permissions changed before command execution");
+          }
+          const data = fs.readFileSync(stagedPath);
+          if (
+            data.length !== snapshot.size ||
+            createHash("sha256").update(data).digest("hex") !== snapshot.sha256
+          ) {
+            throw new Error("X media staging changed before command execution");
+          }
+        }
+      },
+    };
+  }
+
+  private async approveWriteAndCreatePreExecGate(
+    summary: string,
+    rawDetails: Record<string, unknown>,
+    operationInput: XActionInput,
+    admittedSettingsFingerprint: string,
+    admittedWorkspaceFingerprint: string,
+    requireMediaRead: boolean,
+  ): Promise<XCommandPreExecGate> {
+    const details = snapshotToolInput(rawDetails);
+    const checkLocalAuthority = () => {
+      const effectiveWorkspace = this.daemon.getEffectiveWorkspaceForTask(this.taskId);
+      const currentSettings = XSettingsManager.loadSettings();
+      if (
+        !effectiveWorkspace ||
+        workspaceFingerprint(effectiveWorkspace) !== admittedWorkspaceFingerprint ||
+        workspaceFingerprint(this.workspace) !== admittedWorkspaceFingerprint ||
+        settingsFingerprint(currentSettings) !== admittedSettingsFingerprint ||
+        !currentSettings.enabled ||
+        (requireMediaRead && !effectiveWorkspace.permissions.read)
+      ) {
+        throw new Error("X action authority changed before command execution");
+      }
+    };
+
+    checkLocalAuthority();
+    const admittedAuthority = await this.daemon.getToolEffectAuthority(this.taskId, details);
+    checkLocalAuthority();
+    if (!admittedAuthority) throw new Error("X action authority unavailable");
+
+    await this.requireApproval(summary, details);
+    checkLocalAuthority();
+
+    return {
+      beforeExec: async () => {
+        checkLocalAuthority();
+        await enforceResponsibilityToolPolicy(
+          this.daemon.getDatabase(),
+          this.taskId,
+          this.workspace.id,
+          this.workspace.path,
+          "x_action",
+          operationInput,
+        );
+        checkLocalAuthority();
+        const currentAuthority = await this.daemon.getToolEffectAuthority(this.taskId, details);
+        checkLocalAuthority();
+        if (currentAuthority !== admittedAuthority) {
+          throw new Error("X task authority changed before command execution");
+        }
+        checkLocalAuthority();
+      },
+      beforeSpawn: checkLocalAuthority,
+    };
   }
 
   private async requireApproval(summary: string, details: Record<string, unknown>): Promise<void> {
@@ -1261,7 +1449,8 @@ export class XTools {
   }
 
   async executeAction(input: XActionInput): Promise<Any> {
-    const settings = XSettingsManager.loadSettings();
+    input = snapshotToolInput(input);
+    const settings = structuredClone(XSettingsManager.loadSettings());
     if (!settings.enabled) {
       throw new Error("X integration is disabled. Enable it in Settings > X (Twitter).");
     }
@@ -1272,6 +1461,11 @@ export class XTools {
     }
 
     const args: string[] = [];
+    const admittedSettingsFingerprint = settingsFingerprint(settings);
+    const admittedWorkspaceFingerprint = workspaceFingerprint(this.workspace);
+    let beforeExec: (() => Promise<void>) | undefined;
+    let beforeSpawn: (() => void) | undefined;
+    let stagedMedia: StagedXMedia | undefined;
 
     switch (action) {
       case "whoami": {
@@ -1337,15 +1531,34 @@ export class XTools {
       }
       case "tweet": {
         if (!input.text) throw new Error("Missing text for tweet");
-        const mediaPaths = await this.resolveMediaPaths(input.media);
+        const mediaSnapshots = this.captureMediaSnapshots(input.media);
         const preview = input.text.length > 120 ? `${input.text.slice(0, 117)}...` : input.text;
-        await this.requireApproval(`Post to X: "${preview}"`, {
-          action: "tweet",
-          text: input.text,
-          mediaCount: mediaPaths.length,
-        });
+        const effectGate = await this.approveWriteAndCreatePreExecGate(
+          `Post to X: "${preview}"`,
+          {
+            tool: "x_action",
+            params: input,
+            action: "tweet",
+            text: input.text,
+            mediaCount: mediaSnapshots.length,
+            reviewFiles: mediaSnapshots.map((media) => media.path),
+            expectedDraftRevisions: mediaSnapshots.map(({ path: reference, sha256, size }) => ({
+              reference,
+              sha256,
+              size,
+            })),
+          },
+          input,
+          admittedSettingsFingerprint,
+          admittedWorkspaceFingerprint,
+          mediaSnapshots.length > 0,
+        );
+        stagedMedia = this.stageMediaSnapshots(mediaSnapshots);
+        const commandGate = this.withStagedMediaGate(effectGate, mediaSnapshots, stagedMedia);
+        beforeExec = commandGate.beforeExec;
+        beforeSpawn = commandGate.beforeSpawn;
         args.push("tweet", input.text);
-        for (const mediaPath of mediaPaths) {
+        for (const mediaPath of stagedMedia?.paths || []) {
           args.push("--media", mediaPath);
         }
         if (input.alt) {
@@ -1356,16 +1569,35 @@ export class XTools {
       case "reply": {
         if (!input.id_or_url) throw new Error("Missing id_or_url for reply");
         if (!input.text) throw new Error("Missing text for reply");
-        const mediaPaths = await this.resolveMediaPaths(input.media);
+        const mediaSnapshots = this.captureMediaSnapshots(input.media);
         const preview = input.text.length > 120 ? `${input.text.slice(0, 117)}...` : input.text;
-        await this.requireApproval(`Reply on X: "${preview}"`, {
-          action: "reply",
-          inReplyTo: input.id_or_url,
-          text: input.text,
-          mediaCount: mediaPaths.length,
-        });
+        const effectGate = await this.approveWriteAndCreatePreExecGate(
+          `Reply on X: "${preview}"`,
+          {
+            tool: "x_action",
+            params: input,
+            action: "reply",
+            inReplyTo: input.id_or_url,
+            text: input.text,
+            mediaCount: mediaSnapshots.length,
+            reviewFiles: mediaSnapshots.map((media) => media.path),
+            expectedDraftRevisions: mediaSnapshots.map(({ path: reference, sha256, size }) => ({
+              reference,
+              sha256,
+              size,
+            })),
+          },
+          input,
+          admittedSettingsFingerprint,
+          admittedWorkspaceFingerprint,
+          mediaSnapshots.length > 0,
+        );
+        stagedMedia = this.stageMediaSnapshots(mediaSnapshots);
+        const commandGate = this.withStagedMediaGate(effectGate, mediaSnapshots, stagedMedia);
+        beforeExec = commandGate.beforeExec;
+        beforeSpawn = commandGate.beforeSpawn;
         args.push("reply", input.id_or_url, input.text);
-        for (const mediaPath of mediaPaths) {
+        for (const mediaPath of stagedMedia?.paths || []) {
           args.push("--media", mediaPath);
         }
         if (input.alt) {
@@ -1376,14 +1608,46 @@ export class XTools {
       case "follow": {
         const handle = this.normalizeHandle(input.user);
         if (!handle) throw new Error("Missing user for follow");
-        await this.requireApproval(`Follow ${handle} on X`, { action: "follow", user: handle });
+        const commandGate = await this.approveWriteAndCreatePreExecGate(
+          `Follow ${handle} on X`,
+          {
+            tool: "x_action",
+            params: input,
+            action: "follow",
+            user: handle,
+            reviewFiles: [],
+            expectedDraftRevisions: [],
+          },
+          input,
+          admittedSettingsFingerprint,
+          admittedWorkspaceFingerprint,
+          false,
+        );
+        beforeExec = commandGate.beforeExec;
+        beforeSpawn = commandGate.beforeSpawn;
         args.push("follow", handle);
         break;
       }
       case "unfollow": {
         const handle = this.normalizeHandle(input.user);
         if (!handle) throw new Error("Missing user for unfollow");
-        await this.requireApproval(`Unfollow ${handle} on X`, { action: "unfollow", user: handle });
+        const commandGate = await this.approveWriteAndCreatePreExecGate(
+          `Unfollow ${handle} on X`,
+          {
+            tool: "x_action",
+            params: input,
+            action: "unfollow",
+            user: handle,
+            reviewFiles: [],
+            expectedDraftRevisions: [],
+          },
+          input,
+          admittedSettingsFingerprint,
+          admittedWorkspaceFingerprint,
+          false,
+        );
+        beforeExec = commandGate.beforeExec;
+        beforeSpawn = commandGate.beforeSpawn;
         args.push("unfollow", handle);
         break;
       }
@@ -1392,62 +1656,76 @@ export class XTools {
     }
 
     let lastError: unknown;
-    for (let attempt = 0; attempt < XTools.COMMAND_RETRY_ATTEMPTS; attempt++) {
-      try {
-        const result = await runBirdCommand(settings, args, { json: true });
+    try {
+      for (let attempt = 0; attempt < XTools.COMMAND_RETRY_ATTEMPTS; attempt++) {
+        try {
+          const result = await runBirdCommand(settings, args, {
+            json: true,
+            beforeExec,
+            beforeSpawn,
+          });
 
-        this.daemon.logEvent(this.taskId, "tool_result", {
-          tool: "x_action",
-          action,
-          hasData: !!result.data,
-          stderr: result.stderr ? true : false,
-        });
+          this.daemon.logEvent(this.taskId, "tool_result", {
+            tool: "x_action",
+            action,
+            hasData: !!result.data,
+            stderr: result.stderr ? true : false,
+          });
 
-        return {
-          success: true,
-          action,
-          output: result.stdout,
-          data: result.data,
-          stderr: result.stderr || undefined,
-        };
-      } catch (error: Any) {
-        lastError = error;
-        const errorMessage = error?.message || "Failed to execute X action";
+          return {
+            success: true,
+            action,
+            output: result.stdout,
+            data: result.data,
+            stderr: result.stderr || undefined,
+          };
+        } catch (error: Any) {
+          lastError = error;
+          const errorMessage = error?.message || "Failed to execute X action";
 
-        this.daemon.logEvent(this.taskId, "tool_result", {
-          tool: "x_action",
-          action,
-          error: errorMessage,
-          blocked: this.isLikelyBlockingError(errorMessage),
-        });
+          this.daemon.logEvent(this.taskId, "tool_result", {
+            tool: "x_action",
+            action,
+            error: errorMessage,
+            blocked: this.isLikelyBlockingError(errorMessage),
+          });
 
-        if (this.isLikelyBlockingError(errorMessage)) {
-          if (this.isLikelyAuthBlockingError(errorMessage)) {
-            await notifyIntegrationAuthIssue({
-              integrationId: "x-twitter",
-              integrationName: "X (Twitter)",
-              settingsPath: "Settings > X (Twitter)",
-              reason: errorMessage,
-              taskId: this.taskId,
-              workspaceId: this.workspace.id,
-              dedupeKey: "x-auth",
-            });
+          if (this.isLikelyBlockingError(errorMessage)) {
+            if (this.isLikelyAuthBlockingError(errorMessage)) {
+              await notifyIntegrationAuthIssue({
+                integrationId: "x-twitter",
+                integrationName: "X (Twitter)",
+                settingsPath: "Settings > X (Twitter)",
+                reason: errorMessage,
+                taskId: this.taskId,
+                workspaceId: this.workspace.id,
+                dedupeKey: "x-auth",
+              });
+            }
+            return await this.runBrowserFallback(
+              action,
+              input,
+              errorMessage,
+              beforeExec,
+              beforeSpawn,
+            );
           }
-          return await this.runBrowserFallback(action, input, errorMessage);
-        }
 
-        if (
-          !this.shouldRetryCommand(action) ||
-          !this.isRetryableCommandError(errorMessage) ||
-          attempt + 1 >= XTools.COMMAND_RETRY_ATTEMPTS
-        ) {
-          throw error;
-        }
+          if (
+            !this.shouldRetryCommand(action) ||
+            !this.isRetryableCommandError(errorMessage) ||
+            attempt + 1 >= XTools.COMMAND_RETRY_ATTEMPTS
+          ) {
+            throw error;
+          }
 
-        await this.pause(XTools.COMMAND_RETRY_DELAY_MS * (attempt + 1));
+          await this.pause(XTools.COMMAND_RETRY_DELAY_MS * (attempt + 1));
+        }
       }
-    }
 
-    throw lastError;
+      throw lastError;
+    } finally {
+      this.cleanupStagedMedia(stagedMedia);
+    }
   }
 }

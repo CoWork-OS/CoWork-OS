@@ -268,6 +268,71 @@ describeWithSqlite("StrategicPlannerService", () => {
     expect(tasks[0]?.agentConfig?.autonomousMode).toBe(true);
   });
 
+  it("deduplicates a scheduled issue across planner restart while admitting the next occurrence and manual invocations", async () => {
+    const workspace = insertWorkspace();
+    const company = await core.getDefaultCompany();
+    const agent = agentRoleRepo.create({
+      name: "custom-planner",
+      displayName: "Custom Planner",
+      capabilities: ["plan"],
+      heartbeatEnabled: false,
+    });
+    const issue = await core.createIssue({
+      companyId: company.id,
+      workspaceId: workspace.id,
+      title: "Persisted issue",
+      status: "backlog",
+      assigneeAgentRoleId: agent.id,
+    });
+    const { PersistentDispatchBudget } = await import("../../automation/PersistentDispatchBudget");
+    const { StrategicPlannerService } = await import("../StrategicPlannerService");
+    let count = 0;
+    const makePlanner = () =>
+      new StrategicPlannerService({
+        db,
+        dispatchBudget: new PersistentDispatchBudget(db, {
+          maxPerWorkspacePerDay: 20,
+          entityCooldownMs: 0,
+        }),
+        agentDaemon: {
+          createTask: async (params: Any) => {
+            count++;
+            return taskRepo.create({ ...params, status: "pending" });
+          },
+        } as Any,
+      });
+    planner = makePlanner();
+    const config = await planner.updateConfig(company.id, {
+      planningWorkspaceId: workspace.id,
+      plannerAgentRoleId: agent.id,
+      lastRunAt: 1000,
+    });
+    const dispatch = (
+      service: typeof planner,
+      trigger: string,
+      currentConfig = config,
+      occurrence?: string,
+    ) =>
+      (service as Any).dispatchIssue(company, currentConfig, issue, agent, trigger, occurrence);
+    expect(await dispatch(planner, "schedule")).toBeTruthy();
+    await core.releaseIssue({ issueId: issue.id, status: "completed" });
+    await core.updateIssue(issue.id, { status: "backlog" });
+    planner.stop();
+    planner = makePlanner();
+    expect(await dispatch(planner, "startup")).toBeNull();
+    expect(count).toBe(1);
+    expect(db.prepare("SELECT state FROM background_dispatch_reservations").all()).toEqual([
+      { state: "committed" },
+    ]);
+    expect(await dispatch(planner, "schedule", { ...config, lastRunAt: 2000 })).toBeTruthy();
+    await core.releaseIssue({ issueId: issue.id, status: "completed" });
+    expect(await dispatch(planner, "manual", config, "saved-manual-run")).toBeTruthy();
+    await core.releaseIssue({ issueId: issue.id, status: "completed" });
+    expect(await dispatch(planner, "manual", config, "saved-manual-run")).toBeNull();
+    expect(await dispatch(planner, "manual")).toBeTruthy();
+    expect(count).toBe(4);
+  });
+
   it("consults the shared background budget for scheduled dispatches only", async () => {
     const workspace = insertWorkspace();
     const company = await core.getDefaultCompany();

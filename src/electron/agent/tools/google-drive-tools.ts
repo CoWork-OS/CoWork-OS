@@ -1,7 +1,6 @@
-import * as fs from "fs";
 import * as path from "path";
 import mime from "mime-types";
-import { Workspace } from "../../../shared/types";
+import { GoogleWorkspaceSettingsData, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { GoogleWorkspaceSettingsManager } from "../../settings/google-workspace-manager";
 import { googleDriveRequest, googleDriveUpload } from "../../utils/google-workspace-api";
@@ -10,6 +9,15 @@ import {
   hasGoogleWorkspaceTokens,
   inferGoogleWorkspaceConnectionMode,
 } from "../../../shared/google-workspace";
+import {
+  captureIntegrationUploadSnapshot,
+  createIntegrationEffectGuard,
+  googleWorkspaceAuthConfig,
+  googleWorkspacePolicyFingerprint,
+  integrationEffectReview,
+  IntegrationUploadSnapshot,
+  workspaceIntegrationUploadReview,
+} from "./integration-effect-guard";
 import {
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
@@ -94,6 +102,39 @@ export class GoogleDriveTools {
     }
   }
 
+  private createEffectGuard(
+    initialSettings: GoogleWorkspaceSettingsData,
+    input: GoogleDriveActionInput,
+    details: Record<string, unknown>,
+    errorPrefix: string,
+    uploadSnapshot?: IntegrationUploadSnapshot,
+  ) {
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName: "google_drive_action",
+      toolInput: input,
+      approvalDetails: details,
+      uploadSnapshot,
+      initialSettings,
+      loadSettings: () => GoogleWorkspaceSettingsManager.loadSettings(),
+      settingsEnabled: (current) => {
+        const mode = inferGoogleWorkspaceConnectionMode(current.connectionMode, current.scopes);
+        return (
+          current.enabled &&
+          mode === "workspace" &&
+          hasGoogleWorkspaceTokens(current) &&
+          hasGoogleWorkspaceScopeCoverage(current.scopes, "workspace")
+        );
+      },
+      settingsFingerprint: googleWorkspacePolicyFingerprint,
+      authConfig: googleWorkspaceAuthConfig,
+      errorPrefix,
+    });
+  }
+
   async executeAction(input: GoogleDriveActionInput): Promise<Any> {
     const settings = GoogleWorkspaceSettingsManager.loadSettings();
     if (!settings.enabled) {
@@ -145,15 +186,23 @@ export class GoogleDriveTools {
       }
       case "create_folder": {
         if (!input.name) throw new Error("Missing name for create_folder");
-        await this.requireApproval("Create a Google Drive folder", {
-          action: "create_folder",
-          parent_id: input.parent_id || "root",
+        const parentId = input.parent_id || "root";
+        const details = integrationEffectReview("google_drive_action", input, "create_folder", {
+          parent_id: parentId,
           name: input.name,
         });
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "Google Drive action",
+        );
+        await this.requireApproval("Create a Google Drive folder", details);
         result = await googleDriveRequest(settings, {
           method: "POST",
           path: "/files",
           query: { fields: DEFAULT_FILE_FIELDS },
+          beforeSend,
           body: {
             name: input.name,
             mimeType: "application/vnd.google-apps.folder",
@@ -165,18 +214,30 @@ export class GoogleDriveTools {
       case "upload_file": {
         if (!input.file_path) throw new Error("Missing file_path for upload_file");
         const resolved = await this.resolveFilePath(input.file_path);
-        const data = fs.readFileSync(resolved);
+        const snapshot = captureIntegrationUploadSnapshot(this.workspace, resolved);
         const fileName = input.name || path.basename(resolved);
         const contentType = (mime.lookup(fileName) || "application/octet-stream") as string;
-        await this.requireApproval(`Upload file to Google Drive: ${fileName}`, {
-          action: "upload_file",
-          parent_id: input.parent_id || "root",
-          file: fileName,
-        });
+        const details = workspaceIntegrationUploadReview(
+          this.workspace,
+          "google_drive_action",
+          input,
+          "upload_file",
+          { parent_id: input.parent_id || "root", file: fileName },
+          snapshot,
+        );
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "Google Drive upload",
+          snapshot,
+        );
+        await this.requireApproval(`Upload file to Google Drive: ${fileName}`, details);
         const created = await googleDriveRequest(settings, {
           method: "POST",
           path: "/files",
           query: { fields: DEFAULT_FILE_FIELDS },
+          beforeSend,
           body: {
             name: fileName,
             parents: input.parent_id ? [input.parent_id] : undefined,
@@ -186,7 +247,14 @@ export class GoogleDriveTools {
         if (!fileId) {
           throw new Error("Failed to create Google Drive file record");
         }
-        const uploaded = await googleDriveUpload(settings, fileId, data, contentType);
+        const uploaded = await googleDriveUpload(
+          settings,
+          fileId,
+          snapshot.data,
+          contentType,
+          undefined,
+          beforeSend,
+        );
         result = {
           status: uploaded.status,
           data: uploaded.data || created.data,
@@ -196,13 +264,20 @@ export class GoogleDriveTools {
       }
       case "delete_file": {
         if (!input.file_id) throw new Error("Missing file_id for delete_file");
-        await this.requireApproval("Delete a Google Drive file", {
-          action: "delete_file",
+        const details = integrationEffectReview("google_drive_action", input, "delete_file", {
           file_id: input.file_id,
         });
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "Google Drive action",
+        );
+        await this.requireApproval("Delete a Google Drive file", details);
         result = await googleDriveRequest(settings, {
           method: "DELETE",
           path: `/files/${input.file_id}`,
+          beforeSend,
         });
         break;
       }

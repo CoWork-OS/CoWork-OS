@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildTaskTitle, formatTaskEventFrame, isTerminalTaskFrame, matchesTask } from "../format";
+import {
+  buildTaskTitle,
+  formatApproval,
+  formatTaskEventFrame,
+  isTerminalTaskFrame,
+  matchesTask,
+} from "../format";
 
 describe("CLI formatting", () => {
   it("builds compact task titles from prompts", () => {
@@ -47,5 +53,25 @@ describe("CLI formatting", () => {
         "task-3",
       ),
     ).toBe(true);
+  });
+});
+
+describe("CLI concrete approval review", () => {
+  it("displays exact details and the decision revision without interpreting control characters", () => {
+    const hash = "a".repeat(64);
+    const result = formatApproval({
+      id: "approval-1",
+      type: "run_command",
+      details: { command: "tool --target draft.md", params: { text: "\u001b[31m" } },
+      revisionHash: hash,
+    });
+    expect(result).toContain("tool --target draft.md");
+    expect(result).toContain("\\u001b");
+    expect(result).not.toContain("\u001b");
+    expect(result).toContain(`--revision-hash ${hash}`);
+  });
+  it("does not fabricate a missing revision", () => {
+    expect(formatApproval({ id: "old" })).toContain("Revision unavailable");
+    expect(formatApproval({ id: "old" })).not.toContain("--revision-hash");
   });
 });

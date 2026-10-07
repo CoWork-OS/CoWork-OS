@@ -49,6 +49,40 @@ describe("configureLlmFromControlPlaneParams", () => {
     });
   });
 
+  it("configures the existing built-in OpenAI-compatible provider node", () => {
+    let savedSettings: Any;
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "openai-compatible",
+      openaiCompatible: {
+        baseUrl: "http://localhost:1234/v1",
+        model: "local-model",
+        contextWindow: 32000,
+      },
+    } as Any);
+    vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation((settings: Any) => {
+      savedSettings = settings;
+    });
+    vi.spyOn(LLMProviderFactory, "getConfigStatus").mockReturnValue({
+      currentProvider: "openai-compatible",
+      currentModel: "local-model",
+      providers: [],
+    } as Any);
+
+    configureLlmFromControlPlaneParams({
+      providerType: "openai-compatible",
+      apiKey: "local-test-only",
+      settings: { baseUrl: "http://127.0.0.1:4567/v1" },
+    });
+
+    expect(savedSettings.openaiCompatible).toEqual({
+      baseUrl: "http://127.0.0.1:4567/v1",
+      apiKey: "local-test-only",
+      model: "local-model",
+      contextWindow: 32000,
+    });
+    expect(savedSettings.customProviders?.["openai-compatible"]).toBeUndefined();
+  });
+
   it("rejects percent-style OpenRouter Pareto coding scores", () => {
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
       providerType: "openrouter",

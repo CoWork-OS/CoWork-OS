@@ -70,6 +70,7 @@ function preparedWrite(value: unknown, path = "args[0]"): PreparedMemoryItemWrit
     pinned: bool(input.pinned, field("pinned")),
     privacy: oneOf(input.privacy, field("privacy"), MEMORY_ITEM_PRIVACY),
     taskId: nullableId(input.taskId, field("taskId")),
+    originWorkspaceId: nullableId(input.originWorkspaceId, field("originWorkspaceId")),
     expiresAt:
       input.expiresAt === null || input.expiresAt === undefined
         ? null

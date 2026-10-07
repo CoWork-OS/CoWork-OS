@@ -16,6 +16,7 @@ const DEFAULT_EVAL_CASE_PATH = path.join(
 
 const HIGH_RISK_TARGETS = [
   { id: "tool-policy", pattern: /^src\/electron\/security\// },
+  { id: "channel-gateway-boundary", pattern: /^src\/electron\/gateway\// },
   { id: "agent-tools", pattern: /^src\/electron\/agent\/tools\// },
   { id: "agent-runtime-policy", pattern: /^src\/electron\/agent\/runtime\/.*Policy/i },
   { id: "sandbox", pattern: /^src\/electron\/(agent\/)?sandbox\// },

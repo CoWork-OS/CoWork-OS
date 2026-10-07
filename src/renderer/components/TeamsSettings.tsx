@@ -1,3 +1,4 @@
+import { ChannelDecisionSettings } from "./ChannelDecisionSettings";
 import { useState, useEffect, useCallback } from "react";
 import { ChannelOwnerSettings } from "./ChannelOwnerSettings";
 import {
@@ -520,7 +521,25 @@ export function TeamsSettings({ onStatusChange }: TeamsSettingsProps) {
       <ChannelOwnerSettings
         channel={channel}
         users={users}
-        onSaved={(config) => setChannel((prev) => (prev ? { ...prev, config } : prev))}
+        onSaved={(config) =>
+          setChannel((prev) =>
+            prev && prev.id === channel.id
+              ? { ...prev, config: { ...prev.config, ownerUserIds: config.ownerUserIds } }
+              : prev,
+          )
+        }
+      />
+
+      <ChannelDecisionSettings
+        key={channel.id}
+        channel={channel}
+        onSaved={(enabled) =>
+          setChannel((prev) =>
+            prev && prev.id === channel.id
+              ? { ...prev, config: { ...prev.config, decisionMessagesEnabled: enabled } }
+              : prev,
+          )
+        }
       />
 
       <div className="settings-section">

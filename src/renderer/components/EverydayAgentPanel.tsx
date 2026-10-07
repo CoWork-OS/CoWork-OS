@@ -22,6 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
+import { hasHostMethod } from "../host/browser-capabilities";
 import {
   EVERYDAY_AGENT_CAPABILITY_BUNDLES,
   EVERYDAY_AGENT_CONSENT_VERSION,
@@ -679,7 +680,10 @@ export function EverydayAgentPanel({
       } else {
         setSuggestions([]);
       }
-      if (window.electronAPI.listCoreMemoryCandidates) {
+      if (
+        hasHostMethod("listCoreMemoryCandidates") &&
+        window.electronAPI.listCoreMemoryCandidates
+      ) {
         // Candidates belong to automation profiles, not the Everyday Agent profile ("default"),
         // so they are counted per workspace.
         if (isEverydayAgentUuid(workspace?.id)) {
@@ -694,6 +698,8 @@ export function EverydayAgentPanel({
         } else {
           setMemoryCandidateCount(0);
         }
+      } else {
+        setMemoryCandidateCount(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load Everyday Agent");
@@ -1056,9 +1062,11 @@ export function EverydayAgentPanel({
             <article>
               <span>Memory review</span>
               <strong>
-                {memoryCandidateCount === null
-                  ? "Review-first"
-                  : `${memoryCandidateCount} candidates`}
+                {!hasHostMethod("listCoreMemoryCandidates")
+                  ? "Unavailable in this browser"
+                  : memoryCandidateCount === null
+                    ? "Review-first"
+                    : `${memoryCandidateCount} candidates`}
               </strong>
             </article>
           </section>

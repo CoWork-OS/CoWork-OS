@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
-import { getEmojiIcon } from "../../utils/emoji-icon-map";
+import { resolveBotMascot } from "../../../shared/bot-mascots";
+import { BotMascot } from "../bot-mascot/BotMascot";
 import { AUTONOMY_BADGES } from "./useMissionControlData";
 import type { MissionControlData } from "./useMissionControlData";
 
@@ -65,12 +66,11 @@ export function MCAgentsTab({ data }: MCAgentsTabProps) {
             role="button"
             tabIndex={0}
           >
-            <div className="mc-v2-agent-avatar" style={{ backgroundColor: agent.color }}>
-              {(() => {
-                const Icon = getEmojiIcon(agent.icon || "🤖");
-                return <Icon size={20} strokeWidth={2} />;
-              })()}
-            </div>
+            <BotMascot
+              mascot={resolveBotMascot(agent.icon)}
+              size={40}
+              expression={status === "working" ? "working" : "idle"}
+            />
             <div className="mc-v2-agent-info">
               <div className="mc-v2-agent-name-row">
                 <span className="mc-v2-agent-name">{agent.displayName}</span>

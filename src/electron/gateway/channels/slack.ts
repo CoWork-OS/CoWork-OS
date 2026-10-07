@@ -5,7 +5,7 @@
  * Supports Socket Mode for real-time messaging without exposing webhooks.
  */
 
-import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
+import { App, LogLevel, SocketModeReceiver, webApi } from "@slack/bolt";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -19,7 +19,16 @@ import {
   ChannelInfo,
   SlackConfig,
   MessageAttachment,
+  ChannelDecisionMessage,
+  ChannelDecisionHandler,
 } from "./types";
+
+import {
+  decisionFallback,
+  slackDecisionBlocks,
+  slackDecisionEvent,
+  DECISION_ACTION_PREFIX,
+} from "./decision-cards";
 
 export function mapSlackSlashCommandToText(commandName: string, text?: string): string {
   return `/${String(commandName || "").replace(/^\//, "")} ${String(text || "")}`.trim();
@@ -29,6 +38,10 @@ export class SlackAdapter implements ChannelAdapter {
   readonly type = "slack" as const;
 
   private app: App | null = null;
+  private teamId?: string;
+  private decisionClient: webApi.WebClient | null = null;
+  private decisionHandlers: ChannelDecisionHandler[] = [];
+  readonly decisionCapabilities = { approve: true, deny: true };
   private _status: ChannelStatus = "disconnected";
   private _botUsername?: string;
   private _botId?: string;
@@ -83,6 +96,30 @@ export class SlackAdapter implements ChannelAdapter {
       const authResult = await this.app.client.auth.test();
       this._botUsername = authResult.user as string;
       this._botId = authResult.user_id as string;
+      this.teamId = typeof authResult.team_id === "string" ? authResult.team_id : undefined;
+      this.decisionClient = new webApi.WebClient(this.config.botToken, {
+        retryConfig: { retries: 0 },
+        rejectRateLimitedCalls: true,
+        timeout: 15000,
+      });
+      this.app.action(
+        new RegExp(`^${DECISION_ACTION_PREFIX}(approve|deny)$`),
+        async ({ body, ack }) => {
+          await ack();
+          const decision = slackDecisionEvent(body, this.teamId);
+          if (!decision) return;
+          for (const handler of this.decisionHandlers) {
+            try {
+              await handler(decision);
+            } catch (error) {
+              this.handleError(
+                error instanceof Error ? error : new Error(String(error)),
+                "decisionHandler",
+              );
+            }
+          }
+        },
+      );
 
       // Handle direct messages and mentions
       this.app.message(async ({ message, client }) => {
@@ -171,6 +208,8 @@ export class SlackAdapter implements ChannelAdapter {
     }
     this._botUsername = undefined;
     this._botId = undefined;
+    this.teamId = undefined;
+    this.decisionClient = null;
     this.setStatus("disconnected");
   }
 
@@ -216,6 +255,35 @@ export class SlackAdapter implements ChannelAdapter {
     }
 
     return lastMessageTs;
+  }
+
+  onDecision(handler: ChannelDecisionHandler): void {
+    this.decisionHandlers.push(handler);
+  }
+
+  async sendDecision(message: ChannelDecisionMessage): Promise<string> {
+    if (
+      !this.decisionClient ||
+      this._status !== "connected" ||
+      !this.teamId ||
+      this.decisionHandlers.length === 0
+    )
+      throw new Error("Slack decision handler is not ready");
+    const blocks = slackDecisionBlocks(message);
+    // One SDK attempt only. An ambiguous failure must become delivery_unknown upstream.
+    const result = await this.decisionClient.chat.postMessage({
+      channel: message.chatId,
+      text: decisionFallback(message),
+      blocks,
+      mrkdwn: false,
+      parse: "none",
+      link_names: false,
+      unfurl_links: false,
+      unfurl_media: false,
+      thread_ts: message.replyTo,
+    });
+    if (!result.ts) throw new Error("Slack decision delivery has no message ID");
+    return result.ts;
   }
 
   /**

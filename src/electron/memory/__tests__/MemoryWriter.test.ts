@@ -34,6 +34,106 @@ describeWithSqlite("MemoryWriter", () => {
     });
   });
 
+  describe("capture-time bot provenance", () => {
+    function taskSource() {
+      db.exec(`CREATE TABLE agent_roles (id TEXT PRIMARY KEY);
+        CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, assigned_agent_role_id TEXT);
+        INSERT INTO agent_roles VALUES ('bot-original'), ('bot-later');
+        INSERT INTO tasks VALUES ('capture-task', 'ws-1', 'bot-original');`);
+    }
+    it("records assigned bot atomically and preserves it after reassignment and correction", async () => {
+      taskSource();
+      const saved = await writer.ingest(
+        candidate({
+          taskId: "capture-task",
+          sourceRef: { store: "fixture", id: "capture", agentRoleId: "forged" },
+        }),
+      );
+      if (saved.status !== "written") throw Error("Not written");
+      expect(saved.item.sourceRef).toMatchObject({
+        agentRoleId: "bot-original",
+        capturedTaskId: "capture-task",
+        botAttributionRecordedAt: saved.item.createdAt,
+      });
+      db.prepare("UPDATE tasks SET assigned_agent_role_id = 'bot-later'").run();
+      const corrected = await writer.ingest(
+        candidate({
+          content: "Prefers Rust for this project",
+          taskId: "capture-task",
+          sourceRef: { store: "fixture", id: "capture", agentRoleId: "forged" },
+        }),
+      );
+      if (corrected.status !== "written") throw Error("Not written");
+      expect(corrected.item.sourceRef.agentRoleId).toBe("bot-original");
+      expect(corrected.item.sourceRef.botAttributionRecordedAt).toBe(
+        saved.item.sourceRef.botAttributionRecordedAt,
+      );
+    });
+    it("does not attribute migrated history or its later Hub correction", async () => {
+      taskSource();
+      await writer.ingest(
+        candidate({
+          mode: "migration",
+          taskId: "capture-task",
+          sourceRef: { store: "fixture", id: "history" },
+        }),
+      );
+      const corrected = await writer.ingest(
+        candidate({
+          content: "Historical preference corrected",
+          taskId: "capture-task",
+          sourceRef: {
+            store: "fixture",
+            id: "history",
+            editedVia: "memory_hub",
+            agentRoleId: "forged",
+          },
+        }),
+      );
+      if (corrected.status !== "written") throw Error("Not written");
+      expect(corrected.item.sourceRef.agentRoleId).toBeUndefined();
+    });
+    it("rejects foreign task attribution and binds global capture to its origin workspace", async () => {
+      taskSource();
+      const foreign = await writer.ingest(
+        candidate({
+          workspaceId: "ws-2",
+          taskId: "capture-task",
+          sourceRef: { store: "fixture", id: "foreign", agentRoleId: "forged" },
+        }),
+      );
+      const global = await writer.ingest(
+        candidate({
+          scope: "global",
+          workspaceId: undefined,
+          originWorkspaceId: "ws-1",
+          taskId: "capture-task",
+          sourceRef: { store: "fixture", id: "global" },
+        }),
+      );
+      if (foreign.status !== "written" || global.status !== "written") throw Error("Not written");
+      expect(foreign.item.sourceRef.agentRoleId).toBeUndefined();
+      expect(global.item.sourceRef.agentRoleId).toBe("bot-original");
+    });
+    it("clears prior bot attribution when an unattributed higher-trust source becomes primary", async () => {
+      taskSource();
+      await writer.ingest(
+        candidate({
+          source: "inferred",
+          taskId: "capture-task",
+          sourceRef: { store: "fixture", id: "bot-source" },
+        }),
+      );
+      const upgraded = await writer.ingest(
+        candidate({ source: "user_stated", sourceRef: { store: "fixture", id: "owner-source" } }),
+      );
+      if (upgraded.status !== "written") throw Error("Not written");
+      expect(upgraded.item.sourceRef.store).toBe("fixture");
+      expect(upgraded.item.sourceRef.id).toBe("owner-source");
+      expect(upgraded.item.sourceRef.agentRoleId).toBeUndefined();
+    });
+  });
+
   afterEach(() => {
     MemoryWriter.setInstance(null);
     db.close();

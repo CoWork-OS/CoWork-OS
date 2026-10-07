@@ -572,6 +572,8 @@ export interface AutonomyDecision {
   policyLevel: AutonomyPolicyLevel;
   priority: CompanyPriority;
   status: "pending" | "suggested" | "executed" | "dismissed" | "done";
+  /** Incremented by explicit status edits; absent legacy revisions are zero. */
+  statusRevision?: number;
   reason: string;
   evidenceRefs: string[];
   fingerprint: string;
@@ -2327,6 +2329,15 @@ export interface IntegrationMentionOption extends IntegrationMentionSelection {
  * Allows spawning agents with different models/personalities than the global settings
  */
 export interface AgentConfig {
+  /** Internal routine lineage used by the writer to enforce responsibility admission. */
+  automationRoutineId?: string;
+  responsibilityRun?: import("./bot-responsibility").BotResponsibilityRun;
+  /** Internal automatic source sample; stripped at task admission. */
+  responsibilitySignal?: import("./bot-responsibility").BotResponsibilitySignal;
+  /** Internal durable reservation consumed atomically when this task is stored. */
+  backgroundDispatchTicket?: string;
+  /** Internal scheduler admission fence; stripped after atomic task creation. */
+  backgroundSchedulerFence?: { owner: string; generation: number };
   /** Override the LLM provider type (e.g., 'anthropic', 'gemini') */
   providerType?: LLMProviderType;
   /** Override the model key (e.g., 'opus-4-5', 'sonnet-4-5', 'haiku-4-5') */
@@ -2356,6 +2367,8 @@ export interface AgentConfig {
   sideChatTurnContext?: string;
   /** Internal scheduled-job identifier used to prevent duplicate cron task creation after restarts. */
   scheduledJobId?: string;
+  /** Exact persisted cron run lease timestamp; scopes restart recovery to one occurrence. */
+  scheduledRunAtMs?: number;
   /** Internal ownership metadata for tasks launched from the standalone CLI. */
   cli?: CliTaskOwnership;
   /** User-selected integration mentions for soft tool-routing guidance. */
@@ -4720,6 +4733,51 @@ export interface TaskExportJson {
   tasks: TaskExportItem[];
 }
 
+export type BotWorkView = "needs_you" | "working" | "scheduled" | "results";
+
+/** Summary-only, workspace-scoped read model; opening it never starts work. */
+export interface BotWorkQuery {
+  workspaceId: string;
+  agentRoleId: string;
+  view: BotWorkView;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface BotWorkItem {
+  id: string;
+  taskId?: string;
+  scheduleId?: string;
+  title: string;
+  view: BotWorkView;
+  status: TaskStatus | "scheduled";
+  ownership: "assigned" | "delegated";
+  assignedAgentRoleId?: string;
+  parentTaskId?: string;
+  conversation: boolean;
+  updatedAt: number;
+  waitingKind?: WaitStateKind;
+  waitingReason?: string;
+  resultSummary?: string;
+  verification: "passed" | "failed" | "partial" | "unverified";
+  /** Task completion and verification do not establish external delivery. */
+  delivery: "unknown";
+  nextWakeAt?: number;
+  /** Set on a schedule whose run would be skipped: the bot or the responsibility is paused. */
+  schedulePaused?: "bot" | "responsibility";
+}
+
+export interface BotWorkPage {
+  workspaceId: string;
+  agentRoleId: string;
+  view: BotWorkView;
+  items: BotWorkItem[];
+  counts: Record<BotWorkView, number>;
+  nextCursor?: string;
+  scheduleAvailability: "available" | "unavailable";
+  scheduleRuntime: "running" | "disabled" | "not_started" | "unavailable";
+}
+
 /** Query used by the bot workspace/history surface. */
 export interface BotConversationListQuery {
   workspaceId: string;
@@ -4736,6 +4794,10 @@ export interface BotConversationReopenRequest {
   taskId?: string;
   agentRoleId?: string;
   repairMembership?: boolean;
+  /** Explicitly select an existing team; omitted for standalone conversations. */
+  botTeamId?: string;
+  /** Create a fresh conversation in another workspace without copying its context. */
+  branchToWorkspace?: boolean;
 }
 
 export interface BotNotificationPolicy {
@@ -5181,7 +5243,11 @@ export interface ApprovalRequest {
   resolvedAt?: number;
   resolvedByPrincipalId?: string;
   resolvedByRole?: string;
+  /** Main-process-computed revision bound to the approval presentation. */
+  revisionHash?: string;
 }
+
+export type ApprovalResponseStatus = "handled" | "duplicate" | "not_found" | "in_progress";
 
 export type ApprovalResponseAction =
   | "allow_once"
@@ -5199,6 +5265,8 @@ export interface ApprovalResponse {
   approvalId: string;
   approved?: boolean;
   action?: ApprovalResponseAction;
+  /** Revision shown to the operator. Omission is supported only for legacy non-review approvals. */
+  expectedRevisionHash?: string;
 }
 
 export interface RequestUserInputOption {
@@ -8631,6 +8699,25 @@ export const IPC_CHANNELS = {
   TASK_GET: "task:get",
   TASK_LIST: "task:list",
   TASK_LIST_SIDEBAR: "task:listSidebar",
+  BOT_WORK_LIST: "bot:work:list",
+  BOT_NOTIFICATION_ROUTE_GET: "bot:notification:route:get",
+  BOT_NOTIFICATION_ROUTE_UPDATE: "bot:notification:route:update",
+  BOT_NOTIFICATION_RETRY: "bot:notification:retry",
+  BOT_NOTIFICATION_RECEIPTS: "bot:notification:receipts",
+  BOT_WORK_RESULT: "bot:work:result",
+  BOT_RESPONSIBILITY_ACTIVATE: "bot:responsibility:activate",
+  BOT_WORK_STOP: "bot:work:stop",
+  BOT_WORK_CONTROL_GET: "bot:work:control:get",
+  BOT_WORK_CONTROL_STATE: "bot:work:control:state",
+  BOT_RESPONSIBILITY_FUTURE_RUNS: "bot:responsibility:futureRuns",
+  BOT_RESPONSIBILITY_PAUSE: "bot:responsibility:pause",
+  BOT_RESPONSIBILITY_RUN: "bot:responsibility:run",
+  BOT_RESPONSIBILITY_LIST: "bot:responsibility:list",
+  BOT_RESPONSIBILITY_ENGINES: "bot:responsibility:engines",
+  BOT_RESPONSIBILITY_PREVIEW: "bot:responsibility:preview",
+  BOT_RESPONSIBILITY_CREATE: "bot:responsibility:create",
+  BOT_RESPONSIBILITY_REVISE: "bot:responsibility:revise",
+
   BOT_CONVERSATIONS_LIST: "bot:conversationsList",
   BOT_CONVERSATION_REOPEN: "bot:conversationReopen",
   COMPOSER_DRAFT_GET: "composerDraft:get",
@@ -8736,6 +8823,7 @@ export const IPC_CHANNELS = {
   MAILBOX_SCHEDULE_SEND: "mailbox:scheduleSend",
   MAILBOX_UPDATE_CLIENT_SETTINGS: "mailbox:updateClientSettings",
   MAILBOX_RETRY_ACTION: "mailbox:retryAction",
+  MAILBOX_RESOLVE_SEND_OUTCOME: "mailbox:resolveSendOutcome",
   MAILBOX_DISCARD_COMPOSE_DRAFT: "mailbox:discardComposeDraft",
   MAILBOX_UNDO_ACTION: "mailbox:undoAction",
   MAILBOX_SUMMARIZE_THREAD: "mailbox:summarizeThread",
@@ -9090,6 +9178,7 @@ export const IPC_CHANNELS = {
 
   // Approval operations
   APPROVAL_RESPOND: "approval:respond",
+  APPROVAL_DRAFT_PREVIEW: "approval:draftPreview",
   APPROVAL_SESSION_AUTO_APPROVE_SET: "approval:sessionAutoApprove:set",
   APPROVAL_SESSION_AUTO_APPROVE_GET: "approval:sessionAutoApprove:get",
   RECURRING_APPROVAL_LIST: "approval:recurringList",
@@ -9101,6 +9190,7 @@ export const IPC_CHANNELS = {
   PROTECTED_CREDENTIAL_LIST: "protectedCredential:list",
   PROTECTED_CREDENTIAL_REVOKE: "protectedCredential:revoke",
   INPUT_REQUEST_LIST: "inputRequest:list",
+  INPUT_REQUEST_DRAFT_REVIEW: "inputRequest:draftReview",
   INPUT_REQUEST_RESPOND: "inputRequest:respond",
 
   // Artifact operations
@@ -10643,6 +10733,8 @@ export interface ChannelData {
     ingestNonSelfChatsInSelfChatMode?: boolean;
     /** The owner's own account ids on this channel (SEC-16; see gateway-owner-ids.ts). */
     ownerUserIds?: string[];
+    /** Explicit opt-in to owner-authorized Slack/Teams decision cards; default off. */
+    decisionMessagesEnabled?: boolean;
     [key: string]: unknown;
   };
 }
@@ -12010,6 +12102,9 @@ export type NotificationType =
   | "error";
 
 export interface AppNotification {
+  agentRoleId?: string;
+  /** False stores an inbox item without requesting a desktop alert. */
+  desktopAlert?: boolean;
   id: string;
   type: NotificationType;
   title: string;

@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import type { Task, AgentTeamRun, AgentThought, TaskEvent } from "../../shared/types";
 import { isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
-import { getEmojiIcon } from "../utils/emoji-icon-map";
+import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripLeadingEmoji } from "../utils/emoji-replacer";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
@@ -451,7 +451,7 @@ export function CollaborativeAgentLines({
             <span className="collab-agent-status-text">
               <span className="collab-agent-icon">
                 {(() => {
-                  const Icon = getEmojiIcon(icon || "🤖");
+                  const Icon = resolveTwinIcon(icon || "🤖");
                   return <Icon size={14} strokeWidth={1.5} />;
                 })()}
               </span>

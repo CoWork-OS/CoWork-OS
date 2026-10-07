@@ -128,6 +128,7 @@ import {
   MailboxProviderBackend,
   MailboxProviderCapability,
   MailboxQueuedAction,
+  MailboxSendOutcomeResolution,
   MailboxResearchResult,
   MailboxFolder,
   MailboxIdentity,
@@ -603,6 +604,15 @@ const MAILBOX_SYNC_ERROR_LABEL_MAX_LENGTH = 600;
 let mailboxCipherState: MailboxCipherState | null = null;
 
 const mailboxLogger = createLogger("MailboxService");
+const MAILBOX_SEND_OUTCOME_UNKNOWN_MESSAGE =
+  "Delivery status is unknown. Check the provider's Sent folder before attempting another send.";
+
+class MailboxSendOutcomeUnknownError extends Error {
+  constructor() {
+    super(MAILBOX_SEND_OUTCOME_UNKNOWN_MESSAGE);
+    this.name = "MailboxSendOutcomeUnknownError";
+  }
+}
 
 const MAILBOX_CONNECTION_ERROR_RE =
   /\b(connect|connection|network|timeout|timed out|socket|dns|fetch failed|failed to fetch|enotfound|eai_again|econnrefused|econnreset|econnaborted|enotconn|etimedout|enetunreach|ehostunreach|err_internet_disconnected|unknown system error)\b/i;
@@ -1899,6 +1909,7 @@ function guessMimeType(filename: string): string {
 
 export class MailboxService {
   private static backgroundServices = new Set<MailboxService>();
+  private static outboxDrainInFlight = false;
 
   static async stopBackgroundServices(): Promise<void> {
     // Task tools create lightweight MailboxService instances too and can replace
@@ -2589,6 +2600,9 @@ export class MailboxService {
   async retryMailboxAction(actionId: string): Promise<MailboxQueuedAction> {
     const existing = await this.getMailboxQueuedAction(actionId);
     if (!existing) throw new Error("Mailbox action not found");
+    if (existing.status === "outcome_unknown") {
+      throw new Error(MAILBOX_SEND_OUTCOME_UNKNOWN_MESSAGE);
+    }
     if (existing.status !== "failed") {
       return existing;
     }
@@ -2597,15 +2611,53 @@ export class MailboxService {
     return (await this.getMailboxQueuedAction(actionId))!;
   }
 
+  async resolveMailboxSendOutcome(
+    actionId: string,
+    resolution: MailboxSendOutcomeResolution,
+  ): Promise<MailboxQueuedAction> {
+    const existing = await this.getMailboxQueuedAction(actionId);
+    if (!existing) throw new Error("Mailbox action not found");
+    if (existing.type !== "send" || existing.status !== "outcome_unknown" || !existing.draftId) {
+      throw new Error("Only an unresolved mailbox send can be reconciled.");
+    }
+    const draft = await this.getMailboxComposeDraft(existing.draftId);
+    if (!draft) throw new Error("Mailbox compose draft not found");
+    const now = Date.now();
+    await this.sql.unit("mailbox_resolveSendOutcome", [
+      actionId,
+      existing.draftId,
+      resolution,
+      now,
+    ]);
+
+    if (resolution === "confirmed_sent") {
+      try {
+        await this.applyPostSendLocalState(draft);
+      } catch (error) {
+        mailboxLogger.warn(
+          "Could not update local mailbox state after manual send confirmation:",
+          error,
+        );
+      }
+    } else {
+      await this.processMailboxQueue();
+    }
+    return (await this.getMailboxQueuedAction(actionId))!;
+  }
+
   async processMailboxQueue(
     limit = 25,
   ): Promise<{ processed: number; succeeded: number; failed: number }> {
-    if (this.outboxDrainInFlight) return { processed: 0, succeeded: 0, failed: 0 };
+    if (this.outboxDrainInFlight || MailboxService.outboxDrainInFlight) {
+      return { processed: 0, succeeded: 0, failed: 0 };
+    }
     this.outboxDrainInFlight = true;
+    MailboxService.outboxDrainInFlight = true;
     let processed = 0;
     let succeeded = 0;
     let failed = 0;
     try {
+      await this.recoverInterruptedMailboxSends();
       const rows = (await this.sql.all("processMailboxQueue_1", [
         Date.now(),
         Math.min(Math.max(limit, 1), 100),
@@ -2617,11 +2669,20 @@ export class MailboxService {
           succeeded += 1;
         } catch (error) {
           failed += 1;
-          await this.markMailboxQueuedActionFailed(row, error);
+          if (
+            row.action_type === "send" &&
+            row.draft_id &&
+            error instanceof MailboxSendOutcomeUnknownError
+          ) {
+            await this.markMailboxSendOutcomeUnknown(row.id, row.draft_id);
+          } else {
+            await this.markMailboxQueuedActionFailed(row, error);
+          }
         }
       }
     } finally {
       this.outboxDrainInFlight = false;
+      MailboxService.outboxDrainInFlight = false;
     }
     return { processed, succeeded, failed };
   }
@@ -5095,6 +5156,14 @@ export class MailboxService {
     return this.mapThreadRowsWithSummaries(filteredRows);
   }
 
+  async listThreadsForAccount(
+    accountId: string,
+    input: MailboxListThreadsInput = {},
+  ): Promise<MailboxThreadListItem[]> {
+    await this.requireMailboxAccount(accountId);
+    return this.listThreads({ ...input, accountId });
+  }
+
   async getThread(threadId: string): Promise<MailboxThreadDetail | null> {
     const row = (await this.sql.get("getThread_1", [threadId])) as MailboxThreadRow | undefined;
     if (!row) return null;
@@ -5118,6 +5187,19 @@ export class MailboxService {
       contactMemory,
       research,
       sensitiveContent,
+    };
+  }
+
+  async getThreadForAccount(
+    threadId: string,
+    accountId: string,
+  ): Promise<(MailboxThreadListItem & { messages: MailboxMessage[] }) | null> {
+    await this.requireMailboxAccount(accountId);
+    const row = (await this.sql.get("getThread_1", [threadId])) as MailboxThreadRow | undefined;
+    if (!row || row.account_id !== accountId) return null;
+    return {
+      ...(await this.mapThreadRow(row, (await this.getSummaryForThread(threadId)) || undefined)),
+      messages: await this.getMessagesForThread(threadId),
     };
   }
 
@@ -10182,6 +10264,22 @@ export class MailboxService {
     }
   }
 
+  private async markMailboxSendOutcomeUnknown(actionId: string, draftId: string): Promise<void> {
+    await this.sql.unit("mailbox_markSendOutcomeUnknown", [
+      actionId,
+      draftId,
+      MAILBOX_SEND_OUTCOME_UNKNOWN_MESSAGE,
+      Date.now(),
+    ]);
+  }
+
+  private async recoverInterruptedMailboxSends(): Promise<void> {
+    await this.sql.unit("mailbox_recoverInterruptedSends", [
+      MAILBOX_SEND_OUTCOME_UNKNOWN_MESSAGE,
+      Date.now(),
+    ]);
+  }
+
   private async executeQueuedDraftSend(action: MailboxQueuedAction): Promise<void> {
     if (!action.draftId) throw new Error("Queued send is missing draft id.");
     const draft = await this.getMailboxComposeDraft(action.draftId);
@@ -10194,20 +10292,24 @@ export class MailboxService {
     }
 
     const result = await this.sendComposeDraftThroughProvider(draft);
-    await this.sql.run("executeQueuedDraftSend_3", [
-      result.providerDraftId || null,
-      Date.now(),
-      draft.id,
-    ]);
-    if (outgoingId) {
-      await this.sql.run("executeQueuedDraftSend_4", [
-        result.providerMessageId || null,
+    try {
+      await this.sql.run("executeQueuedDraftSend_3", [
+        result.providerDraftId || null,
         Date.now(),
-        outgoingId,
+        draft.id,
       ]);
+      if (outgoingId) {
+        await this.sql.run("executeQueuedDraftSend_4", [
+          result.providerMessageId || null,
+          Date.now(),
+          outgoingId,
+        ]);
+      }
+      await this.applyPostSendLocalState(draft, result.providerMessageId);
+      await this.sql.run("processMailboxQueuedAction_2", [Date.now(), action.id]);
+    } catch {
+      throw new MailboxSendOutcomeUnknownError();
     }
-    await this.sql.run("processMailboxQueuedAction_2", [Date.now(), action.id]);
-    await this.applyPostSendLocalState(draft, result.providerMessageId);
   }
 
   private async executeQueuedThreadAction(action: MailboxQueuedAction): Promise<void> {
@@ -10243,53 +10345,85 @@ export class MailboxService {
     const attachments = await this.readComposeDraftAttachments(draft);
     if (account.provider === "gmail") {
       const raw = this.buildRawMimeMessage(draft, attachments);
-      const draftResult = await gmailRequest(GoogleWorkspaceSettingsManager.loadSettings(), {
-        method: "POST",
-        path: "/users/me/drafts",
-        body: {
-          message: {
-            raw,
-            threadId: draft.mode === "forward" ? undefined : providerThreadId,
+      let providerDraftId = draft.providerDraftId;
+      if (!providerDraftId) {
+        const draftResult = await gmailRequest(GoogleWorkspaceSettingsManager.loadSettings(), {
+          method: "POST",
+          path: "/users/me/drafts",
+          body: {
+            message: {
+              raw,
+              threadId: draft.mode === "forward" ? undefined : providerThreadId,
+            },
           },
-        },
-      });
-      const providerDraftId = asString(draftResult.data?.id) || undefined;
-      const sendResult = await gmailRequest(GoogleWorkspaceSettingsManager.loadSettings(), {
-        method: "POST",
-        path: "/users/me/drafts/send",
-        body: { id: providerDraftId },
-      });
+        });
+        providerDraftId = asString(draftResult.data?.id) || undefined;
+        if (!providerDraftId) throw new Error("Gmail did not return a draft id.");
+        await this.sql.run("persistMailboxProviderDraftId_1", [
+          providerDraftId,
+          Date.now(),
+          draft.id,
+        ]);
+      }
+      let sendResult: Awaited<ReturnType<typeof gmailRequest>>;
+      try {
+        sendResult = await gmailRequest(GoogleWorkspaceSettingsManager.loadSettings(), {
+          method: "POST",
+          path: "/users/me/drafts/send",
+          body: { id: providerDraftId },
+        });
+      } catch {
+        throw new MailboxSendOutcomeUnknownError();
+      }
       return {
         providerDraftId,
         providerMessageId: asString(sendResult.data?.id) || undefined,
       };
     }
     if (account.provider === "outlook_graph" || account.backend === "microsoft_graph") {
-      const graphDraft = await this.microsoftGraphCreateDraft(draft, attachments);
-      const graphDraftId = asString(graphDraft?.id);
-      if (!graphDraftId) throw new Error("Microsoft Graph did not return a draft id.");
-      await this.microsoftGraphRequest(await this.resolveMicrosoftGraphChannelId(), {
-        method: "POST",
-        path: `/me/messages/${encodeURIComponent(graphDraftId)}/send`,
-        scopes: MICROSOFT_GRAPH_SEND_SCOPES,
-      });
+      const channelId = await this.resolveMicrosoftGraphChannelId();
+      let graphDraftId = draft.providerDraftId;
+      if (!graphDraftId) {
+        const graphDraft = await this.microsoftGraphCreateDraft(draft, attachments);
+        graphDraftId = asString(graphDraft?.id) || undefined;
+        if (!graphDraftId) throw new Error("Microsoft Graph did not return a draft id.");
+        await this.sql.run("persistMailboxProviderDraftId_1", [graphDraftId, Date.now(), draft.id]);
+      }
+      try {
+        await this.microsoftGraphRequest(channelId, {
+          method: "POST",
+          path: `/me/messages/${encodeURIComponent(graphDraftId)}/send`,
+          scopes: MICROSOFT_GRAPH_SEND_SCOPES,
+        });
+      } catch {
+        throw new MailboxSendOutcomeUnknownError();
+      }
       return { providerDraftId: graphDraftId, providerMessageId: graphDraftId };
     }
     if (account.provider === "agentmail") {
-      return this.sendAgentMailDraft(draft);
+      try {
+        return await this.sendAgentMailDraft(draft);
+      } catch {
+        throw new MailboxSendOutcomeUnknownError();
+      }
     }
     const channel = await this.channelRepo.findByType("email");
     if (!channel) throw new Error("Email channel is not configured");
     const client = this.createStandardEmailClient(channel.id, (channel.config as Any) || {});
-    const providerMessageId = await client.sendEmail({
-      to: draft.to.map((recipient) => recipient.email),
-      cc: draft.cc.map((recipient) => recipient.email),
-      bcc: draft.bcc.map((recipient) => recipient.email),
-      subject: draft.subject,
-      text: draft.bodyText,
-      html: draft.bodyHtml,
-      attachments,
-    });
+    let providerMessageId: string | undefined;
+    try {
+      providerMessageId = await client.sendEmail({
+        to: draft.to.map((recipient) => recipient.email),
+        cc: draft.cc.map((recipient) => recipient.email),
+        bcc: draft.bcc.map((recipient) => recipient.email),
+        subject: draft.subject,
+        text: draft.bodyText,
+        html: draft.bodyHtml,
+        attachments,
+      });
+    } catch {
+      throw new MailboxSendOutcomeUnknownError();
+    }
     return { providerMessageId };
   }
 
@@ -10517,6 +10651,18 @@ export class MailboxService {
       | MailboxAccountRow
       | undefined;
     return row ? this.mapAccountRow(row) : null;
+  }
+
+  private async requireMailboxAccount(accountId: string): Promise<void> {
+    if (
+      typeof accountId !== "string" ||
+      !accountId.trim() ||
+      accountId !== accountId.trim() ||
+      accountId.length > 512
+    )
+      throw new Error("A valid mailbox account is required for scoped reads");
+    if (!(await this.getMailboxAccount(accountId)))
+      throw new Error("The selected mailbox account is unavailable");
   }
 
   private async getProviderThreadId(threadId: string): Promise<string | undefined> {

@@ -1,3 +1,4 @@
+import { RESPONSIBILITY_SIGNAL_ALREADY_ADMITTED } from "../../shared/bot-responsibility";
 /**
  * CronService - Manages scheduled task execution
  * Handles job lifecycle, timer management, and task creation
@@ -100,8 +101,11 @@ interface CronServiceState {
       | "getTaskResultText"
       | "resolveTemplateVariables"
       | "resolveWorkspaceContext"
+      | "findTaskForRun"
       | "findActiveTaskForJob"
       | "executeWorkflow"
+      | "beforeExecuteJob"
+      | "beforeDeliverJob"
     >
   > & {
     nowMs: () => number;
@@ -118,8 +122,11 @@ interface CronServiceState {
     deliverToChannel?: CronServiceDeps["deliverToChannel"];
     resolveTemplateVariables?: CronServiceDeps["resolveTemplateVariables"];
     resolveWorkspaceContext?: CronServiceDeps["resolveWorkspaceContext"];
+    findTaskForRun?: CronServiceDeps["findTaskForRun"];
     findActiveTaskForJob?: CronServiceDeps["findActiveTaskForJob"];
     executeWorkflow?: CronServiceDeps["executeWorkflow"];
+    beforeExecuteJob?: CronServiceDeps["beforeExecuteJob"];
+    beforeDeliverJob?: CronServiceDeps["beforeDeliverJob"];
   };
   store: CronStoreFile | null;
   timer: ReturnType<typeof setTimeout> | null;
@@ -570,6 +577,8 @@ export class CronService {
       if (patch.modelKey !== undefined) job.modelKey = patch.modelKey;
       if (patch.maxHistoryEntries !== undefined) job.maxHistoryEntries = patch.maxHistoryEntries;
       if (patch.delivery !== undefined) job.delivery = patch.delivery;
+      if (Object.hasOwn(patch, "chatContext")) job.chatContext = patch.chatContext;
+      if (Object.hasOwn(patch, "taskAgentConfig")) job.taskAgentConfig = patch.taskAgentConfig;
       if (patch.state) {
         job.state = { ...job.state, ...patch.state };
       }
@@ -761,11 +770,27 @@ export class CronService {
   }
 
   private async reconcilePersistedTaskOutcome(job: CronJob, nowMs: number): Promise<boolean> {
-    const taskId = job.state.lastTaskId;
     const runAtMs = job.state.runningAtMs;
     const runMode = job.state.runningRunMode ?? job.runMode ?? "new_task";
     const getTaskStatus = this.state.deps.getTaskStatus;
-    if (runMode !== "new_task" || !taskId || runAtMs === undefined || !getTaskStatus) return false;
+    if (runMode !== "new_task" || runAtMs === undefined || !getTaskStatus) return false;
+
+    // Task insertion and the cron file checkpoint are separate commits. Recover
+    // the exact occurrence even when its task has already reached a terminal state.
+    if (this.state.deps.findTaskForRun) {
+      try {
+        const recovered = await this.state.deps.findTaskForRun({
+          jobId: job.id,
+          workspaceId: job.workspaceId,
+          runAtMs,
+        });
+        if (recovered) job.state.lastTaskId = recovered.id;
+      } catch {
+        return false;
+      }
+    }
+    const taskId = job.state.lastTaskId;
+    if (!taskId) return false;
 
     let task: Awaited<ReturnType<NonNullable<CronServiceDeps["getTaskStatus"]>>>;
     try {
@@ -1077,6 +1102,7 @@ export class CronService {
       job.state.runningAtMs = nowMs;
       job.state.runningRunMode = job.runMode ?? "new_task";
       job.state.lastRunAtMs = nowMs;
+      if ((job.runMode ?? "new_task") === "new_task") job.state.lastTaskId = undefined;
       job.state.lastStatus = undefined;
       job.state.lastError = undefined;
       if (!job.deleteAfterRun) {
@@ -1091,13 +1117,18 @@ export class CronService {
       let taskId: string | undefined;
       let status: CronJobStatus = "ok";
       let errorMsg: string | undefined;
+      let skippedReason: "no-signal" | "future-paused" = "no-signal";
       let resultText: string | undefined;
       let workspaceContext: CronWorkspaceContext | null = null;
       let workspaceIdForRun = job.workspaceId;
       let shouldPollTaskStatus = true;
       let taskStillRunning = false;
+      let admitted = false;
 
       try {
+        const preparation = await deps.beforeExecuteJob?.(job);
+        if (preparation?.skipReason) throw new Error(preparation.skipReason);
+        admitted = true;
         workspaceContext = await this.resolveWorkspaceContext(job, nowMs, "run");
         if (workspaceContext?.workspaceId) {
           workspaceIdForRun = workspaceContext.workspaceId;
@@ -1105,6 +1136,8 @@ export class CronService {
         if (workspaceIdForRun !== job.workspaceId) {
           job.workspaceId = workspaceIdForRun;
           job.updatedAtMs = nowMs;
+          // Recovery must look in the workspace resolved for this occurrence.
+          await this.persist();
         }
 
         const renderedPrompt = await this.renderTaskPrompt(
@@ -1116,6 +1149,7 @@ export class CronService {
 
         const agentConfig = {
           ...job.taskAgentConfig,
+          ...preparation?.agentConfig,
           ...(job.accessProfileId ? { accessProfileId: job.accessProfileId } : {}),
           // Profile-selected jobs are governed by the profile resolver. Only
           // legacy jobs without a named profile use the old shell override.
@@ -1212,7 +1246,7 @@ export class CronService {
             assignedAgentRoleId: job.assignedAgentRoleId,
             modelKey: job.modelKey,
             allowUserInput: job.allowUserInput ?? false,
-            agentConfig: { ...agentConfig, scheduledJobId: job.id },
+            agentConfig: { ...agentConfig, scheduledJobId: job.id, scheduledRunAtMs: nowMs },
           });
 
           taskId = result.id;
@@ -1329,8 +1363,20 @@ export class CronService {
         }
       } catch (error) {
         errorMsg = error instanceof Error ? error.message : String(error);
-        status = "error";
-        log.error(`Job ${job.name} failed: ${errorMsg}`);
+        if (
+          errorMsg === RESPONSIBILITY_SIGNAL_ALREADY_ADMITTED ||
+          errorMsg === "Responsibility future runs are paused"
+        ) {
+          skippedReason =
+            errorMsg === RESPONSIBILITY_SIGNAL_ALREADY_ADMITTED ? "no-signal" : "future-paused";
+          status = "skipped";
+          errorMsg = undefined;
+          admitted = false;
+          log.debug(`Job ${job.name} skipped: ${skippedReason}`);
+        } else {
+          status = "error";
+          log.error(`Job ${job.name} failed: ${errorMsg}`);
+        }
       }
 
       const durationMs = Date.now() - startTime;
@@ -1381,14 +1427,9 @@ export class CronService {
       this.armOutboxTimer();
 
       // Deliver results to channel if configured
-      const deliveryResult = await this.deliverToChannel(
-        job,
-        status,
-        taskId,
-        errorMsg,
-        resultText,
-        nowMs,
-      );
+      const deliveryResult = admitted
+        ? await this.deliverToChannel(job, status, taskId, errorMsg, resultText, nowMs)
+        : { attempted: false, attempts: 0, deliverableStatus: "none" as const };
 
       // Update this run's history entry (the object recorded above, which another run
       // of the same job may have moved from the front). Delivery facts are stored
@@ -1420,6 +1461,7 @@ export class CronService {
         nextRunAtMs: job.state.nextRunAtMs,
       });
 
+      if (status === "skipped" && !admitted) return { ok: true, ran: false, reason: skippedReason };
       if (taskId) {
         return { ok: true, ran: true, taskId };
       } else {
@@ -1484,6 +1526,13 @@ export class CronService {
         );
         return { attempted: false, attempts: 0, deliverableStatus: "none" };
       }
+    }
+
+    try {
+      await deps.beforeDeliverJob?.(job.id);
+    } catch {
+      // Policy denial is not a failed transport attempt and must not enqueue a send.
+      return { attempted: false, attempts: 0, deliverableStatus: "none" };
     }
 
     const runKey = Number.isFinite(runAtMs)
@@ -1853,6 +1902,16 @@ export class CronService {
           .slice(0, 10);
 
         for (const entry of dueEntries) {
+          try {
+            await deps.beforeDeliverJob?.(entry.jobId);
+          } catch {
+            // Preserve the queued receipt without claiming a send or exhausting
+            // transport retries while a responsibility/runtime boundary is paused.
+            entry.nextAttemptAtMs = nowMs + 60_000;
+            entry.lastError = "Delivery blocked by runtime admission";
+            changed = true;
+            continue;
+          }
           entry.attempts += 1;
           entry.lastAttemptAtMs = nowMs;
           try {

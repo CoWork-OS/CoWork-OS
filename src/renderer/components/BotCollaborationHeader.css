@@ -1,4 +1,6 @@
 .bot-collaboration-header {
+  /* The task timeline around it is monospace; the bot's header reads as UI. */
+  font-family: var(--font-ui);
   width: 100%;
   max-width: 760px;
   box-sizing: border-box;
@@ -327,12 +329,6 @@
   color: var(--color-danger, #ef8d8d);
 }
 
-.bot-collaboration-disclosure-note {
-  padding-top: 2px;
-  color: var(--color-text-muted, #98a1ad);
-  font-size: 11px;
-}
-
 .bot-collaboration-spin {
   animation: bot-collaboration-spin 1.2s linear infinite;
 }
@@ -394,6 +390,15 @@
   border-radius: 50%;
   background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
   color: var(--color-accent);
+}
+
+/* The bot's illustrated character replaces the tinted mark. */
+.bot-collaboration-avatar.bot-collaboration-avatar-mascot {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-radius: 0;
+  background: none;
 }
 
 .bot-collaboration-bot-name {

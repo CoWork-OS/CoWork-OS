@@ -1,0 +1,93 @@
+/* Bot icon picker: the illustrated characters a bot can be drawn as. */
+
+.bot-icon-picker {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.bot-icon-picker-tile {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.bot-icon-picker-tile:hover {
+  background: var(--color-bg-hover);
+}
+
+.bot-icon-picker-tile.selected {
+  border-color: color-mix(in srgb, var(--color-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.bot-icon-picker-tile:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.bot-icon-select {
+  position: relative;
+  min-width: 0;
+}
+
+.bot-icon-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: var(--color-bg-input);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.bot-icon-select-trigger:hover {
+  border-color: var(--color-border-light);
+}
+
+.bot-icon-select-trigger > svg:last-child {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+
+.bot-icon-select-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-icon-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: min(336px, calc(100vw - 40px));
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+
+.bot-icon-select-menu-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}

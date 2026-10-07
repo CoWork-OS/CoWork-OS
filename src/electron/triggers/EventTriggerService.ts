@@ -1,3 +1,8 @@
+import { prepareResponsibilityEvent } from "../automation/responsibility-signals";
+import { RESPONSIBILITY_SIGNAL_ALREADY_ADMITTED } from "../../shared/bot-responsibility";
+import { BotResponsibilityRepository } from "../automation/BotResponsibilityRepository";
+import type { ResponsibilityAdmissionSnapshot } from "../automation/responsibility-event-admission";
+import type { BotResponsibility } from "../../shared/bot-responsibility";
 /**
  * EventTriggerService — condition-based automation engine.
  *
@@ -6,7 +11,7 @@
  * send_message, wake_agent) when conditions match.
  */
 
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import type Database from "better-sqlite3";
 import { serviceStatements, type ServiceStatementPort } from "../database/service-statements";
 import {
@@ -17,9 +22,30 @@ import {
   type EventTriggerRegistry,
 } from "./types";
 import { evaluateConditions, substituteEventVariables } from "./condition-evaluator";
+import { ensureResponsibilitySnapshotColumn } from "./trigger-sql";
 
 const DEFAULT_COOLDOWN_MS = 60_000; // 1 minute
 const MAX_HISTORY_PER_TRIGGER = 50;
+type TriggerDefinitionSnapshot = Pick<
+  EventTrigger,
+  | "id"
+  | "name"
+  | "description"
+  | "enabled"
+  | "source"
+  | "conditions"
+  | "conditionLogic"
+  | "action"
+  | "workspaceId"
+  | "cooldownMs"
+  | "createdAt"
+>;
+function sameResponsibilityAdmissionSnapshot(
+  left: ResponsibilityAdmissionSnapshot | null,
+  right: ResponsibilityAdmissionSnapshot | null,
+): boolean {
+  return stableStringify(left) === stableStringify(right);
+}
 
 function isMailboxEventSource(source: string): boolean {
   return source === "mailbox_event";
@@ -44,6 +70,7 @@ export class EventTriggerService implements EventTriggerRegistry {
   private queueTimer: NodeJS.Timeout | null = null;
   private drainingQueue = false;
   private drainPromise: Promise<void> | null = null;
+  private readonly evaluations = new Set<Promise<void>>();
   private fireInterceptor:
     | ((
         trigger: EventTrigger,
@@ -73,6 +100,7 @@ export class EventTriggerService implements EventTriggerRegistry {
     if (this.sql) {
       try {
         await this.sql.unit("eventTrigger_recoverProcessing", [Date.now()]);
+        await this.sql.unit("eventTrigger_recoverOccurrences", [Date.now()]);
       } catch (error) {
         this.log("[EventTriggerService] Failed to recover queued events:", error);
       }
@@ -87,7 +115,9 @@ export class EventTriggerService implements EventTriggerRegistry {
     this.running = false;
     if (this.queueTimer) clearInterval(this.queueTimer);
     this.queueTimer = null;
+    await this.ready.catch(() => {});
     await this.drainPromise;
+    await Promise.allSettled(this.evaluations);
     this.log("[EventTriggerService] Stopped");
   }
 
@@ -103,6 +133,7 @@ export class EventTriggerService implements EventTriggerRegistry {
   }
 
   async drainPendingEvents(): Promise<void> {
+    await Promise.allSettled(this.evaluations);
     const drainPromise = this.drainQueuedEvents();
     await drainPromise;
     if (this.drainPromise === drainPromise) this.drainPromise = null;
@@ -172,11 +203,22 @@ export class EventTriggerService implements EventTriggerRegistry {
    */
   async evaluateEvent(event: TriggerEvent): Promise<void> {
     if (!this.running) return;
-    await this.ready;
+    const evaluation = this.evaluateIncomingEvent(event);
+    this.evaluations.add(evaluation);
+    try {
+      await evaluation;
+    } finally {
+      this.evaluations.delete(evaluation);
+    }
+  }
 
-    const activeCount = this.deps.getActiveTaskCount?.() ?? 0;
-    if (activeCount >= 4 && this.sql) {
-      await this.enqueueEvent(event);
+  private async evaluateIncomingEvent(event: TriggerEvent): Promise<void> {
+    await this.ready;
+    if (!this.running) return;
+
+    if (this.sql) {
+      await this.acceptMatchingOccurrences(event);
+      if ((this.deps.getActiveTaskCount?.() ?? 0) < 4) await this.drainQueuedEvents();
       return;
     }
 
@@ -184,7 +226,13 @@ export class EventTriggerService implements EventTriggerRegistry {
   }
 
   private async evaluateEventNow(event: TriggerEvent): Promise<void> {
+    if (this.sql) {
+      await this.acceptMatchingOccurrences(event);
+      await this.drainOccurrencesUntilCapacity();
+      return;
+    }
     for (const trigger of this.triggers.values()) {
+      if (!this.running) return;
       if (!trigger.enabled) continue;
       if (!triggerMatchesEventSource(trigger.source, event.source)) continue;
 
@@ -206,9 +254,509 @@ export class EventTriggerService implements EventTriggerRegistry {
     }
   }
 
+  private async acceptMatchingOccurrences(event: TriggerEvent): Promise<void> {
+    const sql = this.sql;
+    if (!sql) return;
+    for (const trigger of this.triggers.values()) {
+      if (!this.running) return;
+      if (!trigger.enabled || !triggerMatchesEventSource(trigger.source, event.source)) continue;
+      let matched = false;
+      try {
+        matched = evaluateConditions(event, trigger.conditions, trigger.conditionLogic || "all");
+      } catch (error) {
+        this.deps.log?.(`Trigger "${trigger.name}" condition evaluation failed:`, error);
+        continue;
+      }
+      if (!matched) continue;
+
+      try {
+        const now = Date.now();
+        const responsibility = this.db
+          ? ((await new BotResponsibilityRepository(this.db).getForEventTrigger(
+              trigger.id,
+            )) as BotResponsibility | null)
+          : null;
+        const responsibilityRepository = this.db ? new BotResponsibilityRepository(this.db) : null;
+        let responsibilitySnapshot: ResponsibilityAdmissionSnapshot | null;
+        try {
+          responsibilitySnapshot = responsibility
+            ? await responsibilityRepository!.eventAdmissionSnapshot(responsibility, trigger)
+            : null;
+        } catch (error) {
+          if (responsibility && ["channel_message", "mailbox_event"].includes(event.source)) {
+            this.deps.log?.(
+              `Trigger "${trigger.name}" event source instance is unavailable:`,
+              error,
+            );
+            continue;
+          }
+          throw error;
+        }
+        if (
+          responsibilitySnapshot &&
+          responsibilityRepository &&
+          !(await responsibilityRepository.eventSourceMatches(
+            trigger,
+            event,
+            responsibilitySnapshot,
+          ))
+        ) {
+          this.deps.log?.(
+            `Trigger "${trigger.name}" event source instance does not match the selected responsibility instance.`,
+          );
+          continue;
+        }
+        const admission = (await sql.unit("eventTrigger_acceptOccurrence", [
+          trigger.id,
+          randomUUID(),
+          this.occurrenceKey(trigger.id, event),
+          JSON.stringify(event),
+          JSON.stringify(triggerDefinitionSnapshot(trigger)),
+          JSON.stringify(responsibilitySnapshot),
+          now,
+          trigger.cooldownMs ?? DEFAULT_COOLDOWN_MS,
+        ])) as {
+          disposition: "accepted" | "duplicate" | "cooldown" | "disabled";
+          row?: Any;
+          trigger?: { last_fired_at: number | null; fire_count: number };
+        };
+        if (admission.disposition === "accepted" && admission.trigger) {
+          trigger.lastFiredAt = admission.trigger.last_fired_at || undefined;
+          trigger.fireCount = admission.trigger.fire_count;
+        }
+      } catch (error) {
+        this.log(`[EventTriggerService] Failed to persist occurrence for ${trigger.id}:`, error);
+        throw error;
+      }
+    }
+  }
+
+  private occurrenceKey(triggerId: string, event: TriggerEvent): string {
+    const channelInstanceId = event.fields.channelInstanceId?.trim();
+    const sourceIdentity = event.eventId?.trim()
+      ? `source:${JSON.stringify([event.source, channelInstanceId || null, event.eventId.trim()])}`
+      : `payload:${event.source}:${event.timestamp}:${stableStringify(event.fields)}`;
+    return createHash("sha256").update(`${triggerId}\n${sourceIdentity}`).digest("hex");
+  }
+
+  private async drainOccurrencesUntilCapacity(): Promise<void> {
+    const sql = this.sql;
+    if (!sql) return;
+    while (this.running && (this.deps.getActiveTaskCount?.() ?? 0) < 4) {
+      const row = (await sql.unit("eventTrigger_claimNextOccurrence", [Date.now()])) as
+        | Any
+        | undefined;
+      if (!row) return;
+      await this.processOccurrence(row);
+    }
+  }
+
+  private async processOccurrence(row: Any): Promise<void> {
+    const sql = this.sql;
+    if (!sql) return;
+    let event: TriggerEvent;
+    let definition: TriggerDefinitionSnapshot;
+    let responsibilitySnapshot: ResponsibilityAdmissionSnapshot | null;
+    try {
+      event = JSON.parse(String(row.event_json)) as TriggerEvent;
+      definition = JSON.parse(String(row.trigger_snapshot_json)) as TriggerDefinitionSnapshot;
+      if (typeof row.responsibility_snapshot_json !== "string")
+        throw new Error("Occurrence predates responsibility binding snapshots.");
+      responsibilitySnapshot = JSON.parse(
+        row.responsibility_snapshot_json,
+      ) as ResponsibilityAdmissionSnapshot | null;
+    } catch (error) {
+      const message = `Invalid persisted trigger occurrence: ${error instanceof Error ? error.message : String(error)}`;
+      await sql.unit("eventTrigger_markOccurrenceFailed", [row.id, message, Date.now()]);
+      return;
+    }
+
+    const configuredTrigger = this.triggers.get(String(row.trigger_id));
+    const snapshot: EventTrigger = {
+      ...definition,
+      fireCount: configuredTrigger?.fireCount ?? 0,
+      lastFiredAt: configuredTrigger?.lastFiredAt,
+      updatedAt: configuredTrigger?.updatedAt ?? definition.createdAt,
+    };
+    const definitionMatches =
+      !!configuredTrigger &&
+      stableStringify(triggerDefinitionSnapshot(configuredTrigger)) === stableStringify(definition);
+    const trigger = snapshot;
+    const now = Date.now();
+    const historyEntry: TriggerHistoryEntry = {
+      id: randomUUID(),
+      triggerId: String(row.trigger_id),
+      firedAt: now,
+      eventData: event.fields as Record<string, unknown>,
+      sourceLabel:
+        configuredTrigger && isMailboxEventSource(configuredTrigger.source)
+          ? "Inbox automation"
+          : configuredTrigger?.source,
+    };
+    let intentWritten = false;
+    try {
+      if (
+        !definitionMatches ||
+        !configuredTrigger ||
+        !configuredTrigger.enabled ||
+        !trigger.enabled
+      ) {
+        await this.completeOccurrence(
+          row.id,
+          "failed",
+          null,
+          "Trigger definition changed or was removed after occurrence acceptance.",
+          snapshot,
+          event,
+          historyEntry,
+        );
+        return;
+      }
+      if (!this.running) {
+        await sql.unit("eventTrigger_releaseOccurrence", [
+          row.id,
+          "Runtime stopped before action intent.",
+          Date.now(),
+        ]);
+        return;
+      }
+      if (this.db)
+        await new BotResponsibilityRepository(this.db).assertEngineMayExecute(
+          "trigger",
+          trigger.id,
+        );
+      const currentResponsibility = this.db
+        ? ((await new BotResponsibilityRepository(this.db).getForEventTrigger(
+            trigger.id,
+          )) as BotResponsibility | null)
+        : null;
+      if (
+        !sameResponsibilityAdmissionSnapshot(
+          currentResponsibility
+            ? await new BotResponsibilityRepository(this.db).eventAdmissionSnapshot(
+                currentResponsibility,
+                trigger,
+              )
+            : null,
+          responsibilitySnapshot,
+        )
+      )
+        throw new Error("Event responsibility binding changed before preparation.");
+      const prepared = this.db
+        ? await prepareResponsibilityEvent(
+            this.db,
+            trigger,
+            event,
+            this.deps.getResponsibilityAccess?.(),
+          )
+        : undefined;
+      const currentResponsibilityAfterPrepare = this.db
+        ? ((await new BotResponsibilityRepository(this.db).getForEventTrigger(
+            trigger.id,
+          )) as BotResponsibility | null)
+        : null;
+      if (
+        !sameResponsibilityAdmissionSnapshot(
+          currentResponsibilityAfterPrepare
+            ? await new BotResponsibilityRepository(this.db).eventAdmissionSnapshot(
+                currentResponsibilityAfterPrepare,
+                trigger,
+              )
+            : null,
+          responsibilitySnapshot,
+        )
+      )
+        throw new Error("Event responsibility binding changed during preparation.");
+      const preparedRun = prepared?.agentConfig?.responsibilityRun;
+      if (
+        responsibilitySnapshot &&
+        !prepared?.skipReason &&
+        (!preparedRun ||
+          preparedRun.id !== responsibilitySnapshot.id ||
+          preparedRun.revision !== responsibilitySnapshot.revision ||
+          preparedRun.controlVersion !== responsibilitySnapshot.controlVersion ||
+          preparedRun.workspaceId !== responsibilitySnapshot.workspaceId ||
+          preparedRun.agentRoleId !== responsibilitySnapshot.agentRoleId ||
+          stableStringify(preparedRun.engine) !== stableStringify(responsibilitySnapshot.engine))
+      )
+        throw new Error("Event responsibility binding changed before action intent.");
+      if (prepared?.skipReason) {
+        historyEntry.actionResult = "no_signal";
+        await this.completeOccurrence(
+          row.id,
+          "completed",
+          { kind: "no_signal" },
+          null,
+          trigger,
+          event,
+          historyEntry,
+        );
+        return;
+      }
+      if (!this.running) {
+        await sql.unit("eventTrigger_releaseOccurrence", [
+          row.id,
+          "Runtime stopped before action intent.",
+          Date.now(),
+        ]);
+        return;
+      }
+
+      const latestTrigger = this.triggers.get(trigger.id);
+      if (
+        !latestTrigger ||
+        stableStringify(triggerDefinitionSnapshot(latestTrigger)) !== stableStringify(definition)
+      ) {
+        await this.completeOccurrence(
+          row.id,
+          "failed",
+          null,
+          "Trigger definition changed or was removed after occurrence acceptance.",
+          snapshot,
+          event,
+          historyEntry,
+        );
+        return;
+      }
+
+      // The final intent transaction checks the current responsibility revision in SQLite,
+      // so a redefine racing the host-side preparation above cannot adopt a newer boundary.
+      const currentResponsibilityAtIntent = this.db
+        ? ((await new BotResponsibilityRepository(this.db).getForEventTrigger(
+            trigger.id,
+          )) as BotResponsibility | null)
+        : null;
+      if (
+        !sameResponsibilityAdmissionSnapshot(
+          currentResponsibilityAtIntent
+            ? await new BotResponsibilityRepository(this.db).eventAdmissionSnapshot(
+                currentResponsibilityAtIntent,
+                trigger,
+              )
+            : null,
+          responsibilitySnapshot,
+        )
+      )
+        throw new Error("Event responsibility binding changed after occurrence acceptance.");
+
+      // The interceptor may durably queue a managed workflow. Mark intent before calling it,
+      // just as for a channel send, so restart never repeats an ambiguous handoff.
+      await sql.unit("eventTrigger_markOccurrenceIntent", [
+        row.id,
+        String(row.trigger_snapshot_json),
+        String(row.responsibility_snapshot_json),
+        Date.now(),
+      ]);
+      intentWritten = true;
+      const intercepted = await this.fireInterceptor?.(trigger, event);
+      if (intercepted?.handled) {
+        historyEntry.actionResult = intercepted.actionResult || "workflow_queued";
+        await this.completeOccurrence(
+          row.id,
+          "completed",
+          { kind: "managed_workflow", actionResult: historyEntry.actionResult },
+          null,
+          trigger,
+          event,
+          historyEntry,
+          true,
+        );
+        return;
+      }
+      if (!this.running) {
+        await sql.unit("eventTrigger_markOccurrenceUnknown", [
+          row.id,
+          "Runtime stopped after action intent; action was not automatically replayed.",
+          Date.now(),
+        ]);
+        return;
+      }
+
+      const action = trigger.action;
+      const cfg = action.config;
+      let receipt: Record<string, unknown> | null = null;
+      switch (action.type) {
+        case "create_task": {
+          const prompt = prepared
+            ? cfg.prompt || "Read the selected responsibility sources."
+            : substituteEventVariables(cfg.prompt || "", event);
+          const title = prepared
+            ? cfg.title || `Trigger: ${trigger.name}`
+            : substituteEventVariables(cfg.title || `Trigger: ${trigger.name}`, event);
+          if (cfg.runMode === "thread_follow_up") {
+            if (!cfg.targetTaskId)
+              throw new Error("Thread follow-up trigger is missing a target task");
+            if (!this.deps.sendTaskMessage)
+              throw new Error("Thread follow-up execution is not available in this runtime");
+            const result = await this.deps.sendTaskMessage({
+              taskId: cfg.targetTaskId,
+              message: prompt,
+              agentConfig: cfg.agentConfig,
+            });
+            historyEntry.taskId = cfg.targetTaskId;
+            historyEntry.actionResult = "thread_follow_up_sent";
+            receipt = { kind: "thread_follow_up", taskId: cfg.targetTaskId, queued: result.queued };
+          } else {
+            const result = await this.deps.createTask({
+              title,
+              prompt,
+              workspaceId:
+                cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
+              agentConfig: prepared?.agentConfig ?? cfg.agentConfig,
+            });
+            historyEntry.taskId = result.id;
+            historyEntry.actionResult = "task_created";
+            receipt = { kind: "task", taskId: result.id };
+          }
+          break;
+        }
+        case "send_message": {
+          if (!this.deps.deliverToChannel || !cfg.channelType || !cfg.channelId)
+            throw new Error("Channel delivery is not available for this trigger action");
+          const result = await this.deps.deliverToChannel({
+            channelType: cfg.channelType,
+            channelId: cfg.channelId,
+            text: substituteEventVariables(cfg.message || "", event),
+            idempotencyKey: String(row.id),
+          });
+          if (!result || typeof result.messageId !== "string" || !result.messageId.trim())
+            throw new Error("Channel delivery did not return a message receipt");
+          historyEntry.actionResult = "message_sent";
+          receipt = { kind: "channel_message", messageId: result.messageId };
+          break;
+        }
+        case "wake_agent": {
+          if (!this.deps.wakeAgent || !cfg.agentRoleId)
+            throw new Error("Agent wake is not available for this trigger action");
+          await this.deps.wakeAgent(
+            cfg.agentRoleId,
+            substituteEventVariables(cfg.prompt || "", event),
+          );
+          historyEntry.actionResult = "agent_woken";
+          receipt = { kind: "agent_wake", accepted: true };
+          break;
+        }
+        default:
+          throw new Error(`Unsupported trigger action: ${String((action as Any).type)}`);
+      }
+      await this.completeOccurrence(
+        row.id,
+        "completed",
+        receipt,
+        null,
+        trigger,
+        event,
+        historyEntry,
+        true,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (intentWritten) {
+        await sql.unit("eventTrigger_markOccurrenceUnknown", [row.id, message, Date.now()]);
+        this.log(
+          `[EventTriggerService] Occurrence ${row.id} outcome is unknown; not replaying:`,
+          error,
+        );
+      } else {
+        if (message === RESPONSIBILITY_SIGNAL_ALREADY_ADMITTED) {
+          historyEntry.actionResult = "no_signal";
+          try {
+            await this.completeOccurrence(
+              row.id,
+              "completed",
+              { kind: "no_signal" },
+              null,
+              trigger,
+              event,
+              historyEntry,
+            );
+          } catch (recordError) {
+            this.log(
+              `[EventTriggerService] Could not record skipped occurrence ${row.id}:`,
+              recordError,
+            );
+          }
+          return;
+        }
+        historyEntry.actionResult =
+          message === "Responsibility future runs are paused"
+            ? "future_paused"
+            : `error: ${message}`;
+        try {
+          await this.completeOccurrence(
+            row.id,
+            "failed",
+            null,
+            message,
+            trigger,
+            event,
+            historyEntry,
+          );
+        } catch (recordError) {
+          await sql.unit("eventTrigger_releaseOccurrence", [row.id, message, Date.now()]);
+          this.log(
+            `[EventTriggerService] Could not record pre-action failure for ${row.id}:`,
+            recordError,
+          );
+        }
+      }
+    }
+  }
+
+  private async completeOccurrence(
+    occurrenceId: string,
+    status: "completed" | "failed",
+    receipt: Record<string, unknown> | null,
+    error: string | null,
+    trigger: EventTrigger | undefined,
+    event: TriggerEvent,
+    historyEntry: TriggerHistoryEntry,
+    actionMayHaveTakenEffect = false,
+  ): Promise<void> {
+    const sql = this.sql;
+    if (!sql) return;
+    try {
+      await sql.unit("eventTrigger_completeOccurrence", [
+        occurrenceId,
+        status,
+        receipt ? JSON.stringify(receipt) : null,
+        error,
+        historyEntry,
+        Date.now(),
+      ]);
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : String(failure);
+      if (actionMayHaveTakenEffect) {
+        await sql.unit("eventTrigger_markOccurrenceUnknown", [
+          occurrenceId,
+          `Action may have completed but its receipt could not be committed: ${message}`,
+          Date.now(),
+        ]);
+      } else {
+        await sql.unit("eventTrigger_markOccurrenceFailed", [occurrenceId, message, Date.now()]);
+      }
+      throw failure;
+    }
+    this.cacheHistory(historyEntry);
+    if (!trigger) return;
+    try {
+      await this.deps.onTriggerFired?.({ trigger, event, historyEntry });
+    } catch (failure) {
+      this.deps.log?.(`Trigger "${trigger.name}" post-fire hook failed:`, failure);
+    }
+  }
+
+  private cacheHistory(historyEntry: TriggerHistoryEntry): void {
+    if (!this.history.has(historyEntry.triggerId)) this.history.set(historyEntry.triggerId, []);
+    const entries = this.history.get(historyEntry.triggerId)!;
+    entries.unshift(historyEntry);
+    if (entries.length > MAX_HISTORY_PER_TRIGGER) entries.length = MAX_HISTORY_PER_TRIGGER;
+  }
+
   // ── Action execution ────────────────────────────────────────────
 
   private async fireTrigger(trigger: EventTrigger, event: TriggerEvent): Promise<void> {
+    if (!this.running) return;
     const now = Date.now();
     trigger.lastFiredAt = now;
     trigger.fireCount += 1;
@@ -223,10 +771,38 @@ export class EventTriggerService implements EventTriggerRegistry {
     };
 
     try {
+      if (!this.running) {
+        historyEntry.actionResult = "runtime_stopped";
+        await this.recordHistory(trigger, event, historyEntry);
+        return;
+      }
+      if (this.db)
+        await new BotResponsibilityRepository(this.db).assertEngineMayExecute(
+          "trigger",
+          trigger.id,
+        );
+      const prepared = this.db
+        ? await prepareResponsibilityEvent(
+            this.db,
+            trigger,
+            event,
+            this.deps.getResponsibilityAccess?.(),
+          )
+        : undefined;
+      if (prepared?.skipReason) {
+        historyEntry.actionResult = "no_signal";
+        await this.recordHistory(trigger, event, historyEntry);
+        return;
+      }
       const intercepted = await this.fireInterceptor?.(trigger, event);
       if (intercepted?.handled) {
         historyEntry.actionResult = intercepted.actionResult || "workflow_queued";
-        this.recordHistory(trigger, event, historyEntry);
+        await this.recordHistory(trigger, event, historyEntry);
+        return;
+      }
+      if (!this.running) {
+        historyEntry.actionResult = "runtime_stopped";
+        await this.recordHistory(trigger, event, historyEntry);
         return;
       }
       const action = trigger.action;
@@ -234,8 +810,12 @@ export class EventTriggerService implements EventTriggerRegistry {
 
       switch (action.type) {
         case "create_task": {
-          const prompt = substituteEventVariables(cfg.prompt || "", event);
-          const title = substituteEventVariables(cfg.title || `Trigger: ${trigger.name}`, event);
+          const prompt = prepared
+            ? cfg.prompt || "Read the selected responsibility sources."
+            : substituteEventVariables(cfg.prompt || "", event);
+          const title = prepared
+            ? cfg.title || `Trigger: ${trigger.name}`
+            : substituteEventVariables(cfg.title || `Trigger: ${trigger.name}`, event);
           if (cfg.runMode === "thread_follow_up") {
             if (!cfg.targetTaskId) {
               throw new Error("Thread follow-up trigger is missing a target task");
@@ -256,7 +836,7 @@ export class EventTriggerService implements EventTriggerRegistry {
               prompt,
               workspaceId:
                 cfg.workspaceId || trigger.workspaceId || this.deps.getDefaultWorkspaceId(),
-              agentConfig: cfg.agentConfig,
+              agentConfig: prepared?.agentConfig ?? cfg.agentConfig,
             });
             historyEntry.taskId = result.id;
             historyEntry.actionResult = "task_created";
@@ -280,24 +860,29 @@ export class EventTriggerService implements EventTriggerRegistry {
         case "wake_agent": {
           if (this.deps.wakeAgent && cfg.agentRoleId) {
             const prompt = substituteEventVariables(cfg.prompt || "", event);
-            this.deps.wakeAgent(cfg.agentRoleId, prompt);
+            await this.deps.wakeAgent(cfg.agentRoleId, prompt);
             historyEntry.actionResult = "agent_woken";
           }
           break;
         }
       }
     } catch (error) {
-      historyEntry.actionResult = `error: ${error instanceof Error ? error.message : String(error)}`;
+      historyEntry.actionResult =
+        error instanceof Error && error.message === RESPONSIBILITY_SIGNAL_ALREADY_ADMITTED
+          ? "no_signal"
+          : error instanceof Error && error.message === "Responsibility future runs are paused"
+            ? "future_paused"
+            : `error: ${error instanceof Error ? error.message : String(error)}`;
     }
 
-    this.recordHistory(trigger, event, historyEntry);
+    await this.recordHistory(trigger, event, historyEntry);
   }
 
-  private recordHistory(
+  private async recordHistory(
     trigger: EventTrigger,
     event: TriggerEvent,
     historyEntry: TriggerHistoryEntry,
-  ): void {
+  ): Promise<void> {
     if (!this.history.has(trigger.id)) {
       this.history.set(trigger.id, []);
     }
@@ -306,28 +891,12 @@ export class EventTriggerService implements EventTriggerRegistry {
     if (entries.length > MAX_HISTORY_PER_TRIGGER) {
       entries.length = MAX_HISTORY_PER_TRIGGER;
     }
-    // History is kept in memory as well; its row is written without delaying the hook.
-    void this.saveHistoryToDB(historyEntry);
+    // Include history and the post-fire receipt in the shutdown drain.
+    await this.saveHistoryToDB(historyEntry);
     try {
-      this.deps.onTriggerFired?.({ trigger, event, historyEntry });
+      await this.deps.onTriggerFired?.({ trigger, event, historyEntry });
     } catch (error) {
       this.deps.log?.(`Trigger "${trigger.name}" post-fire hook failed:`, error);
-    }
-  }
-
-  private async enqueueEvent(event: TriggerEvent): Promise<void> {
-    if (!this.sql) return;
-    const id = randomUUID();
-    const dedupeKey = `${event.source}:${event.timestamp}:${stableStringify(event.fields)}`;
-    try {
-      await this.sql.unit("eventTrigger_enqueue", [
-        id,
-        dedupeKey,
-        JSON.stringify(event),
-        Date.now(),
-      ]);
-    } catch (error) {
-      this.log("[EventTriggerService] Failed to queue event:", error);
     }
   }
 
@@ -356,6 +925,7 @@ export class EventTriggerService implements EventTriggerRegistry {
     if ((this.deps.getActiveTaskCount?.() ?? 0) >= 4) return;
     this.drainingQueue = true;
     try {
+      await this.drainOccurrencesUntilCapacity();
       while (this.running && (this.deps.getActiveTaskCount?.() ?? 0) < 4) {
         const row = (await sql.unit("eventTrigger_claimNext", [Date.now()])) as Any | undefined;
         if (!row) return;
@@ -364,6 +934,7 @@ export class EventTriggerService implements EventTriggerRegistry {
           await this.evaluateEventNow(event);
           if (!this.running) return;
           await sql.unit("eventTrigger_completeQueued", [row.id]);
+          await this.drainOccurrencesUntilCapacity();
         } catch (error) {
           if (!this.running) return;
           // The claim already counted this attempt.
@@ -425,10 +996,32 @@ export class EventTriggerService implements EventTriggerRegistry {
         );
         CREATE INDEX IF NOT EXISTS idx_event_trigger_queue_pending
         ON event_trigger_queue(status, available_at, created_at);
+
+        CREATE TABLE IF NOT EXISTS event_trigger_occurrences (
+          id TEXT PRIMARY KEY,
+          trigger_id TEXT NOT NULL,
+          occurrence_key TEXT NOT NULL,
+          event_json TEXT NOT NULL,
+          trigger_snapshot_json TEXT NOT NULL,
+          responsibility_snapshot_json TEXT,
+          status TEXT NOT NULL,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          available_at INTEGER NOT NULL,
+          receipt_json TEXT,
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(trigger_id, occurrence_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_trigger_occurrences_pending
+        ON event_trigger_occurrences(status, available_at, created_at);
+        CREATE INDEX IF NOT EXISTS idx_event_trigger_occurrences_trigger
+        ON event_trigger_occurrences(trigger_id, created_at DESC);
       `);
     } catch {
       // Tables already exist
     }
+    ensureResponsibilitySnapshotColumn(this.db as Database.Database);
   }
 
   private async loadFromDB(): Promise<void> {
@@ -510,9 +1103,26 @@ function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, child]) => child !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`)
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function triggerDefinitionSnapshot(trigger: EventTrigger): TriggerDefinitionSnapshot {
+  return {
+    id: trigger.id,
+    name: trigger.name,
+    description: trigger.description || undefined,
+    enabled: trigger.enabled,
+    source: trigger.source,
+    conditions: trigger.conditions,
+    conditionLogic: trigger.conditionLogic || "all",
+    action: trigger.action,
+    workspaceId: trigger.workspaceId,
+    cooldownMs: trigger.cooldownMs ?? DEFAULT_COOLDOWN_MS,
+    createdAt: trigger.createdAt,
+  };
 }

@@ -550,8 +550,8 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       ? { executablePath: process.env.COWORK_WEB_UI_BROWSER_EXECUTABLE }
       : {}),
   });
+  const page = await browser.newPage();
   try {
-    const page = await browser.newPage();
     const controlAudit = [];
     const captureControls = async (route) => {
       const snapshot = await page.evaluate(() => {
@@ -694,20 +694,20 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.getByRole("heading", { name: "Build work that runs itself", exact: true }).waitFor({
       state: "visible",
     });
-    await railButton("devices").click();
+    await openMoreItem("Devices");
     await page.getByRole("heading", { name: "Devices", exact: true }).waitFor({ state: "visible" });
     await openMoreItem("Everyday");
     await page
       .getByRole("heading", { name: "Everyday Agent", exact: true })
       .waitFor({ state: "visible" });
-    await openMoreItem("Ideas");
-    await page.getByRole("heading", { name: "Ideas", exact: true }).waitFor({ state: "visible" });
+    await openMoreItem("Mission Control");
+    await page.locator(".mc-v2-topbar h1").waitFor({ state: "visible" });
     await inboxButton.click();
     await page.getByText("Inbox Agent", { exact: true }).waitFor({ state: "visible" });
 
     await page.evaluate(async () => {
       const project = (await window.electronAPI.listWorkspaces()).find(
-        (candidate) => candidate.name === "Browser smoke workspace",
+        (candidate) => candidate.name === "Browser Git UI smoke workspace",
       );
       if (!project) throw new Error("The Git UI smoke workspace is unavailable.");
       const selected = await window.electronAPI.selectWorkspace(project.id);
@@ -766,7 +766,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       .waitFor({ state: "visible" });
 
     await page.getByRole("button", { name: "Organize projects" }).click();
-    await page.getByRole("menuitem", { name: "Add folder or project" }).click();
+    await page.getByRole("menuitem", { name: "New project", exact: true }).click();
     const projectDialog = page.getByRole("dialog", { name: "Create project" });
     await projectDialog.getByLabel("Project name").fill("UI smoke project");
     await projectDialog.getByRole("button", { name: "Create project" }).click();
@@ -801,7 +801,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     });
     await page.getByRole("button", { name: /Mark all read/ }).click();
     await page.getByRole("button", { name: /Clear all/ }).click();
-    await page.getByText("No notifications yet", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText("You're all caught up", { exact: true }).waitFor({ state: "visible" });
     // Close the notifications popover before interacting with the sidebar; its
     // backdrop intentionally consumes the first click outside the panel.
     // The bell reads "Notifications, N unread" while anything is unread.
@@ -1137,19 +1137,35 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     assert.equal(await page.evaluate(() => sessionStorage.getItem("cowork-openai-sign-in")), null);
 
     await page.locator('.settings-sidebar [data-tab="memory"]').click();
-    await page.getByRole("button", { name: "Manage", exact: true }).waitFor();
-    await page.getByRole("button", { name: "Manage", exact: true }).click();
+    await page.locator("#memory-workspace").selectOption(awarenessWorkspaceId);
+    await page.getByRole("tab", { name: "What CoWork knows", exact: true }).click();
     const qaFact = "Disposable browser UI memory prefers blue notebooks";
-    const factInput = page.getByPlaceholder("Add a fact (for example: Prefers concise responses)");
+    const correctedFact = "Disposable browser UI memory prefers green notebooks";
+    const factInput = page.getByLabel("New memory", { exact: true });
     await factInput.fill(qaFact);
-    await factInput.locator("..").getByRole("button", { name: "Add", exact: true }).click();
-    const factRow = page.locator(".memory-list-item").filter({ hasText: qaFact });
+    await page.getByLabel("Where it applies", { exact: true }).selectOption("workspace");
+    await page.locator(".memory-knowledge-add").getByRole("button", { name: "Add", exact: true }).click();
+    const factRow = page.locator(".memory-knowledge-item").filter({ hasText: qaFact });
     await factRow.waitFor();
     await factRow.getByRole("button", { name: "Pin", exact: true }).click();
     await factRow.getByRole("button", { name: "Pinned", exact: true }).waitFor();
-    await factRow.getByRole("button", { name: "Delete", exact: true }).click();
-    await factRow.waitFor({ state: "detached" });
+    await factRow.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByLabel("Edit memory", { exact: true }).fill(correctedFact);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByLabel("Edit memory", { exact: true }).waitFor({ state: "detached" });
+    const correctedRow = page.locator(".memory-knowledge-item").filter({ hasText: correctedFact });
+    await correctedRow.waitFor();
+    assert.equal(await factRow.count(), 0, "Correction must replace the old active Memory Hub fact");
     const memoryWorkspace = await page.locator("#memory-workspace").inputValue();
+    const correctedId = await correctedRow.getAttribute("data-item-id");
+    assert(correctedId);
+    assert.equal((await page.evaluate(async ({workspaceId, id}) => window.electronAPI.getMemoryItem({workspaceId, id}), {workspaceId: memoryWorkspace, id: correctedId})).item.content, correctedFact);
+    page.once("dialog", (dialog) => dialog.accept());
+    await correctedRow.getByRole("button", { name: "Delete", exact: true }).click();
+    await correctedRow.waitFor({ state: "detached" });
+    assert(!(await page.evaluate(async (workspaceId) => window.electronAPI.listMemoryItems({workspaceId, statuses: ["active"], limit: 200}), memoryWorkspace)).items.some((item) => item.id === correctedId));
+    await page.getByRole("tab", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Manage", exact: true }).click();
     await seedMemoryApprovals(profile, memoryWorkspace, "browser-ui-approval");
     const approvalsCard = page.locator(".settings-card").filter({ has: page.getByText("Pending Memory Writes", { exact: true }) });
     await approvalsCard.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -1275,6 +1291,12 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       [],
       `Browser UI emitted unsupported-action errors: ${failures.join("; ")}`,
     );
+  } catch (error) {
+    const diagnosticBase = path.resolve(process.env.COWORK_WEB_UI_DIAGNOSTIC_PATH || path.join(os.tmpdir(), "cowork-browser-ui-smoke-failure"));
+    await fs.mkdir(path.dirname(diagnosticBase), { recursive: true });
+    await page.screenshot({ path: `${diagnosticBase}.png`, fullPage: true }).catch(() => undefined);
+    await fs.writeFile(`${diagnosticBase}.txt`, await page.locator("body").innerText().catch(() => "UI unavailable")).catch(() => undefined);
+    throw error;
   } finally {
     await browser.close();
   }
@@ -1510,21 +1532,65 @@ async function main() {
     const ignoredMemory = await desktop("setImportedMemoryPromptRecallIgnored", [{ workspaceId: memoryWorkspaceId, memoryId: importedMemory.id, ignored: true }], "memory-ignore-01");
     assert.equal(ignoredMemory.success, true);
     assert.match(ignoredMemory.memory.content, /prompt_recall=ignore/);
-    await assert.rejects(desktop("deleteImportedMemoryEntry", [{ workspaceId: memoryWorkspaceId, memoryId: importedMemory.id }], "memory-delete-denied-01"), /Workspace memory access is unavailable/);
     const memoryPolicyDb = new Database(path.join(profile, "cowork-os.db"));
     const originalMemoryPermissions = memoryPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(memoryWorkspaceId).permissions;
     try {
-      memoryPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify({ ...JSON.parse(originalMemoryPermissions), delete: true }), memoryWorkspaceId);
+      const deniedMemoryPermissions = { ...JSON.parse(originalMemoryPermissions), delete: false };
+      memoryPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify(deniedMemoryPermissions), memoryWorkspaceId);
+      assert.deepEqual(
+        JSON.parse(memoryPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(memoryWorkspaceId).permissions),
+        deniedMemoryPermissions,
+        "The denial check must read back the restricted workspace permission snapshot",
+      );
+      await assert.rejects(desktop("deleteImportedMemoryEntry", [{ workspaceId: memoryWorkspaceId, memoryId: importedMemory.id }], "memory-delete-denied-01"), /Workspace memory access is unavailable/);
+      assert(
+        (await desktop("findImportedMemories", [{ workspaceId: memoryWorkspaceId, limit: 20, offset: 0 }])).some((memory) => memory.id === importedMemory.id),
+        "A refused deletion must preserve the imported memory",
+      );
+      const allowedMemoryPermissions = { ...JSON.parse(originalMemoryPermissions), delete: true };
+      memoryPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify(allowedMemoryPermissions), memoryWorkspaceId);
+      assert.deepEqual(
+        JSON.parse(memoryPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(memoryWorkspaceId).permissions),
+        allowedMemoryPermissions,
+        "The allowed deletion check must read back delete authority",
+      );
       assert.equal((await desktop("deleteImportedMemoryEntry", [{ workspaceId: memoryWorkspaceId, memoryId: importedMemory.id }], "memory-delete-01")).success, true);
+      assert(
+        !(await desktop("findImportedMemories", [{ workspaceId: memoryWorkspaceId, limit: 20, offset: 0 }])).some((memory) => memory.id === importedMemory.id),
+        "An authorized deletion must remove the imported memory",
+      );
     } finally {
       memoryPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(originalMemoryPermissions, memoryWorkspaceId);
       memoryPolicyDb.close();
     }
-    const fact = await desktop("addUserFact", [{ category: "preference", value: "Disposable browser QA prefers blue notebooks", source: "manual" }], "memory-fact-add-01");
-    assert((await desktop("getUserProfile")).facts.some((entry) => entry.id === fact.id));
-    await desktop("updateUserFact", [{ id: fact.id, pinned: true }], "memory-fact-pin-01");
-    assert.equal((await desktop("getUserProfile")).facts.find((entry) => entry.id === fact.id).pinned, true);
-    assert.equal((await desktop("deleteUserFact", [fact.id], "memory-fact-delete-01")).success, true);
+    // Global legacy profile mutations remain unavailable on the browser surface.
+    // Exercise the current, workspace-authorized Memory Hub contract instead.
+    await assert.rejects(desktop("addUserFact", [{ category: "preference", value: "Disposable browser QA prefers blue notebooks", source: "manual" }], "memory-legacy-fact-denied-01"), /unsupported|unknown|unavailable/i);
+    const factResult = await desktop("addMemoryItem", [{ workspaceId: memoryWorkspaceId, kind: "preference", content: "Disposable browser QA prefers blue notebooks", scope: "workspace" }], "memory-fact-add-01");
+    assert.equal(factResult.success, true);
+    const fact = factResult.item;
+    assert(fact?.id);
+    assert.equal(fact.workspaceId, memoryWorkspaceId);
+    assert.equal(fact.source, "user_stated");
+    assert((await desktop("listMemoryItems", [{ workspaceId: memoryWorkspaceId }])).items.some((entry) => entry.id === fact.id));
+    assert.equal((await desktop("setMemoryItemPinned", [{ workspaceId: memoryWorkspaceId, id: fact.id, pinned: true }], "memory-fact-pin-01")).success, true);
+    assert.equal((await desktop("getMemoryItem", [{ workspaceId: memoryWorkspaceId, id: fact.id }])).item.pinned, true);
+    const updatedFact = await desktop("updateMemoryItem", [{ workspaceId: memoryWorkspaceId, id: fact.id, content: "Disposable browser QA prefers green notebooks" }], "memory-fact-update-01");
+    assert.equal(updatedFact.success, true);
+    assert.equal(updatedFact.item.content, "Disposable browser QA prefers green notebooks");
+    const factPolicyDb = new Database(path.join(profile, "cowork-os.db"));
+    const originalFactPermissions = factPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(memoryWorkspaceId).permissions;
+    try {
+      factPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify({ ...JSON.parse(originalFactPermissions), delete: false }), memoryWorkspaceId);
+      await assert.rejects(desktop("deleteMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }], "memory-fact-delete-denied-01"), /Workspace memory access is unavailable/);
+      assert.equal((await desktop("getMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }])).item.status, "active");
+      factPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify({ ...JSON.parse(originalFactPermissions), delete: true }), memoryWorkspaceId);
+      assert.equal((await desktop("deleteMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }], "memory-fact-delete-01")).success, true);
+      assert(!(await desktop("listMemoryItems", [{ workspaceId: memoryWorkspaceId, statuses: ["active"] }])).items.some((entry) => entry.id === updatedFact.item.id));
+    } finally {
+      factPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(originalFactPermissions, memoryWorkspaceId);
+      factPolicyDb.close();
+    }
     const googleWorkspaceSettings = await desktop("getGoogleWorkspaceSettings");
     assert.equal(typeof googleWorkspaceSettings.enabled, "boolean");
     assert.equal(typeof googleWorkspaceSettings.credentialsConfigured, "boolean");
@@ -2189,7 +2255,25 @@ async function main() {
     assert(awarenessEvents.some((event) => event.source === "feedback"));
     assert(awarenessEvents.every((event) => !("payload" in event)));
     assert((await desktop("getAwarenessSnapshot", [selected.id])).beliefs.some((belief) => belief.id === awarenessBelief.id));
-    await assert.rejects(desktop("deleteAwarenessBelief", [awarenessBelief.id], "awareness-delete-denied"), /FORBIDDEN|unavailable/);
+    const awarenessPolicyDb = new Database(path.join(profile, "cowork-os.db"));
+    const originalAwarenessPermissions = awarenessPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(selected.id).permissions;
+    try {
+      const deniedAwarenessPermissions = { ...JSON.parse(originalAwarenessPermissions), delete: false };
+      awarenessPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify(deniedAwarenessPermissions), selected.id);
+      assert.deepEqual(
+        JSON.parse(awarenessPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(selected.id).permissions),
+        deniedAwarenessPermissions,
+        "The awareness denial check must read back the restricted workspace permission snapshot",
+      );
+      await assert.rejects(desktop("deleteAwarenessBelief", [awarenessBelief.id], "awareness-delete-denied"), /FORBIDDEN|unavailable/);
+      assert(
+        (await desktop("listAwarenessBeliefs", [selected.id])).some((belief) => belief.id === awarenessBelief.id),
+        "A refused awareness deletion must preserve the belief",
+      );
+    } finally {
+      awarenessPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(originalAwarenessPermissions, selected.id);
+      awarenessPolicyDb.close();
+    }
     const terminalDb = new Database(path.join(profile, "cowork-os.db"));
     try {
       const mediaEvents = terminalDb
@@ -2556,7 +2640,15 @@ async function main() {
       "approval.list",
       { workspaceId: selected.id, limit: 50 },
     );
-    assert(approvalsAfterRestart.approvals.some((row) => row.id === recoveryFixtures.approval.id));
+    const presentedApproval = approvalsAfterRestart.approvals.find(
+      (row) => row.id === recoveryFixtures.approval.id,
+    );
+    assert(presentedApproval, "The recovery approval must be present in the post-restart list");
+    assert.match(
+      presentedApproval.revisionHash,
+      /^[0-9a-f]{64}$/,
+      "The listed approval must carry the revision shown to the reviewer",
+    );
     const inputRequestsAfterRestart = await rpc(
       base,
       secondaryBrowserSession.cookie,
@@ -2574,6 +2666,7 @@ async function main() {
       workspaceId: selected.id,
       taskId: recoveryFixtures.approval.taskId,
       expectedVersion: recoveryFixtures.approval.expectedVersion,
+      expectedRevisionHash: presentedApproval.revisionHash,
       approved: false,
     };
     const approvalResponseKey = randomUUID();
@@ -2601,6 +2694,7 @@ async function main() {
         workspaceId: selected.id,
         taskId: recoveryFixtures.approval.taskId,
         expectedVersion: recoveryFixtures.approval.expectedVersion,
+        expectedRevisionHash: presentedApproval.revisionHash,
       },
     );
     assert.equal(observedApproval.approval.status, "denied");
@@ -2643,12 +2737,27 @@ async function main() {
     assert.equal(observedInput.inputRequest.status, "submitted");
 
     if (process.env.COWORK_WEB_UI_SMOKE === "1") {
-      await fs.writeFile(path.join(workspace, "ui-git-change.txt"), "A browser UI commit test.\n");
+      // Task execution can add private-path restrictions to its workspace. Give the
+      // independent Git UI acceptance its own disposable repository and permissions.
+      const gitUiWorkspace = path.join(temp, "git-ui-workspace");
+      await fs.mkdir(gitUiWorkspace);
+      await execFileAsync("git", ["init", "-q"], { cwd: gitUiWorkspace });
+      await execFileAsync("git", ["config", "user.name", "Browser Smoke"], { cwd: gitUiWorkspace });
+      await execFileAsync("git", ["config", "user.email", "smoke@example.invalid"], { cwd: gitUiWorkspace });
+      await fs.writeFile(path.join(gitUiWorkspace, "ui-git-change.txt"), "A browser UI commit test.\n");
+      await fs.writeFile(path.join(gitUiWorkspace, "browser-artifact.txt"), "An unrelated unstaged UI fixture.\n");
+      const gitUiDb = new Database(path.join(profile, "cowork-os.db"));
+      try {
+        const { WorkspaceStore } = require("../../dist/daemon/electron/database/repositories.js");
+        new WorkspaceStore(gitUiDb).create("Browser Git UI smoke workspace", gitUiWorkspace, {
+          read: true, write: true, delete: false, shell: false, network: false,
+        });
+      } finally { gitUiDb.close(); }
       await runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspaceId: selected.id, awarenessBeliefId: awarenessBelief.id });
       const committedByUi = await execFileAsync(
         "git",
         ["show", "--format=", "--name-only", "HEAD"],
-        { cwd: workspace },
+        { cwd: gitUiWorkspace },
       );
       assert.equal(committedByUi.stdout.trim(), "ui-git-change.txt");
     }
@@ -2663,7 +2772,7 @@ async function main() {
     });
     assert.equal(afterLogout.status, 401);
     process.stdout.write(
-      `Synthetic browser preview ${process.env.COWORK_WEB_UI_SMOKE === "1" ? "UI and host" : "host"} smoke passed on the ${electronHost ? "Electron" : "Node"} daemon: shared desktop service reads, workspace memory settings/import/observation/recall/deletion permissions, profile fact edits, memory approval/rejection and replay, observation promotion and layer preview, kit initialization/project files/default-job deduplication, Inbox actions, host-backed notifications, queue settings save/replay/readback, installed pack/skill toggles and replay, project creation/replay, message feedback persistence, task wrap-up and side-chat methods, routine workflow methods, pairing, scoped files, verified image admission/persistence, Git status/diff/stage/commit replay, terminal detach/replay, upload/no-overwrite with dropped reply, task admission replay with dropped reply, follow-up attachment receipt replay across two sessions and a same-profile host restart using a local deterministic synthetic OpenAI-compatible stub (${syntheticProvider.requests.length} completion requests), approval/input decisions observed across sessions after restart, in-flight synthetic cancellation with provider abort, cancellation receipt replay after restart, artifact download/one-use handle, traversal denial, ${process.env.COWORK_WEB_UI_SMOKE === "1" ? "UI navigation and all Settings routes/subtabs, memory facts/retention/text-import/approval/rejection/promotion persistence, kit initialization/project/file viewing, and stale workspace replies, scheduled-task create/live-update/delete, queue-setting interaction/save/restore, project/agent/task/notification/Git actions, unavailable-action explanations, " : ""}logout. Synthetic acceptance does not establish real-model execution or installed-artifact parity.\n`,
+      `Synthetic browser preview ${process.env.COWORK_WEB_UI_SMOKE === "1" ? "UI and host" : "host"} smoke passed on the ${electronHost ? "Electron" : "Node"} daemon: shared desktop service reads, workspace memory settings/import/observation/recall/deletion permissions, workspace Memory Hub fact edits and legacy global mutation denial, memory approval/rejection and replay, observation promotion and layer preview, kit initialization/project files/default-job deduplication, Inbox actions, host-backed notifications, queue settings save/replay/readback, installed pack/skill toggles and replay, project creation/replay, message feedback persistence, task wrap-up and side-chat methods, routine workflow methods, pairing, scoped files, verified image admission/persistence, Git status/diff/stage/commit replay, terminal detach/replay, upload/no-overwrite with dropped reply, task admission replay with dropped reply, follow-up attachment receipt replay across two sessions and a same-profile host restart using a local deterministic synthetic OpenAI-compatible stub (${syntheticProvider.requests.length} completion requests), approval/input decisions observed across sessions after restart, in-flight synthetic cancellation with provider abort, cancellation receipt replay after restart, artifact download/one-use handle, traversal denial, ${process.env.COWORK_WEB_UI_SMOKE === "1" ? "UI navigation and all Settings routes/subtabs, memory facts/retention/text-import/approval/rejection/promotion persistence, kit initialization/project/file viewing, and stale workspace replies, scheduled-task create/live-update/delete, queue-setting interaction/save/restore, project/agent/task/notification/Git actions, unavailable-action explanations, " : ""}logout. Synthetic acceptance does not establish real-model execution or installed-artifact parity.\n`,
     );
   } finally {
     try {

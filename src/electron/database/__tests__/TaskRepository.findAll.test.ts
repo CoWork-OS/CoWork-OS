@@ -3,6 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskStore } from "../repositories";
 
 describe("TaskStore.findAll", () => {
+  it("queries exact cron occurrences independently of sidebar limits and task status", () => {
+    const { repository, prepare, all } = createRepository();
+    expect(repository.findByScheduledRun("ws", "job", 123)?.id).toBe("task-1");
+    expect(all).toHaveBeenCalledWith("ws", "job", 123);
+    expect(prepare.mock.calls[0][0]).toContain("source = 'cron'");
+    expect(prepare.mock.calls[0][0]).toContain("$.scheduledRunAtMs");
+    expect(prepare.mock.calls[0][0]).toContain("LIMIT 2");
+    all.mockReturnValue([{} as Any, {} as Any]);
+    expect(repository.findByScheduledRun("ws", "job", 123)).toBeNull();
+    prepare.mockClear();
+    expect(repository.findByScheduledRun("ws", "job", NaN)).toBeNull();
+    expect(prepare).not.toHaveBeenCalled();
+  });
   it("preserves the user preference independently of inferred execution in sidebar rows", () => {
     const { repository, all, prepare } = createRepository();
     all.mockReturnValue([

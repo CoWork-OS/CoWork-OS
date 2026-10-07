@@ -1,3 +1,5 @@
+import { recordOAuthRefresh } from "../../../security/oauth-refresh-proof";
+import { AgentDaemon } from "../../daemon";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -1415,3 +1417,208 @@ it.each(["ask_for_approval", "full_access"])(
     expect(mockMcpCallTool).toHaveBeenCalledTimes(5);
   },
 );
+
+describe("immutable tool operation dispatch", () => {
+  it("keeps the admitted operation when caller input changes during a policy wait", async () => {
+    const input = { destination: "reviewed", params: { body: "approved bytes" } };
+    const execute = vi.fn(async (_name, admitted) => ({ result: admitted }));
+    const registry = {
+      assertResponsibilityPolicy: vi.fn(async () => {
+        input.destination = "other";
+        input.params.body = "changed bytes";
+      }),
+      handlerRegistry: { has: () => true },
+      executeWithRegisteredHandler: execute,
+    } as Any;
+    const result = await ToolRegistry.prototype.executeTool.call(registry, "fixture", input);
+    expect(result).toEqual({ destination: "reviewed", params: { body: "approved bytes" } });
+    expect(Object.isFrozen(result.params)).toBe(true);
+    expect(input.destination).toBe("other");
+  });
+  it("seals runtime handler arguments before an asynchronous review", async () => {
+    const input = { params: { destination: "reviewed", body: "approved bytes" } };
+    let finish: (() => void) | undefined;
+    const wait = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const registry = {
+      handlerRegistry: { has: () => true },
+      executeWithRegisteredHandler: vi.fn(async (_name, admitted) => {
+        await wait;
+        expect(() => {
+          admitted.params.body = "mutated by handler";
+        }).toThrow();
+        return { result: admitted };
+      }),
+    } as Any;
+    const pending = ToolRegistry.prototype.executeToolWithRuntime.call(registry, "fixture", input);
+    input.params.body = "changed while waiting";
+    finish!();
+    expect((await pending).result).toEqual({
+      params: { destination: "reviewed", body: "approved bytes" },
+    });
+  });
+});
+
+describe("MCP current authority at transport submission", () => {
+  beforeEach(() => {
+    mockMcpSettings.toolNamePrefix = "mcp_";
+    mockMcpSettings.servers = [{ id: "effect-server", name: "Effect fixture", enabled: true }];
+    mockMcpState.tools = [
+      { name: "effect_fixture", serverId: "effect-server", inputSchema: { type: "object" } },
+    ];
+    mockMcpCallTool.mockReset();
+  });
+  it("rechecks task authority after the awaited responsibility policy", async () => {
+    const workspace = createWorkspace();
+    let revoked = false;
+    let releasePolicy: (() => void) | undefined;
+    let announcePolicyStart: (() => void) | undefined;
+    const policyStarted = new Promise<void>((resolve) => {
+      announcePolicyStart = resolve;
+    });
+    const policyPending = new Promise<void>((resolve) => {
+      releasePolicy = resolve;
+    });
+    const readAuthority = vi.fn(async () => (revoked ? null : "admitted"));
+    const daemon = {
+      ...createDaemon(),
+      getEffectiveWorkspaceForTask: vi.fn(() => workspace),
+      getToolEffectAuthority: readAuthority,
+    };
+    const wire = vi.fn();
+    mockMcpCallTool.mockImplementation(async (_name, _input, options) => {
+      expect(options.beforeSend).toBeTypeOf("function");
+      await options.beforeSend();
+      wire();
+      return { content: [] };
+    });
+    const registry = new ToolRegistry(workspace, daemon as Any, "task-effect");
+    (registry as Any).assertResponsibilityPolicy = vi.fn(async () => {
+      announcePolicyStart?.();
+      await policyPending;
+    });
+
+    const call = (registry as Any).tryExecuteMCPTool(
+      "mcp_effect_fixture",
+      { action: "fixture" },
+      {},
+    );
+    await policyStarted;
+    revoked = true;
+    releasePolicy?.();
+
+    await expect(call).rejects.toThrow("MCP task authority changed before send");
+    expect(readAuthority).toHaveBeenCalledTimes(2);
+    expect(wire).not.toHaveBeenCalled();
+  });
+  it.each([
+    "unchanged",
+    "permissions",
+    "authority",
+    "disabled-server",
+    "rerouted-tool",
+    "prefix",
+    "cancelled",
+  ])("checks %s after the adapter waits", async (change) => {
+    const workspace = createWorkspace();
+    const controller = new AbortController();
+    const daemon = {
+      ...createDaemon(),
+      getEffectiveWorkspaceForTask: vi.fn(() => workspace),
+      getToolEffectAuthority: vi.fn().mockResolvedValue("admitted"),
+    };
+    const wire = vi.fn();
+    mockMcpCallTool.mockImplementation(async (_name, _input, options) => {
+      if (change === "permissions") workspace.permissions.network = false;
+      if (change === "authority") daemon.getToolEffectAuthority.mockResolvedValue("revoked");
+      if (change === "disabled-server") mockMcpSettings.servers[0].enabled = false;
+      if (change === "rerouted-tool") mockMcpState.tools[0].serverId = "different";
+      if (change === "prefix") mockMcpSettings.toolNamePrefix = "other_";
+      if (change === "cancelled") controller.abort();
+      expect(options.beforeSend).toBeTypeOf("function");
+      await options.beforeSend();
+      wire();
+      return { content: [] };
+    });
+    const registry = new ToolRegistry(workspace, daemon as Any, "task-effect");
+    const call = (registry as Any).tryExecuteMCPTool(
+      "mcp_effect_fixture",
+      { action: "fixture" },
+      { signal: controller.signal },
+    );
+    if (change === "unchanged") {
+      await call;
+      expect(wire).toHaveBeenCalledOnce();
+    } else {
+      await expect(call).rejects.toThrow(/changed|cancelled/);
+      expect(wire).not.toHaveBeenCalled();
+    }
+  });
+  it.each([true, false])(
+    "keeps a refreshed token only with trusted rotation proof (%s)",
+    async (proven) => {
+      const auth = {
+        type: "bearer" as const,
+        token: proven ? "trusted-old" : "manual-old",
+        refreshToken: "refresh",
+        clientId: "client",
+        clientSecret: "secret",
+        tokenUrl: "https://fixture.invalid/token",
+      };
+      mockMcpSettings.servers[0].auth = auth;
+      const before = structuredClone(auth);
+      const wire = vi.fn();
+      mockMcpCallTool.mockImplementation(async (_name, _input, options) => {
+        const next = { ...before, token: "next", refreshToken: "rotated" };
+        if (proven) recordOAuthRefresh(before, next);
+        mockMcpSettings.servers[0].auth = next;
+        await options.beforeSend();
+        wire();
+        return { content: [] };
+      });
+      const workspace = createWorkspace();
+      const daemon = {
+        ...createDaemon(),
+        getToolEffectAuthority: vi.fn().mockResolvedValue("allowed"),
+      };
+      const registry = new ToolRegistry(workspace, daemon as Any, "task-refresh");
+      const call = (registry as Any).tryExecuteMCPTool("mcp_effect_fixture", {}, {});
+      if (proven) {
+        await call;
+        expect(wire).toHaveBeenCalledOnce();
+      } else {
+        await expect(call).rejects.toThrow("authority changed");
+        expect(wire).not.toHaveBeenCalled();
+      }
+    },
+  );
+  it("keeps full-access execution authority distinct from explicit app consent", async () => {
+    const task = { id: "task", status: "executing" };
+    const daemon = {
+      taskRepo: { findById: vi.fn(() => task) },
+      evaluatePermissionRequest: vi
+        .fn()
+        .mockResolvedValue({ evaluation: { decision: "allow" }, authorizationKey: "allowed" }),
+      getTaskWithTransientAgentConfig: (value: Any) => value,
+      getEffectiveAccessProfile: () => ({
+        definition: { sandbox: "danger-full-access", approval: "never", network: "enabled" },
+      }),
+    } as Any;
+    expect(await AgentDaemon.prototype.getToolEffectAuthority.call(daemon, "task", {})).toEqual(
+      expect.any(String),
+    );
+    expect(await AgentDaemon.prototype.getTaskConsentAuthority.call(daemon, "task", {})).toBeNull();
+    task.status = "cancelled";
+    expect(await AgentDaemon.prototype.getToolEffectAuthority.call(daemon, "task", {})).toBeNull();
+    task.status = "executing";
+    daemon.evaluatePermissionRequest.mockImplementationOnce(async () => {
+      task.status = "cancelled";
+      return { evaluation: { decision: "allow" }, authorizationKey: "allowed" };
+    });
+    expect(await AgentDaemon.prototype.getToolEffectAuthority.call(daemon, "task", {})).toBeNull();
+    task.status = "executing";
+    daemon.evaluatePermissionRequest.mockResolvedValue({ evaluation: { decision: "deny" } });
+    expect(await AgentDaemon.prototype.getToolEffectAuthority.call(daemon, "task", {})).toBeNull();
+  });
+});

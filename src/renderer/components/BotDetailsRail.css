@@ -45,6 +45,16 @@
   background: var(--bot-role-color, var(--bot-accent));
 }
 
+/* The bot's illustrated character replaces the coloured tile. */
+.bot-details-rail-icon.bot-details-rail-icon-mascot {
+  flex-basis: 34px;
+  width: 34px;
+  height: 34px;
+  margin: -2px 0;
+  border-radius: 0;
+  background: none;
+}
+
 /* min-width: 0 is what lets the long bot name ellipsize instead of pushing the
    header buttons out of the rail. */
 .bot-details-rail-heading {
@@ -219,6 +229,43 @@
 }
 
 /* ---- Notification toggles ---- */
+
+.bot-details-work {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.bot-details-work-count {
+  display: grid;
+  gap: 1px;
+  padding: 7px 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-details-work-count:hover {
+  background: var(--color-bg-hover);
+}
+
+.bot-details-work-count strong {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.bot-details-work-count span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.bot-details-work-count.attention strong {
+  color: var(--color-warning, #b54708);
+}
 
 .bot-details-toggle-row {
   display: flex;

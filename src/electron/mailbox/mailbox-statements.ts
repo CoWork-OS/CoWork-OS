@@ -231,6 +231,9 @@ export const MAILBOX_STATEMENTS = {
           (id, draft_id, account_id, status, provider_message_id, scheduled_at, send_after, latest_error, metadata_json, created_at, updated_at)
          VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, ?, ?, ?)`,
   sendMailboxDraft_2: `UPDATE mailbox_compose_drafts SET status = ?, send_after = ?, updated_at = ? WHERE id = ?`,
+  persistMailboxProviderDraftId_1: `UPDATE mailbox_compose_drafts
+         SET provider_draft_id = ?, updated_at = ?
+         WHERE id = ?`,
   discardMailboxDraft_1: `UPDATE mailbox_compose_drafts SET status = 'discarded', updated_at = ? WHERE id = ? AND status != 'sent'`,
   discardMailboxDraft_2: `UPDATE mailbox_queued_actions SET status = 'cancelled', updated_at = ? WHERE draft_id = ? AND status IN ('queued', 'failed')`,
   discardMailboxDraft_3: `UPDATE mailbox_outgoing_messages SET status = 'cancelled', updated_at = ? WHERE draft_id = ? AND status IN ('queued', 'failed')`,
@@ -238,6 +241,24 @@ export const MAILBOX_STATEMENTS = {
   retryMailboxAction_1: `UPDATE mailbox_queued_actions
          SET status = 'queued', next_attempt_at = ?, latest_error = NULL, updated_at = ?
          WHERE id = ?`,
+  resolveMailboxSendOutcomeConfirmed_1: `UPDATE mailbox_queued_actions
+         SET status = 'succeeded', next_attempt_at = NULL, latest_error = NULL, updated_at = ?
+         WHERE id = ? AND action_type = 'send' AND status = 'outcome_unknown'`,
+  resolveMailboxSendOutcomeConfirmed_2: `UPDATE mailbox_compose_drafts
+         SET status = 'sent', latest_error = NULL, updated_at = ?
+         WHERE id = ?`,
+  resolveMailboxSendOutcomeConfirmed_3: `UPDATE mailbox_outgoing_messages
+         SET status = 'sent', latest_error = NULL, updated_at = ?
+         WHERE draft_id = ? AND status = 'outcome_unknown'`,
+  resolveMailboxSendOutcomeRetry_1: `UPDATE mailbox_queued_actions
+         SET status = 'queued', attempts = 0, next_attempt_at = ?, latest_error = NULL, updated_at = ?
+         WHERE id = ? AND action_type = 'send' AND status = 'outcome_unknown'`,
+  resolveMailboxSendOutcomeRetry_2: `UPDATE mailbox_compose_drafts
+         SET status = 'queued', latest_error = NULL, updated_at = ?
+         WHERE id = ?`,
+  resolveMailboxSendOutcomeRetry_3: `UPDATE mailbox_outgoing_messages
+         SET status = 'queued', latest_error = NULL, updated_at = ?
+         WHERE draft_id = ? AND status = 'outcome_unknown'`,
   processMailboxQueue_1: `SELECT id, account_id, thread_id, draft_id, action_type, status, payload_json, attempts, next_attempt_at,
                   latest_error, undo_of_action_id, created_at, updated_at
            FROM mailbox_queued_actions
@@ -1104,6 +1125,37 @@ export const MAILBOX_STATEMENTS = {
            SET status = 'failed', latest_error = ?, updated_at = ?
            WHERE draft_id = ?
              AND status IN ('queued', 'sending', 'running', 'failed')`,
+  markMailboxSendOutcomeUnknown_1: `UPDATE mailbox_queued_actions
+         SET status = 'outcome_unknown', next_attempt_at = NULL, latest_error = ?, updated_at = ?
+         WHERE id = ? AND action_type = 'send'`,
+  markMailboxSendOutcomeUnknown_2: `UPDATE mailbox_compose_drafts
+         SET status = 'outcome_unknown', latest_error = ?, updated_at = ?
+         WHERE id = ?`,
+  markMailboxSendOutcomeUnknown_3: `UPDATE mailbox_outgoing_messages
+         SET status = 'outcome_unknown', latest_error = ?, updated_at = ?
+         WHERE draft_id = ?`,
+  recoverInterruptedMailboxSends_1: `UPDATE mailbox_queued_actions
+         SET status = 'outcome_unknown', next_attempt_at = NULL,
+             latest_error = ?, updated_at = ?
+         WHERE action_type = 'send' AND status IN ('running', 'sending')`,
+  recoverInterruptedMailboxSends_2: `UPDATE mailbox_compose_drafts
+         SET status = 'outcome_unknown', latest_error = ?, updated_at = ?
+         WHERE status NOT IN ('sent', 'discarded')
+           AND EXISTS (
+             SELECT 1 FROM mailbox_queued_actions action
+             WHERE action.draft_id = mailbox_compose_drafts.id
+               AND action.action_type = 'send'
+               AND action.status = 'outcome_unknown'
+           )`,
+  recoverInterruptedMailboxSends_3: `UPDATE mailbox_outgoing_messages
+         SET status = 'outcome_unknown', latest_error = ?, updated_at = ?
+         WHERE status NOT IN ('sent', 'cancelled')
+           AND EXISTS (
+             SELECT 1 FROM mailbox_queued_actions action
+             WHERE action.draft_id = mailbox_outgoing_messages.draft_id
+               AND action.action_type = 'send'
+               AND action.status = 'outcome_unknown'
+           )`,
   executeQueuedDraftSend_1: `UPDATE mailbox_compose_drafts SET status = 'sending', latest_error = NULL, updated_at = ? WHERE id = ?`,
   executeQueuedDraftSend_2: `UPDATE mailbox_outgoing_messages SET status = 'sending', latest_error = NULL, updated_at = ? WHERE id = ?`,
   executeQueuedDraftSend_3: `UPDATE mailbox_compose_drafts

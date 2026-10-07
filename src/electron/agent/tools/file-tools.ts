@@ -1,4 +1,13 @@
+import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
+import {
+  getResponsibilityActionReviewContext,
+  getResponsibilityReviewTargetGrant,
+  type ResponsibilityActionReviewPayload,
+  type ResponsibilityActionReviewRun,
+} from "../../automation/responsibility-task-policy";
+import { getAutomationRuntime } from "../../automation/AutomationRuntime";
 import { readDocumentArchiveBuffer } from "../../security/document-archive";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -107,6 +116,23 @@ interface MutationPathBinding extends ResolvedFilesystemPath {
   parentIdentity: fsSync.Stats | null;
 }
 
+interface ResponsibilityActionReviewExecution {
+  approvalId: string;
+  requestRevisionHash: string;
+  executionId: string;
+  canonicalPath: string;
+  baseRevision: {
+    status: "present" | "missing";
+    path: string;
+    sha256?: string;
+    size?: number;
+  };
+  contentSha256: string;
+  contentBytes: number;
+  responsibilityRun: ResponsibilityActionReviewRun;
+  runtime: string;
+}
+
 function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -125,6 +151,23 @@ function getElectronShell(): Any | null {
  */
 export class FileTools {
   private workspacePathAliasPolicy: WorkspacePathAliasPolicy = "rewrite_and_retry";
+
+  private async assertResponsibilityPolicy(toolName: string, resolvedPath: string): Promise<void> {
+    if (typeof this.daemon.getDatabase === "function") {
+      await enforceResponsibilityToolPolicy(
+        this.daemon.getDatabase(),
+        this.taskId,
+        this.workspace.id,
+        this.workspace.path,
+        toolName,
+        { path: resolvedPath },
+      );
+    } else if (typeof this.daemon.getTaskById === "function") {
+      const task = await this.daemon.getTaskById(this.taskId);
+      if (task?.agentConfig?.responsibilityRun || task?.agentConfig?.automationRoutineId)
+        throw new Error("Responsibility policy storage is unavailable");
+    }
+  }
 
   constructor(
     private workspace: Workspace,
@@ -748,6 +791,7 @@ export class FileTools {
 
   private async maybeRedirectAutomatedOutputPath(
     requestedPath: string,
+    preserveSelectedResponsibilityWrite = false,
   ): Promise<{ requestedPath: string; redirectedFrom?: string }> {
     const task = this.getCurrentTask();
     if (!shouldUseManagedAutomatedOutput(task)) {
@@ -759,6 +803,25 @@ export class FileTools {
       resolvedPath = this.resolvePath(requestedPath, "write");
     } catch {
       return { requestedPath };
+    }
+
+    if (preserveSelectedResponsibilityWrite && typeof this.daemon.getDatabase === "function") {
+      const workspaceRelative = getWorkspaceRelativePosixPath(this.workspace.path, resolvedPath);
+      if (workspaceRelative) {
+        try {
+          const selectedReview = await getResponsibilityActionReviewContext(
+            this.daemon.getDatabase(),
+            this.taskId,
+            this.workspace.id,
+            this.workspace.path,
+            workspaceRelative,
+          );
+          if (selectedReview) return { requestedPath };
+        } catch {
+          // Managed-output redirection stays the fallback unless trusted host policy
+          // proves this exact task/path is the selected native review operation.
+        }
+      }
     }
 
     const exists = fsSync.existsSync(resolvedPath);
@@ -931,13 +994,20 @@ export class FileTools {
     binding: MutationPathBinding,
     content: string,
     signal?: AbortSignal,
+    beforeEffect?: () => Promise<void>,
   ): Promise<void> {
+    const guard = async () => {
+      if (signal?.aborted) throw new Error("File write cancelled before effect");
+      await beforeEffect?.();
+      if (signal?.aborted) throw new Error("File write cancelled before effect");
+    };
     const noFollow = (fsSync.constants as Any).O_NOFOLLOW;
     const targetPath = binding.targetRealPath || binding.path;
     const flags =
       fsSync.constants.O_WRONLY |
       (binding.targetRealPath ? 0 : fsSync.constants.O_CREAT | fsSync.constants.O_EXCL) |
       (typeof noFollow === "number" ? noFollow : 0);
+    await guard();
     const handle = await fs.open(targetPath, flags, 0o666);
     try {
       if (
@@ -946,11 +1016,277 @@ export class FileTools {
       ) {
         throw new Error("File target changed before writing");
       }
+      await guard();
       await handle.truncate(0);
+      await guard();
       await handle.writeFile(content, { encoding: "utf-8", signal });
     } finally {
       await handle.close();
     }
+  }
+
+  /** Commit reviewed bytes atomically after a final trusted authority/claim check. */
+  private async writeReviewedBoundFile(
+    binding: MutationPathBinding,
+    content: string,
+    review: ResponsibilityActionReviewExecution,
+    signal: AbortSignal | undefined,
+    beforeCommit: () => Promise<void>,
+    afterClaim: () => Promise<void>,
+  ): Promise<void> {
+    const bytes = Buffer.from(content, "utf8");
+    if (bytes.toString("utf8") !== content || bytes.length !== review.contentBytes)
+      throw new Error("Reviewed write content is not exact UTF-8");
+
+    const parentPath = binding.targetRealPath
+      ? path.dirname(binding.targetRealPath)
+      : await fs.realpath(path.dirname(binding.path));
+    const targetForCommit =
+      binding.targetRealPath || path.join(parentPath, path.basename(binding.path));
+    const tempPath = path.join(
+      parentPath,
+      `.${path.basename(targetForCommit)}.cowork-review-${randomUUID()}.tmp`,
+    );
+    const noFollow = (fsSync.constants as Any).O_NOFOLLOW;
+    const flags =
+      fsSync.constants.O_RDWR |
+      fsSync.constants.O_CREAT |
+      fsSync.constants.O_EXCL |
+      (typeof noFollow === "number" ? noFollow : 0);
+    let claimAttempted = false;
+    let committed = false;
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      if (signal?.aborted) throw new Error("File write cancelled before effect");
+      // The staged proposal stays private until the final authority gate.
+      handle = await fs.open(tempPath, flags, 0o600);
+      await handle.writeFile(bytes, { signal });
+      await handle.sync();
+
+      await this.revalidateMutationPath(binding, "reviewed write commit", true);
+      if (signal?.aborted) throw new Error("File write cancelled before effect");
+      claimAttempted = true;
+      await beforeCommit();
+      if (signal?.aborted) throw new Error("File write cancelled before effect");
+
+      // The approval/claim unit is asynchronous. Recheck the target, current base and
+      // authority after it returns, then verify the staged inode and exact bytes.
+      await this.revalidateMutationPath(binding, "after reviewed approval claim", true);
+      await afterClaim();
+      await this.revalidateMutationPath(binding, "reviewed write commit", true);
+      await afterClaim();
+      // Do every asynchronous authority check before the final synchronous digest and
+      // path checks. Node has no portable filesystem compare-and-replace primitive, so
+      // this bounded critical section narrows (but cannot eliminate) races from another
+      // process changing the directory after verification.
+      const targetMode = binding.targetIdentity
+        ? binding.targetIdentity.mode & 0o777
+        : 0o666 & ~process.umask();
+      // Keep proposed bytes private (0600) throughout asynchronous guards. The final
+      // permission change is synchronous and immediately followed by verification/commit.
+      fsSync.fchmodSync(handle.fd, targetMode);
+      this.assertReviewedCommitPathCurrentSync(binding, targetForCommit);
+      this.assertReviewedBaseCurrentSync(binding, targetForCommit, review.baseRevision);
+      this.assertReviewedStagedBytesCurrentSync(handle.fd, tempPath, bytes, review);
+      if (binding.targetIdentity) {
+        // Replacement is atomic; no existing bytes are truncated before the final gate.
+        fsSync.renameSync(tempPath, targetForCommit);
+      } else {
+        // link() gives the new-file case exclusive creation semantics at commit.
+        fsSync.linkSync(tempPath, targetForCommit);
+      }
+      committed = true;
+
+      const finalized = await this.daemon.finishResponsibilityActionApproval(
+        this.toResponsibilityActionReviewClaim(review),
+        "committed",
+      );
+      if (!finalized)
+        throw new Error(
+          "The reviewed write completed, but its durable receipt could not be finalized. Inspect the target before retrying.",
+        );
+    } catch (error) {
+      if (claimAttempted && !committed) {
+        await this.daemon.finishResponsibilityActionApproval(
+          this.toResponsibilityActionReviewClaim(review),
+          "uncertain",
+        );
+      } else if (committed) {
+        await this.daemon.finishResponsibilityActionApproval(
+          this.toResponsibilityActionReviewClaim(review),
+          "uncertain",
+        );
+      }
+      throw error;
+    } finally {
+      try {
+        await handle?.close();
+      } catch {
+        // The descriptor is no longer needed after commit or failure.
+      }
+      try {
+        await fs.unlink(tempPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          console.warn("Failed to remove temporary reviewed-write file", error);
+        }
+      }
+    }
+  }
+
+  private assertReviewedCommitPathCurrentSync(
+    binding: MutationPathBinding,
+    targetForCommit: string,
+  ): void {
+    const currentParent = fsSync.realpathSync.native(path.dirname(binding.path));
+    if (binding.parentRealPath && !isAccessPathWithin(binding.parentRealPath, currentParent))
+      throw new Error("File parent changed during reviewed write commit");
+    if (path.dirname(targetForCommit) !== currentParent)
+      throw new Error("File parent changed during reviewed write commit");
+
+    if (binding.targetIdentity) {
+      const currentRealPath = fsSync.realpathSync.native(binding.path);
+      if (currentRealPath !== binding.targetRealPath || currentRealPath !== targetForCommit)
+        throw new Error("File target changed during reviewed write commit");
+      const currentTarget = fsSync.lstatSync(binding.path);
+      if (
+        currentTarget.isSymbolicLink() ||
+        !currentTarget.isFile() ||
+        !this.hasSameFilesystemIdentity(binding.targetIdentity, currentTarget)
+      )
+        throw new Error("File target changed during reviewed write commit");
+      return;
+    }
+
+    try {
+      fsSync.lstatSync(targetForCommit);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    throw new Error("File target appeared during reviewed write commit");
+  }
+
+  private assertReviewedBaseCurrentSync(
+    binding: MutationPathBinding,
+    targetForCommit: string,
+    baseRevision: ResponsibilityActionReviewExecution["baseRevision"],
+  ): void {
+    if (baseRevision.path !== targetForCommit)
+      throw new Error("Reviewed write base path changed before commit");
+    if (baseRevision.status === "missing") {
+      try {
+        fsSync.lstatSync(targetForCommit);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
+      }
+      throw new Error("Reviewed write base changed before commit");
+    }
+    if (
+      !Number.isSafeInteger(baseRevision.size) ||
+      (baseRevision.size as number) < 0 ||
+      (baseRevision.size as number) > 4 * 1024 * 1024 ||
+      typeof baseRevision.sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/.test(baseRevision.sha256)
+    )
+      throw new Error("Reviewed write base receipt is invalid");
+
+    const noFollow = (fsSync.constants as Any).O_NOFOLLOW;
+    const fd = fsSync.openSync(
+      targetForCommit,
+      fsSync.constants.O_RDONLY | (typeof noFollow === "number" ? noFollow : 0),
+    );
+    try {
+      const before = fsSync.fstatSync(fd);
+      const pathBefore = fsSync.lstatSync(targetForCommit);
+      if (
+        !before.isFile() ||
+        pathBefore.isSymbolicLink() ||
+        !pathBefore.isFile() ||
+        !this.hasSameFilesystemIdentity(binding.targetIdentity, before) ||
+        !this.hasSameFilesystemIdentity(before, pathBefore) ||
+        before.size !== baseRevision.size
+      )
+        throw new Error("Reviewed write base changed before commit");
+
+      const digest = createHash("sha256");
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      let readBytes = 0;
+      while (true) {
+        const bytesRead = fsSync.readSync(fd, buffer, 0, buffer.length, readBytes);
+        if (bytesRead === 0) break;
+        readBytes += bytesRead;
+        if (readBytes > 4 * 1024 * 1024)
+          throw new Error("Reviewed write base exceeds the 4 MiB revision limit");
+        digest.update(buffer.subarray(0, bytesRead));
+      }
+      const after = fsSync.fstatSync(fd);
+      const pathAfter = fsSync.lstatSync(targetForCommit);
+      if (
+        readBytes !== baseRevision.size ||
+        digest.digest("hex") !== baseRevision.sha256 ||
+        !this.hasSameFilesystemIdentity(before, after) ||
+        !this.hasSameFilesystemIdentity(after, pathAfter) ||
+        pathAfter.isSymbolicLink()
+      )
+        throw new Error("Reviewed write base changed before commit");
+    } finally {
+      fsSync.closeSync(fd);
+    }
+  }
+
+  private assertReviewedStagedBytesCurrentSync(
+    fd: number,
+    tempPath: string,
+    expectedBytes: Buffer,
+    review: ResponsibilityActionReviewExecution,
+  ): void {
+    const before = fsSync.fstatSync(fd);
+    const pathBefore = fsSync.lstatSync(tempPath);
+    if (
+      !before.isFile() ||
+      pathBefore.isSymbolicLink() ||
+      !pathBefore.isFile() ||
+      !this.hasSameFilesystemIdentity(before, pathBefore) ||
+      before.size !== expectedBytes.length
+    )
+      throw new Error("The staged reviewed write changed before commit");
+    const stagedBytes = Buffer.alloc(expectedBytes.length);
+    let offset = 0;
+    while (offset < stagedBytes.length) {
+      const bytesRead = fsSync.readSync(
+        fd,
+        stagedBytes,
+        offset,
+        stagedBytes.length - offset,
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const after = fsSync.fstatSync(fd);
+    const pathAfter = fsSync.lstatSync(tempPath);
+    if (
+      offset !== expectedBytes.length ||
+      !stagedBytes.equals(expectedBytes) ||
+      createHash("sha256").update(stagedBytes).digest("hex") !== review.contentSha256 ||
+      !this.hasSameFilesystemIdentity(before, after) ||
+      !this.hasSameFilesystemIdentity(after, pathAfter) ||
+      pathAfter.isSymbolicLink()
+    )
+      throw new Error("The staged reviewed write does not match the approved bytes");
+  }
+
+  private toResponsibilityActionReviewClaim(
+    review: ResponsibilityActionReviewExecution,
+  ): import("../../automation/responsibility-task-policy").ResponsibilityActionReviewClaimInput {
+    return {
+      taskId: this.taskId,
+      workspaceId: this.workspace.id,
+      workspacePath: this.workspace.path,
+      ...review,
+    };
   }
 
   private async copyBoundFile(
@@ -1163,6 +1499,7 @@ export class FileTools {
       } catch {
         // Keep resolved path when realpath is unavailable.
       }
+      await this.assertResponsibilityPolicy("read_file", canonicalPath);
       let canonicalWorkspacePath = this.workspace.path;
       try {
         canonicalWorkspacePath = await fs.realpath(this.workspace.path);
@@ -1597,11 +1934,71 @@ export class FileTools {
       throw new Error(`Invalid content: expected string but received ${typeof content}`);
     }
 
+    const fingerprint = (workspace: Workspace) =>
+      JSON.stringify({
+        id: workspace.id,
+        path: workspace.path,
+        permissions: workspace.permissions,
+      });
+    const admittedScope = fingerprint(this.workspace);
+    let reviewedExecution: ResponsibilityActionReviewExecution | null = null;
+    const beforeEffect = async (resolvedPath: string, consumeReviewedAction = false) => {
+      const checkScope = () => {
+        const effective =
+          typeof this.daemon.getEffectiveWorkspaceForTask === "function"
+            ? this.daemon.getEffectiveWorkspaceForTask(this.taskId)
+            : this.workspace;
+        if (
+          !effective ||
+          fingerprint(effective) !== admittedScope ||
+          fingerprint(this.workspace) !== admittedScope
+        )
+          throw new Error("File authority changed after write admission; request approval again.");
+        this.checkPermission("write");
+        if (options.signal?.aborted) throw new Error("File write cancelled before effect");
+      };
+      checkScope();
+      if (reviewedExecution) {
+        const canonicalPath = getWorkspaceRelativePosixPath(this.workspace.path, resolvedPath);
+        if (canonicalPath !== reviewedExecution.canonicalPath)
+          throw new Error("Reviewed write target changed; request approval again.");
+        if (typeof this.daemon.getDatabase !== "function")
+          throw new Error("Responsibility review storage is unavailable");
+        const currentRun = await getResponsibilityActionReviewContext(
+          this.daemon.getDatabase(),
+          this.taskId,
+          this.workspace.id,
+          this.workspace.path,
+          reviewedExecution.canonicalPath,
+        );
+        if (
+          !currentRun ||
+          currentRun.id !== reviewedExecution.responsibilityRun.id ||
+          currentRun.revision !== reviewedExecution.responsibilityRun.revision ||
+          currentRun.controlVersion !== reviewedExecution.responsibilityRun.controlVersion ||
+          currentRun.workspaceId !== reviewedExecution.responsibilityRun.workspaceId ||
+          currentRun.agentRoleId !== reviewedExecution.responsibilityRun.agentRoleId
+        )
+          throw new Error("Responsibility review binding changed; request approval again.");
+        const valid = await this.daemon.validateResponsibilityActionApproval(
+          this.toResponsibilityActionReviewClaim(reviewedExecution),
+          consumeReviewedAction,
+        );
+        if (!valid)
+          throw new Error(
+            "The reviewed write approval is no longer valid or has already been used.",
+          );
+      } else {
+        await this.assertResponsibilityPolicy("write_file", resolvedPath);
+      }
+      checkScope();
+    };
+
     const redirected = await this.runWriteFilePhase(
       "resolve managed output path",
       relativePath,
       options,
-      () => this.maybeRedirectAutomatedOutputPath(relativePath),
+      () => this.maybeRedirectAutomatedOutputPath(relativePath, true),
     );
     const requestedPath = redirected.requestedPath;
     if (isCoWorkPrivateGeneratedPath(requestedPath)) {
@@ -1637,9 +2034,64 @@ export class FileTools {
       );
     }
 
+    const canonicalPath = getWorkspaceRelativePosixPath(this.workspace.path, mutationPath.path);
+    if (canonicalPath && typeof this.daemon.getDatabase === "function") {
+      const responsibilityRun = await getResponsibilityActionReviewContext(
+        this.daemon.getDatabase(),
+        this.taskId,
+        this.workspace.id,
+        this.workspace.path,
+        canonicalPath,
+      );
+      if (responsibilityRun) {
+        const proposedBytes = Buffer.from(content, "utf8");
+        if (proposedBytes.toString("utf8") !== content)
+          throw new Error("Reviewed writes require exact UTF-8 content.");
+        if (proposedBytes.length > 256_000)
+          throw new Error("Reviewed write exceeds the 256,000-byte review limit.");
+        // Tell the reviewer whether this file is one the responsibility was granted.
+        const targetGrant = await getResponsibilityReviewTargetGrant(
+          this.daemon.getDatabase(),
+          this.taskId,
+          canonicalPath,
+        ).catch(() => null);
+        const reviewPayload: ResponsibilityActionReviewPayload = {
+          version: 1,
+          operation: { connectorId: "workspace_files", method: "write_file" },
+          canonicalPath,
+          content,
+          contentSha256: createHash("sha256").update(proposedBytes).digest("hex"),
+          contentBytes: proposedBytes.length,
+          responsibilityRun,
+          ...(targetGrant ? { targetGrant } : {}),
+        };
+        if (typeof this.daemon.requestResponsibilityActionApproval !== "function")
+          throw new Error("Exact reviewed write approval is unavailable.");
+        const approval = await this.daemon.requestResponsibilityActionApproval(
+          this.taskId,
+          reviewPayload,
+          options.signal,
+        );
+        if (!approval)
+          throw new Error("The proposed write was not approved for this exact operation.");
+        reviewedExecution = {
+          approvalId: approval.approvalId,
+          requestRevisionHash: approval.requestRevisionHash,
+          executionId: randomUUID(),
+          canonicalPath,
+          baseRevision: approval.baseRevision,
+          contentSha256: reviewPayload.contentSha256,
+          contentBytes: reviewPayload.contentBytes,
+          responsibilityRun,
+          runtime: getAutomationRuntime()?.snapshot().runtime ?? "node",
+        };
+      }
+    }
+
     try {
       await this.daemon.captureTaskMutationBaseline?.(this.taskId, mutationPath.path);
       await this.revalidateMutationPath(mutationPath, "mutation baseline");
+      await beforeEffect(mutationPath.path);
       // Ensure directory exists
       await this.runWriteFilePhase("create parent directory", requestedPath, options, () =>
         fs.mkdir(path.dirname(mutationPath.path), { recursive: true }),
@@ -1660,10 +2112,40 @@ export class FileTools {
         // No previous file: this write creates it.
       }
 
+      await beforeEffect(mutationPath.path);
       // Write file
-      await this.runWriteFilePhase("write file contents", requestedPath, options, (signal) =>
-        this.writeBoundFile(mutationPath, content, signal),
-      );
+      if (reviewedExecution) {
+        await this.runWriteFilePhase(
+          "write reviewed file contents",
+          requestedPath,
+          options,
+          (signal) =>
+            this.writeReviewedBoundFile(
+              mutationPath,
+              content,
+              reviewedExecution!,
+              signal,
+              () => beforeEffect(mutationPath.path, true),
+              () => beforeEffect(mutationPath.path, true),
+            ),
+        );
+        // The approved bytes become a WorkSession revision, so result cards can recheck the
+        // current file against what was reviewed. Best effort: the write already committed.
+        try {
+          this.daemon.getWorkSessionContractService?.().recordReviewedOutput(this.taskId, {
+            path: mutationPath.path,
+            sha256: reviewedExecution.contentSha256,
+            size: Buffer.byteLength(content, "utf8"),
+            approvalId: reviewedExecution.approvalId,
+          });
+        } catch {
+          // The committed claim remains the authoritative record of the effect.
+        }
+      } else {
+        await this.runWriteFilePhase("write file contents", requestedPath, options, (signal) =>
+          this.writeBoundFile(mutationPath, content, signal, () => beforeEffect(mutationPath.path)),
+        );
+      }
 
       // Build content preview (full content up to 20KB cap)
       const MAX_PREVIEW_CHARS = 20_000;
@@ -1910,6 +2392,7 @@ export class FileTools {
     await this.enforceSymlinkSafeAccess(fullPath, "read");
 
     try {
+      await this.assertResponsibilityPolicy("list_directory", await fs.realpath(fullPath));
       const entries = (await fs.readdir(fullPath, { withFileTypes: true })).filter(
         (entry) =>
           evaluateWorkspaceFilesystemAccess(this.workspace, path.join(fullPath, entry.name), "read")

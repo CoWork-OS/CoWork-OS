@@ -226,3 +226,89 @@ it("recognizes app metadata only for the configured Codex driver, with a matchin
   second.toolResult.resolve({ content: [] });
   await call;
 });
+
+describe("MCP transport admission after delayed startup", () => {
+  it.each(["stdio", "sse", "http", "websocket"])(
+    "runs the current effect guard before %s sends any tool request",
+    async (transportType) => {
+      const f = fixture();
+      f.transport.sendRequest.mockResolvedValue({ content: [] });
+      (f.connection as Any).config.transport = transportType;
+      const beforeSend = vi.fn(async () => {
+        throw new Error("Revoked before send");
+      });
+      await expect(f.connection.callTool("js", {}, { beforeSend } as Any)).rejects.toThrow(
+        "Revoked before send",
+      );
+      expect(beforeSend).toHaveBeenCalledOnce();
+      expect(f.transport.sendRequest).not.toHaveBeenCalled();
+    },
+  );
+  it("rechecks a queued stdio call after another task finishes", async () => {
+    const f = fixture();
+    const first = f.connection.callTool("js", {});
+    await vi.waitFor(() => expect(f.transport.sendRequest).toHaveBeenCalledOnce());
+    const beforeSend = vi.fn(async () => {
+      throw new Error("Task stopped in queue");
+    });
+    const second = f.connection.callTool("js", {}, { beforeSend } as Any);
+    const rejection = expect(second).rejects.toThrow("Task stopped in queue");
+    expect(beforeSend).not.toHaveBeenCalled();
+    f.toolResult.resolve({ content: [] });
+    await first;
+    await rejection;
+    expect(f.transport.sendRequest).toHaveBeenCalledOnce();
+    expect((f.connection as Any).activeToolCall).toBeNull();
+    f.transport.sendRequest.mockResolvedValue({ content: [] });
+    await f.connection.callTool("js", {});
+    expect(f.transport.sendRequest).toHaveBeenCalledTimes(2);
+  });
+  it.each(["abort", "disconnect", "replace"])(
+    "does not send after %s during the effect guard",
+    async (change) => {
+      const f = fixture();
+      f.transport.sendRequest.mockResolvedValue({ content: [] });
+      const controller = new AbortController();
+      const replacement = { sendRequest: vi.fn() };
+      const beforeSend = async () => {
+        if (change === "abort") controller.abort();
+        if (change === "disconnect") (f.connection as Any).status = "disconnected";
+        if (change === "replace") (f.connection as Any).transport = replacement;
+      };
+      await expect(
+        f.connection.callTool("js", {}, { beforeSend, signal: controller.signal } as Any),
+      ).rejects.toThrow();
+      expect(f.transport.sendRequest).not.toHaveBeenCalled();
+      expect(replacement.sendRequest).not.toHaveBeenCalled();
+    },
+  );
+  it("checks abort for non-stdio tools as well as queued stdio calls", async () => {
+    const f = fixture();
+    f.transport.sendRequest.mockResolvedValue({ content: [] });
+    (f.connection as Any).config.transport = "http";
+    const controller = new AbortController();
+    controller.abort();
+    await expect(f.connection.callTool("js", {}, { signal: controller.signal })).rejects.toThrow(
+      "cancelled",
+    );
+    expect(f.transport.sendRequest).not.toHaveBeenCalled();
+  });
+});
+
+it("carries the connection guard into a transport that finishes setup after admission", async () => {
+  const f = fixture();
+  const beforeSend = vi.fn(async () => {});
+  const wire = vi.fn();
+  f.transport.sendRequest.mockImplementation(async (...args: Any[]) => {
+    const options = args[2];
+    (f.connection as Any).status = "disconnected";
+    await options.beforeSend();
+    wire();
+    return { content: [] };
+  });
+  await expect(f.connection.callTool("js", {}, { beforeSend })).rejects.toThrow(
+    "connection or tool changed",
+  );
+  expect(beforeSend).toHaveBeenCalledTimes(2);
+  expect(wire).not.toHaveBeenCalled();
+});

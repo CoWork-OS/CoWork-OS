@@ -1,3 +1,4 @@
+import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { spawn, ChildProcess, execSync } from "child_process";
 import * as path from "path";
 import * as os from "os";
@@ -1025,6 +1026,7 @@ export class ShellTools {
       env?: Record<string, string>;
       policies: AdminPolicies;
       signal?: AbortSignal;
+      beforeEffect: () => Promise<void>;
     },
   ): Promise<{
     success: boolean;
@@ -1038,6 +1040,7 @@ export class ShellTools {
     const sandbox = await this.acquireCommandSandbox(command, options);
     if (!sandbox) return null;
     try {
+      await options.beforeEffect();
       this.warnUnforwardedSandboxEnv(options.env);
 
       this.daemon.logEvent(this.taskId, "command_output", {
@@ -1380,7 +1383,7 @@ export class ShellTools {
     const manager = getBackgroundProcessManager();
     // Refuse before asking anyone to approve a command that could not start.
     manager.assertCanStart(this.taskId);
-    const { cwd, policies } = await this.authorizeCommand(command, options, true);
+    const { cwd, policies, beforeEffect } = await this.authorizeCommand(command, options, true);
     manager.assertCanStart(this.taskId);
     if (options?.signal?.aborted) {
       throw new Error("Command execution cancelled after approval expired");
@@ -1414,6 +1417,12 @@ export class ShellTools {
         background: true,
       });
       if (sandbox) {
+        try {
+          await beforeEffect();
+        } catch (error) {
+          sandbox.cleanup();
+          throw error;
+        }
         launch = this.launchSandboxedBackground(sandbox, command, cwd, {
           env: options?.env,
           policies,
@@ -1421,7 +1430,10 @@ export class ShellTools {
         });
       }
     }
-    launch ||= this.launchDirectBackground(command, cwd, options?.env);
+    if (!launch) {
+      await beforeEffect();
+      launch = this.launchDirectBackground(command, cwd, options?.env);
+    }
 
     const summary = manager.start({
       taskId: this.taskId,
@@ -1637,8 +1649,8 @@ export class ShellTools {
       signal?: AbortSignal;
     },
   ): Promise<RunCommandResult> {
-    const { cwd, policies } = await this.authorizeCommand(command, options);
-    const result = await this.runAuthorizedCommand(command, cwd, policies, options);
+    const { cwd, policies, beforeEffect } = await this.authorizeCommand(command, options);
+    const result = await this.runAuthorizedCommand(command, cwd, policies, beforeEffect, options);
     return withLongRunningCommandHint(command, result);
   }
 
@@ -1650,7 +1662,8 @@ export class ShellTools {
     command: string,
     options?: { cwd?: string; timeout?: number; signal?: AbortSignal },
     background = false,
-  ): Promise<{ cwd: string; policies: AdminPolicies }> {
+  ): Promise<{ cwd: string; policies: AdminPolicies; beforeEffect: () => Promise<void> }> {
+    const approvedScope = this.getShellAccessScopeFingerprint(this.workspace);
     if (options?.signal?.aborted) {
       throw new Error("Command execution cancelled before approval");
     }
@@ -1689,6 +1702,41 @@ export class ShellTools {
 
     const networkCommand = isLikelyNetworkShellCommand(command);
     const policies = loadPolicies();
+    const runtimePolicy = JSON.stringify(policies.runtime);
+    const beforeEffect = async () => {
+      const checkScope = () => {
+        if (options?.signal?.aborted) throw new Error("Command execution cancelled before effect");
+        const effective =
+          typeof this.daemon.getEffectiveWorkspaceForTask === "function"
+            ? this.daemon.getEffectiveWorkspaceForTask(this.taskId)
+            : this.workspace;
+        if (
+          !effective ||
+          this.getShellAccessScopeFingerprint(effective) !== approvedScope ||
+          this.getShellAccessScopeFingerprint(this.workspace) !== approvedScope ||
+          JSON.stringify(loadPolicies().runtime) !== runtimePolicy
+        )
+          throw new Error(
+            "Shell authority changed after command admission; request approval again.",
+          );
+      };
+      checkScope();
+      if (typeof this.daemon.getDatabase === "function") {
+        await enforceResponsibilityToolPolicy(
+          this.daemon.getDatabase(),
+          this.taskId,
+          this.workspace.id,
+          this.workspace.path,
+          "run_command",
+          { command, cwd, ...(background ? { background: true } : {}) },
+        );
+      } else if (typeof this.daemon.getTaskById === "function") {
+        const task = await this.daemon.getTaskById(this.taskId);
+        if (task?.agentConfig?.responsibilityRun || task?.agentConfig?.automationRoutineId)
+          throw new Error("Responsibility policy storage is unavailable");
+      }
+      checkScope();
+    };
     const cwd = resolveCommandCwd(this.workspace.path, options?.cwd);
     const cwdAccess = evaluateWorkspaceFilesystemAccess(this.workspace, cwd, "read");
     if (cwdAccess.decision !== "allow") {
@@ -1836,6 +1884,8 @@ export class ShellTools {
       throw new Error("Command execution cancelled after approval expired");
     }
 
+    await beforeEffect();
+
     // Log the command execution attempt
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "run_command",
@@ -1843,13 +1893,14 @@ export class ShellTools {
       cwd: options?.cwd || this.workspace.path,
       ...(background ? { background: true } : {}),
     });
-    return { cwd, policies };
+    return { cwd, policies, beforeEffect };
   }
 
   private async runAuthorizedCommand(
     command: string,
     cwd: string,
     policies: AdminPolicies,
+    beforeEffect: () => Promise<void>,
     options?: {
       timeout?: number;
       env?: Record<string, string>;
@@ -1857,11 +1908,27 @@ export class ShellTools {
     },
   ): Promise<RunCommandResult> {
     const verificationCommandKey = this.getVerificationCommandKey(command, cwd);
+    let ownedVerification: { startedAt: number } | undefined;
     if (verificationCommandKey) {
       const reused = await this.waitForVerificationCommandResult(verificationCommandKey);
       if (reused) return reused;
       this.markVerificationCommandRunning(verificationCommandKey);
+      ownedVerification = ShellTools.runningVerificationCommands.get(verificationCommandKey);
     }
+    const validateEffect = beforeEffect;
+    beforeEffect = async () => {
+      try {
+        await validateEffect();
+      } catch (error) {
+        if (
+          verificationCommandKey &&
+          ownedVerification &&
+          ShellTools.runningVerificationCommands.get(verificationCommandKey) === ownedVerification
+        )
+          ShellTools.runningVerificationCommands.delete(verificationCommandKey);
+        throw error;
+      }
+    };
     const dirName = (() => {
       const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
       return parts[parts.length - 1] ?? "";
@@ -1886,6 +1953,7 @@ export class ShellTools {
         env: options?.env,
         policies,
         signal: options?.signal,
+        beforeEffect,
       });
       if (sandboxResult) {
         return this.recordVerificationCommandResult(verificationCommandKey, sandboxResult);
@@ -1906,6 +1974,7 @@ export class ShellTools {
           workspacePath: this.workspace.path,
           command,
           cwd,
+          beforeExecute: beforeEffect,
           signal: options?.signal,
           timeoutMs: Math.min(options?.timeout || DEFAULT_TIMEOUT, MAX_TIMEOUT),
           fallbackRunner: async () => ({
@@ -2013,6 +2082,7 @@ export class ShellTools {
       }
     }
 
+    await beforeEffect();
     const { resolvedShell, safeEnv, effectiveCommand, isCliAgentCommand } = this.prepareDirectSpawn(
       command,
       options?.env,

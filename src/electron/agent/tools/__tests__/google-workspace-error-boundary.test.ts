@@ -36,6 +36,7 @@ const taskId = "task-123";
 
 const buildDaemon = () => ({
   requestApproval: vi.fn().mockResolvedValue(true),
+  getToolEffectAuthority: vi.fn().mockResolvedValue("authority"),
   logEvent: vi.fn(),
 });
 
@@ -297,7 +298,12 @@ describe("GmailTools error boundary", () => {
       "Apply Gmail labels to selected messages",
       expect.objectContaining({
         tool: "gmail_apply_labels_to_emails",
-        message_ids: ["msg-1"],
+        params: { message_ids: ["msg-1"], add_label_names: ["Waiting"] },
+        reviewedEffect: expect.objectContaining({
+          provider: "gmail",
+          operation: "apply_labels",
+          request: expect.objectContaining({ method: "POST", sha256: expect.any(String) }),
+        }),
       }),
     );
     expect(await daemon.requestApproval.mock.results[0]?.value).toBe(true);
@@ -335,8 +341,16 @@ describe("GmailTools error boundary", () => {
       "Send a Gmail message",
       expect.objectContaining({
         tool: "gmail_send_email",
-        to: "test@example.com",
-        subject: "Hello",
+        params: { to: "test@example.com", subject: "Hello", body: "Olá email" },
+        reviewedEffect: expect.objectContaining({
+          provider: "gmail",
+          operation: "send_email",
+          message: expect.objectContaining({
+            to: "test@example.com",
+            subject: "Hello",
+            body: "Olá email",
+          }),
+        }),
       }),
     );
     const sendRequest = gmailRequestMock.mock.calls[0]?.[1] as Any;

@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { BackgroundDispatchBudget } from "../BackgroundDispatchBudget";
+import { describe, expect, it, vi } from "vitest";
+import {
+  BackgroundDispatchBudget,
+  getBackgroundDispatchBudget,
+  setBackgroundDispatchBudget,
+} from "../BackgroundDispatchBudget";
 
 function clock(start = new Date("2026-10-03T09:00:00").getTime()) {
   let now = start;
@@ -12,6 +16,16 @@ function clock(start = new Date("2026-10-03T09:00:00").getTime()) {
 }
 
 describe("BackgroundDispatchBudget", () => {
+  it("does not silently fall back to an ephemeral production budget", () => {
+    setBackgroundDispatchBudget(null);
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      expect(() => getBackgroundDispatchBudget()).toThrow("not initialized");
+    } finally {
+      vi.unstubAllEnvs();
+      setBackgroundDispatchBudget(null);
+    }
+  });
   it("shares one daily budget per workspace across all producers", () => {
     const time = clock();
     const budget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 3, now: time.now });

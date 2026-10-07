@@ -46,6 +46,13 @@ describe("inline approval availability", () => {
 
   it("treats an interactive desktop task as able to answer the inline card", () => {
     expect(canAnswerInlineApproval(desktopTask, { headless: false })).toBe(true);
+    // A local bot chat pauses and asks in the conversation, like other bot apps.
+    expect(
+      canAnswerInlineApproval(
+        { ...desktopTask, agentConfig: { ...desktopTask.agentConfig, botConversation: true } },
+        { headless: false },
+      ),
+    ).toBe(true);
     expect(canAnswerInlineApproval({ id: "task-plain" } as Any, { headless: false })).toBe(true);
   });
 
@@ -58,7 +65,11 @@ describe("inline approval availability", () => {
       false,
     ],
     ["a sub-agent", { ...desktopTask, parentTaskId: "task-parent" }, false],
-    ["a bot conversation", { ...desktopTask, agentConfig: { botConversation: true } }, false],
+    [
+      "a bot conversation linked to a channel",
+      { ...desktopTask, agentConfig: { botConversation: true, gatewayContext: "private" } },
+      false,
+    ],
     ["a channel task", { ...desktopTask, agentConfig: { gatewayContext: "private" } }, false],
     ["a scheduled task", { ...desktopTask, source: "cron" }, false],
     ["a no-human-input task", { ...desktopTask, agentConfig: { humanInputPolicy: "none" } }, false],

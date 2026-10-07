@@ -1,3 +1,6 @@
+import type Database from "better-sqlite3";
+import { NotificationInboxRepository } from "./NotificationInboxRepository";
+import type { BotInboxAuthority } from "./NotificationInboxStore";
 /**
  * Notification Service - Manages in-app notifications
  * Provides CRUD operations and emits events for UI updates
@@ -8,8 +11,8 @@ import type { AppNotification, NotificationType, NotificationStoreFile } from ".
 import {
   loadNotificationStore as _loadNotificationStore,
   loadNotificationStoreSync,
-  saveNotificationStoreSync,
   saveNotificationStore,
+  saveNotificationStoreSync,
   getNotificationStorePath,
 } from "./store";
 import { createLogger } from "../utils/logger";
@@ -26,10 +29,15 @@ export interface NotificationEvent {
 
 export interface NotificationServiceConfig {
   storePath?: string;
-  onEvent?: (event: NotificationEvent) => void;
+  db?: Database.Database;
+  onEvent?: (event: NotificationEvent) => unknown;
 }
 
 type AddNotificationParams = {
+  beforePublish?: () => Promise<void>;
+  id?: string;
+  agentRoleId?: string;
+  desktopAlert?: boolean;
   type: NotificationType;
   title: string;
   message: string;
@@ -58,6 +66,12 @@ function getIntegrationAuthDedupeKey(notification: AppNotification): string | nu
 }
 
 function getPersistentDedupeKey(notification: AppNotification): string | null {
+  if (
+    /^bot-[a-f0-9]{64}$/.test(notification.id) &&
+    notification.workspaceId &&
+    notification.agentRoleId
+  )
+    return `bot:${notification.id}`;
   return getInputRequiredDedupeKey(notification) || getIntegrationAuthDedupeKey(notification);
 }
 
@@ -97,7 +111,10 @@ function collapseDuplicateNotifications(notifications: AppNotification[]): {
 export class NotificationService {
   private notifications: AppNotification[] = [];
   private storePath: string;
-  private onEvent?: (event: NotificationEvent) => void;
+  private onEvent?: NotificationServiceConfig["onEvent"];
+  private inbox?: InstanceType<typeof NotificationInboxRepository>;
+  private initialized: Promise<void> = Promise.resolve();
+  private additions: Promise<unknown> = Promise.resolve();
 
   constructor(config: NotificationServiceConfig = {}) {
     this.storePath = config.storePath || getNotificationStorePath();
@@ -107,16 +124,24 @@ export class NotificationService {
     const store = loadNotificationStoreSync(this.storePath);
     const collapsed = collapseDuplicateNotifications(store.notifications);
     this.notifications = collapsed.notifications;
-    if (collapsed.changed) {
-      try {
-        saveNotificationStoreSync(
-          { version: store.version, notifications: this.notifications },
-          this.storePath,
+    if (config.db) {
+      this.inbox = new NotificationInboxRepository(config.db);
+      this.initialized = this.inbox
+        .initialize(
+          this.notifications.map((notification) => ({
+            notification,
+            key: getPersistentDedupeKey(notification),
+          })),
+        )
+        .then(async () => {
+          this.notifications = await this.inbox!.list();
+        });
+      void this.initialized.catch((error) =>
+        log.warn("Canonical inbox initialization failed:", error),
         );
-      } catch (error) {
-        log.warn("Failed to save deduplicated notification store:", error);
       }
-    }
+    if (!config.db && collapsed.changed)
+      saveNotificationStoreSync({ version: 1, notifications: this.notifications }, this.storePath);
     log.info(`Loaded ${this.notifications.length} notifications from store`);
   }
 
@@ -137,14 +162,76 @@ export class NotificationService {
   /**
    * Add a new notification
    */
-  async add(params: AddNotificationParams): Promise<AppNotification> {
-    const existing = this.findExistingPersistentNotification(params);
-    if (existing) {
-      return existing;
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.additions.catch(() => {}).then(operation);
+    this.additions = next;
+    return next;
+  }
+  async refresh(): Promise<void> {
+    await this.initialized;
+    if (this.inbox) this.notifications = await this.inbox.list();
+  }
+  async containsDeliveryIdentity(id: string): Promise<boolean> {
+    await this.initialized;
+    return this.inbox ? this.inbox.contains(id) : this.notifications.some((item) => item.id === id);
+  }
+  add(params: AddNotificationParams): Promise<AppNotification> {
+    return this.serialize(async () => {
+      const result = await this.addPersisted(params);
+      return result.notification;
+    });
+  }
+  addBotDelivery(
+    params: AddNotificationParams,
+    authority: BotInboxAuthority,
+  ): Promise<{ notification: AppNotification; desktopRequested: boolean }> {
+    return this.serialize(() => this.addPersisted(params, authority));
+  }
+  private async addPersisted(
+    params: AddNotificationParams,
+    authority?: BotInboxAuthority,
+  ): Promise<{ notification: AppNotification; desktopRequested: boolean }> {
+    await this.initialized;
+    if (this.inbox) {
+      await params.beforePublish?.();
+      const notification = this.makeNotification(params);
+      const key = getPersistentDedupeKey(notification);
+      const result = await this.inbox.add(notification, key, authority);
+      await this.refresh();
+      if (!result.added) return { notification: result.notification, desktopRequested: false };
+      await params.beforePublish?.();
+      const delivery = this.emit({ type: "added", notification: result.notification });
+      return {
+        notification: result.notification,
+        desktopRequested: delivery?.desktopRequested === true,
+      };
     }
-
-    const notification: AppNotification = {
-      id: randomUUID(),
+    const exact = params.id ? this.notifications.find((item) => item.id === params.id) : undefined;
+    if (exact) {
+      if (
+        exact.workspaceId !== params.workspaceId ||
+        exact.agentRoleId !== params.agentRoleId ||
+        exact.taskId !== params.taskId
+      )
+        throw Error("Notification identity belongs to another scope");
+      return { notification: exact, desktopRequested: false };
+    }
+    const existing = params.id ? null : this.findExistingPersistentNotification(params);
+    if (existing) return { notification: existing, desktopRequested: false };
+    const notification = this.makeNotification(params);
+    await params.beforePublish?.();
+    const next = [notification, ...this.notifications];
+    await saveNotificationStore({ version: 1, notifications: next }, this.storePath);
+    await params.beforePublish?.();
+    this.notifications = next;
+    const delivery = this.emit({ type: "added", notification });
+    return { notification, desktopRequested: delivery?.desktopRequested === true };
+    }
+  private makeNotification(params: AddNotificationParams): AppNotification {
+    return {
+      id: params.id ?? randomUUID(),
+      agentRoleId: params.agentRoleId,
+      desktopAlert: params.desktopAlert,
       type: params.type,
       title: params.title,
       message: params.message,
@@ -157,14 +244,7 @@ export class NotificationService {
       recommendedDelivery: params.recommendedDelivery,
       companionStyle: params.companionStyle,
     };
-
-    this.notifications.unshift(notification);
-    await this.save();
-
-    this.emit({ type: "added", notification });
-    return notification;
   }
-
   private findExistingPersistentNotification(
     params: AddNotificationParams,
   ): AppNotification | null {
@@ -198,7 +278,17 @@ export class NotificationService {
   /**
    * Mark a notification as read
    */
-  async markRead(id: string): Promise<AppNotification | null> {
+  markRead(id: string): Promise<AppNotification | null> {
+    return this.serialize(() => this.markReadPersisted(id));
+  }
+  private async markReadPersisted(id: string): Promise<AppNotification | null> {
+    await this.initialized;
+    if (this.inbox) {
+      const value = await this.inbox.markRead(id);
+      await this.refresh();
+      if (value) this.emit({ type: "updated", notification: value });
+      return value;
+    }
     const notification = this.notifications.find((n) => n.id === id);
     if (!notification) return null;
 
@@ -212,7 +302,16 @@ export class NotificationService {
   /**
    * Mark all notifications as read
    */
-  async markAllRead(): Promise<void> {
+  markAllRead(): Promise<void> {
+    return this.serialize(() => this.markAllReadPersisted());
+  }
+  private async markAllReadPersisted(): Promise<void> {
+    await this.initialized;
+    if (this.inbox) {
+      this.notifications = await this.inbox.markAllRead();
+      this.emit({ type: "updated", notifications: this.list() });
+      return;
+    }
     const unread = this.notifications.filter((n) => !n.read);
     if (unread.length === 0) return;
 
@@ -227,7 +326,19 @@ export class NotificationService {
   /**
    * Delete a notification
    */
-  async delete(id: string): Promise<boolean> {
+  delete(id: string): Promise<boolean> {
+    return this.serialize(() => this.deletePersisted(id));
+  }
+  private async deletePersisted(id: string): Promise<boolean> {
+    await this.initialized;
+    if (this.inbox) {
+      await this.refresh();
+      const notification = this.notifications.find((item) => item.id === id);
+      const removed = await this.inbox.delete(id);
+      await this.refresh();
+      if (removed) this.emit({ type: "removed", notification });
+      return removed;
+    }
     const index = this.notifications.findIndex((n) => n.id === id);
     if (index === -1) return false;
 
@@ -241,7 +352,17 @@ export class NotificationService {
   /**
    * Delete all notifications
    */
-  async deleteAll(): Promise<void> {
+  deleteAll(): Promise<void> {
+    return this.serialize(() => this.deleteAllPersisted());
+  }
+  private async deleteAllPersisted(): Promise<void> {
+    await this.initialized;
+    if (this.inbox) {
+      await this.inbox.deleteAll();
+      await this.refresh();
+      this.emit({ type: "cleared" });
+      return;
+    }
     if (this.notifications.length === 0) return;
 
     this.notifications = [];
@@ -264,9 +385,14 @@ export class NotificationService {
   /**
    * Emit an event to listeners
    */
-  private emit(event: NotificationEvent): void {
-    if (this.onEvent) {
-      this.onEvent(event);
+  private emit(event: NotificationEvent): { desktopRequested: boolean } {
+    const result = this.onEvent?.(event);
+    return {
+      desktopRequested:
+        !!result &&
+        typeof result === "object" &&
+        "desktopRequested" in result &&
+        result.desktopRequested === true,
+    };
     }
   }
-}

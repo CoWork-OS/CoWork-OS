@@ -119,4 +119,63 @@ describe("WorkspaceArtifactEvidenceInspector", () => {
       reason: "changed_during_read",
     });
   });
+  it("captures a bounded text prefix from the same read as the full file hash", () => {
+    const { workspace, workspacePath } = setup();
+    const content = "reviewed text\n".repeat(300);
+    fs.writeFileSync(path.join(workspacePath, "draft.md"), content);
+    const result = new WorkspaceArtifactEvidenceInspector({ previewMaxChars: 40 }).inspect(
+      workspace,
+      "draft.md",
+    );
+    expect(result).toMatchObject({
+      status: "present",
+      size: Buffer.byteLength(content),
+      sha256: createHash("sha256").update(content).digest("hex"),
+      preview: { text: content.slice(0, 40), truncated: true },
+    });
+  });
+  it("omits previews for invalid UTF-8 and binary content while retaining hashes", () => {
+    const { workspace, workspacePath } = setup();
+    for (const content of [Buffer.from([0xff, 0xff]), Buffer.from("binary\0payload")]) {
+      fs.writeFileSync(path.join(workspacePath, "draft.bin"), content);
+      const result = new WorkspaceArtifactEvidenceInspector({ previewMaxChars: 40 }).inspect(
+        workspace,
+        "draft.bin",
+      );
+      expect(result).toMatchObject({
+        status: "present",
+        sha256: createHash("sha256").update(content).digest("hex"),
+      });
+      expect(result).not.toHaveProperty("preview");
+    }
+  });
+  it("does not split a UTF-8 character or UTF-16 surrogate at the preview boundary", () => {
+    const { workspace, workspacePath } = setup();
+    fs.writeFileSync(path.join(workspacePath, "draft.md"), "A😀more");
+    expect(
+      new WorkspaceArtifactEvidenceInspector({ previewMaxChars: 2 }).inspect(workspace, "draft.md"),
+    ).toMatchObject({ status: "present", preview: { text: "A", truncated: true } });
+  });
+});
+
+describe("transient artifact snapshot", () => {
+  it("keeps the same hashed bytes after the source path is replaced without retaining bytes in inspection", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-snapshot-"));
+    try {
+      const target = path.join(root, "draft.txt");
+      fs.writeFileSync(target, "approved bytes");
+      const workspace = { path: root, permissions: { read: true } } as Any;
+      const inspector = new WorkspaceArtifactEvidenceInspector();
+      const snapshot = inspector.snapshot(workspace, target);
+      expect(snapshot.status).toBe("present");
+      expect(snapshot.data?.toString()).toBe("approved bytes");
+      expect(inspector.inspect(workspace, target)).not.toHaveProperty("data");
+      fs.writeFileSync(target, "later bytes");
+      expect(snapshot.data?.toString()).toBe("approved bytes");
+      if (snapshot.status === "present")
+        expect(inspector.inspect(workspace, target)).not.toMatchObject({ sha256: snapshot.sha256 });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

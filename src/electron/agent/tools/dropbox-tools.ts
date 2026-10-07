@@ -1,6 +1,5 @@
-import * as fs from "fs";
 import * as path from "path";
-import { Workspace } from "../../../shared/types";
+import { DropboxSettingsData, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { DropboxSettingsManager } from "../../settings/dropbox-manager";
 import { dropboxRequest, dropboxContentUpload } from "../../utils/dropbox-api";
@@ -8,6 +7,13 @@ import {
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
+import {
+  captureIntegrationUploadSnapshot,
+  createIntegrationEffectGuard,
+  integrationEffectReview,
+  IntegrationUploadSnapshot,
+  workspaceIntegrationUploadReview,
+} from "./integration-effect-guard";
 
 type DropboxAction =
   | "get_current_user"
@@ -82,6 +88,32 @@ export class DropboxTools {
     const trimmed = pathValue.trim();
     if (!trimmed) return "";
     return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  }
+
+  private createEffectGuard(
+    initialSettings: DropboxSettingsData,
+    input: DropboxActionInput,
+    details: Record<string, unknown>,
+    errorPrefix: string,
+    uploadSnapshot?: IntegrationUploadSnapshot,
+  ) {
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName: "dropbox_action",
+      toolInput: input,
+      approvalDetails: details,
+      uploadSnapshot,
+      initialSettings,
+      loadSettings: () => DropboxSettingsManager.loadSettings(),
+      settingsEnabled: (current) => current.enabled && Boolean(current.accessToken),
+      settingsFingerprint: (current) =>
+        JSON.stringify({ enabled: current.enabled, timeoutMs: current.timeoutMs }),
+      authConfig: (current) => ({ type: "bearer", token: current.accessToken }),
+      errorPrefix,
+    });
   }
 
   async executeAction(input: DropboxActionInput): Promise<Any> {
@@ -164,13 +196,15 @@ export class DropboxTools {
       case "create_folder": {
         if (!input.path) throw new Error("Missing path for create_folder");
         const folderPath = this.normalizeDropboxPath(input.path);
-        await this.requireApproval("Create a Dropbox folder", {
-          action: "create_folder",
+        const details = integrationEffectReview("dropbox_action", input, "create_folder", {
           path: folderPath,
         });
+        const beforeSend = await this.createEffectGuard(settings, input, details, "Dropbox action");
+        await this.requireApproval("Create a Dropbox folder", details);
         result = await dropboxRequest(settings, {
           method: "POST",
           path: "/files/create_folder_v2",
+          beforeSend,
           body: {
             path: folderPath,
             autorename: true,
@@ -181,13 +215,15 @@ export class DropboxTools {
       case "delete_item": {
         if (!input.path) throw new Error("Missing path for delete_item");
         const deletePath = this.normalizeDropboxPath(input.path);
-        await this.requireApproval("Delete a Dropbox item", {
-          action: "delete_item",
+        const details = integrationEffectReview("dropbox_action", input, "delete_item", {
           path: deletePath,
         });
+        const beforeSend = await this.createEffectGuard(settings, input, details, "Dropbox action");
+        await this.requireApproval("Delete a Dropbox item", details);
         result = await dropboxRequest(settings, {
           method: "POST",
           path: "/files/delete_v2",
+          beforeSend,
           body: { path: deletePath },
         });
         break;
@@ -195,16 +231,32 @@ export class DropboxTools {
       case "upload_file": {
         if (!input.file_path) throw new Error("Missing file_path for upload_file");
         const resolved = await this.resolveFilePath(input.file_path);
-        const data = fs.readFileSync(resolved);
+        const snapshot = captureIntegrationUploadSnapshot(this.workspace, resolved);
         const fileName = input.name || path.basename(resolved);
         const targetPath = input.path
           ? this.normalizeDropboxPath(input.path)
           : this.normalizeDropboxPath(`${input.parent_path || ""}/${fileName}`);
-        await this.requireApproval(`Upload file to Dropbox: ${fileName}`, {
-          action: "upload_file",
+        const details = workspaceIntegrationUploadReview(
+          this.workspace,
+          "dropbox_action",
+          input,
+          "upload_file",
+          { path: targetPath, file: fileName },
+          snapshot,
+        );
+        const beforeSend = await this.createEffectGuard(
+          settings,
+          input,
+          details,
+          "Dropbox upload",
+          snapshot,
+        );
+        await this.requireApproval(`Upload file to Dropbox: ${fileName}`, details);
+        result = await dropboxContentUpload(settings, {
           path: targetPath,
+          data: snapshot.data,
+          beforeSend,
         });
-        result = await dropboxContentUpload(settings, { path: targetPath, data });
         break;
       }
       default:

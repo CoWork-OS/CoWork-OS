@@ -1,3 +1,5 @@
+import { credentialFingerprint, recordOAuthRefresh } from "../security/oauth-refresh-proof";
+import type { MCPAuthConfig } from "../mcp/types";
 /**
  * Box API helpers
  */
@@ -9,7 +11,18 @@ export const BOX_API_BASE = "https://api.box.com/2.0";
 export const BOX_UPLOAD_BASE = "https://upload.box.com/api/2.0";
 export const BOX_TOKEN_URL = "https://api.box.com/oauth2/token";
 const DEFAULT_TIMEOUT_MS = 20000;
-let boxRefreshPromise: Promise<string> | null = null;
+const boxRefreshPromises = new Map<string, Promise<BoxSettingsData>>();
+function boxCredential(settings: BoxSettingsData): MCPAuthConfig {
+  return {
+    type: "bearer",
+    token: settings.accessToken,
+    refreshToken: settings.refreshToken,
+    clientId: settings.clientId,
+    clientSecret: settings.clientSecret,
+    tokenUrl: settings.refreshToken ? BOX_TOKEN_URL : undefined,
+    expiresAt: settings.tokenExpiresAt,
+  };
+}
 
 function parseJsonSafe(text: string): Any | undefined {
   const trimmed = text.trim();
@@ -33,6 +46,7 @@ export interface BoxRequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   body?: Record<string, Any>;
   timeoutMs?: number;
+  beforeSend?: () => void | Promise<void>;
 }
 
 export interface BoxRequestResult {
@@ -59,56 +73,73 @@ export async function getBoxAccessToken(settings: BoxSettingsData): Promise<stri
     throw new Error("Box OAuth credentials are incomplete. Reconnect Box with OAuth.");
   }
 
-  if (boxRefreshPromise) return boxRefreshPromise;
+  const source = structuredClone(settings);
+  const before = boxCredential(source);
+  const key = credentialFingerprint(before);
+  let refresh = boxRefreshPromises.get(key);
+  if (!refresh) {
+    if (boxRefreshPromises.size >= 32)
+      throw new Error("Too many concurrent Box credential refreshes");
+    refresh = (async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), source.timeoutMs || DEFAULT_TIMEOUT_MS);
 
-  boxRefreshPromise = (async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), settings.timeoutMs || DEFAULT_TIMEOUT_MS);
+      try {
+        const response = await fetch(BOX_TOKEN_URL, {
+          method: "POST",
+          redirect: "manual",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            client_id: source.clientId!,
+            client_secret: source.clientSecret!,
+            refresh_token: source.refreshToken!,
+          }).toString(),
+          signal: controller.signal,
+        });
+        const rawText = await response.text();
+        const data = rawText ? parseJsonSafe(rawText) : undefined;
+        if (!response.ok) {
+          throw new Error(formatBoxError(response.status, data, response.statusText));
+        }
+        if (
+          typeof data?.access_token !== "string" ||
+          !data.access_token.trim() ||
+          (data.refresh_token !== undefined &&
+            (typeof data.refresh_token !== "string" || !data.refresh_token.trim()))
+        ) {
+          throw new Error("Box OAuth refresh did not return an access token");
+        }
 
-    try {
-      const response = await fetch(BOX_TOKEN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          client_id: settings.clientId!,
-          client_secret: settings.clientSecret!,
-          refresh_token: settings.refreshToken!,
-        }).toString(),
-        signal: controller.signal,
-      });
-      const rawText = await response.text();
-      const data = rawText ? parseJsonSafe(rawText) : undefined;
-      if (!response.ok) {
-        throw new Error(formatBoxError(response.status, data, response.statusText));
+        const current = BoxSettingsManager.loadSettings();
+        if (credentialFingerprint(boxCredential(current)) !== key)
+          throw new Error("Box credentials changed during token refresh");
+        const refreshed: BoxSettingsData = {
+          ...current,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token || source.refreshToken,
+          tokenExpiresAt:
+            typeof data.expires_in === "number" ? Date.now() + data.expires_in * 1000 : undefined,
+        };
+        BoxSettingsManager.saveSettings(refreshed);
+        recordOAuthRefresh(before, boxCredential(refreshed));
+        return refreshed;
+      } catch (error: Any) {
+        if (error?.name === "AbortError") {
+          throw new Error("Box OAuth refresh timed out");
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeout);
       }
-      if (!data?.access_token) {
-        throw new Error("Box OAuth refresh did not return an access token");
-      }
-
-      const refreshed: BoxSettingsData = {
-        ...settings,
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token || settings.refreshToken,
-        tokenExpiresAt:
-          typeof data.expires_in === "number" ? Date.now() + data.expires_in * 1000 : undefined,
-      };
-      BoxSettingsManager.saveSettings(refreshed);
-      Object.assign(settings, refreshed);
-      return data.access_token as string;
-    } catch (error: Any) {
-      if (error?.name === "AbortError") {
-        throw new Error("Box OAuth refresh timed out");
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
-  })().finally(() => {
-    boxRefreshPromise = null;
-  });
-
-  return boxRefreshPromise;
+    })().finally(() => {
+      if (boxRefreshPromises.get(key) === refresh) boxRefreshPromises.delete(key);
+    });
+    boxRefreshPromises.set(key, refresh);
+  }
+  const refreshed = await refresh;
+  Object.assign(settings, refreshed);
+  return refreshed.accessToken!;
 }
 
 export async function boxRequest(
@@ -136,6 +167,7 @@ export async function boxRequest(
   }
 
   const timeoutMs = options.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await options.beforeSend?.();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -171,8 +203,18 @@ export async function boxRequest(
 
 export async function boxUploadFile(
   settings: BoxSettingsData,
-  opts: { fileName: string; parentId: string; data: Uint8Array; timeoutMs?: number },
+  opts: {
+    fileName: string;
+    parentId: string;
+    data: Uint8Array;
+    timeoutMs?: number;
+    beforeSend?: () => Promise<void>;
+  },
 ): Promise<BoxRequestResult> {
+  const fileName = opts.fileName,
+    parentId = opts.parentId;
+  const fileData = new Uint8Array(opts.data);
+  const beforeSend = opts.beforeSend;
   const accessToken = await getBoxAccessToken(settings);
 
   if (typeof FormData === "undefined") {
@@ -180,10 +222,9 @@ export async function boxUploadFile(
   }
 
   const form = new FormData();
-  form.append("attributes", JSON.stringify({ name: opts.fileName, parent: { id: opts.parentId } }));
+  form.append("attributes", JSON.stringify({ name: fileName, parent: { id: parentId } }));
   // Create a copy with a regular ArrayBuffer to satisfy BlobPart type requirements
-  const fileData = new Uint8Array(opts.data);
-  form.append("file", new Blob([fileData]), opts.fileName);
+  form.append("file", new Blob([fileData]), fileName);
 
   const url = `${BOX_UPLOAD_BASE}/files/content`;
   const headers: Record<string, string> = {
@@ -195,8 +236,10 @@ export async function boxUploadFile(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    await beforeSend?.();
     const response = await fetch(url, {
       method: "POST",
+      redirect: "manual",
       headers,
       body: form,
       signal: controller.signal,

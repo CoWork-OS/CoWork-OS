@@ -1,3 +1,5 @@
+import { dispatchOccurrenceKey } from "../automation/dispatch-occurrence";
+import { serviceStatements } from "../database/service-statements";
 import {
   AgentRoleRepository,
   AutomationProfileRepository,
@@ -46,7 +48,7 @@ import {
 import { HeartbeatDispatchEngine } from "./HeartbeatDispatchEngine";
 import {
   getBackgroundDispatchBudget,
-  type BackgroundDispatchBudget,
+  type BackgroundDispatchBudgetAuthority,
 } from "./BackgroundDispatchBudget";
 import type { SuggestionSource } from "../agent/SuggestionSink";
 import {
@@ -131,7 +133,7 @@ export interface HeartbeatServiceDeps {
     },
   ) => Promise<Task>;
   updateTask?: (taskId: string, updates: Partial<Task>) => void;
-  getTasksForAgent: (agentRoleId: string, workspaceId?: string) => Task[];
+  getTasksForAgent: (agentRoleId: string, workspaceId?: string) => Task[] | Promise<Task[]>;
   /** Current status of a task (undefined when it no longer exists); settles in-flight dispatches. */
   getTaskStatus?: (taskId: string) => TaskStatus | undefined | Promise<TaskStatus | undefined>;
   getDefaultWorkspaceId: () => string | undefined;
@@ -158,7 +160,7 @@ export interface HeartbeatServiceDeps {
    */
   evaluateAutonomy?: (workspaceId: string) => Promise<boolean | void>;
   /** Shared background dispatch budget (Heartbeat, AutonomyEngine, WI, Strategic Planner). */
-  dispatchBudget?: BackgroundDispatchBudget;
+  dispatchBudget?: BackgroundDispatchBudgetAuthority;
   listActiveSuggestions?: (
     workspaceId: string,
   ) => ProactiveSuggestion[] | Promise<ProactiveSuggestion[]>;
@@ -257,9 +259,7 @@ function normalizeWakeCategory(category?: string): string {
 }
 
 /** Dispatch kinds that are reported but not executed yet. */
-function isAdvisoryDispatchKind(
-  kind?: HeartbeatDispatchKind,
-): kind is "runbook" | "cron_handoff" {
+function isAdvisoryDispatchKind(kind?: HeartbeatDispatchKind): kind is "runbook" | "cron_handoff" {
   return kind === "runbook" || kind === "cron_handoff";
 }
 
@@ -354,6 +354,7 @@ export class HeartbeatService extends EventEmitter {
     await this.reconcileStaleDispatchRuns();
     await this.reconcileLegacyMigratedRuns();
     await this.pruneRunHistorySafely();
+    if (!this.started || this.stopping) return;
     if (this.retentionTimer) clearInterval(this.retentionTimer);
     this.retentionTimer = setInterval(() => {
       void this.pruneRunHistorySafely();
@@ -673,6 +674,20 @@ export class HeartbeatService extends EventEmitter {
     } catch (error) {
       // Failures before the pulse run row exists; later failures are recorded by the body.
       const message = error instanceof Error ? error.message : String(error);
+      if (message === "Bot future runs are paused") {
+        const result: HeartbeatResult = {
+          agentRoleId: agent.id,
+          status: "ok",
+          runType: "pulse",
+          pendingMentions: 0,
+          assignedTasks: 0,
+          relevantActivities: 0,
+          pulseOutcome: "idle",
+          triggerReason: message,
+        };
+        await this.finishPulse(agent, result);
+        return result;
+      }
       console.error("[HeartbeatService] Heartbeat pulse failed:", error);
       try {
         await this.deps.agentRoleRepo.updateHeartbeatStatus(agent.id, "error");
@@ -742,7 +757,7 @@ export class HeartbeatService extends EventEmitter {
     const dueChecklistItems = this.getDueChecklistItems(agent);
     const pulseSignals = this.signalStore.listAgentSignals(agent.id);
     const pulseMentions = await this.deps.mentionRepo.getPendingForAgent(agent.id);
-    const pulseTasks = this.deps.getTasksForAgent(agent.id);
+    const pulseTasks = await this.deps.getTasksForAgent(agent.id);
     const workspaceId = this.resolveWorkspaceId(
       agent,
       pulseSignals,
@@ -750,6 +765,27 @@ export class HeartbeatService extends EventEmitter {
       pulseTasks,
       dueChecklistItems,
     );
+    if (
+      workspaceId &&
+      this.deps.db &&
+      (await serviceStatements(this.deps.db).unit("botWorkControl_futurePaused", [
+        workspaceId,
+        agent.id,
+      ]))
+    ) {
+      const result: HeartbeatResult = {
+        agentRoleId: agent.id,
+        status: "ok",
+        runType: "pulse",
+        pendingMentions: pulseMentions.length,
+        assignedTasks: pulseTasks.length,
+        relevantActivities: 0,
+        pulseOutcome: "idle",
+        triggerReason: "Bot future runs are paused",
+      };
+      await this.finishPulse(agent, result);
+      return result;
+    }
     const scopedChecklistItems = workspaceId
       ? dueChecklistItems.filter((item) => !item.workspaceId || item.workspaceId === workspaceId)
       : [];
@@ -1135,14 +1171,40 @@ export class HeartbeatService extends EventEmitter {
       // AutonomyEngine, Workflow Intelligence and the Strategic Planner draw from too. Over
       // budget, the dispatch becomes a suggestion. Manual pulses are recorded, never refused.
       let budgetTicket: string | undefined;
+      let durableBudgetTicket: string | undefined;
       if (decision.dispatchKind === "task") {
-        const grant = this.getDispatchBudget().tryConsume({
+        const grant = await this.getDispatchBudget().tryConsume({
           workspaceId,
           source: "heartbeat",
+          occurrenceKey: dispatchOccurrenceKey("heartbeat", [
+            agent.id,
+            manualOverride ? "manual" : "scheduled",
+            manualOverride ? pulseRun.id : agent.lastPulseAt || 0,
+          ]),
           manual: manualOverride,
         });
         if (grant.allowed) {
           budgetTicket = grant.ticket;
+          durableBudgetTicket = grant.durable ? grant.ticket : undefined;
+        } else if (grant.reason === "duplicate_occurrence") {
+          const summary = "This scheduled pulse has already been admitted for dispatch.";
+          result = { ...result, pulseOutcome: "idle", triggerReason: summary, runId: pulseRun.id };
+          await this.runRepo.finish(pulseRun.id, { status: "completed", summary });
+          if (coreTrace) {
+            await this.deps.coreTraceService?.completeTrace(coreTrace.id, "completed", summary);
+            await this.finalizeCoreLearning(coreTrace.id);
+          }
+          this.emitHeartbeatEvent({
+            type: "pulse_completed",
+            agentRoleId: agent.id,
+            agentName: agent.displayName,
+            timestamp: Date.now(),
+            result,
+            runId: pulseRun.id,
+            runType: "pulse",
+          });
+          await this.finishPulse(agent, result);
+          return result;
         } else {
           decision = {
             ...decision,
@@ -1189,6 +1251,7 @@ export class HeartbeatService extends EventEmitter {
       let dispatchResult: HeartbeatResult;
       try {
         dispatchResult = await this.dispatchEngine.execute({
+          backgroundDispatchTicket: durableBudgetTicket,
           agent,
           heartbeatRunId: dispatchRun.id,
           workspaceId,
@@ -1201,7 +1264,7 @@ export class HeartbeatService extends EventEmitter {
           dispatchKind: decision.dispatchKind ?? "suggestion",
         });
       } catch (error) {
-        this.getDispatchBudget().refund(budgetTicket);
+        await this.getDispatchBudget().refund(budgetTicket);
         const message = error instanceof Error ? error.message : String(error);
         await this.runRepo.recordEvent(dispatchRun.id, "dispatch.failed", {
           dispatchKind: decision.dispatchKind,
@@ -1219,9 +1282,8 @@ export class HeartbeatService extends EventEmitter {
 
       // A created task is the dispatch's real work: the run stays in flight until the task
       // reaches a terminal state (settleInFlightDispatches), so the in-flight guard holds.
-      const tracksTask =
-        dispatchResult.status !== "error" && Boolean(dispatchResult.taskCreated);
-      if (!dispatchResult.taskCreated) this.getDispatchBudget().refund(budgetTicket);
+      const tracksTask = dispatchResult.status !== "error" && Boolean(dispatchResult.taskCreated);
+      if (!dispatchResult.taskCreated) await this.getDispatchBudget().refund(budgetTicket);
       await this.runRepo.recordEvent(
         dispatchRun.id,
         tracksTask ? "dispatch.task_created" : "dispatch.completed",
@@ -1564,7 +1626,7 @@ export class HeartbeatService extends EventEmitter {
     }
   }
 
-  private getDispatchBudget(): BackgroundDispatchBudget {
+  private getDispatchBudget(): BackgroundDispatchBudgetAuthority {
     return this.deps.dispatchBudget || getBackgroundDispatchBudget();
   }
 
@@ -1660,9 +1722,9 @@ export class HeartbeatService extends EventEmitter {
   }
 
   private async getDispatchesToday(agentRoleId: string): Promise<number> {
-    return (await this.runRepo
-      .listRecentDispatches(agentRoleId, getStartOfDay(Date.now())))
-      .filter((run) => run.status !== "cancelled").length;
+    return (await this.runRepo.listRecentDispatches(agentRoleId, getStartOfDay(Date.now()))).filter(
+      (run) => run.status !== "cancelled",
+    ).length;
   }
 
   private async getDispatchCooldownUntil(agent: AgentRole): Promise<number | undefined> {

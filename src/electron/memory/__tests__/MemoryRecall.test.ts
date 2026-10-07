@@ -81,6 +81,58 @@ describeWithSqlite("MemoryRecall", () => {
     ...overrides,
   });
 
+  it.each([false, undefined])(
+    "denies channel recall and ID expansion before any lane for owner=%s",
+    async (owner) => {
+      const secret = await remember({ content: "Owner secret release context", privacy: "private" });
+      const search = vi.spyOn(deps, "searchItems");
+      for (const ids of [undefined, [`memory:${secret.id}`, "external:secret", "archive:secret"]]) {
+        const result = await recall.recall(
+          query({
+            text: "secret",
+            surface: "channel_private",
+            gatewaySenderIsOwner: owner,
+            lanes: ["memory", "archive", "conversations", "knowledge", "external"],
+            ids,
+            policy: { includePrivate: true, allowExternal: true },
+          }),
+        );
+        expect(result.hits).toEqual([]);
+        expect(result.lanes).toEqual([]);
+      }
+      expect(search).not.toHaveBeenCalled();
+      expect(deps.searchArchive).not.toHaveBeenCalled();
+      search.mockRestore();
+    },
+  );
+  it("keeps verified owner channel recall and denies group expansion", async () => {
+    const secret = await remember({ content: "Owner secret release context", privacy: "private" });
+    expect(
+      (
+        await recall.recall(
+          query({
+            surface: "channel_private",
+            gatewaySenderIsOwner: true,
+            ids: [`memory:${secret.id}`],
+            policy: { includePrivate: true },
+          }),
+        )
+      ).hits,
+    ).toHaveLength(1);
+    expect(
+      (
+        await recall.recall(
+          query({
+            surface: "channel_group",
+            gatewaySenderIsOwner: true,
+            ids: [`memory:${secret.id}`],
+            policy: { includePrivate: true },
+          }),
+        )
+      ).hits,
+    ).toEqual([]);
+  });
+
   beforeEach(async () => {
     db = await createMemoryItemsTestDb(["ws-1", "ws-2"]);
     clock = 1_000_000;

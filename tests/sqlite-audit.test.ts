@@ -16,6 +16,17 @@ describe("sqlite dependency audit", () => {
     expect(result.unexplained).toEqual(["src/electron/new-domain/Store.ts"]);
   });
 
+  it("checks newly discovered application-thread files before they enter the register", () => {
+    const result = audit({
+      baseline: { files: {} },
+      inventory: {
+        files: [{ path: "src/electron/new-domain/Store.ts", counts: { prepare: 1 } }],
+      },
+      rules: [{ pattern: "^src/electron/other/", domain: "x", access: "y", plan: "z", owner: "o" }],
+    });
+    expect(result.unexplained).toEqual(["src/electron/new-domain/Store.ts"]);
+  });
+
   it("fails a file only a backstop covers, and a rule without an owner (DB7 gate)", () => {
     const result = audit({
       baseline: { files: { "src/electron/new-area/Service.ts": { prepare: 1 } } },

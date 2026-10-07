@@ -44,6 +44,7 @@ import {
   createBrowserApprovalMethods,
   type BrowserApprovalCommands,
 } from "./browser-approval-methods";
+import { readAuthorizedInlineApprovalDraftReview } from "../../electron/ipc/approval-draft-preview";
 import { TaskAdmissionService } from "../../electron/control-plane/task-admission-service";
 import {
   applyAccessProfileToWorkspace,
@@ -99,6 +100,14 @@ export interface BrowserHostApplicationOptions {
   getSessionBootstrap?: () =>
     | Omit<WebSessionBootstrap, "apiVersion" | "host" | "csrfToken">
     | Promise<Omit<WebSessionBootstrap, "apiVersion" | "host" | "csrfToken">>;
+}
+
+/** Keep the browser approval revision token intact through the desktop command adapter. */
+export function createBrowserApprovalCommandAdapter(
+  commands: Pick<BrowserApprovalCommands, "respondToApproval">,
+): BrowserApprovalCommands["respondToApproval"] {
+  return (approvalId, approved, action, attribution, expectedRevisionHash) =>
+    commands.respondToApproval(approvalId, approved, action, attribution, expectedRevisionHash);
 }
 
 const READ_CAPABILITIES = new Set([
@@ -351,9 +360,42 @@ export function createBrowserHostApplication(
           listPendingInputRequests: () => inputRequestRepository.findAllPending(),
           getInputRequest: async (requestId) =>
             (await inputRequestRepository.findById(requestId)) ?? null,
+          getInputRequestDraftReview: options.agentDaemon
+            ? async (inputRequestId, taskId) =>
+                readAuthorizedInlineApprovalDraftReview(
+                  { inputRequestId, taskId },
+                  {
+                    findInput: async (id) =>
+                      (await inputRequestRepository.findById(id)) ?? undefined,
+                    getApprovalBinding: async (id) =>
+                      (await inputRequestRepository.getApprovalBinding(id)) ?? undefined,
+                    findApproval: async (id) =>
+                      (await approvalRepository.findById(id)) ?? undefined,
+                    authorize: async (authorizedTaskId) => {
+                      const task = await taskRepository.findById(authorizedTaskId);
+                      const workspace = task
+                        ? await resolveBrowserWorkspace(task.workspaceId)
+                        : null;
+                      if (
+                        !task ||
+                        task.id !== taskId ||
+                        !workspace ||
+                        workspace.permissions.read !== true ||
+                        workspace.permissions.write !== true
+                      )
+                        throw new Error("Input request review is unavailable");
+                    },
+                    draftPreviews: (id, revision) =>
+                      approvalRepository.draftPreviews(id, revision),
+                    responsibilityActionAuthorityCurrent: (approval) =>
+                      options.agentDaemon!.isResponsibilityActionReviewAuthorityCurrent(
+                        approval,
+                      ),
+                  },
+                )
+            : undefined,
           commands: {
-            respondToApproval: (approvalId, approved) =>
-              options.taskCommands!.respondToApproval(approvalId, approved),
+            respondToApproval: createBrowserApprovalCommandAdapter(options.taskCommands!),
             respondToInputRequest: (response) =>
               options.taskCommands!.respondToInputRequest(response),
           },

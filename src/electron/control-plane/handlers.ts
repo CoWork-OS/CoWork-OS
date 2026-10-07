@@ -1,3 +1,7 @@
+import { registerBotWorkControlMethods } from "./registerBotWorkControlMethods";
+import { registerBotResponsibilityMethods } from "./registerBotResponsibilityMethods";
+import { registerAutomationRuntimeMethods } from "./registerAutomationRuntimeMethods";
+import { registerBotWorkMethods } from "./registerBotWorkMethods";
 /**
  * Control Plane IPC Handlers
  *
@@ -27,6 +31,7 @@ import {
   LOCAL_MANAGED_DEVICE_NODE_ID,
 } from "../../shared/types";
 import type {
+  ApprovalRequest,
   ControlPlaneSettingsData,
   ControlPlaneStatus,
   TailscaleAvailability,
@@ -51,6 +56,7 @@ import type {
   EverydayCapabilityBundle,
   EverydayPauseScope,
 } from "../../shared/types";
+import { presentApprovalRevision } from "../agent/approval-revision";
 import { ControlPlaneServer, ControlPlaneSettingsManager } from "./index";
 import { Methods, Events, ErrorCodes } from "./protocol";
 import type { AgentConfig } from "../../shared/types";
@@ -1511,19 +1517,27 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
     }
     case Methods.APPROVAL_LIST: {
       const { limit, offset, taskId } = sanitizeApprovalListParams(params);
-      const approvals = taskId
+      const approvalRows: ApprovalRequest[] = taskId
         ? (await approvalRepo.findPendingByTaskId(taskId)).slice(offset, offset + limit)
         : await (async () => {
-            return (await controlPlaneStatements(db).all("api_listPendingApprovals", [
+            const rows = (await controlPlaneStatements(db).all("api_listPendingApprovals", [
               limit,
               offset,
             ])) as Any[];
+            return rows.map((row) => approvalFromDatabaseRow(row));
           })();
+      const approvals = approvalRows.map((approval) => presentApprovalRevision(approval));
       return { approvals };
     }
     case Methods.APPROVAL_RESPOND: {
-      const { approvalId, approved } = sanitizeApprovalRespondParams(params);
-      const status = await controlPlaneDeps.agentDaemon.respondToApproval(approvalId, approved);
+      const { approvalId, approved, expectedRevisionHash } = sanitizeApprovalRespondParams(params);
+      const status = await controlPlaneDeps.agentDaemon.respondToApproval(
+        approvalId,
+        approved,
+        undefined,
+        undefined,
+        expectedRevisionHash,
+      );
       return { status };
     }
     case Methods.INPUT_REQUEST_LIST: {
@@ -1757,14 +1771,50 @@ function sanitizeTaskIdParams(params: unknown): { taskId: string } {
   return { taskId };
 }
 
-function sanitizeApprovalRespondParams(params: unknown): { approvalId: string; approved: boolean } {
+function sanitizeApprovalRespondParams(params: unknown): {
+  approvalId: string;
+  approved: boolean;
+  expectedRevisionHash?: string;
+} {
   const p = (params ?? {}) as any;
   const approvalId = typeof p.approvalId === "string" ? p.approvalId.trim() : "";
   const approved = p.approved;
+  const expectedRevisionHash = p.expectedRevisionHash;
   if (!approvalId) throw { code: ErrorCodes.INVALID_PARAMS, message: "approvalId is required" };
   if (typeof approved !== "boolean")
     throw { code: ErrorCodes.INVALID_PARAMS, message: "approved is required (boolean)" };
-  return { approvalId, approved };
+  if (
+    expectedRevisionHash !== undefined &&
+    (typeof expectedRevisionHash !== "string" || !/^[0-9a-f]{64}$/.test(expectedRevisionHash))
+  )
+    throw {
+      code: ErrorCodes.INVALID_PARAMS,
+      message: "expectedRevisionHash must be a lowercase SHA-256 hash",
+    };
+  return {
+    approvalId,
+    approved,
+    ...(expectedRevisionHash !== undefined ? { expectedRevisionHash } : {}),
+  };
+}
+
+function approvalFromDatabaseRow(row: Any): ApprovalRequest {
+  return {
+    id: String(row.id ?? ""),
+    taskId: String(row.task_id ?? ""),
+    type: String(row.type ?? "") as ApprovalRequest["type"],
+    description: String(row.description ?? ""),
+    details: (() => {
+      try {
+        return row.details ? JSON.parse(String(row.details)) : {};
+      } catch {
+        return {};
+      }
+    })(),
+    status: String(row.status ?? "pending") as ApprovalRequest["status"],
+    requestedAt: Number(row.requested_at ?? 0),
+    resolvedAt: row.resolved_at ? Number(row.resolved_at) : undefined,
+  };
 }
 
 function sanitizeTaskListParams(params: unknown): {
@@ -2919,6 +2969,15 @@ export function registerTaskAndWorkspaceMethods(
   const channelGateway = deps.channelGateway;
   const isAdminClient = (client: any) => !!client?.hasScope?.("admin");
 
+  registerBotWorkMethods({ server, db, requireScope });
+  registerBotWorkControlMethods({ server, db, agentDaemon, requireScope });
+  registerBotResponsibilityMethods({
+    server,
+    db,
+    requireScope,
+    getRoutineService: deps.getRoutineService,
+  });
+  registerAutomationRuntimeMethods({ server, requireScope });
   registerWorkSessionMethods({
     server,
     db,
@@ -3394,6 +3453,7 @@ export function registerTaskAndWorkspaceMethods(
       userPrompt: validated.prompt,
       status: "pending",
       workspaceId: validated.workspaceId,
+      assignedAgentRoleId: validated.assignedAgentRoleId,
       agentConfig: taskAgentConfig,
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
@@ -3402,7 +3462,6 @@ export function registerTaskAndWorkspaceMethods(
     // Apply assignment metadata (update DB + in-memory object before starting).
     const initialUpdates: any = {};
     if (validated.assignedAgentRoleId) {
-      initialUpdates.assignedAgentRoleId = validated.assignedAgentRoleId;
       initialUpdates.boardColumn = "todo";
     }
     if (Object.keys(initialUpdates).length > 0) {
@@ -3537,7 +3596,7 @@ export function registerTaskAndWorkspaceMethods(
     requireScope(client, "admin");
     const { limit, offset, taskId } = sanitizeApprovalListParams(params);
 
-    const approvals = taskId
+    const approvalRows: ApprovalRequest[] = taskId
       ? (await approvalRepo.findPendingByTaskId(taskId)).slice(offset, offset + limit)
       : await (async () => {
           // The repository only has findPendingByTaskId; implement global listing here.
@@ -3545,23 +3604,9 @@ export function registerTaskAndWorkspaceMethods(
             limit,
             offset,
           ])) as any[];
-          return rows.map((row) => ({
-            id: String(row.id ?? ""),
-            taskId: String(row.task_id ?? ""),
-            type: row.type,
-            description: row.description,
-            details: (() => {
-              try {
-                return row.details ? JSON.parse(String(row.details)) : {};
-              } catch {
-                return {};
-              }
-            })(),
-            status: row.status,
-            requestedAt: Number(row.requested_at ?? 0),
-            resolvedAt: row.resolved_at ? Number(row.resolved_at) : undefined,
-          }));
+          return rows.map((row) => approvalFromDatabaseRow(row));
         })();
+    const approvals = approvalRows.map((approval) => presentApprovalRevision(approval));
 
     const enriched = await Promise.all(
       approvals.map(async (a: any) => {
@@ -3579,8 +3624,14 @@ export function registerTaskAndWorkspaceMethods(
 
   server.registerMethod(Methods.APPROVAL_RESPOND, async (client, params) => {
     requireScope(client, "admin");
-    const { approvalId, approved } = sanitizeApprovalRespondParams(params);
-    const status = await agentDaemon.respondToApproval(approvalId, approved);
+    const { approvalId, approved, expectedRevisionHash } = sanitizeApprovalRespondParams(params);
+    const status = await agentDaemon.respondToApproval(
+      approvalId,
+      approved,
+      undefined,
+      undefined,
+      expectedRevisionHash,
+    );
     return { status };
   });
 

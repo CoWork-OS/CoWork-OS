@@ -29,6 +29,7 @@ export interface OneDriveRequestOptions {
   body?: Any;
   headers?: Record<string, string>;
   timeoutMs?: number;
+  beforeSend?: () => void | Promise<void>;
 }
 
 export interface OneDriveRequestResult {
@@ -71,6 +72,7 @@ export async function onedriveRequest(
   }
 
   const timeoutMs = options.timeoutMs ?? settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await options.beforeSend?.();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

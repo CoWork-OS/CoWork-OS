@@ -351,6 +351,45 @@ describe("browser core desktop methods", () => {
     ).toThrowError(/workspace-scoped/);
   });
 
+  it("reads bot work only with effective workspace read access", async () => {
+    const role = new AgentRoleStore(db).create({
+      name: "user-bot",
+      displayName: "My bot",
+      capabilities: [],
+    });
+    const task = new TaskStore(db).create({
+      title: "Assigned",
+      prompt: "private",
+      status: "executing",
+      workspaceId: workspace.id,
+      assignedAgentRoleId: role.id,
+    });
+    const defs = definitions({ write: false });
+    const args = defs.listBotWork.validate!([
+      { workspaceId: workspace.id, agentRoleId: role.id, view: "working" },
+    ]);
+    expect(await defs.listBotWork.handler(args)).toMatchObject({ items: [{ taskId: task.id }] });
+    const denied = createBrowserCoreDefinitions({
+      db,
+      agentDaemon: {},
+      resolveWorkspace: async () => ({
+        ...workspace,
+        permissions: { ...workspace.permissions, read: false },
+      }),
+    });
+    await expect(denied.listBotWork.handler(args)).rejects.toThrow();
+    expect(() =>
+      defs.listBotWork.validate!([
+        {
+          workspaceId: workspace.id,
+          agentRoleId: role.id,
+          view: "working",
+          includeAllWorkspaces: true,
+        },
+      ]),
+    ).toThrow();
+  });
+
   it("returns task picker prompts without paths and agent-hub skill summaries without content", async () => {
     const loadedSkill: CustomSkill = {
       id: "outline",

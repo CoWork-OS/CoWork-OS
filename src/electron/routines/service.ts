@@ -1,3 +1,4 @@
+import { BotResponsibilityRepository } from "../automation/BotResponsibilityRepository";
 import { RoutineRepository, RoutineWorkflowRepository } from "./routine-repository-facades";
 import { RoutineStore } from "./routine-sql";
 import { randomUUID } from "crypto";
@@ -79,6 +80,7 @@ export class RoutineService {
   > &
     Pick<
       RoutineServiceDeps,
+      | "createTaskIdempotent"
       | "createTask"
       | "sendTaskMessage"
       | "createManagedSession"
@@ -99,6 +101,11 @@ export class RoutineService {
   private workflowMaintenanceTimer: NodeJS.Timeout | null = null;
   private workflowInboxActive = 0;
   private workflowRecoveryReady = false;
+  private workflowRuntimeRunning = false;
+  private workflowStartPromise: Promise<void> | null = null;
+  private workflowRecoveryPromise: Promise<void> | null = null;
+  private workflowPumpPromise: Promise<void> | null = null;
+  private readonly workflowInFlight = new Set<Promise<void>>();
 
   constructor(deps: RoutineServiceDeps) {
     this.deps = {
@@ -110,7 +117,15 @@ export class RoutineService {
     this.routineRows = new RoutineRepository(this.deps.db);
     this.workflowEngine = new RoutineWorkflowEngine(this.workflowRepository, {
       now: this.deps.now,
-      executeAction: this.deps.executeWorkflowAction,
+      executeAction: this.deps.executeWorkflowAction
+        ? async (params) => {
+            await new BotResponsibilityRepository(this.deps.db).assertEngineMayExecute(
+              "routine",
+              params.routine.id,
+            );
+            return this.deps.executeWorkflowAction!(params);
+          }
+        : undefined,
     });
   }
 
@@ -309,6 +324,7 @@ export class RoutineService {
       runId: run.id,
       stepId: request.stepId,
       approved: request.approved,
+      reviewDigest: request.reviewDigest,
     });
     await this.refreshRoutineRunFromWorkflow(updated.id);
     return updated;
@@ -340,29 +356,52 @@ export class RoutineService {
     });
   }
 
-  async startWorkflowRuntime(): Promise<void> {
-    if (this.workflowInboxTimer) return;
+  startWorkflowRuntime(): Promise<void> {
+    if (this.workflowRuntimeRunning) return this.workflowStartPromise ?? Promise.resolve();
+    this.workflowRuntimeRunning = true;
     this.workflowRecoveryReady = false;
+    this.workflowStartPromise = this.startWorkflowRuntimeNow().catch((error) => {
+      this.workflowRuntimeRunning = false;
+      throw error;
+    });
+    return this.workflowStartPromise;
+  }
+
+  private async startWorkflowRuntimeNow(): Promise<void> {
     await this.workflowRepository.requeueProcessingEvents();
+    if (!this.workflowRuntimeRunning) return;
+    await this.pruneExpiredWorkflowData();
+    if (!this.workflowRuntimeRunning) return;
     this.workflowInboxTimer = setInterval(() => void this.processWorkflowInbox(), 1_000);
     this.workflowMaintenanceTimer = setInterval(
       () => void this.pruneExpiredWorkflowData(),
       6 * 60 * 60 * 1_000,
     );
     this.workflowMaintenanceTimer.unref?.();
-    await this.pruneExpiredWorkflowData();
-    void this.recoverWorkflowRuns().finally(() => {
-      this.workflowRecoveryReady = true;
-      void this.processWorkflowInbox();
-    });
+    this.workflowRecoveryPromise = this.recoverWorkflowRuns()
+      .then(() => {
+        if (!this.workflowRuntimeRunning) return;
+        this.workflowRecoveryReady = true;
+        void this.processWorkflowInbox();
+      })
+      .catch((error) => {
+        // Failed recovery must not dispatch queued work against unknown run state.
+        logger.warn("Workflow recovery failed; inbox remains stopped:", error);
+      });
   }
 
-  stopWorkflowRuntime(): void {
+  async stopWorkflowRuntime(): Promise<void> {
+    this.workflowRuntimeRunning = false;
+    this.workflowRecoveryReady = false;
     if (this.workflowInboxTimer) clearInterval(this.workflowInboxTimer);
     if (this.workflowMaintenanceTimer) clearInterval(this.workflowMaintenanceTimer);
     this.workflowInboxTimer = null;
     this.workflowMaintenanceTimer = null;
-    this.workflowRecoveryReady = false;
+    // Keep repositories open until claimed work and recovery bookkeeping settle.
+    await this.workflowStartPromise?.catch(() => {});
+    await this.workflowRecoveryPromise;
+    await this.workflowPumpPromise;
+    await Promise.allSettled(this.workflowInFlight);
   }
 
   async listRuns(routineId?: string, limit = DEFAULT_RUN_LIST_LIMIT): Promise<RoutineRun[]> {
@@ -581,7 +620,10 @@ export class RoutineService {
     return trigger?.type === "api" ? trigger : null;
   }
 
-  async runNow(routineId: string): Promise<RoutineRun | null> {
+  async runNow(
+    routineId: string,
+    options?: { operationKey: string; requestIdentity: unknown },
+  ): Promise<RoutineRun | null> {
     const routine = await this.get(routineId);
     if (!routine || !routine.enabled) return null;
 
@@ -622,10 +664,11 @@ export class RoutineService {
       ]),
       sourceSummary: "Manual run",
       source: "manual",
+      ...options,
     });
 
     const run = await this.upsertRun({
-      runKey: `manual:${routine.id}:${this.deps.now()}`,
+      runKey: options?.operationKey ?? `manual:${routine.id}:${this.deps.now()}`,
       routineId: routine.id,
       triggerId: manualTrigger.id,
       triggerType: manualTrigger.type,
@@ -1050,7 +1093,7 @@ export class RoutineService {
       throw new Error("Scheduled task service is not available");
     }
 
-    const agentConfig = this.buildRoutineAgentConfig(routine);
+    const agentConfig = await this.buildRoutineAgentConfig(routine);
     const targetTaskId = getRoutineTargetTaskId(routine);
     const workflowMode = Boolean(routine.workflow && routine.activeWorkflowVersionId);
     const payload = {
@@ -1143,7 +1186,7 @@ export class RoutineService {
               "- Type: {{type}}",
               "- Request text: {{text}}",
             ]),
-        agentConfig: this.buildRoutineAgentConfig(routine),
+        agentConfig: await this.buildRoutineAgentConfig(routine),
         metadata: {
           routineId: routine.id,
           triggerId: trigger.id,
@@ -1183,6 +1226,7 @@ export class RoutineService {
     const source = routineTriggerSource(trigger);
     const nextTriggerId =
       trigger.managedEventTriggerId || `routine:${routine.id}:${trigger.type}:${trigger.id}`;
+    const agentConfig = await this.buildRoutineAgentConfig(routine);
     const nextTrigger: EventTrigger = {
       id: nextTriggerId,
       name: `${routine.name} (${trigger.type.replace(/_/g, " ")})`,
@@ -1196,8 +1240,10 @@ export class RoutineService {
         config: {
           title: routine.name,
           workspaceId: routine.workspaceId,
-          prompt: buildTriggeredPrompt(routine, trigger),
-          agentConfig: this.buildRoutineAgentConfig(routine),
+          prompt: agentConfig?.responsibilityRun
+            ? buildRoutinePrompt(routine, "selected source event", [])
+            : buildTriggeredPrompt(routine, trigger),
+          agentConfig,
           runMode: targetTaskId ? "thread_follow_up" : "new_task",
           targetTaskId,
         },
@@ -1266,14 +1312,38 @@ export class RoutineService {
     }
   }
 
-  private buildRoutineAgentConfig(routine: Routine): AgentConfig | undefined {
-    const config: AgentConfig = {};
+  private async buildRoutineAgentConfig(routine: Routine): Promise<AgentConfig | undefined> {
+    const config: AgentConfig = { automationRoutineId: routine.id };
+    const binding = await new BotResponsibilityRepository(this.deps.db).getForEngine(
+      "routine",
+      routine.id,
+    );
+    if (binding) {
+      config.responsibilityRun = {
+        id: binding.id,
+        workspaceId: binding.workspaceId,
+        agentRoleId: binding.agentRoleId,
+        revision: binding.revision,
+        controlVersion: binding.controlVersion,
+        engine: binding.definition.engine,
+      };
+      config.allowedTools = Array.from(
+        new Set(
+          [...binding.definition.sources, ...binding.definition.permittedActions].map(
+            (op) => op.method,
+          ),
+        ),
+      );
+    }
 
     if (
       routine.connectorPolicy.mode === "allowlist" &&
       routine.connectorPolicy.connectorIds.length > 0
     ) {
-      config.allowedTools = resolveConnectorAllowedTools(routine.connectorPolicy.connectorIds);
+      const connectorTools = resolveConnectorAllowedTools(routine.connectorPolicy.connectorIds);
+      config.allowedTools = config.allowedTools
+        ? config.allowedTools.filter((tool) => connectorTools.includes(tool))
+        : connectorTools;
     }
 
     switch (routine.approvalPolicy.mode) {
@@ -1362,6 +1432,10 @@ export class RoutineService {
       accessProfileId?: AccessProfileId;
     },
   ): Promise<RoutineRun> {
+    await new BotResponsibilityRepository(this.deps.db).assertEngineMayExecute(
+      "routine",
+      routine.id,
+    );
     const workflowRun = await this.workflowEngine.start({
       routine,
       workflow,
@@ -1392,16 +1466,35 @@ export class RoutineService {
     return run;
   }
 
-  private async processWorkflowInbox(): Promise<void> {
-    if (!this.workflowRecoveryReady) return;
-    while (this.workflowInboxActive < 4) {
+  private processWorkflowInbox(): Promise<void> {
+    if (!this.workflowRuntimeRunning || !this.workflowRecoveryReady) return Promise.resolve();
+    if (this.workflowPumpPromise) return this.workflowPumpPromise;
+    const pumping = this.pumpWorkflowInbox()
+      .catch((error) => {
+        logger.warn("Workflow inbox failed:", error);
+      })
+      .finally(() => {
+        if (this.workflowPumpPromise === pumping) this.workflowPumpPromise = null;
+      });
+    this.workflowPumpPromise = pumping;
+    return pumping;
+  }
+
+  private async pumpWorkflowInbox(): Promise<void> {
+    while (this.workflowRuntimeRunning && this.workflowInboxActive < 4) {
       const event = await this.workflowRepository.claimNextEvent();
       if (!event) return;
+      if (!this.workflowRuntimeRunning) {
+        await this.workflowRepository.updateEvent(event.id, { status: "pending" });
+        return;
+      }
       this.workflowInboxActive += 1;
-      void this.processWorkflowEvent(event).finally(() => {
+      const processing = this.processWorkflowEvent(event).finally(() => {
         this.workflowInboxActive = Math.max(0, this.workflowInboxActive - 1);
+        this.workflowInFlight.delete(processing);
         void this.processWorkflowInbox();
       });
+      this.workflowInFlight.add(processing);
     }
   }
 
@@ -1416,6 +1509,10 @@ export class RoutineService {
           status: "cancelled",
           error: "Routine was disabled or removed before this event was processed.",
         });
+        return;
+      }
+      if (!this.workflowRuntimeRunning) {
+        await this.workflowRepository.updateEvent(event.id, { status: "pending" });
         return;
       }
       const routineTrigger = routine.triggers.find((trigger) => trigger.id === event.triggerNodeId);
@@ -1448,6 +1545,7 @@ export class RoutineService {
 
   private async recoverWorkflowRuns(): Promise<void> {
     for (const run of await this.workflowRepository.listRecoverableRuns()) {
+      if (!this.workflowRuntimeRunning) return;
       const routine = await this.get(run.routineId);
       const version = await this.workflowRepository.getVersion(run.workflowVersionId);
       if (!routine || !version) {
@@ -1458,18 +1556,22 @@ export class RoutineService {
         });
         continue;
       }
+      if (!this.workflowRuntimeRunning) return;
       const recovered = await this.workflowEngine.recoverInterruptedRun(version.definition, run.id);
       if (recovered?.status === "waiting_for_approval") {
         await this.refreshRoutineRunFromWorkflow(run.id);
         continue;
       }
-      await this.workflowEngine.continueRun(routine, version.definition, run.id).catch(async (error) => {
-        await this.workflowRepository.updateRun(run.id, {
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          finishedAt: this.deps.now(),
+      if (!this.workflowRuntimeRunning) return;
+      await this.workflowEngine
+        .continueRun(routine, version.definition, run.id)
+        .catch(async (error) => {
+          await this.workflowRepository.updateRun(run.id, {
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+            finishedAt: this.deps.now(),
+          });
         });
-      });
       await this.refreshRoutineRunFromWorkflow(run.id);
     }
   }
@@ -1509,6 +1611,8 @@ export class RoutineService {
       prompt: string;
       sourceSummary: string;
       source: "manual" | "cron" | "hook" | "api";
+      operationKey?: string;
+      requestIdentity?: unknown;
     },
   ): Promise<{
     taskId?: string;
@@ -1520,7 +1624,11 @@ export class RoutineService {
     finishedAt?: number;
   }> {
     try {
-      const agentConfig = this.buildRoutineAgentConfig(routine);
+      await new BotResponsibilityRepository(this.deps.db).assertEngineMayExecute(
+        "routine",
+        routine.id,
+      );
+      const agentConfig = await this.buildRoutineAgentConfig(routine);
 
       if (routine.executionTarget.kind === "managed_environment") {
         if (!routine.executionTarget.managedEnvironmentId || !this.deps.createManagedSession) {
@@ -1582,14 +1690,36 @@ export class RoutineService {
         throw new Error(`Routine execution is unavailable for ${trigger.type} triggers`);
       }
 
-      const task = await this.deps.createTask({
+      const binding = await new BotResponsibilityRepository(this.deps.db).getForEngine(
+        "routine",
+        routine.id,
+      );
+      if (
+        binding &&
+        (binding.revision !== agentConfig?.responsibilityRun?.revision ||
+          binding.controlVersion !== agentConfig?.responsibilityRun?.controlVersion)
+      )
+        throw new Error("Responsibility revision changed during dispatch");
+      const taskParams = {
         title: routine.name,
         prompt: params.prompt,
         workspaceId: routine.workspaceId,
-        assignedAgentRoleId: routine.contextBindings.metadata?.assignedAgentRoleId,
+        assignedAgentRoleId:
+          binding?.agentRoleId ?? routine.contextBindings.metadata?.assignedAgentRoleId,
         agentConfig,
         source: params.source,
-      });
+      };
+      const task = params.operationKey
+        ? await (() => {
+            if (!this.deps.createTaskIdempotent)
+              throw new Error("Idempotent responsibility task admission is unavailable");
+            return this.deps.createTaskIdempotent({
+              ...taskParams,
+              operationKey: params.operationKey!,
+              requestIdentity: params.requestIdentity,
+            });
+          })()
+        : await this.deps.createTask(taskParams);
       return {
         taskId: task.id,
         status: "queued",
@@ -1727,13 +1857,16 @@ export class RoutineService {
     };
   }
 
-  private computeRoutineRunDedupeKey(input: {
-    routineId: string;
-    runKey?: string;
-    backingTaskId?: string;
-    backingManagedSessionId?: string;
-    workflowRunId?: string;
-  }, routine: Routine | null): string | null {
+  private computeRoutineRunDedupeKey(
+    input: {
+      routineId: string;
+      runKey?: string;
+      backingTaskId?: string;
+      backingManagedSessionId?: string;
+      workflowRunId?: string;
+    },
+    routine: Routine | null,
+  ): string | null {
     const normalizedManagedSessionId = String(input.backingManagedSessionId || "").trim();
     if (normalizedManagedSessionId) {
       return `managed:${input.routineId}:${normalizedManagedSessionId}`;
@@ -2341,6 +2474,9 @@ function buildTriggerConditions(
       }
       break;
     case "mailbox_event":
+      if (trigger.accountId) {
+        conditions.push({ field: "accountId", operator: "equals", value: trigger.accountId });
+      }
       if (trigger.eventType) {
         conditions.push({ field: "eventType", operator: "equals", value: trigger.eventType });
       }

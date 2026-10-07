@@ -59,9 +59,24 @@ function createMailboxTriggerEvent(event: MailboxEvent): TriggerEvent {
       fields[key] = value;
     }
   }
+  // Keep adapter-owned identity fields authoritative over arbitrary event payload keys.
+  Object.assign(fields, {
+    eventType: event.type,
+    workspaceId: event.workspaceId,
+    accountId: event.accountId || "",
+    provider: event.provider || "",
+    mailboxEventId: event.id,
+  });
 
   return {
     source: "mailbox_event",
+    eventId: JSON.stringify([
+      "mailbox-event-v1",
+      event.workspaceId,
+      event.provider || "",
+      event.accountId || "",
+      event.id,
+    ]),
     timestamp: event.timestamp,
     fields,
   };

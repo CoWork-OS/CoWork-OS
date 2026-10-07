@@ -1,0 +1,232 @@
+/* Create and edit bot dialog. Shares its shell with the bot work dialog: a
+   16px card on a blurred backdrop, ink primary action, quiet secondary ones. */
+.bot-form-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(5 8 18 / 55%);
+  backdrop-filter: blur(4px);
+}
+
+.bot-form-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: min(760px, calc(100dvh - 40px));
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 30%);
+  overflow: hidden;
+}
+
+.bot-form-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 20px 14px 24px;
+}
+
+.bot-form-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.bot-form-heading h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.bot-form-heading p {
+  margin: 3px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.bot-form-content {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  padding: 4px 24px 20px;
+  overflow-y: auto;
+}
+
+.bot-form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bot-form-field > span {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bot-form-field > span small {
+  margin-left: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.bot-form-field input,
+.bot-form-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-input, var(--color-bg-primary));
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.bot-form-field textarea {
+  resize: vertical;
+  min-height: 0;
+}
+
+.bot-form-field input::placeholder,
+.bot-form-field textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.bot-form-field input:focus,
+.bot-form-field textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-text-primary) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+}
+
+.bot-form-field .bot-icon-picker {
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.bot-form-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.bot-form-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: var(--color-error-subtle, rgb(220 38 38 / 10%));
+  color: var(--color-error, #dc2626);
+  font-size: 13px;
+}
+
+.bot-form-error svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.bot-form-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px 16px 24px;
+  border-top: 1px solid var(--color-border);
+}
+
+.bot-form-actions-end {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.bot-form-footnote {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.bot-form-dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.bot-form-dialog button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bot-form-dialog button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.bot-form-dialog .bot-form-secondary:hover:not(:disabled),
+.bot-form-dialog .bot-form-icon-button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.bot-form-dialog .bot-form-primary {
+  border-color: var(--color-text-primary);
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+}
+
+.bot-form-dialog .bot-form-primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.bot-form-dialog .bot-form-icon-button {
+  align-self: flex-start;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.bot-form-dialog .bot-form-danger {
+  padding: 0;
+  border-color: transparent;
+  color: var(--color-error, #dc2626);
+}
+
+.bot-form-dialog .bot-form-danger:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.bot-form-dialog .bot-icon-picker-tile {
+  height: auto;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 10px;
+}
+
+.bot-form-dialog .bot-icon-picker-tile.selected {
+  border-color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}

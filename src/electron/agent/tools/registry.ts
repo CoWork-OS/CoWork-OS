@@ -1,3 +1,6 @@
+import { mcpConfigurationCurrent } from "../../mcp/configuration-authority";
+import { snapshotToolInput } from "./tool-input-snapshot";
+import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { isFullAccessProfile } from "../../../shared/access-profiles";
 import { isCodexComputerUseServer } from "../../mcp/codex-computer-use";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
@@ -212,6 +215,10 @@ import {
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
 import { getNumbatService } from "../../security/numbat";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
+import {
+  getResponsibilityActionReviewContext,
+  responsibilityWriteReviewTarget,
+} from "../../automation/responsibility-task-policy";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -2000,6 +2007,45 @@ export class ToolRegistry {
     return isCodexComputerUseServer(server) ? server! : null;
   }
 
+  private chatWebConsent: string | null = null;
+  /**
+   * In a local desktop bot chat, one consent covers searching and reading the web for
+   * that chat, like other bot apps; asking per page made chats unusable. Consent ends
+   * when task authority (workspace policy or access profile) changes or the task ends.
+   */
+  private async requestChatWebConsent(toolName: string, signal?: AbortSignal): Promise<boolean> {
+    const details = {
+      tool: toolName,
+      taskConsentScope: "searching and opening web pages in this chat",
+      taskConsentLabel: "Allow for this chat",
+      params: { scope: "chat_read_only_web" },
+    };
+    const snapshot =
+      typeof (this.daemon as Any).getTaskConsentAuthority === "function"
+        ? (this.daemon as Any).getTaskConsentAuthority.bind(this.daemon)
+        : undefined;
+    if (!snapshot || signal?.aborted) return false;
+    const authority: string | null = await snapshot(this.taskId, details, "network_access");
+    if (!authority) {
+      this.chatWebConsent = null;
+      return false;
+    }
+    if (this.chatWebConsent === authority) return true;
+    this.chatWebConsent = null;
+    const approved = await this.daemon.requestApproval(
+      this.taskId,
+      "network_access",
+      "Let this bot search and read web pages for this chat?",
+      details,
+      { allowAutoApprove: false, requireExplicitApproval: true, signal },
+    );
+    if (!approved || signal?.aborted) return false;
+    const current: string | null = await snapshot(this.taskId, details, "network_access");
+    if (current !== authority) return false;
+    this.chatWebConsent = current;
+    return true;
+  }
+
   private async requestCodexTaskConsent(
     description: string,
     details: Any,
@@ -2275,6 +2321,25 @@ export class ToolRegistry {
         hasExplicitNonInteractiveAuthority &&
         isFullAccessProfile(effectiveAccessProfile.definition) &&
         this.getCodexConsentServer(context.request.name) !== null;
+      let responsibilityActionReview = false;
+      // Models often pass an absolute path; the review context takes the canonical
+      // workspace-relative target, normalized the same way the responsibility policy does.
+      const reviewTarget =
+        context.request.name === "write_file" &&
+        typeof (this.daemon as Any)?.getDatabase === "function"
+          ? responsibilityWriteReviewTarget(context.request.input?.path, this.workspace.path)
+          : null;
+      if (reviewTarget) {
+        responsibilityActionReview = Boolean(
+          await getResponsibilityActionReviewContext(
+            (this.daemon as Any).getDatabase(),
+            this.taskId,
+            this.workspace.id,
+            this.workspace.path,
+            reviewTarget,
+          ),
+        );
+      }
       let hasMatchedPermissionRule = false;
       const pipeline = await evaluateToolPolicyPipeline({
         workspace: this.workspace,
@@ -2345,10 +2410,11 @@ export class ToolRegistry {
 
       if (pipeline.decision === "require_approval") {
         if (
-          pipeline.approvalSource === "semantic_review" ||
-          !this.toolHandlesApprovalInternally(context.request.name, context.request.input) ||
-          pipeline.approvalSource === "workspace_policy" ||
-          pipeline.approvalSource === "runtime_metadata"
+          !(responsibilityActionReview && pipeline.approvalSource !== "semantic_review") &&
+          (pipeline.approvalSource === "semantic_review" ||
+            !this.toolHandlesApprovalInternally(context.request.name, context.request.input) ||
+            pipeline.approvalSource === "workspace_policy" ||
+            pipeline.approvalSource === "runtime_metadata")
         ) {
           const requester = (this.daemon as Any)?.requestApproval;
           if (typeof requester !== "function") {
@@ -2386,7 +2452,17 @@ export class ToolRegistry {
             !hasMatchedPermissionRule
               ? this.getCodexConsentServer(context.request.name)
               : null;
-          const approved = codexServer
+          const chatWebConsent =
+            effectiveApprovalType === "network_access" &&
+            (context.request.name === "web_search" || context.request.name === "web_fetch") &&
+            taskForApproval?.agentConfig?.botConversation === true &&
+            !taskForApproval.agentConfig.gatewayContext &&
+            pipeline.approvalSource !== "semantic_review" &&
+            pipeline.approvalSource !== "workspace_policy" &&
+            !browserUseApproval;
+          const approved = chatWebConsent
+            ? await this.requestChatWebConsent(context.request.name, options.signal)
+            : codexServer
             ? await this.requestCodexTaskConsent(
                 `Allow ${codexServer.name} computer-use engine for this task?`,
                 {
@@ -2428,6 +2504,12 @@ export class ToolRegistry {
       }
 
       try {
+        // An approval wait may outlive a pause or definition revision.
+        await this.assertResponsibilityPolicy(
+          context.request.name,
+          context.request.input,
+          responsibilityActionReview,
+        );
         const result = await next(context);
         let outputBytes: number | undefined;
         try {
@@ -4391,6 +4473,7 @@ ${skillDescriptions}`;
     input: Any,
     runtime?: Record<string, unknown>,
   ): Promise<{ result: Any; policyTrace?: Any }> {
+    input = snapshotToolInput(input);
     if (this.handlerRegistry.has(name)) {
       return await this.executeWithRegisteredHandler(name, input, runtime);
     }
@@ -4398,7 +4481,36 @@ ${skillDescriptions}`;
     return { result };
   }
 
+  private async assertResponsibilityPolicy(
+    name: string,
+    input: unknown,
+    allowSelectedActionReview = false,
+  ): Promise<void> {
+    // Always consult persisted task lineage before either registered or legacy handlers.
+    // Runtime metadata cannot bypass this gate, including recursive security wrappers.
+    if (typeof this.daemon.getDatabase === "function") {
+      await enforceResponsibilityToolPolicy(
+        this.daemon.getDatabase(),
+        this.taskId,
+        this.workspace.id,
+        this.workspace.path,
+        name,
+        input,
+        allowSelectedActionReview,
+      );
+    } else {
+      const task =
+        typeof this.daemon.getTaskById === "function"
+          ? await this.daemon.getTaskById(this.taskId)
+          : undefined;
+      if (task?.agentConfig?.responsibilityRun || task?.agentConfig?.automationRoutineId)
+        throw new Error("Responsibility policy storage is unavailable");
+    }
+  }
+
   async executeTool(name: string, input: Any, _runtime?: Record<string, unknown>): Promise<Any> {
+    input = snapshotToolInput(input);
+    await this.assertResponsibilityPolicy(name, input);
     if (this.handlerRegistry.has(name)) {
       const execution = await this.executeWithRegisteredHandler(name, input, _runtime);
       return execution?.result ?? execution;
@@ -4534,6 +4646,8 @@ ${skillDescriptions}`;
         cause: err,
       });
     }
+
+    await this.assertResponsibilityPolicy(name, input);
 
     // File tools
     if (name === "read_file") {
@@ -5280,6 +5394,63 @@ ${skillDescriptions}`;
       throw new Error(`MCP endpoint access denied for "${name}": ${endpointDecision.reason}`);
     }
     const mcpToolDefinition = mcpManager.getAllTools().find((tool) => tool.name === mcpToolName);
+    const scopeFingerprint = (workspace: Workspace) =>
+      JSON.stringify({
+        id: workspace.id,
+        path: workspace.path,
+        permissions: workspace.permissions,
+      });
+    const admittedScope = scopeFingerprint(this.workspace);
+    const admittedServerId = mcpManager.getServerIdForTool(mcpToolName);
+    const admittedServer = settings.servers?.find((server) => server.id === admittedServerId);
+    const admittedConfiguration = admittedServer ? structuredClone(admittedServer) : undefined;
+    const admittedPolicy = JSON.stringify(configuredPolicy ?? null);
+    const details = {
+      tool: name,
+      serverName: this.getMcpServerName(name) || undefined,
+      params: input,
+    };
+    const readAuthority =
+      typeof this.daemon.getToolEffectAuthority === "function"
+        ? () => this.daemon.getToolEffectAuthority(this.taskId, details)
+        : undefined;
+    const admittedAuthority = readAuthority ? await readAuthority() : undefined;
+    if (readAuthority && !admittedAuthority) throw new Error("MCP task authority unavailable");
+    const beforeSend = async () => {
+      const check = () => {
+        if (runtime?.signal instanceof AbortSignal && runtime.signal.aborted)
+          throw new Error("MCP tool call cancelled");
+        const effective =
+          typeof this.daemon.getEffectiveWorkspaceForTask === "function"
+            ? this.daemon.getEffectiveWorkspaceForTask(this.taskId)
+            : this.workspace;
+        const currentSettings = MCPSettingsManager.loadSettings();
+        const serverId = mcpManager.getServerIdForTool(mcpToolName);
+        if (
+          !effective ||
+          scopeFingerprint(effective) !== admittedScope ||
+          scopeFingerprint(this.workspace) !== admittedScope ||
+          (currentSettings.toolNamePrefix || "mcp_") !== prefix ||
+          serverId !== admittedServerId ||
+          !mcpConfigurationCurrent(
+            admittedConfiguration,
+            currentSettings.servers?.find((server) => server.id === serverId),
+          ) ||
+          JSON.stringify(getConfiguredMcpToolPolicy(name) ?? null) !== admittedPolicy ||
+          this.evaluateMcpEndpointNetworkPolicy(name)?.action === "deny"
+        )
+          throw new Error("MCP authority changed before send; request approval again");
+      };
+      check();
+      await this.assertResponsibilityPolicy(name, input);
+      check();
+      if (readAuthority) {
+        const currentAuthority = await readAuthority();
+        check();
+        if (currentAuthority !== admittedAuthority)
+          throw new Error("MCP task authority changed before send; request approval again");
+      }
+    };
 
     if (mcpToolName === MCP_PAYMENT_TOOL_NAME) {
       const amount = extractPaymentAmountFromX402Tool(input, mcpToolDefinition);
@@ -5331,6 +5502,7 @@ ${skillDescriptions}`;
       const signal = runtime?.signal instanceof AbortSignal ? runtime.signal : undefined;
       const result = await mcpManager.callTool(mcpToolName, input, {
         signal,
+        beforeSend,
         onElicitation: async (request) => {
           const server = request.computerUseApp ? this.getCodexConsentServer(name) : null;
           if (server && request.computerUseApp) {
@@ -8572,7 +8744,7 @@ ${skillDescriptions}`;
       {
         name: "mailbox_action",
         description:
-          "Unified Inbox Agent workflow over Gmail or IMAP mailboxes: sync, score threads, summarize, draft replies, extract commitments, review bulk cleanup/follow-ups, and apply approved actions.",
+          "Unified Inbox Agent workflow over configured mailboxes: sync, score threads, summarize, draft replies, extract commitments, review bulk cleanup/follow-ups, and apply approved actions. Responsibility-scoped reads can list threads or retrieve a thread from only the exact mailbox account selected in Sources.",
         input_schema: {
           type: "object",
           properties: {
@@ -8597,7 +8769,8 @@ ${skillDescriptions}`;
             },
             account_id: {
               type: "string",
-              description: "Optional mailbox account ID for compose-frame drafts",
+              description:
+                "Mailbox account ID for list_threads/get_thread scope and compose-frame drafts. Governed responsibilities must use the exact account selected in Sources.",
             },
             thread_id: {
               type: "string",

@@ -1,4 +1,14 @@
 import {
+  readAuthorizedApprovalDraftPreview,
+  readAuthorizedInlineApprovalDraftReview,
+} from "./approval-draft-preview";
+import { BotNotificationService } from "../notifications/BotNotificationService";
+import { BotWorkResultService } from "../agents/BotWorkResultService";
+import { getAutomationRuntime } from "../automation/AutomationRuntime";
+import { BotWorkControlService } from "../automation/BotWorkControlService";
+import { BotResponsibilityService } from "../automation/BotResponsibilityService";
+import { BotWorkQueryService } from "../agents/BotWorkQueryService";
+import {
   createKitProject,
   getLocalDateStamp,
   withKitFrontmatter,
@@ -21,6 +31,7 @@ import { TaskRepository, WorkspaceRepository } from "../database/repository-faca
 import {
   ApprovalRepository,
   ArtifactRepository,
+  InputRequestRepository,
   BotNotificationPreferenceRepository,
   ChannelSpecializationRepository,
   ComposerDraftRepository,
@@ -310,6 +321,8 @@ import {
   BotConversationReopenRequest,
   BotNotificationPolicy,
   UpdateBotNotificationPolicyRequest,
+  ApprovalResponse,
+  SessionActionAttribution,
 } from "../../shared/types";
 import {
   buildComposerDraftKey,
@@ -321,7 +334,7 @@ import {
 } from "../../shared/composer-drafts";
 import { isTerminalTaskStatus } from "../../shared/task-status";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
-import type { MailboxCommitmentState } from "../../shared/mailbox";
+import type { MailboxCommitmentState, MailboxSendOutcomeResolution } from "../../shared/mailbox";
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
 import { approvalPromptsDisabled } from "../agent/approval-policy";
@@ -1552,6 +1565,21 @@ async function planMultitaskLanes(prompt: string, laneCount: number) {
   }
 }
 
+/** Pass only the revision attached to the approval that the renderer presented. */
+export function respondToApprovalWithDisplayedRevision(
+  agentDaemon: Pick<AgentDaemon, "respondToApproval">,
+  response: ApprovalResponse,
+  attribution?: SessionActionAttribution,
+) {
+  return agentDaemon.respondToApproval(
+    response.approvalId,
+    response.approved ?? response.action?.startsWith("allow_") === true,
+    response.action,
+    attribution,
+    response.expectedRevisionHash,
+  );
+}
+
 export async function setupIpcHandlers(
   dbManager: DatabaseManager,
   agentDaemon: AgentDaemon,
@@ -1615,6 +1643,7 @@ export async function setupIpcHandlers(
   const taskSessionMetadataRepo = new TaskSessionMetadataRepository(db);
   const botNotificationPreferenceRepo = new BotNotificationPreferenceRepository(db);
   const approvalRepo = new ApprovalRepository(db);
+  const inputRequestRepo = new InputRequestRepository(db);
   const workContextService = new WorkContextService(db);
   const sessionMembershipService = new SessionMembershipService(db);
   const recurringApprovalService = new RecurringApprovalService(db);
@@ -3919,6 +3948,18 @@ export async function setupIpcHandlers(
     return mailboxService.retryMailboxAction(actionId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_RESOLVE_SEND_OUTCOME, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const actionId = typeof data?.actionId === "string" ? data.actionId : "";
+    const resolution: MailboxSendOutcomeResolution | undefined =
+      data?.resolution === "confirmed_sent" || data?.resolution === "confirmed_not_sent"
+        ? data.resolution
+        : undefined;
+    if (!actionId) throw new Error("Missing mailbox action id");
+    if (!resolution) throw new Error("Missing or invalid mailbox send resolution");
+    return mailboxService.resolveMailboxSendOutcome(actionId, resolution);
+  });
+
   ipcMain.handle(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, async (event, data?: Any) => {
     assertTrustedMailboxSender(event);
     const draftId = typeof data?.draftId === "string" ? data.draftId : "";
@@ -5676,6 +5717,89 @@ export async function setupIpcHandlers(
     },
   );
 
+  const botWorkQueryService = new BotWorkQueryService(db);
+  const botWorkControlService = new BotWorkControlService(db, {
+    cancel: (id, workspaceId, authority) =>
+      agentDaemon.cancelTask(id, {
+        cascade: false,
+        waitForIdle: true,
+        strictCleanup: true,
+        scopeWorkspaceId: workspaceId,
+        controlAuthority: authority,
+      }),
+    captureFence: () => {
+      const runtime = getAutomationRuntime();
+      if (!runtime) throw new Error("Automation runtime is unavailable");
+      return runtime.captureFence();
+    },
+    assertOwnership: async () => {
+      const runtime = getAutomationRuntime();
+      if (!runtime) throw new Error("Automation runtime is unavailable");
+      await runtime.assertOwnership();
+    },
+    activeTaskIds: () => agentDaemon.getActiveWorkTaskIds(),
+    isStopped: (id) => agentDaemon.isTaskStopConfirmed(id),
+    isLocallyStopped: (id) => agentDaemon.isLocalWorkStopConfirmed(id),
+  });
+  ipcMain.handle(IPC_CHANNELS.BOT_WORK_STOP, async (_, request: unknown) =>
+    botWorkControlService.stop(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_WORK_CONTROL_GET, async (_, request: unknown) =>
+    botWorkControlService.read(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_WORK_CONTROL_STATE, async (_, request: unknown) =>
+    botWorkControlService.futureState(request),
+  );
+  const botResponsibilityService = new BotResponsibilityService(db, { getRoutineService });
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_ACTIVATE, async (_, request: unknown) =>
+    botResponsibilityService.activate(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_FUTURE_RUNS, async (_, request: unknown) =>
+    botResponsibilityService.setFutureRuns(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_PAUSE, async (_, request: unknown) =>
+    botResponsibilityService.pause(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_RUN, async (_, request: unknown) =>
+    botResponsibilityService.run(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_LIST, async (_, request: unknown) =>
+    botResponsibilityService.list(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_ENGINES, async (_, request: unknown) =>
+    botResponsibilityService.engines(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_PREVIEW, async (_, request: unknown) =>
+    botResponsibilityService.preview(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_CREATE, async (_, request: unknown) =>
+    botResponsibilityService.create(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_RESPONSIBILITY_REVISE, async (_, request: unknown) =>
+    botResponsibilityService.revise(request),
+  );
+
+  const botNotifications = new BotNotificationService(db);
+  ipcMain.handle(IPC_CHANNELS.BOT_NOTIFICATION_RETRY, async (_, request: unknown) =>
+    botNotifications.retry(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_NOTIFICATION_ROUTE_GET, async (_, scope: unknown) =>
+    botNotifications.get(scope),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_NOTIFICATION_ROUTE_UPDATE, async (_, request: unknown) =>
+    botNotifications.update(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_NOTIFICATION_RECEIPTS, async (_, scope: unknown) =>
+    botNotifications.list(scope),
+  );
+  const botWorkResultService = new BotWorkResultService(db);
+  ipcMain.handle(IPC_CHANNELS.BOT_WORK_RESULT, async (_, request: unknown) =>
+    botWorkResultService.get(request),
+  );
+  ipcMain.handle(IPC_CHANNELS.BOT_WORK_LIST, async (_, query: unknown) =>
+    botWorkQueryService.list(query),
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.BOT_CONVERSATIONS_LIST,
     async (_, rawQuery?: Partial<BotConversationListQuery>) => {
@@ -5710,6 +5834,8 @@ export async function setupIpcHandlers(
           taskId: z.string().trim().min(1).max(128).optional(),
           agentRoleId: z.string().trim().min(1).max(128).optional(),
           repairMembership: z.boolean().optional(),
+          botTeamId: z.string().trim().min(1).max(128).optional(),
+          branchToWorkspace: z.boolean().optional(),
         }),
         rawRequest,
         "bot conversation reopen request",
@@ -6393,15 +6519,32 @@ export async function setupIpcHandlers(
   });
 
   // Approval handlers
+  ipcMain.handle(IPC_CHANNELS.APPROVAL_DRAFT_PREVIEW, async (event, data) =>
+    readAuthorizedApprovalDraftPreview(data, {
+      findById: (id) => approvalRepo.findById(id),
+      authorize: (taskId) => authorizeTaskForEvent(event, taskId, "approve"),
+      draftPreviews: (id, revision) => approvalRepo.draftPreviews(id, revision),
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.INPUT_REQUEST_DRAFT_REVIEW, async (event, data) =>
+    readAuthorizedInlineApprovalDraftReview(data, {
+      findInput: (id) => inputRequestRepo.findById(id),
+      getApprovalBinding: (id) => inputRequestRepo.getApprovalBinding(id),
+      findApproval: (id) => approvalRepo.findById(id),
+      authorize: (taskId) => authorizeTaskForEvent(event, taskId, "approve"),
+      draftPreviews: (id, revision) => approvalRepo.draftPreviews(id, revision),
+      responsibilityActionAuthorityCurrent: (approval) =>
+        agentDaemon.isResponsibilityActionReviewAuthorityCurrent(approval),
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.APPROVAL_RESPOND, async (event, data) => {
     const validated = validateInput(ApprovalResponseSchema, data, "approval response");
     const approval = await approvalRepo.findById(validated.approvalId);
     if (!approval) throw new Error("Approval request not found.");
     const authorization = await authorizeTaskForEvent(event, approval.taskId, "approve");
-    const result = await agentDaemon.respondToApproval(
-      validated.approvalId,
-      validated.approved ?? validated.action?.startsWith("allow_") === true,
-      validated.action,
+    const result = await respondToApprovalWithDisplayedRevision(
+      agentDaemon,
+      validated,
       authorization.actor,
     );
     if (result === "handled") {
@@ -11582,6 +11725,10 @@ export async function setupIpcHandlers(
   // Memory Hub "What CoWork knows": memory_items list/get/add/edit/pin/delete/why.
   setupMemoryItemsHandlers({
     service: new MemoryItemsHubService({
+      getBot: async (id) => {
+        const bot = await agentRoleRepo.findById(id);
+        return bot ? { id: bot.id, displayName: bot.displayName } : undefined;
+      },
       getWriter: () => MemoryWriter.get(),
       getWorkspaceName: async (workspaceId) =>
         (await workspaceRepo.findById(workspaceId))?.name ?? null,
@@ -12753,6 +12900,7 @@ function setupNotificationHandlers(): void {
 
   // Initialize notification service with event forwarding to main window
   notificationService = new NotificationService({
+    db: DatabaseManager.getInstance().getDatabase(),
     onEvent: (event) => {
       // Import lazily because tray initialization depends on the notification handlers.
       // oxlint-disable-next-line typescript-eslint(no-require-imports)
@@ -12776,10 +12924,14 @@ function setupNotificationHandlers(): void {
       }
 
       // Deliver exactly one alert through the selected desktop style.
-      if (event.type === "added" && event.notification) {
+      if (
+        event.type === "added" &&
+        event.notification &&
+        event.notification.desktopAlert !== false
+      ) {
         const settings = getDesktopSettings();
         if (!settings.showNotifications) {
-          return;
+          return { desktopRequested: false };
         }
         showDesktopNotification(
           {
@@ -12791,13 +12943,18 @@ function setupNotificationHandlers(): void {
           },
           settings.notificationStyle,
         );
+        return { desktopRequested: true };
       }
     },
   });
   // Seed the badge from persisted notifications before the first new event.
-  void import("../tray").then(({ trayManager }) => {
-    trayManager.setUnreadNotificationCount(notificationService?.getUnreadCount() ?? 0);
-  });
+  void notificationService
+    .refresh()
+    .then(() => import("../tray"))
+    .then(({ trayManager }) => {
+      trayManager.setUnreadNotificationCount(notificationService?.getUnreadCount() ?? 0);
+    })
+    .catch((error) => console.warn("[Notifications] Could not load persisted inbox:", error));
   setIntegrationAuthNotificationServiceProvider(() => notificationService);
   setLogObserver((event) => {
     const message = event.args
@@ -12819,12 +12976,14 @@ function setupNotificationHandlers(): void {
   // List all notifications
   ipcMain.handle(IPC_CHANNELS.NOTIFICATION_LIST, async () => {
     if (!notificationService) return [];
+    await notificationService.refresh();
     return notificationService.list();
   });
 
   // Get unread count
   ipcMain.handle(IPC_CHANNELS.NOTIFICATION_UNREAD_COUNT, async () => {
     if (!notificationService) return 0;
+    await notificationService.refresh();
     return notificationService.getUnreadCount();
   });
 

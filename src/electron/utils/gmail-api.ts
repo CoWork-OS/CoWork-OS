@@ -40,6 +40,7 @@ export interface GmailRequestOptions {
   body?: Any;
   timeoutMs?: number;
   signal?: AbortSignal;
+  beforeSend?: () => void | Promise<void>;
 }
 
 export interface GmailRequestResult {
@@ -89,6 +90,8 @@ export async function gmailRequest(
     if (options.method !== "GET" && options.method !== "DELETE") {
       headers["Content-Type"] = "application/json";
     }
+
+    await options.beforeSend?.();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);

@@ -5,6 +5,8 @@ import path from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DatabaseClient } from "../../database/async/DatabaseClient";
 import { DATABASE_COMMANDS, requiredTablesFor } from "../../database/async/commands";
+import { AgentRoleStore } from "../../agents/AgentRoleRepository";
+import { TaskStore } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
 import { setStatementClient } from "../../database/statements/statement-route";
 import { MemoryItemsRepository } from "../MemoryItemsRepository";
@@ -93,7 +95,31 @@ describeWithSqlite("memory items on the host and in the database worker", () => 
     const repository = new MemoryItemsRepository(db);
     const writer = new MemoryWriter({ repository, now: () => (clock += 1) });
     const base = { kind: "preference", scope: "global", source: "inferred" } as const;
+    const role = new AgentRoleStore(db).create({
+      name: "parity-bot",
+      displayName: "Parity bot",
+      capabilities: [],
+      heartbeatEnabled: false,
+    });
+    const task = new TaskStore(db).create({
+      title: "Parity capture",
+      prompt: "fixture",
+      status: "completed",
+      workspaceId: "ws",
+      assignedAgentRoleId: role.id,
+    });
+    const attributed = await writer.ingest({
+      ...base,
+      content: "Parity bot prefers current capture evidence",
+      taskId: task.id,
+      originWorkspaceId: "ws",
+      sourceRef: { store: "fixture", id: "bot-capture" },
+    });
+    if (attributed.status !== "written") throw Error("Capture failed");
+    expect(attributed.item.sourceRef.agentRoleId).toBe(role.id);
+    expect(attributed.item.sourceRef.capturedTaskId).toBe(task.id);
     const results = [
+      attributed,
       await writer.ingest({ ...base, content: "Prefers concise responses." }),
       await writer.ingest({ ...base, content: "prefers concise responses" }),
       await writer.ingest({

@@ -94,7 +94,13 @@ function buildDraftPatch(editable: EditableDraftState): MailboxComposeDraftPatch
 export const extractAssistantMailDraft = extractMailboxComposeDraftInputFromText;
 
 function draftStatusIsLocked(status: MailboxComposeDraftStatus): boolean {
-  return status === "queued" || status === "scheduled" || status === "sending" || status === "sent";
+  return (
+    status === "queued" ||
+    status === "scheduled" ||
+    status === "sending" ||
+    status === "sent" ||
+    status === "outcome_unknown"
+  );
 }
 
 function draftStatusIsTransient(status: MailboxComposeDraftStatus): boolean {
@@ -130,6 +136,8 @@ function statusLabel(status: MailboxComposeDraftStatus): string {
       return "Sent";
     case "failed":
       return "Failed";
+    case "outcome_unknown":
+      return "Delivery status unknown — check Sent before sending again";
     case "discarded":
       return "Discarded";
     case "local":

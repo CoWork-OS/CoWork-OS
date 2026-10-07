@@ -4193,8 +4193,10 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
   definitions.respondToRoutineWorkflowApproval = definition(
     automation,
     async ([request]) => {
-      const input = requireRecord(request, ["runId", "stepId", "approved"]);
+      const input = requireRecord(request, ["runId", "stepId", "approved", "reviewDigest"]);
       if (typeof input.approved !== "boolean") return invalidRequest();
+      if (input.reviewDigest !== undefined && typeof input.reviewDigest !== "string")
+        return invalidRequest();
       const run = (await currentRoutineService()!.listWorkflowRuns(undefined, 500)).find(
         (candidate) => candidate.id === stringArg(input.runId),
       );
@@ -4205,6 +4207,7 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
         runId: run!.id,
         stepId: stringArg(input.stepId),
         approved: input.approved,
+        reviewDigest: input.reviewDigest as string | undefined,
       });
     },
     {
@@ -4212,13 +4215,16 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       minArgs: 1,
       maxArgs: 1,
       validate: (args) => {
-        const input = requireRecord(args[0], ["runId", "stepId", "approved"]);
+        const input = requireRecord(args[0], ["runId", "stepId", "approved", "reviewDigest"]);
         if (typeof input.approved !== "boolean") return invalidRequest();
+        if (input.reviewDigest !== undefined && typeof input.reviewDigest !== "string")
+          return invalidRequest();
         return [
           {
             runId: stringArg(input.runId),
             stepId: stringArg(input.stepId),
             approved: input.approved,
+            ...(typeof input.reviewDigest === "string" ? { reviewDigest: input.reviewDigest } : {}),
           },
         ];
       },

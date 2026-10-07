@@ -1,12 +1,17 @@
+import { createHash } from "node:crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { GoogleWorkspaceSettingsManager } from "../../settings/google-workspace-manager";
 import { gmailRequest } from "../../utils/gmail-api";
 import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 import {
-  hasGoogleWorkspaceScopeCoverage,
-  hasGoogleWorkspaceTokens,
-} from "../../../shared/google-workspace";
+  createIntegrationEffectGuard,
+  googleWorkspaceAuthConfig,
+  googleWorkspacePolicyFingerprint,
+  googleWorkspaceScopeReady,
+  integrationEffectRequestDigest,
+  integrationEffectReview,
+} from "./integration-effect-guard";
 
 type GmailAction =
   | "get_profile"
@@ -229,6 +234,36 @@ function buildRawEmail(
   return encodeMessage(message);
 }
 
+function decodeRawEmail(raw: string): string {
+  try {
+    return Buffer.from(raw, "base64url").toString("utf8");
+  } catch {
+    return "Unable to decode the provided Gmail message source.";
+  }
+}
+
+function gmailReviewedEffect(
+  operation: string,
+  method: string,
+  requestPath: string,
+  body: unknown,
+  message: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    version: 1,
+    provider: "gmail",
+    operation,
+    request: {
+      method,
+      path: requestPath,
+      sha256: integrationEffectRequestDigest(method, requestPath, body),
+    },
+    message,
+    ...extra,
+  };
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -250,11 +285,7 @@ export class GmailTools {
 
   static isEnabled(): boolean {
     const settings = GoogleWorkspaceSettingsManager.loadSettings();
-    return (
-      settings.enabled &&
-      hasGoogleWorkspaceTokens(settings) &&
-      hasGoogleWorkspaceScopeCoverage(settings.scopes, "gmail")
-    );
+    return googleWorkspaceScopeReady(settings, "gmail");
   }
 
   static isCodexStyleTool(name: string): name is GmailCodexStyleTool {
@@ -301,6 +332,66 @@ export class GmailTools {
       );
     }
     return settings;
+  }
+
+  private createEffectGuard(
+    initialSettings: ReturnType<typeof GoogleWorkspaceSettingsManager.loadSettings>,
+    toolName: string,
+    input: unknown,
+    details: Record<string, unknown>,
+  ) {
+    return createIntegrationEffectGuard({
+      daemon: this.daemon,
+      taskId: this.taskId,
+      workspace: this.workspace,
+      getWorkspace: () => this.workspace,
+      toolName,
+      toolInput: input,
+      approvalDetails: details,
+      initialSettings,
+      loadSettings: () => GoogleWorkspaceSettingsManager.loadSettings(),
+      settingsEnabled: (current) => googleWorkspaceScopeReady(current, "gmail"),
+      settingsFingerprint: googleWorkspacePolicyFingerprint,
+      authConfig: googleWorkspaceAuthConfig,
+      errorPrefix: "Gmail action",
+    });
+  }
+
+  private async readDraftRaw(
+    settings: ReturnType<typeof GoogleWorkspaceSettingsManager.loadSettings>,
+    draftId: string,
+  ): Promise<string> {
+    const result = await gmailRequest(settings, {
+      method: "GET",
+      path: `/users/me/drafts/${encodeURIComponent(draftId)}`,
+      query: { format: "raw" },
+    });
+    const raw = result.data?.message?.raw;
+    if (typeof raw !== "string" || !raw) {
+      throw new Error("Unable to load the exact Gmail draft revision for review");
+    }
+    return raw;
+  }
+
+  private async readDraftReviewSnapshot(
+    settings: ReturnType<typeof GoogleWorkspaceSettingsManager.loadSettings>,
+    draftId: string,
+  ): Promise<{ message: GmailMessage; raw: string; revisionSha256: string }> {
+    const rawBefore = await this.readDraftRaw(settings, draftId);
+    const full = await gmailRequest(settings, {
+      method: "GET",
+      path: `/users/me/drafts/${encodeURIComponent(draftId)}`,
+      query: { format: "full" },
+    });
+    const message = full.data?.message as GmailMessage | undefined;
+    if (!message) throw new Error("Unable to load the Gmail draft for review");
+    const rawAfter = await this.readDraftRaw(settings, draftId);
+    const beforeRevision = createHash("sha256").update(rawBefore).digest("hex");
+    const revisionSha256 = createHash("sha256").update(rawAfter).digest("hex");
+    if (beforeRevision !== revisionSha256) {
+      throw new Error("Gmail draft changed while its review snapshot was being loaded");
+    }
+    return { message, raw: rawAfter, revisionSha256 };
   }
 
   private async getMessage(
@@ -361,6 +452,8 @@ export class GmailTools {
     settings: ReturnType<typeof GoogleWorkspaceSettingsManager.loadSettings>,
     names: unknown,
     createMissing: boolean,
+    toolName: string,
+    input: unknown,
   ): Promise<string[]> {
     if (!Array.isArray(names) || names.length === 0) return [];
     const requestedNames = names.filter(
@@ -386,14 +479,29 @@ export class GmailTools {
       if (!createMissing) {
         throw new Error(`Gmail label not found: ${labelName}`);
       }
+      const createBody = {
+        name: labelName,
+        labelListVisibility: "labelShow",
+        messageListVisibility: "show",
+      };
+      const createPath = "/users/me/labels";
+      const details = integrationEffectReview(toolName, input, "create_label", {
+        reviewedEffect: gmailReviewedEffect(
+          "create_label",
+          "POST",
+          createPath,
+          createBody,
+          { name: labelName },
+          { target: { kind: "label", name: labelName }, change: createBody },
+        ),
+      });
+      await this.requireApproval("Create a Gmail label", details);
+      const beforeSend = await this.createEffectGuard(settings, toolName, input, details);
       const createResult = await gmailRequest(settings, {
         method: "POST",
-        path: "/users/me/labels",
-        body: {
-          name: labelName,
-          labelListVisibility: "labelShow",
-          messageListVisibility: "show",
-        },
+        path: createPath,
+        body: createBody,
+        beforeSend,
       });
       resolved.push(createResult.data?.id);
     }
@@ -492,15 +600,30 @@ export class GmailTools {
             input as GmailActionInput & Record<string, unknown>,
             reply.headers,
           );
+          const requestPath = "/users/me/drafts";
+          const requestBody = {
+            message: {
+              raw,
+              threadId: reply.threadId,
+            },
+          };
+          const details = integrationEffectReview(name, input, "create_draft", {
+            reviewedEffect: gmailReviewedEffect("create_draft", "POST", requestPath, requestBody, {
+              to: input.to,
+              cc: input.cc,
+              bcc: input.bcc,
+              subject: input.subject,
+              body: typeof input.body === "string" ? input.body : decodeRawEmail(raw),
+              threadId: reply.threadId,
+            }),
+          });
+          await this.requireApproval("Create a Gmail draft", details);
+          const beforeSend = await this.createEffectGuard(settings, name, input, details);
           const result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/drafts",
-            body: {
-              message: {
-                raw,
-                threadId: reply.threadId,
-              },
-            },
+            path: requestPath,
+            body: requestBody,
+            beforeSend,
           });
           return {
             success: true,
@@ -544,12 +667,9 @@ export class GmailTools {
           if (typeof input.draft_id !== "string" || !input.draft_id.trim()) {
             throw new Error("draft_id is required for gmail_update_draft");
           }
-          const existing = await gmailRequest(settings, {
-            method: "GET",
-            path: `/users/me/drafts/${input.draft_id}`,
-            query: { format: "full" },
-          });
-          const message = existing.data?.message as GmailMessage;
+          const requestPath = `/users/me/drafts/${encodeURIComponent(input.draft_id)}`;
+          const snapshot = await this.readDraftReviewSnapshot(settings, input.draft_id);
+          const message = snapshot.message;
           if (hasAttachments(message)) {
             throw new Error("Drafts with attachments are not editable through this built-in tool");
           }
@@ -560,16 +680,41 @@ export class GmailTools {
             subject: input.subject ?? getHeader(message, "Subject") ?? "",
             body: input.body ?? extractBody(message),
           };
+          const reviewedRevision = snapshot.revisionSha256;
           const raw = buildRawEmail(merged as GmailActionInput & Record<string, unknown>);
+          const requestBody = {
+            id: input.draft_id,
+            message: {
+              raw,
+              threadId: message.threadId,
+            },
+          };
+          const details = integrationEffectReview(name, input, "update_draft", {
+            reviewedEffect: gmailReviewedEffect(
+              "update_draft",
+              "PUT",
+              requestPath,
+              requestBody,
+              merged,
+              { draftId: input.draft_id, sourceDraftRevisionSha256: reviewedRevision },
+            ),
+          });
+          await this.requireApproval("Update a Gmail draft", details);
+          const beforeSend = await this.createEffectGuard(settings, name, input, details);
           const result = await gmailRequest(settings, {
             method: "PUT",
-            path: `/users/me/drafts/${input.draft_id}`,
-            body: {
-              id: input.draft_id,
-              message: {
-                raw,
-                threadId: message.threadId,
-              },
+            path: requestPath,
+            body: requestBody,
+            beforeSend: async () => {
+              await beforeSend();
+              const currentRaw = await this.readDraftRaw(settings, input.draft_id);
+              const currentRevision = createHash("sha256").update(currentRaw).digest("hex");
+              if (currentRevision !== reviewedRevision) {
+                throw new Error(
+                  "Gmail draft changed after review; approve its current revision before updating",
+                );
+              }
+              await beforeSend();
             },
           });
           return {
@@ -584,14 +729,39 @@ export class GmailTools {
           if (typeof input.draft_id !== "string" || !input.draft_id.trim()) {
             throw new Error("draft_id is required for gmail_send_draft");
           }
-          await this.requireApproval("Send an existing Gmail draft", {
-            tool: name,
-            draft_id: input.draft_id,
+          const draftPath = `/users/me/drafts/${encodeURIComponent(input.draft_id)}`;
+          const snapshot = await this.readDraftReviewSnapshot(settings, input.draft_id);
+          const reviewedRevision = snapshot.revisionSha256;
+          const draftMessage = snapshot.message;
+          const sendPath = "/users/me/drafts/send";
+          const sendBody = { id: input.draft_id };
+          const details = integrationEffectReview(name, input, "send_draft", {
+            reviewedEffect: gmailReviewedEffect(
+              "send_draft",
+              "POST",
+              sendPath,
+              sendBody,
+              formatMessageSummary(draftMessage, true),
+              { draftId: input.draft_id, draftRevisionSha256: reviewedRevision },
+            ),
           });
+          await this.requireApproval("Send an existing Gmail draft", details);
+          const guard = await this.createEffectGuard(settings, name, input, details);
           const result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/drafts/send",
-            body: { id: input.draft_id },
+            path: sendPath,
+            body: sendBody,
+            beforeSend: async () => {
+              await guard();
+              const currentRaw = await this.readDraftRaw(settings, input.draft_id);
+              const currentRevision = createHash("sha256").update(currentRaw).digest("hex");
+              if (currentRevision !== reviewedRevision) {
+                throw new Error(
+                  "Gmail draft changed after review; approve the updated draft before sending",
+                );
+              }
+              await guard();
+            },
           });
           return { success: true, data: result.data };
         }
@@ -602,23 +772,30 @@ export class GmailTools {
           if (input.attachment_files) {
             throw new Error("Gmail send attachments are not supported by this built-in tool yet");
           }
-          await this.requireApproval("Send a Gmail message", {
-            tool: name,
-            to: input.to,
-            subject: input.subject,
-          });
           const reply = await this.resolveReplyContext(settings, input.reply_message_id);
           const raw = buildRawEmail(
             input as GmailActionInput & Record<string, unknown>,
             reply.headers,
           );
+          const sendPath = "/users/me/messages/send";
+          const sendBody = { raw, threadId: reply.threadId };
+          const details = integrationEffectReview(name, input, "send_email", {
+            reviewedEffect: gmailReviewedEffect("send_email", "POST", sendPath, sendBody, {
+              to: input.to,
+              cc: input.cc,
+              bcc: input.bcc,
+              subject: input.subject,
+              body: typeof input.body === "string" ? input.body : decodeRawEmail(raw),
+              threadId: reply.threadId,
+            }),
+          });
+          await this.requireApproval("Send a Gmail message", details);
+          const beforeSend = await this.createEffectGuard(settings, name, input, details);
           const result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/messages/send",
-            body: {
-              raw,
-              threadId: reply.threadId,
-            },
+            path: sendPath,
+            body: sendBody,
+            beforeSend,
           });
           return { success: true, data: result.data };
         }
@@ -630,29 +807,58 @@ export class GmailTools {
             settings,
             input.add_label_names,
             Boolean(input.create_missing_labels),
+            name,
+            input,
           );
           const removeLabelIds = await this.resolveLabelIds(
             settings,
             input.remove_label_names,
             false,
+            name,
+            input,
           );
           if (addLabelIds.length === 0 && removeLabelIds.length === 0) {
             throw new Error("At least one label name is required");
           }
-          await this.requireApproval("Apply Gmail labels to selected messages", {
-            tool: name,
-            message_ids: input.message_ids,
-            add_label_names: input.add_label_names,
-            remove_label_names: input.remove_label_names,
+          const requestPath = "/users/me/messages/batchModify";
+          const requestBody = {
+            ids: input.message_ids,
+            addLabelIds,
+            removeLabelIds,
+          };
+          const messageIdsSha256 = createHash("sha256")
+            .update(JSON.stringify(input.message_ids))
+            .digest("hex");
+          const details = integrationEffectReview(name, input, "apply_labels", {
+            reviewedEffect: gmailReviewedEffect(
+              "apply_labels",
+              "POST",
+              requestPath,
+              requestBody,
+              {},
+              {
+                target: {
+                  kind: "messages",
+                  count: input.message_ids.length,
+                  idsPreview: input.message_ids.slice(0, 20),
+                },
+                change: {
+                  addLabelIds,
+                  removeLabelIds,
+                  addLabelNames: input.add_label_names,
+                  removeLabelNames: input.remove_label_names,
+                },
+                messageIdsSha256,
+              },
+            ),
           });
+          await this.requireApproval("Apply Gmail labels to selected messages", details);
+          const beforeSend = await this.createEffectGuard(settings, name, input, details);
           const result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/messages/batchModify",
-            body: {
-              ids: input.message_ids,
-              addLabelIds,
-              removeLabelIds,
-            },
+            path: requestPath,
+            body: requestBody,
+            beforeSend,
           });
           return { success: true, status: result.status };
         }
@@ -667,13 +873,9 @@ export class GmailTools {
             settings,
             [input.label_name],
             Boolean(input.create_label_if_missing),
+            name,
+            input,
           );
-          await this.requireApproval("Apply a Gmail label to messages matching a search query", {
-            tool: name,
-            query: input.query,
-            label_name: input.label_name,
-            archive: input.archive,
-          });
           const maxMatches =
             typeof input.max_matches === "number" && Number.isFinite(input.max_matches)
               ? Math.max(1, Math.min(10_000, Math.floor(input.max_matches)))
@@ -697,15 +899,56 @@ export class GmailTools {
             pageToken = messageIds.length >= maxMatches ? undefined : search.data?.nextPageToken;
           } while (pageToken && messageIds.length < maxMatches);
 
-          for (const ids of chunk(messageIds, 1000)) {
+          if (messageIds.length === 0) {
+            return {
+              success: true,
+              matched_count: 0,
+              label_id: labelId,
+              capped: false,
+              max_matches: maxMatches,
+            };
+          }
+
+          const requestPath = "/users/me/messages/batchModify";
+          const requestBodies = chunk(messageIds, 1000).map((ids) => ({
+            ids,
+            addLabelIds: [labelId],
+            removeLabelIds: input.archive ? ["INBOX"] : [],
+          }));
+          const messageIdsSha256 = createHash("sha256")
+            .update(JSON.stringify(messageIds))
+            .digest("hex");
+          const requestDigests = requestBodies.map((body) =>
+            integrationEffectRequestDigest("POST", requestPath, body),
+          );
+          const details = integrationEffectReview(name, input, "bulk_label", {
+            reviewedEffect: gmailReviewedEffect(
+              "bulk_label",
+              "POST",
+              requestPath,
+              { messageIdsSha256, requestDigests },
+              {
+                query: input.query,
+                labelName: input.label_name,
+                matchCount: messageIds.length,
+                messageIdsPreview: messageIds.slice(0, 20),
+              },
+              {
+                target: { kind: "matching_messages", query: input.query, count: messageIds.length },
+                change: { addLabelIds: [labelId], removeLabelIds: input.archive ? ["INBOX"] : [] },
+                messageIdsSha256,
+                requestDigests,
+              },
+            ),
+          });
+          await this.requireApproval("Apply a Gmail label to matching messages", details);
+          const beforeSend = await this.createEffectGuard(settings, name, input, details);
+          for (const body of requestBodies) {
             await gmailRequest(settings, {
               method: "POST",
-              path: "/users/me/messages/batchModify",
-              body: {
-                ids,
-                addLabelIds: [labelId],
-                removeLabelIds: input.archive ? ["INBOX"] : [],
-              },
+              path: requestPath,
+              body,
+              beforeSend,
             });
           }
 
@@ -724,11 +967,6 @@ export class GmailTools {
           if (!Array.isArray(input.message_ids) || input.message_ids.length === 0) {
             throw new Error("message_ids is required for gmail_forward_emails");
           }
-          await this.requireApproval("Forward Gmail messages", {
-            tool: name,
-            to: input.to,
-            message_ids: input.message_ids,
-          });
           const sent = [];
           for (const messageId of input.message_ids) {
             const message = await this.getMessage(settings, messageId, "full");
@@ -752,10 +990,26 @@ export class GmailTools {
               subject: /^fwd?:/i.test(subject) ? subject : `Fwd: ${subject}`,
               body,
             } as GmailActionInput & Record<string, unknown>);
+            const sendPath = "/users/me/messages/send";
+            const sendBody = { raw, threadId: message.threadId };
+            const details = integrationEffectReview(name, input, "forward_email", {
+              message_id: messageId,
+              reviewedEffect: gmailReviewedEffect("forward_email", "POST", sendPath, sendBody, {
+                to: input.to,
+                cc: input.cc,
+                bcc: input.bcc,
+                subject: /^fwd?:/i.test(subject) ? subject : `Fwd: ${subject}`,
+                body,
+                threadId: message.threadId,
+              }),
+            });
+            await this.requireApproval("Forward a Gmail message", details);
+            const beforeSend = await this.createEffectGuard(settings, name, input, details);
             const result = await gmailRequest(settings, {
               method: "POST",
-              path: "/users/me/messages/send",
-              body: { raw, threadId: message.threadId },
+              path: sendPath,
+              body: sendBody,
+              beforeSend,
             });
             sent.push(result.data);
           }
@@ -857,22 +1111,29 @@ export class GmailTools {
             throw new Error("Missing body or subject for send_message");
           }
 
-          await this.requireApproval("Send a Gmail message", {
-            action: "send_message",
-            to: input.to,
-            subject: input.subject,
-          });
-
           const raw = input.raw || buildRawEmail(input);
           const payload: Record<string, Any> = { raw };
           if (input.thread_id) {
             payload.threadId = input.thread_id;
           }
-
+          const requestPath = "/users/me/messages/send";
+          const details = integrationEffectReview("gmail_action", input, action, {
+            reviewedEffect: gmailReviewedEffect(action, "POST", requestPath, payload, {
+              to: input.to,
+              cc: input.cc,
+              bcc: input.bcc,
+              subject: input.subject,
+              body: typeof input.body === "string" ? input.body : decodeRawEmail(raw),
+              threadId: input.thread_id,
+            }),
+          });
+          await this.requireApproval("Send a Gmail message", details);
+          const beforeSend = await this.createEffectGuard(settings, "gmail_action", input, details);
           result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/messages/send",
+            path: requestPath,
             body: payload,
+            beforeSend,
           });
           break;
         }
@@ -889,63 +1150,110 @@ export class GmailTools {
           if (input.thread_id) {
             payload.message.threadId = input.thread_id;
           }
+          const requestPath = "/users/me/drafts";
+          const details = integrationEffectReview("gmail_action", input, action, {
+            reviewedEffect: gmailReviewedEffect(action, "POST", requestPath, payload, {
+              to: input.to,
+              cc: input.cc,
+              bcc: input.bcc,
+              subject: input.subject,
+              body: typeof input.body === "string" ? input.body : decodeRawEmail(raw),
+              threadId: input.thread_id,
+            }),
+          });
+          await this.requireApproval("Create a Gmail draft", details);
+          const beforeSend = await this.createEffectGuard(settings, "gmail_action", input, details);
           result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/drafts",
+            path: requestPath,
             body: payload,
+            beforeSend,
           });
           break;
         }
         case "reply_to_thread": {
           if (!input.thread_id) throw new Error("Missing thread_id for reply_to_thread");
           if (!input.raw && !input.to) throw new Error("Missing to for reply_to_thread");
-          await this.requireApproval("Reply to a Gmail thread", {
-            action: "reply_to_thread",
-            thread_id: input.thread_id,
-            to: input.to,
-            subject: input.subject,
-          });
           const raw = input.raw || buildRawEmail(input);
+          const requestPath = "/users/me/messages/send";
+          const requestBody = {
+            raw,
+            threadId: input.thread_id,
+          };
+          const details = integrationEffectReview("gmail_action", input, action, {
+            reviewedEffect: gmailReviewedEffect(action, "POST", requestPath, requestBody, {
+              to: input.to,
+              cc: input.cc,
+              bcc: input.bcc,
+              subject: input.subject,
+              body: typeof input.body === "string" ? input.body : decodeRawEmail(raw),
+              threadId: input.thread_id,
+            }),
+          });
+          await this.requireApproval("Reply to a Gmail thread", details);
+          const beforeSend = await this.createEffectGuard(settings, "gmail_action", input, details);
           result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/messages/send",
-            body: {
-              raw,
-              threadId: input.thread_id,
-            },
+            path: requestPath,
+            body: requestBody,
+            beforeSend,
           });
           break;
         }
         case "archive_thread": {
           if (!input.thread_id) throw new Error("Missing thread_id for archive_thread");
-          await this.requireApproval("Archive a Gmail thread", {
-            action: "archive_thread",
-            thread_id: input.thread_id,
+          const requestPath = `/users/me/threads/${encodeURIComponent(input.thread_id)}/modify`;
+          const requestBody = { removeLabelIds: ["INBOX"] };
+          const details = integrationEffectReview("gmail_action", input, action, {
+            reviewedEffect: gmailReviewedEffect(
+              action,
+              "POST",
+              requestPath,
+              requestBody,
+              {},
+              {
+                target: { kind: "thread", id: input.thread_id },
+                change: { removeLabelIds: ["INBOX"] },
+              },
+            ),
           });
+          await this.requireApproval("Archive a Gmail thread", details);
+          const beforeSend = await this.createEffectGuard(settings, "gmail_action", input, details);
           result = await gmailRequest(settings, {
             method: "POST",
-            path: `/users/me/threads/${input.thread_id}/modify`,
-            body: {
-              removeLabelIds: ["INBOX"],
-            },
+            path: requestPath,
+            body: requestBody,
+            beforeSend,
           });
           break;
         }
         case "modify_thread_labels": {
           if (!input.thread_id) throw new Error("Missing thread_id for modify_thread_labels");
-          await this.requireApproval("Modify labels on a Gmail thread", {
-            action: "modify_thread_labels",
-            thread_id: input.thread_id,
-            add: input.label_ids_add,
-            remove: input.label_ids_remove,
+          const requestPath = `/users/me/threads/${encodeURIComponent(input.thread_id)}/modify`;
+          const requestBody = {
+            addLabelIds: input.label_ids_add,
+            removeLabelIds: input.label_ids_remove,
+          };
+          const details = integrationEffectReview("gmail_action", input, action, {
+            reviewedEffect: gmailReviewedEffect(
+              action,
+              "POST",
+              requestPath,
+              requestBody,
+              {},
+              {
+                target: { kind: "thread", id: input.thread_id },
+                change: requestBody,
+              },
+            ),
           });
+          await this.requireApproval("Modify labels on a Gmail thread", details);
+          const beforeSend = await this.createEffectGuard(settings, "gmail_action", input, details);
           result = await gmailRequest(settings, {
             method: "POST",
-            path: `/users/me/threads/${input.thread_id}/modify`,
-            body: {
-              addLabelIds: input.label_ids_add,
-              removeLabelIds: input.label_ids_remove,
-            },
+            path: requestPath,
+            body: requestBody,
+            beforeSend,
           });
           break;
         }
@@ -953,32 +1261,68 @@ export class GmailTools {
           if (!input.message_ids?.length) {
             throw new Error("Missing message_ids for batch_modify_messages");
           }
-          await this.requireApproval("Batch modify Gmail messages", {
-            action: "batch_modify_messages",
-            message_ids: input.message_ids,
-            add: input.label_ids_add,
-            remove: input.label_ids_remove,
+          const requestPath = "/users/me/messages/batchModify";
+          const requestBody = {
+            ids: input.message_ids,
+            addLabelIds: input.label_ids_add,
+            removeLabelIds: input.label_ids_remove,
+          };
+          const messageIdsSha256 = createHash("sha256")
+            .update(JSON.stringify(input.message_ids))
+            .digest("hex");
+          const details = integrationEffectReview("gmail_action", input, action, {
+            reviewedEffect: gmailReviewedEffect(
+              action,
+              "POST",
+              requestPath,
+              requestBody,
+              {},
+              {
+                target: {
+                  kind: "messages",
+                  count: input.message_ids.length,
+                  idsPreview: input.message_ids.slice(0, 20),
+                },
+                change: {
+                  addLabelIds: input.label_ids_add,
+                  removeLabelIds: input.label_ids_remove,
+                },
+                messageIdsSha256,
+              },
+            ),
           });
+          await this.requireApproval("Batch modify Gmail messages", details);
+          const beforeSend = await this.createEffectGuard(settings, "gmail_action", input, details);
           result = await gmailRequest(settings, {
             method: "POST",
-            path: "/users/me/messages/batchModify",
-            body: {
-              ids: input.message_ids,
-              addLabelIds: input.label_ids_add,
-              removeLabelIds: input.label_ids_remove,
-            },
+            path: requestPath,
+            body: requestBody,
+            beforeSend,
           });
           break;
         }
         case "trash_message": {
           if (!input.message_id) throw new Error("Missing message_id for trash_message");
-          await this.requireApproval("Trash a Gmail message", {
-            action: "trash_message",
-            message_id: input.message_id,
+          const requestPath = `/users/me/messages/${encodeURIComponent(input.message_id)}/trash`;
+          const details = integrationEffectReview("gmail_action", input, action, {
+            reviewedEffect: gmailReviewedEffect(
+              action,
+              "POST",
+              requestPath,
+              undefined,
+              {},
+              {
+                target: { kind: "message", id: input.message_id },
+                change: { action: "move_to_trash" },
+              },
+            ),
           });
+          await this.requireApproval("Trash a Gmail message", details);
+          const beforeSend = await this.createEffectGuard(settings, "gmail_action", input, details);
           result = await gmailRequest(settings, {
             method: "POST",
-            path: `/users/me/messages/${input.message_id}/trash`,
+            path: requestPath,
+            beforeSend,
           });
           break;
         }

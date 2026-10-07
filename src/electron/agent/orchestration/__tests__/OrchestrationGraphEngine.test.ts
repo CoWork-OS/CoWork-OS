@@ -211,6 +211,22 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("does not dispatch another graph effect after persisted root stop", async () => {
+    db.exec("CREATE TABLE bot_task_stop_intents(task_id TEXT PRIMARY KEY,active INTEGER NOT NULL)");
+    db.prepare("INSERT INTO bot_task_stop_intents(task_id,active) VALUES('stopped-root',1)").run();
+    const { deps } = makeDeps();
+    const engine = new OrchestrationGraphEngine(db, deps);
+    const result = await engine.createRun({
+      rootTaskId: "stopped-root",
+      workspaceId: "workspace-1",
+      kind: "test",
+      maxParallel: 1,
+      nodes: [makeNode("next-local")],
+    });
+    expect(deps.createChildTask).not.toHaveBeenCalled();
+    expect(deps.createRootTask).not.toHaveBeenCalled();
+    expect(result.nodes[0].status).toBe("failed");
+  });
   it("admits a ready node once across two engines sharing the database", async () => {
     const dbPath = path.join(tempDir, "graph.db");
     const dbA = new Database(dbPath);
@@ -567,7 +583,9 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
 
     await recovered.resumeRunningRuns();
 
-    expect(notifications).toEqual([expect.objectContaining({ nodeId: node.id, status: "blocked" })]);
+    expect(notifications).toEqual([
+      expect.objectContaining({ nodeId: node.id, status: "blocked" }),
+    ]);
 
     const after = await recovered.getRepository().findSnapshotByRunId(snapshot.run.id);
     expect(deps.deps.createChildTask).not.toHaveBeenCalled();

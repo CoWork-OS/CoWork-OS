@@ -18,13 +18,14 @@ function createInMemoryInputRequestRepo(requestId: string) {
     findById: vi.fn((id: string) => store.get(id)),
     resolve: vi.fn((id: string, status: "submitted" | "dismissed", answers?: Any) => {
       const existing = store.get(id);
-      if (!existing || existing.status !== "pending") return;
+      if (!existing || existing.status !== "pending") return false;
       store.set(id, {
         ...existing,
         status,
         answers,
         resolvedAt: Date.now(),
       });
+      return true;
     }),
     list: vi.fn(),
     __store: store,
@@ -327,6 +328,7 @@ describe("AgentDaemon structured input requests", () => {
         })),
         update: vi.fn(),
       },
+      findRecoverableResponsibilityActionReviewInput: vi.fn().mockResolvedValue(undefined),
       logEvent: vi.fn(),
     } as Any;
 
@@ -376,13 +378,14 @@ describe("AgentDaemon structured input requests", () => {
       },
       inputRequestRepo: {
         findAllPending: vi.fn().mockResolvedValue([]),
-        resolve: vi.fn().mockResolvedValue(undefined),
+        resolve: vi.fn().mockResolvedValue(true),
       },
       taskRepo: {
         findByStatus: vi.fn().mockReturnValue([]),
         findById: vi.fn().mockReturnValue({ id: "task-async", status: "executing" }),
         update: vi.fn(),
       },
+      findRecoverableResponsibilityActionReviewInput: vi.fn().mockResolvedValue(undefined),
       logEvent: vi.fn(),
     } as Any;
 
@@ -420,7 +423,7 @@ describe("AgentDaemon structured input requests", () => {
             ],
           },
         ]),
-        resolve: vi.fn(),
+        resolve: vi.fn().mockResolvedValue(true),
       },
       taskRepo: {
         findByStatus: vi.fn().mockReturnValue([]),

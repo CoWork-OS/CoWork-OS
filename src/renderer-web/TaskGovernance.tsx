@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { BrowserHostTransport } from "./transport";
+import {
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+  resolveInlineApprovalDraftReviewResponse,
+  type InlineApprovalDraftReview,
+  type ResponsibilityActionReview,
+} from "../shared/approval-draft-presentation";
 
 type Approval = {
   id: string;
@@ -7,6 +13,7 @@ type Approval = {
   description: string;
   type: string;
   expectedVersion: number;
+  revisionHash: string;
 };
 type Question = {
   id: string;
@@ -14,11 +21,15 @@ type Question = {
   question: string;
   options: Array<{ label: string; description: string }>;
 };
-type InputRequest = {
+export type InputRequest = {
   id: string;
   taskId: string;
   expectedVersion: number;
   questions: Question[];
+  baseDraftReview?: Pick<InlineApprovalDraftReview, "draft" | "previews">;
+  responsibilityActionReview?:
+    | { required: true; state: "invalid" }
+    | { required: true; state: "valid"; review: ResponsibilityActionReview };
 };
 type Answer = { optionLabel?: string; otherText?: string };
 type Attempt = {
@@ -26,6 +37,7 @@ type Attempt = {
   key: string;
   kind: "approval" | "input_request";
   expectedVersion: number;
+  expectedRevisionHash?: string;
   decision: "approved" | "denied" | "submitted" | "dismissed";
   answers?: Record<string, Answer>;
 };
@@ -61,6 +73,12 @@ export function TaskGovernance({
   }, [storageKey, attempt]);
 
   useEffect(() => {
+    if (!hasApprovalAttemptRevisionChanged(attempt, approvals)) return;
+    setAttempt(null);
+    setNotice("This approval changed. Review the updated request before deciding again.");
+  }, [attempt, approvals]);
+
+  useEffect(() => {
     if (!transport || !connected || (!approvalsEnabled && !inputsEnabled)) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -93,8 +111,19 @@ export function TaskGovernance({
         );
         setError("");
       } catch (cause) {
-        if (active)
+        if (active) {
           setError(cause instanceof Error ? cause.message : "Could not load pending decisions.");
+          setInputs((current) =>
+            current.map((request) =>
+              requiresResponsibilityActionReview(request)
+                ? {
+                    ...request,
+                    responsibilityActionReview: { required: true, state: "invalid" },
+                  }
+                : request,
+            ),
+          );
+        }
       } finally {
         if (active) timer = setTimeout(() => void load(), 5_000);
       }
@@ -111,6 +140,7 @@ export function TaskGovernance({
     id: string,
     decision: Attempt["decision"],
     expectedVersion: number,
+    expectedRevisionHash?: string,
   ): Promise<boolean> => {
     if (!transport) return false;
     try {
@@ -118,6 +148,7 @@ export function TaskGovernance({
         taskId,
         workspaceId,
         expectedVersion,
+        ...(kind === "approval" && expectedRevisionHash ? { expectedRevisionHash } : {}),
         [kind === "approval" ? "approvalId" : "requestId"]: id,
       });
       const item = isRecord(result)
@@ -150,6 +181,12 @@ export function TaskGovernance({
       (attempt && (attempt.kind !== "approval" || attempt.id !== approval.id))
     )
       return;
+    if (attempt?.kind === "approval" && attempt.expectedRevisionHash !== approval.revisionHash) {
+      setAttempt(null);
+      setError("This approval changed. Review the updated request before deciding again.");
+      setNotice("");
+      return;
+    }
     const decision = approved ? "approved" : "denied";
     if (attempt && attempt.decision !== decision) return;
     const currentAttempt = attempt ?? {
@@ -157,6 +194,7 @@ export function TaskGovernance({
       key: crypto.randomUUID(),
       kind: "approval" as const,
       expectedVersion: approval.expectedVersion,
+      expectedRevisionHash: approval.revisionHash,
       decision,
     };
     setAttempt(currentAttempt);
@@ -171,6 +209,7 @@ export function TaskGovernance({
           taskId,
           workspaceId,
           expectedVersion: approval.expectedVersion,
+          expectedRevisionHash: approval.revisionHash,
           approved,
         },
         { operationKey: currentAttempt.key, mutation: true },
@@ -182,7 +221,16 @@ export function TaskGovernance({
       setNotice("Decision recorded by your CoWork host.");
       setRefresh((current) => current + 1);
     } catch (cause) {
-      if (await reconcile("approval", approval.id, decision, approval.expectedVersion)) return;
+      if (
+        await reconcile(
+          "approval",
+          approval.id,
+          decision,
+          approval.expectedVersion,
+          approval.revisionHash,
+        )
+      )
+        return;
       setError(
         cause instanceof Error
           ? cause.message
@@ -281,7 +329,13 @@ export function TaskGovernance({
             disabled={!connected || busy}
             onClick={() => {
               setBusy(true);
-              void reconcile(attempt.kind, attempt.id, attempt.decision, attempt.expectedVersion)
+              void reconcile(
+                attempt.kind,
+                attempt.id,
+                attempt.decision,
+                attempt.expectedVersion,
+                attempt.expectedRevisionHash,
+              )
                 .then((confirmed) => {
                   if (!confirmed)
                     setError(
@@ -351,7 +405,7 @@ export function TaskGovernance({
   );
 }
 
-function InputRequestForm({
+export function InputRequestForm({
   request,
   disabled,
   locked,
@@ -366,68 +420,99 @@ function InputRequestForm({
 }) {
   const [choices, setChoices] = useState<Record<string, string>>({});
   const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
-  const complete = request.questions.every((question) => {
-    const choice = choices[question.id];
-    return choice && (choice !== "__other__" || Boolean(otherTexts[question.id]?.trim()));
-  });
+  const requiresActionReview = requiresResponsibilityActionReview(request);
+  const validActionReview = request.responsibilityActionReview?.state === "valid";
+  const currentIdentity = inputRequestIdentity(request);
+  const [selectionIdentity, setSelectionIdentity] = useState(currentIdentity);
+  useEffect(() => {
+    setChoices({});
+    setOtherTexts({});
+    setSelectionIdentity("");
+  }, [currentIdentity]);
+  const canSubmit = inputRequestCanSubmit(request, choices, otherTexts, selectionIdentity);
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!complete || retryDecision === "dismissed") return;
-    const answers = Object.fromEntries(
-      request.questions.map((question) => [
-        question.id,
-        choices[question.id] === "__other__"
-          ? { otherText: otherTexts[question.id]?.trim() }
-          : { optionLabel: choices[question.id] },
-      ]),
-    );
-    onRespond("submitted", answers);
+    if (!canSubmit || retryDecision === "dismissed") return;
+    onRespond("submitted", buildInputRequestAnswers(request, choices, otherTexts));
   };
   return (
     <form className="web-decision-card web-input-form" onSubmit={submit}>
       <p className="web-eyebrow">Question from this task</p>
+      {requiresActionReview && (
+        <>
+          <ApprovalDraftBaseReviewCard review={request.baseDraftReview} />
+          <ResponsibilityActionReviewCard review={request.responsibilityActionReview} />
+        </>
+      )}
       {request.questions.map((question) => (
         <fieldset key={question.id} disabled={disabled || locked}>
           <legend>{question.question}</legend>
-          {question.options.map((option) => (
-            <label key={option.label}>
+          {question.options
+            .map((option) => ({ option }))
+            .filter(
+              ({ option }) =>
+                !requiresActionReview ||
+                question.id !== RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID ||
+                ["deny once", "allow once"].includes(option.label.trim().toLowerCase()),
+            )
+            .map(({ option }) => (
+              <label key={option.label}>
+                <input
+                  type="radio"
+                  name={`${request.id}:${question.id}`}
+                  checked={choices[question.id] === option.label}
+                  disabled={
+                    question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID &&
+                    option.label.trim().toLowerCase() === "allow once" &&
+                    !validActionReview
+                  }
+                  onChange={() => {
+                    setChoices((current) => ({ ...current, [question.id]: option.label }));
+                    setSelectionIdentity(currentIdentity);
+                  }}
+                />
+                <span>
+                  {option.label}
+                  {option.description ? ` — ${option.description}` : ""}
+                </span>
+              </label>
+            ))}
+          {!(
+            requiresActionReview &&
+            question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
+          ) && (
+            <label>
               <input
                 type="radio"
                 name={`${request.id}:${question.id}`}
-                checked={choices[question.id] === option.label}
-                onChange={() =>
-                  setChoices((current) => ({ ...current, [question.id]: option.label }))
-                }
+                checked={choices[question.id] === "__other__"}
+                onChange={() => {
+                  setChoices((current) => ({ ...current, [question.id]: "__other__" }));
+                  setSelectionIdentity(currentIdentity);
+                }}
               />
-              <span>
-                {option.label}
-                {option.description ? ` — ${option.description}` : ""}
-              </span>
+              <span>Other</span>
             </label>
-          ))}
-          <label>
-            <input
-              type="radio"
-              name={`${request.id}:${question.id}`}
-              checked={choices[question.id] === "__other__"}
-              onChange={() => setChoices((current) => ({ ...current, [question.id]: "__other__" }))}
-            />
-            <span>Other</span>
-          </label>
-          {choices[question.id] === "__other__" && (
-            <textarea
-              aria-label={`Other answer for ${question.header}`}
-              value={otherTexts[question.id] ?? ""}
-              maxLength={8_000}
-              onChange={(event) =>
-                setOtherTexts((current) => ({ ...current, [question.id]: event.target.value }))
-              }
-            />
           )}
+          {choices[question.id] === "__other__" &&
+            !(
+              requiresActionReview &&
+              question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
+            ) && (
+              <textarea
+                aria-label={`Other answer for ${question.header}`}
+                value={otherTexts[question.id] ?? ""}
+                maxLength={8_000}
+                onChange={(event) => {
+                  setOtherTexts((current) => ({ ...current, [question.id]: event.target.value }));
+                  setSelectionIdentity(currentIdentity);
+                }}
+              />
+            )}
         </fieldset>
       ))}
       <div className="web-decision-actions">
-        <button type="submit" disabled={disabled || !complete || retryDecision === "dismissed"}>
+        <button type="submit" disabled={disabled || !canSubmit || retryDecision === "dismissed"}>
           {retryDecision === "submitted" ? "Retry response" : "Send response"}
         </button>
         <button
@@ -443,6 +528,91 @@ function InputRequestForm({
   );
 }
 
+export function ResponsibilityActionReviewCard({
+  review,
+}: {
+  review: InputRequest["responsibilityActionReview"];
+}) {
+  return (
+    <section className="web-decision-card" aria-label="Proposed write for responsibility review">
+      <p className="web-eyebrow">Proposed write for this request</p>
+      {review?.state !== "valid" ? (
+        <p role="alert">
+          The exact proposed write could not be reviewed. Allow once is unavailable.
+        </p>
+      ) : (
+        <>
+          <dl>
+            <dt>Target</dt>
+            <dd>
+              <code>{review.review.canonicalPath}</code>
+            </dd>
+            <dt>SHA-256</dt>
+            <dd>
+              <code>{review.review.contentSha256}</code>
+            </dd>
+            <dt>Content size</dt>
+            <dd>{review.review.contentBytes.toLocaleString()} bytes</dd>
+          </dl>
+          <p>Exact proposed content</p>
+          <pre aria-label="Full proposed file content" style={{ whiteSpace: "pre-wrap" }}>
+            {review.review.content}
+          </pre>
+        </>
+      )}
+    </section>
+  );
+}
+
+export function ApprovalDraftBaseReviewCard({
+  review,
+}: {
+  review: InputRequest["baseDraftReview"];
+}) {
+  return (
+    <section className="web-decision-card" aria-label="Current target revision for review">
+      <p className="web-eyebrow">Current target revision</p>
+      {!review || review.draft.state === "unavailable" ? (
+        <p>The current target revision could not be inspected.</p>
+      ) : (
+        <>
+          <p>This is the existing file that the proposed write would replace.</p>
+          {review.draft.files.map((file) => {
+            const preview = review.previews.find(
+              (candidate) =>
+                candidate.reference === file.reference && candidate.sha256 === file.sha256,
+            );
+            return (
+              <details key={file.reference} open={review.draft.files.length === 1}>
+                <summary>
+                  {file.reference} ·{" "}
+                  {file.status === "missing"
+                    ? "Missing when requested"
+                    : `${file.size!.toLocaleString()} bytes`}
+                </summary>
+                {file.sha256 && <p>Current file SHA-256: {file.sha256}</p>}
+                {preview ? (
+                  <>
+                    <pre
+                      aria-label="Current target file preview"
+                      style={{ whiteSpace: "pre-wrap" }}
+                    >
+                      {preview.text}
+                    </pre>
+                    {preview.truncated && <p>Current file preview is truncated.</p>}
+                  </>
+                ) : (
+                  file.status === "present" && <p>Current file preview is unavailable.</p>
+                )}
+              </details>
+            );
+          })}
+        </>
+      )}
+    </section>
+  );
+}
+
 function parseApprovals(value: unknown, taskId: string): Approval[] {
   if (!isRecord(value) || !Array.isArray(value.approvals))
     throw new Error("The host returned invalid approvals.");
@@ -453,7 +623,9 @@ function parseApprovals(value: unknown, taskId: string): Approval[] {
       item.taskId !== taskId ||
       typeof item.description !== "string" ||
       typeof item.type !== "string" ||
-      !Number.isSafeInteger(item.expectedVersion)
+      !Number.isSafeInteger(item.expectedVersion) ||
+      typeof item.revisionHash !== "string" ||
+      !REVISION_HASH_RE.test(item.revisionHash)
     ) {
       throw new Error("The host returned an invalid approval.");
     }
@@ -461,7 +633,7 @@ function parseApprovals(value: unknown, taskId: string): Approval[] {
   });
 }
 
-function parseInputs(value: unknown, taskId: string): InputRequest[] {
+export function parseInputs(value: unknown, taskId: string): InputRequest[] {
   if (!isRecord(value) || !Array.isArray(value.inputRequests))
     throw new Error("The host returned invalid input requests.");
   return value.inputRequests.map((item) => {
@@ -494,8 +666,102 @@ function parseInputs(value: unknown, taskId: string): InputRequest[] {
       });
       return { id: question.id, header: question.header, question: question.question, options };
     });
-    return { id: item.id, taskId, expectedVersion: Number(item.expectedVersion), questions };
+    const parsedRequest: InputRequest = {
+      id: item.id,
+      taskId,
+      expectedVersion: Number(item.expectedVersion),
+      questions,
+    };
+    if (requiresResponsibilityActionReview(parsedRequest)) {
+      const baseReview = isRecord(item.draftReview) ? item.draftReview : {};
+      const normalized = resolveInlineApprovalDraftReviewResponse(
+        {
+          draft: baseReview.draft,
+          previews: baseReview.previews,
+          responsibilityActionReview: item.responsibilityActionReview,
+        },
+        true,
+      )!;
+      parsedRequest.baseDraftReview = {
+        draft: normalized.draft,
+        previews: normalized.previews,
+      };
+      parsedRequest.responsibilityActionReview = normalized.responsibilityActionReview ?? {
+        required: true,
+        state: "invalid",
+      };
+    }
+    return parsedRequest;
   });
+}
+
+function requiresResponsibilityActionReview(request: Pick<InputRequest, "questions">): boolean {
+  return request.questions.some(
+    (question) => question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+  );
+}
+
+export function inputRequestIdentity(request: InputRequest): string {
+  return JSON.stringify({
+    taskId: request.taskId,
+    id: request.id,
+    expectedVersion: request.expectedVersion,
+    questions: request.questions,
+    baseRevision:
+      request.baseDraftReview?.draft.state === "bound"
+        ? request.baseDraftReview.draft.files.map((file) => ({
+            reference: file.reference,
+            status: file.status,
+            sha256: file.sha256,
+            size: file.size,
+          }))
+        : (request.baseDraftReview?.draft.state ?? "absent"),
+    responsibilityActionReview:
+      request.responsibilityActionReview?.state === "valid"
+        ? {
+            canonicalPath: request.responsibilityActionReview.review.canonicalPath,
+            contentSha256: request.responsibilityActionReview.review.contentSha256,
+            contentBytes: request.responsibilityActionReview.review.contentBytes,
+          }
+        : (request.responsibilityActionReview?.state ?? "absent"),
+  });
+}
+
+export function inputRequestCanSubmit(
+  request: InputRequest,
+  choices: Record<string, string>,
+  otherTexts: Record<string, string>,
+  selectionIdentity: string,
+): boolean {
+  if (selectionIdentity !== inputRequestIdentity(request)) return false;
+  const complete = request.questions.every((question) => {
+    const choice = choices[question.id];
+    return choice && (choice !== "__other__" || Boolean(otherTexts[question.id]?.trim()));
+  });
+  if (!complete) return false;
+  if (!requiresResponsibilityActionReview(request)) return true;
+  const decisionQuestions = request.questions.filter(
+    (question) => question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+  );
+  if (decisionQuestions.length !== 1) return false;
+  const decision = choices[RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID]?.trim().toLowerCase();
+  if (decision === "deny once") return true;
+  return decision === "allow once" && request.responsibilityActionReview?.state === "valid";
+}
+
+export function buildInputRequestAnswers(
+  request: InputRequest,
+  choices: Record<string, string>,
+  otherTexts: Record<string, string>,
+): Record<string, Answer> {
+  return Object.fromEntries(
+    request.questions.map((question) => [
+      question.id,
+      choices[question.id] === "__other__"
+        ? { otherText: otherTexts[question.id]?.trim() }
+        : { optionLabel: choices[question.id] },
+    ]),
+  );
 }
 
 function humanize(value: string): string {
@@ -517,6 +783,9 @@ export function readAttempt(storageKey: string): Attempt | null {
       typeof value.key !== "string" ||
       !/^[A-Za-z0-9._:-]{8,128}$/.test(value.key) ||
       (value.kind !== "approval" && value.kind !== "input_request") ||
+      (value.kind === "approval" &&
+        (typeof value.expectedRevisionHash !== "string" ||
+          !REVISION_HASH_RE.test(value.expectedRevisionHash))) ||
       !Number.isSafeInteger(value.expectedVersion) ||
       (value.decision !== "approved" &&
         value.decision !== "denied" &&
@@ -529,6 +798,9 @@ export function readAttempt(storageKey: string): Attempt | null {
       key: value.key,
       kind: value.kind,
       expectedVersion: Number(value.expectedVersion),
+      ...(value.kind === "approval"
+        ? { expectedRevisionHash: value.expectedRevisionHash as string }
+        : {}),
       decision: value.decision,
     };
   } catch {
@@ -540,13 +812,31 @@ export function writeAttempt(storageKey: string, attempt: Attempt | null): void 
   try {
     if (!attempt) window.sessionStorage.removeItem(storageKey);
     else {
-      const { id, key, kind, expectedVersion, decision } = attempt;
+      const { id, key, kind, expectedVersion, expectedRevisionHash, decision } = attempt;
       window.sessionStorage.setItem(
         storageKey,
-        JSON.stringify({ id, key, kind, expectedVersion, decision }),
+        JSON.stringify({
+          id,
+          key,
+          kind,
+          expectedVersion,
+          ...(kind === "approval" && expectedRevisionHash ? { expectedRevisionHash } : {}),
+          decision,
+        }),
       );
     }
   } catch {
     // A disabled storage backend leaves the attempt available in memory.
   }
+}
+
+const REVISION_HASH_RE = /^[0-9a-f]{64}$/;
+
+export function hasApprovalAttemptRevisionChanged(
+  attempt: Attempt | null,
+  approvals: Array<Pick<Approval, "id" | "revisionHash">>,
+): boolean {
+  if (attempt?.kind !== "approval") return false;
+  const current = approvals.find((approval) => approval.id === attempt.id);
+  return Boolean(current && current.revisionHash !== attempt.expectedRevisionHash);
 }

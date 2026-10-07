@@ -1,5 +1,6 @@
 import { AgentRoleData, AgentCapability } from "../../electron/preload";
-import { resolveTwinIcon } from "../utils/twin-icons";
+import { resolveBotMascot } from "../../shared/bot-mascots";
+import { BotMascot } from "./bot-mascot/BotMascot";
 
 // Alias for UI usage
 type AgentRole = AgentRoleData;
@@ -58,14 +59,11 @@ export function AgentRoleCard({
       onClick={onSelect ? handleClick : undefined}
     >
       <div className="agent-role-card-header">
-        <div className="agent-role-icon" style={{ backgroundColor: role.color }}>
-          {role.icon
-            ? (() => {
-                const Icon = resolveTwinIcon(role.icon);
-                return <Icon size={20} strokeWidth={2} />;
-              })()
-            : null}
-        </div>
+        <BotMascot
+          mascot={resolveBotMascot(role.icon)}
+          size={compact ? 28 : 36}
+          expression={role.isActive ? "idle" : "sleeping"}
+        />
         <div className="agent-role-info">
           <span className="agent-role-name">
             {role.displayName}

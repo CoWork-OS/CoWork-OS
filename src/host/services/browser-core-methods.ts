@@ -1,3 +1,4 @@
+import { BotWorkQueryService, parseBotWorkQuery } from "../../electron/agents/BotWorkQueryService";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -73,6 +74,7 @@ export function createBrowserCoreDefinitions({
   // The desktop task admission surface is assembled next to these DB-backed methods and shares
   // this options shape. This factory intentionally does not call daemon operations itself.
   const tasks = new TaskRepository(db);
+  const botWork = new BotWorkQueryService(db);
   const teamRuns = new AgentTeamRunRepository(db);
   const workspaces = new WorkspaceRepository(db);
   const skills = new SkillRepository(db);
@@ -196,6 +198,17 @@ export function createBrowserCoreDefinitions({
       handler: async ([skillId]) => {
         const skill = await skills.findById(skillId as string);
         return skill ? toSkillMetadata(skill) : null;
+      },
+    },
+    listBotWork: {
+      capability: "tasks.read",
+      minArgs: 1,
+      maxArgs: 1,
+      validate: ([query]) => [parseBotWorkQuery(query)],
+      handler: async ([rawQuery]) => {
+        const query = parseBotWorkQuery(rawQuery);
+        await requireWorkspaceAccess(getEffectiveWorkspace, query.workspaceId, false);
+        return botWork.list(query);
       },
     },
     listBotConversations: {

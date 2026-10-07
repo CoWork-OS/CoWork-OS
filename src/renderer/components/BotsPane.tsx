@@ -1,17 +1,22 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { createPortal } from "react-dom";
-import { AlertCircle, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
+import { BotWorkDialog } from "./BotWorkDialog";
+import { useMemo, useState } from "react";
+import { AlertCircle, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
-import {
-  BOT_PROFILE_DESCRIPTION_MAX_LENGTH,
-  BOT_PROFILE_INSTRUCTIONS_MAX_LENGTH,
-  normalizeBotProfileText,
-} from "../utils/bot-profile";
+import { normalizeBotProfileText } from "../utils/bot-profile";
 import { stripAllEmojis } from "../utils/emoji-replacer";
-import { LUCIDE_TWIN_ICONS, TWIN_ICON_KEYS, type TwinIconKey } from "../utils/twin-icons";
 import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
-import { BotProfileDialog } from "./BotProfileDialog";
+import {
+  BOT_MASCOT_IDS,
+  botMascotIcon,
+  resolveBotMascot,
+  type BotMascotId,
+} from "../../shared/bot-mascots";
+import { BotMascot } from "./bot-mascot/BotMascot";
+import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
+import "./bot-roster.css";
+import type { MascotExpression } from "./bot-mascot/mascot-eyes";
+import { BOT_PROFILE_UPDATED_EVENT, BotProfileDialog } from "./BotProfileDialog";
 import { selectLatestBotConversation } from "../utils/bot-conversations";
 import { parseAgentMessageProtocolResult } from "../utils/agent-message-receipt";
 import type {
@@ -35,6 +40,7 @@ export interface BotRole {
 }
 
 interface BotsPaneProps {
+  workspaceId?: string;
   roles: BotRole[];
   tasks: Task[];
   selectedTaskId: string | null;
@@ -45,6 +51,7 @@ interface BotsPaneProps {
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
   onReopenBot?: (task: Task) => void | Promise<void>;
   onOpenAgents?: () => void;
+  onOpenBotMemory?: (workspaceId: string, botName: string) => void;
   selectedConversationProjection?: BotConversationRosterProjection | null;
   conversationProjections?: Readonly<Record<string, BotConversationRosterProjection>>;
   onBotCreated?: (bot: BotRole) => void | Promise<void>;
@@ -60,7 +67,6 @@ const ACTIVE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["executing", "
 const AWAITING_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["paused", "blocked"]);
 const UNAVAILABLE_BOT_STATUSES: ReadonlySet<Task["status"]> = new Set(["failed", "cancelled"]);
 
-const DEFAULT_BOT_ICON: TwinIconKey = "Bot";
 const MAX_BOT_PREVIEW_LENGTH = 140;
 const BOT_WAITING_FOR_REPLY_RE =
   /^waiting for (.+?) to reply(?: before finishing this conversation)?\.?$/i;
@@ -273,11 +279,33 @@ export function filterBots(
   });
 }
 
-function getSafeBotIcon(icon: string | undefined) {
-  if (icon && TWIN_ICON_KEYS.includes(icon as TwinIconKey)) {
-    return LUCIDE_TWIN_ICONS[icon as TwinIconKey];
+/** The roster mascot mirrors the readiness label beside it. */
+export function getBotMascotExpression(
+  readiness: BotConversationReadiness,
+  isActive = true,
+): MascotExpression {
+  if (!isActive) return "sleeping";
+  switch (readiness) {
+    case "working":
+      return "working";
+    case "waiting":
+      return "thinking";
+    case "attention":
+      return "attention";
+    case "unavailable":
+      return "error";
+    default:
+      return "idle";
   }
-  return BotGlyph;
+}
+
+/** New bots start as a character no other bot is using yet. */
+export function pickDefaultBotMascot(roles: ReadonlyArray<Pick<BotRole, "icon">>): BotMascotId {
+  const taken = new Set(roles.map((role) => resolveBotMascot(role.icon)));
+  return (
+    BOT_MASCOT_IDS.find((id) => !taken.has(id)) ??
+    BOT_MASCOT_IDS[roles.length % BOT_MASCOT_IDS.length]
+  );
 }
 
 export function getBotTimestamp(
@@ -321,6 +349,7 @@ function BotRow({
   onReopenBot,
   onOpenAgents,
   onEditBot,
+  onViewWork,
 }: {
   bot: BotRole;
   latestTask?: Task;
@@ -331,9 +360,10 @@ function BotRow({
   onReopenBot?: (task: Task) => void | Promise<void>;
   onOpenAgents?: () => void;
   onEditBot?: () => void;
+  onViewWork?: () => void;
 }) {
   const [isReopening, setIsReopening] = useState(false);
-  const Icon = getSafeBotIcon(bot.icon);
+  const mascot = resolveBotMascot(bot.icon);
   const readiness = getBotConversationReadiness(latestTask, conversationProjection);
   const isActive = readiness === "working";
   const isAwaiting =
@@ -359,12 +389,12 @@ function BotRow({
         aria-label={`${displayName}, ${readinessLabel}, ${preview}`}
         title={latestTask ? preview : "Open bot chat"}
       >
-        <span
-          className="sidebar-bot-avatar"
-          style={{ backgroundColor: bot.color || DEFAULT_BOT_COLOR }}
-          aria-hidden="true"
-        >
-          <Icon size={18} />
+        <span className="sidebar-bot-avatar sidebar-bot-avatar-mascot" aria-hidden="true">
+          <BotMascot
+            mascot={mascot}
+            size={36}
+            expression={getBotMascotExpression(readiness, bot.isActive !== false)}
+          />
           <span
             className={`sidebar-bot-status ${isActive ? "active" : ""} ${isAwaiting ? "awaiting" : ""}`}
           />
@@ -387,6 +417,17 @@ function BotRow({
           </span>
         </span>
       </button>
+      {onViewWork && (
+        <button
+          type="button"
+          className="sidebar-bot-work-button"
+          onClick={onViewWork}
+          aria-label={`View work for ${displayName}`}
+          title="View bot work"
+        >
+          <ClipboardList size={16} />
+        </button>
+      )}
       {onEditBot && (
         <button
           type="button"
@@ -423,24 +464,36 @@ function BotRow({
   );
 }
 
-function CreateBotDialog({
+/** Starting values for a new bot, e.g. from a template. */
+export interface CreateBotPrefill {
+  displayName?: string;
+  description?: string;
+  systemPrompt?: string;
+  mascot?: BotMascotId;
+}
+
+export function CreateBotDialog({
+  existingBots,
+  prefill,
   onClose,
   onCreated,
 }: {
+  existingBots: ReadonlyArray<Pick<BotRole, "icon">>;
+  prefill?: CreateBotPrefill;
   onClose: () => void;
   onCreated: (bot: BotRole) => void | Promise<void>;
 }) {
-  const [displayName, setDisplayName] = useState("");
-  const [description, setDescription] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [icon, setIcon] = useState<TwinIconKey>(DEFAULT_BOT_ICON);
-  const [color, setColor] = useState(DEFAULT_BOT_COLOR);
+  const [values, setValues] = useState<BotFormValues>(() => ({
+    displayName: prefill?.displayName ?? "",
+    description: prefill?.description ?? "",
+    systemPrompt: prefill?.systemPrompt ?? "",
+    icon: botMascotIcon(prefill?.mascot ?? pickDefaultBotMascot(existingBots)),
+  }));
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const cleanName = flattenTaskText(displayName);
+  const create = async () => {
+    const cleanName = flattenTaskText(values.displayName);
     if (!cleanName) {
       setError("Enter a name for this bot.");
       return;
@@ -458,13 +511,15 @@ function CreateBotDialog({
       const created = await api.createAgentRole({
         name: normalizeBotHandle(cleanName),
         displayName: cleanName,
-        description: normalizeBotProfileText(description) || undefined,
-        systemPrompt: normalizeBotProfileText(systemPrompt) || undefined,
-        icon,
-        color,
+        description: normalizeBotProfileText(values.description) || undefined,
+        systemPrompt: normalizeBotProfileText(values.systemPrompt) || undefined,
+        icon: values.icon,
+        color: DEFAULT_BOT_COLOR,
         capabilities: ["code"],
       });
       await onCreated(created);
+      // Other bot surfaces (the roster, the Bots page) reload their list.
+      window.dispatchEvent(new CustomEvent(BOT_PROFILE_UPDATED_EVENT, { detail: created }));
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create this bot.");
@@ -473,108 +528,26 @@ function CreateBotDialog({
     }
   };
 
-  return createPortal(
-    <div className="sidebar-bot-dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="sidebar-bot-dialog"
-        onSubmit={handleSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="sidebar-create-bot-title"
-      >
-        <div className="sidebar-bot-dialog-header">
-          <div>
-            <span className="sidebar-bot-dialog-eyebrow">New bot</span>
-            <h3 id="sidebar-create-bot-title">Create a bot</h3>
-          </div>
-          <button
-            type="button"
-            className="sidebar-bot-dialog-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <label className="sidebar-bot-field">
-          <span>Name</span>
-          <input
-            autoFocus
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-            placeholder="Research bot"
-            maxLength={80}
-          />
-        </label>
-        <label className="sidebar-bot-field">
-          <span>Description</span>
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="What should this bot help with?"
-            maxLength={BOT_PROFILE_DESCRIPTION_MAX_LENGTH}
-            rows={4}
-          />
-          <small>Line breaks are preserved.</small>
-        </label>
-        <label className="sidebar-bot-field">
-          <span>Instructions</span>
-          <textarea
-            value={systemPrompt}
-            onChange={(event) => setSystemPrompt(event.target.value)}
-            placeholder="How should this bot work?"
-            maxLength={BOT_PROFILE_INSTRUCTIONS_MAX_LENGTH}
-            rows={4}
-          />
-          <small>Used when this bot starts its next run.</small>
-        </label>
-        <div className="sidebar-bot-field-row">
-          <label className="sidebar-bot-field">
-            <span>Icon</span>
-            <select value={icon} onChange={(event) => setIcon(event.target.value as TwinIconKey)}>
-              {TWIN_ICON_KEYS.map((iconKey) => (
-                <option key={iconKey} value={iconKey}>
-                  {iconKey}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="sidebar-bot-field sidebar-bot-color-field">
-            <span>Color</span>
-            <input
-              type="color"
-              value={color}
-              onChange={(event) => setColor(event.target.value)}
-              aria-label="Bot color"
-            />
-          </label>
-        </div>
-
-        {error && (
-          <div className="sidebar-bot-dialog-error" role="alert">
-            <AlertCircle size={14} />
-            <span>{error}</span>
-          </div>
-        )}
-
-        <div className="sidebar-bot-dialog-actions">
-          <button type="button" className="sidebar-bot-secondary-button" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="sidebar-bot-primary-button" disabled={isCreating}>
-            {isCreating ? <LoaderCircle className="spinning" size={14} /> : <Plus size={14} />}
-            {isCreating ? "Creating" : "Create bot"}
-          </button>
-        </div>
-      </form>
-    </div>,
-    document.body,
+  return (
+    <BotFormDialog
+      title="New bot"
+      subtitle="Pick a character and tell it what to help with."
+      values={values}
+      onChange={setValues}
+      onSubmit={() => void create()}
+      onClose={onClose}
+      submitLabel="Create bot"
+      busyLabel="Creating…"
+      submitIcon={<Plus size={14} />}
+      footnote="You can change all of this later."
+      busy={isCreating}
+      error={error}
+    />
   );
 }
 
 export function BotsPane({
+  workspaceId,
   roles,
   tasks,
   selectedTaskId,
@@ -585,6 +558,7 @@ export function BotsPane({
   onOpenBot,
   onReopenBot,
   onOpenAgents,
+  onOpenBotMemory,
   selectedConversationProjection,
   conversationProjections,
   onBotCreated,
@@ -593,6 +567,8 @@ export function BotsPane({
   createOpen: createOpenProp,
   onCreateOpenChange,
 }: BotsPaneProps) {
+  const [workBotId, setWorkBotId] = useState<string | null>(null);
+  const workBot = roles.find((bot) => bot.id === workBotId);
   const [query, setQuery] = useState("");
   const [ownCreateOpen, setOwnCreateOpen] = useState(false);
   const createOpen = createOpenProp ?? ownCreateOpen;
@@ -715,14 +691,38 @@ export function BotsPane({
                 onReopenBot={onReopenBot}
                 onOpenAgents={onOpenAgents}
                 onEditBot={() => setEditingBot(bot)}
+                onViewWork={workspaceId ? () => setWorkBotId(bot.id) : undefined}
               />
             );
           })}
         </div>
       )}
 
+      {workspaceId && workBot && (
+        <BotWorkDialog
+          key={`${workspaceId}:${workBot.id}`}
+          workspaceId={workspaceId}
+          botId={workBot.id}
+          botName={workBot.displayName}
+          botIcon={workBot.icon}
+          onOpenContext={
+            onOpenBotMemory
+              ? (memoryWorkspaceId) => {
+                  onOpenBotMemory(memoryWorkspaceId, workBot.displayName);
+                  setWorkBotId(null);
+                }
+              : undefined
+          }
+          onClose={() => setWorkBotId(null)}
+          onSelectTask={onSelectTask}
+        />
+      )}
       {createOpen && onBotCreated && (
-        <CreateBotDialog onClose={() => setCreateOpen(false)} onCreated={onBotCreated} />
+        <CreateBotDialog
+          existingBots={roles}
+          onClose={() => setCreateOpen(false)}
+          onCreated={onBotCreated}
+        />
       )}
       {editingBot && (
         <BotProfileDialog

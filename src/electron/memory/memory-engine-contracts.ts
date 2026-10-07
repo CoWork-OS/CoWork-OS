@@ -47,6 +47,8 @@ export interface MemoryRecallQuery {
   /** Lowest provenance admitted, by trust (default: everything but `third_party`). */
   minSource?: MemoryItemSource;
   surface: MemorySurface;
+  /** Trusted persisted sender authority. A private-channel transport alone is insufficient. */
+  gatewaySenderIsOwner?: boolean;
   /** `index`: ids, titles and scores; `full`: content. */
   detail?: "index" | "full";
   ids?: string[];
@@ -130,6 +132,8 @@ export interface MemoryInjectionContext {
   workspaceId: string | null;
   taskId?: string;
   surface: MemorySurface;
+  /** Trusted persisted sender authority. A private-channel transport alone is insufficient. */
+  gatewaySenderIsOwner?: boolean;
   /** The task or message opted out with `<no-memory>`. */
   noMemory?: boolean;
   /** Contact the surface is handling, when any (allows that contact's items). */

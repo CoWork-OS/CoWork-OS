@@ -1,8 +1,10 @@
+import { requestBotMemoryContext } from "./components/memory/memory-hub-focus";
 import {
   BROWSER_HOST_UNSUPPORTED_ACTION_EVENT,
   hasHostCapability,
   hasHostMethod,
 } from "./host/browser-capabilities";
+import { StaleBrowserDecisionError } from "./host/browser-decision-bridge";
 import {
   memo,
   useState,
@@ -80,6 +82,7 @@ import {
   type NavigationEntry,
 } from "./utils/navigation-history";
 import { WebAccessClient } from "./components/WebAccessClient";
+import { approvalResponseDisposition } from "./utils/approval-response-result";
 import {
   Task,
   Workspace,
@@ -1849,6 +1852,7 @@ const SelectedTaskWorkspaceView = memo(
                 window.dispatchEvent(new Event(BOT_CONVERSATION_HISTORY_OPEN_EVENT));
               }}
               onClose={onCloseRightPanel}
+              onSelectTask={onSelectTask}
             />
           ) : !effectiveRightCollapsed && !remoteTaskView ? (
             <Suspense fallback={<RightPanelFallback />}>
@@ -2187,6 +2191,7 @@ export function App() {
     useState<BrowserWorkbenchOpenRequest | null>(null);
   const [sideChat, setSideChat] = useState<SideChatState | null>(null);
   const [settingsTab, setSettingsTab] = useState<
+    | "memory"
     | "appearance"
     | "llm"
     | "image"
@@ -3783,42 +3788,85 @@ export function App() {
   };
 
   const handleApprovalResponse = async (
-    approvalId: string,
+    approval: ApprovalRequest,
     approved: boolean,
     action?: ApprovalResponseAction,
+    expectedRevisionHash = approval.revisionHash,
   ) => {
-    let handled = false;
+    const approvalId = approval.id;
+    const restoreApprovalForReview = (current?: ApprovalRequest) => {
+      const pending = current ?? pendingApprovalsRef.current.get(approvalId) ?? approval;
+      pendingApprovalsRef.current.set(approvalId, pending);
+      if (isComputerUseAppGrantApproval(pending)) {
+        setComputerUseAppGrantApproval((active) =>
+          active?.id === approvalId || !active ? pending : active,
+        );
+      } else {
+        setGenericApproval((active) => (active?.id === approvalId || !active ? pending : active));
+      }
+    };
     try {
-      await window.electronAPI.respondToApproval({
+      const response = await window.electronAPI.respondToApproval({
         approvalId,
         approved,
         action,
+        expectedRevisionHash,
       });
-      handled = true;
+      const disposition = approvalResponseDisposition(response);
+      if (disposition !== "resolved") {
+        restoreApprovalForReview();
+        addToast({
+          type: disposition === "stale" ? "warning" : "error",
+          title:
+            disposition === "stale"
+              ? "Approval needs a fresh review"
+              : disposition === "in_progress"
+                ? "Approval is still processing"
+                : "Approval action was not confirmed",
+          message:
+            disposition === "stale"
+              ? "This approval changed or expired. It remains visible; refresh the task to review the current request before deciding."
+              : disposition === "in_progress"
+                ? "The approval is still being processed. Keep it open and check again shortly."
+                : "The approval response was not confirmed. The request remains open so you can review it again.",
+        });
+        return;
+      }
     } catch (error) {
       console.error("Failed to respond to approval:", error);
+      if (error instanceof StaleBrowserDecisionError) {
+        restoreApprovalForReview(error.currentApproval);
+        addToast({
+          type: "warning",
+          title: "Approval needs a fresh review",
+          message: error.currentApproval
+            ? "The request changed while you were deciding. The updated request is open for review; decide again only after reviewing it."
+            : "The request changed or expired. It remains visible so you can refresh and review its current state.",
+        });
+        return;
+      }
+      restoreApprovalForReview();
       addToast({
         type: "error",
         title: "Approval action failed",
         message: "Could not send your approval decision. Please try again.",
       });
+      return;
     }
 
-    if (handled) {
-      pendingApprovalsRef.current.delete(approvalId);
-      dismissToast(getApprovalToastId(approvalId));
-      if (!bulkApproveSilentRef.current) {
-        setComputerUseAppGrantApproval((prev) =>
-          prev?.id === approvalId
-            ? pickFirstPendingComputerUseApproval(pendingApprovalsRef.current)
-            : prev,
-        );
-        setGenericApproval((prev) =>
-          prev?.id === approvalId
-            ? pickFirstPendingGenericApproval(pendingApprovalsRef.current)
-            : prev,
-        );
-      }
+    pendingApprovalsRef.current.delete(approvalId);
+    dismissToast(getApprovalToastId(approvalId));
+    if (!bulkApproveSilentRef.current) {
+      setComputerUseAppGrantApproval((prev) =>
+        prev?.id === approvalId
+          ? pickFirstPendingComputerUseApproval(pendingApprovalsRef.current)
+          : prev,
+      );
+      setGenericApproval((prev) =>
+        prev?.id === approvalId
+          ? pickFirstPendingGenericApproval(pendingApprovalsRef.current)
+          : prev,
+      );
     }
   };
 
@@ -3867,7 +3915,7 @@ export function App() {
       bulkApproveSilentRef.current = true;
       try {
         await Promise.all(
-          pendingNonComputerUse.map(([approvalId]) => handleApprovalResponse(approvalId, true)),
+          pendingNonComputerUse.map(([, approval]) => handleApprovalResponse(approval, true)),
         );
       } finally {
         bulkApproveSilentRef.current = false;
@@ -4409,11 +4457,15 @@ export function App() {
           pendingApprovalsRef.current.set(approval.id, approval);
 
           if (isComputerUseAppGrantApproval(approval)) {
-            setComputerUseAppGrantApproval(approval);
+            setComputerUseAppGrantApproval((current) =>
+              !current || current.id === approval.id ? approval : current,
+            );
           } else if (sessionAutoApproveAllRef.current) {
-            void handleApprovalResponse(approval.id, true);
+            void handleApprovalResponse(approval, true);
           } else {
-            setGenericApproval((prev) => prev ?? approval);
+            setGenericApproval((current) =>
+              !current || current.id === approval.id ? approval : current,
+            );
           }
         }
       }
@@ -4538,6 +4590,17 @@ export function App() {
 
         void (async () => {
           try {
+            if (
+              task?.assignedAgentRoleId &&
+              task.workspaceId &&
+              typeof window.electronAPI.getBotNotificationRoute === "function"
+            ) {
+              const route = await window.electronAPI.getBotNotificationRoute({
+                workspaceId: task.workspaceId,
+                agentRoleId: task.assignedAgentRoleId,
+              });
+              if (route.enabled) return;
+            }
             if (task?.agentConfig?.botConversation && task.assignedAgentRoleId) {
               const policy = await getBotNotificationPolicy(task.assignedAgentRoleId);
               if (!policy.onInputRequired) return;
@@ -7080,40 +7143,18 @@ export function App() {
   const continueBotConversationInWorkspace = useCallback(
     async (task: Task, workspaceId: string): Promise<Task> => {
       if (!isTempWorkspaceId(workspaceId)) return task;
-      const teams =
-        task.workspaceId === workspaceId && task.agentConfig?.botTeamId
-          ? await window.electronAPI.listTeams(workspaceId, true)
-          : [];
-      if (!shouldReopenBotConversationInWorkspace(task, workspaceId, teams)) return task;
+      if (!shouldReopenBotConversationInWorkspace(task, workspaceId)) return task;
       const cachedBranch = reopenedBotBranchesRef.current.get(task.id);
       if (cachedBranch?.workspaceId === workspaceId) {
         const current = await window.electronAPI.getTask(cachedBranch.id).catch(() => null);
         if (current) return current as Task;
         reopenedBotBranchesRef.current.delete(task.id);
       }
-      let reopened: Task;
-      try {
-        reopened = await window.electronAPI.reopenBotConversation({ workspaceId, taskId: task.id });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/BOT_(?:MEMBERSHIP_REVOKED|TEAM_UNAVAILABLE)/.test(message)) {
-          reopened = await window.electronAPI.reopenBotConversation({
-            workspaceId,
-            taskId: task.id,
-            repairMembership: true,
-          });
-        } else if (/BOT_WORKSPACE_CONFLICT/.test(message) && task.workspaceId !== workspaceId) {
-          // Legacy or custom-team transcripts can't be branched; adopt them into
-          // this workspace as before so they still open.
-          const adopted = (await window.electronAPI.updateTaskWorkspace(task.id, workspaceId)) as
-            | Task
-            | null
-            | undefined;
-          return adopted || task;
-        } else {
-          throw error;
-        }
-      }
+      const reopened = await window.electronAPI.reopenBotConversation({
+        workspaceId,
+        taskId: task.id,
+        branchToWorkspace: task.workspaceId !== workspaceId,
+      });
       if (reopened.id !== task.id) reopenedBotBranchesRef.current.set(task.id, reopened);
       return reopened;
     },
@@ -7231,21 +7272,11 @@ export function App() {
         return;
       }
       try {
-        let reopened: Task;
-        try {
-          reopened = await window.electronAPI.reopenBotConversation({
-            workspaceId,
-            taskId: task.id,
-          });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          if (!/BOT_(?:MEMBERSHIP_REVOKED|TEAM_UNAVAILABLE)/.test(message)) throw error;
-          reopened = await window.electronAPI.reopenBotConversation({
-            workspaceId,
-            taskId: task.id,
-            repairMembership: true,
-          });
-        }
+        const reopened = await window.electronAPI.reopenBotConversation({
+          workspaceId,
+          taskId: task.id,
+          branchToWorkspace: task.workspaceId !== workspaceId,
+        });
         setBotConversationTasks((previous) => [
           reopened,
           ...previous.filter((candidate) => candidate.id !== reopened.id),
@@ -7288,6 +7319,11 @@ export function App() {
     ],
   );
   const handleOpenSettings = useCallback(() => setCurrentView("settings"), []);
+  const handleOpenBotMemory = useCallback((workspaceId: string, botName: string) => {
+    requestBotMemoryContext(workspaceId, botName);
+    setSettingsTab("memory");
+    setCurrentView("settings");
+  }, []);
   const handleOpenMissionControl = useCallback(() => {
     setMissionControlInitialCompanyId(null);
     setMissionControlInitialIssueId(null);
@@ -8252,6 +8288,7 @@ export function App() {
                   }
                 }}
                 onNewSession={handleNewSession}
+                onOpenBotMemory={handleOpenBotMemory}
                 onOpenSettings={handleOpenSettings}
                 onTasksChanged={refreshTaskLists}
                 onLoadMoreTasks={loadMoreTasks}
@@ -8448,6 +8485,12 @@ export function App() {
               ) : currentView === "agents" ? (
                 <main className="main-content">
                   <AgentsHubPanel
+                    bots={{
+                      workspaceId: currentWorkspace?.id,
+                      onOpenBot: handleOpenBot,
+                      onSelectTask: handleSelectTaskFromShell,
+                      onOpenBotMemory: handleOpenBotMemory,
+                    }}
                     onOpenMissionControl={() => {
                       setMissionControlInitialCompanyId(null);
                       setMissionControlInitialIssueId(null);
@@ -8645,23 +8688,26 @@ export function App() {
           ) : computerUseAppGrantApproval ? (
             <ComputerUseApprovalDialog
               approval={computerUseAppGrantApproval}
-              onAllowSession={() =>
-                void handleApprovalResponse(computerUseAppGrantApproval.id, true)
-              }
-              onDeny={() => void handleApprovalResponse(computerUseAppGrantApproval.id, false)}
+              onAllowSession={() => void handleApprovalResponse(computerUseAppGrantApproval, true)}
+              onDeny={() => void handleApprovalResponse(computerUseAppGrantApproval, false)}
             />
           ) : genericApproval && isBrowserUseDomainApproval(genericApproval) ? (
             <BrowserUseApprovalDialog
               approval={genericApproval}
               onRespond={(action) =>
-                void handleApprovalResponse(genericApproval.id, action.startsWith("allow_"), action)
+                void handleApprovalResponse(genericApproval, action.startsWith("allow_"), action)
               }
             />
           ) : genericApproval ? (
             <GenericApprovalDialog
               approval={genericApproval}
-              onRespond={(action) =>
-                void handleApprovalResponse(genericApproval.id, action.startsWith("allow_"), action)
+              onRespond={(action, expectedRevisionHash) =>
+                void handleApprovalResponse(
+                  genericApproval,
+                  action.startsWith("allow_"),
+                  action,
+                  expectedRevisionHash,
+                )
               }
               onApproveAllSession={showApproveAllWarning}
             />

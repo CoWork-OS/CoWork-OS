@@ -475,6 +475,26 @@ export class WorkSessionContractService {
     });
   }
 
+  /** The committed bytes of an exactly reviewed write, recorded from the approved revision. */
+  recordReviewedOutput(
+    taskId: string,
+    output: { path: string; sha256: string; size: number; approvalId: string },
+  ): ArtifactRevision | undefined {
+    const result = this.getForTask(taskId);
+    if (!result) return undefined;
+    return this.repository.createArtifactRevision({
+      sessionId: result.session.id,
+      taskId,
+      path: output.path,
+      mimeType: "text/plain",
+      sha256: output.sha256,
+      size: output.size,
+      createdBy: "agent",
+      metadata: { evidenceKind: "responsibility_reviewed_write", approvalId: output.approvalId },
+      idempotencyKey: `reviewed-write:${output.approvalId}`,
+    });
+  }
+
   recordArtifactByPath(
     taskId: string,
     path: string,

@@ -11,6 +11,7 @@
  */
 
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import { toPlainAnswerText } from "../../shared/answer-surfaces/blocks";
 import {
   app,
   Tray,
@@ -387,7 +388,7 @@ export class TrayManager {
   private formatResponseForDisplay(text: string): string {
     // Basic markdown-like formatting
     return (
-      text
+      toPlainAnswerText(text)
         // Escape HTML
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")

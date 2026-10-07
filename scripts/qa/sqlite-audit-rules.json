@@ -107,6 +107,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/answer-surfaces/answer-surface-state-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Saved control values of interactive answer surfaces: services-domain units behind the static AnswerSurfaceStateStore, which creates the schema on the host first, plus the delete that runs inside the task-delete transaction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/youtube/youtube-transcript-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Workspace YouTube videos and transcript segments with their FTS index: services-domain units behind the static YouTubeTranscriptStore, which creates the schema on the host first. Saving segments replaces a video's segments in one transaction.",
@@ -220,7 +227,7 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/(agents/AgentTeamOrchestrator|chronicle/ChronicleObservationRepository|hooks/agent-ingress|tray/TrayManager|youtube/YouTubeTranscriptStore|agent/decisions/decision-usage-telemetry|agent/llm/usage-telemetry|agent/tools/(mention-tools|registry|system-tools)|ipc/handlers|control-plane/handlers|main)\\.ts$|^src/daemon/(main|control-plane-methods)\\.ts$",
+      "pattern": "^src/electron/(agents/AgentTeamOrchestrator|chronicle/ChronicleObservationRepository|hooks/agent-ingress|tray/TrayManager|youtube/YouTubeTranscriptStore|answer-surfaces/AnswerSurfaceStateStore|agent/decisions/decision-usage-telemetry|agent/llm/usage-telemetry|agent/tools/(mention-tools|registry|system-tools)|ipc/handlers|control-plane/handlers|main)\\.ts$|^src/daemon/(main|control-plane-methods)\\.ts$",
       "domain": "runtime wiring",
       "access": "Connection handles passed to worker-backed facades and statement ports, which key their routing by connection. No SQL runs here.",
       "plan": "stays: handles only; the host backend behind them is the rollback path",

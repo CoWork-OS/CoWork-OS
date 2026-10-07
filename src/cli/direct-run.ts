@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { presentApprovalRevision } from "../electron/agent/approval-revision";
+import { toPlainAnswerText } from "../shared/answer-surfaces/blocks";
 import { formatApproval } from "./format";
 import { TaskRepository, WorkspaceRepository } from "../electron/database/repository-facades";
 import {
@@ -325,7 +326,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
     daemon.on("assistant_message", (payload: Any) => {
       if (payload?.taskId !== task.id) return;
-      const message = stringifyMessage(payload.message || payload.text || payload.content);
+      // Interactive answer components print as their text version.
+      const message = toPlainAnswerText(
+        stringifyMessage(payload.message || payload.text || payload.content),
+      );
       if (message)
         writeEvent(args, { type: "assistant_message", taskId: task.id, message }, message);
     });

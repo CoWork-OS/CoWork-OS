@@ -63,6 +63,7 @@ import type {
 import type { MemoryUsedForTask } from "../shared/memory-used";
 import type { MemoryReviewMutationResult, MemoryReviewState } from "../shared/memory-review-types";
 import type { MemoryHealthReport, MemorySourcesReport } from "../shared/memory-health-types";
+import type { AnswerImageRequest, AnswerImageResult } from "../shared/answer-surfaces/images";
 import type {
   MemoryRepoCompactResult,
   MemoryRepoSyncNowResult,
@@ -4432,6 +4433,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_SOURCES, data),
   getMemoryHealth: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_HUB_HEALTH, data),
+  // Interactive answer surfaces: saved control values and host-fetched photos
+  getAnswerSurfaceState: (data: { taskId: string; keys: string[] }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_GET_STATE, data),
+  saveAnswerSurfaceState: (data: {
+    taskId: string;
+    key: string;
+    state: Record<string, unknown>;
+    summary: string;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_SAVE_STATE, data),
+  resolveAnswerImages: (data: { taskId?: string; requests: AnswerImageRequest[] }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_RESOLVE_IMAGES, data),
   // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
@@ -8150,6 +8162,20 @@ export interface ElectronAPI {
   }) => Promise<MemoryReviewMutationResult>;
   getMemorySources: (data: { workspaceId: string }) => Promise<MemorySourcesReport>;
   getMemoryHealth: (data: { workspaceId: string }) => Promise<MemoryHealthReport>;
+  getAnswerSurfaceState: (data: {
+    taskId: string;
+    keys: string[];
+  }) => Promise<Record<string, Record<string, unknown>>>;
+  saveAnswerSurfaceState: (data: {
+    taskId: string;
+    key: string;
+    state: Record<string, unknown>;
+    summary: string;
+  }) => Promise<{ ok: true }>;
+  resolveAnswerImages: (data: {
+    taskId?: string;
+    requests: AnswerImageRequest[];
+  }) => Promise<Array<AnswerImageResult | null>>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;

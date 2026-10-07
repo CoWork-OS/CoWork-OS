@@ -1725,6 +1725,7 @@ export function renderEventDetails(
               markdownComponents={markdownComponents}
               workspacePath={workspacePath}
               onOpenViewer={onOpenViewer}
+              taskId={event.taskId}
             />
           </div>
           {renderLinkedArtifactCards(linkedMessage)}

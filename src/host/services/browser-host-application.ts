@@ -80,6 +80,13 @@ import { getFirstRunReadiness } from "../../shared/first-run-readiness";
 import { createBrowserNotificationDefinitions } from "./browser-notification-methods";
 import { createBrowserReportDefinitions } from "./browser-report-methods";
 import { createBrowserMemoryDefinitions } from "./browser-memory-methods";
+import { createBrowserAnswerSurfaceDefinitions } from "./browser-answer-surface-methods";
+import { AnswerImageService } from "../../electron/answer-surfaces/AnswerImageService";
+import { AnswerSurfaceStateStore } from "../../electron/answer-surfaces/AnswerSurfaceStateStore";
+import { answerImageNetworkContext } from "../../electron/answer-surfaces/network-context";
+import { configuredImageSearch } from "../../electron/answer-surfaces/web-image-search";
+import { getUserDataDir } from "../../electron/utils/user-data-dir";
+import path from "node:path";
 
 export interface BrowserHostApplicationOptions {
   db: Database.Database;
@@ -160,6 +167,10 @@ export function createBrowserHostApplication(
     ? new InputRequestRepository(options.db)
     : null;
   const agentRoles = new AgentRoleRepository(options.db);
+  const answerImages = new AnswerImageService({
+    cacheDir: path.join(getUserDataDir(), "cache", "answer-images"),
+    imageSearch: configuredImageSearch,
+  });
   const resolveBrowserWorkspace = async (workspaceId: string) => {
     const workspace = await workspaceRepository.findById(workspaceId);
     if (!workspace) return null;
@@ -228,6 +239,20 @@ export function createBrowserHostApplication(
     ...createBrowserReportDefinitions({
       db: options.db,
       resolveWorkspace: resolveBrowserWorkspace,
+    }),
+    ...createBrowserAnswerSurfaceDefinitions({
+      taskExists: async (taskId) => {
+        const task = await taskRepository.findById(taskId);
+        const workspace = task ? await resolveBrowserWorkspace(task.workspaceId) : null;
+        return Boolean(workspace?.permissions.read);
+      },
+      resolveNetworkContext: async (taskId) => {
+        const task = taskId ? await taskRepository.findById(taskId) : undefined;
+        const workspace = task ? await workspaceRepository.findById(task.workspaceId) : undefined;
+        return task && workspace ? answerImageNetworkContext(task, workspace) : {};
+      },
+      images: answerImages,
+      store: AnswerSurfaceStateStore,
     }),
     ...createBrowserQueueDefinitions(options.agentDaemon),
     ...notifications,

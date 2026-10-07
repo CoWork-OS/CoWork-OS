@@ -78,6 +78,8 @@ import {
 import { parseNaturalLlmWikiPrompt } from "../../shared/llm-wiki-prompt-routing";
 import { parseOnboardingSlashCommand } from "../../shared/onboarding";
 import { RICH_FRAME_DESIGN_LANGUAGE_PROMPT } from "../../shared/rich-frame-design-language";
+import { ANSWER_SURFACE_PROMPT } from "../../shared/answer-surfaces/prompt";
+import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { buildUserMessageAttachmentMetadata } from "../../shared/user-message-attachments";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
@@ -9147,8 +9149,24 @@ ${transcript}
         ctx.personalityPrompt,
         "session",
       ),
+      buildSystemBlock(
+        "chat_answer_surfaces",
+        !isThinkMode && this.shouldOfferAnswerSurfaces() ? ANSWER_SURFACE_PROMPT : "",
+        "session",
+      ),
       buildSystemBlock(`chat_rules:${hashPromptCacheValue(rules)}`, rules, "session"),
     ].filter((block) => block.text.length > 0);
+  }
+
+  /**
+   * Native answer components (```cowork-ui blocks) render in the desktop and browser
+   * views. Channel conversations are text-only, so they do not get the instructions;
+   * anything that still reaches a channel is converted to text on the way out.
+   */
+  private shouldOfferAnswerSurfaces(): boolean {
+    return (
+      isFeatureEnabled("COWORK_ANSWER_SURFACES", true) && !this.task.agentConfig?.originChannel
+    );
   }
 
   private buildChatOrThinkSystemPrompt(
@@ -17771,12 +17789,20 @@ ${transcript}
       ...(routing.has("rich_surfaces")
         ? [
             "RICH INLINE SURFACES:",
-            "- When the best answer is a compact visual surface such as a chart card, metric summary, progress/status panel, comparison, calculator, timeline, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
+            ...(this.shouldOfferAnswerSurfaces()
+              ? [
+                  "- For adjustable plans, calculators, comparisons, checklists, metric summaries, timelines and photo-led answers, use cowork-ui components in your final answer (see INTERACTIVE ANSWER COMPONENTS below).",
+                  "- When a compact custom visual is needed that the components cannot express, such as a bespoke diagram, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
+                ]
+              : [
+                  "- When the best answer is a compact visual surface such as a chart card, metric summary, progress/status panel, comparison, calculator, timeline, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
+                ]),
             "- Do not print custom frame markup in your message. Mention the result in normal prose and let the artifact/preview system display it.",
             "- For full web pages, landing pages, websites, app designs, or user-requested standalone HTML files, keep the normal web artifact flow: create the HTML output and summarize it; do not try to force an inline frame.",
             "- Inline surfaces may be static or animated. Use animation only when it clarifies state or progress.",
             RICH_FRAME_DESIGN_LANGUAGE_PROMPT,
             "",
+            ...(this.shouldOfferAnswerSurfaces() ? [ANSWER_SURFACE_PROMPT, ""] : []),
           ]
         : []),
       "HONESTY & UNCERTAINTY:",
@@ -18132,6 +18158,28 @@ ${transcript}
     }
 
     return "- Create a plan with 2-5 specific steps, each with one concrete objective.";
+  }
+
+  /**
+   * What the user changed in the controls of earlier answers (headcount, ticked steps,
+   * chosen options) since the model last saw it, as a note for the next turn. Each change
+   * is reported once.
+   */
+  private async takeAnswerSurfaceChanges(): Promise<string> {
+    try {
+      const changes = await AnswerSurfaceStateStore.listUnreported(this.task.id);
+      if (changes.length === 0) return "";
+      await AnswerSurfaceStateStore.markReported(
+        this.task.id,
+        changes.map((change) => change.key),
+      );
+      return [
+        "INTERACTIVE ANSWER STATE (values the user set in the controls of your earlier answers; build on them):",
+        ...changes.flatMap((change) => change.summary.split("\n").map((line) => `- ${line}`)),
+      ].join("\n");
+    } catch {
+      return "";
+    }
   }
 
   private buildQuotedAssistantContextMessage(
@@ -29186,8 +29234,14 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private async emitAnswerFirstResponse(): Promise<void> {
+    // Advice and planning prompts are often answered entirely here (the short-circuits
+    // below finalize this reply), so this call carries the answer component vocabulary
+    // and enough room for a block or two.
+    const offerSurfaces = this.shouldOfferAnswerSurfaces();
     const textPrompt = [
-      "Provide a direct answer to this user request in 4-8 lines.",
+      offerSurfaces
+        ? "Provide a direct answer to this user request: a short heading and a few short sentences of prose, plus cowork-ui components where they make it easier to use (an adjustable quantity list, a checklist, photos)."
+        : "Provide a direct answer to this user request in 4-8 lines.",
       "Do not mention internal planning or tools.",
       `User request:\n${this.getExecutionTaskPrompt()}`,
     ].join("\n\n");
@@ -29195,8 +29249,10 @@ You are continuing a previous conversation. The context from the previous conver
     const response = await this.createMessageWithTimeout(
       {
         model: this.modelId,
-        maxTokens: 320,
-        system: "Return a direct, concise answer to the user.",
+        maxTokens: offerSurfaces ? 2400 : 320,
+        system: offerSurfaces
+          ? `Return a direct, concise answer to the user.\n\n${ANSWER_SURFACE_PROMPT}`
+          : "Return a direct, concise answer to the user.",
         messages: [
           {
             role: "user",
@@ -29204,7 +29260,7 @@ You are continuing a previous conversation. The context from the previous conver
           },
         ],
       },
-      25_000,
+      offerSurfaces ? 120_000 : 25_000,
       "Answer-first response",
     );
 
@@ -40933,8 +40989,12 @@ Return ONLY a JSON object:
       );
       this.lastUserMessage = message;
     }
+    // Both the chat path and the task path below add this to the message the model sees.
+    const answerSurfaceNote = await this.takeAnswerSurfaceChanges();
+    const withAnswerState = (text: string) =>
+      answerSurfaceNote ? `${text}\n\n${answerSurfaceNote}` : text;
     const followUpConversationMessage = this.buildQuotedAssistantContextMessage(
-      executionMessage,
+      withAnswerState(executionMessage),
       quotedAssistantMessage,
     );
     this.getSessionRuntime().setRecoveryRequestActive(this.isRecoveryIntent(message));
@@ -41273,9 +41333,9 @@ Return ONLY a JSON object:
     let messageWithContext = message;
     const knowledgeSummary = this.fileOperationTracker.getKnowledgeSummary();
     if (knowledgeSummary) {
-      messageWithContext = `${executionMessage}\n\nKNOWLEDGE FROM PREVIOUS STEPS (use this context):\n${knowledgeSummary}`;
+      messageWithContext = `${withAnswerState(executionMessage)}\n\nKNOWLEDGE FROM PREVIOUS STEPS (use this context):\n${knowledgeSummary}`;
     } else {
-      messageWithContext = executionMessage;
+      messageWithContext = withAnswerState(executionMessage);
     }
     if (
       this.getEffectiveTaskPathRootPolicy() === "pin_and_rewrite" &&

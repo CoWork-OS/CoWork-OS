@@ -31,6 +31,8 @@ type MCPServerStatus = {
   status: MCPConnectionStatus;
   error?: string;
   tools: Array<{ name: string }>;
+  /** Admin policy blocks this connector; `error` carries the reason. */
+  blockedByPolicy?: boolean;
 };
 
 interface ConnectorDefinition {
@@ -141,6 +143,7 @@ export function ConnectorProfileView({
   const serverStatus = status?.status || "disconnected";
   const isConnected = serverStatus === "connected";
   const isConnecting = connectingServer === config?.id;
+  const isBlocked = status?.blockedByPolicy === true;
   const errorMsg = config ? connectionErrors[config.id] || status?.error : undefined;
 
   const [registryEntry, setRegistryEntry] = useState<MCPRegistryEntry | null>(null);
@@ -298,6 +301,7 @@ export function ConnectorProfileView({
               onClick={handleConnectClick}
               disabled={
                 (isInstalled && isConnecting) ||
+                (isInstalled && isBlocked && !isConnected) ||
                 (!isInstalled && installingId === connector.registryId)
               }
             >
@@ -524,12 +528,15 @@ export function ConnectorProfileView({
         {/* Connection status & tools (compact) */}
         {isInstalled && (
           <div className="cm-profile-footer">
-            <span className="cm-profile-status" style={{ color: getStatusColor(serverStatus) }}>
+            <span
+              className="cm-profile-status"
+              style={{ color: getStatusColor(isBlocked ? "error" : serverStatus) }}
+            >
               <span
                 className="mcp-status-dot"
-                style={{ backgroundColor: getStatusColor(serverStatus) }}
+                style={{ backgroundColor: getStatusColor(isBlocked ? "error" : serverStatus) }}
               />
-              {getStatusText(serverStatus)}
+              {isBlocked ? "Blocked by administrator" : getStatusText(serverStatus)}
             </span>
             {isConnected && status?.tools && status.tools.length > 0 && (
               <span className="cm-profile-tools-count">{status.tools.length} tools available</span>

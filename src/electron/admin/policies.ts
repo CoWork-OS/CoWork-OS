@@ -483,11 +483,18 @@ export function isPackRequired(packId: string, policies?: AdminPolicies): boolea
 }
 
 /**
- * Check whether a connector is blocked by policy
+ * Check whether a connector is blocked by policy. IDs are typed by administrators, so the
+ * match ignores surrounding whitespace and letter case.
  */
 export function isConnectorBlocked(connectorId: string, policies?: AdminPolicies): boolean {
+  const normalize = (id: unknown) =>
+    String(id ?? "")
+      .trim()
+      .toLowerCase();
+  const target = normalize(connectorId);
+  if (!target) return false;
   const p = policies || loadPolicies();
-  return p.connectors.blocked.includes(connectorId);
+  return p.connectors.blocked.some((blocked) => normalize(blocked) === target);
 }
 
 export function getEverydayAgentPolicy(policies?: AdminPolicies): AdminPolicies["everydayAgent"] {
@@ -654,6 +661,20 @@ export function validatePolicies(policies: unknown): string | null {
 
     if (required && allowed && allowed.length > 0 && required.some((id) => !allowed.includes(id))) {
       return "All required packs must also be in allowed list when allowlist is set";
+    }
+  }
+
+  if (p.connectors !== undefined) {
+    // A non-array would hide an unblock from the relaxation check and then load as [].
+    const blocked =
+      p.connectors && typeof p.connectors === "object"
+        ? (p.connectors as Record<string, unknown>).blocked
+        : null;
+    if (
+      blocked !== undefined &&
+      (!Array.isArray(blocked) || blocked.some((id) => typeof id !== "string"))
+    ) {
+      return "connectors.blocked must be an array of strings";
     }
   }
 

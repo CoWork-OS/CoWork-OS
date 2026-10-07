@@ -38,6 +38,8 @@ type MCPServerStatus = {
   status: MCPConnectionStatus;
   error?: string;
   tools: Array<{ name: string }>;
+  /** Admin policy blocks this connector; `error` carries the reason. */
+  blockedByPolicy?: boolean;
 };
 
 type MCPSettingsData = {
@@ -1312,11 +1314,19 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
                   <span className="cm-card-name">{connector.name}</span>
                   <span className="cm-card-desc">{connector.description}</span>
                 </div>
-                {config && !isConnected && (
+                {config && (!isConnected || status?.blockedByPolicy) && (
                   <span
                     className="cm-card-status-dot"
-                    style={{ backgroundColor: getStatusColor(serverStatus) }}
-                    title={getStatusText(serverStatus)}
+                    style={{
+                      backgroundColor: getStatusColor(
+                        status?.blockedByPolicy ? "error" : serverStatus,
+                      ),
+                    }}
+                    title={
+                      status?.blockedByPolicy
+                        ? "Blocked by administrator"
+                        : getStatusText(serverStatus)
+                    }
                   />
                 )}
               </button>

@@ -1,7 +1,7 @@
 import { BotNotificationRuntime } from "../electron/notifications/BotNotificationRuntime";
 import { BotWorkControlRecovery } from "../electron/automation/BotWorkControlRecovery";
 import { PermissionSettingsManager } from "../electron/security/permission-settings-manager";
-import { loadPolicies } from "../electron/admin/policies";
+import { loadPolicies, watchPolicies } from "../electron/admin/policies";
 import { prepareResponsibilitySchedule } from "../electron/automation/responsibility-signals";
 import { BotResponsibilityRepository } from "../electron/automation/BotResponsibilityRepository";
 import { SchedulerOwnership } from "../electron/automation/SchedulerOwnership";
@@ -489,6 +489,21 @@ async function main(): Promise<void> {
     console.error("[Daemon] Failed to initialize MCP Client Manager:", error);
   }
 
+  // Admin policy connectors.blocked: apply policies.json edits without a restart.
+  let stopConnectorPolicyWatch: (() => void) | null = null;
+  if (mcpClientManager) {
+    const manager = mcpClientManager;
+    try {
+      stopConnectorPolicyWatch = watchPolicies(() => {
+        void manager.reconcileConnectorPolicy().catch((error) => {
+          console.error("[Daemon] Failed to apply connector policy change:", error);
+        });
+      });
+    } catch (error) {
+      console.error("[Daemon] Failed to watch admin policies:", error);
+    }
+  }
+
   // Initialize channel gateway (no UI).
   const channelGateway = new ChannelGateway(dbManager.getDatabase(), {
     autoConnect: true,
@@ -926,6 +941,13 @@ async function main(): Promise<void> {
           name: "security monitor",
           requiresQuiescence: true,
           run: () => NumbatService.getInstance()?.shutdown(),
+        },
+        {
+          name: "connector policy watch",
+          run: () => {
+            stopConnectorPolicyWatch?.();
+            stopConnectorPolicyWatch = null;
+          },
         },
         // Lore, cross signals, feedback: flush and release the kit-writer lease.
         {

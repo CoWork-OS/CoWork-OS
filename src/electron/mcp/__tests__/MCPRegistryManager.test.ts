@@ -6,6 +6,12 @@ const mockState = vi.hoisted(() => ({
   loadSettingsMock: vi.fn(),
   updateServerMock: vi.fn(),
   mockInstalledServers: [] as Any[],
+  blockedConnectors: [] as string[],
+}));
+
+vi.mock("../../admin/policies", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../admin/policies")>()),
+  loadPolicies: vi.fn(() => ({ connectors: { blocked: [...mockState.blockedConnectors] } })),
 }));
 
 vi.mock("electron", () => ({
@@ -41,6 +47,7 @@ describe("MCPRegistryManager install defaults", () => {
     vi.clearAllMocks();
     MCPRegistryManager.setInstallConfirmationHandler(null);
     mockState.mockInstalledServers = [];
+    mockState.blockedConnectors = [];
     mockState.execFileMock.mockImplementation(
       (_file: string, _args: string[], _options: Any, callback: Any) =>
         callback(null, "2026.1.14\n", ""),
@@ -56,6 +63,15 @@ describe("MCPRegistryManager install defaults", () => {
       hostEnabled: false,
     }));
     MCPRegistryManager.clearCache();
+  });
+
+  it("refuses to install a connector blocked by admin policy", async () => {
+    mockState.blockedConnectors = ["salesforce"];
+
+    await expect(MCPRegistryManager.installServer("salesforce")).rejects.toThrow(
+      /blocked by your administrator/,
+    );
+    expect(mockState.addServerMock).not.toHaveBeenCalled();
   });
 
   it("installs manual connectors as disabled by default", async () => {

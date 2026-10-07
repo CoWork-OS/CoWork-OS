@@ -1,5 +1,6 @@
 import { MCPClientManager } from "./client/MCPClientManager";
 import { MCPSettingsManager } from "./settings";
+import { connectorBlockedMessage, findBlockedConnectorId } from "./connector-policy";
 import type { MCPServerConfig, MCPTool, MCPToolApprovalMode } from "./types";
 
 export interface MCPToolPolicy {
@@ -8,6 +9,8 @@ export interface MCPToolPolicy {
   readOnly: boolean;
   enabled: boolean;
   endpoint?: string;
+  /** Set when admin policy `connectors.blocked` blocks the server; a hard deny. */
+  blockedReason?: string;
 }
 
 export function resolveMcpToolPolicy(tool: MCPTool, server: MCPServerConfig): MCPToolPolicy {
@@ -34,7 +37,12 @@ export function getConfiguredMcpToolPolicy(toolName: string): MCPToolPolicy | un
     const serverId = manager.getServerIdForTool(rawName);
     const server = settings.servers.find((entry) => entry.id === serverId);
     const tool = manager.getAllTools().find((entry) => entry.name === rawName);
-    return server && tool ? resolveMcpToolPolicy(tool, server) : undefined;
+    if (!server || !tool) return undefined;
+    const policy = resolveMcpToolPolicy(tool, server);
+    const blockedId = findBlockedConnectorId(server);
+    return blockedId
+      ? { ...policy, blockedReason: connectorBlockedMessage(server, blockedId) }
+      : policy;
   } catch {
     return undefined;
   }

@@ -1,4 +1,5 @@
 import { ChannelDecisionService } from "./ChannelDecisionService";
+import { toPlainAnswerText } from "../../shared/answer-surfaces/blocks";
 import { ChannelDecisionRepository } from "./ChannelDecisionRepository";
 import { ApprovalRepository } from "../database/repository-facades";
 /**
@@ -635,7 +636,7 @@ export class MessageRouter {
     text: string,
     isStreaming: boolean,
   ): Promise<string | null> {
-    const normalized = String(text || "").trim();
+    const normalized = toPlainAnswerText(String(text || "")).trim();
     if (!normalized) {
       return null;
     }
@@ -1598,7 +1599,13 @@ export class MessageRouter {
     message: OutgoingMessage,
     channelId?: string,
   ): Promise<string> {
-    return this.deliveryService.sendMessage(channelType, message, channelId);
+    // Channels cannot render interactive answer components; send their text version.
+    const text = typeof message.text === "string" ? toPlainAnswerText(message.text) : message.text;
+    return this.deliveryService.sendMessage(
+      channelType,
+      text === message.text ? message : { ...message, text },
+      channelId,
+    );
   }
 
   private async sendAdapterMessage(

@@ -572,6 +572,11 @@ import {
 } from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupMemoryHealthHandlers } from "./memory-health-handlers";
+import { setupAnswerSurfaceHandlers } from "./answer-surface-handlers";
+import { answerImageNetworkContext } from "../answer-surfaces/network-context";
+import { configuredImageSearch } from "../answer-surfaces/web-image-search";
+import { AnswerImageService } from "../answer-surfaces/AnswerImageService";
+import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { setupMemoryRepoHandlers } from "./memory-repo-handlers";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
@@ -11778,6 +11783,21 @@ export async function setupIpcHandlers(
   setupMemoryHealthHandlers({
     service: createMemoryHealthService(db),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+  });
+
+  // Interactive answer surfaces: saved control values and photos found by description.
+  setupAnswerSurfaceHandlers({
+    taskExists: async (taskId) => Boolean(await taskRepo.findById(taskId)),
+    resolveNetworkContext: async (taskId) => {
+      const task = taskId ? await taskRepo.findById(taskId) : undefined;
+      const workspace = task ? await workspaceRepo.findById(task.workspaceId) : undefined;
+      return task && workspace ? answerImageNetworkContext(task, workspace) : {};
+    },
+    images: new AnswerImageService({
+      cacheDir: path.join(getUserDataDir(), "cache", "answer-images"),
+      imageSearch: configuredImageSearch,
+    }),
+    store: AnswerSurfaceStateStore,
   });
 
   // Memory folder: status, open, compact history and entry lines by ref. The

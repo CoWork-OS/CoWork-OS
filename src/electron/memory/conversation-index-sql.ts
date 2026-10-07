@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { toPlainAnswerText } from "../../shared/answer-surfaces/blocks";
 import {
   buildFtsMatchQuery,
   extractFtsTerms,
@@ -279,7 +280,7 @@ export function extractConversationEventText(type: string, rawPayload: unknown):
   const payload = parsePayload(rawPayload);
   const budget = CONVERSATION_TEXT_MAX_CHARS;
   if (typeof payload === "string") {
-    const text = collapse(payload);
+    const text = collapse(toPlainAnswerText(payload));
     return text && !looksLikeBinaryText(text) ? text.slice(0, budget) : null;
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
@@ -323,7 +324,9 @@ export function extractConversationEventText(type: string, rawPayload: unknown):
       break;
     default: {
       const preferred = firstField(record, PREFERRED_TEXT_FIELDS);
-      parts.push(...flattenText(preferred ?? record, budget));
+      // Index what an interactive answer says, not its component JSON.
+      const readable = typeof preferred === "string" ? toPlainAnswerText(preferred) : preferred;
+      parts.push(...flattenText(readable ?? record, budget));
     }
   }
   const text = collapse(parts.filter(Boolean).join(" ")).slice(0, budget);

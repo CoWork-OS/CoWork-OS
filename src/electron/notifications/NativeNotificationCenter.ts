@@ -1,4 +1,5 @@
 import { Notification } from "electron";
+import { toPlainAnswerText } from "../../shared/answer-surfaces/blocks";
 import { getDesktopIconImage } from "../branding";
 
 interface NativeNotificationInput {
@@ -39,7 +40,7 @@ export class NativeNotificationCenter {
       const icon = process.platform === "darwin" ? null : getDesktopIconImage();
       const nativeNotification = new Notification({
         title: notification.title,
-        body: notification.message,
+        body: toPlainAnswerText(notification.message),
         ...(icon ? { icon } : {}),
         silent: false,
         timeoutType: "default",

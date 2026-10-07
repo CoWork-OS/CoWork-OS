@@ -226,7 +226,7 @@ Side Chat gives active sessions a read-only inspection lane. `/side [question]` 
 
 ### Chronicle (Desktop Research Preview)
 
-Chronicle is an opt-in desktop-only recent-screen context lane for vague on-screen references such as `this`, `that`, `the failing one`, `latest draft`, or `why is this failing`. Configure it from **Settings > Memory Hub > Chronicle**: passive capture is consent-gated, can be paused from Settings or the tray, resolves through `screen_context_resolve`, and promotes only task-used observations into existing recall, evidence, and optional linked `screen_context` memory entries instead of creating a second memory system. [Learn more](docs/chronicle.md)
+Chronicle is an opt-in desktop-only recent-screen context lane for vague on-screen references such as `this`, `that`, `the failing one`, `latest draft`, or `why is this failing`. Configure it from **Settings > Tools > Chronicle**: passive capture is consent-gated, can be paused from Settings or the tray, resolves through `screen_context_resolve`, and promotes only task-used observations into existing recall, evidence, and optional linked `screen_context` memory entries instead of creating a second memory system. [Learn more](docs/chronicle.md)
 
 ### Research Vaults (`llm-wiki`)
 

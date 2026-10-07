@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Memory settings are short and clear**: **Settings > Memory > Settings** now has five short sections, each saying whether it applies to this workspace or all workspaces: **This workspace** (Use memory, Learn from chats, Strict privacy, Keep history for, Clear), **Memory folder** (folder, Dreaming, Sync, Team memory), **Import**, **Connections** (Supermemory, and a link to Chronicle, now only in **Settings > Tools**) and **Proactive**. Everything else, including AI memory compression and its budget, is under a collapsed **Advanced**. The privacy mode "Disabled" is now the **Use memory** switch. The imported-memories and Chronicle-observations lists moved to the **Sources** tab. Removed: the empty Pending memory writes card, the Memory inspector switch (the inspector is always in Advanced) and duplicate controls.
+
 - **Memory reviews notify you**: when a dream leaves changes for you to accept or reject, CoWork shows a notification ("Memory: 1 change to review"); clicking it opens Settings > Memory > Review. Notes a dream learns for a workspace now always land in that workspace's file (a file it created without the workspace link is repaired on the next save).
 
 - **Bots are user configuration only**: CoWork no longer installs a named bot roster, rewrites bot instructions at startup, or attaches bots to a default team. Existing bots, teams, membership and history are kept as they are.

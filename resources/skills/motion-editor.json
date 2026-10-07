@@ -1,0 +1,82 @@
+{
+  "id": "motion-editor",
+  "name": "Motion Editor",
+  "description": "Build a local, offline motion-design editor app (After Effects / Screen Studio-lite) with scenes, layers, keyframes, springs, presets, stagger, a cursor layer, timeline, undo/redo, save/open, and deterministic MP4 export.",
+  "icon": "🎛️",
+  "category": "Creative",
+  "prompt": "# Motion Editor\n\nUse this skill when the user wants to build a local, offline motion-design editor app (After Effects / Screen Studio-lite). The deliverable is the editor itself, not a video.\n\nDo not use this skill when:\n- the user wants a single finished film (use `motion-film`)\n- the request is a Manim explainer (use `manim-video`) or editing existing footage\n\nInputs:\n- Output dir: {{output_dir}}\n- Phase: {{phase}}\n\nWorkflow:\n1. Resolve the app folder. If `{{output_dir}}` is empty, use `motion-editor` in the current workspace. Confirm the user's OS to adapt shortcuts (Cmd on macOS, Ctrl elsewhere).\n2. Read `{baseDir}/SKILL.md` in full: it is the binding spec (environment, architecture, data model, phases, export, out-of-scope, verification, deliverable). Read `{baseDir}/references/techniques.md` for closed-form springs and the render/QA pipeline.\n3. Keep `PROGRESS.md` in the app folder, recording what is built and which verifications passed. Resume from it when it already exists.\n4. Stack: Vite + React + TypeScript, Zustand, zod, small Express server; Node 20+, ffmpeg in PATH. No AI/API calls at runtime. Justify any deviation in README.\n5. Architecture: `project.json` is the single source of truth; one pure `renderFrame(project, timeSec, ctx, scale)` on Canvas 2D drives both preview and export. No `Date.now()`, unseeded randomness, CSS animations, or rAF-accumulated state.\n6. Do not invent a video concept, demo content, or auto-render. First launch opens an empty project; rendering happens only on Export.\n7. Build Phase 1 completely and verify it before Phase 2. If `{{phase}}` names a phase, focus there but respect that order.\n8. Actually run the verification: unit tests (interpolation, every easing, determinism), the Playwright e2e flow, and the export frame-diff test. Do not claim untested features.\n9. Write `{artifactDir}/progress-report.md` with built features, test results, and the run/render commands.\n10. End with the app path, `npm install && npm run dev`, the CLI render command, and the README's \"Works (tested)\" / \"Not implemented\" / \"Known limitations\" summary.\n\nSuccess criteria:\n- The editor runs offline and passes the verification tests.\n- README lists as working only what passed.",
+  "parameters": [
+    {
+      "name": "output_dir",
+      "type": "string",
+      "description": "Workspace-relative or absolute folder for the editor app",
+      "required": false
+    },
+    {
+      "name": "phase",
+      "type": "select",
+      "description": "Which part of the spec to focus on",
+      "required": false,
+      "options": [
+        "auto",
+        "phase-1-core",
+        "phase-2-advanced",
+        "export"
+      ]
+    }
+  ],
+  "enabled": true,
+  "invocation": {
+    "userInvocable": true
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "author": "CoWork OS",
+    "tags": [
+      "motion-design",
+      "editor",
+      "animation",
+      "keyframes",
+      "timeline",
+      "react",
+      "playwright",
+      "ffmpeg",
+      "creative"
+    ],
+    "routing": {
+      "useWhen": "Use when the user asks to build a motion editor, animation editor, keyframe timeline app, or a reusable tool for making motion-design videos.",
+      "dontUseWhen": "Do not use when the user wants a single finished film or promo video (use motion-film), a Manim explainer (use manim-video), or edits to existing video footage.",
+      "outputs": "A working offline Vite + React + Express motion editor with tests, PROGRESS.md, a README with tested/not-implemented/limitations sections, and a progress report under {artifactDir}.",
+      "successCriteria": "Phase 1 is verified before Phase 2; unit, e2e, and export tests actually run and pass; the README lists as working only what passed.",
+      "expectedArtifacts": [
+        "progress-report.md"
+      ],
+      "keywords": [
+        "motion editor",
+        "animation editor",
+        "keyframe editor",
+        "timeline app",
+        "after effects lite",
+        "screen studio",
+        "motion design tool"
+      ],
+      "examples": {
+        "positive": [
+          "Build me a motion-design editor app with a keyframe timeline.",
+          "Create an After Effects-lite animation editor that exports MP4.",
+          "Make a local Screen Studio-style tool for making motion videos.",
+          "Use the motion-editor skill for this request."
+        ],
+        "negative": [
+          "Render our launch film for Friday's announcement.",
+          "Explain binary search trees with an equation-style walkthrough.",
+          "Cut the silences out of this podcast episode.",
+          "Write release notes for the new version."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
+    }
+  }
+}

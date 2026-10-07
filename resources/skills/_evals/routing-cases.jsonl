@@ -25,3 +25,7 @@
 {"prompt":"Create a Manim animation that visualizes Dijkstra's algorithm step by step.","expectedSkillIds":["manim-video"],"forbiddenSkillIds":["project-structure","video-frames"]}
 {"prompt":"Fix this bug without refactoring unrelated modules or changing behavior outside the failing path.","expectedSkillIds":["karpathy-guidelines"],"forbiddenSkillIds":["summarize","proofread"]}
 {"prompt":"Review this patch and call out unnecessary rewrites or overcomplicated abstractions.","expectedSkillIds":["karpathy-guidelines","code-review","code-reviewer"],"forbiddenSkillIds":["weather","translate"]}
+{"prompt":"Make a 30-second keynote-style launch video for our app.","expectedSkillIds":["motion-film"],"forbiddenSkillIds":["motion-editor","manim-video"]}
+{"prompt":"Create a motion graphics promo for our new feature announcement.","expectedSkillIds":["motion-film"],"forbiddenSkillIds":["motion-editor","video-frames"]}
+{"prompt":"Build me a motion-design editor app with a keyframe timeline and MP4 export.","expectedSkillIds":["motion-editor"],"forbiddenSkillIds":["motion-film","manim-video"]}
+{"prompt":"Create an After Effects-lite animation editor I can run locally.","expectedSkillIds":["motion-editor"],"forbiddenSkillIds":["motion-film"]}

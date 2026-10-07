@@ -47,6 +47,12 @@ import { createLogger } from "../utils/logger";
 import { containsNoMemoryDirective } from "./no-memory-directive";
 import { REDACTED_SECRET, redactSecrets } from "./sensitive-content";
 import type { MemoryItemKind } from "./memory-items-types";
+import {
+  parseTextMemoryImport,
+  TEXT_IMPORT_CATEGORY_STORAGE,
+  textImportEntryBody,
+} from "./text-memory-import";
+import type { TextMemoryImportCategory } from "../../shared/memory-import-prompt";
 import { neutralizeReservedImportPrefix } from "./memory-visibility";
 import {
   PROMPT_RECALL_IGNORE_MARKER,
@@ -1104,54 +1110,6 @@ export class MemoryService {
     return memoryEmbeddingText(summary, content);
   }
 
-  private static extractFirstCodeBlock(text: string): string | null {
-    const match = text.match(/```(?:[a-zA-Z0-9_-]+)?\s*([\s\S]*?)```/);
-    const block = match?.[1]?.trim();
-    return block && block.length > 0 ? block : null;
-  }
-
-  private static extractTextImportEntries(pastedText: string): string[] {
-    const source = this.extractFirstCodeBlock(pastedText) || pastedText;
-    const lines = source.split(/\r?\n/);
-    const entries: string[] = [];
-    let current: string | null = null;
-    const entryWithDatePattern = /^(?:[-*]\s*)?\[([^\]]{1,120})\]\s*[-—]\s*(.+)$/;
-
-    for (const rawLine of lines) {
-      const trimmed = rawLine.trim();
-      if (!trimmed) continue;
-
-      if (trimmed.startsWith("```")) continue;
-
-      const datedMatch = trimmed.match(entryWithDatePattern);
-      if (datedMatch) {
-        if (current) entries.push(current);
-        const date = datedMatch[1].trim();
-        const content = datedMatch[2].trim();
-        current = `[${date}] - ${content}`;
-        continue;
-      }
-
-      // If a line is indented, treat it as a continuation for the previous memory.
-      if (current && /^\s+/.test(rawLine)) {
-        current = `${current} ${trimmed}`;
-        continue;
-      }
-
-      if (current) {
-        entries.push(current);
-        current = null;
-      }
-
-      const fallback = trimmed.replace(/^[-*]\s+/, "").trim();
-      if (fallback) entries.push(fallback);
-    }
-
-    if (current) entries.push(current);
-
-    return entries;
-  }
-
   private static ensureImportedEmbeddingsLoaded(): Promise<void> {
     if (this.importedEmbeddingsLoaded) return Promise.resolve();
     this.importedEmbeddingsLoad ??= this.loadImportedEmbeddings().finally(() => {
@@ -2194,6 +2152,10 @@ export class MemoryService {
     duplicatesSkipped: number;
     truncated: number;
     errors: string[];
+    /** Memories created per export category (the categorized export prompt). */
+    byCategory: Partial<Record<TextMemoryImportCategory, number>>;
+    /** The pasted answer said more entries remain. */
+    incomplete: boolean;
   }> {
     this.ensureInitialized();
 
@@ -2203,7 +2165,8 @@ export class MemoryService {
         .replace(/\s+/g, " ")
         .replace(/[[\]]/g, "")
         .slice(0, 80) || "Other AI";
-    const parsedEntries = this.extractTextImportEntries(options.pastedText);
+    const parsed = parseTextMemoryImport(options.pastedText);
+    const parsedEntries = parsed.entries;
 
     if (parsedEntries.length === 0) {
       throw new Error("No memory entries found. Paste the exported memories and try again.");
@@ -2222,15 +2185,23 @@ export class MemoryService {
     let duplicatesSkipped = 0;
     const errors: string[] = [];
 
+    const byCategory: Partial<Record<TextMemoryImportCategory, number>> = {};
     for (const entry of entries) {
+      // A categorized entry is a fact about the user: also a `memory_items` import fact of
+      // the category's kind (an Instructions entry becomes a rule). Uncategorized lines stay
+      // archive-only insights.
+      const storage = entry.category ? TEXT_IMPORT_CATEGORY_STORAGE[entry.category] : null;
       try {
         const outcome = await session.add({
-          type: "insight",
-          body: entry,
-          header: `[Imported from ${providerLabel} — "Memory export (pasted)"]`,
+          type: storage?.type ?? "insight",
+          body: textImportEntryBody(entry),
+          header: `[Imported from ${providerLabel} — "Memory export (pasted)${storage ? ` · ${storage.label}` : ""}"]`,
+          ...(storage ? { fact: { kind: storage.kind, importer: "text" } } : {}),
         });
-        if (outcome.status === "created") memoriesCreated += 1;
-        else duplicatesSkipped += 1;
+        if (outcome.status === "created") {
+          memoriesCreated += 1;
+          if (entry.category) byCategory[entry.category] = (byCategory[entry.category] ?? 0) + 1;
+        } else duplicatesSkipped += 1;
       } catch (error) {
         errors.push(error instanceof Error ? error.message : String(error));
       }
@@ -2244,6 +2215,8 @@ export class MemoryService {
       duplicatesSkipped,
       truncated,
       errors,
+      byCategory,
+      incomplete: parsed.incomplete,
     };
   }
 

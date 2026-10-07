@@ -454,6 +454,47 @@ describeWithSqlite("memory producers", () => {
       });
     });
 
+    it("stores a categorized export as typed facts, per category", async () => {
+      const result = await MemoryService.importFromText({
+        workspaceId: "ws-1",
+        provider: "ChatGPT",
+        forcePrivate: false,
+        pastedText: [
+          "```",
+          "## Instructions",
+          "[2024-03-01] - Never use emoji in replies.",
+          "## Identity",
+          "[unknown] - Lives in Lisbon.",
+          "## Projects",
+          "[2025-01-10] - Atlas: a CLI for log search, in beta.",
+          "```",
+          "This is not the complete set; more remain.",
+        ].join("\n"),
+      });
+      expect(result).toMatchObject({
+        entriesDetected: 3,
+        memoriesCreated: 3,
+        byCategory: { instructions: 1, identity: 1, projects: 1 },
+        incomplete: true,
+      });
+      expect(archiveRows().map((row) => [row.type, row.content])).toEqual([
+        [
+          "observation",
+          '[Imported from ChatGPT — "Memory export (pasted) · Instructions"]\n[2024-03-01] - Never use emoji in replies.',
+        ],
+        ["observation", '[Imported from ChatGPT — "Memory export (pasted) · Identity"]\nLives in Lisbon.'],
+        [
+          "observation",
+          '[Imported from ChatGPT — "Memory export (pasted) · Projects"]\n[2025-01-10] - Atlas: a CLI for log search, in beta.',
+        ],
+      ]);
+      expect(rowsOf(db).map((row) => [row.kind, row.source])).toEqual([
+        ["rule", "import"],
+        ["identity", "import"],
+        ["project_fact", "import"],
+      ]);
+    });
+
     it("pasted imports go through the same gate and are private by default", async () => {
       const result = await MemoryService.importFromText({
         workspaceId: "ws-1",

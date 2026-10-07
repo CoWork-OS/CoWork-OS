@@ -1,4 +1,9 @@
 import { useMemo, useState } from "react";
+import {
+  MEMORY_EXPORT_PROMPT,
+  TEXT_MEMORY_IMPORT_CATEGORIES,
+  type TextMemoryImportCategory,
+} from "../../shared/memory-import-prompt";
 
 interface TextMemoryImportResult {
   success: boolean;
@@ -7,6 +12,8 @@ interface TextMemoryImportResult {
   duplicatesSkipped: number;
   truncated: number;
   errors: string[];
+  byCategory?: Partial<Record<string, number>>;
+  incomplete?: boolean;
 }
 
 interface PromptMemoryImportWizardProps {
@@ -16,39 +23,35 @@ interface PromptMemoryImportWizardProps {
 }
 
 const PROVIDER_OPTIONS = [
-  "Claude",
   "ChatGPT",
+  "Claude",
   "Gemini",
   "Meta AI",
   "Perplexity",
   "Copilot",
+  "Grok",
   "Other",
 ] as const;
 
-const MEMORY_EXPORT_PROMPT = `I'm moving to another service and need to export my data. List every memory you have stored about me, as well as any context you've learned about me from past conversations. Output everything in a single code block so I can easily copy it.
-
-Format each entry as: [date saved, if available] - memory content.
-
-Make sure to cover all of the following —  preserve my words verbatim where possible:
-- Instructions I've given you about how to respond (tone, format, style, 'always do X', 'never do Y').
-- Personal details: name, location, job, family, interests.
-- Projects, goals, and recurring topics.
-- Tools, languages, and frameworks I use.
-- Preferences and corrections I've made to your behavior.
-- Any other stored context not covered above. Do not summarize, group, or omit any entries.
-
-After the code block, confirm whether that is the complete set or if any remain.`;
+const CATEGORY_LABELS: Record<TextMemoryImportCategory, string> = {
+  instructions: "instructions",
+  identity: "identity",
+  career: "career",
+  projects: "projects",
+  preferences: "preferences",
+};
 
 export function PromptMemoryImportWizard({
   workspaceId,
   onClose,
   onImportComplete,
 }: PromptMemoryImportWizardProps) {
-  const [provider, setProvider] = useState<string>("Claude");
+  const [provider, setProvider] = useState<string>("ChatGPT");
   const [customProvider, setCustomProvider] = useState<string>("");
   const [pastedText, setPastedText] = useState<string>("");
   const [forcePrivate, setForcePrivate] = useState(true);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<TextMemoryImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +86,7 @@ export function PromptMemoryImportWizard({
 
   const handleImport = async () => {
     if (!resolvedProvider) {
-      setError("Please choose a provider name.");
+      setError("Enter the name of the assistant you exported from.");
       return;
     }
     if (!pastedText.trim()) {
@@ -112,169 +115,135 @@ export function PromptMemoryImportWizard({
   };
 
   const hasCreatedMemories = (result?.memoriesCreated || 0) > 0;
+  const categoryBreakdown = TEXT_MEMORY_IMPORT_CATEGORIES.map((category) => ({
+    category,
+    count: result?.byCategory?.[category] ?? 0,
+  })).filter((item) => item.count > 0);
 
   return (
     <div className="mcp-modal-overlay" onClick={onClose}>
       <div
-        className="mcp-modal"
-        style={{ width: "min(96vw, 980px)", maxWidth: "980px", maxHeight: "88vh" }}
+        className="mcp-modal memory-text-import-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="memory-text-import-title"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mcp-modal-header">
-          <h3 style={{ margin: 0 }}>Import memory from other AI providers</h3>
+          <h3 id="memory-text-import-title">Import memory to CoWork</h3>
           <button className="mcp-modal-close" onClick={onClose} aria-label="Close import popup">
             ✕
           </button>
         </div>
         <div className="mcp-modal-content">
-          <p className="settings-form-hint" style={{ marginTop: 0 }}>
-            Copy a prompt into another chatbot, then paste the output here to import memories
-            quickly.
-          </p>
-
           {!result && (
-            <div className="chatgpt-import-step" style={{ marginTop: "6px" }}>
-              <div className="settings-form-group">
-                <div
-                  style={{
-                    fontWeight: 500,
-                    color: "var(--color-text-primary)",
-                    marginBottom: "8px",
-                  }}
-                >
-                  1. Copy this prompt and run it in your other AI chat
-                </div>
-                <textarea
-                  readOnly
-                  value={MEMORY_EXPORT_PROMPT}
-                  style={{
-                    width: "100%",
-                    minHeight: "220px",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    padding: "12px",
-                    background: "var(--color-bg-secondary)",
-                    color: "var(--color-text-primary)",
-                    fontSize: "14px",
-                    lineHeight: 1.45,
-                    resize: "vertical",
-                  }}
-                />
-                <div className="chatgpt-import-actions" style={{ justifyContent: "flex-start" }}>
-                  <button
-                    className="chatgpt-import-btn chatgpt-import-btn-primary"
-                    onClick={handleCopyPrompt}
+            <ol className="memory-text-import-steps">
+              <li className="memory-text-import-step">
+                <span className="chatgpt-import-step-number" aria-hidden="true">
+                  1
+                </span>
+                <div className="memory-text-import-step-body">
+                  <div className="memory-text-import-step-title">
+                    Copy this prompt into a chat with your other AI provider
+                  </div>
+                  <div
+                    className={`memory-text-import-prompt${promptExpanded ? " is-expanded" : ""}`}
                   >
-                    {copyState === "copied" ? "Copied" : "Copy Prompt"}
-                  </button>
+                    <pre tabIndex={0} aria-label="Memory export prompt">
+                      {MEMORY_EXPORT_PROMPT}
+                    </pre>
+                    <div className="memory-text-import-prompt-actions">
+                      <button
+                        type="button"
+                        className="settings-button"
+                        onClick={() => setPromptExpanded((value) => !value)}
+                      >
+                        {promptExpanded ? "Collapse" : "Show all"}
+                      </button>
+                      <button type="button" className="settings-button" onClick={handleCopyPrompt}>
+                        {copyState === "copied" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
                   {copyState === "error" && (
-                    <span style={{ fontSize: "12px", color: "var(--color-error)" }}>
-                      Could not copy automatically. Copy it manually.
+                    <span className="memory-text-import-note is-error">
+                      Could not copy automatically. Select the prompt and copy it manually.
                     </span>
                   )}
                 </div>
-              </div>
+              </li>
 
-              <div className="settings-form-group">
-                <label className="settings-label">Provider</label>
-                <select
-                  className="settings-select"
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                >
-                  {PROVIDER_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-                {provider === "Other" && (
-                  <input
-                    className="settings-input"
-                    type="text"
-                    value={customProvider}
-                    onChange={(e) => setCustomProvider(e.target.value)}
-                    placeholder="Enter provider name"
-                    style={{ marginTop: "8px" }}
-                  />
-                )}
-              </div>
-
-              <div className="settings-form-group">
-                <div
-                  style={{
-                    fontWeight: 500,
-                    color: "var(--color-text-primary)",
-                    marginBottom: "8px",
-                  }}
-                >
-                  2. Paste the full response below
-                </div>
-                <textarea
-                  value={pastedText}
-                  onChange={(e) => setPastedText(e.target.value)}
-                  placeholder="Paste the full exported memory response here"
-                  style={{
-                    width: "100%",
-                    minHeight: "220px",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "8px",
-                    padding: "12px",
-                    background: "var(--color-bg-secondary)",
-                    color: "var(--color-text-primary)",
-                    fontSize: "14px",
-                    lineHeight: 1.45,
-                    resize: "vertical",
-                  }}
-                />
-              </div>
-
-              <div className="settings-form-group">
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    gap: "12px",
-                  }}
-                >
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>
-                      Mark imported memories as private
-                    </div>
-                    <p className="settings-form-hint" style={{ marginTop: "4px", marginBottom: 0 }}>
-                      Recommended for imported personal context.
-                    </p>
-                  </div>
-                  <label className="settings-toggle" style={{ flexShrink: 0, marginTop: "2px" }}>
-                    <input
-                      type="checkbox"
-                      checked={forcePrivate}
-                      onChange={(e) => setForcePrivate(e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
+              <li className="memory-text-import-step">
+                <span className="chatgpt-import-step-number" aria-hidden="true">
+                  2
+                </span>
+                <div className="memory-text-import-step-body">
+                  <label
+                    className="memory-text-import-step-title"
+                    htmlFor="memory-text-import-paste"
+                  >
+                    Paste results below to add to CoWork's memory
                   </label>
+                  <textarea
+                    id="memory-text-import-paste"
+                    className="memory-text-import-paste"
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                    placeholder="Paste your memory details here"
+                  />
+                  <div className="memory-text-import-options">
+                    <label className="memory-text-import-option">
+                      <span>Exported from</span>
+                      <select
+                        className="settings-select"
+                        value={provider}
+                        onChange={(e) => setProvider(e.target.value)}
+                      >
+                        {PROVIDER_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {provider === "Other" && (
+                      <input
+                        className="settings-input"
+                        type="text"
+                        value={customProvider}
+                        onChange={(e) => setCustomProvider(e.target.value)}
+                        placeholder="Assistant name"
+                        aria-label="Assistant name"
+                      />
+                    )}
+                    <label className="memory-text-import-option">
+                      <input
+                        type="checkbox"
+                        checked={forcePrivate}
+                        onChange={(e) => setForcePrivate(e.target.checked)}
+                      />
+                      <span>Keep private (used only in this workspace)</span>
+                    </label>
+                  </div>
                 </div>
-              </div>
+              </li>
+            </ol>
+          )}
 
-              {error && <div className="chatgpt-import-error">{error}</div>}
+          {!result && error && <div className="chatgpt-import-error">{error}</div>}
 
-              <div className="chatgpt-import-actions">
-                <button
-                  className="chatgpt-import-btn chatgpt-import-btn-primary"
-                  onClick={handleImport}
-                  disabled={importing}
-                  style={{ opacity: importing ? 0.6 : 1 }}
-                >
-                  {importing ? "Importing..." : "Add to Memory"}
-                </button>
-                <button
-                  className="chatgpt-import-btn chatgpt-import-btn-secondary"
-                  onClick={onClose}
-                >
-                  Cancel
-                </button>
-              </div>
+          {!result && (
+            <div className="memory-text-import-footer">
+              <button className="chatgpt-import-btn chatgpt-import-btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                className="chatgpt-import-btn chatgpt-import-btn-primary"
+                onClick={handleImport}
+                disabled={importing || !pastedText.trim()}
+              >
+                {importing ? "Adding..." : "Add to memory"}
+              </button>
             </div>
           )}
 
@@ -283,8 +252,8 @@ export function PromptMemoryImportWizard({
               <div
                 className={`chatgpt-import-result ${hasCreatedMemories ? "chatgpt-import-result-success" : "chatgpt-import-result-error"}`}
               >
-                <h4 style={{ margin: "0 0 8px", color: "var(--color-text-primary)" }}>
-                  {hasCreatedMemories ? "Import complete" : "No memories imported"}
+                <h4 className="memory-text-import-result-title">
+                  {hasCreatedMemories ? "Added to memory" : "No memories added"}
                 </h4>
                 <div className="chatgpt-import-result-stats">
                   <div className="chatgpt-import-result-stat">
@@ -298,7 +267,7 @@ export function PromptMemoryImportWizard({
                   {result.duplicatesSkipped > 0 && (
                     <div className="chatgpt-import-result-stat">
                       <strong>{result.duplicatesSkipped}</strong>
-                      <span>duplicates skipped</span>
+                      <span>skipped (duplicate or filtered)</span>
                     </div>
                   )}
                   {result.truncated > 0 && (
@@ -308,10 +277,21 @@ export function PromptMemoryImportWizard({
                     </div>
                   )}
                 </div>
-                {result.errors.length > 0 && (
-                  <p style={{ margin: "10px 0 0", color: "var(--color-error)", fontSize: "13px" }}>
-                    {result.errors[0]}
+                {categoryBreakdown.length > 0 && (
+                  <p className="memory-text-import-note">
+                    {categoryBreakdown
+                      .map(({ category, count }) => `${count} ${CATEGORY_LABELS[category]}`)
+                      .join(" · ")}
                   </p>
+                )}
+                {result.incomplete && (
+                  <p className="memory-text-import-note">
+                    {resolvedProvider} said more memories remain. Ask it to continue, then import
+                    the rest — entries already added are skipped.
+                  </p>
+                )}
+                {result.errors.length > 0 && (
+                  <p className="memory-text-import-note is-error">{result.errors[0]}</p>
                 )}
               </div>
 
@@ -327,7 +307,7 @@ export function PromptMemoryImportWizard({
                     setError(null);
                   }}
                 >
-                  Import Another
+                  {result.incomplete ? "Import the rest" : "Import another"}
                 </button>
               </div>
             </div>

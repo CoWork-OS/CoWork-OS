@@ -1258,6 +1258,10 @@ interface TextMemoryImportResult {
   duplicatesSkipped: number;
   truncated: number;
   errors: string[];
+  /** Memories created per export category (instructions, identity, career, ...). */
+  byCategory: Partial<Record<string, number>>;
+  /** The pasted answer said more entries remain. */
+  incomplete: boolean;
 }
 
 // Hooks types (inlined for sandboxed preload)

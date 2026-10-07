@@ -1,9 +1,13 @@
 /**
  * Convert ATX headings (###, ##, #) that appear mid-line into line-start headings
  * so they render correctly. E.g. "From X: ### Architecture Overview" -> "From X:\n### Architecture Overview"
+ * Only same-line spaces/tabs count, so existing line breaks and indentation are kept, and
+ * fenced code is left untouched so "x = 1 # note" stays on its line.
  */
 export function normalizeInlineHeadings(text: string): string {
-  return text.replace(/\s+(#{1,6})(\s+)/g, "\n$1$2");
+  return transformOutsideFencedCode(text, (segment) =>
+    segment.replace(/(?<=\S)[ \t]+(#{1,6})([ \t]+)/g, "\n$1$2"),
+  );
 }
 
 const FENCE_OPEN_REGEX = /^[ \t]*(`{3,}|~{3,})/;
@@ -203,13 +207,16 @@ function wrapGlobPatterns(text: string): string {
 /**
  * Fix unclosed bold at end of line (e.g. "**Electron" or "**CoWork OS").
  * CommonMark leaves these as literal; adding the closing ** makes them render.
- * Only fix when the line has an odd number of ** (one unclosed pair).
+ * Only fix when the line has an odd number of ** (one unclosed pair). Fenced code is left
+ * untouched, since "y = x ** 2" there is not bold.
  */
 export function fixUnclosedBold(text: string): string {
-  return text.replace(/^.*$/gm, (line) => {
-    const count = (line.match(/\*\*/g) || []).length;
-    return count % 2 === 1 ? line + "**" : line;
-  });
+  return transformOutsideFencedCode(text, (segment) =>
+    segment.replace(/^.*$/gm, (line) => {
+      const count = (line.match(/\*\*/g) || []).length;
+      return count % 2 === 1 ? line + "**" : line;
+    }),
+  );
 }
 
 /**

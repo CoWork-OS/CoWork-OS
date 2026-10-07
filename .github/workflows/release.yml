@@ -109,6 +109,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     needs: hardening-release-gate
+    env:
+      # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
+      NODE_OPTIONS: --max-old-space-size=4096
     strategy:
       fail-fast: false
       matrix:
@@ -458,6 +461,8 @@ jobs:
     needs: [release, release-linux-server]
     timeout-minutes: 90
     env:
+      # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
+      NODE_OPTIONS: --max-old-space-size=4096
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_SHA: ${{ github.sha }}
       RELEASE_BUNDLE_DIR: registry-bundle

@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
   devRunLoggingEnabled: false,
   homeResearchVaultEnabled: false,
   homeNextActionsEnabled: false,
+  costReceiptEnabled: false,
   disclaimerAccepted: false,
   onboardingCompleted: false,
   onboardingCompletedAt: undefined,
@@ -152,7 +153,8 @@ export class AppearanceManager {
             !isValidCommandOutputStyle(stored.commandOutputStyle) ||
             typeof stored.devRunLoggingEnabled !== "boolean" ||
             typeof stored.homeResearchVaultEnabled !== "boolean" ||
-            typeof stored.homeNextActionsEnabled !== "boolean"
+            typeof stored.homeNextActionsEnabled !== "boolean" ||
+            typeof stored.costReceiptEnabled !== "boolean"
           ) {
             needsWrite = true;
           }
@@ -201,6 +203,10 @@ export class AppearanceManager {
         settings.homeNextActionsEnabled = DEFAULT_SETTINGS.homeNextActionsEnabled;
         needsWrite = true;
       }
+      if (typeof settings.costReceiptEnabled !== "boolean") {
+        settings.costReceiptEnabled = DEFAULT_SETTINGS.costReceiptEnabled;
+        needsWrite = true;
+      }
     } catch (error) {
       console.error("[AppearanceManager] Failed to load settings:", error);
       settings = { ...DEFAULT_SETTINGS };
@@ -223,6 +229,7 @@ export class AppearanceManager {
             devRunLoggingEnabled: settings.devRunLoggingEnabled,
             homeResearchVaultEnabled: settings.homeResearchVaultEnabled,
             homeNextActionsEnabled: settings.homeNextActionsEnabled,
+            costReceiptEnabled: settings.costReceiptEnabled,
           }),
         );
       } catch {
@@ -337,6 +344,10 @@ export class AppearanceManager {
           typeof settings.homeNextActionsEnabled === "boolean"
             ? settings.homeNextActionsEnabled
             : existingSettings.homeNextActionsEnabled,
+        costReceiptEnabled:
+          typeof settings.costReceiptEnabled === "boolean"
+            ? settings.costReceiptEnabled
+            : existingSettings.costReceiptEnabled,
       };
 
       const repository = SecureSettingsRepository.getInstance();

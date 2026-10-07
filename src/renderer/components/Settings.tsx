@@ -389,6 +389,8 @@ interface SettingsProps {
   homeNextActionsEnabled: boolean;
   onHomeResearchVaultEnabledChange: (enabled: boolean) => void;
   onHomeNextActionsEnabledChange: (enabled: boolean) => void;
+  costReceiptEnabled: boolean;
+  onCostReceiptEnabledChange: (enabled: boolean) => void;
   initialTab?: SettingsTab;
   /** Bumped to open the Memory tab's Review view (also when Settings is already open). */
   memoryReviewRequest?: number;
@@ -1382,6 +1384,8 @@ export function Settings({
   homeNextActionsEnabled,
   onHomeResearchVaultEnabledChange,
   onHomeNextActionsEnabledChange,
+  costReceiptEnabled,
+  onCostReceiptEnabledChange,
   initialTab = "appearance",
   memoryReviewRequest = 0,
   focusAutomation,
@@ -9250,6 +9254,8 @@ export function Settings({
                   homeNextActionsEnabled={homeNextActionsEnabled}
                   onHomeResearchVaultEnabledChange={onHomeResearchVaultEnabledChange}
                   onHomeNextActionsEnabledChange={onHomeNextActionsEnabledChange}
+                  costReceiptEnabled={costReceiptEnabled}
+                  onCostReceiptEnabledChange={onCostReceiptEnabledChange}
                   onShowOnboarding={onShowOnboarding}
                   onboardingCompletedAt={onboardingCompletedAt}
                 />

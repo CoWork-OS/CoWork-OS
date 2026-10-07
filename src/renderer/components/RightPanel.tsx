@@ -828,6 +828,8 @@ interface RightPanelProps {
   onOpenPresentationArtifact?: (path: string) => void;
   onOpenWebArtifact?: (path: string) => void;
   rendererPerfLoggingEnabled?: boolean;
+  /** Opt-in Appearance setting; the Cost section is hidden by default. */
+  costReceiptEnabled?: boolean;
   highlightOutputPath?: string | null;
   onHighlightConsumed?: () => void;
 }
@@ -1302,7 +1304,15 @@ const FolderSection = memo(
               <div
                 className="cli-workspace-path"
                 style={{ cursor: "pointer" }}
+                role="button"
+                tabIndex={0}
                 onClick={() => window.electronAPI.openFile(workspace.path, workspace.path)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    window.electronAPI.openFile(workspace.path, workspace.path);
+                  }
+                }}
                 title={workspace.path}
               >
                 <span className="cli-label">
@@ -1322,6 +1332,7 @@ const FolderSection = memo(
     prev.expanded === next.expanded &&
     prev.highlightedOutputPath === next.highlightedOutputPath &&
     prev.workspace?.path === next.workspace?.path &&
+    prev.workspace?.name === next.workspace?.name &&
     prev.filesTitleText === next.filesTitleText &&
     prev.outputSummary?.primaryOutputPath === next.outputSummary?.primaryOutputPath &&
     prev.outputSummary?.outputCount === next.outputSummary?.outputCount &&
@@ -1519,6 +1530,7 @@ const ContextSection = memo(
     prev.visible === next.visible &&
     prev.expanded === next.expanded &&
     prev.workspace?.path === next.workspace?.path &&
+    prev.workspace?.name === next.workspace?.name &&
     prev.contextTitleText === next.contextTitleText &&
     getStringListSignature(prev.usedSkills) === getStringListSignature(next.usedSkills) &&
     getToolUsageSignature(prev.toolUsage) === getToolUsageSignature(next.toolUsage) &&
@@ -1680,6 +1692,7 @@ function RightPanelComponent({
   onOpenPresentationArtifact,
   onOpenWebArtifact,
   rendererPerfLoggingEnabled = false,
+  costReceiptEnabled = false,
   highlightOutputPath = null,
   onHighlightConsumed,
 }: RightPanelProps) {
@@ -1717,6 +1730,7 @@ function RightPanelComponent({
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   const [highlightedOutputPath, setHighlightedOutputPath] = useState<string | null>(null);
+  const [highlightRequestCount, setHighlightRequestCount] = useState(0);
   const fileItemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const agentContext = useAgentContext();
   const openFileFromFilesSection = useCallback(
@@ -1977,18 +1991,38 @@ function RightPanelComponent({
     if (!highlightOutputPath) return;
 
     setExpandedSections((prev) => (prev.folder ? prev : { ...prev, folder: true }));
-    const targetEl = fileItemRefs.current.get(highlightOutputPath);
-    if (!targetEl) return;
+    // File rows are keyed workspace-relative, while output paths may be absolute.
+    const requested = highlightOutputPath.replace(/\\/g, "/");
+    const base = workspace?.path?.replace(/\\/g, "/").replace(/\/$/, "");
+    const targetPath =
+      base && requested.startsWith(base + "/") ? requested.slice(base.length + 1) : requested;
+    const targetEl = fileItemRefs.current.get(targetPath);
+    if (!targetEl) {
+      // Drop a request for a path the loaded file list doesn't contain so it can't
+      // fire later; with no files yet, keep waiting for them to arrive.
+      if (files.length > 0 && !files.some((file) => file.path === targetPath)) {
+        onHighlightConsumed?.();
+      }
+      return;
+    }
 
     targetEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    setHighlightedOutputPath(highlightOutputPath);
+    setHighlightedOutputPath(targetPath);
+    setHighlightRequestCount((count) => count + 1);
     onHighlightConsumed?.();
+    // Re-run once the Files section expands so the row exists to be found.
+  }, [highlightOutputPath, files, expandedSections.folder, workspace?.path]);
 
+  // Clear the highlight independently of the request, which is consumed (nulled)
+  // immediately and would otherwise cancel this timer. The request count restarts
+  // the timer when the same file is highlighted again.
+  useEffect(() => {
+    if (!highlightedOutputPath) return;
     const timer = setTimeout(() => {
-      setHighlightedOutputPath((prev) => (prev === highlightOutputPath ? null : prev));
+      setHighlightedOutputPath((prev) => (prev === highlightedOutputPath ? null : prev));
     }, 2200);
     return () => clearTimeout(timer);
-  }, [highlightOutputPath, files.length]);
+  }, [highlightedOutputPath, highlightRequestCount]);
 
   // Extract tool usage from events
   const toolUsage = useMemo((): ToolUsage[] => {
@@ -2147,7 +2181,12 @@ function RightPanelComponent({
   useEffect(() => {
     let cancelled = false;
     setTaskCostEstimate(null);
-    if (!taskIdForCost || typeof window === "undefined" || !hasHostMethod("getTaskCostEstimate")) {
+    if (
+      !costReceiptEnabled ||
+      !taskIdForCost ||
+      typeof window === "undefined" ||
+      !hasHostMethod("getTaskCostEstimate")
+    ) {
       return;
     }
     void (async () => {
@@ -2164,8 +2203,11 @@ function RightPanelComponent({
     return () => {
       cancelled = true;
     };
-  }, [taskIdForCost, taskModelKeyForCost]);
-  const showCostSection = Boolean(task) && (taskCostSummary.hasUsage || taskCostEstimate !== null);
+  }, [costReceiptEnabled, taskIdForCost, taskModelKeyForCost]);
+  const showCostSection =
+    costReceiptEnabled &&
+    Boolean(task) &&
+    (taskCostSummary.hasUsage || taskCostEstimate !== null);
   const showFolderSection = stableFiles.length > 0;
   const showActiveContextSection =
     stableConnectedActiveConnectors.length > 0 && !isLiveExecutionMode;
@@ -2469,6 +2511,7 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
   return (
     getRightPanelTaskSignature(prev.task) === getRightPanelTaskSignature(next.task) &&
     prev.workspace?.path === next.workspace?.path &&
+    prev.workspace?.name === next.workspace?.name &&
     sharedEventsEqual &&
     prev.hasActiveChildren === next.hasActiveChildren &&
     areChildTaskStatsEqual(prev.childTasks || [], next.childTasks || []) &&
@@ -2478,6 +2521,7 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
     prev.onOpenPresentationArtifact === next.onOpenPresentationArtifact &&
     prev.onOpenWebArtifact === next.onOpenWebArtifact &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
+    prev.costReceiptEnabled === next.costReceiptEnabled &&
     prev.highlightOutputPath === next.highlightOutputPath &&
     prev.onSelectTask === next.onSelectTask &&
     prev.onHighlightConsumed === next.onHighlightConsumed

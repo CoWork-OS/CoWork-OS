@@ -39,6 +39,7 @@ export interface AppearanceSettings {
   devRunLoggingEnabled?: boolean; // Persist npm run dev stdout/stderr to logs/
   homeResearchVaultEnabled?: boolean;
   homeNextActionsEnabled?: boolean;
+  costReceiptEnabled?: boolean; // Show the Cost section in the right panel (default: off)
   language?: string; // Persisted language preference (e.g. 'en', 'ja', 'zh')
   disclaimerAccepted?: boolean;
   onboardingCompleted?: boolean;
@@ -1661,6 +1662,8 @@ export type ToolType =
   | "qa_check"
   | "qa_report"
   | "qa_cleanup"
+  // Sandboxed preview of a workspace web page (no network)
+  | "preview_web_page"
   // Computer use tools (CUA)
   | "screen_context_resolve"
   | "screenshot"
@@ -1719,6 +1722,8 @@ export const TOOL_GROUPS = {
     "system_info",
     "get_env",
     "get_app_paths",
+    // Renders a workspace page offline in a sandboxed window; reads only that file
+    "preview_web_page",
     // Monty transform library (workspace-local scripts)
     "monty_list_transforms",
     "monty_run_transform",
@@ -1976,6 +1981,7 @@ export const RETIRED_MEMORY_TOOL_NAMES: readonly string[] = [
 export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Read operations
   read_file: "read",
+  preview_web_page: "read",
   list_directory: "read",
   search_files: "read",
   system_info: "read",
@@ -2329,6 +2335,8 @@ export interface IntegrationMentionOption extends IntegrationMentionSelection {
  * Allows spawning agents with different models/personalities than the global settings
  */
 export interface AgentConfig {
+  /** Composer that created the task; preserved in sidebar summaries. */
+  taskOrigin?: "build";
   /** Internal routine lineage used by the writer to enforce responsibility admission. */
   automationRoutineId?: string;
   responsibilityRun?: import("./bot-responsibility").BotResponsibilityRun;

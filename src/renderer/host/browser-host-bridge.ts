@@ -2352,6 +2352,9 @@ function sanitizeBrowserAppearance(value: Record<string, unknown>): Partial<Appe
   if (typeof value.homeNextActionsEnabled === "boolean") {
     result.homeNextActionsEnabled = value.homeNextActionsEnabled;
   }
+  if (typeof value.costReceiptEnabled === "boolean") {
+    result.costReceiptEnabled = value.costReceiptEnabled;
+  }
   if (typeof value.language === "string" && value.language.length <= 64) {
     result.language = value.language;
   }

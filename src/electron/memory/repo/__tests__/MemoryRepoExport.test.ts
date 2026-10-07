@@ -78,7 +78,12 @@ describeWithGit("runMemoryRepoExport", () => {
     expect(read("workspaces/billing.md")).toContain("Deploys go through staging [by: user; kind: rule;");
     const all = (await service.listFiles()).map(read).join("\n");
     expect(all).not.toMatch(/Bob|Private note/);
-    expect(await runMemoryRepoExport(service, deps)).toEqual({ ran: false, written: 0, skipped: 0 });
+    expect(await runMemoryRepoExport(service, deps)).toEqual({
+      ran: false,
+      reason: "done",
+      written: 0,
+      skipped: 0,
+    });
   });
 });
 

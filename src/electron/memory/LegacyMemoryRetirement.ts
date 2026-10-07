@@ -21,10 +21,16 @@
  *     the settled `pending_memory_writes` rows, together with the marker
  *     `legacy_memory_retirement_v1` (counts only).
  *
+ * Re-run: an older release opened after the upgrade recreates the curated table and the two
+ * settings blobs. `rearmLegacyMemoryRetirement` (on start, before the lane migration) then
+ * clears both markers once, so the lane migration and this retirement run again with the
+ * same backup, verification and claims, and the memory folder export picks the new facts up.
+ *
  * Kept on purpose: `adaptive-style-engine` (AdaptiveStyleEngine still keeps its debounce
  * and weekly drift bookkeeping there) and `awareness-state` (AwarenessService still owns its
  * beliefs and uses them beyond the profile bridge). No VACUUM: idle maintenance runs it.
  */
+import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
 import type { AwarenessBelief, CuratedMemoryEntry, UserFact } from "../../shared/types";
@@ -47,16 +53,21 @@ import {
 } from "./memory-items-lanes";
 import {
   LEGACY_MEMORY_RETIREMENT_KEY,
+  RETIRED_SETTINGS_CATEGORIES,
   type CuratedExportRow,
+  type LegacyMemoryRearmResult,
   type LegacySourceRef,
 } from "./legacy-memory-retirement-sql";
 
-export { LEGACY_MEMORY_RETIREMENT_KEY } from "./legacy-memory-retirement-sql";
+export {
+  LEGACY_MEMORY_RERUN_KEY,
+  LEGACY_MEMORY_RETIREMENT_KEY,
+  RETIRED_SETTINGS_CATEGORIES,
+} from "./legacy-memory-retirement-sql";
 
 const logger = createLogger("LegacyMemoryRetirement");
 
-/** SecureSettings categories the retirement reads; only the first two are deleted. */
-export const RETIRED_SETTINGS_CATEGORIES = ["user-profile", "relationship-memory"] as const;
+/** SecureSettings categories the retirement reads; only the retired ones are deleted. */
 const EXPORTED_SETTINGS_CATEGORIES = [
   ...RETIRED_SETTINGS_CATEGORIES,
   "adaptive-style-engine",
@@ -528,6 +539,49 @@ export function loadLegacySettingsAccess(): LegacySettingsAccess | null {
     },
     subconsciousMigrationDone: () => repo.exists(SUBCONSCIOUS_MIGRATION_CATEGORY),
   };
+}
+
+// ---- Re-run after a downgrade ----
+
+/**
+ * Stores of the lanes the retirement deletes. An older release opened after the upgrade
+ * writes new facts only there; a re-run copies, exports and retires only these.
+ */
+export const LEGACY_RERUN_STORES: ReadonlySet<string> = new Set([
+  MEMORY_LANE_STORES.curated,
+  MEMORY_LANE_STORES.userProfile,
+  MEMORY_LANE_STORES.relationship,
+]);
+
+/**
+ * Call on start, before the lane migration. When the retirement has finished but an older
+ * release has since recreated the legacy stores and written to them, clear the lane
+ * migration and retirement markers so both run once more, and request a re-export into the
+ * memory folder (`legacy_memory_rerun_v1`). Never throws.
+ */
+export async function rearmLegacyMemoryRetirement(
+  port: MemoryStatementPort,
+  now: () => number = Date.now,
+): Promise<LegacyMemoryRearmResult> {
+  try {
+    const result = await port.unit("legacyRetirement_rearm", {
+      token: randomUUID(),
+      now: Math.floor(now()),
+    });
+    if (result.rearmed) {
+      logger.info("Legacy memory data reappeared after the retirement; migrating it again", {
+        curatedRows: result.curatedRows,
+        settings: result.settings,
+      });
+    }
+    return result;
+  } catch (error) {
+    logger.warn(
+      "Checking for reappeared legacy memory data failed; it is checked again on the next start:",
+      error instanceof Error ? error.message : "error",
+    );
+    return { rearmed: false };
+  }
 }
 
 /** Delay of the retirement after startup, off the hot path. */

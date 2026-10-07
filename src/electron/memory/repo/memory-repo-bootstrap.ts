@@ -21,8 +21,10 @@ import { setMemoryRepoRoot } from "../../security/memory-repo-access";
 import { createLogger } from "../../utils/logger";
 import { MemoryWriter, type MemoryWorkspacePolicy } from "../MemoryWriter";
 import { MemoryRepoService, type MemoryRepoDreamRecord, type MemoryRepoStatus } from "./MemoryRepoService";
-import { runMemoryRepoExport } from "./MemoryRepoExport";
-import { runMemoryItemsFactRetirement } from "./MemoryItemsFactRetirement";
+import {
+  runMemoryRepoExportChain,
+  type MemoryRepoRerunRequests,
+} from "./MemoryItemsFactRetirement";
 import path from "node:path";
 import { getSafeStorage } from "../../utils/safe-storage";
 import { getUserDataDir } from "../../utils/user-data-dir";
@@ -158,17 +160,18 @@ export function reconfigureMemoryRepo(): Promise<MemoryRepoStatus | null> {
         if (writer) {
           const listItems = () =>
             writer.repository.list({ statuses: ["active"], includePrivate: false, limit: 5000 });
-          void runMemoryRepoExport(service, {
-            listItems,
-            workspaceName: (id) => (workspaceName ? workspaceName(id) : Promise.resolve(null)),
-          })
-            // Then retire the fact rows the folder now holds (Phase 3 §3).
-            .then(() =>
-              runMemoryItemsFactRetirement(service, {
+          // Export, then retire the fact rows the folder now holds (Phase 3 §3); again for
+          // legacy facts an older release wrote after a downgrade.
+          void legacyRerunRequests()
+            .catch(() => undefined)
+            .then((rerun) =>
+              runMemoryRepoExportChain(service, {
                 listItems,
+                workspaceName: (id) => (workspaceName ? workspaceName(id) : Promise.resolve(null)),
                 deleteItem: (id) => writer.setStatus(id, "deleted"),
                 encryption: getSafeStorage(),
                 backupDir: path.join(getUserDataDir(), "backups"),
+                rerun,
               }),
             )
             .catch((error) => logger.warn("Memory repo export or fact retirement failed:", error));
@@ -181,6 +184,21 @@ export function reconfigureMemoryRepo(): Promise<MemoryRepoStatus | null> {
       return null;
     }
   });
+}
+
+/** The re-run request of the legacy retirement, over the memory statements. */
+async function legacyRerunRequests(): Promise<MemoryRepoRerunRequests | undefined> {
+  const [{ MemoryService }, { LEGACY_RERUN_STORES }] = await Promise.all([
+    import("../MemoryService"),
+    import("../LegacyMemoryRetirement"),
+  ]);
+  const port = MemoryService.getStatements();
+  if (!port) return undefined;
+  return {
+    request: () => port.unit("legacyRetirement_rerunRequest", {}),
+    consume: (token) => port.unit("legacyRetirement_consumeRerun", { token }),
+    stores: LEGACY_RERUN_STORES,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,12 @@
  *  - `transcript_spans` with its FTS index and bookkeeping tables, once the conversation
  *    index migration has recorded `legacy_transcript_spans_migrated_v1`.
  * Settled `pending_memory_writes` rows are deleted; the table stays (MemoryWriteGate).
+ *
+ * Re-run after a downgrade: an older release recreates `curated_memory_entries` and the
+ * `user-profile` / `relationship-memory` settings and stores new facts there. On the next
+ * start `rearmLegacyMemoryRun` clears the lane migration and retirement markers (once per
+ * reappearance) and records `legacy_memory_rerun_v1`, which the memory folder export and
+ * fact retirement consume.
  */
 import type Database from "better-sqlite3";
 import { defineReadUnit, defineUnit, type UnitCatalog } from "../database/statements/statement-catalog";
@@ -19,6 +25,10 @@ import { bool, fields, int, json, list, record, str } from "../database/statemen
 import { MEMORY_ITEMS_LANE_MIGRATION_KEY } from "./memory-items-sql";
 
 export const LEGACY_MEMORY_RETIREMENT_KEY = "legacy_memory_retirement_v1";
+/** Request to re-run the chain for legacy data that reappeared after the retirement. */
+export const LEGACY_MEMORY_RERUN_KEY = "legacy_memory_rerun_v1";
+/** SecureSettings categories the retirement deletes. */
+export const RETIRED_SETTINGS_CATEGORIES = ["user-profile", "relationship-memory"] as const;
 /** Completion marker of the transcript span migration (conversation-index-sql.ts). */
 export const LEGACY_TRANSCRIPT_SPANS_MIGRATED_KEY = "legacy_transcript_spans_migrated_v1";
 
@@ -370,6 +380,126 @@ export function finishLegacyRetirement(
   return result;
 }
 
+export interface LegacyMemoryReappearance {
+  curatedRows: number;
+  settings: string[];
+}
+
+/** Legacy data present now: curated rows and retired settings blobs (by category only). */
+function legacyMemoryReappearance(db: Database.Database): LegacyMemoryReappearance {
+  const curatedRows = tableExists(db, CURATED_TABLE) ? countRows(db, CURATED_TABLE) : 0;
+  const settings = tableExists(db, "secure_settings")
+    ? (
+        db
+          .prepare(
+            "SELECT category FROM secure_settings WHERE category IN (?, ?) ORDER BY category",
+          )
+          .all(...RETIRED_SETTINGS_CATEGORIES) as Array<{ category: string }>
+      ).map((row) => row.category)
+    : [];
+  return { curatedRows, settings };
+}
+
+function writeMaintenanceKey(db: Database.Database, key: string, value: unknown, now: number) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS maintenance_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  db.prepare(
+    `INSERT INTO maintenance_state (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).run(key, JSON.stringify(value), now);
+}
+
+function readMaintenanceValue(db: Database.Database, key: string): Record<string, unknown> | null {
+  if (!tableExists(db, "maintenance_state")) return null;
+  const row = db.prepare("SELECT value FROM maintenance_state WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.value) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export type LegacyMemoryRearmResult =
+  | { rearmed: false }
+  | ({ rearmed: true; token: string; requestedAt: number } & LegacyMemoryReappearance);
+
+/**
+ * When the retirement has finished but legacy data is back (an older release ran on the
+ * profile), clear the lane migration and retirement markers and record the re-run request,
+ * in one transaction. A no-op while the retirement marker is absent, so concurrent starts of
+ * the desktop app and the node daemon re-arm at most once per reappearance; the re-run
+ * itself is claimed like the first run.
+ */
+export function rearmLegacyMemoryRun(
+  db: Database.Database,
+  args: { token: string; now: number },
+): LegacyMemoryRearmResult {
+  const previousRetirement = readMaintenanceValue(db, LEGACY_MEMORY_RETIREMENT_KEY);
+  if (!previousRetirement) return { rearmed: false };
+  const found = legacyMemoryReappearance(db);
+  if (found.curatedRows === 0 && found.settings.length === 0) return { rearmed: false };
+  const previousRuns = Number(readMaintenanceValue(db, LEGACY_MEMORY_RERUN_KEY)?.runs) || 0;
+  db.prepare("DELETE FROM maintenance_state WHERE key IN (?, ?)").run(
+    MEMORY_ITEMS_LANE_MIGRATION_KEY,
+    LEGACY_MEMORY_RETIREMENT_KEY,
+  );
+  // Counts only, like the markers it replaces.
+  writeMaintenanceKey(
+    db,
+    LEGACY_MEMORY_RERUN_KEY,
+    {
+      token: args.token,
+      requestedAt: args.now,
+      runs: previousRuns + 1,
+      curatedRows: found.curatedRows,
+      settings: found.settings,
+      previousRetirementAt:
+        typeof previousRetirement.completedAt === "number" ? previousRetirement.completedAt : null,
+    },
+    args.now,
+  );
+  return { rearmed: true, token: args.token, requestedAt: args.now, ...found };
+}
+
+export interface LegacyMemoryRerunRequest {
+  token: string;
+  requestedAt: number;
+  /** The lane migration has run again since the request (its marker is back). */
+  laneMigrationDone: boolean;
+}
+
+/** The pending re-run request, or null. */
+export function legacyMemoryRerunRequest(db: Database.Database): LegacyMemoryRerunRequest | null {
+  const value = readMaintenanceValue(db, LEGACY_MEMORY_RERUN_KEY);
+  if (!value || typeof value.token !== "string" || typeof value.requestedAt !== "number") {
+    return null;
+  }
+  return {
+    token: value.token,
+    requestedAt: value.requestedAt,
+    laneMigrationDone: hasMaintenanceKey(db, MEMORY_ITEMS_LANE_MIGRATION_KEY),
+  };
+}
+
+/** Remove the re-run request if it is still the one with `token` (a newer one is kept). */
+export function consumeLegacyMemoryRerun(db: Database.Database, args: { token: string }): boolean {
+  const value = readMaintenanceValue(db, LEGACY_MEMORY_RERUN_KEY);
+  if (!value || value.token !== args.token) return false;
+  return (
+    db.prepare("DELETE FROM maintenance_state WHERE key = ?").run(LEGACY_MEMORY_RERUN_KEY).changes >
+    0
+  );
+}
+
 const includeImprovementArgs = fields({
   includeImprovement: (value: unknown, path: string) => bool(value, path),
 });
@@ -401,5 +531,20 @@ export const LEGACY_MEMORY_RETIREMENT_UNITS = {
       now: (value: unknown, path: string) => int(value, path),
     }),
     (db: Database.Database, args) => finishLegacyRetirement(db, args),
+  ),
+  legacyRetirement_rearm: defineUnit(
+    fields({
+      token: (value: unknown, path: string) => str(value, path, 200),
+      now: (value: unknown, path: string) => int(value, path),
+    }),
+    (db: Database.Database, args) => rearmLegacyMemoryRun(db, args),
+  ),
+  legacyRetirement_rerunRequest: defineReadUnit(
+    () => ({}),
+    (db: Database.Database) => legacyMemoryRerunRequest(db),
+  ),
+  legacyRetirement_consumeRerun: defineUnit(
+    fields({ token: (value: unknown, path: string) => str(value, path, 200) }),
+    (db: Database.Database, args) => consumeLegacyMemoryRerun(db, args),
   ),
 } satisfies UnitCatalog;

@@ -659,7 +659,7 @@ Windows ARM64 note:
 
 You don't need to migrate your data. On first launch after an upgrade, CoWork updates its database in place and records a schema version. Your tasks, settings and history stay where they are. Don't delete the app database as an upgrade workaround; if startup fails, capture `logs/dev-latest.log` and report it.
 
-Going back to 0.5.54 after upgrading also works: that release opens the upgraded profile and ignores the tables it doesn't know.
+Going back to 0.5.54 after upgrading also works: that release opens the upgraded profile and ignores the tables it doesn't know. It does not see the memories that moved to the memory folder (or to the newer memory store), so they are missing while you run 0.5.54; nothing is deleted, and they are there again when you upgrade. Memories you save while on 0.5.54 are picked up on the next upgrade: CoWork migrates them the same way as the first time and adds them to the memory folder (or keeps them in the database while the folder is off).
 
 If CoWork says **"This profile's database was upgraded by a newer CoWork OS"**, a newer build has already migrated this profile past what the running build supports. Install the newer version again to open it. The message is there so an older build never runs on a schema it doesn't understand.
 

@@ -531,6 +531,20 @@ self-improvement `improvement_*` tables once Workflow Intelligence has copied th
 `transcript_spans` tables once the conversation index migration has finished).
 `adaptive-style-engine` (engine bookkeeping) and `awareness-state` (belief signals) are kept.
 
+**Re-run after a downgrade.** An older release (0.5.54) opened on an upgraded profile recreates
+`curated_memory_entries` and the `user-profile` / `relationship-memory` blobs and stores new
+facts there. On the next start, before the lane migration, `rearmLegacyMemoryRetirement`
+(unit `legacyRetirement_rearm`) checks in one transaction whether the retirement marker exists
+and the curated table has rows or either blob exists; if so it deletes the lane migration and
+retirement markers and records `maintenance_state.legacy_memory_rerun_v1` (counts only). The
+lane migration then runs again for the curated, profile and relationship lanes only (source
+refs keep already-migrated records from being copied twice), and the retirement runs again
+with its own claim, a fresh backup and the same verification. The memory folder export and
+fact retirement (`runMemoryRepoExportChain`) treat their `.git` markers as absent when they are
+older than the request, export and retire only rows of those three lanes, and then consume the
+request. While the folder is off the request stays pending, so the export runs when it is
+turned on. With no new legacy data nothing is re-armed.
+
 ### Generated kit views (retired)
 
 The `USER.md` / `MEMORY.md` auto-blocks (`<!-- cowork:auto:curated-user:* -->`,

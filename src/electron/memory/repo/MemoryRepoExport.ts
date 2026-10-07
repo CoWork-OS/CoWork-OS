@@ -10,6 +10,10 @@
  * The marker lives in the repo's own `.git` folder: a repo at a new path gets its own
  * export, and the repo's write lock keeps two processes from exporting at once (a re-run
  * adds nothing anyway, because writes dedupe).
+ *
+ * Re-run after a downgrade (`legacy_memory_rerun_v1`, LegacyMemoryRetirement.ts): a marker
+ * written before the request counts as absent, and only rows of the re-run lanes are exported
+ * again (a fresh folder still gets the full export).
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -32,8 +36,15 @@ export interface MemoryRepoExportDeps {
   workspaceName: (workspaceId: string) => Promise<string | null>;
 }
 
+/** A re-run requested at `after` for rows whose source store is in `stores`. */
+export interface MemoryRepoRerun {
+  after: number;
+  stores: ReadonlySet<string>;
+}
+
 export interface MemoryRepoExportResult {
   ran: boolean;
+  reason?: "not_writable" | "done";
   written: number;
   skipped: number;
 }
@@ -42,11 +53,41 @@ function markerPath(service: MemoryRepoService): string {
   return path.join(service.root, ".git", MEMORY_REPO_EXPORT_MARKER);
 }
 
+/** When a folder marker was written (its `at`, else its mtime), or null when absent. */
+export async function folderMarkerTime(file: string): Promise<number | null> {
+  const stat = await fs.stat(file).catch(() => null);
+  if (!stat) return null;
+  try {
+    const at = (JSON.parse(await fs.readFile(file, "utf8")) as { at?: unknown }).at;
+    if (typeof at === "number" && Number.isFinite(at)) return at;
+  } catch {
+    // An unreadable marker still marks the run; its mtime dates it.
+  }
+  return stat.mtimeMs;
+}
+
+/**
+ * How a run treats its marker: `done` when it exists (and, for a re-run, is not older than
+ * the request), `rerun` when a re-run applies, `full` when absent.
+ */
+export function folderRunMode(
+  markerAt: number | null,
+  rerun: MemoryRepoRerun | undefined,
+): "done" | "rerun" | "full" {
+  if (markerAt === null) return "full";
+  return rerun && markerAt < rerun.after ? "rerun" : "done";
+}
+
+export function inRerunStores(item: MemoryItem, rerun: MemoryRepoRerun): boolean {
+  return typeof item.sourceRef?.store === "string" && rerun.stores.has(item.sourceRef.store);
+}
+
 export async function runMemoryRepoExport(
   service: MemoryRepoService,
   deps: MemoryRepoExportDeps,
+  options: { rerun?: MemoryRepoRerun } = {},
 ): Promise<MemoryRepoExportResult> {
-  if (!service.isWritable()) return { ran: false, written: 0, skipped: 0 };
+  if (!service.isWritable()) return { ran: false, reason: "not_writable", written: 0, skipped: 0 };
   const marker = markerPath(service);
   const gitDir = path.dirname(marker);
   const hasGitDir = await fs
@@ -54,15 +95,16 @@ export async function runMemoryRepoExport(
     .then((stat) => stat.isDirectory())
     .catch(() => false);
   // Without git there is no history to mark; the dedupe keeps a re-run from adding anything.
-  if (hasGitDir && (await fs.stat(marker).catch(() => null))) {
-    return { ran: false, written: 0, skipped: 0 };
-  }
+  const mode = hasGitDir ? folderRunMode(await folderMarkerTime(marker), options.rerun) : "full";
+  if (mode === "done") return { ran: false, reason: "done", written: 0, skipped: 0 };
+  const rerun = mode === "rerun" ? options.rerun : undefined;
   let written = 0;
   let skipped = 0;
   const names = new Map<string, string | null>();
   const items = (await deps.listItems())
     .filter(
       (item) =>
+        (!rerun || inRerunStores(item, rerun)) &&
         item.status === "active" &&
         item.privacy !== "private" &&
         item.source !== "third_party" &&
@@ -98,8 +140,14 @@ export async function runMemoryRepoExport(
     else skipped += 1;
   }
   if (hasGitDir) {
-    await fs.writeFile(marker, JSON.stringify({ at: Date.now(), written, skipped }), { mode: 0o600 });
+    await fs.writeFile(
+      marker,
+      JSON.stringify({ at: Date.now(), written, skipped, ...(rerun ? { rerun: true } : {}) }),
+      { mode: 0o600 },
+    );
   }
-  logger.info(`Exported ${written} fact(s) into the memory repo (${skipped} skipped)`);
+  logger.info(
+    `Exported ${written} fact(s) into the memory repo (${skipped} skipped)${rerun ? " after a downgrade" : ""}`,
+  );
   return { ran: true, written, skipped };
 }

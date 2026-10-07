@@ -64,6 +64,18 @@ export interface LaneCounts {
   failed: number;
 }
 
+/**
+ * Lanes of a re-run after a downgrade (`legacy_memory_rerun_v1`): only the stores the
+ * retirement deleted and an older release recreated. The other lanes were copied by the first
+ * run and their stores were kept, so copying them again could bring back facts the user has
+ * since removed from the memory folder.
+ */
+export const RERUN_LANES: ReadonlySet<LaneName> = new Set([
+  "curated",
+  "userProfile",
+  "relationship",
+]);
+
 export interface LaneMigrationResult {
   ran: boolean;
   lanes: Record<LaneName, LaneCounts>;
@@ -218,17 +230,19 @@ export async function loadLegacyLaneSources(): Promise<LegacyLaneSources> {
 
 /**
  * Run the lane migration once. Returns `ran: false` when the marker already exists.
- * `pause` yields between lanes so a large profile does not hold the event loop.
+ * `pause` yields between lanes so a large profile does not hold the event loop. `only`
+ * limits the run to those lanes (a re-run, `RERUN_LANES`).
  */
 export async function runMemoryItemsLaneMigration(
   writer: MemoryWriter,
   sources: LegacyLaneSources,
-  options: { pause?: () => Promise<void> } = {},
+  options: { pause?: () => Promise<void>; only?: ReadonlySet<LaneName> } = {},
 ): Promise<LaneMigrationResult> {
   const lanes = emptyLanes();
   const repository = writer.repository;
   if (await repository.isLaneMigrationComplete()) return { ran: false, lanes };
   const pause = options.pause ?? (async () => undefined);
+  const included = (lane: LaneName) => !options.only || options.only.has(lane);
 
   const ingest = async (lane: LaneName, candidate: MemoryCandidate | null): Promise<void> => {
     lanes[lane].read += 1;
@@ -248,6 +262,7 @@ export async function runMemoryItemsLaneMigration(
     else lanes[lane].skipped += 1;
   };
   const readLane = <T>(lane: LaneName, read: () => T[]): T[] => {
+    if (!included(lane)) return [];
     try {
       return read();
     } catch (error) {
@@ -259,7 +274,7 @@ export async function runMemoryItemsLaneMigration(
     }
   };
 
-  const curated = await repository.listCuratedForMigration();
+  const curated = included("curated") ? await repository.listCuratedForMigration() : [];
   for (const row of curated) {
     await ingest(
       "curated",

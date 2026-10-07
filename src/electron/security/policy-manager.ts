@@ -66,16 +66,30 @@ export interface PolicyContext {
 }
 
 /**
+ * Policy name for sending work to a remote ACP/A2A agent endpoint.
+ *
+ * It is not a model-callable tool: remote dispatch is an orchestration-graph
+ * effect, so it never passes the per-tool middleware that local nodes do. The
+ * graph engine evaluates this name explicitly before every remote dispatch (see
+ * `agent/orchestration/remote-acp-admission.ts`), and workspace `tools.monty`
+ * policies and permission rules can match it like any tool name.
+ */
+export const REMOTE_ACP_INVOCATION_TOOL = "acp_remote";
+
+/**
  * Security Policy Manager implementing monotonic deny-wins precedence
  *
- * NOT WIRED UP. Nothing in the running app calls this class or
- * `createPolicyManager`; only `isToolAllowedQuick` from this module is used in
- * production. Live tool-permission decisions are made by
+ * MOSTLY NOT WIRED UP. Agent tool calls do not go through this class or
+ * `createPolicyManager`; for them only `isToolAllowedQuick` from this module is
+ * used in production. Live tool-permission decisions are made by
  * `src/electron/security/monty-tool-policy.ts`, `ToolPolicyPipeline`, and
- * `PermissionEngine`. Do not treat this as an enforcement point, and do not add
- * checks here expecting them to take effect. Kept for now because it is
- * exercised by tests and re-exported from `security/index.ts`; remove both
- * along with it if you delete this.
+ * `PermissionEngine`. Do not add checks here expecting them to take effect for
+ * ordinary tools.
+ *
+ * The one live caller is remote ACP/A2A dispatch admission
+ * (`agent/orchestration/remote-acp-admission.ts`), which evaluates
+ * `REMOTE_ACP_INVOCATION_TOOL` through `checkToolAccess` so the remote rule in
+ * `evaluateToolSpecificLayer` is enforced. Keep that rule and its caller in step.
  */
 export class SecurityPolicyManager {
   private deniedTools: Set<string> = new Set();
@@ -431,7 +445,10 @@ export class SecurityPolicyManager {
       };
     }
 
-    if (toolName === "acp_remote") {
+    // Remote agents receive the delegated prompt plus dependency output and parent
+    // context, so every remote dispatch needs consent. Reached via
+    // REMOTE_ACP_INVOCATION_TOOL from remote dispatch admission.
+    if (toolName === REMOTE_ACP_INVOCATION_TOOL) {
       return {
         layer: "tool_specific",
         decision: "require_approval",
@@ -460,7 +477,7 @@ export class SecurityPolicyManager {
       tools.add(tool);
     }
 
-    tools.add("acp_remote");
+    tools.add(REMOTE_ACP_INVOCATION_TOOL);
 
     return Array.from(tools);
   }

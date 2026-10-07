@@ -309,6 +309,12 @@ import {
   type OrchestrationGraphNodeInput,
 } from "./orchestration/OrchestrationGraphEngine";
 import { OrchestrationGraphRepository } from "./orchestration/orchestration-graph-repository-facades";
+import {
+  evaluateRemoteAcpPolicy,
+  REMOTE_ACP_INVOCATION_TOOL,
+  type RemoteAcpAdmissionDecision,
+  type RemoteAcpDispatchRequest,
+} from "./orchestration/remote-acp-admission";
 import { OrchestrationGraphStore } from "./orchestration/OrchestrationGraphRepository";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { getConfiguredMcpToolPolicy } from "../mcp/tool-policy";
@@ -913,6 +919,10 @@ export class AgentDaemon extends EventEmitter {
       getTaskById: (taskId) => this.getTaskById(taskId),
       cancelTask: (taskId) => this.cancelTask(taskId),
       getActiveAgentRoles: () => this.getActiveAgentRoles(),
+      remoteAcpAdmission: {
+        evaluate: (request) => this.evaluateRemoteAcpAdmission(request),
+        requestApproval: (request, reason) => this.requestRemoteAcpApproval(request, reason),
+      },
       emitRootEvent: (rootTaskId, eventType, payload) =>
         this.taskRepo.findById(rootTaskId)
           ? this.logEvent(rootTaskId, eventType as EventType, payload)
@@ -7624,6 +7634,93 @@ export class AgentDaemon extends EventEmitter {
         requireExplicitApproval: request.requireExplicitApproval,
       },
     );
+  }
+
+  /** Policy decision for a remote ACP/A2A graph dispatch; see remote-acp-admission.ts. */
+  private async evaluateRemoteAcpAdmission(
+    request: RemoteAcpDispatchRequest,
+  ): Promise<RemoteAcpAdmissionDecision> {
+    const rootTask = this.getTaskWithTransientAgentConfig(
+      this.taskRepo.findById(request.rootTaskId),
+    );
+    const workspace =
+      (rootTask && this.getEffectiveWorkspaceForTask(rootTask.id)) ||
+      this.workspaceRepo.findById(request.workspaceId);
+    const profile = workspace
+      ? this.getEffectiveAccessProfile(request.rootTaskId, rootTask, workspace)
+      : undefined;
+    const result = await evaluateRemoteAcpPolicy({
+      workspace,
+      guardrails: GuardrailManager.loadSettings(),
+      gatewayContext: rootTask?.agentConfig?.gatewayContext,
+      agent: request.agent,
+      networkEnabled: workspace?.permissions.network !== false && profile?.networkEnabled !== false,
+      accessNetworkMode: profile?.definition.network,
+      profileDomainRules: profile?.definition.domainRules,
+    });
+    if (rootTask) {
+      if (result.networkDecision) {
+        this.logEvent(rootTask.id, "network_policy_decision", result.networkDecision);
+      }
+      this.logEvent(rootTask.id, "log", {
+        type: "tool_authorization",
+        tool: REMOTE_ACP_INVOCATION_TOOL,
+        decision: result.decision,
+        reason: result.reason,
+        runId: request.runId,
+        nodeId: request.nodeId,
+        acpAgentId: request.agent.id,
+      });
+    }
+    const { networkDecision: _networkDecision, ...decision } = result;
+    return decision;
+  }
+
+  /** Consent for a remote dispatch that policy marked `require_approval`. */
+  private async requestRemoteAcpApproval(
+    request: RemoteAcpDispatchRequest,
+    reason: string,
+  ): Promise<{ approved: boolean; reason?: string }> {
+    const rootTask = this.taskRepo.findById(request.rootTaskId);
+    // Runs opened from the ACP control plane have a synthetic root and no task
+    // the approval UI can attach to. Fail closed rather than dispatch unapproved.
+    if (!rootTask) {
+      return { approved: false, reason: `${reason}; this run has no task to request approval on` };
+    }
+    if (isTerminalTaskStatus(deriveCanonicalTaskStatus(rootTask))) {
+      return { approved: false, reason: "the parent task has already finished" };
+    }
+    let host = "";
+    try {
+      host = new URL(request.agent.endpoint || "").host;
+    } catch {
+      // The policy step already rejected malformed endpoints.
+    }
+    const approved = await this.authorizeToolAction(rootTask.id, {
+      toolName: REMOTE_ACP_INVOCATION_TOOL,
+      approvalType: "external_service",
+      description: `Send "${request.title}" to remote agent ${request.agent.name}${host ? ` (${host})` : ""}?`,
+      details: {
+        acpAgentId: request.agent.id,
+        agentName: request.agent.name,
+        host,
+        runId: request.runId,
+        nodeId: request.nodeId,
+        policyReason: reason,
+        promptChars: request.prompt.length,
+        promptPreview: request.prompt.slice(0, 600),
+        redactedSecretCount: request.redactedSecretCount,
+      },
+      // The policy rule demands consent for every remote send; a permissive
+      // permission mode must not turn it into a silent allow.
+      requireExplicitApproval: true,
+    });
+    return approved
+      ? { approved: true }
+      : {
+          approved: false,
+          reason: "approval was denied or is unavailable under this access profile",
+        };
   }
 
   async listInputRequests(params?: {

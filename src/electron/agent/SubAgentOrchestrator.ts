@@ -18,7 +18,6 @@ import { OrchestrationRun, OrchestrationTask } from "./OrchestrationRepository";
 import { OrchestrationRepository } from "./orchestration-repository-facades";
 import type { AgentDaemon } from "./daemon";
 import { getACPRegistry } from "../acp";
-import { RemoteAgentInvoker } from "../acp/remote-invoker";
 
 export interface OrchestratorDeps {
   daemon: AgentDaemon;
@@ -35,7 +34,6 @@ export type OrchestratorEvent =
 
 export class SubAgentOrchestrator extends EventEmitter {
   private repo: OrchestrationRepository;
-  private remoteInvoker = new RemoteAgentInvoker();
 
   constructor(
     private db: Database.Database,
@@ -168,7 +166,6 @@ export class SubAgentOrchestrator extends EventEmitter {
 
     try {
       let taskId = "";
-      let remoteTaskId: string | undefined;
       if (task.acpAgentId) {
         const agent = getACPRegistry(this.db).getAgent(
           task.acpAgentId,
@@ -177,18 +174,16 @@ export class SubAgentOrchestrator extends EventEmitter {
         if (!agent) {
           throw new Error(`ACP agent not found: ${task.acpAgentId}`);
         }
-        if (agent.origin === "remote" && agent.endpoint) {
-          const remoteResult = await this.remoteInvoker.invoke(agent, {
-            assigneeId: task.acpAgentId,
-            title: task.title,
-            prompt: this.buildPromptWithContext(task, run),
-            workspaceId: this.deps.workspaceId,
-          });
-          taskId = remoteResult.remoteTaskId || task.acpAgentId;
-          remoteTaskId = remoteResult.remoteTaskId;
-          if (remoteResult.status === "failed" || remoteResult.status === "cancelled") {
-            throw new Error(remoteResult.error || `Remote ACP task ${remoteResult.status}`);
-          }
+        if (agent.origin === "remote") {
+          // Retired: remote ACP/A2A dispatch has exactly one path, the
+          // orchestration graph engine, which runs remote admission (policy,
+          // network policy and approval) before sending anything. This class
+          // previously invoked remote agents directly with no admission; it must
+          // not grow a second remote path. Delegate remote work via spawn_agent /
+          // orchestrate_agents, which build graph runs.
+          throw new Error(
+            `Remote ACP agent ${task.acpAgentId} must be dispatched through the orchestration graph`,
+          );
         } else if (agent.origin === "local" && agent.localRoleId) {
           const childTask = await this.deps.daemon.createChildTask({
             title: task.title,
@@ -226,17 +221,13 @@ export class SubAgentOrchestrator extends EventEmitter {
       const afterSpawn = this.updateTask(updated, task.id, {
         status: "running",
         taskId,
-        remoteTaskId,
         startedAt: Date.now(),
       });
       await this.repo.update(afterSpawn.id, { tasks: afterSpawn.tasks });
       this.emit("task_spawned", { type: "task_spawned", nodeId: task.id, taskId });
 
       // Wait for completion
-      const result =
-        task.acpAgentId && remoteTaskId
-          ? await this.waitForRemoteTask(task.acpAgentId, remoteTaskId, 600)
-          : await this.waitForTask(taskId, 600);
+      const result = await this.waitForTask(taskId, 600);
 
       if (result.success) {
         const afterDone = this.updateTask(afterSpawn, task.id, {
@@ -323,38 +314,6 @@ export class SubAgentOrchestrator extends EventEmitter {
       }
       await sleep(pollInterval);
       pollInterval = Math.min(pollInterval * 1.5, 10_000);
-    }
-    return { success: false, error: `Timed out after ${timeoutSeconds}s` };
-  }
-
-  private async waitForRemoteTask(
-    acpAgentId: string,
-    remoteTaskId: string,
-    timeoutSeconds: number,
-  ): Promise<{ success: boolean; output?: string; error?: string }> {
-    const deadline = Date.now() + timeoutSeconds * 1000;
-    let pollInterval = 2000;
-    while (Date.now() < deadline) {
-      try {
-        const agent = getACPRegistry(this.db).getAgent(
-          acpAgentId,
-          this.deps.daemon.getActiveAgentRoles(),
-        );
-        if (!agent || agent.origin !== "remote" || !agent.endpoint) {
-          return { success: false, error: "ACP agent unavailable" };
-        }
-        const result = await this.remoteInvoker.pollStatus(agent, remoteTaskId);
-        if (result.status === "completed") {
-          return { success: true, output: result.result };
-        }
-        if (result.status === "failed" || result.status === "cancelled") {
-          return { success: false, error: result.error || result.status };
-        }
-      } catch {
-        // Keep polling on transient errors.
-      }
-      await sleep(pollInterval);
-      pollInterval = Math.min(pollInterval * 1.5, 15_000);
     }
     return { success: false, error: `Timed out after ${timeoutSeconds}s` };
   }

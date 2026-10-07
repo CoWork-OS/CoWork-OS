@@ -92,6 +92,10 @@ function makeDeps(overrides: Partial<OrchestrationGraphEngineDeps> = {}) {
       tasks.set(taskId, { ...task, status: "cancelled" });
     }),
     getActiveAgentRoles: vi.fn(() => []),
+    remoteAcpAdmission: {
+      evaluate: vi.fn(async () => ({ decision: "allow" as const })),
+      requestApproval: vi.fn(async () => ({ approved: true })),
+    },
     ...overrides,
   };
   return { deps, tasks };
@@ -639,5 +643,198 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     expect(afterRecovery?.nodes.find((node) => node.key === "first")?.status).toBe("completed");
     expect(afterRecovery?.nodes.find((node) => node.key === "second")?.status).toBe("running");
     expect(deps.createChildTask).toHaveBeenCalledTimes(2);
+  });
+});
+
+describeWithSqlite("OrchestrationGraphEngine remote ACP admission", () => {
+  let db: Database.Database;
+  const registeredAgentIds: string[] = [];
+  const servers: Server[] = [];
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    createGraphSchema(db);
+  });
+
+  afterEach(async () => {
+    for (const server of servers.splice(0)) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    for (const id of registeredAgentIds.splice(0)) {
+      getACPRegistry().unregisterRemoteAgent(id);
+    }
+    db.close();
+  });
+
+  async function registerRecordingAgent(name: string) {
+    const prompts: string[] = [];
+    const remote = await startRemoteAgent(() => "cancelled");
+    servers.push(remote.server);
+    remote.server.prependListener("request", (request) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      request.on("end", () => {
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          params?: { prompt?: string };
+        };
+        if (payload.params?.prompt) prompts.push(payload.params.prompt);
+      });
+    });
+    const agent = getACPRegistry().registerRemoteAgent({
+      name: `${name}-${Date.now()}`,
+      description: "Local fake ACP endpoint",
+      endpoint: remote.endpoint,
+      capabilities: [],
+    });
+    registeredAgentIds.push(agent.id);
+    return { agent, requests: remote.requests, prompts };
+  }
+
+  function remoteRun(agentId: string, rootTaskId: string, prompt = "Summarize the findings") {
+    return {
+      rootTaskId,
+      workspaceId: "workspace-1",
+      kind: "acp" as const,
+      maxParallel: 1,
+      nodes: [
+        makeNode("remote", {
+          kind: "acp_task",
+          dispatchTarget: "remote_acp",
+          acpAgentId: agentId,
+          prompt,
+        }),
+      ],
+    };
+  }
+
+  it("fails a policy-denied remote node with a visible reason and never calls the agent", async () => {
+    const { agent, requests } = await registerRecordingAgent("denied");
+    const { deps } = makeDeps();
+    vi.mocked(deps.remoteAcpAdmission.evaluate).mockResolvedValue({
+      decision: "deny",
+      reason: "network policy: workspace_network_disabled",
+    });
+    const engine = new OrchestrationGraphEngine(db, deps);
+    const failed = vi.fn();
+    engine.on("node_notification", failed);
+
+    const snapshot = await engine.createRun(remoteRun(agent.id, "root-denied"));
+
+    expect(requests).toEqual([]);
+    expect(deps.remoteAcpAdmission.requestApproval).not.toHaveBeenCalled();
+    expect(snapshot.nodes[0]).toMatchObject({
+      status: "failed",
+      error: "Remote ACP dispatch denied: network policy: workspace_network_disabled",
+    });
+    expect(snapshot.nodes[0].remoteTaskId).toBeUndefined();
+    expect(failed).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed", error: expect.stringContaining("denied") }),
+    );
+  });
+
+  it("holds an approval-required node until approval, then dispatches it", async () => {
+    const { agent, requests } = await registerRecordingAgent("approval");
+    const approval = deferred<{ approved: boolean; reason?: string }>();
+    const approvalRequested = deferred<void>();
+    const { deps } = makeDeps();
+    vi.mocked(deps.remoteAcpAdmission.evaluate).mockResolvedValue({
+      decision: "require_approval",
+      reason: "Remote ACP/A2A agent invocations require approval",
+    });
+    vi.mocked(deps.remoteAcpAdmission.requestApproval).mockImplementation(async () => {
+      approvalRequested.resolve();
+      return approval.promise;
+    });
+    const engine = new OrchestrationGraphEngine(db, deps);
+
+    const created = engine.createRun(remoteRun(agent.id, "root-approval"));
+    await approvalRequested.promise;
+
+    const [pending] = (await engine.getRepository().listRunningSnapshots())[0].nodes;
+    expect(pending).toMatchObject({ status: "running" });
+    expect(pending.remoteTaskId).toBeUndefined();
+    expect(requests).toEqual([]);
+    expect(deps.remoteAcpAdmission.requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: expect.objectContaining({ id: agent.id }) }),
+      "Remote ACP/A2A agent invocations require approval",
+    );
+
+    approval.resolve({ approved: true });
+    const snapshot = await created;
+
+    expect(requests).toEqual(["tasks/send"]);
+    expect(snapshot.nodes[0]).toMatchObject({ status: "running", remoteTaskId: "remote-task-1" });
+  });
+
+  it("fails an unapproved node with the approval reason and never calls the agent", async () => {
+    const { agent, requests } = await registerRecordingAgent("unapproved");
+    const { deps } = makeDeps();
+    vi.mocked(deps.remoteAcpAdmission.evaluate).mockResolvedValue({
+      decision: "require_approval",
+      reason: "Remote ACP/A2A agent invocations require approval",
+    });
+    vi.mocked(deps.remoteAcpAdmission.requestApproval).mockResolvedValue({
+      approved: false,
+      reason: "approval was denied",
+    });
+    const engine = new OrchestrationGraphEngine(db, deps);
+
+    const snapshot = await engine.createRun(remoteRun(agent.id, "root-unapproved"));
+
+    expect(requests).toEqual([]);
+    expect(snapshot.nodes[0]).toMatchObject({
+      status: "failed",
+      error: "Remote ACP dispatch was not approved: approval was denied",
+    });
+  });
+
+  it("does not dispatch when the run is cancelled while approval is pending", async () => {
+    const { agent, requests } = await registerRecordingAgent("cancel-during-approval");
+    const approval = deferred<{ approved: boolean }>();
+    const approvalRequested = deferred<void>();
+    const { deps } = makeDeps();
+    vi.mocked(deps.remoteAcpAdmission.evaluate).mockResolvedValue({
+      decision: "require_approval",
+      reason: "approval required",
+    });
+    vi.mocked(deps.remoteAcpAdmission.requestApproval).mockImplementation(async () => {
+      approvalRequested.resolve();
+      return approval.promise;
+    });
+    const engine = new OrchestrationGraphEngine(db, deps);
+
+    const created = engine.createRun(remoteRun(agent.id, "root-cancel-during-approval"));
+    await approvalRequested.promise;
+    await engine.cancelRunForRootTask("root-cancel-during-approval");
+    approval.resolve({ approved: true });
+    const snapshot = await created;
+
+    expect(requests).toEqual([]);
+    expect(snapshot.nodes[0].remoteTaskId).toBeUndefined();
+    expect(snapshot.nodes[0].status).not.toBe("running");
+  });
+
+  it("dispatches an allowed node with secret values stripped from the outbound prompt", async () => {
+    const { agent, requests, prompts } = await registerRecordingAgent("allowed");
+    const { deps } = makeDeps();
+    const engine = new OrchestrationGraphEngine(db, deps);
+    const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
+
+    const snapshot = await engine.createRun(
+      remoteRun(agent.id, "root-allowed", `Use api_key=${secret} to summarize`),
+    );
+
+    expect(requests).toEqual(["tasks/send"]);
+    expect(snapshot.nodes[0]).toMatchObject({ status: "running", remoteTaskId: "remote-task-1" });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).not.toContain(secret);
+    expect(prompts[0]).toContain("[REDACTED_SECRET]");
+    expect(deps.remoteAcpAdmission.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: snapshot.nodes[0].id,
+        redactedSecretCount: 1,
+        prompt: expect.not.stringContaining(secret),
+      }),
+    );
   });
 });

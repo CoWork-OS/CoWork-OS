@@ -917,7 +917,7 @@ export function applyTurnDisclosures(
           kind: "turn-header",
           key: `turn-header:${segment.id}`,
           turn,
-          estimatedHeight: 34,
+          estimatedHeight: 41,
           revision: `${turn.status}:${turn.expanded ? 1 : 0}:${turn.collapsible ? 1 : 0}:${
             turn.endedAt ?? "live"
           }`,

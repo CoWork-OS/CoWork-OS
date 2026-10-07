@@ -218,6 +218,19 @@ export function ModelDropdown({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [closeDropdown]);
 
+  // Escape closes the picker wherever focus is; the trigger's own key handler
+  // only sees it while the trigger is focused.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      closeDropdown();
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [closeDropdown, isOpen]);
+
   const configuredProviders = useMemo(() => {
     const seen = new Set<string>();
     const list = providers.filter((provider) => provider.configured);

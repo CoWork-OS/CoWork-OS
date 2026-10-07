@@ -229,12 +229,12 @@ describe("task event visibility helpers", () => {
     expect(isImportantTaskEvent(makeEvent("tool_result", { tool: "run_command" }))).toBe(false);
   });
 
-  it("hides timeline tool-call noise in summary mode", () => {
+  it("lists tool calls as summary steps but folds their results away", () => {
     expect(
       isImportantTaskEvent(
         makeEvent("timeline_step_updated", { legacyType: "tool_call", tool: "run_command" }),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isImportantTaskEvent(
         makeEvent("timeline_step_updated", { legacyType: "tool_result", tool: "run_command" }),
@@ -507,6 +507,17 @@ describe("task event visibility helpers", () => {
         "executing",
       ),
     ).toBe(false);
+  });
+
+  it("shows each call in a tool batch as its own summary step", () => {
+    const laneCall = makeEvent("timeline_step_updated", {
+      legacyType: "tool_call",
+      tool: "grep",
+      input: { pattern: "New session" },
+      groupId: "tools:step:build:123",
+    });
+    expect(shouldShowTaskEventInSummaryMode(laneCall, "executing")).toBe(true);
+    expect(shouldShowTaskEventInStepFeed(laneCall)).toBe(true);
   });
 
   it("keeps non-internal assistant timeline_step_updated events in verbose mode", () => {

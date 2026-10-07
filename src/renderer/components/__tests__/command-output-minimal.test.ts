@@ -13,18 +13,46 @@ describe("CommandOutput minimal variant", () => {
     expect(source).toContain('const isMinimal = variant === "minimal"');
   });
 
-  it("drops terminal chrome and collapses output in the minimal variant", () => {
+  it("renders a shell card with the command pinned above scrolling output", () => {
     const minimalBranch = source.slice(
       source.indexOf("if (isMinimal)"),
       source.indexOf('return (\n    <div className="command-output-container">'),
     );
 
-    expect(minimalBranch).toContain("command-output-minimal");
+    expect(minimalBranch).toContain("command-output-minimal command-shell");
     expect(minimalBranch).not.toContain("command-window-dot");
     expect(minimalBranch).not.toContain("command-prompt-glyph");
-    // Output stays collapsed to a short tail until expanded.
-    expect(minimalBranch).toContain("minimalExpanded");
-    expect(minimalBranch).toContain("minimal.hiddenCount");
+    // The command sits outside the scroller, so only the output scrolls.
+    const commandAt = minimalBranch.indexOf('className="command-shell-command"');
+    const scrollAt = minimalBranch.indexOf("command-shell-scroll");
+    expect(commandAt).toBeGreaterThan(-1);
+    expect(scrollAt).toBeGreaterThan(commandAt);
+    expect(minimalBranch).toContain("ref={outputRef}");
+  });
+
+  it("labels the card with the command it ran and folds it from that label", () => {
+    const minimalBranch = source.slice(
+      source.indexOf("if (isMinimal)"),
+      source.indexOf('return (\n    <div className="command-output-container">'),
+    );
+
+    const summaryAt = minimalBranch.indexOf('className="command-shell-summary"');
+    expect(summaryAt).toBeGreaterThan(-1);
+    expect(summaryAt).toBeLessThan(minimalBranch.indexOf('className="command-shell-card"'));
+    expect(minimalBranch).toContain('{isRunning ? "Running" : "Ran"}');
+    expect(minimalBranch).toContain("aria-expanded={!shellCollapsed}");
+    expect(source).toContain("useState(true);");
+  });
+
+  it("lets the command and the output be copied separately", () => {
+    const minimalBranch = source.slice(
+      source.indexOf("if (isMinimal)"),
+      source.indexOf('return (\n    <div className="command-output-container">'),
+    );
+
+    expect(source).toContain("navigator.clipboard.writeText(text)");
+    expect(minimalBranch).toContain('<CopyTextButton text={command} label="Copy command" />');
+    expect(minimalBranch).toContain('<CopyTextButton text={shell.text} label="Copy output" />');
   });
 
   it("keeps stop and stdin controls available while a command runs", () => {
@@ -35,15 +63,16 @@ describe("CommandOutput minimal variant", () => {
 
     expect(minimalBranch).toContain("killCommand");
     expect(minimalBranch).toContain("forceKillCommand");
-    expect(minimalBranch).toContain("command-minimal-stdin-input");
+    expect(minimalBranch).toContain("command-shell-stdin-input");
   });
 
-  it("styles the minimal variant without a terminal surface", () => {
+  it("caps the output body height and scrolls it", () => {
     const styles = readFileSync(stylesPath, "utf8");
     const block = styles.slice(styles.indexOf(".command-output-minimal {"));
+    const scrollRule = block.slice(block.indexOf(".command-shell-scroll {"));
 
-    expect(block).toContain("background: transparent;");
-    expect(block).toContain(".command-minimal-more");
-    expect(block).toContain(".command-minimal-scroll.expanded");
+    expect(scrollRule).toMatch(/max-height: \d+px;/);
+    expect(scrollRule).toContain("overflow: auto;");
+    expect(block).toContain(".command-shell-copy::after");
   });
 });

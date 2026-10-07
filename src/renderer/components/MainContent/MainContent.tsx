@@ -115,6 +115,8 @@ import {
 } from "../../../shared/mode-suggestion-detection";
 import { CollaborativeAgentLines } from "../CollaborativeAgentLines";
 import { FirstTaskCard } from "../FirstTaskCard";
+import { UseCasesGallery } from "../UseCasesGallery";
+import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
 import { RealWorkFeedback } from "../RealWorkFeedback";
 import { CollaborativeSummaryPanel } from "../CollaborativeSummaryPanel";
 import { DispatchedAgentsPanel } from "../DispatchedAgentsPanel";
@@ -286,6 +288,9 @@ import {
   type PendingAttachment,
   formatFileSize,
   composeMessageWithAttachments,
+  guessVisualAttachmentMimeType,
+  isVideoVisualAttachmentMimeType,
+  joinWorkspaceRelativePath,
 } from "./attachments";
 import {
   normalizeTimelineTitleMarkdownForDisplay,
@@ -323,41 +328,21 @@ import {
   isTurnThisIntoRoutinePrompt,
   taskCanBecomeRoutineFromFollowUp,
 } from "./TaskAutomationModal";
+import {
+  BuildChangesButton,
+  BuildPreviewButton,
+  BuildStripBadge,
+  pickBuildPreviewPath,
+} from "../calm/BuildTaskBar";
+import { BuildChangesPanel } from "../calm/BuildChangesPanel";
+import { deriveBuildChanges, normalizeBuildPath } from "../calm/build-changes";
+import { isBuildTask } from "../calm/build-task";
 import { BotConversationHistory } from "../BotConversationHistory";
 import { BotCollaborationHeader } from "../BotCollaborationHeader";
 import { BotEarlierConversations, BotMessageAvatar } from "./BotEarlierConversations";
 import { buildBotMascotLookup, type BotMascotLookup } from "./bot-earlier-conversations";
 import { BotGreetingTracker, toBotMessage } from "../../../shared/bot-messages";
 import type { BotConversationProjection } from "../../../shared/bot-lifecycle";
-
-const VISUAL_ATTACHMENT_MIME_SET = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "video/mp4",
-  "video/quicktime",
-  "video/webm",
-]);
-
-const guessVisualAttachmentMimeType = (fileName: string, mimeType?: string): string | undefined => {
-  if (mimeType && VISUAL_ATTACHMENT_MIME_SET.has(mimeType)) return mimeType;
-  const lower = fileName.toLowerCase();
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".gif")) return "image/gif";
-  if (lower.endsWith(".webp")) return "image/webp";
-  if (lower.endsWith(".mp4")) return "video/mp4";
-  if (lower.endsWith(".mov")) return "video/quicktime";
-  if (lower.endsWith(".webm")) return "video/webm";
-  return undefined;
-};
-
-const isVideoVisualAttachmentMimeType = (mimeType: string | undefined): boolean =>
-  Boolean(mimeType && mimeType.startsWith("video/"));
-
-const joinWorkspaceRelativePath = (workspacePath: string, relativePath: string): string =>
-  `${workspacePath.replace(/[\\/]+$/, "")}/${relativePath.replace(/^[\\/]+/, "")}`;
 
 const getAttachmentNamesWithoutImagePreviews = (
   names: string[],
@@ -513,7 +498,12 @@ import { FileChangeTitle } from "../timeline/FileChangeTitle";
 import { isFileEventCoveredByToolCall, summarizeFileChange } from "../timeline/file-change-row";
 import { buildActionBlockSummary } from "../timeline/ActionBlockSummary";
 import { TaskStatusStrip } from "../TaskStatusStrip";
-import { buildParallelGroupProjection } from "../timeline/parallel-group-projection";
+import { truncateLabel } from "../../utils/timeline-tool-labels";
+import {
+  buildParallelGroupProjection,
+  getEventGroupId,
+  isToolsParallelGroupId,
+} from "../timeline/parallel-group-projection";
 import {
   resolveTimelineIndicator,
   shouldShowTimelineBranchStub,
@@ -530,6 +520,26 @@ import type { TaskSurfaceKey } from "../../state/task-view-cache";
 
 const MAX_COMMAND_OUTPUT_SESSION_CHARS = 50 * 1024;
 const MAX_COMMAND_OUTPUT_SESSIONS = 12;
+
+/**
+ * Compact rows read searches as finished steps ("Searched for X"), in plain text so
+ * glob patterns aren't taken for markdown emphasis.
+ */
+function getCompactSearchStepTitle(event: TaskEvent, running: boolean): string | null {
+  if (getEffectiveTaskEventType(event) !== "tool_call") return null;
+  const tool = event.payload?.tool;
+  const input =
+    event.payload?.input && typeof event.payload.input === "object" ? event.payload.input : {};
+  const pattern = typeof input.pattern === "string" ? input.pattern.trim() : "";
+  const query = typeof input.query === "string" ? input.query.trim() : pattern;
+  if ((tool === "grep" && pattern) || (tool === "search_files" && query)) {
+    return `${running ? "Searching" : "Searched"} for ${truncateLabel(tool === "grep" ? pattern : query, 64)}`;
+  }
+  if (tool === "glob" && pattern) {
+    return `${running ? "Finding" : "Found"} files matching ${truncateLabel(pattern, 64)}`;
+  }
+  return null;
+}
 
 function appendCommandOutputTail(current: string, chunk: string): string {
   const next = current + chunk;
@@ -665,6 +675,8 @@ interface MainContentProps {
   onReleaseTaskEventDetail?: (eventId: string, taskId: string) => void;
   remoteSession?: { deviceId: string; deviceName: string } | null;
   replayControls?: ReplayControls;
+  /** The right panel already lists changed files and outputs; the status drawer skips them. */
+  rightPanelOpen?: boolean;
 }
 
 function getTruncatedTaskEventDetailId(event: TaskEvent): string | null {
@@ -1829,10 +1841,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 }
                 const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
                 const isActive = isLatestActionBlock && (isTaskWorking || isReplayMode);
+                const expandSteps = verboseSteps || isReplayMode;
                 const expanded = resolveDisclosureExpanded({
                   intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
-                  isCurrent: isActive,
-                  defaultExpanded: verboseSteps || isReplayMode,
+                  // Compact step groups start folded to their summary ("Read files, ran
+                  // a command"); verbose and replay views keep them open.
+                  isCurrent: expandSteps && isActive,
+                  defaultExpanded: expandSteps,
                 });
                 const visibleEventCount = expanded ? actionBlockState.visibleBlockEvents.length : 0;
                 return estimateTaskFeedRowHeight(item, {
@@ -2352,17 +2367,16 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   return null;
                 }
                 const projectedActivityGroup = activityGroupsById.get(item.blockId);
+                const expandSteps = verboseSteps || isReplayMode;
                 const expanded = resolveDisclosureExpanded({
                   intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
-                  isCurrent: isActive,
-                  defaultExpanded: verboseSteps || isReplayMode,
+                  // Compact step groups start folded to their summary ("Read files, ran
+                  // a command"); verbose and replay views keep them open.
+                  isCurrent: expandSteps && isActive,
+                  defaultExpanded: expandSteps,
                 });
                 const onToggle = () =>
-                  toggleDisclosureIntent(
-                    "group",
-                    item.blockId,
-                    isActive && (verboseSteps || isReplayMode),
-                  );
+                  toggleDisclosureIntent("group", item.blockId, expandSteps && isActive);
                 const indicatorPosition = stepFeedTimelineIndexPosition.get(timelineIndex);
                 const showConnectorAbove =
                   typeof indicatorPosition === "number" && indicatorPosition > 0;
@@ -2436,6 +2450,43 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           isPlanStepLifecycleEvent(event) &&
                           !parallelGroupsByAnchorEventId.has(event.id) &&
                           !ownsParallelChildren(idx);
+                        // Compact rows show each command as its shell card. Sessions are
+                        // matched to their run_command call by command text: a command logs
+                        // two calls (the tool batch's and the shell's), so the second is a
+                        // duplicate once the first has claimed the session.
+                        const inlineCommandSessionByEventId = new Map<
+                          string,
+                          CommandOutputSession
+                        >();
+                        const duplicateCommandEventIds = new Set<string>();
+                        if (!verboseSteps) {
+                          const unclaimed = [...commandOutputsForBlock];
+                          const claimedCommands = new Set<string>();
+                          for (const event of visibleBlockEvents as TaskEvent[]) {
+                            if (
+                              getEffectiveTaskEventType(event) !== "tool_call" ||
+                              event.payload?.tool !== "run_command"
+                            ) {
+                              continue;
+                            }
+                            const rawCommand = event.payload?.input?.command ?? event.payload?.command;
+                            const command = typeof rawCommand === "string" ? rawCommand.trim() : "";
+                            if (!command) continue;
+                            const matchIndex = unclaimed.findIndex(
+                              (session) => session.command.trim() === command,
+                            );
+                            if (matchIndex >= 0) {
+                              const [session] = unclaimed.splice(matchIndex, 1);
+                              inlineCommandSessionByEventId.set(event.id, session);
+                              claimedCommands.add(command);
+                            } else if (claimedCommands.has(command)) {
+                              duplicateCommandEventIds.add(event.id);
+                            }
+                          }
+                        }
+                        const inlineCommandSessionIds = new Set(
+                          [...inlineCommandSessionByEventId.values()].map((session) => session.id),
+                        );
                         const hasActionRows = visibleBlockEvents.some(
                           (event: TaskEvent, idx: number) =>
                             !isHiddenStepMarker(event, idx) &&
@@ -2453,6 +2504,17 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             return null;
                           }
                           if (hasActionRows && isHiddenStepMarker(event, idx)) return null;
+                          // A command lists as its folded shell card ("Ran git status ›"),
+                          // which opens to the command and its output.
+                          const inlineCommandSession = inlineCommandSessionByEventId.get(event.id);
+                          if (inlineCommandSession) {
+                            return (
+                              <Fragment key={event.id || `event-${eventIndex}`}>
+                                {renderCommandOutputs([inlineCommandSession])}
+                              </Fragment>
+                            );
+                          }
+                          if (duplicateCommandEventIds.has(event.id)) return null;
                           const isLastChild = idx === visibleBlockEvents.length - 1;
                           const showChildConnectorAbove = true;
                           const showChildConnectorBelow = !isLastChild || showConnectorBelow;
@@ -2464,6 +2526,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           ).filter(
                             (s: CommandOutputSession) =>
                               !inlineRunCommandSessionIds.has(s.id) &&
+                              !inlineCommandSessionIds.has(s.id) &&
                               (verboseSteps || s.isRunning),
                           );
 
@@ -2593,7 +2656,12 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 events,
                                 workspace?.path,
                               );
-                          const eventTitle = fileChange ? (
+                          const compactSearchTitle = verboseSteps
+                            ? null
+                            : getCompactSearchStepTitle(event, isTaskWorking && isLastChild);
+                          const eventTitle = compactSearchTitle ? (
+                            <span>{compactSearchTitle}</span>
+                          ) : fileChange ? (
                             <FileChangeTitle
                               change={fileChange}
                               pending={!toolCallResultEvent && isTaskWorking}
@@ -2652,7 +2720,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                   )
                                 }
                                 titleTooltip={
-                                  typeof eventTitle === "string" ? eventTitle : undefined
+                                  compactSearchTitle ??
+                                  (typeof eventTitle === "string" ? eventTitle : undefined)
                                 }
                                 subtitle={eventRecapLine}
                                 subtitleTooltip={eventRecapLine ?? undefined}
@@ -3802,6 +3871,7 @@ function MainContentComponent({
   remoteSession = null,
   replayControls,
   headerPlacement = "inline",
+  rightPanelOpen = false,
 }: MainContentProps) {
   const titleBarSlot = useTitleBarContextSlot(headerPlacement === "title-bar");
   recordRendererRender(
@@ -4474,6 +4544,18 @@ function MainContentComponent({
   ]);
   const [modeSuggestions, setModeSuggestions] = useState<ModeSuggestion[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  const [useCasesOpen, setUseCasesOpen] = useState(false);
+
+  useEffect(() => {
+    // The gallery only renders on the welcome screen; with a task open, let the sidebar fall back.
+    if (task) return;
+    const onOpen = (event: Event) => {
+      event.preventDefault();
+      setUseCasesOpen(true);
+    };
+    window.addEventListener(OPEN_USE_CASES_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_USE_CASES_EVENT, onOpen);
+  }, [task]);
   const modeSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [taskDomain, setTaskDomain] = useState<TaskDomain>("auto");
   const [multiLlmConfig, setMultiLlmConfig] = useState<MultiLlmConfig | null>(null);
@@ -5133,8 +5215,32 @@ function MainContentComponent({
       () => buildParallelGroupProjection(events),
     );
   }, [events, effectiveSharedTaskEventUi, rendererPerfLoggingEnabled]);
-  const parallelGroupsByAnchorEventId = parallelGroupProjection.groupsByAnchorEventId;
-  const suppressedParallelEventIds = parallelGroupProjection.suppressedEventIds;
+  // Compact mode lists each call in a tool batch as its own step ("Read Sidebar.tsx",
+  // "Searched for X") instead of folding the batch into one parallel-group row.
+  const { parallelGroupsByAnchorEventId, suppressedParallelEventIds } = useMemo(() => {
+    const groups = parallelGroupProjection.groupsByAnchorEventId;
+    const suppressed = parallelGroupProjection.suppressedEventIds;
+    if (verboseSteps) {
+      return { parallelGroupsByAnchorEventId: groups, suppressedParallelEventIds: suppressed };
+    }
+    const compactGroups = new Map(
+      [...groups].filter(([, group]) => !isToolsParallelGroupId(group.groupId)),
+    );
+    const compactSuppressed = new Set(suppressed);
+    for (const event of events) {
+      if (
+        compactSuppressed.has(event.id) &&
+        getEffectiveTaskEventType(event) === "tool_call" &&
+        isToolsParallelGroupId(getEventGroupId(event))
+      ) {
+        compactSuppressed.delete(event.id);
+      }
+    }
+    return {
+      parallelGroupsByAnchorEventId: compactGroups,
+      suppressedParallelEventIds: compactSuppressed,
+    };
+  }, [events, parallelGroupProjection, verboseSteps]);
 
   // Pair individual tool_call / tool_result events (outside parallel groups) so that
   // the tool_result row is suppressed and the tool_call row reflects the completed state.
@@ -9102,6 +9208,45 @@ function MainContentComponent({
     showHeaderTitle,
   } = useMemo(() => deriveTaskHeaderPresentation(task), [task]);
 
+  const isBuildTaskView = Boolean(task) && !isBotConversation && isBuildTask(task);
+  const buildPreviewPath = useMemo(
+    () => (isBuildTaskView ? pickBuildPreviewPath(statusTaskEventUi.files) : null),
+    [isBuildTaskView, statusTaskEventUi.files],
+  );
+  const [buildChangesOpen, setBuildChangesOpen] = useState(false);
+  useEffect(() => setBuildChangesOpen(false), [task?.id]);
+  const buildWorkspacePath = task?.worktreePath || workspace?.path;
+  const buildChangedPaths = useMemo(() => {
+    const paths = new Map<string, "created" | "modified" | "deleted">();
+    if (!isBuildTaskView) return paths;
+    for (const file of statusTaskEventUi.files) {
+      paths.set(normalizeBuildPath(file.path, buildWorkspacePath), file.action);
+    }
+    return paths;
+  }, [buildWorkspacePath, isBuildTaskView, statusTaskEventUi.files]);
+  const buildChanges = useMemo(
+    () =>
+      buildChangesOpen
+        ? deriveBuildChanges(rawEvents, {
+            workspacePath: buildWorkspacePath,
+            changedPaths: buildChangedPaths,
+          })
+        : [],
+    [buildChangedPaths, buildChangesOpen, buildWorkspacePath, rawEvents],
+  );
+
+  // Open the preview by itself the first time a running build writes its page,
+  // like a dev server opening the app; it then reloads as the build edits files.
+  // Revisiting a finished build never pops it open.
+  const autoOpenedBuildPreviewRef = useRef<Set<string>>(new Set());
+  const buildIsRunning =
+    task?.status === "executing" || task?.status === "planning" || task?.status === "queued";
+  useEffect(() => {
+    if (!task?.id || !buildPreviewPath || !buildIsRunning) return;
+    if (autoOpenedBuildPreviewRef.current.has(task.id)) return;
+    autoOpenedBuildPreviewRef.current.add(task.id);
+    openWebArtifact(buildPreviewPath);
+  }, [buildIsRunning, buildPreviewPath, openWebArtifact, task?.id]);
   const taskWorkingDirectory = task?.worktreePath || workspace?.path || "";
   const taskIdCopyValue = task?.id || "";
   const taskDeeplink = task ? `cowork://tasks/${task.id}` : "";
@@ -9743,6 +9888,16 @@ function MainContentComponent({
   if (!task) {
     return (
       <div className={`main-content${isCalm ? " calm-main calm-welcome" : ""}`}>
+        <UseCasesGallery
+          open={useCasesOpen}
+          contained
+          onClose={() => setUseCasesOpen(false)}
+          onSelect={(prompt) => {
+            pendingProgrammaticResizeRef.current = true;
+            setInputValue(prompt);
+            recordDraftMutation(onDraftValueChange?.(prompt));
+          }}
+        />
         {fullAccessConfirmation.dialog}
         <div className="main-body welcome-view">
           <div
@@ -11085,6 +11240,13 @@ function MainContentComponent({
               />
             )}
             {renderWelcomeTaskSuggestions()}
+            <button
+              type="button"
+              className="use-cases-link use-cases-welcome-link"
+              onClick={() => setUseCasesOpen(true)}
+            >
+              See how people use CoWork OS
+            </button>
           </div>
         </div>
 
@@ -12071,6 +12233,60 @@ function MainContentComponent({
             </button>
           )}
         {renderAttachmentPanel()}
+        {buildChangesOpen && isBuildTaskView && (
+          <BuildChangesPanel
+            changes={buildChanges}
+            onClose={() => setBuildChangesOpen(false)}
+            onOpenFile={(path) => {
+              setBuildChangesOpen(false);
+              const absolute =
+                buildWorkspacePath && !path.startsWith("/")
+                  ? `${buildWorkspacePath.replace(/\/+$/, "")}/${path}`
+                  : path;
+              if (onViewTaskOutputs) onViewTaskOutputs(task.id, absolute);
+              else setViewerFilePath(absolute);
+            }}
+          />
+        )}
+        {/* The run's status sits above the composer as its own bar. */}
+        {taskStatusStripEnabled && !isBotConversation && (
+          <div className="composer-status-strip">
+            <TaskStatusStrip
+              model={taskStatusStripModel}
+              activityGroups={statusTaskEventUi.activityGroups}
+              outcomeMetrics={statusTaskEventUi.outcomeMetrics}
+              markdownComponents={markdownComponents}
+              leading={isBuildTaskView ? <BuildStripBadge /> : undefined}
+              actions={
+                isBuildTaskView && (buildChangedPaths.size > 0 || buildPreviewPath) ? (
+                  <>
+                    {buildChangedPaths.size > 0 && (
+                      <BuildChangesButton
+                        count={buildChangedPaths.size}
+                        onOpen={() => setBuildChangesOpen(true)}
+                      />
+                    )}
+                    {buildPreviewPath && (
+                      <BuildPreviewButton path={buildPreviewPath} onOpen={openWebArtifact} />
+                    )}
+                  </>
+                ) : undefined
+              }
+              replay={isReplayMode}
+              telemetryEnabled={rendererPerfLoggingEnabled}
+              // RightPanel only renders its Files section when it has file rows, and it
+              // never shows Impact, so only defer Outputs when those rows exist.
+              hideOutputs={rightPanelOpen && statusTaskEventUi.files.length > 0}
+              onOpenOutput={(outputPath) => {
+                if (onViewTaskOutputs) {
+                  onViewTaskOutputs(task.id, outputPath);
+                } else if (outputPath) {
+                  setViewerFilePath(outputPath);
+                }
+              }}
+            />
+          </div>
+        )}
         <div
           className={`input-container ${isDraggingFiles ? "drag-over" : ""} ${(collaborativeRun || childTasks.length > 0) && (onOpenChildAgentSidebar || onSelectChildTask) ? "input-container-with-agents" : ""}`}
           onDragOver={handleDragOver}
@@ -12275,23 +12491,6 @@ function MainContentComponent({
                 </div>
               </div>
             )}
-          {taskStatusStripEnabled && !isBotConversation && (
-            <TaskStatusStrip
-              model={taskStatusStripModel}
-              activityGroups={statusTaskEventUi.activityGroups}
-              outcomeMetrics={statusTaskEventUi.outcomeMetrics}
-              markdownComponents={markdownComponents}
-              replay={isReplayMode}
-              telemetryEnabled={rendererPerfLoggingEnabled}
-              onOpenOutput={(outputPath) => {
-                if (onViewTaskOutputs) {
-                  onViewTaskOutputs(task.id, outputPath);
-                } else if (outputPath) {
-                  setViewerFilePath(outputPath);
-                }
-              }}
-            />
-          )}
           {quotedAssistantMessage && (
             <div className="composer-quoted-assistant">
               <div className="composer-quoted-assistant-copy">
@@ -12337,15 +12536,7 @@ function MainContentComponent({
             >
               <Plus size={24} aria-hidden="true" />
             </button>
-            {isCalm && (
-              <>
-                <CalmModeToggle
-                  selection={displayedInteractionMode}
-                  onChange={setInteractionMode}
-                />
-                <CalmAccessMenu access={calmAccess} placement="up" />
-              </>
-            )}
+            {isCalm && <CalmAccessMenu access={calmAccess} placement="up" />}
             {uiDensity === "focused" && (
               <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
                 {showWorkspaceDropdown && (
@@ -12670,20 +12861,6 @@ function MainContentComponent({
             </button>
           </div>
           <div className="input-status-right">
-            <div className="input-status-mode-wrap" ref={modeDropdownRef} hidden={isCalm}>
-              <InteractionModePicker
-                selection={displayedInteractionMode}
-                open={showModeDropdown}
-                onToggle={() => {
-                  setShowDomainDropdown(false);
-                  setShowModeDropdown((value) => !value);
-                }}
-                onChange={(selection) => {
-                  setInteractionMode(selection);
-                  setShowModeDropdown(false);
-                }}
-              />
-            </div>
             <div className="input-status-domain-wrap" ref={domainDropdownRef}>
               <button
                 type="button"
@@ -12845,6 +13022,7 @@ function getRemoteSessionSignature(
 function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps): boolean {
   return (
     prev.headerPlacement === next.headerPlacement &&
+    prev.rightPanelOpen === next.rightPanelOpen &&
     getMainContentTaskSignature(prev.task) === getMainContentTaskSignature(next.task) &&
     prev.selectedTaskId === next.selectedTaskId &&
     prev.workspace?.path === next.workspace?.path &&

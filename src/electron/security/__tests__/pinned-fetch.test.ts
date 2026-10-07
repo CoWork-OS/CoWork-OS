@@ -65,6 +65,32 @@ describe("DNS validation bound to HTTP connections", () => {
     const head = await pinnedFetch(`http://127.0.0.1:${port}/empty`, { method: "HEAD" });
     expect(await head.text()).toBe("");
   });
+  it("cancels an unread body without a late enqueue into the closed stream", async () => {
+    const port = await listen((_req, res) => {
+      res.writeHead(406, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: "Not acceptable for the requested media type" }));
+    });
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => uncaught.push(error);
+    process.on("uncaughtException", onUncaught);
+    try {
+      const response = await pinnedFetch(`http://127.0.0.1:${port}/thumb/`, {
+        headers: { accept: "image/*" },
+      });
+      expect(response.status).toBe(406);
+      await response.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+    expect(uncaught).toEqual([]);
+  });
+  it("streams large bodies intact through backpressure", async () => {
+    const payload = Buffer.alloc(2 * 1024 * 1024, 66);
+    const port = await listen((_req, res) => res.end(payload));
+    const response = await pinnedFetch(`http://127.0.0.1:${port}/`, {});
+    expect(Buffer.from(await response.arrayBuffer()).equals(payload)).toBe(true);
+  });
   it("refuses environment proxy routing when a pinned destination is required", async () => {
     vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:1");
     vi.stubEnv("NO_PROXY", "");

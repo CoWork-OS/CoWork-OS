@@ -1,3 +1,4 @@
+import { BotMessageStore } from "./bot-message-store";
 import { BotWorkResultStore } from "./bot-work-result-store";
 import { BotWorkStore } from "./bot-work-store";
 import { BotOutcomeMetricsStore } from "./bot-outcome-metrics-store";
@@ -61,6 +62,9 @@ export const STORAGE_UNITS = {
     "manifest",
     { readonly: true, report: true },
   ),
+  botMessage_findPage: storeUnit((db: Database.Database) => new BotMessageStore(db), "findPage", {
+    readonly: true,
+  }),
   botWork_list: storeUnit((db: Database.Database) => new BotWorkStore(db), "list", {
     readonly: true,
     report: true,

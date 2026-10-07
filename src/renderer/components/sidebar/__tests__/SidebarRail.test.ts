@@ -24,7 +24,7 @@ describe("SidebarRail", () => {
 
   it("renders fixed destinations, then More, then pinned items, with Settings last", () => {
     const markup = renderRail();
-    const order = ["Home", "Inbox", "Agents", "Automations", "More", "Devices", "Settings"].map(
+    const order = ["Home", "Inbox", "Bots", "Automations", "More", "Devices", "Settings"].map(
       (label) => markup.indexOf(`aria-label="${label}"`),
     );
 
@@ -99,7 +99,7 @@ describe("SidebarRail", () => {
 
   it("follows a saved order, and the shortcuts follow it", () => {
     const markup = renderRail({ initialRailOrder: ["automations", "home"] });
-    const order = ["Automations", "Home", "Inbox", "Agents"].map((label) =>
+    const order = ["Automations", "Home", "Inbox", "Bots"].map((label) =>
       markup.indexOf(`aria-label="${label}"`),
     );
     expect([...order].sort((a, b) => a - b)).toEqual(order);

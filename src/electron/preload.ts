@@ -2891,6 +2891,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_LIST, query) as Promise<BotWorkPage>,
   listBotConversations: (query: BotConversationListQuery) =>
     invokeTaskIpcWithRendererTiming(IPC_CHANNELS.BOT_CONVERSATIONS_LIST, query),
+  listBotMessages: (request: import("../shared/bot-messages").BotMessagePageRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_MESSAGES_PAGE, request) as Promise<
+      import("../shared/bot-messages").BotMessagePage
+    >,
   reopenBotConversation: (request: BotConversationReopenRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.BOT_CONVERSATION_REOPEN, request) as Promise<Task>,
   getComposerDraft: (request: ComposerDraftGetRequest) =>
@@ -6168,6 +6172,9 @@ export interface ElectronAPI {
   reviseBotResponsibility: (request: BotResponsibilityRevise) => Promise<BotResponsibility>;
 
   listBotConversations: (query: BotConversationListQuery) => Promise<Any[]>;
+  listBotMessages: (
+    request: import("../shared/bot-messages").BotMessagePageRequest,
+  ) => Promise<import("../shared/bot-messages").BotMessagePage>;
   reopenBotConversation: (request: BotConversationReopenRequest) => Promise<Task>;
   getComposerDraft?: (request: ComposerDraftGetRequest) => Promise<ComposerDraft | null>;
   upsertComposerDraft?: (draft: ComposerDraft) => Promise<{

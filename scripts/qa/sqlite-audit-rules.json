@@ -392,9 +392,9 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/(automation/(BotWorkControlStore|dispatch-budget-store|receipt-retention|responsibility-mailbox|responsibility-store|responsibility-task-policy|scheduler-lease-store)|gateway/(ChannelDecisionStore|TeamsConversationReferenceStore)|notifications/(BotNotificationStore|NotificationInboxStore)|database/(approval-drafts|bot-outcome-metrics-store|bot-work-result-store|bot-work-store|transactional-review-sql)|agent/orchestration/graph-task-admission)\\.ts$",
+      "pattern": "^src/electron/(automation/(BotWorkControlStore|dispatch-budget-store|receipt-retention|responsibility-mailbox|responsibility-store|responsibility-task-policy|scheduler-lease-store)|gateway/(ChannelDecisionStore|TeamsConversationReferenceStore)|notifications/(BotNotificationStore|NotificationInboxStore)|database/(approval-drafts|bot-message-store|bot-outcome-metrics-store|bot-work-result-store|bot-work-store|task-title-sql|transactional-review-sql)|agent/orchestration/graph-task-admission)\\.ts$",
       "domain": "shared SQL",
-      "access": "Bot responsibility, stop-control, dispatch, receipt-retention, channel-decision, Teams-reference, notification, bot-work, outcome-metrics, review-draft and graph-admission statements execute through storage or services-domain units. The stop-authority check in AgentDaemon remains a single synchronous read inside the immediate task-cancel transaction to preserve atomic cancellation.",
+      "access": "Bot responsibility, stop-control, dispatch, receipt-retention, channel-decision, Teams-reference, notification, bot-work, bot-message-history, outcome-metrics, review-draft and graph-admission statements execute through storage or services-domain units. The stop-authority check in AgentDaemon remains a single synchronous read inside the immediate task-cancel transaction to preserve atomic cancellation.",
       "plan": "worker by default (DB7); retain only the reviewed atomic cancellation read on the host while its task-store transaction remains synchronous",
       "owner": "database platform"
     },

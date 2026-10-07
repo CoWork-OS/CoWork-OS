@@ -325,6 +325,9 @@ import {
 } from "./TaskAutomationModal";
 import { BotConversationHistory } from "../BotConversationHistory";
 import { BotCollaborationHeader } from "../BotCollaborationHeader";
+import { BotEarlierConversations, BotMessageAvatar } from "./BotEarlierConversations";
+import { buildBotMascotLookup, type BotMascotLookup } from "./bot-earlier-conversations";
+import { BotGreetingTracker, toBotMessage } from "../../../shared/bot-messages";
 import type { BotConversationProjection } from "../../../shared/bot-lifecycle";
 
 const VISUAL_ATTACHMENT_MIME_SET = new Set([
@@ -1280,10 +1283,11 @@ const TaskConversationRenderedRows = memo(
       return () => container.removeEventListener("scroll", update);
     }, [mainBodyRef, renderableFeedRows.length, useVirtualizedFeed]);
     // Earlier pages load as the user reaches the top of the step feed in any mode that shows
-    // steps; the summary-only delivery view has no older steps to show.
+    // steps; the summary-only delivery view has no older steps to show. A finished bot chat
+    // is delivered as its full message thread, so its older messages still scroll in.
     useEffect(() => {
       if (
-        transcriptMode === "delivery" ||
+        (transcriptMode === "delivery" && task?.agentConfig?.botConversation !== true) ||
         !hasMoreTimelineHistory ||
         isLoadingTimelineHistory ||
         timelineHistoryError
@@ -1298,6 +1302,7 @@ const TaskConversationRenderedRows = memo(
     }, [
       handleLoadMoreTimelineHistory,
       hasMoreTimelineHistory,
+      task?.agentConfig?.botConversation,
       isAtBottom,
       isLoadingTimelineHistory,
       isNearFeedTop,
@@ -1590,6 +1595,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const isConversationOnlySurface = isChatTask || isBotConversation;
   const botName = props.botName as string | undefined;
   const botMascot = resolveBotMascot(props.botIcon as string | undefined);
+  const botMascotForSender = props.botMascotForSender as BotMascotLookup | undefined;
   const timelineItems = props.timelineItems as Array<any>;
   const timelineRef = props.timelineRef as React.RefObject<HTMLDivElement | null>;
   const toggleEventExpanded = props.toggleEventExpanded as (eventId: string) => void;
@@ -2814,6 +2820,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     event.payload.senderLabel.trim().length > 0
                       ? event.payload.senderLabel.trim()
                       : "Parent agent";
+                  const inboundSenderMascot = isBotConversation
+                    ? (botMascotForSender?.(senderLabel) ?? null)
+                    : null;
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
                       <div
@@ -2823,8 +2832,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                         data-sender-task-id={inboundSenderTaskId || undefined}
                         data-target-task-id={task?.id || undefined}
                       >
-                        <div className="agent-inbound-message-label">
-                          Message from {senderLabel}
+                        <div
+                          className={`agent-inbound-message-label${inboundSenderMascot ? " with-avatar" : ""}`}
+                        >
+                          {inboundSenderMascot && <BotMessageAvatar mascot={inboundSenderMascot} />}
+                          <span>Message from {senderLabel}</span>
                         </div>
                         <div
                           className={`agent-inbound-message-receipt agent-inbound-message-receipt-${inboundReceipt.status}`}
@@ -2986,10 +2998,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     ?.trim() ||
                   botName ||
                   "Bot";
-                // Only this conversation's own bot has a known mascot; teammates
-                // relaying through it keep the generic mark.
-                const showSenderMascot =
-                  Boolean(botMascot) && botMessageSender === (botName || "Bot");
+                const isOwnBotMessage = botMessageSender === (botName || "Bot");
+                // Teammates relaying through this bot show their own character when known.
+                const senderMascot = isOwnBotMessage
+                  ? botMascot
+                  : (botMascotForSender?.(botMessageSender) ?? null);
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div
@@ -3006,16 +3019,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           aria-label={`Agent message ${agentMessageProtocolReceipt.label.toLowerCase()}`}
                         >
                           <div className="bot-message-attribution">
-                            <span
-                              className={`bot-message-attribution-avatar${showSenderMascot ? " bot-message-attribution-avatar-mascot" : ""}`}
-                              aria-hidden="true"
-                            >
-                              {botMascot && showSenderMascot ? (
-                                <BotMascot mascot={botMascot} size={20} animated={false} />
-                              ) : (
-                                <BotGlyph size={12} />
-                              )}
-                            </span>
+                            <BotMessageAvatar mascot={senderMascot} />
                             <span>{botMessageSender}</span>
                           </div>
                           <div
@@ -3040,22 +3044,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       ) : (
                         <>
                           <div className="chat-bubble assistant-bubble">
-                            {isBotConversation && (
+                            {/* The title bar names this chat's bot; label only teammates relaying through it. */}
+                            {isBotConversation && !isOwnBotMessage && (
                               <div className="bot-message-attribution">
-                                <span
-                                  className={`bot-message-attribution-avatar${showSenderMascot ? " bot-message-attribution-avatar-mascot" : ""}`}
-                                  aria-hidden="true"
-                                >
-                                  {botMascot && showSenderMascot ? (
-                                    <BotMascot
-                                      mascot={botMascot}
-                                      size={20}
-                                      animated={isLastAssistant}
-                                    />
-                                  ) : (
-                                    <BotGlyph size={12} />
-                                  )}
-                                </span>
+                                <BotMessageAvatar mascot={senderMascot} />
                                 <span>{botMessageSender}</span>
                               </div>
                             )}
@@ -3094,6 +3086,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           )}
                           {/* Copy with ⌘C and reply by selecting text (SelectionReplyPopover). */}
                           <div className="message-actions">
+                            {/* Bot chats have no selection-reply popover, so offer an explicit copy. */}
+                            {isBotConversation && <MessageCopyButton text={cleanedMessageText} />}
                             <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
                             {event.id &&
                               onForkTaskSessionFromEvent &&
@@ -3544,6 +3538,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.onLoadMoreTimelineHistory === next.onLoadMoreTimelineHistory &&
     prev.botName === next.botName &&
     prev.botIcon === next.botIcon &&
+    prev.botMascotForSender === next.botMascotForSender &&
     prev.agentContext === next.agentContext &&
     prev.activityGroupsById === next.activityGroupsById &&
     prev.childEvents === next.childEvents &&
@@ -7006,6 +7001,104 @@ function MainContentComponent({
     lastAutoScrollTargetRef.current = null;
   }, [task?.id]);
 
+  // Opening a bot chat: the transcript renders hidden, lands on its newest message and only
+  // then appears, so the reader never sees it scroll. Earlier messages load only after the
+  // reader scrolls up themselves.
+  const taskContentRef = useRef<HTMLDivElement>(null);
+  const autoScrollRef = useRef(autoScroll);
+  autoScrollRef.current = autoScroll;
+  const [botEventsLoadedTaskId, setBotEventsLoadedTaskId] = useState<string | null>(null);
+  const [botHistoryReadyTaskId, setBotHistoryReadyTaskId] = useState<string | null>(null);
+  const [botRevealedTaskId, setBotRevealedTaskId] = useState<string | null>(null);
+  const [botHistoryUnlockedTaskId, setBotHistoryUnlockedTaskId] = useState<string | null>(null);
+  const botEventsLoaded = Boolean(task?.id) && botEventsLoadedTaskId === task?.id;
+  const botRevealed = !isBotConversation || botRevealedTaskId === task?.id;
+  const botHistoryUnlocked = Boolean(task?.id) && botHistoryUnlockedTaskId === task?.id;
+  useEffect(() => {
+    if (!isBotConversation || !task?.id || botEventsLoadedTaskId === task.id) return;
+    const taskId = task.id;
+    if (events.length > 0) {
+      setBotEventsLoadedTaskId(taskId);
+      return;
+    }
+    // Usually still loading; a conversation with no stored events counts as loaded soon.
+    const timer = window.setTimeout(() => setBotEventsLoadedTaskId(taskId), 1500);
+    return () => window.clearTimeout(timer);
+  }, [botEventsLoadedTaskId, events.length, isBotConversation, task?.id]);
+  // A long conversation fills the window itself; earlier ones wait until the reader scrolls up.
+  useEffect(() => {
+    if (botEventsLoaded && (hasMoreTimelineHistory || remoteSession) && task?.id) {
+      setBotHistoryReadyTaskId(task.id);
+    }
+  }, [botEventsLoaded, hasMoreTimelineHistory, remoteSession, task?.id]);
+  const markBotHistoryReady = useCallback(() => {
+    if (task?.id) setBotHistoryReadyTaskId(task.id);
+  }, [task?.id]);
+  const botReadyToReveal = botEventsLoaded && botHistoryReadyTaskId === task?.id;
+  useLayoutEffect(() => {
+    const container = mainBodyRef.current;
+    if (!isBotConversation || !task?.id || botRevealed || !container) return;
+    const taskId = task.id;
+    const reveal = () => {
+      container.scrollTop = container.scrollHeight;
+      setBotRevealedTaskId(taskId);
+    };
+    if (botReadyToReveal) {
+      container.scrollTop = container.scrollHeight;
+      // One more frame lets late layout settle before the transcript appears.
+      const frame = window.requestAnimationFrame(reveal);
+      return () => window.cancelAnimationFrame(frame);
+    }
+    // Never leave the chat hidden if something above stalls.
+    const timer = window.setTimeout(reveal, 3000);
+    return () => window.clearTimeout(timer);
+  }, [botReadyToReveal, botRevealed, isBotConversation, task?.id]);
+  // Only the reader's own scroll-up gesture opens the older history.
+  useEffect(() => {
+    const container = mainBodyRef.current;
+    if (!isBotConversation || !task?.id || !botRevealed || botHistoryUnlocked || !container) {
+      return;
+    }
+    const taskId = task.id;
+    const unlock = () => setBotHistoryUnlockedTaskId(taskId);
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) unlock();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") unlock();
+    };
+    container.addEventListener("wheel", onWheel, { passive: true });
+    container.addEventListener("touchstart", unlock, { passive: true });
+    // Dragging the scrollbar: a press to the right of the content area.
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.clientX - container.getBoundingClientRect().left >= container.clientWidth) unlock();
+    };
+    container.addEventListener("pointerdown", onPointerDown);
+    container.addEventListener("keydown", onKeyDown);
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+      container.removeEventListener("touchstart", unlock);
+      container.removeEventListener("pointerdown", onPointerDown);
+      container.removeEventListener("keydown", onKeyDown);
+    };
+  }, [botHistoryUnlocked, botRevealed, isBotConversation, task?.id]);
+
+  // Replies keep growing after they appear (markdown renders in a later pass). While the
+  // reader is on the latest message, keep it pinned there.
+  useEffect(() => {
+    const content = taskContentRef.current;
+    const container = mainBodyRef.current;
+    if (!isBotConversation || !content || !container) return;
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!autoScrollRef.current) return;
+      const target = getAutoScrollTargetTop(container.scrollHeight, container.clientHeight);
+      if (Math.abs(container.scrollTop - target) >= 2) container.scrollTop = target;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [isBotConversation, task?.id]);
+
   const reportAttachmentError = (message: string) => {
     setAttachmentError(message);
     window.setTimeout(() => setAttachmentError(null), 5000);
@@ -9041,6 +9134,28 @@ function MainContentComponent({
       .filter((line): line is string => line !== null)
       .join("\n");
   }, [botDeeplink, cleanedDisplayPrompt, task, taskWorkingDirectory]);
+  const botMascotForSender = useMemo(() => buildBotMascotLookup(agentRoles), [agentRoles]);
+  const botConversationFirstMessageAt = useMemo(() => {
+    if (!isBotConversation) return null;
+    const greetings = new BotGreetingTracker();
+    for (const event of events) {
+      const message = toBotMessage(event);
+      if (message && greetings.isShown(event, message)) return message.timestamp;
+      if (!message) greetings.isShown(event, null);
+    }
+    return null;
+  }, [events, isBotConversation]);
+  const renderBotHistoryMarkdown = useCallback(
+    (text: string) => (
+      <AssistantMessageContent
+        message={text}
+        markdownComponents={markdownComponents}
+        workspacePath={workspace?.path}
+        onOpenViewer={setViewerFilePath}
+      />
+    ),
+    [markdownComponents, workspace?.path],
+  );
   const botTranscriptMarkdown = useMemo(() => {
     if (!task || !isBotConversation) return taskMarkdown;
     const transcriptRows = filterBotConversationTranscriptEvents(events)
@@ -11043,6 +11158,7 @@ function MainContentComponent({
       onOpenWebArtifact={openWebArtifact}
       botName={botName}
       botIcon={botIcon}
+      botMascotForSender={botMascotForSender}
       onForkTaskSessionFromEvent={
         remoteSession ||
         !hasHostMethod("forkTaskSession") ||
@@ -11078,7 +11194,9 @@ function MainContentComponent({
       voiceEnabled={voiceEnabled}
       rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
       taskSwitchId={taskSwitchId}
-      hasMoreTimelineHistory={hasMoreTimelineHistory}
+      hasMoreTimelineHistory={
+        isBotConversation && !botHistoryUnlocked ? false : hasMoreTimelineHistory
+      }
       isLoadingTimelineHistory={isLoadingTimelineHistory}
       timelineHistoryError={timelineHistoryError}
       onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
@@ -11686,7 +11804,27 @@ function MainContentComponent({
             onReply={handleReplyToSelection}
           />
         )}
-        <div className="task-content">
+        <div
+          className={`task-content${botRevealed ? "" : " bot-transcript-pending"}`}
+          ref={taskContentRef}
+        >
+          {isBotConversation && task && !remoteSession && (
+            <BotEarlierConversations
+              key={task.id}
+              currentTask={task}
+              botName={botName || "Bot"}
+              botMascot={botMascot}
+              scrollContainerRef={mainBodyRef}
+              loadInitialPage={botEventsLoaded && !hasMoreTimelineHistory}
+              onInitialPageDone={markBotHistoryReady}
+              canLoadMore={
+                botHistoryUnlocked && !hasMoreTimelineHistory && !isLoadingTimelineHistory
+              }
+              currentFirstMessageAt={botConversationFirstMessageAt}
+              renderMarkdown={renderBotHistoryMarkdown}
+              mascotForSender={botMascotForSender}
+            />
+          )}
           {/* Always anchor the initial user prompt above the timeline. */}
           {initialPromptBubble}
           {isBotConversation && task && (
@@ -11875,11 +12013,8 @@ function MainContentComponent({
           )}
 
           {conversationFlow}
-          <TaskSessionLineageFooter
-            task={task}
-            onSelectTask={onSelectTask}
-            isBotConversation={isBotConversation}
-          />
+          {/* A bot's earlier conversations scroll in above instead. */}
+          {!isBotConversation && <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />}
         </div>
       </div>
 
@@ -11911,7 +12046,9 @@ function MainContentComponent({
                 if (mainBodyRef.current) {
                   mainBodyRef.current.scrollTo({
                     top: mainBodyRef.current.scrollHeight,
-                    behavior: "smooth",
+                    // A bot chat keeps growing as replies render; a smooth scroll chases a
+                    // moving target and its midway positions switch following off.
+                    behavior: isBotConversation ? "auto" : "smooth",
                   });
                   setAutoScroll(true);
                 }

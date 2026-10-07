@@ -66,7 +66,7 @@ export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
   },
   {
     id: "agents",
-    label: "Agents",
+    label: "Bots",
     icon: UsersRound,
     placement: "rail",
     views: ["agents"],

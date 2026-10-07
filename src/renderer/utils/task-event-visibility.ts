@@ -1,4 +1,9 @@
 import type { EventType, TaskEvent, TaskStatus } from "../../shared/types";
+import {
+  BOT_CONVERSATION_INTERNAL_PROMPT_PATTERNS,
+  BotGreetingTracker,
+  toBotMessage,
+} from "../../shared/bot-messages";
 import { inferTimelineSubStageLabel } from "../../shared/timeline-v2";
 import { getEffectiveTaskEventType, getTimelineErrorText } from "./task-event-compat";
 import { hasAssistantMediaDirective } from "./assistant-media-directives";
@@ -565,12 +570,6 @@ const BOT_CONVERSATION_MESSAGE_DEDUPE_WINDOW_MS = 30_000;
  * orchestration brief in the primary bot conversation makes a retry look like
  * a new user instruction and buries the actual teammate exchange.
  */
-const BOT_CONVERSATION_INTERNAL_PROMPT_PATTERNS = [
-  /^\s*\[RETRY CONTEXT\]:/i,
-  /^\s*Recovery run(?:\s+for\b|\b)/i,
-  /\bread-only\s+opportunity-discovery\b[\s\S]*\b(?:send_agent_message|do not merely describe or simulate)\b/i,
-];
-
 function isBotConversationInternalPrompt(event: TaskEvent): boolean {
   if (getEffectiveTaskEventType(event) !== "user_message") return false;
 
@@ -642,11 +641,14 @@ export function filterBotConversationTranscriptEvents(events: TaskEvent[]): Task
   const out: TaskEvent[] = [];
   const byStableMessageId = new Map<string, number>();
   const byMessageText = new Map<string, { index: number; timestamp: number }>();
+  const greetings = new BotGreetingTracker();
 
   for (const event of events) {
     const effectiveType = getEffectiveTaskEventType(event);
     if (BOT_CONVERSATION_INTERNAL_EVENT_TYPES.has(effectiveType)) continue;
     if (isBotConversationInternalPrompt(event)) continue;
+    // The bot's reply to the opening seed repeats in every conversation.
+    if (!greetings.isShown(event, toBotMessage(event))) continue;
 
     const payload = asObject(event.payload);
     const timestamp = Number.isFinite(event.timestamp) ? event.timestamp : event.ts || 0;

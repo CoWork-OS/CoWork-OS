@@ -862,7 +862,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
 const CALM_PANEL_SEGMENTS: ReadonlyArray<{ id: SidebarDestinationId; label: string }> = [
   { id: "home", label: "Home" },
   { id: "build", label: "Build" },
-  { id: "agents", label: "Agents" },
+  { id: "agents", label: "Bots" },
 ];
 
 function SidebarComponent({

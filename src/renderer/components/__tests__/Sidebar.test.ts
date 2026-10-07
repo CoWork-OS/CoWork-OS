@@ -57,12 +57,12 @@ describe("Sidebar top-level destinations", () => {
       );
     };
 
-    it("shows Home, Build, and Agents and marks the destination in view", () => {
+    it("shows Home, Build, and Bots and marks the destination in view", () => {
       const markup = renderCalm("build");
       expect(markup).toContain("sidebar-panel-segments");
       expect(markup).toMatch(/aria-selected="true" class="active">Build<\/button>/);
       expect(markup).toMatch(/aria-selected="false" class="">Home<\/button>/);
-      expect(markup).toContain(">Agents</button>");
+      expect(markup).toContain(">Bots</button>");
     });
 
     it("selects no segment for destinations outside the switch", () => {

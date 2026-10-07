@@ -61,6 +61,33 @@ describe("BotCollaborationHeader", () => {
     expect(markup).not.toContain("send_agent_message");
   });
 
+  it("stays out of the way once a solo bot has answered", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        task: {
+          status: "completed",
+          error: null,
+          resultSummary: "We should turn bug triage into one concrete fix.",
+        },
+        botName: "Atlas",
+      }),
+    );
+
+    expect(markup).toBe("");
+  });
+
+  it("does not claim a team for a solo bot that is working", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(BotCollaborationHeader, {
+        task: { status: "executing", error: null, resultSummary: undefined },
+        botName: "Atlas",
+      }),
+    );
+
+    expect(markup).toContain('data-bot-state="working"');
+    expect(markup).not.toContain("Working with the team");
+  });
+
   it("surfaces a blocked bot as an actionable attention state", () => {
     const markup = renderToStaticMarkup(
       React.createElement(BotCollaborationHeader, {

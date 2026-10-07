@@ -17,7 +17,11 @@ import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
 import "./bot-roster.css";
 import type { MascotExpression } from "./bot-mascot/mascot-eyes";
 import { BOT_PROFILE_UPDATED_EVENT, BotProfileDialog } from "./BotProfileDialog";
-import { selectLatestBotConversation } from "../utils/bot-conversations";
+import {
+  isBotConversationSeedPrompt,
+  selectLatestBotConversation,
+  selectLatestMessagedBotConversation,
+} from "../utils/bot-conversations";
 import { parseAgentMessageProtocolResult } from "../utils/agent-message-receipt";
 import type {
   BotConversationProjection,
@@ -223,12 +227,10 @@ export function getBotPreview(
   const promptPreview = getHumanBotPreview(task.userPrompt);
   const sidebarPreview = getHumanBotPreview(task.sidebarPromptPreview);
   const resultPreview = getHumanBotPreview(task.resultSummary);
-  const isDormantSeed = (value: string) =>
-    /^start (?:a )?(?:conversation|chatting) with /i.test(value);
   const preview =
-    (!isDormantSeed(resultPreview) ? resultPreview : "") ||
-    (!isDormantSeed(sidebarPreview) ? sidebarPreview : "") ||
-    (!isDormantSeed(promptPreview) ? promptPreview : "") ||
+    (!isBotConversationSeedPrompt(resultPreview) ? resultPreview : "") ||
+    (!isBotConversationSeedPrompt(sidebarPreview) ? sidebarPreview : "") ||
+    (!isBotConversationSeedPrompt(promptPreview) ? promptPreview : "") ||
     "No messages yet";
   return preview.length > MAX_BOT_PREVIEW_LENGTH
     ? `${preview.slice(0, MAX_BOT_PREVIEW_LENGTH - 1).trimEnd()}…`
@@ -265,13 +267,12 @@ export function filterBots(
   if (!normalizedQuery) return roles;
 
   return roles.filter((bot) => {
-    const latestTask = getBotLatestTask(tasks, bot.id);
     const searchableText = [
       bot.displayName,
       bot.name,
       bot.description,
       getBotHandle(bot),
-      getBotPreview(latestTask, projections?.[bot.id]),
+      getBotRosterSummary(bot, tasks, projections?.[bot.id]).preview,
     ]
       .map((value) => flattenTaskText(value).toLocaleLowerCase())
       .join(" ");
@@ -319,21 +320,53 @@ export function getBotTimestamp(
   );
 }
 
+/**
+ * What the roster shows for a bot. The conversation it opens can be a fresh branch with
+ * nothing said yet; the preview and age then come from the latest conversation with messages.
+ */
+export function getBotRosterSummary(
+  bot: BotRole,
+  tasks: Task[],
+  projection?: BotConversationRosterProjection | null,
+): { latestTask: Task | undefined; preview: string; timestamp: number } {
+  const latestTask = getBotLatestTask(tasks, bot.id);
+  const latestPreview = getBotPreview(latestTask, projection);
+  if (latestPreview === "No messages yet") {
+    const messagedTask = selectLatestMessagedBotConversation(tasks, bot.id);
+    if (messagedTask && messagedTask.id !== latestTask?.id) {
+      return {
+        latestTask,
+        preview: getBotPreview(messagedTask),
+        timestamp: Math.max(
+          getBotTimestamp(bot, messagedTask),
+          projection?.lastActivityAt || 0,
+        ),
+      };
+    }
+  }
+  return {
+    latestTask,
+    preview: latestPreview,
+    timestamp: getBotTimestamp(bot, latestTask, projection),
+  };
+}
+
 function sortBots(
   roles: BotRole[],
   tasks: Task[],
   projections?: Readonly<Record<string, BotConversationRosterProjection>>,
 ): BotRole[] {
+  const summaries = new Map(
+    roles.map((bot) => [bot.id, getBotRosterSummary(bot, tasks, projections?.[bot.id])]),
+  );
   return [...roles].sort((a, b) => {
-    const aTask = getBotLatestTask(tasks, a.id);
-    const bTask = getBotLatestTask(tasks, b.id);
-    const aActive = aTask && ACTIVE_BOT_STATUSES.has(aTask.status) ? 1 : 0;
-    const bActive = bTask && ACTIVE_BOT_STATUSES.has(bTask.status) ? 1 : 0;
-    if (aActive !== bActive) return bActive - aActive;
+    const aSummary = summaries.get(a.id)!;
+    const bSummary = summaries.get(b.id)!;
+    const aActive = aSummary.latestTask && ACTIVE_BOT_STATUSES.has(aSummary.latestTask.status);
+    const bActive = bSummary.latestTask && ACTIVE_BOT_STATUSES.has(bSummary.latestTask.status);
+    if (aActive !== bActive) return Number(Boolean(bActive)) - Number(Boolean(aActive));
 
-    const activityDifference =
-      getBotTimestamp(b, bTask, projections?.[b.id]) -
-      getBotTimestamp(a, aTask, projections?.[a.id]);
+    const activityDifference = bSummary.timestamp - aSummary.timestamp;
     if (activityDifference !== 0) return activityDifference;
     return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName);
   });
@@ -342,6 +375,8 @@ function sortBots(
 function BotRow({
   bot,
   latestTask,
+  preview,
+  timestamp,
   conversationProjection,
   selected,
   onSelect,
@@ -353,6 +388,8 @@ function BotRow({
 }: {
   bot: BotRole;
   latestTask?: Task;
+  preview: string;
+  timestamp: number;
   conversationProjection?: BotConversationRosterProjection | null;
   selected: boolean;
   onSelect: () => void;
@@ -370,8 +407,7 @@ function BotRow({
     readiness === "waiting" || readiness === "attention" || readiness === "unavailable";
   const readinessLabel = getBotConversationReadinessLabel(readiness);
   const displayName = flattenTaskText(bot.displayName) || "Unnamed bot";
-  const preview = getBotPreview(latestTask, conversationProjection);
-  const age = getBotRelativeTime(getBotTimestamp(bot, latestTask, conversationProjection));
+  const age = getBotRelativeTime(timestamp);
 
   return (
     <div className="sidebar-bot-row-wrap">
@@ -666,23 +702,28 @@ export function BotsPane({
       ) : (
         <div className="sidebar-bots-list" role="list" aria-label="Bots">
           {visibleBots.map((bot) => {
-            const latestTask = getBotLatestTask(tasks, bot.id);
             const selected = tasks.some(
               (task) =>
                 task.id === selectedTaskId &&
                 task.assignedAgentRoleId === bot.id &&
                 isBotConversationTask(task),
             );
+            const conversationProjection = selected
+              ? (selectedConversationProjection ?? conversationProjections?.[bot.id] ?? null)
+              : (conversationProjections?.[bot.id] ?? null);
+            const { latestTask, preview, timestamp } = getBotRosterSummary(
+              bot,
+              tasks,
+              conversationProjection,
+            );
             return (
               <BotRow
                 key={bot.id}
                 bot={bot}
                 latestTask={latestTask}
-                conversationProjection={
-                  selected
-                    ? (selectedConversationProjection ?? conversationProjections?.[bot.id] ?? null)
-                    : (conversationProjections?.[bot.id] ?? null)
-                }
+                preview={preview}
+                timestamp={timestamp}
+                conversationProjection={conversationProjection}
                 selected={selected}
                 onSelect={() => {
                   if (latestTask) onSelectTask(latestTask.id);

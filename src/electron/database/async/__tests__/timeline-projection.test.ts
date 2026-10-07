@@ -218,6 +218,20 @@ async function startClient(profile: Profile, options: { withTestCommands?: boole
   return client;
 }
 
+// The client restarts a dead worker after a backoff and then a full spawn + schema check,
+// which takes well over a second on a loaded CI runner. Wait for the new generation
+// instead of sleeping a fixed time, and fail fast if the restart itself failed.
+async function waitForRestart(client: DatabaseClient, previousGeneration: number) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const status = client.getStatus();
+    if (status.state === "failed") throw new Error("Database worker restart failed");
+    if (status.state === "ready" && status.generation > previousGeneration) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Database worker did not restart: ${JSON.stringify(client.getStatus())}`);
+}
+
 function startQueue(client: DatabaseClient) {
   const queue = new TimelineProjectionQueue(client, { leaseMaintenanceIntervalMs: 60_000 });
   queues.push(queue);
@@ -264,6 +278,7 @@ describe("timeline projections in the database worker", () => {
     const profile = createProfile();
     insertWithOutbox(profile);
     const client = await startClient(profile, { withTestCommands: true });
+    const { generation } = client.getStatus();
     const failure = await client
       .executeCommand("test.drainOneThenExitBeforeCommit", undefined)
       .catch((error: unknown) => error);
@@ -273,8 +288,7 @@ describe("timeline projections in the database worker", () => {
     expect(derivedState(profile).outbox).toBe(EVENT_SCRIPT.length);
     expect(derivedState(profile).items).toEqual([]);
 
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    expect(client.getState()).toBe("ready");
+    await waitForRestart(client, generation);
     const queue = startQueue(client);
     await queue.flush();
     const deadline = Date.now() + 5_000;
@@ -291,12 +305,13 @@ describe("timeline projections in the database worker", () => {
     const profile = createProfile();
     const stored = insertWithOutbox(profile);
     const client = await startClient(profile, { withTestCommands: true });
+    const { generation } = client.getStatus();
     await expect(
       client.executeCommand("test.drainOneThenExitAfterCommit", undefined),
     ).rejects.toMatchObject({ code: "worker_exited", outcome: "unknown" });
     expect(derivedState(profile).outbox).toBe(EVENT_SCRIPT.length - 1);
 
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await waitForRestart(client, generation);
     const queue = startQueue(client);
     for (const event of stored.slice(1)) queue.notifyEnqueued(event.taskId, event.id);
     await queue.flush(profile.taskId);

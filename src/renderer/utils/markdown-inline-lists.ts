@@ -18,7 +18,10 @@ const PARENTHETICAL_ITEM_REGEX = /\s+\((\d+)\)[ \t]+(?=\S)/g;
  * Apply `transform` to the text outside fenced code blocks (``` or ~~~), leaving fence
  * contents untouched. An unclosed fence runs to the end of the text, as in CommonMark.
  */
-function transformOutsideFencedCode(text: string, transform: (segment: string) => string): string {
+export function transformOutsideFencedCode(
+  text: string,
+  transform: (segment: string) => string,
+): string {
   const output: string[] = [];
   let prose: string[] = [];
   let closingFence: RegExp | null = null;

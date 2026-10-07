@@ -8,6 +8,12 @@ import type {
   A2AJsonRpcSuccessResponse,
   A2ARemoteTaskResult,
 } from "./types";
+import {
+  createRemoteAgentSecretResolver,
+  getRemoteAgentSecretRef,
+  type RemoteAgentSecretResolver,
+  type RemoteAgentSecrets,
+} from "./remote-agent-secrets";
 
 export interface RemoteInvocationResult {
   status: "completed" | "failed" | "pending" | "running" | "cancelled";
@@ -86,19 +92,26 @@ export function validateRemoteAgentEndpoint(endpoint: string): URL {
   return parsed;
 }
 
-function buildHeaders(agent: ACPAgentCard): Record<string, string> {
+function buildHeaders(secrets: RemoteAgentSecrets | undefined): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  const metadata = (agent.metadata || {}) as Record<string, unknown>;
-  const explicitHeader = metadata.authorizationHeader;
-  const bearerToken = metadata.bearerToken;
+  const explicitHeader = secrets?.authorizationHeader;
+  const bearerToken = secrets?.bearerToken;
   if (typeof explicitHeader === "string" && explicitHeader.trim()) {
     headers.Authorization = explicitHeader.trim();
   } else if (typeof bearerToken === "string" && bearerToken.trim()) {
     headers.Authorization = `Bearer ${bearerToken.trim()}`;
   }
   return headers;
+}
+
+export interface RemoteAgentInvokerOptions {
+  /**
+   * Resolves an agent's credentials when a request is sent. Defaults to the
+   * secure-settings store; credentials are never read from the agent card.
+   */
+  resolveSecrets?: RemoteAgentSecretResolver;
 }
 
 function normalizeRemoteResult(
@@ -137,6 +150,22 @@ function normalizeRemoteResult(
 }
 
 export class RemoteAgentInvoker {
+  private readonly resolveSecrets: RemoteAgentSecretResolver;
+
+  constructor(options: RemoteAgentInvokerOptions = {}) {
+    this.resolveSecrets = options.resolveSecrets ?? createRemoteAgentSecretResolver();
+  }
+
+  private async resolveHeaders(agent: ACPAgentCard): Promise<Record<string, string>> {
+    const secrets = await this.resolveSecrets(agent);
+    const headers = buildHeaders(secrets);
+    if (!headers.Authorization && getRemoteAgentSecretRef(agent)) {
+      // Fail closed: the agent was registered with credentials that cannot be read now.
+      throw new Error(`Credentials for remote agent ${agent.id} are unavailable`);
+    }
+    return headers;
+  }
+
   private async sendRequest<T>(
     agent: ACPAgentCard,
     method: A2AJsonRpcRequest["method"],
@@ -146,6 +175,7 @@ export class RemoteAgentInvoker {
       throw new Error(`Remote agent ${agent.id} is missing an endpoint`);
     }
     const endpoint = validateRemoteAgentEndpoint(agent.endpoint).toString();
+    const headers = await this.resolveHeaders(agent);
     const request: A2AJsonRpcRequest = {
       jsonrpc: "2.0",
       id: randomUUID(),
@@ -157,7 +187,7 @@ export class RemoteAgentInvoker {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: buildHeaders(agent),
+        headers,
         body: JSON.stringify(request),
         signal: controller.signal,
       });

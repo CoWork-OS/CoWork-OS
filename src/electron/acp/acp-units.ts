@@ -9,6 +9,7 @@ const make = (db: Database.Database) => new AcpStore(db);
 export const ACP_UNITS = {
   acp_remoteAgentRows: storeUnit(make, "remoteAgentRows", { readonly: true }),
   acp_persistRemoteAgent: storeUnit(make, "persistRemoteAgent", { readonly: false }),
+  acp_scrubRemoteAgentCard: storeUnit(make, "scrubRemoteAgentCard", { readonly: false }),
   acp_deleteRemoteAgent: storeUnit(make, "deleteRemoteAgent", { readonly: false }),
   acp_taskRows: storeUnit(make, "taskRows", { readonly: true }),
   acp_persistTask: storeUnit(make, "persistTask", { readonly: false }),

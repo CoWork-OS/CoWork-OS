@@ -19,6 +19,15 @@ import type {
   ACPAgentRegisterParams,
 } from "./types";
 import { validateRemoteAgentEndpoint } from "./remote-invoker";
+import {
+  extractRemoteAgentSecrets,
+  getDefaultRemoteAgentSecretStore,
+  getRemoteAgentSecretRef,
+  hasPlaintextRemoteAgentSecrets,
+  remoteAgentSecretFields,
+  withRemoteAgentSecretRef,
+  type RemoteAgentSecretStore,
+} from "./remote-agent-secrets";
 import { botIconText } from "../../shared/bot-mascots";
 
 const logger = createLogger("ACPAgentRegistry");
@@ -37,6 +46,14 @@ interface AgentRoleLike {
   isActive: boolean;
 }
 
+export interface ACPAgentRegistryOptions {
+  /**
+   * Where remote agent credentials (authorization header / bearer token) are kept.
+   * Defaults to SecureSettingsRepository (safeStorage); cards only hold a reference.
+   */
+  secretStore?: RemoteAgentSecretStore;
+}
+
 /**
  * ACP Agent Registry
  */
@@ -53,22 +70,76 @@ export class ACPAgentRegistry {
   /** Resolves once persisted remote agents are loaded (DB6). */
   readonly ready: Promise<void>;
 
-  constructor(private db?: Database.Database) {
+  private readonly secretStore: RemoteAgentSecretStore;
+
+  constructor(
+    private db?: Database.Database,
+    options: ACPAgentRegistryOptions = {},
+  ) {
+    this.secretStore = options.secretStore ?? getDefaultRemoteAgentSecretStore();
     this.ready = this.loadRemoteAgents();
   }
 
   private async loadRemoteAgents(): Promise<void> {
     if (!this.db) return;
     const rows = await serviceStatements(this.db).unit("acp_remoteAgentRows", []);
+    let migrated = 0;
     for (const row of rows) {
+      let card: ACPAgentCard;
       try {
-        const card = JSON.parse(row.card_json) as ACPAgentCard;
-        // A registration made while loading is newer than the persisted one.
-        if (!this.remoteAgents.has(card.id)) this.remoteAgents.set(card.id, card);
+        card = JSON.parse(row.card_json) as ACPAgentCard;
       } catch {
         // Ignore malformed persisted registrations.
+        continue;
+      }
+      // A registration made while loading is newer than the persisted one.
+      if (this.remoteAgents.has(card.id)) continue;
+      if (hasPlaintextRemoteAgentSecrets(card)) {
+        const next = await this.migratePlaintextSecrets(card);
+        if (next !== card) migrated += 1;
+        card = next;
+        if (this.remoteAgents.has(card.id)) continue;
+      }
+      this.remoteAgents.set(card.id, card);
+    }
+    if (migrated > 0) {
+      logger.info(`Moved credentials of ${migrated} ACP remote agent(s) into secure storage`);
+    }
+  }
+
+  /**
+   * One-time migration for registrations persisted before credentials moved to secure
+   * storage: store the plaintext values under the agent id, then rewrite card_json with
+   * only a reference. Idempotent, so a failed run is retried on the next start; until
+   * then the card is left as it was (the values are never dropped).
+   */
+  private async migratePlaintextSecrets(card: ACPAgentCard): Promise<ACPAgentCard> {
+    const { secrets, metadata } = extractRemoteAgentSecrets(card.metadata);
+    const fields = remoteAgentSecretFields(secrets);
+    if (fields.length > 0) {
+      try {
+        this.secretStore.set(card.id, secrets);
+      } catch (error) {
+        logger.warn(
+          `Could not move credentials of ACP agent ${card.id} into secure storage; will retry on next start:`,
+          error,
+        );
+        return card;
       }
     }
+    const scrubbed: ACPAgentCard = {
+      ...card,
+      metadata: fields.length > 0 ? withRemoteAgentSecretRef(metadata, card.id, fields) : metadata,
+    };
+    if (this.db) {
+      try {
+        await serviceStatements(this.db).unit("acp_scrubRemoteAgentCard", [scrubbed, Date.now()]);
+      } catch (error) {
+        // The credentials are already in secure storage; the next start rewrites the row.
+        logger.warn(`Failed to scrub persisted credentials of ACP agent ${card.id}:`, error);
+      }
+    }
+    return scrubbed;
   }
 
   /** Persist without holding up the caller; the registration stays in memory either way. */
@@ -193,6 +264,14 @@ export class ACPAgentRegistry {
     }
     const id = `remote:${randomUUID().slice(0, 8)}-${params.name.toLowerCase().replace(/\s+/g, "-")}`;
 
+    // Credentials go to secure storage before the card exists anywhere, so a failed
+    // write rejects the registration instead of persisting the token in card_json.
+    const { secrets, metadata } = extractRemoteAgentSecrets(params.metadata);
+    const secretFields = remoteAgentSecretFields(secrets);
+    if (secretFields.length > 0) {
+      this.secretStore.set(id, secrets);
+    }
+
     const card: ACPAgentCard = {
       id,
       name: params.name,
@@ -214,7 +293,8 @@ export class ACPAgentRegistry {
       registeredAt: Date.now(),
       lastActiveAt: Date.now(),
       status: "available",
-      metadata: params.metadata,
+      metadata:
+        secretFields.length > 0 ? withRemoteAgentSecretRef(metadata, id, secretFields) : metadata,
     };
 
     this.remoteAgents.set(id, card);
@@ -226,9 +306,17 @@ export class ACPAgentRegistry {
    * Unregister a remote agent
    */
   unregisterRemoteAgent(agentId: string): boolean {
+    const agent = this.remoteAgents.get(agentId);
     const deleted = this.remoteAgents.delete(agentId);
     if (deleted) {
       this.deleteRemoteAgentFromDb(agentId);
+      if (agent && getRemoteAgentSecretRef(agent)) {
+        try {
+          this.secretStore.delete(agentId);
+        } catch (error) {
+          logger.warn(`Failed to delete stored credentials of ACP agent ${agentId}:`, error);
+        }
+      }
     }
     return deleted;
   }

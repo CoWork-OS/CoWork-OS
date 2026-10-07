@@ -26,6 +26,7 @@ import {
 import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
 import type { AddToolsRoute, AddToolsSelection } from "./AddToolsPanel";
 import type { AutomationOwner } from "./automation-library";
+import type { MemorySettingsLinkTab } from "./memory/MemorySettingsTab";
 import {
   Sparkles,
   Sun,
@@ -9704,6 +9705,7 @@ export function Settings({
                   openReviewRequest={memoryReviewRequest}
                   onSettingsChanged={onSettingsChanged}
                   onOpenTask={onOpenTask}
+                  onOpenSettingsTab={(tab: MemorySettingsLinkTab) => setActiveTab(tab)}
                 />
               ) : activeTab === "insights" ? (
                 <UsageInsightsPanel workspaceId={workspaceId} />

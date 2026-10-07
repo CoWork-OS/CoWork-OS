@@ -169,7 +169,7 @@ Rough order the stack encourages:
 1. **Built-in tools**: Confirm the `computer_use` category is enabled if you want the agent to use this lane at all.
 2. **Permissions / platform status**: On macOS, Accessibility + Screen Recording granted for the helper binary; restart after Screen Recording changes if needed. On Windows, confirm the helper is installed and the target window is visible/non-minimized.
 3. **Operational model**: Expect a foreground-first controlled-window loop centered on `screenshot()` and the latest `captureId`.
-4. **Chronicle**: If your goal is contextual screen understanding rather than GUI control, enable **Settings > Memory Hub > Chronicle**, keep the dedicated **Chronicle** built-in tool category enabled, and test `screen_context_resolve` before forcing a computer-use flow.
+4. **Chronicle**: If your goal is contextual screen understanding rather than GUI control, enable **Settings > Tools > Chronicle**, keep the dedicated **Chronicle** built-in tool category enabled, and test `screen_context_resolve` before forcing a computer-use flow.
 
 ## Security and abuse considerations
 

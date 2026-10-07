@@ -279,7 +279,7 @@ Durable promotion is also gated by Chronicle's `respectWorkspaceMemory` setting:
 ## Optional External Lane — Supermemory
 
 **Service:** `src/electron/memory/SupermemoryService.ts`  
-**Surface:** `Settings → Memory Hub → Supermemory`
+**Surface:** `Settings → Memory → Settings → Connections → Supermemory`
 
 Supermemory is an optional external memory provider that runs alongside CoWork's local memory system.
 
@@ -437,7 +437,7 @@ Workspace kit context is still injected separately and placed before the memory 
 
 The workspace kit remains a governed durable context layer with its own contracts, freshness windows, and prompt budgets. `USER.md` and `MEMORY.md` contain auto-managed blocks rendered from `memory_items` in addition to human-authored content; hand edits inside a block are synced back shortly after the file is saved, and on every kit sync ([memory-engine.md §5](memory-engine.md#generated-kit-views)).
 
-From **Settings → Memory Hub → Per Workspace**, the "Open USER.md" and "Open MEMORY.md" buttons open (or create if missing) these files directly in the system editor via `kit:openFile` IPC.
+From **Settings → Memory → Settings → Advanced → Workspace kit**, the "Open USER.md" and "Open MEMORY.md" buttons open (or create if missing) these files directly in the system editor via `kit:openFile` IPC.
 
 Memory Hub also shows a preview of the current `L0/L1` payload plus the `L2/L3` layers excluded from default injection, including fragment counts dropped by budget.
 

@@ -5,6 +5,7 @@ import { hasHostMethod } from "../../host/browser-capabilities";
 import "./memory-knowledge.css";
 import "./memory-health.css";
 import { SOURCE_FILTERS } from "./MemoryKnowledgeTab";
+import { MemorySourcesLists } from "./MemorySourcesLists";
 import { SOURCE_LABELS } from "./memory-knowledge-model";
 import {
   MEMORY_SOURCES_METHODS,
@@ -233,10 +234,13 @@ export function MemorySourcesTab({
   workspaceId,
   api = healthApi,
   onShowSource,
+  canDelete = true,
 }: {
   workspaceId: string;
   api?: () => MemoryHealthApi;
   onShowSource?: (source: MemoryHubSource) => void;
+  /** The workspace permits deleting memory (imported memories). */
+  canDelete?: boolean;
 }) {
   const [report, setReport] = useState<MemorySourcesReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -265,20 +269,22 @@ export function MemorySourcesTab({
     void load();
   }, [load, available]);
 
-  if (!available) {
-    return (
-      <p className="settings-form-hint">
-        Memory sources are not connected to this browser host yet.
-      </p>
-    );
-  }
   return (
-    <MemorySourcesView
-      report={report}
-      loading={loading}
-      error={error}
-      onRefresh={() => void load()}
-      onShowSource={onShowSource}
-    />
+    <>
+      {available ? (
+        <MemorySourcesView
+          report={report}
+          loading={loading}
+          error={error}
+          onRefresh={() => void load()}
+          onShowSource={onShowSource}
+        />
+      ) : (
+        <p className="settings-form-hint">
+          Memory sources are not connected to this browser host yet.
+        </p>
+      )}
+      <MemorySourcesLists workspaceId={workspaceId} canDelete={canDelete} />
+    </>
   );
 }

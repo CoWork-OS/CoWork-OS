@@ -49,7 +49,7 @@ Every `screen_context_resolve` result is marked as screen-derived, untrusted con
 
 ## Setup
 
-1. Open **Settings > Memory Hub > Chronicle**.
+1. Open **Settings > Tools > Chronicle** (Memory settings link there from **Connections → Chronicle**).
 2. Turn on **Chronicle (Research Preview)** and accept the consent prompt.
 3. Confirm **Screen Recording** is granted for CoWork OS.
 4. Optionally grant **Accessibility** for stronger frontmost app/window/source metadata.
@@ -118,7 +118,7 @@ If OCR-backed matching is important, install local `tesseract`. The Chronicle se
 - the task trace should show a tool call to `screen_context_resolve`
 - Mission Control task detail should show the learning step **Chronicle screen context used**
 - Mission Control recall/search should show `screen_context` evidence or recall results
-- **Settings > Memory Hub > Memory** should show promoted entries under **Chronicle observations**
+- **Settings > Memory > Sources** should show promoted entries under **Chronicle observations**
 
 ## Privacy and security model
 
@@ -140,7 +140,7 @@ If OCR-backed matching is important, install local `tesseract`. The Chronicle se
 Chronicle can observe whatever is visible on screen during its capture window. If you are about to view sensitive material that you do not want Chronicle to use as context:
 
 - pause it from the Chronicle settings card or tray menu, or
-- turn it off entirely from **Settings > Memory Hub > Chronicle**
+- turn it off entirely from **Settings > Tools > Chronicle**
 
 Pausing (or disabling, or withdrawing consent) stops capture and deletes the raw recent-screen buffer, including fallback frames. While paused, `screen_context_resolve` returns no matches and takes no fallback screenshot, and no Chronicle memories are generated. Already-promoted observations in `.cowork/chronicle/` are kept until you delete them.
 
@@ -165,10 +165,10 @@ Chronicle should be treated as **context evidence**, not as an authority overrid
 
 ## User-facing surfaces
 
-- **Settings > Memory Hub > Chronicle**: primary Chronicle setup and status surface
+- **Settings > Tools > Chronicle**: primary Chronicle setup and status surface (Memory settings link there)
 - **Settings > Tools > Built-in tools**: enable or prioritize the dedicated `chronicle` tool family
 - **Task composer / Devices**: per-task Chronicle ON/OFF toggle
-- **Settings > Memory Hub > Memory**: Chronicle observations management (list, delete, clear)
+- **Settings > Memory > Sources**: Chronicle observations management (list, delete, clear)
 - **Mission Control task detail**: `screen_context` evidence, learning step, and unified recall hits
 - **Search everything**: promoted `screen_context` results alongside tasks, messages, files, notes, memory, and knowledge graph
 - **Tray/menu bar**: quick pause/resume when the tray surface is enabled

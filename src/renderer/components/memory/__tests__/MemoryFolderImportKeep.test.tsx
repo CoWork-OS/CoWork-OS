@@ -6,7 +6,9 @@ import type {
   MemoryRepoHubFile,
 } from "../../../../shared/memory-repo-types";
 import { MemoryFolderKnowledge, type MemoryFolderKnowledgeProps } from "../MemoryFolderKnowledge";
-import { importResultMessage, MemoryRepoCard } from "../MemoryRepoCard";
+import type { MemoryFeaturesSettings } from "../../../../shared/types";
+import { MemoryImportSection } from "../MemoryImportSection";
+import { importResultMessage, useMemoryRepoController } from "../MemoryRepoCard";
 import { keepFolderEntry, type MemoryFolderApi } from "../memory-folder-model";
 
 const WS = "ws-1";
@@ -117,38 +119,38 @@ describe("Keep in the memory folder inbox", () => {
 });
 
 describe("Import notes from a folder", () => {
-  it("shows the import button in the Memory folder card on desktop", () => {
+  function ImportWithFolder(props: { features: MemoryFeaturesSettings; api: unknown }) {
+    const repo = useMemoryRepoController({
+      features: props.features,
+      onFeaturesSaved: vi.fn(),
+      api: props.api as never,
+    });
+    return <MemoryImportSection workspaceId={WS} memoryInUse repo={repo} />;
+  }
+  const features = {
+    contextPackInjectionEnabled: true,
+    heartbeatMaintenanceEnabled: true,
+    memoryRepoEnabled: true,
+  };
+
+  it("shows Folder of notes in the Import row on desktop", () => {
     const api = vi.fn();
-    const html = renderToStaticMarkup(
-      <MemoryRepoCard
-        features={{
-          contextPackInjectionEnabled: true,
-          heartbeatMaintenanceEnabled: true,
-          memoryRepoEnabled: true,
-        }}
-        onFeaturesSaved={vi.fn()}
-        api={api as never}
-      />,
-    );
-    expect(html).toContain("Import notes from a folder…");
+    const html = renderToStaticMarkup(<ImportWithFolder features={features} api={api} />);
+    expect(html).toContain(">Folder of notes</button>");
     expect(api).not.toHaveBeenCalled();
   });
 
-  it("hides the import button in a browser session without the method", () => {
+  it("hides Folder of notes in a browser session without the method", () => {
     vi.stubGlobal("window", {
       coworkBrowserHost: true,
-      coworkBrowserHostInfo: { desktopMethods: { openMemoryRepoFolder: true } },
+      coworkBrowserHostInfo: {
+        desktopMethods: { openMemoryRepoFolder: true, getMemoryRepoStatus: true },
+      },
     });
     try {
-      const html = renderToStaticMarkup(
-        <MemoryRepoCard
-          features={{ contextPackInjectionEnabled: true, heartbeatMaintenanceEnabled: true, memoryRepoEnabled: true }}
-          onFeaturesSaved={vi.fn()}
-          api={vi.fn() as never}
-        />,
-      );
-      expect(html).toContain("Open memory folder");
-      expect(html).not.toContain("Import notes from a folder");
+      const html = renderToStaticMarkup(<ImportWithFolder features={features} api={vi.fn()} />);
+      expect(html).toContain(">From another assistant</button>");
+      expect(html).not.toContain("Folder of notes");
     } finally {
       vi.unstubAllGlobals();
     }

@@ -382,7 +382,7 @@ This channel is part of the shared IPC contract exported from `src/shared/types.
 - `KIT_RESET_ADAPTIVE_STYLE` → `kit:resetAdaptiveStyle`
 - `KIT_SUBMIT_MESSAGE_FEEDBACK` → `kit:submitMessageFeedback`
 
-Exposed in **Memory Hub → Per Workspace** as "Open USER.md" and "Open MEMORY.md" buttons.
+Exposed in **Memory Hub → Settings → Advanced → Workspace kit** as "Open USER.md" and "Open MEMORY.md" buttons.
 
 Security constraints:
 

@@ -53,13 +53,12 @@ Supermemory write paths also participate in Memory Write Governance. If `COWORK_
 
 ## Setup
 
-1. Open **Settings → Memory Hub**.
-2. Find the **Supermemory** section.
-3. Enable **Supermemory**.
-4. Paste your Supermemory API key.
-5. Choose a container-tag template.
-6. Save settings.
-7. Click **Test Connection**.
+1. Open **Settings → Memory → Settings** and find **Supermemory** under **Connections**.
+2. Turn on the **Supermemory** switch (it saves at once).
+3. Click **Manage** and paste your Supermemory API key.
+4. Optionally choose a container-tag template under **Search options**.
+5. Click **Save**.
+6. Click **Test connection**.
 
 The normal no-prompt runtime commits new writes immediately. A controlled run can opt into the review queue with `COWORK_MEMORY_WRITE_APPROVAL_MODE`.
 

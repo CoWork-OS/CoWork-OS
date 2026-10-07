@@ -7,6 +7,7 @@ import {
 } from "../../../shared/memory-repo-types";
 import type { MemoryRepoTeamRepoSetting } from "../../../shared/types";
 import { formatRelative } from "./memory-knowledge-model";
+import { SettingsBadge, SettingsFeedback } from "./SettingsRow";
 
 /**
  * The memory folder card's "Sync" and "Team memory" sections
@@ -62,22 +63,6 @@ export function syncNowMessage(result: MemoryRepoSyncNowResult): NonNullable<Sec
   return { tone: "success", text: "Synced." };
 }
 
-function Feedback({ message }: { message: SectionMessage }) {
-  if (!message) return null;
-  return (
-    <div
-      role={message.tone === "error" ? "alert" : "status"}
-      className={`settings-feedback ${message.tone} memory-hub-top-gap`}
-    >
-      {message.text}
-    </div>
-  );
-}
-
-function Badge({ tone, label }: { tone: "success" | "warning" | "neutral"; label: string }) {
-  return <span className={`settings-badge settings-badge--${tone}`}>{label}</span>;
-}
-
 export interface MemoryRepoSyncViewProps {
   savedRemoteUrl: string;
   confirmed: boolean;
@@ -102,17 +87,10 @@ export function MemoryRepoSyncView(props: MemoryRepoSyncViewProps) {
     setLastSaved(props.savedRemoteUrl);
     setDraft(props.savedRemoteUrl);
   }
-  const line = memoryRepoSyncLine({
-    remoteUrl: props.savedRemoteUrl,
-    confirmed: props.confirmed,
-    folderReady: props.folderReady,
-    sync: props.sync,
-  });
   const active = props.folderReady && Boolean(props.sync);
   return (
-    <div className="settings-form-group memory-hub-top-gap" data-testid="memory-repo-sync">
-      <div className="memory-hub-primary-label">Sync</div>
-      <p className="settings-form-hint memory-hub-hint-tight">
+    <div className="memory-repo-sync-view">
+      <p className="settings-form-hint">
         Syncs the memory folder with a private git repository you own, so the same memory is on each
         of your machines. CoWork uses your own git credentials (credential helper or SSH agent) and
         stores none. Dream review branches are never pushed.
@@ -137,7 +115,7 @@ export function MemoryRepoSyncView(props: MemoryRepoSyncViewProps) {
             Save
           </button>
         </div>
-        <p className="settings-hint">
+        <p className="settings-form-hint">
           An https, ssh or user@host:path URL without a password or token in it. Leave empty to turn
           sync off.
         </p>
@@ -151,14 +129,9 @@ export function MemoryRepoSyncView(props: MemoryRepoSyncViewProps) {
         />
         This repository is private and mine
       </label>
-      {!props.confirmed && <p className="settings-hint">Sync stays off until this is checked.</p>}
-      <p className="settings-form-hint" role="status">
-        <Badge
-          tone={line.tone}
-          label={active ? (line.tone === "warning" ? "WARN" : "ON") : "OFF"}
-        />{" "}
-        {line.text}
-      </p>
+      {!props.confirmed && (
+        <p className="settings-form-hint">Sync stays off until this is checked.</p>
+      )}
       {props.canSyncNow && (
         <div className="memory-hub-row-wrap-center">
           <button
@@ -171,7 +144,7 @@ export function MemoryRepoSyncView(props: MemoryRepoSyncViewProps) {
           </button>
         </div>
       )}
-      <Feedback message={props.message} />
+      <SettingsFeedback message={props.message} />
     </div>
   );
 }
@@ -268,15 +241,14 @@ export function MemoryRepoTeamView(props: MemoryRepoTeamViewProps) {
   };
 
   return (
-    <div className="settings-form-group memory-hub-top-gap" data-testid="memory-repo-team">
-      <div className="memory-hub-primary-label">Team memory</div>
-      <p className="settings-form-hint memory-hub-hint-tight">
+    <div className="memory-repo-team-view">
+      <p className="settings-form-hint">
         Read-only memory shared by a team: a memory folder you cloned from your team. CoWork reads
         it next to your own memory and never writes it. A team folder with a remote is updated every
         10 minutes when it has no local edits.
       </p>
       {props.repos.length === 0 ? (
-        <p className="settings-hint">No team memory yet.</p>
+        <p className="settings-form-hint">No team memory yet.</p>
       ) : (
         <div className="memory-hub-column">
           {props.repos.map((repo) => {
@@ -288,17 +260,14 @@ export function MemoryRepoTeamView(props: MemoryRepoTeamViewProps) {
                   <div className="memory-hub-text-secondary">
                     {repo.path} · {teamRepoWorkspacesLabel(repo.workspaceIds)}
                   </div>
-                  <div className="settings-form-hint memory-hub-hint-tight" role="status">
-                    <Badge
-                      tone={status.tone}
-                      label={
-                        status.tone === "success"
-                          ? "READY"
-                          : status.tone === "warning"
-                            ? "WARN"
-                            : "..."
-                      }
-                    />{" "}
+                  <div className="settings-form-hint" role="status">
+                    <SettingsBadge tone={status.tone}>
+                      {status.tone === "success"
+                        ? "Ready"
+                        : status.tone === "warning"
+                          ? "Check"
+                          : "..."}
+                    </SettingsBadge>{" "}
                     {status.text}
                   </div>
                 </div>
@@ -322,7 +291,7 @@ export function MemoryRepoTeamView(props: MemoryRepoTeamViewProps) {
         </div>
       )}
       {full ? (
-        <p className="settings-hint">
+        <p className="settings-form-hint">
           At most {MEMORY_REPO_TEAM_REPOS_MAX} team repos; remove one to add another.
         </p>
       ) : (
@@ -366,18 +335,18 @@ export function MemoryRepoTeamView(props: MemoryRepoTeamViewProps) {
               Only for this workspace
             </label>
           )}
-          <p className="settings-hint">
+          <p className="settings-form-hint">
             The folder must be a memory folder (a git repository with a MEMORY.md), outside your
             workspaces and apart from your own memory folder.
           </p>
           {problem && (
-            <div role="alert" className="settings-feedback error memory-hub-top-gap">
+            <div role="alert" className="settings-feedback error">
               {problem}
             </div>
           )}
         </div>
       )}
-      <Feedback message={props.message} />
+      <SettingsFeedback message={props.message} />
     </div>
   );
 }

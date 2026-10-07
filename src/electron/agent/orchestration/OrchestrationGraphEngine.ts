@@ -13,6 +13,8 @@ import type {
 } from "../../../shared/types";
 import { getACPRegistry, type ACPAgentCard } from "../../acp";
 import { RemoteAgentInvoker } from "../../acp/remote-invoker";
+import { redactSecrets } from "../../memory/sensitive-content";
+import type { RemoteAcpAdmissionGate, RemoteAcpDispatchRequest } from "./remote-acp-admission";
 import {
   type OrchestrationDispatchClaim,
   type OrchestrationNodeCancellationAttempt,
@@ -91,6 +93,12 @@ export interface OrchestrationGraphEngineDeps {
   getTaskById: (taskId: string) => Promise<Task | undefined>;
   cancelTask: (taskId: string) => Promise<void>;
   getActiveAgentRoles: () => AgentRoleLike[];
+  /**
+   * Required admission for `remote_acp` nodes. Remote dispatch skips the tool
+   * policy and approval middleware local nodes run under, so every remote send
+   * needs an explicit decision here first (see remote-acp-admission.ts).
+   */
+  remoteAcpAdmission: RemoteAcpAdmissionGate;
   emitRootEvent?: (rootTaskId: string, eventType: string, payload: Record<string, unknown>) => void;
 }
 
@@ -310,10 +318,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
       nodes,
       edges,
     });
-    if (updated) {
-      await this.tickRun(updated.run.id);
-    }
-    return updated;
+    if (!updated) return updated;
+    // Return the post-dispatch snapshot: callers (the team orchestrator's
+    // synthesis step) read the appended node's taskId and status from it.
+    return (await this.tickRun(updated.run.id)) ?? updated;
   }
 
   async resumeRunningRuns(): Promise<void> {
@@ -756,14 +764,35 @@ export class OrchestrationGraphEngine extends EventEmitter {
       const prompt = await this.buildPromptWithDependencyContext(run.id, claimed);
       await serviceStatements(this.db).unit("botWorkControl_assertNotStopped", [run.rootTaskId]);
       if (claimed.dispatchTarget === "remote_acp") {
-        const acpAgentId = claimed.acpAgentId;
-        if (!acpAgentId) throw new Error("Remote ACP node is missing acpAgentId");
-        const agent = getACPRegistry().getAgent(acpAgentId, this.deps.getActiveAgentRoles());
-        if (!agent || agent.origin !== "remote" || !agent.endpoint) {
-          throw new Error(`ACP agent ${acpAgentId} is unavailable`);
+        const agent = this.resolveRemoteAcpAgent(claimed);
+        // Parent excerpts and recent findings ride along in the prompt; strip
+        // secret values before they leave the host or reach the approval record.
+        const outbound = redactSecrets(prompt);
+        await this.admitRemoteAcpDispatch({
+          runId: run.id,
+          nodeId: claimed.id,
+          rootTaskId: run.rootTaskId,
+          workspaceId: run.workspaceId,
+          agent,
+          title: claimed.title,
+          prompt: outbound.text,
+          redactedSecretCount: outbound.count,
+        });
+        // Approval can take arbitrarily long: recheck stop, ownership and the
+        // agent so a cancelled run or a re-pointed endpoint is not dispatched.
+        await serviceStatements(this.db).unit("botWorkControl_assertNotStopped", [run.rootTaskId]);
+        await this.assertDispatchClaimCurrent(run.id, claimed.id, claimId);
+        const admittedAgent = this.resolveRemoteAcpAgent(claimed);
+        if (admittedAgent.endpoint !== agent.endpoint) {
+          throw new Error("Remote ACP agent endpoint changed while dispatch awaited admission");
         }
         effectBoundaryEntered = true;
-        await this.dispatchRemoteAcpNode(run, { ...claimed, prompt }, agent, claimId);
+        await this.dispatchRemoteAcpNode(
+          run,
+          { ...claimed, prompt: outbound.text },
+          admittedAgent,
+          claimId,
+        );
         return;
       }
 
@@ -937,6 +966,49 @@ export class OrchestrationGraphEngine extends EventEmitter {
       ...notificationToPayload(notification),
       handle: task.id,
     });
+  }
+
+  private resolveRemoteAcpAgent(node: OrchestrationGraphNode): ACPAgentCard {
+    const acpAgentId = node.acpAgentId;
+    if (!acpAgentId) throw new Error("Remote ACP node is missing acpAgentId");
+    const agent = getACPRegistry().getAgent(acpAgentId, this.deps.getActiveAgentRoles());
+    if (!agent || agent.origin !== "remote" || !agent.endpoint) {
+      throw new Error(`ACP agent ${acpAgentId} is unavailable`);
+    }
+    return agent;
+  }
+
+  /** Throws a visible reason unless the remote dispatch is allowed or approved. */
+  private async admitRemoteAcpDispatch(request: RemoteAcpDispatchRequest): Promise<void> {
+    const admission = this.deps.remoteAcpAdmission;
+    const decision = await admission.evaluate(request);
+    if (decision.decision === "deny") {
+      throw new Error(`Remote ACP dispatch denied: ${decision.reason}`);
+    }
+    if (decision.decision === "allow") return;
+    const approval = await admission.requestApproval(request, decision.reason);
+    if (!approval.approved) {
+      throw new Error(
+        `Remote ACP dispatch was not approved: ${approval.reason || decision.reason}`,
+      );
+    }
+  }
+
+  private async assertDispatchClaimCurrent(
+    runId: string,
+    nodeId: string,
+    claimId: string,
+  ): Promise<void> {
+    const current = await this.repo.findNodeById(nodeId);
+    const latestRun = (await this.repo.findSnapshotByRunId(runId))?.run;
+    if (
+      !current ||
+      dispatchClaimForNode(current)?.id !== claimId ||
+      current.status !== "running" ||
+      latestRun?.status !== "running"
+    ) {
+      throw new Error("Orchestration run changed while remote dispatch awaited admission");
+    }
   }
 
   private async dispatchRemoteAcpNode(

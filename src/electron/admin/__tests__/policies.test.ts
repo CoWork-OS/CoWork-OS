@@ -22,6 +22,16 @@ beforeEach(() => {
 });
 
 describe("validatePolicies", () => {
+  it("requires connectors.blocked to be an array of strings", () => {
+    expect(validatePolicies({ connectors: { blocked: ["jira", "linear"] } })).toBeNull();
+    expect(validatePolicies({ connectors: { blocked: "jira" } })).toBe(
+      "connectors.blocked must be an array of strings",
+    );
+    expect(validatePolicies({ connectors: { blocked: ["jira", 7] } })).toBe(
+      "connectors.blocked must be an array of strings",
+    );
+  });
+
   it("accepts non-conflicting pack policy lists", () => {
     expect(
       validatePolicies({

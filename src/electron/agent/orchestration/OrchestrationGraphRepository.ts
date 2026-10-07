@@ -583,7 +583,12 @@ export class OrchestrationGraphStore {
     edges?: OrchestrationGraphEdgeInsert[];
   }): OrchestrationGraphSnapshot | undefined {
     const existing = this.findSnapshotByRunId(input.runId);
-    if (!existing || existing.run.status !== "running") return existing;
+    // A cancelled run stays closed. A run that already finished reopens: the
+    // team orchestrator appends its synthesis node only after every lane has
+    // reported, by which time the engine has usually finalized the run as
+    // completed. Dropping the append there left the synthesis item waiting
+    // on a task that was never created.
+    if (!existing || existing.run.status === "cancelled") return existing;
     const now = Date.now();
     const nodes: OrchestrationGraphNode[] = input.nodes.map((node, index) => ({
       ...node,
@@ -602,7 +607,7 @@ export class OrchestrationGraphStore {
       const run = this.db
         .prepare("SELECT status FROM orchestration_graph_runs WHERE id = ?")
         .get(input.runId) as { status: OrchestrationGraphRun["status"] } | undefined;
-      if (!run || run.status !== "running") return;
+      if (!run || run.status === "cancelled") return;
       const insertNode = this.db.prepare(
         `INSERT INTO orchestration_graph_nodes (
           id, run_id, node_key, title, prompt, kind, status, dispatch_target, worker_role,
@@ -658,9 +663,19 @@ export class OrchestrationGraphStore {
           insertEdge.run(edge.id, edge.runId, edge.fromNodeId, edge.toNodeId);
         }
       }
-      this.db
-        .prepare("UPDATE orchestration_graph_runs SET updated_at = ? WHERE id = ?")
-        .run(now, input.runId);
+      if (run.status === "running") {
+        this.db
+          .prepare("UPDATE orchestration_graph_runs SET updated_at = ? WHERE id = ?")
+          .run(now, input.runId);
+      } else {
+        this.db
+          .prepare(
+            `UPDATE orchestration_graph_runs
+             SET status = 'running', completed_at = NULL, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(now, input.runId);
+      }
     });
 
     tx.immediate();

@@ -30,6 +30,13 @@ import {
   isLikelyIntegrationAuthError,
   notifyIntegrationAuthIssue,
 } from "../../notifications/integration-auth";
+import { loadPolicies, type AdminPolicies } from "../../admin/policies";
+import {
+  assertMcpServerNotBlocked,
+  connectorBlockedMessage,
+  findBlockedConnectorId,
+  isConnectorBlockedError,
+} from "../connector-policy";
 
 const KNOWN_CONNECTORS = new Set(getKnownConnectorIds());
 const logger = createLogger("MCPClientManager");
@@ -61,6 +68,8 @@ export class MCPClientManager extends EventEmitter {
   private connectionRefCounts: Map<string, Set<string>> = new Map();
   /** Server IDs that were connected during initial startup — these are never auto-disconnected */
   private initialServerIds: Set<string> = new Set();
+  /** Servers kept offline by admin policy that should come back when the block is lifted */
+  private policyBlockedServerIds: Set<string> = new Set();
   private startupStats: { enabled: number; attempted: number; connected: number; failed: number } =
     {
       enabled: 0,
@@ -118,7 +127,15 @@ export class MCPClientManager extends EventEmitter {
     if (settings.autoConnect) {
       const enabledServers = settings.servers.filter((s) => s.enabled);
       const autoConnectServers: MCPServerConfig[] = [];
+      const policies = loadPolicies();
       for (const server of enabledServers) {
+        const blockedId = findBlockedConnectorId(server, policies);
+        if (blockedId) {
+          // Keep the user's enabled flag so lifting the block restores the connector.
+          logger.info(`Skipping auto-connect: ${connectorBlockedMessage(server, blockedId)}`);
+          this.policyBlockedServerIds.add(server.id);
+          continue;
+        }
         if (this.shouldAutoConnect(server)) {
           autoConnectServers.push(server);
           continue;
@@ -252,6 +269,9 @@ export class MCPClientManager extends EventEmitter {
    * Connect to a specific server
    */
   async connectServer(serverId: string): Promise<void> {
+    // Admin policy comes first so a blocked server is never reported as connectable.
+    this.assertServerNotBlocked(serverId);
+
     // Check if already connected
     if (this.connections.has(serverId)) {
       const existing = this.connections.get(serverId)!;
@@ -373,12 +393,15 @@ export class MCPClientManager extends EventEmitter {
       }
     }
     this.desiredTriggerResourceSubscriptions = resourcesByServer;
+    const policies = loadPolicies();
 
     await Promise.all(
       Array.from(this.connections.entries()).map(async ([serverId, connection]) => {
+        const config = MCPSettingsManager.getServer(serverId);
+        const blocked = config ? findBlockedConnectorId(config, policies) !== null : false;
         try {
           await connection.syncResourceSubscriptions(
-            this.desiredTriggerResourceSubscriptions.get(serverId) || [],
+            blocked ? [] : this.desiredTriggerResourceSubscriptions.get(serverId) || [],
           );
         } catch (error) {
           logger.debug(`Failed to sync resource subscriptions for ${serverId}:`, error);
@@ -407,13 +430,19 @@ export class MCPClientManager extends EventEmitter {
       throw new Error(`Tool ${toolName} not found`);
     }
 
+    // A server connected before the block was added must still be refused.
+    this.assertServerNotBlocked(serverId);
+
     const connection = this.connections.get(serverId);
     if (!connection) {
       throw new Error(`Server ${serverId} not connected`);
     }
 
     try {
-      return await connection.callTool(toolName, args, options);
+      return await connection.callTool(toolName, args, {
+        ...options,
+        beforeSend: this.policyCheckedBeforeSend(serverId, options?.beforeSend),
+      });
     } catch (error) {
       const config = MCPSettingsManager.getServer(serverId);
       await this.notifyConnectorAuthIssue(serverId, config, error);
@@ -433,13 +462,17 @@ export class MCPClientManager extends EventEmitter {
     toolName: string,
     args: Record<string, Any> = {},
   ): Promise<MCPCallResult> {
+    this.assertServerNotBlocked(serverId);
+
     const connection = this.connections.get(serverId);
     if (!connection) {
       throw new Error(`Server ${serverId} not connected`);
     }
 
     try {
-      return await connection.callTool(toolName, args);
+      return await connection.callTool(toolName, args, {
+        beforeSend: this.policyCheckedBeforeSend(serverId),
+      });
     } catch (error) {
       const config = MCPSettingsManager.getServer(serverId);
       await this.notifyConnectorAuthIssue(serverId, config, error);
@@ -457,21 +490,28 @@ export class MCPClientManager extends EventEmitter {
   getStatus(): MCPServerStatus[] {
     const statuses: MCPServerStatus[] = [];
     const settings = MCPSettingsManager.loadSettings();
+    const policies = loadPolicies();
 
     for (const config of settings.servers) {
       const connection = this.connections.get(config.id);
       if (connection) {
-        statuses.push(connection.getStatus());
+        statuses.push(this.withPolicyStatus(connection.getStatus(), config, policies));
       } else {
         // Server not connected
-        statuses.push({
-          id: config.id,
-          name: config.name,
-          status: "disconnected",
-          error: config.lastError,
-          tools: config.tools || [],
-          lastPing: config.lastConnectedAt,
-        });
+        statuses.push(
+          this.withPolicyStatus(
+            {
+              id: config.id,
+              name: config.name,
+              status: "disconnected",
+              error: config.lastError,
+              tools: config.tools || [],
+              lastPing: config.lastConnectedAt,
+            },
+            config,
+            policies,
+          ),
+        );
       }
     }
 
@@ -482,25 +522,88 @@ export class MCPClientManager extends EventEmitter {
    * Get status of a specific server
    */
   getServerStatus(serverId: string): MCPServerStatus | null {
+    const config = MCPSettingsManager.getServer(serverId);
     const connection = this.connections.get(serverId);
     if (connection) {
-      return connection.getStatus();
+      const status = connection.getStatus();
+      return config ? this.withPolicyStatus(status, config) : status;
     }
 
     // Check if server exists in settings
-    const config = MCPSettingsManager.getServer(serverId);
     if (config) {
-      return {
-        id: config.id,
-        name: config.name,
-        status: "disconnected",
-        error: config.lastError,
-        tools: config.tools || [],
-        lastPing: config.lastConnectedAt,
-      };
+      return this.withPolicyStatus(
+        {
+          id: config.id,
+          name: config.name,
+          status: "disconnected",
+          error: config.lastError,
+          tools: config.tools || [],
+          lastPing: config.lastConnectedAt,
+        },
+        config,
+      );
     }
 
     return null;
+  }
+
+  /**
+   * Apply the admin `connectors.blocked` policy to live connections: disconnect servers that
+   * are now blocked, and reconnect servers that were kept offline only by a block that has
+   * since been lifted. Tool calls are refused independently, so this only tidies up state.
+   */
+  async reconcileConnectorPolicy(): Promise<void> {
+    const policies = loadPolicies();
+    const settings = MCPSettingsManager.loadSettings();
+    const toDisconnect: string[] = [];
+    const toReconnect: string[] = [];
+
+    for (const server of settings.servers) {
+      if (findBlockedConnectorId(server, policies)) {
+        if (this.connections.has(server.id)) {
+          toDisconnect.push(server.id);
+          this.policyBlockedServerIds.add(server.id);
+        } else if (server.enabled && settings.autoConnect && this.initialized) {
+          this.policyBlockedServerIds.add(server.id);
+        }
+        continue;
+      }
+      if (
+        this.policyBlockedServerIds.delete(server.id) &&
+        this.initialized &&
+        server.enabled &&
+        !this.connections.has(server.id) &&
+        this.shouldAutoConnect(server)
+      ) {
+        toReconnect.push(server.id);
+      }
+    }
+
+    await Promise.all(
+      toDisconnect.map((serverId) =>
+        this.disconnectServer(serverId).catch((error) =>
+          logger.error(`Failed to disconnect policy-blocked server ${serverId}:`, error),
+        ),
+      ),
+    );
+    await Promise.all(
+      toReconnect.map(async (serverId) => {
+        try {
+          await this.connectServer(serverId);
+          // It would have been connected at startup, so keep it out of executor release.
+          this.initialServerIds.add(serverId);
+        } catch (error) {
+          logger.error(`Failed to reconnect unblocked server ${serverId}:`, error);
+        }
+      }),
+    );
+
+    if (toDisconnect.length > 0 || toReconnect.length > 0) {
+      logger.info(
+        `Connector policy applied: disconnected=${toDisconnect.length}, reconnected=${toReconnect.length}`,
+      );
+    }
+    this.broadcastStatusChange();
   }
 
   /**
@@ -508,7 +611,7 @@ export class MCPClientManager extends EventEmitter {
    */
   async testServer(
     serverId: string,
-  ): Promise<{ success: boolean; error?: string; tools?: number }> {
+  ): Promise<{ success: boolean; error?: string; tools?: number; blockedByPolicy?: boolean }> {
     try {
       await this.connectServer(serverId);
       const status = this.getServerStatus(serverId);
@@ -517,7 +620,11 @@ export class MCPClientManager extends EventEmitter {
 
       return { success: true, tools: toolCount };
     } catch (error: Any) {
-      return { success: false, error: error.message };
+      return {
+        success: false,
+        error: error.message,
+        ...(isConnectorBlockedError(error) ? { blockedByPolicy: true } : {}),
+      };
     }
   }
 
@@ -588,6 +695,11 @@ export class MCPClientManager extends EventEmitter {
 
     connection.on("connector_event", (event: MCPConnectorEvent) => {
       const config = MCPSettingsManager.getServer(serverId);
+      if (config && findBlockedConnectorId(config)) {
+        // Data from a blocked connector must not reach triggers before reconcile disconnects it.
+        logger.debug(`Dropping connector event from policy-blocked server ${serverId}`);
+        return;
+      }
       const connectorId = config ? this.detectConnectorId(config) : undefined;
       this.emit("connector_event", {
         ...event,
@@ -602,12 +714,45 @@ export class MCPClientManager extends EventEmitter {
     });
   }
 
+  /** Throws ConnectorBlockedError when admin policy blocks this server. */
+  private assertServerNotBlocked(serverId: string): void {
+    const config = MCPSettingsManager.getServer(serverId);
+    if (config) assertMcpServerNotBlocked(config);
+  }
+
+  /** Re-check the block right before the request is sent; approvals can take a while. */
+  private policyCheckedBeforeSend(
+    serverId: string,
+    beforeSend?: () => Promise<void>,
+  ): () => Promise<void> {
+    return async () => {
+      this.assertServerNotBlocked(serverId);
+      await beforeSend?.();
+      this.assertServerNotBlocked(serverId);
+    };
+  }
+
+  private withPolicyStatus(
+    status: MCPServerStatus,
+    config: MCPServerConfig,
+    policies?: AdminPolicies,
+  ): MCPServerStatus {
+    const blockedId = findBlockedConnectorId(config, policies);
+    if (!blockedId) return status;
+    return {
+      ...status,
+      blockedByPolicy: true,
+      error: connectorBlockedMessage(config, blockedId),
+    };
+  }
+
   private async notifyConnectorAuthIssue(
     serverId: string,
     config: MCPServerConfig | undefined,
     error: unknown,
   ): Promise<void> {
-    if (!isLikelyIntegrationAuthError(error)) return;
+    // A policy block is not a sign-in problem, even if the server name mentions OAuth.
+    if (isConnectorBlockedError(error) || !isLikelyIntegrationAuthError(error)) return;
     const connectorId = config ? this.detectConnectorId(config) : undefined;
     await notifyIntegrationAuthIssue({
       integrationId: connectorId || serverId,

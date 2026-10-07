@@ -1066,4 +1066,221 @@ describe("AgentTeamOrchestrator", () => {
     expect(synthesisCall.agentConfig.modelKey).toBe("gpt-5.4");
     expect(synthesisCall.agentConfig.llmProfile).toBe("strong");
   });
+
+  function makeSynthesisFixture(suffix: string) {
+    mockProfileRouting(true);
+    const now = Date.now();
+    const team: AgentTeam = {
+      id: `team-${suffix}`,
+      workspaceId: `ws-${suffix}`,
+      name: `Team ${suffix}`,
+      description: undefined,
+      leadAgentRoleId: `role-lead-${suffix}`,
+      maxParallelAgents: 1,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const run: AgentTeamRun = {
+      id: `run-${suffix}`,
+      teamId: team.id,
+      rootTaskId: `task-root-${suffix}`,
+      status: "running",
+      startedAt: now,
+      collaborativeMode: true,
+      phase: "execute",
+    };
+    const item: AgentTeamItem = {
+      id: `item-${suffix}`,
+      teamRunId: run.id,
+      parentItemId: undefined,
+      title: "Analysis lane",
+      description: "Completed",
+      ownerAgentRoleId: undefined,
+      sourceTaskId: `task-child-${suffix}`,
+      status: "done",
+      resultSummary: "done",
+      sortOrder: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const rootTask: Task = {
+      id: run.rootTaskId,
+      title: `Root ${suffix}`,
+      prompt: "Coordinate and summarize",
+      status: "executing",
+      workspaceId: team.workspaceId,
+      createdAt: now,
+      updatedAt: now,
+      agentType: "main",
+      depth: 0,
+      agentConfig: { llmProfileHint: "strong" },
+    };
+    const completedChild: Task = {
+      id: item.sourceTaskId!,
+      title: item.title,
+      prompt: "Done",
+      status: "completed",
+      workspaceId: team.workspaceId,
+      createdAt: now,
+      updatedAt: now,
+      parentTaskId: rootTask.id,
+      agentType: "sub",
+      depth: 1,
+    };
+    const tasksById = new Map<string, Task>([
+      [rootTask.id, rootTask],
+      [completedChild.id, completedChild],
+    ]);
+    const createChildTask = vi.fn(async (params: Any) => {
+      const child: Task = {
+        id: `task-child-${Math.random().toString(16).slice(2)}`,
+        title: params.title,
+        prompt: params.prompt,
+        status: "executing",
+        workspaceId: params.workspaceId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        parentTaskId: params.parentTaskId,
+        agentType: params.agentType,
+        agentConfig: params.agentConfig,
+        depth: params.depth,
+        assignedAgentRoleId: params.assignedAgentRoleId,
+      };
+      tasksById.set(child.id, child);
+      return child;
+    });
+    return { team, run, item, rootTask, tasksById, createChildTask };
+  }
+
+  it("spawns the synthesis task directly when the graph engine drops the appended node", async () => {
+    const { team, run, item, rootTask, tasksById, createChildTask } = makeSynthesisFixture("drop");
+    const graphRun = { id: "graph-run-drop", status: "completed" };
+    const laneNode = { id: "node-lane", teamRunId: run.id, teamItemId: item.id };
+    const appendOrchestrationGraphNodes = vi.fn(async () => ({
+      run: graphRun,
+      nodes: [laneNode],
+      edges: [],
+    }));
+    const completeRootTask = vi.fn();
+
+    const repos = makeRepos({ team, run, items: [item] });
+    const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+    const orch = new AgentTeamOrchestrator(
+      {
+        getDatabase: () => ({}) as Any,
+        getTaskById: async (taskId: string) => tasksById.get(taskId),
+        createChildTask,
+        cancelTask: async () => {},
+        appendOrchestrationGraphNodes: appendOrchestrationGraphNodes as Any,
+        findOrchestrationGraphByTeamRunId: (async () => ({
+          run: graphRun,
+          nodes: [laneNode],
+          edges: [],
+        })) as Any,
+        completeRootTask,
+      },
+      repos,
+    );
+    vi.spyOn((orch as Any).thoughtRepo, "listByRun").mockReturnValue([]);
+
+    await (orch as Any).transitionToSynthesizePhase(run, team, rootTask, [item]);
+
+    expect(appendOrchestrationGraphNodes).toHaveBeenCalledTimes(1);
+    expect(createChildTask).toHaveBeenCalledTimes(1);
+    expect(createChildTask.mock.calls[0][0]).toMatchObject({
+      title: "Synthesis",
+      workerRole: "synthesizer",
+      parentTaskId: rootTask.id,
+    });
+    const synthesisItem = repos.itemRepo.listByRun(run.id).find((i) => i.title === "Synthesis");
+    expect(synthesisItem?.status).toBe("in_progress");
+    expect(synthesisItem?.sourceTaskId).toBe((await createChildTask.mock.results[0].value).id);
+    expect(completeRootTask).not.toHaveBeenCalled();
+    for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+  });
+
+  it("marks synthesis blocked without spawning when the graph run was cancelled", async () => {
+    const { team, run, item, rootTask, tasksById, createChildTask } =
+      makeSynthesisFixture("cancelled");
+    const graphRun = { id: "graph-run-cancelled", status: "cancelled" };
+    const repos = makeRepos({ team, run, items: [item] });
+    const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+    const orch = new AgentTeamOrchestrator(
+      {
+        getDatabase: () => ({}) as Any,
+        getTaskById: async (taskId: string) => tasksById.get(taskId),
+        createChildTask,
+        cancelTask: async () => {},
+        appendOrchestrationGraphNodes: (async () => ({
+          run: graphRun,
+          nodes: [],
+          edges: [],
+        })) as Any,
+        findOrchestrationGraphByTeamRunId: (async () => ({
+          run: graphRun,
+          nodes: [],
+          edges: [],
+        })) as Any,
+      },
+      repos,
+    );
+    vi.spyOn((orch as Any).thoughtRepo, "listByRun").mockReturnValue([]);
+
+    await (orch as Any).transitionToSynthesizePhase(run, team, rootTask, [item]);
+
+    expect(createChildTask).not.toHaveBeenCalled();
+    const synthesisItem = repos.itemRepo.listByRun(run.id).find((i) => i.title === "Synthesis");
+    expect(synthesisItem?.status).toBe("blocked");
+    for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+  });
+
+  it("extends the synthesis watchdog while the synthesis task is still executing", async () => {
+    const { team, run, item, rootTask, tasksById, createChildTask } =
+      makeSynthesisFixture("watchdog");
+    const completeRootTask = vi.fn();
+    const repos = makeRepos({ team, run, items: [item] });
+    const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+    const orch = new AgentTeamOrchestrator(
+      {
+        getDatabase: () => ({}) as Any,
+        getTaskById: async (taskId: string) => tasksById.get(taskId),
+        createChildTask,
+        cancelTask: async () => {},
+        completeRootTask,
+      },
+      repos,
+    );
+    vi.spyOn((orch as Any).thoughtRepo, "listByRun").mockReturnValue([]);
+    const schedule = vi.spyOn(orch as Any, "scheduleSynthesisWatchdog");
+
+    await (orch as Any).transitionToSynthesizePhase(run, team, rootTask, [item]);
+    const synthesisItem = repos.itemRepo.listByRun(run.id).find((i) => i.title === "Synthesis")!;
+    expect(synthesisItem.status).toBe("in_progress");
+    expect(tasksById.get(synthesisItem.sourceTaskId!)?.status).toBe("executing");
+    for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+    schedule.mockClear();
+
+    // Still executing: the watchdog re-arms instead of closing the run.
+    await (orch as Any).runSynthesisWatchdog(run.id, synthesisItem.id, rootTask.id, 0);
+    expect(schedule).toHaveBeenCalledWith(run.id, rootTask.id, synthesisItem.id, 1);
+    expect(repos.itemRepo.listByRun(run.id).find((i) => i.id === synthesisItem.id)?.status).toBe(
+      "in_progress",
+    );
+    expect(repos.runRepo.findById(run.id)?.status).toBe("running");
+    expect(completeRootTask).not.toHaveBeenCalled();
+    for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+
+    // Extension budget exhausted: close with the lane outputs.
+    await (orch as Any).runSynthesisWatchdog(run.id, synthesisItem.id, rootTask.id, 3);
+    expect(repos.itemRepo.listByRun(run.id).find((i) => i.id === synthesisItem.id)?.status).toBe(
+      "blocked",
+    );
+    expect(repos.runRepo.findById(run.id)?.status).toBe("completed");
+    expect(completeRootTask).toHaveBeenCalledWith(
+      rootTask.id,
+      "completed",
+      expect.stringContaining("Synthesis timed out"),
+    );
+  });
 });

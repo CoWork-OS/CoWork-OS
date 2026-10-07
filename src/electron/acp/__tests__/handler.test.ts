@@ -463,8 +463,35 @@ describe("ACP Handler", () => {
       ).rejects.toMatchObject({ code: "INVALID_PARAMS" });
     });
 
+    it("fails a remote task closed instead of invoking it directly without graph delegation", async () => {
+      const invokeSpy = vi.spyOn(RemoteAgentInvoker.prototype, "invoke");
+      const registered = (await server.invoke(ACPMethods.AGENT_REGISTER, {
+        name: "Remote Bot",
+        description: "Remote worker",
+        endpoint: "https://example.com/acp",
+      })) as Any;
+
+      const created = (await server.invoke(ACPMethods.TASK_CREATE, {
+        assigneeId: registered.agent.id,
+        title: "Remote task",
+        prompt: "Handle this remotely",
+      })) as Any;
+
+      expect(invokeSpy).not.toHaveBeenCalled();
+      expect(created.task).toMatchObject({
+        status: "failed",
+        error: "Remote ACP task delegation is not configured on this server",
+      });
+    });
+
     it("cancels remote ACP tasks through the remote invoker", async () => {
-      vi.spyOn(RemoteAgentInvoker.prototype, "invoke").mockResolvedValue({
+      // New remote sends are admitted by the graph; only cancellation uses the invoker here.
+      deps.createDelegatedGraphTask = vi.fn().mockResolvedValue({
+        status: "running",
+        remoteTaskId: "remote-task-1",
+      });
+      const invokeSpy = vi.spyOn(RemoteAgentInvoker.prototype, "invoke");
+      vi.spyOn(RemoteAgentInvoker.prototype, "pollStatus").mockResolvedValue({
         status: "running",
         remoteTaskId: "remote-task-1",
       });
@@ -489,6 +516,7 @@ describe("ACP Handler", () => {
       })) as Any;
 
       expect(result.task.status).toBe("cancelled");
+      expect(invokeSpy).not.toHaveBeenCalled();
       expect(cancelSpy).toHaveBeenCalledWith(
         expect.objectContaining({ id: registered.agent.id }),
         "remote-task-1",

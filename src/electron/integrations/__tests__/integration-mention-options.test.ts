@@ -264,4 +264,26 @@ describe("buildIntegrationMentionOptionsFromState", () => {
     expect(connected).toHaveLength(2);
     expect(connected[1].tools).toEqual(["mcp_custom_search"]);
   });
+
+  it("hides MCP servers blocked by admin policy even while connected", () => {
+    const options = buildIntegrationMentionOptionsFromState({
+      mcp: {
+        settings: {
+          toolNamePrefix: "mcp_",
+          servers: [{ id: "custom", name: "Custom MCP", enabled: true, transport: "stdio" }],
+        },
+        statuses: [
+          {
+            id: "custom",
+            name: "Custom MCP",
+            status: "connected",
+            blockedByPolicy: true,
+            tools: [{ name: "custom_search", inputSchema: { type: "object" } }],
+          },
+        ],
+      },
+    });
+
+    expect(options.map((option) => option.id)).toEqual(["builtin:browser-use"]);
+  });
 });

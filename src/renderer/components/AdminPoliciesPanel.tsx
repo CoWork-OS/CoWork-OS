@@ -393,7 +393,11 @@ export function AdminPoliciesPanel() {
             onChange={(e) => setBlockedConnectors(e.target.value)}
             placeholder="connector-id-1, connector-id-2"
           />
-          <span className="ap-hint">Comma-separated connector IDs that are blocked.</span>
+          <span className="ap-hint">
+            Comma-separated connector IDs that are blocked. Matches a connector type such as jira, a
+            registry ID, an MCP server ID, or an exact server name. Blocked connectors cannot
+            connect or run tools.
+          </span>
         </div>
       </div>
 

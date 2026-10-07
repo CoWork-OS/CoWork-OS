@@ -503,6 +503,7 @@ import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { MCPSettingsManager } from "../mcp/settings";
 import { MCPClientManager } from "../mcp/client/MCPClientManager";
 import { MCPRegistryManager } from "../mcp/registry/MCPRegistryManager";
+import { assertMcpServerEnableAllowed, assertMcpServerNotBlocked } from "../mcp/connector-policy";
 import { getBoxMcpServer, syncBoxMcpConnection } from "../mcp/box-integration";
 import { getChannelRegistry as _getChannelRegistry } from "../gateway/channel-registry";
 import type { MCPSettings, MCPServerConfig } from "../mcp/types";
@@ -11983,6 +11984,13 @@ function setupMCPHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MCP_SAVE_SETTINGS, async (_, settings) => {
     checkRateLimit(IPC_CHANNELS.MCP_SAVE_SETTINGS);
     const validated = validateInput(MCPSettingsSchema, settings, "MCP settings") as MCPSettings;
+    // Admin policy: a connector in connectors.blocked cannot be switched on.
+    const previousServers = new Map(
+      MCPSettingsManager.loadSettings().servers.map((server) => [server.id, server]),
+    );
+    for (const server of validated.servers || []) {
+      assertMcpServerEnableAllowed(previousServers.get(server.id), server);
+    }
     MCPSettingsManager.saveSettings(validated);
     MCPSettingsManager.clearCache();
     return { success: true };
@@ -11999,6 +12007,7 @@ function setupMCPHandlers(): void {
     checkRateLimit(IPC_CHANNELS.MCP_ADD_SERVER);
     const validated = validateInput(MCPServerConfigSchema, serverConfig, "MCP server config");
     const { id: _id, ...configWithoutId } = validated;
+    assertMcpServerEnableAllowed(undefined, { ...configWithoutId, id: "" } as MCPServerConfig);
     return MCPSettingsManager.addServer(configWithoutId as Omit<MCPServerConfig, "id">);
   });
 
@@ -12010,6 +12019,17 @@ function setupMCPHandlers(): void {
       updates,
       "server updates",
     ) as Partial<MCPServerConfig>;
+    const current = MCPSettingsManager.getServer(validatedId);
+    if (current) {
+      // registryId is the connector identity admin policy matches on; it is set at install.
+      if (
+        validatedUpdates.registryId !== undefined &&
+        validatedUpdates.registryId !== current.registryId
+      ) {
+        throw new Error("A server's registry ID cannot be changed. Reinstall it instead.");
+      }
+      assertMcpServerEnableAllowed(current, { ...current, ...validatedUpdates });
+    }
     return MCPSettingsManager.updateServer(validatedId, validatedUpdates);
   });
 
@@ -12120,6 +12140,8 @@ function setupMCPHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, async (_, payload) => {
     checkRateLimit(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START);
     const validated = validateInput(MCPConnectorOAuthSchema, payload, "connector oauth");
+    // Admin policy connectors.blocked: do not collect tokens for a blocked provider.
+    assertMcpServerNotBlocked({ id: "", name: validated.provider, registryId: validated.provider });
     return startConnectorOAuth(validated);
   });
 

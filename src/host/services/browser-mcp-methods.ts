@@ -7,6 +7,11 @@ import type {
   McpInstallConfirmationRequest,
 } from "../../electron/mcp/registry/MCPRegistryManager";
 import { MCPSettingsManager } from "../../electron/mcp/settings";
+import {
+  CONNECTOR_BLOCKED_PUBLIC_MESSAGE,
+  assertMcpServerEnableAllowed,
+  isConnectorBlockedError,
+} from "../../electron/mcp/connector-policy";
 import type {
   MCPAuthConfig,
   MCPRegistry,
@@ -227,7 +232,9 @@ export interface BrowserMCPClientPort {
   getAllTools(): MCPTool[];
   connectServer(serverId: string): Promise<void>;
   disconnectServer(serverId: string): Promise<void>;
-  testServer(serverId: string): Promise<{ success: boolean; error?: string; tools?: number }>;
+  testServer(
+    serverId: string,
+  ): Promise<{ success: boolean; error?: string; tools?: number; blockedByPolicy?: boolean }>;
 }
 
 export interface BrowserMCPRegistryPort {
@@ -438,9 +445,11 @@ export function createBrowserMCPDefinitions(
       id: status.id,
       name: scrubText(status.name || server?.name || status.id, 200),
       status: MCP_STATUSES.includes(status.status) ? status.status : "disconnected",
-      ...(status.status === "error"
-        ? { error: "MCP operation failed. Review the server configuration on the host." }
-        : {}),
+      ...(status.blockedByPolicy === true
+        ? { blockedByPolicy: true, error: CONNECTOR_BLOCKED_PUBLIC_MESSAGE }
+        : status.status === "error"
+          ? { error: "MCP operation failed. Review the server configuration on the host." }
+          : {}),
       tools: Array.isArray(status.tools) ? status.tools.slice(0, MAX_TOOLS).map(safeTool) : [],
       ...(typeof status.lastPing === "number" && Number.isFinite(status.lastPing)
         ? { lastPing: status.lastPing }
@@ -625,6 +634,7 @@ export function createBrowserMCPDefinitions(
             if (!submitted || !sameSafeServer(submitted, projectServer(currentServer))) {
               throw invalid();
             }
+            assertEnableAllowed(currentServer, { ...currentServer, enabled: submitted.enabled });
             currentServer.enabled = submitted.enabled;
           }
         }
@@ -644,6 +654,7 @@ export function createBrowserMCPDefinitions(
       z.object({ workspaceId: identifier, config: createServerSchema }).strict(),
       async (context, { workspaceId, config }) => {
         await authorize(context, workspaceId, true);
+        assertEnableAllowed(undefined, { ...config, id: "" } as MCPServerConfig);
         const created = settings.addServer(config as Omit<MCPServerConfig, "id">);
         return projectServer(created);
       },
@@ -670,9 +681,18 @@ export function createBrowserMCPDefinitions(
           );
         }
         const current = requireServer(serverId);
+        // registryId is the connector identity admin policy matches on; it is set at install.
+        if (updates.registryId !== undefined && updates.registryId !== current.registryId) {
+          throw new WebApplicationError(
+            "INVALID_REQUEST",
+            "A server's registry ID cannot be changed. Reinstall it instead.",
+            400,
+          );
+        }
         const merged = { ...current, ...updates };
         const validated = createServerSchema.safeParse(pickServerConfigFields(merged));
         if (!validated.success) throw invalid();
+        assertEnableAllowed(current, merged as MCPServerConfig);
         const { removeEnvKeys = [], ...configUpdates } = updates;
         const nextEnvironment =
           updates.env === undefined && removeEnvKeys.length === 0
@@ -770,10 +790,12 @@ export function createBrowserMCPDefinitions(
         );
         return result.success
           ? { success: true, tools: Math.min(Math.max(result.tools ?? 0, 0), MAX_TOOLS) }
-          : {
-              success: false,
-              error: "MCP connection test failed. Review the server configuration on the host.",
-            };
+          : result.blockedByPolicy === true
+            ? { success: false, blockedByPolicy: true, error: CONNECTOR_BLOCKED_PUBLIC_MESSAGE }
+            : {
+                success: false,
+                error: "MCP connection test failed. Review the server configuration on the host.",
+              };
       },
       true,
     ),
@@ -1100,7 +1122,25 @@ async function runManagerOperation<T>(operation: () => Promise<T>, label: string
   }
 }
 
+function connectorBlocked(): WebApplicationError {
+  return new WebApplicationError("FORBIDDEN", CONNECTOR_BLOCKED_PUBLIC_MESSAGE, 403);
+}
+
+/** Admin policy `connectors.blocked` refuses switching a blocked server on. */
+function assertEnableAllowed(
+  current: MCPServerConfig | undefined,
+  next: MCPServerConfig & { enabled?: boolean },
+): void {
+  try {
+    assertMcpServerEnableAllowed(current, next);
+  } catch (error) {
+    if (isConnectorBlockedError(error)) throw connectorBlocked();
+    throw error;
+  }
+}
+
 function safeManagerError(operation: string, error?: unknown): WebApplicationError {
+  if (isConnectorBlockedError(error)) return connectorBlocked();
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/timed?\s*out|timeout/i.test(message)) {
     return new WebApplicationError("HOST_UNAVAILABLE", "The MCP operation timed out.", 504);

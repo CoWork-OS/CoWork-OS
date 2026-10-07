@@ -86,8 +86,11 @@ export function describePolicyRelaxations(current: AdminPolicies, next: AdminPol
     changes.push("Stop forcing review for Everyday Agent actions");
   }
 
+  const nextBlockedConnectors = Array.isArray(next.connectors?.blocked)
+    ? next.connectors.blocked
+    : [];
   const unblockedConnectors = current.connectors.blocked.filter(
-    (id) => !next.connectors.blocked.includes(id),
+    (id) => !nextBlockedConnectors.includes(id),
   );
   if (unblockedConnectors.length > 0) {
     changes.push(`Unblock connectors: ${unblockedConnectors.join(", ")}`);

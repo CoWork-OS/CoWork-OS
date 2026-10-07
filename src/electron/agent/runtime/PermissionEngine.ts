@@ -412,6 +412,14 @@ export class PermissionEngine {
       };
     }
 
+    // Admin policy `connectors.blocked`: no rule, mode, or approval can re-enable it.
+    if (request.mcpToolPolicy?.blockedReason) {
+      return {
+        decision: "deny",
+        reason: { type: "other", summary: request.mcpToolPolicy.blockedReason },
+      };
+    }
+
     if (!profile && request.mode === "plan" && request.mcpToolPolicy?.readOnly === false) {
       return {
         decision: "deny",

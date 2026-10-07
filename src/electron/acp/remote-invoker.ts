@@ -1,5 +1,11 @@
 import { randomUUID } from "crypto";
-import net from "net";
+import { isIP } from "net";
+import {
+  isLoopbackAddress,
+  isPrivateOrLoopbackAddress,
+  normalizeHostname,
+} from "../security/address-classes";
+import { pinnedFetch } from "../security/pinned-fetch";
 import type {
   ACPAgentCard,
   ACPTaskCreateParams,
@@ -41,33 +47,6 @@ const METHOD_UNSUPPORTED_HTTP_STATUSES = new Set([404, 405, 501]);
 // -32601 Method not found, -32600 Invalid Request: rejected before execution per JSON-RPC 2.0.
 const METHOD_UNSUPPORTED_JSON_RPC_CODES = new Set([-32601, -32600]);
 
-function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase();
-  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
-}
-
-function isPrivateIpAddress(hostname: string): boolean {
-  if (net.isIP(hostname) === 4) {
-    return (
-      hostname.startsWith("10.") ||
-      hostname.startsWith("127.") ||
-      hostname.startsWith("169.254.") ||
-      hostname.startsWith("192.168.") ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
-    );
-  }
-  if (net.isIP(hostname) === 6) {
-    const normalized = hostname.toLowerCase();
-    return (
-      normalized === "::1" ||
-      normalized.startsWith("fc") ||
-      normalized.startsWith("fd") ||
-      normalized.startsWith("fe80:")
-    );
-  }
-  return false;
-}
-
 export function validateRemoteAgentEndpoint(endpoint: string): URL {
   let parsed: URL;
   try {
@@ -81,11 +60,22 @@ export function validateRemoteAgentEndpoint(endpoint: string): URL {
     throw new Error("Remote agent endpoint must use https, or http for loopback development only");
   }
 
-  if (protocol === "http:" && !isLoopbackHostname(parsed.hostname)) {
+  // URL keeps IPv6 literals bracketed ("[fd00::1]"), which a raw net.isIP check
+  // reads as "not an IP" and waves through. Normalize first, and use the shared
+  // address classes so IPv4-mapped and encoded literals are classified too.
+  const hostname = normalizeHostname(parsed.hostname);
+  // `*.localhost` names are not guaranteed to resolve locally, so plaintext http
+  // stays limited to `localhost` itself and loopback literals.
+  const loopback =
+    hostname === "localhost" || (isIP(hostname) !== 0 && isLoopbackAddress(hostname));
+  if (protocol === "http:" && !loopback) {
     throw new Error("Remote agent endpoint must use https unless it targets localhost");
   }
 
-  if (isPrivateIpAddress(parsed.hostname) && !isLoopbackHostname(parsed.hostname)) {
+  // Literal addresses only. Names are checked by the network policy at dispatch
+  // admission and resolved and pinned per request by pinnedFetch, both of which
+  // honor the admin `allowedInternalHosts` exception for self-hosted agents.
+  if (isIP(hostname) && !loopback && isPrivateOrLoopbackAddress(hostname)) {
     throw new Error("Remote agent endpoint cannot target private or link-local IP ranges");
   }
 
@@ -185,7 +175,11 @@ export class RemoteAgentInvoker {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REMOTE_REQUEST_TIMEOUT_MS);
     try {
-      const response = await fetch(endpoint, {
+      // pinnedFetch resolves the host, refuses internal answers, and binds the
+      // socket to the validated addresses, so a public name that resolves (or
+      // rebinds) to a private range is refused. It also does not follow redirects;
+      // a 3xx is a non-OK response below rather than a hop to an unchecked host.
+      const response = await pinnedFetch(endpoint, {
         method: "POST",
         headers,
         body: JSON.stringify(request),

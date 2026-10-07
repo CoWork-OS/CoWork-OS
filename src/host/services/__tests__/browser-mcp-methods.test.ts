@@ -1,4 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+
+const policyState = vi.hoisted(() => ({ blocked: [] as string[] }));
+
+// Pin admin policy so these tests never read the developer's real policies.json.
+vi.mock("../../../electron/admin/policies", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../electron/admin/policies")>()),
+  loadPolicies: vi.fn(() => ({ connectors: { blocked: [...policyState.blocked] } })),
+}));
+
 import type { WebRequestContext } from "../../web/WebApplication";
 import type {
   MCPServerConfig,
@@ -8,6 +17,7 @@ import type {
 } from "../../../electron/mcp/types";
 import type { Workspace } from "../../../shared/types";
 import { createBrowserMCPDefinitions } from "../browser-mcp-methods";
+import { ConnectorBlockedError } from "../../../electron/mcp/connector-policy";
 
 const PROFILE_ID = "profile-owner";
 const WORKSPACE_ID = "workspace-one";
@@ -494,5 +504,66 @@ describe("browser MCP methods", () => {
         entryId: ENTRY_ID,
       }),
     ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+  });
+
+  it("reports admin-blocked connectors and refuses to enable or connect them", async () => {
+    const { call, client, settings } = setup();
+    const blockedMessage = "This connector is blocked by your administrator.";
+    policyState.blocked = ["QA Echo"];
+    try {
+      client.getStatus.mockReturnValue([
+        {
+          id: SERVER_ID,
+          name: "QA Echo",
+          status: "disconnected",
+          tools: [],
+          blockedByPolicy: true,
+          error: 'Connector "QA Echo" is blocked by your administrator.',
+        },
+      ]);
+      await expect(call("getMCPStatus", { workspaceId: WORKSPACE_ID })).resolves.toEqual([
+        expect.objectContaining({ id: SERVER_ID, blockedByPolicy: true, error: blockedMessage }),
+      ]);
+
+      client.connectServer.mockRejectedValueOnce(
+        new ConnectorBlockedError(SERVER_ID, "QA Echo", "blocked"),
+      );
+      await expect(
+        call("connectMCPServer", { workspaceId: WORKSPACE_ID, serverId: SERVER_ID }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN", message: blockedMessage });
+
+      client.testServer.mockResolvedValueOnce({
+        success: false,
+        error: "blocked",
+        blockedByPolicy: true,
+      } as Any);
+      await expect(
+        call("testMCPServer", { workspaceId: WORKSPACE_ID, serverId: SERVER_ID }),
+      ).resolves.toEqual({ success: false, blockedByPolicy: true, error: blockedMessage });
+
+      settings.updateServer(SERVER_ID, { enabled: false });
+      const enable = () =>
+        call("updateMCPServer", {
+          workspaceId: WORKSPACE_ID,
+          serverId: SERVER_ID,
+          updates: { enabled: true },
+        });
+      await expect(enable()).rejects.toMatchObject({ code: "FORBIDDEN", message: blockedMessage });
+      expect(settings.getServer(SERVER_ID)?.enabled).toBe(false);
+
+      // The registry identity cannot be edited to slip past a registry-ID block.
+      await expect(
+        call("updateMCPServer", {
+          workspaceId: WORKSPACE_ID,
+          serverId: SERVER_ID,
+          updates: { registryId: "renamed-entry" },
+        }),
+      ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+
+      policyState.blocked = [];
+      await expect(enable()).resolves.toMatchObject({ enabled: true });
+    } finally {
+      policyState.blocked = [];
+    }
   });
 });

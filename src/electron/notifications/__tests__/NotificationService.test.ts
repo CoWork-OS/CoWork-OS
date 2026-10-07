@@ -39,6 +39,20 @@ describe("NotificationService", () => {
       "another scope",
     );
   });
+  it("keeps where a notification opens across restarts (memory review)", async () => {
+    const service = new NotificationService({ storePath });
+    const added = await service.add({
+      id: "memory-dream-review:20261007-abc",
+      type: "info",
+      title: "Memory: 1 change to review",
+      message: "Dreaming suggested a change.",
+      openTarget: "memory_review",
+    });
+    expect(added.openTarget).toBe("memory_review");
+    const restarted = new NotificationService({ storePath });
+    expect(restarted.list().find((item) => item.id === added.id)?.openTarget).toBe("memory_review");
+  });
+
   it("does not publish or retain a failed durable write", async () => {
     fs.writeFileSync(path.join(tmpDir, "blocked"), "not a directory");
     const events: NotificationEvent[] = [];

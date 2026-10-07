@@ -45,6 +45,8 @@ export interface MemoryRepoDreamerDeps {
   listRecentTasks: (sinceMs: number, limit: number) => Promise<DreamTaskInput[]>;
   settings: () => { enabled: boolean; dailyTokenBudget: number };
   now?: () => number;
+  /** Called after a dream that left changes waiting for review (the user is notified). */
+  onReviewPending?: (record: MemoryRepoDreamRecord) => void;
 }
 
 export type MemoryRepoDreamOutcome =
@@ -228,6 +230,13 @@ export class MemoryRepoDreamer {
     logger.info(
       `Dream ${id}: ${record.autoCount} applied, ${record.reviewCount} for review, ${record.rejected} rejected`,
     );
+    if (record.reviewCount > 0 && record.reviewStatus === "pending") {
+      try {
+        this.deps.onReviewPending?.(record);
+      } catch (error) {
+        logger.warn("Dream review notification failed:", error);
+      }
+    }
     return { ran: true, record };
   }
 }

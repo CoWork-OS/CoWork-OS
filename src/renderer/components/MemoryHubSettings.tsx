@@ -85,6 +85,8 @@ export function MemoryHubSettings(props?: {
   onSettingsChanged?: () => void;
   /** Open a task (the source task of a memory folder entry). */
   onOpenTask?: (taskId: string) => void;
+  /** Bumped to show the Review tab (a dream review notification was clicked). */
+  openReviewRequest?: number;
 }) {
   const [botOrigin] = useState(() => peekBotMemoryContext());
   const [features, setFeatures] = useState<MemoryFeaturesSettings | null>(null);
@@ -99,6 +101,10 @@ export function MemoryHubSettings(props?: {
   const [hubTab, setHubTab] = useState<"knowledge" | "review" | "sources" | "health" | "settings">(
     "knowledge",
   );
+  const openReviewRequest = props?.openReviewRequest ?? 0;
+  useEffect(() => {
+    if (openReviewRequest > 0) setHubTab("review");
+  }, [openReviewRequest]);
   // "Show" in the Sources tab opens "What CoWork knows" filtered to that source.
   const [knowledgeSourceFilter, setKnowledgeSourceFilter] = useState<MemoryHubSource | "">("");
   // Memory folder dreams waiting for review (profile-wide; the Review tab badge).

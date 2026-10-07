@@ -54,6 +54,8 @@ interface AppNotification {
   suggestionId?: string;
   recommendedDelivery?: "briefing" | "inbox" | "nudge";
   companionStyle?: "email" | "note";
+  /** Where clicking leads when there is no task (`memory_review`: Settings > Memory > Review). */
+  openTarget?: "memory_review";
 }
 
 export type NotificationPanelNotification = AppNotification;

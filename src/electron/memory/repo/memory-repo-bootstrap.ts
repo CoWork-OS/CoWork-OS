@@ -20,7 +20,7 @@ import { MemoryFeaturesManager } from "../../settings/memory-features-manager";
 import { setMemoryRepoRoot } from "../../security/memory-repo-access";
 import { createLogger } from "../../utils/logger";
 import { MemoryWriter, type MemoryWorkspacePolicy } from "../MemoryWriter";
-import { MemoryRepoService, type MemoryRepoStatus } from "./MemoryRepoService";
+import { MemoryRepoService, type MemoryRepoDreamRecord, type MemoryRepoStatus } from "./MemoryRepoService";
 import { runMemoryRepoExport } from "./MemoryRepoExport";
 import { runMemoryItemsFactRetirement } from "./MemoryItemsFactRetirement";
 import path from "node:path";
@@ -54,6 +54,8 @@ export interface MemoryRepoBootstrapOptions {
   findTaskEvents?: DreamTaskSourceDeps["findTaskEvents"];
   /** The dream's model client (default: the configured provider). */
   dreamModelClient?: DreamModelClient;
+  /** Tell the user a dream left changes waiting for review (desktop notification + inbox). */
+  notifyDreamReview?: (record: MemoryRepoDreamRecord) => void;
 }
 
 let options: MemoryRepoBootstrapOptions | null = null;
@@ -276,6 +278,7 @@ function startDreamer(service: MemoryRepoService, bootOptions: MemoryRepoBootstr
       getService: () => (MemoryRepoService.get() === service ? service : null),
       client: bootOptions.dreamModelClient ?? createProviderDreamModelClient(),
       listRecentTasks,
+      onReviewPending: bootOptions.notifyDreamReview,
       settings: () => {
         const settings = MemoryFeaturesManager.loadSettings();
         return {

@@ -2190,6 +2190,8 @@ export function App() {
   const [browserWorkbenchRequest, setBrowserWorkbenchRequest] =
     useState<BrowserWorkbenchOpenRequest | null>(null);
   const [sideChat, setSideChat] = useState<SideChatState | null>(null);
+  // Bumped to open Settings > Memory > Review (a dream review notification was clicked).
+  const [memoryReviewRequest, setMemoryReviewRequest] = useState(0);
   const [settingsTab, setSettingsTab] = useState<
     | "memory"
     | "appearance"
@@ -7750,6 +7752,13 @@ export function App() {
         })();
         return;
       }
+      // A memory folder dream waiting for review opens Settings > Memory > Review.
+      if (notification.openTarget === "memory_review") {
+        setSettingsTab("memory");
+        setMemoryReviewRequest((tick) => tick + 1);
+        setCurrentView("settings");
+        return;
+      }
       // Fall back to scheduled tasks settings if only cronJobId
       if (notification.cronJobId) {
         setSettingsTab("scheduled");
@@ -8755,6 +8764,7 @@ export function App() {
               onHomeResearchVaultEnabledChange={handleHomeResearchVaultEnabledChange}
               onHomeNextActionsEnabledChange={handleHomeNextActionsEnabledChange}
               initialTab={settingsTab}
+              memoryReviewRequest={memoryReviewRequest}
               focusAutomation={focusAutomationOwner}
               onShowOnboarding={handleShowOnboarding}
               onboardingCompletedAt={onboardingCompletedAt}

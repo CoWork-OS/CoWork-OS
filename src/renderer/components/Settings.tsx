@@ -389,6 +389,8 @@ interface SettingsProps {
   onHomeResearchVaultEnabledChange: (enabled: boolean) => void;
   onHomeNextActionsEnabledChange: (enabled: boolean) => void;
   initialTab?: SettingsTab;
+  /** Bumped to open the Memory tab's Review view (also when Settings is already open). */
+  memoryReviewRequest?: number;
   focusAutomation?: { owner: AutomationOwner; id: string } | null;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
@@ -1380,6 +1382,7 @@ export function Settings({
   onHomeResearchVaultEnabledChange,
   onHomeNextActionsEnabledChange,
   initialTab = "appearance",
+  memoryReviewRequest = 0,
   focusAutomation,
   onShowOnboarding,
   onboardingCompletedAt,
@@ -1411,6 +1414,10 @@ export function Settings({
                 ? "access"
                 : (initialTab ?? "appearance");
   const [activeTab, setActiveTab] = useState<SettingsTab>(normalizedInitialTab);
+  // A dream review notification opens the Memory tab even when Settings is already open.
+  useEffect(() => {
+    if (memoryReviewRequest > 0) setActiveTab("memory");
+  }, [memoryReviewRequest]);
   const [addToolsSelection, setAddToolsSelection] = useState<AddToolsSelection | null>(null);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>("teams");
   const [activeSkillsSubTab, setActiveSkillsSubTab] = useState<"custom" | "store">(
@@ -9694,6 +9701,7 @@ export function Settings({
               ) : activeTab === "memory" ? (
                 <MemoryHubSettings
                   initialWorkspaceId={workspaceId}
+                  openReviewRequest={memoryReviewRequest}
                   onSettingsChanged={onSettingsChanged}
                   onOpenTask={onOpenTask}
                 />

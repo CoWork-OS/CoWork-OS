@@ -1599,6 +1599,7 @@ export class MemoryRepoService {
         const target = await this.chooseFile(input);
         const created = (await this.readFile(target.path)) === null;
         let text = created ? target.initial : ((await this.readFile(target.path)) ?? "");
+        if (!created && target.adoptMarker) text = insertWorkspaceMarker(text, target.adoptMarker);
         const entries = parseMemoryRepoEntries(text);
         const hash = parseMemoryRepoLine(`- ${content}`, 1)?.hash;
         const same = entries.find((entry) => entry.hash === hash);
@@ -1685,7 +1686,7 @@ export class MemoryRepoService {
 
   private async chooseFile(
     input: MemoryRepoRememberInput,
-  ): Promise<{ path: string; initial: string }> {
+  ): Promise<{ path: string; initial: string; adoptMarker?: string }> {
     if (input.by === "agent" && input.tainted) {
       return { path: MEMORY_REPO_INBOX_FILE, initial: initialTopicFile(MEMORY_REPO_INBOX_TITLE) };
     }
@@ -1710,6 +1711,19 @@ export class MemoryRepoService {
     if (existing) return { path: existing, initial: header };
     const taken = new Set(await this.listFiles());
     const slug = workspaceSlug(name);
+    // A file for this workspace's name that names no workspace (written by hand or by an
+    // older dream) is adopted: it gets the workspace line instead of a second file `-2`.
+    const named = `${MEMORY_REPO_WORKSPACES_DIR}/${slug}.md`;
+    if (taken.has(named)) {
+      const entries = parseMemoryRepoEntries((await this.readFile(named)) ?? "");
+      if (!entries.some((entry) => entry.metadata.workspace)) {
+        return {
+          path: named,
+          initial: header,
+          adoptMarker: renderMemoryRepoEntry("CoWork workspace", { by: "user", workspace: workspaceId }),
+        };
+      }
+    }
     let candidate = `${MEMORY_REPO_WORKSPACES_DIR}/${slug}.md`;
     for (let n = 2; taken.has(candidate); n += 1) {
       candidate = `${MEMORY_REPO_WORKSPACES_DIR}/${slug}-${n}.md`;
@@ -1928,6 +1942,18 @@ export interface MemoryRepoDreamRecord {
   taskIds: string[];
   lastTaskCreatedAt: number | null;
   historyNote?: string;
+}
+
+/** Put a workspace line right under the file's first heading (or at the top). */
+export function insertWorkspaceMarker(markdown: string, markerLine: string): string {
+  const lines = splitLines(markdown);
+  const heading = lines.findIndex((line) => /^#\s/.test(line));
+  if (heading < 0) return [markerLine, ...lines].join("\n");
+  let at = heading + 1;
+  while (at < lines.length && lines[at].trim() === "") at += 1;
+  lines.splice(at, 0, markerLine);
+  if (at === heading + 1) lines.splice(at, 0, "");
+  return lines.join("\n");
 }
 
 export function taskSourceLink(taskId: string): string {

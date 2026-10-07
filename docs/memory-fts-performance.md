@@ -180,7 +180,7 @@ FTS now runs off the main thread. Lexical recall and marker lookups run in the m
 - **No host fallback:** if the worker fails, `searchAsync` returns semantic-only results instead of rerunning FTS on the host. A failed marker lookup rejects.
 - **Writes in the worker:** memory capture and embedding writes run in the database write worker (the `memory` domain). Each write reports the ids it wrote to the FTS worker's embedding cache.
 - **Summary re-index in the worker:** the one-time `memory_summary_reindex_v1` job (DATA-5) recomputes summaries, embeddings and observation text in chunks of 100 rows, each one write-worker unit with a 50 ms pause between chunks, and invalidates the changed ids in the FTS worker's cache ([Memory Engine §6a](memory-engine.md#6a-archive-capture-summaries-and-compression)).
-- **Measurements:** in the heavy-profile read benchmark (`npm run qa:db:reads`), the longest host stall around a hybrid search fell from 69 ms to 6 ms. See the [async SQLite baseline](async-sqlite-db0-baseline-2026-09-27.md).
+- **Measurements:** in the heavy-profile read benchmark (`npm run qa:db:reads`), the longest host stall around a hybrid search fell from 69 ms to 6 ms.
 
 ## Future Work
 

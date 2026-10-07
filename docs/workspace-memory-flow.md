@@ -66,7 +66,7 @@ The approval gate sits in front of all durable memory write surfaces:
 - `memory_remember` with scope `external` (target `external`) and optional Supermemory mirroring
 - external provider mirror hooks through `ExternalMemoryProvider`
 
-Not staged: Dreaming curation (it has its own Review tab and undo) and core memory candidate facts, which `CoreMemoryDistiller` writes directly through `MemoryWriter` (an open item in the [audit](memory-system-audit-2026-10-03.md#status)).
+Not staged: Dreaming curation (it has its own Review tab and undo) and core memory candidate facts, which `CoreMemoryDistiller` writes directly through `MemoryWriter` (an open item).
 
 Read-only recall tools are not staged. Search, profile fetch, inspector views, and prompt synthesis read from the current committed memory layers.
 

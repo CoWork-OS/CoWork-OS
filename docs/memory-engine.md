@@ -14,7 +14,6 @@ Phase 3 item 2) is skipped by decision. Recall stays lexical: one Unicode FTS qu
 per lane and weighted reciprocal-rank fusion (§4b). The memory evals (`npm run
 qa:memory-evals`) are the gate for recall quality.
 
-This document refines §8 of the [memory system audit](memory-system-audit-2026-10-03.md).
 Engineers building recall, prompt assembly, the tool surface or the Memory Hub should treat
 this file as the contract. File references are relative to `src/electron/memory/` unless noted.
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Memory health check: Appendix A of docs/memory-system-audit-2026-10-03.md as a
-// CI-safe script (audit §8.5). Reads a profile database strictly read-only and reports
+// Memory health check as a CI-safe script. Reads a profile database strictly read-only and reports
 // aggregate counts only; no memory content is printed.
 //
 // Usage:

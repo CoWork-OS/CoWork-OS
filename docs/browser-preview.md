@@ -6,7 +6,7 @@ The browser application is currently an opt-in development preview. Set `COWORK_
 
 The browser preview must preserve native desktop UI and behavior. Its approval explanation, unavailable-action presentation, sidebar adjustments and browser draft recovery belong only to browser clients. They must not be enabled in desktop merely because `COWORK_WEB_ENABLED=1` is set. That environment variable controls host routes; the browser renderer has a separate explicit identity.
 
-An approval explanation in the desktop composer was an unintended shared-component regression. The local correction hides it on desktop without changing approval settings. Related desktop sidebar, composer structure, draft and feedback behavior were restored. See the [isolation follow-up](qa/browser-desktop-isolation-2026-10-01.md) for the patch status, checks and remaining compatibility gate. This is not a claim that all shared runtime changes have been audited.
+An approval explanation in the desktop composer was an unintended shared-component regression. The local correction hides it on desktop without changing approval settings. Related desktop sidebar, composer structure, draft and feedback behavior were restored. This is not a claim that all shared runtime changes have been audited.
 
 Updating a source checkout and rebuilding it changes the app launched from that checkout. It does not replace an installed application bundle. Identify the running process, checkout, profile and build before comparing desktop and browser results; preserve existing data and credentials. The browser QA profile is separate from the normal desktop profile.
 
@@ -64,6 +64,6 @@ Run `npm run qa:web:smoke` for disposable host/service checks. It also checks th
 
 ## Current runtime and control audit
 
-The [30 September runtime/control audit](qa/browser-control-audit-2026-09-30.md) identifies the running installed versus preview host and records 36 rendered route states. `qa:web:ui-smoke` emits a control ledger to the OS temporary directory as `cowork-web-control-audit.json`; set `COWORK_WEB_CONTROL_AUDIT_PATH` to choose a destination. Visible/enabled controls are inventory, not proof of their effects. Nested dialogs and populated-data states remain separate audit work.
+`qa:web:ui-smoke` emits a control ledger to the OS temporary directory as `cowork-web-control-audit.json`; set `COWORK_WEB_CONTROL_AUDIT_PATH` to choose a destination. Visible/enabled controls are inventory, not proof of their effects. Nested dialogs and populated-data states remain separate audit work.
 
 Awareness settings and belief actions now use the existing host service. Browser config writes send changed fields and merge against current host state; explicit config/belief changes publish only after persistence succeeds. Workspace beliefs authorize their stored workspace, and deletion requires delete access independently. Browser acceptance saves/restores Private Mode and confirms/forgets a belief generated through ordinary task feedback. Node hosts do not imply desktop device collectors are running. Real-task prompt effects, restart and load acceptance remain open.

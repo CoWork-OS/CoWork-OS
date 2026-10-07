@@ -314,7 +314,7 @@ SQLite is owned by worker threads by default in the desktop app, the daemon and 
   - Never delete the profile database to recover.
 - **Enforcement:** `npm run qa:db:ratchet` and `npm run qa:db:audit` fail on new host SQL outside unit stores, on files covered only by backstop rules, and on rules without an owner.
 
-Design, phases and evidence: [async SQLite migration plan](async-sqlite-migration-plan-2026-09-27.md) and [baseline](async-sqlite-db0-baseline-2026-09-27.md).
+Design and phases: [async SQLite migration plan](async-sqlite-migration-plan-2026-09-27.md).
 
 ## Update Rule
 

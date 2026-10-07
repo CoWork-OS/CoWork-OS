@@ -8,7 +8,7 @@ Browser preview is additive and opt-in. Reusing desktop components does not auth
 
 Capability helpers preserve native availability when the browser marker is absent or false. Browser-specific styles must be scoped to `.browser-host`, and native component structure must remain unchanged where browser wrappers are needed. Validate both renderers: an enabled browser host must not add preview notices or disable native tools in the desktop app.
 
-The merged preview also touched shared execution and persistence code. Those changes require independent native regression evidence; browser acceptance, a passing build, or an opt-in route flag cannot establish desktop equivalence. The approval banner regression and local correction are recorded in [desktop isolation follow-up](qa/browser-desktop-isolation-2026-10-01.md). A complete native compatibility audit remains open.
+The merged preview also touched shared execution and persistence code. Those changes require independent native regression evidence; browser acceptance, a passing build, or an opt-in route flag cannot establish desktop equivalence. The approval banner regression was corrected locally. A complete native compatibility audit remains open.
 
 ## Authority and transport
 

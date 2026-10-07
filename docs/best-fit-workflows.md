@@ -107,6 +107,5 @@ Avoid:
 ## Related Pages
 
 - [Plugin Packs & Customize](plugin-packs.md) — how packs work and how to enable them
-- [GTM Strategy](gtm-strategy.md) — primary positioning and best-initial-wedge guidance
 - [Enterprise Connectors](enterprise-connectors.md) — Tier-1 connector setup
 - [Use Case Showcase](showcase.md) — example workflows across all lanes

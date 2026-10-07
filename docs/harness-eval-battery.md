@@ -41,7 +41,7 @@ A fresh application profile is not an operating-system sandbox. Run untrusted ca
 
 ## Memory evals
 
-`npm run qa:memory-evals` runs four deterministic, offline suites over the memory engine (audit §8.5 of [memory-system-audit-2026-10-03.md](memory-system-audit-2026-10-03.md)). `npm run qa:harness` runs them as its last step, so CI runs them too.
+`npm run qa:memory-evals` runs four deterministic, offline suites over the memory engine. `npm run qa:harness` runs them as its last step, so CI runs them too.
 
 Each suite creates a fresh profile database with the real schema in a temporary directory. It runs the real services over that database: `MemoryService` archive capture and search, the conversation index, the knowledge graph, `MemoryWriter`, `MemoryRecall` with its production lanes, `MemoryInjectionPolicy`, `MemoryContextBuilder`, the `memory_recall` tool and the briefing search. Nothing uses the network or a model, and the desktop app is not needed.
 

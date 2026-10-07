@@ -387,4 +387,3 @@ uses the refreshed workspace rule set, profile roots, domain rules, and sandbox 
 - [Context Compaction](context-compaction.md)
 - [Access Profiles](access-profiles.md)
 - [Project Status](project-status.md)
-- [Session Note: 2026-04-02](session-notes/2026-04-02-session-runtime-owner.md)

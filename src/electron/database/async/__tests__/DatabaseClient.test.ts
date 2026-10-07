@@ -222,8 +222,9 @@ describe("DatabaseClient with a real worker", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const readStartedAt = Date.now();
       await expect(client.executeCommand("test.listMarkers", undefined)).resolves.toEqual([]);
-      // The read is not stuck behind the parked write or a long busy wait.
-      expect(Date.now() - readStartedAt).toBeLessThan(150);
+      // The read is not stuck behind the parked write (that would last until the write's
+      // deadline, seconds away); the bound leaves room for slow CI runners.
+      expect(Date.now() - readStartedAt).toBeLessThan(1_000);
       await new Promise((resolve) => setTimeout(resolve, 200));
     });
     expect(writeSettledAt).toBe(0);

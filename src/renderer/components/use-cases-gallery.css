@@ -1,0 +1,160 @@
+.use-cases-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: color-mix(in srgb, var(--color-bg-primary, #1e1e22) 35%, transparent);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+.use-cases-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  max-height: min(820px, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: 22px;
+  background: var(--color-bg-primary, #1e1e22);
+  color: var(--color-text-primary);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.use-cases-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 28px 12px;
+}
+
+.use-cases-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.use-cases-close {
+  display: inline-flex;
+  padding: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.use-cases-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.use-cases-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 28px 12px;
+}
+
+.use-cases-tabs button {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.use-cases-tabs button.active {
+  border-color: var(--color-text-primary);
+  color: var(--color-text-primary);
+}
+
+.use-cases-grid {
+  column-count: 4;
+  column-gap: 14px;
+  padding: 4px 16px 20px;
+  overflow-y: auto;
+}
+
+@media (max-width: 1000px) {
+  .use-cases-grid {
+    column-count: 3;
+  }
+}
+
+@media (max-width: 720px) {
+  .use-cases-grid {
+    column-count: 2;
+  }
+}
+
+.use-cases-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 22px;
+  break-inside: avoid;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-bg-glass);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.use-cases-card:disabled {
+  cursor: default;
+}
+
+.use-cases-card:not(:disabled):hover {
+  border-color: var(--color-border-light);
+  background: var(--color-bg-glass-hover);
+}
+
+.use-cases-emoji {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.use-cases-prompt {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.use-cases-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.use-cases-link:hover {
+  color: var(--color-text-primary);
+}
+
+.use-cases-welcome-link {
+  display: block;
+  margin: 16px auto 0;
+}
+
+/* Centered over the main content pane (where the composer lives), not the whole window. */
+.main-content:has(> .use-cases-overlay-contained) {
+  position: relative;
+}
+
+.use-cases-overlay.use-cases-overlay-contained {
+  position: absolute;
+  padding: 24px;
+}

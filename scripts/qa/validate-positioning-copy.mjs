@@ -12,7 +12,7 @@ const positioningFiles = [
   "docs/migration.md",
   "docs/comparisons/index.md",
   "src/renderer/components/HomeDashboard.tsx",
-  "src/renderer/components/IdeasPanel.tsx",
+  "src/renderer/components/UseCasesGallery.tsx",
   "src/renderer/components/MainContent/MainContent.tsx",
   "src/renderer/components/MainContent/ModelDropdown.tsx",
   "src/renderer/components/MainContent/StructuredInputPromptCard.tsx",

@@ -28,6 +28,7 @@ The version skips from `0.5.54` to `0.5.60` to reflect the size of the change. R
 - **Database indexes and worker** — Indexes on 20 foreign-key columns are created, and the database worker is on by default. If you hit a database problem, set `COWORK_DB_WORKER=0` to return to the previous path and report it. Do not delete your database to fix an upgrade problem.
 - **macOS Keychain** — Settings encrypted under older macOS Keychain identities are migrated automatically, and macOS may show a Keychain access prompt. Check that your saved provider keys are still present afterwards.
 - **Checkpoints** — Existing transcript checkpoints are unsigned and are ignored; resuming falls back to the saved task state.
+- **Migration backups** — The backups in `backups/` are encrypted with the OS keychain in the desktop app. Headless daemon installs without an OS keychain write them as plain JSON readable only by your user account; delete them once you've checked your memory folder. See [Troubleshooting](troubleshooting.md#upgrading-or-downgrading-cowork-os).
 
 ### Features that use model tokens by default
 

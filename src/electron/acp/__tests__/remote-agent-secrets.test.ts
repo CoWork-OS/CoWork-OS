@@ -479,8 +479,12 @@ describe("ACP remote agent credentials", () => {
       const endpoint = await startAgentServer(seen);
       const invoker = new RemoteAgentInvoker({ resolveSecrets: () => undefined });
 
-      await invoker.invoke(plaintextCard({ endpoint }), task);
-      expect(seen[0].authorization).toBeUndefined();
+      // The card's values are never used; a card still waiting to migrate is not sent
+      // unauthenticated either.
+      await expect(invoker.invoke(plaintextCard({ endpoint }), task)).rejects.toThrow(
+        /waiting to move to secure storage/,
+      );
+      expect(seen).toHaveLength(0);
     });
 
     it("fails closed when a referenced credential cannot be resolved", async () => {

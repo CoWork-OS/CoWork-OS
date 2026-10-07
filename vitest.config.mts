@@ -17,6 +17,9 @@ export default defineConfig({
       reporter: ["text", "json", "html"],
       include: ["src/electron/security/**/*.ts", "src/shared/types.ts"],
     },
-    testTimeout: 10000,
+    // CI runners (macOS ones especially) run real SQLite, sandbox and worker tests several
+    // times slower than a laptop; give tests and hooks more room there.
+    testTimeout: process.env.CI ? 30_000 : 10_000,
+    hookTimeout: process.env.CI ? 30_000 : 10_000,
   },
 });

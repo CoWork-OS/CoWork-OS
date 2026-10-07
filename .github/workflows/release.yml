@@ -109,9 +109,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     needs: hardening-release-gate
-    env:
-      # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
-      NODE_OPTIONS: --max-old-space-size=4096
     strategy:
       fail-fast: false
       matrix:
@@ -168,9 +165,19 @@ jobs:
 
       - name: Validate npm tarball first-install flow
         if: runner.os != 'Windows'
+        env:
+          # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
+          # Build steps only: under this flag the tests' 16 MB PDF worker heap limit was not
+          # enforced on the runner, so the heap-exhaustion test never finished.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: node scripts/release-smoke-install.mjs
 
       - name: Build application
+        env:
+          # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
+          # Build steps only: under this flag the tests' 16 MB PDF worker heap limit was not
+          # enforced on the runner, so the heap-exhaustion test never finished.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build
 
       - name: Generate release notes from changelog

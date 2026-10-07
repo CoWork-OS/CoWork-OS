@@ -1,0 +1,121 @@
+.sidebar-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 4px;
+}
+
+.sidebar-notice {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+}
+
+.sidebar-notice:hover {
+  background: var(--color-bg-hover);
+}
+
+.sidebar-notice-new {
+  animation: sidebar-notice-enter 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sidebar-notice-new .sidebar-notice-icon {
+  animation: sidebar-notice-icon-pop 700ms 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes sidebar-notice-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sidebar-notice-icon-pop {
+  0% {
+    transform: scale(0.6) rotate(-25deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-notice-new,
+  .sidebar-notice-new .sidebar-notice-icon {
+    animation: none;
+  }
+}
+
+.sidebar-notice-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-notice-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 50%;
+  background: var(--color-bg-glass);
+}
+
+.sidebar-notice-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-notice-arrow {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.sidebar-notice-dismiss {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: inline-flex;
+  padding: 4px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  opacity: 0;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.sidebar-notice:hover .sidebar-notice-dismiss,
+.sidebar-notice-dismiss:focus-visible {
+  opacity: 1;
+}
+
+.sidebar-notice:hover .sidebar-notice-arrow {
+  visibility: hidden;
+}
+
+.sidebar-notice-dismiss:hover {
+  color: var(--color-text-primary);
+}

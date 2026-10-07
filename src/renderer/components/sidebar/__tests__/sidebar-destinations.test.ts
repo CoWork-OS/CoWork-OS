@@ -56,7 +56,6 @@ describe("getSidebarRailLayout", () => {
       "devices",
       "everyday",
       "missionControl",
-      "ideas",
       "addTools",
     ]);
 
@@ -67,11 +66,11 @@ describe("getSidebarRailLayout", () => {
 
   it("orders pinned items by pin order and drops ones that are not visible", () => {
     const layout = getSidebarRailLayout({ isCalm: false, isBrowserHost: false }, [
-      "ideas",
+      "everyday",
       "build",
       "devices",
     ]);
-    expect(ids(layout.pinned)).toEqual(["ideas", "devices"]);
+    expect(ids(layout.pinned)).toEqual(["everyday", "devices"]);
   });
 
   it("hides Git Changes on the desktop app", () => {
@@ -95,7 +94,6 @@ describe("rail shortcuts and reordering", () => {
       "devices",
       "everyday",
       "missionControl",
-      "ideas",
       "build",
       "addTools",
     ]);
@@ -125,7 +123,7 @@ describe("rail shortcuts and reordering", () => {
       "home",
       "automations",
     ]);
-    expect(moveSidebarDestination([...list], "home", "ideas", "after")).toEqual([...list]);
+    expect(moveSidebarDestination([...list], "home", "everyday", "after")).toEqual([...list]);
   });
 
   it("treats an order matching the default as not custom", () => {
@@ -170,10 +168,10 @@ describe("rail pin persistence", () => {
   it("round-trips pins and ignores unknown, fixed, and duplicate ids", () => {
     const storage = memoryStorage({
       [SIDEBAR_RAIL_STORAGE_KEY]: JSON.stringify({
-        pinned: ["ideas", "home", "nope", "ideas", 7, "missionControl"],
+        pinned: ["everyday", "home", "nope", "everyday", 7, "missionControl"],
       }),
     });
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["ideas", "missionControl"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday", "missionControl"]);
   });
 
   it("falls back to the defaults when storage holds invalid data", () => {
@@ -185,28 +183,28 @@ describe("rail pin persistence", () => {
 
   it("stores the rail order beside the pins without either resetting the other", () => {
     const storage = memoryStorage();
-    writeSidebarRailOrder(["agents", "home", "ideas"], storage);
-    writePinnedSidebarDestinations(["ideas"], storage);
+    writeSidebarRailOrder(["agents", "home", "everyday"], storage);
+    writePinnedSidebarDestinations(["everyday"], storage);
     // Only fixed rail items belong in the order.
     expect(readSidebarRailOrder(storage)).toEqual(["agents", "home"]);
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["ideas"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday"]);
 
     writeSidebarRailOrder([], storage);
     expect(readSidebarRailOrder(storage)).toEqual([]);
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["ideas"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday"]);
   });
 
   it("reads pins saved before the order existed", () => {
     const storage = memoryStorage({
-      [SIDEBAR_RAIL_STORAGE_KEY]: JSON.stringify({ pinned: ["ideas"] }),
+      [SIDEBAR_RAIL_STORAGE_KEY]: JSON.stringify({ pinned: ["everyday"] }),
     });
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["ideas"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday"]);
     expect(readSidebarRailOrder(storage)).toEqual([]);
   });
 
   it("toggles a pin on and off", () => {
-    expect(togglePinnedSidebarDestination(["devices"], "ideas")).toEqual(["devices", "ideas"]);
-    expect(togglePinnedSidebarDestination(["devices", "ideas"], "devices")).toEqual(["ideas"]);
+    expect(togglePinnedSidebarDestination(["devices"], "everyday")).toEqual(["devices", "everyday"]);
+    expect(togglePinnedSidebarDestination(["devices", "everyday"], "devices")).toEqual(["everyday"]);
   });
 });
 
@@ -226,6 +224,6 @@ describe("isSidebarDestinationAvailable", () => {
     });
     expect(isSidebarDestinationAvailable(getSidebarDestination("automations"))).toBe(true);
     expect(isSidebarDestinationAvailable(getSidebarDestination("inbox"))).toBe(false);
-    expect(isSidebarDestinationAvailable(getSidebarDestination("ideas"))).toBe(true);
+    expect(isSidebarDestinationAvailable(getSidebarDestination("build"))).toBe(true);
   });
 });

@@ -17,6 +17,7 @@ import type {
 import {
   createRemoteAgentSecretResolver,
   getRemoteAgentSecretRef,
+  hasPlaintextRemoteAgentSecrets,
   type RemoteAgentSecretResolver,
   type RemoteAgentSecrets,
 } from "./remote-agent-secrets";
@@ -152,6 +153,13 @@ export class RemoteAgentInvoker {
     if (!headers.Authorization && getRemoteAgentSecretRef(agent)) {
       // Fail closed: the agent was registered with credentials that cannot be read now.
       throw new Error(`Credentials for remote agent ${agent.id} are unavailable`);
+    }
+    if (!headers.Authorization && hasPlaintextRemoteAgentSecrets(agent)) {
+      // Fail closed: the card still holds credentials that could not be moved to secure
+      // storage yet. Sending without them would call the agent unauthenticated.
+      throw new Error(
+        `Credentials for remote agent ${agent.id} are waiting to move to secure storage; check that secure storage is available and restart CoWork`,
+      );
     }
     return headers;
   }

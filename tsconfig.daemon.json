@@ -22,8 +22,12 @@
     }
   },
   "include": [
+    "src/electron/gateway/ChannelDecisionRepository.ts",
+    "src/electron/gateway/TeamsConversationReferenceRepository.ts",
     "src/daemon/**/*",
     "src/electron/database/fts-worker.ts",
+    "src/electron/automation/schedule-preview-worker.ts",
+    "src/electron/agents/bot-work-artifact-worker.ts",
     "src/electron/database/async/database-worker.ts",
     "src/electron/database/schema-bootstrap-worker.ts"
   ],

@@ -15,7 +15,12 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
   };
 
   return (
-    <div className="disclaimer-overlay">
+    <div
+      className="disclaimer-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="disclaimer-title"
+    >
       <div className="disclaimer-container">
         {/* Logo */}
         <div className="disclaimer-logo">
@@ -27,7 +32,7 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
         {/* Main content card */}
         <div className="disclaimer-card">
           <div className="disclaimer-card-header">
-            <div className="disclaimer-card-icon-wrap">
+            <div className="disclaimer-card-icon-wrap" aria-hidden="true">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                 <path
                   d="M10 2L18 17H2L10 2Z"
@@ -40,7 +45,9 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
                 <circle cx="10" cy="13.5" r="0.75" fill="currentColor" />
               </svg>
             </div>
-            <span className="disclaimer-card-title">Security Notice</span>
+            <h2 id="disclaimer-title" className="disclaimer-card-title">
+              Security Notice
+            </h2>
           </div>
 
           <div className="disclaimer-card-body">
@@ -94,8 +101,11 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
             I understand this is powerful and inherently risky. Continue?
           </div>
 
-          <div className="disclaimer-options">
-            <label
+          <div className="disclaimer-options" role="radiogroup" aria-label="Accept security notice">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selectedOption === "yes"}
               className={`disclaimer-option ${selectedOption === "yes" ? "selected" : ""}`}
               onClick={() => setSelectedOption("yes")}
             >
@@ -103,8 +113,11 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
                 {selectedOption === "yes" && <span className="disclaimer-radio-dot" />}
               </span>
               <span>Yes, I understand</span>
-            </label>
-            <label
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selectedOption === "no"}
               className={`disclaimer-option ${selectedOption === "no" ? "selected" : ""}`}
               onClick={() => setSelectedOption("no")}
             >
@@ -112,14 +125,17 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
                 {selectedOption === "no" && <span className="disclaimer-radio-dot" />}
               </span>
               <span>No</span>
-            </label>
+            </button>
           </div>
         </div>
 
         {/* Continue button */}
         {selectedOption === "yes" && (
           <div className="disclaimer-continue">
-            <label
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={dontShowAgain}
               className="disclaimer-checkbox-label"
               onClick={() => setDontShowAgain(!dontShowAgain)}
             >
@@ -137,8 +153,8 @@ export function DisclaimerModal({ onAccept }: DisclaimerModalProps) {
                 )}
               </span>
               <span>Don't show this again</span>
-            </label>
-            <button onClick={handleContinue} className="disclaimer-continue-btn">
+            </button>
+            <button type="button" onClick={handleContinue} className="disclaimer-continue-btn">
               Continue
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path

@@ -191,8 +191,7 @@ export function legacyProfileFacts(blob: unknown): UserFact[] {
       confidence: Number.isFinite(Number(fact.confidence))
         ? Math.max(0, Math.min(1, Number(fact.confidence)))
         : 0.7,
-      source:
-        fact.source === "manual" || fact.source === "feedback" ? fact.source : "conversation",
+      source: fact.source === "manual" || fact.source === "feedback" ? fact.source : "conversation",
       firstSeenAt: Number(fact.firstSeenAt) || 0,
       lastUpdatedAt: Number(fact.lastUpdatedAt) || 0,
     });
@@ -404,25 +403,28 @@ async function retire(deps: LegacyMemoryRetirementDeps): Promise<LegacyMemoryRet
       (row) => row.status === "active" && row.workspacePresent,
     );
     counts.curatedChecked = curatedChecked.length;
-    const checks: Array<{ ref: LegacySourceRef; candidate: MemoryCandidate | null; backedUp: boolean }> =
-      [
-        // The export always holds the curated rows.
-        ...curatedChecked.map((row) => ({
-          ref: { store: MEMORY_LANE_STORES.curated, id: row.id },
-          candidate: curatedCandidate(row),
-          backedUp: backup.written,
-        })),
-        ...facts.map((fact) => ({
-          ref: { store: MEMORY_LANE_STORES.userProfile, id: fact.id },
-          candidate: userFactCandidate(fact, { mode: "migration" }),
-          backedUp: backup.encrypted,
-        })),
-        ...relationship.map((item) => ({
-          ref: { store: MEMORY_LANE_STORES.relationship, id: item.id },
-          candidate: relationshipItemCandidate(item, "migration"),
-          backedUp: backup.encrypted,
-        })),
-      ];
+    const checks: Array<{
+      ref: LegacySourceRef;
+      candidate: MemoryCandidate | null;
+      backedUp: boolean;
+    }> = [
+      // The export always holds the curated rows.
+      ...curatedChecked.map((row) => ({
+        ref: { store: MEMORY_LANE_STORES.curated, id: row.id },
+        candidate: curatedCandidate(row),
+        backedUp: backup.written,
+      })),
+      ...facts.map((fact) => ({
+        ref: { store: MEMORY_LANE_STORES.userProfile, id: fact.id },
+        candidate: userFactCandidate(fact, { mode: "migration" }),
+        backedUp: backup.encrypted,
+      })),
+      ...relationship.map((item) => ({
+        ref: { store: MEMORY_LANE_STORES.relationship, id: item.id },
+        candidate: relationshipItemCandidate(item, "migration"),
+        backedUp: backup.encrypted,
+      })),
+    ];
     // Records the lane mapping leaves out (history items, rejected identity values) were
     // never meant to be migrated.
     const expected = checks.filter((check) => {

@@ -83,7 +83,11 @@ export class KnowledgeGraphRepository {
     return this.sql.unit("kg_deleteEdge", [workspaceId, edgeId]);
   }
 
-  invalidateEdge(workspaceId: string, edgeId: string, validTo: number): Promise<KGEdge | undefined> {
+  invalidateEdge(
+    workspaceId: string,
+    edgeId: string,
+    validTo: number,
+  ): Promise<KGEdge | undefined> {
     return this.sql.unit("kg_invalidateEdge", [workspaceId, edgeId, validTo]);
   }
 

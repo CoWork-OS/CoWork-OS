@@ -80,7 +80,11 @@ export interface FolderFilters {
   pinnedOnly: boolean;
 }
 
-function entryMatches(entry: MemoryRepoHubEntry, file: MemoryRepoHubFile, filters: FolderFilters): boolean {
+function entryMatches(
+  entry: MemoryRepoHubEntry,
+  file: MemoryRepoHubFile,
+  filters: FolderFilters,
+): boolean {
   const query = filters.query.trim().toLowerCase();
   if (query && !entry.text.toLowerCase().includes(query)) return false;
   if (filters.kind && entry.kind !== filters.kind) return false;
@@ -107,7 +111,10 @@ export function filterFolderFiles(
   filters: FolderFilters,
 ): MemoryRepoHubFile[] {
   return files
-    .map((file) => ({ ...file, entries: file.entries.filter((entry) => entryMatches(entry, file, filters)) }))
+    .map((file) => ({
+      ...file,
+      entries: file.entries.filter((entry) => entryMatches(entry, file, filters)),
+    }))
     .filter((file) => file.entries.length > 0);
 }
 
@@ -161,7 +168,8 @@ export function editFolderEntry(
     api,
     workspaceId,
     report,
-    () => api.updateMemoryRepoEntry({ workspaceId, ref: entry.ref, hash: entry.hash, text: trimmed }),
+    () =>
+      api.updateMemoryRepoEntry({ workspaceId, ref: entry.ref, hash: entry.hash, text: trimmed }),
     "Memory updated.",
     "Failed to update the memory.",
   );

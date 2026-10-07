@@ -228,7 +228,8 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
       async (): Promise<MemoryRepoImportResult> => {
         const empty = { files: 0, imported: 0, duplicates: 0, skipped: 0, truncated: false };
         const service = getImportService();
-        if (!service?.isWritable()) return { ...empty, error: "The memory folder is not available." };
+        if (!service?.isWritable())
+          return { ...empty, error: "The memory folder is not available." };
         if (!deps.pickFolder) return { ...empty, error: "Importing needs the desktop app." };
         // The folder comes from the native picker in main, never from the renderer.
         const folder = await deps.pickFolder();

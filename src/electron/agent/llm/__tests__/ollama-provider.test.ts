@@ -110,7 +110,10 @@ describe("OllamaProvider reasoning handling", () => {
     );
     const provider = new OllamaProvider({ type: "ollama", model: "qwen3.5:latest" });
 
-    const request = provider.createMessage({ ...createRequest(), signal: requestController.signal });
+    const request = provider.createMessage({
+      ...createRequest(),
+      signal: requestController.signal,
+    });
     requestController.abort();
 
     await expect(request).rejects.toThrow("Request cancelled");

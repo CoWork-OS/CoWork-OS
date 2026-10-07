@@ -2205,9 +2205,7 @@ function RightPanelComponent({
     };
   }, [costReceiptEnabled, taskIdForCost, taskModelKeyForCost]);
   const showCostSection =
-    costReceiptEnabled &&
-    Boolean(task) &&
-    (taskCostSummary.hasUsage || taskCostEstimate !== null);
+    costReceiptEnabled && Boolean(task) && (taskCostSummary.hasUsage || taskCostEstimate !== null);
   const showFolderSection = stableFiles.length > 0;
   const showActiveContextSection =
     stableConnectedActiveConnectors.length > 0 && !isLiveExecutionMode;

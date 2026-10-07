@@ -9,11 +9,7 @@ import type {
 } from "../../shared/types";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
 import { MemoryWriter } from "./MemoryWriter";
-import {
-  memoryWriteSkipMessage,
-  primarySourceRef,
-  reviseMemoryItem,
-} from "./memory-item-revise";
+import { memoryWriteSkipMessage, primarySourceRef, reviseMemoryItem } from "./memory-item-revise";
 import {
   MEMORY_LANE_STORES,
   curatedEntryCandidate,
@@ -468,9 +464,7 @@ export class CuratedMemoryService {
         includePrivate: true,
         limit: 1000,
       })
-    ).filter(
-      (item) => curatedTargetOf(item) === target && (!kind || curatedKindOf(item) === kind),
-    );
+    ).filter((item) => curatedTargetOf(item) === target && (!kind || curatedKindOf(item) === kind));
 
     const exactMatches = items.filter(
       (item) => normalizeMemoryKey(item.content) === normalizedMatch,

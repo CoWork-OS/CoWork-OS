@@ -24,7 +24,7 @@ function collapseHeredocBodies(
   const collapsed: string[] = [];
   let truncated = false;
 
-  for (let index = 0; index < lines.length; ) {
+  for (let index = 0; index < lines.length;) {
     const line = lines[index];
     const markerMatch = line.match(/<<-?\s*(?:'([^'\n]+)'|"([^"\n]+)"|([^\s<>]+))/);
     const marker = markerMatch?.[1] || markerMatch?.[2] || markerMatch?.[3];

@@ -23,7 +23,6 @@ function isArchived(task: Task): boolean {
   return task.sessionArchived === true;
 }
 
-
 export function getBotConversationTitle(task: Task, index: number, botName: string): string {
   const title = String(task.title || "").trim();
   const genericTitle = !title || title.toLocaleLowerCase() === botName.trim().toLocaleLowerCase();

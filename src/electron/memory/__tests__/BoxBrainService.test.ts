@@ -317,18 +317,18 @@ describeWithSqlite("BoxBrainService", () => {
       updatedAt: now,
     };
     const receivers: unknown[] = [];
-    const captureSpy = vi
-      .spyOn(MemoryService, "capture")
-      .mockImplementation(async function (this: unknown) {
-        receivers.push(this);
-        return memory;
-      } as unknown as typeof MemoryService.capture);
-    const deleteSpy = vi
-      .spyOn(MemoryService, "deleteEntries")
-      .mockImplementation(async function (this: unknown) {
-        receivers.push(this);
-        return 1;
-      } as unknown as typeof MemoryService.deleteEntries);
+    const captureSpy = vi.spyOn(MemoryService, "capture").mockImplementation(async function (
+      this: unknown,
+    ) {
+      receivers.push(this);
+      return memory;
+    } as unknown as typeof MemoryService.capture);
+    const deleteSpy = vi.spyOn(MemoryService, "deleteEntries").mockImplementation(async function (
+      this: unknown,
+    ) {
+      receivers.push(this);
+      return 1;
+    } as unknown as typeof MemoryService.deleteEntries);
 
     try {
       const service = new BoxBrainService(db, {

@@ -399,7 +399,9 @@ describe("memory folder sync IPC", () => {
     const syncNow = vi.fn(async () => syncState);
     const checkRateLimit = vi.fn();
     const handlers = build({ isSyncConfigured: () => true, syncNow }, checkRateLimit);
-    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](undefined)).resolves.toEqual(syncState);
+    await expect(handlers[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](undefined)).resolves.toEqual(
+      syncState,
+    );
     expect(syncNow).toHaveBeenCalledWith({ push: true });
     expect(checkRateLimit).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW);
   });
@@ -421,9 +423,7 @@ describe("memory folder sync IPC", () => {
     const syncNow = vi.fn(async () => syncState);
     const handlers = build({ isSyncConfigured: () => true, syncNow });
     for (const payload of [{ push: false }, "now", { url: "https://evil.example/x.git" }]) {
-      await expect(handlers[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](payload)).rejects.toThrow(
-        /Invalid/,
-      );
+      await expect(handlers[IPC_CHANNELS.MEMORY_REPO_SYNC_NOW](payload)).rejects.toThrow(/Invalid/);
     }
     expect(syncNow).not.toHaveBeenCalled();
   });

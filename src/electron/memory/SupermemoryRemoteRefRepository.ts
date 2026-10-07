@@ -1,6 +1,9 @@
 import type Database from "better-sqlite3";
 import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
-import type { SupermemoryRemoteRef, SupermemoryRemoteRefInput } from "./supermemory-remote-refs-sql";
+import type {
+  SupermemoryRemoteRef,
+  SupermemoryRemoteRefInput,
+} from "./supermemory-remote-refs-sql";
 
 function isStatementPort(
   source: Database.Database | MemoryStatementPort,
@@ -21,7 +24,9 @@ export class SupermemoryRemoteRefRepository {
     this.sql = isStatementPort(source) ? source : createMemoryStatementPort(source);
   }
 
-  static initialize(source: Database.Database | MemoryStatementPort): SupermemoryRemoteRefRepository {
+  static initialize(
+    source: Database.Database | MemoryStatementPort,
+  ): SupermemoryRemoteRefRepository {
     this.instance = new SupermemoryRemoteRefRepository(source);
     return this.instance;
   }
@@ -42,7 +47,9 @@ export class SupermemoryRemoteRefRepository {
     return this.sql.unit("supermemoryRefs_listOrphans", [limit]);
   }
 
-  list(filter: { workspaceId?: string | null; limit?: number } = {}): Promise<SupermemoryRemoteRef[]> {
+  list(
+    filter: { workspaceId?: string | null; limit?: number } = {},
+  ): Promise<SupermemoryRemoteRef[]> {
     return this.sql.unit("supermemoryRefs_list", [
       { workspaceId: filter.workspaceId ?? null, limit: filter.limit ?? 500 },
     ]);

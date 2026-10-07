@@ -61,9 +61,21 @@ describeWithGit("runMemoryRepoExport", () => {
 
   it("exports user-owned facts once and leaves third-party, private and contact items out", async () => {
     const items = [
-      item({ content: "Sam", kind: "identity", subjectKey: "preferred_name", source: "user_confirmed", pinned: true }),
+      item({
+        content: "Sam",
+        kind: "identity",
+        subjectKey: "preferred_name",
+        source: "user_confirmed",
+        pinned: true,
+      }),
       item({ content: "Prefers bullet points", source: "inferred" }),
-      item({ content: "Deploys go through staging", kind: "rule", scope: "workspace", workspaceId: "ws-1", source: "curated" }),
+      item({
+        content: "Deploys go through staging",
+        kind: "rule",
+        scope: "workspace",
+        workspaceId: "ws-1",
+        source: "curated",
+      }),
       item({ content: "Mail from Bob about invoices", scope: "contact", source: "third_party" }),
       item({ content: "Private note", privacy: "private" }),
     ];
@@ -73,9 +85,15 @@ describeWithGit("runMemoryRepoExport", () => {
     };
     expect(await runMemoryRepoExport(service, deps)).toEqual({ ran: true, written: 3, skipped: 0 });
     const read = (rel: string) => fs.readFileSync(path.join(service.root, rel), "utf8");
-    expect(read("MEMORY.md")).toContain("- Sam [by: user; kind: identity; subject: preferred_name; added: 2026-09-18]");
-    expect(read("me.md")).toContain("- Prefers bullet points [by: agent; kind: preference; added: 2026-09-18]");
-    expect(read("workspaces/billing.md")).toContain("Deploys go through staging [by: user; kind: rule;");
+    expect(read("MEMORY.md")).toContain(
+      "- Sam [by: user; kind: identity; subject: preferred_name; added: 2026-09-18]",
+    );
+    expect(read("me.md")).toContain(
+      "- Prefers bullet points [by: agent; kind: preference; added: 2026-09-18]",
+    );
+    expect(read("workspaces/billing.md")).toContain(
+      "Deploys go through staging [by: user; kind: rule;",
+    );
     const all = (await service.listFiles()).map(read).join("\n");
     expect(all).not.toMatch(/Bob|Private note/);
     expect(await runMemoryRepoExport(service, deps)).toEqual({
@@ -93,9 +111,16 @@ describe("memoryRepoPathProblem", () => {
     expect(memoryRepoPathProblem("relative/dir")).toMatch(/absolute/);
     expect(memoryRepoPathProblem("/")).toMatch(/root/);
     expect(memoryRepoPathProblem(home)).toMatch(/home folder/);
-    expect(memoryRepoPathProblem(path.join(home, "code", "app", "memory"), [path.join(home, "code", "app")])).toMatch(
-      /outside your workspaces/,
-    );
-    expect(memoryRepoPathProblem(path.join(home, "CoWork Memory"), [home, path.join(home, "code", "app")])).toBeNull();
+    expect(
+      memoryRepoPathProblem(path.join(home, "code", "app", "memory"), [
+        path.join(home, "code", "app"),
+      ]),
+    ).toMatch(/outside your workspaces/);
+    expect(
+      memoryRepoPathProblem(path.join(home, "CoWork Memory"), [
+        home,
+        path.join(home, "code", "app"),
+      ]),
+    ).toBeNull();
   });
 });

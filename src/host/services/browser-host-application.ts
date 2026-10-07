@@ -385,12 +385,9 @@ export function createBrowserHostApplication(
                       )
                         throw new Error("Input request review is unavailable");
                     },
-                    draftPreviews: (id, revision) =>
-                      approvalRepository.draftPreviews(id, revision),
+                    draftPreviews: (id, revision) => approvalRepository.draftPreviews(id, revision),
                     responsibilityActionAuthorityCurrent: (approval) =>
-                      options.agentDaemon!.isResponsibilityActionReviewAuthorityCurrent(
-                        approval,
-                      ),
+                      options.agentDaemon!.isResponsibilityActionReviewAuthorityCurrent(approval),
                   },
                 )
             : undefined,

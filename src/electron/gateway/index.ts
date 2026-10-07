@@ -482,10 +482,13 @@ export class ChannelGateway {
         })
         .join("\n");
 
-      this.detachRouterWork(this.router.sendTaskUpdate(
-        data.taskId,
-        `🔎 Evidence links for key claims\n\n${claimLines}Sources:\n${sourceLines}`,
-      ), "sendTaskUpdate");
+      this.detachRouterWork(
+        this.router.sendTaskUpdate(
+          data.taskId,
+          `🔎 Evidence links for key claims\n\n${claimLines}Sources:\n${sourceLines}`,
+        ),
+        "sendTaskUpdate",
+      );
     };
 
     const timelineBridgeHandler = (timelineType: string) => (evt: Any) => {

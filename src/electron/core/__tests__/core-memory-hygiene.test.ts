@@ -396,9 +396,11 @@ describeWithSqlite("core memory candidates, distillation and cleanup", () => {
       const cleanup = new CoreMemoryCleanupStore(db);
       expect(cleanup.run(now).retiredProposalsDismissed).toBe(3);
       const status = (id: string) =>
-        (db.prepare("SELECT status FROM core_memory_candidates WHERE id = ?").get(id) as {
-          status: string;
-        }).status;
+        (
+          db.prepare("SELECT status FROM core_memory_candidates WHERE id = ?").get(id) as {
+            status: string;
+          }
+        ).status;
       expect(["p1", "p2", "p3"].map(status)).toEqual(["dismissed", "dismissed", "dismissed"]);
       expect(status("w1")).toBe("proposed");
       expect(status("k1")).toBe("proposed");

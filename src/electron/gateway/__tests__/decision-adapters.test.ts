@@ -256,7 +256,7 @@ describe("Teams typed decision adapter", () => {
     expect(persistence.save).not.toHaveBeenCalled();
     await restarted.inner.handleActivity({
       activity: { ...activity, serviceUrl: "https://other.example/" },
-});
+    });
     expect(restarted.handler).toHaveBeenCalledTimes(1);
     persistence.load.mockRejectedValue(new Error("storage unavailable"));
     await restarted.inner.handleActivity({ activity });

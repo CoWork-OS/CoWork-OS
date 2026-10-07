@@ -12,8 +12,16 @@ import { MemoryRepoService } from "../../../memory/repo/MemoryRepoService";
 import { clearSwarmCache, swarmSlug } from "../../../memory/repo/memory-repo-swarm";
 import { runWithMemoryRepoAccess } from "../../../security/memory-repo-access";
 import { evaluateToolPolicy } from "../../tool-policy-engine";
-import { getWorkerRoleSpec, resolveWorkerRoleAgentConfig } from "../../runtime/worker-role-registry";
-import { CONTEXT_TOOL_RESTRICTIONS, TOOL_RISK_LEVELS, type Task, type Workspace } from "../../../../shared/types";
+import {
+  getWorkerRoleSpec,
+  resolveWorkerRoleAgentConfig,
+} from "../../runtime/worker-role-registry";
+import {
+  CONTEXT_TOOL_RESTRICTIONS,
+  TOOL_RISK_LEVELS,
+  type Task,
+  type Workspace,
+} from "../../../../shared/types";
 import type { AgentDaemon } from "../../daemon";
 
 function hasGit(): boolean {
@@ -41,8 +49,12 @@ const tasks: Partial<Task>[] = [
 function fakeDaemon(sources: Array<Record<string, unknown>> = []) {
   return {
     logEvent: vi.fn(),
-    getTaskById: vi.fn(async (id: string) => tasks.find((task) => task.id === id) as Task | undefined),
-    getChildTasks: vi.fn(async (id: string) => tasks.filter((task) => task.parentTaskId === id) as Task[]),
+    getTaskById: vi.fn(
+      async (id: string) => tasks.find((task) => task.id === id) as Task | undefined,
+    ),
+    getChildTasks: vi.fn(
+      async (id: string) => tasks.filter((task) => task.parentTaskId === id) as Task[],
+    ),
     findTeamRunByRootTaskId: vi.fn(() => null),
     listRecentSensitiveSources: vi.fn(() => sources),
   } as unknown as AgentDaemon;
@@ -71,7 +83,9 @@ describe("swarm_note definition and policy", () => {
   it("is denied to verifiers but kept for researchers and shared contexts deny it", () => {
     expect(getWorkerRoleSpec("verifier").toolRestrictions).toContain(SWARM_NOTE_TOOL);
     expect(resolveWorkerRoleAgentConfig("verifier").toolRestrictions).toContain(SWARM_NOTE_TOOL);
-    expect(resolveWorkerRoleAgentConfig("researcher").toolRestrictions).not.toContain(SWARM_NOTE_TOOL);
+    expect(resolveWorkerRoleAgentConfig("researcher").toolRestrictions).not.toContain(
+      SWARM_NOTE_TOOL,
+    );
     expect(CONTEXT_TOOL_RESTRICTIONS.group.deniedTools).toContain(SWARM_NOTE_TOOL);
     expect(CONTEXT_TOOL_RESTRICTIONS.public.deniedTools).toContain(SWARM_NOTE_TOOL);
     expect(TOOL_RISK_LEVELS.swarm_note).toBe("write");
@@ -95,7 +109,12 @@ describeWithGit("SwarmTools.note", () => {
     fs.rmSync(base, { recursive: true, force: true });
   });
 
-  const note = (taskId: string, input: unknown, swarmPrefix: string | null = PREFIX, daemon = fakeDaemon()) =>
+  const note = (
+    taskId: string,
+    input: unknown,
+    swarmPrefix: string | null = PREFIX,
+    daemon = fakeDaemon(),
+  ) =>
     runWithMemoryRepoAccess({ readAllowed: false, swarmPrefix }, () =>
       new SwarmTools(workspace, daemon, taskId).note(input),
     );
@@ -106,7 +125,11 @@ describeWithGit("SwarmTools.note", () => {
       text: "p95 latency of /search is 420 ms with the result cache off",
       sources: ["bench/search.log", 42],
     });
-    expect(result).toMatchObject({ success: true, action: "inserted", file: `${PREFIX}/findings.md` });
+    expect(result).toMatchObject({
+      success: true,
+      action: "inserted",
+      file: `${PREFIX}/findings.md`,
+    });
     const text = fs.readFileSync(path.join(service.root, PREFIX, "findings.md"), "utf8");
     expect(text).toContain("author: researcher");
     expect(text).toContain("source: cowork://tasks/child-1");
@@ -130,7 +153,10 @@ describeWithGit("SwarmTools.note", () => {
 
   it("refuses outside a swarm scope, for verifiers, for a mismatched scope and bad input", async () => {
     const input = { kind: "finding", text: "The cache key ignores the locale entirely" };
-    expect(await note("child-1", input, null)).toMatchObject({ success: false, reason: "not_in_swarm" });
+    expect(await note("child-1", input, null)).toMatchObject({
+      success: false,
+      reason: "not_in_swarm",
+    });
     expect(await note("verifier-1", input)).toMatchObject({ success: false, reason: "verifier" });
     expect(await note("lonely", input)).toMatchObject({ success: false, reason: "not_in_swarm" });
     expect(await note("child-1", input, "swarms/other-ffffffff")).toMatchObject({

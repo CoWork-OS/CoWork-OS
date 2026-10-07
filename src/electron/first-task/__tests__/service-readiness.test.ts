@@ -27,6 +27,8 @@ describe("sample workspace readiness", () => {
     const alias = `${root}-alias`;
     roots.push(root, alias);
     await fs.symlink(root, alias);
-    await expect(checkReleaseBriefRuntime(alias)).rejects.toThrow("Temp workspace root must not be a symlink");
+    await expect(checkReleaseBriefRuntime(alias)).rejects.toThrow(
+      "Temp workspace root must not be a symlink",
+    );
   });
 });

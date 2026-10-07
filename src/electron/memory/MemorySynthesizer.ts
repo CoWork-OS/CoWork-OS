@@ -270,19 +270,21 @@ function extractUserProfileFragments(): MemoryFragment[] {
 /** The user's own open commitments (not third-party ones from mail). */
 function extractRelationshipFragments(): MemoryFragment[] {
   try {
-    return RelationshipMemoryService.listOpenCommitments(16)
-      // Mailbox-sourced items are sender-controlled text, not facts about the user.
-      .filter((item) => !RelationshipMemoryService.isThirdPartyItem(item))
-      .map((item) => ({
-        key: fingerprint(`relationship:${item.layer}:${item.text}`),
-        source: "relationship" as const,
-        text: `[${item.layer}] ${item.text}`,
-        relevance: 0.88,
-        confidence: item.confidence,
-        updatedAt: item.updatedAt,
-        estimatedTokens: estimateTokens(item.text) + 3,
-        category: item.layer,
-      }));
+    return (
+      RelationshipMemoryService.listOpenCommitments(16)
+        // Mailbox-sourced items are sender-controlled text, not facts about the user.
+        .filter((item) => !RelationshipMemoryService.isThirdPartyItem(item))
+        .map((item) => ({
+          key: fingerprint(`relationship:${item.layer}:${item.text}`),
+          source: "relationship" as const,
+          text: `[${item.layer}] ${item.text}`,
+          relevance: 0.88,
+          confidence: item.confidence,
+          updatedAt: item.updatedAt,
+          estimatedTokens: estimateTokens(item.text) + 3,
+          category: item.layer,
+        }))
+    );
   } catch {
     return [];
   }
@@ -814,7 +816,9 @@ export class MemorySynthesizer {
     }
 
     const sourceNote =
-      layers.source === "none" ? " Memory is not available yet (the memory engine is not running)." : "";
+      layers.source === "none"
+        ? " Memory is not available yet (the memory engine is not running)."
+        : "";
     const recallHints = this.buildRecallHintsContext();
     const l3Description =
       'Excluded from default injection. Use `memory_recall` (index, then detail "full") when exact recall is needed.';

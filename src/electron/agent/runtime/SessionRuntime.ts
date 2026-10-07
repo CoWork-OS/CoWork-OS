@@ -2185,7 +2185,9 @@ export class SessionRuntime {
 
     // Swarm notes follow the memory folder block: peer context, never instructions.
     const swarmBlock =
-      opts.allowSwarmInjection && this.deps.buildSwarmBlock ? await this.deps.buildSwarmBlock() : "";
+      opts.allowSwarmInjection && this.deps.buildSwarmBlock
+        ? await this.deps.buildSwarmBlock()
+        : "";
     if (swarmBlock) {
       this.deps.upsertPinnedUserBlock(messages, {
         tag: tags.swarm.open,
@@ -3829,9 +3831,7 @@ export class SessionRuntime {
     // so a forged far-future checkpoint cannot outrank the event snapshot.
     const farFuture = Date.now() + CHECKPOINT_MAX_FUTURE_SKEW_MS;
     const timestamp =
-      typeof rawTimestamp === "number" &&
-      Number.isFinite(rawTimestamp) &&
-      rawTimestamp <= farFuture
+      typeof rawTimestamp === "number" && Number.isFinite(rawTimestamp) && rawTimestamp <= farFuture
         ? rawTimestamp
         : null;
     return { sequence: null, timestamp, position: -1 };
@@ -4007,9 +4007,7 @@ export class SessionRuntime {
         ) {
           // The conversation came from the (fresher) workspace checkpoint, but
           // permission state is trusted only from the database snapshot.
-          this.restorePermissionStateFromPayload(
-            latestSnapshotPayload as SessionRuntimeSnapshotV2,
-          );
+          this.restorePermissionStateFromPayload(latestSnapshotPayload as SessionRuntimeSnapshotV2);
         }
         this.restorePendingSkillStateFromEvents(events);
         this.restoreTaskListStateFromEvents(events);

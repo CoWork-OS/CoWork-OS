@@ -198,9 +198,9 @@ describe("Playbook evidence capture", () => {
     await success("task-1", "Reconcile invoices");
     await PlaybookService.recordUserCorrection(WS, "task-1");
     expect(await PlaybookService.getPlaybookForContext(WS, "Reconcile invoices")).toBe("");
-    expect(db.prepare("SELECT COUNT(*) AS n, MIN(status) AS s FROM playbook_entries").get()).toEqual(
-      { n: 1, s: "invalidated" },
-    );
+    expect(
+      db.prepare("SELECT COUNT(*) AS n, MIN(status) AS s FROM playbook_entries").get(),
+    ).toEqual({ n: 1, s: "invalidated" });
     expect(
       db.prepare("SELECT invalidation_reason AS r FROM playbook_success_evidence").get(),
     ).toEqual({ r: "corrected_by_user" });
@@ -369,9 +369,9 @@ describe("Playbook reinforcement and promotion", () => {
     const result = await PlaybookService.reinforceFromEvidence(WS, third.evidenceId);
     expect(result.linkedEvidenceIds).toHaveLength(1);
     // Re-running reinforcement does not create duplicate links.
-    expect((await PlaybookService.reinforceFromEvidence(WS, third.evidenceId)).linkedEvidenceIds).toEqual(
-      [],
-    );
+    expect(
+      (await PlaybookService.reinforceFromEvidence(WS, third.evidenceId)).linkedEvidenceIds,
+    ).toEqual([]);
   });
 
   it("promotion counts distinct eligible executions, not memory rows or chains", async () => {
@@ -383,7 +383,9 @@ describe("Playbook reinforcement and promotion", () => {
       await PlaybookService.reinforceFromEvidence(WS, captured.evidenceId);
     }
     const counts = db
-      .prepare("SELECT title, reinforcement_count AS n FROM playbook_entries ORDER BY created_at, rowid")
+      .prepare(
+        "SELECT title, reinforcement_count AS n FROM playbook_entries ORDER BY created_at, rowid",
+      )
       .all();
     expect(counts.reduce((sum, row) => sum + (row as { n: number }).n, 0)).toBeGreaterThan(0);
     // Repeated callbacks for t3 add nothing.

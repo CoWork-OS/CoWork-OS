@@ -29,9 +29,7 @@ export function primarySourceRef(item: Pick<MemoryItem, "sourceRef">): {
   id: string;
 } | null {
   const { store, id } = item.sourceRef;
-  return typeof store === "string" && store && typeof id === "string" && id
-    ? { store, id }
-    : null;
+  return typeof store === "string" && store && typeof id === "string" && id ? { store, id } : null;
 }
 
 /**

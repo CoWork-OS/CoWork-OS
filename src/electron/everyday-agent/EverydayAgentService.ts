@@ -29,7 +29,6 @@ import {
 } from "../../shared/types";
 import type { AdminPolicies } from "../admin/policies";
 
-
 import { DEFAULT_AGENT_SECURITY_POLICY } from "../../shared/agent-security";
 
 const VALID_CAPABILITIES = new Set<EverydayCapabilityBundle>(

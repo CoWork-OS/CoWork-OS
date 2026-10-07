@@ -66,7 +66,11 @@ describeWithGit("runMemoryItemsFactRetirement", () => {
   it("waits for the export, backs up and deletes only rows the folder holds, once", async () => {
     const items = [
       item("a", "Prefers bullet points"),
-      item("b", "Deploys go through staging", { scope: "workspace", workspaceId: "ws-1", kind: "rule" }),
+      item("b", "Deploys go through staging", {
+        scope: "workspace",
+        workspaceId: "ws-1",
+        kind: "rule",
+      }),
       item("c", "Call the bank on Friday", { kind: "commitment" }),
       item("d", "Bob wants the invoice", { scope: "contact", source: "third_party" }),
       item("e", "Secret project codename", { privacy: "private" }),
@@ -78,10 +82,18 @@ describeWithGit("runMemoryItemsFactRetirement", () => {
       encryption: null,
       backupDir: path.join(base, "backups"),
     };
-    expect(await runMemoryItemsFactRetirement(service, deps)).toMatchObject({ ran: false, reason: "not_ready" });
+    expect(await runMemoryItemsFactRetirement(service, deps)).toMatchObject({
+      ran: false,
+      reason: "not_ready",
+    });
 
-    await runMemoryRepoExport(service, { listItems: async () => items, workspaceName: async () => "Billing" });
-    const all = (await service.listFiles()).map((file) => fs.readFileSync(path.join(service.root, file), "utf8")).join("\n");
+    await runMemoryRepoExport(service, {
+      listItems: async () => items,
+      workspaceName: async () => "Billing",
+    });
+    const all = (await service.listFiles())
+      .map((file) => fs.readFileSync(path.join(service.root, file), "utf8"))
+      .join("\n");
     expect(all).not.toContain("Call the bank");
 
     // One fact never reached the folder (e.g. the export skipped it): it stays.
@@ -93,7 +105,10 @@ describeWithGit("runMemoryItemsFactRetirement", () => {
     expect(backups).toHaveLength(1);
     expect(backups[0]).toMatch(/^memory-items-facts-.*\.json$/);
 
-    expect(await runMemoryItemsFactRetirement(service, deps)).toMatchObject({ ran: false, reason: "done" });
+    expect(await runMemoryItemsFactRetirement(service, deps)).toMatchObject({
+      ran: false,
+      reason: "done",
+    });
     expect(deleteItem).toHaveBeenCalledTimes(2);
   });
 

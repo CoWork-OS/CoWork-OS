@@ -98,7 +98,9 @@ export const runMemoryRepoGit: GitRunner = (cwd, args) =>
         if (error) {
           reject(
             new MemoryRepoGitError(
-              `git ${args[0] ?? ""} failed: ${String(stderr || error.message).trim().slice(0, 500)}`,
+              `git ${args[0] ?? ""} failed: ${String(stderr || error.message)
+                .trim()
+                .slice(0, 500)}`,
               args,
               String(stderr || ""),
             ),

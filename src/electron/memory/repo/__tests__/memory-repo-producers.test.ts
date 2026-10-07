@@ -36,7 +36,12 @@ describe("memory folder producers", () => {
     expect(await rememberPreferredNameInFolder("Alex", {}, () => null)).toBeNull();
     expect(
       await promoteObservationToMemoryFolder(
-        { workspaceId: "ws-1", target: "workspace", kind: "project_fact", content: "Uses Postgres" },
+        {
+          workspaceId: "ws-1",
+          target: "workspace",
+          kind: "project_fact",
+          content: "Uses Postgres",
+        },
         () => null,
       ),
     ).toBeNull();
@@ -70,7 +75,11 @@ describe("memory folder producers", () => {
     );
     expect(workspace).toMatchObject({ success: true, file: "workspaces/billing.md" });
     expect(lines("workspaces/billing.md")).toContainEqual(
-      expect.objectContaining({ text: "Run the migrations before deploying", by: "user", kind: "rule" }),
+      expect.objectContaining({
+        text: "Run the migrations before deploying",
+        by: "user",
+        kind: "rule",
+      }),
     );
     const user = await promoteObservationToMemoryFolder(
       { workspaceId: "ws-1", target: "user", kind: "preference", content: "Prefers dark mode" },
@@ -80,7 +89,12 @@ describe("memory folder producers", () => {
     // Commitments stay in memory_items.
     expect(
       await promoteObservationToMemoryFolder(
-        { workspaceId: "ws-1", target: "workspace", kind: "active_commitment", content: "Ship it Friday" },
+        {
+          workspaceId: "ws-1",
+          target: "workspace",
+          kind: "active_commitment",
+          content: "Ship it Friday",
+        },
         get,
       ),
     ).toBeNull();
@@ -94,8 +108,8 @@ describe("memory folder producers", () => {
 
   it("explains skips in words", () => {
     expect(memoryRepoSkipMessage({ status: "skipped", reason: "busy" })).toMatch(/busy/);
-    expect(memoryRepoSkipMessage({ status: "skipped", reason: "too_large", detail: "me.md is full" })).toBe(
-      "Not saved: me.md is full.",
-    );
+    expect(
+      memoryRepoSkipMessage({ status: "skipped", reason: "too_large", detail: "me.md is full" }),
+    ).toBe("Not saved: me.md is full.");
   });
 });

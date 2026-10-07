@@ -20,7 +20,11 @@ import { MemoryFeaturesManager } from "../../settings/memory-features-manager";
 import { setMemoryRepoRoot } from "../../security/memory-repo-access";
 import { createLogger } from "../../utils/logger";
 import { MemoryWriter, type MemoryWorkspacePolicy } from "../MemoryWriter";
-import { MemoryRepoService, type MemoryRepoDreamRecord, type MemoryRepoStatus } from "./MemoryRepoService";
+import {
+  MemoryRepoService,
+  type MemoryRepoDreamRecord,
+  type MemoryRepoStatus,
+} from "./MemoryRepoService";
 import {
   runMemoryRepoExportChain,
   type MemoryRepoRerunRequests,
@@ -231,7 +235,10 @@ async function applySyncAndTeam(
     if (teamKey !== appliedTeamKey) {
       appliedTeamKey = teamKey;
       const workspacePaths = (await options?.listWorkspacePaths?.().catch(() => [])) ?? [];
-      await configureTeamMemoryRepos(teams, { personalRoot: service?.root ?? null, workspacePaths });
+      await configureTeamMemoryRepos(teams, {
+        personalRoot: service?.root ?? null,
+        workspacePaths,
+      });
       setTeamMemoryRepoRoots(teamMemoryRepoRoots());
     }
   } catch (error) {

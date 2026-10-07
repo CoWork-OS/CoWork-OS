@@ -20,7 +20,11 @@
  * fact retirement consume.
  */
 import type Database from "better-sqlite3";
-import { defineReadUnit, defineUnit, type UnitCatalog } from "../database/statements/statement-catalog";
+import {
+  defineReadUnit,
+  defineUnit,
+  type UnitCatalog,
+} from "../database/statements/statement-catalog";
 import { bool, fields, int, json, list, record, str } from "../database/statements/unit-args";
 import { MEMORY_ITEMS_LANE_MIGRATION_KEY } from "./memory-items-sql";
 
@@ -230,7 +234,10 @@ export function missingLegacySourceRefs(
  * Drop order: a table goes only after every other table in the set that references it.
  * Tables referenced by a table outside the set are not dropped (returned as blocked).
  */
-function planDrops(db: Database.Database, wanted: string[]): { order: string[]; blocked: string[] } {
+function planDrops(
+  db: Database.Database,
+  wanted: string[],
+): { order: string[]; blocked: string[] } {
   const all = (
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
       name: string;
@@ -240,9 +247,9 @@ function planDrops(db: Database.Database, wanted: string[]): { order: string[]; 
   for (const name of all) {
     // Virtual tables have no foreign keys; the pragma returns no rows for them.
     const parents = (
-      db.prepare("SELECT DISTINCT \"table\" AS parent FROM pragma_foreign_key_list(?)").all(
-        name,
-      ) as Array<{ parent: string }>
+      db
+        .prepare('SELECT DISTINCT "table" AS parent FROM pragma_foreign_key_list(?)')
+        .all(name) as Array<{ parent: string }>
     ).map((row) => row.parent);
     referencesOf.set(name, new Set(parents));
   }
@@ -293,12 +300,19 @@ function dependentObjects(
     .prepare(
       "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('trigger', 'view')",
     )
-    .all() as Array<{ type: "trigger" | "view"; name: string; tbl_name: string; sql: string | null }>;
+    .all() as Array<{
+    type: "trigger" | "view";
+    name: string;
+    tbl_name: string;
+    sql: string | null;
+  }>;
   const droppedSet = new Set(dropped);
   return rows
     .filter((row) => !(row.type === "trigger" && droppedSet.has(row.tbl_name)))
     .filter((row) =>
-      dropped.some((table) => new RegExp(`(^|[^A-Za-z0-9_])${table}([^A-Za-z0-9_]|$)`).test(row.sql ?? "")),
+      dropped.some((table) =>
+        new RegExp(`(^|[^A-Za-z0-9_])${table}([^A-Za-z0-9_]|$)`).test(row.sql ?? ""),
+      ),
     )
     .map((row) => ({ type: row.type, name: row.name }));
 }

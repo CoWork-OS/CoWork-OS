@@ -181,9 +181,7 @@ describe("sanitizeToolCallTextFromAssistant", () => {
       ),
     ).toBe(false);
     expect(
-      responseLooksLikeUnexecutedToolCall(
-        '```\n<tool_call>\n{"name": "x"}\n</tool_call>\n```',
-      ),
+      responseLooksLikeUnexecutedToolCall('```\n<tool_call>\n{"name": "x"}\n</tool_call>\n```'),
     ).toBe(false);
     expect(responseLooksLikeUnexecutedToolCall("Use the <function=name> syntax here.")).toBe(false);
     expect(responseLooksLikeUnexecutedToolCall("The <tool_call> tag wraps each call.")).toBe(false);

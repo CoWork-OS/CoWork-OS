@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  MemoryCurationChange,
-  MemoryReviewState,
-} from "../../../shared/memory-review-types";
+import type { MemoryCurationChange, MemoryReviewState } from "../../../shared/memory-review-types";
 import { hasHostMethod } from "../../host/browser-capabilities";
 import "./memory-knowledge.css";
 import "./memory-review.css";

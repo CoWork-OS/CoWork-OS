@@ -197,7 +197,10 @@ export function setupCanvasHandlers(mainWindow: BrowserWindow, agentDaemon: Agen
         show?: boolean;
       },
     ): Promise<{ success: boolean; url: string }> => {
-      const normalizedUrl = await manager.openUrl(data.sessionId, data.url, { show: data.show, authorizedNetwork: true });
+      const normalizedUrl = await manager.openUrl(data.sessionId, data.url, {
+        show: data.show,
+        authorizedNetwork: true,
+      });
       return { success: true, url: normalizedUrl };
     },
   );

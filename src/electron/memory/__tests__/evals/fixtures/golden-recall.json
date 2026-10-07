@@ -226,9 +226,7 @@
       "type": "technology",
       "name": "ledger-db",
       "description": "Primary accounting database.",
-      "observations": [
-        "Nightly backups run at 02:00 UTC to the eu-west bucket."
-      ]
+      "observations": ["Nightly backups run at 02:00 UTC to the eu-west bucket."]
     },
     {
       "key": "x-harbor-person",
@@ -243,218 +241,163 @@
       "id": "en-deploy",
       "lang": "en",
       "text": "how do we deploy to production",
-      "expect": [
-        "m-deploy"
-      ]
+      "expect": ["m-deploy"]
     },
     {
       "id": "en-pnpm",
       "lang": "en",
       "text": "npm install at the root of the monorepo",
-      "expect": [
-        "m-pnpm"
-      ]
+      "expect": ["m-pnpm"]
     },
     {
       "id": "en-timezone",
       "lang": "en",
       "text": "what timezone is the user in",
-      "expect": [
-        "m-tz"
-      ]
+      "expect": ["m-tz"]
     },
     {
       "id": "en-redis",
       "lang": "en",
       "text": "why redis instead of kafka",
-      "expect": [
-        "m-redis"
-      ]
+      "expect": ["m-redis"]
     },
     {
       "id": "en-emoji",
       "lang": "en",
       "text": "emojis in commit messages",
-      "expect": [
-        "m-emoji"
-      ]
+      "expect": ["m-emoji"]
     },
     {
       "id": "en-length",
       "lang": "en",
       "text": "how long should answers be",
-      "expect": [
-        "m-length"
-      ]
+      "expect": ["m-length"]
     },
     {
       "id": "tr-meeting",
       "lang": "tr",
       "text": "haftalık toplantı ne zaman",
-      "expect": [
-        "m-tr-meeting"
-      ]
+      "expect": ["m-tr-meeting"]
     },
     {
       "id": "tr-invoice",
       "lang": "tr",
       "text": "faturalar muhasebe",
-      "expect": [
-        "m-tr-invoice"
-      ]
+      "expect": ["m-tr-invoice"]
     },
     {
       "id": "tr-invoice-stem",
       "lang": "tr",
       "text": "fatura muhasebe ekibi",
-      "expect": [
-        "m-tr-invoice"
-      ]
+      "expect": ["m-tr-invoice"]
     },
     {
       "id": "de-review",
       "lang": "de",
       "text": "Wer muss Code-Reviews freigeben",
-      "expect": [
-        "m-de-review"
-      ]
+      "expect": ["m-de-review"]
     },
     {
       "id": "de-umlaut-folded",
       "lang": "de",
       "text": "Urlaubsvertretung Jurgen",
-      "expect": [
-        "m-de-vacation"
-      ]
+      "expect": ["m-de-vacation"]
     },
     {
       "id": "de-name",
       "lang": "de",
       "text": "Grünewald Urlaub",
-      "expect": [
-        "m-de-vacation"
-      ]
+      "expect": ["m-de-vacation"]
     },
     {
       "id": "file-invoice",
       "lang": "file",
       "text": "invoice-export.ts",
-      "expect": [
-        "m-file-invoice"
-      ]
+      "expect": ["m-file-invoice"]
     },
     {
       "id": "file-compose",
       "lang": "file",
       "text": "docker-compose.override.yml port",
-      "expect": [
-        "m-file-compose"
-      ]
+      "expect": ["m-file-compose"]
     },
     {
       "id": "archive-outage",
       "lang": "en",
       "text": "login outage root cause",
-      "expect": [
-        "a-outage"
-      ]
+      "expect": ["a-outage"]
     },
     {
       "id": "archive-tls",
       "lang": "en",
       "text": "expired TLS certificate",
-      "expect": [
-        "a-outage"
-      ]
+      "expect": ["a-outage"]
     },
     {
       "id": "archive-migration",
       "lang": "en",
       "text": "when do we ship the postgres 16 migration",
-      "expect": [
-        "a-migration"
-      ]
+      "expect": ["a-migration"]
     },
     {
       "id": "archive-tr",
       "lang": "tr",
       "text": "modül bulunamadı build",
-      "expect": [
-        "a-tr-error"
-      ]
+      "expect": ["a-tr-error"]
     },
     {
       "id": "archive-de",
       "lang": "de",
       "text": "Quartalsbericht Q3",
-      "expect": [
-        "a-de-report"
-      ]
+      "expect": ["a-de-report"]
     },
     {
       "id": "archive-file",
       "lang": "file",
       "text": "checkout.spec.ts safari",
-      "expect": [
-        "a-flaky"
-      ]
+      "expect": ["a-flaky"]
     },
     {
       "id": "conv-logo",
       "lang": "file",
       "text": "logo-dark.svg header",
-      "expect": [
-        "c-logo"
-      ]
+      "expect": ["c-logo"]
     },
     {
       "id": "conv-tr",
       "lang": "tr",
       "text": "CSV Türkçe karakterler bozuluyor",
-      "expect": [
-        "c-tr-csv"
-      ]
+      "expect": ["c-tr-csv"]
     },
     {
       "id": "conv-de",
       "lang": "de",
       "text": "feature-flags.yaml neueKasse",
-      "expect": [
-        "c-de-flags"
-      ]
+      "expect": ["c-de-flags"]
     },
     {
       "id": "conv-rate-limit",
       "lang": "en",
       "text": "orders api rate limit 429",
-      "expect": [
-        "c-rate-limit"
-      ]
+      "expect": ["c-rate-limit"]
     },
     {
       "id": "kg-owner",
       "lang": "en",
       "text": "who owns the payments service",
-      "expect": [
-        "k-juergen",
-        "k-payments"
-      ]
+      "expect": ["k-juergen", "k-payments"]
     },
     {
       "id": "kg-name",
       "lang": "de",
       "text": "Jürgen Weiß",
-      "expect": [
-        "k-juergen"
-      ]
+      "expect": ["k-juergen"]
     },
     {
       "id": "kg-observation",
       "lang": "en",
       "text": "when do the nightly backups run",
-      "expect": [
-        "k-ledger"
-      ]
+      "expect": ["k-ledger"]
     }
   ]
 }

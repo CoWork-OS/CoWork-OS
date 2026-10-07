@@ -111,7 +111,13 @@ function legacyRelationshipSource(
   return "conversation";
 }
 
-const RELATIONSHIP_LAYERS = new Set(["identity", "preferences", "context", "history", "commitments"]);
+const RELATIONSHIP_LAYERS = new Set([
+  "identity",
+  "preferences",
+  "context",
+  "history",
+  "commitments",
+]);
 
 /** The stored relationship items, normalized the way the retired service loaded them. */
 export function normalizeLegacyRelationshipItems(raw: unknown): LegacyRelationshipItem[] {

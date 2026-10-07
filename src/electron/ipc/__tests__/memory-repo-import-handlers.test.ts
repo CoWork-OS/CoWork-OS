@@ -109,7 +109,9 @@ describeWithGit("memory folder import and Keep IPC", () => {
       ["Never deploy on Fridays", "agent", "import"],
     ]);
     // Importing again finds only duplicates.
-    expect(await call<MemoryRepoImportResult>(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER)).toMatchObject({
+    expect(
+      await call<MemoryRepoImportResult>(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER),
+    ).toMatchObject({
       imported: 0,
       duplicates: 3,
     });
@@ -117,12 +119,16 @@ describeWithGit("memory folder import and Keep IPC", () => {
 
   it("reports a closed picker, a refused folder and a missing picker", async () => {
     pickFolder.mockResolvedValueOnce(null);
-    expect(await call<MemoryRepoImportResult>(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER)).toMatchObject({
+    expect(
+      await call<MemoryRepoImportResult>(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER),
+    ).toMatchObject({
       cancelled: true,
       imported: 0,
     });
     pickFolder.mockResolvedValueOnce(service.root);
-    expect(await call<MemoryRepoImportResult>(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER)).toMatchObject({
+    expect(
+      await call<MemoryRepoImportResult>(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER),
+    ).toMatchObject({
       error: "That is your own memory folder.",
     });
     const noPicker = createMemoryRepoIpcHandlers({
@@ -174,7 +180,10 @@ describeWithGit("memory folder import and Keep IPC", () => {
       }),
     ).rejects.toThrow(/Workspace not found/);
 
-    expect(await keep(first, "me")).toMatchObject({ ok: true, ref: expect.stringMatching(/^repo:me\.md#L\d+$/) });
+    expect(await keep(first, "me")).toMatchObject({
+      ok: true,
+      ref: expect.stringMatching(/^repo:me\.md#L\d+$/),
+    });
     const second = await inboxEntry("Release notes go in docs/releases");
     expect(await keep(second, "workspace")).toMatchObject({
       ok: true,
@@ -192,11 +201,17 @@ describeWithGit("memory folder import and Keep IPC", () => {
     );
     expect(byFile["me.md"]).toContainEqual(["Prefers concise status updates", "user"]);
     expect(byFile["lessons.md"]).toContainEqual(["Never deploy on Fridays", "user"]);
-    expect(byFile["workspaces/billing.md"]).toContainEqual(["Release notes go in docs/releases", "user"]);
+    expect(byFile["workspaces/billing.md"]).toContainEqual([
+      "Release notes go in docs/releases",
+      "user",
+    ]);
 
     // Keep is for inbox lines only.
     const kept = report.files.find((file) => file.path === "me.md")!.entries[0];
-    expect(await keep(kept, "lessons")).toEqual({ ok: false, error: "Only inbox entries can be kept." });
+    expect(await keep(kept, "lessons")).toEqual({
+      ok: false,
+      error: "Only inbox entries can be kept.",
+    });
     expect(limited).toContain(IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY);
   });
 });

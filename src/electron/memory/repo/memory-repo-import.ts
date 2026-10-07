@@ -167,7 +167,10 @@ export function memoryRepoImportEntries(files: MemoryRepoImportFile[]): {
 
 /** The `import:` metadata value for a folder. */
 export function memoryRepoImportLabel(folder: string): string {
-  const name = path.basename(path.resolve(folder)).replace(/[;\][\r\n]+/g, " ").trim();
+  const name = path
+    .basename(path.resolve(folder))
+    .replace(/[;\][\r\n]+/g, " ")
+    .trim();
   return `folder:${(name || "notes").slice(0, 80)}`;
 }
 

@@ -368,11 +368,7 @@ export function BotDetailsRail({
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className="bot-details-link"
-            onClick={() => setWorkTab("setup")}
-          >
+          <button type="button" className="bot-details-link" onClick={() => setWorkTab("setup")}>
             Responsibilities and setup
           </button>
         </section>

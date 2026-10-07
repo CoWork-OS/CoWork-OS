@@ -143,7 +143,10 @@ describe("renderer perf replay fixture", () => {
       shared = projectFailureStorm();
       projectionSamples.push(performance.now() - startedAt);
     }
-    const projectionMs = percentile([...projectionSamples].sort((a, b) => a - b), 0.5);
+    const projectionMs = percentile(
+      [...projectionSamples].sort((a, b) => a - b),
+      0.5,
+    );
 
     const feedRows = shared.baseTimelineItems.map((item, index) => ({
       kind: "timeline" as const,

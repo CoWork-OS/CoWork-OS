@@ -39,7 +39,14 @@ function workspace(permissions: Partial<Workspace["permissions"]> = {}): Workspa
     name: "Workspace",
     path: workspacePath,
     createdAt: 0,
-    permissions: { read: true, write: true, delete: true, network: false, shell: false, ...permissions },
+    permissions: {
+      read: true,
+      write: true,
+      delete: true,
+      network: false,
+      shell: false,
+      ...permissions,
+    },
   } as Workspace;
 }
 
@@ -78,7 +85,10 @@ describe("removeGeneratedMemoryBlocks", () => {
 
 describe("stripCuratedKitBlocksOnce", () => {
   it("removes the blocks, keeps the user's text and snapshots the old file", async () => {
-    write("USER.md", `# User Profile\n\nMy own note.\n\n${USER_START}\n- preference: tea\n${USER_END}\n`);
+    write(
+      "USER.md",
+      `# User Profile\n\nMy own note.\n\n${USER_START}\n- preference: tea\n${USER_END}\n`,
+    );
     write(
       "MEMORY.md",
       `# Long-Term Memory\n\n${WS_START}\n- Rule: lint\n${WS_END}\n\n## Hand-written\n- keep me\n`,

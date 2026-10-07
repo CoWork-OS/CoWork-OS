@@ -1437,8 +1437,8 @@ export class ManagedSessionService {
     await this.managedAgentVersionRepo.create(version);
     const syncedVersion = await this.syncLegacyMirror(agent, version);
     const workspaceId = getStudioConfig(syncedVersion)?.defaultEnvironmentId
-      ? (await this.getEnvironment(getStudioConfig(syncedVersion)?.defaultEnvironmentId || ""))?.config
-          .workspaceId
+      ? (await this.getEnvironment(getStudioConfig(syncedVersion)?.defaultEnvironmentId || ""))
+          ?.config.workspaceId
       : undefined;
     if (workspaceId) {
       await this.appendAudit({
@@ -3391,11 +3391,13 @@ export class ManagedSessionService {
     }
   }
 
-  private async listRoutineRunsForAgent(agentId: string): Promise<Array<{
-    run: import("../routines/types").RoutineRun;
-    definition: Routine;
-    surface: "slack" | "chatgpt";
-  }>> {
+  private async listRoutineRunsForAgent(agentId: string): Promise<
+    Array<{
+      run: import("../routines/types").RoutineRun;
+      definition: Routine;
+      surface: "slack" | "chatgpt";
+    }>
+  > {
     const rows = await this.managedRows.routineRunRowsWithDefinition();
     const runs: Array<{
       run: import("../routines/types").RoutineRun;

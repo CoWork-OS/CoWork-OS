@@ -189,7 +189,9 @@ export class SupermemoryRemoteRefStore {
             )
             .all(filter.workspaceId, filter.limit)
         : this.db
-            .prepare(`SELECT ${SELECT_COLUMNS} FROM supermemory_remote_refs r ORDER BY r.id LIMIT ?`)
+            .prepare(
+              `SELECT ${SELECT_COLUMNS} FROM supermemory_remote_refs r ORDER BY r.id LIMIT ?`,
+            )
             .all(filter.limit)
     ) as RemoteRefRow[];
     return rows.map(toRef);

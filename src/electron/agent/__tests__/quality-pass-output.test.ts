@@ -38,8 +38,8 @@ describe("text-only quality passes", () => {
     expect(
       isQualityRewriteFaithful(rewrite.replace("logs/app/server.log", "the server log"), draft),
     ).toBe(false);
-    expect(
-      isQualityRewriteFaithful(rewrite.replace("3 warnings", "a few warnings"), draft),
-    ).toBe(false);
+    expect(isQualityRewriteFaithful(rewrite.replace("3 warnings", "a few warnings"), draft)).toBe(
+      false,
+    );
   });
 });

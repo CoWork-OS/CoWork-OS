@@ -35,23 +35,27 @@ export interface ACPHandlerDeps {
     scope: "admin" | "read" | "write" | "operator",
   ) => void;
   /** Function to fetch active agent roles from the AgentRoleRepository */
-  getActiveRoles: () => Array<{
-    id: string;
-    name: string;
-    displayName: string;
-    description?: string;
-    icon: string;
-    capabilities: string[];
-    isActive: boolean;
-  }> | Promise<Array<{
-    id: string;
-    name: string;
-    displayName: string;
-    description?: string;
-    icon: string;
-    capabilities: string[];
-    isActive: boolean;
-  }>>;
+  getActiveRoles: () =>
+    | Array<{
+        id: string;
+        name: string;
+        displayName: string;
+        description?: string;
+        icon: string;
+        capabilities: string[];
+        isActive: boolean;
+      }>
+    | Promise<
+        Array<{
+          id: string;
+          name: string;
+          displayName: string;
+          description?: string;
+          icon: string;
+          capabilities: string[];
+          isActive: boolean;
+        }>
+      >;
   /** Function to create a CoWork task for local agent delegation */
   createTask?: (params: {
     title: string;

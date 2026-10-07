@@ -318,14 +318,38 @@ describeWithSqlite("MemoryItemsHubService", () => {
         kind: "preference",
         scope: "global",
       });
-      expect(global).toMatchObject({ success: true, item: null, ref: expect.stringMatching(/^repo:me\.md#L/) });
-      await folderHub.add({ workspaceId: "ws-1", content: "The API uses Postgres", kind: "project_fact", scope: "workspace" });
-      await folderHub.add({ workspaceId: "ws-1", content: "Answer in English", kind: "preference", scope: "global", pinned: true });
-      expect(lines("me.md")).toEqual([expect.objectContaining({ text: "Prefers concise answers", by: "user" })]);
-      expect(lines("workspaces/billing.md").map((entry) => entry.text)).toContain("The API uses Postgres");
+      expect(global).toMatchObject({
+        success: true,
+        item: null,
+        ref: expect.stringMatching(/^repo:me\.md#L/),
+      });
+      await folderHub.add({
+        workspaceId: "ws-1",
+        content: "The API uses Postgres",
+        kind: "project_fact",
+        scope: "workspace",
+      });
+      await folderHub.add({
+        workspaceId: "ws-1",
+        content: "Answer in English",
+        kind: "preference",
+        scope: "global",
+        pinned: true,
+      });
+      expect(lines("me.md")).toEqual([
+        expect.objectContaining({ text: "Prefers concise answers", by: "user" }),
+      ]);
+      expect(lines("workspaces/billing.md").map((entry) => entry.text)).toContain(
+        "The API uses Postgres",
+      );
       expect(lines("MEMORY.md").map((entry) => entry.text)).toEqual(["Answer in English"]);
       expect(rowsOf(db)).toHaveLength(0);
-      const again = await folderHub.add({ workspaceId: "ws-1", content: "Prefers concise answers", kind: "preference", scope: "global" });
+      const again = await folderHub.add({
+        workspaceId: "ws-1",
+        content: "Prefers concise answers",
+        kind: "preference",
+        scope: "global",
+      });
       expect(again).toMatchObject({ success: true, action: "reinforced" });
     });
 
@@ -336,23 +360,42 @@ describeWithSqlite("MemoryItemsHubService", () => {
         kind: "commitment",
         scope: "workspace",
       });
-      expect(result).toMatchObject({ success: true, item: expect.objectContaining({ kind: "commitment" }) });
+      expect(result).toMatchObject({
+        success: true,
+        item: expect.objectContaining({ kind: "commitment" }),
+      });
       expect(rowsOf(db)).toHaveLength(1);
     });
 
     it("moves an edited or pinned fact item to the folder and deletes the item", async () => {
       const { globalId, localId } = await seed();
-      const edited = await folderHub.update({ workspaceId: "ws-1", id: localId, content: "The API uses PostgreSQL 17" });
-      expect(edited).toMatchObject({ success: true, action: "moved", ref: expect.stringMatching(/^repo:workspaces\/billing\.md#L/) });
+      const edited = await folderHub.update({
+        workspaceId: "ws-1",
+        id: localId,
+        content: "The API uses PostgreSQL 17",
+      });
+      expect(edited).toMatchObject({
+        success: true,
+        action: "moved",
+        ref: expect.stringMatching(/^repo:workspaces\/billing\.md#L/),
+      });
       expect(rowsOf(db, "id = ? AND status = 'active'", localId)).toHaveLength(0);
       const pinned = await folderHub.setPinned({ workspaceId: "ws-1", id: globalId, pinned: true });
-      expect(pinned).toMatchObject({ success: true, ref: expect.stringMatching(/^repo:MEMORY\.md#L/) });
+      expect(pinned).toMatchObject({
+        success: true,
+        ref: expect.stringMatching(/^repo:MEMORY\.md#L/),
+      });
       expect(lines("MEMORY.md").map((entry) => entry.text)).toEqual(["Prefers concise answers"]);
       expect(rowsOf(db, "id = ? AND status = 'active'", globalId)).toHaveLength(0);
     });
 
     it("reports a folder skip instead of falling back", async () => {
-      const result = await folderHub.add({ workspaceId: "ws-1", content: "ok", kind: "preference", scope: "global" });
+      const result = await folderHub.add({
+        workspaceId: "ws-1",
+        content: "ok",
+        kind: "preference",
+        scope: "global",
+      });
       expect(result).toMatchObject({ success: false });
       expect(rowsOf(db)).toHaveLength(0);
     });

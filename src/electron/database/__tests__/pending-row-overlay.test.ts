@@ -199,9 +199,9 @@ describeWithSqlite("reads over pending timeline rows", () => {
       "pending",
       "committed",
     ]);
-    expect((await activities.list({ workspaceId, limit: 1, offset: 1 })).map((item) => item.title)).toEqual(
-      ["committed"],
-    );
+    expect(
+      (await activities.list({ workspaceId, limit: 1, offset: 1 })).map((item) => item.title),
+    ).toEqual(["committed"]);
     expect(await activities.getUnreadCount(workspaceId)).toBe(2);
     expect((await activities.findById(pending.id))?.title).toBe("pending");
   });

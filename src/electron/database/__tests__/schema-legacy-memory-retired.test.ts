@@ -19,7 +19,8 @@ const nativeSqliteAvailable = await import("better-sqlite3")
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
 /** Tables retired by LegacyMemoryRetirement.ts; a fresh profile must not create them. */
-const RETIRED = /^(curated_memory_entries|memory_summaries|heartbeat_policies|improvement_.*|transcript_spans.*|transcript_span_index_gap|transcript_store_meta)$/;
+const RETIRED =
+  /^(curated_memory_entries|memory_summaries|heartbeat_policies|improvement_.*|transcript_spans.*|transcript_span_index_gap|transcript_store_meta)$/;
 
 describeWithSqlite("DatabaseManager schema without the retired legacy memory tables", () => {
   let tmpDir: string;

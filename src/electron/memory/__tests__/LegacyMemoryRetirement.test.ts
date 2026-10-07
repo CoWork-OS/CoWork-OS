@@ -116,8 +116,7 @@ class FakeSettings implements LegacySettingsAccess {
 const fakeSafeStorage = {
   isEncryptionAvailable: () => true,
   encryptString: (text: string) => Buffer.from(`enc:${Buffer.from(text).toString("base64")}`),
-  decryptString: (data: Buffer) =>
-    Buffer.from(data.toString().slice(4), "base64").toString("utf8"),
+  decryptString: (data: Buffer) => Buffer.from(data.toString().slice(4), "base64").toString("utf8"),
 };
 
 function insertCurated(
@@ -197,7 +196,9 @@ describeWithSqlite("legacy memory retirement", () => {
   let backupDir: string;
   let tmpRoot: string;
 
-  const deps = (overrides: Partial<LegacyMemoryRetirementDeps> = {}): LegacyMemoryRetirementDeps => ({
+  const deps = (
+    overrides: Partial<LegacyMemoryRetirementDeps> = {},
+  ): LegacyMemoryRetirementDeps => ({
     port: createMemoryStatementPort(db),
     writer,
     settings,
@@ -286,9 +287,9 @@ describeWithSqlite("legacy memory retirement", () => {
 
   it("exports, verifies and retires a populated legacy profile", async () => {
     addLegacyTables(db);
-    db.prepare(
-      "INSERT INTO durable_context_meta (key, value, updated_at) VALUES (?, '{}', 1)",
-    ).run(LEGACY_TRANSCRIPT_SPANS_MIGRATED_KEY);
+    db.prepare("INSERT INTO durable_context_meta (key, value, updated_at) VALUES (?, '{}', 1)").run(
+      LEGACY_TRANSCRIPT_SPANS_MIGRATED_KEY,
+    );
     insertCurated(db, "c1", "Run lint before commits");
     insertCurated(db, "c2", "Old archived rule", { status: "archived" });
     settings.values.set("user-profile", PROFILE);
@@ -346,7 +347,10 @@ describeWithSqlite("legacy memory retirement", () => {
     expect(db.prepare("SELECT id FROM pending_memory_writes").all()).toEqual([{ id: "p1" }]);
     expect(result.pendingWritesDeleted).toBe(2);
 
-    expect([...settings.values.keys()].sort()).toEqual(["adaptive-style-engine", "awareness-state"]);
+    expect([...settings.values.keys()].sort()).toEqual([
+      "adaptive-style-engine",
+      "awareness-state",
+    ]);
     expect(result.settingsDeleted).toEqual(["user-profile", "relationship-memory"]);
 
     // Encrypted export, owner-only.
@@ -429,9 +433,9 @@ describeWithSqlite("legacy memory retirement", () => {
     // The export of the aborted run is removed; the claim is released for the next start.
     expect(backups()).toEqual([]);
     expect(
-      db.prepare("SELECT 1 FROM maintenance_state WHERE key = ?").get(
-        maintenanceClaimKey(LEGACY_MEMORY_RETIREMENT_KEY),
-      ),
+      db
+        .prepare("SELECT 1 FROM maintenance_state WHERE key = ?")
+        .get(maintenanceClaimKey(LEGACY_MEMORY_RETIREMENT_KEY)),
     ).toBeUndefined();
 
     // The next start succeeds.

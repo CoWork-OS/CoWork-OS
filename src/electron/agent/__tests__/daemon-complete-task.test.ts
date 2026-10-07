@@ -301,8 +301,9 @@ describe("AgentDaemon.completeTask", () => {
         payload: { tool: "run_command" },
       })),
     ]);
-    daemonLike.runPostCompletionVerification = (AgentDaemon.prototype as Any)
-      .runPostCompletionVerification;
+    daemonLike.runPostCompletionVerification = (
+      AgentDaemon.prototype as Any
+    ).runPostCompletionVerification;
     daemonLike.runReadOnlyChildTaskAndWait = vi.fn().mockResolvedValue({
       childTaskId: "verifier-timeout",
       status: "timeout",
@@ -479,8 +480,12 @@ describe("AgentDaemon.completeTask", () => {
   it("does not learn from a completed synthetic sample task", () => {
     const daemonLike = createDaemonLike();
     daemonLike.taskRepo.findById.mockReturnValue({
-      id: "task-1", title: "Synthetic sample", status: "executing",
-      workspaceId: "workspace-1", agentType: "main", source: "sample",
+      id: "task-1",
+      title: "Synthetic sample",
+      status: "executing",
+      workspaceId: "workspace-1",
+      agentType: "main",
+      source: "sample",
     });
     (PersonalityManager.recordTaskCompleted as Any).mockClear();
 
@@ -833,11 +838,7 @@ describe("AgentDaemon.completeTask", () => {
       keyClaims: ["The agenda is 45 minutes long."],
     });
 
-    AgentDaemon.prototype.completeTask.call(
-      daemonLike,
-      "task-1",
-      "The agenda is 45 minutes long.",
-    );
+    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "The agenda is 45 minutes long.");
 
     expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
       "task-1",

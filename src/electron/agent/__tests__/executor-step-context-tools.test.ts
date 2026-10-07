@@ -19,8 +19,7 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 vi.mock("../../memory/MemoryService", () => ({
-  MemoryService: {
-  },
+  MemoryService: {},
 }));
 
 vi.mock("../custom-skill-loader", () => ({

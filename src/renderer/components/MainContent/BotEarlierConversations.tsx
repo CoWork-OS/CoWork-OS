@@ -102,44 +102,47 @@ export function BotEarlierConversations({
     if (shift !== 0) container.scrollTop += shift;
   }, [messages, scrollContainerRef]);
 
-  const loadMore = useCallback(async (options?: { keepPosition?: boolean }) => {
-    const api = window.electronAPI;
-    if (loadingRef.current) return;
-    if (!agentRoleId || !api?.listBotMessages) {
-      setHasMore(false);
-      return;
-    }
-    loadingRef.current = true;
-    setLoading(true);
-    setError(null);
-    try {
-      const page = await api.listBotMessages({
-        workspaceId: currentTask.workspaceId,
-        includeAllWorkspaces: isTempWorkspaceId(currentTask.workspaceId),
-        agentRoleId,
-        beforeConversationId: currentTask.id,
-        cursor: cursorRef.current,
-        limit: BOT_MESSAGE_PAGE_DEFAULT_LIMIT,
-      });
-      if (!mountedRef.current) return;
-      cursorRef.current = page.nextCursor;
-      if (page.messages.length > 0) {
-        if (options?.keepPosition) captureAnchor();
-        setMessages((previous) => {
-          const known = new Set(previous.map((message) => message.id));
-          return [...page.messages.filter((message) => !known.has(message.id)), ...previous];
+  const loadMore = useCallback(
+    async (options?: { keepPosition?: boolean }) => {
+      const api = window.electronAPI;
+      if (loadingRef.current) return;
+      if (!agentRoleId || !api?.listBotMessages) {
+        setHasMore(false);
+        return;
+      }
+      loadingRef.current = true;
+      setLoading(true);
+      setError(null);
+      try {
+        const page = await api.listBotMessages({
+          workspaceId: currentTask.workspaceId,
+          includeAllWorkspaces: isTempWorkspaceId(currentTask.workspaceId),
+          agentRoleId,
+          beforeConversationId: currentTask.id,
+          cursor: cursorRef.current,
+          limit: BOT_MESSAGE_PAGE_DEFAULT_LIMIT,
         });
+        if (!mountedRef.current) return;
+        cursorRef.current = page.nextCursor;
+        if (page.messages.length > 0) {
+          if (options?.keepPosition) captureAnchor();
+          setMessages((previous) => {
+            const known = new Set(previous.map((message) => message.id));
+            return [...page.messages.filter((message) => !known.has(message.id)), ...previous];
+          });
+        }
+        setHasMore(page.hasMore && page.nextCursor !== null);
+      } catch (cause) {
+        if (mountedRef.current) {
+          setError(cause instanceof Error ? cause.message : "Could not load earlier messages.");
+        }
+      } finally {
+        loadingRef.current = false;
+        if (mountedRef.current) setLoading(false);
       }
-      setHasMore(page.hasMore && page.nextCursor !== null);
-    } catch (cause) {
-      if (mountedRef.current) {
-        setError(cause instanceof Error ? cause.message : "Could not load earlier messages.");
-      }
-    } finally {
-      loadingRef.current = false;
-      if (mountedRef.current) setLoading(false);
-    }
-  }, [agentRoleId, captureAnchor, currentTask.id, currentTask.workspaceId]);
+    },
+    [agentRoleId, captureAnchor, currentTask.id, currentTask.workspaceId],
+  );
 
   useEffect(() => {
     const sentinel = sentinelRef.current;

@@ -35,15 +35,16 @@ function kindLabel(kind: string | null): string | null {
   return KIND_LABELS[kind as MemoryHubKind] ?? null;
 }
 
-const KEEP_ACTIONS: ReadonlyArray<{ target: MemoryRepoKeepTarget; label: string; title: string }> = [
-  { target: "me", label: "Keep: about me", title: "Keep it as yours in me.md" },
-  { target: "lessons", label: "Keep: lesson", title: "Keep it as yours in lessons.md" },
-  {
-    target: "workspace",
-    label: "Keep: this workspace",
-    title: "Keep it as yours in this workspace's file",
-  },
-];
+const KEEP_ACTIONS: ReadonlyArray<{ target: MemoryRepoKeepTarget; label: string; title: string }> =
+  [
+    { target: "me", label: "Keep: about me", title: "Keep it as yours in me.md" },
+    { target: "lessons", label: "Keep: lesson", title: "Keep it as yours in lessons.md" },
+    {
+      target: "workspace",
+      label: "Keep: this workspace",
+      title: "Keep it as yours in this workspace's file",
+    },
+  ];
 
 function FolderEntryRow({
   entry,

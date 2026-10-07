@@ -139,8 +139,8 @@ export class NotificationService {
         });
       void this.initialized.catch((error) =>
         log.warn("Canonical inbox initialization failed:", error),
-        );
-      }
+      );
+    }
     if (!config.db && collapsed.changed)
       saveNotificationStoreSync({ version: 1, notifications: this.notifications }, this.storePath);
     log.info(`Loaded ${this.notifications.length} notifications from store`);
@@ -227,7 +227,7 @@ export class NotificationService {
     this.notifications = next;
     const delivery = this.emit({ type: "added", notification });
     return { notification, desktopRequested: delivery?.desktopRequested === true };
-    }
+  }
   private makeNotification(params: AddNotificationParams): AppNotification {
     return {
       id: params.id ?? randomUUID(),
@@ -396,5 +396,5 @@ export class NotificationService {
         "desktopRequested" in result &&
         result.desktopRequested === true,
     };
-    }
   }
+}

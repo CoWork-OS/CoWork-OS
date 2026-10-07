@@ -435,7 +435,9 @@ describe("FileTools exact responsibility action review", () => {
   it("reviews the granted target when the model passes its absolute workspace path", async () => {
     const test = await fixture();
     fs.writeFileSync(test.targetPath, "Original text\n");
-    await expect(test.files.writeFile(test.targetPath, "Absolute path proposal\n")).resolves.toEqual({
+    await expect(
+      test.files.writeFile(test.targetPath, "Absolute path proposal\n"),
+    ).resolves.toEqual({
       success: true,
       path: "notes.md",
     });

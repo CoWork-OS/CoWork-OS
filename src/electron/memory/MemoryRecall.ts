@@ -1316,7 +1316,10 @@ export function defaultMemoryRecallDeps(): MemoryRecallDeps {
       const swarmPrefix = getMemoryRepoSwarmReadPrefix();
       const inOwnSwarm = (file: string) => !!swarmPrefix && file.startsWith(`${swarmPrefix}/`);
       if (isMemoryRepoReadAllowed()) {
-        return memoryRepoRecallSource(service, (file) => !isSwarmRepoPath(file) || inOwnSwarm(file));
+        return memoryRepoRecallSource(
+          service,
+          (file) => !isSwarmRepoPath(file) || inOwnSwarm(file),
+        );
       }
       return swarmPrefix ? memoryRepoRecallSource(service, inOwnSwarm) : null;
     },

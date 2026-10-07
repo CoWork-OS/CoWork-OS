@@ -120,13 +120,16 @@ export async function runMemoryItemsFactRetirement(
           }),
           { mode: 0o600 },
         );
-        logger.info(`Retired ${retire.length} fact row(s) now held by the memory folder (${kept} kept)`);
+        logger.info(
+          `Retired ${retire.length} fact row(s) now held by the memory folder (${kept} kept)`,
+        );
         return { ran: true, retired: retire.length, kept, backup };
       },
       { timeoutMs: 0, staleMs: 10 * 60 * 1000 },
     );
   } catch (error) {
-    if (error instanceof MemoryRepoBusyError) return { ran: false, reason: "busy", retired: 0, kept: 0 };
+    if (error instanceof MemoryRepoBusyError)
+      return { ran: false, reason: "busy", retired: 0, kept: 0 };
     throw error;
   }
 }

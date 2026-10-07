@@ -81,9 +81,7 @@ describe("commitment expiry checks", () => {
     expect(isExpiryCandidate(commitment({ source: "user_stated" }), NOW)).toBe(false);
     expect(isExpiryCandidate(commitment({ source: "user_confirmed" }), NOW)).toBe(false);
     expect(isExpiryCandidate(commitment({ sourceRef: {} }), NOW)).toBe(false);
-    expect(isExpiryCandidate(commitment({ sourceRef: { dueAt: NOW - DAY / 2 } }), NOW)).toBe(
-      false,
-    );
+    expect(isExpiryCandidate(commitment({ sourceRef: { dueAt: NOW - DAY / 2 } }), NOW)).toBe(false);
     expect(isExpiryCandidate(commitment({ status: "archived" }), NOW)).toBe(false);
     expect(isExpiryCandidate(commitment({ scope: "contact", scopeRef: "c" }), NOW)).toBe(false);
     expect(isExpiryCandidate(commitment({ kind: "preference" }), NOW)).toBe(false);
@@ -94,9 +92,9 @@ describe("commitment expiry checks", () => {
     expect(archiveDoneSignals(item, [archiveRow()])).toEqual([
       expect.objectContaining({ kind: "archive", ref: "archive:m1", taskId: "t1" }),
     ]);
-    expect(archiveDoneSignals(item, [archiveRow({ content: "Quarterly report to finance" })])).toEqual(
-      [],
-    );
+    expect(
+      archiveDoneSignals(item, [archiveRow({ content: "Quarterly report to finance" })]),
+    ).toEqual([]);
     expect(archiveDoneSignals(item, [archiveRow({ content: "Dinner done" })])).toEqual([]);
     expect(archiveDoneSignals(item, [archiveRow({ createdAt: NOW - 30 * DAY })])).toEqual([]);
     expect(conversationDoneSignals(item, [hit("The quarterly report was sent")])).toEqual([
@@ -177,7 +175,9 @@ describe("CommitmentExpiryService", () => {
     const first = new Set(search.mock.calls.map((call) => JSON.stringify(call)));
     now += DAY;
     await service.sweep();
-    const second = search.mock.calls.slice(MAX_CONVERSATION_LOOKUPS).map((call) => JSON.stringify(call));
+    const second = search.mock.calls
+      .slice(MAX_CONVERSATION_LOOKUPS)
+      .map((call) => JSON.stringify(call));
     // The five commitments not searched last time come first.
     expect(second.slice(0, 5).every((call) => !first.has(call))).toBe(true);
     expect(applyCuration).not.toHaveBeenCalled();

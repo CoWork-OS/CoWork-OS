@@ -3120,7 +3120,16 @@ function SidebarComponent({
               onRetry={() => void loadAgentRoles()}
               onSelectTask={onSelectTask}
               onOpenBot={onOpenBot}
-              onOpenBotMemory={hasHostMethods("listMemoryItems","getMemorySettings","getMemoryFeaturesSettings","getRecentMemories") ? onOpenBotMemory : undefined}
+              onOpenBotMemory={
+                hasHostMethods(
+                  "listMemoryItems",
+                  "getMemorySettings",
+                  "getMemoryFeaturesSettings",
+                  "getRecentMemories",
+                )
+                  ? onOpenBotMemory
+                  : undefined
+              }
               onReopenBot={onReopenBot}
               onOpenAgents={browserAction(
                 ["listManagedAgents", "listManagedSessions"],

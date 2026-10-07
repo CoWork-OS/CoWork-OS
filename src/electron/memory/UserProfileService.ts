@@ -304,7 +304,10 @@ export class UserProfileService {
       if (!repo || !hash || !(USER_PROFILE_FOLDER_FILES as readonly string[]).includes(ref.path)) {
         return false;
       }
-      const result = await repo.forget(ref.path, ref.line, { expectHash: hash, origin: "memory_hub" });
+      const result = await repo.forget(ref.path, ref.line, {
+        expectHash: hash,
+        origin: "memory_hub",
+      });
       await UserProfileFolderModel.refresh();
       return Boolean(result.removed);
     }

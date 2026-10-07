@@ -23,7 +23,8 @@ export function defaultMemoryRepoPath(): string {
 export function resolveMemoryRepoPath(configured: string | null | undefined): string {
   const value = typeof configured === "string" ? configured.trim() : "";
   if (!value) return defaultMemoryRepoPath();
-  const expanded = value === "~" || value.startsWith("~/") ? path.join(os.homedir(), value.slice(1)) : value;
+  const expanded =
+    value === "~" || value.startsWith("~/") ? path.join(os.homedir(), value.slice(1)) : value;
   return path.resolve(expanded);
 }
 
@@ -38,7 +39,8 @@ export function memoryRepoPathProblem(
 ): string | null {
   const raw = String(candidate || "").trim();
   if (!raw) return null;
-  const expanded = raw === "~" || raw.startsWith("~/") ? path.join(os.homedir(), raw.slice(1)) : raw;
+  const expanded =
+    raw === "~" || raw.startsWith("~/") ? path.join(os.homedir(), raw.slice(1)) : raw;
   if (!path.isAbsolute(expanded)) return "Use an absolute path.";
   const resolved = path.resolve(expanded);
   if (resolved === path.parse(resolved).root) return "Choose a folder, not the disk root.";
@@ -55,7 +57,10 @@ export function memoryRepoPathProblem(
     // A workspace that is the home folder (or above it) is not a project folder; the
     // file-access layer still keeps the agent from writing the repo inside it.
     if (isAccessPathWithin(workspacePath, home)) continue;
-    if (isAccessPathWithin(workspacePath, resolved) || isAccessPathWithin(resolved, workspacePath)) {
+    if (
+      isAccessPathWithin(workspacePath, resolved) ||
+      isAccessPathWithin(resolved, workspacePath)
+    ) {
       return "Memory must live outside your workspaces.";
     }
   }

@@ -1,6 +1,13 @@
 import { z } from "zod";
-import { MEMORY_REPO_KEEP_TARGETS, MEMORY_REPO_READ_LINES_MAX } from "../../shared/memory-repo-types";
-import { MEMORY_REPO_LIMITS, isSafeRepoPath, parseMemoryRepoRef } from "../memory/repo/memory-repo-format";
+import {
+  MEMORY_REPO_KEEP_TARGETS,
+  MEMORY_REPO_READ_LINES_MAX,
+} from "../../shared/memory-repo-types";
+import {
+  MEMORY_REPO_LIMITS,
+  isSafeRepoPath,
+  parseMemoryRepoRef,
+} from "../memory/repo/memory-repo-format";
 import { WorkspaceIdSchema } from "../utils/validation";
 
 /**
@@ -53,7 +60,11 @@ export const MemoryRepoEntriesRequestSchema = z.object({ workspaceId: WorkspaceI
 
 /** `memoryRepo:removeEntry`, `memoryRepo:pinEntry`. */
 export const MemoryRepoEntryRequestSchema = z
-  .object({ workspaceId: WorkspaceIdSchema, ref: MemoryRepoRefSchema, hash: MemoryRepoEntryHashSchema })
+  .object({
+    workspaceId: WorkspaceIdSchema,
+    ref: MemoryRepoRefSchema,
+    hash: MemoryRepoEntryHashSchema,
+  })
   .strict();
 
 /** `memoryRepo:updateEntry`: the new text (screened again in main). */
@@ -62,7 +73,11 @@ export const MemoryRepoUpdateEntryRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     ref: MemoryRepoRefSchema,
     hash: MemoryRepoEntryHashSchema,
-    text: z.string().trim().min(1).max(MEMORY_REPO_LIMITS.entryChars * 2),
+    text: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MEMORY_REPO_LIMITS.entryChars * 2),
   })
   .strict();
 

@@ -91,15 +91,17 @@ export function cleanNotificationMessage(message: string): string {
       trimmed.replace(/_/g, " ").replace(/^\w/, (first) => first.toUpperCase())
     );
   }
-  return trimmed
-    .replace(/\s*Created task\s+[0-9a-f-]{8,}[^\s.]*\.?/gi, "")
-    .replace(UUID_RE, "")
-    // A raw JSON error body after the summary adds nothing readable.
-    .replace(/:\s*[{[][\s\S]*$/, "")
-    .replace(/\s*Next:\s*$/i, "")
-    .replace(/\(\s*\)/g, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
+  return (
+    trimmed
+      .replace(/\s*Created task\s+[0-9a-f-]{8,}[^\s.]*\.?/gi, "")
+      .replace(UUID_RE, "")
+      // A raw JSON error body after the summary adds nothing readable.
+      .replace(/:\s*[{[][\s\S]*$/, "")
+      .replace(/\s*Next:\s*$/i, "")
+      .replace(/\(\s*\)/g, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim()
+  );
 }
 
 export function getNotificationTone(type: string): NotificationTone {

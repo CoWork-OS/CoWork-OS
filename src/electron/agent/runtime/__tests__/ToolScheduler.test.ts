@@ -700,10 +700,7 @@ describe("ToolScheduler", () => {
 
       expect(ran).toEqual(["1", "2", "3"]);
       expect(outcome.fatalError).toBeUndefined();
-      expect(outcome.batches.map((batch) => batch.semanticSummary)).toEqual([
-        undefined,
-        undefined,
-      ]);
+      expect(outcome.batches.map((batch) => batch.semanticSummary)).toEqual([undefined, undefined]);
     });
 
     it("applies a synchronous label before returning", async () => {

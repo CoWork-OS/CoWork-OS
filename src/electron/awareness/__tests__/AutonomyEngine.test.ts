@@ -565,9 +565,7 @@ describe("AutonomyEngine", () => {
 
   it("makes autonomous task creation opt-in by default", () => {
     expect(DEFAULT_AUTONOMY_CONFIG.actionPolicies.create_task.level).toBe("suggest_only");
-    expect(DEFAULT_AUTONOMY_CONFIG.actionPolicies.execute_local_action.level).toBe(
-      "suggest_only",
-    );
+    expect(DEFAULT_AUTONOMY_CONFIG.actionPolicies.execute_local_action.level).toBe("suggest_only");
     expect(
       Object.values(DEFAULT_AUTONOMY_CONFIG.actionPolicies).some(
         (policy) => policy.level === "execute_local",

@@ -38,7 +38,9 @@ describe("memoryRepoRemoteUrlProblem", () => {
     ]) {
       expect(memoryRepoRemoteUrlProblem(bad), bad).not.toBeNull();
     }
-    expect(redactRemoteUrl("https://user:secret@example.com/r.git")).toBe("https://example.com/r.git");
+    expect(redactRemoteUrl("https://user:secret@example.com/r.git")).toBe(
+      "https://example.com/r.git",
+    );
   });
 });
 
@@ -58,7 +60,13 @@ describeWithGit("memory repo sync between two machines", () => {
     return service;
   };
   const remember = (service: MemoryRepoService, text: string) =>
-    service.remember({ text, kind: "preference", scope: "global", by: "user", origin: "memory_hub" });
+    service.remember({
+      text,
+      kind: "preference",
+      scope: "global",
+      by: "user",
+      origin: "memory_hub",
+    });
   const read = (service: MemoryRepoService, rel: string) =>
     fs.readFileSync(path.join(service.root, rel), "utf8");
 
@@ -97,8 +105,14 @@ describeWithGit("memory repo sync between two machines", () => {
   it("keeps both sides of a concurrent edit (union merge) and leaves the folder clean", async () => {
     const meA = path.join(a.root, "me.md");
     const meB = path.join(b.root, "me.md");
-    fs.writeFileSync(meA, fs.readFileSync(meA, "utf8").replace("Prefers short answers", "Prefers long answers"));
-    fs.writeFileSync(meB, fs.readFileSync(meB, "utf8").replace("Prefers short answers", "Prefers medium answers"));
+    fs.writeFileSync(
+      meA,
+      fs.readFileSync(meA, "utf8").replace("Prefers short answers", "Prefers long answers"),
+    );
+    fs.writeFileSync(
+      meB,
+      fs.readFileSync(meB, "utf8").replace("Prefers short answers", "Prefers medium answers"),
+    );
     await a.syncNow();
     const state = await b.syncNow();
     expect(state).toMatchObject({ conflict: null, lastError: null });

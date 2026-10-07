@@ -17,10 +17,7 @@ vi.mock("../../settings/personality-manager", () => ({
   },
 }));
 
-import {
-  isRevertOfStyleAdaptation,
-  withSettingsResponseStyleMirror,
-} from "../memory-read-side";
+import { isRevertOfStyleAdaptation, withSettingsResponseStyleMirror } from "../memory-read-side";
 
 const hasExplicitResponseStyle = () => personality.explicit;
 
@@ -112,7 +109,11 @@ describe("isRevertOfStyleAdaptation", () => {
     ).toBe(true);
     // An older value of the dimension is not the latest adaptation.
     expect(
-      isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "detailed" }, history),
+      isRevertOfStyleAdaptation(
+        { responseLength: "terse" },
+        { responseLength: "detailed" },
+        history,
+      ),
     ).toBe(false);
     // A changed dimension the engine never adapted is a user change.
     expect(
@@ -122,11 +123,11 @@ describe("isRevertOfStyleAdaptation", () => {
         history,
       ),
     ).toBe(false);
-    expect(isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "terse" }, history)).toBe(
-      false,
-    );
-    expect(isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "balanced" }, [])).toBe(
-      false,
-    );
+    expect(
+      isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "terse" }, history),
+    ).toBe(false);
+    expect(
+      isRevertOfStyleAdaptation({ responseLength: "terse" }, { responseLength: "balanced" }, []),
+    ).toBe(false);
   });
 });

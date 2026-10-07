@@ -2168,7 +2168,9 @@ if (isMacSafeStorageMigrationWorker) {
                   "Dreaming suggested changes to your memory folder. Accept or reject them in Settings > Memory > Review.",
                 openTarget: "memory_review",
               })
-              .catch((error) => logger.warn("Could not post the dream review notification:", error));
+              .catch((error) =>
+                logger.warn("Could not post the dream review notification:", error),
+              );
           },
         });
 

@@ -166,13 +166,11 @@ suite("inline approval canonical request and resumption", () => {
           agentConfig: { accessProfileId: "ask_for_approval" },
         }),
       },
-      requestUserInput: vi
-        .fn()
-        .mockResolvedValue({
-          requestId: "input",
-          status: "submitted",
-          answers: { approval_decision: { optionLabel: "Allow once" } },
-        }),
+      requestUserInput: vi.fn().mockResolvedValue({
+        requestId: "input",
+        status: "submitted",
+        answers: { approval_decision: { optionLabel: "Allow once" } },
+      }),
       logEvent: vi.fn(),
     } as Any;
     expect(

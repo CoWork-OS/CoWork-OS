@@ -15,12 +15,7 @@ export interface DebugSessionPanelProps {
  * Summary strip for tasks created in Debug execution mode: phase, ingest URL, loop stages.
  */
 export function DebugSessionPanel({ events }: DebugSessionPanelProps) {
-  const {
-    ingestUrl,
-    activePhase,
-    lastRuntimeTrace,
-    lastSessionFork,
-  } = useMemo(() => {
+  const { ingestUrl, activePhase, lastRuntimeTrace, lastSessionFork } = useMemo(() => {
     let ingest: string | null = null;
     let phase: DebugPhase = "hypothesize";
     let phaseFound = false;

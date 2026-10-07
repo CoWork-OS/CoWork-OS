@@ -290,41 +290,41 @@ describe("curated prompt entry balance", () => {
   it.skipIf(!nativeSqliteAvailable)(
     "balances the user and workspace lanes of memory_items for prompt entries",
     async () => {
-    const { writer, db } = await useMemoryItems();
-    for (let i = 0; i < 12; i += 1) {
-      await writer.ingest(
-        curatedEntryCandidate({
-          id: `u${i}`,
-          workspaceId: "ws1",
-          target: "user",
-          kind: "preference",
-          content: `User preference number ${i}`,
-          source: "agent_tool",
-          confidence: 0.9,
-        }),
+      const { writer, db } = await useMemoryItems();
+      for (let i = 0; i < 12; i += 1) {
+        await writer.ingest(
+          curatedEntryCandidate({
+            id: `u${i}`,
+            workspaceId: "ws1",
+            target: "user",
+            kind: "preference",
+            content: `User preference number ${i}`,
+            source: "agent_tool",
+            confidence: 0.9,
+          }),
+        );
+      }
+      for (let i = 0; i < 8; i += 1) {
+        await writer.ingest(
+          curatedEntryCandidate({
+            id: `w${i}`,
+            workspaceId: "ws1",
+            target: "workspace",
+            kind: "workflow_rule",
+            content: `Workspace rule number ${i}`,
+            source: "agent_tool",
+            confidence: 0.9,
+          }),
+        );
+      }
+      // Private items (strict privacy mode) never reach prompts.
+      db.prepare("UPDATE memory_items SET privacy = 'private' WHERE content = ?").run(
+        "Workspace rule number 7",
       );
-    }
-    for (let i = 0; i < 8; i += 1) {
-      await writer.ingest(
-        curatedEntryCandidate({
-          id: `w${i}`,
-          workspaceId: "ws1",
-          target: "workspace",
-          kind: "workflow_rule",
-          content: `Workspace rule number ${i}`,
-          source: "agent_tool",
-          confidence: 0.9,
-        }),
-      );
-    }
-    // Private items (strict privacy mode) never reach prompts.
-    db.prepare("UPDATE memory_items SET privacy = 'private' WHERE content = ?").run(
-      "Workspace rule number 7",
-    );
-    const entries = await CuratedMemoryService.getPromptEntries("ws1", 10);
-    expect(entries.filter((entry) => entry.target === "user")).toHaveLength(6);
-    expect(entries.filter((entry) => entry.target === "workspace")).toHaveLength(4);
-    expect(entries.map((entry) => entry.content)).not.toContain("Workspace rule number 7");
+      const entries = await CuratedMemoryService.getPromptEntries("ws1", 10);
+      expect(entries.filter((entry) => entry.target === "user")).toHaveLength(6);
+      expect(entries.filter((entry) => entry.target === "workspace")).toHaveLength(4);
+      expect(entries.map((entry) => entry.content)).not.toContain("Workspace rule number 7");
     },
   );
 });

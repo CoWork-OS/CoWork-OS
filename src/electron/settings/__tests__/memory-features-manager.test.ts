@@ -169,7 +169,9 @@ describe("MemoryFeaturesManager", () => {
     expect(mocks.storedSettings).toMatchObject({
       memoryRepoRemoteUrl: "git@github.com:me/memory.git",
       memoryRepoRemoteConfirmedPrivate: false,
-      memoryRepoTeamRepos: [{ name: "Platform", path: "/Users/me/team-memory", workspaceIds: ["ws-1"] }],
+      memoryRepoTeamRepos: [
+        { name: "Platform", path: "/Users/me/team-memory", workspaceIds: ["ws-1"] },
+      ],
     });
   });
 
@@ -198,7 +200,10 @@ describe("MemoryFeaturesManager", () => {
       heartbeatMaintenanceEnabled: true,
       memoryRepoEnabled: false,
     });
-    expect(mocks.storedSettings).toMatchObject({ memoryRepoEnabled: true, memoryRepoDefaultOnApplied: true });
+    expect(mocks.storedSettings).toMatchObject({
+      memoryRepoEnabled: true,
+      memoryRepoDefaultOnApplied: true,
+    });
     // After the migration, turning it off holds.
     MemoryFeaturesManager.saveSettings({
       contextPackInjectionEnabled: true,
@@ -211,7 +216,9 @@ describe("MemoryFeaturesManager", () => {
 
   it("tells listeners about saves", () => {
     const seen: Array<boolean | undefined> = [];
-    const unsubscribe = MemoryFeaturesManager.onSaved((saved) => seen.push(saved.memoryRepoEnabled));
+    const unsubscribe = MemoryFeaturesManager.onSaved((saved) =>
+      seen.push(saved.memoryRepoEnabled),
+    );
     MemoryFeaturesManager.saveSettings({
       contextPackInjectionEnabled: true,
       heartbeatMaintenanceEnabled: true,

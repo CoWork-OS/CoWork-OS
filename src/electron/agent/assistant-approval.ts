@@ -204,10 +204,11 @@ export function parseAssistantApprovalAnswer(
   answers: InputRequest["answers"] | undefined,
   responsibilityActionReview = false,
 ): boolean {
-  const label = answers?.[
-    responsibilityActionReview
-      ? RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
-      : ASSISTANT_APPROVAL_QUESTION_ID
-  ]?.optionLabel;
+  const label =
+    answers?.[
+      responsibilityActionReview
+        ? RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
+        : ASSISTANT_APPROVAL_QUESTION_ID
+    ]?.optionLabel;
   return typeof label === "string" && label.trim().toLowerCase().startsWith("allow");
 }

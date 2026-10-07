@@ -73,9 +73,7 @@ export function SupermemoryDisconnectPurge({
   confirm,
 }: SupermemoryDisconnectPurgeProps) {
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(
-    null,
-  );
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   if (!status?.enabled) return null;
 
   const recorded = typeof status.mirroredCopies === "number" ? status.mirroredCopies : null;

@@ -27,8 +27,7 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 vi.mock("../../memory/MemoryService", () => ({
-  MemoryService: {
-  },
+  MemoryService: {},
 }));
 
 function toolUseResponse(name: string, input: Record<string, Any>): LLMResponse {
@@ -4639,10 +4638,7 @@ relationship_memory:
     };
     (executor as Any).plan = {
       description: "Plan",
-      steps: [
-        { id: "1", description: "Fix the sum bug in sum.ts", status: "completed" },
-        step,
-      ],
+      steps: [{ id: "1", description: "Fix the sum bug in sum.ts", status: "completed" }, step],
     };
 
     try {
@@ -5953,7 +5949,11 @@ describe("TaskExecutor step loop control", () => {
         return { success: true, file_path: "src/auth/login.ts", replacements: 1 };
       }
       if (name === "read_file") {
-        return { success: true, path: input?.path, content: "export const login = (user) => user.name;" };
+        return {
+          success: true,
+          path: input?.path,
+          content: "export const login = (user) => user.name;",
+        };
       }
       return { success: true };
     });
@@ -5980,7 +5980,8 @@ describe("TaskExecutor step loop control", () => {
     });
     const starvationBlocks = (executor: Any) =>
       executor.daemon.logEvent.mock.calls.filter(
-        (call: Any[]) => call[1] === "tool_blocked" && call[2]?.reason === "mutation_starvation_guard",
+        (call: Any[]) =>
+          call[1] === "tool_blocked" && call[2]?.reason === "mutation_starvation_guard",
       );
     const executedTools = (executor: Any): string[] =>
       executor.toolRegistry.executeTool.mock.calls.map((call: Any[]) => call[0]);
@@ -6208,7 +6209,11 @@ describe("TaskExecutor step loop control", () => {
         description: "Inspect the project modules and describe how they are organized",
         status: "pending",
       };
-      const nextStep: Any = { id: "next-step", description: "Write the summary", status: "pending" };
+      const nextStep: Any = {
+        id: "next-step",
+        description: "Write the summary",
+        status: "pending",
+      };
       (executor as Any).plan = { description: "Plan", steps: [step, nextStep] };
       (executor as Any).maxPlanRevisions = 5;
       (executor as Any).planRevisionCount = 0;
@@ -6229,9 +6234,9 @@ describe("TaskExecutor step loop control", () => {
           entry.role === "user" &&
           JSON.stringify(entry.content).includes("turns left in this step"),
       );
-      expect(history.slice(warningIndex).filter((entry) => entry.role === "assistant")).toHaveLength(
-        2,
-      );
+      expect(
+        history.slice(warningIndex).filter((entry) => entry.role === "assistant"),
+      ).toHaveLength(2);
 
       expect(step.status).toBe("failed");
       const planDescriptions = (executor as Any).plan.steps.map((entry: Any) => entry.description);
@@ -6471,7 +6476,11 @@ describe("TaskExecutor step loop control", () => {
         description: "Inspect src/auth/login.ts and explain the null check problem",
         status: "pending",
       };
-      const laterStep: Any = { id: "later-step", description: "Write the report", status: "pending" };
+      const laterStep: Any = {
+        id: "later-step",
+        description: "Write the report",
+        status: "pending",
+      };
       (executor as Any).plan = { description: "Plan", steps: [step, laterStep] };
 
       const run = (executor as Any).executePlan();
@@ -6554,7 +6563,11 @@ describe("TaskExecutor step loop control", () => {
         responses.push(
           toolCall(
             "edit_file",
-            { file_path: "src/auth/login.ts", old_string: `v${attempt}`, new_string: `v${attempt + 1}` },
+            {
+              file_path: "src/auth/login.ts",
+              old_string: `v${attempt}`,
+              new_string: `v${attempt + 1}`,
+            },
             `e${attempt}`,
           ),
         );
@@ -6588,7 +6601,9 @@ describe("TaskExecutor step loop control", () => {
       const responses: LLMResponse[] = Array.from({ length: 6 }, (_, index) =>
         toolCall("run_command", { command: "npm test -- login" }, `c${index}`),
       );
-      responses.push(textResponse("The login test keeps failing; the blocker is the missing fixture."));
+      responses.push(
+        textResponse("The login test keeps failing; the blocker is the missing fixture."),
+      );
       const executor = createCodeStepExecutor(responses, {
         run_command: () => ({ success: false, exitCode: 1, stdout: "1 failing", stderr: "" }),
       });
@@ -6626,7 +6641,9 @@ describe("TaskExecutor step loop control", () => {
 
       expect(step.status, String(step.error || "")).toBe("completed");
       expect(
-        userTexts(executor).some((text) => text.includes("You have been in repeated tool-use turns")),
+        userTexts(executor).some((text) =>
+          text.includes("You have been in repeated tool-use turns"),
+        ),
       ).toBe(false);
     });
   });
@@ -6723,7 +6740,12 @@ describe("TaskExecutor step loop control", () => {
             stopReason: "tool_use",
             content: [
               { type: "tool_use", id: "r1", name: "read_file", input: { path: "notes.md" } },
-              { type: "tool_use", id: "s1", name: "web_search", input: { query: "widget ship date" } },
+              {
+                type: "tool_use",
+                id: "s1",
+                name: "web_search",
+                input: { query: "widget ship date" },
+              },
             ],
           },
           textResponse("The widget ships in Q3."),
@@ -6773,7 +6795,8 @@ describe("TaskExecutor step loop control", () => {
         name === "edit_file"
           ? {
               success: false,
-              error: "old_string found 2 times in file. Use replace_all: true to replace all occurrences.",
+              error:
+                "old_string found 2 times in file. Use replace_all: true to replace all occurrences.",
             }
           : { success: false, error: "HTTP 403: Forbidden" },
       );
@@ -6827,7 +6850,9 @@ describe("TaskExecutor step loop control", () => {
       await (executor as Any).executeStep(step);
 
       expect(step.status).toBe("failed");
-      expect(String(step.error || "")).toContain("run_command failed: the last test run did not pass");
+      expect(String(step.error || "")).toContain(
+        "run_command failed: the last test run did not pass",
+      );
       expect(userTexts(executor).some((text) => text.includes("has not been re-run"))).toBe(true);
       // The failure is recoverable like any other failed command.
       expect((executor as Any).shouldAutoPlanRecovery(step, String(step.error || ""))).toBe(true);

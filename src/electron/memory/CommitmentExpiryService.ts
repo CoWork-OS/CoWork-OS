@@ -123,12 +123,7 @@ function commitmentKeywords(item: MemoryItem): Set<string> {
 }
 
 /** Text from after the due window that mentions the commitment and a "done" word. */
-function saysDone(
-  keywords: ReadonlySet<string>,
-  text: string,
-  at: number,
-  dueAt: number,
-): boolean {
+function saysDone(keywords: ReadonlySet<string>, text: string, at: number, dueAt: number): boolean {
   return (
     at >= dueAt - 7 * DAY_MS &&
     DONE_WORDS.test(text) &&
@@ -223,7 +218,9 @@ export class CommitmentExpiryService {
    * Run a sweep unless one ran within COMMITMENT_SWEEP_INTERVAL_MS (`force` skips that
    * check) or one is in progress. Returns the skip reason when nothing ran.
    */
-  async sweep(options: { force?: boolean } = {}): Promise<CommitmentSweepResult | CommitmentSweepSkip> {
+  async sweep(
+    options: { force?: boolean } = {},
+  ): Promise<CommitmentSweepResult | CommitmentSweepSkip> {
     if (this.inFlight) return "in_flight";
     const now = this.now();
     if (

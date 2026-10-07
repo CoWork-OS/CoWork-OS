@@ -99,7 +99,9 @@ Answer with JSON only, no prose, matching:
 ]}`;
 
 function clip(text: string, max: number): string {
-  const flat = String(text || "").replace(/\s+/g, " ").trim();
+  const flat = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
@@ -252,7 +254,12 @@ const DreamOperationSchema = z.discriminatedUnion("op", [
     kind,
     subject: z.string().trim().max(120).optional(),
     evidence: z
-      .array(z.object({ task: z.string().regex(/^T\d{1,3}$/), quote: z.string().trim().min(1).max(600) }))
+      .array(
+        z.object({
+          task: z.string().regex(/^T\d{1,3}$/),
+          quote: z.string().trim().min(1).max(600),
+        }),
+      )
       .min(1)
       .max(5),
     reason,
@@ -285,7 +292,8 @@ export function parseDreamOutput(raw: string): ParsedDreamOutput {
   const textValue = String(raw || "");
   const start = textValue.indexOf("{");
   const end = textValue.lastIndexOf("}");
-  if (start < 0 || end <= start) return { summary: "", operations: [], invalid: 0, malformed: true };
+  if (start < 0 || end <= start)
+    return { summary: "", operations: [], invalid: 0, malformed: true };
   let json: unknown;
   try {
     json = JSON.parse(textValue.slice(start, end + 1));
@@ -425,7 +433,11 @@ export function classifyDreamOperations(
           }
           const existing = input.workspaceFiles?.get(workspaceId);
           if (existing) targetFile = existing;
-          else createWorkspace = { id: workspaceId, name: task?.workspaceName?.trim() || titleForFile(op.file) };
+          else
+            createWorkspace = {
+              id: workspaceId,
+              name: task?.workspaceName?.trim() || titleForFile(op.file),
+            };
         }
         if (op.file === MEMORY_REPO_ENTRY_FILE) {
           decision = "review";
@@ -543,7 +555,8 @@ export function applyDreamOperations(params: {
     if (textValue === undefined) return null;
     for (const [index, raw] of splitLines(textValue).entries()) {
       const entry = parseMemoryRepoEntries(raw)[0];
-      if (entry && entry.hash === ref.hash) return { line: index + 1, entry: { ...entry, line: index + 1 } };
+      if (entry && entry.hash === ref.hash)
+        return { line: index + 1, entry: { ...entry, line: index + 1 } };
     }
     return null;
   };
@@ -605,7 +618,14 @@ export function applyDreamOperations(params: {
           why = "line no longer exists";
           break;
         }
-        setFile(op.refs[0].path, replaceLine(files.get(op.refs[0].path) ?? "", found.line, rewrite(found.entry, op.text ?? "")));
+        setFile(
+          op.refs[0].path,
+          replaceLine(
+            files.get(op.refs[0].path) ?? "",
+            found.line,
+            rewrite(found.entry, op.text ?? ""),
+          ),
+        );
         break;
       }
       case "remove":
@@ -624,7 +644,10 @@ export function applyDreamOperations(params: {
           why = "line no longer exists";
           break;
         }
-        setFile(keep.path, replaceLine(files.get(keep.path) ?? "", found.line, rewrite(found.entry, op.text ?? "")));
+        setFile(
+          keep.path,
+          replaceLine(files.get(keep.path) ?? "", found.line, rewrite(found.entry, op.text ?? "")),
+        );
         for (const ref of rest) removeRef(ref);
         break;
       }
@@ -639,14 +662,19 @@ export function applyDreamOperations(params: {
         }
         removeRef(op.refs[0]);
         const newText = op.op.op === "promote" && op.text ? op.text : found.entry.text;
-        insertInto(target, renderMemoryRepoEntry(newText, { ...found.entry.metadata, by: params.by }));
+        insertInto(
+          target,
+          renderMemoryRepoEntry(newText, { ...found.entry.metadata, by: params.by }),
+        );
         break;
       }
     }
     if (ok) {
       for (const path of changed) {
         const limit =
-          path === MEMORY_REPO_ENTRY_FILE ? MEMORY_REPO_LIMITS.entryFileBytes : MEMORY_REPO_LIMITS.fileBytes;
+          path === MEMORY_REPO_ENTRY_FILE
+            ? MEMORY_REPO_LIMITS.entryFileBytes
+            : MEMORY_REPO_LIMITS.fileBytes;
         if (Buffer.byteLength(files.get(path) ?? "", "utf8") > limit) {
           ok = false;
           why = `${path} would exceed its size limit`;

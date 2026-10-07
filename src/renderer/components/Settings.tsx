@@ -4812,18 +4812,14 @@ export function Settings({
               Clear saved TypeSafe key
             </button>
           )}
-          <label className="settings-label settings-label--spaced">
-            TypeSafe base URL
-          </label>
+          <label className="settings-label settings-label--spaced">TypeSafe base URL</label>
           <input
             className="settings-input"
             placeholder="https://api.typesafe.ai"
             value={jevTypesafeBaseUrl}
             onChange={(event) => setJevTypesafeBaseUrl(event.target.value)}
           />
-          <label className="settings-label settings-label--spaced">
-            Jev model
-          </label>
+          <label className="settings-label settings-label--spaced">Jev model</label>
           <input
             className="settings-input"
             placeholder="jev-latest"
@@ -4855,18 +4851,14 @@ export function Settings({
           <p className="settings-hint">
             Disable this only if you already have a separate legacy Jev key saved.
           </p>
-          <label className="settings-label settings-label--spaced">
-            OpenRouter base URL
-          </label>
+          <label className="settings-label settings-label--spaced">OpenRouter base URL</label>
           <input
             className="settings-input"
             placeholder="https://openrouter.ai"
             value={jevOpenRouterBaseUrl}
             onChange={(event) => setJevOpenRouterBaseUrl(event.target.value)}
           />
-          <label className="settings-label settings-label--spaced">
-            Jev model
-          </label>
+          <label className="settings-label settings-label--spaced">Jev model</label>
           <input
             list="jev-openrouter-model-options"
             className="settings-input"
@@ -5255,9 +5247,7 @@ export function Settings({
               value={imageAzureEndpoint}
               onChange={(e) => setImageAzureEndpoint(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Image deployment name
-            </label>
+            <label className="settings-label settings-label--spaced">Image deployment name</label>
             <input
               className="settings-input"
               type="text"
@@ -5272,9 +5262,7 @@ export function Settings({
                 );
               }}
             />
-            <label className="settings-label settings-label--spaced">
-              API version
-            </label>
+            <label className="settings-label settings-label--spaced">API version</label>
             <input
               className="settings-input"
               type="text"
@@ -5331,9 +5319,7 @@ export function Settings({
               value={imageOpenRouterApiKey}
               onChange={(e) => setImageOpenRouterApiKey(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Base URL
-            </label>
+            <label className="settings-label settings-label--spaced">Base URL</label>
             <input
               className="settings-input"
               type="text"
@@ -5436,9 +5422,7 @@ export function Settings({
           </select>
           {imageGenBackupProvider && (
             <>
-              <label className="settings-label settings-label--spaced">
-                Fallback model
-              </label>
+              <label className="settings-label settings-label--spaced">Fallback model</label>
               <select
                 className="settings-select"
                 value={
@@ -5514,9 +5498,7 @@ export function Settings({
               value={videoOpenAIDuration}
               onChange={(e) => setVideoOpenAIDuration(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Default aspect ratio
-            </label>
+            <label className="settings-label settings-label--spaced">Default aspect ratio</label>
             <select
               className="settings-select"
               value={videoOpenAIAspectRatio}
@@ -5526,9 +5508,7 @@ export function Settings({
               <option value="9:16">9:16 (portrait)</option>
               <option value="1:1">1:1 (square)</option>
             </select>
-            <label className="settings-label settings-label--spaced">
-              Default resolution
-            </label>
+            <label className="settings-label settings-label--spaced">Default resolution</label>
             <select
               className="settings-select"
               value={videoOpenAIResolution}
@@ -5566,9 +5546,7 @@ export function Settings({
               value={videoAzureEndpoint}
               onChange={(e) => setVideoAzureEndpoint(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Sora deployment name
-            </label>
+            <label className="settings-label settings-label--spaced">Sora deployment name</label>
             <input
               className="settings-input"
               type="text"
@@ -5576,9 +5554,7 @@ export function Settings({
               value={videoAzureDeployment}
               onChange={(e) => setVideoAzureDeployment(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              API version
-            </label>
+            <label className="settings-label settings-label--spaced">API version</label>
             <input
               className="settings-input"
               type="text"
@@ -5597,9 +5573,7 @@ export function Settings({
               value={videoAzureDuration}
               onChange={(e) => setVideoAzureDuration(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Default aspect ratio
-            </label>
+            <label className="settings-label settings-label--spaced">Default aspect ratio</label>
             <select
               className="settings-select"
               value={videoAzureAspectRatio}
@@ -5644,9 +5618,7 @@ export function Settings({
               value={videoGeminiDuration}
               onChange={(e) => setVideoGeminiDuration(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Default aspect ratio
-            </label>
+            <label className="settings-label settings-label--spaced">Default aspect ratio</label>
             <select
               className="settings-select"
               value={videoGeminiAspectRatio}
@@ -5675,9 +5647,7 @@ export function Settings({
               <option value="veo-3">Veo 3</option>
               <option value="veo-3.1">Veo 3.1</option>
             </select>
-            <label className="settings-label settings-label--spaced">
-              GCP Project ID
-            </label>
+            <label className="settings-label settings-label--spaced">GCP Project ID</label>
             <input
               className="settings-input"
               type="text"
@@ -5685,9 +5655,7 @@ export function Settings({
               value={videoVertexProjectId}
               onChange={(e) => setVideoVertexProjectId(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Location
-            </label>
+            <label className="settings-label settings-label--spaced">Location</label>
             <input
               className="settings-input"
               type="text"
@@ -5705,9 +5673,7 @@ export function Settings({
               value={videoVertexOutputGcsUri}
               onChange={(e) => setVideoVertexOutputGcsUri(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Access Token
-            </label>
+            <label className="settings-label settings-label--spaced">Access Token</label>
             <p
               className="settings-hint"
               style={{
@@ -5736,9 +5702,7 @@ export function Settings({
               value={videoVertexDuration}
               onChange={(e) => setVideoVertexDuration(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Default aspect ratio
-            </label>
+            <label className="settings-label settings-label--spaced">Default aspect ratio</label>
             <select
               className="settings-select"
               value={videoVertexAspectRatio}
@@ -5765,9 +5729,7 @@ export function Settings({
               value={videoKlingApiKey}
               onChange={(e) => setVideoKlingApiKey(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Base URL
-            </label>
+            <label className="settings-label settings-label--spaced">Base URL</label>
             <input
               className="settings-input"
               type="text"
@@ -5775,9 +5737,7 @@ export function Settings({
               value={videoKlingBaseUrl}
               onChange={(e) => setVideoKlingBaseUrl(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Model
-            </label>
+            <label className="settings-label settings-label--spaced">Model</label>
             <input
               className="settings-input"
               type="text"
@@ -5796,9 +5756,7 @@ export function Settings({
               value={videoKlingDuration}
               onChange={(e) => setVideoKlingDuration(e.target.value)}
             />
-            <label className="settings-label settings-label--spaced">
-              Default aspect ratio
-            </label>
+            <label className="settings-label settings-label--spaced">Default aspect ratio</label>
             <select
               className="settings-select"
               value={videoKlingAspectRatio}
@@ -5909,9 +5867,7 @@ export function Settings({
             )}
           </div>
         </div>
-        <label className="settings-label settings-label--spaced">
-          Role instruction
-        </label>
+        <label className="settings-label settings-label--spaced">Role instruction</label>
         <textarea
           className="settings-input"
           rows={2}
@@ -7548,9 +7504,7 @@ export function Settings({
                   }
                 />
 
-                <label className="settings-label settings-label--spaced">
-                  Description
-                </label>
+                <label className="settings-label settings-label--spaced">Description</label>
                 <input
                   className="settings-input"
                   value={selectedMoaPreset.description || ""}
@@ -8024,8 +7978,8 @@ export function Settings({
                           via llama-server.{" "}
                           {hfStatus?.mlxInstalled === "ok" ? (
                             <>
-                              <span style={{ color: "var(--color-accent)" }}>MLX</span> runs natively on Apple
-                              Silicon via mlx_lm — fastest on your M-series Mac.
+                              <span style={{ color: "var(--color-accent)" }}>MLX</span> runs
+                              natively on Apple Silicon via mlx_lm — fastest on your M-series Mac.
                             </>
                           ) : hfStatus?.isAppleSilicon ? (
                             <>

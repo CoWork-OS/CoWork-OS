@@ -56,7 +56,9 @@ describe("import folder check", () => {
     expect(memoryRepoImportFolderProblem("", personal)).toBe("Choose a folder.");
     expect(memoryRepoImportFolderProblem("notes", personal)).toBe("Use an absolute path.");
     expect(memoryRepoImportFolderProblem(os.homedir(), personal)).toMatch(/inside your home/);
-    expect(memoryRepoImportFolderProblem(personal, personal)).toBe("That is your own memory folder.");
+    expect(memoryRepoImportFolderProblem(personal, personal)).toBe(
+      "That is your own memory folder.",
+    );
     expect(memoryRepoImportFolderProblem(path.join(personal, "workspaces"), personal)).toBe(
       "That is your own memory folder.",
     );
@@ -225,7 +227,9 @@ describeWithGit("importToInbox and Keep", () => {
     expect(outcome.truncated).toBe(true);
     expect(outcome.imported).toBeGreaterThan(0);
     expect(outcome.imported).toBeLessThan(400);
-    expect(Buffer.byteLength(read("inbox.md"), "utf8")).toBeLessThanOrEqual(MEMORY_REPO_LIMITS.fileBytes);
+    expect(Buffer.byteLength(read("inbox.md"), "utf8")).toBeLessThanOrEqual(
+      MEMORY_REPO_LIMITS.fileBytes,
+    );
   });
 
   it("imports a folder end to end and skips symlinked files", async () => {
@@ -269,7 +273,9 @@ describeWithGit("importToInbox and Keep", () => {
       parseMemoryRepoEntries(read("inbox.md")).find((entry) => entry.text === text)!;
 
     let entry = inboxEntry("Likes dark mode in every editor");
-    expect(await service.keepEntry("inbox.md", entry.line, "me", { expectHash: "0".repeat(64) })).toMatchObject({
+    expect(
+      await service.keepEntry("inbox.md", entry.line, "me", { expectHash: "0".repeat(64) }),
+    ).toMatchObject({
       moved: null,
       error: expect.stringMatching(/changed/),
     });
@@ -279,7 +285,9 @@ describeWithGit("importToInbox and Keep", () => {
       "- Likes dark mode in every editor [by: user; kind: preference; source: import; added: 2026-10-06; import: folder:agent-memory]",
     );
     expect(read("inbox.md")).not.toContain("dark mode");
-    expect(git(root, "log", "-1", "--format=%s").trim()).toBe("Keep: Likes dark mode in every editor");
+    expect(git(root, "log", "-1", "--format=%s").trim()).toBe(
+      "Keep: Likes dark mode in every editor",
+    );
 
     entry = inboxEntry("Retry flaky tests once before reporting");
     result = await service.keepEntry("inbox.md", entry.line, "lessons", { expectHash: entry.hash });
@@ -297,7 +305,9 @@ describeWithGit("importToInbox and Keep", () => {
     });
     expect(result.moved?.path).toBe("workspaces/gateway.md");
     expect(read("workspaces/gateway.md")).toContain("[by: user; workspace: ws-9]");
-    expect(read("workspaces/gateway.md")).toContain("- The API gateway lives in services/gateway [by: user;");
+    expect(read("workspaces/gateway.md")).toContain(
+      "- The API gateway lives in services/gateway [by: user;",
+    );
     expect(read("MEMORY.md")).toContain("- [[workspaces/gateway]]");
     expect(await service.workspaceFile("ws-9")).toBe("workspaces/gateway.md");
     expect(parseMemoryRepoEntries(read("inbox.md"))).toHaveLength(0);

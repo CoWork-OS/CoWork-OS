@@ -15,9 +15,14 @@ export type MailboxStatementPort = StatementPort<MailboxStatementName, typeof MA
  * (see `mailbox-units.ts`), and reads use the reader connection when one is running.
  */
 export function createMailboxStatementPort(db: Database.Database): MailboxStatementPort {
-  return new StatementPort<MailboxStatementName, typeof MAILBOX_UNITS>(db, "mailbox", MAILBOX_STATEMENTS, {
-    serializeBursts: true,
-    // Mailbox list and search reads run on the reader connection when one is running.
-    readsOnReader: true,
-  });
+  return new StatementPort<MailboxStatementName, typeof MAILBOX_UNITS>(
+    db,
+    "mailbox",
+    MAILBOX_STATEMENTS,
+    {
+      serializeBursts: true,
+      // Mailbox list and search reads run on the reader connection when one is running.
+      readsOnReader: true,
+    },
+  );
 }

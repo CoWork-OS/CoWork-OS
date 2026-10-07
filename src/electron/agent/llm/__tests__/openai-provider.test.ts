@@ -1325,9 +1325,7 @@ describe("OpenAIProvider structured errors", () => {
       },
     };
 
-    await new OpenAIProvider({ ...makeConfig(), model: "gpt-6-luna" }).createMessage(
-      cachedRequest,
-    );
+    await new OpenAIProvider({ ...makeConfig(), model: "gpt-6-luna" }).createMessage(cachedRequest);
 
     expect((completeMock.mock.calls[0][2] as Any).sessionId).toBe("luna-session");
     expect((completeMock.mock.calls[0][2] as Any).onPayload).toBeUndefined();

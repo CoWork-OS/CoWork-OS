@@ -49,7 +49,9 @@ describe("captureToMemory and gateway senders (SEC-16)", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("learns from the owner's own messages", async () => {
-    await capture(daemonFor({}), "user_message", { message: "Call me Sam, I prefer short answers" });
+    await capture(daemonFor({}), "user_message", {
+      message: "Call me Sam, I prefer short answers",
+    });
     await capture(
       daemonFor({ originChannel: "whatsapp", gatewaySenderIsOwner: true }),
       "user_message",

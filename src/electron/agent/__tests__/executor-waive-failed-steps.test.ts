@@ -438,7 +438,10 @@ describe("TaskExecutor completion notes for partial outcomes", () => {
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
     const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
-    expect(metadata).toMatchObject({ terminalStatus: "partial_success", terminalKind: "timed_out" });
+    expect(metadata).toMatchObject({
+      terminalStatus: "partial_success",
+      terminalKind: "timed_out",
+    });
     expect(summary.startsWith(answer)).toBe(true);
     expect(summary).toContain("Completion notes:");
     expect(summary).toContain("Soft deadline reached during execution.");

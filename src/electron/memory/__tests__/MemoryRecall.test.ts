@@ -84,7 +84,10 @@ describeWithSqlite("MemoryRecall", () => {
   it.each([false, undefined])(
     "denies channel recall and ID expansion before any lane for owner=%s",
     async (owner) => {
-      const secret = await remember({ content: "Owner secret release context", privacy: "private" });
+      const secret = await remember({
+        content: "Owner secret release context",
+        privacy: "private",
+      });
       const search = vi.spyOn(deps, "searchItems");
       for (const ids of [undefined, [`memory:${secret.id}`, "external:secret", "archive:secret"]]) {
         const result = await recall.recall(

@@ -10673,7 +10673,6 @@
   .model-dropdown {
     max-height: min(440px, calc(100dvh - 140px));
   }
-
 }
 
 @media (max-width: 720px) {
@@ -10681,7 +10680,6 @@
     width: min(520px, calc(100vw - 24px));
     min-width: 0;
   }
-
 }
 
 @media (max-width: 520px) {
@@ -10706,7 +10704,6 @@
     left: 50%;
     right: auto;
   }
-
 }
 
 .model-selector.open {

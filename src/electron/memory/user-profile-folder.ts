@@ -37,7 +37,9 @@ const CATEGORIES: ReadonlySet<UserFactCategory> = new Set([
 const TASK_SOURCE = /^cowork:\/\/tasks\/(.+)$/;
 
 /** The profile category of a folder entry: its `category` tag, else from its kind. */
-export function userFactCategoryOfEntry(entry: Pick<MemoryRepoEntry, "kind" | "metadata">): UserFactCategory {
+export function userFactCategoryOfEntry(
+  entry: Pick<MemoryRepoEntry, "kind" | "metadata">,
+): UserFactCategory {
   const tagged = entry.metadata.category;
   if (tagged && CATEGORIES.has(tagged as UserFactCategory)) return tagged as UserFactCategory;
   switch (entry.kind) {
@@ -129,7 +131,9 @@ export const UserProfileFolderModel = {
     let unsubscribeChanges: (() => void) | null = null;
     const attach = (service: MemoryRepoService | null) => {
       unsubscribeChanges?.();
-      unsubscribeChanges = service ? service.onChange(() => void UserProfileFolderModel.refresh()) : null;
+      unsubscribeChanges = service
+        ? service.onChange(() => void UserProfileFolderModel.refresh())
+        : null;
       void UserProfileFolderModel.refresh();
     };
     const unsubscribeInstance = MemoryRepoService.onInstanceChange(attach);

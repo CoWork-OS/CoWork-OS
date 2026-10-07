@@ -52,12 +52,7 @@ describe("getSidebarRailLayout", () => {
   it("shows calm-only destinations only in the Calm theme", () => {
     const desktop = getSidebarRailLayout({ isCalm: false, isBrowserHost: false }, []);
     expect(ids(desktop.rail)).toEqual(["home", "inbox", "agents", "automations"]);
-    expect(ids(desktop.more)).toEqual([
-      "devices",
-      "everyday",
-      "missionControl",
-      "addTools",
-    ]);
+    expect(ids(desktop.more)).toEqual(["devices", "everyday", "missionControl", "addTools"]);
 
     const calm = getSidebarRailLayout({ isCalm: true, isBrowserHost: false }, []);
     expect(ids(calm.rail)).toContain("library");
@@ -203,8 +198,13 @@ describe("rail pin persistence", () => {
   });
 
   it("toggles a pin on and off", () => {
-    expect(togglePinnedSidebarDestination(["devices"], "everyday")).toEqual(["devices", "everyday"]);
-    expect(togglePinnedSidebarDestination(["devices", "everyday"], "devices")).toEqual(["everyday"]);
+    expect(togglePinnedSidebarDestination(["devices"], "everyday")).toEqual([
+      "devices",
+      "everyday",
+    ]);
+    expect(togglePinnedSidebarDestination(["devices", "everyday"], "devices")).toEqual([
+      "everyday",
+    ]);
   });
 });
 

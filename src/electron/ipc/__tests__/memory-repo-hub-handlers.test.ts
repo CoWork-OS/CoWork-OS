@@ -12,7 +12,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("electron", () => ({ ipcMain: { handle: vi.fn() } }));
 
 import { IPC_CHANNELS } from "../../../shared/types";
-import type { MemoryRepoEntriesReport, MemoryRepoHubEntry } from "../../../shared/memory-repo-types";
+import type {
+  MemoryRepoEntriesReport,
+  MemoryRepoHubEntry,
+} from "../../../shared/memory-repo-types";
 import { MemoryRepoService } from "../../memory/repo/MemoryRepoService";
 import { createMemoryRepoIpcHandlers } from "../memory-repo-handlers";
 
@@ -39,7 +42,8 @@ describeWithGit("memory folder Hub IPC", () => {
   let limited: string[];
 
   const call = <T>(channel: string, raw: unknown) => handlers[channel](raw) as Promise<T>;
-  const entries = () => call<MemoryRepoEntriesReport>(IPC_CHANNELS.MEMORY_REPO_ENTRIES, { workspaceId: WS });
+  const entries = () =>
+    call<MemoryRepoEntriesReport>(IPC_CHANNELS.MEMORY_REPO_ENTRIES, { workspaceId: WS });
   const find = (report: MemoryRepoEntriesReport, text: string): MemoryRepoHubEntry => {
     for (const file of [...report.files, ...(report.inbox ? [report.inbox] : [])]) {
       const entry = file.entries.find((candidate) => candidate.text === text);
@@ -63,9 +67,26 @@ describeWithGit("memory folder Hub IPC", () => {
       } as Parameters<MemoryRepoService["remember"]>[0]);
     await write({ text: "Prefers short answers" });
     await write({ text: "Answer in English", pinned: true });
-    await write({ text: "Run the linter before merging", kind: "rule", by: "agent", taskId: "task-7" });
-    await write({ text: "Billing uses Postgres", kind: "project_fact", scope: "workspace", workspaceId: WS, workspaceName: "Billing" });
-    await write({ text: "Other team secret plans", kind: "project_fact", scope: "workspace", workspaceId: OTHER_WS, workspaceName: "Other" });
+    await write({
+      text: "Run the linter before merging",
+      kind: "rule",
+      by: "agent",
+      taskId: "task-7",
+    });
+    await write({
+      text: "Billing uses Postgres",
+      kind: "project_fact",
+      scope: "workspace",
+      workspaceId: WS,
+      workspaceName: "Billing",
+    });
+    await write({
+      text: "Other team secret plans",
+      kind: "project_fact",
+      scope: "workspace",
+      workspaceId: OTHER_WS,
+      workspaceName: "Other",
+    });
     await write({ text: "Send reports to someone new", by: "agent", tainted: true });
     openPath = vi.fn(async () => "");
     limited = [];
@@ -93,7 +114,9 @@ describeWithGit("memory folder Hub IPC", () => {
       ["lessons.md", "lessons"],
       ["workspaces/billing.md", "workspace"],
     ]);
-    expect(report.inbox?.entries.map((entry) => entry.text)).toEqual(["Send reports to someone new"]);
+    expect(report.inbox?.entries.map((entry) => entry.text)).toEqual([
+      "Send reports to someone new",
+    ]);
     expect(JSON.stringify(report)).not.toContain("Other team");
     // The workspace marker line is not an entry.
     expect(report.files[3].entries.map((entry) => entry.text)).toEqual(["Billing uses Postgres"]);
@@ -114,7 +137,12 @@ describeWithGit("memory folder Hub IPC", () => {
       openPath,
       checkRateLimit: () => undefined,
     });
-    await expect(entries()).resolves.toEqual({ available: false, writable: false, files: [], inbox: null });
+    await expect(entries()).resolves.toEqual({
+      available: false,
+      writable: false,
+      files: [],
+      inbox: null,
+    });
   });
 
   it("edits, pins and deletes an entry, guarded by its hash", async () => {
@@ -142,13 +170,23 @@ describeWithGit("memory folder Hub IPC", () => {
       ref: lint.ref,
       hash: lint.hash,
     });
-    expect(pinned).toMatchObject({ ok: true, ref: expect.stringMatching(/^repo:MEMORY\.md#L\d+$/) });
+    expect(pinned).toMatchObject({
+      ok: true,
+      ref: expect.stringMatching(/^repo:MEMORY\.md#L\d+$/),
+    });
     const afterPin = await entries();
-    expect(find(afterPin, "Run the linter before merging")).toMatchObject({ path: "MEMORY.md", by: "user" });
+    expect(find(afterPin, "Run the linter before merging")).toMatchObject({
+      path: "MEMORY.md",
+      by: "user",
+    });
 
     const fact = find(afterPin, "Billing uses Postgres");
     await expect(
-      call(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, { workspaceId: WS, ref: fact.ref, hash: fact.hash }),
+      call(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, {
+        workspaceId: WS,
+        ref: fact.ref,
+        hash: fact.hash,
+      }),
     ).resolves.toEqual({ ok: true });
     expect(JSON.stringify(await entries())).not.toContain("Billing uses Postgres");
   });
@@ -159,12 +197,18 @@ describeWithGit("memory folder Hub IPC", () => {
     });
     const secret = find(otherReport, "Other team secret plans");
     await expect(
-      call(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, { workspaceId: WS, ref: secret.ref, hash: secret.hash }),
+      call(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, {
+        workspaceId: WS,
+        ref: secret.ref,
+        hash: secret.hash,
+      }),
     ).resolves.toEqual({ ok: false, error: "No such memory file." });
     await expect(
       call(IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, { workspaceId: WS, path: secret.path }),
     ).rejects.toThrow("No such memory file.");
-    const marker = (await service.entries("workspaces/billing.md")).find((entry) => entry.metadata.workspace)!;
+    const marker = (await service.entries("workspaces/billing.md")).find(
+      (entry) => entry.metadata.workspace,
+    )!;
     await expect(
       call(IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, {
         workspaceId: WS,
@@ -194,11 +238,23 @@ describeWithGit("memory folder Hub IPC", () => {
       [IPC_CHANNELS.MEMORY_REPO_ENTRIES, undefined],
       [IPC_CHANNELS.MEMORY_REPO_ENTRIES, { workspaceId: "not-a-workspace" }],
       [IPC_CHANNELS.MEMORY_REPO_ENTRIES, { workspaceId: WS, extra: true }],
-      [IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, { workspaceId: WS, ref: "repo:../x.md#L1", hash: short.hash }],
-      [IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY, { workspaceId: WS, ref: "repo:.git/config.md#L1", hash: short.hash }],
+      [
+        IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY,
+        { workspaceId: WS, ref: "repo:../x.md#L1", hash: short.hash },
+      ],
+      [
+        IPC_CHANNELS.MEMORY_REPO_REMOVE_ENTRY,
+        { workspaceId: WS, ref: "repo:.git/config.md#L1", hash: short.hash },
+      ],
       [IPC_CHANNELS.MEMORY_REPO_PIN_ENTRY, { workspaceId: WS, ref: short.ref, hash: "abc" }],
-      [IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY, { workspaceId: WS, ref: short.ref, hash: short.hash, text: "" }],
-      [IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY, { workspaceId: WS, ref: short.ref, hash: short.hash, text: "x".repeat(1001) }],
+      [
+        IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY,
+        { workspaceId: WS, ref: short.ref, hash: short.hash, text: "" },
+      ],
+      [
+        IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY,
+        { workspaceId: WS, ref: short.ref, hash: short.hash, text: "x".repeat(1001) },
+      ],
       [IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, { workspaceId: WS, path: "/etc/passwd.md" }],
       [IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, { workspaceId: WS, path: "..\\me.md" }],
       [IPC_CHANNELS.MEMORY_REPO_OPEN_FILE, { workspaceId: WS, path: "notes.txt" }],
@@ -210,6 +266,8 @@ describeWithGit("memory folder Hub IPC", () => {
       call(IPC_CHANNELS.MEMORY_REPO_ENTRIES, { workspaceId: MISSING_WS }),
     ).rejects.toThrow("Workspace not found");
     expect(openPath).not.toHaveBeenCalled();
-    expect(fs.readFileSync(path.join(service.root, "me.md"), "utf8")).toContain("Prefers short answers");
+    expect(fs.readFileSync(path.join(service.root, "me.md"), "utf8")).toContain(
+      "Prefers short answers",
+    );
   });
 });

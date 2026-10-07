@@ -23,7 +23,10 @@ const RESPONSE_STYLE_DIMENSIONS = [
 
 type StyleLike = Partial<Record<(typeof RESPONSE_STYLE_DIMENSIONS)[number], unknown>>;
 
-function sameResponseStyle(a: StyleLike | null | undefined, b: StyleLike | null | undefined): boolean {
+function sameResponseStyle(
+  a: StyleLike | null | undefined,
+  b: StyleLike | null | undefined,
+): boolean {
   return RESPONSE_STYLE_DIMENSIONS.every((key) => (a?.[key] ?? null) === (b?.[key] ?? null));
 }
 

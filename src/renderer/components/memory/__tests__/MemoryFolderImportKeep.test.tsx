@@ -40,10 +40,23 @@ const ME: MemoryRepoHubFile = {
   path: "me.md",
   title: "About me",
   role: "me",
-  entries: [entry({ ref: "repo:me.md#L3", path: "me.md", text: "Prefers short answers", by: "user", source: null })],
+  entries: [
+    entry({
+      ref: "repo:me.md#L3",
+      path: "me.md",
+      text: "Prefers short answers",
+      by: "user",
+      source: null,
+    }),
+  ],
 };
 
-const REPORT: MemoryRepoEntriesReport = { available: true, writable: true, files: [ME], inbox: INBOX };
+const REPORT: MemoryRepoEntriesReport = {
+  available: true,
+  writable: true,
+  files: [ME],
+  inbox: INBOX,
+};
 
 function props(overrides: Partial<MemoryFolderKnowledgeProps> = {}): MemoryFolderKnowledgeProps {
   const noop = () => {};
@@ -71,17 +84,26 @@ describe("Keep in the memory folder inbox", () => {
   it("offers Keep for inbox entries only, next to Keep and pin and Delete", () => {
     const markup = renderToStaticMarkup(<MemoryFolderKnowledge {...props()} />);
     const inbox = markup.slice(markup.indexOf('data-group="unreviewed"'));
-    for (const label of ["Keep: about me", "Keep: lesson", "Keep: this workspace", "Keep and pin", "Delete"]) {
+    for (const label of [
+      "Keep: about me",
+      "Keep: lesson",
+      "Keep: this workspace",
+      "Keep and pin",
+      "Delete",
+    ]) {
       expect(inbox).toContain(`>${label}</button>`);
     }
     expect(inbox).toContain("Imported");
     expect(inbox).toContain("or imported from a folder");
-    const me = markup.slice(markup.indexOf('data-file="me.md"'), markup.indexOf('data-group="unreviewed"'));
+    const me = markup.slice(
+      markup.indexOf('data-file="me.md"'),
+      markup.indexOf('data-group="unreviewed"'),
+    );
     expect(me).not.toContain("Keep:");
     // Without the host method there is no Keep.
-    expect(renderToStaticMarkup(<MemoryFolderKnowledge {...props({ onKeep: undefined })} />)).not.toContain(
-      "Keep:",
-    );
+    expect(
+      renderToStaticMarkup(<MemoryFolderKnowledge {...props({ onKeep: undefined })} />),
+    ).not.toContain("Keep:");
   });
 
   it("keeps an entry through the API and reloads the folder", async () => {
@@ -104,7 +126,10 @@ describe("Keep in the memory folder inbox", () => {
 
     const failing = {
       ...api,
-      keepMemoryRepoEntry: vi.fn(async () => ({ ok: false, error: "lessons.md is full; consolidate it first." })),
+      keepMemoryRepoEntry: vi.fn(async () => ({
+        ok: false,
+        error: "lessons.md is full; consolidate it first.",
+      })),
       getMemoryRepoEntries: vi.fn(async () => REPORT),
     } as unknown as MemoryFolderApi;
     expect(await keepFolderEntry(failing, WS, REPORT, INBOX.entries[0], "lessons")).toEqual({
@@ -167,8 +192,14 @@ describe("Import notes from a folder", () => {
       'Imported 1 note from "notes" into the inbox. Keep the ones you want in What CoWork knows.',
     );
     expect(
-      importResultMessage({ ...base, folderName: "notes", imported: 5, duplicates: 2, skipped: 1, truncated: true })
-        ?.text,
+      importResultMessage({
+        ...base,
+        folderName: "notes",
+        imported: 5,
+        duplicates: 2,
+        skipped: 1,
+        truncated: true,
+      })?.text,
     ).toBe(
       'Imported 5 notes from "notes" into the inbox (2 duplicates left out; 1 skipped; a size limit was reached, so some notes were not read). Keep the ones you want in What CoWork knows.',
     );

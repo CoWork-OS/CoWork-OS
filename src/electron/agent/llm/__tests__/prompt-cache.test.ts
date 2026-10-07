@@ -488,9 +488,7 @@ describe("prompt-cache stable prefix hashing", () => {
     // A generic rejection keeps the key and drops only the optional fields first.
     expect(nextOpenAIPromptCacheTier(full, "400 invalid prompt cache request")).toBe("key_only");
     // The provider names the key itself, so a key-only retry would fail the same way.
-    expect(nextOpenAIPromptCacheTier(full, "Unsupported parameter: prompt_cache_key")).toBe(
-      "none",
-    );
+    expect(nextOpenAIPromptCacheTier(full, "Unsupported parameter: prompt_cache_key")).toBe("none");
     expect(
       nextOpenAIPromptCacheTier(
         { prompt_cache_key: "k" },

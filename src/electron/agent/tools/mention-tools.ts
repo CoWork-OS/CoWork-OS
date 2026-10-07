@@ -180,21 +180,23 @@ export class MentionTools {
       this.workspaceId,
     );
 
-    const mentions = await Promise.all(pending.map(async (m) => {
-      let fromAgent: string | null = null;
-      if (m.fromAgentRoleId) {
-        const role = await this.agentRoleRepo.findById(m.fromAgentRoleId);
-        fromAgent = role?.displayName || null;
-      }
+    const mentions = await Promise.all(
+      pending.map(async (m) => {
+        let fromAgent: string | null = null;
+        if (m.fromAgentRoleId) {
+          const role = await this.agentRoleRepo.findById(m.fromAgentRoleId);
+          fromAgent = role?.displayName || null;
+        }
 
-      return {
-        id: m.id,
-        fromAgent,
-        mentionType: m.mentionType,
-        context: m.context,
-        createdAt: m.createdAt,
-      };
-    }));
+        return {
+          id: m.id,
+          fromAgent,
+          mentionType: m.mentionType,
+          context: m.context,
+          createdAt: m.createdAt,
+        };
+      }),
+    );
 
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: "get_pending_mentions",

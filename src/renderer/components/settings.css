@@ -2638,7 +2638,8 @@
    stacked forms keep a single right edge. Text inputs, dropdowns and the
    searchable select share 560px; number fields share 220px. Search boxes and
    textareas keep the full column. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(select, .searchable-select, input):where(
     :not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(
         [type="color"]
@@ -2647,7 +2648,8 @@
   max-width: 560px;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(.llm-provider-search .settings-input, .cp-search-input, .ps-input) {
   max-width: none;
 }
@@ -2662,7 +2664,8 @@
 }
 
 /* Buttons inside flex-column / grid containers size to their label. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .settings-subsection,
     .form-group,
@@ -2749,8 +2752,15 @@
 }
 
 /* Infrastructure headings use the standard section heading size. */
-.settings-page-layout .settings-content
-  :is(.infra-setup-info, .infra-wallet-card, .infra-config-section, .infra-danger-section, .infra-how-it-works)
+.settings-page-layout
+  .settings-content
+  :is(
+    .infra-setup-info,
+    .infra-wallet-card,
+    .infra-config-section,
+    .infra-danger-section,
+    .infra-how-it-works
+  )
   h3 {
   font-size: 13px;
   font-weight: 600;
@@ -2793,8 +2803,14 @@
 
 /* Empty bar tracks used a 3–5% glass tint that only read against the old card
    fills; give them the same visible track as sliders and progress bars. */
-.settings-page-layout .settings-content
-  :is(.insights-hero-rate-bar, .insights-bar-track, .insights-hour-bar.no-data, .chatgpt-import-progress-bar-container) {
+.settings-page-layout
+  .settings-content
+  :is(
+    .insights-hero-rate-bar,
+    .insights-bar-track,
+    .insights-hour-bar.no-data,
+    .chatgpt-import-progress-bar-container
+  ) {
   background: var(--color-border);
 }
 
@@ -2819,7 +2835,8 @@
    ------------------------------------------------------------------------ */
 
 /* Buttons: secondary is the default look. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .button-secondary,
@@ -2862,12 +2879,14 @@
 }
 
 /* Glossy overlays from the older button system. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(.button-primary, .button-secondary, .settings-button, .btn-primary, .btn-secondary)::before {
   display: none;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .button-secondary,
@@ -2889,7 +2908,8 @@
 }
 
 /* Small. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(.button-small, .btn-sm, .btn-xs, .settings-button.small, .memory-inline-btn) {
   min-height: 28px;
   padding: 5px 10px;
@@ -2897,7 +2917,8 @@
 }
 
 /* Primary. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .settings-button.primary,
@@ -2907,7 +2928,8 @@
     .ea-primary-button,
     .regenerate-button
   ),
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .settings-button.primary,
@@ -2922,7 +2944,9 @@
   color: var(--color-accent-contrast, #fff);
 }
 
-html.visual-calm .settings-page-layout .settings-content
+html.visual-calm
+  .settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .settings-button.primary,
@@ -2932,7 +2956,9 @@ html.visual-calm .settings-page-layout .settings-content
     .ea-primary-button,
     .regenerate-button
   ),
-html.visual-calm .settings-page-layout .settings-content
+html.visual-calm
+  .settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .settings-button.primary,
@@ -2946,7 +2972,8 @@ html.visual-calm .settings-page-layout .settings-content
   color: var(--calm-ink-contrast);
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .settings-button.primary,
@@ -2960,22 +2987,35 @@ html.visual-calm .settings-page-layout .settings-content
 }
 
 /* Danger. */
-.settings-page-layout .settings-content
-  :is(.button-danger, .settings-button.danger, .settings-button-danger, .btn-danger, .memory-inline-btn.danger) {
+.settings-page-layout
+  .settings-content
+  :is(
+    .button-danger,
+    .settings-button.danger,
+    .settings-button-danger,
+    .btn-danger,
+    .memory-inline-btn.danger
+  ) {
   border-color: rgba(239, 68, 68, 0.3);
   background: rgba(239, 68, 68, 0.1);
   color: var(--color-error);
 }
 
-.settings-page-layout .settings-content
-  :is(.button-danger, .settings-button.danger, .settings-button-danger, .btn-danger, .memory-inline-btn.danger):hover:not(
-    :disabled
-  ) {
+.settings-page-layout
+  .settings-content
+  :is(
+    .button-danger,
+    .settings-button.danger,
+    .settings-button-danger,
+    .btn-danger,
+    .memory-inline-btn.danger
+  ):hover:not(:disabled) {
   border-color: rgba(239, 68, 68, 0.5);
   background: rgba(239, 68, 68, 0.18);
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .button-primary,
     .button-secondary,
@@ -3026,7 +3066,8 @@ html.visual-calm .settings-page-layout .settings-content
 
 /* Text inputs and textareas. Horizontal padding is left alone so inputs with
    leading icons keep their inset. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(input, textarea):where(
     :not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(
         [type="color"]
@@ -3045,7 +3086,8 @@ html.visual-calm .settings-page-layout .settings-content
   box-shadow: none;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   input:where(
     :not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not(
         [type="color"]
@@ -3057,15 +3099,25 @@ html.visual-calm .settings-page-layout .settings-content
 }
 
 /* Shared hover / focus for all field-like controls. */
-.settings-page-layout .settings-content
-  :is(select:not([multiple]), .searchable-select-trigger, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea):hover:not(
-    :disabled
-  ):not(:focus) {
+.settings-page-layout
+  .settings-content
+  :is(
+    select:not([multiple]),
+    .searchable-select-trigger,
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    textarea
+  ):hover:not(:disabled):not(:focus) {
   border-color: var(--color-border-light, var(--color-border));
 }
 
-.settings-page-layout .settings-content
-  :is(select, .searchable-select-trigger, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea):focus,
+.settings-page-layout
+  .settings-content
+  :is(
+    select,
+    .searchable-select-trigger,
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    textarea
+  ):focus,
 .settings-page-layout .settings-content .searchable-select-trigger:focus-visible {
   border-color: var(--color-accent);
   outline: none;
@@ -3085,8 +3137,15 @@ html.visual-calm .settings-page-layout .settings-content
 
 /* Tab rows: every sub-tab / filter / toggle row uses the frameless pill tabs of
    the AI & Models reference (.more-channels-tab). */
-.settings-page-layout .settings-content
-  :is(.settings-tabs, .mcp-settings-nav, .insights-period-filter, .insights-awu-toggle, .cm-filter-tabs) {
+.settings-page-layout
+  .settings-content
+  :is(
+    .settings-tabs,
+    .mcp-settings-nav,
+    .insights-period-filter,
+    .insights-awu-toggle,
+    .cm-filter-tabs
+  ) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -3097,7 +3156,8 @@ html.visual-calm .settings-page-layout .settings-content
   box-shadow: none;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .settings-tab,
     .mcp-nav-button,
@@ -3120,7 +3180,8 @@ html.visual-calm .settings-page-layout .settings-content
   cursor: pointer;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .settings-tab,
     .mcp-nav-button,
@@ -3133,7 +3194,8 @@ html.visual-calm .settings-page-layout .settings-content
   color: var(--color-text);
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .settings-tab.active,
     .mcp-nav-button.active,
@@ -3165,7 +3227,10 @@ html.visual-calm .settings-page-layout .settings-content
   transition: background-color 0.2s ease;
 }
 
-.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) .toggle-slider::before {
+.settings-page-layout
+  .settings-content
+  :is(.settings-toggle, .toggle-switch)
+  .toggle-slider::before {
   content: "";
   position: absolute;
   left: 2px;
@@ -3178,25 +3243,35 @@ html.visual-calm .settings-page-layout .settings-content
   transition: transform 0.2s ease;
 }
 
-.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) input:checked + .toggle-slider {
+.settings-page-layout
+  .settings-content
+  :is(.settings-toggle, .toggle-switch)
+  input:checked
+  + .toggle-slider {
   background-color: var(--color-accent);
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(.settings-toggle, .toggle-switch)
   input:checked
   + .toggle-slider::before {
   transform: translateX(18px);
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(.settings-toggle, .toggle-switch)
   input:focus-visible
   + .toggle-slider {
   box-shadow: 0 0 0 3px var(--color-accent-subtle);
 }
 
-.settings-page-layout .settings-content :is(.settings-toggle, .toggle-switch) input:disabled + .toggle-slider {
+.settings-page-layout
+  .settings-content
+  :is(.settings-toggle, .toggle-switch)
+  input:disabled
+  + .toggle-slider {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -3226,7 +3301,8 @@ html.visual-calm .settings-page-layout .settings-content
   max-width: 560px;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   .settings-inline-input
   > :is(select, input[type="number"], .settings-input-number) {
   width: 100%;
@@ -3247,7 +3323,10 @@ html.visual-calm .settings-page-layout .settings-content
 
 /* A second header inside one section (e.g. "Continuation Compaction" under
    "Execution Continuation") starts a new group: space it and add a hairline. */
-.settings-page-layout .settings-content .settings-section > .settings-section-header:not(:first-child) {
+.settings-page-layout
+  .settings-content
+  .settings-section
+  > .settings-section-header:not(:first-child) {
   margin-top: 24px;
   padding-top: 20px;
   border-top: 1px solid var(--color-border-subtle);
@@ -3256,7 +3335,8 @@ html.visual-calm .settings-page-layout .settings-content
 /* Consecutive setting groups inside a System & Security section are separated.
    Listed with the same contextual selectors as the frameless override so the
    divider is not stripped by it; vertical padding from the old boxes is dropped. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .settings-combined-body > .settings-section,
     .system-security-section--safety .settings-combined-body > .settings-section,
@@ -3267,10 +3347,14 @@ html.visual-calm .settings-page-layout .settings-content
   padding-bottom: 0;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .settings-combined-body > .settings-section + .settings-section,
-    .system-security-section--safety .settings-combined-body > .settings-section + .settings-section,
+    .system-security-section--safety
+      .settings-combined-body
+      > .settings-section
+      + .settings-section,
     .system-security-section--tray .tray-settings > .settings-section + .settings-section,
     .system-security-section--admin .settings-panel > .settings-section + .settings-section
   ) {
@@ -3308,7 +3392,10 @@ html.visual-calm .settings-page-layout .settings-content
 }
 
 /* Sub-groups: flush with the group, titled like a field group. */
-.settings-page-layout .settings-content .settings-section > :is(.settings-subsection, .settings-form-group) {
+.settings-page-layout
+  .settings-content
+  .settings-section
+  > :is(.settings-subsection, .settings-form-group) {
   margin-top: 20px;
   padding-left: 0;
 }
@@ -3318,7 +3405,11 @@ html.visual-calm .settings-page-layout .settings-content
 }
 
 .settings-page-layout .settings-content .settings-subsection > h4,
-.settings-page-layout .settings-content .settings-form-group > .settings-section-header > label:first-child {
+.settings-page-layout
+  .settings-content
+  .settings-form-group
+  > .settings-section-header
+  > label:first-child {
   margin: 0 0 4px;
   font-size: 13px;
   font-weight: 600;
@@ -3358,7 +3449,8 @@ html.visual-calm .settings-page-layout .settings-content
   max-width: 680px;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   .settings-section
   > :is(.settings-subsection, .settings-form-group)
   + .settings-hint {
@@ -3372,7 +3464,10 @@ html.visual-calm .settings-page-layout .settings-content
 }
 
 /* Inline-input rows with a trailing hint keep the hint under the field. */
-.settings-page-layout .settings-content .settings-inline-input:has(> label:first-child) > .settings-hint {
+.settings-page-layout
+  .settings-content
+  .settings-inline-input:has(> label:first-child)
+  > .settings-hint {
   grid-column: 2;
   margin-top: 4px;
 }
@@ -3435,7 +3530,8 @@ html.visual-calm .settings-page-layout .settings-content
 
 /* Compact controls in dense rows and toolbars (Built-in Tools per-tool rows,
    Connectors category filter, Usage Insights date picker): same look, small size. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .builtin-tool-timeout-input,
     .builtin-tool-mode-select,
@@ -3450,7 +3546,8 @@ html.visual-calm .settings-page-layout .settings-content
   font-size: 12px;
 }
 
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(.builtin-tool-mode-select, .builtin-tool-priority-select, .cm-category-select) {
   padding-right: 28px;
   padding-left: 10px;
@@ -3470,7 +3567,8 @@ html .settings-nav-items .settings-nav-item:focus-visible {
 
 /* Scroll areas that hold interactive rows clip overflow; draw focus rings inside
    so the first/last row's ring is not cut off (same fix as the sidebar). */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .memory-list,
     .memory-inspector-shell,
@@ -3487,7 +3585,8 @@ html .settings-nav-items .settings-nav-item:focus-visible {
 
 /* Frameless group containers drop the vertical padding their old boxes needed;
    their own margins / parent gaps already space consecutive groups. */
-.settings-page-layout .settings-content
+.settings-page-layout
+  .settings-content
   :is(
     .settings-section.onboarding-section,
     .settings-card:not(.is-selected):not(.settings-item-card):not(.skillhub-card):not(

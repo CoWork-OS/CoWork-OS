@@ -31,7 +31,10 @@ export function emitHeartbeatSignal(input: HeartbeatSignalForAllInput): void {
  * Emit `correction_learning` when the user corrects the agent mid-task. Repeated corrections
  * in a workspace merge into one signal; the user's text is not copied into the signal.
  */
-export function emitCorrectionLearningSignal(params: { workspaceId: string; taskId: string }): void {
+export function emitCorrectionLearningSignal(params: {
+  workspaceId: string;
+  taskId: string;
+}): void {
   emitHeartbeatSignal({
     workspaceId: params.workspaceId,
     signalFamily: "correction_learning",

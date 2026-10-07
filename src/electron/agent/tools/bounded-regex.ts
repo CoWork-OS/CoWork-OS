@@ -83,11 +83,14 @@ export class BoundedRegex {
         if (message.error) reject(new Error(message.error));
         else resolve(message.result);
       };
-      const timer = setTimeout(() => {
-        cleanup();
-        void this.close();
-        reject(new RegexDeadlineError("Regex search exceeded its execution deadline"));
-      }, Math.min(this.callDeadlineMs, remainingMs));
+      const timer = setTimeout(
+        () => {
+          cleanup();
+          void this.close();
+          reject(new RegexDeadlineError("Regex search exceeded its execution deadline"));
+        },
+        Math.min(this.callDeadlineMs, remainingMs),
+      );
       worker.once("message", onMessage);
       worker.once("error", onError);
       worker.once("exit", onExit);

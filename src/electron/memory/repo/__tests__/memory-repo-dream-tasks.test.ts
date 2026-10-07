@@ -162,11 +162,27 @@ describe("createDreamTaskLister", () => {
     expect(await list(100, 0)).toEqual([]);
   });
 
+  it("is not held back by paused, pending, stale or bot tasks", async () => {
+    const list = createDreamTaskLister({
+      findTasksCreatedBetween: async () => [
+        task({ id: "after", createdAt: 40 }),
+        task({ id: "paused", createdAt: 30, status: "paused" as Any }),
+        task({ id: "pending", createdAt: 25, status: "pending" as Any }),
+        task({ id: "stale", createdAt: 22, updatedAt: 22, status: "executing" as Any }),
+        task({ id: "bot", createdAt: 21, status: "executing" as Any, agentConfig: { botConversation: true } as Any }),
+        task({ id: "before", createdAt: 10 }),
+      ],
+      findTaskEvents: async (taskId) => [event(taskId, "assistant_message", { message: "ok" })],
+      now: () => 22 + 7 * 60 * 60 * 1000,
+    });
+    expect((await list(0, 5)).map((t) => t.taskId)).toEqual(["before", "after"]);
+  });
+
   it("never reads past a task that is still running", async () => {
     const list = createDreamTaskLister({
       findTasksCreatedBetween: async () => [
         task({ id: "after", createdAt: 30 }),
-        task({ id: "running", createdAt: 20, status: "executing" as Any }),
+        task({ id: "running", createdAt: 20, updatedAt: 95, status: "executing" as Any }),
         task({ id: "before", createdAt: 10 }),
       ],
       findTaskEvents: async (taskId) => [event(taskId, "assistant_message", { message: "ok" })],

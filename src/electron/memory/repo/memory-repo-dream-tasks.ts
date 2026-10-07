@@ -57,6 +57,19 @@ function trimText(value: unknown, max: number): string {
 }
 
 /** Whether the task itself may be read by a dream (before its events are loaded). */
+/** Statuses of a task that is running now. */
+const IN_PROGRESS_STATUSES: ReadonlySet<TaskStatus> = new Set(["planning", "executing", "queued"]);
+/** A task without activity for this long is not waited for. */
+const IN_PROGRESS_MAX_IDLE_MS = 6 * 60 * 60 * 1000;
+
+/** A top-level, non-bot task that is running now and was active in the last few hours. */
+export function isInProgressTask(task: Task, now: number): boolean {
+  if (task.parentTaskId || !IN_PROGRESS_STATUSES.has(task.status)) return false;
+  if (task.agentConfig?.botConversation === true) return false;
+  const lastActivity = Math.max(task.createdAt || 0, task.updatedAt || 0);
+  return now - lastActivity < IN_PROGRESS_MAX_IDLE_MS;
+}
+
 export function isDreamCandidateTask(task: Task): boolean {
   if (!FINISHED_STATUSES.has(task.status)) return false;
   if (task.parentTaskId || (typeof task.depth === "number" && task.depth > 0)) return false;
@@ -141,8 +154,11 @@ export function createDreamTaskLister(
     const created = (
       await deps.findTasksCreatedBetween({ startMs, endMs: now + 1, limit: CANDIDATE_LIMIT })
     ).filter((task) => task.createdAt > sinceMs);
+    // Only a task that is really in progress holds the cursor back. Paused, pending or
+    // abandoned tasks (and bot tasks, which never finish) would otherwise block it forever,
+    // and no dream would ever see a new task.
     const oldestRunning = created
-      .filter((task) => !FINISHED_STATUSES.has(task.status) && !task.parentTaskId)
+      .filter((task) => isInProgressTask(task, now))
       .reduce((min, task) => Math.min(min, task.createdAt), Number.POSITIVE_INFINITY);
     const candidates = created
       .filter((task) => task.createdAt < oldestRunning && isDreamCandidateTask(task))

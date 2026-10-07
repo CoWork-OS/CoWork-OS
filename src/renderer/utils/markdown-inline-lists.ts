@@ -6,25 +6,150 @@ export function normalizeInlineHeadings(text: string): string {
   return text.replace(/\s+(#{1,6})(\s+)/g, "\n$1$2");
 }
 
+const FENCE_OPEN_REGEX = /^[ \t]*(`{3,}|~{3,})/;
+// A list marker only counts when space/tab and text follow it on the same line, so a
+// sentence ending in "Door 1." never opens an empty item on the next line.
+const NUMBERED_MARKER_REGEX = /(?<=^|[ \t])(\d{1,9})([.)])(?=[ \t]+\S)/g;
+const BULLET_MARKER_REGEX = /(?<=^|[ \t])([-*•])(?=[ \t]+\S)/g;
+const THEMATIC_BREAK_REGEX = /^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const PARENTHETICAL_ITEM_REGEX = /\s+\((\d+)\)[ \t]+(?=\S)/g;
+
+/**
+ * Apply `transform` to the text outside fenced code blocks (``` or ~~~), leaving fence
+ * contents untouched. An unclosed fence runs to the end of the text, as in CommonMark.
+ */
+function transformOutsideFencedCode(text: string, transform: (segment: string) => string): string {
+  const output: string[] = [];
+  let prose: string[] = [];
+  let closingFence: RegExp | null = null;
+  const flushProse = () => {
+    if (prose.length > 0) output.push(transform(prose.join("\n")));
+    prose = [];
+  };
+  for (const line of text.split("\n")) {
+    if (closingFence) {
+      output.push(line);
+      if (closingFence.test(line)) closingFence = null;
+      continue;
+    }
+    const open = line.match(FENCE_OPEN_REGEX);
+    // A backtick fence's info string cannot contain backticks (that is inline code instead).
+    if (open && !(open[1][0] === "`" && line.slice(open[0].length).includes("`"))) {
+      flushProse();
+      output.push(line);
+      closingFence = new RegExp(`^[ \\t]*${open[1][0]}{${open[1].length},}[ \\t]*\\r?$`);
+      continue;
+    }
+    prose.push(line);
+  }
+  flushProse();
+  return output.join("\n");
+}
+
+/** Break `line` before each index in `splitAt`, dropping the spaces that preceded it. */
+function breakLineAt(line: string, splitAt: number[], indent: string): string {
+  let result = "";
+  let cursor = 0;
+  for (const index of splitAt) {
+    result += line.slice(cursor, index).replace(/[ \t]+$/, "") + "\n" + indent;
+    cursor = index;
+  }
+  return result + line.slice(cursor);
+}
+
+/**
+ * Split "1. X 2. Y 3. Z" on one line. The numbers must count up by one with the same
+ * delimiter, so prose like "Requires Node 18. Then Version 2. Next" is left alone. A run
+ * that starts mid-line must start at 1. A line that already begins with a marker is a
+ * rendered list item, so it needs three items before it is split: "1. Upgrade to Version 2.
+ * Next, migrate." stays one item.
+ */
+function splitInlineNumberedItems(line: string): string {
+  const markers = [...line.matchAll(NUMBERED_MARKER_REGEX)].map((match) => ({
+    index: match.index ?? 0,
+    value: Number(match[1]),
+    delimiter: match[2],
+  }));
+  if (markers.length < 2) return line;
+  const indent = line.match(/^[ \t]*/)?.[0] ?? "";
+  const splitAt: number[] = [];
+  let lineStartRun = false;
+  let start = 0;
+  while (start < markers.length) {
+    const first = markers[start];
+    let end = start + 1;
+    while (
+      end < markers.length &&
+      markers[end].delimiter === first.delimiter &&
+      markers[end].value === markers[end - 1].value + 1
+    ) {
+      end++;
+    }
+    const atLineStart = first.index === indent.length;
+    if ((atLineStart || first.value === 1) && end - start >= (atLineStart ? 3 : 2)) {
+      lineStartRun ||= atLineStart;
+      for (let i = start + 1; i < end; i++) splitAt.push(markers[i].index);
+      start = end;
+    } else {
+      start++;
+    }
+  }
+  return splitAt.length > 0 ? breakLineAt(line, splitAt, lineStartRun ? indent : "") : line;
+}
+
+/**
+ * Split "• X • Y" (anywhere on a line) and "- X - Y - Z" / "* X * Y * Z" (only on a line
+ * that is already that kind of bullet item, with three items). Hyphens and asterisks are
+ * ordinary prose and math ("people * 0.4 * 250", "**Speed** - it's faster"), so they need
+ * the stronger signal, and a "-" or "*" followed by a digit never starts an item.
+ */
+function splitInlineBulletItems(line: string): string {
+  if (THEMATIC_BREAK_REGEX.test(line)) return line;
+  const markers = [...line.matchAll(BULLET_MARKER_REGEX)].map((match) => ({
+    index: match.index ?? 0,
+    char: match[1],
+  }));
+  if (markers.length < 2) return line;
+  const indent = line.match(/^[ \t]*/)?.[0] ?? "";
+  const dots = markers.filter((marker) => marker.char === "•");
+  if (dots.length >= 2) {
+    return breakLineAt(
+      line,
+      dots.slice(1).map((marker) => marker.index),
+      dots[0].index === indent.length ? indent : "",
+    );
+  }
+  const first = markers[0];
+  if (first.char === "•" || first.index !== indent.length) return line;
+  const items = markers.filter(
+    (marker, i) =>
+      marker.char === first.char && (i === 0 || !/^[ \t]+\d/.test(line.slice(marker.index + 1))),
+  );
+  if (items.length < 3) return line;
+  return breakLineAt(
+    line,
+    items.slice(1).map((marker) => marker.index),
+    indent,
+  );
+}
+
 /**
  * Split inline list items into proper newline-separated markdown list items.
- * Handles LLM output that puts "1. X 2. Y 3. Z" on one line instead of separate lines.
- * Uses [ \t]+ (space/tab only) between items so we don't match across existing newlines.
- * Also converts parenthetical numbers "(1) X (2) Y" into markdown list format.
+ * Handles LLM output that puts "1. X 2. Y 3. Z" on one line instead of separate lines,
+ * and converts parenthetical numbers "(1) X (2) Y" into markdown list format.
+ * Fenced code blocks are left untouched.
  */
 export function normalizeInlineLists(text: string): string {
-  let prev = "";
-  let result = text;
-  while (result !== prev) {
-    prev = result;
-    // Numbered: "1. X 2. Y" or "1) X 2) Y" -> separate lines (space/tab between items only)
-    result = result.replace(/(\d+[.)]\s+[^\n]+?)[ \t]+(\d+[.)]\s)/g, "$1\n$2");
-    // Bullet: "- X - Y" or "• X • Y" -> separate lines
-    result = result.replace(/([-*•]\s+[^\n]+?)[ \t]+([-*•]\s)/g, "$1\n$2");
-  }
-  // Parenthetical: "(1) X (2) Y" or ", (1) X, (2) Y" -> markdown list format
-  result = result.replace(/\s+\((\d+)\)\s+/g, "\n$1. ");
-  return result;
+  return transformOutsideFencedCode(text, (segment) =>
+    segment
+      .split("\n")
+      .map((line) =>
+        splitInlineNumberedItems(line).split("\n").map(splitInlineBulletItems).join("\n"),
+      )
+      .join("\n")
+      // Parenthetical: "(1) X (2) Y" or ", (1) X, (2) Y" -> markdown list format
+      .replace(PARENTHETICAL_ITEM_REGEX, "\n$1. "),
+  );
 }
 
 /**

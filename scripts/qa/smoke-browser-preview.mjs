@@ -773,6 +773,12 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.getByText("UI smoke project", { exact: true }).first().waitFor({ state: "visible" });
 
     await railButton("agents").click();
+    // The Bots page keeps workspace (managed) agents in a collapsible section below the bots.
+    const workspaceAgentsToggle = page.locator("button.agents-workspace-toggle");
+    await workspaceAgentsToggle.waitFor({ state: "visible" });
+    if ((await workspaceAgentsToggle.getAttribute("aria-expanded")) !== "true") {
+      await workspaceAgentsToggle.click();
+    }
     await page.getByRole("button", { name: "Create agent", exact: true }).first().click();
     await page.getByRole("button", { name: "Start blank", exact: true }).click();
     const saveAgent = page.getByRole("button", { name: "Save Agent", exact: true });
@@ -1147,23 +1153,48 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.locator(".memory-knowledge-add").getByRole("button", { name: "Add", exact: true }).click();
     const factRow = page.locator(".memory-knowledge-item").filter({ hasText: qaFact });
     await factRow.waitFor();
-    await factRow.getByRole("button", { name: "Pin", exact: true }).click();
-    await factRow.getByRole("button", { name: "Pinned", exact: true }).waitFor();
-    await factRow.getByRole("button", { name: "Edit", exact: true }).click();
-    await page.getByLabel("Edit memory", { exact: true }).fill(correctedFact);
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await page.getByLabel("Edit memory", { exact: true }).waitFor({ state: "detached" });
-    const correctedRow = page.locator(".memory-knowledge-item").filter({ hasText: correctedFact });
-    await correctedRow.waitFor();
-    assert.equal(await factRow.count(), 0, "Correction must replace the old active Memory Hub fact");
     const memoryWorkspace = await page.locator("#memory-workspace").inputValue();
-    const correctedId = await correctedRow.getAttribute("data-item-id");
-    assert(correctedId);
-    assert.equal((await page.evaluate(async ({workspaceId, id}) => window.electronAPI.getMemoryItem({workspaceId, id}), {workspaceId: memoryWorkspace, id: correctedId})).item.content, correctedFact);
-    page.once("dialog", (dialog) => dialog.accept());
-    await correctedRow.getByRole("button", { name: "Delete", exact: true }).click();
-    await correctedRow.waitFor({ state: "detached" });
-    assert(!(await page.evaluate(async (workspaceId) => window.electronAPI.listMemoryItems({workspaceId, statuses: ["active"], limit: 200}), memoryWorkspace)).items.some((item) => item.id === correctedId));
+    if (await factRow.getAttribute("data-entry-ref")) {
+      // Memory folder on (the default): the fact is a line in the folder. Pin moves it to
+      // MEMORY.md (its own section, no Pin toggle); edits and deletes act on that line.
+      const folderTexts = async () =>
+        page.evaluate(async (workspaceId) => {
+          const report = await window.electronAPI.getMemoryRepoEntries({ workspaceId });
+          return report.files.flatMap((file) => file.entries.map((entry) => `${file.path}: ${entry.text}`));
+        }, memoryWorkspace);
+      await factRow.getByRole("button", { name: "Pin", exact: true }).click();
+      const pinnedRow = page.locator('[data-file="MEMORY.md"] .memory-knowledge-item').filter({ hasText: qaFact });
+      await pinnedRow.waitFor();
+      await pinnedRow.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByLabel("Edit memory", { exact: true }).fill(correctedFact);
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await page.getByLabel("Edit memory", { exact: true }).waitFor({ state: "detached" });
+      const correctedRow = page.locator('[data-file="MEMORY.md"] .memory-knowledge-item').filter({ hasText: correctedFact });
+      await correctedRow.waitFor();
+      assert.equal(await factRow.count(), 0, "Correction must replace the old folder line");
+      assert((await folderTexts()).includes(`MEMORY.md: ${correctedFact}`), "The corrected fact must be pinned in MEMORY.md");
+      page.once("dialog", (dialog) => dialog.accept());
+      await correctedRow.getByRole("button", { name: "Delete", exact: true }).click();
+      await correctedRow.waitFor({ state: "detached" });
+      assert(!(await folderTexts()).some((text) => text.includes(correctedFact)), "Delete must remove the folder line");
+    } else {
+      await factRow.getByRole("button", { name: "Pin", exact: true }).click();
+      await factRow.getByRole("button", { name: "Pinned", exact: true }).waitFor();
+      await factRow.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByLabel("Edit memory", { exact: true }).fill(correctedFact);
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await page.getByLabel("Edit memory", { exact: true }).waitFor({ state: "detached" });
+      const correctedRow = page.locator(".memory-knowledge-item").filter({ hasText: correctedFact });
+      await correctedRow.waitFor();
+      assert.equal(await factRow.count(), 0, "Correction must replace the old active Memory Hub fact");
+      const correctedId = await correctedRow.getAttribute("data-item-id");
+      assert(correctedId);
+      assert.equal((await page.evaluate(async ({workspaceId, id}) => window.electronAPI.getMemoryItem({workspaceId, id}), {workspaceId: memoryWorkspace, id: correctedId})).item.content, correctedFact);
+      page.once("dialog", (dialog) => dialog.accept());
+      await correctedRow.getByRole("button", { name: "Delete", exact: true }).click();
+      await correctedRow.waitFor({ state: "detached" });
+      assert(!(await page.evaluate(async (workspaceId) => window.electronAPI.listMemoryItems({workspaceId, statuses: ["active"], limit: 200}), memoryWorkspace)).items.some((item) => item.id === correctedId));
+    }
     await page.getByRole("tab", { name: "Settings", exact: true }).click();
     // The workspace kit, inspector and awareness details live under the collapsed Advanced.
     await page.locator("details.memory-settings-advanced > summary").click();
@@ -1221,9 +1252,11 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       });
     }
     await page.getByRole("button", { name: "From another assistant", exact: true }).click();
-    await page.getByPlaceholder("Paste the full exported memory response here").fill("- The disposable browser UI memory project uses green notebooks.");
-    await page.getByRole("button", { name: "Add to Memory", exact: true }).click();
-    await page.getByRole("heading", { name: "Import complete", exact: true }).waitFor();
+    // Two-step copy/paste import dialog (categorized import, 0.5.60).
+    const importDialog = page.getByRole("dialog", { name: "Import memory to CoWork" });
+    await importDialog.getByLabel("Paste results below to add to CoWork's memory", { exact: true }).fill("- The disposable browser UI memory project uses green notebooks.");
+    await importDialog.getByRole("button", { name: "Add to memory", exact: true }).click();
+    await importDialog.getByRole("heading", { name: "Added to memory", exact: true }).waitFor();
     await page.getByRole("button", { name: "Close import popup", exact: true }).click();
     const persistedImport = await page.evaluate(async (workspaceId) => (await window.electronAPI.findImportedMemories({ workspaceId, limit: 50 })).find((memory) => memory.content.includes("green notebooks")), memoryWorkspace);
     assert(persistedImport, "The browser text import should persist in the selected workspace");
@@ -1238,12 +1271,22 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.locator(".memory-observation-detail").getByRole("button", { name: "Promote", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Memory promoted to workspace knowledge." }).waitFor();
     await page.locator(".memory-layer-grid").waitFor({ state: "attached" });
-    const memoryFilesDb = new (await import("better-sqlite3")).default(path.join(profile, "cowork-os.db"));
-    try {
-      const workspacePath = memoryFilesDb.prepare("SELECT path FROM workspaces WHERE id = ?").get(memoryWorkspace).path;
-      const knowledge = await fs.readFile(path.join(workspacePath, ".cowork", "MEMORY.md"), "utf8");
-      assert(knowledge.includes(importedDetail.title), "Browser promotion must persist in the workspace memory file");
-    } finally { memoryFilesDb.close(); }
+    // With the memory folder on, a promotion is the user's line in the workspace's folder
+    // file; with it off, a curated entry in the workspace's .cowork/MEMORY.md.
+    const promotedFolder = await page.evaluate(async (workspaceId) => window.electronAPI.getMemoryRepoEntries({ workspaceId }), memoryWorkspace);
+    if (promotedFolder.available) {
+      assert(
+        promotedFolder.files.some((file) => file.role === "workspace" && file.entries.some((entry) => entry.by === "user" && entry.text.includes(importedDetail.title))),
+        "Browser promotion must persist in the workspace's memory folder file",
+      );
+    } else {
+      const memoryFilesDb = new (await import("better-sqlite3")).default(path.join(profile, "cowork-os.db"));
+      try {
+        const workspacePath = memoryFilesDb.prepare("SELECT path FROM workspaces WHERE id = ?").get(memoryWorkspace).path;
+        const knowledge = await fs.readFile(path.join(workspacePath, ".cowork", "MEMORY.md"), "utf8");
+        assert(knowledge.includes(importedDetail.title), "Browser promotion must persist in the workspace memory file");
+      } finally { memoryFilesDb.close(); }
+    }
 
 
     await page.locator("#memory-workspace").selectOption(awarenessWorkspaceId);
@@ -1514,7 +1557,10 @@ async function main() {
     assert.equal((await desktop("getMemoryObservationDetails", [{ workspaceId: memoryWorkspaceId, ids: [importedMemory.id] }]))[0].title, "Disposable browser QA memory");
     const promotedObservation = await desktop("promoteMemoryObservation", [{ workspaceId: memoryWorkspaceId, memoryId: importedMemory.id }], "memory-promote-01");
     assert.equal(promotedObservation.success, true);
-    assert.equal(promotedObservation.entry.content, "Disposable browser QA memory");
+    // With the memory folder on, the promotion is a line in a folder file (`ref`, `file`);
+    // with it off, a curated entry.
+    if (promotedObservation.entry) assert.equal(promotedObservation.entry.content, "Disposable browser QA memory");
+    else assert.equal(typeof promotedObservation.ref, "string", "A folder promotion returns its line reference");
     const layerPreview = await desktop("getMemoryLayerPreview", [memoryWorkspaceId]);
     assert.equal(layerPreview.workspaceId, memoryWorkspaceId);
     assert(layerPreview.layers.length > 0, "Layer preview must contain authoritative host layers");
@@ -1557,25 +1603,60 @@ async function main() {
     await assert.rejects(desktop("addUserFact", [{ category: "preference", value: "Disposable browser QA prefers blue notebooks", source: "manual" }], "memory-legacy-fact-denied-01"), /unsupported|unknown|unavailable/i);
     const factResult = await desktop("addMemoryItem", [{ workspaceId: memoryWorkspaceId, kind: "preference", content: "Disposable browser QA prefers blue notebooks", scope: "workspace" }], "memory-fact-add-01");
     assert.equal(factResult.success, true);
-    const fact = factResult.item;
-    assert(fact?.id);
-    assert.equal(fact.workspaceId, memoryWorkspaceId);
-    assert.equal(fact.source, "user_stated");
-    assert((await desktop("listMemoryItems", [{ workspaceId: memoryWorkspaceId }])).items.some((entry) => entry.id === fact.id));
-    assert.equal((await desktop("setMemoryItemPinned", [{ workspaceId: memoryWorkspaceId, id: fact.id, pinned: true }], "memory-fact-pin-01")).success, true);
-    assert.equal((await desktop("getMemoryItem", [{ workspaceId: memoryWorkspaceId, id: fact.id }])).item.pinned, true);
-    const updatedFact = await desktop("updateMemoryItem", [{ workspaceId: memoryWorkspaceId, id: fact.id, content: "Disposable browser QA prefers green notebooks" }], "memory-fact-update-01");
-    assert.equal(updatedFact.success, true);
-    assert.equal(updatedFact.item.content, "Disposable browser QA prefers green notebooks");
     const factPolicyDb = new Database(path.join(profile, "cowork-os.db"));
     const originalFactPermissions = factPolicyDb.prepare("SELECT permissions FROM workspaces WHERE id = ?").get(memoryWorkspaceId).permissions;
+    const setFactDeletePermission = (allowed) =>
+      factPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify({ ...JSON.parse(originalFactPermissions), delete: allowed }), memoryWorkspaceId);
     try {
-      factPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify({ ...JSON.parse(originalFactPermissions), delete: false }), memoryWorkspaceId);
-      await assert.rejects(desktop("deleteMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }], "memory-fact-delete-denied-01"), /Workspace memory access is unavailable/);
-      assert.equal((await desktop("getMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }])).item.status, "active");
-      factPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(JSON.stringify({ ...JSON.parse(originalFactPermissions), delete: true }), memoryWorkspaceId);
-      assert.equal((await desktop("deleteMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }], "memory-fact-delete-01")).success, true);
-      assert(!(await desktop("listMemoryItems", [{ workspaceId: memoryWorkspaceId, statuses: ["active"] }])).items.some((entry) => entry.id === updatedFact.item.id));
+      if (factResult.item) {
+        // Memory folder off: the fact is a `memory_items` row.
+        const fact = factResult.item;
+        assert(fact.id);
+        assert.equal(fact.workspaceId, memoryWorkspaceId);
+        assert.equal(fact.source, "user_stated");
+        assert((await desktop("listMemoryItems", [{ workspaceId: memoryWorkspaceId }])).items.some((entry) => entry.id === fact.id));
+        assert.equal((await desktop("setMemoryItemPinned", [{ workspaceId: memoryWorkspaceId, id: fact.id, pinned: true }], "memory-fact-pin-01")).success, true);
+        assert.equal((await desktop("getMemoryItem", [{ workspaceId: memoryWorkspaceId, id: fact.id }])).item.pinned, true);
+        const updatedFact = await desktop("updateMemoryItem", [{ workspaceId: memoryWorkspaceId, id: fact.id, content: "Disposable browser QA prefers green notebooks" }], "memory-fact-update-01");
+        assert.equal(updatedFact.success, true);
+        assert.equal(updatedFact.item.content, "Disposable browser QA prefers green notebooks");
+        setFactDeletePermission(false);
+        await assert.rejects(desktop("deleteMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }], "memory-fact-delete-denied-01"), /Workspace memory access is unavailable/);
+        assert.equal((await desktop("getMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }])).item.status, "active");
+        setFactDeletePermission(true);
+        assert.equal((await desktop("deleteMemoryItem", [{ workspaceId: memoryWorkspaceId, id: updatedFact.item.id }], "memory-fact-delete-01")).success, true);
+        assert(!(await desktop("listMemoryItems", [{ workspaceId: memoryWorkspaceId, statuses: ["active"] }])).items.some((entry) => entry.id === updatedFact.item.id));
+      } else {
+        // Memory folder on (the default): the fact is a user line in the folder, returned as
+        // `ref` with no item. Verify it through the folder APIs the Memory Hub uses.
+        assert.match(factResult.ref ?? "", /^repo:.+#L\d+$/, "A folder write returns its line reference");
+        const folderEntry = async (ref) => {
+          const report = await desktop("getMemoryRepoEntries", [{ workspaceId: memoryWorkspaceId }]);
+          assert.equal(report.available, true);
+          return report.files.flatMap((file) => file.entries.map((entry) => ({ ...entry, role: file.role }))).find((entry) => entry.ref === ref);
+        };
+        const added = await folderEntry(factResult.ref);
+        assert(added, "The added fact must be listed in the memory folder");
+        assert.match(added.text, /blue notebooks/);
+        assert.equal(added.by, "user");
+        assert.equal(added.role, "workspace", "A workspace fact goes to the workspace's file");
+        const pinned = await desktop("pinMemoryRepoEntry", [{ workspaceId: memoryWorkspaceId, ref: added.ref, hash: added.hash }], "memory-fact-pin-01");
+        assert.equal(pinned.ok, true, pinned.error);
+        const pinnedEntry = await folderEntry(pinned.ref);
+        assert.equal(pinnedEntry?.role, "entry", "Pinning moves the fact to MEMORY.md");
+        const updated = await desktop("updateMemoryRepoEntry", [{ workspaceId: memoryWorkspaceId, ref: pinnedEntry.ref, hash: pinnedEntry.hash, text: "Disposable browser QA prefers green notebooks" }], "memory-fact-update-01");
+        assert.equal(updated.ok, true, updated.error);
+        const updatedEntry = await folderEntry(updated.ref);
+        assert.match(updatedEntry?.text ?? "", /green notebooks/);
+        setFactDeletePermission(false);
+        await assert.rejects(desktop("removeMemoryRepoEntry", [{ workspaceId: memoryWorkspaceId, ref: updatedEntry.ref, hash: updatedEntry.hash }], "memory-fact-delete-denied-01"), /Workspace memory access is unavailable/);
+        assert.equal((await folderEntry(updatedEntry.ref))?.hash, updatedEntry.hash, "A refused deletion must keep the folder line");
+        setFactDeletePermission(true);
+        const removed = await desktop("removeMemoryRepoEntry", [{ workspaceId: memoryWorkspaceId, ref: updatedEntry.ref, hash: updatedEntry.hash }], "memory-fact-delete-01");
+        assert.equal(removed.ok, true, removed.error);
+        const remaining = await desktop("getMemoryRepoEntries", [{ workspaceId: memoryWorkspaceId }]);
+        assert(!remaining.files.some((file) => file.entries.some((entry) => /green notebooks/.test(entry.text))), "An authorized deletion must remove the folder line");
+      }
     } finally {
       factPolicyDb.prepare("UPDATE workspaces SET permissions = ? WHERE id = ?").run(originalFactPermissions, memoryWorkspaceId);
       factPolicyDb.close();

@@ -2,7 +2,7 @@ import { Agent as HttpAgent } from "http";
 import { Agent as HttpsAgent } from "https";
 import { promises as dns } from "dns";
 import { isIP } from "net";
-import { Readable } from "stream";
+import { finished, type Readable } from "stream";
 import { loadPolicies } from "../admin/policies";
 import { domainMatches } from "./network-policy";
 import { fetch as nodeFetch } from "node-fetch/node";
@@ -118,13 +118,48 @@ export async function pinnedFetch(
     "set-cookie"
   ] ?? [])
     headers.append("set-cookie", cookie);
-  return new Response(
-    body && !noBody ? (Readable.toWeb(body) as ReadableStream<Uint8Array>) : null,
+  return new Response(body && !noBody ? toCancelSafeWebStream(body) : null, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/**
+ * Adapt a node-fetch body to a web stream that can be cancelled unread.
+ * Readable.toWeb's pull() schedules a resume that still flushes buffered chunks
+ * after cancel() destroys the stream; its enqueue into the closed controller
+ * then throws ERR_INVALID_STATE as an uncaught exception.
+ */
+function toCancelSafeWebStream(body: Readable): ReadableStream<Uint8Array> {
+  let settled = false;
+  return new ReadableStream<Uint8Array>(
     {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
+      start(controller) {
+        // Pause first so attaching the data listener does not start the flow.
+        body.pause();
+        body.on("data", (chunk: Buffer) => {
+          if (settled) return;
+          // Copy so consumers never hold a view into Node's shared buffer pool.
+          controller.enqueue(new Uint8Array(chunk));
+          if ((controller.desiredSize ?? 0) <= 0) body.pause();
+        });
+        finished(body, (error) => {
+          if (settled) return;
+          settled = true;
+          if (error) controller.error(error);
+          else controller.close();
+        });
+      },
+      pull() {
+        body.resume();
+      },
+      cancel() {
+        settled = true;
+        body.destroy();
+      },
     },
+    new ByteLengthQueuingStrategy({ highWaterMark: body.readableHighWaterMark }),
   );
 }
 

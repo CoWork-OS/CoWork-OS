@@ -105,8 +105,19 @@ export function BotCollaborationHeader({
     });
   }, [botConversations, events, projection.handoffs]);
   const handoffCount = projection.handoffs.length;
-  const hasDetails = handoffCount > 0 || projection.collaborators.length > 0 || projection.outcome;
+  const hasTeamContext =
+    handoffCount > 0 || projection.collaborators.length > 0 || projection.teammates.length > 0;
+  // A completed outcome is the bot's last reply, already in the transcript.
+  const outcome = projection.outcome?.state === "completed" ? null : projection.outcome;
+  const hasDetails = hasTeamContext || Boolean(outcome);
   const visibleCollaborators = projection.collaborators.slice(0, 3);
+  // A solo bot that has answered has nothing to add: the title bar already
+  // shows who it is and its mascot mirrors the state.
+  if (!hasTeamContext && !projection.attention && !outcome) {
+    if (projection.state === "completed" || projection.state === "ready") return null;
+  }
+  const stateLabel =
+    projection.state === "working" && !hasTeamContext ? "Working" : projection.stateLabel;
 
   return (
     <section
@@ -131,7 +142,7 @@ export function BotCollaborationHeader({
             <span className="bot-collaboration-bot-name">{botName}</span>
             <span className="bot-collaboration-status" data-testid="bot-collaboration-state">
               <StateIcon state={projection.state} />
-              <span>{projection.stateLabel}</span>
+              <span>{stateLabel}</span>
             </span>
           </div>
           <div
@@ -222,10 +233,10 @@ export function BotCollaborationHeader({
 
       {detailsOpen && (
         <div id="bot-collaboration-details" className="bot-collaboration-details">
-          {projection.outcome && (
+          {outcome && (
             <div className="bot-collaboration-outcome" data-testid="bot-collaboration-outcome">
               <span className="bot-collaboration-detail-label">Latest outcome</span>
-              <span>{projection.outcome.summary}</span>
+              <span>{outcome.summary}</span>
             </div>
           )}
           {projection.handoffs.length > 0 && (

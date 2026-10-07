@@ -8719,6 +8719,7 @@ export const IPC_CHANNELS = {
   BOT_RESPONSIBILITY_REVISE: "bot:responsibility:revise",
 
   BOT_CONVERSATIONS_LIST: "bot:conversationsList",
+  BOT_MESSAGES_PAGE: "bot:messagesPage",
   BOT_CONVERSATION_REOPEN: "bot:conversationReopen",
   COMPOSER_DRAFT_GET: "composerDraft:get",
   COMPOSER_DRAFT_UPSERT: "composerDraft:upsert",

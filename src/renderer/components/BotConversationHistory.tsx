@@ -2,7 +2,7 @@ import { Archive, Check, Clock3, MessageCircle, Plus } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
 import type { BotConversationProjection } from "../../shared/bot-lifecycle";
-import { isBotConversation } from "../utils/bot-conversations";
+import { isBotConversation, isBotConversationSeedPrompt } from "../utils/bot-conversations";
 import "./BotConversationHistory.css";
 
 type BotConversationHistoryProjection = Pick<BotConversationProjection, "state"> &
@@ -23,24 +23,18 @@ function isArchived(task: Task): boolean {
   return task.sessionArchived === true;
 }
 
-const SYNTHETIC_BOT_PROMPT_RE =
-  /^(?:start (?:a )?(?:conversation|chatting) with .+|resume the .+ bot conversation)\b/i;
-
-function isSyntheticBotPrompt(value: string): boolean {
-  return SYNTHETIC_BOT_PROMPT_RE.test(value.trim());
-}
 
 export function getBotConversationTitle(task: Task, index: number, botName: string): string {
   const title = String(task.title || "").trim();
   const genericTitle = !title || title.toLocaleLowerCase() === botName.trim().toLocaleLowerCase();
-  if (!genericTitle && !isSyntheticBotPrompt(title)) return title;
+  if (!genericTitle && !isBotConversationSeedPrompt(title)) return title;
   const firstMessage = [task.userPrompt, task.sidebarPromptPreview, task.rawPrompt, task.prompt]
     .map((value) =>
       String(value || "")
         .replace(/\s+/g, " ")
         .trim(),
     )
-    .find((value) => value && !isSyntheticBotPrompt(value));
+    .find((value) => value && !isBotConversationSeedPrompt(value));
   if (firstMessage) {
     return firstMessage.length > 58 ? `${firstMessage.slice(0, 57).trimEnd()}…` : firstMessage;
   }

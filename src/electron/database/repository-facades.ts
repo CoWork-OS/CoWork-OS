@@ -1,3 +1,4 @@
+import type { BotMessageStore } from "./bot-message-store";
 import type { BotWorkResultStore } from "./bot-work-result-store";
 import type { BotWorkStore } from "./bot-work-store";
 import type { BotOutcomeMetricsStore } from "./bot-outcome-metrics-store";
@@ -719,6 +720,11 @@ export const WorkspaceRepository = repositoryFacade<
   (typeof WORKSPACE_METHODS)[number]
 >("workspace_", WORKSPACE_METHODS);
 
+/** A bot's chat history, a page of messages at a time, read in the database worker. */
+export type BotMessageRepository = AsyncStore<BotMessageStore, "findPage">;
+export const BotMessageRepository = repositoryFacade<BotMessageStore, "findPage">("botMessage_", [
+  "findPage",
+]);
 export type BotWorkRepository = AsyncStore<BotWorkStore, "list">;
 export const BotWorkRepository = repositoryFacade<BotWorkStore, "list">("botWork_", ["list"]);
 export type BotOutcomeMetricsRepository = AsyncStore<BotOutcomeMetricsStore, "summary">;

@@ -14171,20 +14171,8 @@
   display: none;
 }
 
-.bot-conversation .main-footer {
-  padding-top: 12px;
-}
-
 .bot-conversation .main-footer::before {
   height: 32px;
-}
-
-.bot-conversation .chat-message.assistant-message {
-  margin-bottom: 26px;
-}
-
-.bot-conversation .chat-message.assistant-message .chat-bubble {
-  max-width: min(680px, 88%);
 }
 
 .bot-message-attribution {
@@ -14343,7 +14331,8 @@
 .bot-conversation .chat-message.user-message {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 22px;
+  /* The reserved copy row below the bubble supplies the rest of the gap. */
+  margin-bottom: 14px;
 }
 
 .bot-conversation .chat-bubble.user-bubble {
@@ -14375,6 +14364,24 @@
 
 .bot-conversation .chat-bubble.user-bubble:not(.expanded) .user-bubble-fade {
   background: linear-gradient(transparent, var(--bot-user-bubble-bg));
+}
+
+/* Copy stays out of the conversation until the turn is hovered; its row keeps
+   its space so revealing it never shifts the stream. */
+.bot-conversation .chat-message.user-message > .message-copy-btn {
+  margin-top: 2px;
+  padding: 2px 6px;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.15s ease,
+    visibility 0.15s ease;
+}
+
+.bot-conversation .chat-message.user-message:hover > .message-copy-btn,
+.bot-conversation .chat-message.user-message:focus-within > .message-copy-btn {
+  opacity: 1;
+  visibility: visible;
 }
 
 .bot-conversation .chat-bubble.user-bubble a {
@@ -14429,6 +14436,89 @@
   background: none;
 }
 
+/* A bot chat stays hidden while it opens, until it sits on its newest message. */
+.bot-conversation .task-content.bot-transcript-pending {
+  visibility: hidden;
+}
+
+/* Earlier conversations with the bot load above the live one as the user
+   scrolls up; day dividers stand in for conversation boundaries. */
+.bot-history {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-ui);
+}
+
+.bot-history-sentinel {
+  height: 1px;
+}
+
+.bot-history-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 28px 0 32px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.bot-history-start strong {
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.bot-history-start-avatar {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 6px;
+  color: var(--bot-mark-color);
+}
+
+.bot-history-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 0 18px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.bot-history-status button {
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.bot-history-status button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.bot-history-day {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0 22px;
+}
+
+.bot-history-day span {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 80%, transparent);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .bot-conversation .agent-inbound-message {
   margin: 0 0 20px;
   padding: 13px 16px 14px;
@@ -14457,6 +14547,11 @@
   border-radius: 50%;
   background: var(--color-accent);
   content: "";
+}
+
+/* A known teammate shows its character in place of the dot. */
+.bot-conversation .agent-inbound-message-label.with-avatar::before {
+  content: none;
 }
 
 .bot-conversation .agent-inbound-message-body {

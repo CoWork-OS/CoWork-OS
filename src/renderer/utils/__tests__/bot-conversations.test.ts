@@ -7,6 +7,7 @@ import {
   isBotRecoveryBranch,
   matchesBotConversation,
   selectLatestBotConversation,
+  selectLatestMessagedBotConversation,
   shouldReopenBotConversationInWorkspace,
 } from "../bot-conversations";
 
@@ -87,6 +88,36 @@ describe("bot conversations", () => {
     } as Task;
 
     expect(selectLatestBotConversation([source, recovery], "bot-a")?.id).toBe("recovery-task");
+  });
+  it("keeps an empty recovery branch over older conversations so it is not branched again", () => {
+    const older = {
+      ...conversation,
+      id: "older-task",
+      createdAt: 50,
+      updatedAt: 300,
+      resultSummary: "A two-week-old handoff",
+    } as Task;
+    const source = {
+      ...conversation,
+      id: "source-task",
+      createdAt: 100,
+      updatedAt: 500,
+      resultSummary: "Today's conversation",
+    } as Task;
+    const branch = {
+      ...conversation,
+      id: "branch-task",
+      createdAt: 600,
+      updatedAt: 600,
+      branchFromTaskId: source.id,
+      branchLabel: "Reopened bot conversation",
+      userPrompt: "Start chatting with Atlas.",
+    } as Task;
+
+    expect(selectLatestBotConversation([older, source, branch], "bot-a")?.id).toBe("branch-task");
+    expect(selectLatestMessagedBotConversation([older, source, branch], "bot-a")?.id).toBe(
+      "source-task",
+    );
   });
   it("shows a newer real conversation after an earlier recovery branch", () => {
     const recovery = {

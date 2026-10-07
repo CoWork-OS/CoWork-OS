@@ -940,13 +940,24 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   padding-right: 9px;
 }
 
-.sidebar-panel .sidebar-bot-edit-button {
+.sidebar-panel .sidebar-bot-edit-button,
+.sidebar-panel .sidebar-bot-work-button {
   opacity: 0;
 }
 
 .sidebar-panel .sidebar-bot-row-wrap:hover .sidebar-bot-edit-button,
-.sidebar-panel .sidebar-bot-row-wrap:focus-within .sidebar-bot-edit-button {
+.sidebar-panel .sidebar-bot-row-wrap:focus-within .sidebar-bot-edit-button,
+.sidebar-panel .sidebar-bot-row-wrap:hover .sidebar-bot-work-button,
+.sidebar-panel .sidebar-bot-row-wrap:focus-within .sidebar-bot-work-button {
   opacity: 1;
+}
+
+/* Once the work and edit buttons show, the name truncates before them. */
+.sidebar-panel .sidebar-bot-row-wrap:not(:has(.sidebar-bot-reopen-button)):hover .sidebar-bot-row,
+.sidebar-panel
+  .sidebar-bot-row-wrap:not(:has(.sidebar-bot-reopen-button)):focus-within
+  .sidebar-bot-row {
+  padding-right: 64px;
 }
 
 .sidebar-panel .sidebar-bot-row-wrap:not(:has(.sidebar-bot-reopen-button)):hover .sidebar-bot-age,

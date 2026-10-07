@@ -27,7 +27,11 @@ import {
   MentionRepository,
   WorkingStateRepository,
 } from "../agents/agent-repository-facades";
-import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
+import {
+  BotMessageRepository,
+  TaskRepository,
+  WorkspaceRepository,
+} from "../database/repository-facades";
 import {
   ApprovalRepository,
   ArtifactRepository,
@@ -228,6 +232,7 @@ function validateComposerDraft(
 }
 
 import { DatabaseManager } from "../database/schema";
+import { BOT_MESSAGE_PAGE_MAX_LIMIT } from "../../shared/bot-messages";
 import {
   TaskEventRepository,
   TaskSessionMetadataStore,
@@ -5824,6 +5829,30 @@ export async function setupIpcHandlers(
       });
     },
   );
+
+  // A bot's chat history across its conversations, a page of messages at a time.
+  const botMessageRepo = new BotMessageRepository(db);
+  ipcMain.handle(IPC_CHANNELS.BOT_MESSAGES_PAGE, async (_, rawRequest?: unknown) => {
+    const request = validateInput(
+      z.object({
+        workspaceId: WorkspaceIdSchema,
+        includeAllWorkspaces: z.boolean().optional(),
+        agentRoleId: z.string().trim().min(1).max(128),
+        beforeConversationId: z.string().trim().min(1).max(128).optional(),
+        cursor: z
+          .object({
+            timestamp: z.number().int().nonnegative(),
+            id: z.string().trim().min(1).max(128),
+          })
+          .nullable()
+          .optional(),
+        limit: z.number().int().positive().max(BOT_MESSAGE_PAGE_MAX_LIMIT).optional(),
+      }),
+      rawRequest,
+      "bot message page request",
+    );
+    return botMessageRepo.findPage(request);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.BOT_CONVERSATION_REOPEN,

@@ -86,7 +86,7 @@ The [Changelog](changelog.md) lists every change in this release.
 
 - The package version is `0.5.60`; the desktop runtime is Electron 44 (44.5.1) and macOS 13 Ventura remains the minimum supported macOS version.
 - macOS 12 Monterey users should remain on `0.5.51`.
-- Existing CoWork data and profiles are migrated on first start as described in [Upgrade notes](#upgrade-notes). `0.5.54` can still open an upgraded profile and ignores the tables it doesn't know, but memory moved into the memory folder is not visible there.
+- Existing CoWork data and profiles are migrated on first start as described in [Upgrade notes](#upgrade-notes). `0.5.54` can still open an upgraded profile and ignores the tables it doesn't know, but memory moved into the memory folder is not visible there. Memories saved while back on `0.5.54` are picked up again the next time you upgrade.
 - Notable dependency updates: openai 7, mermaid 12, pdfjs-dist 6, lucide-react 1, eventsource 5, @slack/bolt 5 and uuid 14.
 
 ## Release validation

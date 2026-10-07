@@ -3,12 +3,22 @@ import { InlineHtmlPreview, InlineHtmlSourcePreview } from "./InlineHtmlPreview"
 import { InlineVideoPreview } from "./InlineVideoPreview";
 import { normalizeInlineLists, unwrapMarkdownCodeBlocks } from "../utils/markdown-inline-lists";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
+import {
+  answerSurfaceKey,
+  isAnswerSurfaceFenceEnd,
+  isAnswerSurfaceFenceStart,
+} from "../../shared/answer-surfaces/blocks";
+import { AnswerSurfaceBlock } from "./AnswerSurface/AnswerSurface";
 
 type AssistantMessageContentProps = {
   message: string;
   markdownComponents: Any;
   workspacePath?: string;
   onOpenViewer?: (path: string) => void;
+  /** The task the message belongs to; interactive answer state is saved per task. */
+  taskId?: string;
+  /** The message is a draft still being generated. */
+  streaming?: boolean;
 };
 
 type VideoDirective = {
@@ -42,7 +52,8 @@ type MessageSegment =
   | { type: "html_source"; html: string; title?: string; raw: string }
   | { type: "frame"; directive: FrameDirective; raw: string }
   | { type: "frame_source"; html: string; directive: FrameDirective; raw: string }
-  | { type: "html_error"; raw: string; error: string };
+  | { type: "html_error"; raw: string; error: string }
+  | { type: "answer_surface"; source: string; closed: boolean; key: string; raw: string };
 
 const LazyMarkdownRenderer = lazy(() =>
   import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer })),
@@ -460,6 +471,8 @@ export function parseAssistantMessageSegments(message: string): MessageSegment[]
   const segments: MessageSegment[] = [];
   let markdownBuffer: string[] = [];
 
+  const surfaceOccurrences = new Map<string, number>();
+
   const flushMarkdown = () => {
     if (markdownBuffer.length === 0) return;
     segments.push({ type: "markdown", content: markdownBuffer.join("\n") });
@@ -468,6 +481,27 @@ export function parseAssistantMessageSegments(message: string): MessageSegment[]
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex];
+
+    if (isAnswerSurfaceFenceStart(line)) {
+      flushMarkdown();
+      let endIndex = lineIndex + 1;
+      while (endIndex < lines.length && !isAnswerSurfaceFenceEnd(lines[endIndex])) endIndex += 1;
+      const source = lines
+        .slice(lineIndex + 1, endIndex)
+        .join("\n")
+        .trim();
+      const occurrence = surfaceOccurrences.get(source) ?? 0;
+      surfaceOccurrences.set(source, occurrence + 1);
+      segments.push({
+        type: "answer_surface",
+        source,
+        closed: endIndex < lines.length,
+        key: answerSurfaceKey(source, occurrence),
+        raw: lines.slice(lineIndex, endIndex + 1).join("\n"),
+      });
+      lineIndex = endIndex;
+      continue;
+    }
 
     if (HTML_FENCE_START_REGEX.test(line)) {
       const htmlLines: string[] = [];
@@ -578,6 +612,8 @@ export function AssistantMessageContent({
   markdownComponents,
   workspacePath,
   onOpenViewer,
+  taskId,
+  streaming = false,
 }: AssistantMessageContentProps) {
   const segments = parseAssistantMessageSegments(message);
 
@@ -591,6 +627,20 @@ export function AssistantMessageContent({
             <DeferredMarkdown key={`md-${index}`} components={markdownComponents}>
               {normalizedContent}
             </DeferredMarkdown>
+          );
+        }
+
+        if (segment.type === "answer_surface") {
+          return (
+            <AnswerSurfaceBlock
+              key={`surface-${segment.key}`}
+              source={segment.source}
+              surfaceKey={segment.key}
+              closed={segment.closed}
+              streaming={streaming}
+              taskId={taskId}
+              persist={Boolean(taskId) && !streaming}
+            />
           );
         }
 

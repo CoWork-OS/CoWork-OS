@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **PDF worker memory limit holds under heap flags**: `--max-old-space-size` (in `NODE_OPTIONS`, on the command line or in Electron's `--js-flags`) is process-wide and overrode the PDF workers' memory limit, letting a hostile PDF use gigabytes before failing. The app now also watches each PDF worker's heap and stops it at its limit whatever flags the process runs with.
+
 ## [0.5.60] - 2026-10-07
 
 See [Release Notes 0.5.60](docs/release-notes-0.5.60.md) for the upgrade notes and a summary. Versions 0.5.55 to 0.5.59 were skipped.

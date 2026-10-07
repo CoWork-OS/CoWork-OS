@@ -217,6 +217,8 @@ function looksLikePlainToolTranscript(input: string): boolean {
 function stripFencedToolBlocks(input: string): { text: string; removed: number } {
   let removed = 0;
   const text = input.replace(/```[\s\S]*?```/g, (block) => {
+    // Answer surface data is never a tool call, even when a label happens to say "tool".
+    if (/^```cowork-ui\s*\n/i.test(block)) return block;
     const lower = block.toLowerCase();
     const looksLikeToolCall = TOOL_TEXT_MARKERS.some((marker) => lower.includes(marker));
     if (!looksLikeToolCall) return block;

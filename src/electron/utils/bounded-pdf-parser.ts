@@ -80,6 +80,9 @@ export const DEFAULT_MAX_PDF_FILE_BYTES = 100 * 1024 * 1024;
 /** PDF workers that may run at once across the app; further parses wait for a free slot. */
 export const MAX_CONCURRENT_PDF_WORKERS = 2;
 
+/** How often the parent samples a PDF worker's heap (see `run`). */
+const HEAP_WATCH_INTERVAL_MS = 50;
+
 const DEFAULT_PAGE_TEXT_MAX_PAGES = 200;
 const MAX_PAGE_TEXT_ITEMS = 500_000;
 
@@ -309,12 +312,15 @@ export class BoundedPdfParser {
       release();
       throw error;
     }
+    const memoryLimitError = () =>
+      new PdfParseLimitError(`PDF parsing exceeded its ${maxHeapMb} MB memory limit`);
     return new Promise<T>((resolve, reject) => {
       let settled = false;
       const finish = (error: Error | null, result?: T) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearInterval(heapWatch);
         // The slot frees only once the thread is really gone.
         worker.terminate().then(release, release);
         if (error) reject(error);
@@ -329,6 +335,24 @@ export class BoundedPdfParser {
           ),
         deadlineMs,
       );
+      // V8 heap flags are process-wide and override resourceLimits in every worker isolate:
+      // --max-old-space-size in NODE_OPTIONS, the node command line or Electron's --js-flags lifts
+      // this worker's heap to that size. So the parent also watches the heap and stops the worker
+      // once it outgrows what resourceLimits would have allowed (old generation plus young
+      // generation). Without such a flag V8 stops the worker first and this never fires. Sampling
+      // works while the worker is busy in a synchronous parse.
+      const heapWatch = setInterval(() => {
+        // -1 until the thread is up, absent once it has gone.
+        const youngMb = Math.max(0, worker.resourceLimits?.maxYoungGenerationSizeMb ?? 0);
+        const allowedBytes = (maxHeapMb + youngMb) * 1024 * 1024;
+        worker.getHeapStatistics().then(
+          (stats) => {
+            if (stats.used_heap_size > allowedBytes) finish(memoryLimitError());
+          },
+          // The worker is already gone; its exit or error settles the parse.
+          () => {},
+        );
+      }, HEAP_WATCH_INTERVAL_MS);
       worker.once("message", (reply: WorkerReply) => {
         if (!reply || reply.ok !== true) {
           const failure = reply as { error?: unknown } | undefined;
@@ -342,11 +366,7 @@ export class BoundedPdfParser {
         }
       });
       worker.on("error", (error: Error & { code?: string }) => {
-        finish(
-          error.code === "ERR_WORKER_OUT_OF_MEMORY"
-            ? new PdfParseLimitError(`PDF parsing exceeded its ${maxHeapMb} MB memory limit`)
-            : error,
-        );
+        finish(error.code === "ERR_WORKER_OUT_OF_MEMORY" ? memoryLimitError() : error);
       });
       worker.once("exit", (code) => {
         finish(new Error(`PDF parser exited before finishing (code ${code})`));

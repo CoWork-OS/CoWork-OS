@@ -17,6 +17,7 @@ import {
   MAX_QUOTED_ASSISTANT_PREVIEW_CHARS,
 } from "./main-content-constants";
 import { cleanAssistantMessageForDisplay } from "./markdown-normalization";
+import { toPlainAnswerText } from "../../../shared/answer-surfaces/blocks";
 import {
   IntegrationMentionText,
   hasRenderableIntegrationMentions,
@@ -229,7 +230,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({ text }: { tex
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(toPlainAnswerText(text));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -429,8 +430,8 @@ export const MessageSpeakButton = memo(function MessageSpeakButton({
 
     try {
       setLoading(true);
-      // Strip markdown for cleaner speech
-      const cleanText = text
+      // Strip markdown for cleaner speech; interactive answer blocks are read as text.
+      const cleanText = toPlainAnswerText(text)
         .replace(/```[\s\S]*?```/g, "") // Remove code blocks
         .replace(/`[^`]+`/g, "") // Remove inline code
         .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Keep link text only

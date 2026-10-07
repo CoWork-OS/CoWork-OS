@@ -22,6 +22,7 @@ import {
 import { BotGlyph } from "../BotGlyph";
 import { BotMascot } from "../bot-mascot/BotMascot";
 import { mascotExpressionForBotConversation } from "../bot-mascot/mascot-expressions";
+import { withoutAnswerSurfaceBlocks } from "../../../shared/answer-surfaces/blocks";
 import { resolveBotMascot } from "../../../shared/bot-mascots";
 import {
   BOT_CONVERSATION_HISTORY_OPEN_EVENT,
@@ -732,8 +733,10 @@ export function AgentReasoningPanel(props: {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [followStream, setFollowStream] = useState(true);
   const stepLabel = currentStep?.description?.trim() || "";
-  const hasStreamText = state.activeStreamText.trim().length > 0;
-  const streamSignature = hasStreamText ? state.activeStreamText : state.recentUpdates.join("\n");
+  // The answer renders its interactive blocks itself; the preview shows only the prose.
+  const activeStreamText = withoutAnswerSurfaceBlocks(state.activeStreamText);
+  const hasStreamText = activeStreamText.trim().length > 0;
+  const streamSignature = hasStreamText ? activeStreamText : state.recentUpdates.join("\n");
 
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -789,7 +792,7 @@ export function AgentReasoningPanel(props: {
       >
         {hasStreamText ? (
           <div className="agent-reasoning-stream-text markdown-content">
-            <MarkdownRenderer withBreaks>{state.activeStreamText}</MarkdownRenderer>
+            <MarkdownRenderer withBreaks>{activeStreamText}</MarkdownRenderer>
           </div>
         ) : (
           state.recentUpdates.map((message, index) => (
@@ -797,7 +800,7 @@ export function AgentReasoningPanel(props: {
               key={`${index}:${message.slice(0, 48)}`}
               className="agent-reasoning-update markdown-content"
             >
-              <MarkdownRenderer withBreaks>{message}</MarkdownRenderer>
+              <MarkdownRenderer withBreaks>{withoutAnswerSurfaceBlocks(message)}</MarkdownRenderer>
             </div>
           ))
         )}
@@ -2833,6 +2836,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               markdownComponents={markdownComponents}
                               workspacePath={workspace?.path}
                               onOpenViewer={setViewerFilePath}
+                              taskId={event.taskId}
+                              streaming
                             />
                           </div>
                         </div>
@@ -3130,6 +3135,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 markdownComponents={markdownComponents}
                                 workspacePath={workspace?.path}
                                 onOpenViewer={setViewerFilePath}
+                                taskId={event.taskId}
                               />
                             </div>
                           </div>

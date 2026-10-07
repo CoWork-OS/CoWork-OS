@@ -1,4 +1,5 @@
 import type { ControlPlaneFrame } from "./control-plane-client";
+import { toPlainAnswerText } from "../shared/answer-surfaces/blocks";
 
 export interface WorkspaceLike {
   id?: string;
@@ -87,13 +88,15 @@ export function formatTaskEventFrame(frame: ControlPlaneFrame): string | null {
     stringValue(payload.type) ||
     stringValue(inner.kind) ||
     stringValue(inner.type);
-  const message =
+  const rawMessage =
     stringValue(payload.message) ||
     stringValue(payload.text) ||
     stringValue(payload.summary) ||
     stringValue(inner.message) ||
     stringValue(inner.text) ||
     stringValue(inner.summary);
+  // Interactive answer components print as their text version.
+  const message = rawMessage ? toPlainAnswerText(rawMessage) : rawMessage;
   const status = stringValue(payload.status) || stringValue(inner.status);
   const taskId = stringValue(payload.taskId) || stringValue(inner.taskId);
 

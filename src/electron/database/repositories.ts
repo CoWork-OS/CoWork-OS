@@ -1,4 +1,5 @@
 import { isAssistantApprovalInputRequest } from "../agent/assistant-approval";
+import { deleteAnswerSurfaceStateForTask } from "../answer-surfaces/answer-surface-state-sql";
 import {
   assertApprovalDraftsCurrent,
   captureApprovalDrafts,
@@ -1778,6 +1779,9 @@ export class TaskStore {
       // Delete worktree_info record if it exists
       const deleteWorktreeInfo = this.db.prepare("DELETE FROM worktree_info WHERE task_id = ?");
       deleteWorktreeInfo.run(taskId);
+
+      // Control values the user set in this task's interactive answers.
+      deleteAnswerSurfaceStateForTask(this.db, taskId);
 
       // Delete hook_sessions (task_id NOT NULL)
       const deleteHookSessions = this.db.prepare("DELETE FROM hook_sessions WHERE task_id = ?");

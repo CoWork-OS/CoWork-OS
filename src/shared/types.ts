@@ -9781,6 +9781,11 @@ export const IPC_CHANNELS = {
   MEMORY_HUB_SOURCES: "memoryHub:sources",
   MEMORY_HUB_HEALTH: "memoryHub:health",
 
+  // Interactive answer surfaces: saved control values and host-fetched photos
+  ANSWER_SURFACE_GET_STATE: "answerSurfaces:getState",
+  ANSWER_SURFACE_SAVE_STATE: "answerSurfaces:saveState",
+  ANSWER_SURFACE_RESOLVE_IMAGES: "answerSurfaces:resolveImages",
+
   // Memory folder: the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
   MEMORY_REPO_STATUS: "memoryRepo:status",
   MEMORY_REPO_OPEN_FOLDER: "memoryRepo:openFolder",

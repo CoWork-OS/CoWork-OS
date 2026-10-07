@@ -43,7 +43,7 @@ an error.
 
 Example request shape:
 
-`GET /v1/latest-version?version=0.5.54&platform=macos&arch=arm64&surface=desktop`
+`GET /v1/latest-version?version=0.5.60&platform=macos&arch=arm64&surface=desktop`
 
 ## Identity and consent
 

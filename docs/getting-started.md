@@ -23,11 +23,11 @@ Open **Settings > AI & Models > Model Access**, choose an account, API key, or l
 
 ### Step 3: Choose the task permissions
 
-Start with **Ask for approval** so CoWork pauses for review when an action needs approval. This is separate from the work choice: **Ask** is labeled **Chat** and **Do** is labeled **Smart** in stable v0.5.54. Permissions govern allowed actions, while the work choice selects conversation-only help or task work.
+Start with **Ask for approval** so CoWork pauses for review when an action needs approval. This is separate from the work choice (releases before 0.5.60 label **Ask** as **Chat** and **Do** as **Smart**). Permissions govern allowed actions, while the work choice selects conversation-only help or task work.
 
 ### Step 4: Create and inspect one result
 
-Choose **Do** (shown as **Smart** in the stable 0.5.54 release) and try:
+Choose **Do** (shown as **Smart** in releases before 0.5.60) and try:
 
 > Create a small spreadsheet with six columns and four example rows for a project tracker. Save it in this workspace.
 

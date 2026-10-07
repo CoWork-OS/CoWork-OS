@@ -16,13 +16,14 @@
  *   Or download from GitHub releases
  */
 
-import { spawn, ChildProcess, execSync, exec } from "child_process";
+import { spawn, spawnSync, ChildProcess, execFile } from "child_process";
 import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as net from "net";
 import * as readline from "readline";
+import { buildSignalCliInvocation } from "./signal-cli-command";
 
 /**
  * Signal message types
@@ -242,11 +243,16 @@ export class SignalClient extends EventEmitter {
    */
   async checkInstallation(): Promise<{ installed: boolean; version?: string; error?: string }> {
     try {
-      const result = execSync(`${this.options.cliPath} --version`, {
+      const invocation = buildSignalCliInvocation(this.options.cliPath, ["--version"]);
+      const result = spawnSync(invocation.file, invocation.args, {
         encoding: "utf-8",
         timeout: 5000,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       });
-      const version = result.trim().split("\n")[0];
+      if (result.error || result.status !== 0) {
+        throw result.error ?? new Error(result.stderr);
+      }
+      const version = result.stdout.trim().split("\n")[0];
       return { installed: true, version };
     } catch {
       return {
@@ -325,8 +331,10 @@ export class SignalClient extends EventEmitter {
       console.log(`Starting signal-cli: ${this.options.cliPath} ${args.join(" ")}`);
     }
 
-    this.receiveProcess = spawn(this.options.cliPath, args, {
+    const invocation = buildSignalCliInvocation(this.options.cliPath, args);
+    this.receiveProcess = spawn(invocation.file, invocation.args, {
       stdio: ["ignore", "pipe", "pipe"],
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
 
     // Handle stdout (messages)
@@ -689,11 +697,25 @@ export class SignalClient extends EventEmitter {
         console.log(`Executing: ${this.options.cliPath} ${fullArgs.join(" ")}`);
       }
 
-      exec(
-        `${this.options.cliPath} ${fullArgs.map((a) => `"${a}"`).join(" ")}`,
+      // No shell is involved, so message text, recipients, and other
+      // agent-influenced values can never be interpreted as shell syntax.
+      // Never build a command string here; see signal-cli-command.ts for the
+      // Windows batch-file handling.
+      let invocation;
+      try {
+        invocation = buildSignalCliInvocation(this.options.cliPath, fullArgs);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+
+      const child = execFile(
+        invocation.file,
+        invocation.args,
         {
           timeout: 30000,
           maxBuffer: 10 * 1024 * 1024, // 10MB
+          windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         },
         (error, stdout, stderr) => {
           if (error) {
@@ -703,6 +725,10 @@ export class SignalClient extends EventEmitter {
           resolve(stdout);
         },
       );
+
+      if (invocation.stdin !== undefined) {
+        child.stdin?.end(invocation.stdin);
+      }
     });
   }
 

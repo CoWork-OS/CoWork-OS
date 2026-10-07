@@ -168,6 +168,39 @@ jobs:
       - name: Run tests
         run: npm test
 
+  test-macos:
+    # The release workflow runs the suite on macOS too (sandbox-exec, Keychain and slower
+    # runners); run it here so failures surface on the pull request, not mid-release.
+    name: Tests (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
+
+      - name: Install Chromium for browser integration tests
+        run: npx playwright install chromium
+
+      - name: Prepare native test dependencies and Numbat fixtures
+        run: |
+          npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
+          npm run numbat:build
+
+      - name: Run tests
+        run: npm test
+
   targeted-eval:
     name: Targeted Eval (Agent Changes)
     runs-on: ubuntu-latest

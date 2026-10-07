@@ -163,6 +163,7 @@ jobs:
         run: |
           npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
           npm run numbat:build
+          npx playwright install chromium
           npm test
 
       - name: Validate npm tarball first-install flow

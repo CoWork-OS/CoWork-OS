@@ -125,6 +125,7 @@ describe.skipIf(process.platform !== "darwin")("macOS sandbox developer toolchai
     expect(fs.existsSync(path.join(home, ".npm/_cacache"))).toBe(true);
   });
 
+  // Ten sandboxed commands in a row exceed the default timeout on CI runners.
   it("keeps credential stores and the rest of $HOME unreadable", async () => {
     for (const command of [
       'cat "$HOME/.ssh/id_ed25519"',
@@ -143,7 +144,7 @@ describe.skipIf(process.platform !== "darwin")("macOS sandbox developer toolchai
     }
     expect(fs.existsSync(path.join(home, ".zshrc"))).toBe(false);
     expect(fs.existsSync(path.join(home, ".ssh/authorized_keys"))).toBe(false);
-  });
+  }, 60_000);
 
   it("finds toolchains installed under $HOME and reads git and TLS configuration", async () => {
     const result = await run(

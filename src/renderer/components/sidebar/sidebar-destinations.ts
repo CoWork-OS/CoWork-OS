@@ -5,7 +5,6 @@ import {
   House,
   Inbox,
   Library,
-  Lightbulb,
   Monitor,
   Puzzle,
   Sparkles,
@@ -25,7 +24,6 @@ export type SidebarDestinationId =
   | "devices"
   | "everyday"
   | "missionControl"
-  | "ideas"
   | "build"
   | "addTools";
 
@@ -124,7 +122,6 @@ export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
     views: ["missionControl"],
     hostMethods: ["getAgentRoles", "listMissionControlItems"],
   },
-  { id: "ideas", label: "Ideas", icon: Lightbulb, placement: "more", views: ["ideas"] },
   {
     id: "build",
     label: "Build",

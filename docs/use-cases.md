@@ -7,9 +7,9 @@ that fits the scenario. The examples describe capability routing, not a grant
 of permission: skills, integrations, browser actions, devices, and automations
 remain beneath the selected profile and may pause for approval.
 
-## Ideas Panel
+## Use-Case Gallery
 
-The **Ideas** tab in the sidebar shows use case prompts that use built-in capabilities (channels, inbox, /inbox, /brief, /simplify, /batch, /llm-wiki, browser, file I/O). See [Ideas Capabilities](ideas-capabilities.md) for what’s supported. Advanced use cases (e.g. legal skills) require optional skills and are listed below as copy-paste prompts.
+**See how people use CoWork OS** (sidebar notice, welcome screen, or Build) shows ready-to-run prompts in Tasks, Build, and Bots tabs. They use built-in capabilities and bundled skills: channels, inbox, /inbox, /brief, /simplify, /batch, /llm-wiki, browser, and file I/O. The source is `src/renderer/components/UseCasesGallery.tsx`. Advanced use cases (for example legal skills) are listed below as copy-paste prompts.
 
 ## Use Case Coverage (High Level)
 
@@ -708,4 +708,31 @@ Variant (recurring monitoring):
 ```
 Use unbroker to set up recurring monitoring for my own broker exposure after the initial removals.
 Record consent, explain where local data will be stored, and schedule only the recheck flow after the first status report.
+```
+
+### 23) Motion-Design Films and a Motion Editor
+
+Prompt (launch film):
+
+```
+Use the motion-film skill to make a 30-second keynote-style launch video for our app.
+
+Format: 16:9, 1920x1080, 60fps, no loop.
+Brand: wordmark "Sync", colours #0B0B0F and #F5F1EA.
+Use the screenshots in assets/screens/ and the track in assets/music.mp3 (120 BPM, drop at 0:12).
+Show me the beat map and 3-5 stills before building the full film.
+```
+
+Prompt (social loop):
+
+```
+Use the motion-film skill to create a 9:16 looping social clip announcing our new offline mode.
+Silent, about 15 seconds, last frame equals the first.
+```
+
+Prompt (editor app):
+
+```
+Use the motion-editor skill to build the motion editor in ./tools/motion-editor. I'm on macOS.
+Finish and verify Phase 1 before starting Phase 2, and keep PROGRESS.md up to date.
 ```

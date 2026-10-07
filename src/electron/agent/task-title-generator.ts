@@ -1,6 +1,10 @@
 import { LLMProviderFactory } from "./llm/provider-factory";
 import type { LLMContent, LLMProvider, LLMResponse } from "./llm/types";
-import type { AgentConfig } from "../../shared/types";
+import type { AgentConfig, Task } from "../../shared/types";
+import type { TaskRepository } from "../database/repository-facades";
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger("TaskTitle");
 
 /** Keep generated names short enough for the sessions sidebar and history views. */
 export const MAX_GENERATED_TASK_TITLE_LENGTH = 50;
@@ -169,4 +173,40 @@ export async function generateTaskTitle(
     model: selection.modelId,
   });
   return generateTaskTitleFromProvider(provider, selection.modelId, prompt, options);
+}
+
+/** Older API clients use the whole prompt as a placeholder title. */
+export function shouldGenerateTaskTitle(
+  title: string,
+  prompt: string,
+  generateTitle?: boolean,
+): boolean {
+  return generateTitle ?? (Boolean(prompt.trim()) && title.trim() === prompt.trim());
+}
+
+/** Auxiliary metadata must not delay task execution or overwrite a user rename. */
+export async function generateAndApplyTaskTitle(
+  task: Task,
+  prompt: string,
+  repository: Pick<TaskRepository, "updateTitleIfUnchanged" | "findById">,
+  onTitleUpdated: (taskId: string, title: string) => void,
+  agentConfig: AgentConfig | undefined = task.agentConfig,
+): Promise<void> {
+  if (agentConfig?.botConversation) return;
+  const initialTitle = task.title;
+
+  try {
+    const generatedTitle = await generateTaskTitle(prompt, agentConfig);
+    if (!generatedTitle) {
+      logger.warn(`Session title generation returned no usable title for task ${task.id}`);
+      return;
+    }
+    if (generatedTitle === initialTitle) return;
+    if (!(await repository.updateTitleIfUnchanged(task.id, initialTitle, generatedTitle))) return;
+
+    const currentTask = await repository.findById(task.id);
+    if (currentTask?.title === generatedTitle) onTitleUpdated(task.id, generatedTitle);
+  } catch (error) {
+    logger.warn(`Session title generation unavailable for task ${task.id}:`, error);
+  }
 }

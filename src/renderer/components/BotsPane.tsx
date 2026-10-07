@@ -2,6 +2,7 @@ import { BotWorkDialog } from "./BotWorkDialog";
 import { useMemo, useState } from "react";
 import { AlertCircle, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
+import { UseCasesGallery } from "./UseCasesGallery";
 import type { Task } from "../../shared/types";
 import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { stripAllEmojis } from "../utils/emoji-replacer";
@@ -620,6 +621,7 @@ export function BotsPane({
   const [query, setQuery] = useState("");
   const [ownCreateOpen, setOwnCreateOpen] = useState(false);
   const createOpen = createOpenProp ?? ownCreateOpen;
+  const [useCasesOpen, setUseCasesOpen] = useState(false);
   const setCreateOpen = onCreateOpenChange ?? setOwnCreateOpen;
   const [editingBot, setEditingBot] = useState<BotRole | null>(null);
 
@@ -660,6 +662,12 @@ export function BotsPane({
         )}
       </div>
 
+      <UseCasesGallery
+        open={useCasesOpen}
+        initialCategory="bots"
+        onClose={() => setUseCasesOpen(false)}
+      />
+
       <label className="sidebar-bots-search">
         <Search size={15} strokeWidth={2} aria-hidden="true" />
         <input
@@ -696,6 +704,9 @@ export function BotsPane({
           <BotGlyph size={26} />
           <strong>No bots yet</strong>
           <span>Create a bot to give recurring work a stable identity.</span>
+          <button type="button" className="use-cases-link" onClick={() => setUseCasesOpen(true)}>
+            See how people use bots
+          </button>
           <button
             type="button"
             className="sidebar-bot-empty-action"

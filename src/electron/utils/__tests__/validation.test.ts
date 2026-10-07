@@ -156,6 +156,18 @@ describe("WorkspaceCreateSchema", () => {
 });
 
 describe("TaskCreateSchema", () => {
+  it("preserves the Build composer origin through task creation validation", () => {
+    const result = TaskCreateSchema.parse({
+      title: "Build tracker",
+      prompt: "x".repeat(1100),
+      workspaceId: "__temp_workspace__",
+      agentConfig: { taskOrigin: "build" },
+    });
+    expect(result.agentConfig?.taskOrigin).toBe("build");
+    expect(
+      TaskCreateSchema.safeParse({ ...result, agentConfig: { taskOrigin: "unknown" } }).success,
+    ).toBe(false);
+  });
   it("validates with UUID workspaceId", () => {
     const result = TaskCreateSchema.safeParse({
       title: "Test Task",

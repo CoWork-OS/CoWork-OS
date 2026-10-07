@@ -11,7 +11,6 @@ import {
   countHiddenFailedSessions,
   filterTaskTreeBySearch,
   flattenVisibleTaskRows,
-  formatRelativeShort,
   getSidebarDateGroup,
   getSidebarRecencyBucket,
   getSidebarSessionTitle,
@@ -65,18 +64,6 @@ describe("compareTasksByPinAndRecency", () => {
 
     const sorted = tasks.sort(compareTasksByPinAndRecency).map((task) => task.id);
     expect(sorted).toEqual(["older-recently-active", "newer-created"]);
-  });
-});
-
-describe("formatRelativeShort", () => {
-  it("uses mo for month-old sidebar timestamps while keeping minutes as m", () => {
-    const now = new Date("2026-04-24T12:00:00.000Z").getTime();
-    vi.useFakeTimers();
-    vi.setSystemTime(now);
-
-    expect(formatRelativeShort(now - 1 * 60 * 1000)).toBe("1m");
-    expect(formatRelativeShort(now - 30 * 24 * 60 * 60 * 1000)).toBe("1mo");
-    expect(formatRelativeShort(now - 60 * 24 * 60 * 60 * 1000)).toBe("2mo");
   });
 });
 

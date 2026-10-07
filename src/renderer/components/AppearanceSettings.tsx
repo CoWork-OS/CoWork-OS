@@ -33,6 +33,8 @@ interface AppearanceSettingsProps {
   homeNextActionsEnabled: boolean;
   onHomeResearchVaultEnabledChange: (enabled: boolean) => void;
   onHomeNextActionsEnabledChange: (enabled: boolean) => void;
+  costReceiptEnabled: boolean;
+  onCostReceiptEnabledChange: (enabled: boolean) => void;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
 }
@@ -56,6 +58,8 @@ export function AppearanceSettings({
   homeNextActionsEnabled,
   onHomeResearchVaultEnabledChange,
   onHomeNextActionsEnabledChange,
+  costReceiptEnabled,
+  onCostReceiptEnabledChange,
   onShowOnboarding,
   onboardingCompletedAt,
 }: AppearanceSettingsProps) {
@@ -235,7 +239,7 @@ export function AppearanceSettings({
         <h4>Command output</h4>
         <p className="settings-description">
           How shell commands are shown inside steps. Terminal shows a full window with scrollback.
-          Minimal shows a single compact line with the output collapsed.
+          Minimal shows a compact shell card: the command stays pinned while the output scrolls, and both can be copied.
         </p>
         <div className="theme-switcher">
           <button
@@ -432,6 +436,21 @@ export function AppearanceSettings({
             onChange={(event) => onHomeNextActionsEnabledChange(event.target.checked)}
           />
           <span>Show next actions</span>
+        </label>
+      </div>
+
+      <div className="appearance-section">
+        <h4>Task panel</h4>
+        <p className="settings-description">
+          Optional sections in the right panel while a task runs. Off by default.
+        </p>
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={costReceiptEnabled}
+            onChange={(event) => onCostReceiptEnabledChange(event.target.checked)}
+          />
+          <span>Show cost receipt</span>
         </label>
       </div>
 

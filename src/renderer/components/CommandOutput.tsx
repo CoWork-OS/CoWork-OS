@@ -1,10 +1,11 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { Check, ChevronDown, ChevronRight, Copy, SquareTerminal, X } from "lucide-react";
 import type { CommandOutputStyle } from "../../shared/types";
 
 const DIR_NAME_MAX_LEN = 12;
 const DEFAULT_VISIBLE_OUTPUT_LINES = 300;
-/** Lines of tail output kept visible in the minimal style before expanding. */
-const MINIMAL_COLLAPSED_LINES = 5;
+/** How long the copy buttons show their "Copied" confirmation. */
+const COPY_CONFIRM_MS = 1500;
 
 function getDirName(cwd: string): string {
   const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
@@ -16,6 +17,40 @@ function truncateDirName(name: string): string {
   return name.slice(0, DIR_NAME_MAX_LEN) + "...";
 }
 
+/** Icon button that copies text, with a tooltip naming what it copies. */
+function CopyTextButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), COPY_CONFIRM_MS);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <button
+      type="button"
+      className={`command-shell-copy${copied ? " copied" : ""}`}
+      aria-label={label}
+      data-tooltip={copied ? "Copied" : label}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+        } catch {
+          // Clipboard access can be refused; the button simply stays as it was.
+        }
+      }}
+    >
+      {copied ? (
+        <Check size={13} strokeWidth={2} aria-hidden="true" />
+      ) : (
+        <Copy size={13} strokeWidth={1.8} aria-hidden="true" />
+      )}
+    </button>
+  );
+}
+
 interface CommandOutputProps {
   command: string;
   output: string;
@@ -24,7 +59,7 @@ interface CommandOutputProps {
   cwd?: string;
   taskId?: string;
   onClose?: () => void;
-  /** "terminal" (default) renders the classic window; "minimal" renders a compact row. */
+  /** "terminal" (default) renders the classic window; "minimal" renders a compact shell card. */
   variant?: CommandOutputStyle;
 }
 
@@ -43,15 +78,33 @@ export function CommandOutput({
   const [autoScroll, setAutoScroll] = useState(true);
   const [stdinInput, setStdinInput] = useState("");
   const [stopClicked, setStopClicked] = useState(false);
-  const [minimalExpanded, setMinimalExpanded] = useState(false);
+  const [shellScroll, setShellScroll] = useState({ overflowing: false, atBottom: true });
+  // A finished command opens folded to its "Ran <command>" line; a running one
+  // opens so its Stop control is reachable.
+  const [shellCollapsed, setShellCollapsed] = useState(() => !isRunning);
   const isMinimal = variant === "minimal";
 
-  // Auto-scroll to bottom when new output arrives
+  // The shell card fades its bottom edge while more output sits below.
+  const updateShellScroll = useCallback(() => {
+    const el = outputRef.current;
+    if (!el) return;
+    const overflowing = el.scrollHeight > el.clientHeight + 1;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+    setShellScroll((prev) =>
+      prev.overflowing === overflowing && prev.atBottom === atBottom
+        ? prev
+        : { overflowing, atBottom },
+    );
+  }, []);
+
+  // Auto-scroll to bottom when new output arrives. A finished command in the
+  // shell card opens at the top of its output, like a transcript.
   useEffect(() => {
-    if (autoScroll && outputRef.current) {
+    if (autoScroll && outputRef.current && (!isMinimal || isRunning)) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  }, [output, autoScroll]);
+    if (isMinimal) updateShellScroll();
+  }, [output, autoScroll, isMinimal, isRunning, updateShellScroll]);
 
   // Detect manual scrolling
   const handleScroll = () => {
@@ -60,6 +113,7 @@ export function CommandOutput({
     // If user is near the bottom (within 50px), enable auto-scroll
     const nearBottom = scrollHeight - scrollTop - clientHeight < 50;
     setAutoScroll(nearBottom);
+    if (isMinimal) updateShellScroll();
   };
 
   // Send stdin input to the running command
@@ -137,19 +191,19 @@ export function CommandOutput({
     ].join("\n");
   })();
 
-  // Minimal style shows the raw command output (no shell prompt chrome),
-  // tailed to a few lines until the user expands it.
-  const minimal = useMemo(() => {
-    const trimmed = output.replace(/\n+$/, "");
-    const lines = trimmed.length > 0 ? trimmed.split("\n") : [];
-    const hiddenCount = Math.max(0, lines.length - MINIMAL_COLLAPSED_LINES);
-    return {
-      lines,
-      hiddenCount,
-      collapsedText: lines.slice(-MINIMAL_COLLAPSED_LINES).join("\n"),
-      fullText: trimmed,
-    };
-  }, [output]);
+  // The shell card shows the raw command output (no shell prompt chrome) in
+  // full; its body scrolls under the pinned command. The stream opens with an
+  // echo of the prompt and command ("$ dir % cmd"), which the pinned command
+  // already shows, so that line is dropped.
+  const shell = useMemo(() => {
+    let text = output.replace(/\n+$/, "");
+    const firstBreak = text.indexOf("\n");
+    const firstLine = firstBreak === -1 ? text : text.slice(0, firstBreak);
+    if (firstLine.startsWith("$ ") && firstLine.trimEnd().endsWith(command.trim())) {
+      text = firstBreak === -1 ? "" : text.slice(firstBreak + 1);
+    }
+    return { text };
+  }, [output, command]);
 
   const getStatusIndicator = () => {
     if (isRunning) {
@@ -166,126 +220,138 @@ export function CommandOutput({
 
   if (isMinimal) {
     const failed = !isRunning && exitCode !== null && exitCode !== undefined && exitCode !== 0;
+    const succeeded = !isRunning && exitCode === 0;
     const statusClass = isRunning ? "running" : failed ? "error" : "success";
-    const canToggle = minimal.lines.length > 0;
+    const hasOutput = shell.text.length > 0;
+    const commandLine = command.trim().split("\n")[0] ?? "";
 
     return (
-      <div className={`command-output-minimal ${statusClass}`}>
-        <div className="command-minimal-header">
-          <button
-            type="button"
-            className="command-minimal-summary"
-            onClick={() => canToggle && setMinimalExpanded((prev) => !prev)}
-            disabled={!canToggle}
-            title={command}
-            aria-expanded={canToggle ? minimalExpanded : undefined}
-          >
-            <span className={`command-minimal-dot ${statusClass}`} aria-hidden="true" />
-            <span className="command-minimal-command">{command}</span>
-            {cwd && (
-              <span className="command-minimal-cwd" title={cwd}>
-                {dirName}
-              </span>
-            )}
-          </button>
-          <div className="command-minimal-actions">
-            {failed && <span className="command-minimal-exit">Exit {exitCode}</span>}
-            {isRunning && taskId && !stopClicked && (
-              <button
-                type="button"
-                className="command-minimal-action"
-                onClick={killCommand}
-                title="Stop command (Ctrl+C)"
-              >
-                Stop
-              </button>
-            )}
-            {isRunning && taskId && stopClicked && (
-              <button
-                type="button"
-                className="command-minimal-action"
-                onClick={forceKillCommand}
-                title="Force kill (SIGKILL) - immediate termination"
-              >
-                Force kill
-              </button>
-            )}
-            {!isRunning && onClose && (
-              <button
-                type="button"
-                className="command-minimal-action"
-                onClick={onClose}
-                title="Close output"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
+      <div className={`command-output-minimal command-shell ${statusClass}`}>
+        {/* What the agent ran, in the timeline's words; it folds the card. */}
+        <button
+          type="button"
+          className="command-shell-summary"
+          onClick={() => setShellCollapsed((prev) => !prev)}
+          aria-expanded={!shellCollapsed}
+          title={command}
+        >
+          <SquareTerminal size={15} strokeWidth={1.8} aria-hidden="true" />
+          <span className="command-shell-summary-text">
+            {isRunning ? "Running" : "Ran"}{" "}
+            <span className="command-shell-summary-command">{commandLine}</span>
+          </span>
+          {shellCollapsed ? (
+            <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
+          ) : (
+            <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+          )}
+        </button>
 
-        {(minimal.lines.length > 0 || isRunning) && (
-          <div className="command-minimal-body">
-            <span className="command-minimal-gutter" aria-hidden="true">
-              &#8985;
-            </span>
-            <div className="command-minimal-output">
-              {minimalExpanded && minimal.hiddenCount > 0 && (
-                <button
-                  type="button"
-                  className="command-minimal-more"
-                  onClick={() => setMinimalExpanded(false)}
-                >
-                  Show less
-                </button>
+        {!shellCollapsed && (
+          <div className="command-shell-card">
+            <div className="command-shell-header">
+              <span className="command-shell-label">Shell</span>
+              {cwd && (
+                <span className="command-shell-cwd" title={cwd}>
+                  {dirName}
+                </span>
               )}
-              <div
-                ref={minimalExpanded ? outputRef : null}
-                className={`command-minimal-scroll ${minimalExpanded ? "expanded" : ""}`}
-                onScroll={minimalExpanded ? handleScroll : undefined}
-              >
-                <pre>
-                  {minimal.lines.length > 0
-                    ? minimalExpanded
-                      ? minimal.fullText
-                      : minimal.collapsedText
-                    : "Waiting for output..."}
-                </pre>
+              <div className="command-shell-actions">
+                {isRunning && taskId && !stopClicked && (
+                  <button
+                    type="button"
+                    className="command-shell-action"
+                    onClick={killCommand}
+                    title="Stop command (Ctrl+C)"
+                  >
+                    Stop
+                  </button>
+                )}
+                {isRunning && taskId && stopClicked && (
+                  <button
+                    type="button"
+                    className="command-shell-action"
+                    onClick={forceKillCommand}
+                    title="Force kill (SIGKILL) - immediate termination"
+                  >
+                    Force kill
+                  </button>
+                )}
+                {!isRunning && onClose && (
+                  <button
+                    type="button"
+                    className="command-shell-action command-shell-close"
+                    onClick={onClose}
+                    title="Close output"
+                    aria-label="Close output"
+                  >
+                    <X size={13} strokeWidth={2} aria-hidden="true" />
+                  </button>
+                )}
               </div>
-              {!minimalExpanded && minimal.hiddenCount > 0 && (
-                <button
-                  type="button"
-                  className="command-minimal-more"
-                  onClick={() => setMinimalExpanded(true)}
-                >
-                  +{minimal.hiddenCount} line{minimal.hiddenCount === 1 ? "" : "s"}
-                </button>
-              )}
             </div>
-          </div>
-        )}
 
-        {isRunning && taskId && (
-          <div className="command-minimal-stdin">
-            <span className="command-minimal-stdin-prompt">&gt;</span>
-            <input
-              ref={inputRef}
-              type="text"
-              className="command-minimal-stdin-input"
-              placeholder="Type input and press Enter..."
-              value={stdinInput}
-              onChange={(e) => setStdinInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-            />
+            {/* The command stays put; only the output below it scrolls. */}
+            <div className="command-shell-command">
+              <pre>
+                <span className="command-shell-prompt" aria-hidden="true">
+                  ${" "}
+                </span>
+                {command}
+              </pre>
+              <CopyTextButton text={command} label="Copy command" />
+            </div>
+
+            {(hasOutput || isRunning) && (
+              <div className="command-shell-output">
+                <div
+                  ref={outputRef}
+                  className={`command-shell-scroll${shellScroll.overflowing && !shellScroll.atBottom ? " has-more" : ""}`}
+                  onScroll={handleScroll}
+                >
+                  <pre>{hasOutput ? shell.text : "Waiting for output…"}</pre>
+                </div>
+                {hasOutput && <CopyTextButton text={shell.text} label="Copy output" />}
+              </div>
+            )}
+
+            {(isRunning || failed || succeeded) && (
+              <div className={`command-shell-status ${statusClass}`}>
+                {isRunning ? (
+                  <>
+                    <span className="command-shell-status-dot" aria-hidden="true" />
+                    Running
+                  </>
+                ) : failed ? (
+                  <>
+                    <X size={13} strokeWidth={2} aria-hidden="true" />
+                    Exit {exitCode}
+                  </>
+                ) : (
+                  <>
+                    <Check size={13} strokeWidth={2} aria-hidden="true" />
+                    Success
+                  </>
+                )}
+              </div>
+            )}
+
+            {isRunning && taskId && (
+              <div className="command-shell-stdin">
+                <span className="command-shell-stdin-prompt" aria-hidden="true">
+                  &gt;
+                </span>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className="command-shell-stdin-input"
+                  placeholder="Type input and press Enter..."
+                  value={stdinInput}
+                  onChange={(e) => setStdinInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

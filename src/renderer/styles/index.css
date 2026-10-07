@@ -1865,105 +1865,6 @@ a,
   letter-spacing: 0.5px;
 }
 
-/* ── Ideas panel — extends dp-* Devices theme ────────────────────── */
-
-/* Filter row spacing tweak */
-.dp-ideas-filter-row {
-  margin-bottom: 4px;
-  flex-wrap: wrap;
-}
-
-/* Grid — 3-col matches Devices tasks-grid feel */
-.dp-ideas-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  gap: 14px;
-}
-
-@media (max-width: 1000px) {
-  .dp-ideas-grid {
-    grid-template-columns: repeat(2, minmax(180px, 1fr));
-  }
-}
-
-@media (max-width: 600px) {
-  .dp-ideas-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Card overrides — reduces gap so emoji + desc fit neatly */
-.dp-idea-card {
-  gap: 10px;
-  min-height: 150px;
-}
-
-/* Icon + title row */
-.dp-idea-top {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.dp-idea-icon-wrap {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
-  margin-top: 1px;
-}
-
-/* Title inherits dp-task-title; allow 2 lines */
-.dp-idea-title {
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-
-/* Description */
-.dp-idea-desc {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  color: var(--color-text-muted);
-  line-height: 1.45;
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  flex: 1;
-}
-
-/* Meta row */
-.dp-idea-meta {
-  margin-top: auto;
-  flex-wrap: wrap;
-}
-
-/* Integration icons */
-.dp-idea-icons {
-  display: flex;
-  gap: 4px;
-}
-
-.dp-idea-icon {
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  background: var(--color-bg-tertiary);
-  border-radius: 4px;
-}
-
 .task-item {
   padding: 7px 12px;
   cursor: pointer;
@@ -3528,6 +3429,24 @@ a,
   min-width: 0;
 }
 
+/* The session title is a real button (for keyboard and screen readers) that
+   should look and size exactly like the plain title it wraps. */
+.cli-task-select-btn {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: inherit;
+}
+
 .cli-task-title-row-awaiting {
   gap: 8px;
 }
@@ -3545,23 +3464,6 @@ a,
   flex-shrink: 0;
   margin-left: auto;
   min-height: 18px;
-}
-
-.cli-task-action-wrap {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-shrink: 0;
-  margin-left: auto;
-  min-height: 18px;
-}
-
-.browser-host .cli-task-action-wrap {
-  margin-left: 0;
-}
-
-.browser-host .cli-task-title-row-awaiting .cli-task-action-wrap {
-  margin-left: auto;
 }
 
 .cli-task-title-with-agent {
@@ -3584,14 +3486,6 @@ a,
   white-space: nowrap;
 }
 
-.cli-task-time {
-  flex-shrink: 0;
-  min-width: 28px;
-  font-size: 10px;
-  color: var(--color-text-muted);
-  text-align: right;
-}
-
 .cli-task-automation-icon {
   display: inline-flex;
   align-items: center;
@@ -3612,23 +3506,7 @@ a,
   opacity: 0.9;
 }
 
-.cli-task-awaiting-badge {
-  flex-shrink: 0;
-  border-radius: 999px;
-  padding: 1px 6px;
-  font-size: 10px;
-  line-height: 1.15;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  background: color-mix(in srgb, var(--color-success, #34d399) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-success, #34d399) 45%, transparent);
-}
-
 .cli-task-item.task-item-selected .cli-task-title {
-  color: var(--color-text);
-}
-
-.cli-task-item.task-item-selected .cli-task-awaiting-badge {
   color: var(--color-text);
 }
 
@@ -3756,11 +3634,6 @@ a,
   z-index: 200;
 }
 
-.task-tree-children {
-  display: flex;
-  flex-direction: column;
-}
-
 .cli-tree-prefix {
   display: none;
   font-family: var(--font-mono);
@@ -3865,203 +3738,6 @@ a,
 
 .cli-task-item.task-item-selected.session-mode-comparison {
   border-left-color: rgb(var(--session-mode-comparison));
-}
-
-/* ---- Session filter toggle button ---- */
-.session-filter-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted, #6b7280);
-  cursor: pointer;
-  padding: 2px 5px;
-  margin-left: auto;
-  border-radius: 3px;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.session-filter-toggle:hover {
-  color: var(--color-accent, #22d3ee);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.session-filter-toggle.active {
-  color: var(--color-accent, #22d3ee);
-}
-
-.session-filter-toggle .filter-count {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  min-width: 14px;
-  height: 14px;
-  line-height: 14px;
-  text-align: center;
-  border-radius: 7px;
-  background: var(--color-accent, #22d3ee);
-  color: var(--color-bg, #0a0a0a);
-}
-
-/* ---- Session filter bar ---- */
-.session-filter-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 12px 8px;
-  align-items: center;
-}
-
-.session-filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 500;
-  padding: 2px 7px 2px 5px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--color-text-muted, #6b7280);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  letter-spacing: 0.01em;
-}
-
-.session-filter-chip:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-secondary);
-}
-
-/* Colored dot indicator inside filter chip */
-.session-filter-chip .filter-chip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.session-filter-chip.standard .filter-chip-dot {
-  background: var(--color-text-muted, #6b7280);
-}
-
-.session-filter-chip.autonomous .filter-chip-dot {
-  background: rgb(var(--session-mode-autonomous));
-}
-
-.session-filter-chip.collab .filter-chip-dot {
-  background: rgb(var(--session-mode-collab));
-}
-
-.session-filter-chip.multi-llm .filter-chip-dot {
-  background: rgb(var(--session-mode-multi-llm));
-}
-
-.session-filter-chip.scheduled .filter-chip-dot {
-  background: rgb(var(--session-mode-scheduled));
-}
-
-.session-filter-chip.think .filter-chip-dot {
-  background: rgb(var(--session-mode-think));
-}
-
-.session-filter-chip.comparison .filter-chip-dot {
-  background: rgb(var(--session-mode-comparison));
-}
-
-/* Active filter chip states */
-.session-filter-chip.active {
-  border-color: rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-primary);
-}
-
-.session-filter-chip.active.autonomous {
-  border-color: rgba(var(--session-mode-autonomous), 0.4);
-  background: rgba(var(--session-mode-autonomous), 0.1);
-}
-
-.session-filter-chip.active.collab {
-  border-color: rgba(var(--session-mode-collab), 0.4);
-  background: rgba(var(--session-mode-collab), 0.1);
-}
-
-.session-filter-chip.active.multi-llm {
-  border-color: rgba(var(--session-mode-multi-llm), 0.4);
-  background: rgba(var(--session-mode-multi-llm), 0.1);
-}
-
-.session-filter-chip.active.scheduled {
-  border-color: rgba(var(--session-mode-scheduled), 0.4);
-  background: rgba(var(--session-mode-scheduled), 0.1);
-}
-
-.session-filter-chip.active.think {
-  border-color: rgba(var(--session-mode-think), 0.4);
-  background: rgba(var(--session-mode-think), 0.1);
-}
-
-.session-filter-chip.active.comparison {
-  border-color: rgba(var(--session-mode-comparison), 0.4);
-  background: rgba(var(--session-mode-comparison), 0.1);
-}
-
-/* Light theme adjustments for filter chips */
-.theme-light .session-filter-chip {
-  border-color: rgba(0, 0, 0, 0.08);
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.theme-light .session-filter-chip:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.theme-light .session-filter-chip.active.autonomous {
-  background: rgba(var(--session-mode-autonomous), 0.08);
-  border-color: rgba(var(--session-mode-autonomous), 0.25);
-}
-
-.theme-light .session-filter-chip.active.collab {
-  background: rgba(var(--session-mode-collab), 0.08);
-  border-color: rgba(var(--session-mode-collab), 0.25);
-}
-
-.theme-light .session-filter-chip.active.multi-llm {
-  background: rgba(var(--session-mode-multi-llm), 0.08);
-  border-color: rgba(var(--session-mode-multi-llm), 0.25);
-}
-
-.theme-light .session-filter-chip.active.scheduled {
-  background: rgba(var(--session-mode-scheduled), 0.08);
-  border-color: rgba(var(--session-mode-scheduled), 0.25);
-}
-
-.theme-light .session-filter-chip.active.think {
-  background: rgba(var(--session-mode-think), 0.08);
-  border-color: rgba(var(--session-mode-think), 0.25);
-}
-
-.theme-light .session-filter-chip.active.comparison {
-  background: rgba(var(--session-mode-comparison), 0.08);
-  border-color: rgba(var(--session-mode-comparison), 0.25);
-}
-
-/* Clear filter button */
-.session-filter-clear {
-  font-size: 10px;
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted, #6b7280);
-  cursor: pointer;
-  padding: 2px 4px;
-  transition: color 0.15s ease;
-}
-
-.session-filter-clear:hover {
-  color: var(--color-accent, #22d3ee);
 }
 
 /* CLI Rename Input */
@@ -12812,6 +12488,7 @@ a,
 }
 
 .disclaimer-card-title {
+  margin: 0;
   font-size: 15px;
   font-weight: 600;
   color: var(--color-text, #fff);
@@ -12902,6 +12579,9 @@ a,
   transition: all 0.2s ease;
   color: var(--color-text-secondary, rgba(255, 255, 255, 0.7));
   font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
   position: relative;
   overflow: hidden;
 }
@@ -12978,6 +12658,10 @@ a,
   color: var(--color-text-secondary, rgba(255, 255, 255, 0.7));
   user-select: none;
   transition: color 0.15s ease;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
 }
 
 .disclaimer-checkbox-label:hover {
@@ -13686,243 +13370,316 @@ a,
 
 /* ============================================
    Command Output — Minimal Style
-   Compact, chrome-free rendering of a shell step
+   A compact shell card: a "Shell" label, the command pinned at the top,
+   the output scrolling beneath it in a fixed-height body, copy buttons for
+   both, and the result at the foot.
    (opt-in via Appearance → Command output style)
    ============================================ */
 
 .command-output-minimal {
+  --command-shell-bg: color-mix(in srgb, var(--color-text-primary) 3.5%, var(--color-bg-primary));
+  --command-shell-border: color-mix(in srgb, var(--color-text-primary) 10%, transparent);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
+  min-width: 0;
   margin: 6px 0;
   padding: 0;
+  border: 0;
   background: transparent;
-  border: none;
   box-shadow: none;
-  font-family: var(--font-mono);
 }
 
-.command-minimal-header {
+/* "Ran <command>" above the card, like the timeline's other step labels;
+   clicking it folds the card away. */
+.command-shell-summary {
   display: flex;
   align-items: center;
   gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
   min-width: 0;
-}
-
-.command-minimal-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 1px 0;
-  background: none;
-  border: none;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 20px;
   text-align: left;
   cursor: pointer;
-  color: var(--color-text-secondary);
-  font-family: inherit;
-  font-size: 12.5px;
-  line-height: 1.5;
 }
 
-.command-minimal-summary:disabled {
-  cursor: default;
+.command-shell-summary > svg {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
 }
 
-.command-minimal-summary:hover:not(:disabled) .command-minimal-command {
+.command-shell-summary:hover,
+.command-shell-summary:hover > svg {
   color: var(--color-text-primary);
 }
 
-.command-minimal-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--color-text-muted);
-}
-
-.command-minimal-dot.running {
-  background: var(--color-accent);
-  animation: command-status-pulse 1.5s ease-in-out infinite;
-}
-
-.command-minimal-dot.success {
-  background: var(--color-success);
-}
-
-.command-minimal-dot.error {
-  background: var(--color-error);
-}
-
-.command-minimal-command {
-  flex: 0 1 auto;
+.command-shell-summary-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--color-text-secondary);
-  transition: color 0.15s ease;
 }
 
-.command-minimal-cwd {
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-  font-size: 11px;
+.command-shell-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--command-shell-border);
+  border-radius: 12px;
+  background: var(--command-shell-bg);
+  font-family: var(--font-mono);
 }
 
-.command-minimal-actions {
+.command-shell-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 6px 8px 0 14px;
+  font-family: var(--font-ui);
+}
+
+.command-shell-label {
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.command-shell-cwd {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-shell-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.command-shell-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-shell-action.command-shell-close {
+  padding: 0;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
 
-.command-output-minimal:hover .command-minimal-actions,
-.command-output-minimal:focus-within .command-minimal-actions,
-.command-output-minimal.running .command-minimal-actions,
-.command-output-minimal.error .command-minimal-actions {
+.command-shell-card:hover .command-shell-close,
+.command-shell-close:focus-visible {
   opacity: 1;
 }
 
-.command-minimal-exit {
-  color: var(--color-error);
-  font-size: 11px;
-}
-
-.command-minimal-action {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 6px;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  font-family: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.command-minimal-action:hover {
-  color: var(--color-text-primary);
+.command-shell-action:hover,
+.command-shell-action:focus-visible {
   background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
-.command-minimal-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding-left: 3px;
+/* The command and output rows reserve room on the right for their copy
+   button, which shows on hover. */
+.command-shell-command,
+.command-shell-output {
+  position: relative;
   min-width: 0;
 }
 
-.command-minimal-gutter {
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-  opacity: 0.6;
-}
-
-.command-minimal-output {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.command-minimal-scroll {
-  overflow: hidden;
-}
-
-.command-minimal-scroll.expanded {
-  max-height: 320px;
-  overflow-y: auto;
-  overflow-x: auto;
-}
-
-.command-minimal-scroll.expanded::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.command-minimal-scroll.expanded::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.command-minimal-scroll.expanded::-webkit-scrollbar-thumb {
-  background: var(--color-border-light);
-  border-radius: 999px;
-}
-
-.command-minimal-scroll pre {
+.command-shell .command-shell-command pre,
+.command-shell .command-shell-scroll pre {
   margin: 0;
   padding: 0;
+  border: 0;
+  border-radius: 0;
   background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  font-family: inherit;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.command-minimal-more {
-  display: inline-block;
-  margin-top: 1px;
-  padding: 0;
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  font-family: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: color 0.15s ease;
+.command-shell-command {
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 8px 44px 6px 14px;
 }
 
-.command-minimal-more:hover {
+.command-shell .command-shell-command pre {
   color: var(--color-text-primary);
-  text-decoration: underline;
 }
 
-.command-minimal-stdin {
+.command-shell-prompt {
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.command-shell-scroll {
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px 44px 10px 14px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-text-primary) 18%, transparent) transparent;
+}
+
+/* Fade the bottom edge while more output sits below. */
+.command-shell-scroll.has-more {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
+
+.command-shell .command-shell-scroll pre {
+  color: var(--color-text-secondary);
+}
+
+.command-shell-copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-text-primary) 6%, var(--command-shell-bg));
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease;
+}
+
+.command-shell-command:hover .command-shell-copy,
+.command-shell-output:hover .command-shell-copy,
+.command-shell-copy:focus-visible,
+.command-shell-copy.copied {
+  opacity: 1;
+}
+
+.command-shell-copy:hover {
+  color: var(--color-text-primary);
+}
+
+.command-shell-copy.copied {
+  color: var(--color-success);
+}
+
+/* Dark pill naming what the button copies, to its left so the card never
+   clips it. */
+.command-shell-copy::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 6px);
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: #1f2024;
+  color: #ffffff;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.12s ease;
+}
+
+.command-shell-copy:hover::after,
+.command-shell-copy:focus-visible::after,
+.command-shell-copy.copied::after {
+  opacity: 1;
+}
+
+.command-shell-status {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding-left: 14px;
-  margin-top: 2px;
-}
-
-.command-minimal-stdin-prompt {
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 0 14px 10px;
   color: var(--color-text-muted);
-  font-size: 12px;
-  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
 }
 
-.command-minimal-stdin-input {
+.command-shell-status.error {
+  color: var(--color-error);
+}
+
+.command-shell-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: command-status-pulse 1.5s ease-in-out infinite;
+}
+
+.command-shell-stdin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 10px 14px;
+  border-top: 1px solid var(--command-shell-border);
+}
+
+.command-shell-stdin-prompt {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+}
+
+.command-shell-stdin-input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 3px 8px;
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  border: 1px solid var(--command-shell-border);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   outline: none;
   transition: border-color 0.15s ease;
 }
 
-.command-minimal-stdin-input:focus {
+.command-shell-stdin-input:focus {
   border-color: var(--color-accent);
 }
 
-.command-minimal-stdin-input::placeholder {
+.command-shell-stdin-input::placeholder {
   color: var(--color-text-muted);
 }
 
@@ -20787,7 +20544,6 @@ a,
 .visual-oblivion .cli-progress-item,
 .visual-oblivion .cli-file-item,
 .visual-oblivion .cli-context-item,
-.visual-oblivion .cli-queue-item,
 .visual-oblivion .cli-task-item,
 .visual-oblivion .cli-workspace-item {
   border-radius: var(--radius-md);
@@ -20795,8 +20551,7 @@ a,
 
 .visual-oblivion .cli-progress-item,
 .visual-oblivion .cli-file-item,
-.visual-oblivion .cli-context-item,
-.visual-oblivion .cli-queue-item {
+.visual-oblivion .cli-context-item {
   padding: 8px 10px;
   font-size: 12px;
   background: var(--color-bg-primary);
@@ -20818,7 +20573,6 @@ a,
 }
 
 .visual-oblivion .cli-task-title,
-.visual-oblivion .cli-queue-title,
 .visual-oblivion .cli-progress-text,
 .visual-oblivion .cli-file-name,
 .visual-oblivion .cli-context-file {
@@ -20838,13 +20592,11 @@ a,
   display: none;
 }
 
-.visual-oblivion .cli-queue-status,
 .visual-oblivion .cli-progress-status,
 .visual-oblivion .cli-file-action {
   font-family: var(--font-ui);
 }
 
-.visual-oblivion .cli-queue-status,
 .visual-oblivion .cli-progress-status,
 .visual-oblivion .cli-task-status {
   display: inline-flex;
@@ -20857,10 +20609,6 @@ a,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.visual-oblivion .cli-queue-status {
-  font-size: 11px;
 }
 
 .visual-oblivion .queue-status-dot {
@@ -21073,11 +20821,6 @@ a,
 .visual-oblivion .cli-workspace-item {
   padding: 10px 12px;
   gap: 10px;
-}
-
-.visual-oblivion .task-tree-children {
-  margin-left: 6px;
-  padding-left: 12px;
 }
 
 .visual-oblivion .task-tree-node-child {
@@ -22322,23 +22065,6 @@ a,
   text-overflow: ellipsis;
 }
 
-.automated-folder-count {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 5px;
-  border-radius: 8px;
-  background: var(--color-bg-elevated, rgba(255, 255, 255, 0.07));
-  color: var(--color-text-muted, #6b7280);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.automated-folder-active {
-  flex-shrink: 0;
-  margin-left: 2px;
-}
-
 /* In focused density mode, tighten up the folder header a bit */
 .density-focused .automated-folder-header {
   padding: 6px 10px 6px 20px;
@@ -22966,13 +22692,6 @@ a,
   border-radius: 5px;
 }
 
-.density-focused .cli-queue-item {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 5px;
-}
-
 .density-focused .cli-context-item {
   font-family: var(--font-ui);
   font-size: 12px;
@@ -22984,17 +22703,12 @@ a,
   background: var(--color-bg-hover);
 }
 
-.density-focused .cli-queue-item:hover {
-  background: var(--color-bg-hover);
-}
-
 .density-focused .clickable-file-path {
   font-family: var(--font-ui);
 }
 
 .right-panel .cli-progress-item,
 .right-panel .cli-file-item,
-.right-panel .cli-queue-item,
 .right-panel .cli-context-item {
   border: 1px solid color-mix(in srgb, var(--color-border-subtle) 58%, transparent) !important;
   border-radius: 6px !important;
@@ -23004,14 +22718,8 @@ a,
 
 .right-panel .cli-progress-item,
 .right-panel .cli-file-item,
-.right-panel .cli-queue-item,
 .right-panel .cli-context-item {
   padding: 5px 8px !important;
-}
-
-.right-panel .cli-queue-item.running,
-.right-panel .cli-queue-item.queued {
-  border-left-width: 1px !important;
 }
 
 .right-panel .cli-progress-item.in_progress {
@@ -23057,7 +22765,6 @@ a,
 .right-panel .cli-path,
 .right-panel .cli-context-val,
 .right-panel .cli-context-file,
-.right-panel .cli-queue-title,
 .right-panel .right-panel-preserved-line:hover {
   color: var(--right-panel-text-secondary);
 }
@@ -23077,8 +22784,7 @@ a,
 .right-panel .cli-section-prompt,
 .right-panel .cli-label,
 .right-panel .cli-context-key,
-.right-panel .cli-footer-prompt,
-.right-panel .cli-queue-title:hover {
+.right-panel .cli-footer-prompt {
   color: var(--right-panel-accent-text);
 }
 
@@ -23088,7 +22794,6 @@ a,
 
 .right-panel .cli-progress-item,
 .right-panel .cli-file-item,
-.right-panel .cli-queue-item,
 .right-panel .cli-context-item {
   border-color: var(--right-panel-row-border) !important;
   background: var(--right-panel-row-bg) !important;
@@ -23194,7 +22899,6 @@ a,
 
 .right-panel .cli-progress-item,
 .right-panel .cli-file-item,
-.right-panel .cli-queue-item,
 .right-panel .cli-context-item {
   min-height: 34px;
   border-radius: 8px !important;
@@ -23205,8 +22909,7 @@ a,
     transform 0.16s ease;
 }
 
-.right-panel .cli-progress-item,
-.right-panel .cli-queue-item {
+.right-panel .cli-progress-item {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
@@ -23218,8 +22921,7 @@ a,
   display: none;
 }
 
-.right-panel .cli-progress-status,
-.right-panel .cli-queue-status {
+.right-panel .cli-progress-status {
   display: inline-flex;
   width: 16px;
   align-items: center;
@@ -23233,7 +22935,6 @@ a,
 }
 
 .right-panel .cli-progress-text,
-.right-panel .cli-queue-title,
 .right-panel .cli-file-name,
 .right-panel .cli-context-key,
 .right-panel .cli-context-file {
@@ -23245,7 +22946,6 @@ a,
 
 .right-panel .cli-progress-text,
 .right-panel .cli-file-name,
-.right-panel .cli-queue-title,
 .right-panel .cli-context-item {
   font-size: 12px;
   line-height: 1.25;
@@ -23295,8 +22995,7 @@ a,
 }
 
 .right-panel .cli-file-item:hover,
-.right-panel .cli-context-item:hover,
-.right-panel .cli-queue-item:hover {
+.right-panel .cli-context-item:hover {
   background: color-mix(in srgb, var(--right-panel-row-bg) 70%, var(--color-bg-hover)) !important;
   transform: translateY(-1px);
 }
@@ -23451,20 +23150,6 @@ a,
   display: inline-flex;
 }
 
-/* The active-session spinner sits at the end of the row so its title aligns
-   with every other session in the focused sidebar. */
-.density-focused .cli-task-status-trailing {
-  position: absolute;
-  top: 50%;
-  right: 10px;
-  width: 12px;
-  height: 12px;
-  margin: 0;
-  transform: translateY(-50%);
-  pointer-events: none;
-  z-index: 1;
-}
-
 /* Hide task numbering */
 .density-focused .cli-task-num {
   display: none;
@@ -23496,11 +23181,6 @@ a,
   overflow: hidden;
   text-overflow: clip;
   white-space: nowrap;
-}
-
-.density-focused .cli-task-awaiting-badge {
-  font-size: 9px;
-  padding: 1px 5px;
 }
 
 .density-focused .task-item-icon {
@@ -23535,10 +23215,6 @@ a,
 
 .density-focused .task-item-selected .cli-task-title {
   font-weight: 500;
-  color: var(--color-accent);
-}
-
-.density-focused .task-item-selected .cli-task-awaiting-badge {
   color: var(--color-accent);
 }
 
@@ -23633,10 +23309,6 @@ a,
     gap: 4px;
     min-width: 0;
     min-height: 20px;
-  }
-
-  .cli-task-time {
-    display: none;
   }
 
   .cli-task-automation-icon {

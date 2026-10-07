@@ -19,6 +19,7 @@ describe("TASK_EVENT_BRIDGE_ALLOWLIST", () => {
     expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("timeline_command_output");
     expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("timeline_error");
     expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("task_impact_updated");
+    expect(TASK_EVENT_BRIDGE_ALLOWLIST).toContain("task_title_updated");
   });
 
   it("does not contain duplicate event names", () => {

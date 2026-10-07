@@ -128,6 +128,8 @@ export default defineConfig({
           { text: "Task Automations", link: "/task-automations" },
           { text: "Skill Store & External Skills", link: "/skill-store-and-external-skills" },
           { text: "manim-video skill", link: "/skills/manim-video" },
+          { text: "Motion Film skill", link: "/skills/motion-film" },
+          { text: "Motion Editor skill", link: "/skills/motion-editor" },
           { text: "Architecture Design skill", link: "/skills/architecture-design" },
           { text: "Unbroker skill", link: "/skills/unbroker" },
           { text: "Release Notes 0.5.52", link: "/release-notes-0.5.52" },

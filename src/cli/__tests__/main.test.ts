@@ -108,6 +108,42 @@ describe("run command guard", () => {
   });
 });
 
+describe("remote run session naming", () => {
+  it.each([undefined, "My session name"])(
+    "generates a name unless --title is supplied: %s",
+    async (title) => {
+      vi.spyOn(ControlPlaneClient.prototype, "connect").mockResolvedValue();
+      const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue({
+        taskId: "task-1",
+        task: { id: "task-1", title: "Placeholder" },
+      });
+      vi.spyOn(ControlPlaneClient.prototype, "close").mockImplementation(() => {});
+      vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      expect(
+        await main([
+          "run",
+          "what is 2+2?",
+          "--remote",
+          "--workspace-id",
+          "ws-1",
+          "--token",
+          "test-token",
+          "--json",
+          ...(title ? ["--title", title] : []),
+        ]),
+      ).toBe(0);
+      expect(request).toHaveBeenCalledWith(
+        "task.create",
+        expect.objectContaining({
+          title: title || "what is 2+2?",
+          generateTitle: !title,
+        }),
+        30000,
+      );
+    },
+  );
+});
+
 describe("CLI displayed approval revisions", () => {
   it.each([undefined, "latest", "A".repeat(64)])(
     "refuses an unreviewed revision %s before sending",

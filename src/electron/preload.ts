@@ -5609,6 +5609,8 @@ export interface FileViewerResult {
       canPreview: boolean;
       previewMessage?: string;
     };
+    /** cowork-preview:// URL serving the preview with its scripts enabled. */
+    webPreviewUrl?: string;
     playbackUrl?: string;
     mimeType?: string;
     durationMs?: number;
@@ -7276,6 +7278,7 @@ export interface ElectronAPI {
     devRunLoggingEnabled?: boolean;
     homeResearchVaultEnabled?: boolean;
     homeNextActionsEnabled?: boolean;
+    costReceiptEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;
@@ -7307,6 +7310,7 @@ export interface ElectronAPI {
     devRunLoggingEnabled?: boolean;
     homeResearchVaultEnabled?: boolean;
     homeNextActionsEnabled?: boolean;
+    costReceiptEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;

@@ -45,6 +45,8 @@ import {
   prepareResponsibilityActionDecisionInsert,
   prepareScheduledRunRecoveryLookup,
 } from "./transactional-review-sql";
+import { updateTaskTitleIfUnchanged } from "./task-title-sql";
+import { BUILD_PROMPT_MARKER } from "../../shared/build-task";
 import { purgeTaskDerivedRows } from "../memory/memory-purge-sql";
 import { deleteWorkspaceMemoriesOlderThan } from "../memory/memory-retention-sql";
 import {
@@ -1104,6 +1106,20 @@ export class TaskStore {
     UsageInsightsProjector.getIfInitialized()?.enqueueTaskUpdate(before, after);
   }
 
+  /** Apply generated metadata only while the original placeholder still exists. */
+  updateTitleIfUnchanged(id: string, expectedTitle: string, title: string): boolean {
+    return updateTaskTitleIfUnchanged(
+      this.db,
+      id,
+      expectedTitle,
+      title,
+      (taskId) => this.findById(taskId),
+      invalidateTaskRowReads,
+      (before, after) =>
+        UsageInsightsProjector.getIfInitialized()?.enqueueTaskUpdate(before, after),
+    );
+  }
+
   togglePin(id: string): Task | undefined {
     const result = this.db
       .prepare(`
@@ -1445,6 +1461,12 @@ export class TaskStore {
           THEN json_extract(agent_config, '$.taskDomain')
           ELSE NULL
         END AS agent_config_task_domain,
+        CASE
+          WHEN agent_config IS NOT NULL AND json_valid(agent_config)
+            AND json_extract(agent_config, '$.taskOrigin') = 'build' THEN 'build'
+          WHEN INSTR(COALESCE(prompt, ''), '${BUILD_PROMPT_MARKER}') > 0 THEN 'build'
+          ELSE NULL
+        END AS agent_config_task_origin,
         CASE
           WHEN agent_config IS NOT NULL AND json_valid(agent_config)
           THEN json_extract(agent_config, '$.multitaskMode')
@@ -2063,6 +2085,9 @@ export class TaskStore {
   private mapRowToSidebarTask(row: Any): Task {
     type SidebarAgentConfig = NonNullable<Task["agentConfig"]>;
     const agentConfig: SidebarAgentConfig = {};
+    if (row.agent_config_task_origin === "build") {
+      agentConfig.taskOrigin = "build";
+    }
     const setBooleanAgentConfig = (
       key:
         | "videoGenerationMode"

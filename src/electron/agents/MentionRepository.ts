@@ -121,6 +121,8 @@ export class MentionStore {
    * Get pending mentions for a specific agent role
    */
   getPendingForAgent(toAgentRoleId: string, workspaceId?: string): AgentMention[] {
+    // A completed source task can still receive a new review or handoff request.
+    // Mention status, rather than task status, records whether it was handled.
     const conditions = ["to_agent_role_id = ?", "status = ?"];
     const params: Any[] = [toAgentRoleId, "pending"];
 

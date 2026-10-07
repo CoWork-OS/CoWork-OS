@@ -29,6 +29,7 @@ import {
   type TaskSessionSummary,
 } from "../electron/sessions/SessionRetentionService";
 import { AgentDaemon } from "../electron/agent/daemon";
+import { generateAndApplyTaskTitle } from "../electron/agent/task-title-generator";
 import { LLMProviderFactory } from "../electron/agent/llm";
 import { SearchProviderFactory } from "../electron/agent/search";
 import { BuiltinToolsSettingsManager } from "../electron/agent/tools/builtin-settings";
@@ -212,6 +213,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   let activeInterruptPolicy: CliTaskOwnership["interruptPolicy"] = "cancel";
   let cliHeartbeat: ReturnType<typeof setInterval> | null = null;
   let done = false;
+  let titleGeneration: Promise<void> | undefined;
   const restoreConsole = installCliLogFilter();
 
   try {
@@ -293,6 +295,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       agentConfig,
       autoStart: false,
     });
+    if (!args.title) {
+      const taskDaemon = daemon;
+      titleGeneration = generateAndApplyTaskTitle(task, args.prompt, taskRepo, (taskId, title) =>
+        taskDaemon.emitTaskTitleUpdated(taskId, title),
+      );
+    }
     activeTaskId = task.id;
     activeCliRunId = cliRunId;
     activeInterruptPolicy = cliOwnership.interruptPolicy;
@@ -420,6 +428,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 
   async function shutdownRuntime(): Promise<void> {
+    // Let the bounded metadata request finish before its database is closed.
+    await titleGeneration;
     try {
       await mcpClientManager?.shutdown?.();
     } catch {

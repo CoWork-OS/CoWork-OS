@@ -781,13 +781,16 @@ function buildComputerUseCompanionContent(
     ...(note ? { note } : {}),
   });
 
+  // preview_web_page reuses this screenshot path; its note carries the findings.
   const companionText =
-    `Latest controlled-window screenshot after ${action}. ` +
-    `Use only this newest screenshot for the next computer-use action. ` +
-    `captureId=${captureId}.` +
-    (appName ? ` App=${appName}.` : "") +
-    (windowTitle ? ` Window=${windowTitle}.` : "") +
-    (note ? ` Note=${note}` : "");
+    toolName === "preview_web_page"
+      ? `Screenshot of the previewed page (captureId=${captureId}).` + (note ? ` ${note}` : "")
+      : `Latest controlled-window screenshot after ${action}. ` +
+        `Use only this newest screenshot for the next computer-use action. ` +
+        `captureId=${captureId}.` +
+        (appName ? ` App=${appName}.` : "") +
+        (windowTitle ? ` Window=${windowTitle}.` : "") +
+        (note ? ` Note=${note}` : "");
 
   return {
     compactResult,

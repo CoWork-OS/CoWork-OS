@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Memory folder (beta)**: turn on **Settings > Memory > Memory folder** to keep what CoWork learns about you and your workspaces as plain markdown notes in a local git repo (`~/CoWork Memory` by default), in the open [Agent Memory Repo](https://github.com/AgentMemoryRepo/agentmemoryrepo) format. The agent reads the folder and saves to it as it works (each change is a commit you can inspect); you can open and edit the notes in any editor. What the agent saves after reading web pages, email or other untrusted content goes to an unreviewed `inbox.md` that is never put in prompts. **Compact history** removes old versions so deleted memories are really gone. Off by default. See [Memory Repo design](docs/memory-repo-phase1-design.md).
 
+- **Use-case gallery**: "See how people use CoWork OS" shows ready-to-run prompts in Tasks, Build, and Bots tabs, centered over the composer with a blurred backdrop. Open it from the welcome screen, Build, or the new sidebar notice. It covers every former Ideas workflow.
+- **Sidebar notices**: one dismissable notification area in the left sidebar, above Automated sessions, with a first-show animation. See [Sidebar Notices](docs/sidebar-notices.md).
 - **Memory Hub Sources and Health tabs**: **Sources** shows where CoWork's memory comes from (you, the agent, Dreaming, imports, other people, Chronicle, Supermemory, the knowledge graph) and opens the matching facts; **Health** runs the memory health checks with PASS/WARN results and a Refresh button.
 - **AI memory compression is on by default**: long memories get a one-line summary from your configured model and related ones are grouped into digests. It costs tokens: up to 20,000 a day across all workspaces (adjustable in **Settings > Memory**). Turn it off per workspace with **AI memory compression**. Private memories are never sent.
 - **Wider Mission Control recall**: recall also searches your memory items and, when connected and network access is on, Supermemory; older tasks and activity are found too.
@@ -107,6 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Ideas panel**: removed the Ideas page and its sidebar destination. All of its workflows, including their skill prompts, now live in the use-case gallery. A pinned Ideas shortcut is dropped when the app loads.
 - **Personal Health**: discontinued the Health dashboard, source imports, macOS Apple Health/HealthKit bridge, and related build and packaging paths to focus engineering effort on core agent workflows, integrations, and reliability. Upgrading deletes the retired Health data in the active CoWork profile; older settings backups cannot restore it. See the [decision record](docs/personal-health-discontinuation.md).
 - **Mobile Companions**: discontinued the iOS/Android companion apps, the Mobile Companions settings tab, the companion token, and the Control Plane node role and `node.*` methods to focus engineering effort on core agent workflows, integrations, and reliability. Upgrading deletes the stored companion token; older companion apps are refused with a discontinued error. See the [decision record](docs/mobile-companions-discontinuation.md).
 
@@ -780,7 +783,7 @@ See [Release Notes 0.5.53](docs/release-notes-0.5.53.md) for the complete summar
 ### Added
 
 - **Heartbeat v3**: signal-driven Pulse/Dispatch pipeline replaces the queue-first heartbeat internals. `Pulse` runs cheap deterministic gating with no LLM calls; `Dispatch` escalates only when Pulse justifies it. Includes signal ledger with fingerprint-based merging, deferred-state compression, run tracking, heartbeat profiles (`observer`/`operator`/`dispatcher`), dispatch guardrails, foreground suppression, and richer Mission Control status. See [Heartbeat v3](docs/heartbeat-v3.md).
-- **Ideas panel**: curated launch panel with pre-written idea prompts accessible from the sidebar above Sessions. Includes an `/ideas` gateway route and [capabilities reference doc](docs/ideas-capabilities.md).
+- **Ideas panel**: curated launch panel with pre-written idea prompts accessible from the sidebar above Sessions. Includes an `/ideas` gateway route and a capabilities reference doc.
 - **Azure Anthropic provider**: Azure-hosted Claude deployments are now a built-in provider. Configure API key, endpoint, and deployment in Settings > LLM > Azure Anthropic.
 - **OpenRouter image generation**: image generation requests can now be routed through OpenRouter, including preset model support.
 - **Document editing sessions**: inline PDF region editing, DOCX block replacement, version browsing, and document-aware file viewing for active editing sessions.

@@ -25,9 +25,13 @@ interface TaskStatusStripProps {
   replay?: boolean;
   telemetryEnabled?: boolean;
   onOpenOutput?: (path?: string) => void;
+  /** Skip Outputs when the right panel's Files section already lists them. */
+  hideOutputs?: boolean;
   markdownComponents?: unknown;
   /** Optional identity shown before the status label (calm theme agent). */
   leading?: ReactNode;
+  /** Controls shown at the strip's right edge; kept outside the toggle button. */
+  actions?: ReactNode;
 }
 
 type InlineMarkdownNodeProps = {
@@ -100,8 +104,10 @@ export function TaskStatusStrip({
   replay = false,
   telemetryEnabled = false,
   onOpenOutput,
+  hideOutputs = false,
   markdownComponents,
   leading,
+  actions,
 }: TaskStatusStripProps) {
   const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -154,7 +160,10 @@ export function TaskStatusStrip({
 
   if (!model.visible) return null;
   return (
-    <div className={`task-status-strip-shell tone-${model.tone}`} onKeyDown={handleDrawerKeyDown}>
+    <div
+      className={`task-status-strip-shell tone-${model.tone}${actions ? " has-actions" : ""}`}
+      onKeyDown={handleDrawerKeyDown}
+    >
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {announcement}
       </span>
@@ -232,7 +241,7 @@ export function TaskStatusStrip({
             </section>
           )}
 
-          {model.outputs && model.outputs.outputCount > 0 && (
+          {!hideOutputs && model.outputs && model.outputs.outputCount > 0 && (
             <section className="task-status-drawer-section" aria-labelledby="task-status-outputs">
               <h3 id="task-status-outputs">Outputs</h3>
               <div className="task-status-output-list">
@@ -291,6 +300,7 @@ export function TaskStatusStrip({
         )}
         <ChevronDown className="task-status-strip-chevron" aria-hidden="true" />
       </button>
+      {actions && <div className="task-status-strip-actions">{actions}</div>}
     </div>
   );
 }

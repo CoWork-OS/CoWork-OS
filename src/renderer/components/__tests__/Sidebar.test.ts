@@ -173,7 +173,7 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).not.toContain(">Update</button>");
   });
 
-  it("prioritizes the session title over time while a session is awaiting response", () => {
+  it("shows a readable paused reason and age without squeezing a status badge into the title", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
         workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
@@ -198,14 +198,17 @@ describe("Sidebar top-level destinations", () => {
     );
 
     expect(markup).toContain("Investigate the onboarding session");
-    expect(markup).toContain("cli-task-title-row-awaiting");
-    expect(markup).toContain("Awaiting response");
-    expect(markup).not.toContain("cli-task-status awaiting");
-    expect(markup).not.toContain("cli-session-indicator-awaiting");
-    expect(markup).not.toContain("cli-task-time");
+    // The title is the session's keyboard/screen-reader target, not the whole row.
+    expect(markup).toMatch(
+      /<button type="button" class="cli-task-select-btn"[^>]*>[\s\S]*Investigate the onboarding session/,
+    );
+    expect(markup).not.toMatch(/class="task-item cli-task-item[^"]*"[^>]*role="button"/);
+    expect(markup).toContain('class="cli-task-activity needs-you">Paused</div>');
+    expect(markup).toContain("cli-task-status awaiting");
+    expect(markup).not.toContain('class="cli-task-time"');
   });
 
-  it("places active session spinners at the end of the row", () => {
+  it("keeps active session indicators before the title alongside a readable running label", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
         workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
@@ -237,27 +240,99 @@ describe("Sidebar top-level destinations", () => {
       }),
     );
 
-    expect((markup.match(/cli-task-status active cli-task-status-trailing/g) ?? []).length).toBe(2);
+    expect((markup.match(/cli-task-status active/g) ?? []).length).toBe(2);
+    expect((markup.match(/cli-task-activity running/g) ?? []).length).toBe(2);
     expect(markup).toContain("Active session");
-    const source = readFileSync(stylesPath, "utf8");
-    expect(source).toMatch(
-      /\.density-focused \.cli-task-status-trailing\s*\{[\s\S]*position:\s*absolute;[\s\S]*right:\s*10px;/,
+    expect(markup.indexOf("cli-task-status active")).toBeLessThan(
+      markup.indexOf('title="Active session"'),
     );
   });
 
-  it("shows failed sessions by default while keeping the optional filter available", () => {
+  it.each(["failed", "cancelled"])(
+    "shows %s sessions without an X while keeping the optional filter available",
+    (status) => {
+      const markup = renderToStaticMarkup(
+        React.createElement(Sidebar, {
+          workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+          tasks: [
+            {
+              id: "failed-task-1",
+              title: "Recently stopped session",
+              prompt: "Recently stopped session",
+              status,
+              workspaceId: "ws-1",
+              createdAt: Date.now() - 2 * 60 * 1000,
+              updatedAt: Date.now() - 2 * 60 * 1000,
+            },
+          ] as Any,
+          selectedTaskId: null,
+          onSelectTask: () => {},
+          onOpenSettings: () => {},
+          onTasksChanged: () => {},
+        }),
+      );
+
+      expect(markup).toContain("Recently stopped session");
+      expect(markup).toContain('class="cli-task-status failed" aria-hidden="true"></span>');
+      expect(markup).toContain('type="search" aria-label="Search sessions"');
+      expect(markup).toContain('title="Filter sessions"');
+    },
+  );
+
+  it("makes search and status filters visible without opening an extra control", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
-        workspace: { id: "ws-1", name: "Workspace", path: "/workspace" } as Any,
+        workspace: null,
+        tasks: [],
+        selectedTaskId: null,
+        onSelectTask: () => {},
+        onOpenSettings: () => {},
+        onTasksChanged: () => {},
+      }),
+    );
+    expect(markup).toContain('placeholder="Find sessions…"');
+    expect(markup).toContain("aria-keyshortcuts=");
+    expect(markup).toContain('aria-label="Session status"');
+    expect(markup).toContain('aria-pressed="true"><span>All</span>');
+    expect(markup).toContain('aria-pressed="false"><span>Running</span>');
+    expect(markup).toContain('aria-pressed="false"><span>Needs you</span>');
+  });
+
+  it("keeps automated activity discoverable and its history collapsed by default", () => {
+    const now = Date.now();
+    const markup = renderToStaticMarkup(
+      React.createElement(Sidebar, {
+        workspace: null,
         tasks: [
           {
-            id: "failed-task-1",
-            title: "Recently stopped session",
-            prompt: "Recently stopped session",
-            status: "cancelled",
+            id: "manual",
+            title: "Manual session",
+            prompt: "Manual session",
+            status: "completed",
             workspaceId: "ws-1",
-            createdAt: Date.now() - 2 * 60 * 1000,
-            updatedAt: Date.now() - 2 * 60 * 1000,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "cron-running",
+            title: "Scheduled review",
+            prompt: "Review",
+            source: "cron",
+            status: "executing",
+            workspaceId: "ws-1",
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "cron-approval",
+            title: "Scheduled approval",
+            prompt: "Review",
+            source: "cron",
+            status: "blocked",
+            terminalStatus: "awaiting_approval",
+            workspaceId: "ws-1",
+            createdAt: now,
+            updatedAt: now,
           },
         ] as Any,
         selectedTaskId: null,
@@ -266,11 +341,47 @@ describe("Sidebar top-level destinations", () => {
         onTasksChanged: () => {},
       }),
     );
+    expect(markup).toContain('class="automated-folder-header" aria-expanded="false"');
+    expect(markup).toContain("1 running · 1 needs you");
+    expect(markup).toContain(
+      'class="sidebar-session-state-filter running " aria-pressed="false"><span>Running</span><span class="sidebar-session-state-count">1</span>',
+    );
+    expect(markup).toContain(
+      'class="sidebar-session-state-filter needs-you " aria-pressed="false"><span>Needs you</span><span class="sidebar-session-state-count">1</span>',
+    );
+    expect(markup).not.toContain('data-task-id="cron-running"');
+    expect(markup).not.toContain('data-task-id="cron-approval"');
+    expect(markup.indexOf("sidebar-automated-section")).toBeGreaterThan(
+      markup.indexOf('data-task-id="manual"'),
+    );
+  });
 
-    expect(markup).toContain("Recently stopped session");
-    // The filter toggle sits in the search row, which opens from the header.
-    expect(markup).toContain('title="Search sessions"');
-    expect(readFileSync(sidebarSourcePath, "utf8")).toContain('title="Filter sessions"');
+  it("doesn't duplicate pinned automated sessions in the footer", () => {
+    const now = Date.now();
+    const markup = renderToStaticMarkup(
+      React.createElement(Sidebar, {
+        workspace: null,
+        tasks: [
+          {
+            id: "pinned-cron",
+            title: "Pinned schedule",
+            prompt: "Review",
+            source: "cron",
+            pinned: true,
+            status: "executing",
+            workspaceId: "ws-1",
+            createdAt: now,
+            updatedAt: now,
+          },
+        ] as Any,
+        selectedTaskId: null,
+        onSelectTask: () => {},
+        onOpenSettings: () => {},
+        onTasksChanged: () => {},
+      }),
+    );
+    expect(markup).toContain('data-task-id="pinned-cron"');
+    expect(markup).not.toContain('class="sidebar-automated-section"');
   });
 
   it("keeps projects opt-in while retaining pinned and recent sessions", () => {
@@ -308,13 +419,83 @@ describe("Sidebar top-level destinations", () => {
     expect(markup).toContain("Pinned");
     expect(markup).toContain("Projects");
     // Recents are grouped under day labels.
-    expect(markup).toContain('class="sidebar-date-group">Today<');
+    expect(markup).toContain('aria-label="Today sessions" aria-expanded="true"');
     expect(markup).toContain("No projects added");
     expect(markup).toContain('aria-label="Organize projects"');
     expect(markup).not.toContain('sidebar-workspace-label">cowork');
     expect(markup).toContain("Pinned session");
     expect(markup).toContain("Temporary session");
     expect(markup.indexOf("Pinned session")).toBeLessThan(markup.indexOf("Projects"));
+  });
+
+  describe("collapsible recent sessions", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    });
+
+    const renderWithCollapsedGroups = (collapsedRecentGroups: unknown) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-05T12:00:00"));
+      vi.stubGlobal("window", {
+        electronAPI: {},
+        localStorage: {
+          getItem: () =>
+            JSON.stringify({
+              visibleWorkspaceIds: ["ws-project"],
+              expandedWorkspaceIds: ["ws-project"],
+              collapsedRecentGroups,
+            }),
+        },
+      });
+      const task = (id: string, extra: object = {}) => ({
+        id,
+        title: id,
+        prompt: id,
+        status: "completed",
+        workspaceId: "__temp_workspace__:collapse-test",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...extra,
+      });
+      return renderToStaticMarkup(
+        React.createElement(Sidebar, {
+          workspace: { id: "ws-project", name: "Project", path: "/workspace/project" } as Any,
+          tasks: [
+            task("today-root"),
+            task("today-child", { parentTaskId: "today-root" }),
+            task("yesterday-root", {
+              createdAt: Date.now() - 86_400_000,
+              updatedAt: Date.now() - 86_400_000,
+            }),
+            task("pinned-root", { pinned: true }),
+            task("project-root", { workspaceId: "ws-project" }),
+          ] as Any,
+          selectedTaskId: null,
+          onSelectTask: () => {},
+          onOpenSettings: () => {},
+          onTasksChanged: () => {},
+        }),
+      );
+    };
+
+    it("restores a collapsed date group without hiding pinned, project, or other date groups", () => {
+      const markup = renderWithCollapsedGroups(["Today"]);
+      expect(markup).toContain('aria-label="Today sessions" aria-expanded="false"');
+      expect(markup).not.toContain('data-task-id="today-root"');
+      expect(markup).not.toContain('data-task-id="today-child"');
+      expect(markup).toContain('aria-label="Yesterday sessions" aria-expanded="true"');
+      for (const id of ["yesterday-root", "pinned-root", "project-root"]) {
+        expect(markup).toContain(`data-task-id="${id}"`);
+      }
+    });
+
+    it("keeps date groups expanded when the stored preference is invalid", () => {
+      const markup = renderWithCollapsedGroups({ Today: true });
+      expect(markup).toContain('aria-label="Today sessions" aria-expanded="true"');
+      expect(markup).toContain('data-task-id="today-root"');
+      expect(markup).toContain('data-task-id="today-child"');
+    });
   });
 
   it("keeps project menu icons and labels left-aligned", () => {
@@ -447,7 +628,7 @@ describe("Sidebar top-level destinations", () => {
     ]);
   });
 
-  it("places the completion attention dot directly before the session time", () => {
+  it("keeps completion attention before session actions without a timestamp", () => {
     const now = Date.now();
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
@@ -476,12 +657,13 @@ describe("Sidebar top-level destinations", () => {
 
     expect(markup).toContain("cli-task-time-wrap");
     expect(markup).toContain("task-completion-unread-dot");
+    expect(markup).not.toContain('class="cli-task-time"');
     expect(markup.indexOf("task-completion-unread-dot")).toBeLessThan(
-      markup.indexOf('class="cli-task-time"'),
+      markup.indexOf('class="task-item-actions cli-task-actions"'),
     );
   });
 
-  it("marks automated task rows with a distinct icon before the session time", () => {
+  it("keeps the automated task icon before session actions without a timestamp", () => {
     const now = Date.now();
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
@@ -520,10 +702,11 @@ describe("Sidebar top-level destinations", () => {
 
     expect(markup).toContain("cli-task-automation-icon");
     expect(markup).toContain("Automated task");
+    expect(markup).not.toContain('class="cli-task-time"');
     const automatedIconIndex = markup.indexOf("cli-task-automation-icon");
     expect(automatedIconIndex).toBeGreaterThan(markup.indexOf("Update AGENTS.md"));
     expect(automatedIconIndex).toBeLessThan(
-      markup.indexOf('class="cli-task-time"', automatedIconIndex),
+      markup.indexOf('class="task-item-actions cli-task-actions"', automatedIconIndex),
     );
   });
 
@@ -532,9 +715,6 @@ describe("Sidebar top-level destinations", () => {
 
     expect(source).toMatch(/\.sidebar\s*\{[\s\S]*container-type:\s*inline-size;[\s\S]*\}/);
     expect(source).toMatch(/@container\s*\(max-width:\s*280px\)/);
-    expect(source).toMatch(
-      /@container\s*\(max-width:\s*280px\)\s*\{[\s\S]*\.cli-task-time\s*\{[\s\S]*display:\s*none;[\s\S]*\}/,
-    );
     expect(source).toMatch(
       /@container\s*\(max-width:\s*280px\)\s*\{[\s\S]*\.cli-task-item\s*\{[\s\S]*gap:\s*4px;[\s\S]*padding-right:\s*6px\s*!important;[\s\S]*\}/,
     );

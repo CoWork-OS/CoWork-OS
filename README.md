@@ -72,7 +72,7 @@ Recent high-impact additions change the day-to-day product shape: Automation Stu
 
 Stable workflow entry points for the newest high-impact capabilities.
 
-- **Ideas panel** — curated launchpad of pre-written workflow prompts and capability-aware starting points, with deep links into common tasks.
+- **Use-case gallery** — "See how people use CoWork OS": ready-to-run prompts for tasks, builds, and bots that fill the composer in one click.
 - **Research vaults (`llm-wiki`)** — first-class workspace-local knowledge bases inspired by Andrej Karpathy's LLM Wiki concept, with deterministic raw-source capture, Obsidian-friendly notes, filed-back outputs, vault search, and vault-health analysis. [Learn more](docs/llm-wiki.md)
 - **Personal data cleanup (`unbroker`)** — bundled global privacy/security skill for consent-gated data-broker and people-search removal, with a local PII ledger, opt-out queue, human-task digest, and recurring recheck support. [Learn more](docs/skills/unbroker.md)
 - **Everything Workbench** — generated documents, spreadsheets, decks, web pages, PDFs, and previews share the same artifact model: task-feed card, sidebar open, fullscreen workspace, follow-up composer, and refresh after the agent finishes the requested edit. It makes CoWork the default place to create, inspect, and revise everyday Word/Excel/PowerPoint-style work. [Learn more](docs/everything-workbench.md)
@@ -89,6 +89,7 @@ Stable workflow entry points for the newest high-impact capabilities.
 - **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
 - **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
 - **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
+- **Motion-design films and editors** — bundled `motion-film` skill renders launch videos, promos, explainers, and social loops entirely in code (time-seeked HTML → Playwright → ffmpeg MP4, beat-synced, approval stills before the build); bundled `motion-editor` skill builds a local, offline After Effects / Screen Studio-lite editor app with keyframes, springs, timeline, and deterministic MP4 export. [Motion film](docs/skills/motion-film.md) · [Motion editor](docs/skills/motion-editor.md)
 - **Architecture design orchestration** — bundled `architecture-design` skill and local Rhino, Blender, and ComfyUI MCP connectors for concept house/building workflows with project-contained artifacts and connector evidence. [Learn more](docs/skills/architecture-design.md)
 - **React/Next.js implementation guidance** — bundled `react-best-practices` skill for React workspace changes, Next.js feature work, reviews, refactors, data-fetching improvements, bundle-size checks, and rendering-performance fixes. [Learn more](docs/skills/react-best-practices.md)
 - **High-agency frontend design** — bundled `taste-skill` for stricter anti-slop frontend work with stronger layout variance, typography, motion, and implementation rules.
@@ -583,6 +584,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [LLM Wiki](docs/llm-wiki.md)                                             | First-class research vault workflow, slash syntax, vault layout, analyzer outputs, and Obsidian-friendly knowledge-base behavior                   |
 | [Kami Skill](docs/skills/kami.md)                                        | Bundled editorial document workflow for resumes, one-pagers, white papers, diagrams, and slide decks                                               |
 | [manim-video Skill](docs/skills/manim-video.md)                          | Bundled Manim CE workflow for technical animation, project scaffolding, and draft-to-production render flow                                        |
+| [Motion Film Skill](docs/skills/motion-film.md)                          | Bundled code-rendered motion-design film workflow for launch videos, promos, explainers, and social loops                                          |
+| [Motion Editor Skill](docs/skills/motion-editor.md)                      | Bundled build spec for a local, offline keyframe/timeline motion editor app with deterministic MP4 export                                          |
 | [Architecture Design Skill](docs/skills/architecture-design.md)          | Bundled Rhino, Blender, and ComfyUI orchestration workflow for concept architecture artifacts                                                      |
 | [React Best Practices Skill](docs/skills/react-best-practices.md)        | Bundled React and Next.js guidance for feature work, refactors, reviews, data fetching, bundle size, and rendering performance                     |
 | [Unbroker Skill](docs/skills/unbroker.md)                                | Bundled consent-gated workflow for authorized data-broker and people-search opt-outs, local PII ledgers, and recurring privacy rechecks            |

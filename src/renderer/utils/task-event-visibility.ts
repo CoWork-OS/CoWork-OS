@@ -337,12 +337,13 @@ function isToolBatchLaneEvent(event: TaskEvent): boolean {
   const groupId = getTimelineGroupId(event).toLowerCase();
   if (!groupId || !groupId.startsWith("tools:")) return false;
 
+  // Each call in a batch lists as its own step ("Read Sidebar.tsx", "Searched for
+  // X"); its result folds into that row, and the lane's lifecycle markers stay out.
   const effectiveType = getEffectiveTaskEventType(event);
-  if (
-    effectiveType === "tool_call" ||
-    effectiveType === "tool_result" ||
-    effectiveType === "tool_error"
-  ) {
+  if (effectiveType === "tool_call" || effectiveType === "tool_error") {
+    return false;
+  }
+  if (effectiveType === "tool_result") {
     return true;
   }
 
@@ -365,6 +366,9 @@ export function isImportantTaskEvent(event: TaskEvent): boolean {
     return false;
   }
   if (IMPORTANT_EVENT_TYPES.includes(effectiveType as EventType)) return true;
+  // Each tool call is a step the user can follow ("Read Sidebar.tsx", "Searched
+  // for X", "Ran git status"); its result folds into that row.
+  if (effectiveType === "tool_call") return true;
   if (effectiveType !== "tool_result") return false;
   return String((event as Any)?.payload?.tool || "") === "schedule_task";
 }

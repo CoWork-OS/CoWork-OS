@@ -185,9 +185,9 @@ Create a weekly project summary document from the files in this workspace. Inclu
 
 You will quickly see the difference between “a nice answer” and “a usable output.”
 
-### 3. Use the Ideas panel
+### 3. Browse the use-case gallery
 
-If you do not know what to try next, use the Ideas panel. It gives you pre-written prompts for common workflows so you can evaluate the product by running something real rather than inventing the perfect first prompt.
+If you do not know what to try next, open **See how people use CoWork OS** from the sidebar or the welcome screen. It gives you ready-to-run prompts for tasks, builds, and bots, so you can evaluate the product by running something real rather than inventing the perfect first prompt.
 
 ## Intermediate
 

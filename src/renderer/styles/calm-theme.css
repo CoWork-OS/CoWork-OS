@@ -594,6 +594,25 @@ html.visual-calm .calm-main .voice-input-btn:hover {
   color: var(--calm-text);
 }
 
+/* Task composer rhythm: the access shield sits 4px tighter to what precedes it
+   and 4px further from the prompt, so the visible gaps around it match (20px
+   glyph to glyph, and glyph to text). The model name and its effort level read
+   as one 13px label, the effort muted. */
+html.visual-calm .calm-task .input-row .calm-access-menu {
+  margin-left: -4px;
+  margin-right: 4px;
+}
+
+html.visual-calm .calm-task .input-actions .model-selector {
+  font-size: 13px;
+}
+
+html.visual-calm .calm-task .input-actions .model-selector-effort {
+  padding-left: 4px;
+  color: var(--calm-text-muted);
+  font-size: inherit;
+}
+
 /* Round ink send button (welcome + task composers). */
 html.visual-calm .calm-main .lets-go-btn,
 html.visual-calm .calm-main .lets-go-btn.lets-go-btn-sm {
@@ -814,9 +833,11 @@ html.visual-calm .calm-build-composer:focus-within {
   border-color: var(--calm-border-strong);
 }
 
+/* One line is exactly the buttons' 36px (24px line + 6px padding each side),
+   so the text centers on the +, model picker and send button. */
 html.visual-calm .calm-build-composer textarea {
   flex: 1;
-  min-height: 44px;
+  min-height: 36px;
   max-height: 200px;
   resize: none;
   border: none;
@@ -824,7 +845,35 @@ html.visual-calm .calm-build-composer textarea {
   background: transparent;
   color: var(--calm-text);
   font: 400 16px/1.5 var(--font-ui);
-  padding: 8px 0;
+  padding: 6px 0;
+}
+
+/* Attachment chips take the composer's first row; the + button, textarea,
+   model picker and send button share the row below. */
+html.visual-calm .calm-build-composer {
+  flex-wrap: wrap;
+  padding-left: 12px;
+}
+
+html.visual-calm .calm-build-attachments {
+  flex-basis: 100%;
+  padding: 4px 0 0 8px;
+}
+
+html.visual-calm .calm-build-composer .calm-build-attach {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-build-composer .calm-build-attach:hover:not(:disabled) {
+  background: var(--calm-surface-hover);
+  color: var(--calm-text);
 }
 
 html.visual-calm .calm-build-composer textarea::placeholder {
@@ -882,31 +931,40 @@ html.visual-calm .calm-build-starter:hover {
 
 /* ---------- Working view ---------- */
 
-/* The status strip becomes a single, prominent status line. */
+/* The status strip is a tab tucked behind the composer: a quiet tinted surface
+   with smaller type than the prompt, so it doesn't read as a second field. */
 html.visual-calm .calm-task .task-status-strip-shell {
-  border-bottom: none;
+  border-color: var(--calm-border);
+  background: var(--calm-surface-muted);
 }
 
 html.visual-calm .calm-task .task-status-strip {
-  min-height: 44px;
-  padding: 8px 18px;
-  gap: 10px;
+  min-height: 32px;
+  padding: 4px 12px 4px 11px;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
 html.visual-calm .calm-task .task-status-strip:hover {
-  background: var(--calm-surface-hover);
+  background: transparent;
 }
 
 html.visual-calm .calm-task .task-status-strip-primary {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 500;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-task .task-status-strip:hover .task-status-strip-primary,
+html.visual-calm .calm-task .task-status-strip:hover .task-status-strip-chevron {
   color: var(--calm-text);
 }
 
 html.visual-calm .calm-task .task-status-strip-metric,
 html.visual-calm .calm-task .task-status-strip-phase {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--calm-text-muted);
 }
 
@@ -2016,32 +2074,262 @@ html.visual-calm .browser-use-approval-allow {
 }
 
 /* First-run disclaimer. */
+html.visual-calm .disclaimer-overlay {
+  background:
+    radial-gradient(55% 45% at 50% -5%, var(--calm-sky-2), transparent 70%),
+    radial-gradient(45% 35% at 85% 105%, var(--calm-sky), transparent 70%), var(--calm-page);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  align-items: flex-start;
+  padding: 56px 24px 40px;
+}
+
+html.visual-calm .disclaimer-container {
+  max-width: 600px;
+  margin: auto;
+  color: var(--calm-text);
+}
+
+html.visual-calm .disclaimer-logo {
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+html.visual-calm .disclaimer-logo-text,
+html.visual-calm .disclaimer-logo-os {
+  font-family: var(--calm-font-display);
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+}
+
+html.visual-calm .disclaimer-logo-os {
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .disclaimer-subtitle {
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--calm-text-muted);
+  margin-bottom: 28px;
+}
+
 html.visual-calm .disclaimer-card {
   background: var(--calm-surface-raised);
   border-color: var(--calm-border);
+  border-radius: var(--calm-radius-card);
   box-shadow: var(--calm-shadow-pop);
+  margin-bottom: 24px;
 }
 
 html.visual-calm .disclaimer-card::before {
   display: none;
 }
 
+html.visual-calm .disclaimer-card-header {
+  gap: 12px;
+  padding: 18px 22px;
+  background: transparent;
+  border-bottom-color: var(--calm-border);
+}
+
+html.visual-calm .disclaimer-card-icon-wrap {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--calm-radius-item);
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .disclaimer-card-title {
+  font-family: var(--calm-font-display);
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+}
+
+html.visual-calm .disclaimer-card-body {
+  padding: 20px 22px 22px;
+}
+
+html.visual-calm .disclaimer-intro {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--calm-text-secondary);
+  margin-bottom: 18px;
+}
+
+html.visual-calm .disclaimer-section {
+  margin: 0;
+  padding: 16px 0;
+  border-top: 1px solid var(--calm-border);
+}
+
+html.visual-calm .disclaimer-section:last-child {
+  padding-bottom: 0;
+}
+
+html.visual-calm .disclaimer-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--calm-text);
+  margin-bottom: 8px;
+}
+
+html.visual-calm .disclaimer-section ul {
+  gap: 2px;
+}
+
+html.visual-calm .disclaimer-section li {
+  padding: 3px 0 3px 18px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .disclaimer-section li::before {
+  left: 4px;
+  top: 11px;
+  width: 4px;
+  height: 4px;
+  background: var(--calm-text-muted);
+  opacity: 1;
+}
+
+html.visual-calm .disclaimer-question-section {
+  margin-bottom: 20px;
+}
+
+html.visual-calm .disclaimer-question {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--calm-text);
+  margin-bottom: 12px;
+}
+
+html.visual-calm .disclaimer-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 html.visual-calm .disclaimer-option {
+  padding: 12px 14px;
+  border-radius: var(--calm-radius-item);
   background: var(--calm-surface-muted);
   border-color: var(--calm-border);
   color: var(--calm-text-secondary);
+  font-size: 14px;
+  box-shadow: none;
+  transition:
+    background 0.18s var(--calm-ease),
+    border-color 0.18s var(--calm-ease),
+    color 0.18s var(--calm-ease);
+}
+
+html.visual-calm .disclaimer-option::before {
+  display: none;
+}
+
+html.visual-calm .disclaimer-option:hover {
+  background: var(--calm-surface-hover);
+  border-color: var(--calm-border-strong);
+  color: var(--calm-text);
+}
+
+html.visual-calm .disclaimer-option.selected {
+  background: var(--calm-accent-subtle);
+  border-color: var(--calm-accent);
+  color: var(--calm-text);
+  box-shadow: none;
+}
+
+html.visual-calm .disclaimer-radio-modern {
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--calm-border-strong);
+}
+
+html.visual-calm .disclaimer-option.selected .disclaimer-radio-modern {
+  border-color: var(--calm-accent);
+}
+
+html.visual-calm .disclaimer-radio-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--calm-accent);
+}
+
+html.visual-calm .disclaimer-continue {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+html.visual-calm .disclaimer-checkbox-label {
+  font-size: 13.5px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .disclaimer-checkbox-label:hover {
+  color: var(--calm-text);
+}
+
+html.visual-calm .disclaimer-checkbox-modern {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--calm-border-strong);
+  color: var(--calm-ink-contrast);
+}
+
+html.visual-calm .disclaimer-checkbox-modern.checked {
+  background: var(--calm-ink);
+  border-color: var(--calm-ink);
 }
 
 html.visual-calm .disclaimer-continue-btn {
   background: var(--calm-ink);
   border-color: transparent;
   color: var(--calm-ink-contrast);
+  border-radius: var(--calm-radius-pill);
+  padding: 10px 20px 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: var(--calm-shadow-soft);
+  transition: transform 0.18s var(--calm-ease);
 }
 
-html.visual-calm .disclaimer-section,
-html.visual-calm .disclaimer-subtitle {
-  text-transform: none;
-  letter-spacing: 0;
+html.visual-calm .disclaimer-continue-btn::before {
+  display: none;
+}
+
+html.visual-calm .disclaimer-continue-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .disclaimer-option:focus-visible,
+html.visual-calm .disclaimer-checkbox-label:focus-visible,
+html.visual-calm .disclaimer-continue-btn:focus-visible {
+  outline: 2px solid var(--calm-accent);
+  outline-offset: 2px;
+}
+
+html.visual-calm .disclaimer-exit-message {
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--calm-warning-text);
+  background: var(--calm-warning-bg);
+  border: none;
+  border-radius: var(--calm-radius-item);
 }
 
 /* Document editor modal. */
@@ -2214,4 +2502,129 @@ html.visual-calm .calm-build-status .calm-topbar-button {
   padding: 4px 8px;
   font-size: 12.5px;
   color: var(--calm-text-secondary);
+}
+
+/* Build reads like a code tool: monospace prompt, shell-style hints, file
+   stacks on the starters and a terminal-style list of recent builds. */
+html.visual-calm .calm-build-status {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+html.visual-calm .calm-build-hints {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--calm-text-muted);
+  font: 400 12px var(--font-ui);
+}
+
+html.visual-calm .calm-build-hints kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--calm-border-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--calm-surface);
+  color: var(--calm-text-secondary);
+  font: 500 10.5px var(--font-mono);
+}
+
+html.visual-calm .calm-build-recent {
+  width: 100%;
+  margin-top: 22px;
+  border: 1px solid var(--calm-border);
+  border-radius: 14px;
+  background: var(--calm-surface);
+  overflow: hidden;
+  text-align: left;
+}
+
+html.visual-calm .calm-build-recent-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--calm-border);
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-muted);
+  font: 500 11px var(--font-mono);
+  text-transform: lowercase;
+}
+
+html.visual-calm .calm-build-recent-head::before {
+  content: "$";
+  color: var(--calm-accent);
+}
+
+html.visual-calm .calm-build-recent ul {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+}
+
+html.visual-calm .calm-build-recent-row {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto 32px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--calm-text);
+  font: 400 13px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+html.visual-calm .calm-build-recent-row:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-build-recent-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.visual-calm .calm-build-recent-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-build-recent-state,
+html.visual-calm .calm-build-recent-time {
+  color: var(--calm-text-muted);
+  font: 400 11px var(--font-mono);
+}
+
+html.visual-calm .calm-build-recent-time {
+  text-align: right;
+}
+
+html.visual-calm .calm-build-recent-dot.tone-running {
+  background: var(--calm-accent);
+  box-shadow: 0 0 0 3px var(--calm-accent-subtle);
+}
+
+html.visual-calm .calm-build-recent-dot.tone-done {
+  background: var(--calm-success);
+}
+
+html.visual-calm .calm-build-recent-dot.tone-error {
+  background: var(--color-error, #ef4444);
+}
+
+html.visual-calm .calm-build-recent-state.tone-running {
+  color: var(--calm-accent);
 }

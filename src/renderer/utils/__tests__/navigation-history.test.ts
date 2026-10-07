@@ -36,8 +36,8 @@ describe("navigation history", () => {
     history = back!.history;
     expect(getNavigationAvailability(history)).toEqual({ canGoBack: true, canGoForward: true });
 
-    history = recordNavigationEntry(history, at("ideas"));
-    expect(history.entries).toEqual([at("main", "a"), at("main", "b"), at("ideas")]);
+    history = recordNavigationEntry(history, at("build"));
+    expect(history.entries).toEqual([at("main", "a"), at("main", "b"), at("build")]);
     expect(stepNavigationHistory(history, 1)).toBeNull();
   });
 

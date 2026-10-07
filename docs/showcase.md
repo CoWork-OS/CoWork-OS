@@ -1864,6 +1864,29 @@ Scaffold the full project in this workspace, include a voiceover draft, and rend
 
 ---
 
+### Motion-Design Films (motion-film / motion-editor)
+
+Render launch videos, promos, and explainers as code instead of a timeline project: one time-seeked HTML file rendered frame-by-frame to MP4, so every frame is reproducible and every beat can be checked.
+
+**What it handles:**
+
+- Keynote-style launch films and feature announcements driven by a cursor through real UI
+- Brand and event openers built around wordmark mechanics and masks
+- Looping social clips in 1:1, 9:16, or 4:5
+- Beat maps synced to music, with approval stills before the full build
+- A separate `motion-editor` skill that builds a local, offline keyframe/timeline editor app
+
+**Example prompt:**
+
+```
+Use the motion-film skill to make a 30-second keynote-style launch video for our app.
+Use the screenshots in assets/screens/, show me the beat map and stills first, then render a 60fps MP4.
+```
+
+**Powered by:** `motion-film` and `motion-editor` skills, local file tools, Playwright, ffmpeg
+
+---
+
 ### YouTube & Video Analysis
 
 Analyze YouTube videos without watching them — extract transcripts, summarize content, identify key moments, and generate derivative content.

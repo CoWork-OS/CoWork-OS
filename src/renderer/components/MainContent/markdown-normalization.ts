@@ -7,6 +7,7 @@ import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-tex
 import {
   normalizeInlineLists,
   normalizeInlineHeadings,
+  transformOutsideFencedCode,
   unwrapMarkdownCodeBlocks,
 } from "../../utils/markdown-inline-lists";
 
@@ -269,10 +270,13 @@ export function normalizeTimelineTitleMarkdownForDisplay(text: string): string {
     normalizeInlineHeadings(normalizeMarkdownForDisplay(text)),
   );
   // Escape only single # so shell comments like "# route check" are not rendered
-  // as <h1>. Allow ##, ###, etc. to render as headings.
-  return normalized.replace(
-    /^( {0,3})(#)(?=\s)/gm,
-    (_match: string, indent: string, hash: string) => `${indent}${hash.replace(/#/g, "\\#")}`,
+  // as <h1>. Allow ##, ###, etc. to render as headings. Fenced code is skipped, since
+  // backslash escapes are literal there and "\#" would show in the code.
+  return transformOutsideFencedCode(normalized, (segment) =>
+    segment.replace(
+      /^( {0,3})(#)(?=\s)/gm,
+      (_match: string, indent: string, hash: string) => `${indent}${hash.replace(/#/g, "\\#")}`,
+    ),
   );
 }
 

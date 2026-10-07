@@ -138,6 +138,13 @@ const SYNTHESIS_ITEM_TITLE = "Synthesis";
 
 const MAX_SYNTHESIS_PROMPT_CHARS = 100_000;
 const SYNTHESIS_WATCHDOG_MS = 5 * 60 * 1000;
+/**
+ * A synthesis task that is still executing when the watchdog fires gets this
+ * many extra windows before the run is closed with the lane outputs only.
+ * Synthesis reads every lane's full report, so five minutes is often not
+ * enough for a strong model; the cap keeps a hung task from blocking forever.
+ */
+const SYNTHESIS_WATCHDOG_MAX_EXTENSIONS = 3;
 
 function compactTextForSynthesis(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
@@ -876,13 +883,14 @@ export class AgentTeamOrchestrator {
     runId: string,
     rootTaskId: string,
     synthesisItemId: string,
+    extensionsUsed = 0,
   ): void {
     const existing = this.synthesisWatchdogTimers.get(runId);
     if (existing) clearTimeout(existing);
 
     const timer = setTimeout(() => {
       this.synthesisWatchdogTimers.delete(runId);
-      void this.runSynthesisWatchdog(runId, synthesisItemId, rootTaskId);
+      void this.runSynthesisWatchdog(runId, synthesisItemId, rootTaskId, extensionsUsed);
     }, SYNTHESIS_WATCHDOG_MS);
 
     this.synthesisWatchdogTimers.set(runId, timer);
@@ -893,6 +901,7 @@ export class AgentTeamOrchestrator {
     runId: string,
     synthesisItemId: string,
     rootTaskId: string,
+    extensionsUsed = 0,
   ): Promise<void> {
     try {
       const run = await this.runRepo.findById(runId);
@@ -902,10 +911,25 @@ export class AgentTeamOrchestrator {
       const synthesisItem = items.find((item) => item.id === synthesisItemId);
       if (synthesisItem && isTerminalItemStatus(synthesisItem.status)) return;
 
+      // The synthesis task exists and is still working: give it more time
+      // (bounded) instead of discarding a response that is about to land.
+      if (synthesisItem?.sourceTaskId && extensionsUsed < SYNTHESIS_WATCHDOG_MAX_EXTENSIONS) {
+        const synthesisTask = await this.deps.getTaskById(synthesisItem.sourceTaskId);
+        if (synthesisTask && !isTerminalTaskStatus(synthesisTask.status)) {
+          log.warn(
+            `Synthesis for team run ${runId} still executing after ${SYNTHESIS_WATCHDOG_MS}ms; extending (${extensionsUsed + 1}/${SYNTHESIS_WATCHDOG_MAX_EXTENSIONS})`,
+          );
+          this.scheduleSynthesisWatchdog(runId, rootTaskId, synthesisItemId, extensionsUsed + 1);
+          return;
+        }
+      }
+
       await this.itemRepo.update({
         id: synthesisItemId,
         status: "blocked",
-        resultSummary: "Synthesis timed out before producing a final response.",
+        resultSummary: synthesisItem?.sourceTaskId
+          ? "Synthesis timed out before producing a final response."
+          : "Synthesis task was never started; completing with the team outputs only.",
       });
       const refreshedItems = await this.itemRepo.listByRun(runId);
       const summary = `${this.buildRunSummary(refreshedItems)} Synthesis timed out; completing with available team outputs.`;
@@ -1016,8 +1040,30 @@ export class AgentTeamOrchestrator {
       return;
     }
 
+    const spawnSynthesisDirectly = async (): Promise<void> => {
+      const synthesisTask = await this.deps.createChildTask({
+        title: SYNTHESIS_ITEM_TITLE,
+        prompt: synthesisPrompt,
+        workspaceId: rootTask.workspaceId,
+        parentTaskId: rootTask.id,
+        agentType: "sub",
+        agentConfig,
+        depth,
+        assignedAgentRoleId: team.leadAgentRoleId,
+        workerRole: "synthesizer",
+      });
+      await this.itemRepo.update({
+        id: synthesisItem.id,
+        sourceTaskId: synthesisTask.id,
+        status: "in_progress",
+      });
+    };
+
     const existingGraph = await this.deps.findOrchestrationGraphByTeamRunId?.(run.id);
     if (!existingGraph?.run?.id || !this.deps.appendOrchestrationGraphNodes) {
+      // No graph run backs this team run; spawn the synthesis task directly
+      // rather than leaving the item waiting on a node that will never exist.
+      await spawnSynthesisDirectly();
       return;
     }
     const predecessorNodes = (existingGraph?.nodes || []).filter(
@@ -1048,13 +1094,31 @@ export class AgentTeamOrchestrator {
       })),
     });
     const synthesisNode = appended?.nodes.find((node: Any) => node.teamItemId === synthesisItem.id);
+    if (!synthesisNode && appended?.run?.status === "cancelled") {
+      await this.itemRepo.update({
+        id: synthesisItem.id,
+        status: "blocked",
+        resultSummary: "Synthesis skipped: the orchestration run was cancelled.",
+      });
+      return;
+    }
+    if (!synthesisNode) {
+      // The engine refused the append (for example a run it had already
+      // closed). The lanes are done and their thoughts are collected, so the
+      // synthesis still has everything it needs: run it as a plain child task.
+      log.warn(
+        `Synthesis node for team run ${run.id} was not appended to graph run ${existingGraph.run.id}; spawning synthesis task directly`,
+      );
+      await spawnSynthesisDirectly();
+      return;
+    }
     await this.itemRepo.update({
       id: synthesisItem.id,
-      sourceTaskId: synthesisNode?.taskId,
+      sourceTaskId: synthesisNode.taskId,
       status:
-        synthesisNode?.status === "completed"
+        synthesisNode.status === "completed"
           ? "done"
-          : synthesisNode?.status === "failed"
+          : synthesisNode.status === "failed"
             ? "failed"
             : "in_progress",
     });

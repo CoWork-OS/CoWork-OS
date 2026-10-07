@@ -310,10 +310,10 @@ export class OrchestrationGraphEngine extends EventEmitter {
       nodes,
       edges,
     });
-    if (updated) {
-      await this.tickRun(updated.run.id);
-    }
-    return updated;
+    if (!updated) return updated;
+    // Return the post-dispatch snapshot: callers (the team orchestrator's
+    // synthesis step) read the appended node's taskId and status from it.
+    return (await this.tickRun(updated.run.id)) ?? updated;
   }
 
   async resumeRunningRuns(): Promise<void> {

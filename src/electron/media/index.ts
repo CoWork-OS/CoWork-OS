@@ -4,3 +4,8 @@ export {
   registerMediaProtocol,
   registerMediaScheme,
 } from "./media-protocol";
+export {
+  createWebPreviewUrl,
+  registerWebPreviewProtocol,
+  registerWebPreviewScheme,
+} from "./web-preview-protocol";

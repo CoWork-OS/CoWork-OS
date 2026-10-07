@@ -110,7 +110,7 @@ import {
   type PptxPreviewRenderMode,
 } from "../utils/PptxPreviewService";
 import { extractPdfReviewData } from "../utils/pdf-review";
-import { createLocalPreviewFileUrl, createMediaPlaybackUrl } from "../media";
+import { createLocalPreviewFileUrl, createMediaPlaybackUrl, createWebPreviewUrl } from "../media";
 import {
   buildDelimitedSpreadsheetPreview,
   buildSpreadsheetPreviewFromFile,
@@ -343,7 +343,7 @@ import type { MailboxCommitmentState, MailboxSendOutcomeResolution } from "../..
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
 import { approvalPromptsDisabled } from "../agent/approval-policy";
-import { generateTaskTitle } from "../agent/task-title-generator";
+import { generateAndApplyTaskTitle } from "../agent/task-title-generator";
 import { RuntimeVisibilityService } from "../agent/RuntimeVisibilityService";
 import {
   LLMProviderFactory,
@@ -1594,7 +1594,9 @@ export async function setupIpcHandlers(
     getRoutineService?: () => RoutineService | null;
     getPulseService?: () => import("../telemetry/pulse-service").PulseService | null;
     /** The app's DailyBriefingService; created after the IPC handlers. */
-    getDailyBriefingService?: () => import("../briefing/DailyBriefingService").DailyBriefingService | null;
+    getDailyBriefingService?: () =>
+      | import("../briefing/DailyBriefingService").DailyBriefingService
+      | null;
     /** The app's one EverydayAgentService (shared with the control plane and browser host). */
     everydayAgentService?: EverydayAgentService;
   },
@@ -1741,28 +1743,13 @@ export async function setupIpcHandlers(
     prompt: string,
     agentConfig?: AgentConfig,
   ): void => {
-    void (async () => {
-      try {
-        const generatedTitle = await generateTaskTitle(prompt, agentConfig);
-        if (!generatedTitle || generatedTitle === task.title) return;
-
-        // A user rename wins over the asynchronous metadata helper. Compare
-        // against the title that was committed with the task before applying
-        // the generated name.
-        const currentTask = await taskRepo.findById(task.id);
-        if (!currentTask || currentTask.title !== task.title) return;
-
-        await taskRepo.update(currentTask.id, { title: generatedTitle });
-        const updatedTask = await taskRepo.findById(currentTask.id);
-        if (updatedTask?.title === generatedTitle) {
-          agentDaemon.emitTaskTitleUpdated(updatedTask.id, updatedTask.title);
-        }
-      } catch (error) {
-        // Title generation is auxiliary metadata. Provider failures and timeouts
-        // must never interrupt the primary task or surface as task errors.
-        logger.debug("[TASK_CREATE] Session title generation unavailable:", error);
-      }
-    })();
+    void generateAndApplyTaskTitle(
+      task,
+      prompt,
+      taskRepo,
+      (taskId, title) => agentDaemon.emitTaskTitleUpdated(taskId, title),
+      agentConfig,
+    );
   };
 
   const principalForEvent = (event: IpcMainInvokeEvent): string =>
@@ -2911,6 +2898,7 @@ export async function setupIpcHandlers(
         let documentPreview: DocumentPreview | undefined;
         let webPreview: WebPagePreview | undefined;
         let playbackUrl: string | undefined;
+        let webPreviewUrl: string | undefined;
         let mimeType: string | undefined;
 
         switch (fileType) {
@@ -3065,6 +3053,10 @@ export async function setupIpcHandlers(
           case "html": {
             webPreview = await buildWebPagePreviewFromPath(fileReadPath, workspacePath);
             htmlContent = webPreview.htmlContent;
+            // Served from cowork-preview:// so the page's own scripts can run.
+            if (webPreview.canPreview && htmlContent) {
+              webPreviewUrl = createWebPreviewUrl(htmlContent);
+            }
             content = null; // HTML content is in htmlContent
             break;
           }
@@ -3110,6 +3102,7 @@ export async function setupIpcHandlers(
             spreadsheetPreview,
             documentPreview,
             webPreview,
+            webPreviewUrl,
             playbackUrl,
             mimeType,
           },
@@ -13728,88 +13721,82 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
     },
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.KIT_OPEN_FILE,
-    async (_event, rawArgs: unknown) => {
-      checkRateLimit(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
-      const args = validateInput(KitOpenFileRequestSchema, rawArgs, "kit open file");
-      const workspacePath = await getWorkspacePath(args.workspaceId);
-      const kitWorkspace = await workspaceRepo.findById(args.workspaceId);
+  ipcMain.handle(IPC_CHANNELS.KIT_OPEN_FILE, async (_event, rawArgs: unknown) => {
+    checkRateLimit(IPC_CHANNELS.KIT_OPEN_FILE, RATE_LIMIT_CONFIGS.limited);
+    const args = validateInput(KitOpenFileRequestSchema, rawArgs, "kit open file");
+    const workspacePath = await getWorkspacePath(args.workspaceId);
+    const kitWorkspace = await workspaceRepo.findById(args.workspaceId);
 
-      // Markdown under .cowork/ only, never a protected segment (.cowork/policy, .git),
-      // and symlinks may not escape .cowork. Only known kit files are seeded.
-      const { absPath, fileName, seedable } = resolveKitOpenPath(workspacePath, args.relPath);
-      const relPath = path.relative(workspacePath, absPath).split(path.sep).join("/");
+    // Markdown under .cowork/ only, never a protected segment (.cowork/policy, .git),
+    // and symlinks may not escape .cowork. Only known kit files are seeded.
+    const { absPath, fileName, seedable } = resolveKitOpenPath(workspacePath, args.relPath);
+    const relPath = path.relative(workspacePath, absPath).split(path.sep).join("/");
 
-      if (!fsSync.existsSync(absPath)) {
-        if (!seedable) throw new Error("Kit file not found");
-        // Seeding writes a file: it must stay in the workspace and pass the workspace's
-        // effective access profile (a read-only profile cannot seed kit files).
-        if (!kitWorkspace) throw new Error("Workspace not found");
-        const pathGuard = createBackgroundKitPathGuard(
-          withEffectiveAccessProfile(kitWorkspace),
-          "workspace kit file",
-        );
-        pathGuard(absPath, "write");
-        await fs.mkdir(path.dirname(absPath), { recursive: true });
-        const stamp = getLocalDateStamp(new Date());
-        let defaultContent = withKitFrontmatter(
+    if (!fsSync.existsSync(absPath)) {
+      if (!seedable) throw new Error("Kit file not found");
+      // Seeding writes a file: it must stay in the workspace and pass the workspace's
+      // effective access profile (a read-only profile cannot seed kit files).
+      if (!kitWorkspace) throw new Error("Workspace not found");
+      const pathGuard = createBackgroundKitPathGuard(
+        withEffectiveAccessProfile(kitWorkspace),
+        "workspace kit file",
+      );
+      pathGuard(absPath, "write");
+      await fs.mkdir(path.dirname(absPath), { recursive: true });
+      const stamp = getLocalDateStamp(new Date());
+      let defaultContent = withKitFrontmatter(
+        relPath,
+        `# ${fileName.replace(".md", "")}\n\n`,
+        stamp,
+      );
+
+      if (fileName === "DESIGN.md") {
+        defaultContent = buildDefaultDesignSystemMarkdown();
+      }
+
+      if (fileName === "USER.md") {
+        defaultContent = withKitFrontmatter(
           relPath,
-          `# ${fileName.replace(".md", "")}\n\n`,
+          `# USER\n\ntimezone: \ncommunication_style: direct, concise\ndefault_language: English\nprefers: actionable outputs, ready-to-use snippets\navoid: vague advice, unnecessary repetition\n`,
           stamp,
-        );
-
-        if (fileName === "DESIGN.md") {
-          defaultContent = buildDefaultDesignSystemMarkdown();
-        }
-
-        if (fileName === "USER.md") {
-          defaultContent = withKitFrontmatter(
-            relPath,
-            `# USER\n\ntimezone: \ncommunication_style: direct, concise\ndefault_language: English\nprefers: actionable outputs, ready-to-use snippets\navoid: vague advice, unnecessary repetition\n`,
-            stamp,
-          );
-        }
-
-        writeKitFileWithSnapshot(
-          absPath,
-          defaultContent,
-          "system",
-          "seed missing kit file",
-          pathGuard,
         );
       }
 
-      await shell.openPath(absPath);
-      return true;
-    },
-  );
+      writeKitFileWithSnapshot(
+        absPath,
+        defaultContent,
+        "system",
+        "seed missing kit file",
+        pathGuard,
+      );
+    }
+
+    await shell.openPath(absPath);
+    return true;
+  });
 
   ipcMain.handle(IPC_CHANNELS.KIT_RESET_ADAPTIVE_STYLE, () => {
     checkRateLimit(IPC_CHANNELS.KIT_RESET_ADAPTIVE_STYLE, RATE_LIMIT_CONFIGS.limited);
     AdaptiveStyleEngine.reset();
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK,
-    async (_event, rawPayload: unknown) => {
-      checkRateLimit(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
-      const { taskId, decision, reason, note, messageId } = validateInput(
-        MessageFeedbackRequestSchema,
-        rawPayload,
-        "message feedback",
-      );
-      if (!(await agentDaemon.getTaskById(taskId))) {
-        throw new Error("Task not found");
-      }
-      const feedback = [reason, note].filter(Boolean).join(": ") || undefined;
-      agentDaemon.logEvent(taskId, "user_feedback", {
-        decision,
-        reason: feedback,
-        messageId,
-      });
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, async (_event, rawPayload: unknown) => {
+    checkRateLimit(IPC_CHANNELS.KIT_SUBMIT_MESSAGE_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
+    const { taskId, decision, reason, note, messageId } = validateInput(
+      MessageFeedbackRequestSchema,
+      rawPayload,
+      "message feedback",
+    );
+    if (!(await agentDaemon.getTaskById(taskId))) {
+      throw new Error("Task not found");
+    }
+    const feedback = [reason, note].filter(Boolean).join(": ") || undefined;
+    agentDaemon.logEvent(taskId, "user_feedback", {
+      decision,
+      reason: feedback,
+      messageId,
+    });
+  });
 }
 
 /**
@@ -13846,21 +13833,18 @@ function setupMemoryHandlers(
   });
 
   // Save memory settings for a workspace
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_SAVE_SETTINGS,
-    async (_, rawData: unknown) => {
-      checkRateLimit(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
-      try {
-        const data = validateInput(MemorySaveSettingsRequestSchema, rawData, "memory settings");
-        const settings: Partial<MemorySettings> = data.settings;
-        await MemoryService.updateSettings(data.workspaceId, settings);
-        return { success: true };
-      } catch (error) {
-        logger.error("[Memory] Failed to save settings:", error);
-        throw error;
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, async (_, rawData: unknown) => {
+    checkRateLimit(IPC_CHANNELS.MEMORY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+    try {
+      const data = validateInput(MemorySaveSettingsRequestSchema, rawData, "memory settings");
+      const settings: Partial<MemorySettings> = data.settings;
+      await MemoryService.updateSettings(data.workspaceId, settings);
+      return { success: true };
+    } catch (error) {
+      logger.error("[Memory] Failed to save settings:", error);
+      throw error;
+    }
+  });
 
   // Get global memory feature toggles
   ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_GET_SETTINGS, async () => {
@@ -13951,43 +13935,29 @@ function setupMemoryHandlers(
     }
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_WRITE_APPROVALS_APPROVE,
-    async (_event, rawData: unknown) => {
-      checkRateLimit(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_APPROVE, RATE_LIMIT_CONFIGS.limited);
-      // workspaceId is required so the gate verifies the pending write belongs to it.
-      const data = validateInput(
-        MemoryWriteApproveRequestSchema,
-        rawData,
-        "memory write approval",
-      );
-      const id = data.id.trim();
-      if (!id) throw new Error("Pending memory write id is required.");
-      return MemoryWriteGate.applyPending(id, {
-        workspaceId: data.workspaceId,
-        reviewedBy: "user",
-      });
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_APPROVE, async (_event, rawData: unknown) => {
+    checkRateLimit(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_APPROVE, RATE_LIMIT_CONFIGS.limited);
+    // workspaceId is required so the gate verifies the pending write belongs to it.
+    const data = validateInput(MemoryWriteApproveRequestSchema, rawData, "memory write approval");
+    const id = data.id.trim();
+    if (!id) throw new Error("Pending memory write id is required.");
+    return MemoryWriteGate.applyPending(id, {
+      workspaceId: data.workspaceId,
+      reviewedBy: "user",
+    });
+  });
 
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_WRITE_APPROVALS_REJECT,
-    async (_event, rawData: unknown) => {
-      checkRateLimit(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_REJECT, RATE_LIMIT_CONFIGS.limited);
-      const data = validateInput(
-        MemoryWriteRejectRequestSchema,
-        rawData,
-        "memory write rejection",
-      );
-      const id = data.id.trim();
-      if (!id) throw new Error("Pending memory write id is required.");
-      return MemoryWriteGate.rejectForDisplay(id, {
-        workspaceId: data.workspaceId,
-        reviewedBy: "user",
-        resolution: data.reason?.trim() || undefined,
-      });
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_REJECT, async (_event, rawData: unknown) => {
+    checkRateLimit(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_REJECT, RATE_LIMIT_CONFIGS.limited);
+    const data = validateInput(MemoryWriteRejectRequestSchema, rawData, "memory write rejection");
+    const id = data.id.trim();
+    if (!id) throw new Error("Pending memory write id is required.");
+    return MemoryWriteGate.rejectForDisplay(id, {
+      workspaceId: data.workspaceId,
+      reviewedBy: "user",
+      resolution: data.reason?.trim() || undefined,
+    });
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_WRITE_APPROVALS_COUNT,
@@ -14076,36 +14046,30 @@ function setupMemoryHandlers(
   });
 
   // Search memories
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_SEARCH,
-    async (_, rawData: unknown) => {
-      try {
-        const data = validateInput(MemorySearchRequestSchema, rawData, "memory search");
-        return await MemoryService.searchAsync(data.workspaceId, data.query, data.limit);
-      } catch (error) {
-        logger.error("[Memory] Failed to search:", error);
-        return [];
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_SEARCH, async (_, rawData: unknown) => {
+    try {
+      const data = validateInput(MemorySearchRequestSchema, rawData, "memory search");
+      return await MemoryService.searchAsync(data.workspaceId, data.query, data.limit);
+    } catch (error) {
+      logger.error("[Memory] Failed to search:", error);
+      return [];
+    }
+  });
 
   // Get timeline context (Layer 2)
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_GET_TIMELINE,
-    async (_, rawData: unknown) => {
-      try {
-        const data = validateInput(MemoryTimelineRequestSchema, rawData, "memory timeline");
-        // The timeline is drawn from the anchor's workspace, so the anchor must belong
-        // to the workspace the caller named.
-        const [anchor] = await MemoryService.getFullDetails([data.memoryId]);
-        if (!anchor || anchor.workspaceId !== data.workspaceId) return [];
-        return await MemoryService.getTimelineContext(data.memoryId, data.windowSize);
-      } catch (error) {
-        logger.error("[Memory] Failed to get timeline:", error);
-        return [];
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_GET_TIMELINE, async (_, rawData: unknown) => {
+    try {
+      const data = validateInput(MemoryTimelineRequestSchema, rawData, "memory timeline");
+      // The timeline is drawn from the anchor's workspace, so the anchor must belong
+      // to the workspace the caller named.
+      const [anchor] = await MemoryService.getFullDetails([data.memoryId]);
+      if (!anchor || anchor.workspaceId !== data.workspaceId) return [];
+      return await MemoryService.getTimelineContext(data.memoryId, data.windowSize);
+    } catch (error) {
+      logger.error("[Memory] Failed to get timeline:", error);
+      return [];
+    }
+  });
 
   // Get full details (Layer 3)
   ipcMain.handle(IPC_CHANNELS.MEMORY_GET_DETAILS, async (_, rawData: unknown) => {
@@ -14120,39 +14084,33 @@ function setupMemoryHandlers(
     }
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_OBSERVATIONS_SEARCH,
-    async (_, rawData: unknown) => {
-      try {
-        const data: MemoryObservationSearchQuery = validateInput(
-          MemoryObservationSearchRequestSchema,
-          rawData,
-          "memory observation search",
-        );
-        return await MemoryObservationService.search(data);
-      } catch (error) {
-        logger.error("[MemoryObservations] Failed to search:", error);
-        return [];
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_OBSERVATIONS_SEARCH, async (_, rawData: unknown) => {
+    try {
+      const data: MemoryObservationSearchQuery = validateInput(
+        MemoryObservationSearchRequestSchema,
+        rawData,
+        "memory observation search",
+      );
+      return await MemoryObservationService.search(data);
+    } catch (error) {
+      logger.error("[MemoryObservations] Failed to search:", error);
+      return [];
+    }
+  });
 
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_OBSERVATIONS_TIMELINE,
-    async (_, rawData: unknown) => {
-      try {
-        const data = validateInput(
-          MemoryObservationTimelineRequestSchema,
-          rawData,
-          "memory observation timeline",
-        );
-        return await MemoryObservationService.timeline(data);
-      } catch (error) {
-        logger.error("[MemoryObservations] Failed to load timeline:", error);
-        return [];
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_OBSERVATIONS_TIMELINE, async (_, rawData: unknown) => {
+    try {
+      const data = validateInput(
+        MemoryObservationTimelineRequestSchema,
+        rawData,
+        "memory observation timeline",
+      );
+      return await MemoryObservationService.timeline(data);
+    } catch (error) {
+      logger.error("[MemoryObservations] Failed to load timeline:", error);
+      return [];
+    }
+  });
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_OBSERVATIONS_DETAILS, async (_, data: unknown) => {
     try {
@@ -14262,18 +14220,15 @@ function setupMemoryHandlers(
   });
 
   // Get recent memories
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_GET_RECENT,
-    async (_, rawData: unknown) => {
-      try {
-        const data = validateInput(MemoryRecentRequestSchema, rawData, "recent memories");
-        return await MemoryService.getRecent(data.workspaceId, data.limit);
-      } catch (error) {
-        logger.error("[Memory] Failed to get recent:", error);
-        return [];
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_GET_RECENT, async (_, rawData: unknown) => {
+    try {
+      const data = validateInput(MemoryRecentRequestSchema, rawData, "recent memories");
+      return await MemoryService.getRecent(data.workspaceId, data.limit);
+    } catch (error) {
+      logger.error("[Memory] Failed to get recent:", error);
+      return [];
+    }
+  });
 
   // Get memory statistics
   ipcMain.handle(IPC_CHANNELS.MEMORY_GET_STATS, async (_, workspaceId: string) => {
@@ -14388,49 +14343,43 @@ function setupMemoryHandlers(
     }
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_RELATIONSHIP_LIST,
-    async (_, rawData?: unknown) => {
-      try {
-        const data = validateInput(
-          RelationshipListRequestSchema,
-          rawData,
-          "relationship memory list",
-        );
-        return await RelationshipMemoryService.listItems({
-          layer: data?.layer,
-          includeDone: data?.includeDone,
-          limit: data?.limit,
-        });
-      } catch (error) {
-        logger.error("[Memory] Failed to list relationship memory:", error);
-        return [];
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_RELATIONSHIP_LIST, async (_, rawData?: unknown) => {
+    try {
+      const data = validateInput(
+        RelationshipListRequestSchema,
+        rawData,
+        "relationship memory list",
+      );
+      return await RelationshipMemoryService.listItems({
+        layer: data?.layer,
+        includeDone: data?.includeDone,
+        limit: data?.limit,
+      });
+    } catch (error) {
+      logger.error("[Memory] Failed to list relationship memory:", error);
+      return [];
+    }
+  });
 
-  ipcMain.handle(
-    IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE,
-    async (_, rawData: unknown) => {
-      checkRateLimit(IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE, RATE_LIMIT_CONFIGS.limited);
-      try {
-        const data = validateInput(
-          RelationshipUpdateRequestSchema,
-          rawData,
-          "relationship memory update",
-        );
-        return await RelationshipMemoryService.updateItem(data.id, {
-          text: data.text,
-          confidence: data.confidence,
-          status: data.status,
-          dueAt: data.dueAt,
-        });
-      } catch (error) {
-        logger.error("[Memory] Failed to update relationship memory:", error);
-        throw error;
-      }
-    },
-  );
+  ipcMain.handle(IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE, async (_, rawData: unknown) => {
+    checkRateLimit(IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE, RATE_LIMIT_CONFIGS.limited);
+    try {
+      const data = validateInput(
+        RelationshipUpdateRequestSchema,
+        rawData,
+        "relationship memory update",
+      );
+      return await RelationshipMemoryService.updateItem(data.id, {
+        text: data.text,
+        confidence: data.confidence,
+        status: data.status,
+        dueAt: data.dueAt,
+      });
+    } catch (error) {
+      logger.error("[Memory] Failed to update relationship memory:", error);
+      throw error;
+    }
+  });
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_RELATIONSHIP_DELETE, async (_, id: string) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_RELATIONSHIP_DELETE, RATE_LIMIT_CONFIGS.limited);

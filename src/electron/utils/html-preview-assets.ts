@@ -11,7 +11,16 @@ type InlineHtmlPreviewAssetsOptions = {
   readTextFile?: (filePath: string) => Promise<string>;
   statFile?: (filePath: string) => Promise<{ size: number }>;
   realpathFile?: (filePath: string) => Promise<string>;
+  authorizeReadPath?: (filePath: string) => Promise<string>;
 };
+
+/** Authorization failures must not become optional-asset fallbacks. */
+export class HtmlPreviewAccessError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Preview asset access denied", { cause });
+    this.name = "HtmlPreviewAccessError";
+  }
+}
 
 const STYLE_LINK_RE = /<link\b[^>]*>/gi;
 const SCRIPT_SRC_RE = /<script\b[^>]*\bsrc\s*=\s*(["'])([^"']+)\1[^>]*>\s*<\/script>/gi;
@@ -67,6 +76,7 @@ async function readInlineableAsset(
     readTextFile: (filePath: string) => Promise<string>;
     statFile: (filePath: string) => Promise<{ size: number }>;
     realpathFile: (filePath: string) => Promise<string>;
+    authorizeReadPath?: (filePath: string) => Promise<string>;
   },
 ): Promise<string | null> {
   let readablePath = assetPath;
@@ -78,6 +88,15 @@ async function readInlineableAsset(
     const relative = path.relative(realWorkspaceRoot, realAssetPath);
     if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
     readablePath = realAssetPath;
+  }
+  if (state.authorizeReadPath) {
+    try {
+      // Keep the route as well as the target: a symlinked project directory
+      // can carry an ACL even when its canonical target is elsewhere.
+      readablePath = await state.authorizeReadPath(assetPath);
+    } catch (cause) {
+      throw new HtmlPreviewAccessError(cause);
+    }
   }
   const stat = await state.statFile(readablePath);
   if (stat.size > MAX_INLINE_ASSET_BYTES) return null;
@@ -94,9 +113,17 @@ export async function inlineLocalHtmlPreviewAssets({
   readTextFile = (filePath) => fs.readFile(filePath, "utf-8"),
   statFile = (filePath) => fs.stat(filePath),
   realpathFile = (filePath) => fs.realpath(filePath),
+  authorizeReadPath,
 }: InlineHtmlPreviewAssetsOptions): Promise<string> {
   const baseDir = path.dirname(htmlFilePath);
-  const state = { totalBytes: 0, workspaceRoot, readTextFile, statFile, realpathFile };
+  const state = {
+    totalBytes: 0,
+    workspaceRoot,
+    readTextFile,
+    statFile,
+    realpathFile,
+    authorizeReadPath,
+  };
   let output = htmlContent;
 
   const styleReplacements: Array<{ tag: string; replacement: string }> = [];
@@ -125,7 +152,8 @@ export async function inlineLocalHtmlPreviewAssets({
           `<style data-cowork-inline-asset="${escapeAttributeContent(attrs.href)}">\n` +
           `${escapeStyleContent(css)}\n</style>`,
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof HtmlPreviewAccessError) throw error;
       styleReplacements.push({ tag, replacement: tag });
     }
   }
@@ -155,7 +183,8 @@ export async function inlineLocalHtmlPreviewAssets({
           `<script data-cowork-inline-asset="${escapeAttributeContent(scriptUrl)}">\n` +
           `${escapeScriptContent(js)}\n</script>`,
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof HtmlPreviewAccessError) throw error;
       scriptReplacements.push({ tag, replacement: tag });
     }
   }

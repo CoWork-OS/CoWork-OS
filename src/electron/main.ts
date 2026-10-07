@@ -302,7 +302,12 @@ import {
   startReportingReader,
   stopDatabaseWorker,
 } from "./database/async/runtime";
-import { registerMediaProtocol, registerMediaScheme } from "./media";
+import {
+  registerMediaProtocol,
+  registerMediaScheme,
+  registerWebPreviewProtocol,
+  registerWebPreviewScheme,
+} from "./media";
 import { rememberApprovedImportFiles } from "./security/file-import-approvals";
 import { healMovedDesktopWorkspacePaths } from "./utils/workspace-path-healer";
 import {
@@ -1289,6 +1294,7 @@ app.commandLine.appendSwitch("ignore-gpu-blocklist");
 // Register canvas:// protocol scheme (must be called before app.ready)
 registerCanvasScheme();
 registerMediaScheme();
+registerWebPreviewScheme();
 registerLocationProbeScheme();
 registerTaskDeeplinkProtocol();
 
@@ -1788,6 +1794,7 @@ if (isMacSafeStorageMigrationWorker) {
                   "connect-src 'self' https:; " + // Allow API calls to HTTPS endpoints
                   "media-src 'self' data: blob: media: https:; " + // Allow inline video previews via blob/data URLs and the media:// protocol
                   "worker-src 'self' blob:; " + // Allow web workers from blob URLs
+                  "frame-src 'self' cowork-preview:; " + // HTML artifact previews run in their own origin with their own CSP (web-preview-protocol.ts)
                   "frame-ancestors 'none'; " + // Prevent embedding in iframes
                   "form-action 'self';", // Restrict form submissions
               ],
@@ -3114,13 +3121,14 @@ if (isMacSafeStorageMigrationWorker) {
             taskRepo.update(taskId, updates);
           },
           getTasksForAgent: (agentRoleId, workspaceId) => {
-            // Every non-terminal TaskStatus counts as assigned work.
+            // Every non-terminal TaskStatus counts as assigned work, except "paused": a paused
+            // task waits on the user, so the agent cannot advance it and every pulse would
+            // re-dispatch for it until the user returns (or forever, if they never do).
             const activeStatuses: TaskStatus[] = [
               "pending",
               "queued",
               "planning",
               "executing",
-              "paused",
               "blocked",
             ];
             const tasks = workspaceId
@@ -3628,6 +3636,7 @@ if (isMacSafeStorageMigrationWorker) {
       // Register canvas:// protocol handler (must be after app.ready)
       registerCanvasProtocol();
       registerMediaProtocol();
+      registerWebPreviewProtocol();
 
       logStartupLane("blocking_startup", { event: "complete" });
 

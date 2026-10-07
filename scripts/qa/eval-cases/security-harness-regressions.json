@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "bots-gateway-approval-requester-binding-20261006",
-    "taskId": "bots-gateway-approval-requester-binding-20261006"
+    "incident": "uncommitted-web-preview-access",
+    "taskId": "uncommitted-web-preview-access"
   },
   "categories": [
     {
@@ -394,6 +394,18 @@
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true,
         "executableTest": "src/electron/security/__tests__/browser-network-proxy.test.ts"
+      }
+    },
+    {
+      "id": "uncommitted-web-preview-access-confirmed-fix",
+      "prompt": "Regression guard for Authorize every web preview dependency with filesystem profile and project ACLs: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "uncommitted-web-preview-access",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/web-preview-tools.test.ts"
       }
     }
   ],

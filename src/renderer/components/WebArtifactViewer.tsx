@@ -162,7 +162,13 @@ export function WebArtifactViewer({
 
     const canUseCache = refreshKey !== null && refreshKey !== undefined;
     const cached = canUseCache ? webViewerDataCache.get(cacheKey) : undefined;
-    if (cached?.fileType === "html" && (cached.webPreview || cached.htmlContent)) {
+    // Token URLs can expire or be evicted independently of the content cache.
+    // Re-read on reopen to renew registration; identical HTML keeps its live URL.
+    if (
+      cached?.fileType === "html" &&
+      (cached.webPreview || cached.htmlContent) &&
+      (readOnlyPreview || !cached.webPreviewUrl)
+    ) {
       setFileData(cached);
       setLoading(false);
       return () => {
@@ -204,7 +210,7 @@ export function WebArtifactViewer({
     return () => {
       cancelled = true;
     };
-  }, [cacheKey, filePath, refreshKey, workspacePath]);
+  }, [cacheKey, filePath, refreshKey, workspacePath, readOnlyPreview]);
 
   useEffect(() => {
     if (!copyMessage) return;
@@ -326,7 +332,11 @@ export function WebArtifactViewer({
       <iframe
         className="web-artifact-frame"
         title={fileName}
-        srcDoc={htmlContent}
+        // Interactive previews load from cowork-preview://, which carries its own
+        // CSP; a srcdoc frame inherits the app's and cannot run inline scripts.
+        {...(!readOnlyPreview && fileData?.webPreviewUrl
+          ? { src: fileData.webPreviewUrl }
+          : { srcDoc: htmlContent })}
         sandbox={readOnlyPreview ? "" : "allow-scripts allow-forms allow-pointer-lock"}
       />
     );

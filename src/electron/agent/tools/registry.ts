@@ -164,6 +164,7 @@ import { ComputerUseTools } from "./computer-use-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { QATools } from "./qa-tools";
+import { WebPreviewTools } from "./web-preview-tools";
 import {
   CHRONICLE_PROMOTION_MIN_CONFIDENCE,
   ChronicleCaptureService,
@@ -630,6 +631,7 @@ export class ToolRegistry {
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
   private qaTools: QATools;
+  private webPreviewTools: WebPreviewTools;
   private citationTracker?: CitationTracker;
   private gatewayContext?: GatewayContextType;
   private _deepWorkMode = false;
@@ -720,6 +722,7 @@ export class ToolRegistry {
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
     this.qaTools = new QATools(workspace, daemon, taskId);
+    this.webPreviewTools = new WebPreviewTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make database-backed tools optional.
     if (db) {
       this.channelTools = new ChannelTools(db, daemon, taskId);
@@ -1180,6 +1183,7 @@ export class ToolRegistry {
     this.textTools.setWorkspace(workspace);
     this.browserTools.setWorkspace(workspace);
     this.qaTools.setWorkspace(workspace);
+    this.webPreviewTools.setWorkspace(workspace);
     this.shellTools.setWorkspace(workspace);
     this.imageTools.setWorkspace(workspace);
     this.videoTools.setWorkspace(workspace);
@@ -1541,6 +1545,11 @@ export class ToolRegistry {
 
     // Playwright QA tools (automated visual testing for web apps)
     allTools.push(...QATools.getToolDefinitions());
+
+    // Sandboxed, offline preview of workspace web pages (agent self-verification)
+    if (WebPreviewTools.isAvailable()) {
+      allTools.push(...WebPreviewTools.getToolDefinitions());
+    }
 
     // Always add mention tools (enables multi-agent collaboration)
     allTools.push(...MentionTools.getToolDefinitions());
@@ -2843,6 +2852,11 @@ export class ToolRegistry {
     registerPredicate(
       (name) => name.startsWith("qa_"),
       async ({ request }) => this.qaTools.execute(request.name, request.input),
+      serialSchedulerSpec,
+    );
+    registerPredicate(
+      (name) => name === "preview_web_page",
+      async ({ request }) => this.webPreviewTools.execute(request.name, request.input),
       serialSchedulerSpec,
     );
     register("x_action", async ({ request }) => this.xTools.executeAction(request.input));

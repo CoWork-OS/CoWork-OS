@@ -65,6 +65,8 @@ export function templateMascot(template: Pick<AgentTemplate, "id" | "category">)
 
 const VISIBLE_TEMPLATES = 6;
 const REFRESH_DEBOUNCE_MS = 1500;
+/** A steady stream of task events still refreshes the counts this often. */
+const REFRESH_MAX_WAIT_MS = 5000;
 
 function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
@@ -99,7 +101,9 @@ async function loadBotSummary(workspaceId: string, botId: string): Promise<BotSu
   const scope = { workspaceId, agentRoleId: botId };
   const [page, future, responsibilities] = await Promise.all([
     hasHostMethods("listBotWork")
-      ? api.listBotWork({ ...scope, view: "scheduled", limit: 20 }).catch(() => null)
+      ? // The page is ordered by last update, not next run, so read the largest page to find
+        // the soonest run among them.
+        api.listBotWork({ ...scope, view: "scheduled", limit: 100 }).catch(() => null)
       : null,
     hasHostMethods("getBotFutureControl") && typeof api.getBotFutureControl === "function"
       ? api.getBotFutureControl({ scope }).catch(() => null)
@@ -165,9 +169,22 @@ export function BotsHome({
   // Task activity changes what bots need and do; refresh the counts, debounced.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let firstPendingAt: number | null = null;
     const schedule = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => setSummaryToken((value) => value + 1), REFRESH_DEBOUNCE_MS);
+      const now = Date.now();
+      firstPendingAt ??= now;
+      // Without a ceiling, a running task's events would keep pushing the refresh back and
+      // its bot would never show as working.
+      const wait = Math.max(
+        0,
+        Math.min(REFRESH_DEBOUNCE_MS, firstPendingAt + REFRESH_MAX_WAIT_MS - now),
+      );
+      timer = setTimeout(() => {
+        timer = null;
+        firstPendingAt = null;
+        setSummaryToken((value) => value + 1);
+      }, wait);
     };
     const unsubscribe = window.electronAPI?.onTaskEvent?.(schedule);
     window.addEventListener("focus", schedule);
@@ -177,6 +194,11 @@ export function BotsHome({
       window.removeEventListener("focus", schedule);
     };
   }, []);
+
+  // Counts belong to one workspace; drop them as soon as it changes.
+  useEffect(() => {
+    setSummaries({});
+  }, [workspaceId]);
 
   useEffect(() => {
     if (!workspaceId || !bots || bots.length === 0) return;
@@ -263,7 +285,7 @@ export function BotsHome({
             <strong>{bot.displayName}</strong>
             {status ? (
               <span className={`bots-home-chip bots-home-chip-${status.tone}`}>{status.label}</span>
-            ) : (
+            ) : !workspaceId ? null : (
               <LoaderCircle
                 className="spinning bots-home-row-loading"
                 size={13}

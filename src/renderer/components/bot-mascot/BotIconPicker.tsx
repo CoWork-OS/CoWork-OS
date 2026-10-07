@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown } from "lucide-react";
 import { BOT_MASCOT_IDS, botMascotIcon, resolveBotMascot } from "../../../shared/bot-mascots";
 import { botIconLabel } from "../../utils/twin-icons";
@@ -44,12 +44,40 @@ export function BotIconPicker({
   className,
 }: BotIconPickerProps) {
   const selectedMascot = resolveBotMascot(value);
+  // One Tab stop for the group (the selected character); arrow keys move between tiles and
+  // Enter or Space picks one, as a radio group is expected to behave.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const tiles = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>(".bot-icon-picker-tile"),
+    );
+    const current = tiles.indexOf(document.activeElement as HTMLButtonElement);
+    if (current < 0) return;
+    const last = tiles.length - 1;
+    const next =
+      event.key === "ArrowRight" || event.key === "ArrowDown"
+        ? current === last
+          ? 0
+          : current + 1
+        : event.key === "ArrowLeft" || event.key === "ArrowUp"
+          ? current === 0
+            ? last
+            : current - 1
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? last
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    tiles[next]?.focus();
+  };
   return (
     <div
       className={["bot-icon-picker", className].filter(Boolean).join(" ")}
       role="radiogroup"
       aria-labelledby={labelledBy}
       aria-label={labelledBy ? undefined : "Character"}
+      onKeyDown={onKeyDown}
     >
       {BOT_MASCOT_IDS.map((id) => {
         const selected = selectedMascot === id;
@@ -62,6 +90,7 @@ export function BotIconPicker({
             aria-checked={selected}
             aria-label={label}
             title={label}
+            tabIndex={selected ? 0 : -1}
             className={`bot-icon-picker-tile${selected ? " selected" : ""}`}
             onClick={() => onChange(botMascotIcon(id))}
           >

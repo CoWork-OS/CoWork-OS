@@ -145,6 +145,9 @@ export function BotWorkDialog({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
+  // Bumped only by the user's own actions (controls, Refresh), not by background task events,
+  // so panels with forms in progress reload only when something they show really changed.
+  const [actionToken, setActionToken] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -161,7 +164,10 @@ export function BotWorkDialog({
     controlAvailable &&
     hasHostMethods("getBotFutureControl") &&
     typeof window.electronAPI.getBotFutureControl === "function";
-  const workChanged = useCallback(() => setRefresh((value) => value + 1), []);
+  const workChanged = useCallback(() => {
+    setRefresh((value) => value + 1);
+    setActionToken((value) => value + 1);
+  }, []);
   const controls = useMemo(
     () => new BotWorkControls(window.electronAPI, { workspaceId, agentRoleId: botId }, workChanged),
     [workspaceId, botId, workChanged],
@@ -190,11 +196,17 @@ export function BotWorkDialog({
     void window.electronAPI
       .listWorkspaces()
       .then(async (all: Workspace[]) => {
-        const candidates = all
-          .filter(
-            (workspace) => !isTempWorkspaceId(workspace.id) || workspace.id === initialWorkspaceId,
-          )
-          .slice(0, 12);
+        // The workspace the dialog opened from always stays a choice, even when it is a
+        // temporary one (not listed) or past the first dozen.
+        const opening: Pick<Workspace, "id" | "name"> = all.find(
+          (workspace) => workspace.id === initialWorkspaceId,
+        ) ?? { id: initialWorkspaceId, name: "This workspace" };
+        const candidates = [
+          opening,
+          ...all.filter(
+            (workspace) => workspace.id !== initialWorkspaceId && !isTempWorkspaceId(workspace.id),
+          ),
+        ].slice(0, 12);
         const probed = await Promise.all(
           candidates.map(async (workspace) => {
             try {
@@ -214,7 +226,8 @@ export function BotWorkDialog({
         if (disposed) return;
         setWorkspaces(probed);
         const current = probed.find((workspace) => workspace.id === initialWorkspaceId);
-        if (!current?.count) {
+        // Move only when the opening workspace is known to be empty, not when its probe failed.
+        if (current?.count === 0) {
           const busiest = [...probed].sort((a, b) => (b.count ?? 0) - (a.count ?? 0))[0];
           if (busiest?.count) setWorkspaceId(busiest.id);
         }
@@ -250,7 +263,14 @@ export function BotWorkDialog({
       loader.dispose();
       loaderRef.current = null;
     };
-  }, [workspaceId, botId, view, refresh]);
+  }, [workspaceId, botId, view]);
+
+  // Task activity refreshes the list in place: no blanking, and loaded pages and opened
+  // results stay put.
+  useEffect(() => {
+    if (refresh === 0) return;
+    void loaderRef.current?.refresh();
+  }, [refresh]);
 
   useEffect(() => {
     setCounts(null);
@@ -405,6 +425,7 @@ export function BotWorkDialog({
             className="bot-work-icon"
             onClick={() => {
               setRefresh((value) => value + 1);
+              setActionToken((value) => value + 1);
               void controls.refreshFuture();
             }}
             aria-label="Refresh bot work"
@@ -576,7 +597,7 @@ export function BotWorkDialog({
               key={`${workspaceId}:${botId}`}
               workspaceId={workspaceId}
               botId={botId}
-              reloadToken={`${refresh}:${paused}:${control.future?.futureControlVersion ?? 0}`}
+              reloadToken={`${actionToken}:${paused}:${control.future?.futureControlVersion ?? 0}`}
             />
             <BotNotificationPanel
               key={`notifications:${workspaceId}:${botId}`}

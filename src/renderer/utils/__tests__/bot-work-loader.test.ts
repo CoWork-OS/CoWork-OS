@@ -69,4 +69,31 @@ describe("bot work load lifecycle", () => {
     await loader.load(true);
     expect(query.mock.calls[2][0].cursor).toBe("cursor");
   });
+  it("refreshes in place without blanking, keeping as many items as are loaded", async () => {
+    const item = (id: string) => ({ id }) as BotWorkPage["items"][number];
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce(page({ items: [item("a")], nextCursor: "c1" }))
+      .mockResolvedValueOnce(page({ items: [item("b")] }))
+      .mockResolvedValueOnce(page({ items: [item("a2"), item("b")] }))
+      .mockRejectedValueOnce(new Error("offline"));
+    const publish = vi.fn();
+    const loader = new BotWorkLoader(query, { ...scope, limit: 1 }, publish);
+    await loader.load();
+    await loader.load(true);
+    publish.mockClear();
+
+    await loader.refresh();
+    expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 2, cursor: undefined }));
+    // No intermediate empty/loading state is published, only the fresh page.
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0][0].page.items.map((i: { id: string }) => i.id)).toEqual([
+      "a2",
+      "b",
+    ]);
+
+    await loader.refresh();
+    // A failed background refresh keeps what is shown.
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
 });

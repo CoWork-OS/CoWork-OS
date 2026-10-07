@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AgentRoleData } from "../../electron/preload";
-import { normalizeBotProfileText } from "../utils/bot-profile";
+import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { botMascotIcon, resolveBotMascot } from "../../shared/bot-mascots";
 import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
 
@@ -25,6 +25,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,8 +43,10 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           icon: botMascotIcon(resolveBotMascot(loaded.icon)),
         });
       } catch (cause) {
-        if (!cancelled)
+        if (!cancelled) {
+          setLoadFailed(true);
           setError(cause instanceof Error ? cause.message : "Could not load this bot.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -54,7 +57,9 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
   }, [botId]);
 
   const save = async () => {
-    if (!role || !values.displayName.trim()) {
+    if (!role) return;
+    const displayName = normalizeBotDisplayName(values.displayName);
+    if (!displayName) {
       setError("Enter a name for this bot.");
       return;
     }
@@ -67,7 +72,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     try {
       const updated = await window.electronAPI.updateAgentRole({
         id: role.id,
-        displayName: normalizeBotProfileText(values.displayName),
+        displayName,
         description: normalizeBotProfileText(values.description),
         systemPrompt: normalizeBotProfileText(values.systemPrompt),
         icon: values.icon,
@@ -123,6 +128,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       submitLabel="Save"
       busyLabel="Saving…"
       loading={loading}
+      unavailable={loadFailed}
       busy={saving}
       error={error}
       onDelete={role && !role.isSystem ? () => void deleteBot() : undefined}

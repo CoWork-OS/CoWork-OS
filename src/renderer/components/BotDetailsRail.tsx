@@ -124,6 +124,7 @@ export function BotDetailsRail({
 }: BotDetailsRailProps) {
   const [role, setRole] = useState<AgentRoleData | null>(null);
   const [policy, setPolicy] = useState<BotNotificationPolicy | null>(null);
+  const [policyUnavailable, setPolicyUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -159,18 +160,23 @@ export function BotDetailsRail({
     setLoading(true);
     void Promise.all([
       window.electronAPI.getAgentRole(roleId),
-      window.electronAPI.getBotNotificationPolicy(roleId).catch(() => null),
+      window.electronAPI.getBotNotificationPolicy(roleId).catch(() => "failed" as const),
     ])
       .then(([loadedRole, loadedPolicy]) => {
         if (cancelled) return;
         setRole(loadedRole || null);
+        // A failed read must not pose as the defaults: that would show switches the user
+        // turned off as on, and let them be saved from a guess.
+        setPolicyUnavailable(loadedPolicy === "failed");
         setPolicy(
-          loadedPolicy || {
-            agentRoleId: roleId,
-            onFinish: true,
-            onInputRequired: true,
-            updatedAt: 0,
-          },
+          loadedPolicy === "failed"
+            ? null
+            : loadedPolicy || {
+                agentRoleId: roleId,
+                onFinish: true,
+                onInputRequired: true,
+                updatedAt: 0,
+              },
         );
         setError(null);
       })
@@ -407,7 +413,7 @@ export function BotDetailsRail({
             type="checkbox"
             role="switch"
             className="bot-details-switch"
-            checked={policy?.onFinish ?? true}
+            checked={policy?.onFinish ?? !policyUnavailable}
             disabled={savingPolicy || !policy}
             onChange={(event) => void updatePolicy({ onFinish: event.target.checked })}
           />
@@ -421,11 +427,16 @@ export function BotDetailsRail({
             type="checkbox"
             role="switch"
             className="bot-details-switch"
-            checked={policy?.onInputRequired ?? true}
+            checked={policy?.onInputRequired ?? !policyUnavailable}
             disabled={savingPolicy || !policy}
             onChange={(event) => void updatePolicy({ onInputRequired: event.target.checked })}
           />
         </label>
+        {policyUnavailable ? (
+          <p className="bot-details-hint" role="status">
+            Notification settings could not be loaded.
+          </p>
+        ) : null}
       </section>
 
       {error ? (

@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { AlertCircle, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import type { Task } from "../../shared/types";
-import { normalizeBotProfileText } from "../utils/bot-profile";
+import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
 import {
@@ -337,10 +337,7 @@ export function getBotRosterSummary(
       return {
         latestTask,
         preview: getBotPreview(messagedTask),
-        timestamp: Math.max(
-          getBotTimestamp(bot, messagedTask),
-          projection?.lastActivityAt || 0,
-        ),
+        timestamp: Math.max(getBotTimestamp(bot, messagedTask), projection?.lastActivityAt || 0),
       };
     }
   }
@@ -529,7 +526,7 @@ export function CreateBotDialog({
   const [error, setError] = useState<string | null>(null);
 
   const create = async () => {
-    const cleanName = flattenTaskText(values.displayName);
+    const cleanName = normalizeBotDisplayName(values.displayName);
     if (!cleanName) {
       setError("Enter a name for this bot.");
       return;
@@ -544,15 +541,30 @@ export function CreateBotDialog({
     setIsCreating(true);
     setError(null);
     try {
-      const created = await api.createAgentRole({
-        name: normalizeBotHandle(cleanName),
-        displayName: cleanName,
-        description: normalizeBotProfileText(values.description) || undefined,
-        systemPrompt: normalizeBotProfileText(values.systemPrompt) || undefined,
-        icon: values.icon,
-        color: DEFAULT_BOT_COLOR,
-        capabilities: ["code"],
-      });
+      const baseHandle = normalizeBotHandle(cleanName);
+      const createWithHandle = (name: string) =>
+        api.createAgentRole({
+          name,
+          displayName: cleanName,
+          description: normalizeBotProfileText(values.description) || undefined,
+          systemPrompt: normalizeBotProfileText(values.systemPrompt) || undefined,
+          icon: values.icon,
+          color: DEFAULT_BOT_COLOR,
+          capabilities: ["code"],
+        });
+      // The handle is internal and stays taken by deleted bots (deletion keeps the row), so
+      // a name used before, or one with no latin letters ("bot"), gets a numbered handle.
+      let created: BotRole | undefined;
+      for (let attempt = 0; !created; attempt += 1) {
+        try {
+          created = await createWithHandle(
+            attempt === 0 ? baseHandle : `${baseHandle}-${attempt + 1}`,
+          );
+        } catch (cause) {
+          const taken = cause instanceof Error && /already exists/i.test(cause.message);
+          if (!taken || attempt >= 49) throw cause;
+        }
+      }
       await onCreated(created);
       // Other bot surfaces (the roster, the Bots page) reload their list.
       window.dispatchEvent(new CustomEvent(BOT_PROFILE_UPDATED_EVENT, { detail: created }));

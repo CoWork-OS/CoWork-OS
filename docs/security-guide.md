@@ -14,7 +14,7 @@ CoWork OS is an AI-powered task automation tool that can execute actions on your
 All of these capabilities are governed by the active [access profile](access-profiles.md),
 consent rules, and hard guardrails, and are sandboxed where possible.
 
-CoWork OS can also expose **Chronicle**, an opt-in desktop recent-screen context feature. Chronicle keeps a short local passive screen buffer to resolve vague on-screen references, but it does not send those passive screenshots to external providers by itself. Chronicle is configured from **Settings > Memory Hub > Chronicle**, with pause/resume controls and explicit consent gating. See [Chronicle](chronicle.md).
+CoWork OS can also expose **Chronicle**, an opt-in desktop recent-screen context feature. Chronicle keeps a short local passive screen buffer to resolve vague on-screen references, but it does not send those passive screenshots to external providers by itself. Chronicle is configured from **Settings > Tools > Chronicle**, with pause/resume controls and explicit consent gating. See [Chronicle](chronicle.md).
 
 ---
 

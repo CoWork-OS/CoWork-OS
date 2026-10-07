@@ -156,7 +156,7 @@ Generated documents, spreadsheets, presentations, and web pages appear as artifa
 
 ### Optional: Set up Workspace Kit
 
-Workspace Kit is not required for your first task. To add durable workspace context later, open **Settings > Memory Hub** and initialize the kit for a workspace. It creates `.cowork/` context files, including project-specific guidance under `.cowork/projects/`. Review and maintain those files like other project instructions. Use `npm run kit:lint` in a development checkout to check freshness and missing or sensitive files. See [Workspace Memory Flow](workspace-memory-flow.md).
+Workspace Kit is not required for your first task. To add durable workspace context later, open **Settings > Memory > Settings > Advanced > Workspace kit** and initialize the kit for a workspace. It creates `.cowork/` context files, including project-specific guidance under `.cowork/projects/`. Review and maintain those files like other project instructions. Use `npm run kit:lint` in a development checkout to check freshness and missing or sensitive files. See [Workspace Memory Flow](workspace-memory-flow.md).
 
 ## Orientation: Where The New Product Surfaces Live
 
@@ -178,7 +178,7 @@ Once the app opens, the most important places to know are:
 - **Settings > Skills**: Skill Store imports plus optional external read-only skill directories
 - **Settings > Channels**: Slack multi-workspace setup, Telegram group routing, Discord guild allowlists, channel/chat/thread specialization, and enterprise channels such as Feishu/Lark and WeCom
 - **Settings → Tools → Computer use** (macOS): Accessibility + Screen Recording onboarding, built-in tool toggles, and context for [desktop automation](computer-use.md)
-- **Settings → Memory Hub → Chronicle**: primary Chronicle setup for consent-gated recent-screen context, pause/resume, capture scope, OCR status, and linked memory behavior. The dedicated `chronicle` tool category still lives in **Settings → Tools → Built-in tools**. See [Chronicle](chronicle.md).
+- **Settings → Tools → Chronicle**: primary Chronicle setup for consent-gated recent-screen context, pause/resume, capture scope, OCR status, and linked memory behavior. The dedicated `chronicle` tool category still lives in **Settings → Tools → Built-in tools**. See [Chronicle](chronicle.md).
 - **Spreadsheet artifacts**: when a task creates a spreadsheet, use the output card's **Open** action. Excel workbooks and CSV/TSV files open in the right sidebar; native Numbers, Google Sheets shortcut, ODS, and XLSB files use external-app/folder actions. Use fullscreen mode for editable spreadsheets with copy/save/zoom, row/column selection, attachments, voice input, and follow-up prompts. See [Spreadsheet Artifacts](spreadsheet-artifacts.md).
 - **Document artifacts**: when a task creates a Word-style document, the output card appears in the task feed. DOCX opens directly in the right-sidebar editor with Google Docs-style controls and save/copy actions; DOC, RTF, ODT, OTT, Pages, and related formats use best-effort preview or external-app/folder actions. Fullscreen mode keeps the follow-up composer and refreshes the preview after requested edits. See [Document Artifacts](document-artifacts.md).
 - **Presentation artifacts**: when a task creates a PowerPoint deck, the output card appears in the task feed. PPTX opens in the right-sidebar presentation viewer with thumbnails, slide navigation, zoom, speaker notes, and fast text-first loading while slide images render or load from cache. Fullscreen mode keeps the follow-up composer so you can request deck edits and see the preview refresh after the file is updated. See [Presentation Artifacts and PPTX Preview](pptx-generation-and-preview.md).
@@ -190,7 +190,7 @@ If you are just getting started, do not configure everything at once. Set up an 
 
 Use this if you want CoWork OS to understand vague on-screen references from the desktop app.
 
-1. Open **Settings > Memory Hub > Chronicle**.
+1. Open **Settings > Tools > Chronicle**.
 2. Turn on **Chronicle (Research Preview)** and accept the consent prompt.
 3. Grant **Screen Recording** for CoWork OS if macOS prompts for it.
 4. Optional but useful: grant **Accessibility** so Chronicle can attach better frontmost app/window metadata.

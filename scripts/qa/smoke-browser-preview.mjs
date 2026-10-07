@@ -1165,19 +1165,8 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await correctedRow.waitFor({ state: "detached" });
     assert(!(await page.evaluate(async (workspaceId) => window.electronAPI.listMemoryItems({workspaceId, statuses: ["active"], limit: 200}), memoryWorkspace)).items.some((item) => item.id === correctedId));
     await page.getByRole("tab", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Manage", exact: true }).click();
-    await seedMemoryApprovals(profile, memoryWorkspace, "browser-ui-approval");
-    const approvalsCard = page.locator(".settings-card").filter({ has: page.getByText("Pending Memory Writes", { exact: true }) });
-    await approvalsCard.getByRole("button", { name: "Refresh", exact: true }).click();
-    const approveRow = approvalsCard.locator(".memory-list-item").filter({ hasText: "Disposable browser-ui-approval approve memory" });
-    await approveRow.getByRole("button", { name: "Approve", exact: true }).click();
-    await approveRow.waitFor({ state: "detached" });
-    assert.equal((await page.evaluate(() => window.electronAPI.getMemoryWriteApproval("browser-ui-approval-approve"))).status, "applied");
-    const rejectRow = approvalsCard.locator(".memory-list-item").filter({ hasText: "Disposable browser-ui-approval reject memory" });
-    page.once("dialog", (dialog) => dialog.accept("Disposable UI rejection"));
-    await rejectRow.getByRole("button", { name: "Reject", exact: true }).click();
-    await rejectRow.waitFor({ state: "detached" });
-    assert.equal((await page.evaluate(() => window.electronAPI.getMemoryWriteApproval("browser-ui-approval-reject"))).status, "rejected");
+    // The workspace kit, inspector and awareness details live under the collapsed Advanced.
+    await page.locator("details.memory-settings-advanced > summary").click();
     await page.getByRole("button", { name: "Initialize", exact: true }).click();
     await page.waitForFunction(async (workspaceId) => (await window.electronAPI.getWorkspaceKitStatus(workspaceId)).hasKitDir, memoryWorkspace);
     await page.getByPlaceholder("New project id (e.g. website-redesign)").fill("disposable-kit-project");
@@ -1192,7 +1181,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       const kitWorkspacePath = kitDb.prepare("SELECT path FROM workspaces WHERE id = ?").get(memoryWorkspace).path;
       assert((await fs.readFile(path.join(kitWorkspacePath, ".cowork", "projects", "disposable-kit-project", "CONTEXT.md"), "utf8")).includes("## Goals"));
     } finally { kitDb.close(); }
-    const retention = page.locator(".settings-content label.settings-label").filter({ hasText: /^Retention Period$/ }).locator("..").locator("select");
+    const retention = page.locator("#memory-retention");
     const originalRetention = await retention.inputValue();
     const changedRetention = originalRetention === "30" ? "90" : "30";
     await retention.selectOption(changedRetention);
@@ -1231,14 +1220,14 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
         delete window.__memoryDelayedRead;
       });
     }
-    await page.getByRole("button", { name: "Start Import", exact: true }).click();
+    await page.getByRole("button", { name: "From another assistant", exact: true }).click();
     await page.getByPlaceholder("Paste the full exported memory response here").fill("- The disposable browser UI memory project uses green notebooks.");
     await page.getByRole("button", { name: "Add to Memory", exact: true }).click();
     await page.getByRole("heading", { name: "Import complete", exact: true }).waitFor();
     await page.getByRole("button", { name: "Close import popup", exact: true }).click();
     const persistedImport = await page.evaluate(async (workspaceId) => (await window.electronAPI.findImportedMemories({ workspaceId, limit: 50 })).find((memory) => memory.content.includes("green notebooks")), memoryWorkspace);
     assert(persistedImport, "The browser text import should persist in the selected workspace");
-    await page.getByRole("button", { name: "Rebuild Metadata", exact: true }).click();
+    await page.getByRole("button", { name: "Rebuild metadata (all workspaces)", exact: true }).click();
     await page.waitForFunction(async () => !(await window.electronAPI.getMemoryObservationBackfillStatus()).running);
     const importedDetail = await page.evaluate(async ({ workspaceId, memoryId }) => (await window.electronAPI.getMemoryObservationDetails({ workspaceId, ids: [memoryId] }))[0], { workspaceId: memoryWorkspace, memoryId: persistedImport.id });
     assert(importedDetail, "Imported memory metadata should be available for promotion");
@@ -1248,7 +1237,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.locator(".memory-inspector-results button").filter({ hasText: "green notebooks" }).first().click();
     await page.locator(".memory-observation-detail").getByRole("button", { name: "Promote", exact: true }).click();
     await page.getByRole("status").filter({ hasText: "Memory promoted to workspace knowledge." }).waitFor();
-    await page.getByRole("heading", { name: "Wake-Up Layers", exact: true }).waitFor();
+    await page.locator(".memory-layer-grid").waitFor({ state: "attached" });
     const memoryFilesDb = new (await import("better-sqlite3")).default(path.join(profile, "cowork-os.db"));
     try {
       const workspacePath = memoryFilesDb.prepare("SELECT path FROM workspaces WHERE id = ?").get(memoryWorkspace).path;
@@ -1258,13 +1247,13 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
 
 
     await page.locator("#memory-workspace").selectOption(awarenessWorkspaceId);
-    const privateMode = page.getByText("Private Mode", { exact: true }).locator("..").locator("..").locator('input[type="checkbox"]');
+    const privateMode = page.getByRole("switch", { name: "Awareness private mode", exact: true });
     const originalPrivateMode = await privateMode.isChecked();
     await privateMode.locator("..").click();
     await page.waitForFunction(async (desired) => (await window.electronAPI.getAwarenessConfig()).privateModeEnabled === desired, !originalPrivateMode);
     await privateMode.locator("..").click();
     await page.waitForFunction(async (desired) => (await window.electronAPI.getAwarenessConfig()).privateModeEnabled === desired, originalPrivateMode);
-    const beliefRow = page.locator(".settings-card").filter({ has: page.getByText("I prefer disposable awareness QA orange notebooks", { exact: true }) }).last();
+    const beliefRow = page.locator(".memory-settings-item").filter({ has: page.getByText("I prefer disposable awareness QA orange notebooks", { exact: true }) }).last();
     await beliefRow.getByRole("button", { name: "Confirm", exact: true }).click();
     await page.waitForFunction(async ({ workspaceId, beliefId }) => (await window.electronAPI.listAwarenessBeliefs(workspaceId)).find((belief) => belief.id === beliefId)?.promotionStatus === "confirmed", { workspaceId: awarenessWorkspaceId, beliefId: awarenessBeliefId });
     const awarenessDb = new (await import("better-sqlite3")).default(path.join(profile, "cowork-os.db"));

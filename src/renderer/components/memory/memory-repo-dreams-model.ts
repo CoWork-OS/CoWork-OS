@@ -1,6 +1,6 @@
 /**
  * Dreams over the memory folder as the Memory Hub shows them (docs/memory-repo-phase2-design.md
- * §7): the preload methods, and the text of the card's last-dream line, the cost notice and
+ * §7): the preload methods, and the text of the Dreaming row's hints and last-dream line and
  * the "Dream now" result. Pure functions, tested directly.
  */
 import type {
@@ -46,9 +46,22 @@ export function dreamSkipReason(reason: string | undefined): string {
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-/** The cost notice of the Dreaming subsection. */
-export function dreamCostNotice(dailyBudget: number): string {
-  return `Dreaming uses your model provider and costs tokens (up to ${dailyBudget.toLocaleString("en-US")} tokens/day). It runs about once a day and when you press Dream now.`;
+/** The hint of the Dreaming row: how often it runs, what it may cost and today's use. */
+export function dreamScheduleHint(
+  dailyBudget: number,
+  report: MemoryRepoDreamsReport | null,
+): string {
+  const used = report
+    ? `, ${report.tokensUsedToday.toLocaleString("en-US")} used in the last 24 hours`
+    : "";
+  return `About once a day with your model provider: up to ${dailyBudget.toLocaleString("en-US")} tokens/day${used}.`;
+}
+
+/** The second line of the Dreaming row: it depends on Background upkeep (Advanced). */
+export function dreamUpkeepHint(backgroundUpkeepOn: boolean): string {
+  return backgroundUpkeepOn
+    ? "Scheduled dreams and commitment closing pause while Background upkeep (Advanced) is off."
+    : "Paused: Background upkeep (Advanced) is off, so scheduled dreams and commitment closing don't run.";
 }
 
 /** What one dream did, after its time: applied and waiting counts, or why it did nothing. */
@@ -71,10 +84,6 @@ export function dreamLastLine(report: MemoryRepoDreamsReport | null): string {
   const last = report?.dreams[0];
   if (!last) return "No dream yet.";
   return `Last dream ${formatRelative(last.startedAt)}: ${dreamOutcomeText(last)}.`;
-}
-
-export function dreamTokensLine(report: MemoryRepoDreamsReport): string {
-  return `${report.tokensUsedToday.toLocaleString("en-US")} of ${report.dailyBudget.toLocaleString("en-US")} tokens used in the last 24 hours.`;
 }
 
 /** The message after "Dream now". */

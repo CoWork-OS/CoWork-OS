@@ -22,7 +22,7 @@ Do not use it as:
 
 ## Enable And Disable
 
-Open **Settings > Memory Hub** and toggle **Enable Durable Runtime Context**.
+Open **Settings > Memory > Settings > Advanced** and toggle **Session recovery**. It sets `durableContextEnabled` and `durableContextMode` together and nothing else; **Checkpoint capture** stays on while it is on.
 
 The setting is read at runtime by the durable service. An app restart should not be required.
 
@@ -200,14 +200,14 @@ Expected behavior:
 
 ## Implementation Landmarks
 
-| Area                                                           | File                                               |
-| -------------------------------------------------------------- | -------------------------------------------------- |
-| Durable storage, search, large payloads, summary DAG, clearing | `src/electron/memory/DurableContextService.ts`     |
-| Tool definition and active-task scope enforcement              | `src/electron/agent/tools/memory-tools.ts`         |
-| Tool registry dispatch                                         | `src/electron/agent/tools/registry.ts`             |
-| Runtime/executor history capture fallback                      | `src/electron/agent/executor.ts`                   |
-| Settings normalization                                         | `src/electron/settings/memory-features-manager.ts` |
-| Memory Hub toggle                                              | `src/renderer/components/MemoryHubSettings.tsx`    |
+| Area                                                           | File                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------ |
+| Durable storage, search, large payloads, summary DAG, clearing | `src/electron/memory/DurableContextService.ts`         |
+| Tool definition and active-task scope enforcement              | `src/electron/agent/tools/memory-tools.ts`             |
+| Tool registry dispatch                                         | `src/electron/agent/tools/registry.ts`                 |
+| Runtime/executor history capture fallback                      | `src/electron/agent/executor.ts`                       |
+| Settings normalization                                         | `src/electron/settings/memory-features-manager.ts`     |
+| Memory Hub toggle                                              | `src/renderer/components/memory/MemorySettingsTab.tsx` |
 
 ## Validation
 

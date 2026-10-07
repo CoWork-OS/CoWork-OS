@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MemoryRepoStatusReport } from "../../../../shared/memory-repo-types";
-import { dreamLastLine, dreamNowMessage } from "../memory-repo-dreams-model";
+import type { MemoryFeaturesSettings } from "../../../../shared/types";
+import { dreamLastLine, dreamNowMessage, dreamScheduleHint } from "../memory-repo-dreams-model";
 import {
   MemoryRepoSyncView,
   MemoryRepoTeamView,
@@ -16,9 +17,32 @@ import {
   compactHistoryConfirm,
   MemoryRepoCard,
   MemoryRepoDreamingView,
+  MemoryRepoLocation,
+  memoryRepoBadge,
   memoryRepoErrorMessage,
   memoryRepoStatusLine,
+  teamMemorySummary,
+  useMemoryRepoController,
 } from "../MemoryRepoCard";
+
+/** The memory folder section (and Advanced → Memory folder) around one controller. */
+function Folder(props: {
+  features: MemoryFeaturesSettings;
+  api?: unknown;
+  backgroundUpkeepOn?: boolean;
+  part?: "card" | "location";
+}) {
+  const repo = useMemoryRepoController({
+    features: props.features,
+    onFeaturesSaved: vi.fn(),
+    api: (props.api ?? vi.fn()) as never,
+  });
+  return props.part === "location" ? (
+    <MemoryRepoLocation repo={repo} />
+  ) : (
+    <MemoryRepoCard repo={repo} backgroundUpkeepOn={props.backgroundUpkeepOn ?? true} />
+  );
+}
 
 const ready: MemoryRepoStatusReport = {
   enabled: true,
@@ -34,28 +58,59 @@ const ready: MemoryRepoStatusReport = {
 };
 
 describe("Memory folder card", () => {
-  it("renders the switch, folder field, explanation and actions", () => {
+  it("renders one folder row: path, state, Open and the switch", () => {
     const api = vi.fn();
+    const features = {
+      contextPackInjectionEnabled: true,
+      heartbeatMaintenanceEnabled: true,
+      memoryRepoEnabled: true,
+      memoryRepoPath: "/Users/sam/Notes/Memory",
+    };
+    const html = renderToStaticMarkup(<Folder features={features} api={api} />);
+    const row = html.slice(
+      html.indexOf('data-testid="memory-repo-folder"'),
+      html.indexOf('data-testid="memory-repo-dreaming"'),
+    );
+    expect(row).toContain("Memory folder");
+    expect(row).toContain("<code>/Users/sam/Notes/Memory</code>");
+    expect(row).toContain("plain notes you can open and edit");
+    expect(row).toContain(">Open</button>");
+    expect(row).toMatch(/aria-label="Memory folder"[^>]*checked/);
+    // The location and Compact history moved to Advanced.
+    expect(html).not.toContain("Compact history");
+    expect(html).not.toContain('id="memory-repo-path"');
+    // Nothing is loaded during a static render.
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it("keeps the folder location and Compact history for Advanced", () => {
     const html = renderToStaticMarkup(
-      <MemoryRepoCard
+      <Folder
+        part="location"
         features={{
           contextPackInjectionEnabled: true,
           heartbeatMaintenanceEnabled: true,
           memoryRepoEnabled: true,
           memoryRepoPath: "/Users/sam/Notes/Memory",
         }}
-        onFeaturesSaved={vi.fn()}
-        api={api as never}
       />,
     );
-    expect(html).toContain("Memory folder");
-    expect(html).toContain("plain notes in a folder you can open and edit");
+    expect(html).toContain("Folder location");
     expect(html).toContain('value="/Users/sam/Notes/Memory"');
-    expect(html).toContain("Open memory folder");
-    expect(html).toContain("Compact history");
-    expect(html).toContain("checked");
-    // Nothing is loaded during a static render.
-    expect(api).not.toHaveBeenCalled();
+    expect(html).toMatch(/settings-button-danger[^>]*>Compact history/);
+  });
+
+  it("labels the folder state with a badge", () => {
+    expect(memoryRepoBadge(null).label).toBe("...");
+    expect(memoryRepoBadge({ ...ready, enabled: false })).toEqual({
+      tone: "neutral",
+      label: "Off",
+    });
+    expect(memoryRepoBadge(ready)).toEqual({ tone: "success", label: "Ready" });
+    expect(memoryRepoBadge({ ...ready, gitAvailable: false })).toEqual({
+      tone: "warning",
+      label: "Check",
+    });
   });
 
   it("describes each state of the folder", () => {
@@ -134,6 +189,7 @@ describe("Memory folder card: Dreaming", () => {
         report={report}
         ready
         canDreamNow
+        backgroundUpkeepOn
         disabled={false}
         dreaming={false}
         message={null}
@@ -143,16 +199,29 @@ describe("Memory folder card: Dreaming", () => {
       />,
     );
 
-  it("shows the switch, the cost notice, today's use, the last dream and Dream now", () => {
+  it("shows the switch, schedule, budget, today's use, the last dream and Dream now", () => {
     const html = view();
     expect(html).toContain('aria-label="Dreaming"');
     expect(html).toContain(
-      "Dreaming uses your model provider and costs tokens (up to 50,000 tokens/day). It runs about once a day and when you press Dream now.",
+      "About once a day with your model provider: up to 50,000 tokens/day, 3,200 used in the last 24 hours.",
+    );
+    expect(html).toContain(
+      "Scheduled dreams and commitment closing pause while Background upkeep (Advanced) is off.",
     );
     expect(html).toContain("Last dream 2h ago: 3 applied, 2 waiting for review.");
-    expect(html).toContain("3,200 of 50,000 tokens used in the last 24 hours.");
     expect(html).toContain("Dream now");
     expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Dream now/);
+    expect(dreamScheduleHint(20_000, null)).toBe(
+      "About once a day with your model provider: up to 20,000 tokens/day.",
+    );
+  });
+
+  it("says dreaming is paused while Background upkeep is off", () => {
+    const html = view({ backgroundUpkeepOn: false });
+    expect(html).toContain(">Paused</span>");
+    expect(html).toContain(
+      "Paused: Background upkeep (Advanced) is off, so scheduled dreams and commitment closing don&#x27;t run.",
+    );
   });
 
   it("disables Dream now while dreaming or when dreaming is off, and shows the result", () => {
@@ -194,28 +263,24 @@ describe("Memory folder card: Dreaming", () => {
 
   it("is part of the card while the folder is on", () => {
     const html = renderToStaticMarkup(
-      <MemoryRepoCard
+      <Folder
         features={{
           contextPackInjectionEnabled: true,
           heartbeatMaintenanceEnabled: true,
           memoryRepoEnabled: true,
           memoryRepoDreamDailyTokenBudget: 20_000,
         }}
-        onFeaturesSaved={vi.fn()}
-        api={vi.fn() as never}
       />,
     );
     expect(html).toContain('data-testid="memory-repo-dreaming"');
     expect(html).toContain("up to 20,000 tokens/day");
     const off = renderToStaticMarkup(
-      <MemoryRepoCard
+      <Folder
         features={{
           contextPackInjectionEnabled: true,
           heartbeatMaintenanceEnabled: true,
           memoryRepoEnabled: false,
         }}
-        onFeaturesSaved={vi.fn()}
-        api={vi.fn() as never}
       />,
     );
     expect(off).not.toContain("memory-repo-dreaming");
@@ -253,23 +318,24 @@ describe("Memory folder card: sync and team memory", () => {
     );
   });
 
-  it("renders the sync section with its explanation, URL, confirmation and Sync now", () => {
+  it("renders the sync panel with its explanation, URL, confirmation and Sync now", () => {
     const html = renderToStaticMarkup(<MemoryRepoSyncView {...syncProps} />);
-    expect(html).toContain("Sync");
     expect(html).toContain("private git repository you own");
     expect(html).toContain("credential helper or SSH");
     expect(html).toContain("Dream review branches are never pushed");
     expect(html).toContain('value="git@github.com:sam/memory.git"');
     expect(html).toContain("This repository is private and mine");
     expect(html).toContain("Sync now");
-    expect(html).toContain("With https://github.com/sam/memory.git");
-    expect(html).toContain("1 to push");
     expect(html).not.toContain("Sync stays off until this is checked");
+    expect(
+      memoryRepoSyncLine({ remoteUrl: "x", confirmed: true, folderReady: true, sync }).text,
+    ).toContain(
+      "With https://github.com/sam/memory.git; last pull 5m ago; last push 2m ago; 1 to push.",
+    );
     const unconfirmed = renderToStaticMarkup(
       <MemoryRepoSyncView {...syncProps} confirmed={false} sync={null} />,
     );
     expect(unconfirmed).toContain("Sync stays off until this is checked");
-    expect(unconfirmed).toContain("Off until you confirm");
     expect(
       renderToStaticMarkup(
         <MemoryRepoSyncView
@@ -330,7 +396,6 @@ describe("Memory folder card: sync and team memory", () => {
         onSave={vi.fn()}
       />,
     );
-    expect(html).toContain("Team memory");
     expect(html).toContain("never writes it");
     expect(html).toContain("every 10 minutes");
     expect(html).toContain("Platform");
@@ -378,9 +443,9 @@ describe("Memory folder card: sync and team memory", () => {
     ).toMatchObject({ tone: "warning", text: expect.stringContaining("not a fast-forward") });
   });
 
-  it("shows the sync and team sections in the card while the folder is on", () => {
+  it("shows Sync and Team memory as rows that open their settings", () => {
     const html = renderToStaticMarkup(
-      <MemoryRepoCard
+      <Folder
         features={{
           contextPackInjectionEnabled: true,
           heartbeatMaintenanceEnabled: true,
@@ -388,22 +453,27 @@ describe("Memory folder card: sync and team memory", () => {
           memoryRepoRemoteUrl: "https://github.com/sam/memory.git",
           memoryRepoTeamRepos: [{ name: "Platform", path: "/Users/sam/Team" }],
         }}
-        onFeaturesSaved={vi.fn()}
-        api={vi.fn() as never}
       />,
     );
-    expect(html).toContain('data-testid="memory-repo-sync"');
-    expect(html).toContain('value="https://github.com/sam/memory.git"');
-    expect(html).toContain('data-testid="memory-repo-team"');
-    expect(html).toContain("/Users/sam/Team");
+    const sync = html.slice(
+      html.indexOf('data-testid="memory-repo-sync"'),
+      html.indexOf('data-testid="memory-repo-team"'),
+    );
+    expect(sync).toContain("Off until you confirm the repository is private and yours.");
+    expect(sync).toMatch(/aria-expanded="false"[^>]*>Manage<\/button>/);
+    // The panel opens on request.
+    expect(sync).not.toContain('value="https://github.com/sam/memory.git"');
+    const team = html.slice(html.indexOf('data-testid="memory-repo-team"'));
+    expect(team).toContain("1 team repo: Platform.");
+    expect(team).toContain(">Manage</button>");
     const off = renderToStaticMarkup(
-      <MemoryRepoCard
+      <Folder
         features={{ contextPackInjectionEnabled: true, heartbeatMaintenanceEnabled: true }}
-        onFeaturesSaved={vi.fn()}
-        api={vi.fn() as never}
       />,
     );
     expect(off).not.toContain('data-testid="memory-repo-sync"');
     expect(off).toContain('data-testid="memory-repo-team"');
+    expect(off).toContain(">Add</button>");
+    expect(teamMemorySummary([])).toMatch(/^None\./);
   });
 });

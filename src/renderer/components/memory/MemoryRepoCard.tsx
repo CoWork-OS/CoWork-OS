@@ -11,22 +11,32 @@ import type { MemoryFeaturesSettings, MemoryRepoTeamRepoSetting } from "../../..
 import { hasHostMethod } from "../../host/browser-capabilities";
 import { formatRelative } from "./memory-knowledge-model";
 import {
-  dreamCostNotice,
   dreamLastLine,
   dreamNowMessage,
-  dreamTokensLine,
+  dreamScheduleHint,
+  dreamUpkeepHint,
 } from "./memory-repo-dreams-model";
 import {
   MemoryRepoSyncView,
   MemoryRepoTeamView,
+  memoryRepoSyncLine,
   syncNowMessage,
+  teamRepoStatusFor,
+  teamRepoStatusLine,
   type SectionMessage,
 } from "./MemoryRepoSyncTeam";
+import {
+  DisclosureButton,
+  SettingsBadge,
+  SettingsFeedback,
+  SettingsRow,
+  SettingsSwitch,
+} from "./SettingsRow";
 
 /** `memoryRepoDreamDailyTokenBudget` when unset (the settings manager's default). */
 export const MEMORY_REPO_DREAM_DEFAULT_BUDGET = 50_000;
 
-/** The preload methods the card uses (injected in tests). */
+/** The preload methods the memory folder settings use (injected in tests). */
 export type MemoryRepoApi = {
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) => Promise<{ success: boolean }>;
@@ -40,11 +50,14 @@ export type MemoryRepoApi = {
   importMemoryRepoFolder?: () => Promise<MemoryRepoImportResult>;
 };
 
+/** The host methods without which the memory folder settings are not shown. */
+export const MEMORY_REPO_METHODS = ["getMemoryRepoStatus", "compactMemoryRepoHistory"] as const;
+
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-/** The result line of "Import notes from a folder"; null when the picker was closed. */
+/** The result line of "Folder of notes"; null when the picker was closed. */
 export function importResultMessage(
   result: MemoryRepoImportResult,
 ): { tone: "success" | "error"; text: string } | null {
@@ -71,79 +84,6 @@ export function importResultMessage(
       extra.length ? ` (${extra.join("; ")})` : ""
     }. Keep the ones you want in What CoWork knows.`,
   };
-}
-
-export interface MemoryRepoDreamingViewProps {
-  dreamingEnabled: boolean;
-  dailyBudget: number;
-  report: MemoryRepoDreamsReport | null;
-  /** The folder is on and ready. */
-  ready: boolean;
-  canDreamNow: boolean;
-  /** Another action of the card runs. */
-  disabled: boolean;
-  dreaming: boolean;
-  message: { tone: "success" | "error"; text: string } | null;
-  onToggle: (enabled: boolean) => void;
-  onDreamNow: () => void;
-}
-
-/** The card's "Dreaming" subsection (docs/memory-repo-phase2-design.md §6-§7). */
-export function MemoryRepoDreamingView(props: MemoryRepoDreamingViewProps) {
-  return (
-    <div className="settings-form-group memory-hub-top-gap" data-testid="memory-repo-dreaming">
-      <div className="memory-hub-toggle-row">
-        <div className="memory-hub-grow">
-          <div className="memory-hub-primary-label">Dreaming</div>
-          <p className="settings-form-hint memory-hub-hint-tight">
-            A daily pass keeps the folder accurate and small and saves what tasks taught. Safe
-            changes are committed (undo them in the Review tab); the rest waits there for you.
-          </p>
-          <p className="settings-form-hint memory-hub-hint-tight">
-            {dreamCostNotice(props.dailyBudget)}
-          </p>
-        </div>
-        <label className="settings-toggle memory-hub-toggle">
-          <input
-            type="checkbox"
-            aria-label="Dreaming"
-            checked={props.dreamingEnabled}
-            onChange={(e) => props.onToggle(e.target.checked)}
-            disabled={props.disabled || props.dreaming}
-          />
-          <span className="toggle-slider" />
-        </label>
-      </div>
-      {props.ready && (
-        <>
-          <p className="settings-form-hint" role="status">
-            {dreamLastLine(props.report)}
-            {props.report ? ` ${dreamTokensLine(props.report)}` : ""}
-          </p>
-          {props.canDreamNow && (
-            <div className="memory-hub-row-wrap-center">
-              <button
-                type="button"
-                className="settings-button"
-                disabled={props.disabled || props.dreaming || !props.dreamingEnabled}
-                onClick={props.onDreamNow}
-              >
-                {props.dreaming ? "Dreaming..." : "Dream now"}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-      {props.message && (
-        <div
-          role={props.message.tone === "error" ? "alert" : "status"}
-          className={`settings-feedback ${props.message.tone} memory-hub-top-gap`}
-        >
-          {props.message.text}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export const COMPACT_HISTORY_CONFIRM =
@@ -186,11 +126,32 @@ export function memoryRepoStatusLine(status: MemoryRepoStatusReport | null): {
   return { tone: warn ? "warning" : "success", text: `${parts.join("; ")}.` };
 }
 
+/** The badge next to "Memory folder". */
+export function memoryRepoBadge(status: MemoryRepoStatusReport | null): {
+  tone: "success" | "warning" | "neutral";
+  label: string;
+} {
+  if (!status) return { tone: "neutral", label: "..." };
+  if (!status.enabled) return { tone: "neutral", label: "Off" };
+  const line = memoryRepoStatusLine(status);
+  return line.tone === "warning"
+    ? { tone: "warning", label: "Check" }
+    : { tone: "success", label: "Ready" };
+}
+
+/** The Team memory row's summary: none, or how many repos and their names. */
+export function teamMemorySummary(repos: readonly MemoryRepoTeamRepoSetting[]): string {
+  if (repos.length === 0) return "None. Read-only memory a team shares, read next to yours.";
+  return `${plural(repos.length, "team repo", "team repos")}: ${repos.map((repo) => repo.name).join(", ")}.`;
+}
+
 function defaultApi(): MemoryRepoApi {
   return window.electronAPI;
 }
 
-export interface MemoryRepoCardProps {
+type Feedback = { tone: "success" | "error"; text: string } | null;
+
+export interface MemoryRepoControllerOptions {
   features: MemoryFeaturesSettings;
   /** Called with the stored settings after a save. */
   onFeaturesSaved: (settings: MemoryFeaturesSettings) => void;
@@ -198,46 +159,85 @@ export interface MemoryRepoCardProps {
   confirm?: (message: string) => boolean;
   /** Re-read the status this long after a save, once main has restarted the folder. */
   settleMs?: number;
-  /** The workspace the Memory Hub shows (team repos can be limited to it). */
-  workspaceId?: string | null;
+  /** False where the host has no memory folder: nothing is loaded. */
+  available?: boolean;
+}
+
+/** The state and actions of the memory folder, shared by its row, Import and Advanced. */
+export interface MemoryRepoController {
+  features: MemoryFeaturesSettings;
+  status: MemoryRepoStatusReport | null;
+  enabled: boolean;
+  /** The folder is on and ready. */
+  ready: boolean;
+  busy: "save" | "open" | "compact" | "import" | null;
+  /** Results of the folder switch, Open and Dreaming switch. */
+  message: Feedback;
+  /** Results of the folder location and Compact history (Advanced). */
+  locationMessage: Feedback;
+  /** Result of "Folder of notes" (Import). */
+  importMessage: Feedback;
+  syncMessage: SectionMessage;
+  teamMessage: SectionMessage;
+  dreamMessage: Feedback;
+  dreams: MemoryRepoDreamsReport | null;
+  syncing: boolean;
+  dreaming: boolean;
+  canOpen: boolean;
+  canImport: boolean;
+  canSyncNow: boolean;
+  canListDreams: boolean;
+  canDreamNow: boolean;
+  pathDraft: string;
+  setPathDraft: (path: string) => void;
+  setEnabled: (on: boolean) => void;
+  setDreamingEnabled: (on: boolean) => void;
+  savePath: () => void;
+  saveRemoteUrl: (url: string) => void;
+  setConfirmedPrivate: (confirmed: boolean) => void;
+  saveTeamRepos: (repos: MemoryRepoTeamRepoSetting[], done: string) => Promise<boolean>;
+  syncNow: () => void;
+  openFolder: () => void;
+  importFolder: () => void;
+  compact: () => void;
+  dreamNow: () => void;
 }
 
 /**
- * "Memory folder" (docs/memory-repo-phase1-design.md §9): switch the markdown + git
- * memory folder on or off, choose where it lives, open it, and compact its history. The
- * path is only ever sent as the `memoryRepoPath` setting; main validates it on save.
+ * The memory folder (docs/memory-repo-phase1-design.md §9): switch the markdown + git
+ * memory folder on or off, choose where it lives, open it, import notes, compact its
+ * history, dream, sync and read team memory. The path is only ever sent as the
+ * `memoryRepoPath` setting; main validates it on save.
  */
-export function MemoryRepoCard({
+export function useMemoryRepoController({
   features,
   onFeaturesSaved,
   api = defaultApi,
   confirm = (message: string) => window.confirm(message),
   settleMs = 1500,
-  workspaceId = null,
-}: MemoryRepoCardProps) {
+  available = true,
+}: MemoryRepoControllerOptions): MemoryRepoController {
   const [status, setStatus] = useState<MemoryRepoStatusReport | null>(null);
   const [pathDraft, setPathDraft] = useState(features.memoryRepoPath ?? "");
-  const [busy, setBusy] = useState<"save" | "open" | "compact" | "import" | null>(null);
-  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [busy, setBusy] = useState<MemoryRepoController["busy"]>(null);
+  const [message, setMessage] = useState<Feedback>(null);
+  const [locationMessage, setLocationMessage] = useState<Feedback>(null);
+  const [importMessage, setImportMessage] = useState<Feedback>(null);
   const [syncMessage, setSyncMessage] = useState<SectionMessage>(null);
   const [teamMessage, setTeamMessage] = useState<SectionMessage>(null);
   const [syncing, setSyncing] = useState(false);
-  const canSyncNow = hasHostMethod("syncMemoryRepoNow");
+  const [dreams, setDreams] = useState<MemoryRepoDreamsReport | null>(null);
+  const [dreaming, setDreaming] = useState(false);
+  const [dreamMessage, setDreamMessage] = useState<Feedback>(null);
   const generation = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canOpen = hasHostMethod("openMemoryRepoFolder");
   // Desktop only: the browser host has no native folder picker (and no such method).
   const canImport = hasHostMethod("importMemoryRepoFolder");
-  const enabled = features.memoryRepoEnabled === true;
-  const savedPath = features.memoryRepoPath ?? "";
+  const canSyncNow = hasHostMethod("syncMemoryRepoNow");
   const canListDreams = hasHostMethod("getMemoryRepoDreams");
   const canDreamNow = hasHostMethod("dreamMemoryRepoNow");
-  const [dreams, setDreams] = useState<MemoryRepoDreamsReport | null>(null);
-  const [dreaming, setDreaming] = useState(false);
-  const [dreamMessage, setDreamMessage] = useState<{
-    tone: "success" | "error";
-    text: string;
-  } | null>(null);
+  const enabled = features.memoryRepoEnabled === true;
 
   useEffect(() => setPathDraft(features.memoryRepoPath ?? ""), [features.memoryRepoPath]);
 
@@ -252,6 +252,7 @@ export function MemoryRepoCard({
   }, [api, canListDreams]);
 
   const loadStatus = useCallback(async () => {
+    if (!available) return;
     const current = ++generation.current;
     try {
       const next = await api().getMemoryRepoStatus();
@@ -264,7 +265,7 @@ export function MemoryRepoCard({
         text: memoryRepoErrorMessage(error, "Failed to read the memory folder status."),
       });
     }
-  }, [api]);
+  }, [api, available, loadDreams]);
 
   useEffect(() => {
     void loadStatus();
@@ -276,17 +277,24 @@ export function MemoryRepoCard({
   const save = async (
     updates: Partial<MemoryFeaturesSettings>,
     done: string,
-    section: "folder" | "sync" | "team" = "folder",
+    section: "folder" | "location" | "sync" | "team" = "folder",
   ): Promise<boolean> => {
-    // Each section shows its own result (main's validation error next to the field saved).
+    // Each part shows its own result (main's validation error next to the field saved).
     const setFeedback =
-      section === "sync" ? setSyncMessage : section === "team" ? setTeamMessage : setMessage;
+      section === "sync"
+        ? setSyncMessage
+        : section === "team"
+          ? setTeamMessage
+          : section === "location"
+            ? setLocationMessage
+            : setMessage;
     setBusy("save");
     setMessage(null);
+    setLocationMessage(null);
     setSyncMessage(null);
     setTeamMessage(null);
     try {
-      // Merge into the stored settings, not this card's copy (other cards save the same object).
+      // Merge into the stored settings, not this copy (other settings save the same object).
       const stored = await api()
         .getMemoryFeaturesSettings()
         .catch(() => null);
@@ -314,8 +322,7 @@ export function MemoryRepoCard({
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const result = await run();
-      setSyncMessage(syncNowMessage(result));
+      setSyncMessage(syncNowMessage(await run()));
     } catch (error) {
       setSyncMessage({ tone: "error", text: memoryRepoErrorMessage(error, "Sync failed.") });
     } finally {
@@ -323,9 +330,6 @@ export function MemoryRepoCard({
       await loadStatus();
     }
   };
-
-  const saveTeamRepos = (repos: MemoryRepoTeamRepoSetting[], done: string) =>
-    save({ memoryRepoTeamRepos: repos }, done, "team");
 
   const openFolder = async () => {
     const open = api().openMemoryRepoFolder;
@@ -348,12 +352,12 @@ export function MemoryRepoCard({
     const run = api().importMemoryRepoFolder;
     if (!run) return;
     setBusy("import");
-    setMessage(null);
+    setImportMessage(null);
     try {
-      setMessage(importResultMessage(await run()));
+      setImportMessage(importResultMessage(await run()));
       await loadStatus();
     } catch (error) {
-      setMessage({
+      setImportMessage({
         tone: "error",
         text: memoryRepoErrorMessage(error, "Failed to import the notes."),
       });
@@ -365,17 +369,17 @@ export function MemoryRepoCard({
   const compact = async () => {
     if (!confirm(compactHistoryConfirm(Boolean(status?.sync)))) return;
     setBusy("compact");
-    setMessage(null);
+    setLocationMessage(null);
     try {
       const result = await api().compactMemoryRepoHistory();
-      setMessage(
+      setLocationMessage(
         result.compacted
           ? { tone: "success", text: "History compacted. Only the current notes remain." }
           : { tone: "error", text: result.error || "Failed to compact the history." },
       );
       await loadStatus();
     } catch (error) {
-      setMessage({
+      setLocationMessage({
         tone: "error",
         text: memoryRepoErrorMessage(error, "Failed to compact the history."),
       });
@@ -399,169 +403,341 @@ export function MemoryRepoCard({
     }
   };
 
-  const line = memoryRepoStatusLine(status);
-  const ready = enabled && status?.enabled === true && status.ready;
-  const pathChanged = pathDraft.trim() !== savedPath.trim();
+  return {
+    features,
+    status,
+    enabled,
+    ready: enabled && status?.enabled === true && status.ready,
+    busy,
+    message,
+    locationMessage,
+    importMessage,
+    syncMessage,
+    teamMessage,
+    dreamMessage,
+    dreams,
+    syncing,
+    dreaming,
+    canOpen,
+    canImport,
+    canSyncNow,
+    canListDreams,
+    canDreamNow,
+    pathDraft,
+    setPathDraft,
+    setEnabled: (on) =>
+      void save({ memoryRepoEnabled: on }, on ? "Memory folder on." : "Memory folder off."),
+    setDreamingEnabled: (on) =>
+      void save({ memoryRepoDreamingEnabled: on }, on ? "Dreaming on." : "Dreaming off."),
+    savePath: () => void save({ memoryRepoPath: pathDraft.trim() }, "Folder saved.", "location"),
+    saveRemoteUrl: (url) =>
+      void save({ memoryRepoRemoteUrl: url }, url ? "Repository saved." : "Sync off.", "sync"),
+    setConfirmedPrivate: (confirmed) =>
+      void save(
+        { memoryRepoRemoteConfirmedPrivate: confirmed },
+        confirmed ? "Confirmed." : "Sync off.",
+        "sync",
+      ),
+    saveTeamRepos: (repos, done) => save({ memoryRepoTeamRepos: repos }, done, "team"),
+    syncNow: () => void syncNow(),
+    openFolder: () => void openFolder(),
+    importFolder: () => void importFolder(),
+    compact: () => void compact(),
+    dreamNow: () => void dreamNow(),
+  };
+}
 
+export interface MemoryRepoDreamingViewProps {
+  dreamingEnabled: boolean;
+  dailyBudget: number;
+  report: MemoryRepoDreamsReport | null;
+  /** The folder is on and ready. */
+  ready: boolean;
+  canDreamNow: boolean;
+  /** Background upkeep (heartbeat maintenance) runs the scheduled dreams. */
+  backgroundUpkeepOn: boolean;
+  /** Another action of the folder runs. */
+  disabled: boolean;
+  dreaming: boolean;
+  message: Feedback;
+  onToggle: (enabled: boolean) => void;
+  onDreamNow: () => void;
+}
+
+/** The "Dreaming" row (docs/memory-repo-phase2-design.md §6-§7). */
+export function MemoryRepoDreamingView(props: MemoryRepoDreamingViewProps) {
   return (
-    <div className="settings-card" data-testid="memory-repo-card">
-      <div className="settings-form-group">
-        <div className="memory-hub-toggle-row">
-          <div className="memory-hub-grow">
-            <div className="memory-hub-primary-label">Memory folder</div>
-            <p className="settings-form-hint memory-hub-hint-tight">
-              Memory is kept as plain notes in a folder you can open and edit. The agent reads it,
-              and saves to it through CoWork, which keeps every change in its history.
+    <SettingsRow
+      testId="memory-repo-dreaming"
+      label={
+        <>
+          Dreaming{" "}
+          {!props.backgroundUpkeepOn && props.dreamingEnabled && (
+            <SettingsBadge tone="warning">Paused</SettingsBadge>
+          )}
+        </>
+      }
+      hint={
+        <>
+          {dreamScheduleHint(props.dailyBudget, props.report)}{" "}
+          {dreamUpkeepHint(props.backgroundUpkeepOn)}
+        </>
+      }
+      below={
+        <>
+          {props.ready && props.report && props.report.dreams.length > 0 && (
+            <p className="settings-form-hint" role="status">
+              {dreamLastLine(props.report)} Review it in the Review tab.
             </p>
-          </div>
-          <label className="settings-toggle memory-hub-toggle">
-            <input
-              type="checkbox"
-              aria-label="Memory folder"
-              checked={enabled}
-              onChange={(e) =>
-                void save(
-                  { memoryRepoEnabled: e.target.checked },
-                  e.target.checked ? "Memory folder on." : "Memory folder off.",
-                )
-              }
-              disabled={busy !== null}
-            />
-            <span className="toggle-slider" />
-          </label>
-        </div>
-      </div>
-
-      <div className="settings-field">
-        <label htmlFor="memory-repo-path">Folder</label>
-        <div className="memory-hub-stack-gap">
-          <input
-            id="memory-repo-path"
-            className="settings-input"
-            value={pathDraft}
-            placeholder={status?.root || "~/CoWork Memory"}
-            onChange={(e) => setPathDraft(e.target.value)}
-            disabled={busy !== null}
-          />
-          <button
-            type="button"
-            className="settings-button"
-            disabled={busy !== null || !pathChanged}
-            onClick={() => void save({ memoryRepoPath: pathDraft.trim() }, "Folder saved.")}
-          >
-            {busy === "save" ? "Saving..." : "Save"}
-          </button>
-        </div>
-        <p className="settings-hint">
-          Leave empty for the default. The folder must be outside your workspaces, and either empty
-          or an existing memory folder.
-        </p>
-      </div>
-
-      <p className="settings-form-hint" role="status">
-        <span className={`settings-badge settings-badge--${line.tone}`}>
-          {!status ? "..." : !status.enabled ? "OFF" : line.tone === "warning" ? "WARN" : "READY"}
-        </span>{" "}
-        {line.text}
-        {status?.enabled && status.ready && (status.inboxEntries ?? 0) > 0
-          ? ` ${status.inboxEntries} ${status.inboxEntries === 1 ? "entry" : "entries"} in the inbox.`
-          : ""}
-      </p>
-
-      <div className="memory-hub-row-wrap-center">
-        {canOpen && (
-          <button
-            type="button"
-            className="settings-button"
-            disabled={busy !== null || !ready}
-            onClick={() => void openFolder()}
-          >
-            {busy === "open" ? "Opening..." : "Open memory folder"}
-          </button>
-        )}
-        {canImport && (
-          <button
-            type="button"
-            className="settings-button"
-            disabled={busy !== null || !ready || status?.writable === false}
-            onClick={() => void importFolder()}
-            title="Bring notes from another agent's memory folder or any folder of markdown notes into the inbox"
-          >
-            {busy === "import" ? "Importing..." : "Import notes from a folder…"}
-          </button>
-        )}
+          )}
+          <SettingsFeedback message={props.message} />
+        </>
+      }
+    >
+      {props.ready && props.canDreamNow && (
         <button
           type="button"
-          className="settings-button settings-button-danger"
-          disabled={busy !== null || !ready || status?.gitAvailable !== true}
-          onClick={() => void compact()}
+          className="settings-button"
+          disabled={props.disabled || props.dreaming || !props.dreamingEnabled}
+          onClick={props.onDreamNow}
         >
-          {busy === "compact" ? "Compacting..." : "Compact history"}
+          {props.dreaming ? "Dreaming..." : "Dream now"}
         </button>
-      </div>
-
-      {message && (
-        <div
-          role={message.tone === "error" ? "alert" : "status"}
-          className={`settings-feedback ${message.tone} memory-hub-top-gap`}
-        >
-          {message.text}
-        </div>
       )}
+      <SettingsSwitch
+        label="Dreaming"
+        checked={props.dreamingEnabled}
+        onChange={props.onToggle}
+        disabled={props.disabled || props.dreaming}
+      />
+    </SettingsRow>
+  );
+}
 
-      {enabled && canListDreams && (
+/**
+ * The "Memory folder" section: the folder (path, state, Open, switch), Dreaming, Sync and
+ * Team memory, each one row; Sync and Team memory open their settings under the row.
+ */
+export function MemoryRepoCard({
+  repo,
+  backgroundUpkeepOn,
+  workspaceId = null,
+}: {
+  repo: MemoryRepoController;
+  backgroundUpkeepOn: boolean;
+  /** The workspace the Memory Hub shows (team repos can be limited to it). */
+  workspaceId?: string | null;
+}) {
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const { features, status } = repo;
+  const disabled = repo.busy !== null;
+  const badge = memoryRepoBadge(status);
+  const line = memoryRepoStatusLine(status);
+  const folder = status?.root || features.memoryRepoPath || "~/CoWork Memory";
+  const inbox = repo.ready ? (status?.inboxEntries ?? 0) : 0;
+  const remoteUrl = features.memoryRepoRemoteUrl ?? "";
+  const confirmed = features.memoryRepoRemoteConfirmedPrivate === true;
+  const syncLine = memoryRepoSyncLine({
+    remoteUrl,
+    confirmed,
+    folderReady: repo.ready,
+    sync: status?.sync,
+  });
+  const syncActive = repo.ready && Boolean(status?.sync);
+  const teamRepos = features.memoryRepoTeamRepos ?? [];
+  const teamWarning = teamRepos.some(
+    (teamRepo) =>
+      teamRepoStatusLine(teamRepoStatusFor(teamRepo, status?.team)).tone === "warning" &&
+      Boolean(status?.team),
+  );
+
+  return (
+    <div data-testid="memory-repo-card">
+      <SettingsRow
+        testId="memory-repo-folder"
+        label={
+          <>
+            Memory folder <SettingsBadge tone={badge.tone}>{badge.label}</SettingsBadge>
+          </>
+        }
+        hint={
+          <>
+            <code>{folder}</code> · plain notes you can open and edit, with every change in its
+            history.
+          </>
+        }
+        below={
+          <>
+            {(line.tone === "warning" || inbox > 0) && (
+              <p className="settings-form-hint" role="status">
+                {line.tone === "warning" ? `${line.text} ` : ""}
+                {inbox > 0
+                  ? `${plural(inbox, "entry", "entries")} in the inbox; keep them in What CoWork knows.`
+                  : ""}
+              </p>
+            )}
+            <SettingsFeedback message={repo.message} />
+          </>
+        }
+      >
+        {repo.canOpen && (
+          <button
+            type="button"
+            className="settings-button"
+            disabled={disabled || !repo.ready}
+            onClick={repo.openFolder}
+          >
+            {repo.busy === "open" ? "Opening..." : "Open"}
+          </button>
+        )}
+        <SettingsSwitch
+          label="Memory folder"
+          checked={repo.enabled}
+          onChange={repo.setEnabled}
+          disabled={disabled}
+        />
+      </SettingsRow>
+
+      {repo.enabled && repo.canListDreams && (
         <MemoryRepoDreamingView
           dreamingEnabled={features.memoryRepoDreamingEnabled !== false}
           dailyBudget={features.memoryRepoDreamDailyTokenBudget ?? MEMORY_REPO_DREAM_DEFAULT_BUDGET}
-          report={dreams}
-          ready={Boolean(ready) && status?.gitAvailable === true}
-          canDreamNow={canDreamNow}
-          disabled={busy !== null}
-          dreaming={dreaming}
-          message={dreamMessage}
-          onToggle={(on) =>
-            void save({ memoryRepoDreamingEnabled: on }, on ? "Dreaming on." : "Dreaming off.")
-          }
-          onDreamNow={() => void dreamNow()}
+          report={repo.dreams}
+          ready={repo.ready && status?.gitAvailable === true}
+          canDreamNow={repo.canDreamNow}
+          backgroundUpkeepOn={backgroundUpkeepOn}
+          disabled={disabled}
+          dreaming={repo.dreaming}
+          message={repo.dreamMessage}
+          onToggle={repo.setDreamingEnabled}
+          onDreamNow={repo.dreamNow}
         />
       )}
 
-      {enabled && (
-        <MemoryRepoSyncView
-          savedRemoteUrl={features.memoryRepoRemoteUrl ?? ""}
-          confirmed={features.memoryRepoRemoteConfirmedPrivate === true}
-          folderReady={Boolean(ready)}
-          sync={status?.sync}
-          canSyncNow={canSyncNow}
-          disabled={busy !== null}
-          syncing={syncing}
-          message={syncMessage}
-          onSaveRemoteUrl={(url) =>
-            void save(
-              { memoryRepoRemoteUrl: url },
-              url ? "Repository saved." : "Sync off.",
-              "sync",
+      {repo.enabled && (
+        <SettingsRow
+          testId="memory-repo-sync"
+          label={
+            <>
+              Sync{" "}
+              <SettingsBadge tone={syncLine.tone}>
+                {syncActive ? (syncLine.tone === "warning" ? "Check" : "On") : "Off"}
+              </SettingsBadge>
+            </>
+          }
+          hint={syncLine.text}
+          below={
+            syncOpen ? (
+              <div id="memory-repo-sync-panel" className="memory-settings-panel">
+                <MemoryRepoSyncView
+                  savedRemoteUrl={remoteUrl}
+                  confirmed={confirmed}
+                  folderReady={repo.ready}
+                  sync={status?.sync}
+                  canSyncNow={repo.canSyncNow}
+                  disabled={disabled}
+                  syncing={repo.syncing}
+                  message={repo.syncMessage}
+                  onSaveRemoteUrl={repo.saveRemoteUrl}
+                  onConfirmChange={repo.setConfirmedPrivate}
+                  onSyncNow={repo.syncNow}
+                />
+              </div>
+            ) : (
+              <SettingsFeedback message={repo.syncMessage} />
             )
           }
-          onConfirmChange={(confirmed) =>
-            void save(
-              { memoryRepoRemoteConfirmedPrivate: confirmed },
-              confirmed ? "Confirmed." : "Sync off.",
-              "sync",
-            )
-          }
-          onSyncNow={() => void syncNow()}
-        />
+        >
+          <DisclosureButton
+            expanded={syncOpen}
+            onToggle={() => setSyncOpen((open) => !open)}
+            label={remoteUrl ? "Manage" : "Set up"}
+            controls="memory-repo-sync-panel"
+          />
+        </SettingsRow>
       )}
 
-      <MemoryRepoTeamView
-        repos={features.memoryRepoTeamRepos ?? []}
-        statuses={status?.team}
-        workspaceId={workspaceId}
-        disabled={busy !== null}
-        message={teamMessage}
-        onSave={saveTeamRepos}
+      <SettingsRow
+        testId="memory-repo-team"
+        label={
+          <>Team memory {teamWarning && <SettingsBadge tone="warning">Check</SettingsBadge>}</>
+        }
+        hint={teamMemorySummary(teamRepos)}
+        below={
+          teamOpen ? (
+            <div id="memory-repo-team-panel" className="memory-settings-panel">
+              <MemoryRepoTeamView
+                repos={teamRepos}
+                statuses={status?.team}
+                workspaceId={workspaceId}
+                disabled={disabled}
+                message={repo.teamMessage}
+                onSave={repo.saveTeamRepos}
+              />
+            </div>
+          ) : (
+            <SettingsFeedback message={repo.teamMessage} />
+          )
+        }
+      >
+        <DisclosureButton
+          expanded={teamOpen}
+          onToggle={() => setTeamOpen((open) => !open)}
+          label={teamRepos.length === 0 ? "Add" : "Manage"}
+          controls="memory-repo-team-panel"
+        />
+      </SettingsRow>
+    </div>
+  );
+}
+
+/** Advanced → Memory folder: where the folder lives, and compacting its history. */
+export function MemoryRepoLocation({ repo }: { repo: MemoryRepoController }) {
+  const disabled = repo.busy !== null;
+  const savedPath = repo.features.memoryRepoPath ?? "";
+  const pathChanged = repo.pathDraft.trim() !== savedPath.trim();
+  return (
+    <div data-testid="memory-repo-location">
+      <SettingsRow
+        label="Folder location"
+        htmlFor="memory-repo-path"
+        hint="Leave empty for the default. It must be outside your workspaces, and empty or an existing memory folder."
+        below={
+          <div className="memory-settings-inline-field">
+            <input
+              id="memory-repo-path"
+              className="settings-input"
+              value={repo.pathDraft}
+              placeholder={repo.status?.root || "~/CoWork Memory"}
+              onChange={(event) => repo.setPathDraft(event.target.value)}
+              disabled={disabled}
+            />
+            <button
+              type="button"
+              className="settings-button"
+              disabled={disabled || !pathChanged}
+              onClick={repo.savePath}
+            >
+              {repo.busy === "save" ? "Saving..." : "Save"}
+            </button>
+          </div>
+        }
       />
+      <SettingsRow
+        label="Compact history"
+        hint="Removes old versions so deleted memories are really gone. This can't be undone."
+        below={<SettingsFeedback message={repo.locationMessage} />}
+      >
+        <button
+          type="button"
+          className="settings-button settings-button-danger"
+          disabled={disabled || !repo.ready || repo.status?.gitAvailable !== true}
+          onClick={repo.compact}
+        >
+          {repo.busy === "compact" ? "Compacting..." : "Compact history"}
+        </button>
+      </SettingsRow>
     </div>
   );
 }

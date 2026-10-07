@@ -570,7 +570,7 @@ If **Save** returns an inline error, the modal is showing the routine creation o
 
 If Chronicle never seems to help with prompts like `what is this on the right side` or `why is this failing`, check these in order:
 
-1. **Enable Chronicle** in **Settings > Memory Hub > Chronicle** and accept the consent prompt.
+1. **Enable Chronicle** in **Settings > Tools > Chronicle** and accept the consent prompt.
 2. Confirm **Settings > Tools > Built-in tools** still has the **Chronicle** category enabled.
 3. Make sure the per-task **Chronicle ON** toggle was not turned off in the task composer or Devices panel.
 4. Confirm **Screen Recording** is granted for CoWork OS.
@@ -591,7 +591,7 @@ What to look for:
 - Mission Control task detail should later show `screen_context` evidence or recall hits
 - the Chronicle settings card should show a non-zero recent-screen frame count
 - the Chronicle settings card should show whether OCR is available and whether Screen Recording is actually granted
-- **Settings > Memory Hub > Memory** should show promoted entries under **Chronicle observations**
+- **Settings > Memory > Sources** should show promoted entries under **Chronicle observations**
 
 If the agent still asks you for a screenshot:
 

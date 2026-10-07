@@ -13637,8 +13637,10 @@ ${transcript}
         requiredTools.delete("edit_file");
       }
     }
+    const mutationToolsRestricted = this.areWorkspaceMutationToolsRestricted();
     const hasReadOnlyConstraint =
       buildHealthReadOnlyStep ||
+      mutationToolsRestricted ||
       isReadOnlyConstraintOnlyStep(descriptionRaw) ||
       this.promptHasReadOnlyConstraint(`${this.task?.title || ""}\n${this.getContractPrompt()}`);
     const artifactPreparationDeferred = this.isArtifactPreparationDeferredToLaterWrite(step);
@@ -13738,6 +13740,15 @@ ${transcript}
       requiresWriteByArtifactMode: artifactWriteRequired,
       hasReadOnlyConstraint,
     });
+    if (
+      mutationToolsRestricted &&
+      modeDetails.mode === "analysis_only" &&
+      modeDetails.contractReason === "readonly_constraint_detected" &&
+      (inferredMutation || artifactWriteRequired)
+    ) {
+      // Keep the telemetry honest: the step wanted a write, the role forbids it.
+      modeDetails.contractReason = "mutation_tools_restricted_by_role";
+    }
     const policyRequiredTools = getPolicyRequiredToolsForMode(
       this.agentPolicyConfig,
       modeDetails.mode,
@@ -13883,6 +13894,7 @@ ${transcript}
       hasNonRootParent,
       targetPathCount: targetPaths.length,
       artifactPreparationDeferred: this.isArtifactPreparationDeferredToLaterWrite(step),
+      mutationToolsRestricted: this.areWorkspaceMutationToolsRestricted(),
     };
     const payload = {
       taskId: this.task.id,
@@ -17069,6 +17081,23 @@ ${transcript}
     if (this.swarmForTools && !allowlist.has("*")) allowlist.add("swarm_note");
 
     return allowlist;
+  }
+
+  /**
+   * Whether the task's tool restrictions (role denylists such as the
+   * researcher's `group:write`, or an explicit per-tool deny) leave no way to
+   * write workspace files. Step contracts must not demand a mutation the
+   * runtime will refuse: a lane that cannot call write_file would otherwise be
+   * nudged to "perform the required mutation now" until its iteration budget
+   * runs out and then fail with contract_unmet_write_required.
+   */
+  private areWorkspaceMutationToolsRestricted(): boolean {
+    const agentConfig = this.task?.agentConfig;
+    if (!agentConfig) return false;
+    if (agentConfig.readOnlyExecution === true) return true;
+    const restrictions = this.getTaskToolRestrictions();
+    if (restrictions.has("*") || restrictions.has("group:write")) return true;
+    return ["write_file", "edit_file"].every((toolName) => this.isToolRestrictedByPolicy(toolName));
   }
 
   private isToolRestrictedByPolicy(toolName: string): boolean {

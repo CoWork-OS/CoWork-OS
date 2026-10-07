@@ -626,6 +626,54 @@ describe("TaskExecutor completion contract integration", () => {
     expect(executor.buildResultSummary()).not.toContain("PENDING_USER_ACTION");
   });
 
+  it("downgrades a write step to analysis-only when the task's role denies workspace writes", () => {
+    const makeExecutorWithRestrictions = (toolRestrictions?: string[]) => {
+      const executor = createExecuteHarness({
+        title: "Founding an AI-only digital republic",
+        prompt: "Design and launch a public website, constitution, and admission flow.",
+        lastOutput: "",
+      });
+      if (toolRestrictions) {
+        (executor as Any).task.agentConfig = { toolRestrictions };
+      }
+      const writeStep: Any = {
+        id: "write-artifacts",
+        description:
+          "Translate the recommendations into launch artifacts in the workspace: write constitution.md, sitemap.md and the admission API contract files.",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Launch", steps: [writeStep] };
+      return { executor, writeStep };
+    };
+
+    const unrestricted = makeExecutorWithRestrictions();
+    const unrestrictedContract = (unrestricted.executor as Any).resolveStepExecutionContract(
+      unrestricted.writeStep,
+    );
+    expect(unrestrictedContract.mode).toBe("mutation_required");
+    expect(unrestrictedContract.requiresMutation).toBe(true);
+
+    const researcherLane = makeExecutorWithRestrictions(["group:write", "delete_file"]);
+    const laneContract = (researcherLane.executor as Any).resolveStepExecutionContract(
+      researcherLane.writeStep,
+    );
+    expect(laneContract.mode).toBe("analysis_only");
+    expect(laneContract.requiresMutation).toBe(false);
+    expect(laneContract.contractReason).toBe("mutation_tools_restricted_by_role");
+    expect(laneContract.requiredTools).not.toContain("write_file");
+    expect(laneContract.requiredTools).not.toContain("edit_file");
+
+    const explicitDeny = makeExecutorWithRestrictions(["write_file", "edit_file"]);
+    expect(
+      (explicitDeny.executor as Any).resolveStepExecutionContract(explicitDeny.writeStep).mode,
+    ).toBe("analysis_only");
+
+    const partialDeny = makeExecutorWithRestrictions(["write_file"]);
+    expect(
+      (partialDeny.executor as Any).resolveStepExecutionContract(partialDeny.writeStep).mode,
+    ).toBe("mutation_required");
+  });
+
   it("defers the single-use file-info requirement from a combined mutation step", () => {
     const executor = createExecuteHarness({
       title: "Create and verify attendee spreadsheet",

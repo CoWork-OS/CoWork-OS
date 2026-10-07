@@ -644,6 +644,62 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     expect(afterRecovery?.nodes.find((node) => node.key === "second")?.status).toBe("running");
     expect(deps.createChildTask).toHaveBeenCalledTimes(2);
   });
+
+  it("reopens a completed run when late nodes are appended and dispatches them", async () => {
+    const { deps, tasks } = makeDeps();
+    const engine = new OrchestrationGraphEngine(db, deps);
+    const snapshot = await engine.createRun({
+      rootTaskId: "root-reopen",
+      workspaceId: "workspace-1",
+      kind: "team",
+      maxParallel: 2,
+      nodes: [makeNode("lane")],
+    });
+    const lane = snapshot.nodes.find((node) => node.key === "lane");
+    expect(lane?.status).toBe("running");
+
+    tasks.set(lane!.taskId!, { ...tasks.get(lane!.taskId!)!, status: "completed" });
+    await engine.tickRun(snapshot.run.id);
+    const finished = await engine.getRepository().findSnapshotByRunId(snapshot.run.id);
+    expect(finished?.run.status).toBe("completed");
+
+    const appended = await engine.appendNodes({
+      runId: snapshot.run.id,
+      nodes: [makeNode("synthesis", { kind: "synthesis" })],
+      edges: [{ fromNodeId: lane!.id, toNodeKey: "synthesis" }],
+    });
+    const synthesis = appended?.nodes.find((node) => node.key === "synthesis");
+    expect(appended?.run.status).toBe("running");
+    expect(appended?.run.completedAt).toBeFalsy();
+    expect(synthesis?.status).toBe("running");
+    expect(synthesis?.taskId).toBeTruthy();
+    expect(deps.createChildTask).toHaveBeenCalledTimes(2);
+
+    tasks.set(synthesis!.taskId!, { ...tasks.get(synthesis!.taskId!)!, status: "completed" });
+    await engine.tickRun(snapshot.run.id);
+    const after = await engine.getRepository().findSnapshotByRunId(snapshot.run.id);
+    expect(after?.run.status).toBe("completed");
+    expect(after?.nodes.map((node) => node.status)).toEqual(["completed", "completed"]);
+  });
+
+  it("still refuses to append nodes to a cancelled run", async () => {
+    const { deps } = makeDeps();
+    const engine = new OrchestrationGraphEngine(db, deps);
+    const snapshot = await engine.createRun({
+      rootTaskId: "root-cancelled-append",
+      workspaceId: "workspace-1",
+      kind: "team",
+      maxParallel: 1,
+      nodes: [makeNode("lane")],
+    });
+    await engine.cancelRunForRootTask("root-cancelled-append");
+    const appended = await engine.appendNodes({
+      runId: snapshot.run.id,
+      nodes: [makeNode("late")],
+    });
+    expect(appended?.run.status).toBe("cancelled");
+    expect(appended?.nodes.map((node) => node.key)).toEqual(["lane"]);
+  });
 });
 
 describeWithSqlite("OrchestrationGraphEngine remote ACP admission", () => {

@@ -161,15 +161,17 @@ export function getRemoteAgentSecretRef(agent: ACPAgentCard): RemoteAgentSecretR
   const raw = agent.metadata?.[REMOTE_AGENT_SECRET_REF_KEY];
   if (!raw || typeof raw !== "object") return undefined;
   const ref = raw as Record<string, unknown>;
+  // A local keeps the array narrowing inside the filter callback.
+  const refFields = ref.fields;
   if (
     ref.store !== "secure-settings" ||
     ref.category !== ACP_REMOTE_AGENT_SECRETS_CATEGORY ||
     ref.agentId !== agent.id ||
-    !Array.isArray(ref.fields)
+    !Array.isArray(refFields)
   ) {
     return undefined;
   }
-  const fields = REMOTE_AGENT_SECRET_FIELDS.filter((field) => ref.fields.includes(field));
+  const fields = REMOTE_AGENT_SECRET_FIELDS.filter((field) => refFields.includes(field));
   if (fields.length === 0) return undefined;
   return {
     store: "secure-settings",

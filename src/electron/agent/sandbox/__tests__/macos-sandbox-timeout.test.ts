@@ -14,6 +14,16 @@ function isRunning(pid: number): boolean {
   }
 }
 
+/** A killed process can linger briefly (signal delivery, reaping) on slow CI runners. */
+async function stopsWithin(pid: number, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (isRunning(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return true;
+}
+
 // Runs real sandbox-exec processes: a timeout must end the command, not only its shell.
 describe.skipIf(process.platform !== "darwin")("macOS sandbox command timeouts", () => {
   let base: string;
@@ -59,7 +69,8 @@ describe.skipIf(process.platform !== "darwin")("macOS sandbox command timeouts",
       expect(Date.now() - startedAt).toBeLessThan(5_000);
       const childPid = Number(result.stdout.match(/child:(\d+)/)?.[1]);
       expect(childPid).toBeGreaterThan(0);
-      expect(isRunning(childPid)).toBe(false);
+      // An orphaned child would run for the full 20 s.
+      expect(await stopsWithin(childPid, 3_000)).toBe(true);
     } finally {
       sandbox.cleanup();
     }

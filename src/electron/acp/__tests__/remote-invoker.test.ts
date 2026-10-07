@@ -209,6 +209,22 @@ describe("RemoteAgentInvoker destination checks", () => {
     );
     expect(methods).toEqual(["/acp"]);
   });
+
+  it("does not send to an agent whose credentials are still waiting for secure storage", async () => {
+    const methods: string[] = [];
+    server = createServer((request, response) => {
+      methods.push(request.url || "");
+      response.end("{}");
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/acp`;
+    const agent = { ...makeAgent(endpoint), metadata: { bearerToken: "pending-token" } };
+
+    await expect(
+      new RemoteAgentInvoker({ resolveSecrets: () => undefined }).invoke(agent, makeTask()),
+    ).rejects.toThrow(/waiting to move to secure storage/);
+    expect(methods).toEqual([]);
+  });
 });
 
 describe("validateRemoteAgentEndpoint", () => {

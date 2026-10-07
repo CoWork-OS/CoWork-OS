@@ -16,6 +16,7 @@ import { ErrorCodes, Events, Methods } from "../../electron/control-plane/protoc
 import type { ControlPlaneServer } from "../../electron/control-plane/server";
 import { TASK_EVENT_BRIDGE_ALLOWLIST } from "../../electron/control-plane/task-event-bridge-contract";
 import type { AgentDaemon } from "../../electron/agent/daemon";
+import * as taskTitles from "../../electron/agent/task-title-generator";
 import {
   attachAgentDaemonTaskBridge,
   registerControlPlaneMethods,
@@ -143,6 +144,7 @@ describeWithSqlite("Node Control Plane browser parity", () => {
     if (previousUserDataDir === undefined) delete process.env.COWORK_USER_DATA_DIR;
     else process.env.COWORK_USER_DATA_DIR = previousUserDataDir;
     fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
   function registerMethods(agentDaemon: Record<string, unknown>) {
@@ -168,6 +170,61 @@ describeWithSqlite("Node Control Plane browser parity", () => {
       shell: false,
     });
   }
+
+  it.each([
+    { title: "what is 2+2?", generateTitle: undefined, generated: true },
+    { title: "My arithmetic check", generateTitle: true, generated: true },
+    { title: "what is 2+2?", generateTitle: false, generated: false },
+    { title: "My arithmetic check", generateTitle: undefined, generated: false },
+  ])("honors title generation for Node requests: $title / $generateTitle", async (input) => {
+    const workspace = createWorkspace();
+    const generateTitle = vi.spyOn(taskTitles, "generateAndApplyTaskTitle").mockResolvedValue();
+    const startTask = vi.fn().mockResolvedValue(undefined);
+    const emitTaskTitleUpdated = vi.fn();
+    const methods = registerMethods({ startTask, emitTaskTitleUpdated });
+    const result = (await methods.get(Methods.TASK_CREATE)!(scopedClient(["admin"]), {
+      title: input.title,
+      prompt: "what is 2+2?",
+      workspaceId: workspace.id,
+      ...(input.generateTitle !== undefined ? { generateTitle: input.generateTitle } : {}),
+    })) as { taskId: string };
+    expect(startTask).toHaveBeenCalledOnce();
+    expect(generateTitle).toHaveBeenCalledTimes(input.generated ? 1 : 0);
+    if (input.generated) {
+      const [task, prompt, , publish] = generateTitle.mock.calls[0];
+      expect(task.id).toBe(result.taskId);
+      expect(prompt).toBe("what is 2+2?");
+      publish(task.id, "Add two numbers");
+      expect(emitTaskTitleUpdated).toHaveBeenCalledWith(task.id, "Add two numbers");
+    }
+  });
+
+  it.each([false, true])(
+    "avoids duplicate naming on Node keyed replays, replayed=%s",
+    async (replayed) => {
+      const workspace = createWorkspace();
+      const task = new TaskStore(manager.getDatabase()).create({
+        title: "Placeholder",
+        prompt: "what is 2+2?",
+        status: "queued",
+        workspaceId: workspace.id,
+      });
+      const generateTitle = vi.spyOn(taskTitles, "generateAndApplyTaskTitle").mockResolvedValue();
+      const createTaskIdempotent = vi.fn().mockResolvedValue({ task, replayed });
+      const methods = registerMethods({
+        createTaskIdempotent,
+        startAdmittedTask: vi.fn().mockResolvedValue(undefined),
+      });
+      await methods.get(Methods.TASK_CREATE)!(scopedClient(["admin"]), {
+        title: task.title,
+        prompt: "what is 2+2?",
+        workspaceId: workspace.id,
+        operationKey: "title-generation-1",
+        generateTitle: true,
+      });
+      expect(generateTitle).toHaveBeenCalledTimes(replayed ? 0 : 1);
+    },
+  );
 
   it("creates workspaces with delete on and shell off", async () => {
     const methods = registerMethods({});

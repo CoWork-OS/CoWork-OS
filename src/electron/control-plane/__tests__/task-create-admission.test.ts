@@ -10,6 +10,7 @@ import { TaskStore, WorkspaceStore } from "../../database/repositories";
 import type { ControlPlaneServer } from "../server";
 import { ErrorCodes, Methods } from "../protocol";
 import { registerTaskAndWorkspaceMethods } from "../handlers";
+import * as taskTitles from "../../agent/task-title-generator";
 
 type RegisteredMethod = (
   client: { hasScope(scope: string): boolean },
@@ -142,6 +143,86 @@ describe("Electron Control Plane durable task creation", () => {
     expect(createTaskIdempotent).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { title: "what is 2+2?", generateTitle: undefined, generated: true },
+    { title: "My arithmetic check", generateTitle: true, generated: true },
+    { title: "what is 2+2?", generateTitle: false, generated: false },
+    { title: "My arithmetic check", generateTitle: undefined, generated: false },
+  ])("honors title generation for unkeyed requests: $title / $generateTitle", async (input) => {
+    const workspace = createWorkspace();
+    const generateTitle = vi.spyOn(taskTitles, "generateAndApplyTaskTitle").mockResolvedValue();
+    const startTask = vi.fn().mockResolvedValue(undefined);
+    const emitTaskTitleUpdated = vi.fn();
+    register({ startTask, emitTaskTitleUpdated });
+    const result = (await methods.get(Methods.TASK_CREATE)!(
+      { hasScope: (scope) => scope === "admin" },
+      {
+        title: input.title,
+        prompt: "what is 2+2?",
+        workspaceId: workspace.id,
+        ...(input.generateTitle !== undefined ? { generateTitle: input.generateTitle } : {}),
+      },
+    )) as { taskId: string };
+    expect(startTask).toHaveBeenCalledOnce();
+    expect(generateTitle).toHaveBeenCalledTimes(input.generated ? 1 : 0);
+    if (input.generated) {
+      const [task, prompt, , publish] = generateTitle.mock.calls[0];
+      expect(task.id).toBe(result.taskId);
+      expect(prompt).toBe("what is 2+2?");
+      publish(task.id, "Add two numbers");
+      expect(emitTaskTitleUpdated).toHaveBeenCalledWith(task.id, "Add two numbers");
+    }
+  });
+
+  it.each([false, true])(
+    "generates only on the first keyed admission, replayed=%s",
+    async (replayed) => {
+      const workspace = createWorkspace();
+      const task = new TaskStore(manager.getDatabase()).create({
+        title: "Placeholder",
+        prompt: "what is 2+2?",
+        status: "queued",
+        workspaceId: workspace.id,
+      });
+      const generateTitle = vi.spyOn(taskTitles, "generateAndApplyTaskTitle").mockResolvedValue();
+      const createTaskIdempotent = vi.fn().mockResolvedValue({ task, replayed });
+      register({ createTaskIdempotent, startAdmittedTask: vi.fn().mockResolvedValue(undefined) });
+      await methods.get(Methods.TASK_CREATE)!(
+        { hasScope: (scope) => scope === "admin" },
+        {
+          title: task.title,
+          prompt: "what is 2+2?",
+          workspaceId: workspace.id,
+          operationKey: "title-generation-1",
+          generateTitle: true,
+        },
+      );
+      expect(generateTitle).toHaveBeenCalledTimes(replayed ? 0 : 1);
+      expect(createTaskIdempotent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestIdentity: expect.objectContaining({ generateTitle: true }),
+        }),
+      );
+    },
+  );
+
+  it("rejects a malformed title generation flag before creating a task", async () => {
+    const workspace = createWorkspace();
+    const startTask = vi.fn();
+    register({ startTask });
+    await expect(
+      methods.get(Methods.TASK_CREATE)!(
+        { hasScope: (scope) => scope === "admin" },
+        {
+          title: "Placeholder",
+          prompt: "what is 2+2?",
+          workspaceId: workspace.id,
+          generateTitle: "true",
+        },
+      ),
+    ).rejects.toMatchObject({ code: ErrorCodes.INVALID_PARAMS });
+    expect(startTask).not.toHaveBeenCalled();
+  });
   it("checks a bot's future pause before unkeyed task insertion or native start", async () => {
     const workspace = createWorkspace();
     const db = manager.getDatabase();
@@ -169,6 +250,7 @@ describe("Electron Control Plane durable task creation", () => {
           prompt: "Due",
           workspaceId: workspace.id,
           assignedAgentRoleId: bot.id,
+          generateTitle: false,
         },
       ),
     ).rejects.toThrow("Bot future runs are paused");

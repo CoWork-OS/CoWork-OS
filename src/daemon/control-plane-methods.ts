@@ -3,6 +3,10 @@ import { registerBotResponsibilityMethods } from "../electron/control-plane/regi
 import { registerAutomationRuntimeMethods } from "../electron/control-plane/registerAutomationRuntimeMethods";
 import { registerBotWorkMethods } from "../electron/control-plane/registerBotWorkMethods";
 import { TaskRepository, WorkspaceRepository } from "../electron/database/repository-facades";
+import {
+  generateAndApplyTaskTitle,
+  shouldGenerateTaskTitle,
+} from "../electron/agent/task-title-generator";
 import { ChannelRepository } from "../electron/database/repository-facades";
 import {
   ApprovalRepository,
@@ -84,8 +88,12 @@ function sanitizeTaskCreateParams(params: unknown): {
   budgetTokens?: number;
   budgetCost?: number;
   shellAccess?: boolean;
+  generateTitle?: boolean;
 } {
   const p = (params ?? {}) as Any;
+  if (p.generateTitle !== undefined && typeof p.generateTitle !== "boolean") {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: "generateTitle must be a boolean" };
+  }
   const hasOperationKey = Object.prototype.hasOwnProperty.call(p, "operationKey");
   const operationKey = typeof p.operationKey === "string" ? p.operationKey.trim() : "";
   if (hasOperationKey && (!operationKey || operationKey.length > 200)) {
@@ -160,6 +168,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     ...(budgetTokens !== undefined ? { budgetTokens } : {}),
     ...(budgetCost !== undefined ? { budgetCost } : {}),
     ...(shellAccess !== undefined ? { shellAccess } : {}),
+    ...(p.generateTitle !== undefined ? { generateTitle: p.generateTitle } : {}),
   };
 }
 
@@ -1055,9 +1064,21 @@ export function registerControlPlaneMethods(
           budgetTokens: validated.budgetTokens,
           budgetCost: validated.budgetCost,
           shellAccess: validated.shellAccess,
+          ...(validated.generateTitle !== undefined
+            ? { generateTitle: validated.generateTitle }
+            : {}),
         },
         autoStart: false,
       });
+
+      if (
+        !admitted.replayed &&
+        shouldGenerateTaskTitle(validated.title, validated.prompt, validated.generateTitle)
+      ) {
+        void generateAndApplyTaskTitle(admitted.task, validated.prompt, taskRepo, (taskId, title) =>
+          agentDaemon.emitTaskTitleUpdated(taskId, title),
+        );
+      }
 
       if (!isTempWorkspaceId(validated.workspaceId)) {
         try {
@@ -1091,6 +1112,12 @@ export function registerControlPlaneMethods(
       budgetTokens: validated.budgetTokens,
       budgetCost: validated.budgetCost,
     });
+
+    if (shouldGenerateTaskTitle(validated.title, validated.prompt, validated.generateTitle)) {
+      void generateAndApplyTaskTitle(task, validated.prompt, taskRepo, (taskId, title) =>
+        agentDaemon.emitTaskTitleUpdated(taskId, title),
+      );
+    }
 
     const initialUpdates: Any = {};
     if (validated.assignedAgentRoleId) {

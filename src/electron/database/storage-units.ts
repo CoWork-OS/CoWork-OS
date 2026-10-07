@@ -1030,6 +1030,11 @@ export const STORAGE_UNITS = {
   task_update: storeUnit((db: Database.Database) => new TaskStore(db), "update", {
     readonly: false,
   }),
+  task_updateTitleIfUnchanged: storeUnit(
+    (db: Database.Database) => new TaskStore(db),
+    "updateTitleIfUnchanged",
+    { readonly: false },
+  ),
   task_togglePin: storeUnit((db: Database.Database) => new TaskStore(db), "togglePin", {
     readonly: false,
   }),

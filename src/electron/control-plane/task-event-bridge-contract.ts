@@ -15,6 +15,7 @@ export const TASK_EVENT_BRIDGE_ALLOWLIST = [
   "timeline_command_output",
   "timeline_error",
   "task_impact_updated",
+  "task_title_updated",
 ] as const;
 
 export type TaskEventBridgeAllowlistEvent = (typeof TASK_EVENT_BRIDGE_ALLOWLIST)[number];

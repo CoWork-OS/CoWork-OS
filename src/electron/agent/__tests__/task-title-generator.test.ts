@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LLMProviderFactory } from "../llm/provider-factory";
 import {
   generateTaskTitle,
+  generateAndApplyTaskTitle,
   generateTaskTitleFromProvider,
   MAX_GENERATED_TASK_TITLE_LENGTH,
   sanitizeGeneratedTaskTitle,
+  shouldGenerateTaskTitle,
 } from "../task-title-generator";
+import type { Task } from "../../../shared/types";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -104,5 +107,91 @@ describe("generateTaskTitle", () => {
       { allowProviderOverride: true, allowModelOverride: true },
     );
     expect(createProvider).toHaveBeenCalledWith({ type: "openai", model: "gpt-selected" });
+  });
+});
+
+describe("task title persistence", () => {
+  function fixture(text: string | Error = "Add two numbers") {
+    vi.spyOn(LLMProviderFactory, "resolveTaskModelSelection").mockReturnValue({
+      providerType: "openai",
+      modelId: "selected-model",
+      modelKey: "selected-model",
+      llmProfileUsed: "cheap",
+      resolvedModelKey: "selected-model",
+      modelSource: "provider_default",
+      warnings: [],
+    });
+    const createMessage = vi.fn(async () => {
+      if (text instanceof Error) throw text;
+      return { content: [{ type: "text", text }], stopReason: "end_turn" };
+    });
+    vi.spyOn(LLMProviderFactory, "createProvider").mockReturnValue({ createMessage } as Any);
+    const task = {
+      id: "task-1",
+      title: "what is 2+2? answer in one word",
+      prompt: "what is 2+2? answer in one word",
+    } as Task;
+    const repository = {
+      updateTitleIfUnchanged: vi.fn().mockResolvedValue(true),
+      findById: vi.fn().mockResolvedValue({ ...task, title: "Add two numbers" }),
+    };
+    const onTitleUpdated = vi.fn();
+    return { task, repository, onTitleUpdated, createMessage };
+  }
+
+  it("generates prompt placeholders, respects explicit opt-outs and keeps custom names", () => {
+    expect(shouldGenerateTaskTitle("what is 2+2?", "what is 2+2?")).toBe(true);
+    expect(shouldGenerateTaskTitle("Math check", "what is 2+2?")).toBe(false);
+    expect(shouldGenerateTaskTitle("Math check", "what is 2+2?", true)).toBe(true);
+    expect(shouldGenerateTaskTitle("what is 2+2?", "what is 2+2?", false)).toBe(false);
+    expect(shouldGenerateTaskTitle("", "")).toBe(false);
+  });
+
+  it("persists and broadcasts the generated title using the original placeholder guard", async () => {
+    const { task, repository, onTitleUpdated } = fixture();
+    await generateAndApplyTaskTitle(task, task.prompt, repository, onTitleUpdated);
+    expect(repository.updateTitleIfUnchanged).toHaveBeenCalledWith(
+      task.id,
+      task.title,
+      "Add two numbers",
+    );
+    expect(onTitleUpdated).toHaveBeenCalledWith(task.id, "Add two numbers");
+  });
+
+  it("does not broadcast when a user renamed or deleted the task during generation", async () => {
+    const { task, repository, onTitleUpdated } = fixture();
+    repository.updateTitleIfUnchanged.mockResolvedValue(false);
+    await generateAndApplyTaskTitle(task, task.prompt, repository, onTitleUpdated);
+    expect(repository.findById).not.toHaveBeenCalled();
+    expect(onTitleUpdated).not.toHaveBeenCalled();
+  });
+
+  it("does not broadcast a stale generated name after another rename", async () => {
+    const { task, repository, onTitleUpdated } = fixture();
+    repository.findById.mockResolvedValue({ ...task, title: "My math notes" });
+    await generateAndApplyTaskTitle(task, task.prompt, repository, onTitleUpdated);
+    expect(onTitleUpdated).not.toHaveBeenCalled();
+  });
+
+  it.each(["", new Error("Provider unavailable")])(
+    "retains the placeholder and logs unusable provider output: %s",
+    async (output) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { task, repository, onTitleUpdated } = fixture(output);
+      await expect(
+        generateAndApplyTaskTitle(task, task.prompt, repository, onTitleUpdated),
+      ).resolves.toBeUndefined();
+      expect(repository.updateTitleIfUnchanged).not.toHaveBeenCalled();
+      expect(onTitleUpdated).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalled();
+    },
+  );
+
+  it("keeps persistent bot conversation names", async () => {
+    const { task, repository, onTitleUpdated, createMessage } = fixture();
+    await generateAndApplyTaskTitle(task, task.prompt, repository, onTitleUpdated, {
+      botConversation: true,
+    });
+    expect(createMessage).not.toHaveBeenCalled();
   });
 });

@@ -649,6 +649,7 @@ async function runTask(ctx: CommandContext): Promise<number> {
     const params: Record<string, unknown> = {
       workspaceId,
       title: getFlag(ctx.parsed, "--title") || buildTaskTitle(prompt),
+      generateTitle: !getFlag(ctx.parsed, "--title"),
       prompt,
       ...(requestedAccessProfileId ? { accessProfileId: requestedAccessProfileId } : {}),
       ...(getFlag(ctx.parsed, "--permission-mode")

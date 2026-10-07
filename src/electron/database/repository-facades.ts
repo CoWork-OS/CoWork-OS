@@ -657,6 +657,7 @@ export const WorkSessionProtocolReader = repositoryFacade<
 const TASK_METHODS = [
   "create",
   "update",
+  "updateTitleIfUnchanged",
   "togglePin",
   "touch",
   "findById",

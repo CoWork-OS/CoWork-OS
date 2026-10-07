@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as v8 from "node:v8";
 import { Worker, type ResourceLimits } from "node:worker_threads";
 import PDFDocument from "pdfkit";
 import { afterEach, describe, expect, it } from "vitest";
@@ -116,6 +117,44 @@ describe("parsePdfBufferBounded", () => {
     await expect(parse).rejects.toBeInstanceOf(PdfParseLimitError);
     await expect(parse).rejects.toThrow("PDF parsing exceeded its 16 MB memory limit");
   }, 30_000);
+
+  // About 400 MB held, then idle: past a 16 MB limit plus its young generation, but never out of
+  // memory on a 4 GB heap.
+  const holdsFourHundredMb =
+    "const keep = []; for (let i = 0; i < 512; i++) keep.push(new Array(1e5).fill(i));" +
+    " setInterval(() => keep.length, 1000);";
+
+  // --max-old-space-size (NODE_OPTIONS, Electron's --js-flags) is process-wide and overrides
+  // resourceLimits in every worker isolate; set at runtime, it applies to workers started after.
+  it("holds the heap limit when a process-wide --max-old-space-size overrides it", async () => {
+    v8.setFlagsFromString("--max-old-space-size=4096");
+    try {
+      const parse = new FakeWorkerParser(holdsFourHundredMb, {
+        maxHeapMb: 16,
+        deadlineMs: 5_000,
+      }).parse(new Uint8Array([1]));
+
+      await expect(parse).rejects.toThrow("PDF parsing exceeded its 16 MB memory limit");
+    } finally {
+      v8.setFlagsFromString("--max-old-space-size=0");
+    }
+  });
+
+  it("stops a worker whose heap outgrows the limit however its isolate was configured", async () => {
+    class OversizedHeapParser extends FakeWorkerParser {
+      protected override createWorker(data: Uint8Array, resourceLimits: ResourceLimits): Worker {
+        return super.createWorker(data, { ...resourceLimits, maxOldGenerationSizeMb: 4096 });
+      }
+    }
+
+    const parse = new OversizedHeapParser(holdsFourHundredMb, {
+      maxHeapMb: 16,
+      deadlineMs: 5_000,
+    }).parse(new Uint8Array([1]));
+
+    await expect(parse).rejects.toBeInstanceOf(PdfParseLimitError);
+    await expect(parse).rejects.toThrow("PDF parsing exceeded its 16 MB memory limit");
+  });
 
   it("caps text the worker returns past the limit", async () => {
     const source = `require("node:worker_threads").parentPort.postMessage({

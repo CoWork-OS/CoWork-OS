@@ -7,16 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-
-- **PDF worker memory limit holds under heap flags**: `--max-old-space-size` (in `NODE_OPTIONS`, on the command line or in Electron's `--js-flags`) is process-wide and overrode the PDF workers' memory limit, letting a hostile PDF use gigabytes before failing. The app now also watches each PDF worker's heap and stops it at its limit whatever flags the process runs with.
-
 ## [0.5.60] - 2026-10-07
 
 See [Release Notes 0.5.60](release-notes-0.5.60.md) for the upgrade notes and a summary. Versions 0.5.55 to 0.5.59 were skipped.
 
 ### Added
 
+- **Interactive answer components**: replies can include native, interactive components between the prose: photo collages, menu rows, tiles, label/value lists, metrics, tables, charts, checklists, and steppers, sliders, selects and toggles that drive live calculations. Values you change are saved per task and given to the model in your next message. Photos are looked up by description (a configured SearXNG first, then Openverse and Wikimedia Commons; a paid search provider only as a last resort), through the network policy, and cached on disk. Channels, the CLI, notifications, search, Copy and Speak get a plain-text version. On by default; set `COWORK_ANSWER_SURFACES=0` to turn it off.
 - **New sidebar**: an icon rail (Home, Inbox, Agents, Automations, Library, and More, whose items can be pinned) with Cmd/Ctrl+number shortcuts and reordering by drag or Alt+Up/Down, plus a session panel with always-visible search (Cmd/Ctrl+K), **Running** and **Needs you** filters, collapsible day groups and a separate section for automated sessions. Settings opens inside the app shell, and the open session's title and breadcrumb appear in the navbar with back/forward history.
 - **Sandboxed web previews**: HTML artifacts are served from an isolated `cowork-preview://` origin with a strict content security policy, and every dependency is checked against the access profile. The new `preview_web_page` tool renders a workspace page offline, runs clicks and typing, and returns a screenshot, visible text and console errors. The Build view adds attachments, a persistent draft, recent builds, an auto-opening live preview and a per-file changes panel.
 - **Redesigned task feed**: steps stay visible during and after a run, grouped by turn, with one-line activity rows, file rows with created/edited line counts and the agent's progress commentary next to tool calls. Selecting text in a message opens a reply popover, and a model source picker replaces the advanced model list. API, daemon and CLI tasks get generated session titles; a title you set is never overwritten.
@@ -95,6 +92,9 @@ See [Release Notes 0.5.60](release-notes-0.5.60.md) for the upgrade notes and a 
 
 ### Fixed
 
+- **Collaborative team runs**: the synthesis step of a collaborative team run is dispatched again (runs had been closing with "Synthesis timed out" after their lanes finished), and read-only research lanes no longer loop on steps that seemed to require writing.
+- **Markdown rendering**: numbered and bulleted lists in replies are no longer split at a number or bullet at the end of a line, and list, heading, bold and `#` normalization no longer changes text inside fenced code blocks.
+- **Cancelling web fetches**: cancelling an unread response body no longer throws an uncaught "Controller is already closed" error; a connection dropped mid-body is reported as such instead of as a timeout.
 - **Lost edits**: two concurrent `edit_file` calls could silently lose one edit; exact replacements are now rebased, conflicts are reported, and before/after copies are kept for failed or interrupted writes.
 - **Task outcomes**: edit steps on explicitly named files no longer fail by requiring `write_file`; a completed task no longer marks outcomes satisfied when a declared output is missing; a crash during graph dispatch can no longer dispatch a child twice; a follow-up sent as a turn ends is processed instead of waiting for a restart.
 - **Bot delivery**: bot replies and handoffs wait for durable delivery, keep their order, survive restarts and are no longer timed out while queued; creating a bot with a previously used name gives it a numbered handle; opening a bot from a temporary workspace no longer creates empty conversations.
@@ -126,6 +126,10 @@ See [Release Notes 0.5.60](release-notes-0.5.60.md) for the upgrade notes and a 
 ### Security
 
 - **Signal channel command injection**: signal-cli and ngrok commands no longer run through a shell, so message text and other arguments can't be interpreted as shell commands. On Windows, the `signal-cli.bat` launcher runs with quoted arguments and the message is passed on stdin; arguments `cmd.exe` could interpret are rejected. Reported by Tal de Vries (@tal2k9dev-star). Advisory: GHSA-ggwv-w8g3-mc75.
+- **Remote ACP agent credentials**: credentials of remote ACP agents (`authorizationHeader`, `bearerToken`) are kept in encrypted secure settings instead of the agent card, and agent cards returned or broadcast over the Control Plane no longer include them. Registration fails instead of storing a credential in plain text. Existing agents are migrated the first time CoWork loads them (with the Control Plane on, or when a task uses remote agents); if a credential can't be stored, that agent is not called until it can. Without an OS keychain, the desktop app and `coworkd` encrypt them with an app-level key kept in the profile; the Node-only daemon does not run ACP.
+- **Remote ACP dispatch admission**: work sent to a remote ACP agent now passes the tool policy, workspace and profile network policy and approval like local work; a denied or unapproved send fails with a visible reason before anything leaves the machine, prompts are redacted for secrets, and requests are DNS-pinned without following redirects.
+- **Connector blocklist enforced**: the `connectors.blocked` admin policy was editable but not applied. Blocked MCP connectors are no longer started, tested, enabled, installed or called (including connections opened before the block, and requests waiting for approval), their tools are hidden from the agent, and changing the policy disconnects or reconnects servers immediately.
+- **PDF worker memory limit holds under heap flags**: `--max-old-space-size` (in `NODE_OPTIONS`, on the command line or in Electron's `--js-flags`) is process-wide and overrode the PDF workers' memory limit, letting a hostile PDF use gigabytes before failing. The app now also watches each PDF worker's heap and stops it at its limit whatever flags the process runs with.
 - **ACP agents on Windows**: npm `.cmd` shims are resolved to `node.exe` and run without a shell, so prompt text is not re-parsed.
 - **Researcher authority**: researcher child tasks can no longer inherit bypass, shell or ACP authority from a parent, a caller override, a saved task or a recovered queued message.
 - **Keychain identity and credentials**: a known value is checked against the OS keychain key at startup, and secure settings are not saved under a different identity; protected-credential requests without a task ID are accepted only from the local owner.

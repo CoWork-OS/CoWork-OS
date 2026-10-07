@@ -21,6 +21,16 @@ function deferred<T>() {
 }
 
 describe("bot work load lifecycle", () => {
+  it("retries an initial failure through refresh", async () => {
+    const query = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(page());
+    const publish = vi.fn();
+    const loader = new BotWorkLoader(query, scope, publish);
+    await loader.load();
+    expect(publish.mock.lastCall?.[0]).toMatchObject({ page: null, error: "offline" });
+    await loader.refresh();
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(publish.mock.lastCall?.[0]).toMatchObject({ page: page(), error: null, loading: false });
+  });
   it("ignores old bot loads after disposal and overlapping refreshes", async () => {
     const first = deferred<BotWorkPage>();
     const second = deferred<BotWorkPage>();
@@ -84,7 +94,9 @@ describe("bot work load lifecycle", () => {
     publish.mockClear();
 
     await loader.refresh();
-    expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 2, cursor: undefined }));
+    expect(query).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 2, cursor: undefined }),
+    );
     // No intermediate empty/loading state is published, only the fresh page.
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish.mock.calls[0][0].page.items.map((i: { id: string }) => i.id)).toEqual([

@@ -52,7 +52,11 @@ export class BotWorkLoader {
    * loaded (so "Load more" pages survive), keeping the current page if the read fails.
    */
   async refresh(): Promise<void> {
-    if (this.disposed || this.state.loading || !this.state.page) return;
+    if (this.disposed || this.state.loading) return;
+    if (!this.state.page) {
+      await this.load();
+      return;
+    }
     const generation = ++this.generation;
     const shown = this.state.page.items.length;
     try {

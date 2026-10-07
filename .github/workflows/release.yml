@@ -163,6 +163,15 @@ jobs:
           npx playwright install chromium
           npm test
 
+      - name: Build application
+        env:
+          # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
+          # Build steps only: under this flag the tests' 16 MB PDF worker heap limit was not
+          # enforced on the runner, so the heap-exhaustion test never finished.
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run build
+
+      # After the build: the installed-package check needs the browser application in dist/.
       - name: Validate npm tarball first-install flow
         if: runner.os != 'Windows'
         env:
@@ -171,14 +180,6 @@ jobs:
           # enforced on the runner, so the heap-exhaustion test never finished.
           NODE_OPTIONS: --max-old-space-size=4096
         run: node scripts/release-smoke-install.mjs
-
-      - name: Build application
-        env:
-          # The Electron TypeScript build exceeds Node's default heap on the 7 GB macOS runners.
-          # Build steps only: under this flag the tests' 16 MB PDF worker heap limit was not
-          # enforced on the runner, so the heap-exhaustion test never finished.
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run build
 
       - name: Generate release notes from changelog
         shell: bash

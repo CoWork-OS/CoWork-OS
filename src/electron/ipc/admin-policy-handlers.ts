@@ -54,14 +54,24 @@ function reconcilePluginPackPolicies(): Promise<void> {
   return policyReconcileQueue;
 }
 
+/** Disconnect newly blocked MCP connectors and restore ones whose block was lifted. */
+async function reconcileConnectorPolicies(): Promise<void> {
+  const { MCPClientManager } = await import("../mcp/client/MCPClientManager");
+  await MCPClientManager.getInstance().reconcileConnectorPolicy();
+}
+
 /**
  * Set up Admin Policy IPC handlers
  */
 export function setupAdminPolicyHandlers(): void {
   if (!policyWatcherCleanup) {
+    // Fires on savePolicies() and on manual edits to policies.json.
     policyWatcherCleanup = watchPolicies(() => {
       void reconcilePluginPackPolicies().catch((error) => {
         console.warn("[AdminPolicies] Failed to reconcile plugin pack policy file change:", error);
+      });
+      void reconcileConnectorPolicies().catch((error) => {
+        console.warn("[AdminPolicies] Failed to reconcile connector policy change:", error);
       });
     });
   }

@@ -223,6 +223,8 @@ export interface MCPServerStatus {
   serverInfo?: MCPServerInfo;
   lastPing?: number;
   uptime?: number; // Time since connected (ms)
+  /** Admin policy `connectors.blocked` blocks this server; `error` carries the reason. */
+  blockedByPolicy?: boolean;
 }
 
 // MCP Settings

@@ -144,6 +144,23 @@ describe("PermissionEngine", () => {
       ).toBe("deny");
     });
 
+    it("denies admin-blocked connectors in Full access even with an allow rule", () => {
+      const blockedReason = 'Connector "Dayanak Lens" is blocked by your administrator.';
+      const result = evaluate({
+        ...mcpRequest,
+        rules: [
+          {
+            source: "workspace_db",
+            effect: "allow",
+            scope: { kind: "mcp_server", serverName: "Dayanak Lens" },
+          } as PermissionRule,
+        ],
+        mcpToolPolicy: { ...mcpToolPolicy, blockedReason },
+      });
+      expect(result.decision).toBe("deny");
+      expect(result.reason.summary).toBe(blockedReason);
+    });
+
     it("does not allow unknown MCP names without configured authority", () => {
       expect(evaluate({ ...mcpRequest, mcpToolPolicy: undefined }).decision).toBe("deny");
     });

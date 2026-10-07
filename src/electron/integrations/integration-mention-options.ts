@@ -443,6 +443,8 @@ function buildMcpOptions(mcp?: IntegrationMentionOptionsState["mcp"]): Integrati
       : false;
     if (!enabled && !connected) continue;
     if (capabilityId ? !configured && !connected : !connected) continue;
+    // Admin policy connectors.blocked: its tools are refused, so do not offer it.
+    if (status?.blockedByPolicy) continue;
 
     const rawTools = status?.tools?.length ? status.tools : config?.tools || [];
     const exactTools = toolNamesWithPrefix(prefix, rawTools);

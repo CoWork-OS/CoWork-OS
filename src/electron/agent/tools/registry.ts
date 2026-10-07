@@ -95,6 +95,13 @@ import { MCPRegistryManager } from "../../mcp/registry/MCPRegistryManager";
 import type { MCPServerConfig, MCPTool, MCPToolProperty } from "../../mcp/types";
 import { getConfiguredMcpToolPolicy, resolveMcpToolPolicy } from "../../mcp/tool-policy";
 import {
+  CONNECTOR_BLOCKED_ERROR_CODE,
+  connectorBlockedMessage,
+  findBlockedConnectorId,
+  isConnectorBlockedError,
+} from "../../mcp/connector-policy";
+import { isConnectorBlocked, loadPolicies } from "../../admin/policies";
+import {
   ConnectorCapability,
   IntegrationAuthMethod,
   IntegrationInputHint,
@@ -863,6 +870,7 @@ export class ToolRegistry {
             .sort((a, b) => a.id.localeCompare(b.id)),
           managerVersion: mcpManagerVersion,
           toolNames: mcpToolNames,
+          blockedConnectors: loadPolicies().connectors.blocked,
         },
       }),
     );
@@ -3580,6 +3588,7 @@ export class ToolRegistry {
       const settings = MCPSettingsManager.loadSettings();
       const prefix = settings.toolNamePrefix || "mcp_";
       const serversById = new Map((settings.servers || []).map((server) => [server.id, server]));
+      const policies = loadPolicies();
 
       const definitions = mcpTools.flatMap((tool: MCPTool) => {
         const serverId =
@@ -3588,6 +3597,8 @@ export class ToolRegistry {
             : null;
         const server = serverId ? serversById.get(serverId) : undefined;
         if (server?.enabled === false) return [];
+        // Admin-blocked connectors are not offered to the model; dispatch refuses them too.
+        if (server && findBlockedConnectorId(server, policies)) return [];
         const serverName = server?.name;
         const policy = server ? resolveMcpToolPolicy(tool, server) : undefined;
         const readOnly = policy?.readOnly === true;
@@ -5399,6 +5410,15 @@ ${skillDescriptions}`;
     if (!mcpManager.hasTool(mcpToolName)) {
       return null;
     }
+    const routedServerId = mcpManager.getServerIdForTool(mcpToolName);
+    const routedServer = settings.servers?.find((server) => server.id === routedServerId);
+    const blockedConnectorId = routedServer ? findBlockedConnectorId(routedServer) : null;
+    if (routedServer && blockedConnectorId) {
+      return this.connectorBlockedResult(
+        mcpToolName,
+        connectorBlockedMessage(routedServer, blockedConnectorId),
+      );
+    }
     const configuredPolicy = getConfiguredMcpToolPolicy(name);
     if (configuredPolicy?.enabled === false) {
       throw new Error(`MCP server for "${name}" is disabled`);
@@ -5592,6 +5612,17 @@ ${skillDescriptions}`;
       return await this.formatMCPResult(result, mcpToolName, input);
     } catch (error: Any) {
       const message = String(error?.message || "");
+      if (isConnectorBlockedError(error)) {
+        return this.connectorBlockedResult(mcpToolName, message);
+      }
+      // A block that lands mid-call can surface as an authority-changed error first.
+      const blockedNow = routedServer ? findBlockedConnectorId(routedServer) : null;
+      if (routedServer && blockedNow) {
+        return this.connectorBlockedResult(
+          mcpToolName,
+          connectorBlockedMessage(routedServer, blockedNow),
+        );
+      }
       if (/access denied\s*-\s*path outside allowed directories/i.test(message)) {
         return {
           success: false,
@@ -5605,6 +5636,18 @@ ${skillDescriptions}`;
       // Tool was registered but execution failed - propagate the error with context
       throw new Error(`MCP tool '${mcpToolName}' failed: ${message}`);
     }
+  }
+
+  /** Policy denial for a tool whose MCP connector is blocked by admin policy. */
+  private connectorBlockedResult(mcpToolName: string, message: string) {
+    return {
+      success: false,
+      error: `${message} Tool '${mcpToolName}' was not run.`,
+      code: CONNECTOR_BLOCKED_ERROR_CODE,
+      policyDenied: true,
+      source: "mcp",
+      tool: mcpToolName,
+    };
   }
 
   /**
@@ -9658,6 +9701,26 @@ ${skillDescriptions}`;
           'Integration state changed since inspect. Re-run integration_setup with action="inspect" and retry configure using the latest plan_hash.',
         expected_plan_hash: expectedPlanHash,
         current_plan_hash: planHash,
+      };
+    }
+
+    // Admin policy connectors.blocked: do not install, authorize, or enable a blocked provider.
+    const blockedProviderId = isConnectorBlocked(provider)
+      ? provider
+      : findBlockedConnectorId({
+          id: server?.id ?? "",
+          name: server?.name ?? capability.name,
+          registryId: server?.registryId ?? capability.registryEntryId,
+          args: server?.args,
+        });
+    if (blockedProviderId) {
+      return {
+        success: false,
+        action,
+        provider,
+        policyDenied: true,
+        code: CONNECTOR_BLOCKED_ERROR_CODE,
+        message: connectorBlockedMessage({ name: capability.name }, blockedProviderId),
       };
     }
 

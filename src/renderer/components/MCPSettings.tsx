@@ -62,6 +62,8 @@ interface MCPServerStatus {
   error?: string;
   tools: MCPTool[];
   lastPing?: number;
+  /** Admin policy blocks this connector; `error` carries the reason. */
+  blockedByPolicy?: boolean;
 }
 
 interface MCPSettingsData {
@@ -918,13 +920,23 @@ export function MCPSettings({
                             )}
                             <span
                               className="mcp-server-status"
-                              style={{ color: getStatusColor(serverStatus.status) }}
+                              style={{
+                                color: getStatusColor(
+                                  serverStatus.blockedByPolicy ? "error" : serverStatus.status,
+                                ),
+                              }}
                             >
                               <span
                                 className="mcp-status-dot"
-                                style={{ backgroundColor: getStatusColor(serverStatus.status) }}
+                                style={{
+                                  backgroundColor: getStatusColor(
+                                    serverStatus.blockedByPolicy ? "error" : serverStatus.status,
+                                  ),
+                                }}
                               />
-                              {getStatusText(serverStatus.status)}
+                              {serverStatus.blockedByPolicy
+                                ? "Blocked by administrator"
+                                : getStatusText(serverStatus.status)}
                             </span>
                           </div>
                           {config?.command && (
@@ -943,6 +955,7 @@ export function MCPSettings({
                             <input
                               type="checkbox"
                               checked={config?.enabled ?? false}
+                              disabled={serverStatus.blockedByPolicy === true && !config?.enabled}
                               onChange={(e) =>
                                 handleToggleEnabled(serverStatus.id, e.target.checked)
                               }
@@ -993,7 +1006,11 @@ export function MCPSettings({
                           <button
                             className="button-small button-primary"
                             onClick={() => handleConnectServer(serverStatus.id)}
-                            disabled={isConnecting || !config?.enabled}
+                            disabled={
+                              isConnecting ||
+                              !config?.enabled ||
+                              serverStatus.blockedByPolicy === true
+                            }
                           >
                             {isConnecting ? "Connecting..." : "Connect"}
                           </button>

@@ -20,6 +20,7 @@ import {
   MCPUpdateInfo,
 } from "../types";
 import { MCPSettingsManager } from "../settings";
+import { assertMcpServerNotBlocked } from "../connector-policy";
 
 // Cache duration in milliseconds (15 minutes)
 const REGISTRY_CACHE_DURATION = 15 * 60 * 1000;
@@ -3196,6 +3197,14 @@ export class MCPRegistryManager {
     if (existingIndex !== -1) {
       throw new Error(`Server ${entry.name} is already installed`);
     }
+
+    // Admin policy connectors.blocked: refuse before any launch prompt or package fetch.
+    assertMcpServerNotBlocked({
+      id: "",
+      name: entry.name,
+      registryId: entry.id,
+      args: entry.defaultArgs,
+    });
 
     // Validate manual entries (local connectors)
     validateManualEntry(entry);

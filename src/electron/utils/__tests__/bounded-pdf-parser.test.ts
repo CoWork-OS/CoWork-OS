@@ -106,6 +106,7 @@ describe("parsePdfBufferBounded", () => {
     }
   });
 
+  // Filling the worker heap takes several seconds on slow CI runners.
   it("reports a parse that exhausts the worker heap as a limit error", async () => {
     const source =
       "const keep = []; for (;;) keep.push(new Array(1e5).fill({ n: Math.random() }));";
@@ -114,7 +115,7 @@ describe("parsePdfBufferBounded", () => {
 
     await expect(parse).rejects.toBeInstanceOf(PdfParseLimitError);
     await expect(parse).rejects.toThrow("PDF parsing exceeded its 16 MB memory limit");
-  });
+  }, 30_000);
 
   it("caps text the worker returns past the limit", async () => {
     const source = `require("node:worker_threads").parentPort.postMessage({

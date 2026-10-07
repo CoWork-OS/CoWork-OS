@@ -345,7 +345,10 @@ export class MemoryTools {
               description:
                 "Key of a single-valued fact (e.g. preferred_name, timezone): a new value replaces the old.",
             },
-            pin: { type: "boolean", description: "Keep it in every prompt; only when the user asks." },
+            pin: {
+              type: "boolean",
+              description: "Keep it in every prompt; only when the user asks.",
+            },
             user_asked: {
               type: "boolean",
               description: "true only if the user explicitly asked you to remember this.",
@@ -616,7 +619,11 @@ export class MemoryTools {
       // The memory repo (docs/memory-repo-phase1-design.md), when it runs, holds the user's
       // and workspace facts; contact, task and private facts stay in memory_items.
       // Commitments stay in memory_items: they carry due dates the briefing and reminders use.
-      if (!thirdPartySender && (scope === "global" || scope === "workspace") && itemKind !== "commitment") {
+      if (
+        !thirdPartySender &&
+        (scope === "global" || scope === "workspace") &&
+        itemKind !== "commitment"
+      ) {
         const repoResult = await this.rememberInRepo({
           content,
           kind: itemKind,
@@ -705,8 +712,20 @@ export class MemoryTools {
         PersonalityManager.setUserName(name);
         const named = await rememberPreferredNameInFolder(name, { taskId: this.taskId });
         if (named?.status === "written") {
-          this.daemon.logEvent(this.taskId, "tool_result", { tool, success: true, memoryId: named.ref });
-          return { success: true, id: named.ref, action: named.action, kind: input.kind, scope: "global", source: input.source, file: named.path };
+          this.daemon.logEvent(this.taskId, "tool_result", {
+            tool,
+            success: true,
+            memoryId: named.ref,
+          });
+          return {
+            success: true,
+            id: named.ref,
+            action: named.action,
+            kind: input.kind,
+            scope: "global",
+            source: input.source,
+            file: named.path,
+          };
         }
       }
     }
@@ -957,7 +976,8 @@ export class MemoryTools {
 
     try {
       const repoRef = parseMemoryRepoRef(id);
-      if (repoRef) return await this.forgetRepoEntry(repoRef.path, repoRef.line, input?.reason, fail, done);
+      if (repoRef)
+        return await this.forgetRepoEntry(repoRef.path, repoRef.line, input?.reason, fail, done);
       if (id) {
         if (/^team:/i.test(id)) return fail(TEAM_MEMORY_READ_ONLY_ERROR);
         const parsed = parseRecallRef(id);
@@ -1038,7 +1058,13 @@ export class MemoryTools {
       }
       const repoTarget = parseMemoryRepoRef(candidates[0].ref);
       if (repoTarget) {
-        return await this.forgetRepoEntry(repoTarget.path, repoTarget.line, input?.reason, fail, done);
+        return await this.forgetRepoEntry(
+          repoTarget.path,
+          repoTarget.line,
+          input?.reason,
+          fail,
+          done,
+        );
       }
       const target = parseRecallRef(candidates[0].ref);
       if (target?.lane === "memory") {
@@ -1088,8 +1114,12 @@ export class MemoryTools {
       source: entry.by === "user" ? "user" : "agent",
       selfCreated: entry.by === "agent" && entry.metadata.source === taskSourceLink(this.taskId),
     };
-    if (!(await this.confirmForget(target, reason))) return fail(FORGET_DENIED_ERROR, { denied: true });
-    const removed = await repo.forget(relPath, line, { expectHash: entry.hash, taskId: this.taskId });
+    if (!(await this.confirmForget(target, reason)))
+      return fail(FORGET_DENIED_ERROR, { denied: true });
+    const removed = await repo.forget(relPath, line, {
+      expectHash: entry.hash,
+      taskId: this.taskId,
+    });
     return removed.removed ? done(ref) : fail(removed.error ?? `Could not forget "${ref}".`);
   }
 

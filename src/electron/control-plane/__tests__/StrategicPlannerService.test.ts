@@ -312,8 +312,7 @@ describeWithSqlite("StrategicPlannerService", () => {
       trigger: string,
       currentConfig = config,
       occurrence?: string,
-    ) =>
-      (service as Any).dispatchIssue(company, currentConfig, issue, agent, trigger, occurrence);
+    ) => (service as Any).dispatchIssue(company, currentConfig, issue, agent, trigger, occurrence);
     expect(await dispatch(planner, "schedule")).toBeTruthy();
     await core.releaseIssue({ issueId: issue.id, status: "completed" });
     await core.updateIssue(issue.id, { status: "backlog" });

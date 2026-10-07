@@ -14,7 +14,6 @@ Phase 3 item 2) is skipped by decision. Recall stays lexical: one Unicode FTS qu
 per lane and weighted reciprocal-rank fusion (§4b). The memory evals (`npm run
 qa:memory-evals`) are the gate for recall quality.
 
-This document refines §8 of the [memory system audit](memory-system-audit-2026-10-03.md).
 Engineers building recall, prompt assembly, the tool surface or the Memory Hub should treat
 this file as the contract. File references are relative to `src/electron/memory/` unless noted.
 
@@ -530,6 +529,20 @@ mode, aborting and retrying on the next start otherwise), then deletes the `user
 self-improvement `improvement_*` tables once Workflow Intelligence has copied them, and the
 `transcript_spans` tables once the conversation index migration has finished).
 `adaptive-style-engine` (engine bookkeeping) and `awareness-state` (belief signals) are kept.
+
+**Re-run after a downgrade.** An older release (0.5.54) opened on an upgraded profile recreates
+`curated_memory_entries` and the `user-profile` / `relationship-memory` blobs and stores new
+facts there. On the next start, before the lane migration, `rearmLegacyMemoryRetirement`
+(unit `legacyRetirement_rearm`) checks in one transaction whether the retirement marker exists
+and the curated table has rows or either blob exists; if so it deletes the lane migration and
+retirement markers and records `maintenance_state.legacy_memory_rerun_v1` (counts only). The
+lane migration then runs again for the curated, profile and relationship lanes only (source
+refs keep already-migrated records from being copied twice), and the retirement runs again
+with its own claim, a fresh backup and the same verification. The memory folder export and
+fact retirement (`runMemoryRepoExportChain`) treat their `.git` markers as absent when they are
+older than the request, export and retire only rows of those three lanes, and then consume the
+request. While the folder is off the request stays pending, so the export runs when it is
+turned on. With no new legacy data nothing is re-armed.
 
 ### Generated kit views (retired)
 

@@ -91,7 +91,11 @@ describeWithSqlite("CoreMemoryDistiller", () => {
     await createDistiller(
       [
         candidate({ id: "c-pref" }),
-        candidate({ id: "c-rule", candidateType: "constraint", summary: "Never deploy on Fridays" }),
+        candidate({
+          id: "c-rule",
+          candidateType: "constraint",
+          summary: "Never deploy on Fridays",
+        }),
         candidate({
           id: "c-global",
           candidateType: "correction",

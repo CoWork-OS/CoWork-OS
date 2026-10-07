@@ -27,7 +27,7 @@ describe("Sidebar creation controls", () => {
     expect(markup).toContain('aria-label="Organize projects"');
     expect(markup).not.toContain('title="New project"');
     expect(markup).not.toContain('aria-label="New project"');
-    expect(markup).not.toContain('<span>New project</span>');
+    expect(markup).not.toContain("<span>New project</span>");
   });
 
   it("wires New session to session creation, not project creation", () => {
@@ -46,7 +46,7 @@ describe("Sidebar creation controls", () => {
       /<button\s+type="button"\s+className="sidebar-workspace-menu-option"\s+role="menuitem"\s+data-menu-option="add-folder"[\s\S]*?<\/button>/,
     )?.[0];
     expect(projectItem).toBeDefined();
-    expect(projectItem).toContain('<span>New project</span>');
+    expect(projectItem).toContain("<span>New project</span>");
     expect(projectItem).toContain('disabled={!hasHostMethod("createWorkspace")}');
     expect(projectItem).toContain("void handleAddWorkspace();");
     expect(projectItem).not.toContain("handleNewTask");

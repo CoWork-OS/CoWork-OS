@@ -149,7 +149,9 @@ export const WebAccessSettingsPanel: React.FC = () => {
                 >
                   {accessUrl}
                 </code>
-                {status?.running && <span style={{ color: "var(--color-success)", fontSize: 11 }}>Running</span>}
+                {status?.running && (
+                  <span style={{ color: "var(--color-success)", fontSize: 11 }}>Running</span>
+                )}
               </div>
             </div>
 

@@ -555,7 +555,9 @@ export function nextOpenAIPromptCacheTier(
 
 /** Redact and truncate a provider rejection message so it is safe to log. */
 export function summarizePromptCacheRejection(message: unknown, maxLength = 200): string {
-  const collapsed = redactSecrets(String(message || "")).text.replace(/\s+/g, " ").trim();
+  const collapsed = redactSecrets(String(message || ""))
+    .text.replace(/\s+/g, " ")
+    .trim();
   return collapsed.length > maxLength ? `${collapsed.slice(0, maxLength)}...` : collapsed;
 }
 

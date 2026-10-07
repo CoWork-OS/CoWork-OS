@@ -149,9 +149,6 @@ success or model capability. For a real stored task corpus, use
 `COWORK_DB_PATH`. Built-in fixture passes cannot make a missing or skipped selected
 corpus green. Use `qa:eval:run -- --fixtures-only` when only fixtures are intended.
 
-See [the September 2026 harness audit](harness-audit-2026-09-14.md) for reproduced
-failure cases, approach comparisons, and validation limits.
-
 ## Eval Corpus and Replay Workflows
 
 ### Corpus Build

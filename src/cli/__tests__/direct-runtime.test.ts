@@ -113,8 +113,7 @@ describe("buildDirectRuntimeLaunch", () => {
       ).env.COWORK_USER_DATA_DIR,
     ).toBe("/custom");
     expect(
-      buildDirectRuntimeLaunch(runtime, [], {}, "darwin", "/caller", null).env
-        .COWORK_USER_DATA_DIR,
+      buildDirectRuntimeLaunch(runtime, [], {}, "darwin", "/caller", null).env.COWORK_USER_DATA_DIR,
     ).toBeUndefined();
   });
 
@@ -179,13 +178,7 @@ describe("shouldRunDirectRunEntrypoint", () => {
       shouldRunDirectRunEntrypoint({
         isMainModule: false,
         isElectron: true,
-        argv: [
-          "Electron",
-          "direct-run.js",
-          "--cowork-cli-direct-run",
-          "--prompt",
-          "say hi",
-        ],
+        argv: ["Electron", "direct-run.js", "--cowork-cli-direct-run", "--prompt", "say hi"],
       }),
     ).toBe(false);
   });

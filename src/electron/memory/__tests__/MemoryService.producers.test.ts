@@ -482,7 +482,10 @@ describeWithSqlite("memory producers", () => {
           "observation",
           '[Imported from ChatGPT — "Memory export (pasted) · Instructions"]\n[2024-03-01] - Never use emoji in replies.',
         ],
-        ["observation", '[Imported from ChatGPT — "Memory export (pasted) · Identity"]\nLives in Lisbon.'],
+        [
+          "observation",
+          '[Imported from ChatGPT — "Memory export (pasted) · Identity"]\nLives in Lisbon.',
+        ],
         [
           "observation",
           '[Imported from ChatGPT — "Memory export (pasted) · Projects"]\n[2025-01-10] - Atlas: a CLI for log search, in beta.',

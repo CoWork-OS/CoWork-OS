@@ -547,15 +547,19 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
           }
           onChange={(e) => {
             const profileId = e.target.value;
-            const profile = resolveAccessProfileDefinition(profileId, settings.accessProfiles || []);
+            const profile = resolveAccessProfileDefinition(
+              profileId,
+              settings.accessProfiles || [],
+            );
             fullAccessConfirmation.request(
               profile?.sandbox === "danger-full-access" && profile?.approval === "never",
-              () => setSettings({
-                ...settings,
-                defaultAccessProfileId: profileId,
-                defaultPermissionAccess:
-                  profileId === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "full" : "default",
-              }),
+              () =>
+                setSettings({
+                  ...settings,
+                  defaultAccessProfileId: profileId,
+                  defaultPermissionAccess:
+                    profileId === BUILTIN_ACCESS_PROFILE_IDS.fullAccess ? "full" : "default",
+                }),
             );
           }}
         >
@@ -591,7 +595,10 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
         ) : (
           <div className="access-profile-list">
             {(settings.accessProfiles || []).map((profile) => (
-              <div key={profile.id} className="settings-card settings-item-card access-profile-card">
+              <div
+                key={profile.id}
+                className="settings-card settings-item-card access-profile-card"
+              >
                 <div className="access-profile-card-title">{profile.id}</div>
                 <div className="settings-inline-input">
                   <label htmlFor={`${profile.id}-label`}>Label</label>
@@ -603,9 +610,13 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
-                          label: e.target.value,
-                        }),
+                        accessProfiles: updateProfileList(
+                          settings.accessProfiles || [],
+                          profile.id,
+                          {
+                            label: e.target.value,
+                          },
+                        ),
                       })
                     }
                   />
@@ -620,9 +631,13 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        accessProfiles: updateProfileList(settings.accessProfiles || [], profile.id, {
-                          description: e.target.value,
-                        }),
+                        accessProfiles: updateProfileList(
+                          settings.accessProfiles || [],
+                          profile.id,
+                          {
+                            description: e.target.value,
+                          },
+                        ),
                       })
                     }
                   />
@@ -911,7 +926,10 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                 className="settings-select"
                 value={ruleDraft.effect}
                 onChange={(e) =>
-                  setRuleDraft((prev) => ({ ...prev, effect: e.target.value as RuleDraft["effect"] }))
+                  setRuleDraft((prev) => ({
+                    ...prev,
+                    effect: e.target.value as RuleDraft["effect"],
+                  }))
                 }
               >
                 <option value="allow">Allow</option>
@@ -959,7 +977,9 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                   <input
                     className="settings-input"
                     value={ruleDraft.toolName}
-                    onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
+                    onChange={(e) =>
+                      setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))
+                    }
                     placeholder="edit_file"
                   />
                 </div>
@@ -982,7 +1002,9 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                   <input
                     className="settings-input"
                     value={ruleDraft.toolName}
-                    onChange={(e) => setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))}
+                    onChange={(e) =>
+                      setRuleDraft((prev) => ({ ...prev, toolName: e.target.value }))
+                    }
                     placeholder="http_request"
                   />
                 </div>
@@ -1016,7 +1038,9 @@ export function PermissionSettingsPanel({ workspaceId }: PermissionSettingsPanel
                 <input
                   className="settings-input"
                   value={ruleDraft.serverName}
-                  onChange={(e) => setRuleDraft((prev) => ({ ...prev, serverName: e.target.value }))}
+                  onChange={(e) =>
+                    setRuleDraft((prev) => ({ ...prev, serverName: e.target.value }))
+                  }
                   placeholder="github"
                 />
               </div>

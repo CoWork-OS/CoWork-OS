@@ -265,9 +265,13 @@ export const CORE_UNITS = {
       readonly: false,
     },
   ),
-  coreMemoryCleanup_run: storeUnit((db: Database.Database) => new CoreMemoryCleanupStore(db), "run", {
-    readonly: false,
-  }),
+  coreMemoryCleanup_run: storeUnit(
+    (db: Database.Database) => new CoreMemoryCleanupStore(db),
+    "run",
+    {
+      readonly: false,
+    },
+  ),
   coreMemoryCandidate_upsertByFingerprint: storeUnit(
     (db: Database.Database) => new CoreMemoryCandidateStore(db),
     "upsertByFingerprint",

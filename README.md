@@ -35,7 +35,7 @@
   <a href="docs/terminal-tabs.md">Terminal Tabs</a> &middot;
   <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
   <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.54.md">Release Notes 0.5.54</a> &middot;
+  <a href="docs/release-notes-0.5.60.md">Release Notes 0.5.60</a> &middot;
   <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
   <a href="docs/">Documentation</a> &middot;
   <a href="CHANGELOG.md">Changelog</a> &middot;
@@ -98,7 +98,7 @@ See [Everyday Agent](docs/everyday-agent.md), [Workflow Intelligence](docs/workf
 
 ### Latest Release
 
-**`0.5.54`** hardens release publication and recovery: draft release lookup works reliably, registry bundle checksums are validated before archive parsing, scoped GitHub Packages use the correct access behavior, and public adoption reporting is refreshed. Electron 44 and the macOS 13 Ventura minimum remain in force. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.54](docs/release-notes-0.5.54.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
+**`0.5.60`** is a major feature release: the memory folder becomes where CoWork keeps what it knows (with dreaming, sync across machines and read-only team memory), the Bots page adds scheduled responsibilities and a work view, the sidebar becomes an icon rail with a session panel, database work moves off the main thread, and web previews run in a sandboxed origin. It also adds WhatsApp Business and Twilio SMS channels, GPT-6 models, the oMLX provider and a broad security hardening pass. First start runs one-time migrations, and Personal Health and Mobile Companions are removed; read the upgrade notes first. Electron 44 and the macOS 13 Ventura minimum remain in force. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.60](docs/release-notes-0.5.60.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
 
 The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox compose/send upgrades, runtime network/sandbox policy controls, Dreaming memory curation, and `/multitask` lane fan-out. See [Release Notes 0.5.45](docs/release-notes-0.5.45.md), [Managed Agents](docs/managed-agents.md), [Claude-for-Legal Workflows](docs/claude-for-legal.md), [Multitask Command](docs/multitask.md), and [Dreaming](docs/dreaming.md).
 
@@ -113,7 +113,7 @@ Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/
 | **macOS 13 Ventura or later** | `.dmg`                  | Drag CoWork OS into Applications         |
 | **Windows**                   | `.exe` (NSIS installer) | Run the installer and follow the prompts |
 
-> **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.54` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
+> **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.60` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
 
 #### macOS unsigned app workaround
 
@@ -198,7 +198,7 @@ Generated 2026-10-07T10:12:57.950Z. These are public GitHub/npm adoption signals
 
 1. **Choose an AI route** — The easiest path for many users is **Sign in with ChatGPT**. If CoWork detects a local Ollama model, it offers a private local route; Apple Silicon users can configure [MLX-LM](docs/mlx-lm.md) in Settings for another private local route. API-key providers are available for Claude, OpenAI API, Gemini, OpenRouter, Groq, and others, with free-option badges shown where applicable. Once several routes are configured, Mixture of Agents can use them as advisor and aggregator slots.
 2. **Create a task or start from Ideas** — Describe what you want in the desktop app ("create a weekly plan", "create a quarterly report spreadsheet", "draft a DOCX memo", "build a small landing page"), begin from a curated Ideas prompt, or run a one-shot terminal task with `cowork run "..."`. No workspace needed — a private starter workspace is used automatically if you don't select one.
-3. **Choose how to work** — Use **Ask** to discuss or draft from supplied content without external actions, or **Do** to have CoWork work on the task within the selected access profile and approval rules. In stable v0.5.54, Ask is labeled **Chat** and Do is labeled **Smart**; the [release surface reference](docs/release-surface-reference.md) lists version-specific labels and navigation. Advanced runtime overrides include Execute, Plan, Analyze, Debug, and Verified. Autonomy, collaboration, and multi-model routing are separate task controls. [Work modes](docs/interaction-modes.md)
+3. **Choose how to work** — Use **Ask** to discuss or draft from supplied content without external actions, or **Do** to have CoWork work on the task within the selected access profile and approval rules. Releases before 0.5.60 label Ask as **Chat** and Do as **Smart**; the [release surface reference](docs/release-surface-reference.md) lists version-specific labels and navigation. Advanced runtime overrides include Execute, Plan, Analyze, Debug, and Verified. Autonomy, collaboration, and multi-model routing are separate task controls. [Work modes](docs/interaction-modes.md)
 4. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, shell commands stay visible, and the workspace can open real terminal tabs for direct interactive CLI work.
 5. **Inspect without interrupting** — Use `/side` to open Side Chat for read-only questions about the selected running session, or use the title-bar terminal and browser buttons when you need direct CLI or web inspection beside the task.
 6. **Respond when needed** — Actions requiring approval pause according to the selected access profile and hard guardrails. Plan overrides can pause for structured input, and location requests stay explicit and session-scoped.
@@ -546,6 +546,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Release Surface Reference](docs/release-surface-reference.md)           | Work-choice labels and navigation paths by release and interface                                                                                   |
 | [Bots & Conversations](docs/bots-and-conversations.md)                    | Create reusable bot identities, use durable conversations, edit/deactivate profiles, and coordinate the persistent bot team                         |
 | [Beginner's Guide](docs/cowork-school.md)                                | Practical guide to what CoWork OS is for and which workflows to try first                                                                          |
+| [Release Notes 0.5.60](docs/release-notes-0.5.60.md)                     | Memory folder, Bots responsibilities, icon rail sidebar, sandboxed previews, database worker, new channels and models                                                 |
 | [Release Notes 0.5.54](docs/release-notes-0.5.54.md)                     | Registry publication recovery, exact package/checksum validation, GitHub Packages access fixes, portable recovery CI, and refreshed adoption reporting                |
 | [Release Notes 0.5.53](docs/release-notes-0.5.53.md)                     | Approval boundaries, local MLX/Atomic Chat/Jev execution, WorkSessions, bots, Box Brain, Pulse, and security/release hardening                              |
 | [Release Notes 0.5.52](docs/release-notes-0.5.52.md)                     | OpenRouter images, OpenCode/SearXNG/Atlas providers, Electron 44, and macOS support changes                                                        |

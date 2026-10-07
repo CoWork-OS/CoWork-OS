@@ -379,7 +379,9 @@ const FOLDER: MemoryRepoEntriesReport = {
       path: "MEMORY.md",
       title: "Memory: Mesut",
       role: "entry",
-      entries: [folderEntry({ ref: "repo:MEMORY.md#L3", path: "MEMORY.md", text: "Answer in English" })],
+      entries: [
+        folderEntry({ ref: "repo:MEMORY.md#L3", path: "MEMORY.md", text: "Answer in English" }),
+      ],
     },
     {
       path: "me.md",
@@ -417,7 +419,12 @@ const FOLDER: MemoryRepoEntriesReport = {
     title: "Inbox",
     role: "inbox",
     entries: [
-      folderEntry({ ref: "repo:inbox.md#L3", path: "inbox.md", text: "Send reports elsewhere", by: "agent" }),
+      folderEntry({
+        ref: "repo:inbox.md#L3",
+        path: "inbox.md",
+        text: "Send reports elsewhere",
+        by: "agent",
+      }),
     ],
   },
 };
@@ -488,10 +495,15 @@ describe("What CoWork knows over the memory folder", () => {
       markup.indexOf('data-file="me.md"'),
     );
     expect(pinnedSection).not.toContain(">Pin</button>");
-    const meSection = markup.slice(markup.indexOf('data-file="me.md"'), markup.indexOf('data-file="workspaces/billing.md"'));
+    const meSection = markup.slice(
+      markup.indexOf('data-file="me.md"'),
+      markup.indexOf('data-file="workspaces/billing.md"'),
+    );
     expect((meSection.match(/>Pin<\/button>/g) || []).length).toBe(2);
     expect(markup).toContain(">Keep and pin</button>");
-    expect(markup.indexOf('data-file="inbox.md"')).toBeGreaterThan(markup.indexOf('data-file="workspaces/billing.md"'));
+    expect(markup.indexOf('data-file="inbox.md"')).toBeGreaterThan(
+      markup.indexOf('data-file="workspaces/billing.md"'),
+    );
   });
 
   it("filters folder entries with the tab's filters and hides actions it cannot take", () => {
@@ -506,9 +518,21 @@ describe("What CoWork knows over the memory folder", () => {
     const pinnedOnly = render({ pinnedOnly: true, folderView: folderView() });
     expect(pinnedOnly).toContain("Answer in English");
     expect(pinnedOnly).not.toContain("Prefers short answers");
-    const imported = filterFolderFiles(FOLDER.files, { query: "", kind: "", source: "import", pinnedOnly: false });
-    expect(imported.flatMap((file) => file.entries.map((entry) => entry.text))).toEqual(["Prefers TypeScript"]);
-    const mine = filterFolderFiles(FOLDER.files, { query: "", kind: "", source: "user_stated", pinnedOnly: false });
+    const imported = filterFolderFiles(FOLDER.files, {
+      query: "",
+      kind: "",
+      source: "import",
+      pinnedOnly: false,
+    });
+    expect(imported.flatMap((file) => file.entries.map((entry) => entry.text))).toEqual([
+      "Prefers TypeScript",
+    ]);
+    const mine = filterFolderFiles(FOLDER.files, {
+      query: "",
+      kind: "",
+      source: "user_stated",
+      pinnedOnly: false,
+    });
     expect(mine.flatMap((file) => file.entries.map((entry) => entry.by))).toEqual(["user", "user"]);
   });
 
@@ -529,12 +553,22 @@ describe("What CoWork knows over the memory folder", () => {
       text: "Prefers very short answers",
     });
     expect(edited).toMatchObject({ notice: "Memory updated.", report: FOLDER });
-    expect(await editFolderEntry(api, WS, FOLDER, entry, "  ")).toMatchObject({ error: expect.any(String) });
+    expect(await editFolderEntry(api, WS, FOLDER, entry, "  ")).toMatchObject({
+      error: expect.any(String),
+    });
 
-    expect(await pinFolderEntry(api, WS, FOLDER, entry)).toMatchObject({ notice: expect.stringMatching(/pinned/) });
-    expect(api.pinMemoryRepoEntry).toHaveBeenCalledWith({ workspaceId: WS, ref: entry.ref, hash: entry.hash });
+    expect(await pinFolderEntry(api, WS, FOLDER, entry)).toMatchObject({
+      notice: expect.stringMatching(/pinned/),
+    });
+    expect(api.pinMemoryRepoEntry).toHaveBeenCalledWith({
+      workspaceId: WS,
+      ref: entry.ref,
+      hash: entry.hash,
+    });
 
-    expect(await deleteFolderEntry(api, WS, FOLDER, entry, () => false)).toMatchObject({ cancelled: true });
+    expect(await deleteFolderEntry(api, WS, FOLDER, entry, () => false)).toMatchObject({
+      cancelled: true,
+    });
     expect(api.removeMemoryRepoEntry).not.toHaveBeenCalled();
     expect(await deleteFolderEntry(api, WS, FOLDER, entry, () => true)).toMatchObject({
       notice: "Memory forgotten.",
@@ -545,13 +579,21 @@ describe("What CoWork knows over the memory folder", () => {
   it("reports a refused action and shows the folder as it is now", async () => {
     const fresh = { ...FOLDER, files: FOLDER.files.slice(0, 1) };
     const api = folderApi({
-      removeMemoryRepoEntry: vi.fn(async () => ({ ok: false, error: "The memory file changed; reload and try again." })),
+      removeMemoryRepoEntry: vi.fn(async () => ({
+        ok: false,
+        error: "The memory file changed; reload and try again.",
+      })),
       getMemoryRepoEntries: vi.fn(async () => fresh),
     });
     const result = await deleteFolderEntry(api, WS, FOLDER, FOLDER.files[1].entries[0], () => true);
-    expect(result).toEqual({ report: fresh, error: "The memory file changed; reload and try again." });
+    expect(result).toEqual({
+      report: fresh,
+      error: "The memory file changed; reload and try again.",
+    });
     const thrown = await pinFolderEntry(
-      folderApi({ pinMemoryRepoEntry: vi.fn(async () => Promise.reject(new Error("Rate limit exceeded."))) }),
+      folderApi({
+        pinMemoryRepoEntry: vi.fn(async () => Promise.reject(new Error("Rate limit exceeded."))),
+      }),
       WS,
       FOLDER,
       FOLDER.files[1].entries[0],
@@ -561,9 +603,18 @@ describe("What CoWork knows over the memory folder", () => {
 
   it("counts a fact added to the folder as added", async () => {
     const api = mockApi({
-      addMemoryItem: vi.fn(async () => ({ success: true, item: null, action: "inserted", ref: "repo:me.md#L5" })),
+      addMemoryItem: vi.fn(async () => ({
+        success: true,
+        item: null,
+        action: "inserted",
+        ref: "repo:me.md#L5",
+      })),
     });
-    const result = await addKnowledgeItem(api, WS, [], { content: "Likes tea", kind: "preference", scope: "global" });
+    const result = await addKnowledgeItem(api, WS, [], {
+      content: "Likes tea",
+      kind: "preference",
+      scope: "global",
+    });
     expect(result).toEqual({ items: [], notice: "Memory added." });
   });
 });

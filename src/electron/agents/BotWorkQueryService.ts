@@ -37,7 +37,11 @@ export interface BotScheduleSnapshot {
 
 /** Recent work-view query durations in this process, for the outcome baseline. */
 const workViewSamples: number[] = [];
-export function botWorkViewLatency(): { samples: number; medianMs: number | null; p95Ms: number | null } {
+export function botWorkViewLatency(): {
+  samples: number;
+  medianMs: number | null;
+  p95Ms: number | null;
+} {
   if (!workViewSamples.length) return { samples: 0, medianMs: null, p95Ms: null };
   const sorted = [...workViewSamples].sort((a, b) => a - b);
   const at = (quantile: number) =>

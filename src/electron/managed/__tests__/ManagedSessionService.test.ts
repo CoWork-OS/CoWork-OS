@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../../shared/access-profiles";
 import { ChannelStore, TaskEventRepository } from "../../database/repositories";
 import { DatabaseManager } from "../../database/schema";
@@ -356,9 +355,9 @@ describeWithSqlite("ManagedSessionService", () => {
     expect((await service.getSession(panelSession.id))?.surface).toBe("agent_panel");
     expect(taskRepo.findById(panelSession.backingTaskId!)?.source).toBe("managed_agent_panel");
     expect(
-      (await service
-        .listSessions({ agentId: created.agent.id, surface: "agent_panel" }))
-        .map((session) => session.id),
+      (await service.listSessions({ agentId: created.agent.id, surface: "agent_panel" })).map(
+        (session) => session.id,
+      ),
     ).toEqual([panelSession.id]);
 
     await service.sendUserMessage(panelSession.id, [
@@ -370,8 +369,7 @@ describeWithSqlite("ManagedSessionService", () => {
       "Follow up from the panel",
     );
     expect(
-      (await service
-        .listSessionEvents(panelSession.id))
+      (await service.listSessionEvents(panelSession.id))
         .filter((event) => event.type === "user.message")
         .map((event) => event.payload),
     ).toEqual([

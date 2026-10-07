@@ -539,7 +539,9 @@ describe("browser memory folder methods", () => {
     expect(validate("pinMemoryRepoEntry", ref)).not.toThrow();
     expect(validate("removeMemoryRepoEntry", { ...ref, ref: "repo:../x.md#L1" })).toThrow();
     expect(validate("updateMemoryRepoEntry", { ...ref, text: "" })).toThrow();
-    expect(validate("updateMemoryRepoEntry", { ...ref, hash: "nope", text: "Prefers tea" })).toThrow();
+    expect(
+      validate("updateMemoryRepoEntry", { ...ref, hash: "nope", text: "Prefers tea" }),
+    ).toThrow();
     // Keep an inbox entry; importing a folder needs the desktop folder picker.
     expect(definitions.keepMemoryRepoEntry.mutation).toBe(true);
     expect(definitions.importMemoryRepoFolder).toBeUndefined();

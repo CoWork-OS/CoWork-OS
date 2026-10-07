@@ -5,10 +5,7 @@ import {
   type MemoryUsedLane,
   type MemoryUsedReply,
 } from "../../../shared/memory-used";
-import {
-  MEMORY_REPO_READ_LINES_MAX,
-  type MemoryRepoLine,
-} from "../../../shared/memory-repo-types";
+import { MEMORY_REPO_READ_LINES_MAX, type MemoryRepoLine } from "../../../shared/memory-repo-types";
 import { SOURCE_LABELS, sourceTone, type SourceTone } from "./memory-knowledge-model";
 import { requestMemoryHubFocus } from "./memory-hub-focus";
 import { getMemoryUsedStore, type MemoryUsedStore } from "./memory-used-store";
@@ -36,12 +33,14 @@ export interface MemoryUsedApi {
   readMemoryRepoLines?: (refs: string[]) => Promise<MemoryRepoLine[]>;
 }
 
-const LANE_BADGES: Record<Exclude<MemoryUsedLane, "memory">, { label: string; tone: SourceTone }> =
-  {
-    archive: { label: "Task history", tone: "neutral" },
-    external: { label: "Supermemory", tone: "warning" },
-    repo: { label: "Memory folder", tone: "success" },
-  };
+const LANE_BADGES: Record<
+  Exclude<MemoryUsedLane, "memory">,
+  { label: string; tone: SourceTone }
+> = {
+  archive: { label: "Task history", tone: "neutral" },
+  external: { label: "Supermemory", tone: "warning" },
+  repo: { label: "Memory folder", tone: "success" },
+};
 
 /** `repo:workspaces/x.md#L4` → `workspaces/x.md, line 4` (when the line text is unavailable). */
 function repoRefLabel(id: string): string {

@@ -358,14 +358,17 @@ describe("TaskExecutor completion contract integration", () => {
         "Analyze sales.csv and create a PDF report saved as reports/q3.pdf",
       ),
     ).toEqual([".pdf"]);
-    expect(extractExplicitOutputExtensions("", "Write a summary of the meeting to summary.md")).toEqual(
-      [".md"],
-    );
+    expect(
+      extractExplicitOutputExtensions("", "Write a summary of the meeting to summary.md"),
+    ).toEqual([".md"]);
     expect(
       extractExplicitOutputExtensions("", "Create a README for the project as README.md"),
     ).toEqual([".md"]);
     expect(
-      extractExplicitOutputExtensions("", "Generate a report using data from input.csv to output.md"),
+      extractExplicitOutputExtensions(
+        "",
+        "Generate a report using data from input.csv to output.md",
+      ),
     ).toEqual([".md"]);
   });
 
@@ -1266,15 +1269,15 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     executor.task.agentConfig = {
       executionMode: "plan",
     };
-    (executor as Any).emitAnswerFirstResponse = vi.fn(
-      async function emitAnswerFirstStub(this: Any) {
-        const text =
-          "I don't feel guilt, but this is a serious ethical risk and should be handled responsibly.";
-        this.lastAssistantOutput = text;
-        this.lastNonVerificationOutput = text;
-        this.lastAssistantText = text;
-      },
-    );
+    (executor as Any).emitAnswerFirstResponse = vi.fn(async function emitAnswerFirstStub(
+      this: Any,
+    ) {
+      const text =
+        "I don't feel guilt, but this is a serious ethical risk and should be handled responsibly.";
+      this.lastAssistantOutput = text;
+      this.lastNonVerificationOutput = text;
+      this.lastAssistantText = text;
+    });
 
     await (executor as Any).execute();
 
@@ -1296,14 +1299,14 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
       executionMode: "execute",
       taskIntent: "advice",
     };
-    (executor as Any).emitAnswerFirstResponse = vi.fn(
-      async function emitAnswerFirstStub(this: Any) {
-        const text = "I don't feel guilt, but job impacts should be handled responsibly.";
-        this.lastAssistantOutput = text;
-        this.lastNonVerificationOutput = text;
-        this.lastAssistantText = text;
-      },
-    );
+    (executor as Any).emitAnswerFirstResponse = vi.fn(async function emitAnswerFirstStub(
+      this: Any,
+    ) {
+      const text = "I don't feel guilt, but job impacts should be handled responsibly.";
+      this.lastAssistantOutput = text;
+      this.lastNonVerificationOutput = text;
+      this.lastAssistantText = text;
+    });
 
     await (executor as Any).execute();
 
@@ -1535,7 +1538,10 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
 
     expect(executor.daemon.completeTask).toHaveBeenCalledTimes(1);
     const [, summary, metadata] = executor.daemon.completeTask.mock.calls[0];
-    expect(metadata).toMatchObject({ terminalStatus: "partial_success", waiveFailedStepIds: ["2"] });
+    expect(metadata).toMatchObject({
+      terminalStatus: "partial_success",
+      waiveFailedStepIds: ["2"],
+    });
     expect(summary.startsWith(answer)).toBe(true);
     expect(summary).toContain("Completion notes:");
     expect(summary).toContain('"Verify: run the test suite"');
@@ -1625,9 +1631,9 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     expect(guard("Create a spreadsheet of the open invoices.", longAnswer)).toMatch(
       /missing artifact evidence.*\.xlsx/,
     );
-    expect(guard("Write a summary report of the launch feedback.", longAnswer, ["notes.txt"])).toMatch(
-      /missing artifact evidence/,
-    );
+    expect(
+      guard("Write a summary report of the launch feedback.", longAnswer, ["notes.txt"]),
+    ).toMatch(/missing artifact evidence/);
   });
 
   it("fails web-app shipping tasks before Playwright QA when artifact evidence is missing", async () => {
@@ -2116,11 +2122,7 @@ End with a final section titled "Verification Evidence".`,
 
     await (executor as Any).execute();
 
-    expect(executor.daemon.completeTask).toHaveBeenCalledWith(
-      "task-1",
-      answer,
-      expect.any(Object),
-    );
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith("task-1", answer, expect.any(Object));
   });
 
   it("fails a fabricated command report when no tool ran", async () => {

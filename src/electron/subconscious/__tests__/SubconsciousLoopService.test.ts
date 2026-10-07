@@ -598,9 +598,8 @@ describeWithSqlite("SubconsciousLoopService", () => {
   it("routes WI task dispatch through the shared background budget", async () => {
     const workspace = insertWorkspace("budgeted");
     const { SubconsciousLoopService } = await import("../SubconsciousLoopService");
-    const { BackgroundDispatchBudget, setBackgroundDispatchBudget } = await import(
-      "../../agents/BackgroundDispatchBudget"
-    );
+    const { BackgroundDispatchBudget, setBackgroundDispatchBudget } =
+      await import("../../agents/BackgroundDispatchBudget");
     const budget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 2 });
     setBackgroundDispatchBudget(budget);
     try {

@@ -23,8 +23,7 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("../../memory/MemoryService", () => ({
-  MemoryService: {
-  },
+  MemoryService: {},
 }));
 
 // Real PersonalityManager backed by an in-memory secure settings store, so the

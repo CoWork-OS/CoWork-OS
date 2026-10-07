@@ -103,7 +103,10 @@ export function toMemoryRepoHubEntry(relPath: string, entry: MemoryRepoEntry): M
   };
 }
 
-async function hubFile(service: MemoryRepoHubPort, relPath: string): Promise<MemoryRepoHubFile | null> {
+async function hubFile(
+  service: MemoryRepoHubPort,
+  relPath: string,
+): Promise<MemoryRepoHubFile | null> {
   const markdown = await service.readFile(relPath);
   if (markdown === null) return null;
   const entries = parseMemoryRepoEntries(markdown).filter((entry) => !entry.metadata.workspace);

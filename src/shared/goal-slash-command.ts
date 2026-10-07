@@ -49,7 +49,7 @@ export function parseLeadingGoalSlashCommand(input: string): ParsedGoalSlashComm
   const objectiveTokens: string[] = [];
   let maxAutoContinuations: number | undefined;
   let lifetimeMaxTurns: number | undefined;
-  for (let i = 0; i < tokens.length; ) {
+  for (let i = 0; i < tokens.length;) {
     const token = tokens[i] || "";
     const lower = token.toLowerCase();
     if (lower === "--max-continuations" || lower.startsWith("--max-continuations=")) {

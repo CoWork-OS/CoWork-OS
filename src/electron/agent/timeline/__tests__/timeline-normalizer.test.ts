@@ -575,11 +575,9 @@ describe("normalizeTaskEvents — graceful degradation", () => {
 describe("normalizeTaskEvents — compression", () => {
   it("compresses 100 file-read events into a single card in default mode", () => {
     resetSeq();
-    const events = Array.from(
-      { length: 100 },
-      (_, i) =>
-        // Ensure timestamp is within the batch window
-        ({ ...makeToolCall("read_file", { path: `src/file-${i}.ts` }), timestamp: 1000 + i * 10 }),
+    const events = Array.from({ length: 100 }, (_, i) =>
+      // Ensure timestamp is within the batch window
+      ({ ...makeToolCall("read_file", { path: `src/file-${i}.ts` }), timestamp: 1000 + i * 10 }),
     );
     const result = normalizeTaskEvents(events, { batchWindowMs: 10_000 });
     // All within 10 seconds total

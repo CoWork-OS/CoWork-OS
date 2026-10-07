@@ -301,10 +301,7 @@ export class MemoryService {
    * Initialize the memory service. `backgroundJobs: false` (desktop quiet mode) skips the
    * periodic cleanup and the deferred one-time archive cleanup.
    */
-  static initialize(
-    dbManager: DatabaseManager,
-    options: { backgroundJobs?: boolean } = {},
-  ): void {
+  static initialize(dbManager: DatabaseManager, options: { backgroundJobs?: boolean } = {}): void {
     if (this.initialized) return;
     this.draining = false;
 

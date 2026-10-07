@@ -68,7 +68,10 @@ describeWithGit("team memory repos", () => {
       ["Billing", true],
     ]);
     expect(teamMemoryReposFor("ws-other").map((repo) => repo.name)).toEqual(["Platform"]);
-    expect(teamMemoryReposFor("ws-billing").map((repo) => repo.name)).toEqual(["Platform", "Billing"]);
+    expect(teamMemoryReposFor("ws-billing").map((repo) => repo.name)).toEqual([
+      "Platform",
+      "Billing",
+    ]);
     expect(teamMemoryRepoRoots()).toEqual([path.resolve(platform), path.resolve(billing)]);
     const [repo] = teamMemoryReposFor("ws-other");
     expect(repo.service.isWritable()).toBe(false);

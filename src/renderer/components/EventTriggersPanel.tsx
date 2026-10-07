@@ -419,10 +419,7 @@ export const EventTriggersPanel: React.FC<{
             {triggers.length} trigger{triggers.length !== 1 ? "s" : ""}
           </span>
         </div>
-        <button
-onClick={() => setShowForm(!showForm)}
-          className="settings-button small"
-        >
+        <button onClick={() => setShowForm(!showForm)} className="settings-button small">
           <Plus size={14} /> Add Trigger
         </button>
       </div>

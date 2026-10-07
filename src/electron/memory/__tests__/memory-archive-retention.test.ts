@@ -282,13 +282,7 @@ describe("memory archive retention and capture hygiene", () => {
 
       const deleted = store.deleteOlderThan(workspace.id, Date.now() - 90 * DAY);
       expect(deleted).toBe(2);
-      expect(ids(db)).toEqual([
-        "b-recently-used",
-        "c-imported",
-        "e-saved",
-        "f-curated",
-        "g-fresh",
-      ]);
+      expect(ids(db)).toEqual(["b-recently-used", "c-imported", "e-saved", "f-curated", "g-fresh"]);
       expect(
         db.prepare("SELECT COUNT(*) AS n FROM memory_embeddings WHERE memory_id = 'a-stale'").get(),
       ).toEqual({ n: 0 });

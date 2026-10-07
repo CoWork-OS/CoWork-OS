@@ -5,7 +5,12 @@ import type {
   MemoryReviewState,
 } from "../../../../shared/memory-review-types";
 import { MemoryReviewView, type MemoryReviewViewProps } from "../MemoryReviewTab";
-import { MEMORY_REVIEW_METHODS, changeLine, undoChange, type MemoryReviewApi } from "../memory-review-model";
+import {
+  MEMORY_REVIEW_METHODS,
+  changeLine,
+  undoChange,
+  type MemoryReviewApi,
+} from "../memory-review-model";
 
 const WS = "ws-1";
 
@@ -87,9 +92,9 @@ describe("MemoryReviewView", () => {
 describe("memory review model", () => {
   it("needs only the read and undo host methods", () => {
     expect([...MEMORY_REVIEW_METHODS]).toEqual(["getMemoryReview", "undoMemoryChange"]);
-    expect(changeLine({ id: "x", kind: "commitment", content: "", before: null, after: "active" })).toBe(
-      "new → open",
-    );
+    expect(
+      changeLine({ id: "x", kind: "commitment", content: "", before: null, after: "active" }),
+    ).toBe("new → open");
   });
 
   it("undoes through the API and reloads the state", async () => {

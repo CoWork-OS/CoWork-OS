@@ -13,7 +13,11 @@ export const BOT_NOTIFICATION_UNITS = {
   botNotification_recover: storeUnit(make, "recover", { readonly: true }),
   botNotification_assertDelivery: storeUnit(make, "assertDelivery", { readonly: true }),
   botNotification_settle: storeUnit(make, "settle", { readonly: false }),
-  botReceipts_prune: storeUnit((db: Database.Database) => new BotReceiptRetentionStore(db), "prune", {
-    readonly: false,
-  }),
+  botReceipts_prune: storeUnit(
+    (db: Database.Database) => new BotReceiptRetentionStore(db),
+    "prune",
+    {
+      readonly: false,
+    },
+  ),
 };

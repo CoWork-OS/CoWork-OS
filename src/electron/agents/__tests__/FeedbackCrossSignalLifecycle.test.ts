@@ -48,8 +48,18 @@ beforeEach(() => {
     path: tmpDir,
     permissions: { read: true, write: true, delete: true, network: false, shell: false },
   });
-  tasks.set("task-a", { id: "task-a", title: "Draft", workspaceId: "ws-1", assignedAgentRoleId: "role-a" });
-  tasks.set("task-b", { id: "task-b", title: "Edit", workspaceId: "ws-1", assignedAgentRoleId: "role-b" });
+  tasks.set("task-a", {
+    id: "task-a",
+    title: "Draft",
+    workspaceId: "ws-1",
+    assignedAgentRoleId: "role-a",
+  });
+  tasks.set("task-b", {
+    id: "task-b",
+    title: "Edit",
+    workspaceId: "ws-1",
+    assignedAgentRoleId: "role-b",
+  });
   recentTaskEventsOfType.mockClear();
   writeKitFileWithSnapshot.mockClear();
 });
@@ -99,7 +109,9 @@ describe("FeedbackService", () => {
 
     daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "Too vague" });
     await vi.waitFor(() => {
-      expect((service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size).toBe(1);
+      expect(
+        (service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size,
+      ).toBe(1);
     });
 
     await service.stop();
@@ -139,7 +151,9 @@ describe("FeedbackService access boundary", () => {
     await service.start(daemon as unknown as AgentDaemon);
     daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "Too vague" });
     await vi.waitFor(() => {
-      expect((service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size).toBe(1);
+      expect(
+        (service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size,
+      ).toBe(1);
     });
 
     await service.stop();
@@ -218,26 +232,41 @@ describe("FeedbackService with the memory folder", () => {
       id: "task-owner",
       workspaceId: "ws-1",
       assignedAgentRoleId: "role-b",
-      agentConfig: { originChannel: "telegram", gatewayContext: "private", gatewaySenderIsOwner: true },
+      agentConfig: {
+        originChannel: "telegram",
+        gatewayContext: "private",
+        gatewaySenderIsOwner: true,
+      },
     });
     tasks.set("task-other", {
       id: "task-other",
       workspaceId: "ws-1",
       assignedAgentRoleId: "role-b",
-      agentConfig: { originChannel: "telegram", gatewayContext: "private", gatewaySenderIsOwner: false },
+      agentConfig: {
+        originChannel: "telegram",
+        gatewayContext: "private",
+        gatewaySenderIsOwner: false,
+      },
     });
     const { remember, getService } = folder();
     const daemon = new EventEmitter();
     const service = new FeedbackService({} as never, getService);
     await service.start(daemon as unknown as AgentDaemon);
 
-    daemon.emit("user_feedback", { taskId: "task-other", decision: "rejected", reason: "Stranger" });
+    daemon.emit("user_feedback", {
+      taskId: "task-other",
+      decision: "rejected",
+      reason: "Stranger",
+    });
     daemon.emit("user_feedback", { taskId: "task-owner", decision: "rejected", reason: "Owner" });
     await vi.waitFor(() => expect(remember).toHaveBeenCalledTimes(1));
     await service.stop();
 
     expect(remember).toHaveBeenCalledTimes(1);
-    expect(remember.mock.calls[0][0]).toMatchObject({ text: "Writer: Owner", taskId: "task-owner" });
+    expect(remember.mock.calls[0][0]).toMatchObject({
+      text: "Writer: Owner",
+      taskId: "task-owner",
+    });
     expect(mistakesWrites()).toHaveLength(0);
   });
 
@@ -269,7 +298,9 @@ describe("FeedbackService with the memory folder", () => {
     await service.start(daemon as unknown as AgentDaemon);
     daemon.emit("user_feedback", { taskId: "task-a", decision: "rejected", reason: "Too vague" });
     await vi.waitFor(() => {
-      expect((service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size).toBe(1);
+      expect(
+        (service as unknown as { stateByWorkspace: Map<string, unknown> }).stateByWorkspace.size,
+      ).toBe(1);
     });
     await service.stop();
 
@@ -287,12 +318,17 @@ describe("CrossSignalService", () => {
     await service.start(daemon as unknown as AgentDaemon);
     expect(daemon.listenerCount("assistant_message")).toBe(1);
 
-    daemon.emit("assistant_message", { taskId: "task-a", message: "pricing on acme.com looks stale" });
+    daemon.emit("assistant_message", {
+      taskId: "task-a",
+      message: "pricing on acme.com looks stale",
+    });
     daemon.emit("assistant_message", { taskId: "task-b", message: "support at acme.com replied" });
     await vi.waitFor(() => {
-      const state = (service as unknown as {
-        stateByWorkspace: Map<string, { mentions: Map<string, { roles: Set<string> }> }>;
-      }).stateByWorkspace.get("ws-1");
+      const state = (
+        service as unknown as {
+          stateByWorkspace: Map<string, { mentions: Map<string, { roles: Set<string> }> }>;
+        }
+      ).stateByWorkspace.get("ws-1");
       expect(state?.mentions.get("acme.com")?.roles.size).toBe(2);
     });
 

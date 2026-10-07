@@ -158,16 +158,12 @@ export class DiscordSupervisorService {
         });
       },
     );
-    this.agentDaemon.on(
-      "error",
-      (data: { taskId?: string; error?: string; message?: string }) => {
-        if (!data?.taskId) return;
-        void this.handleTaskFailed(
-          data.taskId,
-          data.error || data.message || "Unknown error",
-        ).catch((error: unknown) => logger.warn("Failed to handle task failure:", error));
-      },
-    );
+    this.agentDaemon.on("error", (data: { taskId?: string; error?: string; message?: string }) => {
+      if (!data?.taskId) return;
+      void this.handleTaskFailed(data.taskId, data.error || data.message || "Unknown error").catch(
+        (error: unknown) => logger.warn("Failed to handle task failure:", error),
+      );
+    });
   }
 
   listExchanges(query: SupervisorExchangeListQuery) {
@@ -377,16 +373,15 @@ export class DiscordSupervisorService {
       const workspaceId = await this.resolveWorkspaceId(channel);
       if (!workspaceId) return;
 
-      const openCandidates = (await this.exchangeRepo
-        .list({
+      const openCandidates = (
+        await this.exchangeRepo.list({
           workspaceId,
           status: "open",
           limit: 50,
-        }))
-        .filter(
-          (item) =>
-            item.coordinationChannelId === channelId && item.sourcePeerUserId === peerUserId,
-        );
+        })
+      ).filter(
+        (item) => item.coordinationChannelId === channelId && item.sourcePeerUserId === peerUserId,
+      );
 
       if (openCandidates.length === 1) {
         exchange = openCandidates[0];

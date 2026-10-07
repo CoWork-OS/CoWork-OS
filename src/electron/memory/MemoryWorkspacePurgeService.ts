@@ -339,7 +339,9 @@ export class MemoryWorkspacePurgeService {
     try {
       const remote = await SupermemoryService.forgetWorkspaceCopies(workspaceId);
       if (remote.forgotten > 0) {
-        notes.push(`Deleted ${remote.forgotten} Supermemory ${remote.forgotten === 1 ? "copy" : "copies"}.`);
+        notes.push(
+          `Deleted ${remote.forgotten} Supermemory ${remote.forgotten === 1 ? "copy" : "copies"}.`,
+        );
       }
       if (remote.failed > 0) {
         notes.push(

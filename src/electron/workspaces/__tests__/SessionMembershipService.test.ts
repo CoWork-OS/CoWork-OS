@@ -184,8 +184,8 @@ describeWithSqlite("SessionMembershipService", () => {
 
     const visible = await service.listAccessibleContexts({}, accepted.principal.principalId);
     expect(visible.map((context) => context.id)).toEqual([shared.id]);
-    await expect(service.getSnapshot(privateContext.id, accepted.principal.principalId)).rejects.toThrow(
-      "Principal is not a member",
-    );
+    await expect(
+      service.getSnapshot(privateContext.id, accepted.principal.principalId),
+    ).rejects.toThrow("Principal is not a member");
   });
 });

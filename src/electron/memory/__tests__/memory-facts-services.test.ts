@@ -130,7 +130,11 @@ describeWithSqlite("memory_items-backed fact services", () => {
     it("reports memory as unavailable without a writer", async () => {
       MemoryWriter.setInstance(null);
       await expect(
-        UserProfileService.addFact({ category: "preference", value: "Likes tea", source: "manual" }),
+        UserProfileService.addFact({
+          category: "preference",
+          value: "Likes tea",
+          source: "manual",
+        }),
       ).rejects.toThrow("Memory is not available yet.");
       expect(UserProfileService.getProfile().facts).toEqual([]);
     });
@@ -178,9 +182,7 @@ describeWithSqlite("memory_items-backed fact services", () => {
       await MemoryFactsSnapshot.refresh();
       const facts = UserProfileService.getProfile().facts;
       expect(facts.find((fact) => fact.value === "Ship the v2 launch")?.category).toBe("goal");
-      expect(facts.find((fact) => fact.value === "Likes a friendly tone")?.source).toBe(
-        "feedback",
-      );
+      expect(facts.find((fact) => fact.value === "Likes a friendly tone")?.source).toBe("feedback");
     });
   });
 

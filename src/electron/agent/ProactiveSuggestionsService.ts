@@ -433,10 +433,12 @@ export class ProactiveSuggestionsService {
    * Get top N suggestions for inclusion in daily briefing.
    */
   static async getTopForBriefing(workspaceId: string, limit = 3): Promise<ProactiveSuggestion[]> {
-    return (await this.listActive(workspaceId, {
-      includeDeferred: true,
-      recordSurface: false,
-    })).slice(0, limit);
+    return (
+      await this.listActive(workspaceId, {
+        includeDeferred: true,
+        recordSurface: false,
+      })
+    ).slice(0, limit);
   }
 
   static async getTopForBriefingForWorkspaces(
@@ -444,14 +446,16 @@ export class ProactiveSuggestionsService {
     workspaceIds: string[],
     limit = 3,
   ): Promise<ProactiveSuggestion[]> {
-    return (await this.listActive(
-      workspaceId,
-      {
-        includeDeferred: true,
-        recordSurface: false,
-      },
-      workspaceIds,
-    )).slice(0, limit);
+    return (
+      await this.listActive(
+        workspaceId,
+        {
+          includeDeferred: true,
+          recordSurface: false,
+        },
+        workspaceIds,
+      )
+    ).slice(0, limit);
   }
 
   // ─── Generators ─────────────────────────────────────────────────
@@ -601,7 +605,9 @@ export class ProactiveSuggestionsService {
       await this.propose({
         workspaceId,
         // Due-soon items are relationship commitments: the same entity AutonomyEngine follows up.
-        entityKey: dueSoon.tags.includes("commitment") ? commitmentEntityKey(dueSoon.id) : undefined,
+        entityKey: dueSoon.tags.includes("commitment")
+          ? commitmentEntityKey(dueSoon.id)
+          : undefined,
         source: "awareness",
         type: "follow_up",
         title: `Review due soon: ${dueSoon.title}`.slice(0, 80),
@@ -644,7 +650,9 @@ export class ProactiveSuggestionsService {
       .slice(0, 4);
 
     for (const decision of decisions) {
-      await this.propose(ProactiveSuggestionsService.autonomyDecisionProposal(workspaceId, decision));
+      await this.propose(
+        ProactiveSuggestionsService.autonomyDecisionProposal(workspaceId, decision),
+      );
     }
   }
 

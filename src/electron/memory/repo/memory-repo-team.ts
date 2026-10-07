@@ -37,14 +37,22 @@ const listeners = new Set<() => void>();
 /** Why a team repo setting is refused, or null. */
 export function teamRepoPathProblem(
   setting: MemoryRepoTeamRepoSetting,
-  context: { personalRoot: string | null; workspacePaths: readonly string[]; others: readonly string[] },
+  context: {
+    personalRoot: string | null;
+    workspacePaths: readonly string[];
+    others: readonly string[];
+  },
 ): string | null {
   const problem = memoryRepoPathProblem(setting.path, context.workspacePaths);
   if (problem) return problem;
   const resolved = path.resolve(setting.path);
   const overlaps = (other: string) => {
     const a = path.resolve(other);
-    return a === resolved || resolved.startsWith(`${a}${path.sep}`) || a.startsWith(`${resolved}${path.sep}`);
+    return (
+      a === resolved ||
+      resolved.startsWith(`${a}${path.sep}`) ||
+      a.startsWith(`${resolved}${path.sep}`)
+    );
   };
   if (context.personalRoot && overlaps(context.personalRoot)) {
     return "A team repo cannot be inside or around your own memory folder.";
@@ -96,7 +104,8 @@ export function teamMemoryReposFor(workspaceId: string | null | undefined): Team
     (repo) =>
       !repo.problem &&
       repo.service.isReady() &&
-      (repo.workspaceIds.length === 0 || (workspaceId ? repo.workspaceIds.includes(workspaceId) : false)),
+      (repo.workspaceIds.length === 0 ||
+        (workspaceId ? repo.workspaceIds.includes(workspaceId) : false)),
   );
 }
 
@@ -132,7 +141,10 @@ export async function pullTeamMemoryRepos(git: GitRunner = runMemoryRepoGit): Pr
       const remotes = (await git(repo.root, ["remote"])).split("\n").map((line) => line.trim());
       if (!remotes.includes("origin")) continue;
       if (parsePorcelainZ(await git(repo.root, ["status", "--porcelain=v1", "-z"])).length > 0) {
-        pulls.set(repo.root, { at: pulls.get(repo.root)?.at ?? null, error: "Local changes; not updated." });
+        pulls.set(repo.root, {
+          at: pulls.get(repo.root)?.at ?? null,
+          error: "Local changes; not updated.",
+        });
         continue;
       }
       await git(repo.root, ["pull", "--quiet", "--ff-only", "--no-tags", "origin"]);

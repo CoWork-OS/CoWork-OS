@@ -120,6 +120,9 @@ export class MemoryReviewService {
       const message = REFUSAL_MESSAGES[outcome.reason] ?? "It could not be undone.";
       return { success: false, error: message, reason: outcome.reason };
     }
-    return { success: true, message: "Undone. This commitment will not be closed automatically again." };
+    return {
+      success: true,
+      message: "Undone. This commitment will not be closed automatically again.",
+    };
   }
 }

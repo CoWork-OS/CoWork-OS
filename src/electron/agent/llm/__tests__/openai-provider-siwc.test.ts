@@ -298,17 +298,18 @@ describe("OpenAIProvider Sign in with ChatGPT", () => {
   });
 
   it("lists the plan catalog plus known-working unlisted models", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          models: [
-            { slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list" },
-            { slug: "gpt-6-astra", display_name: "GPT-6 Astra", visibility: "list" },
-            { slug: "gpt-reserve", display_name: "Reserve", visibility: "hide" },
-          ],
-        }),
-        { status: 200 },
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            models: [
+              { slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list" },
+              { slug: "gpt-6-astra", display_name: "GPT-6 Astra", visibility: "list" },
+              { slug: "gpt-reserve", display_name: "Reserve", visibility: "hide" },
+            ],
+          }),
+          { status: 200 },
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
     try {

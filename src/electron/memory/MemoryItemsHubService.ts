@@ -227,7 +227,7 @@ export class MemoryItemsHubService {
     });
     const items = await Promise.all(
       page.items
-      .filter((item) => isMemoryItemVisibleIn(item, request.workspaceId))
+        .filter((item) => isMemoryItemVisibleIn(item, request.workspaceId))
         .map((item) => this.view(item)),
     );
     return { items, total: page.total, offset, hasMore: offset + page.items.length < page.total };

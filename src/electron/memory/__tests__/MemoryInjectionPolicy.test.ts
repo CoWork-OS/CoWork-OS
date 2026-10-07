@@ -62,9 +62,7 @@ describe("resolveMemoryInjection matrix", () => {
     expect(decision.layers.projectGuidance).toBe(input.gatewayContext === "private");
     // The memory folder is off unless its setting is on (not passed here).
     expect(decision.layers.memoryRepo).toBe(false);
-    expect(
-      resolveMemoryInjection({ ...input, memoryRepoEnabled: true }).layers.memoryRepo,
-    ).toBe(
+    expect(resolveMemoryInjection({ ...input, memoryRepoEnabled: true }).layers.memoryRepo).toBe(
       !input.noMemory &&
         retained &&
         !input.isSubAgent &&
@@ -146,22 +144,28 @@ describe("resolveMemoryInjection details", () => {
   it("gates swarm notes (phase 5 §2): sub-agents and verifiers included", () => {
     const on = { memoryRepoEnabled: true, swarmAvailable: true } as const;
     expect(resolveMemoryInjection(on).layers.swarm).toBe(true);
-    expect(resolveMemoryInjection({ memoryRepoEnabled: true }).reasons.swarm).toBe("scope_mismatch");
+    expect(resolveMemoryInjection({ memoryRepoEnabled: true }).reasons.swarm).toBe(
+      "scope_mismatch",
+    );
     expect(resolveMemoryInjection({ swarmAvailable: true }).reasons.swarm).toBe("memory_off");
     const sub = resolveMemoryInjection({ ...on, isSubAgent: true, retainMemory: false });
     expect(sub.layers.swarm).toBe(true);
     expect(sub.layers.memoryRepo).toBe(false);
-    expect(resolveMemoryInjection({ ...on, isSubAgent: true, workerRole: "verifier" }).layers.swarm).toBe(
-      true,
-    );
-    expect(resolveMemoryInjection({ ...on, noMemory: true }).reasons.swarm).toBe("no_memory_directive");
     expect(
-      resolveMemoryInjection({ ...on, gatewayContext: "group", allowSharedContextMemory: true }).reasons
-        .swarm,
+      resolveMemoryInjection({ ...on, isSubAgent: true, workerRole: "verifier" }).layers.swarm,
+    ).toBe(true);
+    expect(resolveMemoryInjection({ ...on, noMemory: true }).reasons.swarm).toBe(
+      "no_memory_directive",
+    );
+    expect(
+      resolveMemoryInjection({ ...on, gatewayContext: "group", allowSharedContextMemory: true })
+        .reasons.swarm,
     ).toBe("group_channel");
     expect(
-      resolveMemoryInjection({ ...on, workspaceSettings: { enabled: true, privacyMode: "disabled" } })
-        .reasons.swarm,
+      resolveMemoryInjection({
+        ...on,
+        workspaceSettings: { enabled: true, privacyMode: "disabled" },
+      }).reasons.swarm,
     ).toBe("memory_off");
   });
 

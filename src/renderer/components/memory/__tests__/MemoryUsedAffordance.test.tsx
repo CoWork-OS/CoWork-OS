@@ -204,10 +204,7 @@ describe("memory used store", () => {
   it("fetches once per task for the replies that ask, and notifies subscribers", async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn(async () =>
-      attribution(
-        { r1: { eventId: "r1", refs: ["memory:a"], surfaces: ["chat"] } },
-        ["r1", "r2"],
-      ),
+      attribution({ r1: { eventId: "r1", refs: ["memory:a"], surfaces: ["chat"] } }, ["r1", "r2"]),
     );
     const store = createMemoryUsedStore(fetcher, { delayMs: 10 });
     const listener = vi.fn();

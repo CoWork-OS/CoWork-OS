@@ -11420,7 +11420,9 @@ ${transcript}
     const memoryRepoReadAllowed = memoryRepoDecision?.layers.memoryRepo === true;
     const swarmPrefix =
       memoryRepoDecision?.layers.swarm === true
-        ? await this.resolveTaskSwarm().then((swarm) => (swarm ? swarmFolderPath(swarm.slug) : null))
+        ? await this.resolveTaskSwarm().then((swarm) =>
+            swarm ? swarmFolderPath(swarm.slug) : null,
+          )
         : null;
 
     try {

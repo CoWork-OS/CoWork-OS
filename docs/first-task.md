@@ -1,6 +1,6 @@
 # First task: release brief sample (beta preview)
 
-This guide describes the `release-brief-v1` beta mission. It is available only in builds with the first-task beta flag enabled. The current stable `0.5.54` installer does not include this mission. Use the [getting-started guide](getting-started.md) for the released application.
+This guide describes the `release-brief-v1` beta mission. It is available only in builds with the first-task beta flag enabled. The current stable `0.5.60` installer does not include this mission. Use the [getting-started guide](getting-started.md) for the released application.
 
 The mission includes three fictional files: `release-notes.md`, `issues.csv`, and `brief-instructions.md`. It asks CoWork to create `outputs/issues-clean.csv`, `outputs/summary.json`, and `outputs/release-brief.html` in a new private sample workspace. The source has thirteen CSV data rows, twelve unique issue IDs, seven open and five closed issues, three open release blockers, and two open issues without owners.
 

@@ -75,10 +75,7 @@ export function describePolicyRelaxations(current: AdminPolicies, next: AdminPol
   if (now.agentSecurity.mode === "enforce" && then.agentSecurity.mode !== "enforce") {
     changes.push("Stop enforcing agent security rules (monitor only)");
   }
-  if (
-    now.agentSecurity.failurePolicy !== "open" &&
-    then.agentSecurity.failurePolicy === "open"
-  ) {
+  if (now.agentSecurity.failurePolicy !== "open" && then.agentSecurity.failurePolicy === "open") {
     changes.push("Allow agent actions when the security check fails");
   }
 

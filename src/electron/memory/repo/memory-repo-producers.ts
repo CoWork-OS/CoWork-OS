@@ -23,7 +23,9 @@ export function preferredNameEntryText(name: string): string {
 }
 
 /** Why a folder write was skipped, in words for the user. */
-export function memoryRepoSkipMessage(result: Extract<MemoryRepoWriteResult, { status: "skipped" }>): string {
+export function memoryRepoSkipMessage(
+  result: Extract<MemoryRepoWriteResult, { status: "skipped" }>,
+): string {
   switch (result.reason) {
     case "busy":
       return "The memory folder is busy; try again in a moment.";

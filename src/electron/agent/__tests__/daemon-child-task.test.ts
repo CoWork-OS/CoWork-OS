@@ -8,17 +8,15 @@ describe("AgentDaemon.createChildTask", () => {
     "inherits parent channel sender evidence without child override (%s)",
     async (owner) => {
       const taskRepo = {
-        findById: vi
-          .fn()
-          .mockReturnValue({
-            id: "parent-1",
-            agentConfig: {
-              originChannel: "telegram",
-              gatewayContext: "private",
-              gatewaySenderIsOwner: owner,
-              gatewaySenderRef: "gateway:telegram:contact",
-            },
-          }),
+        findById: vi.fn().mockReturnValue({
+          id: "parent-1",
+          agentConfig: {
+            originChannel: "telegram",
+            gatewayContext: "private",
+            gatewaySenderIsOwner: owner,
+            gatewaySenderRef: "gateway:telegram:contact",
+          },
+        }),
         update: vi.fn(),
         create: vi.fn((task: Any) => ({ id: "child-1", ...task })),
       };

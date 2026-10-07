@@ -202,3 +202,7 @@ DerivedData/
 .swiftpm/
 .venv/
 venv/
+
+# Locally generated research and reports (never committed)
+reports/
+research_notes/

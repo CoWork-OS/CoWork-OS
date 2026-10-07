@@ -1926,10 +1926,10 @@ describe("approval resolution wins before effects", () => {
       pendingApprovals: new Map(),
       approvalRepo: {
         findById: vi.fn().mockResolvedValue({
-            id: "cas-cancelled-effect",
-            taskId: "task-cancelled-effect",
-            status: "pending",
-          }),
+          id: "cas-cancelled-effect",
+          taskId: "task-cancelled-effect",
+          status: "pending",
+        }),
         resolvePending: vi.fn().mockResolvedValue(true),
       },
       taskRepo: { findById: vi.fn().mockImplementation(() => task) },

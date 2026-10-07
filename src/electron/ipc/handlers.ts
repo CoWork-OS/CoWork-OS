@@ -452,10 +452,7 @@ import {
 import { GuardrailManager } from "../guardrails/guardrail-manager";
 import { AppearanceManager, getDevLogCaptureEnabled } from "../settings/appearance-manager";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
-import {
-  memoryRepoSettingsProblem,
-  memoryRepoStatus,
-} from "../memory/repo/memory-repo-bootstrap";
+import { memoryRepoSettingsProblem, memoryRepoStatus } from "../memory/repo/memory-repo-bootstrap";
 import { MemoryRepoService } from "../memory/repo/MemoryRepoService";
 import { readMemoryRepoLines } from "../memory/repo/memory-repo-read";
 import { PersonalityManager } from "../settings/personality-manager";

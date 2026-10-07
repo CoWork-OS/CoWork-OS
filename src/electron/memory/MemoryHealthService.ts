@@ -175,7 +175,9 @@ export function evaluateMemoryHealth(
  * failed; the inbox count as INFO. A null status (it could not be read) is a WARN. Not part
  * of `qa:memory-health` (no database counts).
  */
-export function evaluateMemoryRepoHealth(status: MemoryRepoStatusReport | null): MemoryHealthCheck[] {
+export function evaluateMemoryRepoHealth(
+  status: MemoryRepoStatusReport | null,
+): MemoryHealthCheck[] {
   const base = { id: "memory_repo", label: "Memory folder", value: null };
   if (!status) {
     return [{ ...base, status: "warn", detail: "The memory folder status could not be read." }];
@@ -195,7 +197,9 @@ export function evaluateMemoryRepoHealth(status: MemoryRepoStatusReport | null):
   const problems: string[] = [];
   if (!status.gitAvailable) problems.push("git not found: memory has no history");
   else if (status.clean === false) {
-    problems.push("the folder has changes CoWork has not committed yet (they are committed before the next write)");
+    problems.push(
+      "the folder has changes CoWork has not committed yet (they are committed before the next write)",
+    );
   }
   if (status.lastWriteError) problems.push(`the last write failed: ${status.lastWriteError}`);
   const checks: MemoryHealthCheck[] = [

@@ -41,7 +41,10 @@ describe("memory repo format", () => {
       added: "2026-10-05",
     });
     expect(line).toBe("- Prefers short answers [by: agent; kind: preference; added: 2026-10-05]");
-    expect(parseMemoryRepoLine(line, 1)).toMatchObject({ by: "agent", text: "Prefers short answers" });
+    expect(parseMemoryRepoLine(line, 1)).toMatchObject({
+      by: "agent",
+      text: "Prefers short answers",
+    });
     expect(cleanEntryText("- two\nlines")).toBe("two lines");
     expect(renderMemoryRepoEntry("x", { source: "a]; by: user" })).toBe("- x [source: a by: user]");
   });
@@ -49,7 +52,9 @@ describe("memory repo format", () => {
   it("inserts entries above the index in MEMORY.md and links new files once", () => {
     const entryFile = "# Memory\n\n- First [by: user]\n\n## Index\n- [[me]]\n";
     const inserted = insertEntryLine(entryFile, "- Second [by: user]", true);
-    expect(inserted).toBe("# Memory\n\n- First [by: user]\n- Second [by: user]\n\n## Index\n- [[me]]\n");
+    expect(inserted).toBe(
+      "# Memory\n\n- First [by: user]\n- Second [by: user]\n\n## Index\n- [[me]]\n",
+    );
     const linked = ensureIndexLink(inserted, "workspaces/billing.md");
     expect(linked).toContain("- [[me]]\n- [[workspaces/billing]]");
     expect(ensureIndexLink(linked, "workspaces/billing.md")).toBe(linked);
@@ -58,10 +63,20 @@ describe("memory repo format", () => {
 
   it("validates paths and refs", () => {
     expect(isSafeRepoPath("workspaces/a.md")).toBe(true);
-    for (const bad of ["../x.md", "/etc/x.md", ".git/config", "a/.hidden.md", "notes.txt", "a//b.md"]) {
+    for (const bad of [
+      "../x.md",
+      "/etc/x.md",
+      ".git/config",
+      "a/.hidden.md",
+      "notes.txt",
+      "a//b.md",
+    ]) {
       expect(isSafeRepoPath(bad), bad).toBe(false);
     }
-    expect(parseMemoryRepoRef("repo:workspaces/a.md#L12")).toEqual({ path: "workspaces/a.md", line: 12 });
+    expect(parseMemoryRepoRef("repo:workspaces/a.md#L12")).toEqual({
+      path: "workspaces/a.md",
+      line: 12,
+    });
     expect(parseMemoryRepoRef("repo:../a.md#L1")).toBeNull();
     expect(workspaceSlug("Café Billing / Service")).toBe("cafe-billing-service");
   });

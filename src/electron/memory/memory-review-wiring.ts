@@ -5,10 +5,7 @@
  */
 import type Database from "better-sqlite3";
 import { ChronicleSettingsManager } from "../chronicle/ChronicleSettingsManager";
-import {
-  CommitmentExpiryService,
-  type CommitmentExpiryDeps,
-} from "./CommitmentExpiryService";
+import { CommitmentExpiryService, type CommitmentExpiryDeps } from "./CommitmentExpiryService";
 import { MemoryCurationRepository } from "./MemoryCurationRepository";
 import { MemoryHealthService } from "./MemoryHealthService";
 import { MemoryReviewService } from "./MemoryReviewService";

@@ -50,7 +50,12 @@ export function FirstTaskCard({
   const [showBoundaries, setShowBoundaries] = useState(false);
   const [modelRoute, setModelRoute] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<
-    (FirstTaskModelPreflight & { workspace: "pass" | "fail"; workspaceDetail?: string; token: string | null }) | null
+    | (FirstTaskModelPreflight & {
+        workspace: "pass" | "fail";
+        workspaceDetail?: string;
+        token: string | null;
+      })
+    | null
   >(null);
   const attemptIdRef = useRef<string | null>(null);
 
@@ -223,10 +228,12 @@ export function FirstTaskCard({
           {preflight && (
             <>
               <p role="status">
-                Workspace and packaged inputs: {preflight.workspace}; endpoint: {preflight.endpoint};
-                model: {preflight.model}; tool calls: {preflight.toolCalls}.
+                Workspace and packaged inputs: {preflight.workspace}; endpoint: {preflight.endpoint}
+                ; model: {preflight.model}; tool calls: {preflight.toolCalls}.
               </p>
-              {preflight.workspaceDetail && <p role="alert">{preflight.workspaceDetail}. Check local storage and retry.</p>}
+              {preflight.workspaceDetail && (
+                <p role="alert">{preflight.workspaceDetail}. Check local storage and retry.</p>
+              )}
               {preflight.reason && <p role="alert">{preflightHelp[preflight.reason]}</p>}
             </>
           )}

@@ -27,7 +27,11 @@ vi.mock("../MemoryWriteGate", () => ({
   MemoryWriteGate: { evaluate: vi.fn(async () => ({ allowed: true })) },
 }));
 
-import { SupermemoryService, countsTowardCircuitBreaker, SupermemoryRequestError } from "../SupermemoryService";
+import {
+  SupermemoryService,
+  countsTowardCircuitBreaker,
+  SupermemoryRequestError,
+} from "../SupermemoryService";
 import { SupermemoryRemoteRefRepository } from "../SupermemoryRemoteRefRepository";
 import { ensureSupermemoryRemoteRefsSchema } from "../supermemory-remote-refs-sql";
 import { createMemoryItemsTestDb, nativeSqliteAvailable } from "./memory-items-test-db";
@@ -58,7 +62,11 @@ describeWithSqlite("Supermemory remote ids (SEC-17)", () => {
   let respond: (call: FetchCall) => ReturnType<typeof jsonResponse>;
 
   const refs = () =>
-    db.prepare("SELECT local_ref, remote_id, remote_kind, container_tag FROM supermemory_remote_refs ORDER BY id").all() as Array<Record<string, string>>;
+    db
+      .prepare(
+        "SELECT local_ref, remote_id, remote_kind, container_tag FROM supermemory_remote_refs ORDER BY id",
+      )
+      .all() as Array<Record<string, string>>;
 
   beforeEach(async () => {
     mocks.settings = {

@@ -110,7 +110,9 @@ export function parseMemoryRepoEntries(markdown: string): MemoryRepoEntry[] {
 }
 
 export function splitLines(markdown: string): string[] {
-  return String(markdown || "").replace(/\r\n?/g, "\n").split("\n");
+  return String(markdown || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n");
 }
 
 /**
@@ -288,5 +290,7 @@ export function isSafeRepoPath(relPath: string): boolean {
 
 /** Whether a repo-relative path is inside `swarms/`. */
 export function isSwarmRepoPath(relPath: string): boolean {
-  return String(relPath || "").replace(/\\/g, "/").startsWith(`${MEMORY_REPO_SWARMS_DIR}/`);
+  return String(relPath || "")
+    .replace(/\\/g, "/")
+    .startsWith(`${MEMORY_REPO_SWARMS_DIR}/`);
 }

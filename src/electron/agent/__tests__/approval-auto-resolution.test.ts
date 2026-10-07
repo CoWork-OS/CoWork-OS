@@ -32,20 +32,18 @@ suite("automatic review with the real approval store", () => {
       pendingApprovals: new Map(),
       logEvent: vi.fn(),
       updateTask: vi.fn(),
-      evaluatePermissionRequest: vi
-        .fn()
-        .mockResolvedValue({
-          evaluation: {
-            decision: "ask",
-            reason: { type: "mode", mode: "default", summary: "Fixture review" },
-          },
-          promptDetails: {},
-          scope: { kind: "tool", toolName: "web_fetch" },
-          trackingKey: "fixture",
-          authorizationKey: "fixture-authority",
-          workspace: { permissions: { accessApprovalPolicy: "on-request" } },
-          runtime: { recordPermissionSuccess },
-        }),
+      evaluatePermissionRequest: vi.fn().mockResolvedValue({
+        evaluation: {
+          decision: "ask",
+          reason: { type: "mode", mode: "default", summary: "Fixture review" },
+        },
+        promptDetails: {},
+        scope: { kind: "tool", toolName: "web_fetch" },
+        trackingKey: "fixture",
+        authorizationKey: "fixture-authority",
+        workspace: { permissions: { accessApprovalPolicy: "on-request" } },
+        runtime: { recordPermissionSuccess },
+      }),
       canSessionAutoApproveType: AgentDaemon.prototype["canSessionAutoApproveType"],
       canAutoReviewApprove: vi.fn(() => ({ approved: true, reason: "fixture safe review" })),
       isApprovalAuthorityCurrent: AgentDaemon.prototype["isApprovalAuthorityCurrent"],

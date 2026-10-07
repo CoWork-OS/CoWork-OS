@@ -94,21 +94,34 @@ export async function configureSyncRemote(
 }
 
 async function remoteBranchExists(git: GitRunner, root: string): Promise<boolean> {
-  return git(root, ["rev-parse", "--verify", "--quiet", `refs/remotes/${MEMORY_REPO_SYNC_REMOTE}/${BRANCH}`]).then(
+  return git(root, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `refs/remotes/${MEMORY_REPO_SYNC_REMOTE}/${BRANCH}`,
+  ]).then(
     (out) => out.trim().length > 0,
     () => false,
   );
 }
 
-async function aheadBehind(git: GitRunner, root: string): Promise<{ ahead: number; behind: number }> {
+async function aheadBehind(
+  git: GitRunner,
+  root: string,
+): Promise<{ ahead: number; behind: number }> {
   if (!(await remoteBranchExists(git, root))) {
-    const count = Number((await git(root, ["rev-list", "--count", "HEAD"]).catch(() => "0")).trim());
+    const count = Number(
+      (await git(root, ["rev-list", "--count", "HEAD"]).catch(() => "0")).trim(),
+    );
     return { ahead: Number.isFinite(count) ? count : 0, behind: 0 };
   }
   const out = (
-    await git(root, ["rev-list", "--left-right", "--count", `HEAD...${MEMORY_REPO_SYNC_REMOTE}/${BRANCH}`]).catch(
-      () => "0\t0",
-    )
+    await git(root, [
+      "rev-list",
+      "--left-right",
+      "--count",
+      `HEAD...${MEMORY_REPO_SYNC_REMOTE}/${BRANCH}`,
+    ]).catch(() => "0\t0")
   ).trim();
   const [ahead, behind] = out.split(/\s+/).map((n) => Number(n) || 0);
   return { ahead, behind };
@@ -121,7 +134,10 @@ async function aheadBehind(git: GitRunner, root: string): Promise<{ ahead: numbe
 export async function pullMemoryRepo(
   git: GitRunner,
   root: string,
-): Promise<{ ok: true; ahead: number; behind: number; changed: boolean } | { ok: false; conflict?: string; error?: string }> {
+): Promise<
+  | { ok: true; ahead: number; behind: number; changed: boolean }
+  | { ok: false; conflict?: string; error?: string }
+> {
   try {
     await git(root, ["fetch", "--quiet", "--no-tags", MEMORY_REPO_SYNC_REMOTE, BRANCH]);
   } catch (error) {
@@ -163,10 +179,21 @@ export async function pushMemoryRepo(
         ? [`--force-with-lease=${BRANCH}:${MEMORY_REPO_SYNC_REMOTE}/${BRANCH}`]
         : ["--force"]
       : [];
-    await git(root, ["push", "--quiet", ...lease, MEMORY_REPO_SYNC_REMOTE, `HEAD:refs/heads/${BRANCH}`]);
-    await git(root, ["fetch", "--quiet", "--no-tags", MEMORY_REPO_SYNC_REMOTE, BRANCH]).catch(() => undefined);
+    await git(root, [
+      "push",
+      "--quiet",
+      ...lease,
+      MEMORY_REPO_SYNC_REMOTE,
+      `HEAD:refs/heads/${BRANCH}`,
+    ]);
+    await git(root, ["fetch", "--quiet", "--no-tags", MEMORY_REPO_SYNC_REMOTE, BRANCH]).catch(
+      () => undefined,
+    );
     return { ok: true };
   } catch (error) {
-    return { ok: false, error: String(error instanceof Error ? error.message : error).slice(0, 300) };
+    return {
+      ok: false,
+      error: String(error instanceof Error ? error.message : error).slice(0, 300),
+    };
   }
 }

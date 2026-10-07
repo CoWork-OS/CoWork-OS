@@ -81,12 +81,12 @@ describeWithSqlite("AutomationRunOutcomeRepository", () => {
     await repo.create({ ...base, agentRoleId: "agent-a", createdAt: 1 });
     await repo.create({ ...base, agentRoleId: "agent-b", createdAt: 2 });
 
-    expect((await repo.findLatestByNotificationKey("shared-key", "agent:agent-a"))?.agentRoleId).toBe(
-      "agent-a",
-    );
-    expect((await repo.findLatestByNotificationKey("shared-key", "agent:agent-b"))?.agentRoleId).toBe(
-      "agent-b",
-    );
+    expect(
+      (await repo.findLatestByNotificationKey("shared-key", "agent:agent-a"))?.agentRoleId,
+    ).toBe("agent-a");
+    expect(
+      (await repo.findLatestByNotificationKey("shared-key", "agent:agent-b"))?.agentRoleId,
+    ).toBe("agent-b");
 
     db.close();
   });

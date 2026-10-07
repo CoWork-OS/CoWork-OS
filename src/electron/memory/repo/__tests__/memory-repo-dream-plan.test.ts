@@ -85,7 +85,10 @@ describe("classifyDreamOperations", () => {
       { op: "move", line: vpn, file: "workspaces/billing.md" },
     ]);
     expect(merge.decision).toBe("auto");
-    expect(removeUser).toMatchObject({ decision: "review", why: expect.stringMatching(/you wrote/) });
+    expect(removeUser).toMatchObject({
+      decision: "review",
+      why: expect.stringMatching(/you wrote/),
+    });
     expect(editEntry.decision).toBe("review");
     expect(move.decision).toBe("auto");
   });
@@ -115,7 +118,10 @@ describe("classifyDreamOperations", () => {
       },
     ]);
     expect(supported).toMatchObject({ decision: "auto", sourceTaskId: "task-9" });
-    expect(unsupported).toMatchObject({ decision: "review", why: expect.stringMatching(/not the user's own words/) });
+    expect(unsupported).toMatchObject({
+      decision: "review",
+      why: expect.stringMatching(/not the user's own words/),
+    });
     expect(toEntryFile.decision).toBe("review");
   });
 
@@ -124,8 +130,20 @@ describe("classifyDreamOperations", () => {
       { op: "promote", line: evil, file: "lessons.md" },
       { op: "discard", line: evil },
       { op: "update", line: "L999", text: "x x x" },
-      { op: "add", file: "../escape.md", text: "nope nope", kind: "rule", evidence: [{ task: "T1", quote: "Please fix the deploy." }] },
-      { op: "add", file: "inbox.md", text: "nope nope", kind: "rule", evidence: [{ task: "T1", quote: "Please fix the deploy." }] },
+      {
+        op: "add",
+        file: "../escape.md",
+        text: "nope nope",
+        kind: "rule",
+        evidence: [{ task: "T1", quote: "Please fix the deploy." }],
+      },
+      {
+        op: "add",
+        file: "inbox.md",
+        text: "nope nope",
+        kind: "rule",
+        evidence: [{ task: "T1", quote: "Please fix the deploy." }],
+      },
       { op: "update", line: vpn, text: "sk-abcdefghijklmnopqrstuvwxyz0123456789" },
       { op: "update", line: evil, text: "edit the inbox" },
     ]);
@@ -147,7 +165,11 @@ describe("applyDreamOperations", () => {
     const input = buildDreamInput({ files: files(), tasks, now: NOW });
     const ops = classifyDreamOperations(
       [
-        { op: "merge", lines: [aliasFor(input, "Prefers short"), aliasFor(input, "Prefers concise")], text: "Prefers short, concise answers" },
+        {
+          op: "merge",
+          lines: [aliasFor(input, "Prefers short"), aliasFor(input, "Prefers concise")],
+          text: "Prefers short, concise answers",
+        },
         {
           op: "add",
           file: "topics/deploys.md",
@@ -161,7 +183,10 @@ describe("applyDreamOperations", () => {
     );
     // Lines shifted since the input was built: a line was added on top of me.md.
     const current = files();
-    current.set("me.md", current.get("me.md")!.replace("# About me\n\n", "# About me\n\n- Hand edit [by: user]\n"));
+    current.set(
+      "me.md",
+      current.get("me.md")!.replace("# About me\n\n", "# About me\n\n- Hand edit [by: user]\n"),
+    );
     const result = applyDreamOperations({ files: current, operations: ops, by: "agent", now: NOW });
     expect(result.skipped).toEqual([]);
     expect(result.files.get("me.md")).toBe(

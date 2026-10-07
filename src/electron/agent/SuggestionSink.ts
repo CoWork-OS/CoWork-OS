@@ -16,7 +16,11 @@
  * Storage stays behind `SuggestionSinkStore` (ProactiveSuggestionsService today); the sink
  * only decides create vs merge vs suppress.
  */
-import type { HeartbeatWorkspaceScope, ProactiveSuggestion, SuggestionType } from "../../shared/types";
+import type {
+  HeartbeatWorkspaceScope,
+  ProactiveSuggestion,
+  SuggestionType,
+} from "../../shared/types";
 
 export type SuggestionSource =
   | "heartbeat"

@@ -696,7 +696,7 @@ describe("bot transcript surface", () => {
   it("keeps collaboration context inside the transcript and attributes bot replies", () => {
     const mainContentSource = readFileSync(mainContentPath, "utf8");
     const mainContentStyles = readFileSync(mainContentStylesPath, "utf8");
-    const taskContentIndex = mainContentSource.indexOf('className={`task-content');
+    const taskContentIndex = mainContentSource.indexOf("className={`task-content");
     const collaborationHeaderIndex = mainContentSource.indexOf("<BotCollaborationHeader");
 
     expect(taskContentIndex).toBeGreaterThan(-1);

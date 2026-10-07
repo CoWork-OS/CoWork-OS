@@ -3104,7 +3104,6 @@ button {
   transform: translateY(1px);
 }
 
-
 .session-approval-draft {
   margin: 0 0 18px;
   padding: 12px 14px;
@@ -3114,10 +3113,20 @@ button {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.session-approval-draft h4 { margin: 0 0 8px; font-size: 13px; }
-.session-approval-draft p { margin: 8px 0; color: var(--color-text-muted); }
-.session-approval-draft details { margin-top: 10px; }
-.session-approval-draft summary { cursor: pointer; }
+.session-approval-draft h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.session-approval-draft p {
+  margin: 8px 0;
+  color: var(--color-text-muted);
+}
+.session-approval-draft details {
+  margin-top: 10px;
+}
+.session-approval-draft summary {
+  cursor: pointer;
+}
 .session-approval-draft pre {
   max-height: 180px;
   overflow: auto;
@@ -3130,7 +3139,9 @@ button {
   color: var(--color-text-primary);
   font-size: 12px;
 }
-.session-approval-draft-version { font-family: monospace; }
+.session-approval-draft-version {
+  font-family: monospace;
+}
 
 .responsibility-grant-note {
   margin: 0 0 10px;

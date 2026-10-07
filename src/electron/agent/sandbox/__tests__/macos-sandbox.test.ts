@@ -146,7 +146,9 @@ describe("MacOSSandbox", () => {
     proc.emit("close", 0, null);
     await resultPromise;
     const deviceRule = profile.slice(profile.indexOf("(allow file-read* file-write-data"));
-    expect(deviceRule).toMatch(/^\(allow file-read\* file-write-data\n {2}\(literal "\/dev\/null"\)/);
+    expect(deviceRule).toMatch(
+      /^\(allow file-read\* file-write-data\n {2}\(literal "\/dev\/null"\)/,
+    );
     expect(deviceRule.slice(0, deviceRule.indexOf("\n)\n"))).toContain('(subpath "/dev/fd")');
     expect(profile).not.toContain('"/dev/tty"');
     expect(profile).not.toMatch(/file-write\*[^\n]*\/dev\//);

@@ -2,7 +2,8 @@
  * Startup wiring of the memory engine (docs/memory-engine.md): create the process-wide
  * MemoryWriter, copy the retired legacy lanes into `memory_items` once (awaited, so no
  * service reads a half-migrated store), then start the synchronous facts snapshot and the
- * profile's read model over the memory folder.
+ * profile's read model over the memory folder. Legacy data an older release wrote after the
+ * retirement re-arms the migration once first (`rearmLegacyMemoryRetirement`).
  */
 import type Database from "better-sqlite3";
 import { createLogger } from "../utils/logger";
@@ -11,8 +12,12 @@ import { MemoryFactsSnapshot } from "./memory-facts-snapshot";
 import { UserProfileFolderModel } from "./user-profile-folder";
 import { createMemoryStatementPort, type MemoryStatementPort } from "./memory-statement-port";
 import { withMaintenanceClaim } from "./maintenance-claim-sql";
+import type { LegacyLaneSources } from "./MemoryItemsLaneMigration";
 import { MEMORY_ITEMS_LANE_MIGRATION_KEY } from "./memory-items-sql";
-import { scheduleLegacyMemoryRetirement } from "./LegacyMemoryRetirement";
+import {
+  rearmLegacyMemoryRetirement,
+  scheduleLegacyMemoryRetirement,
+} from "./LegacyMemoryRetirement";
 
 const logger = createLogger("MemoryEngine");
 
@@ -39,15 +44,25 @@ function isStatementPort(
 export async function runMemoryItemsLaneMigrationNow(
   writer: MemoryWriter,
   port?: MemoryStatementPort,
-  options: { waitMs?: number; pollMs?: number } = {},
+  options: {
+    waitMs?: number;
+    pollMs?: number;
+    /** The legacy lanes (tests); defaults to the stored ones. */
+    loadSources?: () => Promise<LegacyLaneSources>;
+  } = {},
 ): Promise<void> {
   try {
-    const { loadLegacyLaneSources, runMemoryItemsLaneMigration } =
+    const { RERUN_LANES, loadLegacyLaneSources, runMemoryItemsLaneMigration } =
       await import("./MemoryItemsLaneMigration");
-    const run = async () =>
-      runMemoryItemsLaneMigration(writer, await loadLegacyLaneSources(), {
+    const run = async () => {
+      // A re-run after a downgrade copies only the lanes the older release wrote to.
+      const rerun = port ? await port.unit("legacyRetirement_rerunRequest", {}) : null;
+      const sources = await (options.loadSources ?? loadLegacyLaneSources)();
+      return runMemoryItemsLaneMigration(writer, sources, {
         pause: () => new Promise((resolve) => setImmediate(resolve)),
+        ...(rerun ? { only: RERUN_LANES } : {}),
       });
+    };
     if (!port) {
       const result = await run();
       if (result.ran) logger.info("Memory item lane migration finished", result.lanes);
@@ -86,6 +101,7 @@ export async function startMemoryEngine(
   const { migrationWaitMs, ...deps } = options;
   const writer = MemoryWriter.initialize(source, deps);
   const port = isStatementPort(source) ? source : createMemoryStatementPort(source);
+  await rearmLegacyMemoryRetirement(port);
   await runMemoryItemsLaneMigrationNow(writer, port, { waitMs: migrationWaitMs });
   const stopSnapshot = MemoryFactsSnapshot.install();
   // The user profile reads the memory folder once it runs (UserProfileService).

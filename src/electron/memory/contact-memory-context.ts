@@ -51,8 +51,7 @@ export async function buildContactMemoryContext(
     options.companyId ? `company:${options.companyId}` : undefined,
   ].filter((ref): ref is string => Boolean(ref));
   if (scopeRefs.length === 0) return "";
-  const port =
-    options.port === undefined ? (MemoryWriter.get()?.repository ?? null) : options.port;
+  const port = options.port === undefined ? (MemoryWriter.get()?.repository ?? null) : options.port;
   if (!port) return "";
 
   const items: MemoryItem[] = [];
@@ -85,9 +84,7 @@ export async function buildContactMemoryContext(
     .filter((item) => (dueAtOf(item) ?? Number.MAX_SAFE_INTEGER) <= cutoff)
     .sort((a, b) => (dueAtOf(a) ?? 0) - (dueAtOf(b) ?? 0))
     .slice(0, maxPerSection);
-  const open = commitments
-    .filter((item) => !dueSoon.includes(item))
-    .slice(0, maxPerSection);
+  const open = commitments.filter((item) => !dueSoon.includes(item)).slice(0, maxPerSection);
 
   const lines = [CONTACT_MEMORY_HEADER];
   if (facts.length > 0) {

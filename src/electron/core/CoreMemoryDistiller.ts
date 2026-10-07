@@ -46,9 +46,9 @@ export class CoreMemoryDistiller {
   async runHotPath(traceId: string): Promise<CoreMemoryDistillRun | undefined> {
     const trace = await this.traceRepo.findById(traceId);
     if (!trace) return undefined;
-    const accepted = (await this.candidateRepo
-      .listForTrace(traceId))
-      .filter((candidate) => candidate.status === "accepted");
+    const accepted = (await this.candidateRepo.listForTrace(traceId)).filter(
+      (candidate) => candidate.status === "accepted",
+    );
     if (!accepted.length) {
       return this.distillRunRepo.create({
         profileId: trace.profileId,

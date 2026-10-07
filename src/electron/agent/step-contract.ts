@@ -249,13 +249,9 @@ export function isReadOnlyConstraintOnlyStep(text: string): boolean {
   const desc = String(text || "").trim();
   if (!desc || !descriptionHasProtectiveConstraintIntent(desc)) return false;
 
-  const operation =
-    "(?:create|write|edit|modify|move|delete|remove|rename|access|touch|read|open)";
+  const operation = "(?:create|write|edit|modify|move|delete|remove|rename|access|touch|read|open)";
   const actionList =
-    operation +
-    "(?:(?:\\s*,\\s*(?:(?:and|or)\\s+)?|\\s+(?:and|or)\\s+)" +
-    operation +
-    ")*";
+    operation + "(?:(?:\\s*,\\s*(?:(?:and|or)\\s+)?|\\s+(?:and|or)\\s+)" + operation + ")*";
   const match = desc.match(
     new RegExp(
       "^\\s*(?:do\\s+not|don't|must\\s+not|should\\s+not|never)\\s+" +
@@ -343,10 +339,8 @@ const GENERATED_FORMAT_NOUNS: Record<GeneratedArtifactFormat, string> = {
   document: String.raw`word\s+documents?|docx|pdfs?|[\w./-]*[\w-]\.(?:pdf|docx)`,
   spreadsheet: String.raw`spreadsheets?|excel|xlsx|workbooks?|[\w./-]*[\w-]\.xlsx`,
 };
-const ARTIFACT_CREATION_VERB =
-  String.raw`(?:create|generate|write|save|produce|export|build|make|draft|prepare|compile|render)`;
-const OBJECT_STOP_WORD =
-  String.raw`(?:that|which|to|for|in|into|from|with|of|and|or|as|on|by|at|using|via|about|then)`;
+const ARTIFACT_CREATION_VERB = String.raw`(?:create|generate|write|save|produce|export|build|make|draft|prepare|compile|render)`;
+const OBJECT_STOP_WORD = String.raw`(?:that|which|to|for|in|into|from|with|of|and|or|as|on|by|at|using|via|about|then)`;
 // The format noun is the created object ("a PDF report", "PDF invoices", "an
 // Excel workbook") unless it only describes a software component ("the xlsx
 // parser", "a PDF export feature", "a PDF viewer").

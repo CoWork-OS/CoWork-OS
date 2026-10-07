@@ -83,7 +83,6 @@ function computeParallelism(
   return isAllOllama(participants) ? Math.min(participants.length, 2) : participants.length;
 }
 
-
 export interface CouncilServiceDeps {
   db: Database.Database;
   getCronService: () => CronService | null;

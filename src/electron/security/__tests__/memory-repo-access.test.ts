@@ -140,7 +140,9 @@ describe("memory repo filesystem boundary", () => {
       expect(read(target)).toMatchObject({ decision: "deny", reason: "memory_repo_unavailable" });
     }
     expect(
-      swarmOnly(() => evaluateWorkspaceFilesystemAccess(workspace, path.join(swarm, "findings.md"), "write")),
+      swarmOnly(() =>
+        evaluateWorkspaceFilesystemAccess(workspace, path.join(swarm, "findings.md"), "write"),
+      ),
     ).toMatchObject({ decision: "deny", reason: "protected_path" });
     // A malformed prefix is ignored.
     expect(

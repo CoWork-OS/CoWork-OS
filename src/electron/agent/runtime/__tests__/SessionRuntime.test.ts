@@ -3479,7 +3479,10 @@ describe("SessionRuntime pinned swarm block", () => {
     await prepare(runtime, true, true);
     expect(upsertPinnedUserBlock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ tag: swarmTag, insertAfterTag: PINNED_CONTEXT_TAGS.memoryRepo.open }),
+      expect.objectContaining({
+        tag: swarmTag,
+        insertAfterTag: PINNED_CONTEXT_TAGS.memoryRepo.open,
+      }),
     );
 
     // A sub-agent: no personal memory, still the swarm block.

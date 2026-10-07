@@ -128,18 +128,23 @@ describe("Sign in with ChatGPT ID token validation", () => {
 
   it("tries every compatible key when the token has no kid", async () => {
     const { publicKey: otherKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    const keys = async () => [
-      { ...otherKey.export({ format: "jwk" }), kid: "rotated", use: "sig" },
-      { ...jwk, kid: "current" },
-      { ...jwk, kid: "enc-only", use: "enc" },
-    ] as Array<Record<string, unknown>>;
+    const keys = async () =>
+      [
+        { ...otherKey.export({ format: "jwk" }), kid: "rotated", use: "sig" },
+        { ...jwk, kid: "current" },
+        { ...jwk, kid: "enc-only", use: "enc" },
+      ] as Array<Record<string, unknown>>;
     const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
     const payload = Buffer.from(JSON.stringify(validClaims)).toString("base64url");
     const signature = sign("sha256", Buffer.from(`${header}.${payload}`), privateKey).toString(
       "base64url",
     );
     await expect(
-      verifySiwcIdToken(`${header}.${payload}.${signature}`, { clientId: "oaiapp_123", nonce: "nonce-1" }, keys),
+      verifySiwcIdToken(
+        `${header}.${payload}.${signature}`,
+        { clientId: "oaiapp_123", nonce: "nonce-1" },
+        keys,
+      ),
     ).resolves.toMatchObject({ subject: "user-sub" });
   });
 
@@ -161,7 +166,9 @@ describe("Sign in with ChatGPT loopback callback", () => {
       const stray = await fetch(`${callback.redirectUri}?state=wrong&code=bad`);
       expect(stray.status).toBe(400);
 
-      const ok = await fetch(`${callback.redirectUri}?state=expected-state&code=abc&client_id=oaiapp_9`);
+      const ok = await fetch(
+        `${callback.redirectUri}?state=expected-state&code=abc&client_id=oaiapp_9`,
+      );
       expect(ok.status).toBe(200);
       await expect(callback.result).resolves.toEqual({ code: "abc", issuedClientId: "oaiapp_9" });
     } finally {
@@ -186,14 +193,24 @@ describe("Sign in with ChatGPT token refresh", () => {
   });
 
   it("shares one refresh request between concurrent callers", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "new-access",
+            refresh_token: "new-refresh",
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const tokens = { access_token: "old", refresh_token: "old-refresh", expires_at: 0, id_token: "id" };
+    const tokens = {
+      access_token: "old",
+      refresh_token: "old-refresh",
+      expires_at: 0,
+      id_token: "id",
+    };
 
     const [first, second] = await Promise.all([
       OpenAISiwcOAuth.refreshTokens("oaiapp_1", tokens),
@@ -210,13 +227,20 @@ describe("Sign in with ChatGPT token refresh", () => {
       resource: "https://api.openai.com/v1",
     });
     expect(first).toEqual(second);
-    expect(first).toMatchObject({ access_token: "new-access", refresh_token: "new-refresh", id_token: "id" });
+    expect(first).toMatchObject({
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+      id_token: "id",
+    });
   });
 
   it("flags unusable refresh tokens as requiring sign-in again", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ error: "refresh_token_reused" }), { status: 400 })),
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "refresh_token_reused" }), { status: 400 }),
+      ),
     );
     await expect(
       OpenAISiwcOAuth.refreshTokens("oaiapp_1", {

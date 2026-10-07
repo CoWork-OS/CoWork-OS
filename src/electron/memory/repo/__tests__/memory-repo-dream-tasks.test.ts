@@ -170,7 +170,12 @@ describe("createDreamTaskLister", () => {
         task({ id: "paused", createdAt: 30, status: "paused" as Any }),
         task({ id: "pending", createdAt: 25, status: "pending" as Any }),
         task({ id: "stale", createdAt: 22, updatedAt: 22, status: "executing" as Any }),
-        task({ id: "bot", createdAt: 21, status: "executing" as Any, agentConfig: { botConversation: true } as Any }),
+        task({
+          id: "bot",
+          createdAt: 21,
+          status: "executing" as Any,
+          agentConfig: { botConversation: true } as Any,
+        }),
         task({ id: "before", createdAt: 10 }),
       ],
       findTaskEvents: async (taskId) => [event(taskId, "assistant_message", { message: "ok" })],

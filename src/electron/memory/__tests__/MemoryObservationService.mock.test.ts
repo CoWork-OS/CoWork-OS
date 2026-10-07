@@ -90,9 +90,9 @@ describe("MemoryObservationService without native sqlite", () => {
     const status = await MemoryObservationService.getBackfillStatus();
 
     expect(preparedSql.some((sql) => sql.includes("SELECT m.*"))).toBe(false);
-    expect(
-      preparedSql.some((sql) => sql.includes("INSERT INTO memory_observation_metadata")),
-    ).toBe(false);
+    expect(preparedSql.some((sql) => sql.includes("INSERT INTO memory_observation_metadata"))).toBe(
+      false,
+    );
     expect(status).toMatchObject({
       total: 3,
       processed: 1,

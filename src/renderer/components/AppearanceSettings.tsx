@@ -239,7 +239,8 @@ export function AppearanceSettings({
         <h4>Command output</h4>
         <p className="settings-description">
           How shell commands are shown inside steps. Terminal shows a full window with scrollback.
-          Minimal shows a compact shell card: the command stays pinned while the output scrolls, and both can be copied.
+          Minimal shows a compact shell card: the command stays pinned while the output scrolls, and
+          both can be copied.
         </p>
         <div className="theme-switcher">
           <button

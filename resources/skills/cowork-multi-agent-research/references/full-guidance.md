@@ -146,4 +146,4 @@ Search terms examples:
 - Prefer recent papers (2024–2025) when available.
 - Include production deployments (e.g., "how X deploys multi-agent").
 - Note frameworks and their trade-offs (sequential vs parallel, handoff vs shared context).
-- Check CoWork OS docs: `docs/competitive-landscape-research.md`, `docs/architecture.md`, `docs/features.md` for alignment.
+- Check CoWork OS docs: `docs/architecture.md`, `docs/features.md` for alignment.

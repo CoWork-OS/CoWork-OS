@@ -65,36 +65,36 @@ export class BotNotificationRuntime {
         await this.runtime.assertOwnership();
         const ack = await service.addBotDelivery(
           {
-          beforePublish: async () => {
-            await this.runtime.assertOwnership();
-            await this.sql.unit("botNotification_assertDelivery", [
-              receipts.map((r) => r.id),
-              fence,
-            ]);
-          },
-          id: first.notificationId,
-          type:
-            first.kind === "decision"
-              ? "input_required"
-              : first.kind === "failure"
-                ? "task_failed"
-                : "info",
-          title:
-            receipts.length > 1
-              ? `${receipts.length} bot work updates`
-              : first.kind === "decision"
-                ? "Bot needs your decision"
+            beforePublish: async () => {
+              await this.runtime.assertOwnership();
+              await this.sql.unit("botNotification_assertDelivery", [
+                receipts.map((r) => r.id),
+                fence,
+              ]);
+            },
+            id: first.notificationId,
+            type:
+              first.kind === "decision"
+                ? "input_required"
                 : first.kind === "failure"
-                  ? "Bot work failed"
-                  : "Bot result is ready",
-          message:
-            receipts.length > 1
-              ? "Open this bot’s Work view to inspect the results and failures."
-              : "Open the work item to inspect its current state and evidence.",
-          taskId: receipts.length === 1 ? first.taskId : undefined,
-          workspaceId: first.scope.workspaceId,
-          agentRoleId: first.scope.agentRoleId,
-          desktopAlert: desktop === "requested",
+                  ? "task_failed"
+                  : "info",
+            title:
+              receipts.length > 1
+                ? `${receipts.length} bot work updates`
+                : first.kind === "decision"
+                  ? "Bot needs your decision"
+                  : first.kind === "failure"
+                    ? "Bot work failed"
+                    : "Bot result is ready",
+            message:
+              receipts.length > 1
+                ? "Open this bot’s Work view to inspect the results and failures."
+                : "Open the work item to inspect its current state and evidence.",
+            taskId: receipts.length === 1 ? first.taskId : undefined,
+            workspaceId: first.scope.workspaceId,
+            agentRoleId: first.scope.agentRoleId,
+            desktopAlert: desktop === "requested",
           },
           { ids: receipts.map((r) => r.id), fence },
         );

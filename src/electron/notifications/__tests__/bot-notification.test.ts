@@ -314,8 +314,18 @@ describe("durable bot notifications", () => {
       intentId: receipt.id,
       expectedRouteVersion: store.get(scope).version,
     };
-    const foreign=new AgentRoleStore(manager.getDatabase()).create({name:randomUUID(),displayName:"Other private fixture",capabilities:[]});
-    expect(()=>store.retry({...request,scope:{...scope,agentRoleId:foreign.id},expectedRouteVersion:0})).toThrow("not an unknown delivery in this scope");
+    const foreign = new AgentRoleStore(manager.getDatabase()).create({
+      name: randomUUID(),
+      displayName: "Other private fixture",
+      capabilities: [],
+    });
+    expect(() =>
+      store.retry({
+        ...request,
+        scope: { ...scope, agentRoleId: foreign.id },
+        expectedRouteVersion: 0,
+      }),
+    ).toThrow("not an unknown delivery in this scope");
     enable({ destination: "desktop" });
     expect(() => store.retry(request)).toThrow("version changed");
     const next = { ...request, expectedRouteVersion: store.get(scope).version };

@@ -32,7 +32,8 @@ import {
 describe("user profile over the memory folder", () => {
   let base: string;
   let service: MemoryRepoService;
-  const me = () => parseMemoryRepoEntries(fs.readFileSync(path.join(service.root, "me.md"), "utf8"));
+  const me = () =>
+    parseMemoryRepoEntries(fs.readFileSync(path.join(service.root, "me.md"), "utf8"));
 
   beforeEach(async () => {
     personality.name = undefined;
@@ -92,7 +93,13 @@ describe("user profile over the memory folder", () => {
       origin: "agent_tool",
     });
     // A lesson is not a profile fact.
-    await service.remember({ text: "Run lint first", kind: "rule", scope: "global", by: "user", origin: "memory_hub" });
+    await service.remember({
+      text: "Run lint first",
+      kind: "rule",
+      scope: "global",
+      by: "user",
+      origin: "memory_hub",
+    });
     await UserProfileFolderModel.refresh();
     const facts = UserProfileService.getProfile().facts;
     expect(facts.map((fact) => fact.value)).toEqual([
@@ -100,7 +107,12 @@ describe("user profile over the memory folder", () => {
       "Prefers short answers",
       "Works on the billing team",
     ]);
-    expect(facts[0]).toMatchObject({ id: "repo:MEMORY.md#L3", pinned: true, source: "manual", confidence: 1 });
+    expect(facts[0]).toMatchObject({
+      id: "repo:MEMORY.md#L3",
+      pinned: true,
+      source: "manual",
+      confidence: 1,
+    });
     expect(facts[2]).toMatchObject({
       category: "identity",
       source: "conversation",
@@ -121,9 +133,15 @@ describe("user profile over the memory folder", () => {
       origin: "memory_hub",
     });
     await UserProfileFolderModel.refresh();
-    const names = UserProfileService.getProfile().facts.filter((fact) => /preferred name/i.test(fact.value));
+    const names = UserProfileService.getProfile().facts.filter((fact) =>
+      /preferred name/i.test(fact.value),
+    );
     expect(names).toEqual([
-      expect.objectContaining({ value: "Preferred name: Mesut", category: "identity", pinned: true }),
+      expect.objectContaining({
+        value: "Preferred name: Mesut",
+        category: "identity",
+        pinned: true,
+      }),
     ]);
   });
 
@@ -134,16 +152,34 @@ describe("user profile over the memory folder", () => {
       source: "manual",
       pinned: true,
     });
-    expect(fact).toMatchObject({ id: "repo:MEMORY.md#L3", category: "work", value: "Current work context: billing" });
-    await UserProfileService.addFact({ category: "identity", value: "Preferred name: Alex", source: "manual" });
+    expect(fact).toMatchObject({
+      id: "repo:MEMORY.md#L3",
+      category: "work",
+      value: "Current work context: billing",
+    });
+    await UserProfileService.addFact({
+      category: "identity",
+      value: "Preferred name: Alex",
+      source: "manual",
+    });
     expect(personality.name).toBe("Alex");
     expect(me()).toEqual([
-      expect.objectContaining({ text: "Preferred name: Alex", by: "user", subject: "preferred_name" }),
+      expect.objectContaining({
+        text: "Preferred name: Alex",
+        by: "user",
+        subject: "preferred_name",
+      }),
     ]);
   });
 
   it("replaces onboarding facts on re-onboarding and leaves the user's other lines", async () => {
-    await service.remember({ text: "Likes tea", kind: "preference", scope: "global", by: "user", origin: "memory_hub" });
+    await service.remember({
+      text: "Likes tea",
+      kind: "preference",
+      scope: "global",
+      by: "user",
+      origin: "memory_hub",
+    });
     const first = await UserProfileService.replaceTaggedFacts("onboarding", [
       { category: "identity", value: "Preferred name: Alex", source: "manual", pinned: true },
       { category: "work", value: "Current work context: payments", source: "manual", pinned: true },
@@ -162,7 +198,13 @@ describe("user profile over the memory folder", () => {
   });
 
   it("deletes a folder fact by its id, guarded by the hash it read", async () => {
-    await service.remember({ text: "Likes tea", kind: "preference", scope: "global", by: "user", origin: "memory_hub" });
+    await service.remember({
+      text: "Likes tea",
+      kind: "preference",
+      scope: "global",
+      by: "user",
+      origin: "memory_hub",
+    });
     await UserProfileFolderModel.refresh();
     const [fact] = UserProfileService.getProfile().facts;
     expect(await UserProfileService.deleteFact("repo:lessons.md#L1")).toBe(false);
@@ -182,7 +224,9 @@ describe("user profile over the memory folder", () => {
   });
 
   it("builds a fact from an entry", () => {
-    const [entry] = parseMemoryRepoEntries("- Uses vim [by: agent; kind: preference; added: 2026-10-05]");
+    const [entry] = parseMemoryRepoEntries(
+      "- Uses vim [by: agent; kind: preference; added: 2026-10-05]",
+    );
     expect(entryToUserFact("me.md", entry)).toMatchObject({
       id: "repo:me.md#L1",
       category: "preference",

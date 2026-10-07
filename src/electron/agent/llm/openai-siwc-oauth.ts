@@ -106,9 +106,7 @@ type StoredOpenAISettings = NonNullable<LLMSettingsData["openai"]>;
  * registration are kept so the next sign-in reauthorizes the same registration
  * instead of creating a new one.
  */
-export function clearOpenAIOAuthSession(
-  openai: LLMSettingsData["openai"],
-): StoredOpenAISettings {
+export function clearOpenAIOAuthSession(openai: LLMSettingsData["openai"]): StoredOpenAISettings {
   return {
     ...openai,
     accessToken: undefined,

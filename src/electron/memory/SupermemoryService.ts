@@ -543,7 +543,9 @@ export class SupermemoryService {
   }
 
   /** Delete the given remote copies; mappings of the deleted ones are dropped. */
-  static async forgetRemoteCopies(refs: SupermemoryRemoteRef[]): Promise<SupermemoryRemoteForgetResult> {
+  static async forgetRemoteCopies(
+    refs: SupermemoryRemoteRef[],
+  ): Promise<SupermemoryRemoteForgetResult> {
     const result: SupermemoryRemoteForgetResult = { forgotten: 0, failed: 0, errors: [] };
     const repository = SupermemoryRemoteRefRepository.get();
     const done: number[] = [];

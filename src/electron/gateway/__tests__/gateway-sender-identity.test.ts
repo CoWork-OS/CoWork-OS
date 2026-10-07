@@ -17,9 +17,9 @@ describe("gateway sender identity (SEC-16)", () => {
   });
 
   it("never attributes group or ingest-only messages to the owner", () => {
-    expect(
-      isGatewayOwnerSender({ userId: "u-1", isGroup: true }, { ownerUserIds: ["u-1"] }),
-    ).toBe(false);
+    expect(isGatewayOwnerSender({ userId: "u-1", isGroup: true }, { ownerUserIds: ["u-1"] })).toBe(
+      false,
+    );
     expect(isGatewayOwnerSender({ userId: "u-1", ingestOnly: true }, { selfChatMode: true })).toBe(
       false,
     );

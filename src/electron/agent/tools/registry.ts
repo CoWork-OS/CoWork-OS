@@ -2472,38 +2472,38 @@ export class ToolRegistry {
           const approved = chatWebConsent
             ? await this.requestChatWebConsent(context.request.name, options.signal)
             : codexServer
-            ? await this.requestCodexTaskConsent(
-                `Allow ${codexServer.name} computer-use engine for this task?`,
-                {
-                  tool: context.request.name,
-                  serverName: codexServer.name,
-                  params: {
-                    serverId: codexServer.id,
-                    configuration: createHash("sha256")
-                      .update(JSON.stringify(codexServer))
-                      .digest("hex"),
+              ? await this.requestCodexTaskConsent(
+                  `Allow ${codexServer.name} computer-use engine for this task?`,
+                  {
+                    tool: context.request.name,
+                    serverName: codexServer.name,
+                    params: {
+                      serverId: codexServer.id,
+                      configuration: createHash("sha256")
+                        .update(JSON.stringify(codexServer))
+                        .digest("hex"),
+                    },
+                    taskConsentScope:
+                      "calls to this computer-use engine; each app requires separate consent",
                   },
-                  taskConsentScope:
-                    "calls to this computer-use engine; each app requires separate consent",
-                },
-                options.signal,
-              )
-            : typeof authorizer === "function"
-              ? await authorizer.call(this.daemon, this.taskId, {
-                  toolName: context.request.name,
-                  approvalType: effectiveApprovalType || "external_service",
-                  description,
-                  details,
-                  ...options,
-                })
-              : await requester.call(
-                  this.daemon,
-                  this.taskId,
-                  effectiveApprovalType || "external_service",
-                  description,
-                  details,
-                  options,
-                );
+                  options.signal,
+                )
+              : typeof authorizer === "function"
+                ? await authorizer.call(this.daemon, this.taskId, {
+                    toolName: context.request.name,
+                    approvalType: effectiveApprovalType || "external_service",
+                    description,
+                    details,
+                    ...options,
+                  })
+                : await requester.call(
+                    this.daemon,
+                    this.taskId,
+                    effectiveApprovalType || "external_service",
+                    description,
+                    details,
+                    options,
+                  );
           if (approved !== true) {
             throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
               policyTrace: pipeline.trace,

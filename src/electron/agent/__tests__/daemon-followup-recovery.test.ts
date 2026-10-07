@@ -7,12 +7,10 @@ type Any = any;
 // These permission/recovery fixtures stub TaskRepository instead of persisting
 // SQL task rows. Keep the new persisted-policy read separate from their subject.
 beforeEach(() =>
-  vi
-    .spyOn(AgentDaemon.prototype, "getDatabase")
-    .mockReturnValue({
-      prepare: () => ({ get: () => undefined }),
-      transaction: (run: () => unknown) => Object.assign(run, { deferred: run, immediate: run }),
-    } as unknown as ReturnType<AgentDaemon["getDatabase"]>),
+  vi.spyOn(AgentDaemon.prototype, "getDatabase").mockReturnValue({
+    prepare: () => ({ get: () => undefined }),
+    transaction: (run: () => unknown) => Object.assign(run, { deferred: run, immediate: run }),
+  } as unknown as ReturnType<AgentDaemon["getDatabase"]>),
 );
 afterEach(() => vi.restoreAllMocks());
 

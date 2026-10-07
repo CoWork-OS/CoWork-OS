@@ -131,7 +131,9 @@ export class SwarmTools {
       isUntrustedExternalSource(item),
     );
     const author =
-      task.assignedAgentRoleId || task.workerRole || (task.id === swarm.rootTaskId ? "lead" : "agent");
+      task.assignedAgentRoleId ||
+      task.workerRole ||
+      (task.id === swarm.rootTaskId ? "lead" : "agent");
     const result = await repo.swarmAppend({
       slug: swarm.slug,
       kind: kind as SwarmNoteKind,

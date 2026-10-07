@@ -469,10 +469,7 @@ function schedulerRunnerLabel(scheduler?: CronSchedulerObservation): string {
   return scheduler.runnerHost ? `${kind} on ${scheduler.runnerHost}` : kind;
 }
 
-function getJobScheduleTimeZone(
-  job: CronJob,
-  scheduler?: CronSchedulerObservation,
-): string | null {
+function getJobScheduleTimeZone(job: CronJob, scheduler?: CronSchedulerObservation): string | null {
   if (job.schedule.kind === "cron") {
     return job.schedule.tz || scheduler?.timeZone || getLocalTimeZone();
   }

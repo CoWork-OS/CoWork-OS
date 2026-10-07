@@ -205,24 +205,40 @@ describe("resolveEffectiveReviewPolicy", () => {
 
   it("honours an explicit task policy, the env default, and the auto opt-out", () => {
     expect(
-      resolveEffectiveReviewPolicy({ requestedPolicy: "off", taskDomain: "code", riskLevel: "high" }),
+      resolveEffectiveReviewPolicy({
+        requestedPolicy: "off",
+        taskDomain: "code",
+        riskLevel: "high",
+      }),
     ).toEqual({ policy: "off", source: "explicit" });
 
     process.env.COWORK_REVIEW_POLICY_DEFAULT = "off";
     expect(
-      resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain: "code", riskLevel: "high" }),
+      resolveEffectiveReviewPolicy({
+        requestedPolicy: undefined,
+        taskDomain: "code",
+        riskLevel: "high",
+      }),
     ).toEqual({ policy: "off", source: "env_default" });
     delete process.env.COWORK_REVIEW_POLICY_DEFAULT;
 
     process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO = "false";
     expect(
-      resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain: "code", riskLevel: "high" }),
+      resolveEffectiveReviewPolicy({
+        requestedPolicy: undefined,
+        taskDomain: "code",
+        riskLevel: "high",
+      }),
     ).toEqual({ policy: "off", source: "default" });
 
     process.env.COWORK_REVIEW_POLICY_ENABLE_AUTO = "true";
     process.env.COWORK_REVIEW_POLICY_AUTO_DEFAULT = "strict";
     expect(
-      resolveEffectiveReviewPolicy({ requestedPolicy: undefined, taskDomain: "code", riskLevel: "high" }),
+      resolveEffectiveReviewPolicy({
+        requestedPolicy: undefined,
+        taskDomain: "code",
+        riskLevel: "high",
+      }),
     ).toEqual({ policy: "strict", source: "auto" });
   });
 });

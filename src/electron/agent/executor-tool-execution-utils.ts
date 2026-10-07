@@ -1362,9 +1362,7 @@ export function isCompletedNonZeroExitCommandResult(result: Any): boolean {
   const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
   // The shell tool fills an empty stderr with a placeholder explaining that
   // the command printed nothing; that is not output from the command.
-  return (
-    Boolean(stdout) || (Boolean(stderr) && !/^Command exited with no output\b/.test(stderr))
-  );
+  return Boolean(stdout) || (Boolean(stderr) && !/^Command exited with no output\b/.test(stderr));
 }
 
 export function isAdvisoryToolFailureResult(result: Any): boolean {

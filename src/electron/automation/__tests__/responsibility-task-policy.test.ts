@@ -334,7 +334,10 @@ describe("immutable responsibility task admission and per-tool policy", () => {
       ),
     ).not.toContain(headlessIssue);
     expect(
-      responsibilityActivationIssues(definition, null, { ...permissions, interactiveReview: false }),
+      responsibilityActivationIssues(definition, null, {
+        ...permissions,
+        interactiveReview: false,
+      }),
     ).not.toContain(headlessIssue);
     // An unknown runtime is treated as unable to present the review.
     expect(responsibilityActivationIssues(reviewed, null, permissions)).toContain(headlessIssue);
@@ -361,7 +364,9 @@ describe("immutable responsibility task admission and per-tool policy", () => {
     expect(
       responsibilityActivationIssues(
         reviewed,
-        routine([{ id: "s", type: "schedule", enabled: true, schedule: { kind: "every", everyMs: 60000 } }]),
+        routine([
+          { id: "s", type: "schedule", enabled: true, schedule: { kind: "every", everyMs: 60000 } },
+        ]),
         permissions,
       ),
     ).toContain(unattendedIssue);
@@ -375,7 +380,9 @@ describe("immutable responsibility task admission and per-tool policy", () => {
     expect(
       responsibilityActivationIssues(
         { ...reviewed, reviewBoundary: "outside_granted_scope" },
-        routine([{ id: "s", type: "schedule", enabled: true, schedule: { kind: "every", everyMs: 60000 } }]),
+        routine([
+          { id: "s", type: "schedule", enabled: true, schedule: { kind: "every", everyMs: 60000 } },
+        ]),
         permissions,
       ),
     ).not.toContain(unattendedIssue);

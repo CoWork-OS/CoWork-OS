@@ -313,8 +313,6 @@ describe("isQuietActivityBlock", () => {
     ];
     expect(isQuietActivityBlock(markers, 0)).toBe(true);
     expect(isQuietActivityBlock(markers, 2)).toBe(false);
-    expect(isQuietActivityBlock([...markers, makeEvent("fail", 4, "step_failed")], 0)).toBe(
-      false,
-    );
+    expect(isQuietActivityBlock([...markers, makeEvent("fail", 4, "step_failed")], 0)).toBe(false);
   });
 });

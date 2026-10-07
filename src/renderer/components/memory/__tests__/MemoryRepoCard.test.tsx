@@ -353,9 +353,10 @@ describe("Memory folder card: sync and team memory", () => {
     expect(
       memoryRepoSyncLine({ ...base, sync: { ...sync, conflict: "MEMORY.md changed" } }),
     ).toMatchObject({ tone: "warning", text: expect.stringContaining("Sync now") });
-    expect(
-      memoryRepoSyncLine({ ...base, sync: { ...sync, lastError: "timeout" } }),
-    ).toMatchObject({ tone: "warning", text: expect.stringContaining("last error: timeout") });
+    expect(memoryRepoSyncLine({ ...base, sync: { ...sync, lastError: "timeout" } })).toMatchObject({
+      tone: "warning",
+      text: expect.stringContaining("last error: timeout"),
+    });
     expect(syncNowMessage({ error: "Sync is off" })).toEqual({
       tone: "error",
       text: "Sync is off",

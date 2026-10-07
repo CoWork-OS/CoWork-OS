@@ -1,11 +1,7 @@
 import { createHash, randomUUID } from "crypto";
 import type Database from "better-sqlite3";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
-import {
-  buildFtsMatchQuery,
-  collapseWhitespace,
-  likeContainsPattern,
-} from "../database/fts-query";
+import { buildFtsMatchQuery, collapseWhitespace, likeContainsPattern } from "../database/fts-query";
 import { ConversationIndexStore, ensureConversationIndexSchema } from "./conversation-index-sql";
 
 /**
@@ -432,30 +428,32 @@ export class DurableContextStore {
         .map((summary) => summary.id)
         .join(",")}`,
     )}`;
-    const summaryInserted = db.prepare(`
+    const summaryInserted = db
+      .prepare(`
       INSERT OR IGNORE INTO durable_context_summaries (
         id, conversation_id, workspace_id, task_id, depth, kind, summary_text,
         token_count, earliest_seq, latest_seq, earliest_at, latest_at,
         source_message_count, context_label, proactive, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      summaryId,
-      conversationId,
-      args.workspaceId,
-      args.taskId,
-      depth,
-      parentSummaries.length ? "node" : "leaf",
-      args.summaryText,
-      Math.ceil(args.summaryText.length / 4),
-      earliestSeq,
-      latestSeq,
-      sourceRows[0]?.created_at ?? now,
-      sourceRows[sourceRows.length - 1]?.created_at ?? now,
-      sourceIds.length,
-      args.contextLabel || "",
-      args.proactive ? 1 : 0,
-      now,
-    ).changes;
+    `)
+      .run(
+        summaryId,
+        conversationId,
+        args.workspaceId,
+        args.taskId,
+        depth,
+        parentSummaries.length ? "node" : "leaf",
+        args.summaryText,
+        Math.ceil(args.summaryText.length / 4),
+        earliestSeq,
+        latestSeq,
+        sourceRows[0]?.created_at ?? now,
+        sourceRows[sourceRows.length - 1]?.created_at ?? now,
+        sourceIds.length,
+        args.contextLabel || "",
+        args.proactive ? 1 : 0,
+        now,
+      ).changes;
     const link = db.prepare(`
       INSERT OR IGNORE INTO durable_context_summary_messages (summary_id, message_id)
       VALUES (?, ?)

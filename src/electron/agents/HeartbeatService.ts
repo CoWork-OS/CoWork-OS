@@ -815,8 +815,7 @@ export class HeartbeatService extends EventEmitter {
     // Runbook and cron hand-off items that were already reported stay due (they did not run)
     // but must not keep winning every pulse over other work.
     const decisionChecklistItems = scopedChecklistItems.filter(
-      (item) =>
-        !this.isAdvisoryAcknowledged(this.checklistKey(agent, item), item.cadenceMs, now),
+      (item) => !this.isAdvisoryAcknowledged(this.checklistKey(agent, item), item.cadenceMs, now),
     );
     const decisionProactiveTasks = dueProactiveTasks.filter(
       (task) =>

@@ -33,9 +33,7 @@ function hasVisibleBotMessage(task: Task): boolean {
   };
   return [candidate.resultSummary, candidate.sidebarPromptPreview, candidate.userPrompt].some(
     (value) =>
-      typeof value === "string" &&
-      value.trim().length > 0 &&
-      !isBotConversationSeedPrompt(value),
+      typeof value === "string" && value.trim().length > 0 && !isBotConversationSeedPrompt(value),
   );
 }
 

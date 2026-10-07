@@ -9,7 +9,11 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createLogger } from "../../utils/logger";
-import type { MemoryRepoDreamRecord, MemoryRepoDreamTrigger, MemoryRepoService } from "./MemoryRepoService";
+import type {
+  MemoryRepoDreamRecord,
+  MemoryRepoDreamTrigger,
+  MemoryRepoService,
+} from "./MemoryRepoService";
 import {
   DREAM_MAX_OUTPUT_TOKENS,
   DREAM_MAX_TASKS,
@@ -18,7 +22,11 @@ import {
   parseDreamOutput,
   type DreamTaskInput,
 } from "./memory-repo-dream-plan";
-import { MEMORY_REPO_INBOX_FILE, isSwarmRepoPath, parseMemoryRepoEntries } from "./memory-repo-format";
+import {
+  MEMORY_REPO_INBOX_FILE,
+  isSwarmRepoPath,
+  parseMemoryRepoEntries,
+} from "./memory-repo-format";
 import { MemoryRepoBusyError, withMemoryRepoLock } from "./memory-repo-lock";
 
 const logger = createLogger("MemoryRepoDreamer");
@@ -109,7 +117,11 @@ export class MemoryRepoDreamer {
     } catch (error) {
       if (error instanceof MemoryRepoBusyError) return { ran: false, reason: "busy" };
       logger.warn("Dream failed:", error);
-      return { ran: false, reason: "failed", error: error instanceof Error ? error.message : String(error) };
+      return {
+        ran: false,
+        reason: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -146,10 +158,11 @@ export class MemoryRepoDreamer {
     });
     const budget = Math.max(0, settings.dailyTokenBudget) - (await this.tokensUsedToday(service));
     const id = `${new Date(startedAt).toISOString().slice(0, 10).replace(/-/g, "")}-${randomUUID().slice(0, 8)}`;
-    const lastTaskCreatedAt = tasks.reduce<number | null>(
-      (max, task) => (max === null || task.createdAt > max ? task.createdAt : max),
-      null,
-    ) ?? (typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null);
+    const lastTaskCreatedAt =
+      tasks.reduce<number | null>(
+        (max, task) => (max === null || task.createdAt > max ? task.createdAt : max),
+        null,
+      ) ?? (typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null);
     const base = {
       id,
       trigger,
@@ -165,7 +178,10 @@ export class MemoryRepoDreamer {
       skipped: 0,
       operations: [],
       taskIds: tasks.map((task) => task.taskId),
-    } satisfies Omit<MemoryRepoDreamRecord, "status" | "finishedAt" | "tokens" | "lastTaskCreatedAt">;
+    } satisfies Omit<
+      MemoryRepoDreamRecord,
+      "status" | "finishedAt" | "tokens" | "lastTaskCreatedAt"
+    >;
     if (budget < input.estimatedInputTokens + DREAM_MAX_OUTPUT_TOKENS) {
       const record: MemoryRepoDreamRecord = {
         ...base,
@@ -173,7 +189,8 @@ export class MemoryRepoDreamer {
         skipReason: "budget",
         finishedAt: this.now(),
         tokens: 0,
-        lastTaskCreatedAt: typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null,
+        lastTaskCreatedAt:
+          typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null,
       };
       await service.recordDream(record);
       return { ran: false, reason: "budget", record };
@@ -193,7 +210,8 @@ export class MemoryRepoDreamer {
         error: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
         finishedAt: this.now(),
         tokens: input.estimatedInputTokens,
-        lastTaskCreatedAt: typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null,
+        lastTaskCreatedAt:
+          typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null,
       };
       await service.recordDream(record);
       return { ran: false, reason: "failed", record, error: record.error };
@@ -210,7 +228,8 @@ export class MemoryRepoDreamer {
         error: "The model's answer was not the expected JSON.",
         finishedAt: this.now(),
         tokens,
-        lastTaskCreatedAt: typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null,
+        lastTaskCreatedAt:
+          typeof last?.lastTaskCreatedAt === "number" ? last.lastTaskCreatedAt : null,
       };
       await service.recordDream(record);
       return { ran: false, reason: "failed", record, error: record.error };

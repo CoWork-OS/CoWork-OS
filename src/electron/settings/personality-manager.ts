@@ -1057,9 +1057,8 @@ ${companionMindset}`;
     if (this.cachedConfigV2) return this.cachedConfigV2.responseStyleExplicit === true;
     try {
       if (!SecureSettingsRepository.isInitialized()) return false;
-      const stored = SecureSettingsRepository.getInstance().load<Partial<PersonalityConfigV2>>(
-        "personality",
-      );
+      const stored =
+        SecureSettingsRepository.getInstance().load<Partial<PersonalityConfigV2>>("personality");
       return stored?.responseStyleExplicit === true;
     } catch {
       return false;

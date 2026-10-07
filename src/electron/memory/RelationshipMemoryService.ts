@@ -135,8 +135,10 @@ export function toRelationshipItem(item: MemoryItem): RelationshipMemoryItem | n
 /** Open first by due date, then confidence, then recency (the previous list order). */
 function sortItems(items: RelationshipMemoryItem[]): RelationshipMemoryItem[] {
   return [...items].sort((a, b) => {
-    const dueA = a.status === "open" ? (a.dueAt ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
-    const dueB = b.status === "open" ? (b.dueAt ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    const dueA =
+      a.status === "open" ? (a.dueAt ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    const dueB =
+      b.status === "open" ? (b.dueAt ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
     if (dueA !== dueB) return dueA - dueB;
     if ((a.status === "open") !== (b.status === "open")) return a.status === "open" ? -1 : 1;
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;

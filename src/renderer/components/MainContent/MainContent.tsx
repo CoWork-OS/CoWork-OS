@@ -1306,9 +1306,7 @@ const TaskConversationRenderedRows = memo(
       ) {
         return;
       }
-      const reachedTop = useVirtualizedFeed
-        ? !isAtBottom && visibleStartIndex <= 2
-        : isNearFeedTop;
+      const reachedTop = useVirtualizedFeed ? !isAtBottom && visibleStartIndex <= 2 : isNearFeedTop;
       if (!reachedTop) return;
       handleLoadMoreTimelineHistory({ loadAll: false });
     }, [
@@ -2469,7 +2467,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             ) {
                               continue;
                             }
-                            const rawCommand = event.payload?.input?.command ?? event.payload?.command;
+                            const rawCommand =
+                              event.payload?.input?.command ?? event.payload?.command;
                             const command = typeof rawCommand === "string" ? rawCommand.trim() : "";
                             if (!command) continue;
                             const matchIndex = unclaimed.findIndex(
@@ -6987,7 +6986,13 @@ function MainContentComponent({
       });
       return result !== false;
     },
-    [onSendMessage, permissionSettingsLoaded, selectedInteractionMode, task?.id, taskAccessProfileId],
+    [
+      onSendMessage,
+      permissionSettingsLoaded,
+      selectedInteractionMode,
+      task?.id,
+      taskAccessProfileId,
+    ],
   );
 
   // Programmatic input updates still need a resize pass.
@@ -12176,7 +12181,9 @@ function MainContentComponent({
 
           {conversationFlow}
           {/* A bot's earlier conversations scroll in above instead. */}
-          {!isBotConversation && <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />}
+          {!isBotConversation && (
+            <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />
+          )}
         </div>
       </div>
 

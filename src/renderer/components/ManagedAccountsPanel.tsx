@@ -236,195 +236,200 @@ export function ManagedAccountsPanel() {
           <h4 className="managed-accounts-form-title">
             {draft.id ? "Edit account record" : "New account record"}
           </h4>
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="managed-account-provider">
-            Provider
-          </label>
-          <input
-            id="managed-account-provider"
-            className="settings-input"
-            value={draft.provider}
-            maxLength={120}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, provider: event.target.value }))
-            }
-            placeholder="Example: Linear"
-          />
-        </div>
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="managed-account-label">
-            Label
-          </label>
-          <input
-            id="managed-account-label"
-            className="settings-input"
-            value={draft.label || ""}
-            maxLength={160}
-            onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
-            placeholder="Optional display name"
-          />
-        </div>
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="managed-account-status">
-            Status
-          </label>
-          <select
-            id="managed-account-status"
-            className="settings-input"
-            value={draft.status}
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                status: event.target.value as ManagedAccountStatus,
-              }))
-            }
-          >
-            {STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status.replaceAll("_", " ")}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="managed-account-dashboard">
-            Dashboard URL
-          </label>
-          <input
-            id="managed-account-dashboard"
-            className="settings-input"
-            type="url"
-            value={draft.dashboardUrl || ""}
-            maxLength={2048}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, dashboardUrl: event.target.value }))
-            }
-            placeholder="https://..."
-          />
-        </div>
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="managed-account-signup">
-            Signup URL
-          </label>
-          <input
-            id="managed-account-signup"
-            className="settings-input"
-            type="url"
-            value={draft.signupUrl || ""}
-            maxLength={2048}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, signupUrl: event.target.value }))
-            }
-            placeholder="https://..."
-          />
-        </div>
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="managed-account-docs">
-            Documentation URL
-          </label>
-          <input
-            id="managed-account-docs"
-            className="settings-input"
-            type="url"
-            value={draft.docsUrl || ""}
-            maxLength={2048}
-            onChange={(event) => setDraft((current) => ({ ...current, docsUrl: event.target.value }))}
-            placeholder="https://..."
-          />
-        </div>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="managed-account-provider">
+              Provider
+            </label>
+            <input
+              id="managed-account-provider"
+              className="settings-input"
+              value={draft.provider}
+              maxLength={120}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, provider: event.target.value }))
+              }
+              placeholder="Example: Linear"
+            />
+          </div>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="managed-account-label">
+              Label
+            </label>
+            <input
+              id="managed-account-label"
+              className="settings-input"
+              value={draft.label || ""}
+              maxLength={160}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, label: event.target.value }))
+              }
+              placeholder="Optional display name"
+            />
+          </div>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="managed-account-status">
+              Status
+            </label>
+            <select
+              id="managed-account-status"
+              className="settings-input"
+              value={draft.status}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  status: event.target.value as ManagedAccountStatus,
+                }))
+              }
+            >
+              {STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="managed-account-dashboard">
+              Dashboard URL
+            </label>
+            <input
+              id="managed-account-dashboard"
+              className="settings-input"
+              type="url"
+              value={draft.dashboardUrl || ""}
+              maxLength={2048}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, dashboardUrl: event.target.value }))
+              }
+              placeholder="https://..."
+            />
+          </div>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="managed-account-signup">
+              Signup URL
+            </label>
+            <input
+              id="managed-account-signup"
+              className="settings-input"
+              type="url"
+              value={draft.signupUrl || ""}
+              maxLength={2048}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, signupUrl: event.target.value }))
+              }
+              placeholder="https://..."
+            />
+          </div>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="managed-account-docs">
+              Documentation URL
+            </label>
+            <input
+              id="managed-account-docs"
+              className="settings-input"
+              type="url"
+              value={draft.docsUrl || ""}
+              maxLength={2048}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, docsUrl: event.target.value }))
+              }
+              placeholder="https://..."
+            />
+          </div>
 
-        <div className="settings-field">
-          <span className="settings-label">Credentials</span>
-          {draft.id && accounts.find((account) => account.id === draft.id)?.secretCount ? (
-            <p className="settings-hint">
-              {accounts.find((account) => account.id === draft.id)?.secretCount} credential value(s)
-              stored on the host. Add a matching key to replace it; leave fields blank to preserve it.
-            </p>
-          ) : null}
-          {secretDrafts.map((entry, index) => (
-            <div className="managed-accounts-secret-row" key={index}>
-              <input
-                className="settings-input"
-                aria-label={`Credential key ${index + 1}`}
-                value={entry.key}
-                maxLength={128}
-                onChange={(event) =>
-                  setSecretDrafts((current) =>
-                    current.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, key: event.target.value } : item,
-                    ),
-                  )
-                }
-                placeholder="Credential key"
-              />
-              <input
-                className="settings-input"
-                aria-label={`Credential value ${index + 1}`}
-                type="password"
-                autoComplete="new-password"
-                value={entry.value}
-                maxLength={4096}
-                onChange={(event) =>
-                  setSecretDrafts((current) =>
-                    current.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, value: event.target.value } : item,
-                    ),
-                  )
-                }
-                placeholder="Credential value"
-              />
-              {secretDrafts.length > 1 ? (
-                <button
-                  className="button-secondary button-small"
-                  type="button"
-                  aria-label={`Remove credential field ${index + 1}`}
-                  onClick={() =>
+          <div className="settings-field">
+            <span className="settings-label">Credentials</span>
+            {draft.id && accounts.find((account) => account.id === draft.id)?.secretCount ? (
+              <p className="settings-hint">
+                {accounts.find((account) => account.id === draft.id)?.secretCount} credential
+                value(s) stored on the host. Add a matching key to replace it; leave fields blank to
+                preserve it.
+              </p>
+            ) : null}
+            {secretDrafts.map((entry, index) => (
+              <div className="managed-accounts-secret-row" key={index}>
+                <input
+                  className="settings-input"
+                  aria-label={`Credential key ${index + 1}`}
+                  value={entry.key}
+                  maxLength={128}
+                  onChange={(event) =>
                     setSecretDrafts((current) =>
-                      current.filter((_, itemIndex) => itemIndex !== index),
+                      current.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, key: event.target.value } : item,
+                      ),
                     )
                   }
-                >
-                  Remove
-                </button>
-              ) : null}
-            </div>
-          ))}
-          <button
-            className="button-secondary button-small"
-            type="button"
-            onClick={() =>
-              setSecretDrafts((current) =>
-                current.length < 64 ? [...current, { key: "", value: "" }] : current,
-              )
-            }
-            disabled={secretDrafts.length >= 64}
-          >
-            Add credential
-          </button>
-          {draft.id ? (
-            <label className="managed-accounts-clear-row">
-              <input
-                type="checkbox"
-                checked={clearSecrets}
-                onChange={(event) => setClearSecrets(event.target.checked)}
-              />
-              <span>Clear all stored credentials when saving</span>
-            </label>
-          ) : null}
-        </div>
+                  placeholder="Credential key"
+                />
+                <input
+                  className="settings-input"
+                  aria-label={`Credential value ${index + 1}`}
+                  type="password"
+                  autoComplete="new-password"
+                  value={entry.value}
+                  maxLength={4096}
+                  onChange={(event) =>
+                    setSecretDrafts((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, value: event.target.value } : item,
+                      ),
+                    )
+                  }
+                  placeholder="Credential value"
+                />
+                {secretDrafts.length > 1 ? (
+                  <button
+                    className="button-secondary button-small"
+                    type="button"
+                    aria-label={`Remove credential field ${index + 1}`}
+                    onClick={() =>
+                      setSecretDrafts((current) =>
+                        current.filter((_, itemIndex) => itemIndex !== index),
+                      )
+                    }
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+            ))}
+            <button
+              className="button-secondary button-small"
+              type="button"
+              onClick={() =>
+                setSecretDrafts((current) =>
+                  current.length < 64 ? [...current, { key: "", value: "" }] : current,
+                )
+              }
+              disabled={secretDrafts.length >= 64}
+            >
+              Add credential
+            </button>
+            {draft.id ? (
+              <label className="managed-accounts-clear-row">
+                <input
+                  type="checkbox"
+                  checked={clearSecrets}
+                  onChange={(event) => setClearSecrets(event.target.checked)}
+                />
+                <span>Clear all stored credentials when saving</span>
+              </label>
+            ) : null}
+          </div>
 
-        <div className="settings-actions">
-          <button
-            className="button-primary button-small"
-            onClick={() => void saveAccount()}
-            disabled={saving}
-          >
-            {saving ? "Saving on host…" : draft.id ? "Save account" : "Add account record"}
-          </button>
-          <button className="button-secondary button-small" onClick={resetForm} disabled={saving}>
-            Cancel
-          </button>
-        </div>
+          <div className="settings-actions">
+            <button
+              className="button-primary button-small"
+              onClick={() => void saveAccount()}
+              disabled={saving}
+            >
+              {saving ? "Saving on host…" : draft.id ? "Save account" : "Add account record"}
+            </button>
+            <button className="button-secondary button-small" onClick={resetForm} disabled={saving}>
+              Cancel
+            </button>
+          </div>
         </div>
       ) : null}
 

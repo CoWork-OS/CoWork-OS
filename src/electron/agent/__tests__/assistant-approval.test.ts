@@ -82,10 +82,7 @@ describe("assistant mediated approvals", () => {
       "Allow once",
     ]);
     expect(
-      parseAssistantApprovalAnswer(
-        { approval_decision: { optionLabel: "Allow once" } },
-        true,
-      ),
+      parseAssistantApprovalAnswer({ approval_decision: { optionLabel: "Allow once" } }, true),
     ).toBe(false);
     expect(
       parseAssistantApprovalAnswer(

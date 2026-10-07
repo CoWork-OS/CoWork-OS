@@ -275,7 +275,10 @@ function KnowledgeItemRow({
 /** Presentational view of the tab; MemoryKnowledgeTab owns the state and IPC. */
 export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
   const folder = props.folderView?.report.available ? props.folderView : null;
-  const { groups: allGroups, fromOthers } = useMemo(() => groupKnowledge(props.items), [props.items]);
+  const { groups: allGroups, fromOthers } = useMemo(
+    () => groupKnowledge(props.items),
+    [props.items],
+  );
   // With the memory folder, facts are its entries; memory_items keeps the commitments.
   const groups = folder ? allGroups.filter((group) => group.id === "commitments") : allGroups;
   const filters = {
@@ -285,8 +288,9 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
     pinnedOnly: props.pinnedOnly,
   };
   const folderFiles = folder ? filterFolderFiles(folder.report.files, filters) : [];
-  const folderInbox =
-    folder?.report.inbox ? (filterFolderFiles([folder.report.inbox], filters)[0] ?? null) : null;
+  const folderInbox = folder?.report.inbox
+    ? (filterFolderFiles([folder.report.inbox], filters)[0] ?? null)
+    : null;
   const folderCount =
     folderFiles.reduce((total, file) => total + file.entries.length, 0) +
     (folderInbox?.entries.length ?? 0);
@@ -423,9 +427,7 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
         </div>
       )}
 
-      {folder && (
-        <MemoryFolderKnowledge {...folder} files={folderFiles} inbox={folderInbox} />
-      )}
+      {folder && <MemoryFolderKnowledge {...folder} files={folderFiles} inbox={folderInbox} />}
 
       {props.loading && props.items.length === 0 && folderCount === 0 ? (
         <div className="settings-loading">Loading memories...</div>
@@ -591,7 +593,10 @@ export function MemoryKnowledgeTab({
     if (available) void loadFolder();
   }, [loadFolder, available]);
 
-  const applyFolder = async (busy: string, run: (report: MemoryRepoEntriesReport) => Promise<FolderFlowResult>) => {
+  const applyFolder = async (
+    busy: string,
+    run: (report: MemoryRepoEntriesReport) => Promise<FolderFlowResult>,
+  ) => {
     const report = folderRef.current;
     if (!report) return null;
     setFolderBusyRef(busy);
@@ -811,7 +816,9 @@ export function MemoryKnowledgeTab({
                 const open = api().openMemoryRepoFile;
                 if (!open) return;
                 open({ workspaceId, path }).catch((openError: unknown) =>
-                  setError(openError instanceof Error ? openError.message : "Could not open the file."),
+                  setError(
+                    openError instanceof Error ? openError.message : "Could not open the file.",
+                  ),
                 );
               },
             }

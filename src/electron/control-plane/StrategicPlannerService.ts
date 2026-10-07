@@ -24,7 +24,6 @@ import type {
 } from "../../shared/types";
 import type { AgentDaemon } from "../agent/daemon";
 
-
 import { ControlPlaneCoreService } from "./ControlPlaneCoreService";
 import {
   getBackgroundDispatchBudget,
@@ -823,11 +822,9 @@ export class StrategicPlannerService {
   }
 
   private async pickDefaultWorkspaceId(): Promise<string | undefined> {
-    const workspaces = (await this.workspaceRepo
-      .findAll())
-      .filter(
-        (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id) && workspace.path,
-      );
+    const workspaces = (await this.workspaceRepo.findAll()).filter(
+      (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id) && workspace.path,
+    );
     return workspaces[0]?.id;
   }
 

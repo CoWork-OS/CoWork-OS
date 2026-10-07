@@ -13,7 +13,9 @@ function fixtureDirectory(): string {
     : path.join(app.getAppPath(), "resources", "starter-missions", RELEASE_BRIEF_ID);
 }
 
-export async function verifyReleaseBriefInputs(): Promise<Array<{ name: string; content: Buffer }>> {
+export async function verifyReleaseBriefInputs(): Promise<
+  Array<{ name: string; content: Buffer }>
+> {
   const fixture = fixtureDirectory();
   return Promise.all(
     Object.entries(releaseBriefInputHashes()).map(async ([name, expectedHash]) => {
@@ -38,7 +40,8 @@ export async function checkReleaseBriefRuntime(tempWorkspaceRoot: string): Promi
   try {
     const file = path.join(probe, "readiness.txt");
     await fs.writeFile(file, "ready", { flag: "wx", mode: 0o600 });
-    if (await fs.readFile(file, "utf8") !== "ready") throw new Error("Sample workspace read failed");
+    if ((await fs.readFile(file, "utf8")) !== "ready")
+      throw new Error("Sample workspace read failed");
   } finally {
     await fs.rm(probe, { recursive: true, force: true });
   }

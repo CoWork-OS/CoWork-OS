@@ -78,7 +78,9 @@ describe("SidebarRail", () => {
   it("shows icons only, naming each destination in its tooltip", () => {
     const markup = renderRail({ initialPinnedIds: ["missionControl"] });
     expect(markup).not.toContain("sidebar-rail-label");
-    expect(markup).toMatch(/aria-label="Mission Control"[^>]*data-tooltip="Mission Control \(Ctrl\+5\)"/);
+    expect(markup).toMatch(
+      /aria-label="Mission Control"[^>]*data-tooltip="Mission Control \(Ctrl\+5\)"/,
+    );
     expect(markup).toMatch(/aria-label="More"[^>]*data-tooltip="More"/);
   });
 

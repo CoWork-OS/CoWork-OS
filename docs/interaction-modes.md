@@ -12,7 +12,7 @@ Autonomy, collaboration, model comparison, and parallel lanes are separate task 
 
 ## Release labels
 
-The current development UI calls the stored `chat` choice **Ask** and the stored `smart` choice **Do**. CoWork OS 0.5.54 labels those choices **Chat** and **Smart**, respectively. The release-specific [surface reference](release-surface-reference.md) lists labels and Mission Control navigation for the stable release and current development UI. These are UI-label changes only: stored and IPC `InteractionModeSelection` values remain `chat` and `smart`.
+Since CoWork OS 0.5.60 the UI calls the stored `chat` choice **Ask** and the stored `smart` choice **Do**. Releases up to 0.5.54 label those choices **Chat** and **Smart**, respectively. The release-specific [surface reference](release-surface-reference.md) lists labels and Mission Control navigation for each stable release and the current development UI. These are UI-label changes only: stored and IPC `InteractionModeSelection` values remain `chat` and `smart`.
 
 ## Behavior and compatibility
 

@@ -149,7 +149,11 @@ describeWithGit("swarm folders in MemoryRepoService", () => {
 
   it("writes findings and questions as agent entries with a README, one commit each", async () => {
     const first = await append();
-    expect(first).toMatchObject({ status: "written", action: "inserted", path: `swarms/${slug}/findings.md` });
+    expect(first).toMatchObject({
+      status: "written",
+      action: "inserted",
+      path: `swarms/${slug}/findings.md`,
+    });
     const findings = read(`swarms/${slug}/findings.md`);
     expect(findings).toMatch(
       /- p95 latency of \/search is 420 ms with the result cache off \[by: agent; kind: finding; source: cowork:\/\/tasks\/child-1; added: \d{4}-\d{2}-\d{2}; author: researcher; sources: bench\/search\.log\]/,
@@ -159,7 +163,11 @@ describeWithGit("swarm folders in MemoryRepoService", () => {
     expect(readme).toContain(`Root task: cowork://tasks/${ROOT_ID}`);
     expect(readme).toContain("## Rules");
 
-    const question = await append({ kind: "question", text: "Has anyone profiled the tokenizer yet?", tainted: true });
+    const question = await append({
+      kind: "question",
+      text: "Has anyone profiled the tokenizer yet?",
+      tainted: true,
+    });
     expect(question).toMatchObject({ status: "written", path: `swarms/${slug}/questions.md` });
     expect(read(`swarms/${slug}/questions.md`)).toContain("tainted: yes");
 
@@ -176,7 +184,10 @@ describeWithGit("swarm folders in MemoryRepoService", () => {
 
   it("screens notes and rejects an invalid slug", async () => {
     expect(await append({ text: "ok" })).toMatchObject({ status: "skipped" });
-    expect(await append({ slug: "../me" })).toMatchObject({ status: "skipped", reason: "unavailable" });
+    expect(await append({ slug: "../me" })).toMatchObject({
+      status: "skipped",
+      reason: "unavailable",
+    });
     expect(await append({ text: "Use the staging cluster <no-memory>" })).toMatchObject({
       status: "skipped",
       reason: "no_memory",
@@ -197,7 +208,9 @@ describeWithGit("swarm folders in MemoryRepoService", () => {
   it("keeps swarm files out of the Hub and the dream input", async () => {
     await append();
     const hub = await listMemoryRepoEntries(service, "ws-1");
-    expect(hub.files.map((file) => file.path).some((file) => file.startsWith("swarms/"))).toBe(false);
+    expect(hub.files.map((file) => file.path).some((file) => file.startsWith("swarms/"))).toBe(
+      false,
+    );
     const input = buildDreamInput({ files: await service.readAllFiles(), tasks: [] });
     expect(JSON.stringify(input)).not.toContain("420 ms");
   });
@@ -209,17 +222,21 @@ describeWithGit("swarm folders in MemoryRepoService", () => {
     try {
       const deps = defaultMemoryRecallDeps();
       const prefix = `swarms/${slug}`;
-      const swarmOnly = await runWithMemoryRepoAccess({ readAllowed: false, swarmPrefix: prefix }, async () => {
-        const source = deps.memoryRepo?.();
-        return {
-          files: (await source?.listFiles()) ?? [],
-          me: await source?.readFile("me.md"),
-        };
-      });
+      const swarmOnly = await runWithMemoryRepoAccess(
+        { readAllowed: false, swarmPrefix: prefix },
+        async () => {
+          const source = deps.memoryRepo?.();
+          return {
+            files: (await source?.listFiles()) ?? [],
+            me: await source?.readFile("me.md"),
+          };
+        },
+      );
       expect(swarmOnly.files).toEqual([`${prefix}/README.md`, `${prefix}/findings.md`]);
       expect(swarmOnly.me).toBeNull();
-      const full = await runWithMemoryRepoAccess({ readAllowed: true, swarmPrefix: prefix }, async () =>
-        (await deps.memoryRepo?.()?.listFiles()) ?? [],
+      const full = await runWithMemoryRepoAccess(
+        { readAllowed: true, swarmPrefix: prefix },
+        async () => (await deps.memoryRepo?.()?.listFiles()) ?? [],
       );
       expect(full).toContain("me.md");
       expect(full).toContain(`${prefix}/findings.md`);

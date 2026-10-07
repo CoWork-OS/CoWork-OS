@@ -461,16 +461,12 @@ async function toPublicInputRequest(
 async function publicInputReviewFields(
   sources: BrowserApprovalSources,
   request: InputRequest,
-): Promise<
-  Pick<PublicInputRequest, "responsibilityActionReview" | "draftReview">
-> {
+): Promise<Pick<PublicInputRequest, "responsibilityActionReview" | "draftReview">> {
   const required = request.questions.some(
     (question) => question.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
   );
   if (!sources.getInputRequestDraftReview) {
-    return required
-      ? { responsibilityActionReview: { required: true, state: "invalid" } }
-      : {};
+    return required ? { responsibilityActionReview: { required: true, state: "invalid" } } : {};
   }
   let loaded: InlineApprovalDraftReview | undefined;
   try {
@@ -481,8 +477,7 @@ async function publicInputReviewFields(
   const responsibilityActionReview = loaded?.responsibilityActionReview;
   if (!required && !responsibilityActionReview) return {};
   return {
-    responsibilityActionReview:
-      responsibilityActionReview ?? { required: true, state: "invalid" },
+    responsibilityActionReview: responsibilityActionReview ?? { required: true, state: "invalid" },
     ...(loaded ? { draftReview: { draft: loaded.draft, previews: loaded.previews } } : {}),
   };
 }

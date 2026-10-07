@@ -50,7 +50,11 @@ describeWithGit("MemoryRepoDreamer", () => {
   beforeEach(async () => {
     base = fs.mkdtempSync(path.join(os.tmpdir(), "memory-repo-dream-"));
     now = Date.UTC(2026, 9, 5, 3);
-    service = new MemoryRepoService({ root: path.join(base, "repo"), runtime: "desktop", now: () => now });
+    service = new MemoryRepoService({
+      root: path.join(base, "repo"),
+      runtime: "desktop",
+      now: () => now,
+    });
     await service.start();
     const write = (text: string, extra: Record<string, unknown> = {}) =>
       service.remember({
@@ -113,12 +117,23 @@ describeWithGit("MemoryRepoDreamer", () => {
     expect(outcome.ran).toBe(true);
     if (!outcome.ran) return;
     const record = outcome.record;
-    expect(record).toMatchObject({ autoCount: 2, reviewCount: 2, reviewStatus: "pending", tokens: 3_500 });
-    expect(read("me.md")).toContain("- Prefers short, concise answers [by: agent; kind: preference;");
+    expect(record).toMatchObject({
+      autoCount: 2,
+      reviewCount: 2,
+      reviewStatus: "pending",
+      tokens: 3_500,
+    });
+    expect(read("me.md")).toContain(
+      "- Prefers short, concise answers [by: agent; kind: preference;",
+    );
     expect(read("me.md")).toContain("Lives in Berlin");
-    expect(read("lessons.md")).toContain("Run the smoke tests before every deploy [by: agent; kind: rule; source: cowork://tasks/task-9;");
+    expect(read("lessons.md")).toContain(
+      "Run the smoke tests before every deploy [by: agent; kind: rule; source: cowork://tasks/task-9;",
+    );
     expect(read("lessons.md")).not.toContain("evil");
-    expect(git(service.root, "log", "-1", "--format=%B")).toMatch(/Dream 2026-10-05: 2 changes[\s\S]*Origin: dream/);
+    expect(git(service.root, "log", "-1", "--format=%B")).toMatch(
+      /Dream 2026-10-05: 2 changes[\s\S]*Origin: dream/,
+    );
 
     const diff = await service.dreamDiff(record.id, "review");
     expect(diff).toContain("-- Lives in Berlin");
@@ -167,12 +182,17 @@ describeWithGit("MemoryRepoDreamer", () => {
     answer = (user) =>
       JSON.stringify({
         summary: "",
-        operations: [{ op: "update", line: alias(user, "Lives in Berlin"), text: "Lives in Munich" }],
+        operations: [
+          { op: "update", line: alias(user, "Lives in Berlin"), text: "Lives in Munich" },
+        ],
       });
     const outcome = await makeDreamer().run("manual");
     if (!outcome.ran) throw new Error("did not run");
     const me = path.join(service.root, "me.md");
-    fs.writeFileSync(me, fs.readFileSync(me, "utf8").replace("Lives in Berlin", "Lives in Hamburg"));
+    fs.writeFileSync(
+      me,
+      fs.readFileSync(me, "utf8").replace("Lives in Berlin", "Lives in Hamburg"),
+    );
     const result = await service.acceptDream(outcome.record.id);
     expect(result.accepted).toBe(false);
     expect(read("me.md")).toContain("Hamburg");
@@ -204,7 +224,11 @@ describeWithGit("MemoryRepoDreamer", () => {
     client.complete = vi.fn(async () => {
       throw new Error("provider down");
     });
-    expect(await makeDreamer().run("manual")).toMatchObject({ ran: false, reason: "failed", error: "provider down" });
+    expect(await makeDreamer().run("manual")).toMatchObject({
+      ran: false,
+      reason: "failed",
+      error: "provider down",
+    });
     expect(git(service.root, "rev-parse", "HEAD").trim()).toBe(head);
     const records = await service.listDreams();
     expect(records.map((record) => record.status)).toEqual(["failed", "failed"]);

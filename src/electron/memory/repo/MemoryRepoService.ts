@@ -96,7 +96,17 @@ import {
 const logger = createLogger("MemoryRepo");
 
 /** Files editors and Finder leave next to notes; never part of memory. */
-const MEMORY_REPO_GITIGNORE = [".DS_Store", "Thumbs.db", "*.tmp", "*.swp", "*~", ".obsidian/", ".vscode/", ".idea/", ""].join("\n");
+const MEMORY_REPO_GITIGNORE = [
+  ".DS_Store",
+  "Thumbs.db",
+  "*.tmp",
+  "*.swp",
+  "*~",
+  ".obsidian/",
+  ".vscode/",
+  ".idea/",
+  "",
+].join("\n");
 
 /** Kinds that describe the user; global ones go to `me.md`. */
 const ABOUT_USER_KINDS: ReadonlySet<MemoryItemKind> = new Set([
@@ -106,7 +116,8 @@ const ABOUT_USER_KINDS: ReadonlySet<MemoryItemKind> = new Set([
 ]);
 
 /** The `# ` heading of a new `inbox.md`. */
-const MEMORY_REPO_INBOX_TITLE = "Inbox (unreviewed: saved by the agent after reading untrusted content)";
+const MEMORY_REPO_INBOX_TITLE =
+  "Inbox (unreviewed: saved by the agent after reading untrusted content)";
 
 /** One note read from another folder, before screening (`importToInbox`). */
 export interface MemoryRepoImportEntry {
@@ -258,7 +269,9 @@ export class MemoryRepoService {
     return this.instance;
   }
 
-  private static readonly instanceListeners = new Set<(service: MemoryRepoService | null) => void>();
+  private static readonly instanceListeners = new Set<
+    (service: MemoryRepoService | null) => void
+  >();
 
   static setInstance(service: MemoryRepoService | null): void {
     const changed = this.instance !== service;
@@ -426,7 +439,9 @@ export class MemoryRepoService {
     await this.writeFileAtomic(MEMORY_REPO_ME_FILE, initialTopicFile("About me"));
     await this.writeFileAtomic(MEMORY_REPO_LESSONS_FILE, initialTopicFile("Lessons"));
     await fs.writeFile(path.join(this.root, ".gitignore"), MEMORY_REPO_GITIGNORE, { mode: 0o600 });
-    await fs.writeFile(path.join(this.root, ".gitattributes"), "*.md merge=union\n", { mode: 0o600 });
+    await fs.writeFile(path.join(this.root, ".gitattributes"), "*.md merge=union\n", {
+      mode: 0o600,
+    });
     if (this.hasGit) await this.initGit("Create memory repo");
   }
 
@@ -528,7 +543,11 @@ export class MemoryRepoService {
       if (decision.private) return { status: "skipped", reason: "private" };
     }
     if (input.scope === "workspace" && !input.workspaceId) {
-      return { status: "skipped", reason: "unavailable", detail: "workspace scope needs a workspace" };
+      return {
+        status: "skipped",
+        reason: "unavailable",
+        detail: "workspace scope needs a workspace",
+      };
     }
     return this.serialized(() => this.writeEntry(input, screened.content, screened.redactions));
   }
@@ -606,7 +625,8 @@ export class MemoryRepoService {
           const raw = splitLines(file)[line - 1] ?? "";
           const entry = parseMemoryRepoLine(raw, line);
           const problem = editableEntryProblem(entry, options.expectHash);
-          if (problem || !entry) return { entry: null, error: problem ?? "That line is not a saved memory." };
+          if (problem || !entry)
+            return { entry: null, error: problem ?? "That line is not a saved memory." };
           const metadata: MemoryRepoMetadata = {
             ...entry.metadata,
             ...(options.by ? { by: options.by } : {}),
@@ -662,7 +682,8 @@ export class MemoryRepoService {
           if (source === null) return { moved: null, error: "No such memory file." };
           const entry = parseMemoryRepoLine(splitLines(source)[line - 1] ?? "", line);
           const problem = editableEntryProblem(entry, options.expectHash);
-          if (problem || !entry) return { moved: null, error: problem ?? "That line is not a saved memory." };
+          if (problem || !entry)
+            return { moved: null, error: problem ?? "That line is not a saved memory." };
           const target = await this.readFile(targetPath);
           if (target === null) return { moved: null, error: "No such memory file." };
           const metadata: MemoryRepoMetadata = {
@@ -670,7 +691,9 @@ export class MemoryRepoService {
             ...(options.by ? { by: options.by } : {}),
           };
           const rendered = renderMemoryRepoEntry(entry.text, metadata);
-          const existing = parseMemoryRepoEntries(target).find((other) => other.hash === entry.hash);
+          const existing = parseMemoryRepoEntries(target).find(
+            (other) => other.hash === entry.hash,
+          );
           let nextTarget = target;
           let targetLine: number;
           if (existing) {
@@ -710,7 +733,11 @@ export class MemoryRepoService {
     relPath: string,
     line: number,
     target: MemoryRepoKeepTarget,
-    options: { expectHash?: string; workspaceId?: string | null; workspaceName?: string | null } = {},
+    options: {
+      expectHash?: string;
+      workspaceId?: string | null;
+      workspaceName?: string | null;
+    } = {},
   ): Promise<{ moved: { path: string; line: number } | null; error?: string }> {
     if (!this.isWritable()) return { moved: null, error: "The memory repo is not available." };
     if (relPath !== MEMORY_REPO_INBOX_FILE) {
@@ -727,7 +754,8 @@ export class MemoryRepoService {
           if (source === null) return { moved: null, error: "No such memory file." };
           const entry = parseMemoryRepoLine(splitLines(source)[line - 1] ?? "", line);
           const problem = editableEntryProblem(entry, options.expectHash);
-          if (problem || !entry) return { moved: null, error: problem ?? "That line is not a saved memory." };
+          if (problem || !entry)
+            return { moved: null, error: problem ?? "That line is not a saved memory." };
           const file =
             target === "workspace"
               ? await this.chooseFile({
@@ -746,7 +774,9 @@ export class MemoryRepoService {
           const created = current === null;
           const targetText = current ?? file.initial;
           const rendered = renderMemoryRepoEntry(entry.text, { ...entry.metadata, by: "user" });
-          const existing = parseMemoryRepoEntries(targetText).find((other) => other.hash === entry.hash);
+          const existing = parseMemoryRepoEntries(targetText).find(
+            (other) => other.hash === entry.hash,
+          );
           let nextTarget = targetText;
           let targetLine: number;
           if (existing) {
@@ -792,7 +822,12 @@ export class MemoryRepoService {
     entries: ReadonlyArray<MemoryRepoImportEntry>,
     label: string,
   ): Promise<MemoryRepoImportOutcome> {
-    const outcome: MemoryRepoImportOutcome = { imported: 0, duplicates: 0, skipped: 0, truncated: false };
+    const outcome: MemoryRepoImportOutcome = {
+      imported: 0,
+      duplicates: 0,
+      skipped: 0,
+      truncated: false,
+    };
     if (!this.isWritable()) return { ...outcome, error: "The memory repo is not available." };
     const lines: string[] = [];
     for (const candidate of entries) {
@@ -811,9 +846,10 @@ export class MemoryRepoService {
           ...(candidate.kind ? { kind: candidate.kind } : {}),
           source: "import",
           import: label,
-          added: candidate.added && /^\d{4}-\d{2}-\d{2}$/.test(candidate.added)
-            ? candidate.added
-            : isoDay(this.now()),
+          added:
+            candidate.added && /^\d{4}-\d{2}-\d{2}$/.test(candidate.added)
+              ? candidate.added
+              : isoDay(this.now()),
         }),
       );
     }
@@ -1010,7 +1046,11 @@ export class MemoryRepoService {
         });
       } catch (error) {
         if (error instanceof SkipWrite) {
-          return { status: "skipped", reason: error.reason, ...(error.detail ? { detail: error.detail } : {}) };
+          return {
+            status: "skipped",
+            reason: error.reason,
+            ...(error.detail ? { detail: error.detail } : {}),
+          };
         }
         if (error instanceof MemoryRepoBusyError) return { status: "skipped", reason: "busy" };
         this.lastWriteError = this.describeError(error);
@@ -1091,7 +1131,10 @@ export class MemoryRepoService {
         );
         const changed = [file];
         if (linkLine >= 0) {
-          await this.writeFileAtomic(MEMORY_REPO_ENTRY_FILE, replaceLine(entryFile, linkLine + 1, null));
+          await this.writeFileAtomic(
+            MEMORY_REPO_ENTRY_FILE,
+            replaceLine(entryFile, linkLine + 1, null),
+          );
           changed.push(MEMORY_REPO_ENTRY_FILE);
         }
         this.workspaceFiles = null;
@@ -1158,10 +1201,15 @@ export class MemoryRepoService {
     }
     if (!this.isWritable() || !this.hasGit) {
       this.syncUrl = null;
-      return { ok: !next, ...(next ? { error: "Sync needs a writable memory folder and git." } : {}) };
+      return {
+        ok: !next,
+        ...(next ? { error: "Sync needs a writable memory folder and git." } : {}),
+      };
     }
     try {
-      await this.serialized(() => this.locked(() => configureSyncRemote(this.git, this.root, next)));
+      await this.serialized(() =>
+        this.locked(() => configureSyncRemote(this.git, this.root, next)),
+      );
       this.syncUrl = next;
       this.syncState = { ...emptySyncState(), remoteUrl: next ? redactRemoteUrl(next) : null };
       if (!next && this.pushTimer) {
@@ -1191,12 +1239,23 @@ export class MemoryRepoService {
           await this.ensureUnionMerge();
           if (this.forcePushPending) {
             // History was compacted: the remote's history is replaced, not rebased onto.
-            await this.runGit(["fetch", "--quiet", "--no-tags", MEMORY_REPO_SYNC_REMOTE, "main"]).catch(
-              () => undefined,
-            );
+            await this.runGit([
+              "fetch",
+              "--quiet",
+              "--no-tags",
+              MEMORY_REPO_SYNC_REMOTE,
+              "main",
+            ]).catch(() => undefined);
             const forced = await pushMemoryRepo(this.git, this.root, { force: true });
             this.syncState = forced.ok
-              ? { ...this.syncState, lastPushAt: this.now(), ahead: 0, behind: 0, conflict: null, lastError: null }
+              ? {
+                  ...this.syncState,
+                  lastPushAt: this.now(),
+                  ahead: 0,
+                  behind: 0,
+                  conflict: null,
+                  lastError: null,
+                }
               : { ...this.syncState, lastError: forced.error };
             if (forced.ok) this.forcePushPending = false;
             return;
@@ -1230,11 +1289,19 @@ export class MemoryRepoService {
               this.silentNotify = false;
             }
           }
-          if (options.push === false || (this.syncState.ahead === 0 && !this.forcePushPending)) return;
-          const pushed = await pushMemoryRepo(this.git, this.root, { force: this.forcePushPending });
+          if (options.push === false || (this.syncState.ahead === 0 && !this.forcePushPending))
+            return;
+          const pushed = await pushMemoryRepo(this.git, this.root, {
+            force: this.forcePushPending,
+          });
           if (pushed.ok) {
             this.forcePushPending = false;
-            this.syncState = { ...this.syncState, lastPushAt: this.now(), ahead: 0, lastError: null };
+            this.syncState = {
+              ...this.syncState,
+              lastPushAt: this.now(),
+              ahead: 0,
+              lastError: null,
+            };
           } else {
             this.syncState = { ...this.syncState, lastError: pushed.error };
           }
@@ -1254,9 +1321,13 @@ export class MemoryRepoService {
     const file = path.join(this.root, ".gitattributes");
     const current = await fs.readFile(file, "utf8").catch(() => "");
     if (/^\*\.md\s+merge=union\s*$/m.test(current)) return;
-    await fs.writeFile(file, `${current.trimEnd()}${current.trim() ? "\n" : ""}*.md merge=union\n`, {
-      mode: 0o600,
-    });
+    await fs.writeFile(
+      file,
+      `${current.trimEnd()}${current.trim() ? "\n" : ""}*.md merge=union\n`,
+      {
+        mode: 0o600,
+      },
+    );
     await this.runGit(["add", "--", ".gitattributes"]);
     await this.commit("Merge memory notes line by line", { origin: "memory_hub" });
   }
@@ -1318,14 +1389,23 @@ export class MemoryRepoService {
           await this.runGit(["add", "-A", "--", ...auto.files.keys()]);
           await this.commit(
             `Dream ${isoDay(now)}: ${auto.applied.length} change${auto.applied.length === 1 ? "" : "s"}`,
-            { origin: "dream", dreamId: params.id, details: auto.applied.map(describeDreamOperation) },
+            {
+              origin: "dream",
+              dreamId: params.id,
+              details: auto.applied.map(describeDreamOperation),
+            },
           );
           autoCommit = this.head;
           this.notify([...auto.files.keys()]);
         }
         const merged = new Map(files);
         for (const [file, text] of auto.files) merged.set(file, text);
-        const review = applyDreamOperations({ files: merged, operations: reviewOps, by: "user", now });
+        const review = applyDreamOperations({
+          files: merged,
+          operations: reviewOps,
+          by: "user",
+          now,
+        });
         let reviewBranch: string | null = null;
         let reviewBase: string | null = null;
         if (review.files.size > 0) {
@@ -1357,7 +1437,8 @@ export class MemoryRepoService {
           reviewBase,
           reviewCount: review.applied.length,
           reviewStatus: reviewBranch ? "pending" : null,
-          rejected: params.rejected + params.operations.filter((op) => op.decision === "rejected").length,
+          rejected:
+            params.rejected + params.operations.filter((op) => op.decision === "rejected").length,
           skipped: auto.skipped.length + review.skipped.length,
           operations: [
             ...auto.applied.map((op) => describe(op, "auto")),
@@ -1365,7 +1446,9 @@ export class MemoryRepoService {
             ...params.operations
               .filter((op) => op.decision === "rejected")
               .map((op) => describe(op, "rejected", op.why)),
-            ...[...auto.skipped, ...review.skipped].map((entry) => describe(entry.op, "skipped", entry.why)),
+            ...[...auto.skipped, ...review.skipped].map((entry) =>
+              describe(entry.op, "skipped", entry.why),
+            ),
           ],
           taskIds: params.taskIds,
           lastTaskCreatedAt: params.lastTaskCreatedAt,
@@ -1390,7 +1473,9 @@ export class MemoryRepoService {
     for (const name of names) {
       if (!/^[A-Za-z0-9_-]+\.json$/.test(name)) continue;
       try {
-        records.push(JSON.parse(await fs.readFile(path.join(dir, name), "utf8")) as MemoryRepoDreamRecord);
+        records.push(
+          JSON.parse(await fs.readFile(path.join(dir, name), "utf8")) as MemoryRepoDreamRecord,
+        );
       } catch {
         // A half-written record is skipped.
       }
@@ -1401,7 +1486,9 @@ export class MemoryRepoService {
   async getDream(id: string): Promise<MemoryRepoDreamRecord | null> {
     if (!DREAM_ID.test(id)) return null;
     try {
-      return JSON.parse(await fs.readFile(path.join(this.dreamsDir(), `${id}.json`), "utf8")) as MemoryRepoDreamRecord;
+      return JSON.parse(
+        await fs.readFile(path.join(this.dreamsDir(), `${id}.json`), "utf8"),
+      ) as MemoryRepoDreamRecord;
     } catch {
       return null;
     }
@@ -1412,11 +1499,27 @@ export class MemoryRepoService {
     const record = await this.getDream(id);
     if (!record || !this.hasGit) return "";
     try {
-      if (part === "review" && record.reviewBranch && record.reviewBase && record.reviewStatus === "pending") {
-        return await this.runGit(["diff", "--no-color", "--no-ext-diff", `${record.reviewBase}..${record.reviewBranch}`]);
+      if (
+        part === "review" &&
+        record.reviewBranch &&
+        record.reviewBase &&
+        record.reviewStatus === "pending"
+      ) {
+        return await this.runGit([
+          "diff",
+          "--no-color",
+          "--no-ext-diff",
+          `${record.reviewBase}..${record.reviewBranch}`,
+        ]);
       }
       if (part === "auto" && record.autoCommit) {
-        return await this.runGit(["show", "--no-color", "--no-ext-diff", "--format=", record.autoCommit]);
+        return await this.runGit([
+          "show",
+          "--no-color",
+          "--no-ext-diff",
+          "--format=",
+          record.autoCommit,
+        ]);
       }
     } catch {
       // The commit is gone (history compacted).
@@ -1447,7 +1550,14 @@ export class MemoryRepoService {
               ? fs.rm(infoAttributes, { force: true })
               : fs.writeFile(infoAttributes, previousAttributes, { mode: 0o600 });
           try {
-            await this.runGit(["merge", "--no-ff", "--no-edit", "-m", `Accept dream ${record.id}`, branch]);
+            await this.runGit([
+              "merge",
+              "--no-ff",
+              "--no-edit",
+              "-m",
+              `Accept dream ${record.id}`,
+              branch,
+            ]);
             await restoreAttributes();
           } catch (error) {
             await restoreAttributes();
@@ -1463,7 +1573,11 @@ export class MemoryRepoService {
           await this.runGit(["branch", "-D", branch]).catch(() => undefined);
           this.writeCount += 1;
           this.workspaceFiles = null;
-          await this.writeDreamRecord({ ...record, reviewStatus: "accepted", reviewMergeCommit: this.head });
+          await this.writeDreamRecord({
+            ...record,
+            reviewStatus: "accepted",
+            reviewMergeCommit: this.head,
+          });
           this.notify([]);
           return { accepted: true };
         }),
@@ -1542,11 +1656,16 @@ export class MemoryRepoService {
 
   /** Delete every `dream/*` branch and mark pending reviews stale (before compaction). */
   private async dropDreamBranches(reason: string): Promise<void> {
-    const branches = (await this.runGit(["for-each-ref", "--format=%(refname:short)", "refs/heads/dream/"]).catch(() => ""))
+    const branches = (
+      await this.runGit(["for-each-ref", "--format=%(refname:short)", "refs/heads/dream/"]).catch(
+        () => "",
+      )
+    )
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
-    for (const branch of branches) await this.runGit(["branch", "-D", branch]).catch(() => undefined);
+    for (const branch of branches)
+      await this.runGit(["branch", "-D", branch]).catch(() => undefined);
     for (const record of await this.listDreams(1000)) {
       if (record.reviewStatus === "pending" || (record.autoCommit && !record.undoneAt)) {
         await this.writeDreamRecord({
@@ -1575,7 +1694,17 @@ export class MemoryRepoService {
         await fs.writeFile(absolute, text.endsWith("\n") ? text : `${text}\n`, { mode: 0o600 });
       }
       await this.git(worktree, ["add", "-A", "--", ...files.keys()]);
-      await this.git(worktree, ["commit", "-q", "--no-verify", "-m", this.commitBody(meta.message, { origin: "dream", dreamId: meta.dreamId, details: meta.details })]);
+      await this.git(worktree, [
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        this.commitBody(meta.message, {
+          origin: "dream",
+          dreamId: meta.dreamId,
+          details: meta.details,
+        }),
+      ]);
     } catch (error) {
       await this.runGit(["worktree", "remove", "--force", worktree]).catch(() => undefined);
       await this.runGit(["branch", "-D", branch]).catch(() => undefined);
@@ -1623,7 +1752,9 @@ export class MemoryRepoService {
         };
         const line = renderMemoryRepoEntry(content, metadata);
         const holder = input.subject
-          ? entries.find((entry) => entry.subject && entry.subject === normalizeSubject(input.subject))
+          ? entries.find(
+              (entry) => entry.subject && entry.subject === normalizeSubject(input.subject),
+            )
           : undefined;
         let action: "inserted" | "replaced" = "inserted";
         let lineNumber: number;
@@ -1649,7 +1780,11 @@ export class MemoryRepoService {
         const changed = [target.path];
         await this.writeFileAtomic(target.path, text);
         // The inbox is unreviewed: never linked, so following the index never reaches it.
-        if (created && target.path !== MEMORY_REPO_ENTRY_FILE && target.path !== MEMORY_REPO_INBOX_FILE) {
+        if (
+          created &&
+          target.path !== MEMORY_REPO_ENTRY_FILE &&
+          target.path !== MEMORY_REPO_INBOX_FILE
+        ) {
           const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? initialEntryFile();
           const linked = ensureIndexLink(entryFile, target.path);
           if (linked !== entryFile) {
@@ -1675,7 +1810,11 @@ export class MemoryRepoService {
       });
     } catch (error) {
       if (error instanceof SkipWrite) {
-        return { status: "skipped", reason: error.reason, ...(error.detail ? { detail: error.detail } : {}) };
+        return {
+          status: "skipped",
+          reason: error.reason,
+          ...(error.detail ? { detail: error.detail } : {}),
+        };
       }
       if (error instanceof MemoryRepoBusyError) return { status: "skipped", reason: "busy" };
       this.lastWriteError = this.describeError(error);
@@ -1692,7 +1831,10 @@ export class MemoryRepoService {
     }
     if (input.by === "user" && input.pinned) {
       const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? "";
-      if (Buffer.byteLength(entryFile, "utf8") < MEMORY_REPO_LIMITS.entryFileBytes - MEMORY_REPO_LIMITS.entryChars * 2) {
+      if (
+        Buffer.byteLength(entryFile, "utf8") <
+        MEMORY_REPO_LIMITS.entryFileBytes - MEMORY_REPO_LIMITS.entryChars * 2
+      ) {
         return { path: MEMORY_REPO_ENTRY_FILE, initial: initialEntryFile(this.deps.ownerName?.()) };
       }
     }
@@ -1720,7 +1862,10 @@ export class MemoryRepoService {
         return {
           path: named,
           initial: header,
-          adoptMarker: renderMemoryRepoEntry("CoWork workspace", { by: "user", workspace: workspaceId }),
+          adoptMarker: renderMemoryRepoEntry("CoWork workspace", {
+            by: "user",
+            workspace: workspaceId,
+          }),
         };
       }
     }
@@ -1834,7 +1979,9 @@ export class MemoryRepoService {
   private commitBody(message: string, meta: CommitMeta): string {
     return [
       message.slice(0, 200),
-      ...(meta.details?.length ? ["", ...meta.details.slice(0, 50).map((line) => `- ${line}`)] : []),
+      ...(meta.details?.length
+        ? ["", ...meta.details.slice(0, 50).map((line) => `- ${line}`)]
+        : []),
       "",
       `Origin: ${meta.origin}`,
       ...(meta.taskId ? [`Task: ${meta.taskId}`] : []),
@@ -1844,7 +1991,14 @@ export class MemoryRepoService {
 
   private async commit(message: string, meta: CommitMeta, allowEmpty = false): Promise<void> {
     const body = this.commitBody(message, meta);
-    await this.runGit(["commit", "-q", "--no-verify", ...(allowEmpty ? ["--allow-empty"] : []), "-m", body]);
+    await this.runGit([
+      "commit",
+      "-q",
+      "--no-verify",
+      ...(allowEmpty ? ["--allow-empty"] : []),
+      "-m",
+      body,
+    ]);
     this.head = (await this.runGit(["rev-parse", "HEAD"]).catch(() => "")).trim() || null;
   }
 

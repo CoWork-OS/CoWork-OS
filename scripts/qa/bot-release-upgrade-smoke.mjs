@@ -72,11 +72,13 @@ async function freePort() {
 function seedWithBaseline() {
   const source = String.raw`
     const {DatabaseManager}=require('./dist/daemon/electron/database/schema.js');
-    const {WorkspaceStore,TaskStore,ApprovalStore}=require('./dist/daemon/electron/database/repositories.js');
-    const {AgentRoleStore}=require('./dist/daemon/electron/agents/AgentRoleRepository.js');
-    const {AgentTeamStore}=require('./dist/daemon/electron/agents/AgentTeamRepository.js');
-    const {AgentTeamMemberStore}=require('./dist/daemon/electron/agents/AgentTeamMemberRepository.js');
-    const {RoutineService}=require('./dist/daemon/electron/routines/service.js');
+    const repos=require('./dist/daemon/electron/database/repositories.js');
+    // 0.5.54 names the synchronous stores *Repository; later builds name them *Store.
+    const WorkspaceStore=repos.WorkspaceStore||repos.WorkspaceRepository, TaskStore=repos.TaskStore||repos.TaskRepository, ApprovalStore=repos.ApprovalStore||repos.ApprovalRepository;
+    const roleMod=require('./dist/daemon/electron/agents/AgentRoleRepository.js'); const AgentRoleStore=roleMod.AgentRoleStore||roleMod.AgentRoleRepository;
+    const teamMod=require('./dist/daemon/electron/agents/AgentTeamRepository.js'); const AgentTeamStore=teamMod.AgentTeamStore||teamMod.AgentTeamRepository;
+    const memberMod=require('./dist/daemon/electron/agents/AgentTeamMemberRepository.js'); const AgentTeamMemberStore=memberMod.AgentTeamMemberStore||memberMod.AgentTeamMemberRepository;
+    const fs=require('fs'); const {RoutineService}=require(fs.existsSync('./dist/daemon/electron/routines/service.js')?'./dist/daemon/electron/routines/service.js':'./dist/electron/electron/routines/service.js');
     const manager=new DatabaseManager(); const db=manager.getDatabase();
     (async()=>{
       const ws=new WorkspaceStore(db).create('Upgrade workspace',process.env.UP_WS,{read:true,write:true,delete:false,shell:false,network:false});
@@ -110,6 +112,30 @@ function seedWithBaseline() {
   return JSON.parse(result.stdout.match(/SEED=(.+)/)[1]);
 }
 
+/**
+ * The desktop app applies --control-plane-port only in headless mode; otherwise it binds the
+ * port stored in the profile (default 18789, often taken by a running CoWork). Store the
+ * chosen port with the runtime's own settings manager before a desktop start.
+ */
+function pinDesktopControlPlanePort(cwd, port) {
+  const source = String.raw`
+    const {DatabaseManager}=require('./dist/daemon/electron/database/schema.js');
+    const {SecureSettingsRepository}=require('./dist/daemon/electron/database/SecureSettingsRepository.js');
+    const {ControlPlaneSettingsManager}=require('./dist/daemon/electron/control-plane/settings.js');
+    const manager=new DatabaseManager(); new SecureSettingsRepository(manager.getDatabase());
+    ControlPlaneSettingsManager.initialize();
+    ControlPlaneSettingsManager.updateSettings({host:'127.0.0.1',port:Number(process.env.UP_PORT)});
+    manager.close();
+  `;
+  const result = spawnSync(process.execPath, ["-e", source], {
+    cwd,
+    env: { ...environment, UP_PORT: String(port) },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.equal(result.status, 0, `Pinning the control plane port failed: ${result.stderr}`);
+}
+
 /** Starts a runtime from `cwd`; desktop runs the Electron app with a hidden window. */
 async function runtime(cwd, kind) {
   const port = await freePort();
@@ -124,6 +150,7 @@ async function runtime(cwd, kind) {
   ];
   const connectionPath = path.join(profile, "control-plane-local.json");
   await fs.rm(connectionPath, { force: true });
+  if (kind === "desktop") pinDesktopControlPlanePort(cwd, port);
   const child =
     kind === "desktop"
       ? spawn(electronExecutable, [cwd, ...args, "--user-data-dir", profile], {
@@ -152,7 +179,10 @@ async function runtime(cwd, kind) {
     }
     const value = output.match(/Control Plane token: (\S+)/)?.[1];
     return value && output.includes("Control Plane listening:") ? value : null;
-  }, `${kind} runtime from ${path.basename(cwd)}`);
+  }, `${kind} runtime from ${path.basename(cwd)}`).catch((error) => {
+    child.kill("SIGKILL");
+    throw new Error(`${error.message}\n${output.slice(-4000)}`);
+  });
   const socket = new WebSocket(`ws://127.0.0.1:${actualPort}`);
   await new Promise((resolve, reject) => {
     socket.once("open", resolve);
@@ -178,13 +208,16 @@ async function runtime(cwd, kind) {
   return {
     rpc,
     output: () => output,
-    async stop() {
+    async stop({ allowForcedStop = false } = {}) {
       socket.terminate();
       child.kill("SIGTERM");
       const done = await Promise.race([exited, sleep(30_000).then(() => null)]);
       if (!done) {
         child.kill("SIGKILL");
         await exited;
+        // The 0.5.54 desktop app does not exit on SIGTERM (its shutdown hangs after the
+        // database closes); a forced stop is accepted for the previous build only.
+        if (allowForcedStop) return { forced: true };
         throw new Error(`${kind} runtime did not stop`);
       }
       assert.equal(done.code, 0, `${kind} runtime shutdown failed:\n${output.slice(-4000)}`);
@@ -233,7 +266,7 @@ try {
   const seed = seedWithBaseline();
   active = await runtime(baseline, "desktop");
   await sleep(6000); // let the previous build finish its startup seeding
-  await active.stop();
+  const baselineStop = await active.stop({ allowForcedStop: true });
   active = null;
   const old = snapshot();
   const legacyRoster = old.roles.filter((role) => /^(atlas|forge|scribe)/.test(role.name));
@@ -300,6 +333,7 @@ try {
         baselineCommit: spawnSync("git", ["-C", baseline, "rev-parse", "--short", "HEAD"], {
           encoding: "utf8",
         }).stdout.trim(),
+        previousDesktopForcedStop: Boolean(baselineStop?.forced),
         legacyRosterPreserved: legacyRoster.map((role) => role.name),
         legacyTeamPreserved: legacyTeam ? legacyTeam.name : null,
         userBotsPreserved: [seed.mine, seed.renamed, seed.retired].length,

@@ -619,10 +619,10 @@ export function createBrowserMemoryDefinitions(options: {
       z.union([ids, z.object({ workspaceId: id, ids }).strict()]),
       async (value) => {
         const scope = Array.isArray(value) ? undefined : value.workspaceId;
-        const details = await MemoryService.getFullDetails(Array.isArray(value) ? value : value.ids);
-        const visible = scope
-          ? details.filter((memory) => memory.workspaceId === scope)
-          : details;
+        const details = await MemoryService.getFullDetails(
+          Array.isArray(value) ? value : value.ids,
+        );
+        const visible = scope ? details.filter((memory) => memory.workspaceId === scope) : details;
         for (const workspaceId of new Set(visible.map((memory) => memory.workspaceId)))
           await requireWorkspace(workspaceId);
         return visible;
@@ -714,9 +714,7 @@ export function createBrowserMemoryDefinitions(options: {
       ...action(
         z
           .object({
-            layer: z
-              .enum(["identity", "preferences", "context", "commitments"])
-              .optional(),
+            layer: z.enum(["identity", "preferences", "context", "commitments"]).optional(),
             includeDone: z.boolean().optional(),
             limit: z.number().int().min(1).max(200).optional(),
           })

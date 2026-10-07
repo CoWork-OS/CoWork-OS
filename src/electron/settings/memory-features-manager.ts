@@ -94,11 +94,16 @@ function normalizeSettings(settings: MemoryFeaturesSettings): MemoryFeaturesSett
       settings.memoryRepoDefaultOnApplied === true ? isEnabled(settings.memoryRepoEnabled) : true,
     memoryRepoDefaultOnApplied: true,
     memoryRepoPath:
-      typeof settings.memoryRepoPath === "string" ? settings.memoryRepoPath.trim().slice(0, 1024) : "",
+      typeof settings.memoryRepoPath === "string"
+        ? settings.memoryRepoPath.trim().slice(0, 1024)
+        : "",
     memoryRepoDreamingEnabled: settings.memoryRepoDreamingEnabled !== false,
     memoryRepoDreamDailyTokenBudget: Math.min(
       1_000_000,
-      Math.max(1, Math.floor(normalizePositiveNumber(settings.memoryRepoDreamDailyTokenBudget, 50000))),
+      Math.max(
+        1,
+        Math.floor(normalizePositiveNumber(settings.memoryRepoDreamDailyTokenBudget, 50000)),
+      ),
     ),
     memoryRepoRemoteUrl:
       typeof settings.memoryRepoRemoteUrl === "string"

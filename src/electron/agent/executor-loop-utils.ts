@@ -802,7 +802,9 @@ export class ToolLoopProgressTracker {
    * a change is the normal fix-and-retest cycle, not a retry loop.
    */
   isIdenticalRepeatFailure(command: string, failureSignature: string): boolean {
-    const key = String(command || "").replace(/\s+/g, " ").trim();
+    const key = String(command || "")
+      .replace(/\s+/g, " ")
+      .trim();
     const previous = this.lastCommandFailure.get(key);
     this.lastCommandFailure.set(key, {
       signature: failureSignature,
@@ -810,8 +812,8 @@ export class ToolLoopProgressTracker {
     });
     return Boolean(
       previous &&
-        previous.signature === failureSignature &&
-        previous.mutationEpoch === this.mutationEpoch,
+      previous.signature === failureSignature &&
+      previous.mutationEpoch === this.mutationEpoch,
     );
   }
 }

@@ -128,19 +128,27 @@ export function swarmSlug(rootTitle: string | null | undefined, rootTaskId: stri
 }
 
 function oneLine(value: string | null | undefined, max: number): string {
-  const flat = String(value || "").replace(/\s+/g, " ").trim();
+  const flat = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
 function memberLabel(task: SwarmTaskShape, isRoot: boolean): string {
-  const role = oneLine(task.assignedAgentRoleId || task.workerRole || (isRoot ? "lead" : "agent"), 40);
+  const role = oneLine(
+    task.assignedAgentRoleId || task.workerRole || (isRoot ? "lead" : "agent"),
+    40,
+  );
   const title = oneLine(task.title || "task", 80);
   return `${role}: ${title}`;
 }
 
 /** The goal: the root's prompt as the user wrote it, one line. */
 export function swarmGoal(root: SwarmTaskShape): string {
-  return oneLine(root.userPrompt || root.rawPrompt || root.prompt || root.title || "", SWARM_GOAL_CHARS);
+  return oneLine(
+    root.userPrompt || root.rawPrompt || root.prompt || root.title || "",
+    SWARM_GOAL_CHARS,
+  );
 }
 
 /**
@@ -207,7 +215,9 @@ export function renderSwarmReadme(params: {
   members: SwarmMember[];
 }): string {
   const members = params.members.length
-    ? params.members.map((member) => `- ${oneLine(member.label, 120)} (cowork://tasks/${member.taskId})`)
+    ? params.members.map(
+        (member) => `- ${oneLine(member.label, 120)} (cowork://tasks/${member.taskId})`,
+      )
     : ["- (none yet)"];
   return [
     "# Swarm notes",

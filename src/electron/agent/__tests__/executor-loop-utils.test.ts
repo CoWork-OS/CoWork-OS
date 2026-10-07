@@ -540,7 +540,11 @@ describe("progress-aware tool-use streak", () => {
     let toolCalls = 0;
     let previousTurnMadeProgress = false;
     for (let turn = 1; turn <= turns; turn += 1) {
-      streak = nextToolUseStreak({ stopReason: "tool_use", previousStreak: streak, previousTurnMadeProgress });
+      streak = nextToolUseStreak({
+        stopReason: "tool_use",
+        previousStreak: streak,
+        previousTurnMadeProgress,
+      });
       toolCalls += 1;
       nudged = maybeInjectStopReasonNudge({
         stopReason: "tool_use",
@@ -573,9 +577,27 @@ describe("progress-aware tool-use streak", () => {
   };
 
   it("restarts the streak after a turn that made progress and resets it on a non-tool stop", () => {
-    expect(nextToolUseStreak({ stopReason: "tool_use", previousStreak: 7, previousTurnMadeProgress: false })).toBe(8);
-    expect(nextToolUseStreak({ stopReason: "tool_use", previousStreak: 7, previousTurnMadeProgress: true })).toBe(1);
-    expect(nextToolUseStreak({ stopReason: "end_turn", previousStreak: 7, previousTurnMadeProgress: false })).toBe(0);
+    expect(
+      nextToolUseStreak({
+        stopReason: "tool_use",
+        previousStreak: 7,
+        previousTurnMadeProgress: false,
+      }),
+    ).toBe(8);
+    expect(
+      nextToolUseStreak({
+        stopReason: "tool_use",
+        previousStreak: 7,
+        previousTurnMadeProgress: true,
+      }),
+    ).toBe(1);
+    expect(
+      nextToolUseStreak({
+        stopReason: "end_turn",
+        previousStreak: 7,
+        previousTurnMadeProgress: false,
+      }),
+    ).toBe(0);
   });
 
   it("does not lock follow-up tool calls while turns keep editing files or fixing tests", () => {
@@ -592,7 +614,11 @@ describe("progress-aware tool-use streak", () => {
 describe("ToolLoopProgressTracker", () => {
   it("treats edits, a failing command that now passes and first reads of a file as progress", () => {
     const tracker = new ToolLoopProgressTracker();
-    tracker.recordOutcome("edit_file", { file_path: "a.ts", old_string: "a", new_string: "b" }, true);
+    tracker.recordOutcome(
+      "edit_file",
+      { file_path: "a.ts", old_string: "a", new_string: "b" },
+      true,
+    );
     expect(tracker.consumeTurnProgress()).toBe(true);
     expect(tracker.consumeTurnProgress()).toBe(false);
 
@@ -613,13 +639,21 @@ describe("ToolLoopProgressTracker", () => {
 
   it("counts a failing run toward repeated failures only when it repeats unchanged", () => {
     const tracker = new ToolLoopProgressTracker();
-    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|1 failed")).toBe(false);
-    expect(tracker.isIdenticalRepeatFailure("pytest  tests/test_login.py", "1|1 failed")).toBe(true);
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|1 failed")).toBe(
+      false,
+    );
+    expect(tracker.isIdenticalRepeatFailure("pytest  tests/test_login.py", "1|1 failed")).toBe(
+      true,
+    );
     // A different failure is progress, not a repeat.
-    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(false);
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(
+      false,
+    );
     // An edit between runs makes the next red run part of a fix cycle.
     tracker.recordOutcome("edit_file", { file_path: "app/login.py" }, true);
-    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(false);
+    expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(
+      false,
+    );
     expect(tracker.isIdenticalRepeatFailure("pytest tests/test_login.py", "1|2 failed")).toBe(true);
   });
 
@@ -637,6 +671,8 @@ describe("buildLoopTurnLimitWarning", () => {
     expect(buildLoopTurnLimitWarning(2, "step")).toBe(
       "[TURN_LIMIT] You have 2 turns left in this step. Finish the current change, then summarize what is done and what remains.",
     );
-    expect(buildLoopTurnLimitWarning(1, "follow-up")).toContain("You have 1 turn left in this follow-up.");
+    expect(buildLoopTurnLimitWarning(1, "follow-up")).toContain(
+      "You have 1 turn left in this follow-up.",
+    );
   });
 });

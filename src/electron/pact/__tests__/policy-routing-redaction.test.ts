@@ -95,7 +95,7 @@ describe("effect classification and admission", () => {
     expect(admission).toMatchObject({ effectClass: "unknown", approvalRequired: true });
   });
 
-  it("lets the owner's explicit request cover a change, but not an unknown effect", () => {
+  it("needs a confirmation for every change, even the owner's explicit request", () => {
     const change = admitPactOperation({
       principal: owner,
       origin: "owner_cli",
@@ -106,18 +106,9 @@ describe("effect classification and admission", () => {
       requiredScopes: ["orders:cancel"],
       tokenScopes: ["orders:cancel"],
     });
-    expect(change).toMatchObject({ effectClass: "change", approvalRequired: false });
-    const unknown = admitPactOperation({
-      principal: owner,
-      origin: "owner_cli",
-      localAuthority: "explicit_user_request",
-      business,
-      text: "Do the thing",
-      declaredEffect: "unknown",
-      requiredScopes: [],
-      tokenScopes: [],
-    });
-    expect(unknown).toMatchObject({ approvalRequired: true });
+    expect(change).toMatchObject({ effectClass: "change", approvalRequired: true });
+    expect(classifyText("Check my order and close the account")).toBe("change");
+    expect(classifyText("Please place an order for two more")).toBe("change");
   });
 
   it("denies unknown scopes, empty or oversized messages, secrets and non-owner origins", () => {

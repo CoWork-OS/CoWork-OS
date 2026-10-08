@@ -215,4 +215,44 @@ describe("PACT card support check", () => {
       ),
     ).toMatchObject({ status: "invalid" });
   });
+
+  it("refuses loopback, private and metadata literal hosts outside development", () => {
+    for (const url of [
+      "https://127.0.0.1/a2a",
+      "https://[::1]/a2a",
+      "https://10.0.0.5/a2a",
+      "https://169.254.169.254/latest",
+      "https://localhost/a2a",
+    ]) {
+      expect(checkPactUrl(url, rules)).toBeUndefined();
+    }
+    expect(checkPactUrl("https://127.0.0.1/a2a", { allowLoopbackHttp: true })).toBeTruthy();
+  });
+
+  it("binds RFC 8414 issuer and keys to the metadata origin", () => {
+    const support = evaluateCardSupport(
+      card({
+        securitySchemes: delegatedSchemes,
+        securityRequirements: [
+          { schemes: { pa: { list: [] } } },
+          { schemes: { pa: { list: [] }, account: { list: [] } } },
+        ],
+      }),
+      rules,
+    );
+    if (support.status !== "supported" || !support.delegation)
+      throw new Error("expected delegated");
+    expect(
+      evaluateAuthorizationServerMetadata(
+        {
+          issuer: "https://provider.example/a2a/brand/oauth",
+          device_authorization_endpoint: support.delegation.deviceAuthorizationUrl,
+          token_endpoint: support.delegation.tokenUrl,
+          jwks_uri: "https://keys.evil.example/jwks.json",
+        },
+        support.delegation,
+        rules,
+      ),
+    ).toMatchObject({ status: "invalid" });
+  });
 });

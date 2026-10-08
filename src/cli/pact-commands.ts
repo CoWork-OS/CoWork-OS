@@ -60,8 +60,22 @@ function requireValue(value: string | undefined, flag: string): string {
   return value;
 }
 
+/**
+ * Anyone holding the link can finish the sign-in with their own business account, so it is only
+ * printed to an interactive terminal, never into logs or piped output.
+ */
+function linkVisible(): boolean {
+  return Boolean(process.stdout.isTTY);
+}
+
 export function formatSignIn(signIn: PactAuthorizationSignIn, businessName: string): string {
   const minutes = Math.max(0, Math.round((signIn.expiresAt - Date.now()) / 60_000));
+  if (!linkVisible()) {
+    return [
+      `Sign in with ${businessName} is needed (expires in ${minutes} minute(s)).`,
+      `Run \`cowork pact authorization wait ${signIn.id}\` in an interactive terminal to see the link.`,
+    ].join("\n");
+  }
   return [
     `Sign in with ${businessName} to continue: ${signIn.verificationUriComplete}`,
     `The page is ${signIn.verificationOrigin}; check that it shows the code ${signIn.userCode}.`,
@@ -96,9 +110,10 @@ export async function describePactSignInPause(
       authorizationId: view.id,
       business: view.businessName,
       scopes: view.requestedScopes,
-      verificationUriComplete: signIn.verificationUriComplete,
       verificationOrigin: signIn.verificationOrigin,
-      userCode: signIn.userCode,
+      ...(linkVisible()
+        ? { verificationUriComplete: signIn.verificationUriComplete, userCode: signIn.userCode }
+        : {}),
       expiresAt: signIn.expiresAt,
     },
   };
@@ -181,7 +196,7 @@ export async function runPactDirectCommand(
       if (outcome.status === "needs_user_action") {
         const signIn = await service.authorizationSignIn(principal, outcome.authorizationId);
         show(
-          { ...outcome, ...(signIn ? { signIn } : {}) },
+          { ...outcome, ...(signIn && linkVisible() ? { signIn } : {}) },
           `${signIn ? formatSignIn(signIn, "the business") : outcome.message}\nThen run: cowork pact authorization wait ${outcome.authorizationId}`,
         );
         return EXIT_NEEDS_USER_ACTION;

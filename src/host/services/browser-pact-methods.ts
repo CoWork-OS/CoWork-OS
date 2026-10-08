@@ -100,7 +100,8 @@ export function createBrowserPactDefinitions(options: {
     ),
     sendPactMessage: action(
       PactSendSchema,
-      // A browser page cannot pre-confirm a change; approval-requiring sends are refused.
+      // A browser page cannot pre-confirm anything: sends that need local approval (every
+      // non-inspection) come back as local_approval_required.
       (value, principal) => service.send(principal, { ...value, confirmed: false }),
       true,
     ),

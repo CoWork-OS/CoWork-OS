@@ -30,6 +30,18 @@ export interface PactIpcDeps {
   owner: () => Promise<PactPrincipal>;
   /** Opens an https URL in the user's own browser (shell.openExternal in main). */
   openExternal: (url: string) => Promise<void>;
+  /**
+   * A native confirmation owned by main for a send that needs local approval. The renderer can
+   * never answer it; without it such sends are refused.
+   */
+  confirmSend?: (request: {
+    businessName: string;
+    effect: string;
+    text: string;
+    scopes: string[];
+  }) => Promise<boolean>;
+  /** Development deployments may open loopback sign-in pages of a local reference stack. */
+  developmentAllowed?: () => boolean;
   checkRateLimit?: (channel: string) => void;
 }
 
@@ -106,7 +118,29 @@ export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler
       PactSendSchema,
       // The renderer is a web context: it can never pre-confirm a change. Anything that needs
       // local approval comes back as local_approval_required.
-      (v, p) => svc().send(p, { ...v, confirmed: false }),
+      async (v, p) => {
+        // A send that needs local approval is confirmed in a native dialog owned by main,
+        // showing the full text; the renderer's own `confirmed` is ignored.
+        const first = await svc().send(p, { ...v, confirmed: false });
+        if (first.status !== "blocked" || first.reason !== "local_approval_required") return first;
+        if (!deps.confirmSend) return first;
+        const business = (await svc().listBusinesses()).find((entry) => entry.id === v.businessId);
+        const confirmed = await deps.confirmSend({
+          businessName: business?.displayName ?? "this business",
+          effect: v.effect,
+          text: v.text,
+          scopes: v.requiredScopes,
+        });
+        if (!confirmed) {
+          return {
+            status: "denied" as const,
+            conversationId: first.conversationId,
+            reason: "local_approval_denied",
+            message: "The request was not approved.",
+          };
+        }
+        return svc().send(p, { ...v, confirmed: true });
+      },
     ),
     [IPC_CHANNELS.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE]: handler(
       IPC_CHANNELS.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE,
@@ -145,10 +179,11 @@ export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler
         const signIn = await svc().authorizationSignIn(p, v.id);
         if (!signIn) throw new Error("This sign-in is no longer pending.");
         const url = new URL(signIn.verificationUriComplete);
-        if (
-          url.protocol !== "https:" &&
-          !(url.protocol === "http:" && url.hostname === "127.0.0.1")
-        ) {
+        const localDevelopment =
+          deps.developmentAllowed?.() === true &&
+          url.protocol === "http:" &&
+          (url.hostname === "127.0.0.1" || url.hostname === "localhost");
+        if (url.protocol !== "https:" && !localDevelopment) {
           throw new Error("CoWork only opens HTTPS sign-in pages.");
         }
         // The user's own browser: CoWork never frames, proxies or observes the login.

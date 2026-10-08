@@ -7,7 +7,7 @@
  * it is never selected by business name. Refresh is serialised per grant and the rotated refresh
  * token commits atomically with the new access token under a revision check.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { decodeJwtPayloadUnverified } from "./jws";
 import { PactStore } from "./pact-sql";
@@ -15,6 +15,7 @@ import type { PactRepository } from "./pact-repository";
 import type { PactGrantSecret, PactSecretStore } from "./secret-store";
 import type { PactGrantRecord } from "./types";
 import { OAuthError, type DelegationToken } from "./upstream/client-delegation";
+import { DelegationTokenClaimsSchema } from "./upstream/delegation";
 
 const ACCESS_TOKEN_MIN_REMAINING_MS = 60_000;
 /** The reference provider's grant lifetime; used only when a token carries no hint. */
@@ -38,9 +39,52 @@ export interface GrantKey {
   authorizationServer: string;
 }
 
-/** Account binding is stored as a digest; the raw business user id stays inside the token. */
-export function accountBindingDigest(brandUserId: string): string {
-  return createHash("sha256").update(`pact-account:${brandUserId}`).digest("hex");
+/**
+ * Account binding is stored as a keyed digest (the key lives in secure storage), so the plain
+ * SQLite column cannot be reversed by guessing ids; the raw business user id stays in the token.
+ */
+export function accountBindingDigest(brandUserId: string, key: string): string {
+  return createHmac("sha256", key).update(`pact-account:${brandUserId}`).digest("hex");
+}
+
+export class PactTokenClaimsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PactTokenClaimsError";
+  }
+}
+
+/**
+ * Spec §5.4: the delegation token is the provider's JWT for this business and this personal
+ * agent. CoWork cannot verify its signature (the provider does), but a token naming another
+ * audience, client or issuer, or other scopes than the response, is not stored.
+ */
+export function checkDelegationTokenClaims(
+  token: DelegationToken,
+  expected: { interfaceUrl: string; clientId: string; authorizationServer: string },
+): void {
+  let claims: Record<string, unknown>;
+  try {
+    claims = decodeJwtPayloadUnverified(token.accessToken);
+  } catch {
+    throw new PactTokenClaimsError("The business returned a delegation token CoWork cannot read");
+  }
+  const parsed = DelegationTokenClaimsSchema.safeParse(claims);
+  if (!parsed.success)
+    throw new PactTokenClaimsError("The delegation token is missing PACT claims");
+  if (parsed.data.aud !== expected.interfaceUrl) {
+    throw new PactTokenClaimsError("The delegation token is for another business");
+  }
+  if (parsed.data.client_id !== expected.clientId) {
+    throw new PactTokenClaimsError("The delegation token is for another personal agent");
+  }
+  if (expected.authorizationServer && parsed.data.iss !== expected.authorizationServer) {
+    throw new PactTokenClaimsError("The delegation token comes from another authorization server");
+  }
+  const tokenScopes = [...new Set(parsed.data.scope.split(" ").filter(Boolean))].sort().join(" ");
+  if (tokenScopes !== [...new Set(token.scopes)].sort().join(" ")) {
+    throw new PactTokenClaimsError("The delegation token's scopes differ from the approved scopes");
+  }
 }
 
 export function tokenFacts(accessToken: string): {
@@ -137,7 +181,27 @@ export class PactGrantService {
     return [...scopes].sort();
   }
 
-  async storeGrant(key: GrantKey, token: DelegationToken): Promise<PactGrantRecord> {
+  /** The secure-storage key for account-binding digests, created once. */
+  private bindingKey(): string {
+    const signer = this.deps.secrets.getSigner();
+    if (signer?.accountBindingKey) return signer.accountBindingKey;
+    const key = randomBytes(32).toString("base64url");
+    this.deps.secrets.putSigner({ ...signer, accountBindingKey: key });
+    return key;
+  }
+
+  async storeGrant(
+    key: GrantKey,
+    token: DelegationToken,
+    expected?: { clientId: string },
+  ): Promise<PactGrantRecord> {
+    if (expected) {
+      checkDelegationTokenClaims(token, {
+        interfaceUrl: key.interfaceUrl,
+        clientId: expected.clientId,
+        authorizationServer: key.authorizationServer,
+      });
+    }
     const facts = tokenFacts(token.accessToken);
     const secretRef = randomUUID();
     const secret: PactGrantSecret = {
@@ -150,7 +214,9 @@ export class PactGrantService {
     this.deps.secrets.putGrant(secretRef, secret);
     return this.deps.repo.insertGrant({
       ...key,
-      accountBinding: facts.brandUserId ? accountBindingDigest(facts.brandUserId) : null,
+      accountBinding: facts.brandUserId
+        ? accountBindingDigest(facts.brandUserId, this.bindingKey())
+        : null,
       remoteGrantId: facts.remoteGrantId,
       // The approved scope from the token response is authoritative, not what was requested.
       scopes: token.scopes,

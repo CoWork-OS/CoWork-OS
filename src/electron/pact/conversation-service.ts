@@ -140,7 +140,23 @@ export class PactConversationService {
     return (this.deps.sleep ?? sleep)(ms, signal);
   }
 
+  private readonly conversationLocks = new Map<string, Promise<unknown>>();
+
+  /** One turn at a time per conversation in this process; the lease covers other processes. */
   async sendTurn(input: PactTurnInput): Promise<PactTurnResult> {
+    const key = input.conversation.id;
+    const previous = this.conversationLocks.get(key) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(() => this.sendTurnLocked(input));
+    const tail = run.catch(() => undefined);
+    this.conversationLocks.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.conversationLocks.get(key) === tail) this.conversationLocks.delete(key);
+    }
+  }
+
+  private async sendTurnLocked(input: PactTurnInput): Promise<PactTurnResult> {
     let message: PactMessageRecord | null;
     if (input.reuse) {
       if (input.reuse.bodyDigest !== bodyDigest(input.reuse.bodyText)) {
@@ -208,6 +224,8 @@ export class PactConversationService {
     let rateLimitRetries = 0;
     let result: DelegatedSendResult;
     for (;;) {
+      // Each attempt (and each wait before it) keeps the lease alive.
+      await this.deps.repo.renewAttemptLease(message.id, this.deps.leaseOwner, MESSAGE_LEASE_MS);
       let paJwt: string;
       let delegationToken: string | undefined;
       try {

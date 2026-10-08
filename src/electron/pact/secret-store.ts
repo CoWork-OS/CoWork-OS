@@ -34,6 +34,11 @@ export interface PactAuthorizationSecret {
 
 export interface PactSignerSecret {
   credential?: string;
+  /** The signer URL and issuer the credential was entered for; a change voids it. */
+  credentialSignerUrl?: string;
+  credentialIssuer?: string;
+  /** HMAC key for account-binding digests in the pact_* tables. */
+  accountBindingKey?: string;
   deviceKey?: { privateJwk: Record<string, string>; publicJwk: Record<string, string> };
 }
 

@@ -8649,6 +8649,11 @@ export class AgentDaemon extends EventEmitter {
       /** Internal native workspace write review flow; never populated from a tool argument. */
       responsibilityActionReview?: boolean;
       onApprovalCreated?: (approval: ApprovalRequest) => boolean;
+      /**
+       * Skip recurring approvals: each request needs its own decision (PACT business
+       * operations, where a remembered "allow" for one message must not cover the next).
+       */
+      noStandingApproval?: boolean;
     },
   ): Promise<boolean> {
     if (opts?.signal?.aborted) {
@@ -8782,6 +8787,7 @@ export class AgentDaemon extends EventEmitter {
       | undefined;
     if (
       !isResponsibilityActionReview &&
+      !opts?.noStandingApproval &&
       permission.evaluation.decision === "ask" &&
       recurringApprovalService
     ) {

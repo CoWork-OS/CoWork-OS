@@ -14,6 +14,14 @@ import { canAnswerInlineApproval } from "../approval-policy";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
 
+/**
+ * Tasks whose prompt comes from outside content (event hooks, inbound API calls) are not the
+ * owner speaking, even when they are not "automated" for scheduling purposes.
+ */
+function isExternallyDrivenTask(task: Task): boolean {
+  return task.source === "hook" || task.source === "api";
+}
+
 export const PACT_TOOL_NAMES = [
   "pact_discover",
   "pact_send_message",
@@ -206,7 +214,12 @@ export class PactTools {
   offeredToTask(): boolean {
     const task = this.task();
     if (!task) return false;
-    return !task.parentTaskId && !task.agentConfig?.gatewayContext && !isAutomatedTaskLike(task);
+    return (
+      !task.parentTaskId &&
+      !task.agentConfig?.gatewayContext &&
+      !isAutomatedTaskLike(task) &&
+      !isExternallyDrivenTask(task)
+    );
   }
 
   /** Business replies, scopes and skills are untrusted content (design §7.3). */
@@ -236,7 +249,7 @@ export class PactTools {
         ? "sub_agent"
         : agentConfig?.gatewayContext
           ? "gateway"
-          : isAutomatedTaskLike(task)
+          : isAutomatedTaskLike(task) || isExternallyDrivenTask(task)
             ? "automation"
             : agentConfig?.cli?.owner === "cowork-run"
               ? "owner_cli"

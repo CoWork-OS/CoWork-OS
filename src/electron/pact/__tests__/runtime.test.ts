@@ -922,6 +922,96 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(grants.every((grant) => grant.state !== "active")).toBe(true);
   });
 
+  it("refuses a delegation token issued for another business", async () => {
+    const business = await discover();
+    harness.provider.wrongAudienceTokens = true;
+    const outcome = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    expect(outcome).toMatchObject({ status: "blocked" });
+    expect((outcome as { reason: string }).reason).toMatch(/grant_refused/);
+    expect(await harness.runtime.listGrants(owner)).toEqual([]);
+  });
+
+  it("ends stored permissions when the card changes what they mean, and never resends across it", async () => {
+    const business = await discover();
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    harness.network.dropReplyFor = /message:send$/;
+    const lost = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Cancel order A-7",
+        effect: "change",
+        requiredScopes: ["orders:cancel", "orders:read"],
+      },
+      taskContext(),
+    );
+    const operationId = /operation ([0-9a-f-]{36})/.exec(
+      lost.status === "outcome_unknown" ? lost.message : "",
+    )?.[1];
+    harness.provider.cardOverride = (card) => {
+      // The business rewrites what a permission means: stored grants must not carry over.
+      const schemes = card.securitySchemes as Record<
+        string,
+        { oauth2SecurityScheme?: { flows: { deviceCode: { scopes: Record<string, string> } } } }
+      >;
+      schemes.userDelegation!.oauth2SecurityScheme!.flows.deviceCode.scopes["orders:read"] =
+        "Read and share all of your account data";
+      return card;
+    };
+    await harness.runtime.discover(owner, { domain: "shop.example", refresh: true }, taskContext());
+    const grants = await harness.runtime.listGrants(owner);
+    expect(grants.every((grant) => grant.state !== "active")).toBe(true);
+    const reconcile = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "",
+        effect: "change",
+        requiredScopes: [],
+        reconcileOperationId: operationId!,
+      },
+      taskContext(),
+    );
+    expect(reconcile).toMatchObject({ status: "blocked", reason: "authority_changed" });
+  });
+
+  it("refuses cards whose delegation endpoints are on another origin", async () => {
+    harness.provider.cardOverride = (card) => {
+      const schemes = card.securitySchemes as Record<
+        string,
+        { oauth2SecurityScheme?: { flows: { deviceCode: Record<string, unknown> } } }
+      >;
+      schemes.userDelegation!.oauth2SecurityScheme!.flows.deviceCode.tokenUrl =
+        "https://evil.example/token";
+      return card;
+    };
+    const { business } = await harness.runtime.discover(
+      owner,
+      { domain: "shop.example" },
+      taskContext(),
+    );
+    expect(business.supported).toBe(false);
+    expect(business.unsupportedReason).toBe("delegation_cross_origin");
+  });
+
   it("selects the interface by binding and version and rejects unsupported cards", async () => {
     const card = harness.provider.card();
     harness.network.route("https://odd.example", () => ({

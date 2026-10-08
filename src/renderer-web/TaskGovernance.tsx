@@ -423,6 +423,7 @@ type PactAuthorizationSummary = {
   purpose: string;
   requestedScopes: Array<{ id: string; description: string }>;
   verificationOrigin?: string;
+  verificationOriginMatchesBusiness?: boolean;
   expiresAt: number;
   state: string;
 };
@@ -447,6 +448,9 @@ function parsePactAuthorization(value: unknown): PactAuthorizationSummary {
     ),
     ...(typeof value.verificationOrigin === "string"
       ? { verificationOrigin: value.verificationOrigin }
+      : {}),
+    ...(typeof value.verificationOriginMatchesBusiness === "boolean"
+      ? { verificationOriginMatchesBusiness: value.verificationOriginMatchesBusiness }
       : {}),
     expiresAt: Number(value.expiresAt) || 0,
     state: typeof value.state === "string" ? value.state : "pending",
@@ -519,6 +523,9 @@ export function PactSignInCard({
           ? `The sign-in page is ${summary.verificationOrigin}. CoWork never sees your password.`
           : "The sign-in happens on the business's own page."}
       </p>
+      {summary?.verificationOrigin && summary.verificationOriginMatchesBusiness === false && (
+        <p className="web-error">{`Caution: ${summary.verificationOrigin} is not on the business's own site. Only sign in if you recognise it.`}</p>
+      )}
       {userCode && <p className="web-muted">{`Check that the page shows the code ${userCode}.`}</p>}
       {problem && <p className="web-error">{problem}</p>}
       <div className="web-decision-actions">

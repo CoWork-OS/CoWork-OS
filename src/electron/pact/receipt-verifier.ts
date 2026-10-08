@@ -100,6 +100,9 @@ export async function verifyPactReceipt(
   }
 
   const issues: string[] = [];
+  // Without the grant and account from the delegation token, the receipt cannot be bound to the
+  // permission CoWork used: real evidence, but not verified evidence.
+  if (!expected.grantId || !expected.user) issues.push("grant_binding_unknown");
   const allowed = new Set(expected.grantScopes);
   const outside = claims.scopesUsed.filter((scope) => !allowed.has(scope));
   if (outside.length > 0) issues.push(`scopes_outside_grant:${outside.join(",")}`);

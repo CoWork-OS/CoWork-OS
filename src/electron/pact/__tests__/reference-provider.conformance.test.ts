@@ -150,7 +150,8 @@ describe.skipIf(!providerUrl || !nativeSqlite)(
           ({
             pact: { enabled: true, autoRoute: true, blockedProviders: [] },
           }) as unknown as AdminPolicies,
-        transportFor: (networkContext) => createPactTransport({ networkContext }),
+        transportFor: (networkContext) =>
+          createPactTransport({ networkContext, allowLoopback: true }),
         env: { COWORK_PACT_DEVELOPMENT: "1" },
         signerFor: () => signer,
         ownerPrincipalId: () => owner.id,

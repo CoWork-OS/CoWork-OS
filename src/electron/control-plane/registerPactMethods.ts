@@ -23,8 +23,8 @@ type RequireScope = (client: unknown, scope: Scope) => void;
  * PACT methods for both Control Plane entry points (desktop handlers and the Node daemon).
  *
  * Scopes (plan §7): `read` sees status, businesses, conversations and receipts without secrets;
- * `write` sends; `operator` (or `admin`) runs grant operations, including reading a pending
- * sign-in link; configuration changes need `admin`. An opaque conversation id is not authority:
+ * `write` discovers; `operator` (or `admin`) sends, clears evidence reviews and runs grant
+ * operations, including reading a pending sign-in link; configuration changes need `admin`. An opaque conversation id is not authority:
  * every call is checked against the principal. Remote callers act as the local owner (the shared
  * token is the owner's), recorded as the actor.
  */
@@ -102,12 +102,35 @@ export function registerPactMethods(input: {
     PactConversationListSchema,
     (params, principal) => service.listConversations(principal, params),
   );
-  register(Methods.PACT_CONVERSATION_SEND, "write", PactSendSchema, (params, principal) =>
-    service.send(principal, params),
-  );
+  // Sends act with the owner's business permissions: operator scope, and a client-supplied
+  // confirmation counts only from an admin client (the owner's own token).
+  input.server.registerMethod(Methods.PACT_CONVERSATION_SEND, async (client, params) => {
+    input.requireScope(client, "operator");
+    const parsed = PactSendSchema.safeParse(params ?? undefined);
+    if (!parsed.success) {
+      throw {
+        code: ErrorCodes.INVALID_PARAMS,
+        message: `Invalid ${Methods.PACT_CONVERSATION_SEND} request: ${parsed.error.issues[0]?.message ?? "bad input"}`,
+      };
+    }
+    const isAdmin = Boolean(
+      (client as { hasScope?: (scope: string) => boolean })?.hasScope?.("admin"),
+    );
+    try {
+      return await service.send(await principalFor(client), {
+        ...parsed.data,
+        confirmed: parsed.data.confirmed && isAdmin,
+      });
+    } catch (error) {
+      if (error instanceof PactSurfaceError) {
+        throw { code: ErrorCodes.METHOD_FAILED, message: error.message };
+      }
+      throw error;
+    }
+  });
   register(
     Methods.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE,
-    "write",
+    "operator",
     PactIdSchema,
     (params, principal) => service.acknowledgeEvidence(principal, params.id),
   );

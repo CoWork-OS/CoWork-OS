@@ -152,6 +152,10 @@ export class FakePactProvider {
   alwaysMissingScope: string | null = null;
   /** Answer the next N token polls with slow_down. */
   slowDownPolls = 0;
+  /** Issue delegation tokens for another audience (a misbehaving authorization server). */
+  wrongAudienceTokens = false;
+  /** Rewrite the served card (simulates a business changing its endpoints). */
+  cardOverride: ((card: Record<string, unknown>) => Record<string, unknown>) | null = null;
   private lastReceipt: unknown = null;
   /** Map the user's scope approval: given requested scopes, which to grant (or "deny"). */
   approvalPolicy: (requested: string[]) => string[] | "deny" = (requested) => requested;
@@ -338,7 +342,7 @@ export class FakePactProvider {
     const accessToken = this.signProviderJwt(
       {
         iss: this.oauthIssuer,
-        aud: this.interfaceUrl,
+        aud: this.wrongAudienceTokens ? "https://other.example/a2a/x" : this.interfaceUrl,
         sub: grant.brandUserId,
         client_id: grant.clientId,
         scope: grant.scopes.join(" "),
@@ -371,7 +375,8 @@ export class FakePactProvider {
     const path = url.pathname;
     const base = `/a2a/${this.options.brandId}`;
     if (request.method === "GET" && path === `${base}/.well-known/agent-card.json`) {
-      return json(this.card(), 200, { "cache-control": "public, max-age=300" });
+      const card = this.cardOverride ? this.cardOverride(this.card()) : this.card();
+      return json(card, 200, { "cache-control": "public, max-age=300" });
     }
     if (
       request.method === "GET" &&

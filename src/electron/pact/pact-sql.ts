@@ -901,6 +901,17 @@ export class PactStore {
     return result.changes === 0 ? null : this.getMessage(id);
   }
 
+  /** Extend a live send lease (long sends, backoff and rate-limit waits). */
+  renewAttemptLease(id: string, owner: string, leaseMs: number): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE pact_messages SET lease_expires_at = ?, updated_at = ?
+         WHERE id = ? AND lease_owner = ? AND state = 'sending'`,
+      )
+      .run(this.now() + leaseMs, this.now(), id, owner);
+    return result.changes > 0;
+  }
+
   /** Finish an attempt held by `owner`; a lost lease means another runtime owns the outcome. */
   finishAttempt(
     id: string,

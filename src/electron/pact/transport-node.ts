@@ -63,6 +63,8 @@ function mapError(error: unknown, timedOut: boolean, callerAborted: boolean): Pa
 export function createPolicyCheckedHttp(options: {
   networkContext: NetworkPolicyContext;
   onDecision?: (decision: NetworkPolicyDecision) => void;
+  /** Development deployments only: PACT otherwise never sends credentials to loopback. */
+  allowLoopback?: boolean;
 }): PolicyCheckedHttp {
   return {
     async fetch(input): Promise<PactHttpResponse> {
@@ -91,6 +93,7 @@ export function createPolicyCheckedHttp(options: {
             maxRedirects: input.maxRedirects,
             // A cross-origin GET redirect keeps no caller header except Accept.
             publicHeaders: { Accept: input.headers.Accept ?? "application/json" },
+            allowLoopback: options.allowLoopback === true,
             ...(options.onDecision ? { onDecision: options.onDecision } : {}),
           },
         );
@@ -120,6 +123,7 @@ export function createPolicyCheckedHttp(options: {
 export function createPactTransport(options: {
   networkContext: NetworkPolicyContext;
   onDecision?: (decision: NetworkPolicyDecision) => void;
+  allowLoopback?: boolean;
 }): PactTransport {
   return new PactTransport(createPolicyCheckedHttp(options));
 }

@@ -162,6 +162,8 @@ export interface PactAuthorizationView {
   stateReason?: string;
   /** Origin of the business's sign-in page while pending (not the link itself). */
   verificationOrigin?: string;
+  /** False when that origin is not on the business's, its provider's or its card's site. */
+  verificationOriginMatchesBusiness?: boolean;
   expiresAt: number;
   createdAt: number;
 }
@@ -177,6 +179,7 @@ export interface PactAuthorizationSignIn {
   userCode: string;
   /** The origin the link opens, shown so the user can recognise the business's own login. */
   verificationOrigin: string;
+  verificationOriginMatchesBusiness: boolean;
   expiresAt: number;
 }
 

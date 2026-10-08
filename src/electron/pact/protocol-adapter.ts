@@ -12,6 +12,7 @@ import {
   type AuthorizationServerMetadata,
 } from "./upstream/delegation";
 import { delegationScheme, type DelegationScheme } from "./upstream/client-delegation";
+import { isBlockedInternalHost } from "../security/address-classes";
 
 export const PACT_PROTOCOL_VERSION = "1.0";
 export const PACT_A2A_BINDING = "HTTP+JSON";
@@ -32,6 +33,7 @@ export type PactUnsupportedReason =
   | "identity_scheme_ambiguous"
   | "identity_requirement_missing"
   | "delegation_scheme_ambiguous"
+  | "delegation_cross_origin"
   | "required_extension_unsupported";
 
 export interface PactSupportedCard {
@@ -63,7 +65,10 @@ export function isLoopbackHost(hostname: string): boolean {
   return LOOPBACK_HOSTS.has(host) || host.endsWith(".localhost");
 }
 
-/** HTTPS only, no URL credentials, no fragments; loopback http only under development rules. */
+/**
+ * HTTPS only, no URL credentials, no fragments, and no loopback, private or metadata literal
+ * hosts; loopback (http or https) only under development rules.
+ */
 export function checkPactUrl(raw: string, rules: PactUrlRules): URL | undefined {
   let url: URL;
   try {
@@ -73,6 +78,9 @@ export function checkPactUrl(raw: string, rules: PactUrlRules): URL | undefined 
   }
   if (url.username || url.password) return undefined;
   if (url.hash) return undefined;
+  const loopback = isLoopbackHost(url.hostname);
+  if (loopback && !rules.allowLoopbackHttp) return undefined;
+  if (!loopback && isBlockedInternalHost(url.hostname, false)) return undefined;
   if (url.protocol === "https:") return url;
   if (url.protocol === "http:" && rules.allowLoopbackHttp && isLoopbackHost(url.hostname)) {
     return url;
@@ -187,14 +195,24 @@ export function evaluateCardSupport(raw: unknown, rules: PactUrlRules): PactCard
   if (deviceCodeSchemes.length !== 1) {
     return unsupported("delegation_scheme_ambiguous", "Expected exactly one delegation scheme");
   }
+  // The personal-agent JWT and the refresh token go to these endpoints: they must be on the
+  // provider's own origin (the interface's), never a host the card merely names.
+  const providerOrigin = new URL(selected.url).origin;
   for (const url of [
     delegation.deviceAuthorizationUrl,
     delegation.tokenUrl,
     delegation.refreshUrl,
     delegation.metadataUrl,
   ]) {
-    if (!checkPactUrl(url, rules)) {
+    const checked = checkPactUrl(url, rules);
+    if (!checked) {
       return unsupported("insecure_url", "A delegation endpoint is not an allowed HTTPS URL");
+    }
+    if (checked.origin !== providerOrigin) {
+      return unsupported(
+        "delegation_cross_origin",
+        "Delegation endpoints must be on the same origin as the business's agent",
+      );
     }
   }
   return {
@@ -229,9 +247,18 @@ export function evaluateAuthorizationServerMetadata(
   if (metadata.token_endpoint !== delegation.tokenUrl) {
     return { status: "invalid", detail: "Token endpoint does not match the card" };
   }
+  const metadataOrigin = new URL(delegation.metadataUrl).origin;
   for (const url of [metadata.issuer, metadata.jwks_uri]) {
-    if (!checkPactUrl(url, rules)) {
+    const checked = checkPactUrl(url, rules);
+    if (!checked) {
       return { status: "invalid", detail: "Metadata URL is not an allowed HTTPS URL" };
+    }
+    // The receipt keys and the issuer belong to the server that published the metadata.
+    if (checked.origin !== metadataOrigin) {
+      return {
+        status: "invalid",
+        detail: "Metadata issuer and keys must be on the metadata's origin",
+      };
     }
   }
   return { status: "valid", metadata };

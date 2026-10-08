@@ -116,7 +116,7 @@ describe("shared policy-checked redirects", () => {
 });
 
 describe("PACT transport over the shared client", () => {
-  const transport = createPactTransport({ networkContext: context });
+  const transport = createPactTransport({ networkContext: context, allowLoopback: true });
 
   it("follows card redirects and reports the chain", async () => {
     const response = await transport.request({
@@ -151,6 +151,7 @@ describe("PACT transport over the shared client", () => {
         ...context,
         profileDomainRules: [{ pattern: "127.0.0.1", access: "deny" }],
       },
+      allowLoopback: true,
     });
     await expect(
       denied.request({ purpose: "card", method: "GET", url: `${a.origin}/start` }),
@@ -167,5 +168,12 @@ describe("PACT transport over the shared client", () => {
     });
     setTimeout(() => controller.abort(), 50);
     await expect(pending).rejects.toMatchObject({ code: "aborted" });
+  });
+
+  it("refuses loopback destinations outside development", async () => {
+    const production = createPactTransport({ networkContext: context });
+    await expect(
+      production.request({ purpose: "card", method: "GET", url: `${a.origin}/start` }),
+    ).rejects.toMatchObject({ code: "destination_refused" });
   });
 });

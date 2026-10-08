@@ -191,6 +191,21 @@ describe("PACT tools", () => {
     expect(runtime.send).not.toHaveBeenCalled();
   });
 
+  it("treats hook and API tasks as outside content, not the owner", async () => {
+    for (const source of ["hook", "api"]) {
+      const { daemon, runtime } = makeDaemon({ id: "t", source });
+      const tools = new PactTools(workspace, daemon as never, "t");
+      expect(tools.offeredToTask()).toBe(false);
+      runtime.send.mockResolvedValue({ status: "blocked", reason: "x", message: "m" });
+      await tools.sendMessage({
+        business_id: "b",
+        message: "Where is my order?",
+        effect: "inspect",
+      });
+      expect(runtime.send.mock.calls[0]![2].origin).toBe("automation");
+    }
+  });
+
   it("is offered only to the owner's own top-level tasks", () => {
     expect(
       new PactTools(workspace, makeDaemon({ id: "t" }).daemon as never, "t").offeredToTask(),

@@ -43,18 +43,18 @@ describe("PACT Control Plane methods", () => {
     expect([...handlers.keys()].sort()).toEqual([...expected].sort());
   });
 
-  it("maps scopes: read for views, write for sends, operator for grants and sign-in links, admin for config", async () => {
+  it("maps scopes: read for views, operator for sends, grants and sign-in links, admin for config", async () => {
     const { call } = setup();
     await expect(call(Methods.PACT_STATUS, ["read"])).resolves.toBeTruthy();
     await expect(
-      call(Methods.PACT_CONVERSATION_SEND, ["read"], {
+      call(Methods.PACT_CONVERSATION_SEND, ["write"], {
         businessId: "b",
         text: "hi",
         effect: "inspect",
       }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     await expect(
-      call(Methods.PACT_CONVERSATION_SEND, ["write"], {
+      call(Methods.PACT_CONVERSATION_SEND, ["operator"], {
         businessId: "b",
         text: "hi",
         effect: "inspect",
@@ -83,7 +83,7 @@ describe("PACT Control Plane methods", () => {
   it("rejects invalid params and records the remote actor", async () => {
     const { call, runtime } = setup();
     await expect(
-      call(Methods.PACT_CONVERSATION_SEND, ["write"], { businessId: "b" }),
+      call(Methods.PACT_CONVERSATION_SEND, ["operator"], { businessId: "b" }),
     ).rejects.toMatchObject({ code: "INVALID_PARAMS" });
     await call(Methods.PACT_STATUS, ["read"]);
     expect(runtime.ownerPrincipal).toHaveBeenCalledWith("control_plane:client-7");

@@ -22,9 +22,13 @@ is checked for a signed receipt.
    nothing. Discovery sends nothing about you.
 2. **Local admission.** CoWork decides the effect class of the request (`inspect`, `change` or
    `unknown`) from the declared intent, the message text and the business's scope descriptions,
-   taking the strongest. Changes and unknown effects need your approval; messages containing
-   credentials, secrets or card numbers are refused. Only your own tasks can use PACT: sub-agents,
-   bots, channel users and scheduled work cannot act with your identity or permissions.
+   taking the strongest. Every change, unknown effect, or use of a permission broader than the
+   request needs your explicit approval of the full message, one request at a time: remembered
+   rules, recurring approvals and permission modes never approve it. On the desktop, a request you
+   start outside a task is confirmed in a native dialog; the browser and remote clients cannot
+   pre-confirm it. Messages containing credentials, secrets or card numbers are refused. Only your
+   own tasks can use PACT: sub-agents, bots, channel users, event hooks, API-created tasks and
+   scheduled work cannot act with your identity or permissions.
 3. **Business consent.** When the request needs account access, CoWork asks the business for only
    the scopes it needs. The task shows a **Sign in** card: **Open sign-in** opens the business's own
    login in your browser (CoWork never proxies, frames or watches it), and you can uncheck any
@@ -32,7 +36,10 @@ is checked for a signed receipt.
    the wait if it is still valid.
 4. **Send.** Effectful requests go only into an established conversation (CoWork opens it with a
    neutral introduction), with the business permission attached. Every attempt is recorded before
-   it is sent.
+   it is sent. The sign-in, token and refresh endpoints must be on the same origin as the business's
+   agent, and the authorization server's issuer and keys on its metadata's origin; any change to
+   them, or to the permission descriptions, ends the stored permissions for that business. Outside
+   development, PACT never connects to loopback or private addresses.
 5. **Evidence.** A reply sent under a business permission must carry a signed receipt. CoWork
    checks the signature against the business's published keys, that the receipt names your grant,
    account, CoWork's issuer and the business, that the permissions it reports are within what you
@@ -118,12 +125,13 @@ Methods (both the desktop and the Node daemon):
 | Method | Scope |
 | --- | --- |
 | `pact.status`, `pact.settings.get`, `pact.business.list`, `pact.conversation.get`, `pact.conversation.list`, `pact.authorization.get`, `pact.authorization.list`, `pact.grant.list`, `pact.receipt.get` | `read` |
-| `pact.business.discover`, `pact.conversation.send`, `pact.conversation.acknowledgeEvidence` | `write` |
-| `pact.authorization.start`, `pact.authorization.signIn`, `pact.authorization.cancel`, `pact.grant.disconnect` | `operator` |
+| `pact.business.discover` | `write` |
+| `pact.conversation.send`, `pact.conversation.acknowledgeEvidence`, `pact.authorization.start`, `pact.authorization.signIn`, `pact.authorization.cancel`, `pact.grant.disconnect` | `operator` |
 | `pact.settings.update`, `pact.identity.setCredential`, `pact.identity.deviceKey` | `admin` |
 
 Results never contain tokens, device codes or signer credentials. `pact.authorization.signIn` is
-the only method that returns a sign-in link. Remote callers act as the profile owner (the Control
+the only method that returns a sign-in link. A send's `confirmed` flag is honoured only from an
+`admin` client (the owner's own token). Remote callers act as the profile owner (the Control
 Plane token is the owner's) and are recorded as the actor.
 
 ## CLI
@@ -139,7 +147,8 @@ cowork pact authorization wait <authorizationId>
 ```
 
 `cowork run` prints the sign-in link when a task needs one and keeps waiting in an interactive
-terminal. With `--exit-on-input`, or when output is not a terminal, it exits with code **3**
+terminal. The link is printed only to an interactive terminal (anyone holding it could finish the
+sign-in with their own account), never into piped output or logs. With `--exit-on-input`, or when output is not a terminal, it exits with code **3**
 (`needs user action`); resume with `cowork pact authorization wait <id>`. Add `--remote` to any
 `cowork pact` command to use the Control Plane.
 

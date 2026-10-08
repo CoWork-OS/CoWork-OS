@@ -26,7 +26,11 @@ export interface PactDaemonLike {
     type: string,
     description: string,
     details: unknown,
-    opts?: { requireExplicitApproval?: boolean },
+    opts?: {
+      requireExplicitApproval?: boolean;
+      allowAutoApprove?: boolean;
+      noStandingApproval?: boolean;
+    },
   ): Promise<boolean>;
   openPactAuthorizationWait(taskId: string, view: PactAuthorizationView): Promise<string>;
   settlePactAuthorizationWait(
@@ -69,6 +73,10 @@ export class DaemonPactHost implements PactHost {
   ): Promise<boolean> {
     return this.daemon.requestApproval(taskId, "external_service", summary, details, {
       requireExplicitApproval: options.requireExplicit,
+      // A business operation is approved one at a time: no auto-approval by mode or rule, and
+      // no standing (recurring or session) approval reused for a later message.
+      allowAutoApprove: !options.requireExplicit,
+      noStandingApproval: options.requireExplicit,
     });
   }
 
@@ -121,6 +129,8 @@ export function createDaemonPactRuntime(
     transportFor: (networkContext, taskId) =>
       createPactTransport({
         networkContext,
+        // Loopback is reachable only for the development signer and a local reference stack.
+        allowLoopback: PactSettingsManager.loadSettings().identity.deployment === "development",
         ...(taskId
           ? {
               onDecision: (decision: NetworkPolicyDecision) =>

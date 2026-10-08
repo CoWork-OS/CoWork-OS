@@ -51,6 +51,8 @@ export interface PolicyCheckedFetchOptions {
   onDecision?: (decision: NetworkPolicyDecision) => void;
   /** Observes every URL about to be fetched, in order. */
   onHop?: (url: string) => void;
+  /** Refuse loopback destinations (by literal and by DNS answer) as well as private ones. */
+  allowLoopback?: boolean;
 }
 
 export interface PolicyCheckedFetchResult {
@@ -121,7 +123,12 @@ export async function fetchWithPolicyCheckedRedirects(
     if (checkedUrl !== parsedUrl.toString()) assertPolicyAllowsUrl(parsedUrl.toString(), options);
     chain.push(currentUrl);
     options.onHop?.(currentUrl);
-    const response = await pinnedFetch(currentUrl, { ...currentInit, redirect: "manual" });
+    const response =
+      options.allowLoopback === false
+        ? await pinnedFetch(currentUrl, { ...currentInit, redirect: "manual" }, false, {
+            allowLoopback: false,
+          })
+        : await pinnedFetch(currentUrl, { ...currentInit, redirect: "manual" });
 
     if (!followRedirects || !isRedirectStatus(response.status)) {
       return { response, finalUrl: currentUrl, chain };

@@ -136,3 +136,43 @@ export function toReceiptView(receipt: PactReceiptRecord): PactReceiptView {
     createdAt: receipt.createdAt,
   };
 }
+
+/** Coarse site of a host: the last two labels, or three under short second-level suffixes. */
+export function siteOf(hostname: string): string {
+  const labels = hostname.toLowerCase().replace(/\.$/, "").split(".");
+  if (labels.length <= 2) return labels.join(".");
+  const secondLevel = labels[labels.length - 2]!;
+  const take =
+    labels[labels.length - 1]!.length === 2 &&
+    /^(co|com|net|org|gov|ac|edu|ne|or)$/.test(secondLevel)
+      ? 3
+      : 2;
+  return labels.slice(-take).join(".");
+}
+
+/** Whether a sign-in origin sits on the business's card, interface or authorization server site. */
+export function verificationOriginMatches(
+  origin: string,
+  business: PactBusinessRecord | null,
+): boolean {
+  if (!business) return false;
+  let host: string;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  const candidates = [
+    ...business.originChain,
+    business.cardUrl,
+    business.interfaceUrl,
+    business.descriptor.delegation?.authorizationServer ?? "",
+  ].flatMap((url) => {
+    try {
+      return [new URL(url).hostname];
+    } catch {
+      return [];
+    }
+  });
+  return candidates.some((candidate) => siteOf(candidate) === siteOf(host));
+}

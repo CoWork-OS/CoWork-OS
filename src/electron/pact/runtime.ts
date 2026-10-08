@@ -31,6 +31,7 @@ import {
   type PactTaskOrigin,
 } from "./admission-service";
 import {
+  bodyDigest,
   MAX_CONTEXT_ATTEMPTS,
   PACT_INTRODUCTION_TEXT,
   PactConversationService,
@@ -78,6 +79,7 @@ import type {
   PactSubjectBindingRecord,
 } from "./types";
 import {
+  verificationOriginMatches,
   toAuthorizationView,
   toBusinessView,
   toConversationView,
@@ -112,6 +114,7 @@ export interface PactHost {
     taskId: string,
     summary: string,
     details: Record<string, unknown>,
+    /** Explicit: never satisfied by remembered rules, recurring approvals or permission modes. */
     options: { requireExplicit: boolean },
   ): Promise<boolean>;
   openAuthorizationWait(taskId: string, view: PactAuthorizationView): Promise<string>;
@@ -358,7 +361,16 @@ export class PactRuntime {
       return null;
     }
     if (mode === "credential") {
-      return secret?.credential ? { mode: "credential", credential: secret.credential } : null;
+      const identity = this.settings().identity;
+      // The credential is only ever sent to the signer it was entered for.
+      if (
+        !secret?.credential ||
+        secret.credentialSignerUrl !== identity.signerUrl ||
+        secret.credentialIssuer !== identity.issuer
+      ) {
+        return null;
+      }
+      return { mode: "credential", credential: secret.credential };
     }
     if (!secret?.deviceKey) return null;
     const keyPair: Es256KeyPair = {
@@ -389,8 +401,16 @@ export class PactRuntime {
   setSignerCredential(credential: string | null): void {
     const existing = this.deps.secrets.getSigner();
     const next = { ...existing };
-    if (credential) next.credential = credential;
-    else delete next.credential;
+    const identity = this.settings().identity;
+    if (credential) {
+      next.credential = credential;
+      next.credentialSignerUrl = identity.signerUrl;
+      next.credentialIssuer = identity.issuer;
+    } else {
+      delete next.credential;
+      delete next.credentialSignerUrl;
+      delete next.credentialIssuer;
+    }
     this.deps.secrets.putSigner(next.credential || next.deviceKey ? next : undefined);
     this.identityState = null;
   }
@@ -595,18 +615,13 @@ export class PactRuntime {
     return { business: toBusinessView(result.business, result.provider), route };
   }
 
-  /** A card whose interface, provider or authorization server changed gets no old credentials. */
+  /**
+   * Any change to what the card says about where credentials go (interface, endpoints, metadata,
+   * keys, scopes) ends every stored permission for that business: no credential transfer.
+   */
   private async onBusinessSecurityChanged(business: PactBusinessRecord): Promise<void> {
     const grants = await this.repo.listGrants({ businessId: business.id, states: ["active"] });
-    const authorizationServer = business.descriptor.delegation?.authorizationServer ?? "";
-    for (const grant of grants) {
-      if (
-        grant.interfaceUrl !== business.interfaceUrl ||
-        grant.authorizationServer !== authorizationServer
-      ) {
-        await this.grants.invalidate(grant.id, "business_card_changed");
-      }
-    }
+    for (const grant of grants) await this.grants.invalidate(grant.id, "business_card_changed");
   }
 
   private async loadBusiness(
@@ -808,52 +823,15 @@ export class PactRuntime {
       approvalRequired: admission.approvalRequired,
     });
     if (admission.approvalRequired && !ctx.preApproved) {
-      if (!ctx.taskId) {
-        throw blocked(
-          "local_approval_required",
-          "Confirm this request before it is sent to the business.",
-          conversation.id,
-        );
-      }
-      if (ctx.humanInput === "none") {
-        this.deps.host.logInteractiveApprovalUnavailable(
-          ctx.taskId,
-          `Sending a ${admission.effectClass} request to ${business.displayName} needs approval, but this task cannot ask.`,
-        );
-        throw blocked(
-          "interactive_approval_unavailable",
-          "This task cannot ask for the approval this request needs.",
-          conversation.id,
-        );
-      }
-      const approved = await this.deps.host.requestLocalApproval(
-        ctx.taskId,
-        `Send a ${admission.effectClass === "change" ? "change" : "request"} to ${business.displayName}`,
-        {
-          tool: "pact_send_message",
-          params: {
-            business: business.displayName,
-            effect: admission.effectClass,
-            scopes: requiredScopes,
-            message: request.text.slice(0, 1000),
-          },
-          // Runtime-supplied destination for PermissionEngine domain rules (plan §7).
-          permissionInput: { url: business.interfaceUrl },
-          pactDestination: {
-            interfaceUrl: business.interfaceUrl,
-            originChain: business.originChain,
-            providerOrigin: provider.origin,
-          },
-          effectClass: admission.effectClass,
-          approvalReasons: admission.approvalReasons,
-        },
-        {
-          // Unknown effects and over-broad tokens are never auto-approved.
-          requireExplicit:
-            admission.effectClass === "unknown" ||
-            admission.approvalReasons.includes("token_exceeds_operation"),
-        },
-      );
+      const approved = await this.requireLocalApproval(ctx, {
+        business,
+        provider,
+        conversationId: conversation.id,
+        effectClass: admission.effectClass,
+        scopes: requiredScopes,
+        text: request.text,
+        reasons: admission.approvalReasons,
+      });
       if (!approved) {
         return {
           status: "denied",
@@ -960,6 +938,71 @@ export class PactRuntime {
       grantKey,
       requiredScopes,
     });
+  }
+
+  /**
+   * The local gate for one operation. On a task it is an explicit approval card for exactly this
+   * business, effect and full message text: never satisfied by a remembered rule, a recurring
+   * approval or a permission mode. Elsewhere the surface must have confirmed it (preApproved).
+   */
+  private async requireLocalApproval(
+    ctx: PactCallContext,
+    input: {
+      business: PactBusinessRecord;
+      provider: PactProviderRecord;
+      conversationId: string;
+      effectClass: PactEffectClass;
+      scopes: string[];
+      text: string;
+      reasons: string[];
+    },
+  ): Promise<boolean> {
+    if (!ctx.taskId) {
+      throw blocked(
+        "local_approval_required",
+        "Confirm this request before it is sent to the business.",
+        input.conversationId,
+      );
+    }
+    if (ctx.humanInput === "none") {
+      this.deps.host.logInteractiveApprovalUnavailable(
+        ctx.taskId,
+        `Sending a ${input.effectClass} request to a business needs approval, but this task cannot ask.`,
+      );
+      throw blocked(
+        "interactive_approval_unavailable",
+        "This task cannot ask for the approval this request needs.",
+        input.conversationId,
+      );
+    }
+    return this.deps.host.requestLocalApproval(
+      ctx.taskId,
+      `Send a ${input.effectClass === "change" ? "change" : "request"} to ${input.business.displayName}`,
+      {
+        tool: "pact_send_message",
+        params: {
+          business: input.business.displayName,
+          effect: input.effectClass,
+          scopes: input.scopes,
+          // The full text: what is approved is exactly what is sent.
+          message: input.text,
+        },
+        // Runtime-supplied destination for PermissionEngine domain rules (plan §7).
+        permissionInput: {
+          url: input.business.interfaceUrl,
+          effect: input.effectClass,
+          bodyDigest: bodyDigest(input.text.trim()),
+        },
+        pactDestination: {
+          interfaceUrl: input.business.interfaceUrl,
+          originChain: input.business.originChain,
+          providerOrigin: input.provider.origin,
+        },
+        effectClass: input.effectClass,
+        approvalReasons: input.reasons,
+      },
+      { requireExplicit: true },
+    );
   }
 
   private async handleTurn(
@@ -1286,6 +1329,24 @@ export class PactRuntime {
         state.conversation.id,
       );
     }
+    // A resend is the same operation under the same facts, re-admitted like a new one.
+    if (ctx.origin !== "owner" && ctx.origin !== "owner_cli") {
+      throw blocked(
+        "delegation_required",
+        "Only the profile owner's own tasks can talk to businesses through PACT.",
+        state.conversation.id,
+      );
+    }
+    if (
+      target.cardRevision !== state.business.revision ||
+      target.providerRevision !== state.provider.configRevision
+    ) {
+      throw blocked(
+        "authority_changed",
+        "The business or its provider changed since this request was sent, so it will not be resent.",
+        state.conversation.id,
+      );
+    }
     const grant = target.grantId ? await this.repo.getGrant(target.grantId) : null;
     if (target.grantId && (!grant || grant.state !== "active")) {
       throw blocked(
@@ -1293,6 +1354,25 @@ export class PactRuntime {
         "The permission used for that request is no longer active.",
         state.conversation.id,
       );
+    }
+    if (target.effectClass !== "inspect" && !ctx.preApproved) {
+      const approved = await this.requireLocalApproval(ctx, {
+        business: state.business,
+        provider: state.provider,
+        conversationId: state.conversation.id,
+        effectClass: target.effectClass,
+        scopes: target.requiredScopes,
+        text: target.bodyText,
+        reasons: ["reconcile"],
+      });
+      if (!approved) {
+        return {
+          status: "denied",
+          conversationId: state.conversation.id,
+          reason: "local_approval_denied",
+          message: "The resend was not approved.",
+        };
+      }
     }
     const delegation = state.business.descriptor.delegation;
     const transport = this.deps.transportFor(ctx.networkContext, ctx.taskId);
@@ -1540,6 +1620,10 @@ export class PactRuntime {
         tokenUrl: delegation.tokenUrl,
         transport: () => this.deps.transportFor(networkContext, record.taskId ?? undefined),
         credentials: async () => {
+          // A wait whose task was cancelled, finished or dismissed by any path stops polling.
+          if (record.taskId && !(await this.deps.host.taskStillWaiting(record.taskId))) {
+            throw new Error("task_not_waiting");
+          }
           // Policy and provider readiness are rechecked on every poll.
           const current = await this.providers.requireReady(
             provider.origin,
@@ -1553,25 +1637,32 @@ export class PactRuntime {
         kind: "failed",
         reason: redactPactError(error),
       }))
-      .then(async (outcome): Promise<PactAuthorizationOutcome & { grantId?: string }> => {
+      .then(async (polled): Promise<PactAuthorizationOutcome & { grantId?: string }> => {
+        let outcome: PactAuthorizationOutcome = polled;
         if (outcome.kind === "lease_lost") return outcome;
         // Shutting down is not a user cancel: leave the wait pending so it resumes on restart.
         if (outcome.kind === "cancelled" && this.stopped) return outcome;
         let grantId: string | undefined;
         let grantedScopes: string[] | undefined;
         if (outcome.kind === "granted") {
-          const grant = await this.grants.storeGrant(
-            {
-              principalId: record.principalId,
-              subjectBindingId: binding.id,
-              businessId: business.id,
-              interfaceUrl: business.interfaceUrl,
-              authorizationServer: delegation.authorizationServer ?? "",
-            },
-            outcome.token,
-          );
-          grantId = grant.id;
-          grantedScopes = grant.scopes;
+          try {
+            const grant = await this.grants.storeGrant(
+              {
+                principalId: record.principalId,
+                subjectBindingId: binding.id,
+                businessId: business.id,
+                interfaceUrl: business.interfaceUrl,
+                authorizationServer: delegation.authorizationServer ?? "",
+              },
+              outcome.token,
+              { clientId: identity.issuer },
+            );
+            grantId = grant.id;
+            grantedScopes = grant.scopes;
+          } catch (error) {
+            // A token for another business, client or scope set is refused, not stored.
+            outcome = { kind: "failed", reason: `grant_refused: ${redactPactError(error)}` };
+          }
         }
         const settled = await this.authorizations.settle(record, outcome, {
           ...(grantId ? { grantId } : {}),
@@ -1586,11 +1677,7 @@ export class PactRuntime {
               : outcome.kind;
         if (latest?.inputRequestId && settled) {
           await this.deps.host
-            .settleAuthorizationWait(
-              latest.inputRequestId,
-              state,
-              this.authorizationMessage(state, business, grantedScopes),
-            )
+            .settleAuthorizationWait(latest.inputRequestId, state, this.authorizationMessage(state))
             .catch(() => undefined);
         }
         if (record.taskId) {
@@ -1610,22 +1697,22 @@ export class PactRuntime {
     return entry;
   }
 
-  private authorizationMessage(
-    state: PactAuthorizationState,
-    business: PactBusinessRecord,
-    granted?: string[],
-  ): string {
+  /**
+   * Fixed wording: this text can reach the task as a follow-up after a restart, so it carries no
+   * business-controlled strings (names, scope ids).
+   */
+  private authorizationMessage(state: PactAuthorizationState): string {
     switch (state) {
       case "granted":
-        return `Access to ${business.displayName} was approved (${(granted ?? []).join(", ") || "no scopes"}). Retry the pending PACT request to continue.`;
+        return "The user approved access at the business. Retry the pending PACT request to continue.";
       case "denied":
-        return `The user declined access at ${business.displayName}. Stop this operation.`;
+        return "The user declined access at the business. Stop this operation.";
       case "expired":
-        return `The sign-in with ${business.displayName} expired before it was approved.`;
+        return "The business sign-in expired before it was approved.";
       case "cancelled":
-        return `The sign-in with ${business.displayName} was cancelled.`;
+        return "The business sign-in was cancelled.";
       default:
-        return `The sign-in with ${business.displayName} failed.`;
+        return "The business sign-in failed.";
     }
   }
 
@@ -1680,7 +1767,13 @@ export class PactRuntime {
     if (record.state !== "pending") return view;
     try {
       const secret = this.authorizations.signIn(record);
-      if (secret) view.verificationOrigin = new URL(secret.verificationUriComplete).origin;
+      if (secret) {
+        view.verificationOrigin = new URL(secret.verificationUriComplete).origin;
+        view.verificationOriginMatchesBusiness = verificationOriginMatches(
+          view.verificationOrigin,
+          await this.repo.getBusiness(record.businessId),
+        );
+      }
     } catch {
       // Unreadable secret storage: the card still shows the business and scopes.
     }
@@ -1712,12 +1805,17 @@ export class PactRuntime {
     if (record.expiresAt <= this.now()) return null;
     const secret = this.authorizations.signIn(record);
     if (!secret) return null;
+    const verificationOrigin = new URL(secret.verificationUriComplete).origin;
     return {
       id: record.id,
       verificationUri: secret.verificationUri,
       verificationUriComplete: secret.verificationUriComplete,
       userCode: secret.userCode,
-      verificationOrigin: new URL(secret.verificationUriComplete).origin,
+      verificationOrigin,
+      verificationOriginMatchesBusiness: verificationOriginMatches(
+        verificationOrigin,
+        await this.repo.getBusiness(record.businessId),
+      ),
       expiresAt: record.expiresAt,
     };
   }
@@ -1804,12 +1902,11 @@ export class PactRuntime {
     } else if (record.state === "pending") {
       const settled = await this.authorizations.settle(record, { kind: "cancelled" });
       if (settled?.inputRequestId) {
-        const business = await this.repo.getBusiness(record.businessId);
         await this.deps.host
           .settleAuthorizationWait(
             settled.inputRequestId,
             "cancelled",
-            this.authorizationMessage("cancelled", business!, undefined),
+            this.authorizationMessage("cancelled"),
           )
           .catch(() => undefined);
       }
@@ -1941,14 +2038,13 @@ export class PactRuntime {
           reason === "expired" ? { kind: "expired" } : { kind: "failed", reason };
         const settled = await this.authorizations.settle(record, outcome as never);
         if (settled?.inputRequestId) {
-          const business = await this.repo.getBusiness(record.businessId);
           await this.deps.host
             .settleAuthorizationWait(
               settled.inputRequestId,
               settled.state,
               reason === "expired"
-                ? this.authorizationMessage("expired", business!, undefined)
-                : `The sign-in with ${business?.displayName ?? "the business"} could not resume after restart (${reason}).`,
+                ? this.authorizationMessage("expired")
+                : `The business sign-in could not resume after a restart (${reason}).`,
             )
             .catch(() => undefined);
         }

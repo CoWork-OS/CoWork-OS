@@ -21,7 +21,7 @@ export const MAX_OUTBOUND_TEXT_CHARS = 4000;
 // Mutating verbs only: nouns such as "order", "payment" or "return policy" must not turn an
 // inspection into a change, while a false "change" only costs a confirmation.
 const CHANGE_WORDS =
-  /\b(cancel|cancell?ation|refund|rebook|re-book|reschedul\w*|change|modify|update|edit|delete|remove|book|reserve|purchase|buy|pay|transfer|submit|approve|confirm|upgrade|downgrade|subscribe|unsubscribe|renew|redeem|write|writes)\b/i;
+  /\b(cancel|cancell?ation|refund|rebook|re-book|reschedul\w*|change|modify|update|edit|delete|remove|book|reserve|purchase|buy|pay|transfer|submit|approve|confirm|upgrade|downgrade|subscribe|unsubscribe|renew|redeem|write|writes|close|terminate|stop|withdraw|ship|send|return\s+(?:it|them|this|my|the)|place\s+(?:an?\s+)?(?:new\s+)?order|reorder)\b/i;
 const INSPECT_WORDS =
   /\b(read|view|list|look\s?up|lookup|status|history|check|see|show|get|find|search|track|inspect|upcoming|past|balance|receipts?)\b/i;
 const SECRET_PATTERNS: RegExp[] = [
@@ -160,15 +160,10 @@ export function admitPactOperation(input: PactAdmissionInput): PactAdmission {
   if (EFFECT_RANK[tokenClass] > EFFECT_RANK[effectClass]) {
     approvalReasons.push("token_exceeds_operation");
   }
-  const approvalRequired =
-    approvalReasons.length > 0 &&
-    // The owner's own explicit request satisfies the local gate for changes; unknown effects and
-    // over-broad tokens still need review.
-    !(
-      input.localAuthority === "explicit_user_request" &&
-      effectClass === "change" &&
-      !approvalReasons.includes("token_exceeds_operation")
-    );
+  // Every non-inspection needs a confirmation the caller cannot forge: an approval card on a
+  // task, a native dialog on the desktop, or the owner's `--yes` at their own terminal
+  // (`preApproved`, decided by the surface, never by the model or a renderer).
+  const approvalRequired = approvalReasons.length > 0;
   return { decision: "admit", effectClass, approvalRequired, approvalReasons };
 }
 

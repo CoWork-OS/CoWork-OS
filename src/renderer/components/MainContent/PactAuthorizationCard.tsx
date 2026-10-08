@@ -107,6 +107,11 @@ export function PactAuthorizationCard({ request, onCancel }: PactAuthorizationCa
             ? `The sign-in page is ${view.verificationOrigin}. CoWork never sees your password; you can uncheck any permission there.`
             : "The sign-in happens on the business's own page. CoWork never sees your password."}
         </div>
+        {view?.verificationOrigin && view.verificationOriginMatchesBusiness === false && (
+          <div className="input-request-hint pact-authorization-error">
+            {`Caution: ${view.verificationOrigin} is not on ${businessName}'s own site. Only sign in if you recognise it.`}
+          </div>
+        )}
         {userCode && (
           <div className="input-request-hint pact-authorization-code">
             {`Check that the page shows the code ${userCode}.`}

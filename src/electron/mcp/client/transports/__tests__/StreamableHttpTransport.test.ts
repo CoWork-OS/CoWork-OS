@@ -21,6 +21,32 @@ describe("StreamableHttpTransport", () => {
     vi.unstubAllGlobals();
   });
 
+  it("sends MCP 2026 request metadata and version header for discovery", async () => {
+    const transport = new StreamableHttpTransport({
+      id: "modern",
+      name: "Modern",
+      enabled: true,
+      transport: "streamable-http",
+      url: "https://example.invalid/mcp",
+    });
+    await transport.connect();
+    transport.setProtocolVersion("2026-07-28");
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          result: { supportedVersions: ["2026-07-28"], capabilities: { events: {} } },
+        }),
+      ),
+    );
+    await transport.sendRequest("server/discover");
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.params._meta["io.modelcontextprotocol/protocolVersion"]).toBe("2026-07-28");
+    expect(new Headers(init.headers).get("MCP-Protocol-Version")).toBe("2026-07-28");
+  });
+
   it("checks current authority after awaiting credential setup and before posting action bytes", async () => {
     const transport = new StreamableHttpTransport({
       id: "fixture",

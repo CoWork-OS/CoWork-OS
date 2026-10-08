@@ -13,6 +13,7 @@ export type TriggerSource =
   | "mailbox_event"
   | "webhook"
   | "connector_event"
+  | "mcp_event"
   | "github_event"
   | "file_change"
   | "cron_event";
@@ -62,6 +63,15 @@ export interface TriggerAction {
     runMode?: "new_task" | "thread_follow_up";
     /** Existing task to receive the message when runMode is thread_follow_up */
     targetTaskId?: string;
+    /** MCP Events subscription bound to this trigger. */
+    mcpEvent?: {
+      serverId: string;
+      name: string;
+      arguments: Record<string, unknown>;
+      delivery: "webhook" | "poll";
+      /** Public HTTPS URL that forwards to the local MCP Events receiver. */
+      callbackUrl?: string;
+    };
   };
 }
 

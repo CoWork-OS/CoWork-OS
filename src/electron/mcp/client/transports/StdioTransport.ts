@@ -159,6 +159,7 @@ export function normalizeStdioSpawnCommand(
 }
 
 export class StdioTransport extends EventEmitter implements MCPTransport {
+  private protocolVersion = "2025-06-18";
   private process: ChildProcess | null = null;
   private config: MCPServerConfig;
   private messageHandler: ((message: JSONRPCResponse | JSONRPCNotification) => void) | null = null;
@@ -174,6 +175,10 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
   constructor(config: MCPServerConfig) {
     super();
     this.config = config;
+  }
+
+  setProtocolVersion(version: string): void {
+    this.protocolVersion = version;
   }
 
   /**
@@ -396,14 +401,28 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
       jsonrpc: "2.0",
       id,
       method,
-      params,
+      params:
+        this.protocolVersion === "2026-07-28"
+          ? {
+              ...params,
+              _meta: {
+                ...params?._meta,
+                "io.modelcontextprotocol/protocolVersion": this.protocolVersion,
+                "io.modelcontextprotocol/clientInfo": { name: "CoWork-OS", version: "1.0.0" },
+                "io.modelcontextprotocol/clientCapabilities": {},
+              },
+            }
+          : params,
     };
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`Request timeout for method: ${method}`));
-      }, this.config.requestTimeout || 60000);
+      const timeout = setTimeout(
+        () => {
+          this.pendingRequests.delete(id);
+          reject(new Error(`Request timeout for method: ${method}`));
+        },
+        method === "server/discover" ? 5000 : this.config.requestTimeout || 60000,
+      );
 
       this.pendingRequests.set(id, { resolve, reject, timeout });
 
@@ -509,7 +528,12 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
         clearTimeout(pending.timeout);
 
         if ("error" in message && message.error) {
-          pending.reject(new Error(message.error.message || "Unknown error"));
+          pending.reject(
+            Object.assign(new Error(message.error.message || "Unknown error"), {
+              code: message.error.code,
+              data: message.error.data,
+            }),
+          );
         } else {
           pending.resolve(message.result);
         }

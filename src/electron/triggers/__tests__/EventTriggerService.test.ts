@@ -708,6 +708,50 @@ describe("EventTriggerService", () => {
     });
   });
 
+  it("routes MCP occurrences only to their monitor and includes external event data", async () => {
+    const localDeps = makeDeps();
+    const localService = new EventTriggerService(localDeps);
+    await localService.start();
+    const first = await localService.addTrigger({
+      name: "First MCP monitor",
+      enabled: true,
+      source: "mcp_event",
+      conditions: [],
+      action: { type: "create_task", config: { prompt: "Review the comment" } },
+      workspaceId: "ws-1",
+      cooldownMs: 0,
+    });
+    await localService.addTrigger({
+      name: "Second MCP monitor",
+      enabled: true,
+      source: "mcp_event",
+      conditions: [],
+      action: { type: "create_task", config: { prompt: "Other monitor" } },
+      workspaceId: "ws-1",
+      cooldownMs: 0,
+    });
+
+    await localService.evaluateEvent({
+      source: "mcp_event",
+      eventId: "server-1:evt-1",
+      timestamp: Date.now(),
+      fields: {
+        subscriptionTriggerId: first.id,
+        serverId: "server-1",
+        eventName: "comment.created",
+        eventId: "evt-1",
+        data: JSON.stringify({ text: "Add rollout dates" }),
+      },
+    });
+
+    expect(localDeps.createTask).toHaveBeenCalledOnce();
+    expect(localDeps.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining("Add rollout dates"),
+      }),
+    );
+  });
+
   it("fails thread follow-up actions that are missing a target task", async () => {
     const localDeps = makeDeps();
     const localService = new EventTriggerService(localDeps);

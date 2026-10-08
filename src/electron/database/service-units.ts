@@ -37,6 +37,7 @@ import { ORCHESTRATION_GRAPH_UNITS } from "../agent/orchestration/orchestration-
 import { ORCHESTRATION_UNITS } from "../agent/orchestration-units";
 import { AGENT_SECURITY_UNITS } from "../security/numbat/agent-security-units";
 import { RECURRING_APPROVAL_UNITS } from "../security/recurring-approval-units";
+import { MCP_EVENT_UNITS } from "../mcp/events/mcp-event-units";
 
 /**
  * The services domain's transaction units (async SQLite migration plan, DB6): the
@@ -84,4 +85,5 @@ export const SERVICE_UNITS = {
   ...ORCHESTRATION_UNITS,
   ...AGENT_SECURITY_UNITS,
   ...RECURRING_APPROVAL_UNITS,
+  ...MCP_EVENT_UNITS,
 };

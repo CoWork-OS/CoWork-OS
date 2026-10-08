@@ -117,6 +117,10 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     this.config = config;
   }
 
+  setProtocolVersion(version: string): void {
+    this.protocolVersion = version;
+  }
+
   async connect(): Promise<void> {
     if (this.connected) {
       throw new Error("Already connected");
@@ -179,7 +183,21 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       jsonrpc: "2.0",
       id: ++this.requestId,
       method,
-      ...(params === undefined ? {} : { params }),
+      ...(this.protocolVersion === "2026-07-28"
+        ? {
+            params: {
+              ...params,
+              _meta: {
+                ...params?._meta,
+                "io.modelcontextprotocol/protocolVersion": this.protocolVersion,
+                "io.modelcontextprotocol/clientInfo": { name: "CoWork-OS", version: "1.0.0" },
+                "io.modelcontextprotocol/clientCapabilities": {},
+              },
+            },
+          }
+        : params === undefined
+          ? {}
+          : { params }),
     };
 
     if (method === "initialize") {
@@ -301,7 +319,10 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
         matchedResponse = true;
         this.rememberNegotiatedProtocol(message, incoming);
         if (incoming.error) {
-          throw new Error(incoming.error.message || `MCP method failed: ${message.method}`);
+          throw Object.assign(
+            new Error(incoming.error.message || `MCP method failed: ${message.method}`),
+            { code: incoming.error.code, data: incoming.error.data },
+          );
         }
         return incoming.result;
       }
@@ -314,7 +335,10 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     if (!expectsResponse && !matchedResponse) {
       const errorMessage = messages.find((incoming) => isRecord(incoming) && incoming.error);
       if (errorMessage?.error) {
-        throw new Error(errorMessage.error.message || `MCP method failed: ${message.method}`);
+        throw Object.assign(
+          new Error(errorMessage.error.message || `MCP method failed: ${message.method}`),
+          { code: errorMessage.error.code, data: errorMessage.error.data },
+        );
       }
       return undefined;
     }

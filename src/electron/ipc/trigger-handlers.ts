@@ -9,11 +9,18 @@ import { ipcMain } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import { EventTriggerService } from "../triggers/EventTriggerService";
 import { EventTrigger } from "../triggers/types";
+import { MCPClientManager } from "../mcp/client/MCPClientManager";
+import type { MCPEventService } from "../mcp/events/MCPEventService";
 
 export function setupTriggerHandlers(
   triggerService: EventTriggerService,
   onMutation?: () => Promise<void> | void,
+  mcpEvents?: MCPEventService,
 ): void {
+  ipcMain.handle(IPC_CHANNELS.MCP_EVENTS_LIST, async (_, serverId: string) => {
+    return MCPClientManager.getInstance().listServerEvents(serverId);
+  });
+  ipcMain.handle(IPC_CHANNELS.MCP_EVENTS_STATUS, async () => mcpEvents?.status() || []);
   ipcMain.handle(
     IPC_CHANNELS.TRIGGER_LIST,
     async (_, workspaceId: string): Promise<EventTrigger[]> => {

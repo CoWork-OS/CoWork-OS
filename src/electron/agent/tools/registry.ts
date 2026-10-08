@@ -70,6 +70,7 @@ import { VisualTools } from "./visual-tools";
 import { MentionTools } from "./mention-tools";
 import { XTools } from "./x-tools";
 import { XSearchTools } from "./x-search-tools";
+import { PACT_TOOL_NAMES, PactTools } from "./pact-tools";
 import { NotionTools } from "./notion-tools";
 import { BoxTools } from "./box-tools";
 import { OneDriveTools } from "./onedrive-tools";
@@ -298,6 +299,8 @@ const SPREADSHEET_CELL_SCHEMA = {
 };
 
 const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
+  // A sub-agent never acts with the owner's business identity or grants (PACT).
+  ...PACT_TOOL_NAMES,
   "spawn_agent",
   "wait_for_agent",
   "get_agent_status",
@@ -615,6 +618,7 @@ export class ToolRegistry {
   private mentionTools: MentionTools;
   private xTools: XTools;
   private xSearchTools: XSearchTools;
+  private pactTools: PactTools;
   private notionTools: NotionTools;
   private boxTools: BoxTools;
   private oneDriveTools: OneDriveTools;
@@ -704,6 +708,7 @@ export class ToolRegistry {
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
     this.xTools = new XTools(workspace, daemon, taskId);
     this.xSearchTools = new XSearchTools(workspace, daemon, taskId);
+    this.pactTools = new PactTools(workspace, daemon, taskId);
     this.notionTools = new NotionTools(workspace, daemon, taskId);
     this.boxTools = new BoxTools(workspace, daemon, taskId);
     this.oneDriveTools = new OneDriveTools(workspace, daemon, taskId);
@@ -797,6 +802,7 @@ export class ToolRegistry {
     const integrationState = {
       x: XTools.isEnabled(),
       xSearch: XSearchTools.hasCredentials(),
+      pact: PactTools.isAvailable() ? (PactTools.autoRouteEnabled() ? "auto" : "explicit") : false,
       notion: NotionTools.isEnabled(),
       box: BoxTools.isEnabled(),
       oneDrive: OneDriveTools.isEnabled(),
@@ -1207,6 +1213,7 @@ export class ToolRegistry {
     this.visualTools.setWorkspace(workspace);
     this.xTools.setWorkspace(workspace);
     this.xSearchTools.setWorkspace(workspace);
+    this.pactTools.setWorkspace(workspace);
     this.notionTools.setWorkspace(workspace);
     this.boxTools.setWorkspace(workspace);
     this.oneDriveTools.setWorkspace(workspace);
@@ -1368,6 +1375,11 @@ export class ToolRegistry {
     // web_search is always available (DuckDuckGo provides free fallback)
     allTools.push(...this.getSearchToolDefinitions());
 
+    // PACT business agents: only for the owner's own top-level tasks (never sub-agents or
+    // channel conversations, whatever the guardrail phase flags say).
+    if (PactTools.isAvailable() && this.pactTools.offeredToTask()) {
+      allTools.push(...this.pactTools.getToolDefinitions());
+    }
     // x_search is opt-in through built-in tool settings and only appears when
     // xAI OAuth or API-key credentials are configured.
     if (XSearchTools.hasCredentials()) {
@@ -2084,6 +2096,10 @@ export class ToolRegistry {
     }
     if (canonicalToolName.endsWith("_action") || canonicalToolName === "voice_call")
       return "external_service";
+    // A message to a business agent can change the user's account there; reading a stored
+    // PACT conversation is local.
+    if (canonicalToolName === "pact_send_message") return "external_service";
+    if (canonicalToolName === "pact_get_conversation") return null;
     if (canonicalToolName === "open_application" || isComputerUseToolName(canonicalToolName)) {
       return "computer_use";
     }
@@ -2199,6 +2215,8 @@ export class ToolRegistry {
       toolName === "mcp_x402_fetch" ||
       toolName.endsWith("_action") ||
       toolName === "voice_call" ||
+      // The PACT admission service asks for approval per operation (effect class, scopes).
+      toolName === "pact_send_message" ||
       isComputerUseToolName(toolName)
     );
   }
@@ -2379,17 +2397,30 @@ export class ToolRegistry {
       const externalFilesystemBoundary =
         this.getExternalFilesystemBoundary(context.request.name, context.request.input) ||
         this.getSkillManagementFilesystemBoundary(context.request.name, context.request.input);
+      // PACT tools: the destination comes from the runtime's verified business record, not
+      // from model input, so PermissionEngine domain rules see the real interface URL.
+      const pactApproval = context.request.name.startsWith("pact_")
+        ? await this.pactTools.approvalDestination(context.request.name, context.request.input)
+        : {};
       const approvalDetails = {
         tool: context.request.name,
         params: context.request.input ?? null,
         ...(serverName ? { serverName } : {}),
         ...browserUseApproval,
+        ...pactApproval,
         ...(approvalType === "external_file_access" && externalFilesystemBoundary
           ? { ...externalFilesystemBoundary }
           : {}),
       };
       const runtimeApprovalRequired =
-        runtime.approvalKind !== "none" && runtime.approvalKind !== "workspace_policy";
+        runtime.approvalKind !== "none" &&
+        runtime.approvalKind !== "workspace_policy" &&
+        // PACT admission is the authoritative gate for business messages: it asks per operation
+        // (effect class, scopes, token breadth) through requestApproval, which honours the
+        // access profile, and fails closed with interactive_approval_unavailable. A blanket
+        // runtime-metadata prompt here would ask twice and deny headless tasks before admission.
+        // Permission-engine denials still apply below.
+        context.request.name !== "pact_send_message";
       const semanticReview = this.buildJevSemanticReviewEvaluation({
         toolName: context.request.name,
         toolInput: context.request.input,
@@ -2881,6 +2912,29 @@ export class ToolRegistry {
         }
         return result;
       },
+      readParallelSchedulerSpec,
+    );
+    register(
+      "pact_discover",
+      async ({ request }) =>
+        this.pactTools.discover(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "pact_send_message",
+      async ({ request }) =>
+        this.pactTools.sendMessage(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "pact_get_conversation",
+      async ({ request }) => this.pactTools.getConversation(request.input),
       readParallelSchedulerSpec,
     );
     register(

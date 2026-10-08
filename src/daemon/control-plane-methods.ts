@@ -2,6 +2,7 @@ import { registerBotWorkControlMethods } from "../electron/control-plane/registe
 import { registerBotResponsibilityMethods } from "../electron/control-plane/registerBotResponsibilityMethods";
 import { registerAutomationRuntimeMethods } from "../electron/control-plane/registerAutomationRuntimeMethods";
 import { registerBotWorkMethods } from "../electron/control-plane/registerBotWorkMethods";
+import { registerPactMethods } from "../electron/control-plane/registerPactMethods";
 import { TaskRepository, WorkspaceRepository } from "../electron/database/repository-facades";
 import {
   generateAndApplyTaskTitle,
@@ -852,6 +853,7 @@ export function registerControlPlaneMethods(
     requireScope,
   });
   registerBotWorkMethods({ server, db, requireScope });
+  registerPactMethods({ server, agentDaemon, requireScope });
   registerBotWorkControlMethods({ server, db, agentDaemon, requireScope });
   registerBotResponsibilityMethods({
     server,
@@ -1725,7 +1727,6 @@ export function registerControlPlaneMethods(
       "signal",
       "matrix",
       "mattermost",
-      "twitch",
       "line",
       "bluebubbles",
       "email",

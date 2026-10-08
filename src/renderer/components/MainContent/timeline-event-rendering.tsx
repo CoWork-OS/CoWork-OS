@@ -1051,6 +1051,26 @@ export function renderEventTitle(
       return "Approval granted";
     case "approval_denied":
       return "Approval denied";
+    case "pact_business_discovered":
+      return `Found ${String(event.payload?.displayName ?? "business")}'s agent${event.payload?.supported === false ? " (not supported)" : ""}`;
+    case "pact_authorization_requested":
+      return `Waiting for sign-in with ${String(event.payload?.businessName ?? "the business")}`;
+    case "pact_authorization_resolved":
+      return `Business sign-in ${String(event.payload?.state ?? "finished")}`;
+    case "pact_message_sent":
+      return event.payload?.outcome === "replied"
+        ? "Message sent to the business"
+        : `Message to the business: ${String(event.payload?.outcome ?? "sent").replace(/_/g, " ")}`;
+    case "pact_step_up_required":
+      return "The business asked for more permissions";
+    case "pact_outcome_unknown":
+      return "Business request outcome unknown";
+    case "pact_operation_blocked":
+      return `Business request not sent: ${String(event.payload?.message ?? event.payload?.reason ?? "blocked")}`;
+    case "pact_receipt_verified":
+      return "Verified business receipt";
+    case "pact_evidence_issue":
+      return `Business evidence needs review: ${String(event.payload?.issue ?? event.payload?.reason ?? event.payload?.verification ?? "issue").replace(/_/g, " ")}`;
     case "input_request_created":
       return "Structured input requested";
     case "input_request_resolved":
@@ -1850,6 +1870,39 @@ export function renderEventDetails(
           {approval.details && (
             <pre>{truncateForDisplay(JSON.stringify(approval.details, null, 2), 4000)}</pre>
           )}
+        </div>
+      );
+    }
+    case "pact_receipt_verified":
+    case "pact_evidence_issue": {
+      const actions: unknown[] = Array.isArray(event.payload?.actions) ? event.payload.actions : [];
+      const scopes: unknown[] = Array.isArray(event.payload?.scopesUsed)
+        ? event.payload.scopesUsed
+        : [];
+      if (actions.length === 0 && scopes.length === 0 && !event.payload?.reason) return null;
+      return (
+        <div className="event-details">
+          {actions.length > 0 && <div>{`Business actions: ${actions.map(String).join(", ")}`}</div>}
+          {scopes.length > 0 && <div>{`Permissions used: ${scopes.map(String).join(", ")}`}</div>}
+          {event.payload?.reason && <div>{`Note: ${String(event.payload.reason)}`}</div>}
+          <div className="pact-evidence-note">
+            A signed receipt proves what the business reported, not that it settled.
+          </div>
+        </div>
+      );
+    }
+    case "pact_authorization_requested": {
+      const scopes: Array<{ description?: unknown }> = Array.isArray(event.payload?.scopes)
+        ? event.payload.scopes
+        : [];
+      if (scopes.length === 0) return null;
+      return (
+        <div className="event-details">
+          <ul className="pact-event-scopes">
+            {scopes.map((scope, idx) => (
+              <li key={idx}>{String(scope?.description ?? "")}</li>
+            ))}
+          </ul>
         </div>
       );
     }

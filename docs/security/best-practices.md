@@ -153,13 +153,6 @@ Install updates promptly:
 - Use access token rotation
 - Monitor room memberships
 
-### Twitch
-
-- Use OAuth tokens with minimal scopes
-- Restrict to channels you moderate
-- Disable whispers unless needed
-- Monitor chat activity for abuse
-
 ### LINE
 
 - Protect Channel Secret and Access Token

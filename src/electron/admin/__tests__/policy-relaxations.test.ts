@@ -58,4 +58,20 @@ describe("describePolicyRelaxations", () => {
     const next: AdminPolicies = { ...current, connectors: { blocked: [] } };
     expect(describePolicyRelaxations(current, next)).toEqual(["Unblock connectors: gmail"]);
   });
+
+  it("flags allowing PACT, automatic routing and unblocking PACT providers", () => {
+    const base = loadPolicies();
+    const current: AdminPolicies = {
+      ...base,
+      pact: { enabled: false, autoRoute: false, blockedProviders: ["https://bad.example"] },
+    };
+    const next: AdminPolicies = {
+      ...base,
+      pact: { enabled: true, autoRoute: true, blockedProviders: [] },
+    };
+    const changes = describePolicyRelaxations(current, next).join("\n");
+    expect(changes).toMatch(/Allow PACT business agents/);
+    expect(changes).toMatch(/Route business interactions to PACT automatically/);
+    expect(changes).toMatch(/Unblock PACT providers: https:\/\/bad.example/);
+  });
 });

@@ -548,24 +548,6 @@ Federated messaging with room-based conversations.
 
 ---
 
-## Twitch
-
-IRC chat integration over WebSocket.
-
-### Setup
-
-1. Get OAuth token from [twitchtokengenerator.com](https://twitchtokengenerator.com/) (select Chat Bot type)
-2. Configure in **Settings** > **Twitch** — enter username, OAuth token, channel names
-
-### Limitations
-
-- Text-only (no file attachments)
-- 20 messages per 30 seconds rate limit
-- 500 characters max per message (auto-split for longer responses)
-- Whispers may require verified account status
-
----
-
 ## LINE
 
 Messaging API with webhooks and push/reply messages.

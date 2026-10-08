@@ -3341,6 +3341,54 @@ a,
   cursor: not-allowed;
 }
 
+/* PACT business sign-in card (PactAuthorizationCard.tsx) */
+.pact-authorization-purpose {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.pact-authorization-scopes {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pact-authorization-scopes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.pact-authorization-scope-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.pact-authorization-code {
+  color: var(--color-text-secondary);
+}
+
+.pact-authorization-error {
+  color: var(--color-error, #f87171);
+}
+
+.pact-evidence-note {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.pact-event-scopes {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .theme-light .input-request-card {
   border: 1px solid rgba(15, 23, 42, 0.16);
   background:
@@ -9016,175 +9064,6 @@ a,
   font-size: 12px;
   color: var(--color-text-muted);
   margin: 4px 0 0;
-}
-
-.council-settings {
-  display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-
-.council-settings-sidebar,
-.council-settings-main {
-  min-width: 0;
-}
-
-.council-settings-main {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.council-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.council-list-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  padding: 14px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    transform 0.15s ease;
-}
-
-.council-list-item:hover,
-.council-list-item.active {
-  border-color: var(--color-accent);
-  transform: translateY(-1px);
-}
-
-.council-list-item-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.council-list-item-meta,
-.council-run-meta {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.council-status-pill {
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid var(--color-border-subtle);
-}
-
-.council-status-pill.enabled {
-  color: var(--color-success);
-  border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border-subtle));
-}
-
-.council-status-pill.disabled {
-  color: var(--color-text-secondary);
-}
-
-.council-error {
-  padding: 12px 14px;
-  margin-bottom: 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-error);
-  background: var(--color-error-subtle);
-  color: var(--color-error);
-}
-
-.council-seat-grid,
-.council-source-grid,
-.council-history-grid {
-  display: grid;
-  gap: 16px;
-}
-
-.council-seat-grid {
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-}
-
-.council-source-grid,
-.council-history-grid {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-}
-
-.council-seat-card,
-.council-source-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-}
-
-.council-seat-card-header,
-.council-chip-row,
-.council-run-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.council-chip-row {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.council-chip-row:last-child {
-  border-bottom: none;
-}
-
-.council-run-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.council-run-item {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.council-run-item:last-child {
-  border-bottom: none;
-}
-
-.council-memo-preview {
-  margin: 14px 0 0;
-  padding: 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-subtle);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 480px;
-  overflow: auto;
-}
-
-@media (max-width: 1100px) {
-  .council-settings {
-    grid-template-columns: 1fr;
-  }
 }
 
 .form-section {

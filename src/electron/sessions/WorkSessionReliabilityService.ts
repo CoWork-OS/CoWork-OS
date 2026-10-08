@@ -61,6 +61,7 @@ const RESUME_EVENTS = new Set(["task_resumed", "input_response", "wait_resolved"
 const WAIT_EVENTS = new Set([
   "approval_requested",
   "input_request_created",
+  "pact_authorization_requested",
   "reconnect_requested",
   "child_wait",
   "task_paused",

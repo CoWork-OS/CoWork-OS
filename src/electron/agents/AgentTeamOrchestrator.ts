@@ -1377,9 +1377,6 @@ export class AgentTeamOrchestrator {
     thoughts: AgentThought[],
     _items: AgentTeamItem[],
   ): string {
-    if (rootTask.agentConfig?.councilMode) {
-      return this.buildCouncilSynthesisPrompt(rootTask, thoughts);
-    }
     const parts: string[] = [];
     parts.push("You are the JUDGE in a multi-LLM comparison.");
     parts.push("Multiple AI models have independently analyzed the same task.");
@@ -1417,51 +1414,6 @@ export class AgentTeamOrchestrator {
     parts.push("2. Identify the strongest elements from each response.");
     parts.push("3. Synthesize the best comprehensive answer combining the strongest elements.");
     parts.push("4. Note any disagreements between models and explain which view is more accurate.");
-
-    return parts.join("\n");
-  }
-
-  private buildCouncilSynthesisPrompt(rootTask: Task, thoughts: AgentThought[]): string {
-    const parts: string[] = [];
-    parts.push("You are the judge and synthesizer for an R&D Council run.");
-    parts.push(
-      "Multiple models debated a business/product growth question using a curated source bundle.",
-    );
-    parts.push("Your job is to produce a single decision memo.");
-    parts.push("");
-    parts.push("IMPORTANT INSTRUCTIONS:");
-    parts.push("- Use ONLY the model outputs provided below plus the original council prompt.");
-    parts.push("- Do NOT use tools or read external files.");
-    parts.push("- Keep the memo concrete, specific, and action-oriented.");
-    parts.push("- Preserve meaningful disagreements instead of flattening them away.");
-    parts.push("");
-    parts.push("ORIGINAL COUNCIL PROMPT:");
-    parts.push(`Title: ${rootTask.title}`);
-    parts.push(rootTask.prompt);
-    parts.push("");
-
-    if (thoughts.length > 0) {
-      parts.push("=== MODEL OUTPUTS (COMPLETE) ===");
-      parts.push("");
-      parts.push(groupAndCompactThoughts(thoughts, MAX_SYNTHESIS_PROMPT_CHARS));
-      parts.push("");
-      parts.push("=== END OF MODEL OUTPUTS ===");
-      parts.push("");
-    }
-
-    parts.push(
-      "Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.",
-    );
-    parts.push("");
-    parts.push("Return the memo using EXACTLY these sections and headings:");
-    parts.push("## Executive Summary");
-    parts.push("## What We Reviewed");
-    parts.push("## Best New Idea");
-    parts.push("## Where The Models Agreed");
-    parts.push("## Where They Disagreed");
-    parts.push("## Recommended Next Actions");
-    parts.push("## Experiments To Run");
-    parts.push("## Risks / Missing Inputs");
 
     return parts.join("\n");
   }

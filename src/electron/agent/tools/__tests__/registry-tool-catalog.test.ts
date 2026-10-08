@@ -789,6 +789,10 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect((registry as Any).getApprovalTypeForTool("email_imap_unread")).toBe("external_service");
     expect((registry as Any).getApprovalTypeForTool("open_application")).toBe("computer_use");
     expect((registry as Any).getApprovalTypeForTool("click")).toBe("computer_use");
+    // PACT: a business message may change the user's account; reads are network access.
+    expect((registry as Any).getApprovalTypeForTool("pact_send_message")).toBe("external_service");
+    expect((registry as Any).getApprovalTypeForTool("pact_discover")).toBe("network_access");
+    expect((registry as Any).toolHandlesApprovalInternally("pact_send_message")).toBe(true);
   });
 
   it("renders rollout tool descriptions from the shared tool-prompt metadata", () => {

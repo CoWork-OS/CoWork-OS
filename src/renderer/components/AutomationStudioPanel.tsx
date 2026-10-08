@@ -15,7 +15,7 @@ import { ROUTINE_WORKFLOW_VERSION } from "../../shared/routine-workflow";
 import type { CronJob, CronRunHistoryEntry } from "../../electron/cron/types";
 import type { EventTrigger, TriggerHistoryEntry } from "../../electron/triggers/types";
 import type { Routine, RoutineRun } from "../../electron/routines/types";
-import type { CouncilConfig, CouncilRun, HookMappingData } from "../../shared/types";
+import type { HookMappingData } from "../../shared/types";
 import {
   buildAutomationActivity,
   buildAutomationLibrary,
@@ -121,7 +121,6 @@ function automationKindLabel(kind: AutomationLibraryItem["kind"]): string {
     cron: "Scheduled task",
     event: "Event trigger",
     webhook: "Webhook rule",
-    council: "R&D Council",
   }[kind];
 }
 
@@ -157,10 +156,8 @@ export default function AutomationStudioPanel({
   const [cronJobs, setCronJobs] = useState<CronJob[]>([]);
   const [eventTriggers, setEventTriggers] = useState<EventTrigger[]>([]);
   const [hookMappings, setHookMappings] = useState<HookMappingData[]>([]);
-  const [councils, setCouncils] = useState<CouncilConfig[]>([]);
   const [cronHistory, setCronHistory] = useState<Record<string, CronRunHistoryEntry[]>>({});
   const [eventHistory, setEventHistory] = useState<Record<string, TriggerHistoryEntry[]>>({});
-  const [councilRuns, setCouncilRuns] = useState<CouncilRun[]>([]);
   const [profileScope, setProfileScope] = useState("unknown");
   const [profileLabel, setProfileLabel] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<string[]>([]);
@@ -250,19 +247,8 @@ export default function AutomationStudioPanel({
         window.electronAPI.listCronJobs({ includeDisabled: true }),
         eventTriggerApi.listTriggers(""),
         window.electronAPI.getHooksSettings(),
-        Promise.all(
-          (nextWorkspaces as WorkspaceSummary[]).map((space) =>
-            window.electronAPI.listCouncils(space.id),
-          ),
-        ),
       ]);
-      const labels = [
-        "Routine activity",
-        "Scheduled tasks",
-        "Event triggers",
-        "Webhooks",
-        "Councils",
-      ];
+      const labels = ["Routine activity", "Scheduled tasks", "Event triggers", "Webhooks"];
       setUnavailable([
         ...ownerResults.flatMap((result, index) =>
           result.status === "rejected" ? [labels[index]] : [],
@@ -277,14 +263,11 @@ export default function AutomationStudioPanel({
       const jobs = value<CronJob[]>(1, []);
       const triggers = value<EventTrigger[]>(2, []);
       const hooks = value<{ mappings?: HookMappingData[] }>(3, { mappings: [] });
-      const councilList = value<CouncilConfig[][]>(4, []).flat();
       setCronJobs(jobs);
       setEventTriggers(triggers);
       setHookMappings(hooks.mappings || []);
-      setCouncils(councilList);
       setCronHistory({});
       setEventHistory({});
-      setCouncilRuns([]);
     } catch (loadError) {
       setError(
         loadError instanceof Error ? loadError.message : "Automation Studio could not load.",
@@ -302,10 +285,9 @@ export default function AutomationStudioPanel({
         cronJobs,
         eventTriggers,
         hookMappings,
-        councils,
         hookRevision: hookMappingRevision(hookMappings),
       }),
-    [profileScope, routines, cronJobs, eventTriggers, hookMappings, councils],
+    [profileScope, routines, cronJobs, eventTriggers, hookMappings],
   );
   const activityItems = useMemo(
     () =>
@@ -315,9 +297,8 @@ export default function AutomationStudioPanel({
         workflowRuns: runs,
         cronHistory,
         eventHistory,
-        councilRuns,
       }),
-    [libraryItems, routineRuns, runs, cronHistory, eventHistory, councilRuns],
+    [libraryItems, routineRuns, runs, cronHistory, eventHistory],
   );
   const visibleActivityItems = useMemo(
     () =>
@@ -399,7 +380,6 @@ export default function AutomationStudioPanel({
     setActivityHistoryOwnerKey(null);
     setCronHistory({});
     setEventHistory({});
-    setCouncilRuns([]);
 
     const request = activityHistoryQueueRef.current.then(async () => {
       if (cancelled) return;
@@ -414,12 +394,6 @@ export default function AutomationStudioPanel({
           };
           const history = await eventTriggerApi.getTriggerHistory(ownerItem.id);
           if (!cancelled) setEventHistory({ [ownerItem.id]: history || [] });
-        } else if (ownerItem.kind === "council") {
-          const history = await window.electronAPI.listCouncilRuns({
-            councilConfigId: ownerItem.id,
-            limit: 20,
-          });
-          if (!cancelled) setCouncilRuns(history || []);
         }
         if (!cancelled) setActivityHistoryOwnerKey(ownerItem.key);
       } catch (historyError) {
@@ -594,9 +568,6 @@ export default function AutomationStudioPanel({
         const result = await window.electronAPI.runCronJob(item.id, "force");
         if (!result.ok || !result.ran)
           throw new Error("The scheduled task did not start. Review it in Scheduled Tasks.");
-      } else if (item.kind === "council") {
-        const result = await window.electronAPI.runCouncilNow(item.id);
-        if (!result) throw new Error("The Council did not start. Review it in R&D Council.");
       }
       setNotice(`Run requested for ${item.name}. Review Activity for the native result.`);
       await loadOverview();
@@ -637,13 +608,6 @@ export default function AutomationStudioPanel({
         const result = await window.electronAPI.updateCronJob(item.id, { enabled });
         if (!result.ok || result.job.enabled !== enabled)
           throw new Error("Scheduled-task trigger change is incomplete.");
-      } else if (item.kind === "council") {
-        const latest = await window.electronAPI.getCouncil(item.id);
-        if (!latest || latest.updatedAt !== item.updatedAt)
-          throw new Error("This Council changed in another editor. Refresh before changing it.");
-        const result = await window.electronAPI.setCouncilEnabled(item.id, enabled);
-        if (!result || result.enabled !== enabled)
-          throw new Error("Council trigger change is incomplete.");
       }
       setNotice(
         `${item.name}: ${enabled ? "triggers on" : "triggers off"}. Running work is unaffected.`,
@@ -1172,7 +1136,7 @@ export default function AutomationStudioPanel({
               placeholder="Find an automation"
               aria-label="Find an automation"
             />
-            <span>Prompt Routines, flows, schedules, events, webhooks, and Councils</span>
+            <span>Prompt Routines, flows, schedules, events, and webhooks</span>
           </div>
           {libraryItems.length === 0 ? (
             <StudioEmpty

@@ -9,10 +9,9 @@ import {
   AgentRoleRepository,
   AgentTeamRepository,
 } from "../../../electron/agents/agent-repository-facades";
-import type { EverydayActionReceipt, Workspace } from "../../../shared/types";
+import type { Workspace } from "../../../shared/types";
 import type { ChannelGateway } from "../../../electron/gateway";
 import type { ManagedSessionService } from "../../../electron/managed/ManagedSessionService";
-import type { EverydayAgentService } from "../../../electron/everyday-agent/everyday-agent-repository-facades";
 import type { CronService } from "../../../electron/cron/service";
 import type { RoutineService } from "../../../electron/routines/service";
 import type { PluginPackToggleService } from "../../../electron/extensions/plugin-pack-toggle-service";
@@ -30,9 +29,7 @@ describe("browser navigation desktop methods", () => {
   let workspace: Workspace;
   let workspaceRepository: WorkspaceRepository;
   let managed: ManagedSessionService;
-  let everyday: EverydayAgentService;
   let routineService: RoutineService;
-  let receipts: EverydayActionReceipt[];
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-browser-navigation-"));
@@ -62,11 +59,6 @@ describe("browser navigation desktop methods", () => {
         canAuditAgents: true,
       })),
     } as unknown as ManagedSessionService;
-    receipts = [];
-    everyday = {
-      getProfile: vi.fn(async () => ({ profile: { id: "profile-local" } })),
-      listReceipts: vi.fn(async () => receipts),
-    } as unknown as EverydayAgentService;
     routineService = {
       getWorkflowCapabilities: () => ({ operations: [] }),
     } as unknown as RoutineService;
@@ -96,7 +88,6 @@ describe("browser navigation desktop methods", () => {
       agentDaemon: agentDaemon as never,
       channelGateway,
       managedSessionService: managed,
-      everydayAgentService: everyday,
       getRoutineService: () => routineService,
       getCronService: () => cronService,
       resolveWorkspace: resolveWorkspace || (async (id) => workspaceRepository.findById(id)),
@@ -114,7 +105,6 @@ describe("browser navigation desktop methods", () => {
   it("registers only exact browser-safe method names and leaves host-only sources gated", () => {
     const defs = definitions();
 
-    expect(defs.everydayAgentGetProfile).toBeDefined();
     expect(defs.generateManagedAgentPlan).toBeDefined();
     expect(defs.createManagedAgentFromPlan).toBeDefined();
     expect(defs.getSkillStatus).toBeDefined();
@@ -972,9 +962,6 @@ describe("browser navigation desktop methods", () => {
     expect(() =>
       defs.updateManagedAgentRoutine.validate!([{ agentId: "agent-1", name: "Renamed" }]),
     ).toThrow();
-    expect(() =>
-      defs.everydayAgentPreviewAction.validate!([{ title: "", action: "review" }]),
-    ).toThrow();
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -1105,7 +1092,7 @@ describe("browser navigation desktop methods", () => {
     expect(testWorkflow).toHaveBeenCalledWith({ routineId: routine.id, workflow, dryRun: false });
   });
 
-  it("returns workspaces and Everyday receipts only inside the effective readable scope", async () => {
+  it("returns workspaces only inside the effective readable scope", async () => {
     const hidden = new WorkspaceStore(db).create("Hidden", path.join(tempDir, "hidden"), {
       read: true,
       write: true,
@@ -1113,71 +1100,12 @@ describe("browser navigation desktop methods", () => {
       network: false,
       shell: false,
     });
-    receipts = [
-      {
-        id: "visible",
-        profileId: "profile-local",
-        workspaceId: workspace.id,
-      } as EverydayActionReceipt,
-      { id: "hidden", profileId: "profile-local", workspaceId: hidden.id } as EverydayActionReceipt,
-      { id: "global", profileId: "profile-local" } as EverydayActionReceipt,
-    ];
     const defs = definitions(async (id) =>
       id === hidden.id ? null : workspaceRepository.findById(id),
     );
 
     await expect(invoke(defs, "listWorkspaces")).resolves.toEqual([
       expect.objectContaining({ id: workspace.id }),
-    ]);
-    await expect(invoke(defs, "everydayAgentListReceipts")).resolves.toEqual([
-      expect.objectContaining({ id: "visible" }),
-      expect.objectContaining({ id: "global" }),
-    ]);
-    await expect(
-      invoke(defs, "everydayAgentListReceipts", [{ workspaceId: hidden.id }]),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(
-      invoke(defs, "everydayAgentListReceipts", [{ profileId: "other-profile" }]),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-  });
-
-  it("checks an Everyday preview's profile and workspace before approving it", async () => {
-    const hidden = new WorkspaceStore(db).create("Hidden", path.join(tempDir, "hidden"), {
-      read: true,
-      write: true,
-      delete: false,
-      network: false,
-      shell: false,
-    });
-    const previews: Record<string, string> = {
-      visible: JSON.stringify({ profileId: "profile-local", workspaceId: workspace.id }),
-      global: JSON.stringify({ profileId: "profile-local" }),
-      hidden: JSON.stringify({ profileId: "profile-local", workspaceId: hidden.id }),
-      foreign: JSON.stringify({ profileId: "other-profile", workspaceId: workspace.id }),
-      broken: "{not json",
-    };
-    const getActionPreviewJson = vi.fn(async (id: string) => previews[id] ?? null);
-    const approveAction = vi.fn(async ({ previewId }: { previewId: string }) => ({
-      id: `receipt-${previewId}`,
-    }));
-    Object.assign(everyday, { getActionPreviewJson, approveAction });
-    const defs = definitions(async (id) =>
-      id === hidden.id ? null : workspaceRepository.findById(id),
-    );
-    const approve = (previewId: string) =>
-      invoke(defs, "everydayAgentApproveAction", [{ previewId }]);
-
-    await expect(approve("visible")).resolves.toEqual({ id: "receipt-visible" });
-    await expect(approve("global")).resolves.toEqual({ id: "receipt-global" });
-    await expect(approve("missing")).rejects.toMatchObject({ code: "INVALID_REQUEST" });
-    await expect(approve("broken")).rejects.toThrow("Everyday Agent preview is unreadable.");
-    await expect(approve("foreign")).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(approve("hidden")).rejects.toMatchObject({ code: "FORBIDDEN" });
-    // The preview is read through the async facade, and only allowed previews are approved.
-    expect(getActionPreviewJson).toHaveBeenCalledWith("visible");
-    expect(approveAction.mock.calls.map(([input]) => input.previewId)).toEqual([
-      "visible",
-      "global",
     ]);
   });
 });

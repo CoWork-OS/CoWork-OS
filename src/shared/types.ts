@@ -961,7 +961,19 @@ export type EventType =
   | "timeline_error"
   // Persisted, task-scoped impact snapshots. Producers must only emit typed,
   // attributable counts; renderer code never derives these values from prose.
-  | "task_impact_updated";
+  | "task_impact_updated"
+  // PACT business-agent interactions (src/electron/pact); payloads are redacted.
+  | "pact_business_discovered"
+  | "pact_operation_admitted"
+  | "pact_operation_blocked"
+  | "pact_authorization_requested"
+  | "pact_authorization_resolved"
+  | "pact_message_sent"
+  | "pact_step_up_required"
+  | "pact_outcome_unknown"
+  | "pact_operation_reconciled"
+  | "pact_receipt_verified"
+  | "pact_evidence_issue";
 
 export type TimelineEventType =
   | "timeline_group_started"
@@ -1155,7 +1167,9 @@ export type RuntimeToolCapabilityTag =
   | "orchestration"
   | "admin"
   | "shell"
-  | "mcp";
+  | "mcp"
+  // Business-agent interactions (PACT); a lane of its own in tool-policy-engine.
+  | "business";
 
 export interface RuntimeToolMetadata {
   readOnly: boolean;
@@ -1606,6 +1620,10 @@ export type ToolType =
   | "browser_close"
   // X/Twitter
   | "x_action"
+  // PACT business agents
+  | "pact_discover"
+  | "pact_send_message"
+  | "pact_get_conversation"
   // Notion
   | "notion_action"
   // Box
@@ -1808,6 +1826,10 @@ export const TOOL_GROUPS = {
     "x_search",
     "voice_call",
     "x_action",
+    // PACT business agents that reach a business over the network (stored conversations
+    // are read locally by pact_get_conversation).
+    "pact_discover",
+    "pact_send_message",
     "notion_action",
     "box_action",
     "onedrive_action",
@@ -2066,6 +2088,9 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   browser_save_pdf: "network",
   browser_close: "network",
   x_action: "network",
+  pact_discover: "network",
+  pact_send_message: "network",
+  pact_get_conversation: "read",
   notion_action: "network",
   box_action: "network",
   onedrive_action: "network",
@@ -2533,10 +2558,6 @@ export interface AgentConfig {
   multiLlmMode?: boolean;
   /** Configuration for multi-LLM mode: which providers/models to use and which is the judge */
   multiLlmConfig?: MultiLlmConfig;
-  /** Mark this task as a council-triggered multi-LLM run with fixed memo synthesis requirements */
-  councilMode?: boolean;
-  /** Council run id for council-triggered collaborative tasks */
-  councilRunId?: string;
   /** Spawn an independent verification agent after task completion to audit deliverables */
   verificationAgent?: boolean;
   /**
@@ -7476,122 +7497,6 @@ export type CronSchedule =
   | { kind: "every"; everyMs: number; anchorMs?: number }
   | { kind: "cron"; expr: string; tz?: string };
 
-export interface CouncilParticipant {
-  providerType: LLMProviderType;
-  modelKey: string;
-  seatLabel: string;
-  roleInstruction?: string;
-}
-
-export interface CouncilFileSource {
-  path: string;
-  label?: string;
-}
-
-export interface CouncilUrlSource {
-  url: string;
-  label?: string;
-}
-
-export interface CouncilConnectorSource {
-  provider: string;
-  label: string;
-  resourceId?: string;
-  notes?: string;
-}
-
-export interface CouncilSourceBundle {
-  files: CouncilFileSource[];
-  urls: CouncilUrlSource[];
-  connectors: CouncilConnectorSource[];
-}
-
-export interface CouncilDeliveryConfig {
-  enabled: boolean;
-  channelType?: ChannelType;
-  channelDbId?: string;
-  channelId?: string;
-}
-
-export interface CouncilExecutionPolicy {
-  mode: "auto" | "full_parallel" | "capped_local";
-  maxParallelParticipants?: number;
-}
-
-export interface CouncilConfig {
-  id: string;
-  workspaceId: string;
-  name: string;
-  enabled: boolean;
-  schedule: CronSchedule;
-  participants: CouncilParticipant[];
-  judgeSeatIndex: number;
-  rotatingIdeaSeatIndex: number;
-  sourceBundle: CouncilSourceBundle;
-  deliveryConfig: CouncilDeliveryConfig;
-  executionPolicy: CouncilExecutionPolicy;
-  managedCronJobId?: string;
-  nextIdeaSeatIndex: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CreateCouncilConfigRequest {
-  workspaceId: string;
-  name: string;
-  enabled?: boolean;
-  schedule: CronSchedule;
-  participants: CouncilParticipant[];
-  judgeSeatIndex: number;
-  rotatingIdeaSeatIndex?: number;
-  sourceBundle?: Partial<CouncilSourceBundle>;
-  deliveryConfig?: Partial<CouncilDeliveryConfig>;
-  executionPolicy?: Partial<CouncilExecutionPolicy>;
-}
-
-export interface UpdateCouncilConfigRequest {
-  id: string;
-  name?: string;
-  enabled?: boolean;
-  schedule?: import("../electron/cron/types").CronSchedule;
-  participants?: CouncilParticipant[];
-  judgeSeatIndex?: number;
-  rotatingIdeaSeatIndex?: number;
-  sourceBundle?: CouncilSourceBundle;
-  deliveryConfig?: CouncilDeliveryConfig;
-  executionPolicy?: CouncilExecutionPolicy;
-  managedCronJobId?: string | null;
-  nextIdeaSeatIndex?: number;
-}
-
-export interface CouncilRun {
-  id: string;
-  councilConfigId: string;
-  workspaceId: string;
-  taskId?: string;
-  status: "running" | "completed" | "failed";
-  proposerSeatIndex: number;
-  summary?: string;
-  error?: string;
-  memoId?: string;
-  sourceSnapshot: CouncilSourceBundle;
-  startedAt: number;
-  completedAt?: number;
-}
-
-export interface CouncilMemo {
-  id: string;
-  councilRunId: string;
-  councilConfigId: string;
-  workspaceId: string;
-  taskId?: string;
-  proposerSeatIndex: number;
-  content: string;
-  delivered: boolean;
-  deliveryError?: string;
-  createdAt: number;
-}
-
 /**
  * Result from a heartbeat check
  */
@@ -8216,492 +8121,6 @@ export interface ProactiveSuggestion {
   actedOn: boolean;
 }
 
-export const EVERYDAY_AGENT_CONSENT_VERSION = 1;
-export const EVERYDAY_AGENT_DEFAULT_PROFILE_ID = "default";
-export const EVERYDAY_AGENT_DEFAULT_MANAGED_AGENT_ID = "cowork-everyday-agent";
-export const EVERYDAY_AGENT_DEFAULT_MANAGED_ENVIRONMENT_ID = "cowork-everyday-agent-local";
-
-export type EverydayCapabilityBundle =
-  | "inbox"
-  | "calendar"
-  | "browser"
-  | "files"
-  | "docs"
-  | "messages"
-  | "github_work"
-  | "memory"
-  | "screen_context"
-  | "remote_devices"
-  | "automations";
-
-export type EverydayActionRisk =
-  | "read"
-  | "draft"
-  | "stage"
-  | "execute_low_risk"
-  | "execute_sensitive"
-  | "destructive"
-  | "data_export"
-  | "spend"
-  | "credential_sensitive";
-
-export type EverydayApprovalPosture = "review_first" | "trusted_patterns" | "review_only";
-
-export type EverydayReceiptStatus =
-  | "executed"
-  | "skipped"
-  | "blocked"
-  | "paused"
-  | "failed"
-  | "previewed"
-  | "approved";
-
-export type EverydayPreviewStatus = "pending" | "approved" | "rejected" | "expired" | "blocked";
-
-export interface EverydayCapabilityBundleDefinition {
-  id: EverydayCapabilityBundle;
-  label: string;
-  description: string;
-  surfaces: string[];
-  defaultEnabled: boolean;
-  sensitiveRisks: EverydayActionRisk[];
-}
-
-export const EVERYDAY_AGENT_CAPABILITY_BUNDLES: EverydayCapabilityBundleDefinition[] = [
-  {
-    id: "inbox",
-    label: "Inbox",
-    description: "Triage, summarize, draft, and schedule email work.",
-    surfaces: ["Inbox Agent", "Home", "Mission Control"],
-    defaultEnabled: true,
-    sensitiveRisks: ["execute_sensitive", "data_export"],
-  },
-  {
-    id: "calendar",
-    label: "Calendar",
-    description: "Prepare for events, suggest follow-ups, and draft scheduling changes.",
-    surfaces: ["Mission Control", "Routines"],
-    defaultEnabled: true,
-    sensitiveRisks: ["execute_sensitive", "data_export"],
-  },
-  {
-    id: "browser",
-    label: "Browser",
-    description: "Use the visible Browser Workbench for online tasks and evidence review.",
-    surfaces: ["Browser Workbench", "Task Timeline"],
-    defaultEnabled: true,
-    sensitiveRisks: ["credential_sensitive", "data_export"],
-  },
-  {
-    id: "files",
-    label: "Files",
-    description: "Read local workspace files and suggest cleanup or organization.",
-    surfaces: ["Task Timeline", "Home"],
-    defaultEnabled: false,
-    sensitiveRisks: ["destructive", "data_export"],
-  },
-  {
-    id: "docs",
-    label: "Docs",
-    description: "Summarize and draft document changes through connected document tools.",
-    surfaces: ["Documents", "Task Timeline"],
-    defaultEnabled: true,
-    sensitiveRisks: ["execute_sensitive", "data_export"],
-  },
-  {
-    id: "messages",
-    label: "Messages",
-    description: "Draft replies and coordinate work in private or approved channels.",
-    surfaces: ["Channels", "Inbox Agent"],
-    defaultEnabled: false,
-    sensitiveRisks: ["execute_sensitive", "data_export"],
-  },
-  {
-    id: "github_work",
-    label: "GitHub / Work",
-    description: "Track issues, pull requests, and work-system next actions.",
-    surfaces: ["Mission Control", "Managed Agents"],
-    defaultEnabled: false,
-    sensitiveRisks: ["execute_sensitive", "destructive"],
-  },
-  {
-    id: "memory",
-    label: "Memory",
-    description: "Propose reviewable memories from accepted work and outcomes.",
-    surfaces: ["Memory", "Home"],
-    defaultEnabled: true,
-    sensitiveRisks: ["data_export"],
-  },
-  {
-    id: "screen_context",
-    label: "Screen Context",
-    description: "Use explicitly enabled local screen context as untrusted evidence.",
-    surfaces: ["Chronicle", "Task Timeline"],
-    defaultEnabled: false,
-    sensitiveRisks: ["credential_sensitive", "data_export"],
-  },
-  {
-    id: "remote_devices",
-    label: "Remote Devices",
-    description: "Dispatch approved work to connected devices and inspect their status.",
-    surfaces: ["Devices", "Control Plane"],
-    defaultEnabled: false,
-    sensitiveRisks: ["execute_sensitive", "credential_sensitive"],
-  },
-  {
-    id: "automations",
-    label: "Automations",
-    description: "Create, dry-run, monitor, pause, and revoke trusted routines.",
-    surfaces: ["Routines", "Home"],
-    defaultEnabled: true,
-    sensitiveRisks: ["execute_sensitive", "destructive"],
-  },
-];
-
-export interface EverydayCapabilitySetting {
-  enabled: boolean;
-  paused?: boolean;
-  revokedAt?: number;
-  lastChangedAt?: number;
-}
-
-export interface EverydayConnectorAllowlistEntry {
-  enabled: boolean;
-  connectorId: string;
-  accountIds?: string[];
-  scopes?: string[];
-  paused?: boolean;
-}
-
-export interface EverydayActiveHours {
-  enabled: boolean;
-  timezone: string;
-  windows: Array<{
-    days: number[];
-    start: string;
-    end: string;
-  }>;
-}
-
-export interface EverydayMemoryPolicy {
-  reviewRequired: boolean;
-  allowPromptVisibleMemory: boolean;
-  suppressPrivateContent: boolean;
-  allowExternalMirror: boolean;
-  retentionDays: number;
-  allowedWorkspaceIds: string[];
-}
-
-export interface EverydayRetentionSettings {
-  receiptsDays: number;
-  previewsDays: number;
-  connectorCacheDays: number;
-  routineProvenanceDays: number;
-}
-
-export interface EverydayBrowserProfilePolicy {
-  mode: "visible_existing" | "visible_ephemeral" | "isolated_ephemeral";
-  preferVisibleBrowser: boolean;
-  allowRealBrowserAttach: boolean;
-  retainProfileMetadata: boolean;
-}
-
-export interface EverydayPauseScope {
-  id?: string;
-  kind: "global" | "capability" | "connector" | "workspace" | "device" | "channel";
-  capability?: EverydayCapabilityBundle;
-  targetId?: string;
-  reason?: string;
-  pausedAt: number;
-  expiresAt?: number;
-}
-
-export interface EverydayAgentProfile {
-  id: string;
-  enabled: boolean;
-  acceptedConsentVersion: number;
-  consentAcceptedAt?: number;
-  declinedConsentVersion?: number;
-  consentDeclinedAt?: number;
-  managedAgentId?: string;
-  managedEnvironmentId?: string;
-  capabilitySettings: Record<EverydayCapabilityBundle, EverydayCapabilitySetting>;
-  connectorAllowlists: Record<string, EverydayConnectorAllowlistEntry>;
-  workspaceScopes: string[];
-  accountScopes: Record<string, string[]>;
-  approvalPosture: EverydayApprovalPosture;
-  memoryPolicy: EverydayMemoryPolicy;
-  activeHours: EverydayActiveHours;
-  retention: EverydayRetentionSettings;
-  browserProfilePolicy: EverydayBrowserProfilePolicy;
-  pauseScopes: EverydayPauseScope[];
-  revokedCapabilities: EverydayCapabilityBundle[];
-  heartbeatCadenceMinutes: number;
-  maxConcurrentBackgroundWork: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface EverydayAdminPolicySnapshot {
-  blocked: boolean;
-  blockedBundles: EverydayCapabilityBundle[];
-  forceReviewOnly: boolean;
-  maxHeartbeatCadenceMinutes: number;
-  maxConcurrentBackgroundWork: number;
-  activeHours?: Partial<EverydayActiveHours>;
-  reason?: string;
-}
-
-export interface EverydayCompiledPolicy {
-  enabled: boolean;
-  profileId: string;
-  managedAgentId?: string;
-  managedEnvironmentId?: string;
-  allowedCapabilities: EverydayCapabilityBundle[];
-  blockedCapabilities: EverydayCapabilityBundle[];
-  pausedScopes: EverydayPauseScope[];
-  approvalPosture: EverydayApprovalPosture;
-  reviewOnly: boolean;
-  visibleBrowserRequired: boolean;
-  allowRealBrowserAttach: boolean;
-  alwaysRequireApproval: EverydayActionRisk[];
-  permissionRules: Array<{
-    scope: "tool" | "connector" | "browser_profile" | "channel" | "workspace" | "device";
-    target: string;
-    decision: "allow" | "deny" | "prompt";
-    reason: string;
-  }>;
-  workflowTargets: string[];
-  routineEligibility: Array<{
-    capability: EverydayCapabilityBundle;
-    eligible: boolean;
-    reason?: string;
-  }>;
-  adminPolicy: EverydayAdminPolicySnapshot;
-}
-
-export interface EverydayAgentProfileResult {
-  profile: EverydayAgentProfile;
-  compiledPolicy: EverydayCompiledPolicy;
-}
-
-export interface EverydayAgentUpdateProfileRequest {
-  enabled?: boolean;
-  capabilitySettings?: Partial<
-    Record<EverydayCapabilityBundle, Partial<EverydayCapabilitySetting>>
-  >;
-  connectorAllowlists?: Record<string, Partial<EverydayConnectorAllowlistEntry>>;
-  workspaceScopes?: string[];
-  accountScopes?: Record<string, string[]>;
-  approvalPosture?: EverydayApprovalPosture;
-  memoryPolicy?: Partial<EverydayMemoryPolicy>;
-  activeHours?: Partial<EverydayActiveHours>;
-  retention?: Partial<EverydayRetentionSettings>;
-  browserProfilePolicy?: Partial<EverydayBrowserProfilePolicy>;
-  heartbeatCadenceMinutes?: number;
-  maxConcurrentBackgroundWork?: number;
-}
-
-export interface EverydayActionTargetBinding {
-  workspaceId?: string;
-  connectorId?: string;
-  connectorAccountId?: string;
-  browserProfileId?: string;
-  channelId?: string;
-  deviceId?: string;
-  targetIdentity?: string;
-  destination?: string;
-}
-
-export interface EverydayActionPreviewInput {
-  profileId?: string;
-  workspaceId?: string;
-  capability?: EverydayCapabilityBundle;
-  title: string;
-  action: string;
-  toolName?: string;
-  connectorId?: string;
-  connectorAccountId?: string;
-  browserProfileId?: string;
-  channelId?: string;
-  deviceId?: string;
-  targetIdentity?: string;
-  destination?: string;
-  sourceEvidence?: string[];
-  proposedMutation?: string;
-  affectedObjects?: string[];
-  rollbackAvailable?: boolean;
-  metadata?: Record<string, unknown>;
-}
-
-export interface EverydayActionPreview {
-  id: string;
-  profileId: string;
-  workspaceId?: string;
-  capability: EverydayCapabilityBundle;
-  riskClass: EverydayActionRisk;
-  title: string;
-  action: string;
-  sourceEvidence: string[];
-  target: EverydayActionTargetBinding;
-  proposedMutation: string;
-  affectedObjects: string[];
-  rollbackAvailable: boolean;
-  approvalRequired: boolean;
-  approvalReason: string;
-  idempotencyKey: string;
-  status: EverydayPreviewStatus;
-  createdAt: number;
-  expiresAt: number;
-  metadata?: Record<string, unknown>;
-}
-
-export interface EverydayActionReceipt {
-  id: string;
-  profileId: string;
-  workspaceId?: string;
-  capability: EverydayCapabilityBundle;
-  riskClass: EverydayActionRisk;
-  status: EverydayReceiptStatus;
-  title: string;
-  summary: string;
-  sourceSignals: string[];
-  approvalId?: string;
-  previewId?: string;
-  toolCalls: Array<{
-    toolName: string;
-    argumentsPreview?: string;
-    resultPreview?: string;
-    startedAt?: number;
-    completedAt?: number;
-  }>;
-  externalIds: string[];
-  retryState?: {
-    attempt: number;
-    nextRetryAt?: number;
-    lastError?: string;
-  };
-  idempotencyKey: string;
-  result?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface EverydayTrustPattern {
-  id: string;
-  profileId: string;
-  capability: EverydayCapabilityBundle;
-  workspaceId?: string;
-  connectorId?: string;
-  connectorAccountId?: string;
-  actionClass: EverydayActionRisk;
-  destination?: string;
-  status: "candidate" | "trusted" | "paused" | "revoked";
-  sourceSuggestionIds: string[];
-  provenance: string;
-  acceptedCount: number;
-  rejectedCount: number;
-  lastUsedAt?: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface EverydayAgentListReceiptsRequest {
-  profileId?: string;
-  workspaceId?: string;
-  capability?: EverydayCapabilityBundle;
-  limit?: number;
-  offset?: number;
-}
-
-export interface EverydayAgentClearDataRequest {
-  profile?: boolean;
-  receipts?: boolean;
-  previews?: boolean;
-  trustPatterns?: boolean;
-  consentHistory?: boolean;
-  pauseScopes?: boolean;
-  /** Clear the proposed core memory candidates of `workspaceId` (what the panel counts). */
-  memoryCandidates?: boolean;
-  routineProvenance?: boolean;
-  cachedConnectorSummaries?: boolean;
-  browserProfileMetadata?: boolean;
-  /** Workspace whose memory candidates `memoryCandidates` clears; without it none are. */
-  workspaceId?: string;
-}
-
-export interface EverydayAgentApproveActionRequest {
-  previewId: string;
-  approvalId?: string;
-  note?: string;
-}
-
-export const EVERYDAY_AGENT_ALWAYS_APPROVAL_RISKS: EverydayActionRisk[] = [
-  "execute_sensitive",
-  "destructive",
-  "data_export",
-  "spend",
-  "credential_sensitive",
-];
-
-export const DEFAULT_EVERYDAY_CAPABILITY_SETTINGS: Record<
-  EverydayCapabilityBundle,
-  EverydayCapabilitySetting
-> = EVERYDAY_AGENT_CAPABILITY_BUNDLES.reduce(
-  (acc, bundle) => {
-    acc[bundle.id] = {
-      enabled: false,
-      paused: false,
-    };
-    return acc;
-  },
-  {} as Record<EverydayCapabilityBundle, EverydayCapabilitySetting>,
-);
-
-export const DEFAULT_EVERYDAY_AGENT_PROFILE: EverydayAgentProfile = {
-  id: EVERYDAY_AGENT_DEFAULT_PROFILE_ID,
-  enabled: false,
-  acceptedConsentVersion: 0,
-  managedAgentId: EVERYDAY_AGENT_DEFAULT_MANAGED_AGENT_ID,
-  managedEnvironmentId: EVERYDAY_AGENT_DEFAULT_MANAGED_ENVIRONMENT_ID,
-  capabilitySettings: DEFAULT_EVERYDAY_CAPABILITY_SETTINGS,
-  connectorAllowlists: {},
-  workspaceScopes: [],
-  accountScopes: {},
-  approvalPosture: "review_first",
-  memoryPolicy: {
-    reviewRequired: true,
-    allowPromptVisibleMemory: false,
-    suppressPrivateContent: true,
-    allowExternalMirror: false,
-    retentionDays: 90,
-    allowedWorkspaceIds: [],
-  },
-  activeHours: {
-    enabled: false,
-    timezone: "local",
-    windows: [],
-  },
-  retention: {
-    receiptsDays: 180,
-    previewsDays: 30,
-    connectorCacheDays: 30,
-    routineProvenanceDays: 180,
-  },
-  browserProfilePolicy: {
-    mode: "visible_ephemeral",
-    preferVisibleBrowser: true,
-    allowRealBrowserAttach: false,
-    retainProfileMetadata: true,
-  },
-  pauseScopes: [],
-  revokedCapabilities: [],
-  heartbeatCadenceMinutes: 30,
-  maxConcurrentBackgroundWork: 1,
-  createdAt: 0,
-  updatedAt: 0,
-};
-
 // IPC Channel names
 export const IPC_CHANNELS = {
   // Task operations
@@ -8965,17 +8384,6 @@ export const IPC_CHANNELS = {
   STANDUP_LIST: "standup:list",
   STANDUP_DELIVER: "standup:deliver",
 
-  // R&D Council
-  COUNCIL_LIST: "council:list",
-  COUNCIL_GET: "council:get",
-  COUNCIL_CREATE: "council:create",
-  COUNCIL_UPDATE: "council:update",
-  COUNCIL_DELETE: "council:delete",
-  COUNCIL_RUN_NOW: "council:runNow",
-  COUNCIL_LIST_RUNS: "council:listRuns",
-  COUNCIL_GET_MEMO: "council:getMemo",
-  COUNCIL_SET_ENABLED: "council:setEnabled",
-
   // Mission Control - Company Ops / Planner
   MC_COMPANY_LIST: "missionControl:companyList",
   MC_COMPANY_GET: "missionControl:companyGet",
@@ -9085,17 +8493,6 @@ export const IPC_CHANNELS = {
   AGENT_SECURITY_CASE_BUILD: "agentSecurity:caseBuild",
   AGENT_SECURITY_CASE_VERIFY: "agentSecurity:caseVerify",
   AGENT_SECURITY_PRUNE: "agentSecurity:prune",
-
-  // Everyday Agent
-  EVERYDAY_AGENT_GET_PROFILE: "everydayAgent:getProfile",
-  EVERYDAY_AGENT_UPDATE_PROFILE: "everydayAgent:updateProfile",
-  EVERYDAY_AGENT_ACCEPT_CONSENT: "everydayAgent:acceptConsent",
-  EVERYDAY_AGENT_PAUSE: "everydayAgent:pause",
-  EVERYDAY_AGENT_REVOKE_CAPABILITY: "everydayAgent:revokeCapability",
-  EVERYDAY_AGENT_LIST_RECEIPTS: "everydayAgent:listReceipts",
-  EVERYDAY_AGENT_CLEAR_DATA: "everydayAgent:clearData",
-  EVERYDAY_AGENT_PREVIEW_ACTION: "everydayAgent:previewAction",
-  EVERYDAY_AGENT_APPROVE_ACTION: "everydayAgent:approveAction",
 
   // Workspace Kit (.cowork)
   KIT_GET_STATUS: "kit:getStatus",
@@ -9811,6 +9208,28 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_KEEP_ENTRY: "memoryRepo:keepEntry",
   // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
   MEMORY_REPO_SYNC_NOW: "memoryRepo:syncNow",
+  // PACT business agents (docs/pact.md). Sign-in links never reach the desktop renderer:
+  // PACT_AUTHORIZATION_OPEN_SIGN_IN opens the business's login in the system browser from main.
+  PACT_STATUS: "pact:status",
+  PACT_SETTINGS_GET: "pact:settingsGet",
+  PACT_SETTINGS_UPDATE: "pact:settingsUpdate",
+  PACT_IDENTITY_SET_CREDENTIAL: "pact:identitySetCredential",
+  PACT_IDENTITY_DEVICE_KEY: "pact:identityDeviceKey",
+  PACT_BUSINESS_DISCOVER: "pact:businessDiscover",
+  PACT_BUSINESS_LIST: "pact:businessList",
+  PACT_CONVERSATION_GET: "pact:conversationGet",
+  PACT_CONVERSATION_LIST: "pact:conversationList",
+  PACT_CONVERSATION_SEND: "pact:conversationSend",
+  PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE: "pact:conversationAcknowledgeEvidence",
+  PACT_AUTHORIZATION_START: "pact:authorizationStart",
+  PACT_AUTHORIZATION_GET: "pact:authorizationGet",
+  PACT_AUTHORIZATION_FOR_INPUT: "pact:authorizationForInput",
+  PACT_AUTHORIZATION_LIST: "pact:authorizationList",
+  PACT_AUTHORIZATION_CANCEL: "pact:authorizationCancel",
+  PACT_AUTHORIZATION_OPEN_SIGN_IN: "pact:authorizationOpenSignIn",
+  PACT_GRANT_LIST: "pact:grantList",
+  PACT_GRANT_DISCONNECT: "pact:grantDisconnect",
+  PACT_RECEIPT_GET: "pact:receiptGet",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",
@@ -10523,7 +9942,6 @@ export type ChannelType =
   | "signal"
   | "mattermost"
   | "matrix"
-  | "twitch"
   | "line"
   | "bluebubbles"
   | "email"
@@ -10820,11 +10238,6 @@ export interface AddChannelRequest {
   matrixAccessToken?: string;
   matrixDeviceId?: string;
   matrixRoomIds?: string[];
-  // Twitch-specific fields
-  twitchUsername?: string;
-  twitchOauthToken?: string;
-  twitchChannels?: string[];
-  twitchAllowWhispers?: boolean;
   // LINE-specific fields
   lineChannelAccessToken?: string;
   lineChannelSecret?: string;

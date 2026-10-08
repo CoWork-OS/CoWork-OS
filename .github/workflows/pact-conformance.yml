@@ -1,0 +1,103 @@
+name: PACT Conformance
+
+# Runs CoWork's PACT runtime against the upstream reference provider at the pinned commit
+# (docs/pact.md). Only PACT-related changes trigger it; it can also be run by hand.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/electron/pact/**"
+      - "src/electron/security/policy-checked-fetch.ts"
+      - "src/electron/security/pinned-fetch.ts"
+      - "src/electron/security/network-policy.ts"
+      - ".github/workflows/pact-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PACT_UPSTREAM_REPOSITORY: openpactprotocol/openpactprotocol
+  PACT_UPSTREAM_COMMIT: 838c6bd1da9be39da04264e8b156dbb4e848a208
+  DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+  DATABASE_POOL_MAX: "1"
+  A2A_AUDIENCE: http://localhost:3000/a2a
+  PA_ISSUER: http://localhost:3002
+
+jobs:
+  reference-provider:
+    name: Reference provider interoperability
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out the pinned PACT reference stack
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.PACT_UPSTREAM_REPOSITORY }}
+          ref: ${{ env.PACT_UPSTREAM_COMMIT }}
+          path: pact-reference
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install CoWork dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Prepare native SQLite for tests
+        run: npm rebuild better-sqlite3 --ignore-scripts=false --no-audit --no-fund
+
+      - name: Install the reference stack
+        working-directory: pact-reference
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.21.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Start PGlite, migrate and seed
+        working-directory: pact-reference
+        run: |
+          set -euo pipefail
+          export PGLITE_DATA_DIR="$RUNNER_TEMP/pact-provider-db"
+          nohup pnpm --filter @openpactprotocol/provider db:pglite > "$RUNNER_TEMP/pglite.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/5432) 2>/dev/null; then break; fi
+            sleep 1
+          done
+          pnpm --filter @openpactprotocol/provider db:migrate
+          pnpm --filter @openpactprotocol/provider db:seed
+
+      - name: Start the Brand app and the Provider (delegation on)
+        working-directory: pact-reference
+        run: |
+          set -euo pipefail
+          nohup pnpm --filter @openpactprotocol/brand dev > "$RUNNER_TEMP/brand.log" 2>&1 &
+          DELEGATION_ENABLED=1 nohup pnpm --filter @openpactprotocol/provider dev > "$RUNNER_TEMP/provider.log" 2>&1 &
+          for _ in $(seq 1 120); do
+            if curl -fsS http://localhost:3000/api/health > /dev/null 2>&1 \
+              && curl -fsS -o /dev/null http://localhost:3004/ 2>/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Reference stack did not become healthy" >&2
+          tail -n 100 "$RUNNER_TEMP/provider.log" "$RUNNER_TEMP/brand.log" >&2 || true
+          exit 1
+
+      - name: Run CoWork's PACT tests against the reference provider
+        env:
+          PACT_REFERENCE_PROVIDER_URL: http://localhost:3000
+          PACT_REFERENCE_AUDIENCE: http://localhost:3000/a2a
+          PACT_REFERENCE_IDENTITY_CUSTOMER: 01M3R53Q5WKZ7A0GY4PZ8Y39TB
+          PACT_REFERENCE_DELEGATED_CUSTOMER: 01M3R53Q5SZQ6FQSMSDBSSREAA
+        run: npx vitest run src/electron/pact/__tests__/
+
+      - name: Show reference stack logs
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/provider.log" "$RUNNER_TEMP/brand.log" "$RUNNER_TEMP/pglite.log" || true

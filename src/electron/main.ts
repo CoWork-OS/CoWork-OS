@@ -109,7 +109,6 @@ import { ActivityRepository } from "./activity/activity-repository-facades";
 
 import type { KitWriterOwnership } from "./agents/kit-writer-ownership";
 import { createKitWriterOwnership } from "./agents/kit-writers";
-import { EverydayAgentService } from "./everyday-agent/everyday-agent-repository-facades";
 
 import { AutomationRunOutcomeRepository } from "./automation/automation-outcome-repository-facades";
 import { AutomationOutcomeService } from "./automation/AutomationOutcomeService";
@@ -262,9 +261,6 @@ import { createRoutineWorkflowActionExecutor } from "./routines/workflow/action-
 import { GoogleWorkspaceWorkflowStarterWatcher } from "./routines/workflow/google-starter-watcher";
 import { DailyBriefingService } from "./briefing/DailyBriefingService";
 import { syncDailyBriefingCronJob, DAILY_BRIEFING_MARKER } from "./briefing/briefing-scheduler";
-import { CouncilService } from "./council/CouncilService";
-import { setCouncilService } from "./council";
-import { mergeCouncilCronAgentConfig } from "./council/cron-bridge";
 import {
   readWorkspaceOpenLoops,
   readWorkspacePriorities,
@@ -361,7 +357,6 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
         getRoutineService: () => routineService,
         getEventTriggerService: () => eventTriggerService,
         getHeartbeatService: () => heartbeatService,
-        everydayAgentService: getEverydayAgentService(),
       });
     }
 
@@ -388,7 +383,6 @@ let headlessBotAutomation: ReturnType<typeof createHeadlessBotAutomation> | null
 let cronService: CronService | null = null;
 let pulseService: PulseService | null = null;
 let hostPerfMonitor: HostPerfMonitorHandle | null = null;
-let councilService: CouncilService | null = null;
 let dailyBriefingService: DailyBriefingService | null = null;
 let ambientMonitoringService: AmbientMonitoringService | null = null;
 let mailboxForwardingService: MailboxForwardingService | null = null;
@@ -398,12 +392,6 @@ let autonomyEngine: AutonomyEngine | null = null;
 let subconsciousLoopService: SubconsciousLoopService | null = null;
 // CrossSignal, Feedback and Lore: run only while this process owns the kit-writer lease.
 let kitWriterOwnership: KitWriterOwnership | null = null;
-// One Everyday Agent service for IPC, the control plane and the browser host (LIFE-5).
-let everydayAgentService: EverydayAgentService | null = null;
-function getEverydayAgentService(): EverydayAgentService {
-  everydayAgentService ??= new EverydayAgentService(dbManager.getDatabase());
-  return everydayAgentService;
-}
 let xMentionBridgeService: XMentionBridgeService | null = null;
 let strategicPlannerService: StrategicPlannerService | null = null;
 let automationOutcomeService: AutomationOutcomeService | null = null;
@@ -1082,6 +1070,10 @@ const RESETTABLE_SECURE_SETTINGS_CATEGORIES: SettingsCategory[] = [
   "autonomy-chief-of-staff",
   "awareness-state",
   "webaccess",
+  // PACT business grants and pending sign-ins can be re-consented; the runtime marks grants whose
+  // tokens are gone as invalid. Signer configuration (pact:signer) is never reset silently.
+  "pact:grants",
+  "pact:authorization",
 ];
 
 const ACCEPT_NEW_KEYCHAIN_KEY_ENV = "COWORK_ACCEPT_NEW_KEYCHAIN_KEY";
@@ -2424,36 +2416,6 @@ if (isMacSafeStorageMigrationWorker) {
         }
       }
 
-      try {
-        councilService = new CouncilService({
-          db: dbManager.getDatabase(),
-          getCronService: () => cronService,
-          getNotificationService: () => getNotificationService(),
-          deliverToChannel: async (params) => {
-            if (!channelGateway) {
-              throw new Error("Cannot deliver council memo - gateway not initialized");
-            }
-            let resolvedType = params.channelType as string;
-            if (params.channelDbId) {
-              const ch = await channelGateway.getChannel(params.channelDbId);
-              if (ch) resolvedType = ch.type;
-            }
-            await channelGateway.sendMessage(
-              resolvedType as Any,
-              params.channelId,
-              params.message,
-              {
-                parseMode: "markdown",
-                idempotencyKey: params.idempotencyKey,
-              },
-            );
-          },
-        });
-        setCouncilService(councilService);
-      } catch (error) {
-        logger.error("Failed to initialize Council Service:", error);
-      }
-
       // Initialize Cron Service for scheduled task execution
       try {
         const db = dbManager.getDatabase();
@@ -2499,18 +2461,6 @@ if (isMacSafeStorageMigrationWorker) {
             await routineService?.recordScheduledEvent(evt);
           } catch (error) {
             logger.debug("[Routines] Failed to record cron routine run:", error);
-          }
-
-          if (
-            evt.action === "finished" &&
-            evt.taskId &&
-            councilService &&
-            (await councilService.isCouncilJob(evt.jobId))
-          ) {
-            await councilService.finalizeRunForTask(evt.taskId).catch((error) => {
-              console.error("[Council] Failed to finalize council run:", error);
-            });
-            return;
           }
 
           // Show desktop notification when scheduled task finishes
@@ -2672,39 +2622,6 @@ if (isMacSafeStorageMigrationWorker) {
                 generatedAt: briefing.generatedAt,
               });
               return { id: syntheticTaskId };
-            }
-            let preparedCouncilTask = null;
-            if (councilService) {
-              try {
-                preparedCouncilTask = await councilService.prepareTaskForTrigger(
-                  params.prompt,
-                  params.workspaceId,
-                );
-              } catch (err) {
-                console.error("[Council] Failed to prepare council task trigger:", err);
-              }
-            }
-            if (preparedCouncilTask) {
-              const task = await agentDaemon.createTask({
-                title: preparedCouncilTask.title,
-                prompt: preparedCouncilTask.prompt,
-                workspaceId: preparedCouncilTask.workspaceId,
-                ...(params.assignedAgentRoleId
-                  ? { taskOverrides: { assignedAgentRoleId: params.assignedAgentRoleId } }
-                  : {}),
-                agentConfig: {
-                  ...mergeCouncilCronAgentConfig(
-                    params.agentConfig,
-                    preparedCouncilTask.agentConfig,
-                    params.jobId,
-                  ),
-                  scheduledRunAtMs: params.agentConfig?.scheduledRunAtMs,
-                  backgroundSchedulerFence: schedulerFence,
-                },
-                source: "cron",
-              });
-              await councilService?.bindRunTask(preparedCouncilTask.runId, task.id);
-              return { id: task.id };
             }
             const allowUserInput = params.allowUserInput ?? false;
             const mergedAgentConfig = {
@@ -2971,16 +2888,6 @@ if (isMacSafeStorageMigrationWorker) {
         } else {
           await automationRuntime.start("cron");
         }
-        if (councilService) {
-          for (const councilId of await councilService.listAllIds()) {
-            await councilService.syncManagedJob(councilId).catch((error) => {
-              console.error(
-                `[Council] Failed to sync managed cron job for council ${councilId}:`,
-                error,
-              );
-            });
-          }
-        }
         logger.info("Cron Service initialized");
       } catch (error) {
         logger.error("Failed to initialize Cron Service:", error);
@@ -3040,7 +2947,6 @@ if (isMacSafeStorageMigrationWorker) {
         getRoutineService: () => routineService,
         getPulseService: () => pulseService,
         getDailyBriefingService: () => dailyBriefingService,
-        everydayAgentService: getEverydayAgentService(),
       });
       if (subconsciousLoopService) {
         setupSubconsciousHandlers(subconsciousLoopService);
@@ -3601,7 +3507,6 @@ if (isMacSafeStorageMigrationWorker) {
             dbManager,
             channelGateway,
             getRoutineService: () => routineService,
-            everydayAgentService: getEverydayAgentService(),
           },
           forceEnable: FORCE_ENABLE_CONTROL_PLANE,
           onEvent: (event) => {
@@ -3702,7 +3607,6 @@ if (isMacSafeStorageMigrationWorker) {
           dbManager,
           channelGateway,
           getRoutineService: () => routineService,
-          everydayAgentService: getEverydayAgentService(),
         });
         // Auto-start control plane if enabled (and register methods/bridge)
         await startControlPlaneFromSettings({
@@ -3711,7 +3615,6 @@ if (isMacSafeStorageMigrationWorker) {
             dbManager,
             channelGateway,
             getRoutineService: () => routineService,
-            everydayAgentService: getEverydayAgentService(),
           },
           forceEnable: FORCE_ENABLE_CONTROL_PLANE || shouldAutoEnableDesktopControlPlane(),
         });

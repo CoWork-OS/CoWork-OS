@@ -135,53 +135,6 @@ describeWithSqlite("TaskRepository.delete", () => {
       `,
     ).run(randomUUID(), workspace.id, "discord:ops", task.id, "open", now, now);
 
-    const councilConfigId = randomUUID();
-    db.prepare(
-      `
-        INSERT INTO council_configs (
-          id, workspace_id, name, enabled, schedule_json, participants_json, judge_seat_index,
-          rotating_idea_seat_index, source_bundle_json, delivery_config_json, execution_policy_json,
-          managed_cron_job_id, next_idea_seat_index, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-    ).run(
-      councilConfigId,
-      workspace.id,
-      "Delete test council",
-      1,
-      JSON.stringify({ kind: "cron", expr: "0 9 * * *" }),
-      JSON.stringify([]),
-      0,
-      0,
-      JSON.stringify({}),
-      JSON.stringify({}),
-      JSON.stringify({}),
-      null,
-      0,
-      now,
-      now,
-    );
-
-    const councilRunId = randomUUID();
-    db.prepare(
-      `
-        INSERT INTO council_runs (
-          id, council_config_id, workspace_id, task_id, status, source_snapshot_json, started_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `,
-    ).run(councilRunId, councilConfigId, workspace.id, task.id, "running", JSON.stringify({}), now);
-
-    db.prepare(
-      `
-        INSERT INTO council_memos (
-          id, council_run_id, council_config_id, workspace_id, task_id, content, created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `,
-    ).run(randomUUID(), councilRunId, councilConfigId, workspace.id, task.id, "memo", now);
-
     taskRepo.delete(task.id);
 
     expect(taskRepo.findById(task.id)).toBeUndefined();
@@ -199,20 +152,6 @@ describeWithSqlite("TaskRepository.delete", () => {
         linked_task_id: string | null;
       },
     ).toEqual({ linked_task_id: null });
-
-    expect(
-      db.prepare("SELECT task_id FROM council_runs WHERE id = ?").get(councilRunId) as {
-        task_id: string | null;
-      },
-    ).toEqual({ task_id: null });
-
-    expect(
-      db
-        .prepare("SELECT task_id FROM council_memos WHERE council_run_id = ?")
-        .get(councilRunId) as {
-        task_id: string | null;
-      },
-    ).toEqual({ task_id: null });
 
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });

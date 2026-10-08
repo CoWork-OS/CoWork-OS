@@ -2,7 +2,6 @@ import { createBrowserProviderSignIn } from "./browser-provider-sign-in";
 import { createBrowserAwarenessDefinitions } from "./browser-awareness-methods";
 import { getAwarenessService } from "../../electron/awareness/AwarenessService";
 import type Database from "better-sqlite3";
-import type { EverydayAgentService } from "../../electron/everyday-agent/everyday-agent-repository-facades";
 import {
   ApprovalRepository,
   ArtifactRepository,
@@ -80,6 +79,7 @@ import { getFirstRunReadiness } from "../../shared/first-run-readiness";
 import { createBrowserNotificationDefinitions } from "./browser-notification-methods";
 import { createBrowserReportDefinitions } from "./browser-report-methods";
 import { createBrowserMemoryDefinitions } from "./browser-memory-methods";
+import { createBrowserPactDefinitions } from "./browser-pact-methods";
 import { createBrowserAnswerSurfaceDefinitions } from "./browser-answer-surface-methods";
 import { AnswerImageService } from "../../electron/answer-surfaces/AnswerImageService";
 import { AnswerSurfaceStateStore } from "../../electron/answer-surfaces/AnswerSurfaceStateStore";
@@ -99,8 +99,6 @@ export interface BrowserHostApplicationOptions {
   getEventTriggerService?: () => EventTriggerService | null;
   getHeartbeatService?: () => HeartbeatService | null;
   notificationService?: NotificationService;
-  /** The process's one EverydayAgentService, shared with IPC and the control plane (LIFE-5). */
-  everydayAgentService: EverydayAgentService;
   taskCommands?: Pick<BrowserTaskCommands, "createTaskIdempotent" | "startAdmittedTask"> &
     BrowserApprovalCommands &
     Pick<AgentDaemon, "sendMessage" | "getDurableTaskFollowUpReceipt" | "cancelTask">;
@@ -203,7 +201,6 @@ export function createBrowserHostApplication(
         getRoutineService: options.getRoutineService,
         getEventTriggerService: options.getEventTriggerService,
         getHeartbeatService: options.getHeartbeatService,
-        everydayAgentService: options.everydayAgentService,
         resolveWorkspace: resolveBrowserWorkspace,
       })
     : null;
@@ -219,6 +216,9 @@ export function createBrowserHostApplication(
       service: getAwarenessService(),
       resolveWorkspace: resolveBrowserWorkspace,
     }),
+    ...(options.agentDaemon
+      ? createBrowserPactDefinitions({ agentDaemon: options.agentDaemon })
+      : {}),
     ...createBrowserMemoryDefinitions({
       db: options.db,
       resolveWorkspace: resolveBrowserWorkspace,

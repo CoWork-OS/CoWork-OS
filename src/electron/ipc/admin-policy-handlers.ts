@@ -99,17 +99,13 @@ export function setupAdminPolicyHandlers(): void {
           ...current.connectors,
           ...updates.connectors,
         },
+        pact: {
+          ...current.pact,
+          ...updates.pact,
+        },
         agents: {
           ...current.agents,
           ...updates.agents,
-        },
-        everydayAgent: {
-          ...current.everydayAgent,
-          ...updates.everydayAgent,
-          activeHours: {
-            ...current.everydayAgent.activeHours,
-            ...updates.everydayAgent?.activeHours,
-          },
         },
         runtime: {
           ...current.runtime,

@@ -9,7 +9,6 @@ import { DatabaseManager } from "../schema";
 import { serviceStatements } from "../service-statements";
 import { setStatementClient } from "../statements/statement-route";
 import { TaskRepository } from "../repository-facades";
-import { CouncilConfigRepository } from "../../council/council-repository-facades";
 import { EventTriggerService } from "../../triggers/EventTriggerService";
 import { HookSessionRepository } from "../../hooks/hook-session-repository-facades";
 import { ensureFirstTaskTables } from "../../first-task/attempt-schema";
@@ -139,20 +138,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
       manager.close();
       fs.rmSync(dir, { recursive: true, force: true });
     });
-
-    // Councils.
-    const councils = new CouncilConfigRepository(db);
-    const council = await councils.create({
-      workspaceId: "ws-1",
-      name: "Weekly council",
-      schedule: { kind: "every", everyMs: 3_600_000 },
-      participants: [
-        { providerType: "openai", modelKey: "gpt-5", seatLabel: "Proposer" },
-        { providerType: "anthropic", modelKey: "sonnet", seatLabel: "Judge" },
-      ],
-      judgeSeatIndex: 1,
-    } as never);
-    const councilIds = await councils.allIds();
 
     // Event triggers: kept in memory, persisted through units.
     await triggers.start();
@@ -353,7 +338,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
 
     const result = stable(
       {
-        council: { name: council.name, ids: councilIds.length },
         triggers: { storedTriggers, removed },
         mcpEvents: {
           cursor: mcpEvent?.cursor,

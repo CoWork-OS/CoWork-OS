@@ -33,7 +33,6 @@ type Gateway = Pick<
   | "addSignalChannel"
   | "addMattermostChannel"
   | "addMatrixChannel"
-  | "addTwitchChannel"
   | "addLineChannel"
   | "addBlueBubblesChannel"
   | "addGoogleChatChannel"
@@ -145,7 +144,6 @@ const CHANNEL_PUBLIC_CONFIG_KEYS: Record<string, Set<string>> = {
   ]),
   mattermost: new Set(["serverUrl", "teamId"]),
   matrix: new Set(["homeserver", "userId", "deviceId", "roomIds"]),
-  twitch: new Set(["username", "channels", "allowWhispers"]),
   line: new Set(["webhookPort"]),
   bluebubbles: new Set([
     "serverUrl",
@@ -219,7 +217,6 @@ const CHANNEL_CREDENTIAL_CONFIG_KEYS: Record<string, Set<string>> = {
   signal: new Set(),
   mattermost: new Set(["token"]),
   matrix: new Set(["accessToken"]),
-  twitch: new Set(["oauthToken"]),
   line: new Set(["channelAccessToken", "channelSecret"]),
   bluebubbles: new Set(["password", "webhookSecret"]),
   googlechat: new Set(["serviceAccountKeyPath", "serviceAccountKey", "webhookSecret"]),
@@ -259,8 +256,6 @@ const CHANNEL_UPDATE_CONFIG_KEYS = new Set([
   "allowedContacts",
   "allowedSenders",
   "subjectFilter",
-  "twitchChannels",
-  "twitchAllowWhispers",
   "allowedAuthors",
   "outboundEnabled",
   "pollIntervalSec",
@@ -869,15 +864,6 @@ async function addChannel(gateway: Gateway, request: AddChannelRequest) {
         request.matrixAccessToken!,
         request.matrixDeviceId,
         request.matrixRoomIds,
-        securityMode,
-      );
-    case "twitch":
-      return gateway.addTwitchChannel(
-        request.name,
-        request.twitchUsername!,
-        request.twitchOauthToken!,
-        request.twitchChannels || [],
-        request.twitchAllowWhispers ?? false,
         securityMode,
       );
     case "line":

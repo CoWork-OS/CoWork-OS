@@ -79,6 +79,32 @@ import type {
   MemoryRepoStatusReport,
 } from "../shared/memory-repo-types";
 import type {
+  PactAuthorizationSignIn,
+  PactAuthorizationView,
+  PactBusinessView,
+  PactConversationView,
+  PactEffectClass,
+  PactGrantView,
+  PactReceiptView,
+  PactSendOutcome,
+  PactSettings,
+  PactStatusView,
+} from "../shared/pact";
+
+type PactSettingsUpdate = Partial<
+  Pick<PactSettings, "enabled" | "preference" | "identity" | "providers">
+>;
+interface PactSendRequestInput {
+  businessId: string;
+  conversationId?: string;
+  text: string;
+  effect: PactEffectClass;
+  requiredScopes?: string[];
+  purpose?: string;
+  reconcileOperationId?: string;
+  confirmed?: boolean;
+}
+import type {
   SpreadsheetApplyPatchesResult,
   SpreadsheetOpenWorkbookResult,
   SpreadsheetPatch,
@@ -220,11 +246,6 @@ import type {
   PersistedPermissionRule,
   PermissionSettingsData,
   PermissionRuntimeInfo,
-  CouncilConfig,
-  CouncilMemo,
-  CouncilRun,
-  CreateCouncilConfigRequest,
-  UpdateCouncilConfigRequest,
   PdfReviewSummary,
   TaskLearningProgress,
   UnifiedRecallResponse,
@@ -254,16 +275,6 @@ import type {
   BoxBrainSyncResult,
   IntegrationMentionOption,
   IntegrationMentionSelection,
-  EverydayActionPreview,
-  EverydayActionPreviewInput,
-  EverydayActionReceipt,
-  EverydayAgentApproveActionRequest,
-  EverydayAgentClearDataRequest,
-  EverydayAgentListReceiptsRequest,
-  EverydayAgentProfileResult,
-  EverydayAgentUpdateProfileRequest,
-  EverydayCapabilityBundle,
-  EverydayPauseScope,
   TaskEventDetailRequest,
   TaskEventDetailResult,
   TaskTimelinePageRequest,
@@ -945,7 +956,6 @@ interface CronDeliveryConfig {
     | "signal"
     | "mattermost"
     | "matrix"
-    | "twitch"
     | "line"
     | "bluebubbles"
     | "email"
@@ -4109,27 +4119,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCronRunHistory: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_RUN_HISTORY, id),
   clearCronRunHistory: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_CLEAR_RUN_HISTORY, id),
   getCronWebhookStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_WEBHOOK_STATUS),
-  listCouncils: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_LIST, { workspaceId }) as Promise<CouncilConfig[]>,
-  getCouncil: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_GET, id) as Promise<CouncilConfig | null>,
-  createCouncil: (data: CreateCouncilConfigRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_CREATE, data) as Promise<CouncilConfig>,
-  updateCouncil: (data: UpdateCouncilConfigRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_UPDATE, data) as Promise<CouncilConfig | null>,
-  deleteCouncil: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_DELETE, id) as Promise<boolean>,
-  runCouncilNow: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_RUN_NOW, id) as Promise<CouncilRun | null>,
-  listCouncilRuns: (payload: { councilConfigId: string; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_LIST_RUNS, payload) as Promise<CouncilRun[]>,
-  getCouncilMemo: (query: string | { id?: string; councilConfigId?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_GET_MEMO, query) as Promise<CouncilMemo | null>,
-  setCouncilEnabled: (id: string, enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_SET_ENABLED, {
-      id,
-      enabled,
-    }) as Promise<CouncilConfig | null>,
 
   // Notification APIs
   listNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_LIST),
@@ -4449,6 +4438,42 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
   compactMemoryRepoHistory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY),
   syncMemoryRepoNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW),
+
+  // PACT business agents (docs/pact.md)
+  getPactStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_STATUS),
+  getPactSettings: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_SETTINGS_GET),
+  updatePactSettings: (data: PactSettingsUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_SETTINGS_UPDATE, data),
+  setPactSignerCredential: (data: { credential: string | null }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_IDENTITY_SET_CREDENTIAL, data),
+  createPactDeviceKey: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_IDENTITY_DEVICE_KEY),
+  discoverPactBusiness: (data: { domain?: string; cardUrl?: string; refresh?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_BUSINESS_DISCOVER, data),
+  listPactBusinesses: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_BUSINESS_LIST),
+  getPactConversation: (data: { id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_CONVERSATION_GET, data),
+  listPactConversations: (data: { businessId?: string; taskId?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_CONVERSATION_LIST, data),
+  sendPactMessage: (data: PactSendRequestInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_CONVERSATION_SEND, data),
+  acknowledgePactEvidence: (data: { id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE, data),
+  startPactAuthorization: (data: { businessId: string; scopes: string[]; purpose?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_AUTHORIZATION_START, data),
+  getPactAuthorization: (data: { id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_AUTHORIZATION_GET, data),
+  getPactAuthorizationForInput: (data: { inputRequestId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_AUTHORIZATION_FOR_INPUT, data),
+  listPactAuthorizations: (data: { pendingOnly?: boolean; taskId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_AUTHORIZATION_LIST, data),
+  cancelPactAuthorization: (data: { id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_AUTHORIZATION_CANCEL, data),
+  openPactSignIn: (data: { id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_AUTHORIZATION_OPEN_SIGN_IN, data),
+  listPactGrants: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_GRANT_LIST),
+  disconnectPactGrant: (data: { id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PACT_GRANT_DISCONNECT, data),
+  getPactReceipt: (data: { id: string }) => ipcRenderer.invoke(IPC_CHANNELS.PACT_RECEIPT_GET, data),
   readMemoryRepoLines: (refs: string[]) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_READ_LINES, { refs }),
   // Dreams over the memory folder: review, undo and "Dream now"
@@ -4941,55 +4966,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       decisions: number;
       diagnostics: number;
     }>,
-
-  // Everyday Agent APIs
-  everydayAgentGetProfile: () =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_GET_PROFILE,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentUpdateProfile: (updates: EverydayAgentUpdateProfileRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_UPDATE_PROFILE,
-      updates,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentAcceptConsent: (request?: {
-    enabled?: boolean;
-    workspaceId?: string;
-    accepted?: boolean;
-  }) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_ACCEPT_CONSENT,
-      request,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentPause: (scope: Partial<EverydayPauseScope>) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_PAUSE,
-      scope,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentRevokeCapability: (capability: EverydayCapabilityBundle) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_REVOKE_CAPABILITY,
-      capability,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentListReceipts: (request?: EverydayAgentListReceiptsRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_LIST_RECEIPTS, request) as Promise<
-      EverydayActionReceipt[]
-    >,
-  everydayAgentClearData: (request?: EverydayAgentClearDataRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_CLEAR_DATA,
-      request,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentPreviewAction: (input: EverydayActionPreviewInput) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_PREVIEW_ACTION,
-      input,
-    ) as Promise<EverydayActionPreview>,
-  everydayAgentApproveAction: (request: EverydayAgentApproveActionRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_APPROVE_ACTION,
-      request,
-    ) as Promise<EverydayActionReceipt>,
 
   // Agent Teams APIs
   listTeams: (workspaceId: string, includeInactive?: boolean) =>
@@ -7816,17 +7792,6 @@ export interface ElectronAPI {
   getCronRunHistory: (id: string) => Promise<CronRunHistoryResult | null>;
   clearCronRunHistory: (id: string) => Promise<boolean>;
   getCronWebhookStatus: () => Promise<CronWebhookStatus>;
-  listCouncils: (workspaceId: string) => Promise<CouncilConfig[]>;
-  getCouncil: (id: string) => Promise<CouncilConfig | null>;
-  createCouncil: (data: CreateCouncilConfigRequest) => Promise<CouncilConfig>;
-  updateCouncil: (data: UpdateCouncilConfigRequest) => Promise<CouncilConfig | null>;
-  deleteCouncil: (id: string) => Promise<boolean>;
-  runCouncilNow: (id: string) => Promise<CouncilRun | null>;
-  listCouncilRuns: (payload: { councilConfigId: string; limit?: number }) => Promise<CouncilRun[]>;
-  getCouncilMemo: (
-    query: string | { id?: string; councilConfigId?: string },
-  ) => Promise<CouncilMemo | null>;
-  setCouncilEnabled: (id: string, enabled: boolean) => Promise<CouncilConfig | null>;
   // Notifications
   listNotifications: () => Promise<AppNotification[]>;
   addNotification: (data: {
@@ -8189,6 +8154,57 @@ export interface ElectronAPI {
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
   syncMemoryRepoNow: () => Promise<MemoryRepoSyncNowResult>;
+
+  // PACT business agents. Sign-in links never reach the desktop renderer; openPactSignIn
+  // opens the business's own login in the system browser from main.
+  getPactStatus: () => Promise<PactStatusView>;
+  getPactSettings: () => Promise<PactSettings>;
+  updatePactSettings: (data: PactSettingsUpdate) => Promise<PactSettings>;
+  setPactSignerCredential: (data: {
+    credential: string | null;
+  }) => Promise<{ configured: boolean }>;
+  createPactDeviceKey: () => Promise<{ publicJwk: Record<string, unknown> }>;
+  discoverPactBusiness: (data: {
+    domain?: string;
+    cardUrl?: string;
+    refresh?: boolean;
+  }) => Promise<{
+    business: PactBusinessView;
+    route: { route: string; reason: string; message?: string };
+  }>;
+  listPactBusinesses: () => Promise<PactBusinessView[]>;
+  getPactConversation: (data: { id: string }) => Promise<PactConversationView>;
+  listPactConversations: (data: {
+    businessId?: string;
+    taskId?: string;
+    limit?: number;
+  }) => Promise<PactConversationView[]>;
+  sendPactMessage: (data: PactSendRequestInput) => Promise<PactSendOutcome>;
+  acknowledgePactEvidence: (data: { id: string }) => Promise<PactConversationView>;
+  startPactAuthorization: (data: {
+    businessId: string;
+    scopes: string[];
+    purpose?: string;
+  }) => Promise<PactAuthorizationView>;
+  getPactAuthorization: (data: { id: string }) => Promise<PactAuthorizationView>;
+  getPactAuthorizationForInput: (data: {
+    inputRequestId: string;
+  }) => Promise<PactAuthorizationView>;
+  listPactAuthorizations: (data: {
+    pendingOnly?: boolean;
+    taskId?: string;
+  }) => Promise<PactAuthorizationView[]>;
+  cancelPactAuthorization: (data: { id: string }) => Promise<PactAuthorizationView>;
+  openPactSignIn: (data: {
+    id: string;
+  }) => Promise<{ opened: true; verificationOrigin: string; userCode: string }>;
+  /** Browser build only: the link, for the owner's own browser tab. */
+  getPactSignIn?: (data: { id: string }) => Promise<PactAuthorizationSignIn>;
+  listPactGrants: () => Promise<PactGrantView[]>;
+  disconnectPactGrant: (data: {
+    id: string;
+  }) => Promise<{ grant: PactGrantView; revokedAtBusiness: false }>;
+  getPactReceipt: (data: { id: string }) => Promise<PactReceiptView>;
   readMemoryRepoLines: (refs: string[]) => Promise<MemoryRepoLine[]>;
   getMemoryRepoDreams: () => Promise<MemoryRepoDreamsReport>;
   getMemoryRepoDreamDiff: (id: string, part: MemoryRepoDreamPart) => Promise<string>;
@@ -8595,19 +8611,8 @@ export interface ElectronAPI {
     updatedAt: string;
     packs: { allowed: string[]; blocked: string[]; required: string[] };
     connectors: { blocked: string[] };
+    pact?: { enabled: boolean; autoRoute: boolean; blockedProviders: string[] };
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
-    everydayAgent: {
-      blocked: boolean;
-      blockedBundles: EverydayCapabilityBundle[];
-      forceReviewOnly: boolean;
-      maxHeartbeatCadenceMinutes: number;
-      maxConcurrentBackgroundWork: number;
-      activeHours: {
-        enabled: boolean;
-        timezone?: string;
-        windows: Array<{ days: number[]; start: string; end: string }>;
-      };
-    };
     runtime: {
       allowedPermissionModes: PermissionMode[];
       allowedSandboxTypes: Array<"macos" | "docker" | "none">;
@@ -8634,19 +8639,8 @@ export interface ElectronAPI {
     updatedAt: string;
     packs: { allowed: string[]; blocked: string[]; required: string[] };
     connectors: { blocked: string[] };
+    pact?: { enabled: boolean; autoRoute: boolean; blockedProviders: string[] };
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
-    everydayAgent: {
-      blocked: boolean;
-      blockedBundles: EverydayCapabilityBundle[];
-      forceReviewOnly: boolean;
-      maxHeartbeatCadenceMinutes: number;
-      maxConcurrentBackgroundWork: number;
-      activeHours: {
-        enabled: boolean;
-        timezone?: string;
-        windows: Array<{ days: number[]; start: string; end: string }>;
-      };
-    };
     runtime: {
       allowedPermissionModes: PermissionMode[];
       allowedSandboxTypes: Array<"macos" | "docker" | "none">;
@@ -8698,31 +8692,6 @@ export interface ElectronAPI {
     decisions: number;
     diagnostics: number;
   }>;
-
-  // Everyday Agent
-  everydayAgentGetProfile: () => Promise<EverydayAgentProfileResult>;
-  everydayAgentUpdateProfile: (
-    updates: EverydayAgentUpdateProfileRequest,
-  ) => Promise<EverydayAgentProfileResult>;
-  everydayAgentAcceptConsent: (request?: {
-    enabled?: boolean;
-    workspaceId?: string;
-    accepted?: boolean;
-  }) => Promise<EverydayAgentProfileResult>;
-  everydayAgentPause: (scope: Partial<EverydayPauseScope>) => Promise<EverydayAgentProfileResult>;
-  everydayAgentRevokeCapability: (
-    capability: EverydayCapabilityBundle,
-  ) => Promise<EverydayAgentProfileResult>;
-  everydayAgentListReceipts: (
-    request?: EverydayAgentListReceiptsRequest,
-  ) => Promise<EverydayActionReceipt[]>;
-  everydayAgentClearData: (
-    request?: EverydayAgentClearDataRequest,
-  ) => Promise<EverydayAgentProfileResult>;
-  everydayAgentPreviewAction: (input: EverydayActionPreviewInput) => Promise<EverydayActionPreview>;
-  everydayAgentApproveAction: (
-    request: EverydayAgentApproveActionRequest,
-  ) => Promise<EverydayActionReceipt>;
 
   // Agent Teams
   listTeams: (workspaceId: string, includeInactive?: boolean) => Promise<AgentTeam[]>;

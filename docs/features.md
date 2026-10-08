@@ -21,7 +21,6 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Signal**: End-to-end encrypted messaging via signal-cli
 - **Mattermost**: WebSocket real-time, REST API
 - **Matrix**: Federated messaging, room-based, end-to-end encryption ready
-- **Twitch**: IRC chat integration, multi-channel
 - **LINE**: Messaging API webhooks, 200M+ users in Asia
 - **BlueBubbles**: iMessage via Mac server, SMS support
 - **Email**: IMAP/SMTP, any email provider, threading
@@ -1607,7 +1606,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 - Task-sourced scheduled jobs preserve a source task title, task ID, and `cowork://tasks/<taskId>` deeplink in the compiled prompt/description
 - Target modes: create a new task for each run or continue an existing task thread with a scheduled follow-up
 - Run mode presets: `Chat` for no-command-tool unattended work, `Local` for work governed by the selected access profile; worktree automation is forced to new-task execution instead of continuing a thread
-- Channel delivery to any of the 19 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
+- Channel delivery to any of the 18 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
 - Conditional delivery (`deliverOnlyIfResult`)
 - Template variables: `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`
 - Chat context variables: `{{chat_messages}}`, `{{chat_since}}`, etc.

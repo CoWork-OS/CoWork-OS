@@ -7,10 +7,12 @@ How to integrate an OpenClaw + acpx-style coding agent stack into Cowork OS.
 Cowork now supports more than ACP discovery-only plumbing:
 
 - remote ACP agent registrations can be persisted locally
-- `acp.task.create` can invoke remote agents over an A2A-compatible JSON-RPC/HTTP bridge
+- `acp.task.create` can invoke remote agents over a custom JSON-RPC/HTTP bridge (`tasks/send`,
+  falling back to `tasks/create`). This bridge is not A2A 1.0 and not PACT; business agents use the
+  separate [PACT](pact.md) adapter, which shares nothing with it but validation helpers
 - `acp.task.get` can poll remote task status/results
 - ACP task state is persisted locally so task ids survive app restarts
-- `acp.task.cancel` can cancel both local delegated work and remote A2A-compatible tasks
+- `acp.task.cancel` can cancel both local delegated work and remote bridge tasks
 - orchestration tools can target `acp_agent_id` so local DAGs can delegate to local or remote ACP agents
 - remote ACP invocations are approval-gated under the same policy model as other governed actions
 - ACP child tasks inherit the effective [access profile](access-profiles.md). The external acpx

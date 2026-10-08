@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserHostTransport } from "./transport";
+import { isPactAuthorizationInputRequest } from "../shared/pact";
 import {
   RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
   resolveInlineApprovalDraftReviewResponse,
@@ -391,17 +392,155 @@ export function TaskGovernance({
           </div>
         </div>
       ))}
-      {inputs.map((request) => (
-        <InputRequestForm
-          key={request.id}
-          request={request}
-          disabled={!connected || busy || (attempt !== null && attempt.id !== request.id)}
-          locked={attempt?.id === request.id && Boolean(attempt.answers)}
-          retryDecision={attempt?.id === request.id ? attempt.decision : null}
-          onRespond={(status, answers) => void respondInput(request, status, answers)}
-        />
-      ))}
+      {inputs.map((request) =>
+        isPactAuthorizationInputRequest(request) ? (
+          // A business sign-in: answered on the business's own page, so only Open and Cancel.
+          <PactSignInCard
+            key={request.id}
+            request={request}
+            transport={transport}
+            disabled={!connected || busy || (attempt !== null && attempt.id !== request.id)}
+            onCancel={() => void respondInput(request, "dismissed")}
+          />
+        ) : (
+          <InputRequestForm
+            key={request.id}
+            request={request}
+            disabled={!connected || busy || (attempt !== null && attempt.id !== request.id)}
+            locked={attempt?.id === request.id && Boolean(attempt.answers)}
+            retryDecision={attempt?.id === request.id ? attempt.decision : null}
+            onRespond={(status, answers) => void respondInput(request, status, answers)}
+          />
+        ),
+      )}
     </section>
+  );
+}
+
+type PactAuthorizationSummary = {
+  id: string;
+  businessName: string;
+  purpose: string;
+  requestedScopes: Array<{ id: string; description: string }>;
+  verificationOrigin?: string;
+  verificationOriginMatchesBusiness?: boolean;
+  expiresAt: number;
+  state: string;
+};
+
+function parsePactAuthorization(value: unknown): PactAuthorizationSummary {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.businessName !== "string" ||
+    !Array.isArray(value.requestedScopes)
+  ) {
+    throw new Error("The host returned an invalid sign-in request.");
+  }
+  return {
+    id: value.id,
+    businessName: value.businessName,
+    purpose: typeof value.purpose === "string" ? value.purpose : "",
+    requestedScopes: value.requestedScopes.flatMap((scope) =>
+      isRecord(scope) && typeof scope.id === "string" && typeof scope.description === "string"
+        ? [{ id: scope.id, description: scope.description }]
+        : [],
+    ),
+    ...(typeof value.verificationOrigin === "string"
+      ? { verificationOrigin: value.verificationOrigin }
+      : {}),
+    ...(typeof value.verificationOriginMatchesBusiness === "boolean"
+      ? { verificationOriginMatchesBusiness: value.verificationOriginMatchesBusiness }
+      : {}),
+    expiresAt: Number(value.expiresAt) || 0,
+    state: typeof value.state === "string" ? value.state : "pending",
+  };
+}
+
+export function PactSignInCard({
+  request,
+  transport,
+  disabled,
+  onCancel,
+}: {
+  request: InputRequest;
+  transport: BrowserHostTransport | null;
+  disabled: boolean;
+  onCancel: () => void;
+}) {
+  const [summary, setSummary] = useState<PactAuthorizationSummary | null>(null);
+  const [userCode, setUserCode] = useState("");
+  const [problem, setProblem] = useState("");
+  useEffect(() => {
+    if (!transport) return;
+    let cancelled = false;
+    void transport
+      .request<unknown>("desktop.getPactAuthorizationForInput", {
+        args: [{ inputRequestId: request.id }],
+      })
+      .then((value) => {
+        if (!cancelled) setSummary(parsePactAuthorization(value));
+      })
+      .catch((cause) => {
+        if (!cancelled) setProblem(cause instanceof Error ? cause.message : "Sign-in unavailable.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [request.id, transport]);
+  const open = async () => {
+    if (!transport || !summary) return;
+    setProblem("");
+    try {
+      const signIn = await transport.request<unknown>("desktop.getPactSignIn", {
+        args: [{ id: summary.id }],
+      });
+      if (!isRecord(signIn) || typeof signIn.verificationUriComplete !== "string") {
+        throw new Error("The host returned an invalid sign-in link.");
+      }
+      const url = new URL(signIn.verificationUriComplete);
+      if (url.protocol !== "https:") throw new Error("Only HTTPS sign-in pages are opened.");
+      setUserCode(typeof signIn.userCode === "string" ? signIn.userCode : "");
+      window.open(url.toString(), "_blank", "noopener,noreferrer");
+    } catch (cause) {
+      setProblem(cause instanceof Error ? cause.message : "The sign-in could not be opened.");
+    }
+  };
+  return (
+    <div className="web-decision-card web-input-form">
+      <p className="web-eyebrow">Sign in to continue</p>
+      <h3>{`${summary?.businessName ?? "A business"} asks you to sign in and approve access`}</h3>
+      {summary?.purpose && <p>{summary.purpose}</p>}
+      {summary && summary.requestedScopes.length > 0 && (
+        <ul>
+          {summary.requestedScopes.map((scope) => (
+            <li key={scope.id}>{scope.description}</li>
+          ))}
+        </ul>
+      )}
+      <p className="web-muted">
+        {summary?.verificationOrigin
+          ? `The sign-in page is ${summary.verificationOrigin}. CoWork never sees your password.`
+          : "The sign-in happens on the business's own page."}
+      </p>
+      {summary?.verificationOrigin && summary.verificationOriginMatchesBusiness === false && (
+        <p className="web-error">{`Caution: ${summary.verificationOrigin} is not on the business's own site. Only sign in if you recognise it.`}</p>
+      )}
+      {userCode && <p className="web-muted">{`Check that the page shows the code ${userCode}.`}</p>}
+      {problem && <p className="web-error">{problem}</p>}
+      <div className="web-decision-actions">
+        <button type="button" disabled={disabled} onClick={onCancel}>
+          Cancel sign-in
+        </button>
+        <button
+          type="button"
+          disabled={disabled || !summary || summary.state !== "pending"}
+          onClick={() => void open()}
+        >
+          Open sign-in
+        </button>
+      </div>
+    </div>
   );
 }
 

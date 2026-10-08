@@ -8,8 +8,8 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 
 | Integration type | Count |
 | --- | ---: |
-| Native app integrations | 14 |
-| Gateway channels | 19 |
+| Native app integrations | 15 |
+| Gateway channels | 18 |
 | MCP connectors (Settings > Connectors) | 67 |
 | Bundled skills | 152 |
 
@@ -29,6 +29,7 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `mailbox` | Inbox Agent (Gmail API, Microsoft Graph, IMAP/SMTP, AgentMail) | read, write, event-trigger | oauth-consent | first-party-api |
 | `notion` | Notion | read, write | api-key | first-party-api |
 | `onedrive` | OneDrive | read, write | oauth-consent | first-party-api |
+| `pact` | PACT business agents | read, write, outbound-message | oauth-consent, public-webhook | first-party-api |
 | `sharepoint` | SharePoint | read, write | oauth-consent | first-party-api |
 | `teams-meetings` | Teams meeting transcripts | read, event-trigger | oauth-consent | first-party-api |
 | `voice-call` | Voice calls | outbound-message | api-key | first-party-api |
@@ -52,7 +53,6 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `slack` | Slack | inbound-message, outbound-message | api-key | third-party-package |
 | `telegram` | Telegram | inbound-message, outbound-message | api-key | third-party-package |
 | `twilio_sms` | Twilio SMS | inbound-message, outbound-message | api-key, public-webhook | first-party-api |
-| `twitch` | Twitch | inbound-message, outbound-message | oauth-consent | first-party-api |
 | `wecom` | WeCom | inbound-message, outbound-message | api-key, public-webhook | first-party-api |
 | `whatsapp` | WhatsApp (personal, WhatsApp Web) | inbound-message, outbound-message | personal-account-session | third-party-package |
 | `whatsapp_cloud` | WhatsApp Business Cloud API | inbound-message, outbound-message | api-key, public-webhook | first-party-api |

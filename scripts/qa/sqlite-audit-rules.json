@@ -65,6 +65,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/pact/pact-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "PACT persistence (providers, businesses, subject bindings, grants, conversations, turns with send leases, sign-in requests, receipts): synchronous SQL run as clocked services-domain units (COWORK_DB_WORKER_SERVICES) behind PactRepository. The only host-side use outside a unit is the grant refresh commit, which runs inside SecureSettingsRepository.updateWithin so the rotated token and the grant row commit together.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/agents/agent-signal-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Agent kit rebuild reads (recent task events of a type) and the task event range scan behind the daily summary tool: services-domain read units. The range scan waits for accepted timeline rows to commit instead of committing them on the host.",
@@ -364,13 +371,6 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/council/council-sql\\.ts$",
-      "domain": "shared SQL",
-      "access": "Council config, run and memo stores: synchronous SQL run as services-domain units behind async facades (COWORK_DB_WORKER_SERVICES).",
-      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
-      "owner": "database platform"
-    },
-    {
       "pattern": "^src/electron/triggers/trigger-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Event trigger store (trigger rows, fire history, the durable event queue with an atomic claim): synchronous SQL run as services-domain units (COWORK_DB_WORKER_SERVICES). EventTriggerService keeps its triggers in memory and awaits each write; its schema setup runs on the host at construction.",
@@ -381,13 +381,6 @@
       "pattern": "^src/electron/supervisor/SupervisorExchangeRepository\\.ts$",
       "domain": "shared SQL",
       "access": "Discord supervisor exchange store: synchronous SQL run as services-domain units behind the async SupervisorExchangeRepository facade (COWORK_DB_WORKER_SERVICES).",
-      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
-      "owner": "database platform"
-    },
-    {
-      "pattern": "^src/electron/everyday-agent/EverydayAgentService\\.ts$",
-      "domain": "shared SQL",
-      "access": "Everyday Agent store (profile, consent history, pause scopes, receipts, previews, trust patterns, data clearing): synchronous SQL run as services-domain units behind the async EverydayAgentService facade (COWORK_DB_WORKER_SERVICES). Admin policies are read from disk on the host and passed to each unit; the default managed agent is prepared through the managed repositories before consent is recorded. Schema setup runs on the host at construction.",
       "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
       "owner": "database platform"
     },
@@ -421,7 +414,7 @@
       "ratchetExemptKeys": ["getDatabase"]
     },
     {
-      "pattern": "^src/electron/(agents|council|supervisor|mission-control|managed|automation|triggers|routines|everyday-agent|subconscious|improvement|core|eval|identity|workspaces|first-task|briefing|file-hub|git|youtube|chronicle|voice|activity|sessions|hooks|acp|gateway|tray|utils)/",
+      "pattern": "^src/electron/(agents|supervisor|mission-control|managed|automation|triggers|routines|subconscious|improvement|core|eval|identity|workspaces|first-task|briefing|file-hub|git|youtube|chronicle|voice|activity|sessions|hooks|acp|gateway|tray|utils)/",
       "domain": "background and domain services",
       "access": "Scheduler, teams, heartbeats, automations, evaluation and other domain stores: reads and writes on their own timers or user actions, not per task event.",
       "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",

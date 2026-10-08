@@ -14,11 +14,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getUserDataDir } from "../utils/user-data-dir";
-import {
-  EVERYDAY_AGENT_CAPABILITY_BUNDLES,
-  type EverydayCapabilityBundle,
-  type PermissionMode,
-} from "../../shared/types";
+import { type PermissionMode } from "../../shared/types";
 import {
   DEFAULT_AGENT_SECURITY_POLICY,
   type AgentSecurityFailurePolicy,
@@ -56,36 +52,22 @@ export interface AdminPolicies {
     blocked: string[];
   };
 
+  /** PACT business-agent protocol (docs/pact.md) */
+  pact: {
+    /** Whether the outbound PACT adapter may be used at all. */
+    enabled: boolean;
+    /** Whether eligible business interactions may be routed to PACT automatically. */
+    autoRoute: boolean;
+    /** Provider origins (or host patterns) CoWork must never contact over PACT. */
+    blockedProviders: string[];
+  };
+
   /** Agent policies */
   agents: {
     /** Maximum heartbeat frequency in seconds (minimum 60) */
     maxHeartbeatFrequencySec: number;
     /** Maximum concurrent agents per workspace */
     maxConcurrentAgents: number;
-  };
-
-  /** Everyday Agent policy gates */
-  everydayAgent: {
-    /** Block the Everyday Agent product surface and background work entirely. */
-    blocked: boolean;
-    /** Specific capability bundle IDs blocked by policy. */
-    blockedBundles: EverydayCapabilityBundle[];
-    /** Force all Everyday Agent actions into explicit review mode. */
-    forceReviewOnly: boolean;
-    /** Maximum heartbeat cadence in minutes. Profile values are clamped to this. */
-    maxHeartbeatCadenceMinutes: number;
-    /** Maximum concurrent Everyday Agent background jobs. */
-    maxConcurrentBackgroundWork: number;
-    /** Optional active-hours ceiling. Empty windows means no org override. */
-    activeHours: {
-      enabled: boolean;
-      timezone?: string;
-      windows: Array<{
-        days: number[];
-        start: string;
-        end: string;
-      }>;
-    };
   };
 
   /** Runtime safety requirements */
@@ -162,20 +144,14 @@ const DEFAULT_POLICIES: AdminPolicies = {
   connectors: {
     blocked: [],
   },
+  pact: {
+    enabled: true,
+    autoRoute: true,
+    blockedProviders: [],
+  },
   agents: {
     maxHeartbeatFrequencySec: 60,
     maxConcurrentAgents: 10,
-  },
-  everydayAgent: {
-    blocked: false,
-    blockedBundles: [],
-    forceReviewOnly: false,
-    maxHeartbeatCadenceMinutes: 60,
-    maxConcurrentBackgroundWork: 1,
-    activeHours: {
-      enabled: false,
-      windows: [],
-    },
   },
   runtime: {
     allowedPermissionModes: [],
@@ -247,32 +223,14 @@ function normalizePolicies(parsed: any): AdminPolicies {
     connectors: {
       blocked: Array.isArray(parsed.connectors?.blocked) ? parsed.connectors.blocked : [],
     },
+    pact: {
+      enabled: parsed.pact?.enabled !== false,
+      autoRoute: parsed.pact?.autoRoute !== false,
+      blockedProviders: normalizeStringList(parsed.pact?.blockedProviders),
+    },
     agents: {
       maxHeartbeatFrequencySec: Math.max(60, parsed.agents?.maxHeartbeatFrequencySec || 60),
       maxConcurrentAgents: Math.max(1, parsed.agents?.maxConcurrentAgents || 10),
-    },
-    everydayAgent: {
-      blocked: parsed.everydayAgent?.blocked === true,
-      blockedBundles: normalizeEverydayBundles(parsed.everydayAgent?.blockedBundles),
-      forceReviewOnly: parsed.everydayAgent?.forceReviewOnly === true,
-      maxHeartbeatCadenceMinutes: Math.max(
-        5,
-        Number(parsed.everydayAgent?.maxHeartbeatCadenceMinutes) ||
-          DEFAULT_POLICIES.everydayAgent.maxHeartbeatCadenceMinutes,
-      ),
-      maxConcurrentBackgroundWork: Math.max(
-        1,
-        Number(parsed.everydayAgent?.maxConcurrentBackgroundWork) ||
-          DEFAULT_POLICIES.everydayAgent.maxConcurrentBackgroundWork,
-      ),
-      activeHours: {
-        enabled: parsed.everydayAgent?.activeHours?.enabled === true,
-        timezone:
-          typeof parsed.everydayAgent?.activeHours?.timezone === "string"
-            ? parsed.everydayAgent.activeHours.timezone
-            : undefined,
-        windows: normalizeActiveHourWindows(parsed.everydayAgent?.activeHours?.windows),
-      },
     },
     runtime: {
       allowedPermissionModes: normalizePermissionModes(parsed.runtime?.allowedPermissionModes),
@@ -497,45 +455,35 @@ export function isConnectorBlocked(connectorId: string, policies?: AdminPolicies
   return p.connectors.blocked.some((blocked) => normalize(blocked) === target);
 }
 
-export function getEverydayAgentPolicy(policies?: AdminPolicies): AdminPolicies["everydayAgent"] {
-  return (policies || loadPolicies()).everydayAgent;
+export function getPactPolicy(policies?: AdminPolicies): AdminPolicies["pact"] {
+  return (policies || loadPolicies()).pact ?? DEFAULT_POLICIES.pact;
+}
+
+/**
+ * Whether a PACT provider is blocked. Entries are origins (`https://provider.example`) or host
+ * patterns (`provider.example`, `*.provider.example`), matched case-insensitively.
+ */
+export function isPactProviderBlocked(providerOrigin: string, policies?: AdminPolicies): boolean {
+  let host: string;
+  let origin: string;
+  try {
+    const url = new URL(providerOrigin);
+    host = url.hostname.toLowerCase();
+    origin = url.origin.toLowerCase();
+  } catch {
+    return true;
+  }
+  return getPactPolicy(policies).blockedProviders.some((entry) => {
+    const pattern = entry.trim().toLowerCase().replace(/\/+$/, "");
+    if (!pattern) return false;
+    if (pattern.includes("://")) return pattern === origin;
+    if (pattern.startsWith("*.")) return host.endsWith(pattern.slice(1));
+    return host === pattern;
+  });
 }
 
 function normalizeStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
-}
-
-const VALID_EVERYDAY_BUNDLES = new Set<EverydayCapabilityBundle>(
-  EVERYDAY_AGENT_CAPABILITY_BUNDLES.map((bundle) => bundle.id),
-);
-
-function normalizeEverydayBundles(value: unknown): EverydayCapabilityBundle[] {
-  return normalizeStringList(value).filter((bundle): bundle is EverydayCapabilityBundle =>
-    VALID_EVERYDAY_BUNDLES.has(bundle as EverydayCapabilityBundle),
-  );
-}
-
-function normalizeActiveHourWindows(
-  value: unknown,
-): AdminPolicies["everydayAgent"]["activeHours"]["windows"] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((window) => {
-      if (!window || typeof window !== "object") return null;
-      const record = window as Record<string, unknown>;
-      const days = Array.isArray(record.days)
-        ? record.days
-            .map((day) => Number(day))
-            .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
-        : [];
-      const start = typeof record.start === "string" ? record.start : "";
-      const end = typeof record.end === "string" ? record.end : "";
-      if (!days.length || !/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
-        return null;
-      }
-      return { days, start, end };
-    })
-    .filter(Boolean) as AdminPolicies["everydayAgent"]["activeHours"]["windows"];
 }
 
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
@@ -678,6 +626,23 @@ export function validatePolicies(policies: unknown): string | null {
     }
   }
 
+  if (p.pact !== undefined) {
+    if (!p.pact || typeof p.pact !== "object") return "pact must be an object";
+    const pact = p.pact as Record<string, unknown>;
+    for (const key of ["enabled", "autoRoute"] as const) {
+      if (pact[key] !== undefined && typeof pact[key] !== "boolean") {
+        return `pact.${key} must be a boolean`;
+      }
+    }
+    if (
+      pact.blockedProviders !== undefined &&
+      (!Array.isArray(pact.blockedProviders) ||
+        pact.blockedProviders.some((entry) => typeof entry !== "string"))
+    ) {
+      return "pact.blockedProviders must be an array of strings";
+    }
+  }
+
   if (p.agents && typeof p.agents === "object") {
     const agents = p.agents as Record<string, unknown>;
     if (
@@ -691,51 +656,6 @@ export function validatePolicies(policies: unknown): string | null {
       (typeof agents.maxConcurrentAgents !== "number" || agents.maxConcurrentAgents < 1)
     ) {
       return "agents.maxConcurrentAgents must be a number >= 1";
-    }
-  }
-
-  if (p.everydayAgent && typeof p.everydayAgent === "object") {
-    const everyday = p.everydayAgent as Record<string, unknown>;
-    if (everyday.blocked !== undefined && typeof everyday.blocked !== "boolean") {
-      return "everydayAgent.blocked must be a boolean";
-    }
-    if (
-      everyday.blockedBundles !== undefined &&
-      (!Array.isArray(everyday.blockedBundles) ||
-        everyday.blockedBundles.some(
-          (bundle) => !VALID_EVERYDAY_BUNDLES.has(bundle as EverydayCapabilityBundle),
-        ))
-    ) {
-      return "everydayAgent.blockedBundles contains an invalid bundle";
-    }
-    if (everyday.forceReviewOnly !== undefined && typeof everyday.forceReviewOnly !== "boolean") {
-      return "everydayAgent.forceReviewOnly must be a boolean";
-    }
-    if (
-      everyday.maxHeartbeatCadenceMinutes !== undefined &&
-      (typeof everyday.maxHeartbeatCadenceMinutes !== "number" ||
-        everyday.maxHeartbeatCadenceMinutes < 5)
-    ) {
-      return "everydayAgent.maxHeartbeatCadenceMinutes must be a number >= 5";
-    }
-    if (
-      everyday.maxConcurrentBackgroundWork !== undefined &&
-      (typeof everyday.maxConcurrentBackgroundWork !== "number" ||
-        everyday.maxConcurrentBackgroundWork < 1)
-    ) {
-      return "everydayAgent.maxConcurrentBackgroundWork must be a number >= 1";
-    }
-    const activeHours = everyday.activeHours as Record<string, unknown> | undefined;
-    if (activeHours) {
-      if (activeHours.enabled !== undefined && typeof activeHours.enabled !== "boolean") {
-        return "everydayAgent.activeHours.enabled must be a boolean";
-      }
-      if (activeHours.timezone !== undefined && typeof activeHours.timezone !== "string") {
-        return "everydayAgent.activeHours.timezone must be a string";
-      }
-      if (activeHours.windows !== undefined && !Array.isArray(activeHours.windows)) {
-        return "everydayAgent.activeHours.windows must be an array";
-      }
     }
   }
 

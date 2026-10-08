@@ -12,8 +12,7 @@
     "Deny missing authority without prompts when approval policy is never",
     "Invalidate an outstanding grant when policy or operation arguments change",
     "Reject symlink replacement during consent and mutation baseline capture",
-    "Isolate default bounded command scratch files from sibling temporary sessions",
-    "Preserve selected profiles through Council scheduled-task creation"
+    "Isolate default bounded command scratch files from sibling temporary sessions"
   ],
   "assertions": {
     "allowedWorkspaceApprovalCalls": 0,

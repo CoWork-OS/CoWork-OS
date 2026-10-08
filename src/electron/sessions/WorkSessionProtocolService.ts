@@ -53,9 +53,12 @@ const WAITING_EVENT_TYPES = new Set([
   "follow_up_turn_recovery_blocked",
   "safety_stop_triggered",
   "mode_gate_blocked",
+  // The durable part of a PACT sign-in wait is its input request; this marks the turn waiting.
+  "pact_authorization_requested",
 ]);
 
 const EXECUTING_EVENT_TYPES = new Set([
+  "pact_authorization_resolved",
   "executing",
   "task_resumed",
   "task_dequeued",

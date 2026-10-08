@@ -79,13 +79,6 @@ export function describePolicyRelaxations(current: AdminPolicies, next: AdminPol
     changes.push("Allow agent actions when the security check fails");
   }
 
-  if (current.everydayAgent.blocked && !next.everydayAgent.blocked) {
-    changes.push("Unblock the Everyday Agent");
-  }
-  if (current.everydayAgent.forceReviewOnly && !next.everydayAgent.forceReviewOnly) {
-    changes.push("Stop forcing review for Everyday Agent actions");
-  }
-
   const nextBlockedConnectors = Array.isArray(next.connectors?.blocked)
     ? next.connectors.blocked
     : [];
@@ -94,6 +87,23 @@ export function describePolicyRelaxations(current: AdminPolicies, next: AdminPol
   );
   if (unblockedConnectors.length > 0) {
     changes.push(`Unblock connectors: ${unblockedConnectors.join(", ")}`);
+  }
+  const currentPact = current.pact;
+  const nextPact = next.pact;
+  if (currentPact && nextPact) {
+    if (!currentPact.enabled && nextPact.enabled) changes.push("Allow PACT business agents");
+    if (!currentPact.autoRoute && nextPact.autoRoute) {
+      changes.push("Route business interactions to PACT automatically");
+    }
+    const nextBlockedProviders = Array.isArray(nextPact.blockedProviders)
+      ? nextPact.blockedProviders
+      : [];
+    const unblockedProviders = currentPact.blockedProviders.filter(
+      (provider) => !nextBlockedProviders.includes(provider),
+    );
+    if (unblockedProviders.length > 0) {
+      changes.push(`Unblock PACT providers: ${unblockedProviders.join(", ")}`);
+    }
   }
   const unblockedPacks = current.packs.blocked.filter((id) => !next.packs.blocked.includes(id));
   if (unblockedPacks.length > 0) {

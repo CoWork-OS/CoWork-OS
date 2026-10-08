@@ -1,6 +1,28 @@
 import type { TaskEvent } from "../../shared/types";
 import { loadPolicies } from "../admin/policies";
+import { toLogSafeNetworkPolicyUrl } from "../security/network-policy";
+import {
+  fetchWithPolicyCheckedRedirects,
+  PolicyCheckedFetchError,
+  type NetworkPolicyContext,
+} from "../security/policy-checked-fetch";
+import { createLogger } from "../utils/logger";
 import { createHash } from "crypto";
+
+const log = createLogger("TaskEventExporter");
+
+const TELEMETRY_TOOL_NAME = "telemetry_export";
+const EXPORT_TIMEOUT_MS = 2500;
+
+// The endpoint comes from admin policy, not from a task, so no workspace permission or access
+// profile applies. An empty context still enforces admin `runtime.network.*` rules, the legacy
+// domain guardrail and the internal-address boundary (literal hosts in the policy check, DNS
+// answers in the pinned connection). Loopback stays reachable for a local collector.
+const TELEMETRY_NETWORK_CONTEXT: NetworkPolicyContext = {};
+
+// Messages pinnedFetch and assertResolvedHostAllowed throw when a DNS answer is internal.
+const INTERNAL_DESTINATION_REFUSED =
+  /Refusing to connect|Internal destination refused|resolves to an internal/i;
 
 const EXPORTABLE_EVENT_TYPES = new Set([
   "approval_requested",
@@ -102,14 +124,60 @@ export function enqueueTaskEventTelemetry(event: TaskEvent): void {
     ],
   };
 
+  void sendTelemetry(endpoint, JSON.stringify(body));
+}
+
+let loggedRefusalKey: string | undefined;
+
+function refusalReason(error: unknown): string | undefined {
+  if (error instanceof PolicyCheckedFetchError) return error.decision?.reason ?? error.code;
+  if (error instanceof Error && INTERNAL_DESTINATION_REFUSED.test(error.message)) {
+    return "internal_address_refused";
+  }
+  return undefined;
+}
+
+function logRefusalOnce(endpoint: string, reason: string): void {
+  const key = `${endpoint}\n${reason}`;
+  if (loggedRefusalKey === key) return;
+  loggedRefusalKey = key;
+  let safeEndpoint = "<invalid url>";
+  try {
+    safeEndpoint = toLogSafeNetworkPolicyUrl(new URL(endpoint));
+  } catch {
+    // Keep the placeholder; the reason already says why it was refused.
+  }
+  log.warn(
+    `Task event telemetry to ${safeEndpoint} refused by network policy (${reason}); events are dropped until the policy or endpoint changes`,
+  );
+}
+
+async function sendTelemetry(endpoint: string, body: string): Promise<void> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2500);
-  void fetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  })
-    .catch(() => undefined)
-    .finally(() => clearTimeout(timer));
+  const timer = setTimeout(() => controller.abort(), EXPORT_TIMEOUT_MS);
+  try {
+    // No onDecision: recording a network_policy_decision task event here would re-enter this
+    // exporter, since that event type is itself exported.
+    const { response } = await fetchWithPolicyCheckedRedirects(
+      endpoint,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        signal: controller.signal,
+      },
+      {
+        toolName: TELEMETRY_TOOL_NAME,
+        networkContext: TELEMETRY_NETWORK_CONTEXT,
+        followRedirects: false,
+      },
+    );
+    loggedRefusalKey = undefined;
+    await response.body?.cancel();
+  } catch (error) {
+    const reason = refusalReason(error);
+    if (reason) logRefusalOnce(endpoint, reason);
+  } finally {
+    clearTimeout(timer);
+  }
 }

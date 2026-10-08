@@ -48,6 +48,8 @@ export type RuntimeToolSchedulerSpecResolver = (
 ) => RuntimeToolSchedulerSpecOverride;
 
 const READ_PARALLEL_TOOLS = new Set([
+  "pact_discover",
+  "pact_get_conversation",
   "read_file",
   "read_files",
   "list_directory",
@@ -90,6 +92,7 @@ const EXCLUSIVE_TOOLS = new Set([
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",
+  "pact_send_message",
   "cancel_agent",
   "pause_agent",
   "resume_agent",
@@ -97,6 +100,8 @@ const EXCLUSIVE_TOOLS = new Set([
 ]);
 
 const IDEMPOTENT_TOOLS = new Set([
+  "pact_discover",
+  "pact_get_conversation",
   "read_file",
   "read_files",
   "list_directory",

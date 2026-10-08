@@ -165,6 +165,15 @@ export const NATIVE_INTEGRATIONS: NativeIntegrationSpec[] = [
     requirements: ["api-key"],
     source: "src/electron/agent/tools/voice-call-tools.ts",
   },
+  {
+    // Account access is RFC 8628 consent on the business's own login; a self-hosted
+    // personal-agent identity needs a public HTTPS issuer serving its JWKS.
+    id: "pact",
+    name: "PACT business agents",
+    actions: ["read", "write", "outbound-message"],
+    requirements: ["oauth-consent", "public-webhook"],
+    source: "src/electron/agent/tools/pact-tools.ts",
+  },
 ];
 
 export const CHANNEL_INVENTORY: Record<ChannelType, ChannelInventorySpec> = {
@@ -188,7 +197,6 @@ export const CHANNEL_INVENTORY: Record<ChannelType, ChannelInventorySpec> = {
   },
   mattermost: { name: "Mattermost", requirements: ["api-key"], provenance: "first-party-api" },
   matrix: { name: "Matrix", requirements: ["api-key"], provenance: "third-party-package" },
-  twitch: { name: "Twitch", requirements: ["oauth-consent"], provenance: "first-party-api" },
   line: {
     name: "LINE",
     requirements: ["api-key", "public-webhook"],

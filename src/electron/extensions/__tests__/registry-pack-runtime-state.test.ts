@@ -132,14 +132,6 @@ describe("PluginRegistry pack runtime state", () => {
       packs: { allowed: [], blocked: [], required: [] },
       connectors: { blocked: [] },
       agents: { maxHeartbeatFrequencySec: 60, maxConcurrentAgents: 10 },
-      everydayAgent: {
-        blocked: false,
-        blockedBundles: [],
-        forceReviewOnly: false,
-        maxHeartbeatCadenceMinutes: 60,
-        maxConcurrentBackgroundWork: 1,
-        activeHours: { enabled: false, windows: [] },
-      },
       runtime: {
         allowedPermissionModes: [],
         allowedSandboxTypes: ["macos", "docker"],

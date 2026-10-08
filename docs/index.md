@@ -66,9 +66,6 @@ hero:
       text: Bots & Conversations
       link: /bots-and-conversations
     - theme: alt
-      text: Everyday Agent
-      link: /everyday-agent
-    - theme: alt
       text: Composer Mentions
       link: /composer-mentions
     - theme: alt

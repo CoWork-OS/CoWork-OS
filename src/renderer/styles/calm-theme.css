@@ -1273,7 +1273,6 @@ html.visual-calm .skills-menu-btn.active,
 html.visual-calm .task-automation-save-btn,
 html.visual-calm .ea-primary-button,
 html.visual-calm .mode-suggestion-pill:hover,
-html.visual-calm .leader-badge,
 html.visual-calm .bubble-feedback-btn.retry:hover:not(:disabled),
 html.visual-calm .bubble-feedback-btn.drift:hover:not(:disabled) {
   color: var(--calm-accent-contrast) !important;

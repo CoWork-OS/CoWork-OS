@@ -1783,6 +1783,7 @@ export async function setupIpcHandlers(
       agentDaemon.appendOrchestrationGraphNodes(params as Any),
     findOrchestrationGraphByTeamRunId: (teamRunId: string) =>
       agentDaemon.findOrchestrationGraphByTeamRunId(teamRunId),
+    listRootUserUpdates: (rootTaskId: string) => agentDaemon.listUserFollowUpMessages(rootTaskId),
     completeRootTask: async (taskId, status, summary, metadata) => {
       if (status === "failed") {
         agentDaemon.failTask(taskId, summary, {

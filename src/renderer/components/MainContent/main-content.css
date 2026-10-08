@@ -10822,7 +10822,8 @@ button.collab-timeline-thought-agent:hover {
     text-decoration-color 0.15s ease;
 }
 
-.clickable-file-path:hover {
+.clickable-file-path:hover,
+.clickable-file-path:focus-visible {
   color: var(--color-accent);
   text-decoration: underline;
   text-decoration-style: solid;

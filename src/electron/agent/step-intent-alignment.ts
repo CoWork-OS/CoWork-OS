@@ -68,6 +68,26 @@ export function scoreStepIntentOverlap(stepDescription: string, taskText: string
   return union > 0 ? inter / union : 0;
 }
 
+/**
+ * Share of the step's tokens that appear in the task text, in [0,1]. Unlike the
+ * Jaccard overlap, this does not shrink as the task text grows: a step drawn
+ * from a long orchestration prompt can score near zero on Jaccard while every
+ * one of its terms comes from that prompt.
+ */
+export function scoreStepIntentContainment(stepDescription: string, taskText: string): number {
+  const a = new Set(tokenize(stepDescription));
+  const b = new Set(tokenize(taskText));
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const x of a) {
+    if (b.has(x)) inter += 1;
+  }
+  return inter / a.size;
+}
+
+/** Containment at or above this keeps a low-Jaccard step aligned. */
+export const STEP_INTENT_MIN_CONTAINMENT = 0.25;
+
 export interface StepIntentScoreRow {
   stepId: string;
   score: number;
@@ -94,7 +114,10 @@ export function scorePlanStepIntentAlignment(
       descriptionPreview: step.description.slice(0, 120),
     });
     minScore = Math.min(minScore, score);
-    if (score < 0.08) {
+    if (
+      score < 0.08 &&
+      scoreStepIntentContainment(step.description, taskText) < STEP_INTENT_MIN_CONTAINMENT
+    ) {
       lowAlignmentStepIds.push(step.id);
     }
   }

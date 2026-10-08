@@ -6,6 +6,7 @@
  * nothing) for every formula. Formula strings become ExcelJS formulas and unambiguous numeric
  * strings become numbers; anything that only looks numeric (codes, ids, versions) stays text.
  */
+import type ExcelJS from "exceljs";
 
 /** Plain or comma-grouped integers/decimals: "1200", "-0.75", "1,234.50". */
 const NUMERIC_TEXT_PATTERN = /^[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/;
@@ -69,4 +70,147 @@ export function normalizeSpreadsheetCell(
     return { formula: trimmed.slice(1) };
   }
   return options.coerceNumbers === false ? value : coerceNumericText(value);
+}
+
+/**
+ * A number format requested through tool input: an Excel format code ("€#,##0.00", "0.0%",
+ * "yyyy-mm-dd") for a column (letter or header text) or an A1 cell/range. Fields are unknown
+ * because tool input is not validated before it reaches the writers.
+ */
+export interface SpreadsheetNumberFormatInput {
+  column?: unknown;
+  range?: unknown;
+  numFmt?: unknown;
+}
+
+/**
+ * Tool input schema for a sheet's numberFormats (create_spreadsheet, generate_spreadsheet). An
+ * array of { column | range, numFmt } rather than a column-to-format map: Gemini drops
+ * additionalProperties, which would leave a map schema empty.
+ */
+export const SPREADSHEET_NUMBER_FORMATS_SCHEMA = {
+  type: "array",
+  description:
+    'Optional Excel number formats for currency, decimals, percentages and dates. Column formats skip the header row. E.g. [{"column":"Amount EUR","numFmt":"€#,##0.00;[Red]-€#,##0.00"},{"range":"B2:B6","numFmt":"€#,##0.00"}]',
+  items: {
+    type: "object",
+    properties: {
+      column: {
+        type: "string",
+        description: 'Column letter ("D") or exact header text ("Amount EUR")',
+      },
+      range: {
+        type: "string",
+        description: 'A cell or range instead of a column, e.g. "B6" or "B2:B6"',
+      },
+      numFmt: {
+        type: "string",
+        description:
+          'Excel format code: "€#,##0.00", "$#,##0.00", "#,##0", "0.00", "0%", "0.0%", "yyyy-mm-dd"',
+      },
+    },
+    required: ["numFmt"],
+  },
+};
+
+/** Excel rejects number format codes longer than 255 characters. */
+const MAX_NUMBER_FORMAT_LENGTH = 255;
+const MAX_FORMATTED_RANGE_CELLS = 100_000;
+const MAX_WORKSHEET_ROW = 1_048_576;
+const MAX_WORKSHEET_COLUMN = 16_384;
+const A1_RANGE_PATTERN = /^\$?([A-Z]{1,3})\$?(\d+)(?::\$?([A-Z]{1,3})\$?(\d+))?$/i;
+
+function columnNumberFromLetters(letters: string): number {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+
+function isValidNumberFormat(numFmt: string): boolean {
+  if (!numFmt || numFmt.length > MAX_NUMBER_FORMAT_LENGTH) return false;
+  for (const ch of numFmt) {
+    const code = ch.charCodeAt(0);
+    if (code < 32 || code === 127) return false;
+  }
+  return true;
+}
+
+/** Header text wins over a column letter, so a header named "ID" is not read as column ID. */
+function resolveFormatColumn(column: unknown, headerRow: unknown[]): number | null {
+  if (typeof column !== "string" || !column.trim()) return null;
+  const label = column.trim().toLowerCase();
+  const headerIndex = headerRow.findIndex(
+    (header) => typeof header === "string" && header.trim().toLowerCase() === label,
+  );
+  if (headerIndex >= 0) return headerIndex + 1;
+  if (!/^[a-z]{1,3}$/.test(label)) return null;
+  const index = columnNumberFromLetters(label);
+  return index <= MAX_WORKSHEET_COLUMN ? index : null;
+}
+
+/**
+ * Applies requested number formats to a worksheet. Column formats cover the data rows (not the
+ * header); range formats cover exactly the cells named. Requests that cannot be applied are
+ * returned as warnings instead of failing the whole workbook.
+ */
+export function applySpreadsheetNumberFormats(
+  worksheet: ExcelJS.Worksheet,
+  formats: unknown,
+  options: { headerRow?: unknown[]; firstDataRow: number },
+): string[] {
+  if (formats === undefined || formats === null) return [];
+  const sheetLabel = `Sheet "${worksheet.name}"`;
+  if (!Array.isArray(formats)) {
+    return [`${sheetLabel}: numberFormats must be an array; no number formats were applied.`];
+  }
+  const warnings: string[] = [];
+  const lastRow = Math.max(worksheet.rowCount, options.firstDataRow);
+  for (const entry of formats) {
+    const spec: SpreadsheetNumberFormatInput = entry && typeof entry === "object" ? entry : {};
+    const numFmt = typeof spec.numFmt === "string" ? spec.numFmt.trim() : "";
+    if (!isValidNumberFormat(numFmt)) {
+      warnings.push(
+        `${sheetLabel}: skipped invalid number format ${JSON.stringify(spec.numFmt ?? null)}.`,
+      );
+      continue;
+    }
+    if (typeof spec.range === "string" && spec.range.trim()) {
+      const match = A1_RANGE_PATTERN.exec(spec.range.trim());
+      const c1 = match ? columnNumberFromLetters(match[1]) : 0;
+      const r1 = match ? Number(match[2]) : 0;
+      const c2 = match?.[3] ? columnNumberFromLetters(match[3]) : c1;
+      const r2 = match?.[4] ? Number(match[4]) : r1;
+      const [top, bottom] = [Math.min(r1, r2), Math.max(r1, r2)];
+      const [left, right] = [Math.min(c1, c2), Math.max(c1, c2)];
+      if (
+        !match ||
+        top < 1 ||
+        bottom > MAX_WORKSHEET_ROW ||
+        right > MAX_WORKSHEET_COLUMN ||
+        (bottom - top + 1) * (right - left + 1) > MAX_FORMATTED_RANGE_CELLS
+      ) {
+        warnings.push(
+          `${sheetLabel}: range ${JSON.stringify(spec.range)} is not a usable A1 range, so "${numFmt}" was not applied.`,
+        );
+        continue;
+      }
+      for (let row = top; row <= bottom; row += 1) {
+        for (let column = left; column <= right; column += 1) {
+          worksheet.getCell(row, column).numFmt = numFmt;
+        }
+      }
+      continue;
+    }
+    const column = resolveFormatColumn(spec.column, options.headerRow ?? []);
+    if (!column) {
+      warnings.push(
+        `${sheetLabel}: column ${JSON.stringify(spec.column ?? null)} was not found, so "${numFmt}" was not applied.`,
+      );
+      continue;
+    }
+    for (let row = options.firstDataRow; row <= lastRow; row += 1) {
+      worksheet.getCell(row, column).numFmt = numFmt;
+    }
+  }
+  return warnings;
 }

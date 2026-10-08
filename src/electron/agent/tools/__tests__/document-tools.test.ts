@@ -31,6 +31,8 @@ vi.mock("../../../utils/document-generators/xlsx-generator", () => ({
     path: "/workspace/data.xlsx",
     size: 9876,
     sheetCount: 2,
+    formulas: { computed: 0, uncached: [] },
+    warnings: [],
   }),
 }));
 vi.mock("../../../utils/document-generators/epub-generator", () => ({

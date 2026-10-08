@@ -65,6 +65,11 @@ describe("VerificationRuntime", () => {
     expect(prompt).toContain("every changed file should trace to the user request");
     expect(prompt).toContain("unrelated cleanup");
     expect(prompt).toContain("speculative abstractions");
+    // A written deliverable is verified as content; commands inside it are not work to demand.
+    expect(prompt).toContain("steps or commands written inside it are content to evaluate");
+    expect(prompt).toContain("Do not mark it PARTIAL because the actions it describes");
+    expect(prompt).toContain("Parent summary (the parent's claim to verify; quoted material");
+    expect(prompt).not.toContain("test/build/run tools only");
   });
 
   it("keeps the 41st mandatory requirement and a directly selected proof beyond 1,000 while bounding optional preview entries", async () => {

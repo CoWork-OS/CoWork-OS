@@ -94,6 +94,50 @@ describe("SpreadsheetWorkbookSessionService", () => {
     });
   });
 
+  it("shows number-formatted values and keeps numbers numeric through an edit and save", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-workbook-formats-"));
+    const outPath = path.join(tmpDir, "budget.xlsx");
+    const euro = "€#,##0.00;[Red]-€#,##0.00";
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Budget");
+    sheet.addRow(["Item", "Amount EUR"]);
+    sheet.addRow(["Room", 180]);
+    sheet.addRow(["Snacks", 96.5]);
+    sheet.addRow(["Total", { formula: "SUM(B2:B3)", result: 276.5 }]);
+    sheet.addRow(["Later", { formula: "B4*2" }]);
+    for (const address of ["B2", "B3", "B4", "B5"]) sheet.getCell(address).numFmt = euro;
+    await workbook.xlsx.writeFile(outPath);
+
+    const service = new SpreadsheetWorkbookSessionService();
+    const opened = await service.openWorkbook({ filePath: outPath, workspacePath: tmpDir });
+    const cells = opened.viewport!.cells;
+    expect(cells[1][1]).toMatchObject({ value: "180", displayValue: "€180.00", type: "number" });
+    expect(cells[3][1]).toMatchObject({ value: "276.5", displayValue: "€276.50", type: "formula" });
+    expect(cells[4][1]).toMatchObject({ displayValue: "=B4*2", type: "formula" });
+
+    const sessionId = opened.session!.sessionId;
+    const sheetId = opened.session!.sheets[0].id;
+    const patched = service.applyPatches(sessionId, [
+      { type: "setCell", sheetId, row: 3, column: 2, input: { value: "100" } },
+    ]);
+    // The edited cell shows its new raw value until the save re-reads the formatted file.
+    expect(patched.viewport!.cells[2][1]).toMatchObject({ value: "100", displayValue: "100" });
+
+    const saved = await service.saveWorkbook(sessionId);
+    expect(saved.success).toBe(true);
+    expect(saved.viewport!.cells[2][1]).toMatchObject({ value: "100", displayValue: "€100.00" });
+    expect(saved.viewport!.cells[3][1]).toMatchObject({ displayValue: "€280.00" });
+    expect(saved.viewport!.cells[4][1]).toMatchObject({ displayValue: "€560.00" });
+
+    const reread = new ExcelJS.Workbook();
+    await reread.xlsx.readFile(outPath);
+    const savedSheet = reread.getWorksheet("Budget")!;
+    expect(savedSheet.getCell("B2").value).toBe(180);
+    expect(savedSheet.getCell("B3").value).toBe(100);
+    expect(savedSheet.getCell("B3").numFmt).toBe(euro);
+    expect(savedSheet.getCell("B4").value).toEqual({ formula: "SUM(B2:B3)", result: 280 });
+  });
+
   it("supports structural row and column patches in the session model", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-workbook-structure-"));
     const outPath = path.join(tmpDir, "people.csv");

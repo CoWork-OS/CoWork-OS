@@ -6,9 +6,11 @@ import {
   spreadsheetColumnLetter,
   type SpreadsheetPreview,
   type SpreadsheetPreviewCell,
+  type SpreadsheetPreviewValueType,
 } from "../../shared/spreadsheet-preview";
-
-type ExcelCellValue = ExcelJS.CellValue;
+import { formatSpreadsheetValue } from "../../shared/spreadsheet-number-format";
+import { coerceNumericText } from "./document-generators/spreadsheet-cells";
+import { computeWorkbookFormulaResults } from "./document-generators/spreadsheet-formulas";
 
 const MAX_PREVIEW_ROWS = 2000;
 const MAX_PREVIEW_COLUMNS = 200;
@@ -21,40 +23,70 @@ function argbToCssColor(argb?: string): string | undefined {
   return undefined;
 }
 
-function getFormulaDisplayValue(value: ExcelCellValue): string | null {
-  if (!value || typeof value !== "object" || !("formula" in value)) return null;
-  const result = (value as ExcelJS.CellFormulaValue).result;
-  if (result === null || result === undefined) return "";
-  if (result instanceof Date) return result.toISOString();
-  return String(result);
+type PreviewCellContent = Pick<
+  SpreadsheetPreviewCell,
+  "value" | "displayValue" | "numFmt" | "valueType" | "formulaPending" | "formula"
+>;
+
+function isFormulaValue(value: ExcelJS.CellValue): value is ExcelJS.CellFormulaValue {
+  return Boolean(
+    value && typeof value === "object" && ("formula" in value || "sharedFormula" in value),
+  );
 }
 
-function getCellDisplayValue(cell: ExcelJS.Cell): string {
-  const formulaValue = getFormulaDisplayValue(cell.value);
-  if (formulaValue !== null) return formulaValue;
-
-  const value = cell.value;
-  if (value === null || value === undefined) return "";
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "object") {
-    if ("richText" in value) {
-      return value.richText?.map((entry) => entry.text).join("") ?? "";
-    }
-    if ("text" in value) return String(value.text ?? "");
-    if ("hyperlink" in value) {
-      const hyperlinkValue = value as { hyperlink?: unknown; text?: unknown };
-      return String(hyperlinkValue.text ?? hyperlinkValue.hyperlink ?? "");
-    }
-    if ("error" in value) return String(value.error ?? "");
-    if ("result" in value) return String(value.result ?? "");
+/** Raw text, type and (for numbers and dates) the typed value a number format applies to. */
+function readPlainValue(value: unknown): {
+  text: string;
+  valueType?: SpreadsheetPreviewValueType;
+  typed?: number | Date;
+} {
+  if (value === null || value === undefined) return { text: "" };
+  if (typeof value === "number") return { text: String(value), valueType: "number", typed: value };
+  if (typeof value === "boolean") return { text: String(value), valueType: "boolean" };
+  if (value instanceof Date) {
+    return { text: value.toISOString(), valueType: "date", typed: value };
   }
-  return String(value);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.richText)) {
+      const text = record.richText
+        .map((entry) => (entry && typeof entry === "object" ? String(entry.text ?? "") : ""))
+        .join("");
+      return { text, valueType: "string" };
+    }
+    if ("text" in record) return { text: String(record.text ?? ""), valueType: "string" };
+    if ("hyperlink" in record) return { text: String(record.hyperlink ?? ""), valueType: "string" };
+    if ("error" in record) return { text: String(record.error ?? ""), valueType: "error" };
+    if ("result" in record) return readPlainValue(record.result);
+  }
+  return { text: String(value), valueType: "string" };
 }
 
-function getCellFormula(cell: ExcelJS.Cell): string | undefined {
-  const value = cell.value;
-  if (!value || typeof value !== "object" || !("formula" in value)) return undefined;
-  return value.formula || undefined;
+/**
+ * The preview content of one cell: the raw value stays in `value` for editing and saving, and
+ * `displayValue` carries what Excel shows (number format applied, or the formula text when the
+ * file has no cached result for it).
+ */
+function readPreviewCell(cell: ExcelJS.Cell, date1904: boolean): PreviewCellContent {
+  const raw = cell.value;
+  const formula = isFormulaValue(raw) ? cell.formula || undefined : undefined;
+  const numFmt =
+    typeof cell.numFmt === "string" && cell.numFmt.trim() && !/^general$/i.test(cell.numFmt.trim())
+      ? cell.numFmt
+      : undefined;
+  const base = { ...(formula ? { formula } : {}), ...(numFmt ? { numFmt } : {}) };
+  if (formula && isFormulaValue(raw) && (raw.result === null || raw.result === undefined)) {
+    return { ...base, value: "", displayValue: `=${formula}`, formulaPending: true };
+  }
+  const plain = readPlainValue(isFormulaValue(raw) ? raw.result : raw);
+  const display =
+    plain.typed === undefined ? null : formatSpreadsheetValue(plain.typed, numFmt, { date1904 });
+  return {
+    ...base,
+    value: plain.text,
+    ...(plain.valueType ? { valueType: plain.valueType } : {}),
+    ...(display !== null && display !== plain.text ? { displayValue: display } : {}),
+  };
 }
 
 function isStyled(cell: ExcelJS.Cell): boolean {
@@ -75,6 +107,7 @@ export async function buildSpreadsheetPreviewFromFile(
     (await readDocumentArchiveBuffer(filePath)) as unknown as ExcelJS.Buffer,
   );
 
+  const date1904 = Boolean(workbook.properties?.date1904);
   const sheets = workbook.worksheets.map((worksheet) => {
     const sourceRowCount = Math.max(worksheet.actualRowCount || 0, worksheet.rowCount || 0);
     const sourceColumnCount = Math.max(
@@ -97,15 +130,12 @@ export async function buildSpreadsheetPreviewFromFile(
         const fill =
           cell.fill?.type === "pattern" ? argbToCssColor(cell.fill.fgColor?.argb) : undefined;
         const fontColor = argbToCssColor(cell.font?.color?.argb);
-        const value = getCellDisplayValue(cell);
-        const formula = getCellFormula(cell);
         const styled = isStyled(cell);
         cells.push({
           address: `${spreadsheetColumnLetter(columnIndex - 1)}${rowIndex}`,
           row: rowIndex,
           column: columnIndex,
-          value,
-          ...(formula ? { formula } : {}),
+          ...readPreviewCell(cell, date1904),
           ...(cell.font?.bold ? { bold: true } : {}),
           ...(cell.font?.italic ? { italic: true } : {}),
           ...(fill ? { backgroundColor: fill } : {}),
@@ -344,14 +374,36 @@ export async function writeDelimitedSpreadsheetPreviewToFile(
   });
 }
 
+function previewFormula(cell: SpreadsheetPreviewCell): string {
+  return typeof cell.formula === "string" ? cell.formula.trim().replace(/^=/, "") : "";
+}
+
+/**
+ * Whether a preview cell (which may come from the renderer, so only `value` and `formula` are
+ * trusted) still holds what the workbook cell holds. Unchanged cells are left alone on save, so
+ * numbers, dates, rich text and shared formulas keep their type.
+ */
+function isPreviewCellUnchanged(
+  cellPreview: SpreadsheetPreviewCell,
+  cell: ExcelJS.Cell,
+  date1904: boolean,
+): boolean {
+  const current = readPreviewCell(cell, date1904);
+  const formula = previewFormula(cellPreview);
+  if (formula || current.formula) return formula === (current.formula ?? "");
+  return cellPreview.value === current.value;
+}
+
+/**
+ * The value written for an edited cell. Formulas get no cached result here (it is computed
+ * before writing, and never the formula text); numeric text becomes a number with the same rules
+ * as create_spreadsheet. displayValue, numFmt and valueType are display data and are ignored.
+ */
 function getPreviewCellInput(cell: SpreadsheetPreviewCell): ExcelJS.CellValue {
-  if (cell.formula) {
-    return {
-      formula: cell.formula.replace(/^=/, ""),
-      result: cell.value || undefined,
-    };
-  }
-  return cell.value === "" ? null : cell.value;
+  const formula = previewFormula(cell);
+  if (formula) return { formula } as ExcelJS.CellFormulaValue;
+  const value = typeof cell.value === "string" ? cell.value : String(cell.value ?? "");
+  return value === "" ? null : coerceNumericText(value);
 }
 
 export async function writeSpreadsheetPreviewToFile(
@@ -368,6 +420,7 @@ export async function writeSpreadsheetPreviewToFile(
     // If the file was removed between preview and save, recreate a workbook.
   }
 
+  const date1904 = Boolean(workbook.properties?.date1904);
   for (const sheetPreview of preview.sheets) {
     const worksheet =
       workbook.getWorksheet(sheetPreview.name) ||
@@ -394,6 +447,7 @@ export async function writeSpreadsheetPreviewToFile(
       for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
         const cellPreview = rowPreview[columnIndex - 1];
         const cell = row.getCell(columnIndex);
+        if (cellPreview && isPreviewCellUnchanged(cellPreview, cell, date1904)) continue;
         cell.value = cellPreview ? getPreviewCellInput(cellPreview) : null;
       }
       row.commit();
@@ -411,6 +465,10 @@ export async function writeSpreadsheetPreviewToFile(
     }
   }
 
+  // Edits change what formulas compute: refresh the results CoWork can evaluate and have Excel
+  // recalculate the rest on open.
+  computeWorkbookFormulaResults(workbook);
+  workbook.calcProperties.fullCalcOnLoad = true;
   await workbook.xlsx.writeFile(filePath);
   return buildSpreadsheetPreviewFromFile(filePath);
 }
@@ -420,7 +478,7 @@ export function spreadsheetPreviewToTsv(preview: SpreadsheetPreview): string {
     .map((sheet) => {
       const lines = [`## Sheet: ${sheet.name}`];
       for (const row of sheet.rows) {
-        lines.push(row.map((cell) => cell.value).join("\t"));
+        lines.push(row.map((cell) => cell.displayValue ?? cell.value).join("\t"));
       }
       return lines.join("\n");
     })

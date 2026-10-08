@@ -3,7 +3,15 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import ExcelJS from "exceljs";
 import { Workspace } from "../../../shared/types";
-import { normalizeSpreadsheetCell } from "../../utils/document-generators/spreadsheet-cells";
+import {
+  applySpreadsheetNumberFormats,
+  normalizeSpreadsheetCell,
+  type SpreadsheetNumberFormatInput,
+} from "../../utils/document-generators/spreadsheet-cells";
+import {
+  computeWorkbookFormulaResults,
+  type FormulaComputationReport,
+} from "../../utils/document-generators/spreadsheet-formulas";
 
 export interface SheetData {
   name: string;
@@ -12,6 +20,15 @@ export interface SheetData {
   columnWidths?: number[];
   /** If true, first row is treated as header with bold formatting */
   hasHeader?: boolean;
+  /** Optional Excel number formats by column (letter or header text) or A1 range */
+  numberFormats?: SpreadsheetNumberFormatInput[];
+}
+
+export interface SpreadsheetCreateReport {
+  /** Formula cells with a cached result, and those left for Excel to calculate on open */
+  formulas: FormulaComputationReport;
+  /** Requests that could not be applied, such as an unknown number-format column */
+  warnings: string[];
 }
 
 export interface SpreadsheetOptions {
@@ -33,17 +50,21 @@ export class SpreadsheetBuilder {
     outputPath: string,
     sheets: SheetData[],
     options: SpreadsheetOptions = {},
-  ): Promise<void> {
+  ): Promise<SpreadsheetCreateReport> {
     if (sheets.length === 0) {
       throw new Error("At least one sheet is required");
     }
 
     const ext = path.extname(outputPath).toLowerCase();
+    const warnings: string[] = [];
 
     // If CSV is explicitly requested, use CSV format
     if (ext === ".csv") {
       await this.createCSV(outputPath, sheets[0]);
-      return;
+      if (sheets.some((sheet) => sheet.numberFormats?.length)) {
+        warnings.push("CSV files cannot store number formats; they were not applied.");
+      }
+      return { formulas: { computed: 0, uncached: [] }, warnings };
     }
 
     // Create Excel workbook
@@ -78,6 +99,13 @@ export class SpreadsheetBuilder {
           };
         }
       }
+
+      warnings.push(
+        ...applySpreadsheetNumberFormats(worksheet, sheetData.numberFormats, {
+          headerRow: sheetData.hasHeader !== false ? sheetData.data[0] : undefined,
+          firstDataRow: sheetData.hasHeader !== false ? 2 : 1,
+        }),
+      );
 
       // Set column widths
       if (sheetData.columnWidths) {
@@ -116,8 +144,14 @@ export class SpreadsheetBuilder {
       }
     }
 
+    // Cache results for the formulas CoWork can evaluate, so viewers that do not recalculate
+    // (CoWork's preview, Quick Look, LibreOffice by default) show values; Excel recalculates all.
+    workbook.calcProperties.fullCalcOnLoad = true;
+    const formulas = computeWorkbookFormulaResults(workbook);
+
     // Write the file
     await workbook.xlsx.writeFile(outputPath);
+    return { formulas, warnings };
   }
 
   /**

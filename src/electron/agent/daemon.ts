@@ -16469,6 +16469,13 @@ export class AgentDaemon extends EventEmitter {
       // The turn can end while the receipt commits, after its post-run drain
       // found the queue empty. Nothing would then pick this item up, so drain now.
       if (!executor.isRunning) this.processOrphanedFollowUps(taskId, executor);
+      if (effectiveOptions?.messageSource !== "agent") {
+        this.forwardRootFollowUpToActiveTeamLanes(
+          effectiveTask,
+          message,
+          effectiveOptions?.messageId,
+        );
+      }
       return {
         queued: true,
         deliveryMode,
@@ -16536,6 +16543,13 @@ export class AgentDaemon extends EventEmitter {
       if (directUserFollowUpId) {
         await this.timelineRowsCommitted(taskId);
       }
+    }
+    if (effectiveOptions?.messageSource !== "agent") {
+      this.forwardRootFollowUpToActiveTeamLanes(
+        effectiveTask,
+        message,
+        effectiveOptions?.messageId,
+      );
     }
     if (effectiveOptions?.agentConfigOverride) {
       this.setTransientTaskAgentConfig(taskId, effectiveOptions.agentConfigOverride);
@@ -18106,6 +18120,100 @@ export class AgentDaemon extends EventEmitter {
       this.getTaskEventsForReplay(taskId),
       resultSummary,
     );
+  }
+
+  /**
+   * A follow-up on a collaborative root while its team run is still working
+   * must not complete the root: the team's synthesis is the final answer, and
+   * the orchestrator completes the root when it lands.
+   */
+  reconcileCollaborativeRunBeforeFollowUpCompletion(taskId: string): {
+    deferred: boolean;
+    activeChildCount: number;
+  } {
+    const task = this.taskRepo.findById(taskId);
+    const config = task?.agentConfig;
+    if (!task || (!config?.collaborativeMode && !config?.multiLlmMode)) {
+      return { deferred: false, activeChildCount: 0 };
+    }
+    // Child-agent runs are driven by the parent's own executor, not completeRootTask.
+    if (config.childAgentCollaborativeRun === true) return { deferred: false, activeChildCount: 0 };
+    const run = this.findTeamRunByRootTaskId(taskId);
+    if (!run || run.status !== "running") return { deferred: false, activeChildCount: 0 };
+    const activeChildCount = this.taskRepo
+      .findByParent(taskId)
+      .filter((child) => !isTerminalTaskStatus(deriveCanonicalTaskStatus(child))).length;
+    if (this.teamOrchestrator) {
+      void this.teamOrchestrator
+        .tickRun(run.id, "root_follow_up_deferred")
+        .catch((error) => log.warn(`Team run tick after a root follow-up failed:`, error));
+    }
+    return { deferred: true, activeChildCount };
+  }
+
+  /**
+   * Forward a user's update on a collaborative root to the team lanes that are
+   * still running, so they apply it at their next turn boundary.
+   */
+  private forwardRootFollowUpToActiveTeamLanes(
+    rootTask: Task,
+    message: string,
+    rootMessageId?: string,
+  ): void {
+    const config = rootTask.agentConfig;
+    if (
+      (!config?.collaborativeMode && !config?.multiLlmMode) ||
+      config.childAgentCollaborativeRun
+    ) {
+      return;
+    }
+    const text = String(message || "").trim();
+    if (!text) return;
+    const run = this.findTeamRunByRootTaskId(rootTask.id);
+    if (!run || run.status !== "running") return;
+    const forwarded =
+      "The user updated the parent request while you were working. This supersedes any " +
+      "conflicting value in your original task; apply it to the rest of your work and recheck " +
+      `figures you already produced:\n${text}`;
+    for (const child of this.taskRepo.findByParent(rootTask.id)) {
+      if (isTerminalTaskStatus(deriveCanonicalTaskStatus(child))) continue;
+      // Only lanes already running take the update; one not yet started reads
+      // it from the synthesis-time USER UPDATES section instead.
+      if (!this.activeTasks.get(child.id)?.executor.isRunning) continue;
+      void this.sendMessage(child.id, forwarded, undefined, undefined, {
+        deliveryMode: "follow_up",
+        messageSource: "user",
+        ...(rootMessageId ? { messageId: `${rootMessageId}:lane:${child.id}` } : {}),
+      }).catch((error) =>
+        log.warn(`Could not forward a root follow-up to team lane ${child.id}:`, error),
+      );
+    }
+  }
+
+  /** User follow-up messages on a task, in order, excluding its original request. */
+  listUserFollowUpMessages(taskId: string): string[] {
+    const task = this.taskRepo.findById(taskId);
+    const initial = new Set(
+      [task?.prompt, task?.rawPrompt, task?.userPrompt]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    );
+    const seen = new Set<string>();
+    const messages: string[] = [];
+    for (const event of readDurableTaskEvents(this, taskId, "user_message")) {
+      const payload = (event.payload || {}) as Record<string, unknown>;
+      if (payload.messageSource === "agent" || payload.deliveryMode === "message") continue;
+      const text = typeof payload.message === "string" ? payload.message.trim() : "";
+      if (!text || initial.has(text)) continue;
+      const key =
+        typeof payload.messageId === "string" && payload.messageId.trim()
+          ? payload.messageId.trim()
+          : text;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      messages.push(text);
+    }
+    return messages;
   }
 
   /** Mark the originating handoff when a teammate sends a correlated reply. */

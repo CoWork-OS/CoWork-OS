@@ -11,8 +11,31 @@ import {
 } from "./tool-semantics";
 import { getDefaultRuntimeToolMetadata } from "./tools/runtime-tool-definition";
 
-const ARTIFACT_CREATION_VERB_REGEX =
-  /\b(create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)\b/;
+const ARTIFACT_CREATION_VERBS = String.raw`(?:create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)`;
+const ARTIFACT_CREATION_VERB_REGEX = new RegExp(String.raw`\b${ARTIFACT_CREATION_VERBS}\b`);
+// "Video" names a deliverable only as a media object. "Two video calls" or a
+// "video meeting" describes how the user communicates, not an output to make.
+const VIDEO_ARTIFACT_NOUN = String.raw`(?:videos?|clips?|movies?|footage)(?![\s-]*(?:calls?|calling|meetings?|conferenc\w*|chats?|interviews?|consultations?|sessions?)\b)`;
+// A prohibition whose verb list ends in an artifact verb, such as "do not
+// contact anyone, reserve, pay, or create files". Removing these spans keeps
+// the negated "create files" from being read as an affirmative output request.
+const NEGATED_ARTIFACT_CLAUSE_REGEX = new RegExp(
+  String.raw`\b(?:do\s+not|don'?t|must\s+not|should\s+not|never|no\s+need\s+to)\s+` +
+    String.raw`(?:(?!\b(?:but|instead|then|unless|except|rather)\b)[^.!?;\n]){0,160}?` +
+    String.raw`\b(?:create|build|write|generate|produce|draft|prepare|save|export|make)\s+` +
+    String.raw`(?:any\s+|new\s+|a\s+|an\s+)*(?:files?|documents?|reports?|artifacts?|attachments?|${VIDEO_ARTIFACT_NOUN})\b`,
+  "gi",
+);
+
+/**
+ * Lowercased contract prompt with negated artifact clauses removed, for
+ * inferring which output files the user affirmatively asked for.
+ */
+function promptForArtifactIntent(taskTitle: string, taskPrompt: string): string {
+  return `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`
+    .toLowerCase()
+    .replace(NEGATED_ARTIFACT_CLAUSE_REGEX, " ");
+}
 const STRATEGY_CONTEXT_BLOCK_REGEX =
   /\[AGENT_STRATEGY_CONTEXT_V1\][\s\S]*?\[\/AGENT_STRATEGY_CONTEXT_V1\]/g;
 const ADDITIONAL_CONTEXT_HEADER = "ADDITIONAL CONTEXT:";
@@ -62,6 +85,24 @@ const COMMAND_OR_API_EVIDENCE_TOOLS = new Set([
   "web_fetch",
 ]);
 
+/**
+ * Reads the leading token of a final verification reply ("OK", "WARN_NON_BLOCKING
+ * — ...", "FAIL_BLOCKING — ..."). Returns null when the reply does not open with
+ * one of the protocol tokens the verification prompts ask for.
+ */
+export function parseVerificationProtocolOutcome(
+  text: string,
+): "pass" | "warn_non_blocking" | "fail_blocking" | "pending_user_action" | null {
+  const head = String(text || "")
+    .trim()
+    .replace(/^[*_`#>\s]+/, "");
+  if (/^ok\b/i.test(head)) return "pass";
+  const match = /^(WARN_NON_BLOCKING|FAIL_BLOCKING|PENDING_USER_ACTION)\b/i.exec(head);
+  return match
+    ? (match[1]!.toLowerCase() as "warn_non_blocking" | "fail_blocking" | "pending_user_action")
+    : null;
+}
+
 export function normalizePromptForContracts(taskPrompt: string): string {
   const raw = String(taskPrompt || "");
   if (!raw.trim()) return "";
@@ -96,10 +137,10 @@ export function shouldRequireExecutionEvidence(taskTitle: string, taskPrompt: st
 }
 
 export function promptRequestsArtifactOutput(taskTitle: string, taskPrompt: string): boolean {
-  const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
+  const prompt = promptForArtifactIntent(taskTitle, taskPrompt);
   if (promptRequestsPresentationArtifactOutput(taskTitle, taskPrompt)) return true;
 
-  const artifactNoun = String.raw`(?:files?(?!\s*(?:paths?|names?|areas?|refs?|references?|changes?|diffs?|statuses?|state|tree|lists?|involved)\b)|document|report|pdf|docx|markdown|md|spreadsheet|csv|xlsx|json|txt|pptx|slide|slides|video|videos|clip|clips|movie|footage)`;
+  const artifactNoun = String.raw`(?:files?(?!\s*(?:paths?|names?|areas?|refs?|references?|changes?|diffs?|statuses?|state|tree|lists?|involved)\b)|document|report|pdf|docx|markdown|md|spreadsheet|csv|xlsx|json|txt|pptx|slide|slides|${VIDEO_ARTIFACT_NOUN})`;
   const createVerb = String.raw`(?:create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)`;
   const directObjectModifier = String.raw`(?:(?!(?:in|with|from|for|to|as|about|including|include|that|which)\b)[a-z0-9][a-z0-9-]*\s+)`;
   const directArtifactCreation = new RegExp(
@@ -125,11 +166,25 @@ export function promptRequestsArtifactOutput(taskTitle: string, taskPrompt: stri
 }
 
 function promptRequestsVideoArtifactOutput(taskTitle: string, taskPrompt: string): boolean {
-  const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
+  const prompt = promptForArtifactIntent(taskTitle, taskPrompt);
   if (!prompt.trim()) return false;
-  const hasVideoNoun = /\b(video|videos|clip|clips|movie|footage)\b/.test(prompt);
-  if (!hasVideoNoun) return false;
-  return ARTIFACT_CREATION_VERB_REGEX.test(prompt);
+  if (!new RegExp(String.raw`\b${VIDEO_ARTIFACT_NOUN}`).test(prompt)) return false;
+
+  // The video must be the object of the creation verb ("combine two videos",
+  // "generate a short promo video"), not merely mentioned elsewhere in a
+  // request that creates something else ("summarize the video").
+  const createVerb = ARTIFACT_CREATION_VERBS;
+  const objectModifier = String.raw`(?:(?!(?:in|with|from|for|to|as|about|of|on|including|include|that|which|and|or)\b)[a-z0-9][a-z0-9'-]*\s+)`;
+  const directVideoObject = new RegExp(
+    String.raw`\b${createVerb}\s+${objectModifier}{0,4}${VIDEO_ARTIFACT_NOUN}\b`,
+  ).test(prompt);
+  const intoVideo = new RegExp(
+    String.raw`\b(?:${createVerb}|turn|convert|transform|edit|render)\b[^.!?;\n]{0,120}\binto\s+${objectModifier}{0,3}${VIDEO_ARTIFACT_NOUN}\b`,
+  ).test(prompt);
+  const saveAsVideo = new RegExp(
+    String.raw`\b(?:save|export|output|render)\b[^.!?;\n]{0,60}\bas\s+${objectModifier}{0,3}${VIDEO_ARTIFACT_NOUN}\b`,
+  ).test(prompt);
+  return directVideoObject || intoVideo || saveAsVideo;
 }
 
 export function promptRequestsPresentationArtifactOutput(
@@ -283,7 +338,7 @@ export function promptIsMultiFileWebAppCreation(prompt: string): boolean {
 }
 
 export function inferRequiredArtifactExtensions(taskTitle: string, taskPrompt: string): string[] {
-  const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
+  const prompt = promptForArtifactIntent(taskTitle, taskPrompt);
   const hasCreateIntent = ARTIFACT_CREATION_VERB_REGEX.test(prompt);
   if (!hasCreateIntent) return [];
 
@@ -322,7 +377,7 @@ const EXPLICIT_OUTPUT_EXTENSION_SET = new Set([
  * like "read PRIORITIES.md".
  */
 export function extractExplicitOutputExtensions(taskTitle: string, taskPrompt: string): string[] {
-  const prompt = `${taskTitle}\n${normalizePromptForContracts(taskPrompt)}`.toLowerCase();
+  const prompt = promptForArtifactIntent(taskTitle, taskPrompt);
   const extensions = new Set<string>();
 
   // Pattern 1: "save/export/write/output ... to/as ... .ext"
@@ -541,6 +596,29 @@ export function detectReadOnlyConstraint(prompt: string): boolean {
     );
   if (hasNegatedFileOperationList && !requestsChangeOutsideProhibition) return true;
 
+  // A mixed prohibition such as "do not contact anyone, reserve, pay, or
+  // create files" lists non-file actions first, so the file-only verb list
+  // above cannot see its final "create files" item.
+  const hasMixedProhibitionEndingInFileCreation = new RegExp(
+    String.raw`\b(?:do\s+not|don'?t|must\s+not|should\s+not|never)\s+` +
+      String.raw`(?:(?!\b(?:but|instead|then|unless|except|rather)\b)[^.!?;\n]){1,160}?(?:,\s*|\s)(?:(?:and|or|nor)\s+)?` +
+      String.raw`(?:create|write|edit|modify|save|generate|produce)\s+(?:any\s+)?(?:new\s+)?(?:files?|documents?|artifacts?)\b${unscoped}`,
+  ).test(lower);
+  if (hasMixedProhibitionEndingInFileCreation && !requestsChangeOutsideProhibition) return true;
+
+  // "Keep it in chat" / "chat only" confines the deliverable to the reply
+  // when nothing else in the request asks for a file or a change.
+  const hasChatOnlyBoundary =
+    /\b(?:keep|leave)\s+(?:it|this|everything|all\s+of\s+it|the\s+(?:answer|response|reply|plan|results?|output|comparison|summary|analysis|recommendation))\s+(?:all\s+)?in\s+(?:the\s+|this\s+)?chat\b/.test(
+      lower,
+    ) ||
+    /\b(?:in|within)\s+(?:the\s+|this\s+)?chat\s+only\b|\bonly\s+in\s+(?:the\s+|this\s+)?chat\b|\bchat[- ]only\b/.test(
+      lower,
+    );
+  if (hasChatOnlyBoundary && !explicitlyRequestsFileOutput && !requestsChangeOutsideProhibition) {
+    return true;
+  }
+
   // "read-only" counts only when it frames the task itself ("this task is
   // read-only", "read-only review: ...", "stay read-only", "Read-only."). As an
   // attribute of something to build ("a read-only mode toggle", "make the field
@@ -671,6 +749,8 @@ export function responseHasDecisionSignal(text: string): boolean {
       normalized,
     ) ||
     /\bi recommend\b/.test(normalized) ||
+    /\brecommend(?:ation|ed)\s*:/.test(normalized) ||
+    /\bbest\s+(?:fit|option|choice|pick)\b/.test(normalized) ||
     /\byou should\b/.test(normalized) ||
     /\bshould (?:you|i|we)\b/.test(normalized) ||
     /\bgo with\b/.test(normalized) ||

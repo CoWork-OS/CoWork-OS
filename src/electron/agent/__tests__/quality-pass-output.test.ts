@@ -42,4 +42,38 @@ describe("text-only quality passes", () => {
       false,
     );
   });
+
+  it("rejects a rewrite that changes the verdict or invents missing evidence", () => {
+    const draft =
+      "VERDICT: PASS\n- Read macos-release-checklist.md; it covers build validation, signing and notarization, packaging, release notes, distribution, and monitoring.";
+    const flipped =
+      "VERDICT: PARTIAL\n- No file contents or read/search output were supplied, so macos-release-checklist.md cannot be confirmed to cover build validation, signing and notarization, packaging, release notes, distribution, and monitoring.";
+    expect(isQualityRewriteFaithful(flipped, draft)).toBe(false);
+    expect(
+      isQualityRewriteFaithful(flipped.replace("VERDICT: PARTIAL", "VERDICT: PASS"), draft),
+    ).toBe(false);
+    expect(
+      isQualityRewriteFaithful(
+        draft.replace("it covers", "the checklist fully covers") + " Scope stays preparation-only.",
+        draft,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a rewrite that drops a file link or denies an available output", () => {
+    const draft =
+      "Created meetup-budget.xlsx with Transactions and Summary sheets. Final total €320.25. Download: [meetup-budget.xlsx](meetup-budget.xlsx)";
+    expect(
+      isQualityRewriteFaithful(
+        "Created meetup-budget.xlsx with Transactions and Summary sheets and a final total of €320.25. Download it here: meetup-budget.xlsx",
+        draft,
+      ),
+    ).toBe(false);
+    expect(
+      isQualityRewriteFaithful(
+        `${draft} I can’t confirm that the workbook is available to download.`,
+        draft,
+      ),
+    ).toBe(false);
+  });
 });

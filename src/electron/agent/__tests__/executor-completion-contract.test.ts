@@ -14,6 +14,7 @@ import {
   hasUnrecoveredToolFailureForAssistantOutput,
   hasVerificationEvidence,
   getBestFinalResponseCandidate,
+  parseVerificationProtocolOutcome,
   responseHasDecisionSignal,
   responseLooksOperationalOnly,
   responseHasExecutionReportEvidenceSignal,
@@ -3281,6 +3282,73 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     "Do not make any changes to the codebase; just describe the module layout.",
   ])("keeps a genuine read-only constraint: %s", (prompt) => {
     expect(detectReadOnlyConstraint(prompt)).toBe(true);
+  });
+
+  const coworkingDayPassPrompt =
+    "I need a coworking day pass in Lisbon for Tuesday 13 October, with reliable Wi-Fi and a quiet place for two video calls. " +
+    "Compare three currently operating options using their official websites. In one table include location, day-pass price " +
+    "and VAT caveats, opening hours, call-space arrangements, accessibility information, and a source link for each. Mark " +
+    "anything you cannot confirm as unknown. Recommend the best fit and list what I should ask before booking. Keep it in " +
+    "chat; do not contact anyone, reserve, pay, or create files.";
+
+  it("does not turn 'video calls' plus a negated 'create files' into a video deliverable", () => {
+    const contract = buildCompletionContract({
+      taskTitle: "Lisbon Coworking Day Pass Comparison",
+      taskPrompt: coworkingDayPassPrompt,
+      requiresDirectAnswer: true,
+      requiresDecisionSignal: false,
+      isWatchSkipRecommendationTask: false,
+    });
+
+    expect(detectReadOnlyConstraint(coworkingDayPassPrompt)).toBe(true);
+    expect(extractExplicitOutputExtensions("Coworking", coworkingDayPassPrompt)).toEqual([]);
+    expect(contract.requiredArtifactExtensions).toEqual([]);
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(contract.artifactKind).toBe("none");
+  });
+
+  it.each([
+    "Research the best CRM tools for a small team. Do not contact vendors, sign up, or create files.",
+    "Plan the workshop agenda. Keep it in chat; do not create files.",
+    "Compare the three hosting plans and keep the comparison in chat.",
+  ])("treats a mixed prohibition or chat-only boundary as read-only: %s", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(true);
+  });
+
+  it.each([
+    "Fix the failing login test and keep the explanation in chat.",
+    "Do not email anyone, but create files for each section: intro.md and body.md.",
+    "Write the release notes to notes.md; keep the summary in chat.",
+  ])("does not let a chat or partial prohibition block requested work: %s", (prompt) => {
+    expect(detectReadOnlyConstraint(prompt)).toBe(false);
+  });
+
+  it.each([
+    ['can you combine two videos and save it as a new video named "Cowork OS Gmail"', [".mp4"]],
+    ["Generate a short promo video for our launch.", [".mp4"]],
+    ["Stitch these clips into one movie.", [".mp4"]],
+    ["Watch this video and write a summary of the key points.", []],
+    ["Transcribe this YouTube video and create a document for me to review.", []],
+    ["Schedule two video calls and create a checklist of agenda topics.", []],
+  ])(
+    "requires a video output only for an affirmative video deliverable: %s",
+    (prompt, expected) => {
+      expect(extractExplicitOutputExtensions("Task", prompt)).toEqual(expected);
+    },
+  );
+});
+
+describe("parseVerificationProtocolOutcome", () => {
+  it.each([
+    ["OK", "pass"],
+    ["**OK**", "pass"],
+    ["WARN_NON_BLOCKING — workbook exists; euro format missing.", "warn_non_blocking"],
+    ["FAIL_BLOCKING: the agenda is missing.", "fail_blocking"],
+    ["PENDING_USER_ACTION - open the app and confirm.", "pending_user_action"],
+    ["Okay, everything looks fine.", null],
+    ["The check found a WARN_NON_BLOCKING issue.", null],
+  ])("reads %s as %s", (text, expected) => {
+    expect(parseVerificationProtocolOutcome(text)).toBe(expected);
   });
 });
 

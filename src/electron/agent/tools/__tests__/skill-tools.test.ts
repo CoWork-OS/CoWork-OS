@@ -123,4 +123,58 @@ describe("SkillTools access profile boundaries", () => {
       }),
     ).rejects.toThrow(/must provide a 2D "data" array or both "headers" and "rows" arrays/i);
   });
+
+  it("passes number formats through and reports formulas left without a saved result", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-skill-tools-"));
+    tempDirs.push(directory);
+
+    const workspace: Workspace = {
+      id: "workspace-1",
+      name: "Workspace",
+      path: directory,
+      createdAt: Date.now(),
+      permissions: { read: true, write: true, delete: true, network: false, shell: false },
+    };
+    const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+
+    const result = await tools.createSpreadsheet({
+      filename: "budget",
+      sheets: [
+        {
+          name: "Summary",
+          headers: ["Category", "Total EUR"],
+          rows: [
+            ["Venue", "150"],
+            ["Total", "=SUM(B2:B2)"],
+            ["Lookup", "=VLOOKUP(A2,A2:B3,2,FALSE)"],
+          ],
+          numberFormats: [
+            { column: "Total EUR", numFmt: "€#,##0.00" },
+            { column: "Nope", numFmt: "0" },
+          ],
+        },
+      ],
+    });
+
+    expect(result.formulas).toEqual({
+      computed: 1,
+      uncached: [
+        {
+          sheet: "Summary",
+          address: "B4",
+          formula: "VLOOKUP(A2,A2:B3,2,FALSE)",
+          reason: "VLOOKUP is not evaluated by CoWork",
+        },
+      ],
+    });
+    expect(result.warnings).toEqual([
+      'Sheet "Summary": column "Nope" was not found, so "0" was not applied.',
+      expect.stringMatching(/^1 formula cell\(s\) have no saved result/),
+    ]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(path.join(directory, result.path));
+    const sheet = workbook.getWorksheet("Summary")!;
+    expect(sheet.getCell("B3").numFmt).toBe("€#,##0.00");
+    expect(sheet.getCell("B3").value).toEqual({ formula: "SUM(B2:B2)", result: 150 });
+  });
 });

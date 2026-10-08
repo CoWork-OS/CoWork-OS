@@ -5,7 +5,16 @@
  */
 
 import * as fs from "fs";
-import { normalizeSpreadsheetCell, toPlainSpreadsheetValue } from "./spreadsheet-cells";
+import {
+  applySpreadsheetNumberFormats,
+  normalizeSpreadsheetCell,
+  toPlainSpreadsheetValue,
+  type SpreadsheetNumberFormatInput,
+} from "./spreadsheet-cells";
+import {
+  computeWorkbookFormulaResults,
+  type FormulaComputationReport,
+} from "./spreadsheet-formulas";
 
 interface SheetDefinition {
   name: string;
@@ -13,6 +22,7 @@ interface SheetDefinition {
   rows: (string | number | boolean | null)[][];
   columnWidths?: number[];
   freezeHeader?: boolean;
+  numberFormats?: SpreadsheetNumberFormatInput[];
 }
 
 interface XlsxOptions {
@@ -29,7 +39,14 @@ interface XlsxOptions {
 export async function generateXLSX(
   outputPath: string,
   options: XlsxOptions,
-): Promise<{ success: boolean; path: string; size: number; sheetCount: number }> {
+): Promise<{
+  success: boolean;
+  path: string;
+  size: number;
+  sheetCount: number;
+  formulas: FormulaComputationReport;
+  warnings: string[];
+}> {
   const ExcelJS = (await import("exceljs")).default;
   const workbook = new ExcelJS.Workbook();
 
@@ -40,6 +57,7 @@ export async function generateXLSX(
 
   const headerFill = options.theme?.headerColor || "2563EB";
   const headerFont = options.theme?.headerFontColor || "FFFFFF";
+  const warnings: string[] = [];
 
   for (const sheetDef of options.sheets) {
     const sheet = workbook.addWorksheet(sheetDef.name);
@@ -76,6 +94,13 @@ export async function generateXLSX(
       });
     }
 
+    warnings.push(
+      ...applySpreadsheetNumberFormats(sheet, sheetDef.numberFormats, {
+        headerRow: sheetDef.headers,
+        firstDataRow: 2,
+      }),
+    );
+
     // Column widths
     if (sheetDef.columnWidths) {
       sheetDef.columnWidths.forEach((w, i) => {
@@ -106,6 +131,11 @@ export async function generateXLSX(
     }
   }
 
+  // Cache results for the formulas CoWork can evaluate, so viewers that do not recalculate show
+  // values; Excel recalculates everything on open.
+  workbook.calcProperties.fullCalcOnLoad = true;
+  const formulas = computeWorkbookFormulaResults(workbook);
+
   await workbook.xlsx.writeFile(outputPath);
 
   const stat = fs.statSync(outputPath);
@@ -114,5 +144,7 @@ export async function generateXLSX(
     path: outputPath,
     size: stat.size,
     sheetCount: options.sheets.length,
+    formulas,
+    warnings,
   };
 }

@@ -839,6 +839,22 @@ describe("ToolRegistry tool catalog versioning", () => {
     }
   });
 
+  it("offers create_spreadsheet number formats as an array, not a map Gemini would drop", () => {
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-spreadsheet");
+    const createSpreadsheet = registry
+      .getTools()
+      .find((tool) => tool.name === "create_spreadsheet");
+    const numberFormats =
+      createSpreadsheet!.input_schema.properties.sheets.items.properties.numberFormats;
+
+    expect(numberFormats.type).toBe("array");
+    expect(numberFormats.items.additionalProperties).toBeUndefined();
+    expect(numberFormats.items.properties.numFmt.type).toBe("string");
+    expect(numberFormats.items.properties.column.type).toBe("string");
+    expect(numberFormats.items.properties.range.type).toBe("string");
+    expect(numberFormats.items.required).toEqual(["numFmt"]);
+  });
+
   it("advertises the table, list and code blocks create_document renders", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-document-schema");
     const createDocument = registry.getTools().find((tool) => tool.name === "create_document");

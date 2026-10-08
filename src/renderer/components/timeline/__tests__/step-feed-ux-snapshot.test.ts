@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { Check, Circle, Loader2 } from "lucide-react";
 
 import { StepFeed } from "../StepFeed";
+import { ClickableFilePath } from "../../MainContent/timeline-event-rendering";
 import type { TimelineIndicatorSpec } from "../timeline-indicators";
 
 function render(element: React.ReactElement): string {
@@ -159,5 +160,31 @@ describe("StepFeed UX snapshots", () => {
     expect(markup).toContain("Sharing negotiation_cheat_sheet.pdf");
     expect(markup).toContain("negotiation_cheat_sheet.pdf");
     expect(markup).toMatchSnapshot();
+  });
+
+  it("keeps an Output ready file link focusable when the row has nothing to expand", () => {
+    const markup = render(
+      React.createElement(StepFeed, {
+        title: React.createElement(
+          "span",
+          null,
+          "Output ready: ",
+          React.createElement(ClickableFilePath, {
+            path: "/workspace/meetup-budget.xlsx",
+            workspacePath: "/workspace",
+          }),
+        ),
+        timeLabel: "16:21",
+        indicator: makeIndicator({ icon: Check, tone: "success", label: "Completed" }),
+        expandable: false,
+        expanded: false,
+      }),
+    );
+
+    expect(markup).not.toMatch(/<button[^>]*disabled/);
+    expect(markup).not.toMatch(/<button[^>]*class="event-header/);
+    expect(markup).toMatch(
+      /<span class="clickable-file-path [^"]*" role="link" tabindex="0" aria-label="Open meetup-budget.xlsx"/,
+    );
   });
 });

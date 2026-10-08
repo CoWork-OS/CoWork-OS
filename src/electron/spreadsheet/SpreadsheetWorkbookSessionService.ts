@@ -138,6 +138,10 @@ function ensureSheetBounds(
 }
 
 function applyCellInput(cell: SpreadsheetPreviewCell, input: SpreadsheetCellInput): void {
+  // The formatted display and value type describe the old value; the next save re-derives them.
+  delete cell.displayValue;
+  delete cell.valueType;
+  delete cell.formulaPending;
   if (input.formula || input.value.startsWith("=")) {
     cell.formula = (input.formula || input.value.slice(1)).replace(/^=/, "");
     cell.value = input.value.startsWith("=") ? input.value : `=${cell.formula}`;
@@ -148,8 +152,10 @@ function applyCellInput(cell: SpreadsheetPreviewCell, input: SpreadsheetCellInpu
 }
 
 function cellType(cell: SpreadsheetPreviewCell | undefined): SpreadsheetCellData["type"] {
-  if (!cell || cell.value === "") return "blank";
+  if (!cell) return "blank";
   if (cell.formula) return "formula";
+  if (cell.value === "") return "blank";
+  if (cell.valueType === "date") return "date";
   if (/^#(?:DIV\/0!|N\/A|NAME\?|NULL!|NUM!|REF!|VALUE!)$/.test(cell.value)) return "error";
   if (cell.value === "TRUE" || cell.value === "FALSE") return "boolean";
   if (cell.value.trim() !== "" && Number.isFinite(Number(cell.value))) return "number";
@@ -168,7 +174,7 @@ function toCellData(
     column,
     address: `${spreadsheetColumnLetter(column - 1)}${row}`,
     type: cellType(base),
-    displayValue: base.value || "",
+    displayValue: base.displayValue ?? base.value ?? "",
   };
 }
 

@@ -1049,6 +1049,12 @@
   cursor: cell;
 }
 
+/* A formula saved without a result: the cell shows the formula, muted, until Excel recalculates. */
+.spreadsheet-viewer-grid td.formula-pending {
+  color: #6b7280;
+  font-style: italic;
+}
+
 .spreadsheet-viewer-grid td.selected {
   outline: 3px solid #0a84ff;
   outline-offset: -3px;

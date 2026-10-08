@@ -115,7 +115,7 @@ export function ClickableFilePath({
   className?: string;
   onOpenViewer?: (path: string) => void;
 }) {
-  const handleClick = async (e: React.MouseEvent) => {
+  const handleClick = async (e: React.MouseEvent | React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -146,13 +146,21 @@ export function ClickableFilePath({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") void handleClick(e);
+  };
+
   // Extract filename for display
   const fileName = path.split("/").pop() || path;
 
   return (
     <span
       className={`clickable-file-path ${className}`}
+      role="link"
+      tabIndex={0}
+      aria-label={`Open ${fileName}`}
       onClick={handleClick}
+      onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
       title={`${path}\n\nClick to preview • Right-click to show in Finder`}
     >

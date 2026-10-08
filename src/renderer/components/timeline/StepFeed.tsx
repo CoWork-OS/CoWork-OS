@@ -56,6 +56,29 @@ export function StepFeed({
   }, [onToggle, visibleExpanded]);
 
   const IndicatorIcon = indicator.icon;
+  const headerContent = (
+    <>
+      <div className="event-header-left">
+        <div className="event-title" title={titleTooltip}>
+          {title}
+        </div>
+        {expandable && (
+          <svg
+            className="event-expand-icon"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        )}
+      </div>
+      {!hideTime && <div className="event-time">{timeLabel}</div>}
+    </>
+  );
   return (
     <div className="timeline-event step-feed-card">
       <div className="event-indicator">
@@ -78,37 +101,31 @@ export function StepFeed({
         <span id={`step-feed-status-${generatedId}`} className="step-feed-sr-only">
           {indicator.label}
         </span>
-        <button
-          ref={buttonRef}
-          type="button"
-          className={`event-header ${expandable ? "expandable" : ""} ${visibleExpanded ? "expanded" : ""}`}
-          onClick={expandable ? handleToggle : undefined}
-          disabled={!expandable}
-          aria-expanded={expandable ? visibleExpanded : undefined}
-          aria-controls={expandable ? `step-feed-details-${generatedId}` : undefined}
-          aria-describedby={`step-feed-status-${generatedId}`}
-          id={`step-feed-toggle-${generatedId}`}
-        >
-          <div className="event-header-left">
-            <div className="event-title" title={titleTooltip}>
-              {title}
-            </div>
-            {expandable && (
-              <svg
-                className="event-expand-icon"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            )}
+        {expandable ? (
+          <button
+            ref={buttonRef}
+            type="button"
+            className={`event-header expandable ${visibleExpanded ? "expanded" : ""}`}
+            onClick={handleToggle}
+            aria-expanded={visibleExpanded}
+            aria-controls={`step-feed-details-${generatedId}`}
+            aria-describedby={`step-feed-status-${generatedId}`}
+            id={`step-feed-toggle-${generatedId}`}
+          >
+            {headerContent}
+          </button>
+        ) : (
+          // A row with nothing to expand is not a control. Rendering it as a
+          // disabled button would also disable and hide any link in its title
+          // (such as an "Output ready" file) from keyboard and accessibility users.
+          <div
+            className="event-header"
+            aria-describedby={`step-feed-status-${generatedId}`}
+            id={`step-feed-toggle-${generatedId}`}
+          >
+            {headerContent}
           </div>
-          {!hideTime && <div className="event-time">{timeLabel}</div>}
-        </button>
+        )}
         {subtitle ? (
           <div className="event-subtitle" title={subtitleTooltip}>
             {subtitle}

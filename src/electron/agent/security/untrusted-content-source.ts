@@ -1,13 +1,14 @@
 /**
  * Taint for content that did not come from the user's workspace (docs/memory-repo-phase1-design.md
- * §7.3 item 2): web pages, browser pages, mailbox messages and channel history. Tools that hand
+ * §7.3 item 2): web pages, browser pages, mailbox messages, channel history and business-agent
+ * replies (PACT, `business://<interface origin>`). Tools that hand
  * such text to the model record it as a sensitive source read; `isUntrustedExternalSource`
  * then classifies the task as having read untrusted content, so an agent memory write after it
  * goes to the memory repo's `inbox.md`, and permission prompts show the recent untrusted read.
  */
 import type { SensitiveSourceRef } from "../../../shared/types";
 
-export type UntrustedContentChannel = "web" | "browser" | "mailbox" | "channel";
+export type UntrustedContentChannel = "web" | "browser" | "mailbox" | "channel" | "business";
 
 /** The part of a URL worth showing: no credentials, query or fragment. */
 function displayUrl(raw: string): string {

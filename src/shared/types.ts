@@ -1826,10 +1826,10 @@ export const TOOL_GROUPS = {
     "x_search",
     "voice_call",
     "x_action",
-    // PACT business agents: every call reaches a business over the network.
+    // PACT business agents that reach a business over the network (stored conversations
+    // are read locally by pact_get_conversation).
     "pact_discover",
     "pact_send_message",
-    "pact_get_conversation",
     "notion_action",
     "box_action",
     "onedrive_action",
@@ -2090,7 +2090,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   x_action: "network",
   pact_discover: "network",
   pact_send_message: "network",
-  pact_get_conversation: "network",
+  pact_get_conversation: "read",
   notion_action: "network",
   box_action: "network",
   onedrive_action: "network",

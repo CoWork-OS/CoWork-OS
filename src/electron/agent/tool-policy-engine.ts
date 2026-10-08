@@ -273,12 +273,13 @@ const WEB_SURFACE_PATTERN =
 const ORCHESTRATION_INTENT_PATTERN =
   /\b(spawn agent|sub-?agent|child task|child agent|delegate|parallel agent|orchestrate|multi-agent|handoff|coordinate agents|agent team)\b/i;
 /**
- * A request to get something done with a business: account objects ("my order", "my booking"),
- * account actions with a business object, or support contact. The user does not need to say
- * "PACT" or a scope name; the tools themselves never act without admission and consent.
+ * A request to get something done with a business: the user's own account objects ("my order",
+ * "my booking"), business objects ("the order", never generic ones like "the plan" or "the
+ * ticket", which coding prompts use), account actions on them, or support contact. The user does
+ * not need to say "PACT" or a scope name; the tools never act without admission and consent.
  */
 const BUSINESS_INTERACTION_INTENT_PATTERN =
-  /\b(?:my|our|the)\s+(?:order|orders|booking|bookings|reservation|reservations|flight|flights|trip|trips|delivery|deliveries|package|parcel|shipment|subscription|subscriptions|account|bill|invoice|refund|return|appointment|ticket|plan|membership|policy|claim)\b|\b(?:cancel|refund|rebook|reschedule|return|exchange|track|upgrade|downgrade|renew)\b[\s\S]{0,60}\b(?:order|booking|reservation|flight|trip|delivery|package|shipment|subscription|account|appointment|ticket|plan|membership|purchase)\b|\b(?:customer (?:service|support)|support agent|contact (?:the )?(?:store|shop|airline|merchant|business|company|retailer)|(?:ask|tell|message|talk to|chat with) (?:the )?(?:store|shop|airline|merchant|business|company|retailer|support))\b/i;
+  /\b(?:my|our)\s+(?:order|orders|booking|bookings|reservation|reservations|flight|flights|trip|trips|delivery|deliveries|package|parcel|shipment|subscription|subscriptions|account|bill|invoice|refund|return|appointment|ticket|plan|membership|policy|claim)\b|\bthe\s+(?:order|booking|reservation|flight|delivery|package|parcel|shipment|subscription|refund)\b|\b(?:cancel|refund|rebook|reschedule|return|exchange|track|upgrade|downgrade|renew)\b[\s\S]{0,60}\b(?:order|booking|reservation|flight|trip|delivery|package|shipment|subscription|appointment|membership|purchase)\b|\b(?:customer (?:service|support)|support agent|contact (?:the )?(?:store|shop|airline|merchant|business|company|retailer)|(?:ask|tell|message|talk to|chat with) (?:the )?(?:store|shop|airline|merchant|business|company|retailer|support))\b/i;
 /** Explicit references, used alone when auto-routing is off. */
 const PACT_EXPLICIT_INTENT_PATTERN =
   /\b(?:pact|business agent|agent card|pact_discover|pact_send_message)\b/i;

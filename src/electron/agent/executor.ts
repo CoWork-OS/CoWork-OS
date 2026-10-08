@@ -11277,6 +11277,12 @@ ${transcript}
       );
     }
 
+    if (toolName === "pact_send_message") {
+      // A business sign-in waits for the user on the business's own page (up to 30 minutes),
+      // plus the local approval and the send itself; aborting earlier would cancel the wait.
+      return normalizedSettingsTimeout ?? 45 * 60 * 1000;
+    }
+
     if (toolName === "request_user_input") {
       // Structured user input waits on a real human response and can legitimately
       // exceed a single step window. Avoid timing this out at the step deadline.

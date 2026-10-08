@@ -107,6 +107,7 @@ export class PactDiscoveryService {
     rules: PactUrlRules;
     providerContext: PactProviderContext;
     forceRefresh?: boolean;
+    signal?: AbortSignal;
   }): Promise<PactDiscoveryResult> {
     const cardUrl = resolveCardUrl(input, input.rules);
     const cached = await this.deps.repo.getBusinessByCardUrl(cardUrl);
@@ -154,11 +155,21 @@ export class PactDiscoveryService {
 
   private async fetchAndStore(
     cardUrl: string,
-    input: { transport: PactTransport; rules: PactUrlRules; providerContext: PactProviderContext },
+    input: {
+      transport: PactTransport;
+      rules: PactUrlRules;
+      providerContext: PactProviderContext;
+      signal?: AbortSignal;
+    },
   ): Promise<PactDiscoveryResult> {
     let response;
     try {
-      response = await input.transport.request({ purpose: "card", method: "GET", url: cardUrl });
+      response = await input.transport.request({
+        purpose: "card",
+        method: "GET",
+        url: cardUrl,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
     } catch (error) {
       if (error instanceof PactTransportError && error.code === "policy_denied") {
         throw new PactDiscoveryError("policy_denied", error.message);
@@ -274,7 +285,7 @@ export class PactDiscoveryService {
 
   private async fetchMetadata(
     metadataUrl: string,
-    input: { transport: PactTransport },
+    input: { transport: PactTransport; signal?: AbortSignal },
   ): Promise<unknown> {
     let response;
     try {
@@ -282,6 +293,7 @@ export class PactDiscoveryService {
         purpose: "metadata",
         method: "GET",
         url: metadataUrl,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
     } catch (error) {
       throw new PactDiscoveryError(

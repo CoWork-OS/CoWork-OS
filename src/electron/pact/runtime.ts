@@ -574,6 +574,7 @@ export class PactRuntime {
       transport: this.deps.transportFor(ctx.networkContext, ctx.taskId),
       rules: this.rules(),
       providerContext: await this.providerContext(signerStatus),
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
     if (result.securityChanged) await this.onBusinessSecurityChanged(result.business);
     const route = resolveBusinessRoute({

@@ -28,6 +28,7 @@ function makeDaemon(task: Record<string, unknown>) {
     },
   };
   const daemon = {
+    recordSensitiveSourceRead: vi.fn(),
     getTask: () => task,
     getEffectiveWorkspaceForTask: () => ({
       id: "ws",
@@ -101,6 +102,15 @@ describe("PACT tools", () => {
         runtime,
       ).decision,
     ).toBe("defer");
+    for (const coding of [
+      "Update the plan and close the ticket",
+      "Fix the account settings page",
+      "Refactor the policy module",
+    ]) {
+      expect(
+        evaluateToolAvailability("pact_send_message", { taskText: coding }, runtime).decision,
+      ).toBe("defer");
+    }
     policyState.autoRoute = false;
     const explicit = send().runtime;
     expect(explicit?.exposure).toBe("explicit_only");
@@ -179,5 +189,102 @@ describe("PACT tools", () => {
     await expect(tools.sendMessage({ message: "hi" })).resolves.toMatchObject({ success: false });
     await expect(tools.discover({})).resolves.toMatchObject({ success: false });
     expect(runtime.send).not.toHaveBeenCalled();
+  });
+
+  it("is offered only to the owner's own top-level tasks", () => {
+    expect(
+      new PactTools(workspace, makeDaemon({ id: "t" }).daemon as never, "t").offeredToTask(),
+    ).toBe(true);
+    expect(
+      new PactTools(
+        workspace,
+        makeDaemon({ id: "t", parentTaskId: "p" }).daemon as never,
+        "t",
+      ).offeredToTask(),
+    ).toBe(false);
+    expect(
+      new PactTools(
+        workspace,
+        makeDaemon({ id: "t", agentConfig: { gatewayContext: { channelType: "slack" } } })
+          .daemon as never,
+        "t",
+      ).offeredToTask(),
+    ).toBe(false);
+  });
+
+  it("redacts and caps business replies and marks them untrusted", async () => {
+    const { daemon, runtime } = makeDaemon({ id: "t" });
+    runtime.send.mockResolvedValue({
+      status: "replied",
+      conversationId: "c",
+      turnId: "m",
+      replyText: `Use Bearer abc.def.ghi to log in. ${"x".repeat(9000)}`,
+      evidence: "verified",
+    });
+    const result = (await new PactTools(workspace, daemon as never, "t").sendMessage({
+      business_id: "b",
+      message: "Where is my order?",
+      effect: "inspect",
+    })) as { reply: string };
+    expect(result.reply).not.toContain("abc.def.ghi");
+    expect(result.reply.length).toBeLessThan(8_200);
+    expect(result.reply).toMatch(/reply truncated/);
+    expect(daemon.recordSensitiveSourceRead).toHaveBeenCalledWith(
+      "t",
+      expect.objectContaining({ path: "business://https://p.example", trustLevel: "untrusted" }),
+    );
+  });
+
+  it("returns stored conversations safely and reports lookup failures without leaking", async () => {
+    const { daemon, runtime } = makeDaemon({ id: "t" });
+    runtime.getConversation.mockResolvedValue({
+      id: "c",
+      businessId: "b",
+      businessName: "Shop",
+      state: "replied",
+      turns: [
+        {
+          operationId: "op",
+          text: "hi",
+          state: "replied",
+          effectClass: "inspect",
+          replyText: "eyJabcde.eyJfghij.sig",
+          evidence: "verified",
+        },
+      ],
+    });
+    const tools = new PactTools(workspace, daemon as never, "t");
+    const view = (await tools.getConversation({ conversation_id: "c" })) as {
+      turns: { reply: string }[];
+    };
+    expect(view.turns[0]!.reply).not.toContain("eyJabcde");
+    runtime.getConversation.mockRejectedValue(
+      new Error("db failed with Bearer secret-token-value"),
+    );
+    const failed = (await tools.getConversation({ conversation_id: "c" })) as { error: string };
+    expect(failed.error).not.toContain("secret-token-value");
+  });
+
+  it("passes the abort signal to discovery", async () => {
+    const { daemon, runtime } = makeDaemon({ id: "t" });
+    runtime.discover.mockResolvedValue({
+      business: {
+        id: "b",
+        displayName: "Shop",
+        originChain: ["https://shop.example/.well-known/agent-card.json"],
+        providerOrigin: "https://p.example",
+        supported: true,
+        profile: "identity",
+        scopes: [],
+        skills: [],
+      },
+      route: { route: "pact", reason: "supported" },
+    });
+    const controller = new AbortController();
+    await new PactTools(workspace, daemon as never, "t").discover(
+      { domain: "shop.example" },
+      controller.signal,
+    );
+    expect(runtime.discover.mock.calls[0]![2].signal).toBe(controller.signal);
   });
 });

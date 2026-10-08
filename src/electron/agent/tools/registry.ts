@@ -1374,11 +1374,13 @@ export class ToolRegistry {
     // web_search is always available (DuckDuckGo provides free fallback)
     allTools.push(...this.getSearchToolDefinitions());
 
-    // x_search is opt-in through built-in tool settings and only appears when
-    // xAI OAuth or API-key credentials are configured.
-    if (PactTools.isAvailable()) {
+    // PACT business agents: only for the owner's own top-level tasks (never sub-agents or
+    // channel conversations, whatever the guardrail phase flags say).
+    if (PactTools.isAvailable() && this.pactTools.offeredToTask()) {
       allTools.push(...this.pactTools.getToolDefinitions());
     }
+    // x_search is opt-in through built-in tool settings and only appears when
+    // xAI OAuth or API-key credentials are configured.
     if (XSearchTools.hasCredentials()) {
       allTools.push(...this.getXSearchToolDefinitions());
     }
@@ -2093,8 +2095,10 @@ export class ToolRegistry {
     }
     if (canonicalToolName.endsWith("_action") || canonicalToolName === "voice_call")
       return "external_service";
-    // A message to a business agent can change the user's account there.
+    // A message to a business agent can change the user's account there; reading a stored
+    // PACT conversation is local.
     if (canonicalToolName === "pact_send_message") return "external_service";
+    if (canonicalToolName === "pact_get_conversation") return null;
     if (canonicalToolName === "open_application" || isComputerUseToolName(canonicalToolName)) {
       return "computer_use";
     }
@@ -2408,7 +2412,14 @@ export class ToolRegistry {
           : {}),
       };
       const runtimeApprovalRequired =
-        runtime.approvalKind !== "none" && runtime.approvalKind !== "workspace_policy";
+        runtime.approvalKind !== "none" &&
+        runtime.approvalKind !== "workspace_policy" &&
+        // PACT admission is the authoritative gate for business messages: it asks per operation
+        // (effect class, scopes, token breadth) through requestApproval, which honours the
+        // access profile, and fails closed with interactive_approval_unavailable. A blanket
+        // runtime-metadata prompt here would ask twice and deny headless tasks before admission.
+        // Permission-engine denials still apply below.
+        context.request.name !== "pact_send_message";
       const semanticReview = this.buildJevSemanticReviewEvaluation({
         toolName: context.request.name,
         toolInput: context.request.input,
@@ -2904,7 +2915,11 @@ export class ToolRegistry {
     );
     register(
       "pact_discover",
-      async ({ request }) => this.pactTools.discover(request.input),
+      async ({ request }) =>
+        this.pactTools.discover(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
       readParallelSchedulerSpec,
     );
     register(

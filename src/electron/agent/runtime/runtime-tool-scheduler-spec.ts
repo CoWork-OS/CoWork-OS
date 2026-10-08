@@ -100,6 +100,8 @@ const EXCLUSIVE_TOOLS = new Set([
 ]);
 
 const IDEMPOTENT_TOOLS = new Set([
+  "pact_discover",
+  "pact_get_conversation",
   "read_file",
   "read_files",
   "list_directory",

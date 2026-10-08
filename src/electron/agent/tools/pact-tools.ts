@@ -3,7 +3,9 @@ import type { RuntimeToolMetadata, Task, Workspace } from "../../../shared/types
 import { isAutomatedTaskLike } from "../../../shared/automated-task-detection";
 import { getPactPolicy } from "../../admin/policies";
 import { networkContextOf } from "../../pact/daemon-host";
+import { resolveCardUrl } from "../../pact/discovery-service";
 import { redactPact, redactPactError } from "../../pact/redaction";
+import { recordUntrustedContentRead } from "../security/untrusted-content-source";
 import { pactToolsExposed } from "../../pact/routing";
 import type { PactCallContext } from "../../pact/runtime";
 import { PactSettingsManager } from "../../pact/settings";
@@ -20,6 +22,15 @@ export const PACT_TOOL_NAMES = [
 
 const EFFECTS: readonly PactEffectClass[] = ["inspect", "change", "unknown"];
 const MAX_SCOPES = 20;
+/** Business text handed to the model is capped; the full reply stays in the conversation. */
+const MAX_REPLY_CHARS = 8_000;
+
+function capReply(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  return text.length > MAX_REPLY_CHARS
+    ? `${text.slice(0, MAX_REPLY_CHARS)}\n… [reply truncated; ${text.length} characters]`
+    : text;
+}
 
 function stringInput(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -101,7 +112,8 @@ export class PactTools {
             domain: { type: "string", description: "The business's own domain, e.g. example.com" },
             card_url: {
               type: "string",
-              description: "An HTTPS agent card URL the user or the business provided",
+              description:
+                "An HTTPS agent card URL the user or the business provided; it is fetched as given, query string included",
             },
             refresh: {
               type: "boolean",
@@ -110,7 +122,9 @@ export class PactTools {
           },
           required: [],
         },
-        runtime: { ...readRuntime },
+        // Read-only for plan mode, but it fetches from the business and updates the local card
+        // cache (which can invalidate stale permissions).
+        runtime: { ...readRuntime, sideEffectLevel: "low" },
       },
       {
         name: "pact_send_message",
@@ -165,7 +179,7 @@ export class PactTools {
       {
         name: "pact_get_conversation",
         description:
-          "Use to review an earlier PACT conversation with a business: the messages CoWork sent, the replies, and whether each reply carried verified evidence (a signed receipt).",
+          "Use to review an earlier PACT conversation with a business: the messages CoWork sent, the replies, and whether each reply carried verified evidence (a signed receipt). It is also where to find the operation_id of a request whose outcome is unknown, before passing it to pact_send_message as reconcile_operation_id.",
         input_schema: {
           type: "object",
           properties: {
@@ -183,6 +197,33 @@ export class PactTools {
 
   private task(): Task | undefined {
     return this.daemon.getTask(this.taskId);
+  }
+
+  /**
+   * PACT acts with the owner's identity, so only the owner's own top-level tasks are offered the
+   * tools: never sub-agents, channel conversations or scheduled work. (Admission denies them too.)
+   */
+  offeredToTask(): boolean {
+    const task = this.task();
+    if (!task) return false;
+    return !task.parentTaskId && !task.agentConfig?.gatewayContext && !isAutomatedTaskLike(task);
+  }
+
+  /** Business replies, scopes and skills are untrusted content (design §7.3). */
+  private async markUntrusted(businessId: string): Promise<void> {
+    try {
+      const business = await this.daemon.getPactRuntime().repo.getBusiness(businessId);
+      const origin = business ? new URL(business.interfaceUrl).origin : "unknown";
+      recordUntrustedContentRead(
+        this.daemon,
+        this.taskId,
+        "business",
+        `business://${origin}`,
+        "pact",
+      );
+    } catch {
+      // Taint is best effort; the result is still returned.
+    }
   }
 
   /** Where this call comes from, decided from the task record, never from tool input. */
@@ -232,9 +273,13 @@ export class PactTools {
       if (toolName === "pact_discover") {
         const cardUrl = stringInput(record.card_url, 2048);
         const domain = stringInput(record.domain, 253);
-        const url =
-          cardUrl ?? (domain ? `https://${domain}/.well-known/agent-card.json` : undefined);
-        return url ? { permissionInput: { url } } : {};
+        if (!cardUrl && !domain) return {};
+        // Exactly the URL discovery will fetch, so domain rules see the real destination.
+        const url = resolveCardUrl(cardUrl ? { cardUrl } : { domain: domain! }, {
+          allowLoopbackHttp:
+            PactSettingsManager.loadSettings().identity.deployment === "development",
+        });
+        return { permissionInput: { url } };
       }
       if (toolName === "pact_send_message") {
         const businessId = stringInput(record.business_id, 200);
@@ -256,7 +301,7 @@ export class PactTools {
     return {};
   }
 
-  async discover(input: unknown) {
+  async discover(input: unknown, signal?: AbortSignal) {
     const record = (input ?? {}) as Record<string, unknown>;
     const domain = stringInput(record.domain, 253);
     const cardUrl = stringInput(record.card_url, 2048);
@@ -271,9 +316,10 @@ export class PactTools {
           ...(cardUrl ? { cardUrl } : {}),
           refresh: record.refresh === true,
         },
-        this.callContext(),
+        this.callContext(signal),
       );
-      return {
+      await this.markUntrusted(business.id);
+      return redactPact({
         success: true,
         business_id: business.id,
         name: business.displayName,
@@ -291,7 +337,7 @@ export class PactTools {
         route: route.route,
         guidance:
           route.route === "pact" ? "Use pact_send_message with this business_id." : route.message,
-      };
+      });
     } catch (error) {
       return { success: false, error: redactPactError(error) };
     }
@@ -324,6 +370,7 @@ export class PactTools {
         },
         this.callContext(signal),
       );
+      if (outcome.status === "replied") await this.markUntrusted(businessId);
       return this.toToolResult(outcome);
     } catch (error) {
       return { success: false, error: redactPactError(error) };
@@ -333,11 +380,12 @@ export class PactTools {
   private toToolResult(outcome: PactSendOutcome) {
     switch (outcome.status) {
       case "replied":
-        return {
+        // Business text: redacted like every PACT result, and capped.
+        return redactPact({
           success: true,
           status: "replied",
           conversation_id: outcome.conversationId,
-          reply: outcome.replyText,
+          reply: capReply(outcome.replyText),
           evidence: outcome.evidence,
           note:
             outcome.evidence === "verified"
@@ -345,7 +393,7 @@ export class PactTools {
               : outcome.evidence === "not_applicable"
                 ? "No account permission was used, so no receipt is expected."
                 : "This reply has no verified receipt; tell the user the outcome is unverified.",
-        };
+        });
       case "needs_user_action":
         return {
           success: false,
@@ -369,24 +417,29 @@ export class PactTools {
     const record = (input ?? {}) as Record<string, unknown>;
     const conversationId = stringInput(record.conversation_id, 200);
     if (!conversationId) return { success: false, error: "conversation_id is required." };
-    const view = await this.daemon
-      .getPactRuntime()
-      .getConversation(await this.principal(), conversationId);
-    if (!view) return { success: false, error: "Unknown conversation." };
-    return {
-      success: true,
-      conversation_id: view.id,
-      business: view.businessName,
-      state: view.state,
-      ...(view.stateReason ? { state_reason: view.stateReason } : {}),
-      turns: view.turns.map((turn) => ({
-        operation_id: turn.operationId,
-        sent: turn.text,
-        state: turn.state,
-        effect: turn.effectClass,
-        reply: turn.replyText,
-        evidence: turn.evidence,
-      })),
-    };
+    try {
+      const view = await this.daemon
+        .getPactRuntime()
+        .getConversation(await this.principal(), conversationId);
+      if (!view) return { success: false, error: "Unknown conversation." };
+      await this.markUntrusted(view.businessId);
+      return redactPact({
+        success: true,
+        conversation_id: view.id,
+        business: view.businessName,
+        state: view.state,
+        ...(view.stateReason ? { state_reason: view.stateReason } : {}),
+        turns: view.turns.slice(-20).map((turn) => ({
+          operation_id: turn.operationId,
+          sent: turn.text,
+          state: turn.state,
+          effect: turn.effectClass,
+          reply: capReply(turn.replyText),
+          evidence: turn.evidence,
+        })),
+      });
+    } catch (error) {
+      return { success: false, error: redactPactError(error) };
+    }
   }
 }

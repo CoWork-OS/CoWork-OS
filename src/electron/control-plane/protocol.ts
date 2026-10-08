@@ -323,17 +323,6 @@ export const Methods = {
   MANAGED_SESSION_SEND_EVENT: "managedSession.sendEvent",
   MANAGED_SESSION_EVENTS_LIST: "managedSession.events.list",
 
-  // Everyday Agent operations
-  EVERYDAY_AGENT_GET_PROFILE: "everydayAgent.getProfile",
-  EVERYDAY_AGENT_UPDATE_PROFILE: "everydayAgent.updateProfile",
-  EVERYDAY_AGENT_ACCEPT_CONSENT: "everydayAgent.acceptConsent",
-  EVERYDAY_AGENT_PAUSE: "everydayAgent.pause",
-  EVERYDAY_AGENT_REVOKE_CAPABILITY: "everydayAgent.revokeCapability",
-  EVERYDAY_AGENT_LIST_RECEIPTS: "everydayAgent.listReceipts",
-  EVERYDAY_AGENT_CLEAR_DATA: "everydayAgent.clearData",
-  EVERYDAY_AGENT_PREVIEW_ACTION: "everydayAgent.previewAction",
-  EVERYDAY_AGENT_APPROVE_ACTION: "everydayAgent.approveAction",
-
   // Agent operations
   AGENT_WAKE: "agent.wake",
   AGENT_SEND: "agent.send",

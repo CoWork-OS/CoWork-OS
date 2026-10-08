@@ -62,7 +62,6 @@ const OriginChannelSchema = z.preprocess(
     "signal",
     "mattermost",
     "matrix",
-    "twitch",
     "line",
     "bluebubbles",
     "email",
@@ -302,8 +301,6 @@ export const AgentConfigSchema = z
       })
       .strict()
       .optional(),
-    councilMode: z.boolean().optional(),
-    councilRunId: z.string().uuid().optional(),
     verificationAgent: z.boolean().optional(),
     reviewPolicy: z.enum(["off", "balanced", "strict"]).optional(),
     entropySweepPolicy: z.enum(["off", "balanced", "strict"]).optional(),
@@ -1636,16 +1633,6 @@ export const AddMatrixChannelSchema = z.object({
   securityMode: SecurityModeSchema.optional(),
 });
 
-export const AddTwitchChannelSchema = z.object({
-  type: z.literal("twitch"),
-  name: z.string().min(1).max(MAX_TITLE_LENGTH),
-  twitchUsername: z.string().min(1).max(100),
-  twitchOauthToken: z.string().min(1).max(500),
-  twitchChannels: z.array(z.string().max(100)).min(1).max(50),
-  twitchAllowWhispers: z.boolean().optional(),
-  securityMode: SecurityModeSchema.optional(),
-});
-
 export const AddLineChannelSchema = z.object({
   type: z.literal("line"),
   name: z.string().min(1).max(MAX_TITLE_LENGTH),
@@ -2116,7 +2103,6 @@ export const AddChannelSchema = z.discriminatedUnion("type", [
   AddSignalChannelSchema,
   AddMattermostChannelSchema,
   AddMatrixChannelSchema,
-  AddTwitchChannelSchema,
   AddLineChannelSchema,
   AddBlueBubblesChannelSchema,
   AddGoogleChatChannelSchema,
@@ -2232,7 +2218,6 @@ const CHANNEL_TYPE_VALUES = [
   "signal",
   "mattermost",
   "matrix",
-  "twitch",
   "line",
   "bluebubbles",
   "email",

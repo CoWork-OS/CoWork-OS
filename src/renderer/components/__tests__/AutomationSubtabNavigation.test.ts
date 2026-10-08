@@ -22,7 +22,6 @@ describe("Automation settings subtab availability", () => {
     ).toEqual({ available: true, message: "" });
     for (const tab of [
       "queue",
-      "council",
       "subconscious",
       "scheduled",
       "hooks",
@@ -84,7 +83,7 @@ describe("Automation settings subtab availability", () => {
     expect(markup).toContain('<button type="button" class="more-channels-tab active"');
     expect(markup).toContain('disabled="" title="Task Queue is unavailable on this browser host.');
     expect(markup).toContain('role="status"');
-    expect(markup).toContain("Task Queue, R&amp;D Council");
+    expect(markup).toContain("Task Queue, Workflow Intelligence");
     expect(markup).toContain("desktop app");
   });
 });

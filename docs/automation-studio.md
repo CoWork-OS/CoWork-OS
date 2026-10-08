@@ -10,7 +10,7 @@ Advanced and compatibility controls remain under **Settings → Automations**. T
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | Build a multi-step flow with typed fields, variables, branches, testing, approvals, and versioned activation | Main sidebar **Automations**                                             |
 | Turn the current task into a recurring same-thread or new-task automation                                    | Task menu **… → Add automation…**                                        |
-| Find prompt routines, flows, schedules, events, webhooks, and Councils                                       | Main sidebar **Automations → Library**                                   |
+| Find prompt routines, flows, schedules, events, and webhooks                                                 | Main sidebar **Automations → Library**                                   |
 | Create or inspect a prompt-based routine                                                                     | Task menu **… → Add automation…** or the advanced Routines editor        |
 | Manage the cron, inbound hook, or event-trigger engine directly                                              | **Settings → Automations → Scheduled Tasks / Webhooks / Event Triggers** |
 | Watch a connected MCP server event and run saved instructions                                                 | **Settings → Automations → Event Triggers → MCP Event** ([setup guide](./mcp-events.md)) |
@@ -43,7 +43,7 @@ The bundled patterns cover unread email recaps, saving Gmail attachments to Driv
 
 ### Library
 
-Library projects existing owners into one searchable view. Prompt Routines and structured flows appear once as Routine owners; schedules, event triggers, action-bearing webhook rules, and Councils appear when they are standalone. A managed child is grouped only when its exact managed resource ID points back to its owner. A same-name job stays visible. Ambiguous ID ownership is shown as a warning.
+Library projects existing owners into one searchable view. Prompt Routines and structured flows appear once as Routine owners; schedules, event triggers, and action-bearing webhook rules appear when they are standalone. A managed child is grouped only when its exact managed resource ID points back to its owner. A same-name job stays visible. Ambiguous ID ownership is shown as a warning.
 
 Library identities include the active CoWork profile ID returned by the profile API. If the active profile cannot be identified, the Library labels that scope as unknown and does not claim cross-profile uniqueness.
 

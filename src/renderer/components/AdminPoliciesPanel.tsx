@@ -15,18 +15,6 @@ interface AdminPolicies {
     maxHeartbeatFrequencySec: number;
     maxConcurrentAgents: number;
   };
-  everydayAgent: {
-    blocked: boolean;
-    blockedBundles: string[];
-    forceReviewOnly: boolean;
-    maxHeartbeatCadenceMinutes: number;
-    maxConcurrentBackgroundWork: number;
-    activeHours: {
-      enabled: boolean;
-      timezone?: string;
-      windows: Array<{ days: number[]; start: string; end: string }>;
-    };
-  };
   runtime: ShellRuntimePolicies & {
     agentSecurity: {
       enabled: boolean;
@@ -160,11 +148,6 @@ export function AdminPoliciesPanel() {
   const [blockedConnectors, setBlockedConnectors] = useState("");
   const [maxHeartbeat, setMaxHeartbeat] = useState(60);
   const [maxAgents, setMaxAgents] = useState(10);
-  const [everydayBlocked, setEverydayBlocked] = useState(false);
-  const [everydayBlockedBundles, setEverydayBlockedBundles] = useState("");
-  const [everydayReviewOnly, setEverydayReviewOnly] = useState(false);
-  const [everydayMaxCadence, setEverydayMaxCadence] = useState(60);
-  const [everydayMaxWork, setEverydayMaxWork] = useState(1);
   const [allowCustom, setAllowCustom] = useState(true);
   const [allowGit, setAllowGit] = useState(true);
   const [allowUrl, setAllowUrl] = useState(true);
@@ -195,11 +178,6 @@ export function AdminPoliciesPanel() {
       setBlockedConnectors(data.connectors.blocked.join(", "));
       setMaxHeartbeat(data.agents.maxHeartbeatFrequencySec);
       setMaxAgents(data.agents.maxConcurrentAgents);
-      setEverydayBlocked(data.everydayAgent?.blocked === true);
-      setEverydayBlockedBundles((data.everydayAgent?.blockedBundles || []).join(", "));
-      setEverydayReviewOnly(data.everydayAgent?.forceReviewOnly === true);
-      setEverydayMaxCadence(data.everydayAgent?.maxHeartbeatCadenceMinutes || 60);
-      setEverydayMaxWork(data.everydayAgent?.maxConcurrentBackgroundWork || 1);
       setAllowCustom(data.general.allowCustomPacks);
       setAllowGit(data.general.allowGitInstall);
       setAllowUrl(data.general.allowUrlInstall);
@@ -249,13 +227,6 @@ export function AdminPoliciesPanel() {
         agents: {
           maxHeartbeatFrequencySec: Math.max(60, maxHeartbeat),
           maxConcurrentAgents: Math.max(1, maxAgents),
-        },
-        everydayAgent: {
-          blocked: everydayBlocked,
-          blockedBundles: parseList(everydayBlockedBundles),
-          forceReviewOnly: everydayReviewOnly,
-          maxHeartbeatCadenceMinutes: Math.max(5, everydayMaxCadence),
-          maxConcurrentBackgroundWork: Math.max(1, everydayMaxWork),
         },
         runtime: {
           agentSecurity: {
@@ -427,64 +398,6 @@ export function AdminPoliciesPanel() {
               onChange={(e) => setMaxAgents(parseInt(e.target.value) || 10)}
             />
             <span className="ap-hint">Maximum agents per workspace.</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Everyday Agent Policies */}
-      <div className="settings-section">
-        <h3>Everyday Agent</h3>
-        <label className="ap-toggle-row">
-          <input
-            type="checkbox"
-            checked={everydayBlocked}
-            onChange={(e) => setEverydayBlocked(e.target.checked)}
-          />
-          <span>Block Everyday Agent entirely</span>
-        </label>
-        <label className="ap-toggle-row">
-          <input
-            type="checkbox"
-            checked={everydayReviewOnly}
-            onChange={(e) => setEverydayReviewOnly(e.target.checked)}
-          />
-          <span>Force review-only mode</span>
-        </label>
-        <div className="ap-field">
-          <label className="ap-label">Blocked Capability Bundles</label>
-          <input
-            type="text"
-            className="ap-input"
-            value={everydayBlockedBundles}
-            onChange={(e) => setEverydayBlockedBundles(e.target.value)}
-            placeholder="inbox, browser, memory"
-          />
-          <span className="ap-hint">
-            Valid IDs: inbox, calendar, browser, files, docs, messages, github_work, memory,
-            screen_context, remote_devices, automations.
-          </span>
-        </div>
-        <div className="ap-row">
-          <div className="ap-field ap-field-half">
-            <label className="ap-label">Max Heartbeat Cadence (min)</label>
-            <input
-              type="number"
-              className="ap-input"
-              value={everydayMaxCadence}
-              min={5}
-              onChange={(e) => setEverydayMaxCadence(parseInt(e.target.value) || 60)}
-            />
-          </div>
-          <div className="ap-field ap-field-half">
-            <label className="ap-label">Max Background Work</label>
-            <input
-              type="number"
-              className="ap-input"
-              value={everydayMaxWork}
-              min={1}
-              max={20}
-              onChange={(e) => setEverydayMaxWork(parseInt(e.target.value) || 1)}
-            />
           </div>
         </div>
       </div>

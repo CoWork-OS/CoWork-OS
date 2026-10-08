@@ -24,7 +24,6 @@ Use these dedicated guides when you want channel-specific details without scanni
 | Signal             | [Signal User Guide](channel-guides/signal.md)                         |
 | Mattermost         | [Mattermost User Guide](channel-guides/mattermost.md)                 |
 | Matrix             | [Matrix User Guide](channel-guides/matrix.md)                         |
-| Twitch             | [Twitch User Guide](channel-guides/twitch.md)                         |
 | LINE               | [LINE User Guide](channel-guides/line.md)                             |
 | BlueBubbles        | [BlueBubbles User Guide](channel-guides/bluebubbles.md)               |
 | Email              | [Email User Guide](channel-guides/email.md)                           |
@@ -417,34 +416,6 @@ Watch-outs:
 - Federation can add delivery variability.
 - Access tokens should be treated as sensitive credentials.
 
-## Twitch
-
-Best for:
-
-- Live-stream chat interaction.
-- Lightweight audience prompts or moderator-controlled bot usage.
-- Streaming workflows where CoWork responds in chat.
-
-Features:
-
-- IRC chat integration over WebSocket.
-- Multi-channel support.
-- Text-only responses.
-- Automatic splitting for longer replies.
-
-Best practices:
-
-- Use moderator-only or command-only patterns for serious tasks.
-- Keep prompts short and outputs concise.
-- Use Twitch for public interaction, not sensitive work.
-- Route deeper work to a private channel or desktop session.
-
-Watch-outs:
-
-- Twitch has strict message length and rate limits.
-- No file attachments.
-- Public chat should be treated as untrusted input.
-
 ## LINE
 
 Best for:
@@ -573,7 +544,7 @@ Watch-outs:
 | Engineering/community workflows | Discord, Slack, Mattermost, Matrix     |
 | Enterprise tenant chat          | Teams, Google Chat, Feishu/Lark, WeCom |
 | Apple Messages workflows        | iMessage, BlueBubbles                  |
-| Public interaction              | Twitch, X mention triggers             |
+| Public interaction              | X mention triggers                     |
 | Asynchronous requests           | Email                                  |
 | Privacy-sensitive mobile chat   | Signal                                 |
 | Link research rooms             | WhatsApp, Telegram                     |

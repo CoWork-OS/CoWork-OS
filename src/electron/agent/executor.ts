@@ -19245,7 +19245,7 @@ ${transcript}
     if (!normalized) return false;
 
     if (
-      /\b(whatsapp|telegram|slack|imessage|signal|mattermost|matrix|twitch|line|teams|google\s+chat|discord)\b/.test(
+      /\b(whatsapp|telegram|slack|imessage|signal|mattermost|matrix|line|teams|google\s+chat|discord)\b/.test(
         normalized,
       )
     ) {

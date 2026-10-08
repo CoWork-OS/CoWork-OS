@@ -22,7 +22,6 @@ Admins can also use [Channel Specialization](../channels.md#channel-specializati
 | Signal             | [Signal User Guide](signal.md)                         |
 | Mattermost         | [Mattermost User Guide](mattermost.md)                 |
 | Matrix             | [Matrix User Guide](matrix.md)                         |
-| Twitch             | [Twitch User Guide](twitch.md)                         |
 | LINE               | [LINE User Guide](line.md)                             |
 | BlueBubbles        | [BlueBubbles User Guide](bluebubbles.md)               |
 | Email              | [Email User Guide](email.md)                           |

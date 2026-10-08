@@ -9,7 +9,6 @@ import { TaskRepository } from "../repository-facades";
 import { DatabaseManager } from "../schema";
 import { setStatementClient } from "../statements/statement-route";
 import { HookSessionRepository } from "../../hooks/hook-session-repository-facades";
-import { CouncilConfigRepository } from "../../council/council-repository-facades";
 
 // Rollback (async SQLite migration plan, DB7): both backends read and write one schema, so
 // rolling back is a restart on the other backend after the worker drains. One profile goes
@@ -59,7 +58,6 @@ describe("rolling a profile back and forward between backends", () => {
       }
       const tasks = new TaskRepository(db);
       const hooks = new HookSessionRepository(db);
-      const councils = new CouncilConfigRepository(db);
       const task = await tasks.create({
         title: `Task from ${label}`,
         prompt: "Rollback check",
@@ -68,16 +66,6 @@ describe("rolling a profile back and forward between backends", () => {
         source: "manual",
       } as never);
       await hooks.create(`hook:${label}`, task.id);
-      await councils.create({
-        workspaceId: "ws-1",
-        name: `Council from ${label}`,
-        schedule: { kind: "every", everyMs: 3_600_000 },
-        participants: [
-          { providerType: "openai", modelKey: "gpt-5", seatLabel: "A" },
-          { providerType: "anthropic", modelKey: "sonnet", seatLabel: "B" },
-        ],
-        judgeSeatIndex: 1,
-      } as never);
       const seen = {
         tasks: (await tasks.findByWorkspace("ws-1")).map((row) => row.title).sort(),
         hooks: await Promise.all(
@@ -85,7 +73,6 @@ describe("rolling a profile back and forward between backends", () => {
             Boolean(await hooks.findBySessionKey(`hook:${key}`)),
           ),
         ),
-        councils: (await councils.listByWorkspace("ws-1")).map((row) => row.name).sort(),
         schemaVersion: db.pragma("user_version", { simple: true }),
       };
       // Roll back cleanly: drain the worker before the next run takes over.
@@ -115,7 +102,6 @@ describe("rolling a profile back and forward between backends", () => {
       expect(rolledForward.seen).toMatchObject({
         tasks: ["Task from host", "Task from worker-1", "Task from worker-2"],
         hooks: [true, true, true],
-        councils: ["Council from host", "Council from worker-1", "Council from worker-2"],
       });
       // Neither backend changes the schema on its own.
       expect(

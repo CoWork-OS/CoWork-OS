@@ -246,11 +246,6 @@ import type {
   PersistedPermissionRule,
   PermissionSettingsData,
   PermissionRuntimeInfo,
-  CouncilConfig,
-  CouncilMemo,
-  CouncilRun,
-  CreateCouncilConfigRequest,
-  UpdateCouncilConfigRequest,
   PdfReviewSummary,
   TaskLearningProgress,
   UnifiedRecallResponse,
@@ -280,16 +275,6 @@ import type {
   BoxBrainSyncResult,
   IntegrationMentionOption,
   IntegrationMentionSelection,
-  EverydayActionPreview,
-  EverydayActionPreviewInput,
-  EverydayActionReceipt,
-  EverydayAgentApproveActionRequest,
-  EverydayAgentClearDataRequest,
-  EverydayAgentListReceiptsRequest,
-  EverydayAgentProfileResult,
-  EverydayAgentUpdateProfileRequest,
-  EverydayCapabilityBundle,
-  EverydayPauseScope,
   TaskEventDetailRequest,
   TaskEventDetailResult,
   TaskTimelinePageRequest,
@@ -971,7 +956,6 @@ interface CronDeliveryConfig {
     | "signal"
     | "mattermost"
     | "matrix"
-    | "twitch"
     | "line"
     | "bluebubbles"
     | "email"
@@ -4135,27 +4119,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getCronRunHistory: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_RUN_HISTORY, id),
   clearCronRunHistory: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.CRON_CLEAR_RUN_HISTORY, id),
   getCronWebhookStatus: () => ipcRenderer.invoke(IPC_CHANNELS.CRON_GET_WEBHOOK_STATUS),
-  listCouncils: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_LIST, { workspaceId }) as Promise<CouncilConfig[]>,
-  getCouncil: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_GET, id) as Promise<CouncilConfig | null>,
-  createCouncil: (data: CreateCouncilConfigRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_CREATE, data) as Promise<CouncilConfig>,
-  updateCouncil: (data: UpdateCouncilConfigRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_UPDATE, data) as Promise<CouncilConfig | null>,
-  deleteCouncil: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_DELETE, id) as Promise<boolean>,
-  runCouncilNow: (id: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_RUN_NOW, id) as Promise<CouncilRun | null>,
-  listCouncilRuns: (payload: { councilConfigId: string; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_LIST_RUNS, payload) as Promise<CouncilRun[]>,
-  getCouncilMemo: (query: string | { id?: string; councilConfigId?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_GET_MEMO, query) as Promise<CouncilMemo | null>,
-  setCouncilEnabled: (id: string, enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COUNCIL_SET_ENABLED, {
-      id,
-      enabled,
-    }) as Promise<CouncilConfig | null>,
 
   // Notification APIs
   listNotifications: () => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_LIST),
@@ -5003,55 +4966,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       decisions: number;
       diagnostics: number;
     }>,
-
-  // Everyday Agent APIs
-  everydayAgentGetProfile: () =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_GET_PROFILE,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentUpdateProfile: (updates: EverydayAgentUpdateProfileRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_UPDATE_PROFILE,
-      updates,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentAcceptConsent: (request?: {
-    enabled?: boolean;
-    workspaceId?: string;
-    accepted?: boolean;
-  }) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_ACCEPT_CONSENT,
-      request,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentPause: (scope: Partial<EverydayPauseScope>) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_PAUSE,
-      scope,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentRevokeCapability: (capability: EverydayCapabilityBundle) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_REVOKE_CAPABILITY,
-      capability,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentListReceipts: (request?: EverydayAgentListReceiptsRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVERYDAY_AGENT_LIST_RECEIPTS, request) as Promise<
-      EverydayActionReceipt[]
-    >,
-  everydayAgentClearData: (request?: EverydayAgentClearDataRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_CLEAR_DATA,
-      request,
-    ) as Promise<EverydayAgentProfileResult>,
-  everydayAgentPreviewAction: (input: EverydayActionPreviewInput) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_PREVIEW_ACTION,
-      input,
-    ) as Promise<EverydayActionPreview>,
-  everydayAgentApproveAction: (request: EverydayAgentApproveActionRequest) =>
-    ipcRenderer.invoke(
-      IPC_CHANNELS.EVERYDAY_AGENT_APPROVE_ACTION,
-      request,
-    ) as Promise<EverydayActionReceipt>,
 
   // Agent Teams APIs
   listTeams: (workspaceId: string, includeInactive?: boolean) =>
@@ -7878,17 +7792,6 @@ export interface ElectronAPI {
   getCronRunHistory: (id: string) => Promise<CronRunHistoryResult | null>;
   clearCronRunHistory: (id: string) => Promise<boolean>;
   getCronWebhookStatus: () => Promise<CronWebhookStatus>;
-  listCouncils: (workspaceId: string) => Promise<CouncilConfig[]>;
-  getCouncil: (id: string) => Promise<CouncilConfig | null>;
-  createCouncil: (data: CreateCouncilConfigRequest) => Promise<CouncilConfig>;
-  updateCouncil: (data: UpdateCouncilConfigRequest) => Promise<CouncilConfig | null>;
-  deleteCouncil: (id: string) => Promise<boolean>;
-  runCouncilNow: (id: string) => Promise<CouncilRun | null>;
-  listCouncilRuns: (payload: { councilConfigId: string; limit?: number }) => Promise<CouncilRun[]>;
-  getCouncilMemo: (
-    query: string | { id?: string; councilConfigId?: string },
-  ) => Promise<CouncilMemo | null>;
-  setCouncilEnabled: (id: string, enabled: boolean) => Promise<CouncilConfig | null>;
   // Notifications
   listNotifications: () => Promise<AppNotification[]>;
   addNotification: (data: {
@@ -8710,18 +8613,6 @@ export interface ElectronAPI {
     connectors: { blocked: string[] };
     pact?: { enabled: boolean; autoRoute: boolean; blockedProviders: string[] };
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
-    everydayAgent: {
-      blocked: boolean;
-      blockedBundles: EverydayCapabilityBundle[];
-      forceReviewOnly: boolean;
-      maxHeartbeatCadenceMinutes: number;
-      maxConcurrentBackgroundWork: number;
-      activeHours: {
-        enabled: boolean;
-        timezone?: string;
-        windows: Array<{ days: number[]; start: string; end: string }>;
-      };
-    };
     runtime: {
       allowedPermissionModes: PermissionMode[];
       allowedSandboxTypes: Array<"macos" | "docker" | "none">;
@@ -8750,18 +8641,6 @@ export interface ElectronAPI {
     connectors: { blocked: string[] };
     pact?: { enabled: boolean; autoRoute: boolean; blockedProviders: string[] };
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
-    everydayAgent: {
-      blocked: boolean;
-      blockedBundles: EverydayCapabilityBundle[];
-      forceReviewOnly: boolean;
-      maxHeartbeatCadenceMinutes: number;
-      maxConcurrentBackgroundWork: number;
-      activeHours: {
-        enabled: boolean;
-        timezone?: string;
-        windows: Array<{ days: number[]; start: string; end: string }>;
-      };
-    };
     runtime: {
       allowedPermissionModes: PermissionMode[];
       allowedSandboxTypes: Array<"macos" | "docker" | "none">;
@@ -8813,31 +8692,6 @@ export interface ElectronAPI {
     decisions: number;
     diagnostics: number;
   }>;
-
-  // Everyday Agent
-  everydayAgentGetProfile: () => Promise<EverydayAgentProfileResult>;
-  everydayAgentUpdateProfile: (
-    updates: EverydayAgentUpdateProfileRequest,
-  ) => Promise<EverydayAgentProfileResult>;
-  everydayAgentAcceptConsent: (request?: {
-    enabled?: boolean;
-    workspaceId?: string;
-    accepted?: boolean;
-  }) => Promise<EverydayAgentProfileResult>;
-  everydayAgentPause: (scope: Partial<EverydayPauseScope>) => Promise<EverydayAgentProfileResult>;
-  everydayAgentRevokeCapability: (
-    capability: EverydayCapabilityBundle,
-  ) => Promise<EverydayAgentProfileResult>;
-  everydayAgentListReceipts: (
-    request?: EverydayAgentListReceiptsRequest,
-  ) => Promise<EverydayActionReceipt[]>;
-  everydayAgentClearData: (
-    request?: EverydayAgentClearDataRequest,
-  ) => Promise<EverydayAgentProfileResult>;
-  everydayAgentPreviewAction: (input: EverydayActionPreviewInput) => Promise<EverydayActionPreview>;
-  everydayAgentApproveAction: (
-    request: EverydayAgentApproveActionRequest,
-  ) => Promise<EverydayActionReceipt>;
 
   // Agent Teams
   listTeams: (workspaceId: string, includeInactive?: boolean) => Promise<AgentTeam[]>;

@@ -138,8 +138,6 @@ import { ManagedSessionRequirementCorrectionRequestSchema } from "../../shared/m
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
-import type { EverydayAgentService } from "../everyday-agent/everyday-agent-repository-facades";
-import { setupEverydayAgentHandlers } from "./everyday-agent-handlers";
 import { setupVoiceActionHandlers } from "./voice-handlers";
 import { rendererPerfLogLevel, stringifyRendererPerfPayload } from "./renderer-perf-log";
 import type { RoutineService } from "../routines/service";
@@ -607,7 +605,6 @@ import { getVoiceService } from "../voice/VoiceService";
 import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReviewService";
 import { EvalService } from "../eval/eval-repository-facades";
 import { getXMentionBridgeService, getXMentionTriggerStatus } from "../x-mentions";
-import { getCouncilService } from "../council";
 import {
   createUniqueScopedTempWorkspaceDirectorySync,
   ensureTempWorkspaceDirectoryPathSync,
@@ -1603,8 +1600,6 @@ export async function setupIpcHandlers(
     getDailyBriefingService?: () =>
       | import("../briefing/DailyBriefingService").DailyBriefingService
       | null;
-    /** The app's one EverydayAgentService (shared with the control plane and browser host). */
-    everydayAgentService?: EverydayAgentService;
   },
 ) {
   if (options?.getMainWindow) mainWindowGetter = options.getMainWindow;
@@ -1723,11 +1718,6 @@ export async function setupIpcHandlers(
     getRoutineService,
     workContextService,
   });
-  if (options?.everydayAgentService) {
-    setupEverydayAgentHandlers(options.everydayAgentService);
-  } else {
-    logger.warn("Everyday Agent handlers not registered: no EverydayAgentService was provided");
-  }
   const agentTemplateService = new AgentTemplateService();
   const agentBuilderService = new AgentBuilderService();
   const imageGenProfileService = new ImageGenProfileService();
@@ -9370,24 +9360,6 @@ export async function setupIpcHandlers(
       return toPublicChannel(channel, "connecting");
     }
 
-    if (validated.type === "twitch") {
-      const channel = await gateway.addTwitchChannel(
-        validated.name,
-        validated.twitchUsername!,
-        validated.twitchOauthToken!,
-        validated.twitchChannels || [],
-        validated.twitchAllowWhispers ?? false,
-        validated.securityMode || "pairing",
-      );
-
-      // Automatically enable and connect Twitch
-      gateway.enableChannel(channel.id).catch((err) => {
-        logger.error("Failed to enable Twitch channel:", err);
-      });
-
-      return toPublicChannel(channel, "connecting");
-    }
-
     if (validated.type === "line") {
       const channel = await gateway.addLineChannel(
         validated.name,
@@ -12456,7 +12428,6 @@ function setupMCPHandlers(): void {
   // Cron (Scheduled Tasks) Handlers
   // =====================
   setupCronHandlers();
-  setupCouncilHandlers();
 }
 
 /**
@@ -12744,214 +12715,6 @@ function setupCronHandlers(): void {
     if (!service) return { enabled: false };
     const status = await service.status();
     return status.webhook ?? { enabled: false };
-  });
-}
-
-function setupCouncilHandlers(): void {
-  const ListCouncilsSchema = z.object({ workspaceId: WorkspaceIdSchema }).strict();
-  const CouncilParticipantSchema = z
-    .object({
-      providerType: z.enum(LLM_PROVIDER_TYPES),
-      modelKey: z.string().trim().min(1),
-      seatLabel: z.string().trim().min(1),
-      roleInstruction: z.string().optional(),
-    })
-    .strict();
-  const CouncilFileSourceSchema = z
-    .object({
-      path: z.string().trim().min(1),
-      label: z.string().optional(),
-    })
-    .strict();
-  const CouncilUrlSourceSchema = z
-    .object({
-      url: z.string().trim().min(1),
-      label: z.string().optional(),
-    })
-    .strict();
-  const CouncilConnectorSourceSchema = z
-    .object({
-      provider: z.string().trim().min(1),
-      label: z.string().trim().min(1),
-      resourceId: z.string().optional(),
-      notes: z.string().optional(),
-    })
-    .strict();
-  const CouncilSourceBundleSchema = z
-    .object({
-      files: z.array(CouncilFileSourceSchema).default([]),
-      urls: z.array(CouncilUrlSourceSchema).default([]),
-      connectors: z.array(CouncilConnectorSourceSchema).default([]),
-    })
-    .strict();
-  const CouncilDeliverySchema = z
-    .object({
-      enabled: z.boolean().default(false),
-      channelType: z.enum(CHANNEL_TYPES).optional(),
-      channelDbId: z.string().optional(),
-      channelId: z.string().optional(),
-    })
-    .strict();
-  const CouncilExecutionPolicySchema = z
-    .object({
-      mode: z.enum(["auto", "full_parallel", "capped_local"]).default("auto"),
-      maxParallelParticipants: z.number().int().positive().optional(),
-    })
-    .strict();
-  const CronScheduleSchema = z.union([
-    z
-      .object({
-        kind: z.literal("cron"),
-        expr: z.string().trim().min(1),
-        tz: z.string().optional(),
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal("every"),
-        everyMs: z.number().int().positive(),
-        anchorMs: z.number().int().optional(),
-      })
-      .strict(),
-    z.object({ kind: z.literal("at"), atMs: z.number().int().positive() }).strict(),
-  ]);
-  const CouncilCreateSchema = z
-    .object({
-      workspaceId: WorkspaceIdSchema,
-      name: z.string().trim().min(1),
-      enabled: z.boolean().optional(),
-      schedule: CronScheduleSchema,
-      participants: z.array(CouncilParticipantSchema).min(2).max(8),
-      judgeSeatIndex: z.number().int().min(0),
-      rotatingIdeaSeatIndex: z.number().int().min(0).optional(),
-      sourceBundle: CouncilSourceBundleSchema.optional(),
-      deliveryConfig: CouncilDeliverySchema.optional(),
-      executionPolicy: CouncilExecutionPolicySchema.optional(),
-    })
-    .strict();
-  const CouncilUpdateSchema = z
-    .object({
-      id: StringIdSchema,
-      name: z.string().trim().min(1).optional(),
-      enabled: z.boolean().optional(),
-      schedule: CronScheduleSchema.optional(),
-      participants: z.array(CouncilParticipantSchema).min(2).max(8).optional(),
-      judgeSeatIndex: z.number().int().min(0).optional(),
-      rotatingIdeaSeatIndex: z.number().int().min(0).optional(),
-      sourceBundle: CouncilSourceBundleSchema.optional(),
-      deliveryConfig: CouncilDeliverySchema.optional(),
-      executionPolicy: CouncilExecutionPolicySchema.optional(),
-      managedCronJobId: z.string().nullable().optional(),
-      nextIdeaSeatIndex: z.number().int().min(0).optional(),
-    })
-    .strict();
-  const CouncilMemoQuerySchema = z.union([
-    StringIdSchema,
-    z
-      .object({
-        id: z.string().optional(),
-        councilConfigId: z.string().optional(),
-      })
-      .strict(),
-  ]);
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_LIST, async (_, payload?: Any) => {
-    const service = getCouncilService();
-    if (!service) return [];
-    const validated = validateInput(ListCouncilsSchema, payload, "council list request");
-    return service.list(validated.workspaceId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_GET, async (_, id: string) => {
-    const service = getCouncilService();
-    if (!service) return null;
-    const validatedId = validateInput(StringIdSchema, id, "council ID");
-    return (await service.get(validatedId)) ?? null;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_CREATE, async (_, payload: Any) => {
-    checkRateLimit(IPC_CHANNELS.COUNCIL_CREATE);
-    const service = getCouncilService();
-    if (!service) {
-      throw new Error("Council service not initialized");
-    }
-    const validated = validateInput(CouncilCreateSchema, payload, "council config");
-    return service.create(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_UPDATE, async (_, payload: Any) => {
-    checkRateLimit(IPC_CHANNELS.COUNCIL_UPDATE);
-    const service = getCouncilService();
-    if (!service) {
-      throw new Error("Council service not initialized");
-    }
-    const validated = validateInput(CouncilUpdateSchema, payload, "council update");
-    return (await service.update(validated)) ?? null;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_DELETE, async (_, id: string) => {
-    checkRateLimit(IPC_CHANNELS.COUNCIL_DELETE);
-    const service = getCouncilService();
-    if (!service) {
-      throw new Error("Council service not initialized");
-    }
-    const validatedId = validateInput(StringIdSchema, id, "council ID");
-    return service.delete(validatedId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_RUN_NOW, async (_, id: string) => {
-    const service = getCouncilService();
-    if (!service) {
-      throw new Error("Council service not initialized");
-    }
-    const validatedId = validateInput(StringIdSchema, id, "council ID");
-    return (await service.runNow(validatedId)) ?? null;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_LIST_RUNS, async (_, payload: Any) => {
-    const service = getCouncilService();
-    if (!service) return [];
-    const validated = validateInput(
-      z
-        .object({
-          councilConfigId: StringIdSchema,
-          limit: z.number().int().positive().max(100).optional(),
-        })
-        .strict(),
-      payload,
-      "council runs request",
-    );
-    return service.listRuns(validated.councilConfigId, validated.limit);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_GET_MEMO, async (_, payload: Any) => {
-    const service = getCouncilService();
-    if (!service) return null;
-    const validated = validateInput(CouncilMemoQuerySchema, payload, "council memo request");
-    if (typeof validated === "string") {
-      return (await service.getMemo(validated)) ?? null;
-    }
-    if (validated.id) {
-      return (await service.getMemo(validated.id)) ?? null;
-    }
-    if (validated.councilConfigId) {
-      return (await service.getLatestMemo(validated.councilConfigId)) ?? null;
-    }
-    return null;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.COUNCIL_SET_ENABLED, async (_, payload: Any) => {
-    checkRateLimit(IPC_CHANNELS.COUNCIL_SET_ENABLED);
-    const service = getCouncilService();
-    if (!service) {
-      throw new Error("Council service not initialized");
-    }
-    const validated = validateInput(
-      z.object({ id: StringIdSchema, enabled: z.boolean() }).strict(),
-      payload,
-      "council enabled update",
-    );
-    return (await service.setEnabled(validated.id, validated.enabled)) ?? null;
   });
 }
 

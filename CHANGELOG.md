@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **macOS terminal installer**: `curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash` installs the released app without the Gatekeeper "Apple could not verify" dialog that the DMG triggers on first launch. Browsers attach the quarantine attribute that drives that dialog for the ad hoc signed build; `curl` does not. The installer verifies the ZIP's size and SHA-512 against the published updater metadata and the app bundle's code signature before copying it into Applications, re-runs as an updater, and refuses Intel Macs and older macOS versions with a pointer to npm. The macOS release smoke test now installs each build's ZIP through it. See [macOS Installation](docs/macos-installation.md).
 
+### Removed
+
+- **Everyday Agent**: discontinued the Everyday page, Settings tab, Home card, Mission Control focus, `everydayAgent` admin-policy section, `everydayAgent.*` Control Plane and browser-host methods, IPC channels and shared types. Its compiled policy was never read by the task runtime. Upgrading drops the `everyday_agent_*` tables. See the [decision record](docs/everyday-agent-discontinuation.md).
+- **R&D Council**: discontinued the Settings > Automations > R&D Council sub-tab, the Council owner and runs in the Automation Studio Library and Activity views, the `council:*` IPC channels, the `councilMode` task fields, the Council synthesis prompt and the Council cron bridge. Upgrading drops the `council_*` tables; a scheduled task a Council created keeps running as a plain scheduled task. See the [decision record](docs/rd-council-discontinuation.md).
+- **Twitch channel**: discontinued the Twitch IRC adapter, its settings page, the `addTwitchChannel` paths and the Twitch channel guide. An existing Twitch channel row is no longer loaded; remove it from Settings > Channels. The gateway now supports 18 channels. See the [decision record](docs/twitch-channel-discontinuation.md).
+
 ## [0.5.60] - 2026-10-07
 
 See [Release Notes 0.5.60](docs/release-notes-0.5.60.md) for the upgrade notes and a summary. Versions 0.5.55 to 0.5.59 were skipped.

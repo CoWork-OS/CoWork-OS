@@ -28,7 +28,6 @@ import {
   WeComConfig,
   MattermostConfig,
   MatrixConfig,
-  TwitchConfig,
   LineConfig,
   BlueBubblesConfig,
   EmailConfig,
@@ -48,7 +47,6 @@ import { createFeishuAdapter } from "./channels/feishu";
 import { createWeComAdapter } from "./channels/wecom";
 import { createMattermostAdapter } from "./channels/mattermost";
 import { createMatrixAdapter } from "./channels/matrix";
-import { createTwitchAdapter } from "./channels/twitch";
 import { createLineAdapter } from "./channels/line";
 import { createBlueBubblesAdapter } from "./channels/bluebubbles";
 import { createEmailAdapter } from "./channels/email";
@@ -1148,65 +1146,6 @@ export class ChannelRegistry extends EventEmitter {
         },
       },
       factory: (config) => createMatrixAdapter(config as MatrixConfig),
-    });
-
-    // Twitch
-    this.register({
-      metadata: {
-        type: "twitch",
-        displayName: "Twitch",
-        description: "Twitch IRC chat integration",
-        icon: "🟣",
-        builtin: true,
-        capabilities: {
-          sendMessage: true,
-          receiveMessage: true,
-          attachments: false,
-          reactions: false,
-          inlineKeyboards: false,
-          replyKeyboards: false,
-          polls: false,
-          voice: false,
-          video: false,
-          location: false,
-          editMessage: false,
-          deleteMessage: true,
-          typing: false,
-          readReceipts: false,
-          groups: true,
-          threads: false,
-          webhooks: false,
-          e2eEncryption: false,
-        },
-        configSchema: {
-          type: "object",
-          properties: {
-            username: {
-              type: "string",
-              description: "Twitch username (login name)",
-              required: true,
-            },
-            oauthToken: {
-              type: "string",
-              description: "OAuth token",
-              required: true,
-              secret: true,
-            },
-            channels: {
-              type: "array",
-              description: "Channels to join (without # prefix)",
-              required: true,
-            },
-            allowWhispers: {
-              type: "boolean",
-              description: "Whether to respond to whispers (DMs)",
-              default: false,
-            },
-          },
-          required: ["username", "oauthToken", "channels"],
-        },
-      },
-      factory: (config) => createTwitchAdapter(config as TwitchConfig),
     });
 
     // LINE

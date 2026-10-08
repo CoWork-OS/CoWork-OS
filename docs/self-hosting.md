@@ -85,7 +85,7 @@ The tarball includes built daemon output, the full `resources/` tree, bundled co
 
 These are generally easiest on a VPS:
 
-- Telegram, Discord, Slack, Teams, Google Chat, Mattermost, Matrix, Twitch, LINE, Email
+- Telegram, Discord, Slack, Teams, Google Chat, Mattermost, Matrix, LINE, Email
 
 Channels that typically require a macOS relay or a “pairing UI”:
 

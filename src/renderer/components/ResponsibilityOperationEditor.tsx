@@ -11,7 +11,6 @@ const channelNames: Record<(typeof CHANNEL_TYPES)[number], string> = {
   signal: "Signal",
   mattermost: "Mattermost",
   matrix: "Matrix",
-  twitch: "Twitch",
   line: "LINE",
   bluebubbles: "BlueBubbles",
   email: "Email",

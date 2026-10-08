@@ -1,9 +1,8 @@
-import { Box, Clock, Link, ListOrdered, Sparkles, Users, Zap } from "lucide-react";
+import { Box, Clock, Link, ListOrdered, Sparkles, Zap } from "lucide-react";
 
 export type AutomationSettingsSubTab =
   | "routines"
   | "queue"
-  | "council"
   | "subconscious"
   | "scheduled"
   | "hooks"
@@ -20,19 +19,6 @@ export const AUTOMATION_SUBTAB_METHOD_REQUIREMENTS: Record<AutomationSettingsSub
     "runRoutineNow",
   ],
   queue: ["getQueueSettings", "saveQueueSettings"],
-  council: [
-    "listCouncilRuns",
-    "getCouncilMemo",
-    "listCouncils",
-    "listWorkspaces",
-    "getGatewayChannels",
-    "getCouncil",
-    "updateCouncil",
-    "createCouncil",
-    "deleteCouncil",
-    "runCouncilNow",
-    "selectFiles",
-  ],
   subconscious: [
     "getSubconsciousSettings",
     "getSubconsciousBrain",
@@ -80,7 +66,6 @@ const AUTOMATION_SUBTABS: Array<{
 }> = [
   { key: "routines", label: "Routines", icon: Box },
   { key: "queue", label: "Task Queue", icon: ListOrdered },
-  { key: "council", label: "R&D Council", icon: Users },
   { key: "subconscious", label: "Workflow Intelligence", icon: Sparkles },
   { key: "scheduled", label: "Scheduled Tasks", icon: Clock },
   { key: "hooks", label: "Webhooks", icon: Link },

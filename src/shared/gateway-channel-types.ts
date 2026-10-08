@@ -8,7 +8,6 @@ export const CHANNEL_TYPES = [
   "signal",
   "mattermost",
   "matrix",
-  "twitch",
   "line",
   "bluebubbles",
   "email",

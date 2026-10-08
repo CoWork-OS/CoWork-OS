@@ -1,11 +1,11 @@
 import type { CronJob, CronRunHistoryEntry } from "../../electron/cron/types";
 import type { EventTrigger, TriggerHistoryEntry } from "../../electron/triggers/types";
 import type { Routine, RoutineRun } from "../../electron/routines/types";
-import type { CouncilConfig, CouncilRun, HookMappingData } from "../../shared/types";
+import type { HookMappingData } from "../../shared/types";
 import type { RoutineWorkflowRunRecord } from "../../shared/routine-workflow";
 
-export type AutomationOwner = "routines" | "scheduled" | "triggers" | "hooks" | "council";
-export type AutomationKind = "prompt" | "structured" | "cron" | "event" | "webhook" | "council";
+export type AutomationOwner = "routines" | "scheduled" | "triggers" | "hooks";
+export type AutomationKind = "prompt" | "structured" | "cron" | "event" | "webhook";
 
 export interface AutomationLibraryItem {
   key: string;
@@ -61,7 +61,6 @@ export interface AutomationSources {
   cronJobs: CronJob[];
   eventTriggers: EventTrigger[];
   hookMappings: HookMappingData[];
-  councils: CouncilConfig[];
   hookRevision: string;
 }
 
@@ -91,7 +90,6 @@ function claimsFor(sources: AutomationSources) {
         add(claims.event, trigger.managedEventTriggerId, routine.id);
     }
   }
-  for (const council of sources.councils) add(claims.cron, council.managedCronJobId, council.id);
   return claims;
 }
 
@@ -284,30 +282,6 @@ export function buildAutomationLibrary(sources: AutomationSources): AutomationLi
       },
     });
   });
-  for (const council of sources.councils) {
-    items.push({
-      key: keyFor("council", council.id),
-      profileScope: sources.profileScope,
-      id: council.id,
-      kind: "council",
-      owner: "council",
-      name: council.name,
-      description: "R&D Council",
-      workspaceId: council.workspaceId,
-      enabled: council.enabled,
-      updatedAt: council.updatedAt,
-      triggerSummary:
-        council.schedule.kind === "cron" ? council.schedule.expr : council.schedule.kind,
-      detail: `${council.participants.length} seats`,
-      workTarget: "Council task",
-      schedulerOwner: "Local scheduled-task engine",
-      timezone: council.schedule.kind === "cron" ? council.schedule.tz : undefined,
-      linkedChildren: council.managedCronJobId
-        ? [`Scheduled task ${council.managedCronJobId}`]
-        : [],
-      actions: { run: available, pause: available, edit: available, review: reviewOnly },
-    });
-  }
   return items.sort(
     (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || a.name.localeCompare(b.name),
   );
@@ -344,7 +318,6 @@ export function buildAutomationActivity(input: {
   workflowRuns: RoutineWorkflowRunRecord[];
   cronHistory: Record<string, CronRunHistoryEntry[]>;
   eventHistory: Record<string, TriggerHistoryEntry[]>;
-  councilRuns: CouncilRun[];
 }): AutomationActivityItem[] {
   const names = new Map(input.items.map((item) => [item.key, item.name]));
   const ownerKeyFor = (owner: AutomationOwner, id: string) =>
@@ -444,20 +417,5 @@ export function buildAutomationActivity(input: {
       );
     }
   }
-  for (const run of input.councilRuns)
-    rows.push({
-      key: `council-run:${run.id}`,
-      ownerKey: ownerKeyFor("council", run.councilConfigId),
-      owner: "council",
-      runId: run.id,
-      name: names.get(ownerKeyFor("council", run.councilConfigId)) || "Council",
-      source: "Council run",
-      at: run.startedAt,
-      execution: run.status,
-      detail: run.error || run.summary,
-      taskId: run.taskId,
-      needsAttention: needsAttention(run.status),
-      retention: "Latest 20 Council runs per Council",
-    });
   return rows.sort((a, b) => b.at - a.at);
 }

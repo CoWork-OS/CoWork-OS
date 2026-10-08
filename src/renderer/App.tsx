@@ -293,11 +293,6 @@ const InboxAgentPanel = lazy(() =>
 const AgentsHubPanel = lazy(() =>
   import("./components/AgentsHubPanel").then((module) => ({ default: module.AgentsHubPanel })),
 );
-const EverydayAgentPanel = lazy(() =>
-  import("./components/EverydayAgentPanel").then((module) => ({
-    default: module.EverydayAgentPanel,
-  })),
-);
 const MissionControlPanel = lazy(() =>
   import("./components/mission-control").then((module) => ({
     default: module.MissionControlPanel,
@@ -706,7 +701,6 @@ type AppView =
   | "devices"
   | "inboxAgent"
   | "agents"
-  | "everydayAgent"
   | "missionControl"
   | "library"
   | "git"
@@ -719,7 +713,6 @@ const SIDEBAR_SHELL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([
   "devices",
   "inboxAgent",
   "agents",
-  "everydayAgent",
   "missionControl",
   "library",
   "git",
@@ -2205,7 +2198,6 @@ export function App() {
   const [missionControlInitialIssueId, setMissionControlInitialIssueId] = useState<string | null>(
     null,
   );
-  const [missionControlEverydayAgentFocus, setMissionControlEverydayAgentFocus] = useState(false);
   const [browserUrl, setBrowserUrl] = useState<string>("");
   const [browserWorkbenchRequest, setBrowserWorkbenchRequest] =
     useState<BrowserWorkbenchOpenRequest | null>(null);
@@ -2227,7 +2219,6 @@ export function App() {
     | "integrations"
     | "automations"
     | "routines"
-    | "council"
     | "hooks"
     | "tools"
     | "addtools"
@@ -2244,7 +2235,6 @@ export function App() {
     | "insights"
     | "pulse"
     | "traces"
-    | "everydayAgent"
     | "customize"
   >("appearance");
   const [homeAutomationFocusTick, setHomeAutomationFocusTick] = useState(0);
@@ -7341,7 +7331,6 @@ export function App() {
   const handleOpenMissionControl = useCallback(() => {
     setMissionControlInitialCompanyId(null);
     setMissionControlInitialIssueId(null);
-    setMissionControlEverydayAgentFocus(false);
     setCurrentView("missionControl");
   }, []);
 
@@ -7403,9 +7392,6 @@ export function App() {
           return;
         case "devices":
           setCurrentView("devices");
-          return;
-        case "everyday":
-          setCurrentView("everydayAgent");
           return;
         case "missionControl":
           handleOpenMissionControl();
@@ -8328,7 +8314,6 @@ export function App() {
                         scheduled: "scheduled",
                         hooks: "hooks",
                         triggers: "triggers",
-                        council: "council",
                       } as const;
                       setFocusAutomationOwner(id ? { owner, id } : null);
                       setSettingsTab(tabByOwner[owner]);
@@ -8362,10 +8347,8 @@ export function App() {
                   onOpenMissionControl={() => {
                     setMissionControlInitialCompanyId(null);
                     setMissionControlInitialIssueId(null);
-                    setMissionControlEverydayAgentFocus(false);
                     setCurrentView("missionControl");
                   }}
-                  onOpenEverydayAgent={() => setCurrentView("everydayAgent")}
                   onOpenEventTriggers={() => {
                     setSettingsTab("triggers");
                     setCurrentView("settings");
@@ -8488,7 +8471,6 @@ export function App() {
                   onOpenMissionControlIssue={(companyId, issueId) => {
                     setMissionControlInitialCompanyId(companyId);
                     setMissionControlInitialIssueId(issueId);
-                    setMissionControlEverydayAgentFocus(false);
                     setCurrentView("missionControl");
                   }}
                 />
@@ -8504,7 +8486,6 @@ export function App() {
                     onOpenMissionControl={() => {
                       setMissionControlInitialCompanyId(null);
                       setMissionControlInitialIssueId(null);
-                      setMissionControlEverydayAgentFocus(false);
                       setCurrentView("missionControl");
                     }}
                     onOpenSlackSettings={() => {
@@ -8518,24 +8499,6 @@ export function App() {
                     onOpenTask={handleOpenManagedAgentTask}
                   />
                 </main>
-              ) : currentView === "everydayAgent" ? (
-                <EverydayAgentPanel
-                  workspace={currentWorkspace}
-                  onOpenSettings={() => {
-                    setSettingsTab("everydayAgent");
-                    setCurrentView("settings");
-                  }}
-                  onOpenMissionControl={() => {
-                    setMissionControlInitialCompanyId(null);
-                    setMissionControlInitialIssueId(null);
-                    setMissionControlEverydayAgentFocus(true);
-                    setCurrentView("missionControl");
-                  }}
-                  onCreateTask={(title, prompt) => {
-                    setCurrentView("main");
-                    handleCreateTask(title, prompt, { generateTitle: true });
-                  }}
-                />
               ) : currentView === "library" ? (
                 <LibraryPanel workspaceId={currentWorkspace?.id} />
               ) : currentView === "git" ? (
@@ -8577,7 +8540,6 @@ export function App() {
                     onOpenAgents={() => setCurrentView("agents")}
                     initialCompanyId={missionControlInitialCompanyId}
                     initialIssueId={missionControlInitialIssueId}
-                    initialEverydayAgentFocus={missionControlEverydayAgentFocus}
                   />
                 </main>
               ) : (

@@ -168,7 +168,7 @@ describe("TaskExecutor plan parsing", () => {
     expect(executor.callLLMWithRetry).not.toHaveBeenCalled();
     expect(executor.plan.steps).toHaveLength(3);
     expect(executor.plan.steps.map((step: Any) => step.description)).toEqual([
-      expect.stringMatching(/search the selected workspace/i),
+      expect.stringMatching(/locate and extract the requested source document/i),
       expect.stringMatching(/every bounded document segment/i),
       expect.stringMatching(/synthesize/i),
     ]);
@@ -183,6 +183,38 @@ describe("TaskExecutor plan parsing", () => {
     executor.task.prompt = executor.task.rawPrompt;
 
     expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(false);
+  });
+
+  it("keeps verifier workers out of the full-document pipeline", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Verify: Write a practical one-page checklist for releasing...";
+    executor.task.rawPrompt = [
+      "WORKER ROLE: Verifier",
+      "Inspect files, tests, and supplied or already-captured outputs.",
+      "Task prompt: Write a practical one-page checklist for releasing a small macOS desktop app.",
+      "Parent summary:",
+      "Drafted `macos-app-release-checklist.md` with practical checks; review the document.",
+    ].join("\n");
+    executor.task.userPrompt = executor.task.rawPrompt;
+    executor.task.prompt = executor.task.rawPrompt;
+
+    executor.task.workerRole = undefined;
+    expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(true);
+    executor.task.workerRole = "verifier";
+    expect((executor as Any).isBoundedDocumentAnalysisTask()).toBe(false);
+  });
+
+  it("does not rewrite steps that mention documents as a personal-folder search", () => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.rawPrompt = "Plan a small community meetup in Lisbon.";
+    executor.task.prompt = executor.task.rawPrompt;
+    const steps = [
+      { id: "1", description: "Identify the planning documents the organizers will need." },
+      { id: "2", description: "Search Desktop and Downloads for the venue contract." },
+    ];
+    const normalized = (executor as Any).normalizeOutOfWorkspaceDiscoveryPlanSteps(steps);
+    expect(normalized[0].description).toBe(steps[0].description);
+    expect(normalized[1].description).toMatch(/search the selected workspace/i);
   });
 
   it("merges noun-phrase continuations into the preceding answer-list step", async () => {
@@ -1495,6 +1527,26 @@ image_generation_contract:
     expect(executor.descriptionIndicatesVerification("Leave `meeting-notes.txt` unchanged.")).toBe(
       true,
     );
+  });
+
+  it("does not classify reviewing supplied inputs as a verification checkpoint", () => {
+    const executor = createPlanExecutor({ content: [] });
+    expect(
+      executor.descriptionIndicatesVerification(
+        "Review the four provided team analyses and identify their shared recommendations, any differences in proposed agenda timing or emphasis, and unresolved inputs. Do not use tools or external sources.",
+      ),
+    ).toBe(false);
+    expect(
+      executor.descriptionIndicatesVerification(
+        "Review only the team analyses provided in the prompt. Extract their venue and logistics recommendations.",
+      ),
+    ).toBe(false);
+    expect(executor.descriptionIndicatesVerification("Review the final checklist for accuracy")).toBe(
+      true,
+    );
+    expect(
+      executor.descriptionIndicatesVerification("Review the report and identify any missing sections"),
+    ).toBe(true);
   });
 
   it("uses compact step-count guidance for plan and advice tasks", () => {

@@ -325,12 +325,23 @@ export function CollaborativeSummaryPanel({
       });
     }
 
-    // 8. Status: "All N agents completed" (when done)
+    // 8. Status: "All N agents completed" (when done). Lanes that failed or
+    // finished with warnings are called out so the line is not read as every
+    // agent succeeding.
     if (allDone) {
+      const needsReviewCount = childTasks.filter(
+        (t) =>
+          t.status === "failed" ||
+          t.status === "cancelled" ||
+          (t.terminalStatus !== undefined && t.terminalStatus !== "ok"),
+      ).length;
       entries.push({
         kind: "status",
         id: "status-complete",
-        label: `All ${childTasks.length} agents completed`,
+        label:
+          needsReviewCount > 0
+            ? `${childTasks.length} agents finished · ${needsReviewCount} need review`
+            : `All ${childTasks.length} agents completed`,
         ts: collaborativeRun.completedAt ?? Date.now(),
       });
     }

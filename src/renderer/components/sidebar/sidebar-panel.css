@@ -373,6 +373,33 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   padding-top: 8px;
 }
 
+.sidebar-session-search-scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 2px 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.sidebar-session-search-scope span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-session-search-scope button {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
 .sidebar-session-state-filter {
   display: inline-flex;
   align-items: center;

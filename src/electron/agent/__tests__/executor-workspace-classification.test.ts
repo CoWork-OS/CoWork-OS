@@ -56,6 +56,28 @@ describe("TaskExecutor intent detection", () => {
     expect(internalAppIntent("Update tooling in the project and run tests")).toBe(false);
   });
 
+  it("does not treat deliverable prose about permission as a limitation statement", () => {
+    expect(capabilityRefusal("Do not imply partner endorsement without permission.")).toBe(false);
+    expect(capabilityRefusal("I don't have permission to write to that folder.")).toBe(true);
+    expect(capabilityRefusal("I cannot run commands without shell access.")).toBe(true);
+  });
+
+  it("treats a long structured answer as a deliverable, not a refusal", () => {
+    const isDeliverable = (text: string) =>
+      (TaskExecutor as Any).prototype.isSubstantiveDeliverableResponse.call({}, text) as boolean;
+    const plan = [
+      "# Lisbon meetup plan",
+      "Venue prices have not been verified; these are recommendations.",
+      "## Venue",
+      "x".repeat(400),
+      "## Outreach",
+      "Do not imply partner endorsement without permission.",
+      "y".repeat(400),
+    ].join("\n\n");
+    expect(isDeliverable(plan)).toBe(true);
+    expect(isDeliverable("I can't run that in this environment.")).toBe(false);
+  });
+
   it("detects limitation phrasing that says only Chromium/Chrome are supported", () => {
     expect(
       capabilityRefusal(

@@ -276,17 +276,24 @@ export async function buildSwarmContextBlock(
 ): Promise<string> {
   const folder = swarmFolderPath(swarm.slug);
   if (!folder) return "";
-  const findings = parseMemoryRepoEntries(
-    (await source.readFile(`${folder}/${SWARM_FINDINGS_FILE}`)) ?? "",
-  ).slice(-SWARM_BLOCK_FINDINGS);
-  const questions = parseMemoryRepoEntries(
-    (await source.readFile(`${folder}/${SWARM_QUESTIONS_FILE}`)) ?? "",
-  ).slice(-SWARM_BLOCK_QUESTIONS);
+  const findingsText = await source.readFile(`${folder}/${SWARM_FINDINGS_FILE}`);
+  const questionsText = await source.readFile(`${folder}/${SWARM_QUESTIONS_FILE}`);
+  const findings = parseMemoryRepoEntries(findingsText ?? "").slice(-SWARM_BLOCK_FINDINGS);
+  const questions = parseMemoryRepoEntries(questionsText ?? "").slice(-SWARM_BLOCK_QUESTIONS);
+  // The files only exist after the first swarm_note. Telling agents to read
+  // them before that sent every lane into ENOENT read_file calls.
+  const existing = [
+    findingsText !== null ? SWARM_FINDINGS_FILE : "",
+    questionsText !== null ? SWARM_QUESTIONS_FILE : "",
+  ].filter(Boolean);
+  const folderHint = existing.length
+    ? `${existing.join(", ")}; the latest notes are below, read_file only for older ones; add notes with swarm_note`
+    : "no notes written yet, so there is nothing to read; add notes with swarm_note";
   const tags = PINNED_CONTEXT_TAGS.swarm;
   return [
     tags.open,
     swarmContextHeader(),
-    `Folder: ${blockLine(`${source.root}/${folder}`)} (findings.md, questions.md; read them with read_file, add notes with swarm_note).`,
+    `Folder: ${blockLine(`${source.root}/${folder}`)} (${folderHint}).`,
     `Goal: ${blockLine(swarm.goal) || "(none given)"}`,
     "Members:",
     ...swarm.members.map((member) => `- ${blockLine(member.label)}`),

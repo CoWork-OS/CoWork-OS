@@ -3226,6 +3226,11 @@ function SidebarComponent({
                       className={`sidebar-session-state-filter ${filter} ${sessionStateFilter === filter ? "active" : ""}`}
                       aria-pressed={sessionStateFilter === filter}
                       onClick={() => setSessionStateFilter(filter)}
+                      title={
+                        hasSessionSearch && filter !== "all"
+                          ? `${label} sessions matching "${sessionSearch.trim()}"`
+                          : undefined
+                      }
                     >
                       <span>{label}</span>
                       {filter !== "all" && (
@@ -3238,6 +3243,18 @@ function SidebarComponent({
                     </button>
                   ))}
                 </div>
+
+                {/* The counts and list above are scoped to the search. Say so,
+                    or a running session hidden by an old query reads as
+                    "Running 0". */}
+                {hasSessionSearch && (
+                  <div className="sidebar-session-search-scope" role="status">
+                    <span>Showing matches for “{sessionSearch.trim()}”</span>
+                    <button type="button" onClick={() => setSessionSearch("")}>
+                      Clear
+                    </button>
+                  </div>
+                )}
 
                 {/* Stopped sessions are only hidden in focused density, so the
                     filter panel has nothing to offer elsewhere. */}

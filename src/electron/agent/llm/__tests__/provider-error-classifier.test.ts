@@ -220,6 +220,10 @@ describe("classifyProviderError", () => {
 
   it("falls back to message heuristics for text-only adapter errors", () => {
     expect(classifyProviderError({ message: "socket hang up" }).retryable).toBe(true);
+    expect(classifyProviderError({ message: "WebSocket closed 1000" })).toMatchObject({
+      retryable: true,
+      reason: "connection",
+    });
     expect(
       classifyProviderError({ message: "socket hang up" }, { legacyRetrySemantics: true })
         .retryable,

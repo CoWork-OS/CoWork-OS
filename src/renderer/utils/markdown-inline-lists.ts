@@ -166,19 +166,42 @@ export function normalizeInlineLists(text: string): string {
  * content contains markdown headings (lines starting with #).
  */
 export function unwrapMarkdownCodeBlocks(text: string): string {
-  let result = text;
-  // 1. ```markdown or ```md (case-insensitive) - always unwrap
-  result = result.replace(
-    /^[ \t]*```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n[ \t]*```(?!\w)/gim,
-    "$1",
-  );
-  // 2. Plain ``` with content containing # headings - likely a markdown document
-  result = result.replace(
-    /^[ \t]*```(?!\w)\s*\r?\n([\s\S]*?)\r?\n[ \t]*```(?!\w)/gm,
-    (fullMatch, content) =>
-      /\n#{1,6}\s/m.test(content) || /^#{1,6}\s/m.test(content) ? content : fullMatch,
-  );
-  return result;
+  // Scan line by line so only real opening fences start a block. A regex over
+  // the whole text treated the bare closing fence of one block as the opener
+  // of the next, so "```bash ... ```  ### Next  ```bash ... ```" lost both
+  // closing fences and the rest of the answer rendered as one code block.
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const opener = lines[i].match(/^[ \t]*(`{3,})[ \t]*([^`\s]*)[^`]*$/);
+    if (!opener) {
+      out.push(lines[i]);
+      i += 1;
+      continue;
+    }
+    const fence = opener[1];
+    const language = opener[2].toLowerCase();
+    const closePattern = new RegExp(`^[ \\t]*\`{${fence.length},}[ \\t]*\r?$`);
+    let close = i + 1;
+    while (close < lines.length && !closePattern.test(lines[close])) close += 1;
+    if (close >= lines.length) {
+      // Unclosed fence: leave the remainder untouched.
+      out.push(...lines.slice(i));
+      break;
+    }
+    const content = lines.slice(i + 1, close);
+    const isMarkdownLanguage = language === "markdown" || language === "md";
+    const isPlainMarkdownDocument =
+      language === "" && content.some((line) => /^#{1,6}\s/.test(line));
+    if (isMarkdownLanguage || isPlainMarkdownDocument) {
+      out.push(...content);
+    } else {
+      out.push(...lines.slice(i, close + 1));
+    }
+    i = close + 1;
+  }
+  return out.join("\n");
 }
 
 /**

@@ -8674,9 +8674,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Fit the container and let cells wrap. A max-content table sized every column
+   to its longest unwrapped cell, which pushed later columns out of view. Wide
+   tables whose cells cannot shrink further still scroll inside the wrapper. */
 .markdown-table-wrapper > table {
-  min-width: 100%;
-  width: max-content;
+  width: 100%;
 }
 
 .markdown-content table {
@@ -8687,7 +8689,7 @@
 }
 
 .markdown-content .markdown-table-wrapper > table {
-  width: max-content;
+  width: 100%;
 }
 
 .markdown-content thead {
@@ -8700,6 +8702,7 @@
   font-weight: 600;
   color: var(--color-text);
   border-bottom: 2px solid var(--color-border);
+  min-width: 7em;
   white-space: normal;
   word-break: normal;
   overflow-wrap: break-word;

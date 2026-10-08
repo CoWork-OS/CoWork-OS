@@ -151,7 +151,7 @@ Generated documents, spreadsheets, presentations, and web pages appear as artifa
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-4.webp" alt="Task execution timeline" width="700">
-  <br><em>Task runs show progress, approvals, and outputs in one view.</em>
+  <br><em>The task feed shows each turn's progress, the files it changed, and its outputs in one view.</em>
 </p>
 
 ### Optional: Set up Workspace Kit

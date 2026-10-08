@@ -11,8 +11,8 @@ V1 introduces three control-plane resources:
 The implementation is local-first and additive. Managed resources are exposed through the control plane and Agents Hub, while existing `Task`, `AgentTeamRun`, `task_events`, and `session_runtime_v2` remain the execution primitives underneath.
 
 <p align="center">
-  <img src="../resources/branding/images/cowork-os-3.webp" alt="Agents Hub" width="700">
-  <br><em>Agents Hub is the main surface for reusable managed agents, templates, and starter prompts.</em>
+  <img src="../resources/branding/images/cowork-os-3.webp" alt="Bots page" width="700">
+  <br><em>The Bots page is the main surface for bots, templates, and workspace agents (managed agents).</em>
 </p>
 
 ## Why This Exists

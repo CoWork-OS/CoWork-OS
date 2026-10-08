@@ -53,18 +53,27 @@ To uninstall, delete `CoWork OS.app` from the install directory. Your data stays
 
 Intel Macs: no Intel build is published, so the installer stops with a message. Use [npm](#npm), which builds the app on your machine, or an Apple Silicon Mac.
 
-The first start may still ask for access to the `cowork-os Safe Storage` keychain item. That is the macOS keychain, not Gatekeeper; enter your login password and click **Always Allow** so CoWork OS can store credentials securely.
-
 ## DMG and the Open Anyway steps
 
 If you prefer the DMG from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest):
 
 1. Open the DMG and drag **CoWork OS** into **Applications**.
+
+   <img src="../screenshots/macos-install/01-drag-to-applications.png" alt="CoWork OS DMG showing the app icon being dragged into Applications" width="480">
+
 2. Open **CoWork OS** once. When macOS says `"CoWork OS" Not Opened`, click **Done**.
+
+   <img src="../screenshots/macos-install/02-not-opened-warning.png" alt="macOS warning saying CoWork OS was not opened because Apple could not verify it" width="260">
+
 3. Open **System Settings > Privacy & Security**, scroll to **Security**, and click **Open Anyway** next to `"CoWork OS" was blocked to protect your Mac`.
+
+   <img src="../screenshots/macos-install/03-privacy-security-open-anyway.png" alt="macOS Privacy and Security settings with the CoWork OS Open Anyway button highlighted" width="480">
+
 4. Click **Open Anyway** in the confirmation dialog and authenticate.
 
-The [README](../README.md#quick-start) shows each step with a screenshot. Alternatively, remove the quarantine attribute from the copy in Applications and open it normally:
+   <img src="../screenshots/macos-install/04-confirm-open-anyway.png" alt="macOS confirmation dialog asking whether to open CoWork OS anyway" width="260">
+
+Alternatively, remove the quarantine attribute from the copy in Applications and open it normally:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/CoWork OS.app"
@@ -78,6 +87,14 @@ cowork-os
 ```
 
 npm downloads through Node.js, which does not attach the quarantine attribute, and the Electron runtime it fetches is likewise unquarantined, so there is no Gatekeeper dialog. This path compiles native modules on your machine, needs Node.js, and also works on Intel Macs. See the [README](../README.md#or-install-via-npm) for details.
+
+## First start
+
+Whichever method you used, the first start may ask for access to the `cowork-os Safe Storage` keychain item. That is the macOS keychain, not Gatekeeper. Enter your Mac login password and click **Always Allow** so CoWork OS can store local credentials securely.
+
+<img src="../screenshots/macos-install/05-keychain-safe-storage.png" alt="macOS keychain prompt asking to allow CoWork OS safe storage access" width="480">
+
+Then choose how to power AI; [Getting Started](getting-started.md) walks through the first task.
 
 ## For maintainers
 

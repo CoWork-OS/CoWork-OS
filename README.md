@@ -110,7 +110,7 @@ Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/
 
 | Platform                      | Download                | Install                                  |
 | ----------------------------- | ----------------------- | ---------------------------------------- |
-| **macOS 13 Ventura or later** | `.dmg`                  | Drag CoWork OS into Applications         |
+| **macOS 13 Ventura or later** | Terminal installer below, or `.dmg` | Run the one-line command below (no Gatekeeper dialog), or drag CoWork OS from the DMG into Applications |
 | **Windows**                   | `.exe` (NSIS installer) | Run the installer and follow the prompts |
 
 > **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.60` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
@@ -127,29 +127,13 @@ Re-run the same command to update. Options go after `bash -s --`, for example `-
 
 #### macOS: if you used the DMG
 
-This Gatekeeper warning is different from the macOS 13 system requirement. On a supported Mac, the DMG build needs a one-time Gatekeeper override (the terminal installer above avoids it):
+The DMG build needs a one-time Gatekeeper override, because the browser download carries the quarantine attribute. This is separate from the macOS 13 system requirement, and the terminal installer above avoids it:
 
-1. Open the downloaded `.dmg` and drag **CoWork OS** into **Applications**.
+1. Drag **CoWork OS** from the DMG into **Applications** and open it once. When macOS says `"CoWork OS" Not Opened`, click **Done**.
+2. Open **System Settings > Privacy & Security**, scroll to **Security**, click **Open Anyway** next to `"CoWork OS" was blocked to protect your Mac`, then **Open Anyway** again in the confirmation dialog.
+3. Whichever install method you used, first start may ask for access to the `cowork-os Safe Storage` keychain item. Enter your Mac login password and click **Always Allow** so CoWork OS can store local credentials securely.
 
-   <img src="screenshots/macos-install/01-drag-to-applications.png" alt="CoWork OS DMG showing the app icon being dragged into Applications" width="480">
-
-2. Open **CoWork OS** from Applications. If macOS says `"CoWork OS" Not Opened`, click **Done**.
-
-   <img src="screenshots/macos-install/02-not-opened-warning.png" alt="macOS warning saying CoWork OS was not opened because Apple could not verify it" width="260">
-
-3. Open **System Settings > Privacy & Security**, scroll to **Security**, and click **Open Anyway** next to `"CoWork OS" was blocked to protect your Mac`.
-
-   <img src="screenshots/macos-install/03-privacy-security-open-anyway.png" alt="macOS Privacy and Security settings with the CoWork OS Open Anyway button highlighted" width="480">
-
-4. In the confirmation dialog, click **Open Anyway**.
-
-   <img src="screenshots/macos-install/04-confirm-open-anyway.png" alt="macOS confirmation dialog asking whether to open CoWork OS anyway" width="260">
-
-5. On first startup, macOS may ask for access to the `cowork-os Safe Storage` keychain item. Enter your Mac login password and click **Always Allow** so CoWork OS can store local credentials securely.
-
-   <img src="screenshots/macos-install/05-keychain-safe-storage.png" alt="macOS keychain prompt asking to allow CoWork OS safe storage access" width="480">
-
-Release maintainers can create this unsigned DMG/ZIP with `npm run package:mac:unsigned`.
+Each step is shown with screenshots in [macOS Installation](docs/macos-installation.md#dmg-and-the-open-anyway-steps). Release maintainers create the unsigned DMG/ZIP with `npm run package:mac:unsigned`.
 
 > **Windows first launch:** Windows SmartScreen may show a warning for unrecognized apps. Click **More info** > **Run anyway** to proceed.
 

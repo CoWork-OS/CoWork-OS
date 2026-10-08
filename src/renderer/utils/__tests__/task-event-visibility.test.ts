@@ -1088,3 +1088,33 @@ describe("task event visibility helpers", () => {
     ).toBe(true);
   });
 });
+
+describe("business-agent (PACT) timeline rows", () => {
+  const pactRow = (legacyType: string, payload: Record<string, unknown> = {}) =>
+    makeEvent("timeline_step_updated", { ...payload, legacyType }, { id: `event-${legacyType}` });
+
+  it("shows sign-ins, sends and receipts in summary and verbose views", () => {
+    const rows = [
+      pactRow("pact_authorization_requested", { businessName: "Example Co." }),
+      pactRow("pact_step_up_required", { missingScopes: ["orders:read"] }),
+      pactRow("pact_message_sent", { outcome: "replied" }),
+      pactRow("pact_receipt_verified", { verification: "verified" }),
+    ];
+    for (const row of rows) {
+      expect(isImportantTaskEvent(row), String(row.payload.legacyType)).toBe(true);
+      expect(shouldShowTaskEventInSummaryMode(row), String(row.payload.legacyType)).toBe(true);
+    }
+    expect(filterVerboseTimelineNoise(rows).map((row) => row.payload.legacyType)).toEqual([
+      "pact_authorization_requested",
+      "pact_step_up_required",
+      "pact_message_sent",
+      "pact_receipt_verified",
+    ]);
+  });
+
+  it("keeps internal PACT bookkeeping out of the timeline", () => {
+    const admitted = pactRow("pact_operation_admitted", { effectClass: "change" });
+    expect(isImportantTaskEvent(admitted)).toBe(false);
+    expect(filterVerboseTimelineNoise([admitted])).toEqual([]);
+  });
+});

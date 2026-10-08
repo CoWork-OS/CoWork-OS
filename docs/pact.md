@@ -83,6 +83,8 @@ Open **Settings > Connectors > PACT business agents**.
 ## Permissions and disconnect
 
 Connected businesses and their permissions are listed in Settings and with `cowork pact grants`.
+When a business asks for more permissions and you approve them for the same account, the new
+permission replaces the narrower one (shown as `superseded` in `cowork pact grants`).
 **Disconnect** deletes the stored permission immediately. PACT 1.0 has no revocation endpoint, so
 the business is not notified; revoke it in the business's own account settings if you want the
 business to forget it too. Grants expire (30 days at the reference provider); CoWork asks you to

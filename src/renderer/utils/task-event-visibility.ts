@@ -62,6 +62,22 @@ export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "task_list_verification_nudged",
 ];
 
+/**
+ * Business-agent (PACT) outcomes the user acts on or relies on: sign-ins, what was sent, and
+ * whether the business signed for it. They are persisted as timeline_step_updated rows.
+ */
+const PACT_TIMELINE_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "pact_business_discovered",
+  "pact_operation_blocked",
+  "pact_authorization_requested",
+  "pact_authorization_resolved",
+  "pact_message_sent",
+  "pact_step_up_required",
+  "pact_outcome_unknown",
+  "pact_receipt_verified",
+  "pact_evidence_issue",
+]);
+
 export const ALWAYS_VISIBLE_TECHNICAL_EVENT_TYPES: ReadonlySet<EventType> = new Set([
   "approval_requested",
   "approval_granted",
@@ -366,6 +382,7 @@ export function isImportantTaskEvent(event: TaskEvent): boolean {
     return false;
   }
   if (IMPORTANT_EVENT_TYPES.includes(effectiveType as EventType)) return true;
+  if (PACT_TIMELINE_EVENT_TYPES.has(effectiveType)) return true;
   // Each tool call is a step the user can follow ("Read Sidebar.tsx", "Searched
   // for X", "Ran git status"); its result folds into that row.
   if (effectiveType === "tool_call") return true;
@@ -851,7 +868,7 @@ function isLowValueVerboseLifecycleEvent(event: TaskEvent): boolean {
   // Preserve user-visible chat messages, which are persisted as
   // timeline_step_updated + legacyType=user_message/assistant_message in timeline v2.
   if (event.type === "timeline_step_updated") {
-    if (effectiveType === "user_message") {
+    if (effectiveType === "user_message" || PACT_TIMELINE_EVENT_TYPES.has(effectiveType)) {
       return false;
     }
     if (effectiveType === "assistant_message") {

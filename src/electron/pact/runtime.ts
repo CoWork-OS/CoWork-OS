@@ -975,10 +975,24 @@ export class PactRuntime {
         input.conversationId,
       );
     }
+    const scopeDescriptions = new Map(
+      (input.business.descriptor.delegation?.scopes ?? []).map((scope) => [
+        scope.id,
+        scope.description,
+      ]),
+    );
+    const permissions = input.scopes.map((id) => {
+      const description = scopeDescriptions.get(id);
+      return description ? `${description} (${id})` : id;
+    });
     return this.deps.host.requestLocalApproval(
       ctx.taskId,
-      `Send a ${input.effectClass === "change" ? "change" : "request"} to ${input.business.displayName}`,
+      `Send a ${input.effectClass === "change" ? "change" : "request"} to ${input.business.displayName}.`,
       {
+        // Shown in full with the approval question: the user approves this exact text.
+        approvalReviewText: `Message: “${input.text.trim()}”${
+          permissions.length > 0 ? ` Permissions: ${permissions.join("; ")}.` : ""
+        }`,
         tool: "pact_send_message",
         params: {
           business: input.business.displayName,

@@ -104,7 +104,18 @@ export function formatSpawnRecapLine(input: {
   return `${verb} ${input.label} with the instructions: ${instructions}`;
 }
 
-export type AgentRosterState = "working" | "finished";
+/**
+ * "working" marks a burst of agents starting; the rest mark a burst ending,
+ * split by outcome so a failure never reads as "finished".
+ */
+export type AgentRosterState = "working" | "finished" | "failed" | "stopped";
+
+const ROSTER_STATE_VERB: Record<AgentRosterState, string> = {
+  working: "started working",
+  finished: "finished",
+  failed: "failed",
+  stopped: "stopped",
+};
 
 /** "Anansi, Ares and 2 more" — first two names, then a count. */
 export function formatAgentNameList(names: string[], maxNamed: number = 2): string {
@@ -118,9 +129,9 @@ export function formatAgentNameList(names: string[], maxNamed: number = 2): stri
   return `${cleaned.slice(0, maxNamed).join(", ")} and ${remaining} more`;
 }
 
-/** "Anansi, Ares and 2 more started working" / "… finished". */
+/** "Anansi, Ares and 2 more started working" / "… finished" / "… failed" / "… stopped". */
 export function formatAgentRosterLine(input: { names: string[]; state: AgentRosterState }): string {
+  const verb = ROSTER_STATE_VERB[input.state] ?? ROSTER_STATE_VERB.working;
   const list = formatAgentNameList(input.names);
-  if (!list) return input.state === "finished" ? "Agents finished" : "Agents started working";
-  return `${list} ${input.state === "finished" ? "finished" : "started working"}`;
+  return `${list || "Agents"} ${verb}`;
 }

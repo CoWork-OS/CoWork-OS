@@ -87,6 +87,13 @@ describe("formatAgentRosterLine", () => {
   it("stays readable with no names", () => {
     expect(formatAgentRosterLine({ names: [], state: "working" })).toBe("Agents started working");
   });
+
+  it("names failed and stopped bursts by outcome", () => {
+    expect(formatAgentRosterLine({ names: ["Anansi", "Ares"], state: "failed" })).toBe(
+      "Anansi and Ares failed",
+    );
+    expect(formatAgentRosterLine({ names: ["Anansi"], state: "stopped" })).toBe("Anansi stopped");
+  });
 });
 
 describe("stripAgentRoleSuffix", () => {

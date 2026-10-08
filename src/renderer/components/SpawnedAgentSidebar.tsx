@@ -16,6 +16,9 @@ import type {
 } from "../../shared/types";
 import { MainContent } from "./MainContent";
 import { resolveSpawnedAgentSidebarTask } from "../utils/spawned-agent-sidebar";
+import { AgentGlyph } from "./AgentGlyph";
+import { assignAgentGlyphs, getAgentGlyphForSeed } from "../utils/agent-glyphs";
+import { resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
 
 type SpawnedAgentSidebarProps = {
   parentTask: Task;
@@ -174,6 +177,7 @@ export function SpawnedAgentSidebar({
     },
     [selectedTask],
   );
+  const agentGlyphs = useMemo(() => assignAgentGlyphs(childTasks), [childTasks]);
   const selectedEvents = useMemo(
     () =>
       selectedTask
@@ -283,7 +287,14 @@ export function SpawnedAgentSidebar({
           <div className="spawned-agent-sidebar-kicker">
             Spawned from {parentTask.title || "parent task"}
           </div>
-          <h2>{selectedTask.title}</h2>
+          <h2 className="spawned-agent-sidebar-title">
+            <AgentGlyph
+              glyph={agentGlyphs.get(selectedTask.id) ?? getAgentGlyphForSeed(selectedTask.id)}
+              size={18}
+              working={isWorkingTask(selectedTask)}
+            />
+            <span>{resolveAgentDisplayName(selectedTask.title, selectedTask.title)}</span>
+          </h2>
           <div className="spawned-agent-sidebar-meta">
             <StatusBadge task={selectedTask} />
             {durationLabel ? <span>{durationLabel}</span> : null}
@@ -335,7 +346,14 @@ export function SpawnedAgentSidebar({
               className={`spawned-agent-sidebar-tab ${task.id === selectedTask.id ? "active" : ""}`}
               onClick={() => onSelectTask(task.id)}
             >
-              <span className="spawned-agent-sidebar-tab-label">{task.title}</span>
+              <AgentGlyph
+                glyph={agentGlyphs.get(task.id) ?? getAgentGlyphForSeed(task.id)}
+                size={13}
+                working={isWorkingTask(task)}
+              />
+              <span className="spawned-agent-sidebar-tab-label">
+                {resolveAgentDisplayName(task.title, task.title)}
+              </span>
               {isWorkingTask(task) ? (
                 <Loader2 size={12} className="spawned-agent-sidebar-tab-icon spinning" />
               ) : task.status === "completed" ? (

@@ -24,6 +24,7 @@ The file is created when policies are first saved via the Admin Policies panel. 
 | --------------------------- | -------------------------------------------------------------------------------- |
 | **Pack policies**           | Which plugin packs are allowed, blocked, or required                             |
 | **Connector policies**      | Which MCP connectors are blocked                                                 |
+| **PACT policies**           | Whether PACT business agents may be used, auto-routed, and which providers are blocked |
 | **Agent policies**          | Heartbeat frequency limits, concurrent agent caps                                |
 | **Everyday Agent policies** | Product block, bundle blocks, review-only mode, cadence and background-work caps |
 | **Runtime policies**        | Permission/sandbox/network limits, telemetry, and Numbat agent-security policy   |
@@ -69,6 +70,11 @@ network, and shell egress below that selection.
   },
   "connectors": {
     "blocked": ["risky-connector"]
+  },
+  "pact": {
+    "enabled": true,
+    "autoRoute": true,
+    "blockedProviders": []
   },
   "agents": {
     "maxHeartbeatFrequencySec": 60,
@@ -146,6 +152,17 @@ network, and shell egress below that selection.
 | Field     | Type       | Default | Description                              |
 | --------- | ---------- | ------- | ---------------------------------------- |
 | `blocked` | `string[]` | `[]`    | Connector IDs that are blocked from use. |
+
+#### `pact`
+
+| Field              | Type       | Default | Description |
+| ------------------ | ---------- | ------- | ----------- |
+| `enabled`          | `boolean`  | `true`  | `false` turns the [PACT](pact.md) adapter off for every profile. |
+| `autoRoute`        | `boolean`  | `true`  | `false` offers PACT tools only when a task names PACT or a business agent. |
+| `blockedProviders` | `string[]` | `[]`    | Provider origins (`https://provider.example`) or host patterns (`provider.example`, `*.provider.example`) never contacted over PACT. |
+
+Allowing PACT, turning on auto-routing and unblocking providers count as policy relaxations and
+need confirmation in the desktop app.
 
 #### `agents`
 

@@ -53,6 +53,7 @@ export const PACT_UNITS = {
   pact_getReceipt: clockedStoreUnit(make, "getReceipt", { readonly: true }),
   pact_listReceipts: clockedStoreUnit(make, "listReceipts", { readonly: true }),
   pact_counts: clockedStoreUnit(make, "counts", { readonly: true }),
+  pact_metrics: clockedStoreUnit(make, "metrics", { readonly: true }),
 } satisfies UnitCatalog;
 
 export const PACT_STORE_METHODS = [
@@ -94,4 +95,5 @@ export const PACT_STORE_METHODS = [
   "getReceipt",
   "listReceipts",
   "counts",
+  "metrics",
 ] as const;

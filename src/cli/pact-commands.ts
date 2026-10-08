@@ -131,6 +131,11 @@ export async function runPactDirectCommand(
               `Provider ${provider.origin}: ${provider.ready ? "ready" : (provider.reason ?? "not ready")}`,
           ),
           `Connected permissions: ${status.activeGrants}; pending sign-ins: ${status.pendingAuthorizations}`,
+          ...(status.metrics
+            ? [
+                `Turns: ${JSON.stringify(status.metrics.turns)}; evidence: ${JSON.stringify(status.metrics.evidence)}`,
+              ]
+            : []),
         ].join("\n"),
       );
       return 0;

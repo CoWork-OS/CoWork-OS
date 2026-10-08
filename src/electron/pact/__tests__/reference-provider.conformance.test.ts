@@ -221,6 +221,36 @@ describe.skipIf(!providerUrl || !nativeSqlite)(
       expect(outcome).toMatchObject({ status: "replied", evidence: "verified" });
     }, 180_000);
 
+    it("delegated profile: step-up requests the union of granted and missing scopes", async () => {
+      const { business } = await runtime.discover(
+        owner,
+        { cardUrl: `${providerUrl}/a2a/${delegatedCustomer}/.well-known/agent-card.json` },
+        context,
+      );
+      if (business.profile !== "delegated") return;
+      consentDecision = "allow";
+      consentScopes = null;
+      // Holds flights:upcoming:read from the earlier test; rebooking also needs flights:rebook.
+      const outcome = await runtime.send(
+        owner,
+        {
+          businessId: business.id,
+          text: "Please rebook me on an earlier flight.",
+          effect: "change",
+          requiredScopes: ["flights:upcoming:read"],
+        },
+        context,
+      );
+      expect(outcome).toMatchObject({ status: "replied" });
+      const grants = (await runtime.listGrants(owner)).filter((grant) => grant.state === "active");
+      const unionGrant = grants.find((grant) =>
+        grant.scopes.some((scope) => scope.id === "flights:rebook"),
+      );
+      expect(unionGrant?.scopes.map((scope) => scope.id).sort()).toEqual(
+        ["flights:rebook", "flights:upcoming:read"].sort(),
+      );
+    }, 180_000);
+
     it("delegated profile: a declined consent stops the operation", async () => {
       const { business } = await runtime.discover(
         owner,

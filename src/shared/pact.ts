@@ -214,6 +214,13 @@ export interface PactStatusView {
   providers: { origin: string; audience?: string; ready: boolean; reason?: string }[];
   pendingAuthorizations: number;
   activeGrants: number;
+  /** Local-only counters by state; nothing here leaves the device. */
+  metrics?: {
+    authorizations: Record<string, number>;
+    turns: Record<string, number>;
+    evidence: Record<string, number>;
+    businesses: Record<string, number>;
+  };
 }
 
 export type PactSendOutcome =

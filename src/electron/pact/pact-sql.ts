@@ -1181,6 +1181,46 @@ export class PactStore {
     ).map(mapReceipt);
   }
 
+  /**
+   * Local-only operating counters (plan §15): no prompts, account ids, links or tokens, and
+   * nothing leaves the device.
+   */
+  metrics(principalId: string): {
+    authorizations: Record<string, number>;
+    turns: Record<string, number>;
+    evidence: Record<string, number>;
+    businesses: Record<string, number>;
+  } {
+    const group = (sql: string, ...values: unknown[]) =>
+      Object.fromEntries(
+        (this.db.prepare(sql).all(...values) as { k: string; n: number }[]).map((row) => [
+          String(row.k),
+          Number(row.n),
+        ]),
+      );
+    return {
+      authorizations: group(
+        "SELECT state AS k, COUNT(*) AS n FROM pact_authorization_requests WHERE principal_id = ? GROUP BY state",
+        principalId,
+      ),
+      turns: group(
+        `SELECT m.state AS k, COUNT(*) AS n FROM pact_messages m
+         JOIN pact_conversations c ON c.id = m.conversation_id
+         WHERE c.principal_id = ? AND m.kind = 'operation' GROUP BY m.state`,
+        principalId,
+      ),
+      evidence: group(
+        `SELECT m.evidence AS k, COUNT(*) AS n FROM pact_messages m
+         JOIN pact_conversations c ON c.id = m.conversation_id
+         WHERE c.principal_id = ? AND m.kind = 'operation' GROUP BY m.evidence`,
+        principalId,
+      ),
+      businesses: group(
+        "SELECT support_status AS k, COUNT(*) AS n FROM pact_businesses GROUP BY support_status",
+      ),
+    };
+  }
+
   counts(principalId: string): { pendingAuthorizations: number; activeGrants: number } {
     const pending = this.db
       .prepare(

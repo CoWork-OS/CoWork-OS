@@ -534,7 +534,10 @@ export class PactRuntime {
         providers.push({ origin, ready: false, reason: "invalid_origin" });
       }
     }
-    const counts = await this.repo.counts(principal.id);
+    const [counts, metrics] = await Promise.all([
+      this.repo.counts(principal.id),
+      this.repo.metrics(principal.id),
+    ]);
     return {
       available: availability.available,
       ...(availability.reason ? { unavailableReason: availability.reason } : {}),
@@ -548,6 +551,7 @@ export class PactRuntime {
       },
       providers,
       ...counts,
+      metrics,
     };
   }
 

@@ -1996,7 +1996,7 @@ Rate the attractiveness of entering with a [specific angle].
 | **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and more           | See the [Connector Inventory](connector-inventory.md)        |
 | **Data & Analytics**       | CSV analysis, SQL, financial modeling, market screening                                             | Data Analysis pack, 8+ financial skills                      |
 | **Content & Marketing**    | Blog, social, email campaigns, SEO, copywriting                                                     | Marketing pack, marketing strategist skill                   |
-| **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 17 channels, scheduling, 10+ productivity skills             |
+| **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 19 channels, scheduling, 10+ productivity skills             |
 | **Team & Management**      | Sprints, 1-on-1 prep, status reports                                                                | EM pack, PM pack                                             |
 | **Security**               | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup     | Security audit skill, dependency check skill, Unbroker skill |
 | **Remote Ops**             | Chat-driven deployment, headless mode, WebSocket API                                                | Gateway, headless daemon, remote access                      |

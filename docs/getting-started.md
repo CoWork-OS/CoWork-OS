@@ -500,7 +500,7 @@ For slash-searchable app commands and workflow shortcuts, type `/` in the same m
 
 ### Enterprise MCP Connectors (Optional)
 
-Install enterprise connectors from **Settings** > **MCP Servers** > **Browse Registry** (or browse everything in **Settings** > **Add tools**):
+Install enterprise connectors from **Settings** > **Integrations** > **Connectors** (or browse connectors, MCP servers, plugins and skills together in **Settings** > **Add tools**):
 
 | Connector            | Type             | Setup                                                                      |
 | -------------------- | ---------------- | -------------------------------------------------------------------------- |

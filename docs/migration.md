@@ -192,7 +192,7 @@ For each channel you want to use:
 
 ### 4. Configure Guardrails
 
-1. Go to Settings > Guardrails
+1. Go to Settings > System & Security > Safety Limits
 2. Set appropriate budgets:
    - Token budget (e.g., 100,000)
    - Cost budget (e.g., $1.00)

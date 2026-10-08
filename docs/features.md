@@ -469,7 +469,7 @@ Role-specific and workflow bundles that group skills, agent roles, connectors, a
 - **Skill conflict detection**: Warns when multiple packs register the same skill ID, preventing silent overwrites
 - **Admin Policies**: Organization-level controls for allowed/blocked/required packs, installation permissions, and agent limits
 
-Access from **Settings** > **Customize**. See [Plugin Packs](plugin-packs.md) for pack management and [Message Box Shortcuts](message-box-shortcuts.md) for the composer shortcut model.
+Access from **Settings** > **Feature Packs**. See [Plugin Packs](plugin-packs.md) for pack management and [Message Box Shortcuts](message-box-shortcuts.md) for the composer shortcut model.
 
 ---
 
@@ -643,7 +643,7 @@ A set of connected subsystems that make improvement visible and measurable over 
 | **Evolution Metrics**             | Computes 5 on-demand metrics: Correction Rate, Style Adaptations, Knowledge Graph growth, Task Success Rate, and Style Alignment. Produces an overall 0–100 Evolution Score. Surfaced in the Daily Briefing.                                                                               |
 | **Daily Log Summarizer**          | Retired in memory repo Phase 3: the memory folder and its dreaming replace daily summaries ([design](memory-repo-phase3-design.md)). |
 
-**Behavior Adaptation controls** (Settings > Guardrails > Behavior Adaptation):
+**Behavior Adaptation controls** (Settings > System & Security > Safety Limits > Behavior Adaptation):
 
 - **Adaptive Style** toggle — enable/disable style learning (off by default)
 - **Max drift per week** — maximum one-level style shifts per 7-day window (default: 1)
@@ -1395,7 +1395,7 @@ See [Remote Access](remote-access.md) for details.
 
 ## Enterprise MCP Connectors
 
-Pre-built connectors for enterprise integrations, local services, and creative workflows. Install from **Settings > Connectors > Browse Registry**. The [Connector Inventory](connector-inventory.md) lists every shipped connector, channel and skill with its actions and requirements. **Settings > Add tools** searches available and installed packs, skills, native integrations, channels, and MCP servers before opening their setup surfaces; see [Add tools discovery](add-tools-discovery.md) for what its readiness states establish.
+Pre-built connectors for enterprise integrations, local services, and creative workflows. Install from **Settings > Integrations > Connectors**, or browse everything in **Settings > Add tools**. The [Connector Inventory](connector-inventory.md) lists every shipped connector, channel and skill with its actions and requirements. **Settings > Add tools** searches available and installed packs, skills, native integrations, channels, and MCP servers before opening their setup surfaces; see [Add tools discovery](add-tools-discovery.md) for what its readiness states establish.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">
@@ -1558,7 +1558,7 @@ The wallet is auto-generated on first setup, with the private key encrypted in t
 | -------------- | ------------------------------------------------------------------------ |
 | `infra_status` | Get overall status: provider connections, active sandboxes, wallet state |
 
-Configure in **Settings** > **Infrastructure**. The settings UI shows:
+Configure in **Settings** > **Integrations** > **Infrastructure**. The settings UI shows:
 
 - Provider connection status (E2B, Namecheap, Wallet)
 - API key configuration for each provider
@@ -1607,7 +1607,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 - Task-sourced scheduled jobs preserve a source task title, task ID, and `cowork://tasks/<taskId>` deeplink in the compiled prompt/description
 - Target modes: create a new task for each run or continue an existing task thread with a scheduled follow-up
 - Run mode presets: `Chat` for no-command-tool unattended work, `Local` for work governed by the selected access profile; worktree automation is forced to new-task execution instead of continuing a thread
-- Channel delivery to any of the 17 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
+- Channel delivery to any of the 19 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
 - Conditional delivery (`deliverOnlyIfResult`)
 - Template variables: `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`
 - Chat context variables: `{{chat_messages}}`, `{{chat_since}}`, etc.
@@ -1690,4 +1690,4 @@ Programmatic API for external automation and remote CoWork devices.
 
 Mobile Companions (iOS/Android node clients) were discontinued; see the [decision record](mobile-companions-discontinuation.md).
 
-Configure in **Settings** > **Control Plane**. For reverse proxies, keep the daemon loopback/private when possible, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin, and only set `COWORK_CONTROL_PLANE_TRUST_PROXY=1` behind a proxy you control.
+Configure in **Settings** > **Access** > **Control Plane**. For reverse proxies, keep the daemon loopback/private when possible, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin, and only set `COWORK_CONTROL_PLANE_TRUST_PROXY=1` behind a proxy you control.

@@ -36,9 +36,9 @@ export default defineConfig({
       { text: "Compare", link: "/comparisons/" },
       { text: "CLI", link: "/cli" },
       { text: "Platform Updates", link: "/integration-skill-bootstrap-lifecycle" },
-      { text: "Release Notes", link: "/release-notes-0.5.52" },
+      { text: "Release Notes", link: "/release-notes-0.5.60" },
       { text: "Architecture", link: "/architecture" },
-      { text: "Security", link: "/security/" },
+      { text: "Security", link: "/security/README" },
       { text: "GitHub", link: "https://github.com/CoWork-OS/CoWork-OS" },
     ],
 
@@ -102,7 +102,7 @@ export default defineConfig({
       {
         text: "Security",
         items: [
-          { text: "Security Overview", link: "/security/" },
+          { text: "Security Overview", link: "/security/README" },
           { text: "Security Model", link: "/security/security-model" },
           { text: "Trust Boundaries", link: "/security/trust-boundaries" },
           { text: "Best Practices", link: "/security/best-practices" },
@@ -132,7 +132,12 @@ export default defineConfig({
           { text: "Motion Editor skill", link: "/skills/motion-editor" },
           { text: "Architecture Design skill", link: "/skills/architecture-design" },
           { text: "Unbroker skill", link: "/skills/unbroker" },
+          { text: "Release Notes 0.5.60", link: "/release-notes-0.5.60" },
+          { text: "Release Notes 0.5.54", link: "/release-notes-0.5.54" },
+          { text: "Release Notes 0.5.53", link: "/release-notes-0.5.53" },
           { text: "Release Notes 0.5.52", link: "/release-notes-0.5.52" },
+          { text: "Release Notes 0.5.51", link: "/release-notes-0.5.51" },
+          { text: "Release Notes 0.5.50", link: "/release-notes-0.5.50" },
           { text: "Release Notes 0.5.48", link: "/release-notes-0.5.48" },
           { text: "Release Notes 0.5.47", link: "/release-notes-0.5.47" },
           { text: "Release Notes 0.5.45", link: "/release-notes-0.5.45" },

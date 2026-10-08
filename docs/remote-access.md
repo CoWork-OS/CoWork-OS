@@ -57,7 +57,7 @@ Before connecting from your main CoWork machine, determine the address that is a
 
 If the remote machine is a Mac mini, laptop, or VM on the same LAN:
 
-1. Enable **Allow LAN Connections** in CoWork Settings > Control Plane.
+1. Enable **Allow LAN Connections** in CoWork Settings > Access > Control Plane.
 2. On the remote machine, find its local IP:
 
 ```bash
@@ -101,7 +101,7 @@ SSH tunnels provide secure remote access using standard SSH port forwarding. Thi
 
 ### Setup
 
-1. **Enable Control Plane** in CoWork Settings > Control Plane
+1. **Enable Control Plane** in CoWork Settings > Access > Control Plane
    - Packaged Linux server release: run `node bin/coworkd-node.js --print-control-plane-token` from the extracted package directory.
    - Source/headless: start with `node bin/coworkd-node.js` (Node daemon) or `node bin/coworkd.js` (headless Electron).
 2. **Note your token** (copy it for client configuration)
@@ -164,7 +164,7 @@ Exposes your Control Plane to devices on your Tailnet only.
 
 1. **Install Tailscale** from [tailscale.com](https://tailscale.com)
 2. **Connect to your Tailnet**: `tailscale up`
-3. **Enable in CoWork**: Settings > Control Plane > Tailscale Mode > "Serve"
+3. **Enable in CoWork**: Settings > Access > Control Plane > Tailscale Mode > "Serve"
 4. **Access via**: `wss://<hostname>.<tailnet>.ts.net`
 
 ### Tailscale Funnel (Public Internet)
@@ -172,7 +172,7 @@ Exposes your Control Plane to devices on your Tailnet only.
 Exposes your Control Plane to the public internet (requires Tailscale subscription).
 
 1. **Enable Funnel** on your Tailscale account
-2. **Enable in CoWork**: Settings > Control Plane > Tailscale Mode > "Funnel"
+2. **Enable in CoWork**: Settings > Access > Control Plane > Tailscale Mode > "Funnel"
 3. **Access via**: `wss://<hostname>.<tailnet>.ts.net` from anywhere
 
 ## Security Considerations
@@ -271,7 +271,7 @@ CoWork can also operate as a client connecting to a remote Control Plane. This i
 
 ### Configuration
 
-In Settings > Control Plane > Remote Connection:
+In Settings > Access > Control Plane > Remote Connection:
 
 | Setting         | Description                                                            |
 | --------------- | ---------------------------------------------------------------------- |

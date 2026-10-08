@@ -2,7 +2,7 @@
 
 CoWork OS ships a bundled **Codex Security** plugin pack for defensive repository security review. It adapts the Codex Security workflows into normal CoWork plugin-pack skills, slash commands, task timelines, approvals, workspace path rules, and packaged resources.
 
-Access it from **Settings > Customize > Codex Security**, or invoke one of its slash commands in the composer:
+Access it from **Settings > Feature Packs > Codex Security**, or invoke one of its slash commands in the composer:
 
 ```text
 /security-scan Run a security scan on this repository

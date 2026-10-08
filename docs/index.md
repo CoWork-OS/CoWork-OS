@@ -162,8 +162,8 @@ hero:
       text: Supermemory
       link: /supermemory
     - theme: alt
-      text: Release Notes 0.5.45
-      link: /release-notes-0.5.45
+      text: Release Notes 0.5.60
+      link: /release-notes-0.5.60
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3

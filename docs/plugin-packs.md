@@ -2,7 +2,7 @@
 
 Plugin packs are composable bundles that group skills, agent roles, connectors, and slash commands into a single installable unit. Most packs target a job function — engineering, sales, product management, legal practice areas — while workflow packs such as **CoWork Shortcuts** add reusable message-box shortcuts.
 
-Access from **Settings** > **Customize**.
+Access from **Settings** > **Feature Packs**.
 
 Plugin packs add discoverable skills, roles, connectors, and commands; they do
 not grant execution authority. When a pack is used, its skills and connector

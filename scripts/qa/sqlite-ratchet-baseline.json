@@ -6,7 +6,7 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1780,
+    "prepare": 1781,
     "getDatabase": 129,
     "runtimeImport": 49
   },
@@ -412,7 +412,7 @@
       "runtimeImport": 1
     },
     "src/electron/pact/pact-sql.ts": {
-      "prepare": 59
+      "prepare": 60
     },
     "src/electron/reports/agent-performance-review-sql.ts": {
       "prepare": 8

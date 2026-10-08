@@ -853,6 +853,14 @@ export class PactStore {
     return row ? mapMessage(row) : null;
   }
 
+  /** The latest attempt of a logical operation, wherever it was sent. */
+  findOperation(operationId: string): PactMessageRecord | null {
+    const row = this.db
+      .prepare("SELECT * FROM pact_messages WHERE operation_id = ? ORDER BY seq DESC LIMIT 1")
+      .get(operationId) as Row | undefined;
+    return row ? mapMessage(row) : null;
+  }
+
   listMessages(conversationId: string): PactMessageRecord[] {
     return (
       this.db

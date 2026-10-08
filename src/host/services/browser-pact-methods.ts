@@ -100,7 +100,8 @@ export function createBrowserPactDefinitions(options: {
     ),
     sendPactMessage: action(
       PactSendSchema,
-      (value, principal) => service.send(principal, value),
+      // A browser page cannot pre-confirm a change; approval-requiring sends are refused.
+      (value, principal) => service.send(principal, { ...value, confirmed: false }),
       true,
     ),
     acknowledgePactEvidence: action(

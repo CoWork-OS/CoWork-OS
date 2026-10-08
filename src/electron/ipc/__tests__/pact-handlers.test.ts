@@ -60,6 +60,17 @@ describe("PACT IPC handlers", () => {
       expect.objectContaining({ id: "owner" }),
       expect.objectContaining({ requiredScopes: [], confirmed: false }),
     );
+    // A renderer cannot pre-confirm a change.
+    await handlers[IPC_CHANNELS.PACT_CONVERSATION_SEND]!({
+      businessId: "b",
+      text: "Cancel order A-1",
+      effect: "change",
+      confirmed: true,
+    });
+    expect(service.send).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ confirmed: false }),
+    );
   });
 
   it("opens the business's sign-in page in the system browser and returns no link", async () => {

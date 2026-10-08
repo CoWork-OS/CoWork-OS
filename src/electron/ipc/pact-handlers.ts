@@ -104,7 +104,9 @@ export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler
     [IPC_CHANNELS.PACT_CONVERSATION_SEND]: handler(
       IPC_CHANNELS.PACT_CONVERSATION_SEND,
       PactSendSchema,
-      (v, p) => svc().send(p, v),
+      // The renderer is a web context: it can never pre-confirm a change. Anything that needs
+      // local approval comes back as local_approval_required.
+      (v, p) => svc().send(p, { ...v, confirmed: false }),
     ),
     [IPC_CHANNELS.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE]: handler(
       IPC_CHANNELS.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE,

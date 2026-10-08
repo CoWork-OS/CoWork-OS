@@ -708,6 +708,11 @@ export class PactRuntime {
     }
     void resolvedProvider;
 
+    // A reconcile targets the conversation that holds the operation.
+    if (request.reconcileOperationId && !request.conversationId) {
+      const operation = await this.repo.findOperation(request.reconcileOperationId);
+      if (operation) request = { ...request, conversationId: operation.conversationId };
+    }
     // Conversation for this principal, subject and business only.
     let conversation: PactConversationRecord | null = null;
     if (request.conversationId) {

@@ -115,9 +115,19 @@ Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/
 
 > **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.60` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
 
-#### macOS unsigned app workaround
+#### macOS: install from the terminal (no Gatekeeper dialog)
 
-This Gatekeeper warning is different from the macOS 13 system requirement. On a supported Mac, an unsigned CoWork OS DMG may still need a one-time Gatekeeper override:
+CoWork OS releases are ad hoc signed, not notarized by Apple, so a DMG downloaded in a browser is blocked on first launch. On macOS 15 Sequoia and later that dialog has no **Open** button, and Control-click > **Open** no longer bypasses it. The check is triggered by the quarantine attribute browsers attach to downloads; `curl` does not attach it. This command downloads the same release ZIP, verifies its SHA-512 against the published updater metadata, verifies the app bundle's code signature, and copies it into Applications without the quarantine attribute, so it opens like any other app:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+```
+
+Re-run the same command to update. Options go after `bash -s --`, for example `--version 0.5.60`, `--install-dir "$HOME/Applications"` or `--no-launch`. To read the script before running it, download [`scripts/install-macos.sh`](scripts/install-macos.sh) and run `bash install-macos.sh`. Like the DMG, it needs an Apple Silicon Mac; see [macOS Installation](docs/macos-installation.md) for details, Intel Macs and uninstalling.
+
+#### macOS: if you used the DMG
+
+This Gatekeeper warning is different from the macOS 13 system requirement. On a supported Mac, the DMG build needs a one-time Gatekeeper override (the terminal installer above avoids it):
 
 1. Open the downloaded `.dmg` and drag **CoWork OS** into **Applications**.
 

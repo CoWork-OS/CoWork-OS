@@ -34,7 +34,13 @@ This is a best-effort WSL/WSLg compatibility path, not a claim of general Linux 
 
 On a supported macOS version, an unsigned CoWork OS DMG may show **"Apple could not verify CoWork OS is free of malware"** or **`"CoWork OS" was blocked to protect your Mac`** on first launch.
 
-Use the macOS Gatekeeper override:
+To avoid the dialog entirely, install from the terminal instead of the DMG. Browsers add the quarantine attribute that triggers Gatekeeper; `curl` does not, and the installer verifies the release checksum and the app signature before copying it into Applications (details in [macOS Installation](macos-installation.md)):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+```
+
+If you already copied the app from the DMG, use the macOS Gatekeeper override:
 
 1. Drag **CoWork OS** from the DMG into **Applications**.
 2. Open **CoWork OS** once. If macOS blocks it, click **Done**.

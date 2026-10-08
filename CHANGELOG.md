@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **macOS terminal installer**: `curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash` installs the released app without the Gatekeeper "Apple could not verify" dialog that the DMG triggers on first launch. Browsers attach the quarantine attribute that drives that dialog for the ad hoc signed build; `curl` does not. The installer verifies the ZIP's size and SHA-512 against the published updater metadata and the app bundle's code signature before copying it into Applications, re-runs as an updater, and refuses Intel Macs and older macOS versions with a pointer to npm. The macOS release smoke test now installs each build's ZIP through it. See [macOS Installation](docs/macos-installation.md).
+
 ## [0.5.60] - 2026-10-07
 
 See [Release Notes 0.5.60](docs/release-notes-0.5.60.md) for the upgrade notes and a summary. Versions 0.5.55 to 0.5.59 were skipped.

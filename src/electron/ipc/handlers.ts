@@ -11806,12 +11806,11 @@ export async function setupIpcHandlers(
   // system browser.
   const pactSurface = new PactSurfaceService({
     runtime: () => agentDaemon.getPactRuntime(),
-    db: dbManager.getDatabase(),
     findWorkspace: (workspaceId) => agentDaemon.getWorkspaceForPact(workspaceId),
   });
   setupPactHandlers({
     service: () => pactSurface,
-    db: dbManager.getDatabase(),
+    owner: () => agentDaemon.getPactRuntime().ownerPrincipal("desktop"),
     openExternal: (url) => shell.openExternal(url),
   });
 

@@ -1082,6 +1082,10 @@ const RESETTABLE_SECURE_SETTINGS_CATEGORIES: SettingsCategory[] = [
   "autonomy-chief-of-staff",
   "awareness-state",
   "webaccess",
+  // PACT business grants and pending sign-ins can be re-consented; the runtime marks grants whose
+  // tokens are gone as invalid. Signer configuration (pact:signer) is never reset silently.
+  "pact:grants",
+  "pact:authorization",
 ];
 
 const ACCEPT_NEW_KEYCHAIN_KEY_ENV = "COWORK_ACCEPT_NEW_KEYCHAIN_KEY";

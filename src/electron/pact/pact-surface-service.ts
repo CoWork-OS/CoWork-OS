@@ -4,7 +4,6 @@
  * falls back to a default client principal. Results never contain secrets: the sign-in link is
  * returned only from `authorizationSignIn`, which surfaces gate to the owner.
  */
-import type Database from "better-sqlite3";
 import type {
   PactAuthorizationSignIn,
   PactAuthorizationView,
@@ -40,7 +39,6 @@ export class PactSurfaceError extends Error {
 
 export interface PactSurfaceDeps {
   runtime: () => PactRuntime;
-  db: Database.Database;
   findWorkspace: (workspaceId: string) => Promise<Workspace | undefined> | Workspace | undefined;
 }
 

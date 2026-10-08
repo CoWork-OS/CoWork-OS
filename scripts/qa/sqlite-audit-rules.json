@@ -65,6 +65,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/pact/pact-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "PACT persistence (providers, businesses, subject bindings, grants, conversations, turns with send leases, sign-in requests, receipts): synchronous SQL run as clocked services-domain units (COWORK_DB_WORKER_SERVICES) behind PactRepository. The only host-side use outside a unit is the grant refresh commit, which runs inside SecureSettingsRepository.updateWithin so the rotated token and the grant row commit together.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/agents/agent-signal-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Agent kit rebuild reads (recent task events of a type) and the task event range scan behind the daily summary tool: services-domain read units. The range scan waits for accepted timeline rows to commit instead of committing them on the host.",

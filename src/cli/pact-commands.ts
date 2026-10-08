@@ -5,7 +5,6 @@
  * the Control Plane. A send typed here is the owner's explicit request; `--yes` confirms it.
  */
 import type { AgentDaemon } from "../electron/agent/daemon";
-import { localOwnerPrincipal } from "../electron/pact/daemon-host";
 import { PactSurfaceService } from "../electron/pact/pact-surface-service";
 import {
   PactAuthorizationStartSchema,
@@ -52,7 +51,6 @@ export type PactWrite = (payload: Record<string, unknown>, text: string) => void
 function surface(daemon: AgentDaemon): PactSurfaceService {
   return new PactSurfaceService({
     runtime: () => daemon.getPactRuntime(),
-    db: daemon.getDatabase(),
     findWorkspace: (workspaceId) => daemon.getWorkspaceForPact(workspaceId),
   });
 }
@@ -82,8 +80,8 @@ export async function describePactSignInPause(
   const pending = await daemon.getPendingInputRequests?.(taskId);
   const request = (pending ?? []).find((entry) => isPactAuthorizationInputRequest(entry));
   if (!request) return null;
-  const principal = localOwnerPrincipal(daemon.getDatabase(), "cli");
   const runtime = daemon.getPactRuntime();
+  const principal = await runtime.ownerPrincipal("cli");
   const view = await runtime.getAuthorizationByInputRequest(principal, request.id);
   if (!view) return null;
   const signIn = await runtime.getAuthorizationSignIn(principal, view.id);
@@ -112,7 +110,7 @@ export async function runPactDirectCommand(
   write: PactWrite,
 ): Promise<number> {
   const service = surface(daemon);
-  const principal = localOwnerPrincipal(daemon.getDatabase(), "cli");
+  const principal = await daemon.getPactRuntime().ownerPrincipal("cli");
   const show = (payload: unknown, text: string) =>
     write({ type: "pact", action: args.pactAction, result: payload as Record<string, unknown> }, text);
 

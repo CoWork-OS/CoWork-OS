@@ -1,5 +1,4 @@
 import type { ZodType } from "zod";
-import { localOwnerPrincipal } from "../pact/daemon-host";
 import { PactSurfaceError, PactSurfaceService } from "../pact/pact-surface-service";
 import {
   PactAuthorizationListSchema,
@@ -34,18 +33,16 @@ export function registerPactMethods(input: {
   agentDaemon: AgentDaemon;
   requireScope: RequireScope;
 }): void {
-  const db = input.agentDaemon.getDatabase();
   const service = new PactSurfaceService({
     runtime: () => input.agentDaemon.getPactRuntime(),
-    db,
     findWorkspace: (workspaceId) => input.agentDaemon.getWorkspaceForPact(workspaceId),
   });
-  const principalFor = (client: unknown): PactPrincipal => {
+  const principalFor = async (client: unknown): Promise<PactPrincipal> => {
     const id = (client as { id?: unknown })?.id;
-    return {
-      ...localOwnerPrincipal(db, `control_plane:${typeof id === "string" || typeof id === "number" ? id : "unknown"}`),
-      kind: "control_plane_client",
-    };
+    const owner = await input.agentDaemon
+      .getPactRuntime()
+      .ownerPrincipal(`control_plane:${typeof id === "string" || typeof id === "number" ? id : "unknown"}`);
+    return { ...owner, kind: "control_plane_client" };
   };
 
   const register = <T>(
@@ -64,7 +61,7 @@ export function registerPactMethods(input: {
         };
       }
       try {
-        return await run(parsed.data, principalFor(client));
+        return await run(parsed.data, await principalFor(client));
       } catch (error) {
         if (error instanceof PactSurfaceError) {
           throw {

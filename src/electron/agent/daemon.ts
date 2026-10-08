@@ -785,6 +785,8 @@ export class AgentDaemon extends EventEmitter {
   /** PACT consent waits whose tool call is still running in this process. */
   private livePactAuthorizationWaits: Set<string> = new Set();
   private pactRuntime: PactRuntime | null = null;
+  /** The host connection captured at construction; the PACT runtime runs its units over it. */
+  private pactDatabase!: Database.Database;
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private maintenanceIntervalHandle?: ReturnType<typeof setInterval>;
   private vacuumRetryHandle?: ReturnType<typeof setTimeout>;
@@ -869,6 +871,7 @@ export class AgentDaemon extends EventEmitter {
   ) {
     super();
     const db = dbManager.getDatabase();
+    this.pactDatabase = db;
     this.options = {
       ...this.options,
       recurringApprovalService:
@@ -7802,7 +7805,7 @@ export class AgentDaemon extends EventEmitter {
 
   /** The PACT runtime for this process (desktop main, Node daemon or `cowork run`). */
   getPactRuntime(): PactRuntime {
-    this.pactRuntime ??= createDaemonPactRuntime(this);
+    this.pactRuntime ??= createDaemonPactRuntime(this, this.pactDatabase);
     return this.pactRuntime;
   }
 
@@ -18782,7 +18785,8 @@ export class AgentDaemon extends EventEmitter {
     });
     this.pendingInputRequests.clear();
     // Consent pollers stop; their durable rows resume (or expire) on the next start.
-    this.livePactAuthorizationWaits.clear();
+    // Optional chaining: prototype-built test daemons have no field initializers.
+    this.livePactAuthorizationWaits?.clear();
     void this.pactRuntime?.shutdown().catch(() => undefined);
 
     // Save conversation snapshots and mark active tasks as "interrupted" so they

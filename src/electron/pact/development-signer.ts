@@ -106,6 +106,27 @@ export class DevelopmentPactSigner implements PactSigner {
     };
   }
 
+  /**
+   * A self-service registration token for providers that expose the reference
+   * `POST /api/platforms` endpoint: `sub` = `iss`, `aud` = that endpoint URL.
+   */
+  registrationToken(registrationUrl: string): string {
+    const iat = Math.floor((this.options.now?.() ?? Date.now()) / 1000);
+    const key = this.keys[0]!;
+    return signCompactJws(
+      JSON.stringify({
+        iss: this.issuer,
+        sub: this.issuer,
+        aud: registrationUrl,
+        iat,
+        exp: iat + 120,
+        jti: randomUUID(),
+      }),
+      { alg: "ES256", kid: key.publicJwk.kid, typ: "JWT" },
+      key.privateKey,
+    );
+  }
+
   async status(): Promise<PactSignerStatus> {
     return {
       ok: Boolean(this.issuerUrl),

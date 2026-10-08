@@ -47,6 +47,7 @@ import { PactGrantService, PactGrantUnavailableError, type GrantKey } from "./gr
 import { PactJwksCache } from "./jwks-cache";
 import { generateEs256KeyPair, privateKeyFromJwk, type Es256KeyPair } from "./jws";
 import { PactRepository } from "./pact-repository";
+import { serviceStatements } from "../database/service-statements";
 import { refreshDelegationToken, type PactClientCredentials } from "./protocol-client";
 import { PactProviderBlockedError, PactProviderRegistry, type PactProviderContext } from "./provider-registry";
 import { verifyPactReceipt } from "./receipt-verifier";
@@ -96,7 +97,6 @@ export interface PactCallContext {
 
 /** What the runtime needs from the daemon (or a test double). */
 export interface PactHost {
-  localPrincipal(): PactPrincipal;
   requestLocalApproval(
     taskId: string,
     summary: string,
@@ -137,6 +137,8 @@ export interface PactRuntimeDeps {
   now?: () => number;
   leaseOwner?: string;
   env?: NodeJS.ProcessEnv;
+  /** Tests supply the owner principal instead of the session-membership unit. */
+  ownerPrincipalId?: () => Promise<string> | string;
   /** Tests shorten consent polling and retry backoff. */
   authorizationPollIntervalMs?: number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -196,6 +198,7 @@ export class PactRuntime {
     { promise: Promise<PactAuthorizationOutcome & { grantId?: string }>; abort: AbortController }
   >();
   private identityState: IdentityState | null = null;
+  private ownerId: string | null = null;
   private signerStatusCache: { fingerprint: string; at: number; status: PactSignerStatus } | null = null;
   private stopped = false;
 
@@ -224,6 +227,20 @@ export class PactRuntime {
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();
+  }
+
+  /**
+   * The profile owner, the principal every desktop, CLI and Control Plane call acts as. Read
+   * through the services unit (never a client-principal fallback) and cached; `actor` records
+   * which surface made the call.
+   */
+  async ownerPrincipal(actor?: string): Promise<PactPrincipal> {
+    if (!this.ownerId) {
+      this.ownerId = this.deps.ownerPrincipalId
+        ? await this.deps.ownerPrincipalId()
+        : (await serviceStatements(this.deps.db).unit("sessionMembership_getLocalPrincipal", [])).principalId;
+    }
+    return { id: this.ownerId, kind: "local_owner", ...(actor ? { actor } : {}) };
   }
 
   private settings(): PactSettings {
@@ -272,7 +289,7 @@ export class PactRuntime {
       if (!isPactDevelopmentEnabled(this.deps.env)) return null;
       const signer = new DevelopmentPactSigner({
         // Opaque and stable per local principal; never the principal id itself.
-        subject: `cowork-dev-${createHash("sha256").update(this.deps.host.localPrincipal().id).digest("hex").slice(0, 32)}`,
+        subject: `cowork-dev-${createHash("sha256").update(this.ownerId ?? "owner").digest("hex").slice(0, 32)}`,
         ...(identity.issuer ? { issuer: identity.issuer } : {}),
         audiences: Object.fromEntries(settings.providers.map((p) => [p.origin, p.audience])),
       });
@@ -353,6 +370,7 @@ export class PactRuntime {
   }
 
   private async resolveIdentity(principal: PactPrincipal): Promise<ResolvedIdentity> {
+    await this.ownerPrincipal();
     const identity = this.identity();
     if (!identity) throw blocked("identity_not_ready", "PACT identity is not configured in Settings.");
     if (identity.development && !identity.issuer) {
@@ -395,6 +413,7 @@ export class PactRuntime {
   }
 
   private async currentSignerStatus(): Promise<PactSignerStatus | null> {
+    await this.ownerPrincipal();
     const identity = this.identity();
     if (!identity) return null;
     try {
@@ -439,6 +458,7 @@ export class PactRuntime {
   // --------------------------------------------------------------------- status
 
   async status(principal: PactPrincipal): Promise<PactStatusView> {
+    await this.ownerPrincipal();
     const settings = this.settings();
     const availability = this.availability();
     let identityReady = false;
@@ -1625,7 +1645,7 @@ export class PactRuntime {
         continue;
       }
       try {
-        const principal = this.deps.host.localPrincipal();
+        const principal = await this.ownerPrincipal();
         const { identity, binding } = await this.resolveIdentity(principal);
         const business = (await this.repo.getBusiness(record.businessId))!;
         const provider = await this.providers.requireReady(
@@ -1649,7 +1669,7 @@ export class PactRuntime {
   private async resumeBlocker(record: PactAuthorizationRecord): Promise<string | null> {
     if (record.expiresAt <= this.now()) return "expired";
     if (!this.availability().available) return "pact_unavailable";
-    if (record.principalId !== this.deps.host.localPrincipal().id) return "owner_changed";
+    if (record.principalId !== (await this.ownerPrincipal()).id) return "owner_changed";
     if (record.taskId && !(await this.deps.host.taskStillWaiting(record.taskId))) return "task_not_waiting";
     const business = await this.repo.getBusiness(record.businessId);
     if (!business || business.supportStatus !== "supported") return "business_changed";

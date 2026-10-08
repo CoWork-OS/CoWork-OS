@@ -300,6 +300,25 @@ export class HttpPactSigner implements PactSigner {
     });
   }
 
+  /**
+   * Device-key enrollment (account-free managed identity): prove possession of the install's key
+   * and receive the opaque subject the signer assigns to it.
+   */
+  async enroll(): Promise<{ subject: string; issuer: string }> {
+    const auth = this.options.auth;
+    if (auth.mode !== "device_key") {
+      throw new PactSignerError("not_configured", "Enrollment needs the install's device key");
+    }
+    const body = await this.post("/pact/enroll", {
+      publicJwk: auth.keyPair.publicJwk,
+      proof: this.authorization("/pact/enroll").replace(/^PACT-Device /, ""),
+    });
+    if (typeof body.subject !== "string" || body.issuer !== this.options.issuer) {
+      throw new PactSignerError("rejected", "The signer did not confirm enrollment");
+    }
+    return { subject: body.subject, issuer: body.issuer };
+  }
+
   async status(): Promise<PactSignerStatus> {
     const jwksUri = `${this.options.issuer.replace(/\/+$/, "")}/.well-known/jwks.json`;
     try {

@@ -7,7 +7,6 @@
 import { ipcMain } from "electron";
 import type { ZodType } from "zod";
 import { IPC_CHANNELS } from "../../shared/types";
-import { localOwnerPrincipal } from "../pact/daemon-host";
 import type { PactSurfaceService } from "../pact/pact-surface-service";
 import {
   PactAuthorizationByInputSchema,
@@ -24,11 +23,11 @@ import {
 import type { PactPrincipal } from "../pact/types";
 import { RATE_LIMIT_CONFIGS, rateLimiter } from "../utils/rate-limiter";
 import { validateInput } from "../utils/validation";
-import type Database from "better-sqlite3";
 
 export interface PactIpcDeps {
   service: () => PactSurfaceService;
-  db: Database.Database;
+  /** The owner principal (the desktop user), resolved by the PACT runtime. */
+  owner: () => Promise<PactPrincipal>;
   /** Opens an https URL in the user's own browser (shell.openExternal in main). */
   openExternal: (url: string) => Promise<void>;
   checkRateLimit?: (channel: string) => void;
@@ -46,13 +45,12 @@ function defaultRateLimit(channel: string): void {
 /** The handlers by channel, independent of Electron (tests call them directly). */
 export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler> {
   const limit = deps.checkRateLimit ?? defaultRateLimit;
-  const owner = (): PactPrincipal => localOwnerPrincipal(deps.db, "desktop");
   const handler =
     <T>(channel: string, schema: ZodType<T>, run: (value: T, principal: PactPrincipal) => unknown): Handler =>
     async (raw) => {
       limit(channel);
       const value = validateInput(schema, raw, "PACT request");
-      return run(value, owner());
+      return run(value, await deps.owner());
     };
   const svc = () => deps.service();
   return {

@@ -90,7 +90,6 @@ function makeHarness(options: { delegated?: boolean; leaseOwner?: string; shared
     unavailable: [],
     approve: true,
     onWait: () => provider.decide(),
-    localPrincipal: () => ({ id: "principal-owner", kind: "local_owner" }),
     async requestLocalApproval(_taskId, summary) {
       host.approvals.push(summary);
       return host.approve;
@@ -126,6 +125,7 @@ function makeHarness(options: { delegated?: boolean; leaseOwner?: string; shared
     transportFor: () => new PactTransport(network),
     now: () => clock.now,
     signerFor: () => signer,
+    ownerPrincipalId: () => "principal-owner",
     authorizationPollIntervalMs: 5,
     sleep: async () => undefined,
     ...(options.leaseOwner ? { leaseOwner: options.leaseOwner } : {}),

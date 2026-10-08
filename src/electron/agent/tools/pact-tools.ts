@@ -2,7 +2,7 @@ import type { PactEffectClass, PactSendOutcome } from "../../../shared/pact";
 import type { RuntimeToolMetadata, Task, Workspace } from "../../../shared/types";
 import { isAutomatedTaskLike } from "../../../shared/automated-task-detection";
 import { getPactPolicy } from "../../admin/policies";
-import { networkContextOf, localOwnerPrincipal } from "../../pact/daemon-host";
+import { networkContextOf } from "../../pact/daemon-host";
 import { redactPact, redactPactError } from "../../pact/redaction";
 import { pactToolsExposed } from "../../pact/routing";
 import type { PactCallContext } from "../../pact/runtime";
@@ -212,7 +212,7 @@ export class PactTools {
   }
 
   private principal() {
-    return localOwnerPrincipal(this.daemon.getDatabase());
+    return this.daemon.getPactRuntime().ownerPrincipal(`task:${this.taskId}`);
   }
 
   /** The runtime-supplied destination for PermissionEngine domain rules (plan §7). */
@@ -251,7 +251,7 @@ export class PactTools {
     }
     try {
       const { business, route } = await this.daemon.getPactRuntime().discover(
-        this.principal(),
+        await this.principal(),
         { ...(domain ? { domain } : {}), ...(cardUrl ? { cardUrl } : {}), refresh: record.refresh === true },
         this.callContext(),
       );
@@ -292,7 +292,7 @@ export class PactTools {
       const conversationId = stringInput(record.conversation_id, 200);
       const purpose = stringInput(record.purpose, 300);
       const outcome = await this.daemon.getPactRuntime().send(
-        this.principal(),
+        await this.principal(),
         {
           businessId,
           text: message,
@@ -349,7 +349,7 @@ export class PactTools {
     const record = (input ?? {}) as Record<string, unknown>;
     const conversationId = stringInput(record.conversation_id, 200);
     if (!conversationId) return { success: false, error: "conversation_id is required." };
-    const view = await this.daemon.getPactRuntime().getConversation(this.principal(), conversationId);
+    const view = await this.daemon.getPactRuntime().getConversation(await this.principal(), conversationId);
     if (!view) return { success: false, error: "Unknown conversation." };
     return {
       success: true,

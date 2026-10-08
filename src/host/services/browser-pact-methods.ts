@@ -1,6 +1,5 @@
 import type { ZodType } from "zod";
 import type { AgentDaemon } from "../../electron/agent/daemon";
-import { localOwnerPrincipal } from "../../electron/pact/daemon-host";
 import { PactSurfaceError, PactSurfaceService } from "../../electron/pact/pact-surface-service";
 import {
   PactAuthorizationByInputSchema,
@@ -26,13 +25,12 @@ import type { BrowserDesktopDefinition, BrowserDesktopDefinitions } from "./brow
 export function createBrowserPactDefinitions(options: {
   agentDaemon: AgentDaemon;
 }): BrowserDesktopDefinitions {
-  const db = options.agentDaemon.getDatabase();
   const service = new PactSurfaceService({
     runtime: () => options.agentDaemon.getPactRuntime(),
-    db,
     findWorkspace: (workspaceId) => options.agentDaemon.getWorkspaceForPact(workspaceId),
   });
-  const owner = (): PactPrincipal => localOwnerPrincipal(db, "browser_session");
+  const owner = (): Promise<PactPrincipal> =>
+    options.agentDaemon.getPactRuntime().ownerPrincipal("browser_session");
   const run = async (handler: () => unknown) => {
     try {
       return await handler();
@@ -57,14 +55,14 @@ export function createBrowserPactDefinitions(options: {
     minArgs: 1,
     maxArgs: 1,
     validate: (args) => [schema.parse(args[0])],
-    handler: ([value]) => run(() => handler(value as T, owner())),
+    handler: ([value]) => run(async () => handler(value as T, await owner())),
   });
   const noArgs = (handler: (principal: PactPrincipal) => unknown, mutation = false): BrowserDesktopDefinition => ({
     capability: "pact.manage",
     mutation,
     minArgs: 0,
     maxArgs: 0,
-    handler: () => run(() => handler(owner())),
+    handler: () => run(async () => handler(await owner())),
   });
 
   return {

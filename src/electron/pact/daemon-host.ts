@@ -11,16 +11,13 @@ import { applyAccessProfileToWorkspace, resolveEffectiveAccessProfile } from "..
 import type { NetworkPolicyDecision } from "../security/network-policy";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import type { NetworkPolicyContext } from "../security/policy-checked-fetch";
-import { SessionMembershipStore } from "../workspaces/SessionMembershipService";
 import { PactRuntime, type PactHost } from "./runtime";
 import { SecureSettingsPactSecretStore } from "./secret-store";
 import { PactSettingsManager } from "./settings";
 import { createPactTransport } from "./transport-node";
-import type { PactPrincipal } from "./types";
 
 /** The daemon surface the host needs; structural so pact/ does not import the daemon module. */
 export interface PactDaemonLike {
-  getDatabase(): Database.Database;
   requestApproval(
     taskId: string,
     type: string,
@@ -58,17 +55,8 @@ export function effectiveWorkspace(workspace: Workspace): Workspace {
   return applyAccessProfileToWorkspace(workspace, profile);
 }
 
-export function localOwnerPrincipal(db: Database.Database, actor?: string): PactPrincipal {
-  const principal = new SessionMembershipStore(db).getLocalPrincipal();
-  return { id: principal.principalId, kind: "local_owner", ...(actor ? { actor } : {}) };
-}
-
 export class DaemonPactHost implements PactHost {
   constructor(private readonly daemon: PactDaemonLike) {}
-
-  localPrincipal(): PactPrincipal {
-    return localOwnerPrincipal(this.daemon.getDatabase());
-  }
 
   requestLocalApproval(
     taskId: string,
@@ -115,9 +103,9 @@ export class DaemonPactHost implements PactHost {
   }
 }
 
-export function createDaemonPactRuntime(daemon: PactDaemonLike): PactRuntime {
+export function createDaemonPactRuntime(daemon: PactDaemonLike, db: Database.Database): PactRuntime {
   return new PactRuntime({
-    db: daemon.getDatabase(),
+    db,
     secrets: new SecureSettingsPactSecretStore(),
     host: new DaemonPactHost(daemon),
     settings: () => PactSettingsManager.loadSettings(),

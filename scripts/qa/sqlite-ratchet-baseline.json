@@ -6,7 +6,7 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1721,
+    "prepare": 1779,
     "getDatabase": 129,
     "runtimeImport": 49
   },
@@ -410,6 +410,9 @@
     "src/electron/mission-control/MissionControlRepository.ts": {
       "prepare": 10,
       "runtimeImport": 1
+    },
+    "src/electron/pact/pact-sql.ts": {
+      "prepare": 58
     },
     "src/electron/reports/agent-performance-review-sql.ts": {
       "prepare": 8

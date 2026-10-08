@@ -34,6 +34,7 @@ import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import { SpreadsheetArtifactCard } from "./SpreadsheetArtifactCard";
 import "./artifact-viewers.css";
+import { AttachmentTile } from "./AttachmentTile";
 
 type SpreadsheetArtifactViewerMode = "sidebar" | "fullscreen";
 type SpreadsheetSettingsTab =
@@ -63,6 +64,7 @@ type PendingSpreadsheetAttachment = {
   name: string;
   size: number;
   mimeType?: string;
+  thumbnailDataUrl?: string;
 };
 
 export type SpreadsheetTurnContext = {
@@ -111,14 +113,6 @@ const MAX_EDITABLE_COLUMNS = 200;
 
 function getFileName(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
-}
-
-function formatAttachmentSize(size: number): string {
-  if (size < 1024) return `${size} B`;
-  const kb = size / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
 }
 
 function isImageAttachment(attachment: PendingSpreadsheetAttachment): boolean {
@@ -1256,36 +1250,12 @@ export function SpreadsheetArtifactViewer({
                 {fullscreenAttachments.length > 0 && (
                   <div className="attachment-list">
                     {fullscreenAttachments.map((attachment) => (
-                      <div className="attachment-chip" key={attachment.id}>
-                        <span className="attachment-icon" aria-hidden="true">
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                            <path d="M14 2v6h6" />
-                          </svg>
-                        </span>
-                        <span className="attachment-name" title={attachment.name}>
-                          {attachment.name}
-                        </span>
-                        <span className="attachment-size">
-                          {formatAttachmentSize(attachment.size)}
-                        </span>
-                        <button
-                          type="button"
-                          className="attachment-remove"
-                          onClick={() => removeAttachment(attachment.id)}
-                          title="Remove attachment"
-                          disabled={fullscreenSending}
-                        >
-                          <X size={12} aria-hidden="true" />
-                        </button>
-                      </div>
+                      <AttachmentTile
+                        key={attachment.id}
+                        attachment={attachment}
+                        onRemove={() => removeAttachment(attachment.id)}
+                        disabled={fullscreenSending}
+                      />
                     ))}
                   </div>
                 )}

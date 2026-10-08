@@ -14,6 +14,8 @@ export type SelectedFileInfo = {
   name: string;
   size: number;
   mimeType?: string;
+  /** Preview image (data URL) rendered by the OS file picker, when available. */
+  thumbnailDataUrl?: string;
 };
 
 export type PendingAttachment = SelectedFileInfo & {

@@ -287,7 +287,6 @@ import {
 import {
   type ImportedAttachment,
   type PendingAttachment,
-  formatFileSize,
   composeMessageWithAttachments,
   guessVisualAttachmentMimeType,
   isVideoVisualAttachmentMimeType,
@@ -518,6 +517,7 @@ import {
 } from "../../utils/disclosure-state";
 import { useTaskDisclosureIntents } from "../../hooks/useTaskDisclosureIntents";
 import type { TaskSurfaceKey } from "../../state/task-view-cache";
+import { AttachmentTile } from "../AttachmentTile";
 
 const MAX_COMMAND_OUTPUT_SESSION_CHARS = 50 * 1024;
 const MAX_COMMAND_OUTPUT_SESSIONS = 12;
@@ -7460,42 +7460,12 @@ function MainContentComponent({
         {pendingAttachments.length > 0 && (
           <div className="attachment-list">
             {pendingAttachments.map((attachment) => (
-              <div className="attachment-chip" key={attachment.id}>
-                <span className="attachment-icon">
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <path d="M14 2v6h6" />
-                  </svg>
-                </span>
-                <span className="attachment-name" title={attachment.name}>
-                  {attachment.name}
-                </span>
-                <span className="attachment-size">{formatFileSize(attachment.size)}</span>
-                <button
-                  className="attachment-remove"
-                  onClick={() => handleRemoveAttachment(attachment.id)}
-                  title="Remove attachment"
-                  disabled={isUploadingAttachments}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+              <AttachmentTile
+                key={attachment.id}
+                attachment={attachment}
+                onRemove={() => handleRemoveAttachment(attachment.id)}
+                disabled={isUploadingAttachments}
+              />
             ))}
           </div>
         )}

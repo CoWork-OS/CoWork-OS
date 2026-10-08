@@ -11735,11 +11735,6 @@ a,
   max-height: 90vh;
 }
 
-.file-viewer-modal[data-format="image"] {
-  width: min(94vw, 1280px);
-  max-height: 90vh;
-}
-
 .file-viewer-modal[data-format="video"] {
   width: min(94vw, 1280px);
   max-height: 90vh;
@@ -11874,10 +11869,6 @@ a,
 .file-viewer-modal[data-format="pptx"] .file-viewer-content {
   padding: 0;
   overflow: hidden;
-}
-
-.file-viewer-modal[data-format="image"] .file-viewer-content {
-  padding: 12px;
 }
 
 .file-viewer-modal[data-format="audio"] .file-viewer-content {
@@ -12066,89 +12057,6 @@ a,
   max-width: 100%;
   border-radius: 14px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
-}
-
-/* Image content */
-.file-viewer-image-container {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 200px;
-  width: 100%;
-  border-radius: var(--radius-md);
-  background: transparent;
-}
-
-.file-viewer-image-container[data-alpha="true"] {
-  background-color: var(--color-bg-tertiary);
-  background-image:
-    linear-gradient(45deg, var(--color-bg-primary) 25%, transparent 25%),
-    linear-gradient(-45deg, var(--color-bg-primary) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, var(--color-bg-primary) 75%),
-    linear-gradient(-45deg, transparent 75%, var(--color-bg-primary) 75%);
-  background-size: 16px 16px;
-  background-position:
-    0 0,
-    0 8px,
-    8px -8px,
-    -8px 0;
-}
-
-.file-viewer-image-container[data-mode="actual"] {
-  overflow: auto;
-  align-items: flex-start;
-  justify-content: flex-start;
-}
-
-.file-viewer-image {
-  max-width: 100%;
-  max-height: 80vh;
-  object-fit: contain;
-  border-radius: var(--radius-md);
-}
-
-.file-viewer-image-container[data-mode="actual"] .file-viewer-image {
-  max-width: none;
-  max-height: none;
-  width: auto;
-  height: auto;
-  object-fit: none;
-}
-
-.file-viewer-image-download-button {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.62);
-  border-radius: 999px;
-  background: rgba(17, 24, 39, 0.74);
-  color: #fff;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
-  text-decoration: none;
-  transition:
-    background-color 0.16s ease,
-    border-color 0.16s ease,
-    transform 0.16s ease;
-}
-
-.file-viewer-image-download-button:hover,
-.file-viewer-image-download-button:focus-visible {
-  border-color: rgba(255, 255, 255, 0.82);
-  background: rgba(17, 24, 39, 0.88);
-  transform: translateY(-1px);
-}
-
-.file-viewer-image-download-button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
 }
 
 .file-viewer-video-container {

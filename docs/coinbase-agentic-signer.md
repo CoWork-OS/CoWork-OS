@@ -18,7 +18,7 @@ payment actions behind their explicit confirmation and hard-guardrail paths.
 
 ## Base URL
 
-Configure in **Settings > Infrastructure > Wallet > Signer Endpoint**.
+Configure in **Settings > Integrations > Infrastructure > Wallet > Signer Endpoint**.
 
 Example:
 

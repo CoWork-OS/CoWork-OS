@@ -64,6 +64,7 @@ Preview behavior:
 - HTML/HTM files are read from disk and returned through `webPreview.htmlContent`.
 - Local relative assets are inlined through the shared HTML asset pipeline where possible.
 - The iframe uses a sandboxed preview mode.
+- Interactive previews load from the isolated `cowork-preview://` origin (`FileViewerResult.data.webPreviewUrl`). The page is served with its own strict content security policy: inline scripts, styles and `data:`/`blob:` assets run, but every network fetch, navigation target and form submission is blocked, and the frame is sandboxed without same-origin access, so the page cannot reach the app, its storage or the preload API. Preview URLs use an unguessable token that expires after an hour. Read-only previews still render through `srcdoc` with scripts disabled.
 - Built React/Vite/Next output is treated as normal HTML once `dist/index.html`, `build/index.html`, or `out/index.html` exists.
 - React-style source projects without built output return `canPreview: false` plus a preview message explaining that build output is needed.
 
@@ -84,7 +85,11 @@ The preview contract is `FileViewerResult.data.webPreview`:
 }
 ```
 
-The existing `htmlContent` field remains available for compatibility with older HTML preview paths.
+The existing `htmlContent` field remains available for compatibility with older HTML preview paths; `webPreviewUrl` (a `cowork-preview://` URL) is returned next to it for interactive previews.
+
+## Agent Checks With `preview_web_page`
+
+After writing or editing a page, the agent can call `preview_web_page` with a workspace path. It renders the page offline in the same sandboxed preview, can run clicks and typing first, and returns a screenshot, the page's visible text and any console errors. Because the preview has no network access, CDN scripts and remote fetches do not load, so generated apps should be self-contained. Use the [Browser Workbench](browser-workbench.md) for live websites instead.
 
 ## Fullscreen Follow-Up Flow
 

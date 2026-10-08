@@ -13,7 +13,7 @@ showcase workflow. Examples that use commands, files, browsers, connectors,
 devices, or automation should be run with the least-privileged profile that
 fits; a skill or provider route cannot widen it.
 
-CoWork makes many-agent work visible while still offering a terminal entrypoint: users can create reusable agents in Agents Hub, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, manage teams from GUI surfaces built for normal daily operation, and start local one-shot tasks with `cowork run`.
+CoWork makes many-agent work visible while still offering a terminal entrypoint: users can create reusable agents on the Bots page, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, manage teams from GUI surfaces built for normal daily operation, and start local one-shot tasks with `cowork run`.
 
 ---
 
@@ -1996,7 +1996,7 @@ Rate the attractiveness of entering with a [specific angle].
 | **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and more           | See the [Connector Inventory](connector-inventory.md)        |
 | **Data & Analytics**       | CSV analysis, SQL, financial modeling, market screening                                             | Data Analysis pack, 8+ financial skills                      |
 | **Content & Marketing**    | Blog, social, email campaigns, SEO, copywriting                                                     | Marketing pack, marketing strategist skill                   |
-| **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 17 channels, scheduling, 10+ productivity skills             |
+| **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 19 channels, scheduling, 10+ productivity skills             |
 | **Team & Management**      | Sprints, 1-on-1 prep, status reports                                                                | EM pack, PM pack                                             |
 | **Security**               | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup     | Security audit skill, dependency check skill, Unbroker skill |
 | **Remote Ops**             | Chat-driven deployment, headless mode, WebSocket API                                                | Gateway, headless daemon, remote access                      |

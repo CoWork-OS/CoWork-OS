@@ -12,7 +12,7 @@ SQLite sidecar rather than a new external memory store.
 
 CoWork memory now has four complementary shapes:
 
-- **Facts (`memory_items`)**: short, prompt-visible facts and rules, written only through `MemoryWriter` (see [Memory Engine](memory-engine.md)).
+- **Facts**: short, prompt-visible facts and rules about you and your workspaces, kept as notes in the memory folder (`~/CoWork Memory`); commitments and notes about other people stay in `memory_items`. Both are written only through `MemoryWriter` (see [Memory Engine](memory-engine.md)).
 - **Archive memory**: durable local memory rows stored in `memories`.
 - **Structured observations**: metadata rows keyed by `memory_id` that describe archive memories with title, narrative, facts, concepts, provenance, files, tools, source events, privacy state, and migration status.
 - **Durable runtime context**: optional task-scoped message and compaction-summary rows used only for active-task recall through `context_recall`.
@@ -24,9 +24,8 @@ Durable runtime context is not a replacement for structured observations. It is 
 lane for long active tasks, especially after context compaction. See
 [Durable Runtime Context](durable-runtime-context.md).
 
-Dreaming uses recent archive outcomes as evidence for curating `memory_items`: an outcome that
-recurs in at least two tasks can be promoted into an inferred fact that lists its archive rows as
-evidence. It never edits archive rows or observation metadata. See [Dreaming](dreaming.md).
+Dreaming works on the memory folder, not on the archive: it reads the folder and recent task
+conversations and never edits archive rows or observation metadata. See [Dreaming](dreaming.md).
 
 ## Data Model
 
@@ -44,10 +43,9 @@ Full-text search indexes observation text, facts, concepts, file paths, and tool
 observation FTS table. The original `memories` row remains the source for full content and existing
 archive recall behavior.
 
-Dreaming state is stored outside the observation sidecar:
-
-- `dreaming_runs` records each background curation pass.
-- `dreaming_candidates` records each proposed memory maintenance action.
+Dreaming state is stored outside the observation sidecar: each dream is recorded in the memory
+folder's git directory, and its pending changes are a branch you review. The older
+`dreaming_runs` and `dreaming_candidates` tables from the retired curator are kept for history only.
 
 This separation keeps observation metadata descriptive and keeps memory curation reviewable.
 
@@ -157,7 +155,7 @@ The earlier tools (`search_memories`, `memory_search_index`, `memory_timeline`, 
 
 ## Memory Hub Inspector
 
-The Memory Hub Inspector is the primary user surface for structured observations.
+The Memory Hub Inspector is the primary user surface for structured observations. It is under **Settings > Memory > Settings > Advanced**.
 
 It supports:
 
@@ -166,7 +164,7 @@ It supports:
 - compact result rows with source labels and token estimates
 - a detail drawer for title, narrative, facts, provenance, and timeline context
 - metadata editing
-- promotion to a workspace fact (`memory_items`, curated trust; staged when a memory-write approval mode is on)
+- promotion to memory: your line in the memory folder (the workspace's file, or `me.md` for facts about you); commitments, or a memory folder that is off, keep the earlier `memory_items` path
 - marking private
 - suppressing prompt recall
 - redaction
@@ -180,8 +178,8 @@ row. Hard deletion happens through task delete and **Clear All Memories** (see
 [Workspace Memory Flow](workspace-memory-flow.md#deleting-memory)) and through archive retention,
 which honours the workspace's `retention_days`.
 
-Dreaming proposals are reviewed in the Memory Hub **Review** tab, which shows the archive evidence
-behind each proposal; accepted proposals are applied through `MemoryWriter` and can be undone.
+Dream changes that touch your own notes are reviewed as diffs in **Settings > Memory > Review**;
+applied changes are commits that can be undone.
 
 ## IPC And Security Boundary
 

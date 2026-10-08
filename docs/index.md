@@ -162,8 +162,8 @@ hero:
       text: Supermemory
       link: /supermemory
     - theme: alt
-      text: Release Notes 0.5.45
-      link: /release-notes-0.5.45
+      text: Release Notes 0.5.60
+      link: /release-notes-0.5.60
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3
@@ -185,7 +185,7 @@ features:
   - title: MLX-LM on Apple Silicon
     details: Run quantized local models through Apple's open-source MLX framework and MLX-LM's OpenAI-compatible server, with native-platform checks, Settings lifecycle controls, and local-only model requests. See the MLX-LM Local Inference guide.
   - title: GUI-First Agent Management
-    details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through Agents Hub, Mission Control, task timelines, and visual boards, while still having a terminal-native entrypoint for fast local runs.
+    details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through the Bots page, Mission Control, task timelines, and visual boards, while still having a terminal-native entrypoint for fast local runs.
   - title: First-Class CoWork CLI
     details: Type `cowork` for the interactive terminal UI or `cowork run "task"` for a local one-shot run. The default CLI path shares local desktop profile, provider, workspace, skills, and MCP settings without requiring a Control Plane token; remote mode is explicit.
   - title: One App For Daily Work
@@ -204,18 +204,18 @@ features:
     details: Connect supported accounts, APIs, gateways, cloud credentials, and local inference. Switch models per task or workflow phase, configure ordered fallback chains, and combine advisors and aggregators with Mixture of Agents presets. Model capabilities, eligibility, limits, and charges vary by provider.
   - title: Multi-Channel Gateway
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, Google Chat, Feishu/Lark, WeCom, and more. Chat with your AI from anywhere, with channel/chat/thread specialization for workspace, agent role, prompt guidance, tool policy, and shared-memory opt-in.
-  - title: Chat Mode
+  - title: Ask (Chat Mode)
     details: Direct LLM chat with no tools by default, same-session follow-ups, chat-only streaming for supported providers, and a narrow read-only analysis exception for uploaded PDF turns that need deeper document reading.
   - title: Side Chat
     details: Ask questions about an active running session from the right side panel without steering or stopping the parent task. Side Chat uses a read-only side fork with hidden parent context, live status snapshots for progress questions, a side-only visible transcript, and Markdown-rendered answers.
   - title: Runtime Visibility
     details: Visible learning progression after each task, unified recall across tasks/messages/files, persistent shell sessions, and live provider routing/fallback status.
   - title: Memory Engine
-    details: One local fact store written through one MemoryWriter, four memory tools (memory_recall, memory_remember, memory_forget, context_recall), Dreaming curation with a Review tab and undo, per-reply "Memory used", and privacy-first defaults.
+    details: A local memory folder of plain markdown notes in a git repo, written through one MemoryWriter, four memory tools (memory_recall, memory_remember, memory_forget, context_recall), daily Dreaming with a Review tab and undo, per-reply "Memory used", and privacy-first defaults.
   - title: Structured Memory
     details: Local archive memories have inspectable observation metadata, progressive index/detail recall through memory_recall, Memory Hub privacy controls, deterministic rebuild status, and soft-delete suppression.
   - title: Box Brain
-    details: Opt-in, bounded background indexing from one Box folder through Hosted MCP, incremental private local recall with preserved Box source URLs, and Dreaming curation after each sync. Box remains the source of truth and the background index never writes back.
+    details: Opt-in, bounded background indexing from one Box folder through Hosted MCP and incremental private local recall with preserved Box source URLs. Box remains the source of truth and the background index never writes back.
   - title: Rich Artifact Previews
     details: Format-aware in-app preview popup for HTML, Markdown, code (with syntax highlighting), JSON tree view, CSV/TSV tables, XLSX, DOCX, PDF, images (fit/actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format adapts the modal width, header subtitle metadata, and per-format actions; Copy path / Show in Finder / Open externally / Close are unified across every format.
   - title: Smart PDF Attachments
@@ -233,13 +233,13 @@ features:
   - title: Browser Workbench
     details: Interactive browser-use tasks open a visible right-sidebar browser by default, with shared agent/user page state, functional navigation controls, responsive viewport presets, screenshots, annotation, fullscreen follow-up context, and visible cursor movement during agent clicks, fills, reads, scrolls, and navigation.
   - title: Chronicle
-    details: Opt-in desktop recent-screen context for vague on-screen references, with Memory Hub controls, local passive capture, `screen_context` recall, pause/resume, and Mission Control evidence.
+    details: Opt-in desktop recent-screen context for vague on-screen references, configured in Settings > Tools, with local passive capture, `screen_context` recall, pause/resume, and Mission Control evidence.
   - title: Optional Supermemory
     details: Add Supermemory as an external memory lane with prompt-time profile injection, an external scope in the memory tools, optional mirroring of non-private local memory captures, and forget/purge of mirrored copies, while keeping CoWork's local memory system primary.
   - title: Runtime Orchestration
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
   - title: Managed Agents
-    details: Agents Hub is the dedicated UI for reusable managed agents, templates, drafts, governance, channels, tools, skills, memory, and schedules. Clicking an agent opens a single-pane configuration detail view; test, preview, and starter-prompt actions create runtime managed sessions and open the backing task in the main window so work is observed through the standard task timeline, approvals, artifacts, and outputs.
+    details: Workspace agents on the Bots page is the dedicated UI for reusable managed agents, templates, drafts, governance, channels, tools, skills, memory, and schedules. Clicking an agent opens a single-pane configuration detail view; test, preview, and starter-prompt actions create runtime managed sessions and open the backing task in the main window so work is observed through the standard task timeline, approvals, artifacts, and outputs.
   - title: Composer Mentions
     details: Type `@` in the composer to pick Agents, configured Integrations, or Files. Integration chips render with icon and label in prompts and user message history, and selected integration metadata reaches the runtime as soft routing guidance rather than tool restrictions.
   - title: Message Box Shortcuts
@@ -259,7 +259,7 @@ features:
   - title: Managed Devices
     details: Connect local and remote CoWork nodes, inspect device summaries, browse remote workspaces, and launch tasks against selected machines from one Devices tab.
   - title: Core Automation
-    details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Dreaming curates the memory fact store, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
+    details: Workflow Intelligence now forms the strict always-on core: Memory is the source of truth, Heartbeat schedules reflection, Dreaming tidies the memory folder about once a day, Suggestions are reviewable outputs, and Mission Control remains the cockpit.
   - title: Automations
     details: Main-sidebar Automation Studio provides Discover, Library, Builder, and Activity for versioned structured flows with dry runs, variables, Yes/No branches, approvals, cancellation, recovery, and retained evidence. Advanced Settings keeps prompt-based routines, queueing, schedules, webhooks, triggers, briefing, and Workflow Intelligence policy; tasks can still become same-thread or new-task automations from the task menu.
   - title: Heartbeat V3

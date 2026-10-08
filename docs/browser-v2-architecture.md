@@ -2,7 +2,7 @@
 
 Browser V2 is CoWork OS's unified browser integration for agent work. It replaces the old split model of renderer-side webview scripts plus a separate Playwright fallback with one browser session layer, one tool contract, and one visible default surface.
 
-The product goal is simple: when the agent works on the web, the user should see and trust the same browser state the agent is using. Background/headless browsers and real signed-in Chrome/Edge control remain available, but they are explicit fallback modes rather than the normal path.
+The product goal is simple: when the agent works on the web, the user should see and trust the same browser state the agent is using. Background/headless browsers and launching Chrome with the signed-in system profile remain available, but they are explicit fallback modes rather than the normal path.
 
 ## Product Model
 
@@ -10,7 +10,7 @@ Default behavior:
 
 - **Visible in-app Browser Workbench is the default** for interactive browser-use tasks.
 - **Workspace browser profile is the default profile**. Cookies and storage persist per workspace and are isolated from system Chrome.
-- **Real Chrome/Edge profile control is opt-in only**. The agent must receive explicit consent before attaching to or launching against a signed-in system browser profile.
+- **Real Chrome/Edge profile control is opt-in only**. The agent must receive explicit consent before launching against a signed-in system browser profile. Attaching to an already-running external browser over CDP is refused.
 - **Refs from accessibility snapshots are preferred**. CSS selectors still work for legacy prompts, but Browser V2 tools prefer snapshot refs because they are grounded in the rendered page.
 - **Diagnostics and viewport state are first-class browser context**. Console, network, downloads, storage, trace state, screenshots, emulated viewport size, and visible cursor events are part of the browser session rather than one-off debug artifacts.
 
@@ -48,10 +48,10 @@ Browser V2 normalizes four backend kinds behind one conceptual session interface
 | -------------------- | --------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `electron-workbench` | Visible in-app browser surface controlled through Electron `webContents.debugger` / CDP | Yes      | Primary user/agent shared browser. Renderer owns UX; main process owns automation.                                                                                                                                                        |
 | `playwright-local`   | Background/headless/headed fallback for CI-like or non-visible runs                     | No       | Used when no renderer is available or the user explicitly requests forced headless/background browser work.                                                                                                                               |
-| `external-cdp`       | Explicit attach to user Chrome/Edge via DevTools URL                                    | No       | Requires real-browser consent and should show the target browser/profile/tab/domain before control.                                                                                                                                       |
+| `external-cdp`       | Attach to user Chrome/Edge via DevTools URL (refused)                                   | No       | Refused under the enforced network policy: pre-existing sockets and service workers in an external browser cannot be contained, so `browser_attach` and `debugger_url` fail and the managed session is kept.                              |
 | `browser-use-cloud`  | Explicit Browser Use Cloud stealth browser session controlled through CDP               | No       | Requires Browser Use credentials and explicit `browser_provider: "browser-use-cloud"`. Localhost/private/file targets stay on the default workbench. Sessions must be stopped on `browser_close` to avoid leaking remote browser runtime. |
 
-The tool layer keeps old options such as `headless`, `profile`, `browser_channel`, and `debugger_url` for compatibility. Browser V2 treats `headless` as compatibility-only; `force_headless`, explicit profile/browser-channel options, explicit attach requests, or explicit `browser_provider` requests are what move work away from the visible workbench.
+The tool layer keeps old options such as `headless`, `profile`, `browser_channel`, and `debugger_url` for compatibility. Browser V2 treats `headless` as compatibility-only; `force_headless`, explicit profile/browser-channel options, or explicit `browser_provider` requests are what move work away from the visible workbench.
 
 ### Browser Use Cloud Backend
 
@@ -97,7 +97,7 @@ Browser V2 keeps existing tool names and adds snapshot-first controls.
 
 Core navigation and page tools:
 
-- `browser_attach`
+- `browser_attach` (kept for compatibility; attaching to an external browser is refused)
 - `browser_navigate`
 - `browser_screenshot`
 - `browser_get_content`

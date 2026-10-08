@@ -8,7 +8,7 @@ V1 introduces three control-plane resources:
 - `ManagedEnvironment`: reusable local execution template
 - `ManagedSession`: durable run resource that owns lifecycle, event history, and resume semantics
 
-The implementation is local-first and additive. Managed resources are exposed through the control plane and Agents Hub, while existing `Task`, `AgentTeamRun`, `task_events`, and `session_runtime_v2` remain the execution primitives underneath.
+The implementation is local-first and additive. Managed resources are exposed through the control plane and the **Workspace agents** section of the Bots page (formerly Agents Hub), while existing `Task`, `AgentTeamRun`, `task_events`, and `session_runtime_v2` remain the execution primitives underneath.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-3.webp" alt="Bots page" width="700">
@@ -32,12 +32,12 @@ The model is:
 Managed Agents V1 is intentionally narrow:
 
 - local execution only through `ManagedEnvironment.kind = "cowork_local"`
-- renderer support through the Agents Hub for creation, inspection, governance, and manual runs
+- renderer support through **Workspace agents** on the Bots page for creation, inspection, governance, and manual runs
 - existing task APIs remain supported
 - Mission Control and task surfaces observe the backing task or team run created by each managed session
 - no private agent-detail chat surface; every runnable action is processed as a normal main-window task
 
-This means Managed Agents is an additive product surface on top of the existing task runtime. The Agents Hub configures reusable agents, but the main task window remains the only place where agent work, questions, responses, approvals, and outputs are shown.
+This means Managed Agents is an additive product surface on top of the existing task runtime. **Workspace agents** configures reusable agents, but the main task window remains the only place where agent work, questions, responses, approvals, and outputs are shown.
 
 ## Control-Plane Surface
 
@@ -91,13 +91,13 @@ Managed Agents is not a second executor. It maps onto the existing runtime:
 - team-mode `ManagedSession` also creates a backing `AgentTeamRun`
 - `task_events` and daemon notifications are mirrored into `managed_session_events`
 - `session_runtime_v2` remains task-scoped runtime state owned by `SessionRuntime`
-- Agents Hub manual actions create `runtime` managed sessions and then open the backing task in the main task view
+- Workspace agents manual actions create `runtime` managed sessions and then open the backing task in the main task view
 
 The important contract is that `ManagedSession` is the API-facing durable run, while `Task` remains the execution worker.
 
-## Agents Hub Concept
+## Workspace Agents Concept
 
-The Agents Hub is the user-facing managed-agent surface in the renderer.
+Managed agents are configured in the **Workspace agents** section of the Bots page (select **Bots** on the left icon rail, then expand **Workspace agents**). This surface was called Agents Hub before 0.5.60.
 
 It owns:
 
@@ -114,7 +114,7 @@ The supported action model is:
 - **Preview** follows the same runtime task path
 - starter prompt cards follow the same runtime task path
 - **Edit agent** opens the agent draft/editor surface to change its configuration
-- any follow-up questions, approvals, responses, files, and final outputs belong to the opened task, not to the Agents Hub detail screen
+- any follow-up questions, approvals, responses, files, and final outputs belong to the opened task, not to the agent detail screen
 
 This keeps all agent execution observable through the same task timeline, right-panel artifacts, approvals, notifications, and completion behavior as ordinary user-created tasks.
 
@@ -122,7 +122,7 @@ This keeps all agent execution observable through the same task timeline, right-
 
 Managed Agents do not own memory curation policy.
 
-Managed sessions can produce task transcripts, task results, and memory observations like ordinary tasks. Dreaming may later review that evidence after task completion or from memory-specific Heartbeat signals, but it writes reviewable `dreaming_candidates` through the normal Workflow Intelligence memory-curation path.
+Managed sessions can produce task transcripts, task results, and memory observations like ordinary tasks. Dreaming may later read recent task conversations in its daily pass over the memory folder, and edits that touch your own notes wait for review like any other dream change.
 
 That keeps Managed Agents focused on reusable execution identity while Memory, Heartbeat, Reflection, Dreaming, and Suggestions remain the core Workflow Intelligence runtime. See [Dreaming](dreaming.md).
 
@@ -158,11 +158,11 @@ These rules keep the managed control-plane surface suitable for UI/backend consu
 
 ## Current UI State
 
-Managed Agents now has a dedicated renderer surface: **Agents Hub**.
+Managed Agents has a dedicated renderer surface: **Workspace agents** on the Bots page.
 
 Today’s product workflow is:
 
-1. open **Agents** from the primary app navigation
+1. select **Bots** on the left icon rail and expand **Workspace agents**
 2. create an agent from a prompt, a template, or an existing role/profile conversion
 3. review and adjust tools, skills, files, memory, approvals, schedule, channels, and instructions
 4. save or publish the agent
@@ -215,7 +215,7 @@ Then verify:
 - the task starts through the normal daemon lifecycle
 - `managedSession.get` shows the backing task link and current status
 - `managedSession.events.list` returns sanitized event payloads
-- Agents Hub-created manual runs open the backing task in the main window rather than rendering a separate agent-panel transcript
+- Manual runs started from Workspace agents open the backing task in the main window rather than rendering a separate agent-panel transcript
 
 For team mode:
 
@@ -239,7 +239,7 @@ The additive contract is:
 - managed resources add a new control-plane namespace; they do not replace existing APIs
 - `enableShell` may still be present in older persisted environment configurations, but it is a
   compatibility field only. New and edited environments should set `config.accessProfileId`; the
-  Agents Hub does not expose a separate shell toggle.
+  Workspace agents does not expose a separate shell toggle.
 
 See [Access Profiles](access-profiles.md#surfaces-and-inheritance) for the cross-surface contract.
 

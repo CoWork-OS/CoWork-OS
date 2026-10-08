@@ -55,7 +55,7 @@ integration.
 | OpenRouter             | API key in Settings (default provider)                         | Free model options available; pay-per-token for premium models                                                     |
 | DeepSeek               | API key in Settings                                            | Provider billing                                                                                                   |
 | OpenAI (API Key)       | API key in Settings                                            | Pay-per-token                                                                                                      |
-| OpenAI (ChatGPT OAuth) | Sign in with an eligible ChatGPT account                       | Provider-controlled plan eligibility and usage limits apply                                                        |
+| OpenAI (ChatGPT)       | Sign in with ChatGPT (official flow; legacy Codex sign-in kept as an unofficial fallback) | Provider-controlled plan eligibility and usage limits apply                                                        |
 | AWS Bedrock            | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS                                                                                              |
 | Azure OpenAI           | API key + endpoint in Settings                                 | Pay-per-token via Azure                                                                                            |
 | Mixture of Agents      | Presets composed from already-configured providers             | No separate billing; each selected provider bills normally                                                         |
@@ -77,8 +77,6 @@ integration.
 | OpenCode Zen                  | API key + base URL in Settings                 | Provider billing                                                        |
 | OpenCode Go                   | API key or supported account token in Settings | Provider-controlled plan eligibility and usage limits apply             |
 | Google Vertex                 | Access token + base URL in Settings            | Provider billing                                                        |
-| Google Antigravity            | Access token + base URL in Settings            | Provider billing                                                        |
-| Google Gemini CLI             | Access token + base URL in Settings            | Provider billing                                                        |
 | Z.AI                          | API key + base URL in Settings                 | Provider billing                                                        |
 | GLM                           | API key + base URL in Settings                 | Provider billing                                                        |
 | Vercel AI Gateway             | API key in Settings                            | Provider billing                                                        |
@@ -204,7 +202,7 @@ Cost estimates, cost budgets and context-window sizes come from a price list gen
 - **Optional daily refresh (off by default).** Enable **Refresh model prices and context limits daily** in **Settings > AI & Models > Model Access** to download the models.dev catalogue once a day between releases. It is one anonymous `GET https://models.dev/api.json` with no prompts, usage data or identifiers; set `COWORK_DISABLE_MODEL_METADATA_REFRESH=1` to block it entirely.
 - **Unknown models are not free.** A model without a price shows cost as **Unknown** (or `$x+` when some usage was priced). Usage Insights counts these calls separately, and cost budgets cannot account for them.
 - **Local models** (Ollama, MLX, oMLX, Atomic Chat) and OpenRouter `:free` routes are counted as $0.
-- **Per-task cost:** the task panel's **Cost** section shows spend so far, the cap that applies (the task's own budget or **Settings > Guardrails**), and token counts; on a finished task it is the receipt. Before any usage it shows the typical cost of a task on the selected model, from your own last 30 tasks (computed locally).
+- **Per-task cost:** the task panel's **Cost** section shows spend so far, the cap that applies (the task's own budget or **Settings > System & Security > Safety Limits**), and token counts; on a finished task it is the receipt. Before any usage it shows the typical cost of a task on the selected model, from your own last 30 tasks (computed locally).
 - **Newer Claude tokenizer:** Opus 4.7 and later (including Opus 5.x and Fable) produce up to ~1.35x as many tokens for the same text. Costs use the provider's reported token counts, so they are unaffected; CoWork's own context estimate is scaled so compaction runs early enough.
 
 Retired models and deliberate exceptions live in `src/electron/agent/llm/pricing-overrides.ts`. `pricing-coverage.test.ts` fails when a model CoWork offers has no price.
@@ -510,19 +508,12 @@ For prompt caching, OpenRouter Claude routes use explicit Anthropic-style cache 
 ## OpenAI / ChatGPT
 
 - **Option 1: API Key** — Standard pay-per-token access to GPT models
-- **Option 2: ChatGPT OAuth** — Sign in with an eligible ChatGPT account
+- **Option 2: Sign in with ChatGPT** — OpenAI's official sign-in flow for third-party apps. Requests use the usage included in your ChatGPT plan, so no API key is needed. You can set a weekly CoWork OS usage cap or revoke access in ChatGPT settings. Image generation is not available with this sign-in.
+- **Legacy Codex sign-in (unofficial)** — The older ChatGPT/Codex OAuth route stays available as a fallback marked unofficial. OpenAI does not support it in third-party apps and it may stop working at any time; disconnect it and use Sign in with ChatGPT instead.
 
-### Models with ChatGPT OAuth
+### Models with Sign in with ChatGPT
 
-The current built-in catalog includes the following GPT-5.6 Codex routes. The
-signed-in account and OpenAI backend remain the source of truth for which models
-and controls are actually available:
-
-| Model ID        | Reasoning efforts                                   |
-| --------------- | --------------------------------------------------- |
-| `gpt-5.6-sol`   | Low, Medium, High, Extra High (`xhigh`), Max, Ultra |
-| `gpt-5.6-terra` | Low, Medium, High, Extra High (`xhigh`), Max, Ultra |
-| `gpt-5.6-luna`  | Low, Medium, High, Extra High (`xhigh`), Max        |
+After sign-in, CoWork reads your plan and suggests a model: GPT-6 Luna (`gpt-6-luna`) on the Free and Go plans, and GPT-6 Astra (`gpt-6-astra`) on paid plans. The built-in catalog also includes GPT-6 Sol (`gpt-6-sol`), GPT-6.1 Sol (`gpt-6.1-sol`) and the earlier GPT-5.x models. The signed-in account and OpenAI backend remain the source of truth for which models and controls are actually available.
 
 Reasoning effort is a request control, not a separate model ID. Choose the
 model first, then set its effort from either:
@@ -531,16 +522,11 @@ model first, then set its effort from either:
 - **Settings > AI & Models > OpenAI Request Controls** for the saved OpenAI
   provider configuration
 
-The UI only lists efforts supported by the selected GPT-5.6 model. In
-particular, Ultra is available for Sol and Terra but not Luna. Max requests the
-deepest standard reasoning mode; Ultra requests maximum reasoning with the
-ChatGPT/Codex automatic task-delegation mode. The selected effort and response
-verbosity are forwarded to the ChatGPT Codex Responses transport for OAuth
-requests.
-
-All three GPT-5.6 models support Low, Medium, and High response verbosity. The
-verbosity control changes final-answer detail independently of reasoning
-effort.
+The UI only lists efforts the selected model supports (from None through
+Extra High, Max and, on some models, Ultra). Max requests the deepest standard
+reasoning mode; Ultra requests maximum reasoning with the ChatGPT/Codex
+automatic task-delegation mode. Response verbosity (Low, Medium, High) changes
+final-answer detail independently of reasoning effort.
 
 Model and effort availability remains account-, plan-, and entitlement-dependent.
 If a model is listed locally but the ChatGPT backend rejects it, refresh the

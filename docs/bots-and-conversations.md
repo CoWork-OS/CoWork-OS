@@ -208,8 +208,8 @@ controls when a run uses work tools.
 
 ### 1. Open the Bots surface
 
-Choose **Bots** beside **Sessions** in the left sidebar. If a bot conversation
-is open, CoWork keeps **Bots** selected so the roster remains the navigation
+Select **Bots** on the left icon rail. The main view opens the Bots page and the
+sidebar panel switches to the bot roster. If a bot conversation is open, CoWork keeps **Bots** selected so the roster remains the navigation
 context. The roster shows one row per active bot, its current status indicator,
 the latest conversation preview, and relative activity time.
 
@@ -611,8 +611,8 @@ and run the focused Agent Role Repository regression tests.
 
 The bot implementation is intentionally split by responsibility:
 
-- `src/renderer/components/Sidebar.tsx` owns Sessions/Bots tab selection and
-  active bot-role loading.
+- `src/renderer/components/Sidebar.tsx` switches the panel between sessions and
+  the bot roster (driven by the rail destination) and loads active bot roles.
 - `src/renderer/components/BotsPane.tsx` owns the roster, search, previews,
   create flow, and row-level edit entry point.
 - `src/renderer/components/BotProfileDialog.tsx` owns profile loading,

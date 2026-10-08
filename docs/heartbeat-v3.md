@@ -5,7 +5,7 @@ Heartbeat v3 is the scheduling and signal-readiness layer inside Workflow Intell
 - `Memory` is the source of truth.
 - `Heartbeat` decides when enough fresh signal exists.
 - `Reflection` evaluates evidence internally.
-- `Dreaming` curates the `memory_items` fact store when memory signals justify it, and once a day for recently active workspaces.
+- `Dreaming` tidies the memory folder about once a day, offered by Heartbeat's idle pulses.
 - `Suggestions` are the default user-facing output.
 
 It replaces the older queue-first heartbeat internals with a two-lane pipeline designed around three goals, in order:
@@ -16,11 +16,11 @@ It replaces the older queue-first heartbeat internals with a two-lane pipeline d
 
 The key design change is that not every wake is treated as potential task work anymore.
 
-Heartbeat owns the "when should we think?" decision for Reflection, the chief-of-staff (AutonomyEngine) evaluation and heartbeat-triggered Dreaming. Reflection no longer runs its own independent interval loop for normal operation; Heartbeat triggers it when Pulse results or accumulated signals justify another evaluation. AutonomyEngine has no timer of its own: each in-hours, non-deferred pulse evaluates the pulse workspace once (repeat calls for the same workspace within a minute are skipped, since several agents can pulse it). Other background loops (for example core memory distillation, Box Brain polling and task-completion Dreaming) still schedule themselves.
+Heartbeat owns the "when should we think?" decision for Reflection, the chief-of-staff (AutonomyEngine) evaluation and heartbeat-triggered Dreaming. Reflection no longer runs its own independent interval loop for normal operation; Heartbeat triggers it when Pulse results or accumulated signals justify another evaluation. AutonomyEngine has no timer of its own: each in-hours, non-deferred pulse evaluates the pulse workspace once (repeat calls for the same workspace within a minute are skipped, since several agents can pulse it). Other background loops (for example core memory distillation, and Box Brain polling) still schedule themselves.
 
 Awareness is a signal producer only. It keeps its 20-second device poll, but its Heartbeat wakes are debounced to one per category (focus, calendar, workflow) and workspace every 5 minutes, carry that category and workspace so they merge, and no longer trigger an AutonomyEngine evaluation per event.
 
-Heartbeat can also trigger Dreaming when the signal ledger contains memory-specific signals such as `memory_drift`, `correction_learning`, or `cross_workspace_patterns`, or when hot-memory pressure changed since the last run, and runs a once-daily idle curation when no other trigger fires. Dreaming runs as background memory curation: it applies safe, undoable operations to inferred facts and queues the rest for the Memory Hub Review tab; it never creates tasks.
+Heartbeat also offers the memory folder its daily dream on each pulse that has no foreground task while heartbeat maintenance is on. The dreamer decides whether to run (more than 20 hours since the last dream, something new to read, budget left); it never creates tasks, and anything that touches your own notes waits in **Settings > Memory > Review**.
 
 ## Two-Lane Model
 
@@ -144,7 +144,7 @@ Dispatch is intentionally narrow.
 - repeated identical low-value signals do not keep retriggering escalation
 - task creation requires evidence refs; a task decision without them is downgraded to a suggestion
 - one shared background budget per workspace and day (6, the `maxDispatchesPerDay` default) for every producer that creates tasks the user did not ask for: Heartbeat, AutonomyEngine, Workflow Intelligence auto-dispatch and scheduled Strategic Planner runs. It also holds a 2-hour per-entity cooldown across producers. Over budget, Heartbeat and Workflow Intelligence suggest instead, AutonomyEngine keeps the decision as a suggestion and the planner leaves the issue for a later run. Manual pulses and manual planner runs are counted but never refused. The shared ledger is in memory, so it restarts at zero with the app; Heartbeat's per-agent budget is stored and still applies.
-- AutonomyEngine does not create tasks by default: every action policy is `suggest_only` or approval-based, and creating tasks is an explicit opt-in (`execute_local` in Memory Hub). Older saved settings that still carried the former `execute_local` defaults are reset once.
+- AutonomyEngine does not create tasks by default: every action policy is `suggest_only` or approval-based, and creating tasks is an explicit opt-in (`execute_local` in Settings > Memory). Older saved settings that still carried the former `execute_local` defaults are reset once.
 
 Every Pulse and every task-creating Dispatch gets a run record. If Dispatch creates a heartbeat task, that task carries a non-null `heartbeatRunId`. Each pulse settles in-flight dispatch runs from their task's status (or as failed when the task is gone or the run is older than 12 hours), and startup reconciles stale dispatch runs the same way.
 
@@ -184,17 +184,11 @@ File, git, and other ambient sources emit low-priority mergeable signals that Pu
 
 ## Dreaming Trigger Contract
 
-Dreaming is a side effect of memory-specific Heartbeat pressure, not a Dispatch lane.
+Dreaming is a side effect of idle Heartbeat pulses, not a Dispatch lane.
 
-When a non-deferred, in-hours pulse sees memory drift, correction learning, or cross-workspace pattern signals (or changed hot-memory pressure), Heartbeat can ask Dreaming to run for the active workspace. The daemon emits a low-urgency `correction_learning` signal when it detects a user correction; `memory_drift` comes from mailbox automation, and nothing emits `cross_workspace_patterns` today. Dreaming enforces a 6-hour per-workspace cooldown, and Heartbeat skips it when `heartbeatMaintenanceEnabled` is off. Handled memory signals are removed from the ledger after a run. A pulse with no other Dreaming trigger and no foreground task also runs the once-daily idle curation for the next recently active workspace not curated in the last 24 hours. A Dreaming run applies safe curation operations to `memory_items` (undoable), queues the rest for the Memory Hub Review tab, records `dreaming_runs`, then returns run metadata on the heartbeat result for traceability.
+On every pulse that reaches its Dreaming step (no foreground task, `heartbeatMaintenanceEnabled` not off), Heartbeat offers the memory folder its daily dream. The dreamer runs only when the last dream is more than 20 hours old, there is something new (tasks since the last dream or inbox entries) and the daily token budget allows it. Memory-specific signals such as `memory_drift` or `correction_learning` no longer start a run. The node daemon has no Heartbeat, so there Dreaming only runs on **Dream now**.
 
-Dreaming should not consume dispatch budget, create heartbeat tasks, or turn general activity signals into memory writes. Its only output is curation of `memory_items` (safe operations applied, the rest queued for review). See [Dreaming](dreaming.md).
-
-Before a memory-specific Dreaming run, Heartbeat resolves the workspace's [access profile](access-profiles.md)
-and builds a read guard for file-backed workspace-kit and transcript evidence. Profile resolution
-errors, unavailable profiles, and denied candidate paths fail closed: pressure analysis and Dreaming
-are skipped rather than performed with a broader filesystem boundary. Every curation change goes
-through `MemoryWriter`.
+Dreaming should not consume dispatch budget or create heartbeat tasks. Its only output is edits to the memory folder: safe edits are one undoable commit, the rest wait for review. See [Dreaming](dreaming.md) and [Memory Repo Phase 2](memory-repo-phase2-design.md).
 
 ## Default Configuration
 

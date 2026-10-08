@@ -116,7 +116,7 @@ In CoWork OS, context learning includes:
 
 - memory candidates extracted from traces
 - hot-path memory capture
-- Dreaming curation of the fact store (merges, conflict flags, promotion of recurring outcomes and corrections, decay), with safe changes applied and undoable and the rest reviewed in the Memory Hub
+- Dreaming over the memory folder (merging duplicates, removing stale notes, saving what was said but not saved), with safe changes applied as one undoable commit and the rest reviewed in **Settings > Memory > Review**
 - offline memory distillation
 - scoped memory by workspace/profile/target
 - workflow-intelligence journals and reflection artifacts

@@ -7,11 +7,11 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 ### What CoWork OS Is
 
 - **Personal AI Super App**: Code, email, research, create documents, work with spreadsheets and decks, test web pages, automate work, and manage agents from the desktop app or the `cowork` CLI
-- **GUI-first Agent Management**: Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub, Mission Control, task boards, and approval dialogs
+- **GUI-first Agent Management**: Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through the Bots page, Mission Control, task boards, and approval dialogs
 - **CoWork CLI**: Run `cowork` for an interactive terminal UI or `cowork run "task"` for local one-shot work using the same local profile and providers as the desktop app
 - **Personal AI Gateway**: Connect your AI assistant to WhatsApp, Telegram, Discord, Slack, and iMessage
 - **Everything Workbench**: Create, open, review, edit, and revise generated documents, spreadsheets, presentations, web pages, PDFs, and previews from the same local-first task workspace
-- **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices tab
+- **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices view (More > Devices)
 - **Automation Studio**: A main-sidebar Discover/Library/Builder/Activity surface for versioned structured flows, dry runs, variables, branches, approvals, signed webhooks, durable activity, cancellation, and restart recovery; advanced queueing, prompt-based routines, schedules, triggers, briefing, and Workflow Intelligence remain grouped in Settings
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
 - **Security-First Design**: Extensive automated test coverage, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
@@ -20,6 +20,19 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - **Local-First Architecture**: Operational state is persisted locally by default; configured providers, gateways, connectors, channels, and other integrations receive the data required for requests you invoke
 
 ## What's Built and Working
+
+### Added in 0.5.60
+
+- [x] Memory folder: what CoWork knows about you and your workspaces as markdown notes in a local git repo (`~/CoWork Memory`), with daily Dreaming, review and undo, private git sync, read-only team memory, and four memory tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`)
+- [x] Bots page with responsibilities (trigger, sources, mode, review boundary, budget; saved paused) and a per-bot work view
+- [x] Icon-rail sidebar (Home, Inbox, Bots, Automations, More) with a session panel, Cmd/Ctrl+K search, and **Running** / **Needs you** filters
+- [x] Opt-in Calm visual style with Library and Build views
+- [x] Sandboxed `cowork-preview://` web previews and the `preview_web_page` tool
+- [x] Interactive answer components, a per-task Cost panel with a $10 default cap, an Automation Library, and **Settings > Add tools**
+- [x] SQLite in worker threads (on by default; `COWORK_DB_WORKER=0` returns to the previous path)
+- [x] WhatsApp Business (Cloud API) and Twilio SMS channels, GPT-6 models, OpenAI's official Sign in with ChatGPT, and the oMLX local provider
+
+See [Release Notes 0.5.60](release-notes-0.5.60.md).
 
 ### 1. Core Architecture
 
@@ -98,7 +111,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Browser V2 session manager with visible workbench default and responsive viewport testing
 - [x] Electron Workbench CDP control through renderer-owned webview
 - [x] Playwright local fallback for forced headless/background runs
-- [x] External CDP attach path gated by explicit real-browser consent
+- [x] System Chrome profile launch gated by explicit real-browser consent; attaching to an already-running external browser over CDP is refused
 - [x] Right-sidebar/fullscreen workbench routing with persistent workspace browser profile
 - [x] Accessibility snapshots with short-lived refs and stale-ref validation
 - [x] Visible cursor movement for agent browser actions
@@ -135,7 +148,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 
 #### Managed Agents
 
-- [x] Agents Hub for managed-agent discovery, template-backed creation, draft editing, governance, channels, skills, runtime tools, memory, files, schedules, and deployment posture
+- [x] Workspace agents on the Bots page (formerly Agents Hub) for managed-agent discovery, template-backed creation, draft editing, governance, channels, skills, runtime tools, memory, files, schedules, and deployment posture
 - [x] Single-pane clicked-agent detail view with no local assistant sidebar or bottom ask box
 - [x] Test, preview, and starter-prompt actions create runtime managed sessions and open their backing tasks in the main task window
 - [x] Add advanced logic and Optimize this agent route to the agent draft/editor surface
@@ -200,7 +213,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] browser_back
 - [x] browser_forward
 - [x] browser_reload
-- [x] browser_attach
+- [x] browser_attach (kept for compatibility; external attach is refused)
 - [x] browser_act_batch
 - [x] browser_close
 
@@ -300,7 +313,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Unified recall search across tasks, messages, files, memory, and knowledge-graph context
 - [x] Persistent shell session status and retained-state controls for long-running operator workflows
 - [x] Worktree Settings - Git worktree configuration UI
-- [x] Devices tab - saved remote devices, remote task feed, remote workspace browser, remote file picker
+- [x] Devices view (More > Devices) - saved remote devices, remote task feed, remote workspace browser, remote file picker
 - [x] Workflow Intelligence settings - heartbeat-triggered reflection, target kinds, last winner visibility, namespaced backlog, suggestion output, and dispatch history
 
 #### Settings UI
@@ -627,7 +640,7 @@ Expected behavior:
 - **Security**: Extensive automated test coverage, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
 - **Multi-Provider**: Supported account connections, APIs, compatible gateways, cloud credentials, local inference, ordered fallback routes, and Mixture of Agents presets
-- **GUI-first Agents + CLI entrypoint**: Agents Hub, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents, plus `cowork` for local terminal starts against the same runtime
+- **GUI-first Agents + CLI entrypoint**: the Bots page, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents, plus `cowork` for local terminal starts against the same runtime
 - **Local-First**: Operational state is persisted locally by default, with explicit boundaries for configured remote providers and integrations
 - **Extensible**: MCP support (Client, Host, Registry), bundled and installable skills, and plugin packs
 

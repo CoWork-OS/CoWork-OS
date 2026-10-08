@@ -10,7 +10,7 @@ scope, bypass a domain deny, or override a hard guardrail.
 
 ## Product Surface
 
-Open **Everyday Agent** from the sidebar. The surface shows:
+Open **More > Everyday** from the left icon rail. The surface shows:
 
 - Enabled, disabled, paused, or admin-blocked state.
 - Active capability bundles and their compiled policy state.
@@ -154,7 +154,7 @@ In-flight work must stop before the next side-effecting action after revocation 
 
 Manual acceptance for a complete release:
 
-1. Open Everyday Agent from the sidebar.
+1. Open **More > Everyday** from the left icon rail.
 2. Enable consent.
 3. Toggle capability bundles.
 4. Review compiled state, suggestions, memory count, and receipts.

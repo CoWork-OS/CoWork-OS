@@ -109,7 +109,7 @@ result.
 
 ### Configurable Guardrails
 
-CoWork OS includes configurable guardrails in **Settings > Guardrails** to limit what the agent can do:
+CoWork OS includes configurable guardrails in **Settings > System & Security > Safety Limits** to limit what the agent can do:
 
 | Guardrail              | Description                                                        | Default            |
 | ---------------------- | ------------------------------------------------------------------ | ------------------ |

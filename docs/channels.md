@@ -658,7 +658,7 @@ For personal Microsoft mailboxes, the Client ID field is not enough by itself. C
 
 Native menu bar companion for quick access. Press **⌘⇧Space** from anywhere to open a floating input window.
 
-Configure in **Settings** > **Menu Bar**.
+Configure in **Settings** > **System & Security** > **Menu Bar**.
 
 ---
 

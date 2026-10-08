@@ -4,7 +4,7 @@ CoWork OS can use [Supermemory](https://supermemory.ai/) as an external memory l
 
 This integration is intentionally modeled after the Hermes-style provider shape:
 
-- native provider-style configuration in **Settings → Memory Hub**
+- native provider-style configuration in **Settings → Memory → Settings → Connections**
 - workspace-scoped container tags
 - explicit external memory tools
 - optional prompt-time profile injection
@@ -12,7 +12,7 @@ This integration is intentionally modeled after the Hermes-style provider shape:
 - optional explicit Memory Write review gating before external writes commit
 - guarded failure behavior so provider outages do not break the main agent loop
 
-Supermemory does **not** replace CoWork's local memory system. CoWork keeps its own fact store (`memory_items`), archive memory, workspace kit files, conversation recall, and knowledge graph ([Memory Engine](memory-engine.md)). Supermemory is an additional external memory lane.
+Supermemory does **not** replace CoWork's local memory system. CoWork keeps its own memory folder (`~/CoWork Memory`), the `memory_items` store for commitments and notes about other people, archive memory, workspace kit files, conversation recall, and knowledge graph ([Memory Engine](memory-engine.md)). Supermemory is an additional external memory lane.
 
 The task's [access profile](access-profiles.md) remains the ceiling for this
 integration. Profile network and connector rules apply before Supermemory
@@ -90,10 +90,10 @@ These are sanitized into a valid Supermemory `containerTag`.
 CoWork now has three distinct memory surfaces:
 
 1. **Local prompt-visible memory**
-   `memory_items` facts (L0/L1), the `USER.md` / `MEMORY.md` blocks rendered from them, and the wake-up layers.
+   The memory folder's `MEMORY.md` and workspace file, the `L0`/`L1` wake-up layers (pinned profile, open commitments and memory relevant to the request), and your own text in `.cowork/USER.md` / `MEMORY.md`.
 
 2. **Local deep recall**
-   `memory_recall` over saved facts, the archive, earlier conversations, `.cowork` notes, topic packs and the knowledge graph; `context_recall` for the active task after compaction.
+   `memory_recall` over saved facts, the archive, earlier conversations, `.cowork` notes, the memory folder and the knowledge graph; `context_recall` for the active task after compaction.
 
 3. **External Supermemory**
    Scoped profile/search/remember/forget operations plus optional mirrored memory history.
@@ -244,7 +244,7 @@ Current safeguards:
 
 When the circuit breaker opens, CoWork pauses Supermemory requests temporarily and keeps running with local memory only.
 
-The Memory Hub shows:
+The Supermemory card in **Settings → Memory → Settings → Connections** shows:
 
 - whether the API key is configured
 - the latest connection-test result

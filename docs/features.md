@@ -39,16 +39,16 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **GUI-first, CLI-capable AI Super App, Everything App, and Personal Agentic OS**: CoWork OS is a free, open-source, local-first super app for everyday AI work: coding, email, web design, research, documents, spreadsheets, presentations, automations, channels, devices, terminal tasks, and long-running work in one governed workspace.
 - **Open Multi-Provider Harness**: Supported provider accounts, APIs, compatible gateways, cloud credentials, and local models can use the same CoWork tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; provider eligibility, limits, and charges remain separate. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
 - **MLX-LM Local Inference**: On native Apple Silicon Macs, the first-class **MLX (Apple Silicon)** provider runs quantized models through the local MLX-LM OpenAI-compatible server. Settings checks the native platform and Python imports, starts/stops the local server, shows download/loading logs, and routes normal agent requests through the shared provider interface. See [MLX-LM Local Inference](mlx-lm.md).
-- **GUI-first Agent Management**: Agents Hub, Mission Control, task timelines, visual boards, Teams, Devices, and Automations let users create reusable agents, spawn many parallel or specialized agents, inspect delegated runs, assign work, review approvals, and monitor outcomes through the desktop operator console.
+- **GUI-first Agent Management**: the Bots page, Mission Control, task timelines, visual boards, Teams, Devices, and Automations let users create reusable agents, spawn many parallel or specialized agents, inspect delegated runs, assign work, review approvals, and monitor outcomes through the desktop operator console.
 - **CoWork CLI**: `cowork` opens an interactive terminal UI for local agent work, and `cowork run "task"` starts one-shot local tasks using the same local profile, providers, workspaces, skills, and MCP configuration as the desktop app. Normal local CLI use does not require a Control Plane token; `--remote` is the explicit remote client path. See [CoWork OS CLI](cli.md).
 - **Governed Access Profiles**: The main composer offers Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles. A profile carries sandbox, approval, reviewer, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, and child-task surfaces. Command tools are derived from the selected profile; there is no separate new-task shell toggle. See [Access Profiles](access-profiles.md).
 - **Everything Workbench**: Generated documents, spreadsheets, presentations, web pages, PDFs, and previews share one artifact model: compact output card, sidebar open, fullscreen artifact workspace, follow-up composer, and refresh after the agent completes requested edits. This makes CoWork the default place to create, inspect, and revise everyday Word/Excel/PowerPoint-style work while keeping external app actions available for advanced native workflows. See [Everything Workbench](everything-workbench.md).
 - **Terminal Tabs**: CoWork now includes real xterm.js + node-pty terminal tabs inside the workspace, with native macOS login-shell behavior, Windows `cmd.exe` through ConPTY/winpty, keyboard shortcuts, Tab completion, Ctrl+C, interactive prompts, resizing, closeable tabs, and cwd-only prompts. This is a major super-app step because direct CLI work, repository work, agents, artifacts, browser testing, approvals, channels, and automations can stay in one governed workspace. See [Terminal Tabs](terminal-tabs.md).
-- **Browser Workbench / Browser V2**: live website and local-app testing opens in a visible right-sidebar/fullscreen browser by default. Browser-use tools target the same webview the user can see through Browser V2, with responsive viewport testing through `browser_emulate`, accessibility snapshot refs, CDP-backed actions, tabs, diagnostics, screenshots, annotation, and visible cursor movement during agent actions. Explicit fallback modes include local Playwright, external Chrome/Edge CDP attach with consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
+- **Browser Workbench / Browser V2**: live website and local-app testing opens in a visible right-sidebar/fullscreen browser by default. Browser-use tools target the same webview the user can see through Browser V2, with responsive viewport testing through `browser_emulate`, accessibility snapshot refs, CDP-backed actions, tabs, diagnostics, screenshots, annotation, and visible cursor movement during agent actions. Explicit fallback modes include local Playwright, a separately launched Chrome with your system profile after consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
 - **Task Overflow Actions**: task view title menus expose supported task actions in place: pin/unpin, rename, archive, copy working directory, copy task ID, copy `cowork://tasks/<taskId>` deeplink, copy Markdown, fork session, view outputs, and create a same-thread or new-task automation from the current task. See [Task Automations](task-automations.md).
-- **Managed Agents**: Agents Hub provides a dedicated surface for creating, inspecting, publishing, suspending, and improving reusable agents. Agent detail screens are configuration-first and single-pane: test, preview, and starter-prompt actions create normal runtime managed sessions and open their backing tasks in the main task window, where questions, responses, approvals, artifacts, and outputs are handled like any other task. See [Managed Agents](managed-agents.md).
-- **Persistent Bots**: the sidebar Bots surface gives reusable agent roles a stable identity across many durable conversations. Bots open or create dormant conversations, keep history separate from Sessions, support profile editing/deactivation, expose notification and host-computer state, and can message verified teammates through the persistent CoWork Bot Team. See [Bots, conversations, and tasks](bots-and-conversations.md).
+- **Managed Agents**: **Workspace agents** on the Bots page (formerly Agents Hub) provides a dedicated surface for creating, inspecting, publishing, suspending, and improving reusable agents. Agent detail screens are configuration-first and single-pane: test, preview, and starter-prompt actions create normal runtime managed sessions and open their backing tasks in the main task window, where questions, responses, approvals, artifacts, and outputs are handled like any other task. See [Managed Agents](managed-agents.md).
+- **Persistent Bots**: the **Bots** rail item opens the Bots page (what your bots need from you, what is running and scheduled, templates for new bots) and the bot roster. Bots give reusable agent roles a stable identity across many durable conversations, open or create dormant conversations, keep history separate from Sessions, support profile editing/deactivation, expose notification and host-computer state, and can take **responsibilities** (a trigger, sources, a mode, a review boundary and a budget; saved paused). Bots you add to a team you configure can message verified teammates; CoWork no longer installs a default bot team. See [Bots, conversations, and tasks](bots-and-conversations.md).
 - **Runtime Orchestration**: SessionRuntime owns task-session state, session checklists, resume snapshots, recovery state, and task projection while the turn kernel handles each individual step, follow-up, or text turn; metadata-driven tool scheduling, graph-backed delegation, typed worker roles, verifier verdicts, semantic tool-batch summaries, and terminal-state reconciliation keep delegated work coherent across tasks, follow-ups, teams, and ACP runs.
 - **Prompt-Aware Tooling**: visible tools receive concise prompt-local guidance after policy filtering, and planning plus execution share the same render source for compact tool text and provider-facing tool descriptions.
 - **Composer Mentions**: type `@` in the main composer to choose Agents, configured Integrations, or Files. Integration mentions render as icon+name chips and add soft runtime routing guidance without changing permissions. See [Composer Mentions](composer-mentions.md).
@@ -72,7 +72,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
   <br><em>The Bots page turns reusable bots, templates and workspace agents into a first-class product surface.</em>
 </p>
 
-- **Chat Mode**: Direct LLM chat with no tools by default, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. Uploaded PDF turns that need deeper document reading are narrowly promoted into read-only analysis so the document parser can run. See [Chat Mode](chat-mode.md).
+- **Ask (chat mode)**: Direct LLM chat with no tools by default, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. Uploaded PDF turns that need deeper document reading are narrowly promoted into read-only analysis so the document parser can run. See [Chat Mode](chat-mode.md).
 - **Side Chat**: Right-side read-only questions about an active running session without steering or stopping the parent task. Side Chat uses a side-specific fork with hidden parent context, live parent-status snapshots for progress questions, a side-only visible transcript, and Markdown-rendered answers. See [Side Chat](side-chat.md).
 - **Document Creation**: Excel, Word, PDF, PowerPoint, HTML, and React-style outputs with professional formatting, first-class LaTeX/TikZ `.tex` -> PDF compilation when a system TeX engine is installed, plus the bundled [kami](skills/kami.md) workflow for editorial PDFs, resumes, one-pagers, and slide decks
 - **Document Artifact Workbench**: task-created Word-style files use compact artifact cards in the task feed. `.docx` opens directly into a resizable right-sidebar editor with a Google Docs-style toolbar, direct text editing, copy, save, external-open, and folder actions. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related formats are recognized as document artifacts and use best-effort preview or external-app/folder actions depending on parser support. Fullscreen mode expands editable documents across the app and keeps a functional follow-up composer with the main task model picker, voice input, attachments, send behavior, latest-turn/working context, and automatic preview refresh after follow-up edits. See [Document Artifacts](document-artifacts.md).
@@ -134,8 +134,8 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Think With Me Mode**: Socratic brainstorming mode that helps clarify thinking without executing tools. Activated via toggle or auto-detected from brainstorm/trade-off patterns.
 - **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
 - **Graceful Uncertainty**: Agent expresses uncertainty honestly and rates confidence on recommendations. Low-confidence messages display with an amber indicator.
-- **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. View in Settings > AI Playbook.
-- **Evolving Agent Intelligence**: The agent visibly improves over time through a connected set of subsystems — layered memory, retry-aware recovery reuse, adaptive style learning, playbook-to-skill promotion, channel persona adaptation, evolution metrics, and daily operational journaling. See [Evolving Agent Intelligence](evolving-agent-intelligence.md).
+- **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. There is no separate settings page; a task's learning progression shows what was captured.
+- **Evolving Agent Intelligence**: The agent visibly improves over time through a connected set of subsystems — layered memory, retry-aware recovery reuse, adaptive style learning, playbook-to-skill promotion, channel persona adaptation, and evolution metrics. See [Evolving Agent Intelligence](evolving-agent-intelligence.md).
 
 ### LLM Wiki Research Vaults
 
@@ -318,7 +318,7 @@ This workflow is designed for "human-directed, agent-operated" execution:
 
 - **Memory as source of truth**: reflection outputs become memory candidates such as preferences, workflow patterns, open loops, corrections, recurring tasks, and ignored noise
 - **Heartbeat as scheduler**: Heartbeat decides when accumulated signals justify reflection
-- **Dreaming as memory curation**: background Dreaming curates the `memory_items` fact store after memory-specific Heartbeat signals, a daily idle pass or (opt-in) task completion; safe operations on inferred facts are applied and undoable, everything else waits in the Memory Hub Review tab
+- **Dreaming as memory curation**: about once a day (offered by idle Heartbeat pulses) or on **Dream now**, Dreaming tidies the memory folder; safe edits to agent-written notes are one undoable commit, and anything touching your own notes waits in **Settings > Memory > Review**
 - **Reviewable suggestions first**: useful outcomes appear in the automation inbox and Suggestions panel. The optional welcome-screen **Next actions** widget is off by default and can be enabled from **Settings > Appearance > Home widgets > Show next actions**.
 - **Global coordinator, namespaced targets**: one coordinator ranks work globally while each workflow target keeps its own history, winner, backlog, and dispatch stream
 - **Stable target identities**: supports core-owned targets such as `global`, `workspace`, `agent_role`, `code_workspace`, and `pull_request`
@@ -399,9 +399,9 @@ The task creation UI also includes higher-level toggles that change how tasks ar
 > when a trusted task needs that profile, and remember that export, location,
 > hard-guardrail, administrator, and explicit-deny boundaries still apply.
 
-### Chat Mode
+### Ask (Chat Mode)
 
-Chat mode is the direct assistant conversation surface. It is designed for normal Q&A, not task execution.
+**Ask** (stored as the `chat` execution mode; labelled **Chat** before 0.5.60) is the direct assistant conversation surface. It is designed for normal Q&A, not task execution.
 
 - **No tools by default**: the assistant does not plan or call tools in normal chat mode
 - **PDF exception**: chat turns with uploaded PDF attachment metadata are auto-promoted to read-only analysis when deeper PDF content is needed, so `parse_document` can read the file without enabling mutating tools
@@ -411,7 +411,7 @@ Chat mode is the direct assistant conversation surface. It is designed for norma
 - **High output budget**: explicit chat sessions use a fixed 48K target output cap, clamped to the active provider budget
 - **History strategy**: long chat sessions use a summary-plus-recent-window prompt strategy with cached summary reuse
 
-See [Chat Mode](chat-mode.md) for the full behavior contract.
+See [Ask (Chat Mode)](chat-mode.md) for the full behavior contract.
 
 ### Side Chat
 
@@ -469,7 +469,7 @@ Role-specific and workflow bundles that group skills, agent roles, connectors, a
 - **Skill conflict detection**: Warns when multiple packs register the same skill ID, preventing silent overwrites
 - **Admin Policies**: Organization-level controls for allowed/blocked/required packs, installation permissions, and agent limits
 
-Access from **Settings** > **Customize**. See [Plugin Packs](plugin-packs.md) for pack management and [Message Box Shortcuts](message-box-shortcuts.md) for the composer shortcut model.
+Access from **Settings** > **Feature Packs**. See [Plugin Packs](plugin-packs.md) for pack management and [Message Box Shortcuts](message-box-shortcuts.md) for the composer shortcut model.
 
 ---
 
@@ -570,7 +570,7 @@ Inline privacy controls are also available during capture: `<no-memory>` disable
 
 Supermemory is additive, not a replacement for local memory. CoWork still keeps the workspace kit, `memory_items` facts, archive memory, structured observation metadata, Dreaming proposals, conversation recall, and knowledge graph locally. Memory Write Governance can require approval before external writes or mirrors are committed; sensitive external-memory payloads are blocked rather than stored in the pending queue. The current integration mirrors local memory captures only when you opt in; it does not yet stream every chat turn into Supermemory conversations. See [Structured Memory Observations](memory-observations.md), [Dreaming](dreaming.md), [Workspace Memory Flow](workspace-memory-flow.md#memory-write-governance), and [Supermemory Integration](supermemory.md).
 
-Configure in **Settings** > **Memory Hub**.
+Configure in **Settings** > **Memory**.
 
 ---
 
@@ -581,7 +581,7 @@ Import your full ChatGPT conversation history into CoWork OS's memory system. In
 ### How It Works
 
 1. **Export from ChatGPT**: Go to [ChatGPT Settings > Data Controls > Export Data](https://chat.openai.com/#settings/DataControls). OpenAI emails you a `.zip` file containing `conversations.json`.
-2. **Import in CoWork OS**: Go to **Settings > Memory Hub > Import ChatGPT History** and select the exported `.zip` or `conversations.json` file.
+2. **Import in CoWork OS**: Go to **Settings > Memory > Settings > Import** and choose **ChatGPT export** and select the exported `.zip` or `conversations.json` file.
 3. **Processing**: Conversations are parsed, deduplicated, and stored as memory entries with full-text search indexing. User messages are captured as context; assistant responses are summarized for token efficiency.
 
 ### What Gets Imported
@@ -599,7 +599,7 @@ Import your full ChatGPT conversation history into CoWork OS's memory system. In
 - **Local protected storage** — Imported history is stored in the local SQLite database; selected sensitive settings/fields use OS keychain/AES-backed encryption, while memory import content relies on local storage controls and privacy filtering rather than whole-file database encryption.
 - **Privacy filtering** — The same auto-detection that filters API keys, passwords, and tokens from regular memories applies to imported history.
 - **Scoped provider context** — Memory selection happens locally. When relevant snippets are included in a task prompt, they are sent to the model route selected for that task, just like the rest of the prompt. CoWork does not send the full imported archive unless a user explicitly places it in task context.
-- **Deletable** — You can clear all imported memories at any time from Settings > Memory Hub.
+- **Deletable** — You can clear all imported memories at any time from **Settings > Memory > Sources**.
 
 ### Why This Matters
 
@@ -614,9 +614,9 @@ CoWork OS still keeps a multi-layered learning stack under the reflective loop. 
 | Layer             | Service                   | What It Learns                                                          |
 | ----------------- | ------------------------- | ----------------------------------------------------------------------- |
 | **Task Patterns** | PlaybookService           | Successful approaches, failure categories, error recovery strategies    |
-| **Facts**         | MemoryWriter (`memory_items`) | Preferences, identity, rules, project facts, decisions, commitments, corrections; the profile and relationship services are views of it |
+| **Facts**         | MemoryWriter (memory folder; `memory_items` for commitments and people) | Preferences, identity, rules, project facts, decisions and corrections as notes in the memory folder; commitments and notes about other people in `memory_items` |
 | **Archive**       | MemoryService             | Outcomes, decisions, errors, insights with hybrid lexical search        |
-| **Feedback**      | FeedbackService           | Rejection patterns, preference corrections, workspace-local MISTAKES.md |
+| **Feedback**      | FeedbackService           | Rejection patterns and preference corrections, saved as corrections in the workspace's memory folder file (`.cowork/MISTAKES.md` when the folder is off) |
 
 **Key mechanisms:**
 
@@ -627,7 +627,7 @@ CoWork OS still keeps a multi-layered learning stack under the reflective loop. 
 - **Retry-aware reuse**: retries can reuse playbook patterns during planning, recent session recall during planning/execution/follow-ups, and pending verification checklist state instead of restarting cold
 - **`/learn` skill**: manually teach the agent insights, corrections, preferences, or rules
 
-These layers feed `Workflow Intelligence` and the normal task runtime. Dreaming curates the fact store from the same evidence. See [Workflow Intelligence](workflow-intelligence.md) and [Dreaming](dreaming.md) for the full architecture guide.
+These layers feed `Workflow Intelligence` and the normal task runtime. Dreaming tidies the memory folder about once a day. See [Workflow Intelligence](workflow-intelligence.md) and [Dreaming](dreaming.md) for the full architecture guide.
 
 ### Evolving Agent Intelligence
 
@@ -643,7 +643,7 @@ A set of connected subsystems that make improvement visible and measurable over 
 | **Evolution Metrics**             | Computes 5 on-demand metrics: Correction Rate, Style Adaptations, Knowledge Graph growth, Task Success Rate, and Style Alignment. Produces an overall 0–100 Evolution Score. Surfaced in the Daily Briefing.                                                                               |
 | **Daily Log Summarizer**          | Retired in memory repo Phase 3: the memory folder and its dreaming replace daily summaries ([design](memory-repo-phase3-design.md)). |
 
-**Behavior Adaptation controls** (Settings > Guardrails > Behavior Adaptation):
+**Behavior Adaptation controls** (Settings > System & Security > Safety Limits > Behavior Adaptation):
 
 - **Adaptive Style** toggle — enable/disable style learning (off by default)
 - **Max drift per week** — maximum one-level style shifts per 7-day window (default: 1)
@@ -763,9 +763,9 @@ updated: 2026-03-14
 
 ### Quick-open kit files
 
-The Memory Hub exposes **Open USER.md** and **Open MEMORY.md** buttons that open the corresponding `.cowork/` file directly in the system editor. If the file does not exist it is created from a default template (with full frontmatter and section scaffolding) before opening.
+The **Workspace kit** group (**Settings > Memory > Settings > Advanced**) has **Open USER.md**, **Open MEMORY.md** and **Open DESIGN.md** buttons that open the corresponding `.cowork/` file directly in the system editor. If the file does not exist it is created from a default template (with full frontmatter and section scaffolding) before opening.
 
-Configure in **Settings** > **Memory Hub**.
+Configure in **Settings** > **Memory**.
 
 ---
 
@@ -801,7 +801,7 @@ Configure in **Mission Control** > **Teams**.
 
 ## Mission Control
 
-Centralized agent orchestration and monitoring dashboard. In the standard interface, open **Mission Control** from the main sidebar; in the Calm interface, open **More**. Availability and exact routes vary by release; see the [release surface reference](release-surface-reference.md). The surface separates Heartbeat-enabled agents, the global runtime queue, and workspace-scoped Mission Board work so users can tell whether an item is monitoring, waiting to execute, or tracked on the board.
+Centralized agent orchestration and monitoring dashboard. Open **More > Mission Control** from the left icon rail, in both the standard and Calm interfaces. Availability and exact routes vary by release; see the [release surface reference](release-surface-reference.md). The surface separates Heartbeat-enabled agents, the global runtime queue, and workspace-scoped Mission Board work so users can tell whether an item is monitoring, waiting to execute, or tracked on the board.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-8.webp" alt="Mission Control board" width="700">
@@ -1039,7 +1039,7 @@ Unified file aggregation service combining local workspace files, task artifacts
 | **Web page workbench**     | Generated HTML/HTM files and built React output open in a resizable sidebar or fullscreen sandboxed iframe preview with browser/folder/copy actions and follow-up refresh after completion                            |
 | **Source/rendered pairs**  | LaTeX `.tex` files compiled through `compile_latex` are paired with their generated PDFs in task artifact surfaces                                                                                                    |
 
-Access from the **File Hub** panel in the sidebar.
+In the Calm visual style, open **Library** on the left icon rail; the File Hub lives inside it. Generated files also open from each task's output cards and **Files** panel.
 
 ---
 
@@ -1175,7 +1175,7 @@ The browser workbench supports:
 - diagnostics drawer and tools for console, network, downloads, storage, and trace state
 - workspace screenshot capture plus in-app screenshot annotation that can be saved or sent back to the agent as an image attachment
 - fullscreen mode with the same follow-up composer and latest-turn/working context frame used by artifact workbenches
-- optional fallback to forced headless Playwright or explicit Chrome DevTools attach for background runs and signed-in system Chrome/Edge sessions
+- optional fallback to forced headless Playwright for background runs, or a separately launched Chrome with the signed-in system profile after consent (attaching to an already-running external browser is refused)
 
 Use `web_fetch` for reading a known static URL. Use the browser workbench for interactive websites, JavaScript-heavy pages, forms, app testing, and visual checks. See [Browser Workbench](browser-workbench.md) for user behavior and [Browser V2 Architecture](browser-v2-architecture.md) for the implementation contract.
 
@@ -1211,7 +1211,7 @@ Browser tools first target the active visible browser workbench for the selected
 
 | Tool                    | Description                                                                                                                                                        |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `browser_attach`        | Attach to existing Chrome/Edge via Chrome DevTools Protocol after explicit real-browser consent. See [Chrome DevTools attach](#chrome-devtools-attach-mode) below. |
+| `browser_attach`        | Kept for compatibility; attaching to an existing Chrome/Edge is refused under the enforced network policy. See [External browser attach](#external-browser-attach-refused) below. |
 | `browser_act_batch`     | Execute batched actions (click, fill, type, press, wait, scroll) in sequence with optional delays                                                                  |
 | `browser_navigate`      | Navigate to URL with configurable wait states; opens the visible in-app browser workbench by default                                                               |
 | `browser_snapshot`      | Return compact accessibility nodes with short-lived refs, focus state, console summary, and network summary                                                        |
@@ -1255,23 +1255,13 @@ Lightweight HTTP without browser overhead — preferred for reading known URLs.
 | `web_fetch`    | Fetch URL → HTML-to-Markdown conversion with optional CSS selector filtering              |
 | `http_request` | Raw HTTP requests (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) with custom headers/body |
 
-### Chrome DevTools Attach Mode
+<a id="chrome-devtools-attach-mode"></a>
 
-Attach to an existing Chrome/Edge instance to control a signed-in browser session (e.g. Gmail, social media). Uses the Chrome DevTools Protocol and requires explicit real-browser consent before control.
+### External Browser Attach (Refused)
 
-**Setup:**
+Attaching to an already-running Chrome or Edge over the Chrome DevTools Protocol (`browser_attach`, or any tool call with `debugger_url`) is refused. An external browser can hold sockets and service workers that were opened before CoWork connected, and those cannot be brought under the task's network policy, so the attempt fails and the managed browser session is kept.
 
-1. Launch Chrome with remote debugging: `chrome --remote-debugging-port=9222` (or add `--remote-debugging-port=9222` to your Chrome shortcut).
-2. Visit [chrome://inspect/#devices](chrome://inspect/#devices) to verify the endpoint.
-3. The agent asks for explicit consent showing the target browser/profile/tab/domain.
-4. The agent uses `browser_attach` with `debugger_url: "http://localhost:9222"` (or the WebSocket URL from the version endpoint) and `confirm_real_browser_control: true`.
-5. After attach, `browser_navigate` and other browser tools operate on the attached session.
-
-See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-debugging/) for full setup guides.
-
-**Profile presets vs attach mode:** Use `browser_attach` with `debugger_url` when you want to control an **already running** signed-in Chrome/Edge session after consent. Use `profile="user"` when you want to **launch a new** Chrome instance with your system profile — but Chrome must not already be running with that profile (profile lock). For existing sessions, attach mode is the correct choice.
-
-**Note:** If you close the Chrome window while attached, subsequent browser actions will fail with "Target closed". Re-attach with `browser_attach` after relaunching Chrome.
+For a signed-in session, sign in inside the Browser Workbench (cookies persist in the workspace browser profile), or use `profile="user"` to **launch a new** Chrome instance with your system profile after you approve real-browser control. Chrome must not already be running with that profile (profile lock).
 
 ### Browser Features
 
@@ -1286,7 +1276,7 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 | **Visible Cursor**               | Agent browser actions render cursor movement and click/action pulses over the in-app webview                                                                                                                                         |
 | **Screenshot Annotation**        | Capture, mark up, save, and send browser screenshots back to the agent as image attachments                                                                                                                                          |
 | **Real-Browser Consent**         | System Chrome/Edge profile control requires explicit approval; default workbench never silently reuses system cookies                                                                                                                |
-| **Profile Presets**              | `user` (launch new Chrome with system profile after consent — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). For existing signed-in sessions, use `browser_attach` instead. |
+| **Profile Presets**              | `user` (launch new Chrome with system profile after consent — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). Attaching to an already-running browser is refused. |
 | **Persistent Profiles**          | Cookies and storage persist across tasks in `.cowork/browser-profiles/`                                                                                                                                                              |
 | **Consent Auto-Dismiss**         | 40+ pattern detectors for cookie/GDPR consent popups                                                                                                                                                                                 |
 | **Retry Logic**                  | 2-attempt retry with per-attempt timeout calculation                                                                                                                                                                                 |
@@ -1405,7 +1395,7 @@ See [Remote Access](remote-access.md) for details.
 
 ## Enterprise MCP Connectors
 
-Pre-built connectors for enterprise integrations, local services, and creative workflows. Install from **Settings > Connectors > Browse Registry**. The [Connector Inventory](connector-inventory.md) lists every shipped connector, channel and skill with its actions and requirements. **Settings > Add tools** searches available and installed packs, skills, native integrations, channels, and MCP servers before opening their setup surfaces; see [Add tools discovery](add-tools-discovery.md) for what its readiness states establish.
+Pre-built connectors for enterprise integrations, local services, and creative workflows. Install from **Settings > Integrations > Connectors**, or browse everything in **Settings > Add tools**. The [Connector Inventory](connector-inventory.md) lists every shipped connector, channel and skill with its actions and requirements. **Settings > Add tools** searches available and installed packs, skills, native integrations, channels, and MCP servers before opening their setup surfaces; see [Add tools discovery](add-tools-discovery.md) for what its readiness states establish.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">
@@ -1568,7 +1558,7 @@ The wallet is auto-generated on first setup, with the private key encrypted in t
 | -------------- | ------------------------------------------------------------------------ |
 | `infra_status` | Get overall status: provider connections, active sandboxes, wallet state |
 
-Configure in **Settings** > **Infrastructure**. The settings UI shows:
+Configure in **Settings** > **Integrations** > **Infrastructure**. The settings UI shows:
 
 - Provider connection status (E2B, Namecheap, Wallet)
 - API key configuration for each provider
@@ -1596,6 +1586,7 @@ Customize agent behavior via Settings or conversation:
 | ------------ | --------------------------------------------------------------- |
 | **Modern**   | Refined non-terminal UI style with rounded components (default) |
 | **Terminal** | CLI-inspired interface with prompt-style visuals                |
+| **Calm**     | Opt-in cool-neutral style with a Home screen Ask / Do switch, simplified sidebar, and the Library and Build views |
 
 | Color Mode | Description                                   |
 | ---------- | --------------------------------------------- |
@@ -1616,7 +1607,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 - Task-sourced scheduled jobs preserve a source task title, task ID, and `cowork://tasks/<taskId>` deeplink in the compiled prompt/description
 - Target modes: create a new task for each run or continue an existing task thread with a scheduled follow-up
 - Run mode presets: `Chat` for no-command-tool unattended work, `Local` for work governed by the selected access profile; worktree automation is forced to new-task execution instead of continuing a thread
-- Channel delivery to any of the 17 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
+- Channel delivery to any of the 19 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
 - Conditional delivery (`deliverOnlyIfResult`)
 - Template variables: `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`
 - Chat context variables: `{{chat_messages}}`, `{{chat_since}}`, etc.
@@ -1673,7 +1664,7 @@ Access CoWork OS from any web browser — no Electron desktop app required.
 | **Security**            | Challenge-response authentication (extends existing control plane auth). HTTPS recommended for production                   |
 | **Existing foundation** | Control plane already serves a web dashboard at `http://127.0.0.1:18789/`. Web mode extends this to the full React UI       |
 
-See [Architecture: Web Browser Mode](architecture.md#web-browser-mode-planned--serve) for the implementation plan.
+An opt-in development preview of the browser application now exists (`COWORK_WEB_ENABLED=1`), without full desktop parity; see [Browser application preview](browser-preview.md).
 
 ---
 
@@ -1699,4 +1690,4 @@ Programmatic API for external automation and remote CoWork devices.
 
 Mobile Companions (iOS/Android node clients) were discontinued; see the [decision record](mobile-companions-discontinuation.md).
 
-Configure in **Settings** > **Control Plane**. For reverse proxies, keep the daemon loopback/private when possible, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin, and only set `COWORK_CONTROL_PLANE_TRUST_PROXY=1` behind a proxy you control.
+Configure in **Settings** > **Access** > **Control Plane**. For reverse proxies, keep the daemon loopback/private when possible, set `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` to the public HTTPS origin, and only set `COWORK_CONTROL_PLANE_TRUST_PROXY=1` behind a proxy you control.

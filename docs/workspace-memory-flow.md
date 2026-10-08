@@ -425,7 +425,7 @@ Workspace kit context is still injected separately and placed before the memory 
 - `L1 Essential Story`: **on**
 - archive memory: **off by default** (the per-turn recall block still injects query matches)
 - Supermemory profile injection: **optional**
-- `L2 Topic Packs`: **tool-driven**
+- `L2 Topic Packs`: retired
 - `L3 Deep Recall` (`memory_recall`, `context_recall`): **tool-driven**
 
 ---
@@ -435,7 +435,7 @@ Workspace kit context is still injected separately and placed before the memory 
 **Service:** `src/electron/memory/WorkspaceKitContext.ts`  
 **Location:** `.cowork/*.md`
 
-The workspace kit remains a governed durable context layer with its own contracts, freshness windows, and prompt budgets. `USER.md` and `MEMORY.md` contain auto-managed blocks rendered from `memory_items` in addition to human-authored content; hand edits inside a block are synced back shortly after the file is saved, and on every kit sync ([memory-engine.md §5](memory-engine.md#generated-kit-views)).
+The workspace kit remains a governed durable context layer with its own contracts, freshness windows, and prompt budgets. `USER.md` and `MEMORY.md` hold human-authored content; the auto-managed blocks once rendered from `memory_items` were removed in 0.5.60 with a `.history` snapshot, and hand edits sync back into memory shortly after the file is saved ([memory-engine.md §5](memory-engine.md#generated-kit-views-retired)).
 
 From **Settings → Memory → Settings → Advanced → Workspace kit**, the "Open USER.md" and "Open MEMORY.md" buttons open (or create if missing) these files directly in the system editor via `kit:openFile` IPC.
 

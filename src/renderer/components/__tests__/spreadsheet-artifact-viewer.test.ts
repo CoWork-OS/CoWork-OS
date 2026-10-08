@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { SpreadsheetArtifactViewer } from "../SpreadsheetArtifactViewer";
+import { getCellDisplayText, SpreadsheetArtifactViewer } from "../SpreadsheetArtifactViewer";
 
 function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);
@@ -81,5 +81,23 @@ describe("SpreadsheetArtifactViewer", () => {
     expect(markup).toContain("spreadsheet-viewer-turn-frame collapsed");
     expect(markup).toContain("Latest turn");
     expect(markup).not.toContain("Created the sample spreadsheet.");
+  });
+
+  it("shows number-formatted text, pending formulas and typed formulas in the grid", () => {
+    const cell = { address: "B2", row: 2, column: 2 };
+    expect(getCellDisplayText({ ...cell, value: "96.5", displayValue: "€96.50" })).toBe("€96.50");
+    expect(getCellDisplayText({ ...cell, value: "Venue" })).toBe("Venue");
+    expect(
+      getCellDisplayText({
+        ...cell,
+        value: "",
+        formula: "SUM(B2:B5)",
+        displayValue: "=SUM(B2:B5)",
+        formulaPending: true,
+      }),
+    ).toBe("=SUM(B2:B5)");
+    // A formula typed in the viewer shows as typed until it is saved and calculated.
+    expect(getCellDisplayText({ ...cell, value: "=B2*2", formula: "B2*2" })).toBe("=B2*2");
+    expect(getCellDisplayText(undefined)).toBe("");
   });
 });

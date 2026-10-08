@@ -183,10 +183,21 @@ function getCellText(cell: SpreadsheetPreviewCell | null): string {
   return cell.value || "";
 }
 
-function getCellDisplayText(cell: SpreadsheetPreviewCell | undefined): string {
+/**
+ * Grid text for a cell: what Excel shows (number format applied, or the formula when the file has
+ * no saved result), falling back to the raw value. Editing always works on the raw value.
+ */
+export function getCellDisplayText(cell: SpreadsheetPreviewCell | undefined): string {
   if (!cell) return "";
   if (cell.formula && cell.value.startsWith("=")) return cell.value;
-  return cell.value || "";
+  return cell.displayValue ?? cell.value ?? "";
+}
+
+/** Formatting and pending-result flags describe the saved value, so an edit drops them. */
+function clearDerivedCellDisplay(cell: SpreadsheetPreviewCell): void {
+  delete cell.displayValue;
+  delete cell.valueType;
+  delete cell.formulaPending;
 }
 
 function normalizeRange(range: CellRange | null): CellRange | null {
@@ -553,6 +564,7 @@ export function SpreadsheetArtifactViewer({
       if (!sheet) return current;
       ensureSheetBounds(sheet, row, column);
       const cell = sheet.rows[row - 1][column - 1] || createCell(row, column);
+      clearDerivedCellDisplay(cell);
       if (value.startsWith("=")) {
         cell.formula = value.slice(1);
         cell.value = value;
@@ -693,6 +705,7 @@ export function SpreadsheetArtifactViewer({
           const row = selectedCell.row + rowOffset;
           const column = selectedCell.column + columnOffset;
           const cell = sheet.rows[row - 1][column - 1] || createCell(row, column);
+          clearDerivedCellDisplay(cell);
           if (value.startsWith("=")) {
             cell.formula = value.slice(1);
             cell.value = value;
@@ -1120,6 +1133,7 @@ export function SpreadsheetArtifactViewer({
                             [
                               rangeSelected ? "range-selected" : "",
                               selectedCellActive ? "selected" : "",
+                              cell?.formulaPending ? "formula-pending" : "",
                             ]
                               .filter(Boolean)
                               .join(" ") || undefined
@@ -1143,7 +1157,13 @@ export function SpreadsheetArtifactViewer({
                           onDoubleClick={() =>
                             startEditing({ row: rowIndex + 1, column: columnIndex + 1 })
                           }
-                          title={cell?.formula ? `=${cell.formula}` : cell?.value}
+                          title={
+                            cell?.formulaPending
+                              ? `=${cell.formula} (no saved result; Excel calculates it when the file is opened)`
+                              : cell?.formula
+                                ? `=${cell.formula}`
+                                : cell?.value
+                          }
                         >
                           {editingCell?.row === rowIndex + 1 &&
                           editingCell?.column === columnIndex + 1 ? (

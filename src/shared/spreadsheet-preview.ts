@@ -1,8 +1,19 @@
+export type SpreadsheetPreviewValueType = "number" | "boolean" | "date" | "string" | "error";
+
 export interface SpreadsheetPreviewCell {
   address: string;
   row: number;
   column: number;
+  /** Raw, editable value ("96.5", a formula's cached result); never number-formatted. */
   value: string;
+  /** What Excel shows: the value through numFmt ("€96.50"), or "=FORMULA" with no result. */
+  displayValue?: string;
+  /** Excel number format code of the cell, omitted for General. */
+  numFmt?: string;
+  /** Type of the stored value (or of a formula's cached result). */
+  valueType?: SpreadsheetPreviewValueType;
+  /** A formula saved without a cached result, so its value is unknown until Excel recalculates. */
+  formulaPending?: boolean;
   formula?: string;
   bold?: boolean;
   italic?: boolean;

@@ -15,7 +15,13 @@ The desktop app requires **macOS 13 Ventura or later** or Windows 10/11. CoWork 
 
 Choose the macOS or Windows installer from the [latest release](https://github.com/CoWork-OS/CoWork-OS/releases/latest). On macOS, open the DMG and drag CoWork OS into Applications. On Windows, run the published installer. Match your computer's architecture to the available release asset. If no matching installer is listed, do not use an asset for another architecture.
 
-No Git checkout, compiler, or Node.js installation is needed for the desktop installer. For macOS first-launch security prompts, see the [README installation steps](../README.md#quick-start). If you want the terminal interface, use the [released CLI guide](cli.md). To clone, build, or contribute, use the [development guide](development.md).
+On macOS, the terminal installer avoids the Gatekeeper "Apple could not verify" dialog that the DMG triggers on first launch. It fetches the same release, verifies its checksum and signature, and installs it without the quarantine attribute browsers add to downloads:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+```
+
+No Git checkout, compiler, or Node.js installation is needed for the desktop installer. For macOS first-launch security prompts and the DMG's **Open Anyway** steps, see [macOS Installation](macos-installation.md). If you want the terminal interface, use the [released CLI guide](cli.md). To clone, build, or contribute, use the [development guide](development.md).
 
 ### Step 2: Connect and test one model
 

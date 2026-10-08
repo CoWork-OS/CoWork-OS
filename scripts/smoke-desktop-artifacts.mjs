@@ -582,6 +582,71 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
     }
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
+
+  await smokeMacInstaller({ releaseDir, zip, expectedVersion });
+}
+
+// The terminal installer (scripts/install-macos.sh) is the documented way to
+// install without the Gatekeeper dialog, so each build's ZIP must install
+// through it: valid signature after extraction, right version, and no
+// com.apple.quarantine on the result.
+async function smokeMacInstaller({ releaseDir, zip, expectedVersion }) {
+  const metadataPath = path.join(releaseDir, "latest-mac.yml");
+  await fs.access(metadataPath);
+  const installRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-mac-install-smoke-"));
+  try {
+    // /bin/bash is the bash 3.2 that `curl ... | bash` runs on a stock Mac.
+    run(
+      "/bin/bash",
+      [
+        path.join(ROOT, "scripts", "install-macos.sh"),
+        "--archive",
+        zip.fullPath,
+        "--metadata",
+        metadataPath,
+        "--install-dir",
+        installRoot,
+        "--no-launch",
+        "--yes",
+      ],
+      { shell: false },
+    );
+
+    const appPath = path.join(installRoot, "CoWork OS.app");
+    const bundleVersion = plistValue(
+      path.join(appPath, "Contents", "Info.plist"),
+      "CFBundleShortVersionString",
+    );
+    if (bundleVersion !== expectedVersion) {
+      throw new Error(
+        `Terminal installer installed version ${bundleVersion}, expected ${expectedVersion}`,
+      );
+    }
+
+    const verify = runStatus(
+      "codesign",
+      ["--verify", "--deep", "--strict", "--verbose=2", appPath],
+      { shell: false },
+    );
+    if (verify.status !== 0) {
+      throw new Error(
+        `Terminal installer produced an app with an invalid code signature:\n${summarizeCommandOutput(verify)}`,
+      );
+    }
+
+    const quarantine = runStatus("xattr", ["-p", "com.apple.quarantine", appPath], {
+      shell: false,
+    });
+    if (quarantine.status === 0) {
+      throw new Error(
+        "Terminal installer left com.apple.quarantine on the installed app; it must never carry the attribute that triggers Gatekeeper.",
+      );
+    }
+
+    console.log(`[desktop-smoke] macOS terminal installer passed: ${zip.name}`);
+  } finally {
+    await fs.rm(installRoot, { recursive: true, force: true });
+  }
 }
 
 function powershell(command) {

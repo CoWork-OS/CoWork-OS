@@ -157,6 +157,7 @@ scripts/release/*
 !scripts/release/registry-publication.test.mjs
 !scripts/release/smoke-bundle.mjs
 !scripts/release/smoke-input.test.mjs
+!scripts/release/install-macos.test.mjs
 
 # Signing keys and certificates — never commit
 *.p12

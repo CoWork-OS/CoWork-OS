@@ -168,6 +168,43 @@ describe("DocumentParserTools", () => {
     }
   });
 
+  it("lists workbook formulas and number formats so a check can confirm them", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Summary");
+    sheet.addRow(["Category", "Total"]);
+    sheet.addRow(["Venue", 150]);
+    sheet.addRow(["Overall", { formula: "SUM(B2:B2)", result: 150 }]);
+    sheet.getCell("B2").numFmt = "€#,##0.00";
+    sheet.getCell("B3").numFmt = "€#,##0.00";
+    const plain = workbook.addWorksheet("Notes");
+    plain.addRow(["Duplicate receipt counted once"]);
+    await workbook.xlsx.writeFile(path.join(tmpDir, "budget.xlsx"));
+
+    const tools = new DocumentParserTools({
+      id: "ws-1",
+      name: "Test Workspace",
+      path: tmpDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: false,
+        shell: false,
+        allowedPaths: [],
+      },
+    } as Any);
+
+    const result = await tools.parseDocument({ path: "budget.xlsx" });
+
+    expect(result.content).toContain("Formulas in Summary:");
+    expect(result.content).toContain("- B3: =SUM(B2:B2) (saved result 150)");
+    expect(result.content).toContain("Number formats in Summary:");
+    expect(result.content).toContain("- B2: €#,##0.00 (shown as €150.00)");
+    expect(result.content).toContain("Number formats in Notes: none (all cells use General)");
+  });
+
   it("returns lossless continuation metadata for bounded document windows", async () => {
     fs.writeFileSync(path.join(tmpDir, "long.txt"), "0123456789".repeat(30));
     const tools = new DocumentParserTools({

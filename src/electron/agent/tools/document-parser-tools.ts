@@ -15,6 +15,7 @@ import * as path from "path";
 import type { SensitiveSourceRef, Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
+import { formatSpreadsheetValue } from "../../../shared/spreadsheet-number-format";
 import { extractPdfText } from "../../utils/pdf-text";
 import {
   buildSensitiveSourceRefForPath,
@@ -120,6 +121,65 @@ function formatSpreadsheetCell(value: unknown): string {
   if ("text" in cell) return String(cell.text ?? "");
   if ("error" in cell) return String(cell.error ?? "");
   return JSON.stringify(value);
+}
+
+const MAX_SPREADSHEET_DETAIL_ENTRIES = 60;
+
+/**
+ * Formula and number-format lines for one sheet. Cell values alone cannot show
+ * whether a total is a live formula or whether an amount is stored with a
+ * currency format, which is what a workbook check usually needs to confirm.
+ */
+function describeSheetFormulasAndFormats(
+  sheet: import("exceljs").Worksheet,
+  date1904: boolean,
+): string[] {
+  const formulas: string[] = [];
+  const formats: string[] = [];
+  let formulaCount = 0;
+  let formatCount = 0;
+  sheet.eachRow((row) => {
+    row.eachCell((cell) => {
+      const raw = cell.value as unknown;
+      const isFormula =
+        !!raw && typeof raw === "object" && ("formula" in raw || "sharedFormula" in raw);
+      if (isFormula) {
+        formulaCount += 1;
+        if (formulas.length < MAX_SPREADSHEET_DETAIL_ENTRIES) {
+          const result = (raw as { result?: unknown }).result;
+          const saved =
+            result === undefined || result === null
+              ? "no saved result"
+              : `saved result ${formatSpreadsheetCell(result)}`;
+          formulas.push(`- ${cell.address}: =${cell.formula || ""} (${saved})`);
+        }
+      }
+      const numFmt = typeof cell.numFmt === "string" ? cell.numFmt.trim() : "";
+      if (numFmt && !/^general$/i.test(numFmt)) {
+        formatCount += 1;
+        if (formats.length < MAX_SPREADSHEET_DETAIL_ENTRIES) {
+          const value = isFormula ? (raw as { result?: unknown }).result : raw;
+          const shown =
+            typeof value === "number" || value instanceof Date
+              ? formatSpreadsheetValue(value, numFmt, { date1904 })
+              : null;
+          formats.push(`- ${cell.address}: ${numFmt}${shown ? ` (shown as ${shown})` : ""}`);
+        }
+      }
+    });
+  });
+  const lines: string[] = [];
+  if (formulaCount > 0) {
+    lines.push(`Formulas in ${sheet.name}:`, ...formulas);
+    if (formulaCount > formulas.length) lines.push(`- ${formulaCount - formulas.length} more`);
+  }
+  if (formatCount > 0) {
+    lines.push(`Number formats in ${sheet.name}:`, ...formats);
+    if (formatCount > formats.length) lines.push(`- ${formatCount - formats.length} more`);
+  } else {
+    lines.push(`Number formats in ${sheet.name}: none (all cells use General)`);
+  }
+  return lines;
 }
 
 export class DocumentParserTools {
@@ -325,6 +385,7 @@ export class DocumentParserTools {
     );
 
     const lines: string[] = [];
+    const date1904 = Boolean(workbook.properties?.date1904);
     workbook.eachSheet((sheet) => {
       if (format === "structured") {
         lines.push(`\n## Sheet: ${sheet.name}\n`);
@@ -339,6 +400,7 @@ export class DocumentParserTools {
           lines.push(cells);
         });
       }
+      lines.push("", ...describeSheetFormulasAndFormats(sheet, date1904), "");
     });
 
     return lines.join("\n");

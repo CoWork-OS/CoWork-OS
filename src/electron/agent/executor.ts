@@ -1757,6 +1757,44 @@ export class TaskExecutor {
     }
   }
 
+  /**
+   * A denied or expired approval stopped this follow-up before its requested
+   * side effect ran. That is not a completed request: finish with an
+   * action-needed outcome the user can retry, and stop advertising checklist
+   * work as in progress.
+   */
+  private finalizeApprovalBlockedFollowUp(block: { toolName: string; message: string }): void {
+    if (this.cancelled) return;
+    this.markInProgressChecklistItemsBlocked();
+    this.finalizeFollowUpCompletion(`Follow-up blocked: ${block.message}`, {
+      clearTerminalFailure: false,
+      terminalStatus: "needs_user_action",
+      failureClass: "user_blocker",
+    });
+  }
+
+  private markInProgressChecklistItemsBlocked(): void {
+    let items: ReturnType<SessionRuntime["listTaskList"]>;
+    try {
+      items = this.getSessionRuntime().listTaskList();
+    } catch {
+      return;
+    }
+    if (!items.some((item) => item.status === "in_progress")) return;
+    try {
+      this.getSessionRuntime().updateTaskList(
+        items.map(({ id, title, kind, status }) => ({
+          id,
+          title,
+          kind,
+          status: status === "in_progress" ? "blocked" : status,
+        })),
+      );
+    } catch (error) {
+      logger.warn(`${this.logTag} Could not mark in-progress checklist items blocked:`, error);
+    }
+  }
+
   private finalizeFollowUpCompletion(
     message: string,
     opts?: {
@@ -10690,7 +10728,7 @@ ${transcript}
   private shouldFinalizeAsNeedsUserAction(error: unknown): boolean {
     const message = String((error as Any)?.message || error || "").toLowerCase();
     if (
-      !/user denied approval|approval request timed out|structured input request dismissed|user action required|awaiting user input/i.test(
+      !/\buser denied\b|approval request timed out|structured input request dismissed|user action required|awaiting user input/i.test(
         message,
       )
     ) {
@@ -33266,9 +33304,11 @@ Return ONLY a JSON object:
           return "Action required: Enable/reconnect the integration in Settings > Integrations, then try again.";
         }
 
+        // Tools report a denial as "User denied command execution" (or
+        // AppleScript execution), not "user denied approval".
         const approvalBlocked =
           lower.includes("approval request timed out") ||
-          lower.includes("user denied approval") ||
+          /\buser denied\b/.test(lower) ||
           lower.includes("approval denied") ||
           lower.includes("requires approval");
         if (approvalBlocked) {
@@ -44095,6 +44135,16 @@ Return ONLY a JSON object:
         this.emitEvent("task_paused", {
           message: "Paused - awaiting user input",
         });
+        return;
+      }
+
+      // TS narrows the closure-assigned `let` to `null` here; widen it back.
+      const approvalBlock = approvalBlockedForFollowUp as {
+        toolName: string;
+        message: string;
+      } | null;
+      if (approvalBlock) {
+        this.finalizeApprovalBlockedFollowUp(approvalBlock);
         return;
       }
 

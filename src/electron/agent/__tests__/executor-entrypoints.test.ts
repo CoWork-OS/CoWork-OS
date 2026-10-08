@@ -805,6 +805,41 @@ describe("TaskExecutor entrypoint guards", () => {
     );
   });
 
+  it("ends an approval-blocked follow-up as action needed and blocks its in-progress checklist item", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-follow-up-denied", status: "executing" };
+    executor.lastAssistantText =
+      "Approval for the shell command was denied, so it was not executed. The workbook is unchanged.";
+    executor.getContentFallback = vi.fn(() => "");
+    executor.daemon = { updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+    const runtime = executor.getSessionRuntime();
+    vi.spyOn(runtime, "listTaskList").mockReturnValue([
+      { id: "1", title: "Repair the workbook", kind: "implementation", status: "in_progress" },
+      { id: "2", title: "Verify the saved file", kind: "verification", status: "pending" },
+    ]);
+    const updateTaskList = vi.spyOn(runtime, "updateTaskList").mockReturnValue({} as Any);
+
+    executor.finalizeApprovalBlockedFollowUp({
+      toolName: "run_command",
+      message: "Approval for the shell command was denied, so it was not executed.",
+    });
+
+    expect(updateTaskList).toHaveBeenCalledWith([
+      { id: "1", title: "Repair the workbook", kind: "implementation", status: "blocked" },
+      { id: "2", title: "Verify the saved file", kind: "verification", status: "pending" },
+    ]);
+    expect(executor.task.terminalStatus).toBe("needs_user_action");
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "task-follow-up-denied",
+      expect.objectContaining({
+        status: "completed",
+        terminalStatus: "needs_user_action",
+        failureClass: "user_blocker",
+      }),
+    );
+  });
+
   it("does not bypass the bot handoff gate when a completed conversation is reopened", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = {

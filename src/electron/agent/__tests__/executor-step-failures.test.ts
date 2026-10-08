@@ -6674,6 +6674,36 @@ describe("TaskExecutor step loop control", () => {
         suppressUserMessageEvent: true,
       });
 
+    it.each(["User denied command execution", "Approval request timed out"])(
+      "does not complete a follow-up whose shell approval failed: %s",
+      async (approvalError) => {
+        const executor = createFollowUpExecutor(
+          [
+            toolCall("run_command", { command: "python3 repair_workbook.py" }, "c1"),
+            textResponse("The repair command was not run."),
+          ],
+          {
+            run_command: () => {
+              throw new Error(approvalError);
+            },
+          },
+        );
+        executor.finalizeFollowUpCompletion = vi.fn();
+
+        await sendFollowUp(executor, "Please fix the workbook so its formula totals are visible.");
+
+        expect(executor.finalizeSuccessfulFollowUp).not.toHaveBeenCalled();
+        expect(executor.finalizeFollowUpCompletion).toHaveBeenCalledWith(
+          expect.stringContaining("Follow-up blocked"),
+          expect.objectContaining({
+            clearTerminalFailure: false,
+            terminalStatus: "needs_user_action",
+            failureClass: "user_blocker",
+          }),
+        );
+      },
+    );
+
     it("nudges a follow-up that only states its next action, then runs the tool", async () => {
       const executor = createFollowUpExecutor([
         textResponse("Let me check src/auth/login.ts first."),

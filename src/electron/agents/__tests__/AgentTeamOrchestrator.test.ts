@@ -1200,6 +1200,41 @@ describe("AgentTeamOrchestrator", () => {
     for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
   });
 
+  it.each([
+    ["full", "transitionToSynthesizePhase"],
+    ["compact", "transitionToSynthesizePhaseCompact"],
+  ])(
+    "gives the %s synthesis the user's updates as superseding constraints",
+    async (suffix, method) => {
+      const { team, run, item, rootTask, tasksById, createChildTask } = makeSynthesisFixture(
+        `updates-${suffix}`,
+      );
+      rootTask.prompt = "Plan a workshop for 40 people with a €250 cash budget.";
+      const repos = makeRepos({ team, run, items: [item] });
+      const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+      const orch = new AgentTeamOrchestrator(
+        {
+          getDatabase: () => ({}) as Any,
+          getTaskById: async (taskId: string) => tasksById.get(taskId),
+          createChildTask,
+          cancelTask: async () => {},
+          listRootUserUpdates: () => ["Cap attendance at 20 people and the cash budget at €150."],
+        },
+        repos,
+      );
+      vi.spyOn((orch as Any).thoughtRepo, "listByRun").mockReturnValue([]);
+
+      await (orch as Any)[method](run, team, rootTask, [item]);
+
+      const prompt = String(createChildTask.mock.calls[0][0].prompt);
+      expect(prompt).toContain("USER UPDATES");
+      expect(prompt).toContain("SUPERSEDE");
+      expect(prompt).toContain("1. Cap attendance at 20 people and the cash budget at €150.");
+      expect(prompt.indexOf("USER UPDATES")).toBeGreaterThan(prompt.indexOf("40 people"));
+      for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+    },
+  );
+
   it("marks synthesis blocked without spawning when the graph run was cancelled", async () => {
     const { team, run, item, rootTask, tasksById, createChildTask } =
       makeSynthesisFixture("cancelled");

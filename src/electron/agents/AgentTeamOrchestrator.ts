@@ -112,7 +112,25 @@ export type AgentTeamOrchestratorDeps = {
   findOrchestrationGraphByTeamRunId?: (
     teamRunId: string,
   ) => Promise<OrchestrationGraphSnapshot | undefined>;
+  /** User follow-up messages sent to the root task after its original request. */
+  listRootUserUpdates?: (rootTaskId: string) => Promise<string[]> | string[];
 };
+
+/**
+ * Append user updates sent after the original request. They supersede
+ * conflicting values in the request and in team analyses written before them.
+ */
+export function appendUserUpdatesToPrompt(prompt: string, updates: string[]): string {
+  if (updates.length === 0) return prompt;
+  return [
+    prompt,
+    "",
+    "USER UPDATES (sent after the original request; they SUPERSEDE any conflicting value in the ORIGINAL REQUEST and in every team analysis):",
+    ...updates.map((update, index) => `${index + 1}. ${update}`),
+    "",
+    "Team analyses may predate these updates. Recompute or adapt their numbers, schedules and budgets to the updated constraints, never present a superseded value as the plan, and keep every original requirement the updates do not change (for example risks and open decisions).",
+  ].join("\n");
+}
 
 function getAllElectronWindows(): Any[] {
   try {
@@ -1030,9 +1048,12 @@ export class AgentTeamOrchestrator {
     const useProfileRouting = this.shouldUseProfileRouting(rootTask);
 
     // Build synthesis prompt with all member thoughts
-    const synthesisPrompt = run.multiLlmMode
-      ? this.buildMultiLlmSynthesisPrompt(rootTask, thoughts, items)
-      : this.buildSynthesisPrompt(team.name, rootTask, thoughts, items);
+    const synthesisPrompt = appendUserUpdatesToPrompt(
+      run.multiLlmMode
+        ? this.buildMultiLlmSynthesisPrompt(rootTask, thoughts, items)
+        : this.buildSynthesisPrompt(team.name, rootTask, thoughts, items),
+      await this.listRootUserUpdates(rootTask.id),
+    );
 
     // Spawn a synthesis task assigned to the leader (or judge in multi-LLM mode)
     const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
@@ -1175,6 +1196,18 @@ export class AgentTeamOrchestrator {
   /**
    * Retry synthesis with a compacted prompt when the first synthesis task fails.
    */
+  private async listRootUserUpdates(rootTaskId: string): Promise<string[]> {
+    if (!this.deps.listRootUserUpdates) return [];
+    try {
+      const updates = await this.deps.listRootUserUpdates(rootTaskId);
+      return (Array.isArray(updates) ? updates : [])
+        .map((update) => String(update || "").trim())
+        .filter((update) => update.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
   private async transitionToSynthesizePhaseCompact(
     run: AgentTeamRun,
     team: AgentTeam,
@@ -1183,20 +1216,24 @@ export class AgentTeamOrchestrator {
   ): Promise<void> {
     const thoughts = await this.thoughtRepo.listByRun(run.id);
     const compactBudget = Math.floor(MAX_SYNTHESIS_PROMPT_CHARS / 2);
-    const synthesisPrompt = [
-      `You are the LEADER of team "${team.name}".`,
-      "Your team members completed their analysis. Synthesize a final answer.",
-      "Respond directly in a SINGLE response. Do NOT use any tools or create sub-tasks.",
-      "",
-      `ORIGINAL REQUEST: ${rootTask.title}`,
-      rootTask.prompt,
-      "",
-      "=== TEAM MEMBER ANALYSES (COMPACTED) ===",
-      thoughts.length > 0
-        ? groupAndCompactThoughts(thoughts, compactBudget)
-        : "No team member analyses were captured.",
-      "=== END OF TEAM MEMBER ANALYSES ===",
-    ].join("\n");
+    const userUpdates = await this.listRootUserUpdates(rootTask.id);
+    const synthesisPrompt = appendUserUpdatesToPrompt(
+      [
+        `You are the LEADER of team "${team.name}".`,
+        "Your team members completed their analysis. Synthesize a final answer.",
+        "Respond directly in a SINGLE response. Do NOT use any tools or create sub-tasks.",
+        "",
+        `ORIGINAL REQUEST: ${rootTask.title}`,
+        rootTask.prompt,
+        "",
+        "=== TEAM MEMBER ANALYSES (COMPACTED) ===",
+        thoughts.length > 0
+          ? groupAndCompactThoughts(thoughts, compactBudget)
+          : "No team member analyses were captured.",
+        "=== END OF TEAM MEMBER ANALYSES ===",
+      ].join("\n"),
+      userUpdates,
+    );
 
     const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
     const synthesisItem = await this.itemRepo.create({

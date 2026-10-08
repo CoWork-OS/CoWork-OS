@@ -1855,6 +1855,11 @@ export class TaskExecutor {
       return;
     }
 
+    // A follow-up on a collaborative root while its team is still working is
+    // an update for the team, not the end of the task: the team's synthesis
+    // completes the root when it lands.
+    if (this.deferFollowUpCompletionToCollaborativeRun()) return;
+
     this.task.status = "completed";
     this.task.completedAt = completedAt;
     if (clearError) {
@@ -1897,6 +1902,24 @@ export class TaskExecutor {
       ...runtimeProjection,
       ...this.getCompletionProjectionFields(),
     });
+  }
+
+  private deferFollowUpCompletionToCollaborativeRun(): boolean {
+    const collaborative = (this.daemon as Any).reconcileCollaborativeRunBeforeFollowUpCompletion?.(
+      this.task.id,
+    ) as { deferred: boolean; activeChildCount: number } | undefined;
+    if (!collaborative?.deferred) return false;
+    this.task.status = "executing";
+    this.task.completedAt = undefined;
+    this.daemon.updateTaskStatus(this.task.id, "executing");
+    this.emitEvent("task_status", {
+      status: "executing",
+      message:
+        "Your update was sent to the team; the final answer follows when the remaining agents and the synthesis finish.",
+      collaborativeRunWaiting: true,
+      activeChildCount: collaborative.activeChildCount,
+    });
+    return true;
   }
 
   private buildFollowUpResultSummary(): string {
@@ -1949,6 +1972,8 @@ export class TaskExecutor {
       );
       return;
     }
+
+    if (this.deferFollowUpCompletionToCollaborativeRun()) return;
 
     // Restore previous status, but never restore 'executing' (would leave spinner stuck)
     const safeRestoreStatus =

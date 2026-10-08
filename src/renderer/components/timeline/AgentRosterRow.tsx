@@ -1,14 +1,14 @@
 /**
  * AgentRosterRow
  *
- * One compact transcript line for a burst of sub-agents: a cluster of colorful
- * agent glyphs followed by "Anansi, Ares and 2 more started working" (or
+ * One compact transcript line for a burst of sub-agents: a cluster of bot
+ * mascots followed by "Anansi, Ares and 2 more started working" (or
  * "… finished" / "… failed" / "… stopped"). Expandable rows reveal whatever
  * the caller passes as children — usually one line per agent.
  */
 
 import type { ReactNode } from "react";
-import { AgentGlyph } from "../AgentGlyph";
+import { AgentGlyph, type AgentGlyphState } from "../AgentGlyph";
 import type { AgentGlyphSpec } from "../../utils/agent-glyphs";
 import {
   formatAgentRosterLine,
@@ -20,8 +20,8 @@ export interface AgentRosterEntry {
   id: string;
   name: string;
   glyph: AgentGlyphSpec;
-  /** The agent is still running; its glyph turns slowly. */
-  working?: boolean;
+  /** Drives the mascot's face: working, done (happy) or failed. */
+  state?: AgentGlyphState;
 }
 
 interface AgentRosterRowProps {
@@ -56,12 +56,7 @@ export function AgentRosterRow({
     <>
       <span className="agent-roster-glyphs" aria-hidden="true">
         {visibleGlyphs.map((agent) => (
-          <AgentGlyph
-            key={agent.id}
-            glyph={agent.glyph}
-            size={16}
-            working={state === "working" && agent.working}
-          />
+          <AgentGlyph key={agent.id} glyph={agent.glyph} size={20} state={agent.state} />
         ))}
       </span>
       <span className="agent-roster-text">{rosterLine}</span>

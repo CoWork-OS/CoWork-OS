@@ -43,7 +43,7 @@ describe("AgentLifecycleRow", () => {
       }),
     );
     expect(html).toContain("Renderer workflows, Task data lifecycle and 2 more started working");
-    expect(html.match(/class="agent-glyph /g)).toHaveLength(4);
+    expect(html.match(/class="agent-glyph[ "]/g)).toHaveLength(4);
     // Running agents animate in a start row.
     expect(html).toContain("is-working");
     // Details stay folded until the row is opened.

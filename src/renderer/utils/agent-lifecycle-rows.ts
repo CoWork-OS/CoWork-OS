@@ -199,3 +199,11 @@ export function withoutCoveredAgentLifecycleEvents(
   }
   return changed ? next : items;
 }
+
+/** The face an agent's mascot wears for its task status. */
+export function getAgentGlyphState(status: Task["status"]): "idle" | "working" | "done" | "failed" {
+  if (isAgentTaskRunning(status)) return "working";
+  if (status === "completed") return "done";
+  if (status === "failed" || status === "cancelled") return "failed";
+  return "idle";
+}

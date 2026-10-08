@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Task, AgentTeamRun, AgentThought, TaskEvent } from "../../shared/types";
 import { isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
-import { AgentGlyph } from "./AgentGlyph";
+import { AgentGlyph, type AgentGlyphState } from "./AgentGlyph";
 import {
   assignAgentGlyphs,
   getAgentGlyphForSeed,
@@ -259,6 +259,9 @@ function formatAgentSummary(counts: Record<AgentLineStatusKind, number>): string
     .join(" · ");
 }
 
+const glyphStateFor = (kind: AgentLineStatusKind): AgentGlyphState =>
+  kind === "running" ? "working" : kind === "completed" ? "done" : kind === "failed" ? "failed" : "idle";
+
 export function CollaborativeAgentLines({
   collaborativeRun,
   childTasks,
@@ -436,8 +439,8 @@ export function CollaborativeAgentLines({
             <AgentGlyph
               key={line.id}
               glyph={line.glyph}
-              size={14}
-              working={line.statusKind === "running"}
+              size={18}
+              state={glyphStateFor(line.statusKind)}
             />
           ))}
         </span>
@@ -451,7 +454,7 @@ export function CollaborativeAgentLines({
         {visibleAgentLines.map(({ id, title, status, statusKind, statusLabel, taskId, glyph }) => (
           <div key={id} className={`collab-agent-line collab-agent-line-${statusKind}`}>
             <span className="collab-agent-status-text">
-              <AgentGlyph glyph={glyph} size={14} working={statusKind === "running"} />
+              <AgentGlyph glyph={glyph} size={18} state={glyphStateFor(statusKind)} />
               <span className="collab-agent-name">{resolveAgentDisplayName(title)}</span>
               {statusKind === "running" ? (
                 <span className="collab-agent-activity" title={status}>

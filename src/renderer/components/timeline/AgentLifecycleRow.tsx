@@ -16,7 +16,7 @@ import { AgentRosterRow, type AgentRosterEntry } from "./AgentRosterRow";
 import { getAgentGlyphForSeed, type AgentGlyphSpec } from "../../utils/agent-glyphs";
 import {
   describeAgentStatus,
-  isAgentTaskRunning,
+  getAgentGlyphState,
   resolveAgentDisplayName,
   type AgentLifecycleRow as AgentLifecycleRowModel,
 } from "../../utils/agent-lifecycle-rows";
@@ -61,7 +61,7 @@ export function AgentLifecycleRow({
     id: task.id,
     name: resolveAgentDisplayName(task.title),
     glyph: glyphFor(task),
-    working: isAgentTaskRunning(task.status),
+    state: getAgentGlyphState(task.status),
   }));
 
   return (
@@ -79,11 +79,7 @@ export function AgentLifecycleRow({
             const detail = getAgentDetail(task, phase);
             const body = (
               <>
-                <AgentGlyph
-                  glyph={glyphFor(task)}
-                  size={14}
-                  working={isAgentTaskRunning(task.status)}
-                />
+                <AgentGlyph glyph={glyphFor(task)} size={18} state={getAgentGlyphState(task.status)} />
                 <span className="agent-lifecycle-item-name">
                   {resolveAgentDisplayName(task.title)}
                 </span>

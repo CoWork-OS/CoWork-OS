@@ -490,12 +490,21 @@ export function isAskingQuestion(text: string): boolean {
   if (hasBlockingCue) return true;
   let tailRequiresResponse = false;
 
+  // A deliverable can end with a list of questions for the user to put to
+  // someone else ("Questions to ask before booking: - Is the booth bookable?").
+  // Those list items are content, not questions directed at the user.
+  const hasThirdPartyQuestionList =
+    /\bquestions?\s+(?:to\s+(?:ask|raise|put\s+to)|for\s+(?:the|your|them)\b|you\s+(?:should|could|might|can)\s+ask)|\b(?:ask|confirm\s+with)\s+(?:them|the\s+(?:venue|vendor|provider|host|organi[sz]er|landlord|seller|supplier|agency|space|team))\b|\bask\s+before\s+(?:booking|buying|signing|committing|paying)\b/i.test(
+      sample,
+    );
+
   for (const line of tailLines) {
     const normalized = line.replace(/^[-*]?\s*\d*[).]?\s*/, "").trim();
     if (!normalized) continue;
     if (nonBlockingQuestionPatterns.some((pattern) => pattern.test(normalized))) {
       continue;
     }
+    if (hasThirdPartyQuestionList && /^(?:[-*•]|\d+[.)])\s+/.test(line)) continue;
     if (explicitResponseRequestPatterns.some((pattern) => pattern.test(normalized))) {
       tailRequiresResponse = true;
     }

@@ -20,4 +20,31 @@ describe("isAskingQuestion", () => {
       ),
     ).toBe(true);
   });
+
+  it("does not treat a closing list of questions to ask a third party as a question to the user", () => {
+    const deliverable = [
+      "| Option | Price | Source |",
+      "|---|---|---|",
+      "| Second Home | €25 + VAT | [site](https://secondhome.io) |",
+      "",
+      "**Best fit on confirmed information: Second Home Lisboa.**",
+      "",
+      "### Questions to ask before booking",
+      "",
+      "- Can you reserve a private, quiet booth for both video calls?",
+      "- What accessibility features are available at the entrance and in the restrooms?",
+      "",
+      "*Source scope: official websites reviewed for the listed details.*",
+    ].join("\n");
+
+    expect(isAskingQuestion(deliverable)).toBe(false);
+  });
+
+  it("still detects a closing question addressed to the user", () => {
+    expect(
+      isAskingQuestion(
+        "Here are two layouts.\n\n- Option A: grid\n- Option B: list\n\nWhich option do you want me to build?",
+      ),
+    ).toBe(true);
+  });
 });

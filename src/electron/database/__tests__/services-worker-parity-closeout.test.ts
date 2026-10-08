@@ -21,6 +21,7 @@ import { OrchestrationRepository } from "../../agent/orchestration-repository-fa
 import { YouTubeTranscriptStore } from "../../youtube/YouTubeTranscriptStore";
 import { pruneTempWorkspaces } from "../../utils/temp-workspace";
 import { TEMP_WORKSPACE_ID_PREFIX } from "../../../shared/types";
+import { MCP_EVENT_SCHEMA } from "../../mcp/events/mcp-event-sql";
 
 // The services areas moved while closing DB6 (async SQLite migration plan): the same calls
 // return the same results on the host and in the database worker, and every data call
@@ -106,6 +107,7 @@ describe("DB6 close-out services on the host and in the database worker", () => 
     }
     // Schema the services create on the host at construction.
     ensureFirstTaskTables(db);
+    db.exec(MCP_EVENT_SCHEMA);
     YouTubeTranscriptStore.setDatabaseForTests(db);
     const triggers = new EventTriggerService(
       {
@@ -167,6 +169,31 @@ describe("DB6 close-out services on the host and in the database worker", () => 
       await serviceStatements(db).unit("eventTrigger_loadTriggerRows", [])
     ).map((row: { name: string }) => row.name);
     const removed = await triggers.removeTrigger(trigger.id);
+
+    // MCP Events: cursor, subscription status, and deletion use services-domain units.
+    const eventSql = serviceStatements(db);
+    await eventSql.unit("mcpEvent_insert", [
+      {
+        trigger_id: "mcp-trigger-1",
+        server_id: "mcp-server-1",
+        event_name: "comment.created",
+        arguments_json: "{}",
+        delivery: "poll",
+        callback_url: null,
+        secret_encrypted: null,
+      },
+    ]);
+    await eventSql.unit("mcpEvent_setPolled", [
+      "mcp-trigger-1",
+      "cursor-1",
+      30_000,
+      "active",
+      null,
+    ]);
+    const mcpEvent = await eventSql.unit("mcpEvent_get", ["mcp-trigger-1"]);
+    const mcpEventList = await eventSql.unit("mcpEvent_list", []);
+    await eventSql.unit("mcpEvent_delete", ["mcp-trigger-1"]);
+    const mcpEventAfterDelete = await eventSql.unit("mcpEvent_get", ["mcp-trigger-1"]);
 
     // Hook sessions: idempotent creation and a single lock holder.
     const hooks = new HookSessionRepository(db);
@@ -328,6 +355,11 @@ describe("DB6 close-out services on the host and in the database worker", () => 
       {
         council: { name: council.name, ids: councilIds.length },
         triggers: { storedTriggers, removed },
+        mcpEvents: {
+          cursor: mcpEvent?.cursor,
+          status: mcpEventList[0]?.status,
+          deleted: mcpEventAfterDelete === undefined,
+        },
         hooks: { hookCreated, taskId: hookSession?.taskId, locks, relocked },
         firstTask: {
           choice: setup?.choice,
@@ -363,6 +395,7 @@ describe("DB6 close-out services on the host and in the database worker", () => 
     expect(worker.result).toEqual(host.result);
     const result = host.result as Record<string, Any>;
     expect(result.triggers).toEqual({ storedTriggers: ["Invoices (renamed)"], removed: true });
+    expect(result.mcpEvents).toEqual({ cursor: "cursor-1", status: "active", deleted: true });
     expect(result.hooks).toEqual({
       hookCreated: [true, false],
       taskId: "task-a",

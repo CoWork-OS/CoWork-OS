@@ -114,6 +114,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/mcp/events/mcp-event-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "MCP event subscription state: services-domain units behind MCPEventService; the host creates the schema before the first unit runs.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/youtube/youtube-transcript-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Workspace YouTube videos and transcript segments with their FTS index: services-domain units behind the static YouTubeTranscriptStore, which creates the schema on the host first. Saving segments replaces a video's segments in one transaction.",

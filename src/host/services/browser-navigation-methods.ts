@@ -4546,7 +4546,7 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
             .filter((trigger) => visibleIds.has(trigger.workspaceId))
             .map((trigger) => trigger.id),
         );
-        return (MCPEventService.getActive()?.status() || []).filter((row) =>
+        return ((await MCPEventService.getActive()?.status()) || []).filter((row) =>
           triggerIds.has(row.triggerId),
         );
       },

@@ -1982,7 +1982,7 @@ export class ToolRegistry {
         if (typeof input.serverId !== "string") throw new Error("serverId is required");
         return { events: await service.listAvailable(input.serverId) };
       case "list_subscriptions":
-        return { subscriptions: service.listOwned(workspaceId) };
+        return { subscriptions: await service.listOwned(workspaceId) };
       case "subscribe":
         return service.createFromTask({
           serverId: input.serverId,

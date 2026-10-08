@@ -19,6 +19,8 @@ import type { EventTriggerService } from "../../triggers/EventTriggerService";
 import type { EventTrigger } from "../../triggers/types";
 import { readLimitedBody } from "../../gateway/channels/webhook-channel-utils";
 import { createLogger } from "../../utils/logger";
+import { serviceStatements } from "../../database/service-statements";
+import { MCP_EVENT_SCHEMA, type SubscriptionRow } from "./mcp-event-sql";
 
 const log = createLogger("MCPEventService");
 const MAX_BODY_BYTES = 256 * 1024;
@@ -35,22 +37,6 @@ function canonicalJson(value: unknown): string {
   );
 }
 
-interface SubscriptionRow {
-  trigger_id: string;
-  server_id: string;
-  event_name: string;
-  arguments_json: string;
-  delivery: "webhook" | "poll";
-  callback_url: string | null;
-  secret_encrypted: string | null;
-  server_subscription_id: string | null;
-  cursor: string | null;
-  refresh_before: number | null;
-  next_poll_at: number | null;
-  status: string;
-  last_error: string | null;
-}
-
 export class MCPEventService {
   private static active: MCPEventService | null = null;
   private server: http.Server | null = null;
@@ -65,21 +51,7 @@ export class MCPEventService {
     private readonly triggers: EventTriggerService,
     private readonly port = Number(process.env.COWORK_MCP_EVENTS_PORT) || DEFAULT_PORT,
   ) {
-    this.db.exec(`CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
-      trigger_id TEXT PRIMARY KEY,
-      server_id TEXT NOT NULL,
-      event_name TEXT NOT NULL,
-      arguments_json TEXT NOT NULL,
-      delivery TEXT NOT NULL,
-      callback_url TEXT,
-      secret_encrypted TEXT,
-      server_subscription_id TEXT,
-      cursor TEXT,
-      refresh_before INTEGER,
-      next_poll_at INTEGER,
-      status TEXT NOT NULL DEFAULT 'pending',
-      last_error TEXT
-    )`);
+    this.db.exec(MCP_EVENT_SCHEMA);
   }
 
   async start(): Promise<void> {
@@ -118,10 +90,11 @@ export class MCPEventService {
     }
   }
 
-  status(): Array<{ triggerId: string; status: string; error?: string; refreshBefore?: number }> {
-    return (
-      this.db.prepare("SELECT * FROM mcp_event_subscriptions").all() as SubscriptionRow[]
-    ).map((row) => ({
+  async status(): Promise<
+    Array<{ triggerId: string; status: string; error?: string; refreshBefore?: number }>
+  > {
+    const rows = await serviceStatements(this.db).unit("mcpEvent_list", []);
+    return rows.map((row) => ({
       triggerId: row.trigger_id,
       status: row.status,
       ...(row.last_error ? { error: row.last_error } : {}),
@@ -142,7 +115,8 @@ export class MCPEventService {
     return this.client.listServerEvents(serverId);
   }
 
-  listOwned(workspaceId: string) {
+  async listOwned(workspaceId: string) {
+    const statuses = await this.status();
     return this.triggers
       .listTriggers(workspaceId)
       .filter((trigger) => trigger.source === "mcp_event")
@@ -151,7 +125,7 @@ export class MCPEventService {
         name: trigger.name,
         enabled: trigger.enabled,
         event: trigger.action.config.mcpEvent,
-        status: this.status().find((row) => row.triggerId === trigger.id),
+        status: statuses.find((row) => row.triggerId === trigger.id),
       }));
   }
 
@@ -208,7 +182,7 @@ export class MCPEventService {
     if (existing)
       return {
         triggerId: existing.id,
-        status: this.status().find((row) => row.triggerId === existing.id),
+        status: (await this.status()).find((row) => row.triggerId === existing.id),
       };
     const trigger = await this.triggers.addTrigger({
       name: input.title?.trim() || `Watch ${input.eventName}`,
@@ -242,7 +216,7 @@ export class MCPEventService {
     await this.sync();
     return {
       triggerId: trigger.id,
-      status: this.status().find((row) => row.triggerId === trigger.id),
+      status: (await this.status()).find((row) => row.triggerId === trigger.id),
     };
   }
 
@@ -262,9 +236,9 @@ export class MCPEventService {
       await this.reconciling;
       return this.sync();
     }
-    this.reconciling = this.reconcile().finally(() => {
+    this.reconciling = this.reconcile().finally(async () => {
       this.reconciling = null;
-      this.scheduleNext();
+      await this.scheduleNext();
     });
     return this.reconciling;
   }
@@ -276,9 +250,7 @@ export class MCPEventService {
         .filter((trigger) => trigger.enabled && trigger.source === "mcp_event")
         .map((trigger) => [trigger.id, trigger]),
     );
-    const rows = this.db
-      .prepare("SELECT * FROM mcp_event_subscriptions")
-      .all() as SubscriptionRow[];
+    const rows = await serviceStatements(this.db).unit("mcpEvent_list", []);
     for (const row of rows) {
       const trigger = active.get(row.trigger_id);
       if (!trigger || !this.matches(row, trigger)) {
@@ -288,43 +260,36 @@ export class MCPEventService {
     for (const trigger of active.values()) {
       const spec = trigger.action.config.mcpEvent;
       if (!spec) continue;
-      let row = this.get(trigger.id);
+      let row = await this.get(trigger.id);
       if (!row) {
         try {
           const callbackUrl =
             spec.delivery === "webhook" ? this.callbackUrl(spec.callbackUrl, trigger.id) : null;
           const secret = spec.delivery === "webhook" ? this.newEncryptedSecret() : null;
-          this.db
-            .prepare(`INSERT INTO mcp_event_subscriptions
-            (trigger_id, server_id, event_name, arguments_json, delivery, callback_url,
-             secret_encrypted, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`)
-            .run(
-              trigger.id,
-              spec.serverId,
-              spec.name,
-              canonicalJson(spec.arguments || {}),
-              spec.delivery,
-              callbackUrl,
-              secret,
-            );
-          row = this.get(trigger.id);
+          await serviceStatements(this.db).unit("mcpEvent_insert", [
+            {
+              trigger_id: trigger.id,
+              server_id: spec.serverId,
+              event_name: spec.name,
+              arguments_json: canonicalJson(spec.arguments || {}),
+              delivery: spec.delivery,
+              callback_url: callbackUrl,
+              secret_encrypted: secret,
+            },
+          ]);
+          row = await this.get(trigger.id);
         } catch (error) {
           log.warn(`Invalid MCP event trigger ${trigger.id}:`, error);
           const message = error instanceof Error ? error.message : String(error);
-          this.db
-            .prepare(`INSERT OR REPLACE INTO mcp_event_subscriptions
-            (trigger_id, server_id, event_name, arguments_json, delivery,
-             callback_url, secret_encrypted, status, last_error, next_poll_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NULL, 'error', ?, ?)`)
-            .run(
-              trigger.id,
-              spec.serverId,
-              spec.name,
-              canonicalJson(spec.arguments || {}),
-              spec.delivery,
-              message.slice(0, 500),
-              Date.now() + 30_000,
-            );
+          await serviceStatements(this.db).unit("mcpEvent_insertError", [
+            trigger.id,
+            spec.serverId,
+            spec.name,
+            canonicalJson(spec.arguments || {}),
+            spec.delivery,
+            message.slice(0, 500),
+            Date.now() + 30_000,
+          ]);
           continue;
         }
       }
@@ -336,10 +301,11 @@ export class MCPEventService {
         if (row.delivery === "webhook") {
           if (!row.callback_url) continue;
           if (!row.secret_encrypted) {
-            this.db
-              .prepare("UPDATE mcp_event_subscriptions SET secret_encrypted=? WHERE trigger_id=?")
-              .run(this.newEncryptedSecret(), row.trigger_id);
-            row = this.get(row.trigger_id)!;
+            await serviceStatements(this.db).unit("mcpEvent_setSecret", [
+              row.trigger_id,
+              this.newEncryptedSecret(),
+            ]);
+            row = (await this.get(row.trigger_id))!;
           }
           if (!this.server) throw new Error("Local MCP webhook receiver is unavailable");
           const healthy = row.status === "active" || row.status === "gap";
@@ -351,17 +317,16 @@ export class MCPEventService {
           await this.poll(row);
         }
       } catch (error) {
-        this.setError(row.trigger_id, error);
+        await this.setError(row.trigger_id, error);
       }
     }
   }
 
-  private scheduleNext(): void {
+  private async scheduleNext(): Promise<void> {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
-    const rows = this.db
-      .prepare("SELECT * FROM mcp_event_subscriptions")
-      .all() as SubscriptionRow[];
+    const rows = await serviceStatements(this.db).unit("mcpEvent_list", []);
+    if (!this.running) return;
     const deadlines = rows.map((row) => row.next_poll_at || Date.now() + 30_000);
     const next = deadlines.length ? Math.min(...deadlines) : Date.now() + 30_000;
     const delay = Math.max(1000, Math.min(30_000, next - Date.now()));
@@ -407,18 +372,15 @@ export class MCPEventService {
       refreshBefore === null
         ? Date.now() + 24 * 60 * 60_000
         : Date.now() + Math.max(1000, Math.floor((refreshBefore - Date.now()) * 0.8));
-    this.db
-      .prepare(`UPDATE mcp_event_subscriptions SET server_subscription_id=?, cursor=?,
-      refresh_before=?, next_poll_at=?, status=?, last_error=? WHERE trigger_id=?`)
-      .run(
-        result.id,
-        typeof result.cursor === "string" ? result.cursor : row.cursor,
-        refreshBefore,
-        refreshAt,
-        result.truncated ? "gap" : "active",
-        result.truncated ? "Some events were missed before this subscription resumed" : null,
-        row.trigger_id,
-      );
+    await serviceStatements(this.db).unit("mcpEvent_setSubscribed", [
+      row.trigger_id,
+      result.id,
+      typeof result.cursor === "string" ? result.cursor : row.cursor,
+      refreshBefore,
+      refreshAt,
+      result.truncated ? "gap" : "active",
+      result.truncated ? "Some events were missed before this subscription resumed" : null,
+    ]);
   }
 
   private async poll(row: SubscriptionRow): Promise<void> {
@@ -433,16 +395,13 @@ export class MCPEventService {
     const interval = result.hasMore
       ? MIN_POLL_MS
       : Math.max(MIN_POLL_MS, Math.min(MAX_POLL_MS, Number(result.nextPollMs) || DEFAULT_POLL_MS));
-    this.db
-      .prepare(`UPDATE mcp_event_subscriptions SET cursor=?, next_poll_at=?,
-      status=?, last_error=? WHERE trigger_id=?`)
-      .run(
-        typeof result.cursor === "string" ? result.cursor : row.cursor,
-        Date.now() + interval,
-        result.truncated ? "gap" : "active",
-        result.truncated ? "Some events were missed before this poll resumed" : null,
-        row.trigger_id,
-      );
+    await serviceStatements(this.db).unit("mcpEvent_setPolled", [
+      row.trigger_id,
+      typeof result.cursor === "string" ? result.cursor : row.cursor,
+      Date.now() + interval,
+      result.truncated ? "gap" : "active",
+      result.truncated ? "Some events were missed before this poll resumed" : null,
+    ]);
   }
 
   private async remove(row: SubscriptionRow): Promise<void> {
@@ -457,17 +416,15 @@ export class MCPEventService {
         });
       } catch (error) {
         if ((error as { code?: number })?.code === -32011) {
-          this.db
-            .prepare("DELETE FROM mcp_event_subscriptions WHERE trigger_id=?")
-            .run(row.trigger_id);
+          await serviceStatements(this.db).unit("mcpEvent_delete", [row.trigger_id]);
           await this.releaseServer(row.trigger_id);
           return;
         }
-        this.setError(row.trigger_id, error, "removing");
+        await this.setError(row.trigger_id, error, "removing");
         return;
       }
     }
-    this.db.prepare("DELETE FROM mcp_event_subscriptions WHERE trigger_id=?").run(row.trigger_id);
+    await serviceStatements(this.db).unit("mcpEvent_delete", [row.trigger_id]);
     await this.releaseServer(row.trigger_id);
   }
 
@@ -499,7 +456,7 @@ export class MCPEventService {
   private async receive(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const match = /^\/mcp-events\/([a-zA-Z0-9-]+)$/.exec(req.url || "");
     if (req.method !== "POST" || !match) return this.reply(res, 404, { error: "Not found" });
-    const row = this.get(match[1]);
+    const row = await this.get(match[1]);
     const trigger = this.triggers.getTrigger(match[1]);
     if (
       !this.running ||
@@ -545,27 +502,25 @@ export class MCPEventService {
       return this.reply(res, 401, { error: "Subscription mismatch" });
     }
     if (value?.type === "terminated") {
-      this.setError(row.trigger_id, new Error("MCP event subscription terminated"), "terminated");
+      await this.setError(
+        row.trigger_id,
+        new Error("MCP event subscription terminated"),
+        "terminated",
+      );
       return this.reply(res, 200, {});
     }
     if (value?.type === "gap") {
-      this.db
-        .prepare(
-          "UPDATE mcp_event_subscriptions SET cursor=?, status='gap', last_error=? WHERE trigger_id=?",
-        )
-        .run(
-          typeof value.cursor === "string" ? value.cursor : null,
-          "Some events were missed; the subscription continues from the new cursor",
-          row.trigger_id,
-        );
+      await serviceStatements(this.db).unit("mcpEvent_setGap", [
+        row.trigger_id,
+        typeof value.cursor === "string" ? value.cursor : null,
+        "Some events were missed; the subscription continues from the new cursor",
+      ]);
       return this.reply(res, 200, {});
     }
     if (id !== value?.eventId) return this.reply(res, 400, { error: "Event ID mismatch" });
     await this.accept(row, value);
     if (typeof value.cursor === "string") {
-      this.db
-        .prepare("UPDATE mcp_event_subscriptions SET cursor=? WHERE trigger_id=?")
-        .run(value.cursor, row.trigger_id);
+      await serviceStatements(this.db).unit("mcpEvent_setCursor", [row.trigger_id, value.cursor]);
     }
     this.reply(res, 200, {});
   }
@@ -671,19 +626,18 @@ export class MCPEventService {
     });
   }
 
-  private get(triggerId: string): SubscriptionRow | undefined {
-    return this.db
-      .prepare("SELECT * FROM mcp_event_subscriptions WHERE trigger_id=?")
-      .get(triggerId) as SubscriptionRow | undefined;
+  private get(triggerId: string): Promise<SubscriptionRow | undefined> {
+    return serviceStatements(this.db).unit("mcpEvent_get", [triggerId]);
   }
 
-  private setError(triggerId: string, error: unknown, status = "error"): void {
+  private async setError(triggerId: string, error: unknown, status = "error"): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
-    this.db
-      .prepare(
-        "UPDATE mcp_event_subscriptions SET status=?, last_error=?, next_poll_at=? WHERE trigger_id=?",
-      )
-      .run(status, message.slice(0, 500), Date.now() + 30_000, triggerId);
+    await serviceStatements(this.db).unit("mcpEvent_setError", [
+      triggerId,
+      status,
+      message.slice(0, 500),
+      Date.now() + 30_000,
+    ]);
     log.warn(`MCP event subscription ${triggerId}: ${message}`);
   }
 

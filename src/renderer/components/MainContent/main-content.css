@@ -3782,7 +3782,7 @@
 .collab-lines-glyphs {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .collab-agent-status-text {
@@ -4043,36 +4043,14 @@
 }
 
 /* --- Sub-agent glyphs --------------------------------------------------
-   Colorful per-agent marks shared by transcript rows, composer agent lines
-   and the agent sidebar. Running agents turn slowly. */
+   Each sub-agent is drawn as a bot mascot, shared by transcript rows, the
+   composer agent lines and the agent sidebar. The face follows its state. */
 .agent-glyph {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
   line-height: 0;
-}
-
-.agent-glyph svg {
-  display: block;
-  overflow: visible;
-  filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.12));
-}
-
-.agent-glyph.is-working svg {
-  animation: agent-glyph-turn 5.5s linear infinite;
-}
-
-@keyframes agent-glyph-turn {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-glyph.is-working svg {
-    animation: none;
-  }
 }
 
 /* --- Sub-agent lifecycle rows ------------------------------------------
@@ -4092,7 +4070,10 @@
 .agent-roster-row {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
+  overflow: visible;
+  border-radius: 0;
   width: 100%;
   min-width: 0;
   padding: 4px 0;
@@ -4125,7 +4106,7 @@
 .agent-roster-glyphs {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
 }
 
@@ -4163,7 +4144,7 @@
 }
 
 .agent-roster-details {
-  margin: 2px 0 6px 7px;
+  margin: 2px 0 6px 9px;
   padding-left: 14px;
   border-left: 1px solid var(--color-border-subtle);
 }
@@ -4180,7 +4161,9 @@
 .agent-lifecycle-item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+  overflow: visible;
   width: 100%;
   min-width: 0;
   padding: 5px 8px;
@@ -4323,6 +4306,9 @@ button.agent-lifecycle-item:hover .agent-lifecycle-item-open {
 }
 
 .collab-timeline-thought-agent {
+  display: inline-flex;
+  justify-content: flex-start;
+  overflow: visible;
   padding: 0;
   border: none;
   background: transparent;
@@ -4343,7 +4329,7 @@ button.collab-timeline-thought-agent:hover {
 }
 
 .collab-timeline-thought-content.markdown-content {
-  padding-left: 22px;
+  padding-left: 26px;
   font-family: var(--font-ui);
 }
 

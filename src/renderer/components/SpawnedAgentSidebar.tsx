@@ -18,7 +18,7 @@ import { MainContent } from "./MainContent";
 import { resolveSpawnedAgentSidebarTask } from "../utils/spawned-agent-sidebar";
 import { AgentGlyph } from "./AgentGlyph";
 import { assignAgentGlyphs, getAgentGlyphForSeed } from "../utils/agent-glyphs";
-import { resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
+import { getAgentGlyphState, resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
 
 type SpawnedAgentSidebarProps = {
   parentTask: Task;
@@ -290,8 +290,8 @@ export function SpawnedAgentSidebar({
           <h2 className="spawned-agent-sidebar-title">
             <AgentGlyph
               glyph={agentGlyphs.get(selectedTask.id) ?? getAgentGlyphForSeed(selectedTask.id)}
-              size={18}
-              working={isWorkingTask(selectedTask)}
+              size={24}
+              state={getAgentGlyphState(selectedTask.status)}
             />
             <span>{resolveAgentDisplayName(selectedTask.title, selectedTask.title)}</span>
           </h2>
@@ -348,8 +348,8 @@ export function SpawnedAgentSidebar({
             >
               <AgentGlyph
                 glyph={agentGlyphs.get(task.id) ?? getAgentGlyphForSeed(task.id)}
-                size={13}
-                working={isWorkingTask(task)}
+                size={16}
+                state={getAgentGlyphState(task.status)}
               />
               <span className="spawned-agent-sidebar-tab-label">
                 {resolveAgentDisplayName(task.title, task.title)}

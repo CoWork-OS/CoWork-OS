@@ -1,31 +1,22 @@
 import { describe, expect, it } from "vitest";
 
+import { BOT_MASCOT_IDS } from "../../../shared/bot-mascots";
 import {
-  AGENT_GLYPH_PALETTES,
-  AGENT_GLYPH_SHAPES,
+  AGENT_GLYPH_MASCOT_ORDER,
   assignAgentGlyphs,
   getAgentGlyphForIndex,
   getAgentGlyphForSeed,
 } from "../agent-glyphs";
 
-const key = (index: number) => {
-  const glyph = getAgentGlyphForIndex(index);
-  return `${glyph.shape}:${glyph.palette.name}`;
-};
-
 describe("agent glyphs", () => {
-  it("gives the first 64 spawn positions distinct shape/palette pairs", () => {
-    const keys = new Set(Array.from({ length: 64 }, (_, index) => key(index)));
-    expect(keys.size).toBe(AGENT_GLYPH_SHAPES.length * AGENT_GLYPH_PALETTES.length);
+  it("orders every bot mascot exactly once", () => {
+    expect([...AGENT_GLYPH_MASCOT_ORDER].sort()).toEqual([...BOT_MASCOT_IDS].sort());
   });
 
-  it("varies both shape and color between neighbouring agents", () => {
-    for (let index = 0; index < 63; index += 1) {
-      const a = getAgentGlyphForIndex(index);
-      const b = getAgentGlyphForIndex(index + 1);
-      expect(a.shape).not.toBe(b.shape);
-      expect(a.palette.name).not.toBe(b.palette.name);
-    }
+  it("gives the first sixteen agents distinct mascots, then repeats", () => {
+    const first = Array.from({ length: 16 }, (_, index) => getAgentGlyphForIndex(index).mascot);
+    expect(new Set(first).size).toBe(16);
+    expect(getAgentGlyphForIndex(16)).toEqual(getAgentGlyphForIndex(0));
   });
 
   it("assigns by spawn order regardless of input order", () => {
@@ -35,13 +26,12 @@ describe("agent glyphs", () => {
       { id: "middle", createdAt: 20 },
     ];
     const glyphs = assignAgentGlyphs(agents);
-    const reversed = assignAgentGlyphs([...agents].reverse());
     expect(glyphs.get("early")).toEqual(getAgentGlyphForIndex(0));
     expect(glyphs.get("late")).toEqual(getAgentGlyphForIndex(2));
-    expect(reversed).toEqual(glyphs);
+    expect(assignAgentGlyphs([...agents].reverse())).toEqual(glyphs);
   });
 
-  it("is deterministic for seeds", () => {
+  it("is deterministic for seeds and safe for bad indices", () => {
     expect(getAgentGlyphForSeed("team-item-1")).toEqual(getAgentGlyphForSeed("team-item-1"));
     expect(getAgentGlyphForIndex(-3)).toEqual(getAgentGlyphForIndex(0));
   });

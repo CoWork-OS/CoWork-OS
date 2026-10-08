@@ -165,7 +165,7 @@ export function CollaborativeSummaryPanel({
       entries.push({
         kind: "strategic",
         id: "strategic-generated",
-        content: `Coordinating ${plannedCount} agents to ${truncate(userPrompt, 80)}.`,
+        content: `Coordinating ${plannedCount} agents on this request.`,
         ts: runStart,
       });
     }
@@ -319,7 +319,7 @@ export function CollaborativeSummaryPanel({
               className={`collab-timeline-thought ${err ? "collab-timeline-thought-error" : ""}`}
             >
               <div className="collab-timeline-thought-head">
-                <AgentGlyph glyph={glyphForThought(entry.thought)} size={14} />
+                <AgentGlyph glyph={glyphForThought(entry.thought)} size={18} />
                 {canOpen ? (
                   <button
                     type="button"

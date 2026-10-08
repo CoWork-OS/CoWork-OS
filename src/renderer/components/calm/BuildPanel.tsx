@@ -6,6 +6,9 @@ import { ModelDropdown, type ModelDropdownProps } from "../MainContent/ModelDrop
 import { formatFileSize, type PendingAttachment } from "../MainContent/attachments";
 import { hasHostMethod } from "../../host/browser-capabilities";
 import { CalmFolderMenu } from "./CalmTopBar";
+import { BuildAccessPicker, useBuildAccessProfile } from "./BuildAccessPicker";
+import type { AccessProfileId } from "../../../shared/access-profiles";
+import type { SettingsTab } from "../MainContent/main-content-types";
 import { BUILD_FOCUS_COMPOSER_EVENT } from "./build-events";
 import { BUILD_INSTRUCTIONS } from "./build-task";
 import { UseCasesGallery } from "../UseCasesGallery";
@@ -15,6 +18,7 @@ interface BuildPanelProps {
   onStart: (
     prompt: string,
     attachments?: PendingAttachment[],
+    options?: { accessProfileId?: AccessProfileId },
   ) => void | boolean | Promise<void | boolean>;
   /** Folder the new build task will run in. */
   workspace: Workspace | null;
@@ -24,6 +28,7 @@ interface BuildPanelProps {
   showWorkspacePaths?: boolean;
   /** Model picker shown in the composer, as in the modern theme. */
   model: ModelDropdownProps;
+  onOpenSettings?: (tab?: SettingsTab) => void;
   /** Latest tasks started from Build, newest first. */
   recentBuilds?: RecentBuild[];
   onOpenBuild?: (taskId: string) => void;
@@ -99,11 +104,12 @@ export async function submitBuildTask(
   onStart: BuildPanelProps["onStart"],
   text: string,
   attachments: PendingAttachment[] = [],
+  options?: { accessProfileId?: AccessProfileId },
 ): Promise<boolean> {
   const trimmed =
     text.trim() || (attachments.length > 0 ? "Build something from the attached files." : "");
   if (!trimmed) return false;
-  const result = await onStart(`${trimmed}\n\n${BUILD_INSTRUCTIONS}`, attachments);
+  const result = await onStart(`${trimmed}\n\n${BUILD_INSTRUCTIONS}`, attachments, options);
   return result !== false;
 }
 
@@ -120,9 +126,11 @@ export function BuildPanel({
   folderPickerUnavailableReason,
   showWorkspacePaths,
   model,
+  onOpenSettings,
   recentBuilds = [],
   onOpenBuild,
 }: BuildPanelProps) {
+  const access = useBuildAccessProfile();
   const [value, setValue] = useState(() => buildDraft.value);
   const [useCasesOpen, setUseCasesOpen] = useState(false);
 
@@ -208,7 +216,9 @@ export function BuildPanel({
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const admitted = await submitBuildTask(onStart, text, attachments);
+      const admitted = await submitBuildTask(onStart, text, attachments, {
+        accessProfileId: access.profileId,
+      });
       if (admitted) {
         // Admission can navigate away before another render/effect is committed.
         buildDraft.value = "";
@@ -325,6 +335,14 @@ export function BuildPanel({
               showWorkspacePaths,
               onOpen: () => void loadRecentWorkspaces(),
             }}
+          />
+          <BuildAccessPicker
+            profileId={access.profileId}
+            customProfiles={access.customProfiles}
+            approvalPromptsEnabled={access.approvalPromptsEnabled}
+            onSelect={access.select}
+            onOpenSettings={onOpenSettings ? () => onOpenSettings("system") : undefined}
+            disabled={submitting}
           />
           <span className="calm-build-hints" aria-hidden="true">
             <kbd>↵</kbd> to build · <kbd>⇧↵</kbd> new line

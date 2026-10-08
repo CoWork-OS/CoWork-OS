@@ -134,8 +134,8 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Think With Me Mode**: Socratic brainstorming mode that helps clarify thinking without executing tools. Activated via toggle or auto-detected from brainstorm/trade-off patterns.
 - **Problem Framing Pre-flight**: Complex tasks show a structured problem restatement, assumptions, risks, and approach before execution begins
 - **Graceful Uncertainty**: Agent expresses uncertainty honestly and rates confidence on recommendations. Low-confidence messages display with an amber indicator.
-- **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. View in Settings > AI Playbook.
-- **Evolving Agent Intelligence**: The agent visibly improves over time through a connected set of subsystems — layered memory, retry-aware recovery reuse, adaptive style learning, playbook-to-skill promotion, channel persona adaptation, evolution metrics, and daily operational journaling. See [Evolving Agent Intelligence](evolving-agent-intelligence.md).
+- **AI Playbook**: Auto-captures successful patterns (approach, outcome, tools) and lessons from failures with error classification (7 categories: tool failure, wrong approach, missing context, permission denied, timeout, rate limit, user correction). Time-based decay scoring deprioritises stale entries. Proven patterns reinforced on repeated success. Mid-task user corrections automatically detected and captured. Relevant entries injected into system prompts. There is no separate settings page; a task's learning progression shows what was captured.
+- **Evolving Agent Intelligence**: The agent visibly improves over time through a connected set of subsystems — layered memory, retry-aware recovery reuse, adaptive style learning, playbook-to-skill promotion, channel persona adaptation, and evolution metrics. See [Evolving Agent Intelligence](evolving-agent-intelligence.md).
 
 ### LLM Wiki Research Vaults
 
@@ -318,7 +318,7 @@ This workflow is designed for "human-directed, agent-operated" execution:
 
 - **Memory as source of truth**: reflection outputs become memory candidates such as preferences, workflow patterns, open loops, corrections, recurring tasks, and ignored noise
 - **Heartbeat as scheduler**: Heartbeat decides when accumulated signals justify reflection
-- **Dreaming as memory curation**: background Dreaming curates the `memory_items` fact store after memory-specific Heartbeat signals, a daily idle pass or (opt-in) task completion; safe operations on inferred facts are applied and undoable, everything else waits in the Memory Hub Review tab
+- **Dreaming as memory curation**: about once a day (offered by idle Heartbeat pulses) or on **Dream now**, Dreaming tidies the memory folder; safe edits to agent-written notes are one undoable commit, and anything touching your own notes waits in **Settings > Memory > Review**
 - **Reviewable suggestions first**: useful outcomes appear in the automation inbox and Suggestions panel. The optional welcome-screen **Next actions** widget is off by default and can be enabled from **Settings > Appearance > Home widgets > Show next actions**.
 - **Global coordinator, namespaced targets**: one coordinator ranks work globally while each workflow target keeps its own history, winner, backlog, and dispatch stream
 - **Stable target identities**: supports core-owned targets such as `global`, `workspace`, `agent_role`, `code_workspace`, and `pull_request`
@@ -570,7 +570,7 @@ Inline privacy controls are also available during capture: `<no-memory>` disable
 
 Supermemory is additive, not a replacement for local memory. CoWork still keeps the workspace kit, `memory_items` facts, archive memory, structured observation metadata, Dreaming proposals, conversation recall, and knowledge graph locally. Memory Write Governance can require approval before external writes or mirrors are committed; sensitive external-memory payloads are blocked rather than stored in the pending queue. The current integration mirrors local memory captures only when you opt in; it does not yet stream every chat turn into Supermemory conversations. See [Structured Memory Observations](memory-observations.md), [Dreaming](dreaming.md), [Workspace Memory Flow](workspace-memory-flow.md#memory-write-governance), and [Supermemory Integration](supermemory.md).
 
-Configure in **Settings** > **Memory Hub**.
+Configure in **Settings** > **Memory**.
 
 ---
 
@@ -581,7 +581,7 @@ Import your full ChatGPT conversation history into CoWork OS's memory system. In
 ### How It Works
 
 1. **Export from ChatGPT**: Go to [ChatGPT Settings > Data Controls > Export Data](https://chat.openai.com/#settings/DataControls). OpenAI emails you a `.zip` file containing `conversations.json`.
-2. **Import in CoWork OS**: Go to **Settings > Memory Hub > Import ChatGPT History** and select the exported `.zip` or `conversations.json` file.
+2. **Import in CoWork OS**: Go to **Settings > Memory > Settings > Import** and choose **ChatGPT export** and select the exported `.zip` or `conversations.json` file.
 3. **Processing**: Conversations are parsed, deduplicated, and stored as memory entries with full-text search indexing. User messages are captured as context; assistant responses are summarized for token efficiency.
 
 ### What Gets Imported
@@ -599,7 +599,7 @@ Import your full ChatGPT conversation history into CoWork OS's memory system. In
 - **Local protected storage** — Imported history is stored in the local SQLite database; selected sensitive settings/fields use OS keychain/AES-backed encryption, while memory import content relies on local storage controls and privacy filtering rather than whole-file database encryption.
 - **Privacy filtering** — The same auto-detection that filters API keys, passwords, and tokens from regular memories applies to imported history.
 - **Scoped provider context** — Memory selection happens locally. When relevant snippets are included in a task prompt, they are sent to the model route selected for that task, just like the rest of the prompt. CoWork does not send the full imported archive unless a user explicitly places it in task context.
-- **Deletable** — You can clear all imported memories at any time from Settings > Memory Hub.
+- **Deletable** — You can clear all imported memories at any time from **Settings > Memory > Sources**.
 
 ### Why This Matters
 
@@ -614,9 +614,9 @@ CoWork OS still keeps a multi-layered learning stack under the reflective loop. 
 | Layer             | Service                   | What It Learns                                                          |
 | ----------------- | ------------------------- | ----------------------------------------------------------------------- |
 | **Task Patterns** | PlaybookService           | Successful approaches, failure categories, error recovery strategies    |
-| **Facts**         | MemoryWriter (`memory_items`) | Preferences, identity, rules, project facts, decisions, commitments, corrections; the profile and relationship services are views of it |
+| **Facts**         | MemoryWriter (memory folder; `memory_items` for commitments and people) | Preferences, identity, rules, project facts, decisions and corrections as notes in the memory folder; commitments and notes about other people in `memory_items` |
 | **Archive**       | MemoryService             | Outcomes, decisions, errors, insights with hybrid lexical search        |
-| **Feedback**      | FeedbackService           | Rejection patterns, preference corrections, workspace-local MISTAKES.md |
+| **Feedback**      | FeedbackService           | Rejection patterns and preference corrections, saved as corrections in the workspace's memory folder file (`.cowork/MISTAKES.md` when the folder is off) |
 
 **Key mechanisms:**
 
@@ -627,7 +627,7 @@ CoWork OS still keeps a multi-layered learning stack under the reflective loop. 
 - **Retry-aware reuse**: retries can reuse playbook patterns during planning, recent session recall during planning/execution/follow-ups, and pending verification checklist state instead of restarting cold
 - **`/learn` skill**: manually teach the agent insights, corrections, preferences, or rules
 
-These layers feed `Workflow Intelligence` and the normal task runtime. Dreaming curates the fact store from the same evidence. See [Workflow Intelligence](workflow-intelligence.md) and [Dreaming](dreaming.md) for the full architecture guide.
+These layers feed `Workflow Intelligence` and the normal task runtime. Dreaming tidies the memory folder about once a day. See [Workflow Intelligence](workflow-intelligence.md) and [Dreaming](dreaming.md) for the full architecture guide.
 
 ### Evolving Agent Intelligence
 
@@ -763,9 +763,9 @@ updated: 2026-03-14
 
 ### Quick-open kit files
 
-The Memory Hub exposes **Open USER.md** and **Open MEMORY.md** buttons that open the corresponding `.cowork/` file directly in the system editor. If the file does not exist it is created from a default template (with full frontmatter and section scaffolding) before opening.
+The **Workspace kit** group (**Settings > Memory > Settings > Advanced**) has **Open USER.md**, **Open MEMORY.md** and **Open DESIGN.md** buttons that open the corresponding `.cowork/` file directly in the system editor. If the file does not exist it is created from a default template (with full frontmatter and section scaffolding) before opening.
 
-Configure in **Settings** > **Memory Hub**.
+Configure in **Settings** > **Memory**.
 
 ---
 

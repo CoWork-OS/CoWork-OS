@@ -92,7 +92,7 @@ The intended flow is:
 
 Downstream surfaces can create visible work, but they do not become cognition owners themselves. User response to suggestions is part of the loop: acting reinforces a workflow pattern, editing captures a correction, and snooze/dismiss/ignore lowers similar future suggestions.
 
-Dreaming is the memory-maintenance branch of this path. It can run after task completion or from memory-specific Heartbeat signals, persists `dreaming_runs` and `dreaming_candidates`, and leaves final mutation to the existing memory services.
+Dreaming is the memory-maintenance branch of this path. About once a day (offered by idle Heartbeat pulses) or on **Dream now**, it tidies the memory folder: safe edits are one undoable commit, and edits to your own notes wait in **Settings > Memory > Review**. See [Dreaming](dreaming.md).
 
 ## Core Targets
 

@@ -122,7 +122,7 @@ This keeps all agent execution observable through the same task timeline, right-
 
 Managed Agents do not own memory curation policy.
 
-Managed sessions can produce task transcripts, task results, and memory observations like ordinary tasks. Dreaming may later review that evidence after task completion or from memory-specific Heartbeat signals, but it writes reviewable `dreaming_candidates` through the normal Workflow Intelligence memory-curation path.
+Managed sessions can produce task transcripts, task results, and memory observations like ordinary tasks. Dreaming may later read recent task conversations in its daily pass over the memory folder, and edits that touch your own notes wait for review like any other dream change.
 
 That keeps Managed Agents focused on reusable execution identity while Memory, Heartbeat, Reflection, Dreaming, and Suggestions remain the core Workflow Intelligence runtime. See [Dreaming](dreaming.md).
 

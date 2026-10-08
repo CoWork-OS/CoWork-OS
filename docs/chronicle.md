@@ -160,7 +160,7 @@ Chronicle should be treated as **context evidence**, not as an authority overrid
 
 - **Computer use**: Chronicle shares desktop-screen prerequisites such as Screen Recording, but Chronicle is for local screen context lookup rather than mouse/keyboard control
 - **Mission Control**: promoted Chronicle observations appear in learning/evidence and unified recall
-- **Memory Hub**: Chronicle is configured alongside local memory, and Chronicle-backed memories can be linked into the existing memory system
+- **Memory**: Chronicle is configured only in **Settings > Tools > Chronicle** (Memory settings link there); Chronicle observations are listed under **Settings > Memory > Sources**, and Chronicle-backed memories are archive rows in the existing memory system
 - **AI Playbook**: Chronicle can reinforce destination and workflow hints, but it reuses the existing playbook and recall systems
 
 ## User-facing surfaces

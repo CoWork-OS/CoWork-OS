@@ -20,10 +20,10 @@ The new model makes the boundaries explicit:
 
 | Layer         | Responsibility                                                                                                     | User-facing?                                  |
 | ------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
-| `Memory`      | Stores durable preferences, workflow patterns, corrections, open loops, recurring tasks, and ignored-noise signals | Yes, through Memory Hub and retrieved context |
+| `Memory`      | Stores durable preferences, workflow patterns, corrections, open loops, recurring tasks, and ignored-noise signals | Yes, through Settings > Memory and retrieved context |
 | `Heartbeat`   | Decides when enough fresh signal exists to think again                                                             | Mostly visible through Mission Control status |
 | `Reflection`  | Evaluates evidence, generates hypotheses, critiques them, and chooses a recommended next action                    | No, except in diagnostics/settings            |
-| `Dreaming`    | Curates `memory_items`: merges, resolves conflicts, promotes recurring outcomes, decays and expires facts           | Yes, through the Memory Hub Review tab        |
+| `Dreaming`    | Tidies the memory folder about once a day: merges duplicates, removes stale notes, saves what was not saved yet       | Yes, through Settings > Memory > Review       |
 | `Suggestions` | Presents reviewable next actions with evidence, confidence, and controls                                           | Yes                                           |
 
 `Subconscious` remains an internal compatibility name in some code paths, database tables, artifact folders, and logs. Product copy and docs should use `Workflow Intelligence` unless they are describing those internals directly.
@@ -39,8 +39,8 @@ workspace activity, memory, mailbox, tasks, git, schedules, triggers
     -> Heartbeat signal ledger
     -> Heartbeat Pulse decides whether reflection is useful now
     -> Reflection collects evidence, critiques options, and selects a recommendation
-    -> Dreaming curates memory_items (safe operations applied, the rest queued for review)
-    -> Memory receives curated facts and durable feedback signals
+    -> Memory receives accepted candidates and durable feedback signals
+    -> Dreaming tidies the memory folder about once a day (safe edits applied, the rest queued for review)
     -> Suggestions show reviewable next actions
     -> user acts, edits, snoozes, dismisses, or ignores
     -> feedback updates memory and future suggestion scoring
@@ -90,17 +90,15 @@ Reflection outputs are converted into core memory candidates, including:
 - watch item
 - constraint
 
-Accepted candidates flow through the core memory distillation path: fact types become `inferred` `memory_items` through `MemoryWriter`, events (open loops, watch items, recurring-workflow hints) become archive rows, and ignored noise is a runtime signal that is never written. This keeps durable learning in the existing memory stack instead of creating a parallel source of truth.
+Accepted candidates flow through the core memory distillation path and are written to the archive (with the usual memory settings, redaction and deduplication); ignored noise is a runtime signal that is never written. Facts are no longer written to `memory_items` from here: Dreaming promotes what deserves to be remembered into the memory folder. This keeps durable learning in the existing memory stack instead of creating a parallel source of truth.
 
 ## Dreaming As Memory Curation
 
-Dreaming is the offline memory-maintenance lane. It runs after task completion when `backgroundConsolidationEnabled` is on (default off), and Heartbeat can trigger it when `memory_drift` or `correction_learning` signals appear (the daemon emits `correction_learning` when it detects a user correction) or hot-memory pressure changes. Automatic runs are limited to one per workspace every 6 hours.
+Dreaming is the model pass over the **memory folder** (`~/CoWork Memory`), where CoWork keeps what it knows about you, your workspaces and lessons. About once a day (Heartbeat's daily idle pass offers a run; it starts when the last dream is more than 20 hours old and something new happened) or when you press **Dream now**, it reads the folder and recent task conversations, merges duplicates, removes stale notes, moves notes to better files and saves things you said that were not saved yet. Changes to notes the agent wrote are applied as one commit you can undo; anything that touches your own notes, `MEMORY.md` or the unreviewed inbox waits in **Settings > Memory > Review**. It uses your configured model provider within a daily budget (50,000 tokens by default) and can be turned off in the Memory folder card.
 
-Dreaming is the curator of `memory_items`. It reads the workspace's active facts, archive outcomes of the last 30 days and conversation evidence of finished commitments. Safe operations on inferred facts (merges, promotions of outcomes that recur in two or more tasks, decay, closing done commitments) are applied through `MemoryWriter`, one audited and undoable operation each; everything else, and anything the user stated or confirmed, is queued for the Memory Hub Review tab. A once-daily idle pass curates recently active workspaces, and an optional, budgeted LLM synthesis step (off by default) can add proposals that always go to review.
+Memory signals, task completion and Box Brain imports no longer start a run, and the earlier rule-based curator of `memory_items` is retired.
 
-This keeps Dreaming from becoming a second memory system: it has no store of its own and every change goes through the same writer as every other producer.
-
-See [Dreaming](dreaming.md) for the canonical memory-curation contract.
+See [Dreaming](dreaming.md) and [Memory Repo Phase 2](memory-repo-phase2-design.md) for the full contract.
 
 ## Heartbeat As Scheduler
 
@@ -139,7 +137,7 @@ Workflow Intelligence appears in:
 - **Settings > Automations > Workflow Intelligence**: policy, target, run, and diagnostic controls
 - **Suggestions panel**: review, act, snooze, and dismiss active suggestions
 - **Mission Control**: heartbeat state, traces, core harness learning, and dispatched work
-- **Memory Hub**: "What CoWork knows" (facts), the **Review** tab for Dreaming proposals and undo, the **Sources** and **Health** tabs (where memory comes from; the memory health checks), and pending memory writes.
+- **Settings > Memory**: "What CoWork knows" (the memory folder's notes by file), the **Review** tab for dream changes and undo, and the **Sources** and **Health** tabs (where memory comes from; the memory health checks).
 
 Reflection internals remain inspectable for power users, but suggestions are the primary user-facing output.
 

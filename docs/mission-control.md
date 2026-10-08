@@ -22,7 +22,7 @@ Mission Control now sits alongside the other operational entry points:
 - **Devices** for machine-level task routing and remote execution
 - main-sidebar **Automations** for structured flow authoring, activation, approvals, and step-level Activity
 - **Settings > Automations** for prompt-based routines, core automation, queueing, scheduling, triggers, briefing, and Workflow Intelligence policies
-- **Settings > Memory Hub** for durable memory, structured observations, and future Dreaming candidate review
+- **Settings > Memory** for the memory folder, structured observations, and dream changes waiting in **Review**
 
 ## Layout
 

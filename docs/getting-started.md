@@ -111,19 +111,23 @@ availability, filesystem rules, and network/domain scope. Command tools do not
 have a separate shell enable/disable control. See [Access Profiles](access-profiles.md)
 before enabling automations, channels, managed agents, or remote devices.
 
-### Optional: Configure Memory Hub And Supermemory
+### Optional: Review memory and costs
 
-Before you start relying on long-term context, open **Settings > Memory Hub** and confirm how memory should behave for this profile.
+CoWork keeps what it learns about you and your workspaces in a **memory folder**: plain markdown notes in a local git repo (`~/CoWork Memory` by default). Every change is a commit, and you can open the notes in any editor. Before you start relying on long-term context, open **Settings > Memory** and confirm how memory should behave for this profile.
 
-- **Workspace Kit** initializes the local `.cowork/` context files used for durable prompt injection and project guidance.
-- **What CoWork knows** lists the facts CoWork keeps about you and the workspace (`memory_items`) with where each came from; add, edit, pin or delete them here. The **Review** tab shows Dreaming's proposals and recent automatic changes, each with Undo. **Sources** shows how much each source (you, the agent, Dreaming, imports, other people) contributes, and **Health** runs the memory health checks with PASS or WARN.
-- **Memory settings** control local capture, privacy mode, retention, preview of the `L0/L1` memory payload, and the Memory Inspector for structured archive observations.
+- **What CoWork knows** lists the memory folder's notes by file; edit, pin or delete them here. Commitments and notes about other people are listed too. The **Review** tab shows dream changes waiting for you, each with accept, reject and Undo. **Sources** shows where memory comes from (you, the agent, Dreaming, imports, other people, Chronicle, Supermemory), and **Health** runs the memory health checks with PASS or WARN.
+- **Settings** has five short sections: **This workspace** (Use memory, Learn from chats, Strict privacy, Keep history for, Clear), **Memory folder** (the folder, Dreaming, Sync, Team memory), **Import**, **Connections** (Supermemory, and a link to Chronicle in **Settings > Tools**) and **Proactive**. Everything else is under a collapsed **Advanced**, including the **Inspector** for structured archive observations, **Session recovery** (durable runtime context), AI memory compression and the **Workspace kit**.
 - **Memory Write Approval** is an optional review compatibility path. The normal no-prompt runtime commits new durable memory writes immediately, including when an older saved setting selected a review mode. `COWORK_MEMORY_WRITE_APPROVAL_MODE=curated_only|external_only|background_only|all` opts a controlled run into the review queue. Sensitive external-memory payloads are blocked before they are stored in the queue.
-- **Memory Inspector** lets you search observation metadata, inspect details and timelines, edit titles/narratives, promote useful entries to workspace facts, mark entries private, suppress prompt recall, redact content, soft-delete entries, and rebuild deterministic metadata when needed.
-- **Durable Runtime Context** is optional. Enable it if you want long active tasks to retain sanitized task messages and source-linked compaction summaries that the agent can recover with `context_recall`. It stays task-scoped by default and is erased by **Clear memory** for the workspace.
-- **Supermemory** is optional. If you want an external memory provider, enable it here, paste your API key, keep the default `cowork:{workspaceId}` container template unless you need something else, save, and click **Test Connection**.
+- **Session recovery** (durable runtime context) is optional. Enable it if you want long active tasks to retain sanitized task messages and source-linked compaction summaries that the agent can recover with `context_recall`. It stays task-scoped by default and is erased by **Clear** for the workspace.
+- **Supermemory** is optional. If you want an external memory provider, open **Connections**, paste your API key, keep the default `cowork:{workspaceId}` container template unless you need something else, save, and click **Test Connection**.
 
-Supermemory does not replace CoWork's local memory system. It adds an external profile/search layer (the `external` scope of `memory_recall`), optional prompt-time profile injection, and optional mirroring of non-private local memory captures. Local structured observations remain authoritative for privacy controls; private, redacted, and suppressed entries stay local. Dreaming also stays local: it curates the local fact store and never sends memory maintenance to an external provider. In a controlled run with an explicit review mode, mirror writes (and `memory_remember` with scope `external`) are staged for review; the normal no-prompt runtime commits them directly after the same sensitive-payload checks. See [Memory Engine](memory-engine.md), [Structured Memory Observations](memory-observations.md), [Durable Runtime Context](durable-runtime-context.md), [Dreaming](dreaming.md), [Workspace Memory Flow](workspace-memory-flow.md#memory-write-governance), and [Supermemory Integration](supermemory.md).
+Three defaults use model tokens or money, so check them once:
+
+- **Dreaming**: about once a day, or when you press **Dream now** in the Memory folder card, one model pass tidies the memory folder (merges duplicates, removes stale notes, saves things you said that were not saved yet). It uses your configured model provider, up to 50,000 tokens a day by default. Turn it off in the Memory folder card.
+- **AI memory compression**: long memories get a one-line summary from your configured model, up to 20,000 tokens a day across workspaces. Adjust the budget or turn it off per workspace in **Settings > Memory > Settings > Advanced**. Private memories are never sent.
+- **Per-task cost cap**: each task is capped at $10 by default. A task's own budget can only lower it, and routes billed to a subscription skip the global cap. See [Guardrails](#guardrails).
+
+Supermemory does not replace CoWork's local memory system. It adds an external profile/search layer (the `external` scope of `memory_recall`), optional prompt-time profile injection, and optional mirroring of non-private local memory captures. Local structured observations remain authoritative for privacy controls; private, redacted, and suppressed entries stay local. Dreaming never sends memory to Supermemory, but it does send memory-folder notes to your configured model provider. In a controlled run with an explicit review mode, mirror writes (and `memory_remember` with scope `external`) are staged for review; the normal no-prompt runtime commits them directly after the same sensitive-payload checks. See [Memory Engine](memory-engine.md), [Structured Memory Observations](memory-observations.md), [Durable Runtime Context](durable-runtime-context.md), [Dreaming](dreaming.md), [Workspace Memory Flow](workspace-memory-flow.md#memory-write-governance), and [Supermemory Integration](supermemory.md).
 
 ## Troubleshooting
 
@@ -254,7 +258,7 @@ Recommended order:
 3. **Routines**: use a prompt-based routine only when a deterministic multi-step graph is unnecessary.
 4. **Daily Briefing**: enable a daily summary if you want background context generation.
 5. **Webhooks / Event Triggers**: connect inbound automation only after you have a stable workspace and provider setup, and only when you need the lower-level surfaces directly.
-6. **Workflow Intelligence**: enable reviewable Next actions once you have at least one stable workflow target. Dreaming curates the memory fact store on memory-specific Heartbeat signals and once a day; review its proposals in the Memory Hub Review tab. Code-change auto-create works best on trusted git-backed workspaces where worktrees are available.
+6. **Workflow Intelligence**: enable reviewable Next actions once you have at least one stable workflow target. Dreaming tidies the memory folder about once a day; review changes to your own notes in **Settings > Memory > Review**. Code-change auto-create works best on trusted git-backed workspaces where worktrees are available.
 
 Rule of thumb:
 

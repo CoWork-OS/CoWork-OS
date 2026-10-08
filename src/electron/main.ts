@@ -54,6 +54,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 import {
   app,
   BrowserWindow,
+  clipboard,
   ipcMain,
   dialog,
   session,
@@ -66,6 +67,7 @@ import {
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
+import { attachImageContextMenu } from "./utils/image-context-menu";
 import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
 import { DatabaseManager } from "./database/schema";
 import {
@@ -630,6 +632,7 @@ async function ensureCoreAutomationProfiles(): Promise<void> {
 }
 
 app.on("web-contents-created", (_event, contents) => {
+  attachImageContextMenu(contents, clipboard);
   contents.on("did-attach-webview", (_event, guest) => {
     CanvasManager.getInstance().attachWebviewNetworkGuards(guest);
   });

@@ -278,6 +278,25 @@ describe("MCPEventService", () => {
     db.close();
   });
 
+  it("surfaces a server-reported webhook delivery failure and retries refresh", async () => {
+    process.env.COWORK_MCP_EVENTS_KEY = key;
+    const { db, client, service } = fixture("webhook");
+    client.requestServerEventMethod.mockResolvedValueOnce({
+      id: "sub-1",
+      refreshBefore: new Date(Date.now() + 3_600_000).toISOString(),
+      cursor: null,
+      deliveryStatus: { active: false, lastError: "timeout" },
+    });
+    await service.start();
+    const row = db
+      .prepare("SELECT status, last_error, next_poll_at FROM mcp_event_subscriptions")
+      .get() as Any;
+    expect(row.status).toBe("error");
+    expect(row.last_error).toContain("timeout");
+    expect(row.next_poll_at).toBeLessThan(Date.now() + 31_000);
+    db.close();
+  });
+
   it("treats an already absent remote subscription as removed", async () => {
     process.env.COWORK_MCP_EVENTS_KEY = key;
     const { db, active, client, service } = fixture("webhook");

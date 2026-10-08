@@ -372,14 +372,19 @@ export class MCPEventService {
       refreshBefore === null
         ? Date.now() + 24 * 60 * 60_000
         : Date.now() + Math.max(1000, Math.floor((refreshBefore - Date.now()) * 0.8));
+    const deliveryError =
+      result.deliveryStatus?.active === false
+        ? `Webhook delivery paused${typeof result.deliveryStatus.lastError === "string" ? ` (${result.deliveryStatus.lastError.slice(0, 100)})` : ""}`
+        : null;
     await serviceStatements(this.db).unit("mcpEvent_setSubscribed", [
       row.trigger_id,
       result.id,
       typeof result.cursor === "string" ? result.cursor : row.cursor,
       refreshBefore,
-      refreshAt,
-      result.truncated ? "gap" : "active",
-      result.truncated ? "Some events were missed before this subscription resumed" : null,
+      deliveryError ? Date.now() + 30_000 : refreshAt,
+      deliveryError ? "error" : result.truncated ? "gap" : "active",
+      deliveryError ||
+        (result.truncated ? "Some events were missed before this subscription resumed" : null),
     ]);
   }
 

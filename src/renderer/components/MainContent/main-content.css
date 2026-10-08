@@ -3964,29 +3964,40 @@
   background: transparent;
 }
 
-.collab-agent-icon {
-  flex-shrink: 0;
+.collab-lines-glyphs {
   display: inline-flex;
   align-items: center;
-  margin-right: 6px;
-  color: var(--color-text-muted);
+  gap: 4px;
 }
 
 .collab-agent-status-text {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 13px;
   min-width: 0;
 }
 
 .collab-agent-name {
+  flex-shrink: 0;
+  max-width: 45%;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
   color: var(--color-text-secondary);
+}
+
+/* Latest step of a running agent, e.g. "grep done" — quiet, one line. */
+.collab-agent-activity {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .collab-agent-state {
@@ -4013,7 +4024,7 @@
 }
 
 .collab-agent-state-running {
-  color: color-mix(in srgb, var(--color-warning, #f59e0b) 70%, var(--color-text-secondary));
+  color: #3b82f6;
 }
 
 .collab-agent-state-pending {
@@ -4216,28 +4227,67 @@
   cursor: not-allowed;
 }
 
-/* Collaborative Summary Panel — chronological timeline */
-.collaborative-summary-panel {
-  padding: 20px 24px;
+/* --- Sub-agent glyphs --------------------------------------------------
+   Colorful per-agent marks shared by transcript rows, composer agent lines
+   and the agent sidebar. Running agents turn slowly. */
+.agent-glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.agent-glyph svg {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.12));
+}
+
+.agent-glyph.is-working svg {
+  animation: agent-glyph-turn 5.5s linear infinite;
+}
+
+@keyframes agent-glyph-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-glyph.is-working svg {
+    animation: none;
+  }
+}
+
+/* --- Sub-agent lifecycle rows ------------------------------------------
+   "Anansi, Ares and 2 more started working" / "… finished": one quiet line
+   in the same voice as the "Read files, ran commands" activity rows. */
+.agent-lifecycle-event {
+  font-family: var(--font-ui);
+  padding: 2px 0;
+}
+
+.agent-roster {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  font-family: var(--font-ui);
+  min-width: 0;
 }
 
 .agent-roster-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
   padding: 4px 0;
   margin: 0;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 400;
   text-align: left;
 }
 
@@ -4247,150 +4297,265 @@
   transition: color 0.15s ease;
 }
 
-.agent-roster-row.expandable:hover {
-  color: var(--color-text-primary);
+.agent-roster-row.expandable:hover,
+.agent-roster.expanded > .agent-roster-row {
+  color: var(--color-text-secondary);
+}
+
+.agent-roster-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .agent-roster-glyphs {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
-.agent-roster-glyph {
-  display: inline-flex;
-  align-items: center;
-}
-
 .agent-roster-text {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.agent-roster-failed .agent-roster-text {
+  color: var(--color-error, #ef4444);
+  opacity: 0.85;
+}
+
 .agent-roster-chevron {
   flex-shrink: 0;
   color: var(--color-text-muted);
-  transition: transform 0.2s ease;
+  opacity: 0;
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.15s ease;
   transform: rotate(-90deg);
+}
+
+.agent-roster-row:hover .agent-roster-chevron,
+.agent-roster-row:focus-visible .agent-roster-chevron,
+.agent-roster-chevron.expanded {
+  opacity: 1;
 }
 
 .agent-roster-chevron.expanded {
   transform: rotate(0deg);
 }
 
-.collab-summary-heading-row {
+.agent-roster-details {
+  margin: 2px 0 6px 7px;
+  padding-left: 14px;
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.agent-lifecycle-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-lifecycle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  margin-left: -8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  text-align: left;
+}
+
+button.agent-lifecycle-item {
+  cursor: pointer;
+}
+
+button.agent-lifecycle-item:hover {
+  background: var(--color-bg-hover, rgba(127, 127, 127, 0.08));
+}
+
+.agent-lifecycle-item-name {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.agent-lifecycle-item-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.agent-lifecycle-item-open {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+button.agent-lifecycle-item:hover .agent-lifecycle-item-open {
+  opacity: 1;
+}
+
+.agent-status-chip {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 16px;
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--color-text-muted);
+}
+
+.agent-status-running {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
+.agent-status-done {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--color-success, #10b981);
+}
+
+.agent-status-failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--color-error, #ef4444);
+}
+
+.agent-status-paused {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--color-warning, #d97706);
+}
+
+/* --- Collaborative / multi-LLM run --------------------------------------
+   Same transcript voice: plan as prose, glyph lines for agents starting and
+   ending, each agent's thoughts under its glyph, then the synthesis. */
+.collaborative-summary-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: var(--font-ui);
+}
+
+.collab-summary-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collab-timeline-strategic {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+}
+
+.collab-timeline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.collab-timeline-status svg {
+  flex-shrink: 0;
+}
+
+.collab-timeline-thought {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+}
+
+.collab-timeline-thought-head {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.collab-summary-done-badge {
-  flex-shrink: 0;
-  color: var(--color-success, #10b981);
-}
-
-.collab-summary-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-left: 4px;
-}
-
-.collab-timeline-strategic {
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--color-text-secondary);
+.collab-timeline-thought-agent {
+  padding: 0;
+  border: none;
+  background: transparent;
   font-family: var(--font-ui);
-}
-
-.collab-timeline-spawn-header {
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--color-text-primary);
-  margin-top: 4px;
-  font-family: var(--font-ui);
+  text-align: left;
 }
 
-.collab-timeline-spawn {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--color-text-secondary);
-  padding-left: 12px;
-  font-family: var(--font-ui);
-}
-
-.collab-timeline-spawn-icon {
-  flex-shrink: 0;
-  color: var(--color-accent, #8b5cf6);
-}
-
-.collab-timeline-spawn-name {
-  font-weight: 500;
-  color: var(--color-accent, #8b5cf6);
+button.collab-timeline-thought-agent {
   cursor: pointer;
 }
 
-.collab-timeline-spawn-name:hover {
+button.collab-timeline-thought-agent:hover {
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
-.collab-timeline-spawn-desc {
-  color: var(--color-text-muted);
+.collab-timeline-thought-content.markdown-content {
+  padding-left: 22px;
+  font-family: var(--font-ui);
 }
 
-.collab-timeline-spawn-name.collab-timeline-spawn-synthesis {
-  cursor: default;
+.collab-timeline-thought-error .collab-timeline-thought-content {
+  color: var(--color-error, #ef4444);
 }
 
-.collab-timeline-spawn-name.collab-timeline-spawn-synthesis:hover {
-  text-decoration: none;
+.collab-timeline-thought-content.markdown-content p {
+  margin: 0 0 4px;
 }
 
-/* Inline markdown in spawn descriptions — headings render as bold, not block */
-.collab-timeline-spawn-desc .markdown-inline h1,
-.collab-timeline-spawn-desc .markdown-inline h2,
-.collab-timeline-spawn-desc .markdown-inline h3,
-.collab-timeline-spawn-desc .markdown-inline h4,
-.collab-timeline-spawn-desc .markdown-inline h5,
-.collab-timeline-spawn-desc .markdown-inline h6 {
-  display: inline;
-  font-size: inherit;
-  font-weight: 600;
-  margin: 0;
-}
-
-.collab-timeline-spawn-desc .markdown-inline p {
-  display: inline;
-  margin: 0;
+.collab-timeline-thought-content.markdown-content p:last-child {
+  margin-bottom: 0;
 }
 
 .collab-summary-synthesis-output {
-  margin-top: 12px;
-  padding: 16px;
-  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.04));
-  border-radius: 10px;
-  border-left: 4px solid var(--color-success, #10b981);
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .collab-summary-synthesis-heading {
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-success, #10b981);
-  margin-bottom: 10px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
 }
 
 .collab-summary-synthesis-content {
   font-size: 14px;
   line-height: 1.6;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   font-family: var(--font-ui);
 }
 
@@ -4402,75 +4567,13 @@
   margin-bottom: 0;
 }
 
-.collab-timeline-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--color-text-muted);
-}
-
-.collab-timeline-status svg {
-  flex-shrink: 0;
-}
-
-.collab-timeline-status-done {
-  color: var(--color-success, #10b981);
-  font-weight: 500;
-}
-
-.collab-timeline-thought {
-  display: block;
-  padding: 8px 14px;
-  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.03));
-  border-radius: 0 8px 8px 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-text-secondary);
-  font-family: var(--font-ui);
-}
-
-.collab-timeline-thought.collab-timeline-thought-error {
-  background: rgba(239, 68, 68, 0.08);
-}
-
-.collab-timeline-thought-agent {
-  display: block;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  margin-bottom: 4px;
-  opacity: 0.85;
-}
-
-.collab-timeline-thought-content.markdown-content {
-  font-family: var(--font-ui);
-}
-
-.collab-timeline-thought-content.markdown-content p {
-  margin: 0 0 4px;
-}
-
-.collab-timeline-thought-content.markdown-content p:last-child {
-  margin-bottom: 0;
-}
-
 .collab-summary-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.03));
+  padding: 4px 0;
   font-size: 13px;
-  font-weight: 500;
   color: var(--color-text-muted);
-}
-
-.collab-summary-status.collab-summary-status-active {
-  background: rgba(139, 92, 246, 0.08);
-  color: var(--color-accent, #8b5cf6);
 }
 
 .collab-summary-status svg {
@@ -4479,27 +4582,27 @@
 
 .collab-summary-wrap-up-btn {
   margin-left: auto;
-  padding: 6px 14px;
-  border-radius: 20px;
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  background: linear-gradient(180deg, rgba(217, 119, 6, 0.25) 0%, rgba(180, 83, 9, 0.2) 100%);
-  color: var(--color-warning, #fbbf24);
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition:
     background 0.15s,
-    border-color 0.15s;
+    color 0.15s;
 }
 
 .collab-summary-wrap-up-btn:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(217, 119, 6, 0.35) 0%, rgba(180, 83, 9, 0.3) 100%);
-  border-color: rgba(245, 158, 11, 0.6);
+  background: var(--color-bg-hover, rgba(127, 127, 127, 0.08));
+  color: var(--color-text-primary);
 }
 
 .collab-summary-wrap-up-btn.active,
 .collab-summary-wrap-up-btn:disabled {
-  opacity: 0.7;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
@@ -4508,12 +4611,9 @@
 }
 
 /* Collaborative Thoughts in main content area */
+/* The collaborative run reads as part of the transcript, not a framed card. */
 .collaborative-thoughts-main {
-  margin: 16px 0;
-  border-radius: 12px;
-  background: var(--color-bg-secondary, #1a1a2e);
-  border: 1px solid var(--color-border, #333);
-  overflow: hidden;
+  margin: 8px 0;
   font-family: var(--font-ui);
 }
 

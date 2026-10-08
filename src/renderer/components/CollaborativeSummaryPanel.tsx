@@ -1,24 +1,32 @@
 /**
  * CollaborativeSummaryPanel
  *
- * Chronological timeline view for collaborative runs. Shows strategic plan,
- * spawning steps, progress thoughts, and status updates in order — not just
- * the final result.
+ * Chronological view of a collaborative or multi-LLM run, in the same voice as
+ * the rest of the transcript: the coordinator's plan as prose, one glyph line
+ * when the agents start ("Anansi, Ares and 2 more started working") and when
+ * they end, each agent's thoughts under its own colorful glyph, then the
+ * synthesis.
  */
 
 import { useEffect, useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { Loader2, Check } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { Task, AgentTeamRun, AgentThought, AgentTeamItem } from "../../shared/types";
 import type { TaskEvent } from "../../shared/types";
-import { SYNTHESIS_TASK_TITLE, isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
+import { isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { normalizeMarkdownForCollab, fixUnclosedBold } from "../utils/markdown-inline-lists";
-import { replaceEmojisInChildren, stripLeadingEmoji } from "../utils/emoji-replacer";
-import { resolveTwinIcon } from "../utils/twin-icons";
-import { AgentRosterRow, type AgentRosterEntry } from "./timeline/AgentRosterRow";
+import { replaceEmojisInChildren } from "../utils/emoji-replacer";
+import { AgentGlyph } from "./AgentGlyph";
+import { AgentLifecycleRow } from "./timeline/AgentLifecycleRow";
+import { getAgentGlyphForSeed, type AgentGlyphSpec } from "../utils/agent-glyphs";
+import {
+  buildAgentLifecycleRows,
+  resolveAgentDisplayName,
+  type AgentLifecycleRow as AgentLifecycleRowModel,
+} from "../utils/agent-lifecycle-rows";
 
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
@@ -27,16 +35,7 @@ function truncate(str: string, maxLen: number): string {
 
 type TimelineEntry =
   | { kind: "strategic"; id: string; content: string; ts: number }
-  | { kind: "spawn_header"; id: string; count: number; ts: number }
-  | {
-      kind: "spawn";
-      id: string;
-      title: string;
-      description: string;
-      taskId: string | null;
-      icon?: string;
-      ts: number;
-    }
+  | { kind: "lifecycle"; id: string; row: AgentLifecycleRowModel; ts: number }
   | { kind: "status"; id: string; label: string; ts: number }
   | { kind: "thought"; id: string; thought: AgentThought; ts: number };
 
@@ -44,6 +43,8 @@ interface CollaborativeSummaryPanelProps {
   collaborativeRun: AgentTeamRun;
   childTasks: Task[];
   childEvents?: TaskEvent[];
+  /** Glyph per child task id, shared with the composer lines and agent sidebar. */
+  agentGlyphs: Map<string, AgentGlyphSpec>;
   userPrompt?: string;
   onSelectChildTask?: (taskId: string) => void;
   onOpenChildAgentSidebar?: (taskId: string) => void;
@@ -57,6 +58,7 @@ export function CollaborativeSummaryPanel({
   collaborativeRun,
   childTasks,
   childEvents = [],
+  agentGlyphs,
   userPrompt,
   onSelectChildTask,
   onOpenChildAgentSidebar,
@@ -67,27 +69,11 @@ export function CollaborativeSummaryPanel({
   const [teamItems, setTeamItems] = useState<AgentTeamItem[]>([]);
   const [thoughts, setThoughts] = useState<AgentThought[]>([]);
   const [phase, setPhase] = useState<string>(collaborativeRun.phase || "dispatch");
-  const [spawnEvents, setSpawnEvents] = useState<Array<{ item: AgentTeamItem; ts: number }>>([]);
-  const [expanded, setExpanded] = useState(true);
-  const [agentRoles, setAgentRoles] = useState<Map<string, { icon?: string; color?: string }>>(
-    new Map(),
-  );
 
   useEffect(() => {
     window.electronAPI
       .listTeamItems(collaborativeRun.id)
-      .then((items: AgentTeamItem[]) => {
-        setTeamItems(items);
-        // Seed spawn events from items with sourceTaskId (when we load after spawns already happened)
-        // Use createdAt (spawn time), not updatedAt (last-modified time), to preserve creation order.
-        setSpawnEvents((prev) => {
-          if (prev.length > 0) return prev;
-          return items
-            .filter((i) => i.sourceTaskId)
-            .map((i) => ({ item: i, ts: i.createdAt ?? i.updatedAt }))
-            .sort((a, b) => a.ts - b.ts);
-        });
-      })
+      .then((items: AgentTeamItem[]) => setTeamItems(items))
       .catch(() => {});
   }, [collaborativeRun.id]);
 
@@ -113,20 +99,21 @@ export function CollaborativeSummaryPanel({
         type?: string;
         run?: { id: string; phase?: string };
         item?: AgentTeamItem;
-        timestamp?: number;
       }) => {
         if (event.run?.id === collaborativeRun.id && event.run?.phase) {
           setPhase(event.run.phase);
         }
         if (
-          event.type === "team_item_spawned" &&
+          (event.type === "team_item_spawned" || event.type === "team_item_updated") &&
           event.item &&
           event.runId === collaborativeRun.id
         ) {
-          setSpawnEvents((prev) => {
-            const ts = (event as { timestamp?: number }).timestamp ?? Date.now();
-            if (prev.some((e) => e.item.id === event.item!.id)) return prev;
-            return [...prev, { item: event.item!, ts }];
+          setTeamItems((prev) => {
+            const index = prev.findIndex((item) => item.id === event.item!.id);
+            if (index === -1) return [...prev, event.item!];
+            const next = [...prev];
+            next[index] = event.item!;
+            return next;
           });
         }
       },
@@ -137,72 +124,30 @@ export function CollaborativeSummaryPanel({
     };
   }, [collaborativeRun.id]);
 
-  useEffect(() => {
-    window.electronAPI
-      .getAgentRoles(false)
-      .then((roles: Array<{ id: string; icon?: string; color?: string }>) => {
-        const map = new Map<string, { icon?: string; color?: string }>();
-        for (const r of roles) map.set(r.id, { icon: r.icon, color: r.color });
-        setAgentRoles(map);
-      })
-      .catch(() => {});
-  }, []);
+  // The synthesis agent's output is shown below as the run's answer, not as a team member.
+  const memberTasks = useMemo(
+    () => childTasks.filter((task) => !isSynthesisChildTask(task)),
+    [childTasks],
+  );
+  const childTasksById = useMemo(
+    () => new Map(childTasks.map((task) => [task.id, task])),
+    [childTasks],
+  );
+  const plannedCount = Math.max(teamItems.length, memberTasks.length);
 
-  const childByTaskId = new Map(childTasks.map((t) => [t.id, t]));
-  const taskToRoleId = new Map<string, string>();
-  for (const item of teamItems) {
-    if (item.sourceTaskId && item.ownerAgentRoleId)
-      taskToRoleId.set(item.sourceTaskId, item.ownerAgentRoleId);
-  }
-  const spawnItems = teamItems.map((item) => {
-    const childTask = item.sourceTaskId ? childByTaskId.get(item.sourceTaskId) : null;
-    return {
-      id: item.id,
-      title: item.title,
-      description: item.description || childTask?.prompt || "",
-      taskId: item.sourceTaskId || null,
-      // Use createdAt (spawn time) for ordering, not updatedAt (last-modified time)
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    };
-  });
-
-  const displayItems =
-    spawnItems.length > 0
-      ? spawnItems
-      : childTasks.map((t) => ({
-          id: t.id,
-          title: t.title,
-          description: t.prompt || "",
-          taskId: t.id,
-          updatedAt: t.updatedAt ?? t.createdAt ?? 0,
-        }));
-
-  const completedCount = childTasks.filter(
+  const terminalCount = memberTasks.filter(
     (t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled",
   ).length;
-  const workingCount = childTasks.filter(
+  const workingCount = memberTasks.filter(
     (t) => t.status === "executing" || t.status === "planning" || t.status === "interrupted",
   ).length;
-  const allDone = completedCount === childTasks.length && childTasks.length > 0;
+  const allDone = memberTasks.length > 0 && terminalCount === memberTasks.length;
 
-  const rosterAgents: AgentRosterEntry[] = displayItems.map((item) => {
-    const roleId = item.taskId ? taskToRoleId.get(item.taskId) : undefined;
-    const role = roleId ? agentRoles.get(roleId) : undefined;
-    return {
-      id: item.id,
-      name: item.title,
-      icon: role?.icon,
-      color: role?.color,
-    };
-  });
-
-  // Build chronological timeline
   const timeline = useMemo(() => {
     const entries: TimelineEntry[] = [];
     const runStart = collaborativeRun.startedAt ?? 0;
 
-    // 1. Strategic intro (from first dispatch thought or generated)
+    // 1. The coordinator's plan, as prose.
     const strategicThought = thoughts.find(
       (t) =>
         t.phase === "dispatch" &&
@@ -216,314 +161,188 @@ export function CollaborativeSummaryPanel({
         content: strategicThought.content,
         ts: strategicThought.createdAt,
       });
-    } else if (userPrompt && displayItems.length > 0) {
+    } else if (userPrompt && plannedCount > 0) {
       entries.push({
         kind: "strategic",
         id: "strategic-generated",
-        content: `Coordinating ${displayItems.length} agents to ${truncate(userPrompt, 80)}.`,
+        content: `Coordinating ${plannedCount} agents to ${truncate(userPrompt, 80)}.`,
         ts: runStart,
       });
     }
 
-    // 2 & 3. Spawn header and items — use child task createdAt when available (actual spawn time)
-    const childByTaskId = new Map(childTasks.map((t) => [t.id, t]));
-    const spawnOrder = displayItems
-      .map((d) => {
-        const childTask = d.taskId ? childByTaskId.get(d.taskId) : null;
-        const roleId =
-          childTask?.assignedAgentRoleId ?? (d.taskId ? taskToRoleId.get(d.taskId) : undefined);
-        const role = roleId ? agentRoles.get(roleId) : undefined;
-        const ts =
-          spawnEvents.length > 0
-            ? spawnEvents.find((e) => e.item.id === d.id || e.item.sourceTaskId === d.taskId)?.ts
-            : (childTask?.createdAt ??
-              childTask?.updatedAt ??
-              (d as { createdAt?: number }).createdAt ??
-              d.updatedAt);
-        return {
-          id: d.id,
-          title: d.title,
-          description: d.description,
-          taskId: d.taskId,
-          icon: role?.icon,
-          // Fall back to createdAt before updatedAt so ordering reflects spawn time, not last-modified
-          ts: ts ?? (d as { createdAt?: number }).createdAt ?? d.updatedAt,
-        };
-      })
-      .filter((s) => s.ts != null && s.ts > 0)
-      .sort((a, b) => a.ts - b.ts);
-
-    const spawnTs = spawnOrder.length > 0 ? Math.min(...spawnOrder.map((s) => s.ts)) : runStart;
-    entries.push({
-      kind: "spawn_header",
-      id: "spawn-header",
-      count: displayItems.length,
-      ts: Math.max(0, spawnTs - 1),
-    });
-
-    for (const s of spawnOrder) {
-      entries.push({
-        kind: "spawn",
-        id: `spawn-${s.id}`,
-        title: s.title,
-        description: s.description,
-        taskId: s.taskId,
-        icon: s.icon,
-        ts: s.ts,
-      });
+    // 2. Glyph lines where agents started and where they ended.
+    const lifecycleRows = buildAgentLifecycleRows(memberTasks);
+    for (const row of lifecycleRows) {
+      entries.push({ kind: "lifecycle", id: row.id, row, ts: row.timestamp });
     }
+    const firstStartTs = lifecycleRows[0]?.timestamp ?? runStart;
 
-    // 4. Status indicator based on current phase
-    if (phase === "dispatch") {
-      entries.push({
-        kind: "status",
-        id: "status-thinking",
-        label: "Planning...",
-        ts: spawnTs + 100,
-      });
-    } else if (phase === "think" || phase === "execute") {
-      entries.push({
-        kind: "status",
-        id: "status-thinking",
-        label: "Agents are executing...",
-        ts: spawnTs + 100,
-      });
-    }
-
-    // 5. Thoughts (chronological)
+    // 3. Each agent's thoughts, in order.
     for (const t of thoughts) {
+      if (t === strategicThought) continue;
       if (t.phase === "synthesis" || t.content.length > 50) {
-        entries.push({
-          kind: "thought",
-          id: t.id,
-          thought: t,
-          ts: t.createdAt,
-        });
+        entries.push({ kind: "thought", id: t.id, thought: t, ts: t.createdAt });
       }
     }
 
-    // 6. Status: "Sub-agents working..." (when we have thoughts and agents running)
-    if (workingCount > 0 && thoughts.length > 0) {
-      const lastThoughtTs = thoughts.length > 0 ? Math.max(...thoughts.map((t) => t.createdAt)) : 0;
-      if (!entries.some((e) => e.kind === "status" && e.id === "status-working")) {
-        entries.push({
-          kind: "status",
-          id: "status-working",
-          label: "Sub-agents working...",
-          ts: lastThoughtTs + 1,
-        });
-      }
-    }
-
-    // 7. Status: "Synthesizing..." (when phase=synthesize)
+    // 4. A live status line while the run is in flight.
     if (phase === "synthesize") {
+      entries.push({ kind: "status", id: "status-synthesize", label: "Synthesizing", ts: Date.now() });
+    } else if (memberTasks.length === 0 && !mainTaskCompleted) {
       entries.push({
         kind: "status",
-        id: "status-synthesize",
-        label: "Synthesizing...",
-        ts: Date.now(),
-      });
-    }
-
-    // 8. Status: "All N agents completed" (when done)
-    if (allDone) {
-      entries.push({
-        kind: "status",
-        id: "status-complete",
-        label: `All ${childTasks.length} agents completed`,
-        ts: collaborativeRun.completedAt ?? Date.now(),
+        id: "status-dispatch",
+        label: plannedCount > 0 ? `Starting ${plannedCount} agents` : "Planning",
+        ts: firstStartTs + 1,
       });
     }
 
     return entries.sort((a, b) => a.ts - b.ts);
   }, [
     thoughts,
-    displayItems,
-    spawnEvents,
-    teamItems,
-    agentRoles,
-    childTasks,
+    memberTasks,
+    plannedCount,
     phase,
-    workingCount,
-    allDone,
     userPrompt,
+    mainTaskCompleted,
     collaborativeRun.startedAt,
-    collaborativeRun.completedAt,
-    childTasks.length,
   ]);
 
   const isErrorLike = (text: string) =>
     /unable|error|failed|cannot|no team member|not provided/i.test(text);
   const openChildAgent = onOpenChildAgentSidebar ?? onSelectChildTask;
 
+  const glyphForThought = (thought: AgentThought): AgentGlyphSpec => {
+    const taskId =
+      thought.sourceTaskId ??
+      teamItems.find((item) => item.id === thought.teamItemId)?.sourceTaskId ??
+      undefined;
+    return (
+      (taskId ? agentGlyphs.get(taskId) : undefined) ??
+      getAgentGlyphForSeed(thought.agentRoleId || thought.agentDisplayName)
+    );
+  };
+
+  const synthesisOutput = (() => {
+    const synthesisTask = childTasks.find((t) => isSynthesisChildTask(t));
+    if (!synthesisTask) return null;
+    const lastAssistant = [...childEvents]
+      .reverse()
+      .find(
+        (e) => e.taskId === synthesisTask.id && getEffectiveTaskEventType(e) === "assistant_message",
+      );
+    return (
+      synthesisTask.resultSummary?.trim() ||
+      (lastAssistant?.payload as { message?: string } | undefined)?.message?.trim() ||
+      null
+    );
+  })();
+
+  const isMultiLlm = collaborativeRun.multiLlmMode === true;
+  const agentNoun = isMultiLlm ? "Models" : "Agents";
+
   return (
     <div className="collaborative-summary-panel">
-      <div className="collab-summary-heading-row">
-        <AgentRosterRow
-          agents={rosterAgents}
-          state={allDone ? "finished" : "working"}
-          expandable
-          expanded={expanded}
-          onToggle={() => setExpanded(!expanded)}
-        />
-        {allDone && <Check className="collab-summary-done-badge" size={18} strokeWidth={2.5} />}
+      <div className="collab-summary-timeline">
+        {timeline.map((entry) => {
+          if (entry.kind === "strategic") {
+            return (
+              <div key={entry.id} className="collab-timeline-strategic">
+                {entry.content}
+              </div>
+            );
+          }
+          if (entry.kind === "lifecycle") {
+            const rowTasks = entry.row.taskIds
+              .map((taskId) => childTasksById.get(taskId))
+              .filter((task): task is Task => Boolean(task));
+            return (
+              <AgentLifecycleRow
+                key={entry.id}
+                row={entry.row}
+                tasks={rowTasks}
+                glyphs={agentGlyphs}
+                onOpenAgent={openChildAgent}
+              />
+            );
+          }
+          if (entry.kind === "status") {
+            return (
+              <div key={entry.id} className="collab-timeline-status">
+                <Loader2 className="collab-summary-spinner" size={13} strokeWidth={2.5} />
+                <span>{entry.label}</span>
+              </div>
+            );
+          }
+          const err = isErrorLike(entry.thought.content);
+          const content = fixUnclosedBold(
+            truncate(normalizeMarkdownForCollab(entry.thought.content), 300),
+          );
+          const thoughtTaskId = entry.thought.sourceTaskId;
+          const canOpen = Boolean(openChildAgent && thoughtTaskId && childTasksById.has(thoughtTaskId));
+          return (
+            <div
+              key={entry.id}
+              className={`collab-timeline-thought ${err ? "collab-timeline-thought-error" : ""}`}
+            >
+              <div className="collab-timeline-thought-head">
+                <AgentGlyph glyph={glyphForThought(entry.thought)} size={14} />
+                {canOpen ? (
+                  <button
+                    type="button"
+                    className="collab-timeline-thought-agent"
+                    onClick={() => openChildAgent?.(thoughtTaskId!)}
+                  >
+                    {resolveAgentDisplayName(entry.thought.agentDisplayName)}
+                  </button>
+                ) : (
+                  <span className="collab-timeline-thought-agent">
+                    {resolveAgentDisplayName(entry.thought.agentDisplayName)}
+                  </span>
+                )}
+              </div>
+              <div className="collab-timeline-thought-content markdown-content">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
+                  components={{
+                    p: ({ children }) => <p>{replaceEmojisInChildren(children, 14)}</p>,
+                    li: ({ children }) => <li>{replaceEmojisInChildren(children, 14)}</li>,
+                  }}
+                >
+                  {content}
+                </ReactMarkdown>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {expanded && (
-        <div className="collab-summary-timeline">
-          {timeline.map((entry) => {
-            if (entry.kind === "strategic") {
-              return (
-                <div key={entry.id} className="collab-timeline-strategic">
-                  {entry.content}
-                </div>
-              );
-            }
-            if (entry.kind === "spawn_header") {
-              return (
-                <div key={entry.id} className="collab-timeline-spawn-header">
-                  Spawning {entry.count} agent{entry.count !== 1 ? "s" : ""}
-                </div>
-              );
-            }
-            if (entry.kind === "spawn") {
-              const SpawnIcon = resolveTwinIcon(entry.icon || "🤖");
-              return (
-                <div key={entry.id} className="collab-timeline-spawn">
-                  <span className="collab-timeline-spawn-icon">
-                    <SpawnIcon size={14} strokeWidth={1.5} />
-                  </span>
-                  <span className="collab-timeline-spawn-body">
-                    <span
-                      className={`collab-timeline-spawn-name ${entry.title === SYNTHESIS_TASK_TITLE ? "collab-timeline-spawn-synthesis" : ""}`}
-                      onClick={() =>
-                        entry.taskId &&
-                        entry.title !== SYNTHESIS_TASK_TITLE &&
-                        openChildAgent?.(entry.taskId)
-                      }
-                      role={
-                        openChildAgent && entry.taskId && entry.title !== SYNTHESIS_TASK_TITLE
-                          ? "button"
-                          : undefined
-                      }
-                    >
-                      Created {stripLeadingEmoji(entry.title)}
-                    </span>
-                    <span className="collab-timeline-spawn-desc">
-                      {" "}
-                      with the instructions:{" "}
-                      <span className="markdown-content markdown-inline">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm, remarkBreaks]}
-                          components={{
-                            p: ({ children }) => <>{replaceEmojisInChildren(children, 12)}</>,
-                            li: ({ children }) => <>{replaceEmojisInChildren(children, 12)}</>,
-                          }}
-                        >
-                          {fixUnclosedBold(
-                            truncate(normalizeMarkdownForCollab(entry.description), 150),
-                          )}
-                        </ReactMarkdown>
-                      </span>
-                    </span>
-                  </span>
-                </div>
-              );
-            }
-            if (entry.kind === "status") {
-              const isComplete = entry.id === "status-complete";
-              return (
-                <div
-                  key={entry.id}
-                  className={`collab-timeline-status ${isComplete ? "collab-timeline-status-done" : ""}`}
-                >
-                  {isComplete ? (
-                    <Check size={14} strokeWidth={2.5} />
-                  ) : entry.id === "status-thinking" || entry.id === "status-synthesize" ? (
-                    <Loader2 className="collab-summary-spinner" size={14} strokeWidth={2.5} />
-                  ) : null}
-                  <span>{entry.label}</span>
-                </div>
-              );
-            }
-            if (entry.kind === "thought") {
-              const err = isErrorLike(entry.thought.content);
-              const content = fixUnclosedBold(
-                truncate(normalizeMarkdownForCollab(entry.thought.content), 300),
-              );
-              return (
-                <div
-                  key={entry.id}
-                  className={`collab-timeline-thought ${err ? "collab-timeline-thought-error" : ""}`}
-                  style={{ borderLeftColor: entry.thought.agentColor }}
-                >
-                  <span
-                    className="collab-timeline-thought-agent"
-                    style={{ color: entry.thought.agentColor }}
-                  >
-                    {entry.thought.agentDisplayName}
-                  </span>
-                  <div className="collab-timeline-thought-content markdown-content">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkBreaks]}
-                      components={{
-                        p: ({ children }) => <p>{replaceEmojisInChildren(children, 14)}</p>,
-                        li: ({ children }) => <li>{replaceEmojisInChildren(children, 14)}</li>,
-                      }}
-                    >
-                      {content}
-                    </ReactMarkdown>
-                  </div>
-                </div>
-              );
-            }
-            return null;
-          })}
-        </div>
-      )}
-
-      {/* Synthesis output — shown in main view (no separate window) */}
-      {(() => {
-        const synthesisTask = childTasks.find((t) => isSynthesisChildTask(t));
-        if (!synthesisTask) return null;
-        const synthesisEvents = childEvents.filter((e) => e.taskId === synthesisTask.id);
-        const lastAssistant = [...synthesisEvents]
-          .reverse()
-          .find((e) => getEffectiveTaskEventType(e) === "assistant_message");
-        const synthesisOutput =
-          synthesisTask.resultSummary?.trim() ||
-          (lastAssistant?.payload as { message?: string } | undefined)?.message?.trim();
-        if (!synthesisOutput) return null;
-        return (
-          <div className="collab-summary-synthesis-output">
-            <div className="collab-summary-synthesis-heading">Synthesis</div>
-            <div className="collab-summary-synthesis-content markdown-content">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkBreaks]}
-                components={{
-                  p: ({ children }) => <p>{replaceEmojisInChildren(children, 14)}</p>,
-                  li: ({ children }) => <li>{replaceEmojisInChildren(children, 14)}</li>,
-                }}
-              >
-                {normalizeMarkdownForCollab(synthesisOutput)}
-              </ReactMarkdown>
-            </div>
+      {synthesisOutput ? (
+        <div className="collab-summary-synthesis-output">
+          <div className="collab-summary-synthesis-heading">Synthesis</div>
+          <div className="collab-summary-synthesis-content markdown-content">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkBreaks]}
+              components={{
+                p: ({ children }) => <p>{replaceEmojisInChildren(children, 14)}</p>,
+                li: ({ children }) => <li>{replaceEmojisInChildren(children, 14)}</li>,
+              }}
+            >
+              {normalizeMarkdownForCollab(synthesisOutput)}
+            </ReactMarkdown>
           </div>
-        );
-      })()}
+        </div>
+      ) : null}
 
-      {/* Live status — spinner, "Agents are working...", Wrap Up — until main task completes */}
-      {!mainTaskCompleted && (
-        <div className="collab-summary-status collab-summary-status-active">
-          {!allDone && <Loader2 className="collab-summary-spinner" size={16} strokeWidth={2.5} />}
+      {!mainTaskCompleted && (workingCount > 0 || allDone || isWrappingUp) ? (
+        <div className="collab-summary-status">
+          <Loader2 className="collab-summary-spinner" size={13} strokeWidth={2.5} />
           <span>
             {isWrappingUp
-              ? "Wrapping up..."
+              ? "Wrapping up"
               : allDone
-                ? "Finalizing..."
-                : phase === "dispatch" && displayItems.length === 0
-                  ? "Dispatching agents..."
-                  : "Agents are working..."}
+                ? "Finalizing"
+                : `${workingCount} of ${memberTasks.length} ${agentNoun.toLowerCase()} working`}
           </span>
           {onWrapUp && (
             <button
@@ -536,7 +355,7 @@ export function CollaborativeSummaryPanel({
             </button>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

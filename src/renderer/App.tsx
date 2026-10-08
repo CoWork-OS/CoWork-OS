@@ -2258,7 +2258,7 @@ export function App() {
   const botConversationTasksRef = useRef<Task[]>([]);
   botConversationTasksRef.current = botConversationTasks;
 
-  // Child tasks dispatched from the selected parent task (for DispatchedAgentsPanel)
+  // Child tasks dispatched from the selected parent task (for sub-agent lifecycle rows and the agent sidebar)
   const childTasks = useMemo(() => {
     if (!selectedTaskId) return [];
     return tasks.filter((t) => t.parentTaskId === selectedTaskId && t.agentType === "sub");
@@ -4881,7 +4881,7 @@ export function App() {
         }
       }
 
-      // Capture events from dispatched child tasks for DispatchedAgentsPanel / CliAgentFrame
+      // Capture events from dispatched child tasks for sub-agent lifecycle rows / CliAgentFrame
       if (!isSelectedTask && event.type !== "llm_streaming" && event.type !== "llm_usage") {
         if (childTaskIdsRef.current.has(event.taskId)) {
           setChildEvents((prev) =>

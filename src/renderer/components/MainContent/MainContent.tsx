@@ -120,7 +120,13 @@ import { UseCasesGallery } from "../UseCasesGallery";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
 import { RealWorkFeedback } from "../RealWorkFeedback";
 import { CollaborativeSummaryPanel } from "../CollaborativeSummaryPanel";
-import { DispatchedAgentsPanel } from "../DispatchedAgentsPanel";
+import { AgentLifecycleRow } from "../timeline/AgentLifecycleRow";
+import { assignAgentGlyphs } from "../../utils/agent-glyphs";
+import {
+  buildAgentLifecycleRows,
+  withoutCoveredAgentLifecycleEvents,
+  type AgentLifecycleRow as AgentLifecycleRowModel,
+} from "../../utils/agent-lifecycle-rows";
 import { CliAgentFrame } from "../CliAgentFrame";
 import { isCliAgentChildTask, resolveCliAgentType } from "../../../shared/cli-agent-detection";
 import { MultiLlmSelectionPanel } from "../MultiLlmSelectionPanel";
@@ -1511,6 +1517,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const onOpenSettings = props.onOpenSettings as ((tab?: SettingsTab) => void) | undefined;
   const childEvents = props.childEvents as TaskEvent[];
   const childTasks = props.childTasks as Task[];
+  const agentGlyphs = useMemo(() => assignAgentGlyphs(childTasks), [childTasks]);
+  const childTasksById = useMemo(
+    () => new Map(childTasks.map((childTask) => [childTask.id, childTask])),
+    [childTasks],
+  );
   const collaborativeRun = props.collaborativeRun as AgentTeamRun | null;
   const commandOutputSessionsByInsertIndex = props.commandOutputSessionsByInsertIndex as Map<
     number,
@@ -1782,7 +1793,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
             ? `cli-agent:${item.childTask.id}`
             : item.kind === "dispatched-agents"
               ? "dispatched-agents"
-              : item.kind === "action_block"
+              : item.kind === "agent-lifecycle"
+                ? `agent-lifecycle:${item.row.id}`
+                : item.kind === "action_block"
                 ? `action-block:${item.blockId}`
                 : `event:${item.event.id}`;
       if (item.kind === "event") {
@@ -1810,7 +1823,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               ? `${childTasks
                   .map((childTask) => `${childTask.id}:${childTask.status}`)
                   .join(",")}:${childEvents.length}:${collaborativeRun?.id ?? "none"}`
-              : item.kind === "action_block"
+              : item.kind === "agent-lifecycle"
+                ? `${item.row.id}:${(item.row.taskIds as string[])
+                    .map((taskId) => `${taskId}:${childTasksById.get(taskId)?.status ?? "none"}`)
+                    .join(",")}`
+                : item.kind === "action_block"
                 ? `${item.blockId}:${item.events.length}:${
                     item.events[item.events.length - 1]?.id ?? "none"
                   }:${item.eventIndices
@@ -1903,7 +1920,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         if (
           item.kind === "canvas" ||
           item.kind === "cli-agent-frame" ||
-          item.kind === "dispatched-agents"
+          item.kind === "dispatched-agents" ||
+          item.kind === "agent-lifecycle"
         ) {
           return !isConversationOnlySurface;
         }
@@ -2051,7 +2069,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               }
 
               const { item, timelineIndex } = row;
-              if (item.kind === "canvas" || item.kind === "cli-agent-frame") {
+              if (
+                item.kind === "canvas" ||
+                item.kind === "cli-agent-frame" ||
+                item.kind === "agent-lifecycle"
+              ) {
                 return row.revision;
               }
               if (item.kind === "dispatched-agents") {
@@ -2216,42 +2238,42 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 );
               }
 
-              if (item.kind === "dispatched-agents") {
+              if (item.kind === "agent-lifecycle") {
                 if (isConversationOnlySurface) return null;
-                // Collaborative runs own every child agent in the shared team-run surface.
-                const nonCliChildTasks = childTasks.filter((t) => !isCliAgentChildTask(t));
-                const panelTasks = collaborativeRun
-                  ? childTasks
-                  : nonCliChildTasks.length > 0
-                    ? nonCliChildTasks
-                    : childTasks;
-                const panelEvents = childEvents.filter((e) =>
-                  panelTasks.some((t) => t.id === e.taskId),
+                const lifecycleRow = item.row as AgentLifecycleRowModel;
+                const rowTasks = lifecycleRow.taskIds
+                  .map((taskId) => childTasksById.get(taskId))
+                  .filter((childTask): childTask is Task => Boolean(childTask));
+                return (
+                  <AgentLifecycleRow
+                    key={lifecycleRow.id}
+                    row={lifecycleRow}
+                    tasks={rowTasks}
+                    glyphs={agentGlyphs}
+                    onOpenAgent={onOpenChildAgentSidebar ?? onSelectChildTask}
+                  />
                 );
+              }
+
+              if (item.kind === "dispatched-agents") {
+                // Only collaborative and multi-LLM runs keep a single team-run surface; other
+                // sub-agents render as agent-lifecycle rows.
+                if (isConversationOnlySurface || !collaborativeRun) return null;
                 return (
                   <div key="dispatched-agents" className="collaborative-thoughts-main">
-                    {collaborativeRun ? (
-                      <CollaborativeSummaryPanel
-                        collaborativeRun={collaborativeRun}
-                        childTasks={panelTasks}
-                        childEvents={panelEvents}
-                        userPrompt={task?.rawPrompt || task?.userPrompt || task?.prompt}
-                        onSelectChildTask={onSelectChildTask}
-                        onOpenChildAgentSidebar={onOpenChildAgentSidebar}
-                        mainTaskCompleted={
-                          !!task && ["completed", "failed", "cancelled"].includes(task.status)
-                        }
-                        isWrappingUp={wrappingUp}
-                      />
-                    ) : (
-                      <DispatchedAgentsPanel
-                        parentTaskId={task!.id}
-                        childTasks={panelTasks}
-                        childEvents={panelEvents}
-                        onSelectChildTask={onSelectChildTask}
-                        onOpenChildAgentSidebar={onOpenChildAgentSidebar}
-                      />
-                    )}
+                    <CollaborativeSummaryPanel
+                      collaborativeRun={collaborativeRun}
+                      childTasks={childTasks}
+                      childEvents={childEvents}
+                      agentGlyphs={agentGlyphs}
+                      userPrompt={task?.rawPrompt || task?.userPrompt || task?.prompt}
+                      onSelectChildTask={onSelectChildTask}
+                      onOpenChildAgentSidebar={onOpenChildAgentSidebar}
+                      mainTaskCompleted={
+                        !!task && ["completed", "failed", "cancelled"].includes(task.status)
+                      }
+                      isWrappingUp={wrappingUp}
+                    />
                   </div>
                 );
               }
@@ -5542,6 +5564,9 @@ function MainContentComponent({
     };
   }, [events, guardrailDefaultMaxAutoContinuations, isTaskWorking, task]);
 
+  // One glyph per sub-agent, shared by the composer agent lines and transcript rows.
+  const composerAgentGlyphs = useMemo(() => assignAgentGlyphs(childTasks), [childTasks]);
+
   const latestCanvasSessionId = useMemo(() => {
     if (canvasSessions.length === 0) return null;
     const eligibleSessions = latestUserMessageTimestamp
@@ -5592,15 +5617,25 @@ function MainContentComponent({
         forceSnapshot: boolean;
       };
       type DispatchedItem = { kind: "dispatched-agents"; timestamp: number };
+      type AgentLifecycleItem = {
+        kind: "agent-lifecycle";
+        timestamp: number;
+        row: AgentLifecycleRowModel;
+      };
       type CliAgentFrameItem = {
         kind: "cli-agent-frame";
         timestamp: number;
         childTask: Task;
         childTaskEvents: TaskEvent[];
       };
-      type TimelineItem = BaseTimelineItem | CanvasItem | DispatchedItem | CliAgentFrameItem;
+      type TimelineItem =
+        | BaseTimelineItem
+        | CanvasItem
+        | DispatchedItem
+        | AgentLifecycleItem
+        | CliAgentFrameItem;
 
-      const eventItems = baseTimelineItems;
+      let eventItems: BaseTimelineItem[] = baseTimelineItems;
 
       const freezeBefore = latestUserMessageTimestamp;
       const canvasItems: CanvasItem[] = canvasSessions
@@ -5651,14 +5686,18 @@ function MainContentComponent({
             }
           }
 
-          if (nonCliChildTasks.length > 0 || cliChildTasks.length === 0) {
-            // Non-CLI child tasks (or if none are CLI) use the existing dispatched agents panel
-            const tasksForPanel = nonCliChildTasks.length > 0 ? nonCliChildTasks : childTasks;
-            const firstChildTimestamp = Math.min(...tasksForPanel.map((t) => t.createdAt));
-            specialItems.push({
-              kind: "dispatched-agents" as const,
-              timestamp: firstChildTimestamp,
-            });
+          if (nonCliChildTasks.length > 0) {
+            // Other sub-agents read as lifecycle rows at the moments they started and
+            // ended ("Anansi and 2 more started working" … "Anansi finished"), so the
+            // parent's own narration interleaves between them. Those rows replace the
+            // parent's per-agent "Created an agent" / "Agent finished" events.
+            for (const row of buildAgentLifecycleRows(nonCliChildTasks)) {
+              specialItems.push({ kind: "agent-lifecycle" as const, timestamp: row.timestamp, row });
+            }
+            eventItems = withoutCoveredAgentLifecycleEvents(
+              eventItems,
+              new Set(nonCliChildTasks.map((t) => t.id)),
+            );
           }
         }
       }
@@ -12285,6 +12324,7 @@ function MainContentComponent({
                 collaborativeRun={collaborativeRun}
                 childTasks={childTasks}
                 childEvents={childEvents}
+                agentGlyphs={composerAgentGlyphs}
                 onOpenAgent={(taskId) => (onOpenChildAgentSidebar ?? onSelectChildTask)?.(taskId)}
                 onShowAllAgents={
                   childTasks.length > 0 && (onOpenChildAgentSidebar || onSelectChildTask)

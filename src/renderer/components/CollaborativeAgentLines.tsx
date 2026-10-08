@@ -6,11 +6,16 @@
  * Matches the UX of "agents as lines over the input" with latest updates per agent.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Task, AgentTeamRun, AgentThought, TaskEvent } from "../../shared/types";
 import { isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
-import { resolveTwinIcon } from "../utils/twin-icons";
-import { stripLeadingEmoji } from "../utils/emoji-replacer";
+import { AgentGlyph } from "./AgentGlyph";
+import {
+  assignAgentGlyphs,
+  getAgentGlyphForSeed,
+  type AgentGlyphSpec,
+} from "../utils/agent-glyphs";
+import { resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
 
@@ -18,6 +23,8 @@ interface CollaborativeAgentLinesProps {
   collaborativeRun?: AgentTeamRun | null;
   childTasks: Task[];
   childEvents?: TaskEvent[];
+  /** Glyph per child task id, shared with the transcript rows and agent sidebar. */
+  agentGlyphs?: Map<string, AgentGlyphSpec>;
   onOpenAgent: (taskId: string) => void;
   onShowAllAgents?: () => void;
   onWrapUp?: () => void;
@@ -34,7 +41,7 @@ interface AgentLine {
   statusLabel: string;
   isStreaming: boolean;
   taskId: string | null; // null when not yet spawned
-  icon?: string;
+  glyph: AgentGlyphSpec;
   task?: Task | null;
 }
 
@@ -256,6 +263,7 @@ export function CollaborativeAgentLines({
   collaborativeRun,
   childTasks,
   childEvents = [],
+  agentGlyphs: providedAgentGlyphs,
   onOpenAgent,
   onShowAllAgents,
   onWrapUp,
@@ -263,6 +271,8 @@ export function CollaborativeAgentLines({
   mainTaskCompleted = false,
 }: CollaborativeAgentLinesProps) {
   const [streamingByAgent, setStreamingByAgent] = useState<Map<string, AgentThought>>(new Map());
+  const fallbackAgentGlyphs = useMemo(() => assignAgentGlyphs(childTasks), [childTasks]);
+  const agentGlyphs = providedAgentGlyphs ?? fallbackAgentGlyphs;
   const isMultiLlm = collaborativeRun?.multiLlmMode === true;
   const collaborativeRunId = collaborativeRun?.id ?? null;
 
@@ -278,7 +288,6 @@ export function CollaborativeAgentLines({
       icon?: string;
     }>
   >([]);
-  const [agentRoles, setAgentRoles] = useState<Map<string, { icon?: string }>>(new Map());
   useEffect(() => {
     if (!collaborativeRunId) {
       setTeamItems([]);
@@ -316,21 +325,6 @@ export function CollaborativeAgentLines({
       if (typeof unsub === "function") unsub();
     };
   }, [collaborativeRunId]);
-  useEffect(() => {
-    if (!collaborativeRunId) {
-      setAgentRoles(new Map());
-      return;
-    }
-    window.electronAPI
-      .getAgentRoles(false)
-      .then((roles: Array<{ id: string; icon?: string }>) => {
-        const map = new Map<string, { icon?: string }>();
-        for (const r of roles) map.set(r.id, { icon: r.icon });
-        setAgentRoles(map);
-      })
-      .catch(() => {});
-  }, [collaborativeRunId]);
-
   useEffect(() => {
     if (!collaborativeRunId) return;
     const unsub = window.electronAPI.onTeamThoughtEvent((event: Any) => {
@@ -376,7 +370,6 @@ export function CollaborativeAgentLines({
   for (const t of childTasks.slice().sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))) {
     const roleId = t.assignedAgentRoleId ?? taskToRole.get(t.id);
     const isStreaming = !!roleId && streamingByAgent.has(roleId);
-    const role = roleId ? agentRoles.get(roleId) : undefined;
     const status = getLatestStepLabel(t.id, childEvents, t, isStreaming);
     const statusKind = getAgentLineStatusKind(t, status, isStreaming);
     agentLines.push({
@@ -387,7 +380,7 @@ export function CollaborativeAgentLines({
       statusLabel: getAgentLineStatusLabel(statusKind, t),
       isStreaming,
       taskId: t.id,
-      icon: role?.icon,
+      glyph: agentGlyphs.get(t.id) ?? getAgentGlyphForSeed(t.id),
       task: t,
     });
   }
@@ -397,7 +390,6 @@ export function CollaborativeAgentLines({
     if (item.sourceTaskId && childByTaskId.has(item.sourceTaskId)) continue;
     const roleId = item.ownerAgentRoleId;
     const isStreaming = !!roleId && streamingByAgent.has(roleId);
-    const role = roleId ? agentRoles.get(roleId) : undefined;
     const status = getLatestStepLabel("", childEvents, null, isStreaming);
     const statusKind = getAgentLineStatusKind(null, status, isStreaming);
     agentLines.push({
@@ -408,7 +400,7 @@ export function CollaborativeAgentLines({
       statusLabel: getAgentLineStatusLabel(statusKind, null),
       isStreaming,
       taskId: item.sourceTaskId || null,
-      icon: role?.icon ?? item.icon,
+      glyph: getAgentGlyphForSeed(item.id),
       task: null,
     });
   }
@@ -439,6 +431,16 @@ export function CollaborativeAgentLines({
   return (
     <div className="collaborative-agent-lines">
       <div className="collab-lines-header">
+        <span className="collab-lines-glyphs" aria-hidden="true">
+          {agentLines.slice(0, 5).map((line) => (
+            <AgentGlyph
+              key={line.id}
+              glyph={line.glyph}
+              size={14}
+              working={line.statusKind === "running"}
+            />
+          ))}
+        </span>
         <span className="collab-lines-title">
           {agentLines.length} {isMultiLlm ? "models" : "background agents"}
         </span>
@@ -446,16 +448,16 @@ export function CollaborativeAgentLines({
         <span className="collab-lines-hint">@ to tag agents</span>
       </div>
       <div className="collab-lines-list">
-        {visibleAgentLines.map(({ id, title, status, statusKind, statusLabel, taskId, icon }) => (
+        {visibleAgentLines.map(({ id, title, status, statusKind, statusLabel, taskId, glyph }) => (
           <div key={id} className={`collab-agent-line collab-agent-line-${statusKind}`}>
             <span className="collab-agent-status-text">
-              <span className="collab-agent-icon">
-                {(() => {
-                  const Icon = resolveTwinIcon(icon || "🤖");
-                  return <Icon size={14} strokeWidth={1.5} />;
-                })()}
-              </span>
-              <span className="collab-agent-name">{stripLeadingEmoji(title)}</span>
+              <AgentGlyph glyph={glyph} size={14} working={statusKind === "running"} />
+              <span className="collab-agent-name">{resolveAgentDisplayName(title)}</span>
+              {statusKind === "running" ? (
+                <span className="collab-agent-activity" title={status}>
+                  {status}
+                </span>
+              ) : null}
             </span>
             <span
               className={`collab-agent-state collab-agent-state-${statusKind}`}

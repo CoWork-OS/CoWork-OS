@@ -1557,6 +1557,19 @@ a,
   white-space: nowrap;
 }
 
+.spawned-agent-sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.spawned-agent-sidebar-title > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .spawned-agent-sidebar-meta {
   display: flex;
   flex-wrap: wrap;

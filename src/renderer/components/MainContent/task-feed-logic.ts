@@ -577,7 +577,8 @@ export function selectVisibleTaskFeedRows(
     if (
       row.kind === "turn-header" ||
       isConversationMessageRow(row) ||
-      (row.kind === "timeline" && row.item.kind === "action_block")
+      (row.kind === "timeline" &&
+        (row.item.kind === "action_block" || row.item.kind === "agent-lifecycle"))
     ) {
       alwaysVisibleIndexes.add(index);
       keepIndexes.add(index);
@@ -955,6 +956,7 @@ export function estimateTaskFeedRowHeight(
   if (item.kind === "canvas") return 320;
   if (item.kind === "cli-agent-frame") return 240;
   if (item.kind === "dispatched-agents") return 220;
+  if (item.kind === "agent-lifecycle") return 32;
   if (item.kind === "action_block") {
     const expanded = options?.expanded === true;
     const visibleEventCount = Math.max(0, options?.visibleEventCount ?? 0);

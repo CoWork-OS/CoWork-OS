@@ -1,13 +1,15 @@
 /**
  * AgentRosterRow
  *
- * One compact transcript line for a burst of dispatched sub-agents: a cluster
- * of role glyphs followed by "Anansi, Ares and 2 more started working". Acts as
- * the header for the dispatched-agents surface, so the full panel can be folded
- * away once the roster line already says who is running.
+ * One compact transcript line for a burst of sub-agents: a cluster of colorful
+ * agent glyphs followed by "Anansi, Ares and 2 more started working" (or
+ * "… finished" / "… failed" / "… stopped"). Expandable rows reveal whatever
+ * the caller passes as children — usually one line per agent.
  */
 
-import { resolveTwinIcon } from "../../utils/twin-icons";
+import type { ReactNode } from "react";
+import { AgentGlyph } from "../AgentGlyph";
+import type { AgentGlyphSpec } from "../../utils/agent-glyphs";
 import {
   formatAgentRosterLine,
   stripAgentRoleSuffix,
@@ -17,8 +19,9 @@ import {
 export interface AgentRosterEntry {
   id: string;
   name: string;
-  icon?: string;
-  color?: string;
+  glyph: AgentGlyphSpec;
+  /** The agent is still running; its glyph turns slowly. */
+  working?: boolean;
 }
 
 interface AgentRosterRowProps {
@@ -27,12 +30,11 @@ interface AgentRosterRowProps {
   expandable?: boolean;
   expanded?: boolean;
   onToggle?: () => void;
+  children?: ReactNode;
 }
 
 /** Glyphs stay readable up to five; beyond that the count carries the rest. */
 const MAX_VISIBLE_GLYPHS = 5;
-
-const DEFAULT_AGENT_COLOR = "#6366f1";
 
 export function AgentRosterRow({
   agents,
@@ -40,6 +42,7 @@ export function AgentRosterRow({
   expandable = false,
   expanded = false,
   onToggle,
+  children,
 }: AgentRosterRowProps) {
   if (agents.length === 0) return null;
 
@@ -52,18 +55,14 @@ export function AgentRosterRow({
   const content = (
     <>
       <span className="agent-roster-glyphs" aria-hidden="true">
-        {visibleGlyphs.map((agent) => {
-          const Icon = resolveTwinIcon(agent.icon || "🤖");
-          return (
-            <span
-              key={agent.id}
-              className="agent-roster-glyph"
-              style={{ color: agent.color || DEFAULT_AGENT_COLOR }}
-            >
-              <Icon size={14} strokeWidth={1.75} />
-            </span>
-          );
-        })}
+        {visibleGlyphs.map((agent) => (
+          <AgentGlyph
+            key={agent.id}
+            glyph={agent.glyph}
+            size={16}
+            working={state === "working" && agent.working}
+          />
+        ))}
       </span>
       <span className="agent-roster-text">{rosterLine}</span>
       {expandable && (
@@ -83,18 +82,23 @@ export function AgentRosterRow({
     </>
   );
 
-  if (!expandable) {
-    return <div className="agent-roster-row">{content}</div>;
-  }
-
   return (
-    <button
-      type="button"
-      className="agent-roster-row expandable"
-      onClick={onToggle}
-      aria-expanded={expanded}
-    >
-      {content}
-    </button>
+    <div className={`agent-roster agent-roster-${state}${expanded ? " expanded" : ""}`}>
+      {expandable ? (
+        <button
+          type="button"
+          className="agent-roster-row expandable"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="agent-roster-row">{content}</div>
+      )}
+      {expandable && expanded && children ? (
+        <div className="agent-roster-details">{children}</div>
+      ) : null}
+    </div>
   );
 }
